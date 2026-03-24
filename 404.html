@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>IronCalc</title>
+  <script>
+    // GitHub Pages serves this file for any path that doesn't exist.
+    // Redirect to the root so the Leptos SPA can handle the URL.
+    var l = window.location;
+    l.replace(l.protocol + '//' + l.host + l.pathname.split('/')[1] + '/' +
+      l.search + l.hash);
+  </script>
+</head>
+<body></body>
+</html>

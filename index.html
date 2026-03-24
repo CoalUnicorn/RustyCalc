@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IronCalc</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; overflow: hidden; }
+
+    :root {
+      --bg-primary:     #fff;
+      --bg-secondary:   #f5f5f5;
+      --border-color:   #d9d9d9;
+      --border-inner:   #e0e0e0;
+      --text-primary:   #444;
+      --text-dim:       #666;
+      --text-strong:    #333;
+      --accent:         #1976d2;
+      --btn-bg:         #f5f5f5;
+      --tab-active-bg:  #fff;
+      --cell-editor-bg: #fff;
+    }
+
+    [data-theme="dark"] {
+      --bg-primary:     #1e1e1e;
+      --bg-secondary:   #2a2a2a;
+      --border-color:   #3a3a3a;
+      --border-inner:   #3a3a3a;
+      --text-primary:   #ccc;
+      --text-dim:       #888;
+      --text-strong:    #ddd;
+      --accent:         #4da3e8;
+      --btn-bg:         #2d2d2d;
+      --tab-active-bg:  #2d2d2d;
+      --cell-editor-bg: #1e1e1e;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>

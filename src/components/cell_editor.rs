@@ -1,0 +1,119 @@
+use leptos::prelude::*;
+use leptos::html;
+
+use crate::canvas::selected_cell_rect;
+use crate::state::ModelStore;
+use crate::state::WorkbookState;
+
+/// In-cell `<textarea>` overlay positioned over the active cell while editing.
+///
+/// Mounts only when `WorkbookState.editing_cell` is `Some`.
+/// Auto-focused on mount so subsequent keystrokes go here, not to the canvas.
+#[component]
+pub fn CellEditor() -> impl IntoView {
+    #[allow(clippy::expect_used)]
+    let state = use_context::<WorkbookState>().expect("WorkbookState must be in context");
+    #[allow(clippy::expect_used)]
+    let model = use_context::<ModelStore>()
+        .expect("ModelStore must be in context");
+
+    let textarea_ref = NodeRef::<html::Textarea>::new();
+
+    // Derive a memo that tracks only the EditFocus variant (not the text content).
+    // This prevents the Effect below from re-running on every keystroke — text
+    // updates mutate `editing_cell.text` but leave the focus variant unchanged,
+    // so `focus_state` stays stable while the user types.
+    let focus_state = Memo::new(move |_| {
+        state.editing_cell.get().map(|e| e.focus)
+    });
+
+    // Auto-focus the textarea only when the edit session *starts* with Cell focus
+    // (click or printable key), NOT when the formula bar triggered the edit —
+    // in that case the formula bar input already holds focus and must keep it.
+    // Tracking `focus_state` (not `editing_cell`) ensures this Effect fires only
+    // when the focus variant transitions, not on every character typed.
+    Effect::new(move |_| {
+        let Some(focus) = focus_state.get() else { return };
+        if focus != crate::state::EditFocus::Cell {
+            return;
+        }
+        let Some(ta) = textarea_ref.get() else { return };
+        ta.focus().ok();
+        // Move cursor to end of pre-filled text.
+        let len = ta.value().len() as u32;
+        ta.set_selection_range(len, len).ok();
+    });
+
+    // Compute pixel rect of the selected cell, reactive to redraw.
+    let cell_style = move || {
+        let _ = state.redraw.get();
+        let r = model.with_value(|m| selected_cell_rect(m));
+        format!(
+            "position:absolute;\
+             left:{:.0}px;top:{:.0}px;\
+             width:{:.0}px;height:{:.0}px;\
+             border:2px solid var(--accent);\
+             padding:1px 3px;\
+             font-family:Inter,Arial,sans-serif;\
+             font-size:13px;\
+             line-height:1.4;\
+             resize:none;\
+             z-index:10;\
+             outline:none;\
+             box-sizing:border-box;\
+             overflow:hidden;\
+             background:var(--cell-editor-bg);\
+             color:var(--text-strong);",
+            r.x, r.y, r.width, r.height,
+        )
+    };
+
+    // Mirror formula bar: the live text buffer.
+    let text_value = move || {
+        state.editing_cell.get().map(|e| e.text).unwrap_or_default()
+    };
+
+    // Keep editing_cell.text in sync as the user types.
+    let state_input = state.clone();
+    let on_input = move |ev: web_sys::Event| {
+        use wasm_bindgen::JsCast;
+        let value = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
+            .map(|el| el.value())
+            .unwrap_or_default();
+        state_input.editing_cell.update(|cell| {
+            if let Some(c) = cell {
+                c.text = value;
+            }
+        });
+    };
+
+    // Intercept Enter / Tab / Escape to stop default textarea behavior
+    // (newline insertion, browser focus cycling) and let them bubble up
+    // to the Workbook container which commits or cancels the edit.
+    let on_keydown = move |ev: web_sys::KeyboardEvent| {
+        match ev.key().as_str() {
+            "Enter" | "Tab" | "Escape" => {
+                ev.prevent_default();
+                // Do NOT stop_propagation — the Workbook keydown handler
+                // picks this up via bubbling and commits / navigates.
+            }
+            _ => {}
+        }
+    };
+
+    view! {
+        <Show when=move || state.editing_cell.get().is_some()>
+            <textarea
+                node_ref=textarea_ref
+                style=cell_style
+                prop:value=text_value
+                on:input=on_input
+                on:keydown=on_keydown
+            />
+        </Show>
+    }
+}
+
+

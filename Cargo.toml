@@ -1,0 +1,31 @@
+[package]
+name = "rusty-calc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+leptos = { version = "0.7", features = ["csr"] }
+ironcalc_base = { git = "https://github.com/CoalUnicorn/IronCalc.git",branch = "fix/issue-761-locale-date-edit", features = ["use_regex_lite"] }
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "HtmlCanvasElement", "HtmlElement",
+    "CanvasRenderingContext2d", "TextMetrics", "Element", "Storage",
+    "KeyboardEvent", "MouseEvent", "WheelEvent",
+    "Clipboard", "Navigator", "ResizeObserver", "ResizeObserverEntry",
+    "HtmlInputElement", "HtmlSelectElement", "FileList", "File", "Blob", "BlobPropertyBag",
+    "Url", "HtmlAnchorElement", "Node",
+    "Crypto",
+] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+gloo-storage = "0.3"
+gloo-net = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = "z"
+lto = true

@@ -1,0 +1,13 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+[watch]
+ignore = ["dist"]
+
+# Forward all /api/* requests to the Rocket backend during development.
+# Start the server with: cargo run -p ironcalc_server
+# (Rocket listens on port 8000 by default.)
+[[proxy]]
+rewrite = "/api"
+backend = "http://localhost:8000/api"

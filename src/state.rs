@@ -1,0 +1,161 @@
+use gloo_storage::Storage as GlooStorage;
+use ironcalc_base::UserModel;
+use leptos::prelude::*;
+
+use crate::theme::Theme;
+
+/// Shorthand for the context-provided `UserModel` storage handle.
+///
+/// `StoredValue<UserModel<'static>, LocalStorage>` is the Leptos arena-stored
+/// wrapper used throughout the app.  This alias eliminates the repetition in
+/// every `use_context` call.
+pub type ModelStore = StoredValue<UserModel<'static>, LocalStorage>;
+
+/// In-progress cell edit not yet committed to the model.
+/// Mirrors the TypeScript `EditingCell` interface in workbookState.ts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditingCell {
+    pub(crate) sheet: u32,
+    pub(crate) row: i32,
+    pub(crate) col: i32,
+    /// Text the user has typed; NOT yet written to UserModel
+    pub(crate) text: String,
+    /// "accept" = arrow keys navigate; "edit" = arrow keys move cursor within text
+    pub(crate) mode: EditMode,
+    /// Which widget currently has keyboard focus
+    pub(crate) focus: EditFocus,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EditMode {
+    /// Arrow keys commit the edit and navigate to adjacent cells
+    Accept,
+    /// Arrow keys move the text cursor; entered via F2 or double-click
+    Edit,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EditFocus {
+    Cell,
+    FormulaBar,
+}
+
+/// Which header was right-clicked to open the context menu.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ContextMenuTarget {
+    /// Column index (1-based).
+    Column(i32),
+    /// Row index (1-based).
+    Row(i32),
+}
+
+/// Position and target for the active context menu.
+#[derive(Clone, Copy, Debug)]
+pub struct ContextMenuState {
+    /// Viewport-relative x (from `ev.client_x()`).
+    pub(crate) x: i32,
+    /// Viewport-relative y (from `ev.client_y()`).
+    pub(crate) y: i32,
+    /// Which header triggered the menu.
+    pub(crate) target: ContextMenuTarget,
+}
+
+/// All transient UI state — never persisted, never in the model.
+///
+/// All primitive fields use `RwSignal` (Send+Sync+Clone) so Leptos re-runs
+/// only the closures that read a specific field.
+///
+/// The model itself is NOT stored here — it lives in a `StoredValue::new_local`
+/// in `App` and is accessed via `use_context::<StoredValue<UserModel<'static>, LocalStorage>>()`.
+/// A `RwSignal<u32>` redraw counter (also in context) triggers canvas re-draws.
+///
+/// Note: row/col/sheet are NOT stored here — they are always derived from
+/// `UserModel::get_selected_view()` inside a `{ let _ = state.redraw.get(); … }` closure
+/// to stay in sync with the model's navigation state.
+#[derive(Clone)]
+pub struct WorkbookState {
+    /// None = not editing; Some = live edit buffer
+    pub(crate) editing_cell: RwSignal<Option<EditingCell>>,
+    /// True while the mouse button is held for a range-drag selection.
+    pub(crate) is_selecting: RwSignal<bool>,
+    /// Set during autofill handle drag: the cell the user is dragging toward.
+    /// None = no autofill drag in progress.
+    pub(crate) extend_to: RwSignal<Option<(i32, i32)>>,
+    /// Column being resized: Some((col_1based, start_mouse_x)) while drag active.
+    pub(crate) resize_col: RwSignal<Option<(i32, f64)>>,
+    /// Row being resized: Some((row_1based, start_mouse_y)) while drag active.
+    pub(crate) resize_row: RwSignal<Option<(i32, f64)>>,
+    /// Increment after any model mutation to force canvas re-renders.
+    /// Components that draw the canvas subscribe to this signal.
+    pub(crate) redraw: RwSignal<u32>,
+    /// UUID of the workbook currently loaded in the model.
+    /// Used by `storage::save` to write back to the correct localStorage key.
+    pub(crate) current_uuid: RwSignal<String>,
+    /// Active color theme; initialized from localStorage on startup.
+    pub(crate) theme: RwSignal<Theme>,
+    /// Whether the left workbook-list drawer is open.
+    pub(crate) is_drawer_open: RwSignal<bool>,
+    /// Controls the Upload xlsx file dialog.
+    pub(crate) show_upload_dialog: RwSignal<bool>,
+    /// Controls the Share dialog; holds the URL returned by the server.
+    pub(crate) share_url: RwSignal<Option<String>>,
+    /// BCP-47 language tag for formula language, persisted in localStorage.
+    pub(crate) current_lang: RwSignal<String>,
+    /// Whether the Regional Settings right panel is open.
+    pub(crate) show_regional_settings: RwSignal<bool>,
+    /// Whether the Named Ranges right panel is open.
+    pub(crate) show_named_ranges: RwSignal<bool>,
+    /// Active right-click context menu; None when no menu is showing.
+    pub(crate) context_menu: RwSignal<Option<ContextMenuState>>,
+    /// Range being pointed at during formula entry (`[r1, c1, r2, c2]`, 1-based).
+    /// `None` when not in point mode.
+    pub(crate) point_range: RwSignal<Option<[i32; 4]>>,
+    /// True while the user is dragging to extend the point-mode range.
+    pub(crate) is_pointing: RwSignal<bool>,
+    /// Byte span `(start, end)` within `editing_cell.text` that holds the
+    /// current point-mode reference text, so it can be replaced in-place
+    /// when the user presses arrow keys or clicks another cell.
+    pub(crate) point_ref_span: RwSignal<Option<(usize, usize)>>,
+    /// ID of the chart currently displayed in ChartModal; None when modal is closed.
+    pub(crate) open_chart_id: RwSignal<Option<String>>,
+    /// Controls the Insert Function browser modal.
+    pub(crate) show_function_browser: RwSignal<bool>,
+    /// NodeRef to the formula bar <input> — used by FunctionBrowserModal
+    /// to read/write cursor position when inserting a function name.
+    pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
+}
+
+impl WorkbookState {
+    pub fn new() -> Self {
+        let lang: String = <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_lang")
+            .unwrap_or_else(|_| "en".to_owned());
+        Self {
+            editing_cell: RwSignal::new(None),
+            is_selecting: RwSignal::new(false),
+            extend_to: RwSignal::new(None),
+            resize_col: RwSignal::new(None),
+            resize_row: RwSignal::new(None),
+            redraw: RwSignal::new(0),
+            current_uuid: RwSignal::new(String::new()),
+            theme: RwSignal::new(Theme::from_storage()),
+            is_drawer_open: RwSignal::new(false),
+            show_upload_dialog: RwSignal::new(false),
+            share_url: RwSignal::new(None),
+            current_lang: RwSignal::new(lang),
+            show_regional_settings: RwSignal::new(false),
+            show_named_ranges: RwSignal::new(false),
+            context_menu: RwSignal::new(None),
+            point_range: RwSignal::new(None),
+            is_pointing: RwSignal::new(false),
+            point_ref_span: RwSignal::new(None),
+            open_chart_id: RwSignal::new(None),
+            show_function_browser: RwSignal::new(false),
+            formula_input_ref: NodeRef::new(),
+        }
+    }
+
+    /// Call after any UserModel mutation to trigger canvas re-render.
+    pub fn request_redraw(&self) {
+        self.redraw.update(|n| *n += 1);
+    }
+}
