@@ -8,9 +8,10 @@ use web_sys::HtmlCanvasElement;
 use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
 use crate::model::{AppClipboard, ArrowKey, FrontendModel, PageDir};
-use crate::state::ModelStore;
+
 use crate::state::{
-    ContextMenuState, ContextMenuTarget, DragState, EditFocus, EditMode, EditingCell, WorkbookState,
+    ContextMenuState, ContextMenuTarget, DragState, EditFocus, EditMode, EditingCell, ModelStore,
+    WorkbookState,
 };
 use crate::util::warn_if_err;
 
@@ -186,7 +187,7 @@ pub fn Worksheet() -> impl IntoView {
         // committing the edit and navigating away.
         if let Some(ref edit) = state.editing_cell.get_untracked() {
             if edit.mode == crate::state::EditMode::Accept {
-                let cursor = get_formula_cursor();
+                let cursor = crate::formula_input::get_formula_cursor();
                 let already_pointing = state.point_range.get_untracked().is_some();
                 if already_pointing
                     || crate::formula_input::is_in_reference_mode(&edit.text, cursor)
@@ -503,10 +504,4 @@ pub fn Worksheet() -> impl IntoView {
             <CellEditor />
         </div>
     }
-}
-
-// ── Module-level helpers ──────────────────────────────────────────────────────
-
-fn get_formula_cursor() -> usize {
-    crate::formula_input::get_formula_cursor()
 }

@@ -2,6 +2,7 @@ use ironcalc_base::expressions::types::Area;
 use leptos::prelude::*;
 
 use crate::action::{classify_key, execute, SpreadsheetAction};
+use crate::components::file_bar::FileBar;
 use crate::components::formula_bar::FormulaBar;
 use crate::components::sheet_tab_bar::SheetTabBar;
 use crate::components::worksheet::Worksheet;
@@ -25,14 +26,8 @@ pub fn Workbook() -> impl IntoView {
     let clipboard_store = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
-        // Don't intercept keyboard events while the function browser modal is open;
-        // it handles Escape / Enter / Arrow keys itself via window_event_listener.
-        if state.show_function_browser.get_untracked() {
-            return;
-        }
-
         // Don't intercept keystrokes from panel form elements (Named Ranges, etc.).
-        // Exception: the cell-editor <textarea> must bubble Enter/Escape/Tab/Arrow
+        // Exception: the cell-editor <textarea> formula-bar must bubble Enter/Escape/Tab/Arrow
         // up to this handler, so we only block textarea when not in editing mode.
         if let Some(target) = ev.target() {
             use wasm_bindgen::JsCast;
@@ -163,6 +158,7 @@ pub fn Workbook() -> impl IntoView {
             tabindex="0"
             on:keydown=on_keydown
         >
+            <FileBar />
             <FormulaBar />
             <Worksheet />
             <SheetTabBar />

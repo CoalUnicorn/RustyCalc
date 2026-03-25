@@ -186,8 +186,8 @@ pub fn FormulaBar() -> impl IntoView {
             display: flex;
             align-items: center;
             height: 38px;
-            border-bottom: 2px solid var(--border);
-            background: var(--surface);
+            border-bottom: 1px solid var(--border-inner);
+            background: var(--bg-primary);
             font-family: Inter, Arial, sans-serif;
             font-size: 15px;
             flex-shrink: 0;
@@ -198,7 +198,7 @@ pub fn FormulaBar() -> impl IntoView {
                 padding: 0 8px;
                 font-weight: 600;
                 color: var(--text-strong);
-                border-right: 1px solid var(--border);
+                border-right: 1px solid var(--border-inner);
                 text-align: center;
                 user-select: none;
             ">

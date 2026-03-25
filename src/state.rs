@@ -130,10 +130,6 @@ pub struct WorkbookState {
     /// current point-mode reference text, so it can be replaced in-place
     /// when the user presses arrow keys or clicks another cell.
     pub(crate) point_ref_span: RwSignal<Option<(usize, usize)>>,
-    /// ID of the chart currently displayed in ChartModal; None when modal is closed.
-    pub(crate) open_chart_id: RwSignal<Option<String>>,
-    /// Controls the Insert Function browser modal.
-    pub(crate) show_function_browser: RwSignal<bool>,
     /// NodeRef to the formula bar <input> — used by FunctionBrowserModal
     /// to read/write cursor position when inserting a function name.
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
@@ -158,8 +154,6 @@ impl WorkbookState {
             context_menu: RwSignal::new(None),
             point_range: RwSignal::new(None),
             point_ref_span: RwSignal::new(None),
-            open_chart_id: RwSignal::new(None),
-            show_function_browser: RwSignal::new(false),
             formula_input_ref: NodeRef::new(),
         }
     }
