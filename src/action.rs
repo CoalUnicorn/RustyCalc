@@ -70,6 +70,7 @@ use leptos::prelude::*;
 use crate::canvas::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
+use crate::util::warn_if_err;
 
 /// Whether `mutate` should recalculate formulas after applying the closure.
 ///
@@ -78,8 +79,8 @@ use crate::storage;
 /// Pass `Eval::No` for pure navigation or selection changes.
 #[derive(Clone, Copy)]
 enum Eval {
-    Yes,
-    No,
+    Y,
+    N,
 }
 
 // ── SpreadsheetAction ─────────────────────────────────────────────────────────
@@ -281,54 +282,54 @@ pub fn classify_key(
 pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookState) {
     match action {
         SpreadsheetAction::Navigate(dir) => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_arrow(*dir);
             });
         }
         SpreadsheetAction::NavigateEdge(dir) => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_to_edge(*dir);
             });
         }
         SpreadsheetAction::JumpToA1 => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_set_cell(1, 1);
             });
         }
         SpreadsheetAction::JumpToLastCell => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_to_edge(ArrowKey::Down);
                 m.nav_to_edge(ArrowKey::Right);
             });
         }
         SpreadsheetAction::ExpandSelection(dir) => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_expand_selection(*dir);
             });
         }
         SpreadsheetAction::PageDown => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_page(PageDir::Down);
             });
         }
         SpreadsheetAction::PageUp => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_page(PageDir::Up);
             });
         }
         SpreadsheetAction::RowHome => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_home_row();
             });
         }
         SpreadsheetAction::RowEnd => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 m.nav_to_edge(ArrowKey::Right);
             });
         }
         SpreadsheetAction::SwitchSheet(delta) => {
             let delta = *delta;
-            mutate(model, state, Eval::No, move |m| {
+            mutate(model, state, Eval::N, move |m| {
                 let current = m.get_selected_view().sheet;
                 let visible: Vec<u32> = m
                     .get_worksheets_properties()
@@ -338,7 +339,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
                     .collect();
                 if let Some(pos) = visible.iter().position(|&id| id == current) {
                     let next = (pos as i32 + delta).rem_euclid(visible.len() as i32) as usize;
-                    m.set_selected_sheet(visible[next]).ok();
+                    warn_if_err(m.set_selected_sheet(visible[next]), "set_selected_sheet");
                 }
             });
         }
@@ -377,8 +378,10 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
             if let Some(edit) = state.editing_cell.get_untracked() {
                 // Write the edit buffer to the model and recalculate.
                 model.update_value(|m| {
-                    m.set_user_input(edit.sheet, edit.row, edit.col, &edit.text)
-                        .ok();
+                    warn_if_err(
+                        m.set_user_input(edit.sheet, edit.row, edit.col, &edit.text),
+                        "set_user_input",
+                    );
                     m.evaluate();
                 });
                 // Clear all edit-related state.
@@ -409,62 +412,79 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
         SpreadsheetAction::Copy | SpreadsheetAction::Cut | SpreadsheetAction::Paste => {}
 
         SpreadsheetAction::Delete => {
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, Eval::Y, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
-                m.range_clear_contents(&make_area(v.sheet, r1, c1, r2, c2))
-                    .ok();
+                warn_if_err(
+                    m.range_clear_contents(&make_area(v.sheet, r1, c1, r2, c2)),
+                    "range_clear_contents",
+                );
             });
         }
         SpreadsheetAction::ClearAll => {
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, Eval::Y, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
-                m.range_clear_all(&make_area(v.sheet, r1, c1, r2, c2)).ok();
+                warn_if_err(
+                    m.range_clear_all(&make_area(v.sheet, r1, c1, r2, c2)),
+                    "range_clear_all",
+                );
             });
         }
         SpreadsheetAction::SelectAll => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, Eval::N, |m| {
                 let d = m.sheet_dimension();
                 m.nav_select_range(d.min_row, d.min_column, d.max_row, d.max_column);
             });
         }
         SpreadsheetAction::Undo => {
-            mutate(model, state, Eval::No, |m| {
-                m.undo().ok();
+            mutate(model, state, Eval::N, |m| {
+                warn_if_err(m.undo(), "undo");
             });
         }
         SpreadsheetAction::Redo => {
-            mutate(model, state, Eval::No, |m| {
-                m.redo().ok();
+            mutate(model, state, Eval::N, |m| {
+                warn_if_err(m.redo(), "redo");
             });
         }
         SpreadsheetAction::InsertRows => {
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, Eval::Y, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
-                m.insert_rows(v.sheet, r_min, r_max - r_min + 1).ok();
+                warn_if_err(
+                    m.insert_rows(v.sheet, r_min, r_max - r_min + 1),
+                    "insert_rows",
+                );
             });
         }
         SpreadsheetAction::InsertColumns => {
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, Eval::Y, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
-                m.insert_columns(v.sheet, c_min, c_max - c_min + 1).ok();
+                warn_if_err(
+                    m.insert_columns(v.sheet, c_min, c_max - c_min + 1),
+                    "insert_columns",
+                );
             });
         }
         SpreadsheetAction::DeleteRows => {
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, Eval::Y, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
-                m.delete_rows(v.sheet, r_min, r_max - r_min + 1).ok();
+                warn_if_err(
+                    m.delete_rows(v.sheet, r_min, r_max - r_min + 1),
+                    "delete_rows",
+                );
             });
         }
         SpreadsheetAction::DeleteColumns => {
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, Eval::Y, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
-                m.delete_columns(v.sheet, c_min, c_max - c_min + 1).ok();
+                warn_if_err(
+                    m.delete_columns(v.sheet, c_min, c_max - c_min + 1),
+                    "delete_columns",
+                );
             });
         }
     }
@@ -481,7 +501,7 @@ fn mutate(
 ) {
     model.update_value(|m| {
         f(m);
-        if matches!(evaluate, Eval::Yes) {
+        if matches!(evaluate, Eval::Y) {
             m.evaluate();
         }
     });

@@ -3,6 +3,7 @@ use leptos::prelude::*;
 
 use crate::action::{classify_key, execute, SpreadsheetAction};
 use crate::canvas::AppClipboard;
+use crate::util::warn_if_err;
 use crate::components::worksheet::Worksheet;
 use crate::state::{EditMode, ModelStore, WorkbookState};
 
@@ -146,7 +147,10 @@ pub fn Workbook() -> impl IntoView {
                     let [r1, c1, r2, c2] = v.range;
                     for row in r1..=r2 {
                         for col in c1..=c2 {
-                            m.set_user_input(v.sheet, row, col, "").ok();
+                            warn_if_err(
+                                m.set_user_input(v.sheet, row, col, ""),
+                                "set_user_input (cut)",
+                            );
                         }
                     }
                     m.evaluate();

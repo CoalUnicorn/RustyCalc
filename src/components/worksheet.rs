@@ -17,6 +17,7 @@ use crate::state::{
     ContextMenuState, ContextMenuTarget, DragState, EditFocus, EditMode, EditingCell,
     WorkbookState,
 };
+use crate::util::warn_if_err;
 
 /// The spreadsheet canvas element.
 ///
@@ -280,7 +281,7 @@ pub fn Worksheet() -> impl IntoView {
                     let sheet = m.active_cell().sheet;
                     let current_w = m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH);
                     let new_w = (current_w + delta).max(5.0);
-                    m.set_columns_width(sheet, col, col, new_w).ok();
+                    warn_if_err(m.set_columns_width(sheet, col, col, new_w), "set_columns_width");
                 });
                 state_mm.drag.set(DragState::ResizingCol { col, x });
                 state_mm.request_redraw();
@@ -293,7 +294,7 @@ pub fn Worksheet() -> impl IntoView {
                     let sheet = m.active_cell().sheet;
                     let current_h = m.get_row_height(sheet, row).unwrap_or(DEFAULT_ROW_HEIGHT);
                     let new_h = (current_h + delta).max(3.0);
-                    m.set_rows_height(sheet, row, row, new_h).ok();
+                    warn_if_err(m.set_rows_height(sheet, row, row, new_h), "set_rows_height");
                 });
                 state_mm.drag.set(DragState::ResizingRow { row, y });
                 state_mm.request_redraw();
@@ -395,9 +396,9 @@ pub fn Worksheet() -> impl IntoView {
                 };
                 // Fill rows if the drag crossed a row boundary, else fill columns.
                 if to_row < r_min || to_row > r_max {
-                    m.auto_fill_rows(&area, to_row).ok();
+                    warn_if_err(m.auto_fill_rows(&area, to_row), "auto_fill_rows");
                 } else {
-                    m.auto_fill_columns(&area, to_col).ok();
+                    warn_if_err(m.auto_fill_columns(&area, to_col), "auto_fill_columns");
                 }
                 m.evaluate();
             });
