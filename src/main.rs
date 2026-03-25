@@ -1,6 +1,6 @@
 use leptos::{mount::mount_to_body, prelude::*};
 
-mod action;
+// mod action;
 mod app;
 mod canvas;
 mod components;

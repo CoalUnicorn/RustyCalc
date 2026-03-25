@@ -8,7 +8,7 @@ use web_sys::HtmlCanvasElement;
 
 use crate::canvas::{
     autofill_handle_pos, frozen_geometry, pixel_to_col, pixel_to_row, ArrowKey, CanvasRenderer,
-    Clipboard, ClipboardRange, FrontendModel, PageDir, RenderOverlays, SheetRect,
+    AppClipboard, ClipboardRange, FrontendModel, PageDir, RenderOverlays, SheetRect,
     AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
 use crate::components::cell_editor::CellEditor;
@@ -67,8 +67,8 @@ pub fn Worksheet() -> impl IntoView {
     // Re-render canvas every time the redraw counter increments.
     let state_draw = state.clone();
     #[allow(clippy::expect_used)]
-    let clipboard_draw = use_context::<StoredValue<Option<Clipboard>, LocalStorage>>()
-        .expect("StoredValue<Option<Clipboard>> must be in context");
+    let clipboard_draw = use_context::<StoredValue<Option<AppClipboard>, LocalStorage>>()
+        .expect("StoredValue<Option<AppClipboard>> must be in context");
     Effect::new(move |_| {
         let _ = state_draw.redraw.get();
         let Some(canvas) = canvas_ref.get() else {
@@ -79,15 +79,9 @@ pub fn Worksheet() -> impl IntoView {
         let point_range = state_draw.point_range.get_untracked();
         let canvas_theme = state_draw.theme.get_untracked().canvas_theme();
         let clipboard = clipboard_draw.with_value(|opt| {
-            opt.as_ref().map(|cb| {
-                let (r1, c1, r2, c2) = cb.range();
-                ClipboardRange {
-                    sheet: cb.sheet(),
-                    r1,
-                    c1,
-                    r2,
-                    c2,
-                }
+            opt.as_ref().map(|acb| {
+                let (r1, c1, r2, c2) = acb.range;
+                ClipboardRange { sheet: acb.sheet, r1, c1, r2, c2 }
             })
         });
         let overlays = RenderOverlays {

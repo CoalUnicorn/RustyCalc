@@ -1,41 +1,12 @@
 use ironcalc_base::{
     types::{CellType, HorizontalAlignment, VerticalAlignment},
     worksheet::NavigationDirection,
-    ClipboardData, UserModel,
+    UserModel,
 };
-
-use serde::{Deserialize, Serialize};
-
-/// Holds a snapshot of a copied or cut cell range, ready to be pasted.
-#[derive(Serialize, Deserialize)]
-pub struct Clipboard {
-    pub(crate) csv: String,
-    pub(crate) data: ClipboardData,
-    pub(crate) sheet: u32,
-    pub(crate) range: (i32, i32, i32, i32),
-}
-
-impl Clipboard {
-    /// The tab-separated CSV text of the copied range, suitable for writing
-    /// to the OS clipboard via the Web Clipboard API.
-    pub fn csv(&self) -> &str {
-        &self.csv
-    }
-
-    /// The 0-based sheet index of the copied range.
-    pub fn sheet(&self) -> u32 {
-        self.sheet
-    }
-
-    /// The `(row_start, col_start, row_end, col_end)` of the copied range (1-based).
-    pub fn range(&self) -> (i32, i32, i32, i32) {
-        self.range
-    }
-}
 
 use crate::canvas::frontend_types::{
     ActiveCell, ArrowKey, CellBorders, CssColor, FrozenPanes, PageDir, ResolvedBorderEdge,
-    ResolvedCellStyle, ResolvedFont, SafeFontFamily, ToolbarState,
+    ResolvedCellStyle, ResolvedFont, SafeFontFamily, SheetDimension, ToolbarState,
 };
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 
@@ -72,6 +43,9 @@ pub trait FrontendModel {
     /// Frozen pane state for the active sheet.
     fn frozen_panes(&self) -> FrozenPanes;
 
+    /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
+    fn sheet_dimension(&self) -> SheetDimension;
+
     // ── Navigation (infallible) ───────────────────────────────────────────────
 
     /// Move the active cell one step. No-op at sheet edges.
@@ -107,6 +81,7 @@ pub trait FrontendModel {
 
     /// Move to column 1 of the current row (Home key).
     fn nav_home_row(&mut self);
+
 }
 
 // ── Helper: map font name String → SafeFontFamily ─────────────────────────────
@@ -269,11 +244,7 @@ impl FrontendModel for UserModel<'_> {
 
     fn active_cell(&self) -> ActiveCell {
         let view = self.get_selected_view();
-        ActiveCell {
-            sheet: view.sheet,
-            row: view.row,
-            column: view.column,
-        }
+        ActiveCell { sheet: view.sheet, row: view.row, column: view.column }
     }
 
     fn frozen_panes(&self) -> FrozenPanes {
@@ -281,6 +252,24 @@ impl FrontendModel for UserModel<'_> {
         FrozenPanes {
             rows: self.get_frozen_rows_count(sheet).unwrap_or(0),
             cols: self.get_frozen_columns_count(sheet).unwrap_or(0),
+        }
+    }
+
+    fn sheet_dimension(&self) -> SheetDimension {
+        let sheet = self.get_selected_sheet();
+        match self.get_model().workbook.worksheet(sheet) {
+            Ok(ws) => {
+                let d = ws.dimension();
+                SheetDimension {
+                    min_row: d.min_row,
+                    min_column: d.min_column,
+                    max_row: d.max_row,
+                    max_column: d.max_column,
+                }
+            }
+            Err(_) => SheetDimension {
+                min_row: 1, min_column: 1, max_row: 1, max_column: 1,
+            },
         }
     }
 
@@ -309,17 +298,17 @@ impl FrontendModel for UserModel<'_> {
     }
 
     fn nav_select_column(&mut self, col: i32) {
-        self.set_selected_cell(1, col);
+        let _ = self.set_selected_cell(1, col);
         let _ = self.set_selected_range(1, col, LAST_ROW, col);
     }
 
     fn nav_select_row(&mut self, row: i32) {
-        self.set_selected_cell(row, 1);
+        let _ = self.set_selected_cell(row, 1);
         let _ = self.set_selected_range(row, 1, row, LAST_COLUMN);
     }
 
     fn nav_select_all(&mut self) {
-        self.set_selected_cell(1, 1);
+        let _ = self.set_selected_cell(1, 1);
         let _ = self.set_selected_range(1, 1, LAST_ROW, LAST_COLUMN);
     }
 
@@ -338,8 +327,8 @@ impl FrontendModel for UserModel<'_> {
     }
 
     fn nav_select_range(&mut self, row: i32, col: i32, row2: i32, col2: i32) {
-        let row = row.clamp(1, LAST_ROW);
-        let col = col.clamp(1, LAST_COLUMN);
+        let row  = row.clamp(1, LAST_ROW);
+        let col  = col.clamp(1, LAST_COLUMN);
         let row2 = row2.clamp(1, LAST_ROW);
         let col2 = col2.clamp(1, LAST_COLUMN);
         let _ = self.set_selected_cell(row, col);
@@ -348,9 +337,9 @@ impl FrontendModel for UserModel<'_> {
 
     fn nav_expand_selection(&mut self, dir: ArrowKey) {
         let key = match dir {
-            ArrowKey::Up => "ArrowUp",
-            ArrowKey::Down => "ArrowDown",
-            ArrowKey::Left => "ArrowLeft",
+            ArrowKey::Up    => "ArrowUp",
+            ArrowKey::Down  => "ArrowDown",
+            ArrowKey::Left  => "ArrowLeft",
             ArrowKey::Right => "ArrowRight",
         };
         let _ = self.on_expand_selected_range(key);
@@ -360,6 +349,7 @@ impl FrontendModel for UserModel<'_> {
         let row = self.get_selected_view().row;
         let _ = self.set_selected_cell(row, 1);
     }
+
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -460,5 +450,26 @@ mod tests {
         assert_eq!(v.column, 3);
         assert_eq!(v.range[1], 3);
         assert_eq!(v.range[3], 3);
+    }
+
+    #[test]
+    fn sheet_dimension_empty_sheet() {
+        let m = make_model();
+        let d = m.sheet_dimension();
+        // Empty sheet defaults to (1,1,1,1).
+        assert_eq!(d.min_row, 1);
+        assert_eq!(d.min_column, 1);
+        assert_eq!(d.max_row, 1);
+        assert_eq!(d.max_column, 1);
+    }
+
+    #[test]
+    fn sheet_dimension_after_input() {
+        let mut m = make_model();
+        m.set_user_input(0, 5, 3, "hello").unwrap();
+        m.evaluate();
+        let d = m.sheet_dimension();
+        assert!(d.max_row >= 5);
+        assert!(d.max_column >= 3);
     }
 }

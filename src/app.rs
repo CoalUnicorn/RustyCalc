@@ -18,8 +18,14 @@ pub fn App() -> impl IntoView {
 
     let model = StoredValue::new_local(model);
 
+    // Internal clipboard — mirrors what was last copied/cut, so Ctrl+V can
+    // paste even if the OS clipboard is unavailable (sandboxed iframe, etc.).
+    let clipboard: StoredValue<Option<crate::canvas::AppClipboard>, LocalStorage> =
+        StoredValue::new_local(None);
+
     provide_context(wb_state.clone());
     provide_context(model);
+    provide_context(clipboard);
 
     // ── Auto-save interval ────────────────────────────────────────────────────
     // Every second, flush the model's pending diff queue. If there are unsaved

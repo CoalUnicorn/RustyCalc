@@ -144,6 +144,17 @@ pub struct ToolbarState {
     pub bg_color:      Option<CssColor>,
 }
 
+// ── Sheet dimension ───────────────────────────────────────────────────────────
+
+/// The used data extent of the active sheet.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SheetDimension {
+    pub min_row:    i32,
+    pub min_column: i32,
+    pub max_row:    i32,
+    pub max_column: i32,
+}
+
 // ── Direction enums ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
