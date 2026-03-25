@@ -105,7 +105,7 @@ pub fn Workbook() -> impl IntoView {
             }
         }
 
-        // ── Classify key → action ─────────────────────────────────────────
+        // ── Classify key -> action ─────────────────────────────────────────
         let edit_ref = state.editing_cell.get_untracked();
         let Some(action) = classify_key(&key, is_ctrl, is_shift, is_alt, edit_ref.as_ref()) else {
             return;

@@ -569,7 +569,7 @@ impl CanvasRenderer {
                     Self::stroke_line(ctx, x1, y1 + 1.0, x2, y1 + 1.0);
                 }
             }
-            // Thin, Dotted, SlantDashDot, and anything else → single thin line.
+            // Thin, Dotted, SlantDashDot, and anything else -> single thin line.
             // TODO: implement dash patterns for Dotted/SlantDashDot with setLineDash.
             _ => {
                 ctx.set_line_width(1.0);

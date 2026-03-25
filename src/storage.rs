@@ -24,7 +24,7 @@ pub struct WorkbookMeta {
 
 // ── Registry helpers ──────────────────────────────────────────────────────────
 
-/// Load the UUID→metadata registry from localStorage.
+/// Load the UUID->metadata registry from localStorage.
 pub fn load_registry() -> HashMap<String, WorkbookMeta> {
     LocalStorage::get(MODELS_KEY).unwrap_or_default()
 }
@@ -158,9 +158,6 @@ pub fn create_new_from(model: UserModel<'static>) -> (String, UserModel<'static>
 }
 
 /// Remove a workbook from localStorage and the registry.
-///
-/// Also deletes the associated chart data so orphaned `charts_{uuid}` keys
-/// don't accumulate in localStorage after a workbook is deleted.
 pub fn delete(uuid: &str) {
     LocalStorage::delete(uuid);
     let mut registry = load_registry();

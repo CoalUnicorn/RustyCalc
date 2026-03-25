@@ -1,22 +1,4 @@
-// ──────────────────────────────────────────────────────────────────────────────
-// LEPTOS COMPONENT ANATOMY — FormulaBar
-//
-// A Leptos component is a plain Rust function annotated with #[component].
-// It runs ONCE at mount time to set up reactive subscriptions, then Leptos
-// re-runs only the individual closures whose signals changed — NOT the whole
-// function (unlike React, which re-runs the entire component on every render).
-//
-// Key patterns used here:
-//   1. expect_context::<T>()  — pull shared state from ancestor components
-//   2. move || { ... }        — reactive closure: Leptos tracks which signals
-//                               it reads and re-runs it when they change
-//   3. Memo::new(move |_| ..) — cached derived value, only recomputes when
-//                               its input signals change (like useMemo)
-//   4. on:event=closure       — DOM event handler (like onClick)
-//   5. prop:value=signal      — one-way bind a DOM property to a reactive value
-//   6. node_ref=ref           — capture a reference to the DOM element
-//   7. view! { <tag /> }      — JSX-like HTML template with reactive bindings
-// ──────────────────────────────────────────────────────────────────────────────
+// See docs/leptos-patterns.md for component conventions.
 
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -37,31 +19,11 @@ use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 /// components read/write the same `RwSignal`, so they stay in sync.
 #[component]
 pub fn FormulaBar() -> impl IntoView {
-    // ── 1. Pull shared state from context ────────────────────────────────────
-    //
-    // These were `provide_context()`-ed by App. Every component in the tree
-    // can access them. Because WorkbookState is Copy (all fields are arena
-    // handles), there's no cloning overhead.
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
-
-    // This NodeRef is stored in WorkbookState so other components
-    // (like FunctionBrowserModal) can read/write the input's cursor position.
     let input_ref = state.formula_input_ref;
 
-    // ── 2. Derived reactive values ───────────────────────────────────────────
-    //
-    // These closures are NOT called eagerly — they're passed to the view!
-    // macro and Leptos calls them whenever their subscribed signals change.
-    //
-    // `state.redraw.get()` subscribes to the redraw counter. Any model
-    // mutation calls `state.request_redraw()` which increments it, causing
-    // all closures that read it to re-run. This is how the address label
-    // and display value stay current after navigation/edits.
-
-    // Cell address: "A1", "B7", etc. — updates when selection moves.
     let cell_address = move || {
-        // Reading redraw.get() subscribes this closure to selection changes.
         let _ = state.redraw.get();
         model.with_value(|m| {
             let ac = m.active_cell();
@@ -69,31 +31,20 @@ pub fn FormulaBar() -> impl IntoView {
         })
     };
 
-    // The text shown in the input:
-    // - While editing: the live edit buffer (shared with CellEditor)
-    // - While not editing: the raw cell content (formula text or literal)
+    // While editing: live edit buffer (shared with CellEditor).
+    // Otherwise: raw cell content (formula text or literal).
     let display_text = move || {
-        // First check if we're in an edit session.
         if let Some(edit) = state.editing_cell.get() {
             return edit.text;
         }
-        // Not editing — show the stored cell content.
         let _ = state.redraw.get();
         model.with_value(|m| m.active_cell_content())
     };
 
-    // Is the formula bar input currently the active editor?
-    // Used to style the input differently during editing.
     let is_editing = move || state.editing_cell.get().is_some();
 
-    // ── 3. Event handlers ────────────────────────────────────────────────────
-    //
-    // Each handler is a `move` closure that captures `state` and `model` by
-    // copy (they're Copy types — just arena indices). The closures are passed
-    // to `on:event` in the view.
-
-    // Focus/click on the input: start an edit session (if not already editing)
-    // with FormulaBar focus, so CellEditor doesn't steal focus back.
+    // Start an edit session with FormulaBar focus (so CellEditor doesn't
+    // steal focus back), or switch focus if already editing.
     let on_focus = move |_: web_sys::FocusEvent| {
         if state.editing_cell.get_untracked().is_some() {
             // Already editing — just switch focus to formula bar.
@@ -119,8 +70,7 @@ pub fn FormulaBar() -> impl IntoView {
         });
     };
 
-    // Typing in the input: update the shared edit buffer.
-    // CellEditor also reads `editing_cell.text`, so it updates live.
+    // Update the shared edit buffer (syncs with CellEditor).
     let on_input = move |ev: web_sys::Event| {
         let value = ev
             .target()
@@ -136,8 +86,7 @@ pub fn FormulaBar() -> impl IntoView {
                 }
             });
         } else {
-            // First keystroke — start a new edit session in Accept mode.
-            // Accept mode means arrow keys will commit + navigate (like Excel).
+            // First keystroke — Accept mode: arrows commit + navigate.
             model.with_value(|m| {
                 let ac = m.active_cell();
                 state.editing_cell.set(Some(EditingCell {
@@ -152,34 +101,13 @@ pub fn FormulaBar() -> impl IntoView {
         }
     };
 
-    // Keyboard shortcuts specific to the formula bar input.
-    // Enter/Tab/Escape commit or cancel — same as CellEditor.
-    // We prevent_default to stop the browser's native behavior, then
-    // let the event bubble up to Workbook's keydown handler which
-    // calls execute(CommitAndNavigate/CancelEdit).
+    // Suppress browser defaults; let the event bubble to Workbook
+    // which commits or cancels via classify_key -> execute.
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
-        match ev.key().as_str() {
-            "Enter" | "Tab" | "Escape" => {
-                ev.prevent_default();
-                // Bubble up to Workbook — it handles commit/cancel/navigate.
-            }
-            _ => {}
+        if matches!(ev.key().as_str(), "Enter" | "Tab" | "Escape") {
+            ev.prevent_default();
         }
     };
-
-    // ── 4. The view ──────────────────────────────────────────────────────────
-    //
-    // view! { } is a macro that produces real DOM nodes (not a virtual DOM).
-    // Reactive closures (move || ...) are registered as fine-grained
-    // subscriptions — only the specific text node or attribute updates,
-    // not the whole component tree.
-    //
-    // Key bindings:
-    //   {cell_address}     — text content, re-evaluated when redraw fires
-    //   prop:value=...     — sets the DOM .value property reactively
-    //   on:input=handler   — DOM event listener
-    //   node_ref=input_ref — stores the HtmlInputElement in the NodeRef
-    //   class:editing=...  — toggles CSS class based on a reactive bool
 
     view! {
         <div id="formula-bar" style="

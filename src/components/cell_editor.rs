@@ -86,14 +86,11 @@ pub fn CellEditor() -> impl IntoView {
     // Intercept Enter / Tab / Escape to stop default textarea behavior
     // (newline insertion, browser focus cycling) and let them bubble up
     // to the Workbook container which commits or cancels the edit.
+    // Suppress browser defaults; let the event bubble to Workbook
+    // which commits or cancels via classify_key -> execute.
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
-        match ev.key().as_str() {
-            "Enter" | "Tab" | "Escape" => {
-                ev.prevent_default();
-                // Do NOT stop_propagation — the Workbook keydown handler
-                // picks this up via bubbling and commits / navigates.
-            }
-            _ => {}
+        if matches!(ev.key().as_str(), "Enter" | "Tab" | "Escape") {
+            ev.prevent_default();
         }
     };
 

@@ -275,7 +275,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn splice_span_out_of_range_clamps() {
-        // prev_span (10, 15) is beyond text length 3 — clamps to (3, 3) → append.
+        // prev_span (10, 15) is beyond text length 3 — clamps to (3, 3) -> append.
         assert_eq!(
             splice_ref("=A1", 3, "B2", Some((10, 15))),
             ("=A1B2".to_string(), 3, 5)

@@ -1,67 +1,5 @@
-// ==============================================================================
-// SpreadsheetAction — typed description of every user-triggered mutation.
-//
-// Two public entry points:
-//   classify_key(...)  →  pure mapping from a key event to an action
-//   execute(...)       →  applies the action: model mutation, signal updates,
-//                         formula evaluation, persistence, focus management
-// ==============================================================================
-//
-// ── HOW TO ADD A NEW KEY ACTION ───────────────────────────────────────────────
-//
-// Three steps, always in the same order:
-//
-//   1. Add a variant to `SpreadsheetAction`.
-//      Name it after the user's *intent*, not the key.
-//      Good: `DuplicateRow`    Bad: `CtrlD`
-//
-//   2. Add a branch to `classify_key`.
-//      Pick the right modifier block (ctrl-only / shift-only / plain / …) and
-//      map the key string to the new variant.
-//      Example — Ctrl+D duplicates the current row:
-//
-//          // inside the `ctrl && !shift && !alt` block:
-//          "d" => return Some(DuplicateRow),
-//
-//   3. Add an arm to the `match` in `execute`.
-//      Call `mutate(model, state, Evaluate::Yes, |m| { … })` for model
-//      mutations.  Pass `Evaluate::Yes` whenever formula results may change
-//      (cell writes, row/column inserts/deletes, undo/redo of those).
-//      Example:
-//
-//          SpreadsheetAction::DuplicateRow => {
-//              mutate(model, state, Evaluate::Yes, |m| {
-//                  let v = m.get_selected_view();
-//                  m.insert_rows(v.sheet, v.row + 1, 1).ok();
-//                  // copy logic …
-//              });
-//          }
-//
-// ── MODIFYING AN EXISTING ACTION ──────────────────────────────────────────────
-//
-//   • To change the key binding:  edit only `classify_key`.
-//   • To change what it does:     edit only `execute`.
-//   • To change the name:         rename the variant and update both.
-//
-//   `classify_key` is a pure function — it must never touch the DOM, signals,
-//   or the model.  All side-effects belong in `execute`.
-//
-// ── NOTE ON POINT-MODE ARROWS ─────────────────────────────────────────────────
-//
-//   Arrow keys while editing a formula can extend a cell-reference range
-//   instead of committing the edit.  That logic runs as a *pre-check* in the
-//   `on_keydown` closure in `workbook.rs`, before `classify_key` is called,
-//   because it requires reading the textarea cursor position from the DOM.
-//   Do not try to move it into `classify_key`.
-//
-// ── NOTE ON CLIPBOARD ACTIONS ─────────────────────────────────────────────────
-//
-//   `Copy`, `Cut`, and `Paste` are classified by `classify_key` but NOT
-//   executed by `execute`.  They require the `AppClipboard` context store
-//   and async OS clipboard APIs, so the Workbook component handles them
-//   directly after receiving the classified action.
-//
-// ==============================================================================
+// Key -> SpreadsheetAction -> model mutation pipeline.
+// See docs/adding-actions.md for how to add or modify actions.
 
 use ironcalc_base::expressions::types::Area;
 use ironcalc_base::UserModel;
@@ -79,8 +17,8 @@ use crate::util::warn_if_err;
 /// Pass `Eval::No` for pure navigation or selection changes.
 #[derive(Clone, Copy)]
 enum Eval {
-    Y,
-    N,
+    Yes,
+    No,
 }
 
 // ── SpreadsheetAction ─────────────────────────────────────────────────────────
@@ -282,54 +220,54 @@ pub fn classify_key(
 pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookState) {
     match action {
         SpreadsheetAction::Navigate(dir) => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_arrow(*dir);
             });
         }
         SpreadsheetAction::NavigateEdge(dir) => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_to_edge(*dir);
             });
         }
         SpreadsheetAction::JumpToA1 => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_set_cell(1, 1);
             });
         }
         SpreadsheetAction::JumpToLastCell => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_to_edge(ArrowKey::Down);
                 m.nav_to_edge(ArrowKey::Right);
             });
         }
         SpreadsheetAction::ExpandSelection(dir) => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_expand_selection(*dir);
             });
         }
         SpreadsheetAction::PageDown => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_page(PageDir::Down);
             });
         }
         SpreadsheetAction::PageUp => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_page(PageDir::Up);
             });
         }
         SpreadsheetAction::RowHome => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_home_row();
             });
         }
         SpreadsheetAction::RowEnd => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_to_edge(ArrowKey::Right);
             });
         }
         SpreadsheetAction::SwitchSheet(delta) => {
             let delta = *delta;
-            mutate(model, state, Eval::N, move |m| {
+            mutate(model, state, Eval::No, move |m| {
                 let current = m.get_selected_view().sheet;
                 let visible: Vec<u32> = m
                     .get_worksheets_properties()
@@ -412,7 +350,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
         SpreadsheetAction::Copy | SpreadsheetAction::Cut | SpreadsheetAction::Paste => {}
 
         SpreadsheetAction::Delete => {
-            mutate(model, state, Eval::Y, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 warn_if_err(
@@ -422,7 +360,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
             });
         }
         SpreadsheetAction::ClearAll => {
-            mutate(model, state, Eval::Y, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 warn_if_err(
@@ -432,23 +370,23 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
             });
         }
         SpreadsheetAction::SelectAll => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 let d = m.sheet_dimension();
                 m.nav_select_range(d.min_row, d.min_column, d.max_row, d.max_column);
             });
         }
         SpreadsheetAction::Undo => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 warn_if_err(m.undo(), "undo");
             });
         }
         SpreadsheetAction::Redo => {
-            mutate(model, state, Eval::N, |m| {
+            mutate(model, state, Eval::No, |m| {
                 warn_if_err(m.redo(), "redo");
             });
         }
         SpreadsheetAction::InsertRows => {
-            mutate(model, state, Eval::Y, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
                 warn_if_err(
@@ -458,7 +396,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
             });
         }
         SpreadsheetAction::InsertColumns => {
-            mutate(model, state, Eval::Y, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
                 warn_if_err(
@@ -468,7 +406,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
             });
         }
         SpreadsheetAction::DeleteRows => {
-            mutate(model, state, Eval::Y, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
                 warn_if_err(
@@ -478,7 +416,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
             });
         }
         SpreadsheetAction::DeleteColumns => {
-            mutate(model, state, Eval::Y, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
                 warn_if_err(
@@ -501,7 +439,7 @@ fn mutate(
 ) {
     model.update_value(|m| {
         f(m);
-        if matches!(evaluate, Eval::Y) {
+        if matches!(evaluate, Eval::Yes) {
             m.evaluate();
         }
     });
@@ -1060,8 +998,8 @@ mod tests {
                 model,
                 &state,
             );
-            // value committed to A1
-            let val = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
+            // value committed to A1 (sheet 0)
+            let val = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(val, "42");
             // editing state cleared
             assert!(state.editing_cell.get_untracked().is_none());
@@ -1080,7 +1018,7 @@ mod tests {
             );
             // Write "hello" directly to the model so it's already there before F2.
             model.update_value(|m| {
-                m.set_user_input(1, 1, 1, "hello").ok();
+                m.set_user_input(0, 1, 1, "hello").ok();
                 m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
@@ -1101,12 +1039,12 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             model.update_value(|m| {
-                m.set_user_input(1, 1, 1, "data").ok();
+                m.set_user_input(0, 1, 1, "data").ok();
                 m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
             execute(&SpreadsheetAction::Delete, model, &state);
-            let val = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
+            let val = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(val, "");
         });
     }
@@ -1119,17 +1057,17 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             model.update_value(|m| {
-                m.set_user_input(1, 1, 1, "42").ok();
+                m.set_user_input(0, 1, 1, "42").ok();
                 m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
             execute(&SpreadsheetAction::Undo, model, &state);
             let after_undo =
-                model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
+                model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(after_undo, "");
             execute(&SpreadsheetAction::Redo, model, &state);
             let after_redo =
-                model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
+                model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(after_redo, "42");
         });
     }
@@ -1143,14 +1081,14 @@ mod tests {
             );
             // Write "original" to A1 (row 1, col 1).
             model.update_value(|m| {
-                m.set_user_input(1, 1, 1, "original").ok();
+                m.set_user_input(0, 1, 1, "original").ok();
                 m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
-            // Cursor at row 1 → InsertRows inserts above, pushing "original" to A2.
+            // Cursor at row 1 -> InsertRows inserts above, pushing "original" to A2.
             execute(&SpreadsheetAction::InsertRows, model, &state);
-            let a1 = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
-            let a2 = model.with_value(|m| m.get_formatted_cell_value(1, 2, 1).unwrap_or_default());
+            let a1 = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
+            let a2 = model.with_value(|m| m.get_formatted_cell_value(0, 2, 1).unwrap_or_default());
             assert_eq!(a1, "");
             assert_eq!(a2, "original");
         });
@@ -1165,13 +1103,13 @@ mod tests {
             );
             // Put content in A2 (row 2), then delete row 1 to bring it to A1.
             model.update_value(|m| {
-                m.set_user_input(1, 2, 1, "data").ok();
+                m.set_user_input(0, 2, 1, "data").ok();
                 m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
-            // Cursor at row 1 → DeleteRows removes row 1, A2 becomes A1.
+            // Cursor at row 1 -> DeleteRows removes row 1, A2 becomes A1.
             execute(&SpreadsheetAction::DeleteRows, model, &state);
-            let a1 = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
+            let a1 = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(a1, "data");
         });
     }

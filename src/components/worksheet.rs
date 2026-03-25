@@ -45,9 +45,11 @@ pub fn Worksheet() -> impl IntoView {
             return;
         };
         let canvas_el: HtmlCanvasElement = canvas;
-        let extend_to = match state.drag.get_untracked() {
-            DragState::Extending { to_row, to_col } => Some((to_row, to_col)),
-            _ => None,
+        let extend_to = if let DragState::Extending { to_row, to_col } = state.drag.get_untracked()
+        {
+            Some((to_row, to_col))
+        } else {
+            None
         };
         let point_range = state.point_range.get_untracked();
         let canvas_theme = state.theme.get_untracked().canvas_theme();
@@ -115,7 +117,7 @@ pub fn Worksheet() -> impl IntoView {
             }
         }
 
-        // Corner cell (top-left of header area) → select the entire sheet.
+        // Corner cell (top-left of header area) -> select the entire sheet.
         if x < HEADER_COL_WIDTH && y < HEADER_ROW_HEIGHT {
             model.update_value(|m| {
                 m.nav_select_all();
@@ -125,7 +127,7 @@ pub fn Worksheet() -> impl IntoView {
             return;
         }
 
-        // Column header click → select the entire column.
+        // Column header click -> select the entire column.
         if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
             model.update_value(|m| {
                 let view = m.get_selected_view();
@@ -144,7 +146,7 @@ pub fn Worksheet() -> impl IntoView {
             return;
         }
 
-        // Row header click → select the entire row.
+        // Row header click -> select the entire row.
         if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
             model.update_value(|m| {
                 let view = m.get_selected_view();
@@ -279,7 +281,10 @@ pub fn Worksheet() -> impl IntoView {
                 ev.prevent_default();
                 return;
             }
-            _ => {}
+            DragState::Idle
+            | DragState::Selecting
+            | DragState::Extending { .. }
+            | DragState::Pointing => {}
         }
 
         if x < HEADER_COL_WIDTH || y < HEADER_ROW_HEIGHT {
@@ -353,7 +358,7 @@ pub fn Worksheet() -> impl IntoView {
                 });
                 state.request_redraw();
             }
-            _ => {}
+            DragState::Idle | DragState::ResizingCol { .. } | DragState::ResizingRow { .. } => {}
         }
     };
 
@@ -459,14 +464,14 @@ pub fn Worksheet() -> impl IntoView {
                     m.nav_arrow(ArrowKey::Left);
                 }
             } else if dy.abs() < 100.0 {
-                // Small vertical delta → single-row scroll (trackpad).
+                // Small vertical delta -> single-row scroll (trackpad).
                 if dy > 0.0 {
                     m.nav_arrow(ArrowKey::Down);
                 } else {
                     m.nav_arrow(ArrowKey::Up);
                 }
             } else {
-                // Large vertical delta → page scroll (mouse wheel).
+                // Large vertical delta -> page scroll (mouse wheel).
                 if dy > 0.0 {
                     m.nav_page(PageDir::Down);
                 } else {
@@ -489,7 +494,10 @@ pub fn Worksheet() -> impl IntoView {
                             "width:100%;height:100%;display:block;cursor:col-resize;",
                         DragState::ResizingRow { .. } =>
                             "width:100%;height:100%;display:block;cursor:row-resize;",
-                        _ =>
+                        DragState::Idle
+                        | DragState::Selecting
+                        | DragState::Extending { .. }
+                        | DragState::Pointing =>
                             "width:100%;height:100%;display:block;cursor:cell;",
                     }
                 }

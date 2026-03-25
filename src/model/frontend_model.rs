@@ -83,7 +83,7 @@ pub trait FrontendModel {
     fn nav_home_row(&mut self);
 }
 
-// ── Helper: map font name String → SafeFontFamily ─────────────────────────────
+// ── Helper: map font name String -> SafeFontFamily ─────────────────────────────
 
 fn font_family_from_name(name: &str) -> SafeFontFamily {
     if name.is_empty() {

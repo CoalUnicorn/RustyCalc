@@ -212,21 +212,18 @@ fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
         ev.stop_propagation();
-        match ev.key().as_str() {
-            "Enter" => {
-                ev.prevent_default();
-                let new_name = ev
-                    .target()
-                    .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-                    .map(|i| i.value())
-                    .unwrap_or_default();
-                commit_rename(new_name);
-            }
-            "Escape" => {
-                ev.prevent_default();
-                renaming.set(None);
-            }
-            _ => {}
+        let key = ev.key();
+        if key == "Enter" {
+            ev.prevent_default();
+            let new_name = ev
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+                .map(|i| i.value())
+                .unwrap_or_default();
+            commit_rename(new_name);
+        } else if key == "Escape" {
+            ev.prevent_default();
+            renaming.set(None);
         }
     };
 
