@@ -2,6 +2,8 @@ use ironcalc_base::expressions::types::Area;
 use leptos::prelude::*;
 
 use crate::action::{classify_key, execute, SpreadsheetAction};
+use crate::components::formula_bar::FormulaBar;
+use crate::components::sheet_tab_bar::SheetTabBar;
 use crate::components::worksheet::Worksheet;
 use crate::model::AppClipboard;
 use crate::state::{EditMode, ModelStore, WorkbookState};
@@ -20,8 +22,7 @@ use crate::util::warn_if_err;
 pub fn Workbook() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
-    let clipboard_store =
-        expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
+    let clipboard_store = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
         // Don't intercept keyboard events while the function browser modal is open;
@@ -38,7 +39,7 @@ pub fn Workbook() -> impl IntoView {
             if let Ok(el) = target.dyn_into::<web_sys::HtmlElement>() {
                 let tag = el.tag_name().to_ascii_lowercase();
                 let is_editing = state.editing_cell.get_untracked().is_some();
-                if tag == "input" || tag == "select" || (tag == "textarea" && !is_editing) {
+                if tag == "select" || ((tag == "input" || tag == "textarea") && !is_editing) {
                     return;
                 }
             }
@@ -162,7 +163,9 @@ pub fn Workbook() -> impl IntoView {
             tabindex="0"
             on:keydown=on_keydown
         >
+            <FormulaBar />
             <Worksheet />
+            <SheetTabBar />
         </div>
     }
 }
