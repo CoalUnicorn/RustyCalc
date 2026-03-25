@@ -22,6 +22,7 @@ gloo-net = "0.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+leptos-use = "0.15"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

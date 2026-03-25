@@ -11,10 +11,8 @@ use crate::state::WorkbookState;
 /// Auto-focused on mount so subsequent keystrokes go here, not to the canvas.
 #[component]
 pub fn CellEditor() -> impl IntoView {
-    #[allow(clippy::expect_used)]
-    let state = use_context::<WorkbookState>().expect("WorkbookState must be in context");
-    #[allow(clippy::expect_used)]
-    let model = use_context::<ModelStore>().expect("ModelStore must be in context");
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
 
     let textarea_ref = NodeRef::<html::Textarea>::new();
 
@@ -71,7 +69,6 @@ pub fn CellEditor() -> impl IntoView {
     let text_value = move || state.editing_cell.get().map(|e| e.text).unwrap_or_default();
 
     // Keep editing_cell.text in sync as the user types.
-    let state_input = state.clone();
     let on_input = move |ev: web_sys::Event| {
         use wasm_bindgen::JsCast;
         let value = ev
@@ -79,7 +76,7 @@ pub fn CellEditor() -> impl IntoView {
             .and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
             .map(|el| el.value())
             .unwrap_or_default();
-        state_input.editing_cell.update(|cell| {
+        state.editing_cell.update(|cell| {
             if let Some(c) = cell {
                 c.text = value;
             }

@@ -18,21 +18,10 @@ use crate::util::warn_if_err;
 /// handled inline here.
 #[component]
 pub fn Workbook() -> impl IntoView {
-    #[allow(clippy::expect_used)]
-    let state = use_context::<WorkbookState>().expect("WorkbookState must be in context");
-    #[allow(clippy::expect_used)]
-    let model = use_context::<ModelStore>().expect("StoredValue<UserModel> must be in context");
-    #[allow(clippy::expect_used)]
-    let clipboard_store = use_context::<StoredValue<Option<AppClipboard>, LocalStorage>>()
-        .expect("StoredValue<Option<AppClipboard>> must be in context");
-
-    // Pre-clone for the Show closures in view! (on_keydown moves `state` below).
-    let _state_upload = state.clone();
-    let _state_share = state.clone();
-    let _state_regional = state.clone();
-    let _state_named = state.clone();
-    let _state_chart = state.clone();
-    let _state_fn_browser = state.clone();
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+    let clipboard_store =
+        expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
         // Don't intercept keyboard events while the function browser modal is open;
@@ -153,7 +142,7 @@ pub fn Workbook() -> impl IntoView {
                 ev.prevent_default();
             }
             SpreadsheetAction::Paste => {
-                if paste_from_clipboard(model, &state, clipboard_store) {
+                if paste_from_clipboard(model, state, clipboard_store) {
                     ev.prevent_default();
                 }
             }
@@ -209,7 +198,7 @@ fn copy_to_app_clipboard(
 /// succeeded (caller should call `ev.prevent_default()`).
 fn paste_from_clipboard(
     model: ModelStore,
-    state: &WorkbookState,
+    state: WorkbookState,
     clipboard_store: StoredValue<Option<AppClipboard>, LocalStorage>,
 ) -> bool {
     // Internal paste (synchronous) — from within-app Ctrl+C.
@@ -238,8 +227,6 @@ fn paste_from_clipboard(
     // Only attempted when no internal clipboard data was available; otherwise
     // the async path would race and overwrite the already-completed paste.
     if !internal_pasted {
-        let model2 = model;
-        let state2 = state.clone();
         wasm_bindgen_futures::spawn_local(async move {
             let Some(window) = web_sys::window() else {
                 return;
@@ -252,7 +239,7 @@ fn paste_from_clipboard(
             if text.is_empty() {
                 return;
             }
-            model2.update_value(|m| {
+            model.update_value(|m| {
                 let v = m.get_selected_view();
                 let area = Area {
                     sheet: v.sheet,
@@ -268,7 +255,7 @@ fn paste_from_clipboard(
                 }
                 m.evaluate();
             });
-            state2.request_redraw();
+            state.request_redraw();
         });
     }
 

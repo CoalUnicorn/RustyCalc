@@ -5,10 +5,7 @@ use crate::model::frontend_model::FrontendModel;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use super::geometry::{
-    col_name, col_width, row_height, AUTOFILL_HANDLE_PX, FROZEN_SEP, HEADER_COL_WIDTH,
-    HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
-};
+use super::geometry::*;
 use crate::theme::CanvasTheme;
 
 // ── Layout constants ──────────────────────────────────────────────────────────

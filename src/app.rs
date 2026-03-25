@@ -1,8 +1,7 @@
 use crate::components::workbook::Workbook;
 
 use leptos::prelude::*;
-use wasm_bindgen::closure::Closure;
-use wasm_bindgen::JsCast;
+use leptos_use::use_interval_fn;
 
 use crate::state::WorkbookState;
 use crate::storage;
@@ -23,39 +22,28 @@ pub fn App() -> impl IntoView {
     let clipboard: StoredValue<Option<crate::model::AppClipboard>, LocalStorage> =
         StoredValue::new_local(None);
 
-    provide_context(wb_state.clone());
+    provide_context(wb_state);
     provide_context(model);
     provide_context(clipboard);
 
     // ── Auto-save interval ────────────────────────────────────────────────────
     // Every second, flush the model's pending diff queue. If there are unsaved
-    // mutations, persist to localStorage. `cb.forget()` is intentional — the
-    // closure lives for the duration of the app (no way to cancel it anyway).
-    {
-        let save_state = wb_state;
-        let save_model = model;
-        let cb = Closure::wrap(Box::new(move || {
-            let Some(uuid) = save_state.current_uuid.get_untracked() else {
+    // mutations, persist to localStorage. Cleanup is automatic on unmount.
+    use_interval_fn(
+        move || {
+            let Some(uuid) = wb_state.current_uuid.get_untracked() else {
                 return;
             };
             let mut has_changes = false;
-            save_model.update_value(|m| {
+            model.update_value(|m| {
                 has_changes = !m.flush_send_queue().is_empty();
             });
             if has_changes {
-                save_model.with_value(|m| storage::save(&uuid, m));
+                model.with_value(|m| storage::save(&uuid, m));
             }
-        }) as Box<dyn Fn()>);
-        #[allow(clippy::expect_used)]
-        let win = web_sys::window().expect("window must exist in WASM context");
-        #[allow(clippy::expect_used)]
-        win.set_interval_with_callback_and_timeout_and_arguments_0(
-            cb.as_ref().unchecked_ref(),
-            1000,
-        )
-        .expect("set_interval must not fail");
-        cb.forget();
-    }
+        },
+        1000,
+    );
 
     // Row layout: collapsible drawer on the left, workbook editor fills the rest.
 

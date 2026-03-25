@@ -2,6 +2,7 @@ use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
+// NOTE: <Meta name="color-scheme" content="dark"/>
 use crate::theme::Theme;
 
 /// Shorthand for the context-provided `UserModel` storage handle.
@@ -93,7 +94,7 @@ pub struct ContextMenuState {
 /// Note: row/col/sheet are NOT stored here — they are always derived from
 /// `UserModel::get_selected_view()` inside a `{ let _ = state.redraw.get(); … }` closure
 /// to stay in sync with the model's navigation state.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct WorkbookState {
     /// None = not editing; Some = live edit buffer
     pub(crate) editing_cell: RwSignal<Option<EditingCell>>,
