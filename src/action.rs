@@ -24,13 +24,13 @@
 //          "d" => return Some(DuplicateRow),
 //
 //   3. Add an arm to the `match` in `execute`.
-//      Call `mutate(model, state, needs_evaluate, |m| { … })` for model
-//      mutations.  Pass `evaluate: true` whenever formula results may change
+//      Call `mutate(model, state, Evaluate::Yes, |m| { … })` for model
+//      mutations.  Pass `Evaluate::Yes` whenever formula results may change
 //      (cell writes, row/column inserts/deletes, undo/redo of those).
 //      Example:
 //
 //          SpreadsheetAction::DuplicateRow => {
-//              mutate(model, state, true, |m| {
+//              mutate(model, state, Evaluate::Yes, |m| {
 //                  let v = m.get_selected_view();
 //                  m.insert_rows(v.sheet, v.row + 1, 1).ok();
 //                  // copy logic …
@@ -70,6 +70,17 @@ use leptos::prelude::*;
 use crate::canvas::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
+
+/// Whether `mutate` should recalculate formulas after applying the closure.
+///
+/// Pass `Eval::Yes` when the mutation may change formula results
+/// (cell writes, row/column inserts/deletes).
+/// Pass `Eval::No` for pure navigation or selection changes.
+#[derive(Clone, Copy)]
+enum Eval {
+    Yes,
+    No,
+}
 
 // ── SpreadsheetAction ─────────────────────────────────────────────────────────
 
@@ -270,38 +281,54 @@ pub fn classify_key(
 pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookState) {
     match action {
         SpreadsheetAction::Navigate(dir) => {
-            mutate(model, state, false, |m| { m.nav_arrow(*dir); });
+            mutate(model, state, Eval::No, |m| {
+                m.nav_arrow(*dir);
+            });
         }
         SpreadsheetAction::NavigateEdge(dir) => {
-            mutate(model, state, false, |m| { m.nav_to_edge(*dir); });
+            mutate(model, state, Eval::No, |m| {
+                m.nav_to_edge(*dir);
+            });
         }
         SpreadsheetAction::JumpToA1 => {
-            mutate(model, state, false, |m| { m.nav_set_cell(1, 1); });
+            mutate(model, state, Eval::No, |m| {
+                m.nav_set_cell(1, 1);
+            });
         }
         SpreadsheetAction::JumpToLastCell => {
-            mutate(model, state, false, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_to_edge(ArrowKey::Down);
                 m.nav_to_edge(ArrowKey::Right);
             });
         }
         SpreadsheetAction::ExpandSelection(dir) => {
-            mutate(model, state, false, |m| { m.nav_expand_selection(*dir); });
+            mutate(model, state, Eval::No, |m| {
+                m.nav_expand_selection(*dir);
+            });
         }
         SpreadsheetAction::PageDown => {
-            mutate(model, state, false, |m| { m.nav_page(PageDir::Down); });
+            mutate(model, state, Eval::No, |m| {
+                m.nav_page(PageDir::Down);
+            });
         }
         SpreadsheetAction::PageUp => {
-            mutate(model, state, false, |m| { m.nav_page(PageDir::Up); });
+            mutate(model, state, Eval::No, |m| {
+                m.nav_page(PageDir::Up);
+            });
         }
         SpreadsheetAction::RowHome => {
-            mutate(model, state, false, |m| { m.nav_home_row(); });
+            mutate(model, state, Eval::No, |m| {
+                m.nav_home_row();
+            });
         }
         SpreadsheetAction::RowEnd => {
-            mutate(model, state, false, |m| { m.nav_to_edge(ArrowKey::Right); });
+            mutate(model, state, Eval::No, |m| {
+                m.nav_to_edge(ArrowKey::Right);
+            });
         }
         SpreadsheetAction::SwitchSheet(delta) => {
             let delta = *delta;
-            mutate(model, state, false, move |m| {
+            mutate(model, state, Eval::No, move |m| {
                 let current = m.get_selected_view().sheet;
                 let visible: Vec<u32> = m
                     .get_worksheets_properties()
@@ -310,8 +337,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
                     .map(|s| s.sheet_id)
                     .collect();
                 if let Some(pos) = visible.iter().position(|&id| id == current) {
-                    let next =
-                        (pos as i32 + delta).rem_euclid(visible.len() as i32) as usize;
+                    let next = (pos as i32 + delta).rem_euclid(visible.len() as i32) as usize;
                     m.set_selected_sheet(visible[next]).ok();
                 }
             });
@@ -364,7 +390,9 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
                     model.with_value(|m| storage::save(&uuid, m));
                 }
                 // Navigate to the next cell and redraw.
-                model.update_value(|m| { m.nav_arrow(*dir); });
+                model.update_value(|m| {
+                    m.nav_arrow(*dir);
+                });
                 state.request_redraw();
                 crate::util::refocus_workbook();
             }
@@ -378,12 +406,10 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
         }
 
         // ── Clipboard: handled by the Workbook component ─────────────────
-        SpreadsheetAction::Copy
-        | SpreadsheetAction::Cut
-        | SpreadsheetAction::Paste => {}
+        SpreadsheetAction::Copy | SpreadsheetAction::Cut | SpreadsheetAction::Paste => {}
 
         SpreadsheetAction::Delete => {
-            mutate(model, state, true, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 m.range_clear_contents(&make_area(v.sheet, r1, c1, r2, c2))
@@ -391,47 +417,51 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
             });
         }
         SpreadsheetAction::ClearAll => {
-            mutate(model, state, true, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 m.range_clear_all(&make_area(v.sheet, r1, c1, r2, c2)).ok();
             });
         }
         SpreadsheetAction::SelectAll => {
-            mutate(model, state, false, |m| {
+            mutate(model, state, Eval::No, |m| {
                 let d = m.sheet_dimension();
                 m.nav_select_range(d.min_row, d.min_column, d.max_row, d.max_column);
             });
         }
         SpreadsheetAction::Undo => {
-            mutate(model, state, false, |m| { m.undo().ok(); });
+            mutate(model, state, Eval::No, |m| {
+                m.undo().ok();
+            });
         }
         SpreadsheetAction::Redo => {
-            mutate(model, state, false, |m| { m.redo().ok(); });
+            mutate(model, state, Eval::No, |m| {
+                m.redo().ok();
+            });
         }
         SpreadsheetAction::InsertRows => {
-            mutate(model, state, true, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
                 m.insert_rows(v.sheet, r_min, r_max - r_min + 1).ok();
             });
         }
         SpreadsheetAction::InsertColumns => {
-            mutate(model, state, true, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
                 m.insert_columns(v.sheet, c_min, c_max - c_min + 1).ok();
             });
         }
         SpreadsheetAction::DeleteRows => {
-            mutate(model, state, true, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
                 m.delete_rows(v.sheet, r_min, r_max - r_min + 1).ok();
             });
         }
         SpreadsheetAction::DeleteColumns => {
-            mutate(model, state, true, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
                 m.delete_columns(v.sheet, c_min, c_max - c_min + 1).ok();
@@ -446,12 +476,12 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
 fn mutate(
     model: ModelStore,
     state: &WorkbookState,
-    evaluate: bool,
+    evaluate: Eval,
     f: impl FnOnce(&mut UserModel<'static>),
 ) {
     model.update_value(|m| {
         f(m);
-        if evaluate {
+        if matches!(evaluate, Eval::Yes) {
             m.evaluate();
         }
     });
@@ -528,10 +558,22 @@ mod tests {
     #[wasm_bindgen_test]
     fn plain_arrows_navigate() {
         let ck = |k| classify_key(k, false, false, false, None);
-        assert_eq!(ck("ArrowRight"), Some(SpreadsheetAction::Navigate(ArrowKey::Right)));
-        assert_eq!(ck("ArrowLeft"),  Some(SpreadsheetAction::Navigate(ArrowKey::Left)));
-        assert_eq!(ck("ArrowDown"),  Some(SpreadsheetAction::Navigate(ArrowKey::Down)));
-        assert_eq!(ck("ArrowUp"),    Some(SpreadsheetAction::Navigate(ArrowKey::Up)));
+        assert_eq!(
+            ck("ArrowRight"),
+            Some(SpreadsheetAction::Navigate(ArrowKey::Right))
+        );
+        assert_eq!(
+            ck("ArrowLeft"),
+            Some(SpreadsheetAction::Navigate(ArrowKey::Left))
+        );
+        assert_eq!(
+            ck("ArrowDown"),
+            Some(SpreadsheetAction::Navigate(ArrowKey::Down))
+        );
+        assert_eq!(
+            ck("ArrowUp"),
+            Some(SpreadsheetAction::Navigate(ArrowKey::Up))
+        );
     }
 
     #[wasm_bindgen_test]
@@ -560,25 +602,46 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn page_up_down() {
-        assert_eq!(classify_key("PageDown", false, false, false, None), Some(SpreadsheetAction::PageDown));
-        assert_eq!(classify_key("PageUp",   false, false, false, None), Some(SpreadsheetAction::PageUp));
+        assert_eq!(
+            classify_key("PageDown", false, false, false, None),
+            Some(SpreadsheetAction::PageDown)
+        );
+        assert_eq!(
+            classify_key("PageUp", false, false, false, None),
+            Some(SpreadsheetAction::PageUp)
+        );
     }
 
     #[wasm_bindgen_test]
     fn home_end() {
-        assert_eq!(classify_key("Home", false, false, false, None), Some(SpreadsheetAction::RowHome));
-        assert_eq!(classify_key("End",  false, false, false, None), Some(SpreadsheetAction::RowEnd));
+        assert_eq!(
+            classify_key("Home", false, false, false, None),
+            Some(SpreadsheetAction::RowHome)
+        );
+        assert_eq!(
+            classify_key("End", false, false, false, None),
+            Some(SpreadsheetAction::RowEnd)
+        );
     }
 
     #[wasm_bindgen_test]
     fn delete_and_escape() {
-        assert_eq!(classify_key("Delete", false, false, false, None), Some(SpreadsheetAction::Delete));
-        assert_eq!(classify_key("Escape", false, false, false, None), Some(SpreadsheetAction::CancelEdit));
+        assert_eq!(
+            classify_key("Delete", false, false, false, None),
+            Some(SpreadsheetAction::Delete)
+        );
+        assert_eq!(
+            classify_key("Escape", false, false, false, None),
+            Some(SpreadsheetAction::CancelEdit)
+        );
     }
 
     #[wasm_bindgen_test]
     fn f2_enters_edit_mode() {
-        assert_eq!(classify_key("F2", false, false, false, None), Some(SpreadsheetAction::EnterEditMode));
+        assert_eq!(
+            classify_key("F2", false, false, false, None),
+            Some(SpreadsheetAction::EnterEditMode)
+        );
     }
 
     #[wasm_bindgen_test]
@@ -593,11 +656,11 @@ mod tests {
     #[wasm_bindgen_test]
     fn non_printable_returns_none() {
         let none = |k| classify_key(k, false, false, false, None);
-        assert_eq!(none("F1"),       None);
-        assert_eq!(none("Shift"),    None);
-        assert_eq!(none("Control"),  None);
+        assert_eq!(none("F1"), None);
+        assert_eq!(none("Shift"), None);
+        assert_eq!(none("Control"), None);
         assert_eq!(none("Backspace"), None);
-        assert_eq!(none("Alt"),      None);
+        assert_eq!(none("Alt"), None);
     }
 
     // ── classify_key: Ctrl combos ─────────────────────────────────────────────
@@ -613,8 +676,14 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn ctrl_a_selects_all() {
-        assert_eq!(classify_key("a", true, false, false, None), Some(SpreadsheetAction::SelectAll));
-        assert_eq!(classify_key("A", true, false, false, None), Some(SpreadsheetAction::SelectAll));
+        assert_eq!(
+            classify_key("a", true, false, false, None),
+            Some(SpreadsheetAction::SelectAll)
+        );
+        assert_eq!(
+            classify_key("A", true, false, false, None),
+            Some(SpreadsheetAction::SelectAll)
+        );
     }
 
     #[wasm_bindgen_test]
@@ -630,56 +699,101 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn ctrl_home_end_jump() {
-        assert_eq!(classify_key("Home", true, false, false, None), Some(SpreadsheetAction::JumpToA1));
-        assert_eq!(classify_key("End",  true, false, false, None), Some(SpreadsheetAction::JumpToLastCell));
+        assert_eq!(
+            classify_key("Home", true, false, false, None),
+            Some(SpreadsheetAction::JumpToA1)
+        );
+        assert_eq!(
+            classify_key("End", true, false, false, None),
+            Some(SpreadsheetAction::JumpToLastCell)
+        );
     }
 
     #[wasm_bindgen_test]
     fn ctrl_arrows_navigate_to_edge() {
         let c = |k| classify_key(k, true, false, false, None);
-        assert_eq!(c("ArrowRight"), Some(SpreadsheetAction::NavigateEdge(ArrowKey::Right)));
-        assert_eq!(c("ArrowLeft"),  Some(SpreadsheetAction::NavigateEdge(ArrowKey::Left)));
-        assert_eq!(c("ArrowUp"),    Some(SpreadsheetAction::NavigateEdge(ArrowKey::Up)));
-        assert_eq!(c("ArrowDown"),  Some(SpreadsheetAction::NavigateEdge(ArrowKey::Down)));
+        assert_eq!(
+            c("ArrowRight"),
+            Some(SpreadsheetAction::NavigateEdge(ArrowKey::Right))
+        );
+        assert_eq!(
+            c("ArrowLeft"),
+            Some(SpreadsheetAction::NavigateEdge(ArrowKey::Left))
+        );
+        assert_eq!(
+            c("ArrowUp"),
+            Some(SpreadsheetAction::NavigateEdge(ArrowKey::Up))
+        );
+        assert_eq!(
+            c("ArrowDown"),
+            Some(SpreadsheetAction::NavigateEdge(ArrowKey::Down))
+        );
     }
 
     #[wasm_bindgen_test]
     fn ctrl_minus_deletes_rows() {
-        assert_eq!(classify_key("-", true, false, false, None), Some(SpreadsheetAction::DeleteRows));
+        assert_eq!(
+            classify_key("-", true, false, false, None),
+            Some(SpreadsheetAction::DeleteRows)
+        );
     }
 
     // ── classify_key: Ctrl+Shift combos ──────────────────────────────────────
 
     #[wasm_bindgen_test]
     fn ctrl_shift_delete_clears_all() {
-        assert_eq!(classify_key("Delete", true, true, false, None), Some(SpreadsheetAction::ClearAll));
+        assert_eq!(
+            classify_key("Delete", true, true, false, None),
+            Some(SpreadsheetAction::ClearAll)
+        );
     }
 
     #[wasm_bindgen_test]
     fn ctrl_shift_plus_inserts_rows() {
-        assert_eq!(classify_key("=", true, true, false, None), Some(SpreadsheetAction::InsertRows));
-        assert_eq!(classify_key("+", true, true, false, None), Some(SpreadsheetAction::InsertRows));
+        assert_eq!(
+            classify_key("=", true, true, false, None),
+            Some(SpreadsheetAction::InsertRows)
+        );
+        assert_eq!(
+            classify_key("+", true, true, false, None),
+            Some(SpreadsheetAction::InsertRows)
+        );
     }
 
     // ── classify_key: Ctrl+Alt and Ctrl+Shift+Alt ─────────────────────────────
 
     #[wasm_bindgen_test]
     fn ctrl_alt_minus_deletes_columns() {
-        assert_eq!(classify_key("-", true, false, true, None), Some(SpreadsheetAction::DeleteColumns));
+        assert_eq!(
+            classify_key("-", true, false, true, None),
+            Some(SpreadsheetAction::DeleteColumns)
+        );
     }
 
     #[wasm_bindgen_test]
     fn ctrl_shift_alt_plus_inserts_columns() {
-        assert_eq!(classify_key("=", true, true, true, None), Some(SpreadsheetAction::InsertColumns));
-        assert_eq!(classify_key("+", true, true, true, None), Some(SpreadsheetAction::InsertColumns));
+        assert_eq!(
+            classify_key("=", true, true, true, None),
+            Some(SpreadsheetAction::InsertColumns)
+        );
+        assert_eq!(
+            classify_key("+", true, true, true, None),
+            Some(SpreadsheetAction::InsertColumns)
+        );
     }
 
     // ── classify_key: Alt-only ────────────────────────────────────────────────
 
     #[wasm_bindgen_test]
     fn alt_arrows_switch_sheet() {
-        assert_eq!(classify_key("ArrowDown", false, false, true, None), Some(SpreadsheetAction::SwitchSheet(1)));
-        assert_eq!(classify_key("ArrowUp",   false, false, true, None), Some(SpreadsheetAction::SwitchSheet(-1)));
+        assert_eq!(
+            classify_key("ArrowDown", false, false, true, None),
+            Some(SpreadsheetAction::SwitchSheet(1))
+        );
+        assert_eq!(
+            classify_key("ArrowUp", false, false, true, None),
+            Some(SpreadsheetAction::SwitchSheet(-1))
+        );
     }
 
     // ── classify_key: Shift-only ──────────────────────────────────────────────
@@ -687,10 +801,22 @@ mod tests {
     #[wasm_bindgen_test]
     fn shift_arrows_expand_selection() {
         let s = |k| classify_key(k, false, true, false, None);
-        assert_eq!(s("ArrowRight"), Some(SpreadsheetAction::ExpandSelection(ArrowKey::Right)));
-        assert_eq!(s("ArrowLeft"),  Some(SpreadsheetAction::ExpandSelection(ArrowKey::Left)));
-        assert_eq!(s("ArrowUp"),    Some(SpreadsheetAction::ExpandSelection(ArrowKey::Up)));
-        assert_eq!(s("ArrowDown"),  Some(SpreadsheetAction::ExpandSelection(ArrowKey::Down)));
+        assert_eq!(
+            s("ArrowRight"),
+            Some(SpreadsheetAction::ExpandSelection(ArrowKey::Right))
+        );
+        assert_eq!(
+            s("ArrowLeft"),
+            Some(SpreadsheetAction::ExpandSelection(ArrowKey::Left))
+        );
+        assert_eq!(
+            s("ArrowUp"),
+            Some(SpreadsheetAction::ExpandSelection(ArrowKey::Up))
+        );
+        assert_eq!(
+            s("ArrowDown"),
+            Some(SpreadsheetAction::ExpandSelection(ArrowKey::Down))
+        );
     }
 
     // ── classify_key: while editing (Accept mode) ─────────────────────────────
@@ -698,24 +824,48 @@ mod tests {
     #[wasm_bindgen_test]
     fn accept_mode_enter_tab_commit() {
         let e = accept_cell();
-        assert_eq!(classify_key("Enter", false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down)));
-        assert_eq!(classify_key("Tab",   false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Right)));
-        assert_eq!(classify_key("Tab",   false, true,  false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Left)));
+        assert_eq!(
+            classify_key("Enter", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down))
+        );
+        assert_eq!(
+            classify_key("Tab", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Right))
+        );
+        assert_eq!(
+            classify_key("Tab", false, true, false, Some(&e)),
+            Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Left))
+        );
     }
 
     #[wasm_bindgen_test]
     fn accept_mode_escape_cancels() {
         let e = accept_cell();
-        assert_eq!(classify_key("Escape", false, false, false, Some(&e)), Some(SpreadsheetAction::CancelEdit));
+        assert_eq!(
+            classify_key("Escape", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CancelEdit)
+        );
     }
 
     #[wasm_bindgen_test]
     fn accept_mode_arrows_commit_and_navigate() {
         let e = accept_cell();
-        assert_eq!(classify_key("ArrowDown",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down)));
-        assert_eq!(classify_key("ArrowUp",    false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Up)));
-        assert_eq!(classify_key("ArrowLeft",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Left)));
-        assert_eq!(classify_key("ArrowRight", false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Right)));
+        assert_eq!(
+            classify_key("ArrowDown", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down))
+        );
+        assert_eq!(
+            classify_key("ArrowUp", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Up))
+        );
+        assert_eq!(
+            classify_key("ArrowLeft", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Left))
+        );
+        assert_eq!(
+            classify_key("ArrowRight", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Right))
+        );
     }
 
     // ── classify_key: while editing (Edit mode) ───────────────────────────────
@@ -724,17 +874,32 @@ mod tests {
     fn edit_mode_arrows_are_unhandled() {
         // In Edit mode arrows move the text cursor — not a SpreadsheetAction.
         let e = edit_cell();
-        assert_eq!(classify_key("ArrowDown",  false, false, false, Some(&e)), None);
-        assert_eq!(classify_key("ArrowUp",    false, false, false, Some(&e)), None);
-        assert_eq!(classify_key("ArrowLeft",  false, false, false, Some(&e)), None);
-        assert_eq!(classify_key("ArrowRight", false, false, false, Some(&e)), None);
+        assert_eq!(
+            classify_key("ArrowDown", false, false, false, Some(&e)),
+            None
+        );
+        assert_eq!(classify_key("ArrowUp", false, false, false, Some(&e)), None);
+        assert_eq!(
+            classify_key("ArrowLeft", false, false, false, Some(&e)),
+            None
+        );
+        assert_eq!(
+            classify_key("ArrowRight", false, false, false, Some(&e)),
+            None
+        );
     }
 
     #[wasm_bindgen_test]
     fn edit_mode_enter_and_escape_still_work() {
         let e = edit_cell();
-        assert_eq!(classify_key("Enter",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down)));
-        assert_eq!(classify_key("Escape", false, false, false, Some(&e)), Some(SpreadsheetAction::CancelEdit));
+        assert_eq!(
+            classify_key("Enter", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down))
+        );
+        assert_eq!(
+            classify_key("Escape", false, false, false, Some(&e)),
+            Some(SpreadsheetAction::CancelEdit)
+        );
     }
 
     // ── classify_key: editing mode ignores Ctrl shortcuts ─────────────────────
@@ -826,7 +991,11 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::StartEdit("=SUM".to_owned()), model, &state);
+            execute(
+                &SpreadsheetAction::StartEdit("=SUM".to_owned()),
+                model,
+                &state,
+            );
             let cell = state.editing_cell.get_untracked();
             assert!(cell.is_some());
             assert_eq!(cell.unwrap().text, "=SUM");
@@ -841,7 +1010,11 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::StartEdit("hello".to_owned()), model, &state);
+            execute(
+                &SpreadsheetAction::StartEdit("hello".to_owned()),
+                model,
+                &state,
+            );
             assert!(state.editing_cell.get_untracked().is_some());
             execute(&SpreadsheetAction::CancelEdit, model, &state);
             assert!(state.editing_cell.get_untracked().is_none());
@@ -857,8 +1030,16 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::StartEdit("42".to_owned()), model, &state);
-            execute(&SpreadsheetAction::CommitAndNavigate(ArrowKey::Down), model, &state);
+            execute(
+                &SpreadsheetAction::StartEdit("42".to_owned()),
+                model,
+                &state,
+            );
+            execute(
+                &SpreadsheetAction::CommitAndNavigate(ArrowKey::Down),
+                model,
+                &state,
+            );
             // value committed to A1
             let val = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
             assert_eq!(val, "42");
@@ -878,7 +1059,10 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             // Write "hello" directly to the model so it's already there before F2.
-            model.update_value(|m| { m.set_user_input(1, 1, 1, "hello").ok(); m.evaluate(); });
+            model.update_value(|m| {
+                m.set_user_input(1, 1, 1, "hello").ok();
+                m.evaluate();
+            });
             let state = crate::state::WorkbookState::new();
             execute(&SpreadsheetAction::EnterEditMode, model, &state);
             let cell = state.editing_cell.get_untracked().unwrap();
@@ -896,7 +1080,10 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            model.update_value(|m| { m.set_user_input(1, 1, 1, "data").ok(); m.evaluate(); });
+            model.update_value(|m| {
+                m.set_user_input(1, 1, 1, "data").ok();
+                m.evaluate();
+            });
             let state = crate::state::WorkbookState::new();
             execute(&SpreadsheetAction::Delete, model, &state);
             let val = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
@@ -911,13 +1098,18 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            model.update_value(|m| { m.set_user_input(1, 1, 1, "42").ok(); m.evaluate(); });
+            model.update_value(|m| {
+                m.set_user_input(1, 1, 1, "42").ok();
+                m.evaluate();
+            });
             let state = crate::state::WorkbookState::new();
             execute(&SpreadsheetAction::Undo, model, &state);
-            let after_undo = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
+            let after_undo =
+                model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
             assert_eq!(after_undo, "");
             execute(&SpreadsheetAction::Redo, model, &state);
-            let after_redo = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
+            let after_redo =
+                model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
             assert_eq!(after_redo, "42");
         });
     }
@@ -930,7 +1122,10 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             // Write "original" to A1 (row 1, col 1).
-            model.update_value(|m| { m.set_user_input(1, 1, 1, "original").ok(); m.evaluate(); });
+            model.update_value(|m| {
+                m.set_user_input(1, 1, 1, "original").ok();
+                m.evaluate();
+            });
             let state = crate::state::WorkbookState::new();
             // Cursor at row 1 → InsertRows inserts above, pushing "original" to A2.
             execute(&SpreadsheetAction::InsertRows, model, &state);
@@ -949,7 +1144,10 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             // Put content in A2 (row 2), then delete row 1 to bring it to A1.
-            model.update_value(|m| { m.set_user_input(1, 2, 1, "data").ok(); m.evaluate(); });
+            model.update_value(|m| {
+                m.set_user_input(1, 2, 1, "data").ok();
+                m.evaluate();
+            });
             let state = crate::state::WorkbookState::new();
             // Cursor at row 1 → DeleteRows removes row 1, A2 becomes A1.
             execute(&SpreadsheetAction::DeleteRows, model, &state);
