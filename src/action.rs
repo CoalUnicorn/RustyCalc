@@ -54,153 +54,22 @@
 //   because it requires reading the textarea cursor position from the DOM.
 //   Do not try to move it into `classify_key`.
 //
-// ── IRONCALC UserModel API REFERENCE ──────────────────────────────────────────
+// ── NOTE ON CLIPBOARD ACTIONS ─────────────────────────────────────────────────
 //
-// Everything here lives in `ironcalc_base::UserModel<'static>`.
-// Use `mutate(model, state, evaluate, |m| { … })` to call these inside execute.
-//
-// CELL READING / WRITING
-//   m.set_user_input(sheet, row, col, value)   → write a formula or literal
-//   m.get_cell_content(sheet, row, col)         → raw formula / literal string
-//   m.get_formatted_cell_value(sheet, row, col) → display string (e.g. "1,234")
-//   m.get_cell_type(sheet, row, col)            → CellType enum
-//
-// EVALUATION
-//   m.evaluate()                                → recalculate all dirty cells
-//   m.pause_evaluation() / m.resume_evaluation()
-//
-// UNDO / REDO
-//   m.undo()  m.redo()  m.can_undo()  m.can_redo()
-//
-// SELECTION & NAVIGATION  (these also update the internal viewport/scroll)
-//   m.get_selected_view()                       → SelectedView { sheet, row, column, range, … }
-//   m.set_selected_cell(row, col)
-//   m.set_selected_range(r1, c1, r2, c2)
-//   m.on_expand_selected_range(key)             → key = "ArrowRight" / "ArrowLeft" / …
-//   m.on_arrow_right/left/up/down()
-//   m.on_navigate_to_edge_in_direction(NavigationDirection::…)
-//   m.on_page_down() / m.on_page_up()
-//   m.on_area_selecting(target_row, target_col) → drag-selection
-//   m.set_top_left_visible_cell(top_row, left_col)
-//   m.get_scroll_x() / m.get_scroll_y()
-//   m.set_window_width(w) / m.set_window_height(h)
-//
-// SHEET MANAGEMENT
-//   m.get_worksheets_properties()               → Vec<SheetProperties> (id, name, state, color, …)
-//   m.get_selected_sheet()
-//   m.set_selected_sheet(sheet_id)
-//   m.new_sheet()
-//   m.delete_sheet(sheet_id)
-//   m.rename_sheet(sheet_id, new_name)
-//   m.hide_sheet(sheet_id) / m.unhide_sheet(sheet_id)
-//   m.set_sheet_color(sheet_id, "#RRGGBB")
-//
-// ROW / COLUMN OPERATIONS
-//   m.insert_rows(sheet, row, count)
-//   m.delete_rows(sheet, row, count)
-//   m.insert_columns(sheet, col, count)
-//   m.delete_columns(sheet, col, count)
-//   m.move_rows_action(sheet, row, count, delta)
-//   m.move_columns_action(sheet, col, count, delta)
-//   m.set_rows_height(sheet, row_start, row_end, height_px)
-//   m.set_columns_width(sheet, col_start, col_end, width_px)
-//   m.get_row_height(sheet, row)
-//   m.get_column_width(sheet, col)
-//   m.set_rows_hidden(sheet, row_start, row_end, hidden)
-//   m.set_columns_hidden(sheet, col_start, col_end, hidden)
-//
-// RANGE CLEARING
-//   m.range_clear_contents(&area)              → values only, keep formatting
-//   m.range_clear_formatting(&area)            → formatting only
-//   m.range_clear_all(&area)                   → both
-//   // Build Area with make_area(sheet, r1, c1, r2, c2) from this file.
-//
-// CLIPBOARD
-//   m.copy_to_clipboard()                      → Clipboard
-//   m.paste_from_clipboard(src_sheet, src_range, &clipboard_data, is_cut)
-//   m.paste_csv_string(&area, csv_str)
-//
-// STYLING
-//   m.get_cell_style(sheet, row, col)           → Style
-//   m.update_range_style(&area, style_path, value)
-//   m.on_paste_styles(&styles)
-//   m.set_area_with_border(&area, &border_area)
-//   m.set_show_grid_lines(sheet, bool)
-//
-// AUTO-FILL
-//   m.auto_fill_rows(&source_area, to_row)
-//   m.auto_fill_columns(&source_area, to_col)
-//
-// FROZEN PANES
-//   m.set_frozen_rows_count(sheet, n)
-//   m.set_frozen_columns_count(sheet, n)
-//   m.get_frozen_rows_count(sheet) / m.get_frozen_columns_count(sheet)
-//
-// NAMED RANGES
-//   m.get_defined_name_list()                  → Vec<(name, scope, formula)>
-//   m.new_defined_name(name, scope, formula)
-//   m.update_defined_name(name, scope, new_name, new_scope, new_formula)
-//   m.delete_defined_name(name, scope)
-//   m.is_valid_defined_name(name, scope, formula)
-//
-// LOCALE / TIMEZONE / LANGUAGE
-//   m.set_locale(locale_id)  m.get_locale()
-//   m.set_timezone(tz)       m.get_timezone()
-//   m.set_language(lang_id)  m.get_language()
-//   m.get_fmt_settings()     → FmtSettings (decimal/thousands separators, …)
-//
-// SERIALISATION
-//   m.to_bytes() / UserModel::from_bytes(bytes, lang_id)
+//   `Copy`, `Cut`, and `Paste` are classified by `classify_key` but NOT
+//   executed by `execute`.  They require the `AppClipboard` context store
+//   and async OS clipboard APIs, so the Workbook component handles them
+//   directly after receiving the classified action.
 //
 // ==============================================================================
 
 use ironcalc_base::expressions::types::Area;
-use ironcalc_base::worksheet::NavigationDirection;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
+use crate::canvas::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
-
-// ── Direction ─────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-impl Direction {
-    fn to_nav(self) -> NavigationDirection {
-        match self {
-            Self::Up => NavigationDirection::Up,
-            Self::Down => NavigationDirection::Down,
-            Self::Left => NavigationDirection::Left,
-            Self::Right => NavigationDirection::Right,
-        }
-    }
-
-    /// Key string expected by `UserModel::on_expand_selected_range`.
-    fn to_arrow_key(self) -> &'static str {
-        match self {
-            Self::Up => "ArrowUp",
-            Self::Down => "ArrowDown",
-            Self::Left => "ArrowLeft",
-            Self::Right => "ArrowRight",
-        }
-    }
-
-    fn navigate(self, m: &mut UserModel<'static>) -> Result<(), String> {
-        match self {
-            Self::Up => m.on_arrow_up(),
-            Self::Down => m.on_arrow_down(),
-            Self::Left => m.on_arrow_left(),
-            Self::Right => m.on_arrow_right(),
-        }
-    }
-}
 
 // ── SpreadsheetAction ─────────────────────────────────────────────────────────
 
@@ -208,15 +77,15 @@ impl Direction {
 pub enum SpreadsheetAction {
     // ── Navigation ──────────────────────────────────────────────────────────
     /// Move the active cell one step in a direction.
-    Navigate(Direction),
+    Navigate(ArrowKey),
     /// Ctrl+Arrow: jump to the data boundary in a direction.
-    NavigateEdge(Direction),
+    NavigateEdge(ArrowKey),
     /// Ctrl+Home: jump to A1.
     JumpToA1,
     /// Ctrl+End: jump to the last used cell.
     JumpToLastCell,
     /// Shift+Arrow: extend the selection range.
-    ExpandSelection(Direction),
+    ExpandSelection(ArrowKey),
     PageDown,
     PageUp,
     /// Home: move to column A of the current row.
@@ -232,15 +101,22 @@ pub enum SpreadsheetAction {
     /// F2: enter edit mode preserving the existing cell content.
     EnterEditMode,
     /// Enter/Tab: write the edit buffer to the model then navigate.
-    CommitAndNavigate(Direction),
+    CommitAndNavigate(ArrowKey),
     /// Escape: discard the edit buffer without writing to the model.
     CancelEdit,
+
+    // ── Clipboard (handled by the Workbook component, not execute) ──────────
+    Copy,
+    Cut,
+    Paste,
 
     // ── Structural mutations ─────────────────────────────────────────────────
     /// Delete key: clear cell contents, preserve formatting.
     Delete,
     /// Ctrl+Shift+Delete: clear both contents and formatting.
     ClearAll,
+    /// Ctrl+A: select the used data range.
+    SelectAll,
     Undo,
     Redo,
     InsertRows,
@@ -265,7 +141,7 @@ pub fn classify_key(
     alt: bool,
     edit: Option<&EditingCell>,
 ) -> Option<SpreadsheetAction> {
-    use Direction::*;
+    use ArrowKey::*;
     use SpreadsheetAction::*;
 
     // ── While editing ────────────────────────────────────────────────────────
@@ -289,10 +165,14 @@ pub fn classify_key(
 
     // Ctrl-only (no shift, no alt).
     if ctrl && !shift && !alt {
-        // Z/Y are lowercased to handle caps-lock correctly.
+        // Lowercase to handle caps-lock correctly.
         match key.to_lowercase().as_str() {
             "z" => return Some(Undo),
             "y" => return Some(Redo),
+            "a" => return Some(SelectAll),
+            "c" => return Some(Copy),
+            "x" => return Some(Cut),
+            "v" => return Some(Paste),
             _ => {}
         }
         return match key {
@@ -383,46 +263,41 @@ pub fn classify_key(
 ///
 /// Centralises all side-effects: model mutation, formula evaluation, signal
 /// updates, localStorage persistence, and focus restoration.
+///
+/// **Clipboard actions** (`Copy`, `Cut`, `Paste`) are no-ops here — they
+/// require the `AppClipboard` store and async OS clipboard APIs, so the
+/// caller (Workbook component) handles them directly.
 pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookState) {
     match action {
         SpreadsheetAction::Navigate(dir) => {
-            mutate(model, state, false, |m| { dir.navigate(m).ok(); });
+            mutate(model, state, false, |m| { m.nav_arrow(*dir); });
         }
         SpreadsheetAction::NavigateEdge(dir) => {
-            mutate(model, state, false, |m| {
-                m.on_navigate_to_edge_in_direction(dir.to_nav()).ok();
-            });
+            mutate(model, state, false, |m| { m.nav_to_edge(*dir); });
         }
         SpreadsheetAction::JumpToA1 => {
-            mutate(model, state, false, |m| { m.set_selected_cell(1, 1).ok(); });
+            mutate(model, state, false, |m| { m.nav_set_cell(1, 1); });
         }
         SpreadsheetAction::JumpToLastCell => {
             mutate(model, state, false, |m| {
-                m.on_navigate_to_edge_in_direction(NavigationDirection::Down).ok();
-                m.on_navigate_to_edge_in_direction(NavigationDirection::Right).ok();
+                m.nav_to_edge(ArrowKey::Down);
+                m.nav_to_edge(ArrowKey::Right);
             });
         }
         SpreadsheetAction::ExpandSelection(dir) => {
-            mutate(model, state, false, |m| {
-                m.on_expand_selected_range(dir.to_arrow_key()).ok();
-            });
+            mutate(model, state, false, |m| { m.nav_expand_selection(*dir); });
         }
         SpreadsheetAction::PageDown => {
-            mutate(model, state, false, |m| { m.on_page_down().ok(); });
+            mutate(model, state, false, |m| { m.nav_page(PageDir::Down); });
         }
         SpreadsheetAction::PageUp => {
-            mutate(model, state, false, |m| { m.on_page_up().ok(); });
+            mutate(model, state, false, |m| { m.nav_page(PageDir::Up); });
         }
         SpreadsheetAction::RowHome => {
-            mutate(model, state, false, |m| {
-                let row = m.get_selected_view().row;
-                m.set_selected_cell(row, 1).ok();
-            });
+            mutate(model, state, false, |m| { m.nav_home_row(); });
         }
         SpreadsheetAction::RowEnd => {
-            mutate(model, state, false, |m| {
-                m.on_navigate_to_edge_in_direction(NavigationDirection::Right).ok();
-            });
+            mutate(model, state, false, |m| { m.nav_to_edge(ArrowKey::Right); });
         }
         SpreadsheetAction::SwitchSheet(delta) => {
             let delta = *delta;
@@ -489,7 +364,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
                     model.with_value(|m| storage::save(&uuid, m));
                 }
                 // Navigate to the next cell and redraw.
-                model.update_value(|m| { dir.navigate(m).ok(); });
+                model.update_value(|m| { m.nav_arrow(*dir); });
                 state.request_redraw();
                 crate::util::refocus_workbook();
             }
@@ -501,6 +376,12 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
             state.request_redraw();
             crate::util::refocus_workbook();
         }
+
+        // ── Clipboard: handled by the Workbook component ─────────────────
+        SpreadsheetAction::Copy
+        | SpreadsheetAction::Cut
+        | SpreadsheetAction::Paste => {}
+
         SpreadsheetAction::Delete => {
             mutate(model, state, true, |m| {
                 let v = m.get_selected_view();
@@ -514,6 +395,12 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 m.range_clear_all(&make_area(v.sheet, r1, c1, r2, c2)).ok();
+            });
+        }
+        SpreadsheetAction::SelectAll => {
+            mutate(model, state, false, |m| {
+                let d = m.sheet_dimension();
+                m.nav_select_range(d.min_row, d.min_column, d.max_row, d.max_column);
             });
         }
         SpreadsheetAction::Undo => {
@@ -606,6 +493,7 @@ fn is_printable(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::canvas::ArrowKey;
     use crate::state::{EditFocus, EditMode, EditingCell};
     use wasm_bindgen_test::*;
 
@@ -640,17 +528,17 @@ mod tests {
     #[wasm_bindgen_test]
     fn plain_arrows_navigate() {
         let ck = |k| classify_key(k, false, false, false, None);
-        assert_eq!(ck("ArrowRight"), Some(SpreadsheetAction::Navigate(Direction::Right)));
-        assert_eq!(ck("ArrowLeft"),  Some(SpreadsheetAction::Navigate(Direction::Left)));
-        assert_eq!(ck("ArrowDown"),  Some(SpreadsheetAction::Navigate(Direction::Down)));
-        assert_eq!(ck("ArrowUp"),    Some(SpreadsheetAction::Navigate(Direction::Up)));
+        assert_eq!(ck("ArrowRight"), Some(SpreadsheetAction::Navigate(ArrowKey::Right)));
+        assert_eq!(ck("ArrowLeft"),  Some(SpreadsheetAction::Navigate(ArrowKey::Left)));
+        assert_eq!(ck("ArrowDown"),  Some(SpreadsheetAction::Navigate(ArrowKey::Down)));
+        assert_eq!(ck("ArrowUp"),    Some(SpreadsheetAction::Navigate(ArrowKey::Up)));
     }
 
     #[wasm_bindgen_test]
     fn tab_navigates_right() {
         assert_eq!(
             classify_key("Tab", false, false, false, None),
-            Some(SpreadsheetAction::Navigate(Direction::Right))
+            Some(SpreadsheetAction::Navigate(ArrowKey::Right))
         );
     }
 
@@ -658,7 +546,7 @@ mod tests {
     fn shift_tab_navigates_left() {
         assert_eq!(
             classify_key("Tab", false, true, false, None),
-            Some(SpreadsheetAction::Navigate(Direction::Left))
+            Some(SpreadsheetAction::Navigate(ArrowKey::Left))
         );
     }
 
@@ -666,7 +554,7 @@ mod tests {
     fn enter_navigates_down() {
         assert_eq!(
             classify_key("Enter", false, false, false, None),
-            Some(SpreadsheetAction::Navigate(Direction::Down))
+            Some(SpreadsheetAction::Navigate(ArrowKey::Down))
         );
     }
 
@@ -724,6 +612,23 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
+    fn ctrl_a_selects_all() {
+        assert_eq!(classify_key("a", true, false, false, None), Some(SpreadsheetAction::SelectAll));
+        assert_eq!(classify_key("A", true, false, false, None), Some(SpreadsheetAction::SelectAll));
+    }
+
+    #[wasm_bindgen_test]
+    fn ctrl_c_x_v_clipboard() {
+        let c = |k| classify_key(k, true, false, false, None);
+        assert_eq!(c("c"), Some(SpreadsheetAction::Copy));
+        assert_eq!(c("C"), Some(SpreadsheetAction::Copy));
+        assert_eq!(c("x"), Some(SpreadsheetAction::Cut));
+        assert_eq!(c("X"), Some(SpreadsheetAction::Cut));
+        assert_eq!(c("v"), Some(SpreadsheetAction::Paste));
+        assert_eq!(c("V"), Some(SpreadsheetAction::Paste));
+    }
+
+    #[wasm_bindgen_test]
     fn ctrl_home_end_jump() {
         assert_eq!(classify_key("Home", true, false, false, None), Some(SpreadsheetAction::JumpToA1));
         assert_eq!(classify_key("End",  true, false, false, None), Some(SpreadsheetAction::JumpToLastCell));
@@ -732,10 +637,10 @@ mod tests {
     #[wasm_bindgen_test]
     fn ctrl_arrows_navigate_to_edge() {
         let c = |k| classify_key(k, true, false, false, None);
-        assert_eq!(c("ArrowRight"), Some(SpreadsheetAction::NavigateEdge(Direction::Right)));
-        assert_eq!(c("ArrowLeft"),  Some(SpreadsheetAction::NavigateEdge(Direction::Left)));
-        assert_eq!(c("ArrowUp"),    Some(SpreadsheetAction::NavigateEdge(Direction::Up)));
-        assert_eq!(c("ArrowDown"),  Some(SpreadsheetAction::NavigateEdge(Direction::Down)));
+        assert_eq!(c("ArrowRight"), Some(SpreadsheetAction::NavigateEdge(ArrowKey::Right)));
+        assert_eq!(c("ArrowLeft"),  Some(SpreadsheetAction::NavigateEdge(ArrowKey::Left)));
+        assert_eq!(c("ArrowUp"),    Some(SpreadsheetAction::NavigateEdge(ArrowKey::Up)));
+        assert_eq!(c("ArrowDown"),  Some(SpreadsheetAction::NavigateEdge(ArrowKey::Down)));
     }
 
     #[wasm_bindgen_test]
@@ -782,10 +687,10 @@ mod tests {
     #[wasm_bindgen_test]
     fn shift_arrows_expand_selection() {
         let s = |k| classify_key(k, false, true, false, None);
-        assert_eq!(s("ArrowRight"), Some(SpreadsheetAction::ExpandSelection(Direction::Right)));
-        assert_eq!(s("ArrowLeft"),  Some(SpreadsheetAction::ExpandSelection(Direction::Left)));
-        assert_eq!(s("ArrowUp"),    Some(SpreadsheetAction::ExpandSelection(Direction::Up)));
-        assert_eq!(s("ArrowDown"),  Some(SpreadsheetAction::ExpandSelection(Direction::Down)));
+        assert_eq!(s("ArrowRight"), Some(SpreadsheetAction::ExpandSelection(ArrowKey::Right)));
+        assert_eq!(s("ArrowLeft"),  Some(SpreadsheetAction::ExpandSelection(ArrowKey::Left)));
+        assert_eq!(s("ArrowUp"),    Some(SpreadsheetAction::ExpandSelection(ArrowKey::Up)));
+        assert_eq!(s("ArrowDown"),  Some(SpreadsheetAction::ExpandSelection(ArrowKey::Down)));
     }
 
     // ── classify_key: while editing (Accept mode) ─────────────────────────────
@@ -793,9 +698,9 @@ mod tests {
     #[wasm_bindgen_test]
     fn accept_mode_enter_tab_commit() {
         let e = accept_cell();
-        assert_eq!(classify_key("Enter", false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(Direction::Down)));
-        assert_eq!(classify_key("Tab",   false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(Direction::Right)));
-        assert_eq!(classify_key("Tab",   false, true,  false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(Direction::Left)));
+        assert_eq!(classify_key("Enter", false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down)));
+        assert_eq!(classify_key("Tab",   false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Right)));
+        assert_eq!(classify_key("Tab",   false, true,  false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Left)));
     }
 
     #[wasm_bindgen_test]
@@ -807,10 +712,10 @@ mod tests {
     #[wasm_bindgen_test]
     fn accept_mode_arrows_commit_and_navigate() {
         let e = accept_cell();
-        assert_eq!(classify_key("ArrowDown",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(Direction::Down)));
-        assert_eq!(classify_key("ArrowUp",    false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(Direction::Up)));
-        assert_eq!(classify_key("ArrowLeft",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(Direction::Left)));
-        assert_eq!(classify_key("ArrowRight", false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(Direction::Right)));
+        assert_eq!(classify_key("ArrowDown",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down)));
+        assert_eq!(classify_key("ArrowUp",    false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Up)));
+        assert_eq!(classify_key("ArrowLeft",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Left)));
+        assert_eq!(classify_key("ArrowRight", false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Right)));
     }
 
     // ── classify_key: while editing (Edit mode) ───────────────────────────────
@@ -828,8 +733,20 @@ mod tests {
     #[wasm_bindgen_test]
     fn edit_mode_enter_and_escape_still_work() {
         let e = edit_cell();
-        assert_eq!(classify_key("Enter",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(Direction::Down)));
+        assert_eq!(classify_key("Enter",  false, false, false, Some(&e)), Some(SpreadsheetAction::CommitAndNavigate(ArrowKey::Down)));
         assert_eq!(classify_key("Escape", false, false, false, Some(&e)), Some(SpreadsheetAction::CancelEdit));
+    }
+
+    // ── classify_key: editing mode ignores Ctrl shortcuts ─────────────────────
+
+    #[wasm_bindgen_test]
+    fn editing_mode_ctrl_c_returns_none() {
+        // While editing, Ctrl+C/V/Z are handled by the textarea natively.
+        let e = edit_cell();
+        assert_eq!(classify_key("c", true, false, false, Some(&e)), None);
+        assert_eq!(classify_key("v", true, false, false, Some(&e)), None);
+        assert_eq!(classify_key("z", true, false, false, Some(&e)), None);
+        assert_eq!(classify_key("a", true, false, false, Some(&e)), None);
     }
 
     // ── selection_bounds ──────────────────────────────────────────────────────
@@ -862,7 +779,7 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::Navigate(Direction::Down), model, &state);
+            execute(&SpreadsheetAction::Navigate(ArrowKey::Down), model, &state);
             let row = model.with_value(|m| m.get_selected_view().row);
             assert_eq!(row, 2);
         });
@@ -876,7 +793,7 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::Navigate(Direction::Right), model, &state);
+            execute(&SpreadsheetAction::Navigate(ArrowKey::Right), model, &state);
             let col = model.with_value(|m| m.get_selected_view().column);
             assert_eq!(col, 2);
         });
@@ -891,8 +808,8 @@ mod tests {
             );
             let state = crate::state::WorkbookState::new();
             // move away from A1 first
-            execute(&SpreadsheetAction::Navigate(Direction::Down), model, &state);
-            execute(&SpreadsheetAction::Navigate(Direction::Right), model, &state);
+            execute(&SpreadsheetAction::Navigate(ArrowKey::Down), model, &state);
+            execute(&SpreadsheetAction::Navigate(ArrowKey::Right), model, &state);
             execute(&SpreadsheetAction::JumpToA1, model, &state);
             let v = model.with_value(|m| m.get_selected_view());
             assert_eq!((v.row, v.column), (1, 1));
@@ -941,7 +858,7 @@ mod tests {
             );
             let state = crate::state::WorkbookState::new();
             execute(&SpreadsheetAction::StartEdit("42".to_owned()), model, &state);
-            execute(&SpreadsheetAction::CommitAndNavigate(Direction::Down), model, &state);
+            execute(&SpreadsheetAction::CommitAndNavigate(ArrowKey::Down), model, &state);
             // value committed to A1
             let val = model.with_value(|m| m.get_formatted_cell_value(1, 1, 1).unwrap_or_default());
             assert_eq!(val, "42");
