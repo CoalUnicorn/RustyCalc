@@ -1,6 +1,9 @@
 [build]
 target = "index.html"
 dist = "dist"
+# Set to "/RustyCalc/" for GitHub Pages (https://<user>.github.io/RustyCalc/).
+# Override locally with: trunk serve --public-url /
+public_url = "/RustyCalc/"
 
 [watch]
 ignore = ["dist"]
