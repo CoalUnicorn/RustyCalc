@@ -269,8 +269,7 @@ pub fn Workbook() -> impl IntoView {
                                 model.update_value(|m| {
                                     if let Err(e) = acb.paste(m, false) {
                                         web_sys::console::warn_1(
-                                            &format!("[ironcalc] paste failed: {e}")
-                                                .into(),
+                                            &format!("[ironcalc] paste failed: {e}").into(),
                                         );
                                     }
                                     m.evaluate();
@@ -598,8 +597,7 @@ fn commit_edit(
     state.point_ref_span.set(None);
 
     // Persist after every committed edit.
-    let uuid = state.current_uuid.get_untracked();
-    if !uuid.is_empty() {
+    if let Some(uuid) = state.current_uuid.get_untracked() {
         model.with_value(|m| storage::save(&uuid, m));
     }
 }

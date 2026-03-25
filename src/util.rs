@@ -14,18 +14,29 @@ use wasm_bindgen::JsCast;
 
 /// Produce a UUID v4 string using `window.crypto.getRandomValues` (CSPRNG).
 ///
-/// `Math.random()` is a deterministic PRNG — collision probability is far
-/// higher than the ~2^-61 guarantee of a proper UUID v4.  Using the Web Crypto
-/// API gives us 122 bits of cryptographic randomness per UUID.
+/// Fills 16 bytes via the Web Crypto API (122 bits of cryptographic randomness),
+/// then stamps the version-4 and variant bits per RFC 9562 §5.4.
+#[allow(clippy::expect_used)]
 pub fn new_uuid() -> String {
-    let r = || (web_sys::js_sys::Math::random() * 65536.0) as u16;
-    let (a, b, c) = (r(), r(), r());
-    let d = (r() & 0x0fff) | 0x4000; // version 4
-    let e = (r() & 0x3fff) | 0x8000; // variant bits
-    let (f, g, h) = (r(), r(), r());
+    let mut buf = [0u8; 16];
+    let crypto = web_sys::window()
+        .expect("window must exist in WASM context")
+        .crypto()
+        .expect("crypto must be available");
+    crypto
+        .get_random_values_with_u8_array(&mut buf)
+        .expect("getRandomValues must not fail for 16 bytes");
+
+    buf[6] = (buf[6] & 0x0f) | 0x40; // version 4
+    buf[8] = (buf[8] & 0x3f) | 0x80; // variant 10xx
+
     format!(
-        "{:04x}{:04x}-{:04x}-{:04x}-{:04x}-{:04x}{:04x}{:04x}",
-        a, b, c, d, e, f, g, h
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        buf[0], buf[1], buf[2], buf[3],
+        buf[4], buf[5],
+        buf[6], buf[7],
+        buf[8], buf[9],
+        buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
     )
 }
 

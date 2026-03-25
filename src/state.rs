@@ -90,7 +90,8 @@ pub struct WorkbookState {
     pub(crate) redraw: RwSignal<u32>,
     /// UUID of the workbook currently loaded in the model.
     /// Used by `storage::save` to write back to the correct localStorage key.
-    pub(crate) current_uuid: RwSignal<String>,
+    /// `None` during the brief window before a workbook is loaded.
+    pub(crate) current_uuid: RwSignal<Option<String>>,
     /// Active color theme; initialized from localStorage on startup.
     pub(crate) theme: RwSignal<Theme>,
     /// Whether the left workbook-list drawer is open.
@@ -136,7 +137,7 @@ impl WorkbookState {
             resize_col: RwSignal::new(None),
             resize_row: RwSignal::new(None),
             redraw: RwSignal::new(0),
-            current_uuid: RwSignal::new(String::new()),
+            current_uuid: RwSignal::new(None),
             theme: RwSignal::new(Theme::from_storage()),
             is_drawer_open: RwSignal::new(false),
             show_upload_dialog: RwSignal::new(false),

@@ -14,7 +14,7 @@ pub fn App() -> impl IntoView {
     let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
 
     let wb_state = WorkbookState::new();
-    wb_state.current_uuid.set(uuid);
+    wb_state.current_uuid.set(Some(uuid));
 
     let model = StoredValue::new_local(model);
 
@@ -35,10 +35,9 @@ pub fn App() -> impl IntoView {
         let save_state = wb_state;
         let save_model = model;
         let cb = Closure::wrap(Box::new(move || {
-            let uuid = save_state.current_uuid.get_untracked();
-            if uuid.is_empty() {
+            let Some(uuid) = save_state.current_uuid.get_untracked() else {
                 return;
-            }
+            };
             let mut has_changes = false;
             save_model.update_value(|m| {
                 has_changes = !m.flush_send_queue().is_empty();

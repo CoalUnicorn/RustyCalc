@@ -485,8 +485,7 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
                 state.point_range.set(None);
                 state.point_ref_span.set(None);
                 // Persist the committed change immediately.
-                let uuid = state.current_uuid.get_untracked();
-                if !uuid.is_empty() {
+                if let Some(uuid) = state.current_uuid.get_untracked() {
                     model.with_value(|m| storage::save(&uuid, m));
                 }
                 // Navigate to the next cell and redraw.
