@@ -14,7 +14,8 @@ use crate::canvas::{
 use crate::components::cell_editor::CellEditor;
 use crate::state::ModelStore;
 use crate::state::{
-    ContextMenuState, ContextMenuTarget, EditFocus, EditMode, EditingCell, WorkbookState,
+    ContextMenuState, ContextMenuTarget, DragState, EditFocus, EditMode, EditingCell,
+    WorkbookState,
 };
 
 /// The spreadsheet canvas element.
@@ -75,7 +76,10 @@ pub fn Worksheet() -> impl IntoView {
             return;
         };
         let canvas_el: HtmlCanvasElement = canvas;
-        let extend_to = state_draw.extend_to.get_untracked();
+        let extend_to = match state_draw.drag.get_untracked() {
+            DragState::Extending { to_row, to_col } => Some((to_row, to_col)),
+            _ => None,
+        };
         let point_range = state_draw.point_range.get_untracked();
         let canvas_theme = state_draw.theme.get_untracked().canvas_theme();
         let clipboard = clipboard_draw.with_value(|opt| {
@@ -120,7 +124,7 @@ pub fn Worksheet() -> impl IntoView {
             if let Some(col) =
                 model.with_value(|m| crate::canvas::geometry::find_col_boundary_at(m, x, HIT_ZONE))
             {
-                state_md.resize_col.set(Some((col, x)));
+                state_md.drag.set(DragState::ResizingCol { col, x });
                 ev.prevent_default();
                 return;
             }
@@ -131,7 +135,7 @@ pub fn Worksheet() -> impl IntoView {
             if let Some(row) =
                 model.with_value(|m| crate::canvas::geometry::find_row_boundary_at(m, y, HIT_ZONE))
             {
-                state_md.resize_row.set(Some((row, y)));
+                state_md.drag.set(DragState::ResizingRow { row, y });
                 ev.prevent_default();
                 return;
             }
@@ -227,7 +231,7 @@ pub fn Worksheet() -> impl IntoView {
                         }
                     });
                     state_md.point_range.set(Some([row, col, row, col]));
-                    state_md.is_pointing.set(true);
+                    state_md.drag.set(DragState::Pointing);
                     state_md.point_ref_span.set(Some((new_start, new_end)));
                     state_md.request_redraw();
                     return;
@@ -238,18 +242,18 @@ pub fn Worksheet() -> impl IntoView {
         // Apply model mutations and signal writes after the read closure.
         if near_handle {
             // Begin autofill drag — don't change the selection.
-            state_md.extend_to.set(Some((row, col)));
+            state_md.drag.set(DragState::Extending { to_row: row, to_col: col });
         } else if ev.shift_key() {
             // Shift-click extends the range from the current anchor.
             model.update_value(|m| {
                 m.nav_extend_selection(row, col);
             });
-            state_md.is_selecting.set(true);
+            state_md.drag.set(DragState::Selecting);
         } else {
             model.update_value(|m| {
                 m.nav_set_cell(row, col);
             });
-            state_md.is_selecting.set(true);
+            state_md.drag.set(DragState::Selecting);
         }
 
         state_md.editing_cell.set(None);
@@ -262,43 +266,41 @@ pub fn Worksheet() -> impl IntoView {
         // If no button is held the drag ended outside the canvas (mouseup was
         // missed). Reset all drag state so the next interaction starts clean.
         if ev.buttons() == 0 {
-            state_mm.is_selecting.set(false);
-            state_mm.resize_col.set(None);
-            state_mm.resize_row.set(None);
-            state_mm.extend_to.set(None);
+            state_mm.drag.set(DragState::Idle);
             return;
         }
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;
 
-        // ── Column resize drag ────────────────────────────────────────────────
-        if let Some((col, last_x)) = state_mm.resize_col.get_untracked() {
-            let delta = x - last_x;
-            model.update_value(|m| {
-                let sheet = m.active_cell().sheet;
-                let current_w = m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH);
-                let new_w = (current_w + delta).max(5.0);
-                m.set_columns_width(sheet, col, col, new_w).ok();
-            });
-            state_mm.resize_col.set(Some((col, x)));
-            state_mm.request_redraw();
-            ev.prevent_default();
-            return;
-        }
-
-        // ── Row resize drag ───────────────────────────────────────────────────
-        if let Some((row, last_y)) = state_mm.resize_row.get_untracked() {
-            let delta = y - last_y;
-            model.update_value(|m| {
-                let sheet = m.active_cell().sheet;
-                let current_h = m.get_row_height(sheet, row).unwrap_or(DEFAULT_ROW_HEIGHT);
-                let new_h = (current_h + delta).max(3.0);
-                m.set_rows_height(sheet, row, row, new_h).ok();
-            });
-            state_mm.resize_row.set(Some((row, y)));
-            state_mm.request_redraw();
-            ev.prevent_default();
-            return;
+        // ── Resize drags ──────────────────────────────────────────────────────
+        match state_mm.drag.get_untracked() {
+            DragState::ResizingCol { col, x: last_x } => {
+                let delta = x - last_x;
+                model.update_value(|m| {
+                    let sheet = m.active_cell().sheet;
+                    let current_w = m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH);
+                    let new_w = (current_w + delta).max(5.0);
+                    m.set_columns_width(sheet, col, col, new_w).ok();
+                });
+                state_mm.drag.set(DragState::ResizingCol { col, x });
+                state_mm.request_redraw();
+                ev.prevent_default();
+                return;
+            }
+            DragState::ResizingRow { row, y: last_y } => {
+                let delta = y - last_y;
+                model.update_value(|m| {
+                    let sheet = m.active_cell().sheet;
+                    let current_h = m.get_row_height(sheet, row).unwrap_or(DEFAULT_ROW_HEIGHT);
+                    let new_h = (current_h + delta).max(3.0);
+                    m.set_rows_height(sheet, row, row, new_h).ok();
+                });
+                state_mm.drag.set(DragState::ResizingRow { row, y });
+                state_mm.request_redraw();
+                ev.prevent_default();
+                return;
+            }
+            _ => {}
         }
 
         if x < HEADER_COL_WIDTH || y < HEADER_ROW_HEIGHT {
@@ -315,33 +317,36 @@ pub fn Worksheet() -> impl IntoView {
             )
         });
 
-        if state_mm.extend_to.get_untracked().is_some() {
-            // Update autofill preview target.
-            state_mm.extend_to.set(Some((row, col)));
-            state_mm.request_redraw();
-        } else if state_mm.is_pointing.get_untracked() {
-            // Extend the point-mode range to the hovered cell.
-            if let Some([r1, c1, _, _]) = state_mm.point_range.get_untracked() {
-                let sheet = model.with_value(|m| m.active_cell().sheet);
-                let ref_str =
-                    crate::formula_input::range_ref_str(r1, c1, row, col, sheet, sheet, "");
-                let prev_span = state_mm.point_ref_span.get_untracked();
-                let cursor = prev_span.map(|(_, end)| end).unwrap_or(0);
-                let new_state = state_mm.editing_cell.get_untracked().map(|edit| {
-                    crate::formula_input::splice_ref(&edit.text, cursor, &ref_str, prev_span)
-                });
-                if let Some((new_text, new_start, new_end)) = new_state {
-                    state_mm.editing_cell.update(|c| {
-                        if let Some(e) = c {
-                            e.text = new_text;
-                        }
+        match state_mm.drag.get_untracked() {
+            DragState::Extending { .. } => {
+                // Update autofill preview target.
+                state_mm.drag.set(DragState::Extending { to_row: row, to_col: col });
+                state_mm.request_redraw();
+            }
+            DragState::Pointing => {
+                // Extend the point-mode range to the hovered cell.
+                if let Some([r1, c1, _, _]) = state_mm.point_range.get_untracked() {
+                    let sheet = model.with_value(|m| m.active_cell().sheet);
+                    let ref_str =
+                        crate::formula_input::range_ref_str(r1, c1, row, col, sheet, sheet, "");
+                    let prev_span = state_mm.point_ref_span.get_untracked();
+                    let cursor = prev_span.map(|(_, end)| end).unwrap_or(0);
+                    let new_state = state_mm.editing_cell.get_untracked().map(|edit| {
+                        crate::formula_input::splice_ref(&edit.text, cursor, &ref_str, prev_span)
                     });
-                    state_mm.point_range.set(Some([r1, c1, row, col]));
-                    state_mm.point_ref_span.set(Some((new_start, new_end)));
-                    state_mm.request_redraw();
+                    if let Some((new_text, new_start, new_end)) = new_state {
+                        state_mm.editing_cell.update(|c| {
+                            if let Some(e) = c {
+                                e.text = new_text;
+                            }
+                        });
+                        state_mm.point_range.set(Some([r1, c1, row, col]));
+                        state_mm.point_ref_span.set(Some((new_start, new_end)));
+                        state_mm.request_redraw();
+                    }
                 }
             }
-        } else if state_mm.is_selecting.get_untracked() {
+            DragState::Selecting => {
             // pixel_to_col/row start scanning from left_column/top_row, so
             // they can never return a value smaller than the viewport origin.
             // When the pointer is at the leftmost/topmost visible data cell
@@ -365,17 +370,16 @@ pub fn Worksheet() -> impl IntoView {
                 m.nav_extend_selection(eff_row, eff_col);
             });
             state_mm.request_redraw();
+            }
+            _ => {}
         }
     };
 
     // ── mouseup: commit autofill or end selection drag ────────────────────────
     let state_mu = state.clone();
     let on_mouseup = move |_ev: web_sys::MouseEvent| {
-        // Clear any active resize drag unconditionally.
-        state_mu.resize_col.set(None);
-        state_mu.resize_row.set(None);
-
-        if let Some((to_row, to_col)) = state_mu.extend_to.get_untracked() {
+        // Commit autofill if active, then reset drag state unconditionally.
+        if let DragState::Extending { to_row, to_col } = state_mu.drag.get_untracked() {
             model.update_value(|m| {
                 let view = m.get_selected_view();
                 let sheet = view.sheet;
@@ -397,11 +401,9 @@ pub fn Worksheet() -> impl IntoView {
                 }
                 m.evaluate();
             });
-            state_mu.extend_to.set(None);
             state_mu.request_redraw();
         }
-        state_mu.is_selecting.set(false);
-        state_mu.is_pointing.set(false);
+        state_mu.drag.set(DragState::Idle);
     };
 
     // ── dblclick: enter edit mode with existing cell content ──────────────────
@@ -504,12 +506,13 @@ pub fn Worksheet() -> impl IntoView {
                 role="application"
                 aria-label="Spreadsheet grid"
                 style=move || {
-                    if state.resize_col.get().is_some() {
-                        "width:100%;height:100%;display:block;cursor:col-resize;"
-                    } else if state.resize_row.get().is_some() {
-                        "width:100%;height:100%;display:block;cursor:row-resize;"
-                    } else {
-                        "width:100%;height:100%;display:block;cursor:cell;"
+                    match state.drag.get() {
+                        DragState::ResizingCol { .. } =>
+                            "width:100%;height:100%;display:block;cursor:col-resize;",
+                        DragState::ResizingRow { .. } =>
+                            "width:100%;height:100%;display:block;cursor:row-resize;",
+                        _ =>
+                            "width:100%;height:100%;display:block;cursor:cell;",
                     }
                 }
                 tabindex="-1"

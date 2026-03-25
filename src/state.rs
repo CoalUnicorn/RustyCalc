@@ -49,6 +49,27 @@ pub enum ContextMenuTarget {
     Row(i32),
 }
 
+/// Active mouse-drag interaction.
+///
+/// At most one drag mode can be active at a time.  Using a single enum
+/// instead of parallel `bool` / `Option` signals makes illegal combinations
+/// (e.g. selecting while resizing) unrepresentable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DragState {
+    /// No drag in progress.
+    Idle,
+    /// Mouse button held for a range-drag selection.
+    Selecting,
+    /// Autofill handle drag: the cell the user is dragging toward.
+    Extending { to_row: i32, to_col: i32 },
+    /// Column header resize: `(col_1based, current_mouse_x)`.
+    ResizingCol { col: i32, x: f64 },
+    /// Row header resize: `(row_1based, current_mouse_y)`.
+    ResizingRow { row: i32, y: f64 },
+    /// Dragging to extend the point-mode range during formula entry.
+    Pointing,
+}
+
 /// Position and target for the active context menu.
 #[derive(Clone, Copy, Debug)]
 pub struct ContextMenuState {
@@ -76,15 +97,8 @@ pub struct ContextMenuState {
 pub struct WorkbookState {
     /// None = not editing; Some = live edit buffer
     pub(crate) editing_cell: RwSignal<Option<EditingCell>>,
-    /// True while the mouse button is held for a range-drag selection.
-    pub(crate) is_selecting: RwSignal<bool>,
-    /// Set during autofill handle drag: the cell the user is dragging toward.
-    /// None = no autofill drag in progress.
-    pub(crate) extend_to: RwSignal<Option<(i32, i32)>>,
-    /// Column being resized: Some((col_1based, start_mouse_x)) while drag active.
-    pub(crate) resize_col: RwSignal<Option<(i32, f64)>>,
-    /// Row being resized: Some((row_1based, start_mouse_y)) while drag active.
-    pub(crate) resize_row: RwSignal<Option<(i32, f64)>>,
+    /// Active mouse-drag interaction (selection, resize, autofill, point-mode).
+    pub(crate) drag: RwSignal<DragState>,
     /// Increment after any model mutation to force canvas re-renders.
     /// Components that draw the canvas subscribe to this signal.
     pub(crate) redraw: RwSignal<u32>,
@@ -111,8 +125,6 @@ pub struct WorkbookState {
     /// Range being pointed at during formula entry (`[r1, c1, r2, c2]`, 1-based).
     /// `None` when not in point mode.
     pub(crate) point_range: RwSignal<Option<[i32; 4]>>,
-    /// True while the user is dragging to extend the point-mode range.
-    pub(crate) is_pointing: RwSignal<bool>,
     /// Byte span `(start, end)` within `editing_cell.text` that holds the
     /// current point-mode reference text, so it can be replaced in-place
     /// when the user presses arrow keys or clicks another cell.
@@ -132,10 +144,7 @@ impl WorkbookState {
             .unwrap_or_else(|_| "en".to_owned());
         Self {
             editing_cell: RwSignal::new(None),
-            is_selecting: RwSignal::new(false),
-            extend_to: RwSignal::new(None),
-            resize_col: RwSignal::new(None),
-            resize_row: RwSignal::new(None),
+            drag: RwSignal::new(DragState::Idle),
             redraw: RwSignal::new(0),
             current_uuid: RwSignal::new(None),
             theme: RwSignal::new(Theme::from_storage()),
@@ -147,7 +156,6 @@ impl WorkbookState {
             show_named_ranges: RwSignal::new(false),
             context_menu: RwSignal::new(None),
             point_range: RwSignal::new(None),
-            is_pointing: RwSignal::new(false),
             point_ref_span: RwSignal::new(None),
             open_chart_id: RwSignal::new(None),
             show_function_browser: RwSignal::new(false),
