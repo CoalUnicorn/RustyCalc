@@ -225,7 +225,7 @@ impl FrontendModel for UserModel<'_> {
     fn active_num_fmt(&self) -> String {
         let view = self.get_selected_view();
         self.get_cell_style(view.sheet, view.row, view.column)
-            .map(|s| s.num_fmt.format_code)
+            .map(|s| s.num_fmt)
             .unwrap_or_else(|_| "general".to_owned())
     }
 

@@ -5,15 +5,14 @@ edition = "2021"
 
 [dependencies]
 leptos = { version = "0.7", features = ["csr"] }
-ironcalc_base = { git = "https://github.com/CoalUnicorn/IronCalc.git",branch = "fix/issue-761-locale-date-edit", features = ["use_regex_lite"] }
+ironcalc_base = { git = "https://github.com/ironcalc/IronCalc/",branch = "main", features = ["use_regex_lite"] }
 web-sys = { version = "0.3", features = [
     "Window", "Document", "HtmlCanvasElement", "HtmlElement",
-    "CanvasRenderingContext2d", "TextMetrics", "Element", "Storage",
+    "CanvasRenderingContext2d", "TextMetrics", "Element",
     "KeyboardEvent", "MouseEvent", "WheelEvent",
-    "Clipboard", "Navigator", "ResizeObserver", "ResizeObserverEntry",
-    "HtmlInputElement", "HtmlSelectElement", "FileList", "File", "Blob", "BlobPropertyBag",
-    "Url", "HtmlAnchorElement", "Node",
-    "Crypto",
+    "Clipboard", "Navigator",
+    "HtmlInputElement", "HtmlTextAreaElement",
+    "Crypto", "DomStringMap",
 ] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
