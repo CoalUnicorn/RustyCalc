@@ -1,7 +1,7 @@
 use ironcalc_base::types::{BorderStyle, HorizontalAlignment, VerticalAlignment};
 use ironcalc_base::UserModel;
 
-use super::frontend_model::FrontendModel;
+use crate::model::frontend_model::FrontendModel;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 

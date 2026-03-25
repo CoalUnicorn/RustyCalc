@@ -67,7 +67,7 @@ use ironcalc_base::expressions::types::Area;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
-use crate::canvas::{ArrowKey, FrontendModel, PageDir};
+use crate::model::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
 use crate::util::warn_if_err;
@@ -543,7 +543,7 @@ fn is_printable(key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::canvas::ArrowKey;
+    use crate::model::ArrowKey;
     use crate::state::{EditFocus, EditMode, EditingCell};
     use wasm_bindgen_test::*;
 

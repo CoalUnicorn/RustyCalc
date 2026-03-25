@@ -5,6 +5,7 @@ mod app;
 mod canvas;
 mod components;
 mod formula_input;
+mod model;
 mod state;
 mod storage;
 mod theme;

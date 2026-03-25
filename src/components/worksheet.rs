@@ -7,15 +7,15 @@ use wasm_bindgen::JsCast;
 use web_sys::HtmlCanvasElement;
 
 use crate::canvas::{
-    autofill_handle_pos, frozen_geometry, pixel_to_col, pixel_to_row, ArrowKey, CanvasRenderer,
-    AppClipboard, ClipboardRange, FrontendModel, PageDir, RenderOverlays, SheetRect,
-    AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+    autofill_handle_pos, frozen_geometry, pixel_to_col, pixel_to_row, CanvasRenderer,
+    ClipboardRange, RenderOverlays, SheetRect, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH,
+    DEFAULT_ROW_HEIGHT, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
 use crate::components::cell_editor::CellEditor;
+use crate::model::{AppClipboard, ArrowKey, FrontendModel, PageDir};
 use crate::state::ModelStore;
 use crate::state::{
-    ContextMenuState, ContextMenuTarget, DragState, EditFocus, EditMode, EditingCell,
-    WorkbookState,
+    ContextMenuState, ContextMenuTarget, DragState, EditFocus, EditMode, EditingCell, WorkbookState,
 };
 use crate::util::warn_if_err;
 
@@ -86,7 +86,13 @@ pub fn Worksheet() -> impl IntoView {
         let clipboard = clipboard_draw.with_value(|opt| {
             opt.as_ref().map(|acb| {
                 let (r1, c1, r2, c2) = acb.range;
-                ClipboardRange { sheet: acb.sheet, r1, c1, r2, c2 }
+                ClipboardRange {
+                    sheet: acb.sheet,
+                    r1,
+                    c1,
+                    r2,
+                    c2,
+                }
             })
         });
         let overlays = RenderOverlays {
@@ -243,7 +249,10 @@ pub fn Worksheet() -> impl IntoView {
         // Apply model mutations and signal writes after the read closure.
         if near_handle {
             // Begin autofill drag — don't change the selection.
-            state_md.drag.set(DragState::Extending { to_row: row, to_col: col });
+            state_md.drag.set(DragState::Extending {
+                to_row: row,
+                to_col: col,
+            });
         } else if ev.shift_key() {
             // Shift-click extends the range from the current anchor.
             model.update_value(|m| {
@@ -281,7 +290,10 @@ pub fn Worksheet() -> impl IntoView {
                     let sheet = m.active_cell().sheet;
                     let current_w = m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH);
                     let new_w = (current_w + delta).max(5.0);
-                    warn_if_err(m.set_columns_width(sheet, col, col, new_w), "set_columns_width");
+                    warn_if_err(
+                        m.set_columns_width(sheet, col, col, new_w),
+                        "set_columns_width",
+                    );
                 });
                 state_mm.drag.set(DragState::ResizingCol { col, x });
                 state_mm.request_redraw();
@@ -321,7 +333,10 @@ pub fn Worksheet() -> impl IntoView {
         match state_mm.drag.get_untracked() {
             DragState::Extending { .. } => {
                 // Update autofill preview target.
-                state_mm.drag.set(DragState::Extending { to_row: row, to_col: col });
+                state_mm.drag.set(DragState::Extending {
+                    to_row: row,
+                    to_col: col,
+                });
                 state_mm.request_redraw();
             }
             DragState::Pointing => {
@@ -348,29 +363,29 @@ pub fn Worksheet() -> impl IntoView {
                 }
             }
             DragState::Selecting => {
-            // pixel_to_col/row start scanning from left_column/top_row, so
-            // they can never return a value smaller than the viewport origin.
-            // When the pointer is at the leftmost/topmost visible data cell
-            // and the viewport is scrolled, nudge the target one step past
-            // the edge so on_area_selecting scrolls the viewport left/up.
-            let (eff_row, eff_col) = model.with_value(|m| {
-                let view = m.get_selected_view();
-                let ec = if col == view.left_column && view.left_column > 1 {
-                    col - 1
-                } else {
-                    col
-                };
-                let er = if row == view.top_row && view.top_row > 1 {
-                    row - 1
-                } else {
-                    row
-                };
-                (er, ec)
-            });
-            model.update_value(|m| {
-                m.nav_extend_selection(eff_row, eff_col);
-            });
-            state_mm.request_redraw();
+                // pixel_to_col/row start scanning from left_column/top_row, so
+                // they can never return a value smaller than the viewport origin.
+                // When the pointer is at the leftmost/topmost visible data cell
+                // and the viewport is scrolled, nudge the target one step past
+                // the edge so on_area_selecting scrolls the viewport left/up.
+                let (eff_row, eff_col) = model.with_value(|m| {
+                    let view = m.get_selected_view();
+                    let ec = if col == view.left_column && view.left_column > 1 {
+                        col - 1
+                    } else {
+                        col
+                    };
+                    let er = if row == view.top_row && view.top_row > 1 {
+                        row - 1
+                    } else {
+                        row
+                    };
+                    (er, ec)
+                });
+                model.update_value(|m| {
+                    m.nav_extend_selection(eff_row, eff_col);
+                });
+                state_mm.request_redraw();
             }
             _ => {}
         }

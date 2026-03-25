@@ -4,11 +4,11 @@ use ironcalc_base::{
     UserModel,
 };
 
-use crate::canvas::frontend_types::{
+use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
+use crate::model::frontend_types::{
     ActiveCell, ArrowKey, CellBorders, CssColor, FrozenPanes, PageDir, ResolvedBorderEdge,
     ResolvedCellStyle, ResolvedFont, SafeFontFamily, SheetDimension, ToolbarState,
 };
-use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 
 pub trait FrontendModel {
     // ── Query ─────────────────────────────────────────────────────────────────
@@ -81,7 +81,6 @@ pub trait FrontendModel {
 
     /// Move to column 1 of the current row (Home key).
     fn nav_home_row(&mut self);
-
 }
 
 // ── Helper: map font name String → SafeFontFamily ─────────────────────────────
@@ -244,7 +243,11 @@ impl FrontendModel for UserModel<'_> {
 
     fn active_cell(&self) -> ActiveCell {
         let view = self.get_selected_view();
-        ActiveCell { sheet: view.sheet, row: view.row, column: view.column }
+        ActiveCell {
+            sheet: view.sheet,
+            row: view.row,
+            column: view.column,
+        }
     }
 
     fn frozen_panes(&self) -> FrozenPanes {
@@ -268,7 +271,10 @@ impl FrontendModel for UserModel<'_> {
                 }
             }
             Err(_) => SheetDimension {
-                min_row: 1, min_column: 1, max_row: 1, max_column: 1,
+                min_row: 1,
+                min_column: 1,
+                max_row: 1,
+                max_column: 1,
             },
         }
     }
@@ -327,8 +333,8 @@ impl FrontendModel for UserModel<'_> {
     }
 
     fn nav_select_range(&mut self, row: i32, col: i32, row2: i32, col2: i32) {
-        let row  = row.clamp(1, LAST_ROW);
-        let col  = col.clamp(1, LAST_COLUMN);
+        let row = row.clamp(1, LAST_ROW);
+        let col = col.clamp(1, LAST_COLUMN);
         let row2 = row2.clamp(1, LAST_ROW);
         let col2 = col2.clamp(1, LAST_COLUMN);
         let _ = self.set_selected_cell(row, col);
@@ -337,9 +343,9 @@ impl FrontendModel for UserModel<'_> {
 
     fn nav_expand_selection(&mut self, dir: ArrowKey) {
         let key = match dir {
-            ArrowKey::Up    => "ArrowUp",
-            ArrowKey::Down  => "ArrowDown",
-            ArrowKey::Left  => "ArrowLeft",
+            ArrowKey::Up => "ArrowUp",
+            ArrowKey::Down => "ArrowDown",
+            ArrowKey::Left => "ArrowLeft",
             ArrowKey::Right => "ArrowRight",
         };
         let _ = self.on_expand_selected_range(key);
@@ -349,7 +355,6 @@ impl FrontendModel for UserModel<'_> {
         let row = self.get_selected_view().row;
         let _ = self.set_selected_cell(row, 1);
     }
-
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

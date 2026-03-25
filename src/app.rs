@@ -20,7 +20,7 @@ pub fn App() -> impl IntoView {
 
     // Internal clipboard — mirrors what was last copied/cut, so Ctrl+V can
     // paste even if the OS clipboard is unavailable (sandboxed iframe, etc.).
-    let clipboard: StoredValue<Option<crate::canvas::AppClipboard>, LocalStorage> =
+    let clipboard: StoredValue<Option<crate::model::AppClipboard>, LocalStorage> =
         StoredValue::new_local(None);
 
     provide_context(wb_state.clone());

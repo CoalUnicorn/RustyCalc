@@ -2,10 +2,10 @@ use ironcalc_base::expressions::types::Area;
 use leptos::prelude::*;
 
 use crate::action::{classify_key, execute, SpreadsheetAction};
-use crate::canvas::AppClipboard;
-use crate::util::warn_if_err;
 use crate::components::worksheet::Worksheet;
+use crate::model::AppClipboard;
 use crate::state::{EditMode, ModelStore, WorkbookState};
+use crate::util::warn_if_err;
 
 /// Top-level editor container.
 ///
@@ -80,13 +80,12 @@ pub fn Workbook() -> impl IntoView {
                     || crate::formula_input::is_in_reference_mode(&edit.text, cursor)
                 {
                     // Move or extend the point-mode range by one cell.
-                    let [r1, c1, r2, c2] =
-                        state.point_range.get_untracked().unwrap_or_else(|| {
-                            model.with_value(|m| {
-                                let v = m.get_selected_view();
-                                [v.row, v.column, v.row, v.column]
-                            })
-                        });
+                    let [r1, c1, r2, c2] = state.point_range.get_untracked().unwrap_or_else(|| {
+                        model.with_value(|m| {
+                            let v = m.get_selected_view();
+                            [v.row, v.column, v.row, v.column]
+                        })
+                    });
                     let (new_r2, new_c2) = match key.as_str() {
                         "ArrowDown" => (r2 + 1, c2),
                         "ArrowUp" => ((r2 - 1).max(1), c2),
@@ -95,8 +94,7 @@ pub fn Workbook() -> impl IntoView {
                         _ => (r2, c2),
                     };
                     // Shift extends the range; plain arrow moves the whole range.
-                    let (new_r1, new_c1) =
-                        if is_shift { (r1, c1) } else { (new_r2, new_c2) };
+                    let (new_r1, new_c1) = if is_shift { (r1, c1) } else { (new_r2, new_c2) };
                     let sheet = model.with_value(|m| m.get_selected_view().sheet);
                     let ref_str = crate::formula_input::range_ref_str(
                         new_r1, new_c1, new_r2, new_c2, sheet, sheet, "",
@@ -105,9 +103,7 @@ pub fn Workbook() -> impl IntoView {
                     let splice_at = prev_span.map(|(_, end)| end).unwrap_or(cursor);
                     let text = edit.text.clone();
                     let (new_text, new_start, new_end) =
-                        crate::formula_input::splice_ref(
-                            &text, splice_at, &ref_str, prev_span,
-                        );
+                        crate::formula_input::splice_ref(&text, splice_at, &ref_str, prev_span);
                     state.editing_cell.update(|c| {
                         if let Some(e) = c {
                             e.text = new_text;
@@ -126,9 +122,7 @@ pub fn Workbook() -> impl IntoView {
 
         // ── Classify key → action ─────────────────────────────────────────
         let edit_ref = state.editing_cell.get_untracked();
-        let Some(action) =
-            classify_key(&key, is_ctrl, is_shift, is_alt, edit_ref.as_ref())
-        else {
+        let Some(action) = classify_key(&key, is_ctrl, is_shift, is_alt, edit_ref.as_ref()) else {
             return;
         };
 
@@ -201,9 +195,7 @@ fn copy_to_app_clipboard(
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(window) = web_sys::window() {
                     let clip = window.navigator().clipboard();
-                    let _ =
-                        wasm_bindgen_futures::JsFuture::from(clip.write_text(&csv))
-                            .await;
+                    let _ = wasm_bindgen_futures::JsFuture::from(clip.write_text(&csv)).await;
                 }
             });
         }
@@ -227,9 +219,7 @@ fn paste_from_clipboard(
             if let Some(acb) = opt {
                 model.update_value(|m| {
                     if let Err(e) = acb.paste(m, false) {
-                        web_sys::console::warn_1(
-                            &format!("[ironcalc] paste failed: {e}").into(),
-                        );
+                        web_sys::console::warn_1(&format!("[ironcalc] paste failed: {e}").into());
                     }
                     m.evaluate();
                 });
@@ -255,9 +245,7 @@ fn paste_from_clipboard(
                 return;
             };
             let clip = window.navigator().clipboard();
-            let Ok(js_text) =
-                wasm_bindgen_futures::JsFuture::from(clip.read_text()).await
-            else {
+            let Ok(js_text) = wasm_bindgen_futures::JsFuture::from(clip.read_text()).await else {
                 return;
             };
             let text = js_text.as_string().unwrap_or_default();
