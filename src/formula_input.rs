@@ -254,7 +254,10 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn splice_insert_at_cursor_no_prev_span() {
-        assert_eq!(splice_ref("=SUM(", 5, "A1", None), ("=SUM(A1".to_string(), 5, 7));
+        assert_eq!(
+            splice_ref("=SUM(", 5, "A1", None),
+            ("=SUM(A1".to_string(), 5, 7)
+        );
     }
 
     #[wasm_bindgen_test]

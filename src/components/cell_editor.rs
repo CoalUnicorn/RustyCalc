@@ -1,5 +1,5 @@
-use leptos::prelude::*;
 use leptos::html;
+use leptos::prelude::*;
 
 use crate::canvas::selected_cell_rect;
 use crate::state::ModelStore;
@@ -14,8 +14,7 @@ pub fn CellEditor() -> impl IntoView {
     #[allow(clippy::expect_used)]
     let state = use_context::<WorkbookState>().expect("WorkbookState must be in context");
     #[allow(clippy::expect_used)]
-    let model = use_context::<ModelStore>()
-        .expect("ModelStore must be in context");
+    let model = use_context::<ModelStore>().expect("ModelStore must be in context");
 
     let textarea_ref = NodeRef::<html::Textarea>::new();
 
@@ -23,9 +22,7 @@ pub fn CellEditor() -> impl IntoView {
     // This prevents the Effect below from re-running on every keystroke — text
     // updates mutate `editing_cell.text` but leave the focus variant unchanged,
     // so `focus_state` stays stable while the user types.
-    let focus_state = Memo::new(move |_| {
-        state.editing_cell.get().map(|e| e.focus)
-    });
+    let focus_state = Memo::new(move |_| state.editing_cell.get().map(|e| e.focus));
 
     // Auto-focus the textarea only when the edit session *starts* with Cell focus
     // (click or printable key), NOT when the formula bar triggered the edit —
@@ -33,7 +30,9 @@ pub fn CellEditor() -> impl IntoView {
     // Tracking `focus_state` (not `editing_cell`) ensures this Effect fires only
     // when the focus variant transitions, not on every character typed.
     Effect::new(move |_| {
-        let Some(focus) = focus_state.get() else { return };
+        let Some(focus) = focus_state.get() else {
+            return;
+        };
         if focus != crate::state::EditFocus::Cell {
             return;
         }
@@ -69,9 +68,7 @@ pub fn CellEditor() -> impl IntoView {
     };
 
     // Mirror formula bar: the live text buffer.
-    let text_value = move || {
-        state.editing_cell.get().map(|e| e.text).unwrap_or_default()
-    };
+    let text_value = move || state.editing_cell.get().map(|e| e.text).unwrap_or_default();
 
     // Keep editing_cell.text in sync as the user types.
     let state_input = state.clone();
@@ -115,5 +112,3 @@ pub fn CellEditor() -> impl IntoView {
         </Show>
     }
 }
-
-

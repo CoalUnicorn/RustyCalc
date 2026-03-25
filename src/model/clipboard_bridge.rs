@@ -45,10 +45,9 @@ impl AppClipboard {
     /// # Panics
     /// Only if the base crate changes `Clipboard`'s serialization shape.
     pub fn capture(clipboard: &impl serde::Serialize) -> Self {
-        let json = serde_json::to_value(clipboard)
-            .expect("Clipboard must be serializable");
-        let m: ClipboardMirror = serde_json::from_value(json)
-            .expect("ClipboardMirror must match Clipboard's shape");
+        let json = serde_json::to_value(clipboard).expect("Clipboard must be serializable");
+        let m: ClipboardMirror =
+            serde_json::from_value(json).expect("ClipboardMirror must match Clipboard's shape");
         Self {
             csv: m.csv,
             sheet: m.sheet,
@@ -89,19 +88,13 @@ pub enum BorderKind {
 }
 
 /// Construct a [`BorderArea`] without accessing its `pub(crate)` fields.
-pub fn make_border_area(
-    kind: BorderKind,
-    style: BorderStyle,
-    color: Option<String>,
-) -> BorderArea {
+pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<String>) -> BorderArea {
     let mirror = BorderAreaMirror {
         item: BorderItem { style, color },
         r#type: kind,
     };
-    let json = serde_json::to_value(&mirror)
-        .expect("BorderAreaMirror must be serializable");
-    serde_json::from_value(json)
-        .expect("BorderArea must deserialize from mirror shape")
+    let json = serde_json::to_value(&mirror).expect("BorderAreaMirror must be serializable");
+    serde_json::from_value(json).expect("BorderArea must deserialize from mirror shape")
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -112,8 +105,7 @@ mod tests {
 
     #[test]
     fn capture_roundtrip() {
-        let model =
-            UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("create test model");
+        let model = UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("create test model");
         let cb = model.copy_to_clipboard().expect("copy empty range");
         let app = AppClipboard::capture(&cb);
         assert!(!app.csv.is_empty() || app.csv.is_empty()); // just ensure no panic
@@ -122,7 +114,11 @@ mod tests {
 
     #[test]
     fn make_border_area_all_thin_black() {
-        let ba = make_border_area(BorderKind::All, BorderStyle::Thin, Some("#000000".to_owned()));
+        let ba = make_border_area(
+            BorderKind::All,
+            BorderStyle::Thin,
+            Some("#000000".to_owned()),
+        );
         // If this didn't panic, the serde roundtrip succeeded.
         // We can't inspect fields (pub(crate)), but set_area_with_border will accept it.
         let _ = ba;

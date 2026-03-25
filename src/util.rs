@@ -86,10 +86,7 @@ pub fn defer_close(sig: RwSignal<bool>) {
     let cb = Closure::once(move || sig.set(false));
     web_sys::window()
         .expect("window must exist")
-        .set_timeout_with_callback_and_timeout_and_arguments_0(
-            cb.as_ref().unchecked_ref(),
-            0,
-        )
+        .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0)
         .ok();
     cb.forget(); // intentional: callback runs once then is garbage-collected by JS
 }

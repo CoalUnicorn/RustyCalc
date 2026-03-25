@@ -44,13 +44,13 @@ pub enum SafeFontFamily {
 impl SafeFontFamily {
     pub fn css_name(&self) -> &'static str {
         match self {
-            Self::Arial         => "Arial",
-            Self::CalibriLike   => "Calibri, system-ui",
-            Self::CourierNew    => "Courier New",
-            Self::Georgia       => "Georgia",
+            Self::Arial => "Arial",
+            Self::CalibriLike => "Calibri, system-ui",
+            Self::CourierNew => "Courier New",
+            Self::Georgia => "Georgia",
             Self::TimesNewRoman => "Times New Roman",
-            Self::Verdana       => "Verdana",
-            Self::SystemUi      => "system-ui",
+            Self::Verdana => "Verdana",
+            Self::SystemUi => "system-ui",
         }
     }
 }
@@ -58,13 +58,13 @@ impl SafeFontFamily {
 impl From<Option<&str>> for SafeFontFamily {
     fn from(name: Option<&str>) -> Self {
         match name {
-            Some("Arial")           => Self::Arial,
-            Some("Calibri")         => Self::CalibriLike,
-            Some("Courier New")     => Self::CourierNew,
-            Some("Georgia")         => Self::Georgia,
+            Some("Arial") => Self::Arial,
+            Some("Calibri") => Self::CalibriLike,
+            Some("Courier New") => Self::CourierNew,
+            Some("Georgia") => Self::Georgia,
             Some("Times New Roman") => Self::TimesNewRoman,
-            Some("Verdana")         => Self::Verdana,
-            _                       => Self::SystemUi,
+            Some("Verdana") => Self::Verdana,
+            _ => Self::SystemUi,
         }
     }
 }
@@ -73,14 +73,14 @@ impl From<Option<&str>> for SafeFontFamily {
 
 #[derive(Debug, Clone)]
 pub struct ResolvedFont {
-    pub size_px:       f64,
-    pub bold:          bool,
-    pub italic:        bool,
-    pub underline:     bool,
+    pub size_px: f64,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
     pub strikethrough: bool,
-    pub family:        SafeFontFamily,
+    pub family: SafeFontFamily,
     /// Pre-built canvas `ctx.set_font()` string, e.g. `"bold italic 12px Arial"`.
-    pub css:           String,
+    pub css: String,
 }
 
 impl ResolvedFont {
@@ -101,10 +101,10 @@ pub struct ResolvedBorderEdge {
 
 #[derive(Debug, Clone, Default)]
 pub struct CellBorders {
-    pub top:    Option<ResolvedBorderEdge>,
-    pub right:  Option<ResolvedBorderEdge>,
+    pub top: Option<ResolvedBorderEdge>,
+    pub right: Option<ResolvedBorderEdge>,
     pub bottom: Option<ResolvedBorderEdge>,
-    pub left:   Option<ResolvedBorderEdge>,
+    pub left: Option<ResolvedBorderEdge>,
 }
 
 // ── ResolvedCellStyle ─────────────────────────────────────────────────────────
@@ -115,13 +115,13 @@ pub struct ResolvedCellStyle {
     /// Resolved text color; never empty.
     pub text_color: CssColor,
     /// `None` = transparent (skip the fillRect call).
-    pub bg_color:   Option<CssColor>,
-    pub font:       ResolvedFont,
+    pub bg_color: Option<CssColor>,
+    pub font: ResolvedFont,
     /// `General` already resolved to `Left` or `Right` based on cell type.
-    pub h_align:    HorizontalAlignment,
-    pub v_align:    VerticalAlignment,
-    pub wrap_text:  bool,
-    pub borders:    CellBorders,
+    pub h_align: HorizontalAlignment,
+    pub v_align: VerticalAlignment,
+    pub wrap_text: bool,
+    pub borders: CellBorders,
 }
 
 // ── ToolbarState ──────────────────────────────────────────────────────────────
@@ -133,15 +133,15 @@ pub struct ResolvedCellStyle {
 /// not the cell-type-resolved value the renderer uses).
 #[derive(Debug, Clone)]
 pub struct ToolbarState {
-    pub bold:          bool,
-    pub italic:        bool,
-    pub underline:     bool,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
     pub strikethrough: bool,
-    pub font_size:     f64,
-    pub font_family:   SafeFontFamily,
-    pub h_align:       HorizontalAlignment,
-    pub text_color:    CssColor,
-    pub bg_color:      Option<CssColor>,
+    pub font_size: f64,
+    pub font_family: SafeFontFamily,
+    pub h_align: HorizontalAlignment,
+    pub text_color: CssColor,
+    pub bg_color: Option<CssColor>,
 }
 
 // ── Sheet dimension ───────────────────────────────────────────────────────────
@@ -149,27 +149,35 @@ pub struct ToolbarState {
 /// The used data extent of the active sheet.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SheetDimension {
-    pub min_row:    i32,
+    pub min_row: i32,
     pub min_column: i32,
-    pub max_row:    i32,
+    pub max_row: i32,
     pub max_column: i32,
 }
 
 // ── Direction enums ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ArrowKey { Up, Down, Left, Right }
+pub enum ArrowKey {
+    Up,
+    Down,
+    Left,
+    Right,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PageDir { Up, Down }
+pub enum PageDir {
+    Up,
+    Down,
+}
 
 // ── Active cell address ───────────────────────────────────────────────────────
 
 /// The active cell's position — the cell the cursor is on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ActiveCell {
-    pub sheet:  u32,
-    pub row:    i32,
+    pub sheet: u32,
+    pub row: i32,
     pub column: i32,
 }
 
@@ -209,23 +217,35 @@ mod tests {
 
     #[test]
     fn safe_font_family_known_names() {
-        assert_eq!(SafeFontFamily::from(Some("Arial")),           SafeFontFamily::Arial);
-        assert_eq!(SafeFontFamily::from(Some("Calibri")),         SafeFontFamily::CalibriLike);
-        assert_eq!(SafeFontFamily::from(Some("Courier New")),     SafeFontFamily::CourierNew);
-        assert_eq!(SafeFontFamily::from(Some("Times New Roman")), SafeFontFamily::TimesNewRoman);
+        assert_eq!(SafeFontFamily::from(Some("Arial")), SafeFontFamily::Arial);
+        assert_eq!(
+            SafeFontFamily::from(Some("Calibri")),
+            SafeFontFamily::CalibriLike
+        );
+        assert_eq!(
+            SafeFontFamily::from(Some("Courier New")),
+            SafeFontFamily::CourierNew
+        );
+        assert_eq!(
+            SafeFontFamily::from(Some("Times New Roman")),
+            SafeFontFamily::TimesNewRoman
+        );
     }
 
     #[test]
     fn safe_font_family_unknown_falls_back() {
-        assert_eq!(SafeFontFamily::from(Some("Wingdings")), SafeFontFamily::SystemUi);
-        assert_eq!(SafeFontFamily::from(None),              SafeFontFamily::SystemUi);
+        assert_eq!(
+            SafeFontFamily::from(Some("Wingdings")),
+            SafeFontFamily::SystemUi
+        );
+        assert_eq!(SafeFontFamily::from(None), SafeFontFamily::SystemUi);
     }
 
     #[test]
     fn safe_font_family_css_names() {
-        assert_eq!(SafeFontFamily::Arial.css_name(),       "Arial");
-        assert_eq!(SafeFontFamily::CourierNew.css_name(),  "Courier New");
-        assert_eq!(SafeFontFamily::SystemUi.css_name(),    "system-ui");
+        assert_eq!(SafeFontFamily::Arial.css_name(), "Arial");
+        assert_eq!(SafeFontFamily::CourierNew.css_name(), "Courier New");
+        assert_eq!(SafeFontFamily::SystemUi.css_name(), "system-ui");
     }
 
     #[test]
