@@ -2,5 +2,6 @@ pub mod cell_editor;
 pub mod file_bar;
 pub mod formula_bar;
 pub mod sheet_tab_bar;
+pub mod toolbar;
 pub mod workbook;
 pub mod worksheet;

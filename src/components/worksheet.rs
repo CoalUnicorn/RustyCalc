@@ -7,6 +7,7 @@ use web_sys::HtmlCanvasElement;
 
 use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
+use crate::input::formula_input::*;
 use crate::model::{AppClipboard, ArrowKey, FrontendModel, PageDir};
 
 use crate::state::{
@@ -189,18 +190,15 @@ pub fn Worksheet() -> impl IntoView {
         // committing the edit and navigating away.
         if let Some(ref edit) = state.editing_cell.get_untracked() {
             if edit.mode == crate::state::EditMode::Accept {
-                let cursor = crate::formula_input::get_formula_cursor();
+                let cursor = get_formula_cursor();
                 let already_pointing = state.point_range.get_untracked().is_some();
-                if already_pointing
-                    || crate::formula_input::is_in_reference_mode(&edit.text, cursor)
-                {
+                if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                     let sheet = model.with_value(|m| m.active_cell().sheet);
-                    let ref_str =
-                        crate::formula_input::range_ref_str(row, col, row, col, sheet, sheet, "");
+                    let ref_str = range_ref_str(row, col, row, col, sheet, sheet, "");
                     let prev_span = state.point_ref_span.get_untracked();
                     let text = edit.text.clone();
                     let (new_text, new_start, new_end) =
-                        crate::formula_input::splice_ref(&text, cursor, &ref_str, prev_span);
+                        splice_ref(&text, cursor, &ref_str, prev_span);
                     state.editing_cell.update(|c| {
                         if let Some(e) = c {
                             e.text = new_text;
@@ -314,13 +312,13 @@ pub fn Worksheet() -> impl IntoView {
                 // Extend the point-mode range to the hovered cell.
                 if let Some([r1, c1, _, _]) = state.point_range.get_untracked() {
                     let sheet = model.with_value(|m| m.active_cell().sheet);
-                    let ref_str =
-                        crate::formula_input::range_ref_str(r1, c1, row, col, sheet, sheet, "");
+                    let ref_str = range_ref_str(r1, c1, row, col, sheet, sheet, "");
                     let prev_span = state.point_ref_span.get_untracked();
                     let cursor = prev_span.map(|(_, end)| end).unwrap_or(0);
-                    let new_state = state.editing_cell.get_untracked().map(|edit| {
-                        crate::formula_input::splice_ref(&edit.text, cursor, &ref_str, prev_span)
-                    });
+                    let new_state = state
+                        .editing_cell
+                        .get_untracked()
+                        .map(|edit| splice_ref(&edit.text, cursor, &ref_str, prev_span));
                     if let Some((new_text, new_start, new_end)) = new_state {
                         state.editing_cell.update(|c| {
                             if let Some(e) = c {

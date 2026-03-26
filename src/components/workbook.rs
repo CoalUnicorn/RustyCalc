@@ -1,11 +1,13 @@
 use ironcalc_base::expressions::types::Area;
 use leptos::prelude::*;
 
-use crate::action::{classify_key, execute, SpreadsheetAction};
 use crate::components::file_bar::FileBar;
 use crate::components::formula_bar::FormulaBar;
 use crate::components::sheet_tab_bar::SheetTabBar;
+use crate::components::toolbar::Toolbar;
 use crate::components::worksheet::Worksheet;
+use crate::input::action::{classify_key, execute, SpreadsheetAction};
+use crate::input::formula_input::*;
 use crate::model::AppClipboard;
 use crate::state::{EditMode, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
@@ -59,11 +61,9 @@ pub fn Workbook() -> impl IntoView {
                     "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight"
                 )
             {
-                let cursor = crate::formula_input::get_formula_cursor();
+                let cursor = get_formula_cursor();
                 let already_pointing = state.point_range.get_untracked().is_some();
-                if already_pointing
-                    || crate::formula_input::is_in_reference_mode(&edit.text, cursor)
-                {
+                if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                     // Move or extend the point-mode range by one cell.
                     let [r1, c1, r2, c2] = state.point_range.get_untracked().unwrap_or_else(|| {
                         model.with_value(|m| {
@@ -81,14 +81,12 @@ pub fn Workbook() -> impl IntoView {
                     // Shift extends the range; plain arrow moves the whole range.
                     let (new_r1, new_c1) = if is_shift { (r1, c1) } else { (new_r2, new_c2) };
                     let sheet = model.with_value(|m| m.get_selected_view().sheet);
-                    let ref_str = crate::formula_input::range_ref_str(
-                        new_r1, new_c1, new_r2, new_c2, sheet, sheet, "",
-                    );
+                    let ref_str = range_ref_str(new_r1, new_c1, new_r2, new_c2, sheet, sheet, "");
                     let prev_span = state.point_ref_span.get_untracked();
                     let splice_at = prev_span.map(|(_, end)| end).unwrap_or(cursor);
                     let text = edit.text.clone();
                     let (new_text, new_start, new_end) =
-                        crate::formula_input::splice_ref(&text, splice_at, &ref_str, prev_span);
+                        splice_ref(&text, splice_at, &ref_str, prev_span);
                     state.editing_cell.update(|c| {
                         if let Some(e) = c {
                             e.text = new_text;
@@ -181,6 +179,7 @@ pub fn Workbook() -> impl IntoView {
             on:keydown=on_keydown
         >
             <FileBar />
+            <Toolbar />
             <FormulaBar />
             <Worksheet />
             <SheetTabBar />

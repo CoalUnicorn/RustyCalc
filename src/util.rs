@@ -73,7 +73,7 @@ pub fn refocus_workbook() {
 }
 
 // ── Deferred close helper ─────────────────────────────────────────────────────
-
+// NOTE: this may not be needed anymore.
 /// Schedule `sig.set(false)` in the next macrotask via `setTimeout(0)`.
 ///
 /// `spawn_local` (Promise microtask) can run between event-propagation steps,

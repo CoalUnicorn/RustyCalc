@@ -5,10 +5,7 @@ use ironcalc_base::{
 };
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
-use crate::model::frontend_types::{
-    ActiveCell, ArrowKey, CellBorders, CssColor, FrozenPanes, PageDir, ResolvedBorderEdge,
-    ResolvedCellStyle, ResolvedFont, SafeFontFamily, SheetDimension, ToolbarState,
-};
+use crate::model::frontend_types::*;
 
 pub trait FrontendModel {
     // ── Query ─────────────────────────────────────────────────────────────────

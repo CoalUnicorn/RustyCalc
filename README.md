@@ -1,7 +1,7 @@
 # RustyCalc
 
-[![MIT licensed][mit-badge]][mit-url]
-[![Apache 2.0 licensed][apache-badge]][apache-url]
+[![MIT licensed][mit-badge]][https://opensource.org/licenses/MIT]
+[![Apache 2.0 licensed][apache-badge]][https://opensource.org/licenses/Apache-2.0]
 
 Alpha-stage spreadsheet built with Rust, compiled to WebAssembly. The calculation engine is [IronCalc](https://github.com/ironcalc/IronCalc), an open-source Excel-compatible engine written in Rust. RustyCalc wraps it with a Leptos CSR frontend and a Canvas 2D grid renderer.
 
@@ -16,11 +16,11 @@ Alpha-stage spreadsheet built with Rust, compiled to WebAssembly. The calculatio
 - Column/row resize by dragging header borders
 - Keyboard navigation matching Excel conventions (arrow keys, Ctrl+arrow, Shift+arrow, Page Up/Down, Home/End)
 - Copy/paste (internal clipboard with structural paste, OS clipboard fallback for text)
-- Undo/redo, insert/delete rows and columns
 - Light/dark theme with localStorage persistence
 - Auto-save to localStorage every second
 - Tauri desktop build
 - GitHub Pages deployment
+- Undo/redo, insert/delete rows and columns
 
 ## Known limitations
 
@@ -52,9 +52,7 @@ wasm-pack test --headless --firefox
 
 ```
 src/
-├── action.rs          Key→action classification and execution
 ├── app.rs             Root component, context providers, auto-save
-├── formula_input.rs   Formula point-mode helpers (pure string ops)
 ├── state.rs           WorkbookState — all UI signals
 ├── storage.rs         localStorage serialization
 ├── theme.rs           Light/dark theme + CanvasTheme for Canvas 2D
@@ -62,13 +60,16 @@ src/
 ├── canvas/
 │   ├── geometry.rs    Pixel<->cell coordinate math
 │   └── renderer.rs    Canvas 2D drawing (grid, headers, selection, borders)
+├── input/
+│   ├── action.rs          Key→action classification and execution
+│   ├── formula_input.rs   Formula point-mode helpers (pure string ops)
 ├── components/
-│   ├── cell_editor.rs Textarea overlay during cell editing
-│   ├── file_bar.rs    Theme toggle (more buttons planned)
-│   ├── formula_bar.rs Cell address + formula input
-│   ├── sheet_tab_bar.rs Sheet tabs with rename, color, hide/delete
-│   ├── workbook.rs    Top-level keyboard dispatch
-│   └── worksheet.rs   Canvas element + mouse handlers
+│   ├── cell_editor.rs    Textarea overlay during cell editing
+│   ├── file_bar.rs       Theme toggle (more buttons planned)
+│   ├── formula_bar.rs    Cell address + formula input
+│   ├── sheet_tab_bar.rs  Sheet tabs with rename, color, hide/delete
+│   ├── workbook.rs       Top-level keyboard dispatch
+│   └── worksheet.rs      Canvas element + mouse handlers
 └── model/
     ├── clipboard_bridge.rs  Serde bridge for IronCalc's pub(crate) Clipboard
     ├── frontend_model.rs    FrontendModel trait abstracting UserModel

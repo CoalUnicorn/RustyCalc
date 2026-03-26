@@ -7,6 +7,7 @@ use wasm_bindgen::JsCast;
 
 // ── DOM cursor helper ─────────────────────────────────────────────────────────
 
+// TODO: can this use active_cell?
 /// Return the `selectionEnd` cursor position of the currently focused formula
 /// input (cell textarea or formula-bar input). Returns 0 on failure.
 pub fn get_formula_cursor() -> usize {
@@ -46,6 +47,7 @@ pub fn is_in_reference_mode(text: &str, cursor: usize) -> bool {
     }
     matches!(
         before.trim_end().chars().last(),
+        // NOTE: confirm valid ','
         Some(',' | '(' | '+' | '-' | '*' | '/' | '<' | '>' | '=' | '&' | ';' | ':')
     )
 }

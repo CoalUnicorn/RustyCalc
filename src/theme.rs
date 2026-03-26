@@ -7,7 +7,7 @@
 use gloo_storage::{LocalStorage, Storage};
 
 // ── Shared color palette ──────────────────────────────────────────────────────
-
+// TODO: create a component
 /// 40-color palette used by the tab color picker and future color pickers.
 pub const COLOR_PALETTE: &[&str] = &[
     "#000000", "#FFFFFF", "#FF0000", "#FF4500", "#FF8C00", "#FFD700", "#00CC44", "#008000",

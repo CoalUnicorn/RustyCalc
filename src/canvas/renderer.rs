@@ -1,3 +1,93 @@
+//! Canvas 2D renderer for the spreadsheet grid.
+//!
+//! This module is the only piece of RustyCalc that talks to the browser's
+//! Canvas 2D API. Everything else — Leptos components, signals, event
+//! handlers — lives in `src/components/`. The split is deliberate: Leptos
+//! manages reactivity and DOM, but the actual cell grid is a `<canvas>`
+//! element drawn imperatively, because HTML tables/divs can't keep up with
+//! thousands of cells at 60fps.
+//!
+//! # How it connects to Leptos
+//!
+//! The `Worksheet` component (`src/components/worksheet.rs`) owns the
+//! `<canvas>` element and holds a `NodeRef` to it. Whenever
+//! `state.redraw` (an `RwSignal<u32>`) increments, an `Effect` fires,
+//! creates a fresh `CanvasRenderer` from the `NodeRef`, and calls
+//! `renderer.render(model, overlays)`. That single call redraws everything.
+//!
+//! The renderer is intentionally stateless between frames — it's
+//! constructed, used, and dropped each redraw. This avoids stale-state
+//! bugs: canvas size, DPR, and theme can change between frames.
+//!
+//! # Render pipeline
+//!
+//! `render()` runs four phases in order, each building on the previous:
+//!
+//! ```text
+//! Phase 1 — Cell backgrounds and borders
+//!   For each of the four frozen-pane quadrants, iterate visible cells.
+//!   Paint the fill color, then resolve and draw all four border edges.
+//!   Collect text layout (`CellText`) into a Vec for Phase 4.
+//!
+//! Phase 2 — Row and column headers
+//!   Paint the grey header bars with row numbers and column letters (A, B, …).
+//!   Selected headers get a highlighted background.
+//!
+//! Phase 3 — Selection and overlays
+//!   Draw the blue selection rectangle, autofill handle, clipboard marching
+//!   ants, and point-mode range highlight on top of the cell grid.
+//!
+//! Phase 4 — Cell text
+//!   Paint all collected `CellText` entries last so text always appears
+//!   above backgrounds, selection tint, and header lines.
+//! ```
+//!
+//! Text is deferred to Phase 4 because earlier phases may paint over cells
+//! (e.g. the selection fill tint covers an area). Drawing text last keeps
+//! it readable.
+//!
+//! # Frozen panes
+//!
+//! The grid supports frozen rows and columns (Excel's "Freeze Panes").
+//! This splits the canvas into up to four quadrants:
+//!
+//! ```text
+//! ┌────────────┬──────────────────┐
+//! │ frozen/    │ frozen rows,     │
+//! │ frozen     │ scrollable cols  │
+//! ├────────────┼──────────────────┤
+//! │ scrollable │ main scrollable  │
+//! │ rows,      │ area             │
+//! │ frozen cols│                  │
+//! └────────────┴──────────────────┘
+//! ```
+//!
+//! Each quadrant is rendered by `render_pane()` with different row/col
+//! ranges and pixel offsets. A thick separator line marks the freeze
+//! boundary.
+//!
+//! # Border resolution
+//!
+//! Each cell has four border edges (left, top, right, bottom). The
+//! renderer resolves each edge by checking, in order:
+//! 1. The cell's own explicit border (from styling)
+//! 2. The adjacent neighbour's matching border (left cell's right, etc.)
+//! 3. The background color of either cell (for a clean edge between fills)
+//! 4. The grid line color (thin grey default)
+//!
+//! To avoid allocations in this hot path, all colors are borrowed (`&str`)
+//! from the style structs or theme — no `String` cloning per cell.
+//!
+//! # Key types
+//!
+//! - `CanvasRenderer` — short-lived; created per frame from a canvas element
+//! - `CellText` / `TextLine` — pre-computed text layout collected during
+//!    Phase 1 and painted in Phase 4
+//! - `RenderOverlays` — selection/clipboard/point-mode state passed in from
+//!    the Worksheet component each frame
+//! - `CanvasTheme` (`src/model/theme.rs`) — static color palette; the Canvas 2D
+//!    API can't read CSS variables, so concrete color strings are needed
+
 use ironcalc_base::types::{BorderStyle, HorizontalAlignment, VerticalAlignment};
 use ironcalc_base::UserModel;
 
@@ -379,16 +469,8 @@ impl CanvasRenderer {
         let style = model.get_cell_style(sheet, row, col).unwrap_or_default();
         let show_grid = model.get_show_grid_lines(sheet).unwrap_or(true);
 
-        let bg: &str = style
-            .fill
-            .fg_color
-            .as_deref()
-            .unwrap_or(self.theme.cell_bg);
-        let cell_grid_color: &str = if show_grid {
-            self.theme.grid_color
-        } else {
-            bg
-        };
+        let bg: &str = style.fill.fg_color.as_deref().unwrap_or(self.theme.cell_bg);
+        let cell_grid_color: &str = if show_grid { self.theme.grid_color } else { bg };
 
         ctx.set_fill_style_str(bg);
         ctx.fill_rect(x, y, w, h);
@@ -396,21 +478,19 @@ impl CanvasRenderer {
         // Left border: use this cell's left, or neighbour's right, or grid color.
         // Fetch left neighbour's style once — its lifetime must span the match.
         let left_nb = if col > 1 && style.border.left.is_none() {
-            Some(model.get_cell_style(sheet, row, col - 1).unwrap_or_default())
+            Some(
+                model
+                    .get_cell_style(sheet, row, col - 1)
+                    .unwrap_or_default(),
+            )
         } else {
             None
         };
         let (bl_color, bl_style) = if let Some(ref bl) = style.border.left {
-            (
-                bl.color.as_deref().unwrap_or(cell_grid_color),
-                &bl.style,
-            )
+            (bl.color.as_deref().unwrap_or(cell_grid_color), &bl.style)
         } else if let Some(ref left) = left_nb {
             if let Some(ref br) = left.border.right {
-                (
-                    br.color.as_deref().unwrap_or(cell_grid_color),
-                    &br.style,
-                )
+                (br.color.as_deref().unwrap_or(cell_grid_color), &br.style)
             } else if style.fill.fg_color.is_some() {
                 (bg, &BorderStyle::Thin)
             } else if let Some(ref nbg) = left.fill.fg_color {
@@ -441,21 +521,19 @@ impl CanvasRenderer {
 
         // Top border: use this cell's top, or neighbour's bottom, or grid color.
         let top_nb = if row > 1 && style.border.top.is_none() {
-            Some(model.get_cell_style(sheet, row - 1, col).unwrap_or_default())
+            Some(
+                model
+                    .get_cell_style(sheet, row - 1, col)
+                    .unwrap_or_default(),
+            )
         } else {
             None
         };
         let (bt_color, bt_style) = if let Some(ref bt) = style.border.top {
-            (
-                bt.color.as_deref().unwrap_or(cell_grid_color),
-                &bt.style,
-            )
+            (bt.color.as_deref().unwrap_or(cell_grid_color), &bt.style)
         } else if let Some(ref top) = top_nb {
             if let Some(ref bb) = top.border.bottom {
-                (
-                    bb.color.as_deref().unwrap_or(cell_grid_color),
-                    &bb.style,
-                )
+                (bb.color.as_deref().unwrap_or(cell_grid_color), &bb.style)
             } else if style.fill.fg_color.is_some() {
                 (bg, &BorderStyle::Thin)
             } else if let Some(ref nbg) = top.fill.fg_color {
@@ -489,10 +567,7 @@ impl CanvasRenderer {
         let draw_right_explicit = style.border.right.is_some();
         if draw_right || draw_right_explicit {
             let (br_color, br_style) = if let Some(ref br) = style.border.right {
-                (
-                    br.color.as_deref().unwrap_or(cell_grid_color),
-                    &br.style,
-                )
+                (br.color.as_deref().unwrap_or(cell_grid_color), &br.style)
             } else {
                 (cell_grid_color, &BorderStyle::Thin)
             };
@@ -515,10 +590,7 @@ impl CanvasRenderer {
         let draw_bottom_explicit = style.border.bottom.is_some();
         if draw_bottom || draw_bottom_explicit {
             let (bb_color, bb_style) = if let Some(ref bb) = style.border.bottom {
-                (
-                    bb.color.as_deref().unwrap_or(cell_grid_color),
-                    &bb.style,
-                )
+                (bb.color.as_deref().unwrap_or(cell_grid_color), &bb.style)
             } else {
                 (cell_grid_color, &BorderStyle::Thin)
             };
