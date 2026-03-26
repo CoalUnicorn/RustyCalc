@@ -1,7 +1,7 @@
+# RustyCalc
+
 [![MIT licensed][mit-badge]][mit-url]
 [![Apache 2.0 licensed][apache-badge]][apache-url]
-
-# RustyCalc
 
 Alpha-stage spreadsheet built with Rust, compiled to WebAssembly. The calculation engine is [IronCalc](https://github.com/ironcalc/IronCalc), an open-source Excel-compatible engine written in Rust. RustyCalc wraps it with a Leptos CSR frontend and a Canvas 2D grid renderer.
 
