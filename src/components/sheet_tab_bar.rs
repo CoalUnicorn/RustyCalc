@@ -14,7 +14,7 @@ pub fn SheetTabBar() -> impl IntoView {
 
     // Tracks which tab's context menu is open (by sheet_idx), or None.
     let menu_open: RwSignal<Option<u32>> = RwSignal::new(None);
-    // Fixed position for the context menu (set on chevron click).
+    // Fixed position for the context menu (set on menu click).
     let menu_pos: RwSignal<(i32, i32)> = RwSignal::new((0, 0));
     // Tracks which tab is being renamed, or None.
     let renaming: RwSignal<Option<u32>> = RwSignal::new(None);
@@ -32,7 +32,9 @@ pub fn SheetTabBar() -> impl IntoView {
     };
 
     let on_add = move |_| {
-        model.update_value(|m| { m.new_sheet().ok(); });
+        model.update_value(|m| {
+            m.new_sheet().ok();
+        });
         state.request_redraw();
     };
 
@@ -98,7 +100,9 @@ fn SheetTab(
     };
 
     let on_click = move |_: web_sys::MouseEvent| {
-        model.update_value(|m| { m.set_selected_sheet(sheet_idx).ok(); });
+        model.update_value(|m| {
+            m.set_selected_sheet(sheet_idx).ok();
+        });
         state.request_redraw();
     };
 
@@ -109,24 +113,30 @@ fn SheetTab(
         renaming.set(Some(sheet_idx));
     };
 
-    let on_chevron = move |ev: web_sys::MouseEvent| {
+    let menu = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
         if menu_open.get_untracked() == Some(sheet_idx) {
             menu_open.set(None);
         } else {
-            // Position the fixed menu at the chevron's screen location.
+            // Position the fixed menu at the menu's screen location.
             menu_pos.set((ev.client_x(), ev.client_y()));
             menu_open.set(Some(sheet_idx));
         }
     };
 
     let tab_class = move || {
-        if is_selected() { "sheet-tab selected" } else { "sheet-tab" }
+        if is_selected() {
+            "sheet-tab selected"
+        } else {
+            "sheet-tab"
+        }
     };
 
     // Color accent bar at the bottom of the tab (if a tab color is set).
     let color_bar_style = move || {
-        tab_color().map(|c| format!("background:{c};")).unwrap_or_default()
+        tab_color()
+            .map(|c| format!("background:{c};"))
+            .unwrap_or_default()
     };
 
     view! {
@@ -137,7 +147,7 @@ fn SheetTab(
             >
                 <RenameInput sheet_idx=sheet_idx renaming=renaming />
             </Show>
-            <span class="tab-chevron" on:click=on_chevron>"▾"</span>
+            <span class="sheet-tab-menu" on:click=menu>"≓"</span>
             <div class="tab-color-bar" style=color_bar_style />
 
             <Show when=move || menu_open.get() == Some(sheet_idx)>
@@ -183,7 +193,9 @@ fn TabContextMenu(
     };
 
     let set_color = move |hex: &str| {
-        model.update_value(|m| { m.set_sheet_color(sheet_idx, hex).ok(); });
+        model.update_value(|m| {
+            m.set_sheet_color(sheet_idx, hex).ok();
+        });
         state.request_redraw();
         menu_open.set(None);
     };
@@ -191,7 +203,9 @@ fn TabContextMenu(
     let on_hide = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
         menu_open.set(None);
-        model.update_value(|m| { m.hide_sheet(sheet_idx).ok(); });
+        model.update_value(|m| {
+            m.hide_sheet(sheet_idx).ok();
+        });
         state.request_redraw();
     };
 
@@ -211,7 +225,9 @@ fn TabContextMenu(
             })
             .unwrap_or(false);
         if confirmed {
-            model.update_value(|m| { m.delete_sheet(sheet_idx).ok(); });
+            model.update_value(|m| {
+                m.delete_sheet(sheet_idx).ok();
+            });
             state.request_redraw();
         }
     };
@@ -304,7 +320,9 @@ fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView
 
     let commit_rename = move |new_name: String| {
         if !new_name.trim().is_empty() {
-            model.update_value(|m| { m.rename_sheet(sheet_idx, &new_name).ok(); });
+            model.update_value(|m| {
+                m.rename_sheet(sheet_idx, &new_name).ok();
+            });
             state.request_redraw();
         }
         renaming.set(None);

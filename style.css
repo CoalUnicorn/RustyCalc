@@ -126,8 +126,12 @@
     cursor: cell;
 }
 
-.worksheet-canvas.resize-col { cursor: col-resize; }
-.worksheet-canvas.resize-row { cursor: row-resize; }
+.worksheet-canvas.resize-col {
+    cursor: col-resize;
+}
+.worksheet-canvas.resize-row {
+    cursor: row-resize;
+}
 
 /* ── Sheet tab bar ──────────────────────────────────────────────── */
 
@@ -222,15 +226,15 @@
     pointer-events: none;
 }
 
-.tab-chevron {
-    font-size: 10px;
+.sheet-tab-menu {
+    font-size: 18px;
     color: var(--text-dim);
-    padding: 2px;
+    padding: 5px;
     border-radius: 3px;
     line-height: 1;
 }
 
-.tab-chevron:hover {
+.sheet-tab-menu:hover {
     background: rgba(128, 128, 128, 0.15);
 }
 
