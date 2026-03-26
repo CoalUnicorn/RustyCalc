@@ -61,7 +61,7 @@ src/
 │   ├── geometry.rs    Pixel<->cell coordinate math
 │   └── renderer.rs    Canvas 2D drawing (grid, headers, selection, borders)
 ├── input/
-│   ├── action.rs          Key→action classification and execution
+│   ├── action.rs          Key -> action classification and execution
 │   ├── formula_input.rs   Formula point-mode helpers (pure string ops)
 ├── components/
 │   ├── cell_editor.rs    Textarea overlay during cell editing
@@ -80,6 +80,7 @@ src/
 
 - [docs/adding-actions.md](docs/adding-actions.md) — how to add keyboard shortcuts
 - [docs/leptos-patterns.md](docs/leptos-patterns.md) — Leptos conventions used in this codebase
+- [docs/building-components.md](docs/building-components.md) — how to create components
 
 ## Dependencies
 

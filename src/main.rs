@@ -7,6 +7,7 @@ mod input;
 mod model;
 mod state;
 mod storage;
+mod theme;
 mod util;
 
 use app::App;
