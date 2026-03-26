@@ -379,55 +379,57 @@ impl CanvasRenderer {
         let style = model.get_cell_style(sheet, row, col).unwrap_or_default();
         let show_grid = model.get_show_grid_lines(sheet).unwrap_or(true);
 
-        let bg: String = style
+        let bg: &str = style
             .fill
             .fg_color
-            .clone()
-            .unwrap_or_else(|| self.theme.cell_bg.to_owned());
-        let cell_grid_color: String = if show_grid {
-            self.theme.grid_color.to_owned()
+            .as_deref()
+            .unwrap_or(self.theme.cell_bg);
+        let cell_grid_color: &str = if show_grid {
+            self.theme.grid_color
         } else {
-            bg.clone()
+            bg
         };
 
-        ctx.set_fill_style_str(&bg);
+        ctx.set_fill_style_str(bg);
         ctx.fill_rect(x, y, w, h);
 
         // Left border: use this cell's left, or neighbour's right, or grid color.
+        // Fetch left neighbour's style once — its lifetime must span the match.
+        let left_nb = if col > 1 && style.border.left.is_none() {
+            Some(model.get_cell_style(sheet, row, col - 1).unwrap_or_default())
+        } else {
+            None
+        };
         let (bl_color, bl_style) = if let Some(ref bl) = style.border.left {
             (
-                bl.color.clone().unwrap_or_else(|| cell_grid_color.clone()),
-                bl.style.clone(),
+                bl.color.as_deref().unwrap_or(cell_grid_color),
+                &bl.style,
             )
-        } else if col > 1 {
-            // Check if the left neighbour has an explicit right border.
-            let left = model
-                .get_cell_style(sheet, row, col - 1)
-                .unwrap_or_default();
+        } else if let Some(ref left) = left_nb {
             if let Some(ref br) = left.border.right {
                 (
-                    br.color.clone().unwrap_or_else(|| cell_grid_color.clone()),
-                    br.style.clone(),
+                    br.color.as_deref().unwrap_or(cell_grid_color),
+                    &br.style,
                 )
             } else if style.fill.fg_color.is_some() {
-                (bg.clone(), BorderStyle::Thin)
+                (bg, &BorderStyle::Thin)
             } else if let Some(ref nbg) = left.fill.fg_color {
-                (nbg.clone(), BorderStyle::Thin)
+                (nbg.as_str(), &BorderStyle::Thin)
             } else {
-                (cell_grid_color.clone(), BorderStyle::Thin)
+                (cell_grid_color, &BorderStyle::Thin)
             }
         } else {
-            // Column 1: no left neighbour.
+            // Column 1 or has explicit left border (handled above).
             if style.fill.fg_color.is_some() {
-                (bg.clone(), BorderStyle::Thin)
+                (bg, &BorderStyle::Thin)
             } else {
-                (cell_grid_color.clone(), BorderStyle::Thin)
+                (cell_grid_color, &BorderStyle::Thin)
             }
         };
         self.draw_border(
             ctx,
-            &bl_style,
-            &bl_color,
+            bl_style,
+            bl_color,
             BorderSegment {
                 x1: x,
                 y1: y,
@@ -438,40 +440,41 @@ impl CanvasRenderer {
         );
 
         // Top border: use this cell's top, or neighbour's bottom, or grid color.
+        let top_nb = if row > 1 && style.border.top.is_none() {
+            Some(model.get_cell_style(sheet, row - 1, col).unwrap_or_default())
+        } else {
+            None
+        };
         let (bt_color, bt_style) = if let Some(ref bt) = style.border.top {
             (
-                bt.color.clone().unwrap_or_else(|| cell_grid_color.clone()),
-                bt.style.clone(),
+                bt.color.as_deref().unwrap_or(cell_grid_color),
+                &bt.style,
             )
-        } else if row > 1 {
-            // Check if the top neighbour has an explicit bottom border.
-            let top = model
-                .get_cell_style(sheet, row - 1, col)
-                .unwrap_or_default();
+        } else if let Some(ref top) = top_nb {
             if let Some(ref bb) = top.border.bottom {
                 (
-                    bb.color.clone().unwrap_or_else(|| cell_grid_color.clone()),
-                    bb.style.clone(),
+                    bb.color.as_deref().unwrap_or(cell_grid_color),
+                    &bb.style,
                 )
             } else if style.fill.fg_color.is_some() {
-                (bg.clone(), BorderStyle::Thin)
+                (bg, &BorderStyle::Thin)
             } else if let Some(ref nbg) = top.fill.fg_color {
-                (nbg.clone(), BorderStyle::Thin)
+                (nbg.as_str(), &BorderStyle::Thin)
             } else {
-                (cell_grid_color.clone(), BorderStyle::Thin)
+                (cell_grid_color, &BorderStyle::Thin)
             }
         } else {
-            // Row 1: no top neighbour.
+            // Row 1 or has explicit top border (handled above).
             if style.fill.fg_color.is_some() {
-                (bg.clone(), BorderStyle::Thin)
+                (bg, &BorderStyle::Thin)
             } else {
-                (cell_grid_color.clone(), BorderStyle::Thin)
+                (cell_grid_color, &BorderStyle::Thin)
             }
         };
         self.draw_border(
             ctx,
-            &bt_style,
-            &bt_color,
+            bt_style,
+            bt_color,
             BorderSegment {
                 x1: x,
                 y1: y,
@@ -487,16 +490,16 @@ impl CanvasRenderer {
         if draw_right || draw_right_explicit {
             let (br_color, br_style) = if let Some(ref br) = style.border.right {
                 (
-                    br.color.clone().unwrap_or_else(|| cell_grid_color.clone()),
-                    br.style.clone(),
+                    br.color.as_deref().unwrap_or(cell_grid_color),
+                    &br.style,
                 )
             } else {
-                (cell_grid_color.clone(), BorderStyle::Thin)
+                (cell_grid_color, &BorderStyle::Thin)
             };
             self.draw_border(
                 ctx,
-                &br_style,
-                &br_color,
+                br_style,
+                br_color,
                 BorderSegment {
                     x1: x + w,
                     y1: y,
@@ -513,16 +516,16 @@ impl CanvasRenderer {
         if draw_bottom || draw_bottom_explicit {
             let (bb_color, bb_style) = if let Some(ref bb) = style.border.bottom {
                 (
-                    bb.color.clone().unwrap_or_else(|| cell_grid_color.clone()),
-                    bb.style.clone(),
+                    bb.color.as_deref().unwrap_or(cell_grid_color),
+                    &bb.style,
                 )
             } else {
-                (cell_grid_color.clone(), BorderStyle::Thin)
+                (cell_grid_color, &BorderStyle::Thin)
             };
             self.draw_border(
                 ctx,
-                &bb_style,
-                &bb_color,
+                bb_style,
+                bb_color,
                 BorderSegment {
                     x1: x,
                     y1: y + h,
