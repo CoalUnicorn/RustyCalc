@@ -3,6 +3,7 @@ use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
 // NOTE: <Meta name="color-scheme" content="dark"/>
+use crate::perf::PerfTimings;
 use crate::theme::Theme;
 
 /// Shorthand for the context-provided `UserModel` storage handle.
@@ -133,6 +134,8 @@ pub struct WorkbookState {
     /// NodeRef to the formula bar <input> — used by FunctionBrowserModal
     /// to read/write cursor position when inserting a function name.
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
+    /// Performance timings for the commit→render pipeline.
+    pub perf: PerfTimings,
 }
 
 impl WorkbookState {
@@ -155,6 +158,7 @@ impl WorkbookState {
             point_range: RwSignal::new(None),
             point_ref_span: RwSignal::new(None),
             formula_input_ref: NodeRef::new(),
+            perf: PerfTimings::new(),
         }
     }
 

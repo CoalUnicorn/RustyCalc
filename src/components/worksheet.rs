@@ -84,6 +84,10 @@ pub fn Worksheet() -> impl IntoView {
             let renderer = CanvasRenderer::new(&canvas_el, canvas_theme);
             renderer.render(m, &overlays);
         });
+        // Record render-done timestamp for the perf panel.
+        if state.perf.commit_start.get_untracked().is_some() {
+            state.perf.render_done.set(Some(crate::perf::now()));
+        }
     });
 
     // mousedown: start selection or autofill drag

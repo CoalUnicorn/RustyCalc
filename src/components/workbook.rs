@@ -3,6 +3,7 @@ use leptos::prelude::*;
 
 use crate::components::file_bar::FileBar;
 use crate::components::formula_bar::FormulaBar;
+use crate::components::perf_panel::PerfPanel;
 use crate::components::sheet_tab_bar::SheetTabBar;
 use crate::components::toolbar::Toolbar;
 use crate::components::worksheet::Worksheet;
@@ -161,6 +162,7 @@ pub fn Workbook() -> impl IntoView {
             <Toolbar />
             <FormulaBar />
             <Worksheet />
+            <PerfPanel />
             <SheetTabBar />
         </div>
     }

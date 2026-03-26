@@ -172,6 +172,7 @@ pub fn classify_key(
     }
 }
 
+
 /// True for single printable characters that should start a cell edit.
 fn is_printable(key: &str) -> bool {
     key.chars().count() == 1 && key.as_bytes()[0] >= 0x20

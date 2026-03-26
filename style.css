@@ -256,7 +256,48 @@
     cursor: row-resize;
 }
 
-/* Sheet tab bar                  */
+/* ── Perf panel ──────────────────────────────────────────────────── */
+
+.perf-panel {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    height: 24px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-inner);
+    flex-shrink: 0;
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--text-dim);
+    overflow: hidden;
+}
+
+.perf-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    flex-shrink: 0;
+}
+
+.perf-detail {
+    flex-shrink: 0;
+}
+
+.perf-total {
+    font-weight: 600;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.perf-formula {
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 300px;
+}
+
+/* ── Sheet tab bar ──────────────────────────────────────────────── */
 
 .tab-bar {
     display: flex;

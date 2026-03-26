@@ -5,6 +5,7 @@ mod canvas;
 mod components;
 mod input;
 mod model;
+pub mod perf;
 mod state;
 mod storage;
 mod theme;

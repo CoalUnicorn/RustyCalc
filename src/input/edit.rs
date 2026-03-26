@@ -55,18 +55,33 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
         }
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
-                mutate(model, state, Eval::Yes, |m| {
+                // ── Perf timing ──────────────────────────────────────────
+                let perf = state.perf;
+                perf.commit_start.set(Some(crate::perf::now()));
+                perf.last_formula.set(Some(edit.text.clone()));
+
+                // Write the edit buffer to the model and recalculate.
+                model.update_value(|m| {
                     warn_if_err(
                         m.set_user_input(edit.sheet, edit.row, edit.col, &edit.text),
                         "set_user_input",
                     );
+                    perf.input_done.set(Some(crate::perf::now()));
+                    m.evaluate();
+                    perf.eval_done.set(Some(crate::perf::now()));
                 });
+
+                // Clear all edit-related state.
                 state.editing_cell.set(None);
                 state.point_range.set(None);
                 state.point_ref_span.set(None);
+                
+                // Persist the committed change immediately.
                 if let Some(uuid) = state.current_uuid.get_untracked() {
                     model.with_value(|m| storage::save(&uuid, m));
                 }
+                
+                // Navigate to the next cell and redraw.
                 mutate(model, state, Eval::No, |m| m.nav_arrow(*dir));
                 crate::util::refocus_workbook();
             }
