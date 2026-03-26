@@ -144,7 +144,29 @@ pub fn Workbook() -> impl IntoView {
             }
 
             // Everything else is handled by the centralised execute().
-            _ => {
+            SpreadsheetAction::Navigate(_)
+            | SpreadsheetAction::NavigateEdge(_)
+            | SpreadsheetAction::JumpToA1
+            | SpreadsheetAction::JumpToLastCell
+            | SpreadsheetAction::ExpandSelection(_)
+            | SpreadsheetAction::PageDown
+            | SpreadsheetAction::PageUp
+            | SpreadsheetAction::RowHome
+            | SpreadsheetAction::RowEnd
+            | SpreadsheetAction::SwitchSheet(_)
+            | SpreadsheetAction::StartEdit(_)
+            | SpreadsheetAction::EnterEditMode
+            | SpreadsheetAction::CommitAndNavigate(_)
+            | SpreadsheetAction::CancelEdit
+            | SpreadsheetAction::Delete
+            | SpreadsheetAction::ClearAll
+            | SpreadsheetAction::SelectAll
+            | SpreadsheetAction::Undo
+            | SpreadsheetAction::Redo
+            | SpreadsheetAction::InsertRows
+            | SpreadsheetAction::InsertColumns
+            | SpreadsheetAction::DeleteRows
+            | SpreadsheetAction::DeleteColumns => {
                 execute(&action, model, &state);
                 ev.prevent_default();
             }
