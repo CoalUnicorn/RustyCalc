@@ -6,6 +6,17 @@
 ///   which cannot consume CSS variables.
 use gloo_storage::{LocalStorage, Storage};
 
+// ── Shared color palette ──────────────────────────────────────────────────────
+
+/// 40-color palette used by the tab color picker and future color pickers.
+pub const COLOR_PALETTE: &[&str] = &[
+    "#000000", "#FFFFFF", "#FF0000", "#FF4500", "#FF8C00", "#FFD700", "#00CC44", "#008000",
+    "#00BFFF", "#0000FF", "#C00000", "#FF6666", "#FF9966", "#FFCC44", "#AADD44", "#44AA66",
+    "#44BBCC", "#4477DD", "#7755BB", "#CC44CC", "#7F0000", "#CC3333", "#CC6633", "#CC9922",
+    "#88BB22", "#228844", "#228899", "#224499", "#553388", "#882288", "#400000", "#800000",
+    "#804000", "#808000", "#406000", "#004000", "#004040", "#000080", "#400080", "#800040",
+];
+
 // ── Theme enum ────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

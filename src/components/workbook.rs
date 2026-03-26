@@ -154,7 +154,7 @@ pub fn Workbook() -> impl IntoView {
     view! {
         <div
             id="workbook"
-            style="display:flex;flex-direction:column;flex:1;min-width:0;height:100%;outline:none;"
+            class="workbook"
             tabindex="0"
             on:keydown=on_keydown
         >

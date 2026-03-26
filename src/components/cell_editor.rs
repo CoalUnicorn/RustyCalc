@@ -41,26 +41,12 @@ pub fn CellEditor() -> impl IntoView {
         ta.set_selection_range(len, len).ok();
     });
 
-    // Compute pixel rect of the selected cell, reactive to redraw.
+    // Only the pixel position is dynamic — static styles live in style.css (.cell-editor).
     let cell_style = move || {
         let _ = state.redraw.get();
         let r = model.with_value(|m| selected_cell_rect(m));
         format!(
-            "position:absolute;\
-             left:{:.0}px;top:{:.0}px;\
-             width:{:.0}px;height:{:.0}px;\
-             border:2px solid var(--accent);\
-             padding:1px 3px;\
-             font-family:Inter,Arial,sans-serif;\
-             font-size:13px;\
-             line-height:1.4;\
-             resize:none;\
-             z-index:10;\
-             outline:none;\
-             box-sizing:border-box;\
-             overflow:hidden;\
-             background:var(--cell-editor-bg);\
-             color:var(--text-strong);",
+            "left:{:.0}px;top:{:.0}px;width:{:.0}px;height:{:.0}px;",
             r.x, r.y, r.width, r.height,
         )
     };
@@ -98,6 +84,7 @@ pub fn CellEditor() -> impl IntoView {
         <Show when=move || state.editing_cell.get().is_some()>
             <textarea
                 node_ref=textarea_ref
+                class="cell-editor"
                 style=cell_style
                 prop:value=text_value
                 on:input=on_input

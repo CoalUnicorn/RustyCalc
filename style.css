@@ -1,0 +1,389 @@
+/* ── App root ────────────────────────────────────────────────────── */
+
+#app {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;
+    font-family: Inter, Arial, sans-serif;
+}
+
+/* ── Workbook layout ─────────────────────────────────────────────── */
+
+.workbook {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    outline: none;
+}
+
+/* ── File bar ───────────────────────────────────────────────────── */
+
+.file-bar {
+    display: flex;
+    align-items: center;
+    height: 44px;
+    padding: 0 8px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.file-bar-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 0 10px;
+    font-size: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    background: var(--btn-bg);
+    color: var(--text-primary);
+}
+
+/* ── Formula bar ────────────────────────────────────────────────── */
+
+.formula-bar {
+    display: flex;
+    align-items: center;
+    height: 38px;
+    border-bottom: 1px solid var(--border-inner);
+    background: var(--bg-primary);
+    font-family: Inter, Arial, sans-serif;
+    font-size: 15px;
+    flex-shrink: 0;
+}
+
+.formula-bar-address {
+    min-width: 60px;
+    padding: 0 8px;
+    font-weight: 600;
+    color: var(--text-strong);
+    border-right: 1px solid var(--border-inner);
+    text-align: center;
+    user-select: none;
+}
+
+.formula-bar-fx {
+    padding: 0 6px;
+    color: var(--text-muted);
+    font-style: italic;
+    user-select: none;
+}
+
+.formula-bar-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    padding: 0 8px;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    background: transparent;
+    color: var(--text-strong);
+    height: 100%;
+}
+
+.formula-bar-input.editing {
+    background: var(--cell-editor-bg);
+}
+
+/* ── Cell editor (textarea overlay) ─────────────────────────────── */
+
+.cell-editor {
+    position: absolute;
+    border: 2px solid var(--accent);
+    padding: 1px 3px;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    resize: none;
+    z-index: 10;
+    outline: none;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: var(--cell-editor-bg);
+    color: var(--text-strong);
+}
+
+/* ── Worksheet (canvas container) ───────────────────────────────── */
+
+.worksheet-container {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.worksheet-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: cell;
+}
+
+.worksheet-canvas.resize-col { cursor: col-resize; }
+.worksheet-canvas.resize-row { cursor: row-resize; }
+
+/* ── Sheet tab bar ──────────────────────────────────────────────── */
+
+.tab-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-height: 36px;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-inner);
+    background: var(--bg-secondary);
+    overflow: visible;
+    font-size: 13px;
+    position: relative;
+    z-index: 400;
+}
+
+.tab-bar-add,
+.tab-bar-hamburger {
+    min-width: 30px;
+    min-height: 30px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 18px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tab-bar-add:hover,
+.tab-bar-hamburger:hover {
+    color: var(--text-primary);
+}
+
+.tab-bar-divider {
+    width: 1px;
+    height: 60%;
+    background: var(--border-inner);
+    flex-shrink: 0;
+}
+
+.tab-bar-scroll {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex: 1;
+    height: 100%;
+    align-items: end;
+    padding-left: 4px;
+    gap: 0;
+}
+
+/* ── Individual sheet tab ───────────────────────────────────────── */
+
+.sheet-tab {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 6px 0 12px;
+    background: var(--bg-secondary);
+    border: none;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    font-weight: 400;
+    color: var(--text-dim);
+    white-space: nowrap;
+    font-size: 13px;
+    gap: 2px;
+    transition: background 0.1s;
+    overflow: visible;
+}
+
+.sheet-tab:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.sheet-tab.selected {
+    background: var(--bg-primary);
+    font-weight: 600;
+    color: var(--text-primary);
+    border: 1px solid var(--border-inner);
+    border-bottom: 1px solid var(--bg-primary);
+}
+
+.tab-name {
+    pointer-events: none;
+}
+
+.tab-chevron {
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 2px;
+    border-radius: 3px;
+    line-height: 1;
+}
+
+.tab-chevron:hover {
+    background: rgba(128, 128, 128, 0.15);
+}
+
+/* Colored accent bar at the bottom of the tab */
+.tab-color-bar {
+    position: absolute;
+    bottom: 0;
+    left: 4px;
+    right: 4px;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+}
+
+/* ── Rename input ───────────────────────────────────────────────── */
+
+.tab-rename-input {
+    width: 80px;
+    font-size: 13px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: inherit;
+}
+
+/* ── Click-away backdrop (shared) ───────────────────────────────── */
+
+.click-away-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1099;
+}
+
+/* ── Tab context menu ───────────────────────────────────────────── */
+
+.tab-context-menu {
+    position: fixed;
+    z-index: 1100;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+    min-width: 170px;
+    font-size: 13px;
+}
+
+.ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.ctx-item:hover {
+    background: rgba(128, 128, 128, 0.1);
+}
+
+.ctx-item.delete {
+    color: #d32f2f;
+}
+
+.ctx-icon {
+    width: 18px;
+    text-align: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.ctx-divider {
+    height: 1px;
+    background: var(--border-inner);
+    margin: 4px 0;
+}
+
+/* ── Color picker (inline in context menu) ──────────────────────── */
+
+.color-picker-inline {
+    padding: 6px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.color-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(10, 22px);
+    gap: 2px;
+}
+
+.color-picker-swatch {
+    width: 22px;
+    height: 22px;
+    cursor: pointer;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.color-picker-swatch:hover {
+    border-color: rgba(0, 0, 0, 0.4);
+    transform: scale(1.15);
+}
+
+.color-picker-clear {
+    font-size: 11px;
+    padding: 3px 6px;
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--btn-bg);
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.color-picker-clear:hover {
+    background: rgba(128, 128, 128, 0.1);
+}
+
+/* ── All-sheets menu (hamburger) ────────────────────────────────── */
+
+.all-sheets-menu {
+    position: fixed;
+    z-index: 1100;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+    min-width: 160px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-size: 13px;
+}
+
+.all-sheets-item {
+    padding: 8px 14px;
+    cursor: pointer;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.all-sheets-item:hover {
+    background: rgba(128, 128, 128, 0.1);
+}
+
+.all-sheets-item.active {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.all-sheets-item.hidden {
+    color: var(--text-dim);
+    font-style: italic;
+}

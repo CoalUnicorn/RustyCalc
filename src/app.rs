@@ -48,11 +48,7 @@ pub fn App() -> impl IntoView {
     // Row layout: collapsible drawer on the left, workbook editor fills the rest.
 
     view! {
-        <div
-            id="app"
-            style="width:100vw;height:100vh;display:flex;flex-direction:row;overflow:hidden;\
-                font-family:Inter,Arial,sans-serif;"
-        >
+        <div id="app">
             <Workbook />
         </div>
     }

@@ -47,7 +47,6 @@ pub fn FormulaBar() -> impl IntoView {
     // steal focus back), or switch focus if already editing.
     let on_focus = move |_: web_sys::FocusEvent| {
         if state.editing_cell.get_untracked().is_some() {
-            // Already editing — just switch focus to formula bar.
             state.editing_cell.update(|cell| {
                 if let Some(c) = cell {
                     c.focus = EditFocus::FormulaBar;
@@ -55,7 +54,6 @@ pub fn FormulaBar() -> impl IntoView {
             });
             return;
         }
-        // Start a new edit session with the cell's current content.
         model.with_value(|m| {
             let ac = m.active_cell();
             let text = m.active_cell_content();
@@ -79,7 +77,6 @@ pub fn FormulaBar() -> impl IntoView {
             .unwrap_or_default();
 
         if state.editing_cell.get_untracked().is_some() {
-            // Update existing edit session.
             state.editing_cell.update(|cell| {
                 if let Some(c) = cell {
                     c.text = value;
@@ -109,65 +106,26 @@ pub fn FormulaBar() -> impl IntoView {
         }
     };
 
+    let input_class = move || {
+        if is_editing() {
+            "formula-bar-input editing"
+        } else {
+            "formula-bar-input"
+        }
+    };
+
     view! {
-        <div id="formula-bar" style="
-            display: flex;
-            align-items: center;
-            height: 38px;
-            border-bottom: 1px solid var(--border-inner);
-            background: var(--bg-primary);
-            font-family: Inter, Arial, sans-serif;
-            font-size: 15px;
-            flex-shrink: 0;
-        ">
-            // ── Cell address (read-only) ─────────────────────────────────
-            <div style="
-                min-width: 60px;
-                padding: 0 8px;
-                font-weight: 600;
-                color: var(--text-strong);
-                border-right: 1px solid var(--border-inner);
-                text-align: center;
-                user-select: none;
-            ">
-                {cell_address}
-            </div>
-
-            // ── "fx" label ───────────────────────────────────────────────
-            <div style="
-                padding: 0 6px;
-                color: var(--text-muted);
-                font-style: italic;
-                user-select: none;
-            ">
-                "fx"
-            </div>
-
-            // ── Formula/content input ────────────────────────────────────
+        <div id="formula-bar" class="formula-bar">
+            <div class="formula-bar-address">{cell_address}</div>
+            <div class="formula-bar-fx">"fx"</div>
             <input
                 node_ref=input_ref
                 type="text"
+                class=input_class
                 prop:value=display_text
                 on:focus=on_focus
                 on:input=on_input
                 on:keydown=on_keydown
-                style=move || {
-                    let base = "flex:1;\
-                        border:none;\
-                        outline:none;\
-                        padding:0 8px;\
-                        font-family:Inter,Arial,sans-serif;\
-                        font-size:13px;\
-                        background:transparent;\
-                        color:var(--text-strong);\
-                        height:100%;";
-                    if is_editing() {
-                        // Subtle highlight when actively editing
-                        format!("{base}background:var(--cell-editor-bg);")
-                    } else {
-                        base.to_owned()
-                    }
-                }
             />
         </div>
     }

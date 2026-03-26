@@ -22,11 +22,6 @@ pub fn FileBar() -> impl IntoView {
         state.request_redraw();
     };
 
-    let btn = "display:flex;align-items:center;justify-content:center;\
-               min-height:44px;padding:0 10px;font-size:12px;\
-               border:1px solid var(--border-color);border-radius:8px;\
-               cursor:pointer;background:var(--btn-bg);color:var(--text-primary);";
-
     // Show icon for the CURRENT theme (☀ = light mode active, ☾ = dark mode active).
     let theme_icon = move || {
         if state.theme.get() == Theme::Dark {
@@ -37,10 +32,8 @@ pub fn FileBar() -> impl IntoView {
     };
 
     view! {
-        <div style="display:flex;align-items:center;height:44px;\
-            padding:0 8px;background:var(--bg-secondary);\
-            border-bottom:1px solid var(--border-color);flex-shrink:0;">
-            <button style=btn on:click=on_toggle title="Toggle theme">
+        <div class="file-bar">
+            <button class="file-bar-btn" on:click=on_toggle title="Toggle theme">
                 {theme_icon}
             </button>
         </div>

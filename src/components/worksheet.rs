@@ -483,22 +483,19 @@ pub fn Worksheet() -> impl IntoView {
     };
 
     view! {
-        <div node_ref=container_ref style="position:relative;flex:1;overflow:hidden;min-height:0;">
+        <div node_ref=container_ref class="worksheet-container">
             <canvas
                 node_ref=canvas_ref
                 role="application"
                 aria-label="Spreadsheet grid"
-                style=move || {
+                class=move || {
                     match state.drag.get() {
-                        DragState::ResizingCol { .. } =>
-                            "width:100%;height:100%;display:block;cursor:col-resize;",
-                        DragState::ResizingRow { .. } =>
-                            "width:100%;height:100%;display:block;cursor:row-resize;",
+                        DragState::ResizingCol { .. } => "worksheet-canvas resize-col",
+                        DragState::ResizingRow { .. } => "worksheet-canvas resize-row",
                         DragState::Idle
                         | DragState::Selecting
                         | DragState::Extending { .. }
-                        | DragState::Pointing =>
-                            "width:100%;height:100%;display:block;cursor:cell;",
+                        | DragState::Pointing => "worksheet-canvas",
                     }
                 }
                 tabindex="-1"
