@@ -15,6 +15,16 @@ use crate::input::nav::{execute_nav, NavAction};
 use crate::input::structure::{execute_struct, StructAction};
 use crate::model::{ArrowKey, SafeFontFamily};
 use crate::state::{EditMode, EditingCell, ModelStore, WorkbookState};
+use leptos::prelude::UpdateValue;
+
+/// Pass `Eval::Yes` when the mutation may change formula results
+/// and you want the model to recalculate after the mutation.
+/// Pass `Eval::No` for pure navigation or selection changes.
+#[derive(Clone, Copy)]
+pub enum Eval {
+    Yes,
+    No,
+}
 
 // SpreadsheetAction
 
@@ -230,6 +240,30 @@ impl SpreadsheetAction {
     pub fn redo() -> Self {
         Self::Structure(StructAction::Redo)
     }
+}
+
+// ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Run `f` on the model, optionally call `evaluate`, then trigger a redraw.
+///
+/// Many `UserModel` methods call `evaluate()` internally. We pause
+/// evaluation before `f` so the model is evaluated at most once — after
+/// all mutations are done.
+pub fn mutate(
+    model: ModelStore,
+    state: &WorkbookState,
+    evaluate: Eval,
+    f: impl FnOnce(&mut ironcalc_base::UserModel<'static>),
+) {
+    model.update_value(|m| {
+        m.pause_evaluation();
+        f(m);
+        m.resume_evaluation();
+        if matches!(evaluate, Eval::Yes) {
+            m.evaluate();
+        }
+    });
+    state.request_redraw();
 }
 
 // Tests
@@ -764,9 +798,8 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            model.update_value(|m| {
+            mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 1, 1, "hello").ok();
-                m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
             execute(
@@ -789,9 +822,8 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            model.update_value(|m| {
+            mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 1, 1, "data").ok();
-                m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
             execute(&struc(StructAction::Delete), model, &state);
@@ -807,9 +839,8 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            model.update_value(|m| {
+            mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 1, 1, "42").ok();
-                m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
             execute(&SpreadsheetAction::undo(), model, &state);
@@ -830,9 +861,8 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            model.update_value(|m| {
+            mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 1, 1, "original").ok();
-                m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
             execute(&struc(StructAction::InsertRows), model, &state);
@@ -850,9 +880,8 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            model.update_value(|m| {
+            mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 2, 1, "data").ok();
-                m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
             execute(&struc(StructAction::DeleteRows), model, &state);

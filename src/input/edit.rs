@@ -1,5 +1,6 @@
 //! Edit actions: start/commit/cancel cell editing.
 
+use crate::input::action::{mutate, Eval};
 use crate::model::{ArrowKey, FrontendModel};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
@@ -54,12 +55,11 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
         }
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
-                model.update_value(|m| {
+                mutate(model, state, Eval::Yes, |m| {
                     warn_if_err(
                         m.set_user_input(edit.sheet, edit.row, edit.col, &edit.text),
                         "set_user_input",
                     );
-                    m.evaluate();
                 });
                 state.editing_cell.set(None);
                 state.point_range.set(None);
@@ -67,8 +67,7 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 if let Some(uuid) = state.current_uuid.get_untracked() {
                     model.with_value(|m| storage::save(&uuid, m));
                 }
-                model.update_value(|m| m.nav_arrow(*dir));
-                state.request_redraw();
+                mutate(model, state, Eval::No, |m| m.nav_arrow(*dir));
                 crate::util::refocus_workbook();
             }
         }
