@@ -9,7 +9,7 @@ use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::{BorderArea, ClipboardData, UserModel};
 use serde::{Deserialize, Serialize};
 
-// AppClipboard                    
+// AppClipboard
 
 /// Webapp-owned mirror of `ironcalc_base::Clipboard` with public fields.
 ///
@@ -62,7 +62,7 @@ impl AppClipboard {
     }
 }
 
-// BorderArea construction                  
+// BorderArea construction
 
 /// Serde mirror matching `ironcalc_base::BorderArea`'s JSON shape.
 #[derive(Serialize)]
@@ -97,7 +97,7 @@ pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<Stri
     serde_json::from_value(json).expect("BorderArea must deserialize from mirror shape")
 }
 
-// Tests                        
+// Tests
 
 #[cfg(test)]
 mod tests {

@@ -6,7 +6,7 @@
 ///   which cannot consume CSS variables.
 use gloo_storage::{LocalStorage, Storage};
 
-// Shared color palette                   
+// Shared color palette
 // TODO: create a component
 /// 40-color palette used by the tab color picker and future color pickers.
 pub const COLOR_PALETTE: &[&str] = &[
@@ -17,7 +17,7 @@ pub const COLOR_PALETTE: &[&str] = &[
     "#804000", "#808000", "#406000", "#004000", "#004040", "#000080", "#400080", "#800040",
 ];
 
-// Theme enum                     
+// Theme enum
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Theme {
@@ -67,7 +67,7 @@ impl Theme {
     }
 }
 
-// CanvasTheme                      
+// CanvasTheme
 
 /// Concrete color strings for the Canvas 2D rendering context.
 /// One static instance per theme; passed into `CanvasRenderer::new()`.

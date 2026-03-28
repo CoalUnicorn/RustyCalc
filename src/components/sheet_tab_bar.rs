@@ -4,7 +4,7 @@ use wasm_bindgen::JsCast;
 use crate::state::{ModelStore, WorkbookState};
 use crate::theme::COLOR_PALETTE;
 
-// Main component                   
+// Main component
 
 /// Sheet tab bar: `[ + ][ ≡ ][ Sheet1 ▾ | **Sheet2 ▾** | Sheet3 ▾ ]`
 #[component]
@@ -63,7 +63,7 @@ pub fn SheetTabBar() -> impl IntoView {
     }
 }
 
-// Individual sheet tab                 
+// Individual sheet tab
 
 #[component]
 fn SheetTab(
@@ -157,7 +157,7 @@ fn SheetTab(
     }
 }
 
-// Context menu                    
+// Context menu
 
 #[component]
 fn TabContextMenu(
@@ -293,7 +293,7 @@ fn TabContextMenu(
     }
 }
 
-// Rename input                    
+// Rename input
 
 #[component]
 fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView {
@@ -372,7 +372,7 @@ fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView
     }
 }
 
-// All sheets menu (hamburger)               
+// All sheets menu (hamburger)
 
 /// `≡` button that lists all sheets (visible + hidden) for quick navigation.
 #[component]

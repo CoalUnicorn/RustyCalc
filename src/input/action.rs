@@ -286,7 +286,10 @@ mod tests {
     #[wasm_bindgen_test]
     fn plain_arrows_navigate() {
         let ck = |k| classify_key(k, false, false, false, None);
-        assert_eq!(ck("ArrowRight"), Some(nav(NavAction::Arrow(ArrowKey::Right))));
+        assert_eq!(
+            ck("ArrowRight"),
+            Some(nav(NavAction::Arrow(ArrowKey::Right)))
+        );
         assert_eq!(ck("ArrowLeft"), Some(nav(NavAction::Arrow(ArrowKey::Left))));
         assert_eq!(ck("ArrowDown"), Some(nav(NavAction::Arrow(ArrowKey::Down))));
         assert_eq!(ck("ArrowUp"), Some(nav(NavAction::Arrow(ArrowKey::Up))));
@@ -516,10 +519,22 @@ mod tests {
     #[wasm_bindgen_test]
     fn shift_arrows_expand_selection() {
         let s = |k| classify_key(k, false, true, false, None);
-        assert_eq!(s("ArrowRight"), Some(nav(NavAction::ExpandSelection(ArrowKey::Right))));
-        assert_eq!(s("ArrowLeft"), Some(nav(NavAction::ExpandSelection(ArrowKey::Left))));
-        assert_eq!(s("ArrowUp"), Some(nav(NavAction::ExpandSelection(ArrowKey::Up))));
-        assert_eq!(s("ArrowDown"), Some(nav(NavAction::ExpandSelection(ArrowKey::Down))));
+        assert_eq!(
+            s("ArrowRight"),
+            Some(nav(NavAction::ExpandSelection(ArrowKey::Right)))
+        );
+        assert_eq!(
+            s("ArrowLeft"),
+            Some(nav(NavAction::ExpandSelection(ArrowKey::Left)))
+        );
+        assert_eq!(
+            s("ArrowUp"),
+            Some(nav(NavAction::ExpandSelection(ArrowKey::Up)))
+        );
+        assert_eq!(
+            s("ArrowDown"),
+            Some(nav(NavAction::ExpandSelection(ArrowKey::Down)))
+        );
     }
 
     // classify_key: while editing (Accept mode)
@@ -576,10 +591,19 @@ mod tests {
     #[wasm_bindgen_test]
     fn edit_mode_arrows_are_unhandled() {
         let e = edit_cell();
-        assert_eq!(classify_key("ArrowDown", false, false, false, Some(&e)), None);
+        assert_eq!(
+            classify_key("ArrowDown", false, false, false, Some(&e)),
+            None
+        );
         assert_eq!(classify_key("ArrowUp", false, false, false, Some(&e)), None);
-        assert_eq!(classify_key("ArrowLeft", false, false, false, Some(&e)), None);
-        assert_eq!(classify_key("ArrowRight", false, false, false, Some(&e)), None);
+        assert_eq!(
+            classify_key("ArrowLeft", false, false, false, Some(&e)),
+            None
+        );
+        assert_eq!(
+            classify_key("ArrowRight", false, false, false, Some(&e)),
+            None
+        );
     }
 
     #[wasm_bindgen_test]
@@ -680,7 +704,11 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::start_edit("=SUM".to_owned()), model, &state);
+            execute(
+                &SpreadsheetAction::start_edit("=SUM".to_owned()),
+                model,
+                &state,
+            );
             let cell = state.editing_cell.get_untracked();
             assert!(cell.is_some());
             assert_eq!(cell.unwrap().text, "=SUM");
@@ -695,7 +723,11 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::start_edit("hello".to_owned()), model, &state);
+            execute(
+                &SpreadsheetAction::start_edit("hello".to_owned()),
+                model,
+                &state,
+            );
             assert!(state.editing_cell.get_untracked().is_some());
             execute(&SpreadsheetAction::Edit(EditAction::Cancel), model, &state);
             assert!(state.editing_cell.get_untracked().is_none());
@@ -711,7 +743,11 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::start_edit("42".to_owned()), model, &state);
+            execute(
+                &SpreadsheetAction::start_edit("42".to_owned()),
+                model,
+                &state,
+            );
             execute(&SpreadsheetAction::commit(ArrowKey::Down), model, &state);
             let val = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(val, "42");
@@ -733,7 +769,11 @@ mod tests {
                 m.evaluate();
             });
             let state = crate::state::WorkbookState::new();
-            execute(&SpreadsheetAction::Edit(EditAction::EnterEditMode), model, &state);
+            execute(
+                &SpreadsheetAction::Edit(EditAction::EnterEditMode),
+                model,
+                &state,
+            );
             let cell = state.editing_cell.get_untracked().unwrap();
             assert_eq!(cell.mode, EditMode::Edit);
             assert_eq!(cell.text, "hello");

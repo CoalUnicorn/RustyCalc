@@ -98,11 +98,11 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use super::geometry::*;
 use crate::theme::CanvasTheme;
 
-// Layout constants                   
+// Layout constants
 const CELL_PADDING: f64 = 4.0;
 const DEFAULT_FONT_FAMILY: &str = "Inter, Arial, sans-serif";
 
-// Pre-computed text for one cell              
+// Pre-computed text for one cell
 
 /// One visual line of text inside a cell, positioned for center-aligned rendering.
 struct TextLine {
@@ -219,7 +219,7 @@ impl CanvasRenderer {
         }
     }
 
-    // Entry point                   
+    // Entry point
 
     /// Full redraw of the spreadsheet canvas.
     pub fn render(&self, model: &UserModel, overlays: &RenderOverlays) {
@@ -389,7 +389,7 @@ impl CanvasRenderer {
             );
         }
 
-        // Phase 4: Cell text — always on top          
+        // Phase 4: Cell text — always on top
         // Rendered after selection fill so text is readable over the blue tint,
         // and after the active-cell white-fill so text appears on a clean background.
         ctx.set_text_align("center");
@@ -399,8 +399,9 @@ impl CanvasRenderer {
         }
     }
 
-    // Pane helper (DRYs the four frozen-pane quadrants)      
+    // Pane helper (DRYs the four frozen-pane quadrants)
 
+    // TODO: Refactor
     /// Render cell backgrounds, borders, and collect text for one pane quadrant.
     fn render_pane(
         &self,
@@ -445,6 +446,7 @@ impl CanvasRenderer {
     }
 
     // Cell style (background + left/top borders)
+    // TODO: Refactor
 
     fn render_cell_style(
         &self,
@@ -609,7 +611,7 @@ impl CanvasRenderer {
         }
     }
 
-    // Border helper                  
+    // Border helper
 
     fn draw_border(
         &self,
@@ -823,7 +825,7 @@ impl CanvasRenderer {
         ctx.restore();
     }
 
-    // Row headers                   
+    // Row headers
 
     fn render_row_headers(
         &self,
@@ -881,7 +883,7 @@ impl CanvasRenderer {
         }
     }
 
-    // Column headers                  
+    // Column headers
 
     fn render_column_headers(
         &self,
@@ -946,7 +948,7 @@ impl CanvasRenderer {
             .ok();
     }
 
-    // Selection outline                 
+    // Selection outline
 
     /// Draw the blue selection border directly on canvas.
     fn draw_selection(&self, model: &UserModel, sheet: u32, frozen_x: f64, frozen_y: f64) {
@@ -1153,7 +1155,7 @@ impl CanvasRenderer {
     }
 }
 
-// Free helpers                    
+// Free helpers
 
 /// Convert a 6-digit hex color (`"#1E6FD9"`) to an `rgba(…)` CSS string with
 /// the given alpha.  Falls back to transparent on malformed input.

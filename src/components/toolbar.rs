@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use wasm_bindgen::UnwrapThrowExt;
 
 use crate::input::action::{execute, SpreadsheetAction};
 use crate::model::{FrontendModel, SafeFontFamily};
@@ -6,8 +7,8 @@ use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
 const FONT_SIZES: &[f64] = &[
-    6.0, 7.0, 8.0, 9.0, 10.0, 10.5, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0,
-    28.0, 36.0, 48.0, 72.0,
+    6.0, 7.0, 8.0, 9.0, 10.0, 10.5, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0,
+    36.0, 48.0, 72.0,
 ];
 
 #[component]
@@ -28,7 +29,6 @@ pub fn Toolbar() -> impl IntoView {
 }
 
 // Undo / Redo
-
 #[component]
 fn UndoRedo() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
@@ -73,7 +73,6 @@ fn UndoRedo() -> impl IntoView {
 }
 
 // Font family
-
 #[component]
 fn FontFamily() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
@@ -88,7 +87,7 @@ fn FontFamily() -> impl IntoView {
         use wasm_bindgen::JsCast;
         let target = ev
             .target()
-            .unwrap()
+            .unwrap_throw() // NOTE: Can this work ? instead of unwrap
             .unchecked_into::<web_sys::HtmlSelectElement>();
         let family = SafeFontFamily::from(Some(target.value().as_str()));
         execute(&SpreadsheetAction::set_font_family(family), model, &state);
@@ -120,7 +119,6 @@ fn FontFamily() -> impl IntoView {
 }
 
 // Font size
-
 #[component]
 fn FontSize() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
@@ -148,7 +146,10 @@ fn FontSize() -> impl IntoView {
 
     let on_blur = move |ev: web_sys::FocusEvent| {
         use wasm_bindgen::JsCast;
-        if let Some(input) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok()) {
+        if let Some(input) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
             if let Ok(size) = input.value().parse::<f64>() {
                 apply(size, model, &state);
             }
@@ -159,7 +160,10 @@ fn FontSize() -> impl IntoView {
         use wasm_bindgen::JsCast;
         if ev.key() == "Enter" {
             ev.prevent_default();
-            if let Some(input) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok()) {
+            if let Some(input) = ev
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+            {
                 if let Ok(size) = input.value().parse::<f64>() {
                     apply(size, model, &state);
                 }
@@ -216,8 +220,7 @@ fn snap_size(current: f64, step: SizeStep) -> f64 {
     }
 }
 
-// Bold / Italic / Underline / Strikethrough            
-
+// Bold / Italic / Underline / Strikethrough
 #[component]
 fn FormatToggles() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
@@ -282,7 +285,7 @@ fn FormatToggles() -> impl IntoView {
     }
 }
 
-// Freeze panes                    
+// Freeze panes
 
 #[component]
 fn FreezePane() -> impl IntoView {
@@ -324,28 +327,18 @@ fn FreezePane() -> impl IntoView {
         crate::util::refocus_workbook();
     };
 
-    let freeze_class = move || {
-        if is_frozen() {
-            "toolbar-btn active"
-        } else {
-            "toolbar-btn"
-        }
-    };
-
-    let freeze_title = move || {
-        if is_frozen() {
-            "Unfreeze panes"
-        } else {
-            "Freeze panes above and left of active cell"
-        }
-    };
-
     let freeze_label = move || {
-        if is_frozen() { "╔" } else { "╬" }
+        if is_frozen() {
+            "╔"
+        } else {
+            "╬"
+        }
     };
 
     view! {
-        <button class=freeze_class title=freeze_title on:click=on_freeze>
+        <button class=move || if is_frozen() {"toolbar-btn active"} else {"toolbar-btn"}
+            title=move || if is_frozen() {"Unfreeze panes"} else {"Freeze panes above and left of active cell"}
+            on:click=on_freeze>
             {freeze_label}
         </button>
     }

@@ -103,7 +103,8 @@ src/
 
 Licensed under either of
 
-* [MIT license](LICENSE-MIT)
-* [Apache license, version 2.0](LICENSE-Apache-2.0)
+* [MIT license](https://opensource.org/licenses/MIT)
+* [Apache license, version 2.0](https://opensource.org/licenses/Apache-2.0)
+
 
 at your option.
