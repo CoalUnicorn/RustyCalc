@@ -6,7 +6,7 @@ use crate::components::formula_bar::FormulaBar;
 use crate::components::sheet_tab_bar::SheetTabBar;
 use crate::components::toolbar::Toolbar;
 use crate::components::worksheet::Worksheet;
-use crate::input::action::{classify_key, execute, SpreadsheetAction};
+use crate::input::action::{classify_key, execute, mutate, Eval, SpreadsheetAction};
 use crate::input::formula_input::*;
 use crate::model::AppClipboard;
 use crate::state::{EditMode, ModelStore, WorkbookState};
@@ -118,7 +118,7 @@ pub fn Workbook() -> impl IntoView {
             }
             SpreadsheetAction::Cut => {
                 copy_to_app_clipboard(model, clipboard_store);
-                model.update_value(|m| {
+                mutate(model, &state, Eval::Yes, |m| {
                     let v = m.get_selected_view();
                     let [r1, c1, r2, c2] = v.range;
                     for row in r1..=r2 {
@@ -129,9 +129,7 @@ pub fn Workbook() -> impl IntoView {
                             );
                         }
                     }
-                    m.evaluate();
                 });
-                state.request_redraw();
                 ev.prevent_default();
             }
             SpreadsheetAction::Paste => {
