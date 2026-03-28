@@ -120,7 +120,11 @@ pub fn Workbook() -> impl IntoView {
             }
             SpreadsheetAction::Cut => {
                 copy_to_app_clipboard(model, clipboard_store);
-                mutate(model, &state, Eval::Yes, |m| {
+                // Clear the selected range.
+                // Pause evaluation so each set_user_input doesn't trigger a
+                // full recalc; evaluate once at the end.
+                model.update_value(|m| {
+                    m.pause_evaluation();
                     let v = m.get_selected_view();
                     let [r1, c1, r2, c2] = v.range;
                     for row in r1..=r2 {
@@ -131,6 +135,8 @@ pub fn Workbook() -> impl IntoView {
                             );
                         }
                     }
+                    m.resume_evaluation();
+                    m.evaluate();
                 });
                 ev.prevent_default();
             }
@@ -208,9 +214,11 @@ fn paste_from_clipboard(
         clipboard_store.with_value(|opt| {
             if let Some(acb) = opt {
                 model.update_value(|m| {
+                    m.pause_evaluation();
                     if let Err(e) = acb.paste(m, false) {
                         web_sys::console::warn_1(&format!("[ironcalc] paste failed: {e}").into());
                     }
+                    m.resume_evaluation();
                     m.evaluate();
                 });
                 pasted = true;
@@ -241,6 +249,7 @@ fn paste_from_clipboard(
                 return;
             }
             model.update_value(|m| {
+                m.pause_evaluation();
                 let v = m.get_selected_view();
                 let area = Area {
                     sheet: v.sheet,
@@ -254,6 +263,7 @@ fn paste_from_clipboard(
                         &format!("[ironcalc] paste_csv_string failed: {e}").into(),
                     );
                 }
+                m.resume_evaluation();
                 m.evaluate();
             });
             state.request_redraw();

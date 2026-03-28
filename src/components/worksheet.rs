@@ -369,6 +369,7 @@ pub fn Worksheet() -> impl IntoView {
         // Commit autofill if active, then reset drag state unconditionally.
         if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
             model.update_value(|m| {
+                m.pause_evaluation();
                 let view = m.get_selected_view();
                 let sheet = view.sheet;
                 let [r1, c1, r2, c2] = view.range;
@@ -387,6 +388,7 @@ pub fn Worksheet() -> impl IntoView {
                 } else {
                     warn_if_err(m.auto_fill_columns(&area, to_col), "auto_fill_columns");
                 }
+                m.resume_evaluation();
                 m.evaluate();
             });
             state.request_redraw();
