@@ -1,6 +1,6 @@
 //! Navigation actions: arrow keys, page up/down, home/end, sheet switching.
 
-use crate::input::helpers::{mutate, Recalc};
+use crate::input::helpers::{mutate, Eval};
 use crate::model::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
@@ -32,38 +32,38 @@ pub enum NavAction {
 pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState) {
     match action {
         NavAction::Arrow(dir) => {
-            mutate(model, state, Recalc::No, |m| m.nav_arrow(*dir));
+            mutate(model, state, Eval::No, |m| m.nav_arrow(*dir));
         }
         NavAction::Edge(dir) => {
-            mutate(model, state, Recalc::No, |m| m.nav_to_edge(*dir));
+            mutate(model, state, Eval::No, |m| m.nav_to_edge(*dir));
         }
         NavAction::JumpToA1 => {
-            mutate(model, state, Recalc::No, |m| m.nav_set_cell(1, 1));
+            mutate(model, state, Eval::No, |m| m.nav_set_cell(1, 1));
         }
         NavAction::JumpToLastCell => {
-            mutate(model, state, Recalc::No, |m| {
+            mutate(model, state, Eval::No, |m| {
                 m.nav_to_edge(ArrowKey::Down);
                 m.nav_to_edge(ArrowKey::Right);
             });
         }
         NavAction::ExpandSelection(dir) => {
-            mutate(model, state, Recalc::No, |m| m.nav_expand_selection(*dir));
+            mutate(model, state, Eval::No, |m| m.nav_expand_selection(*dir));
         }
         NavAction::PageDown => {
-            mutate(model, state, Recalc::No, |m| m.nav_page(PageDir::Down));
+            mutate(model, state, Eval::No, |m| m.nav_page(PageDir::Down));
         }
         NavAction::PageUp => {
-            mutate(model, state, Recalc::No, |m| m.nav_page(PageDir::Up));
+            mutate(model, state, Eval::No, |m| m.nav_page(PageDir::Up));
         }
         NavAction::RowHome => {
-            mutate(model, state, Recalc::No, |m| m.nav_home_row());
+            mutate(model, state, Eval::No, |m| m.nav_home_row());
         }
         NavAction::RowEnd => {
-            mutate(model, state, Recalc::No, |m| m.nav_to_edge(ArrowKey::Right));
+            mutate(model, state, Eval::No, |m| m.nav_to_edge(ArrowKey::Right));
         }
         NavAction::SwitchSheet(delta) => {
             let delta = *delta;
-            mutate(model, state, Recalc::No, move |m| {
+            mutate(model, state, Eval::No, move |m| {
                 let current = m.get_selected_view().sheet;
                 let visible: Vec<u32> = m
                     .get_worksheets_properties()
@@ -78,7 +78,7 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
             });
         }
         NavAction::SelectAll => {
-            mutate(model, state, Recalc::No, |m| {
+            mutate(model, state, Eval::No, |m| {
                 let d = m.sheet_dimension();
                 m.nav_select_range(d.min_row, d.min_column, d.max_row, d.max_column);
             });

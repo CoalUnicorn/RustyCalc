@@ -2,7 +2,7 @@
 
 use ironcalc_base::UserModel;
 
-use crate::input::helpers::{mutate, selection_area, Recalc};
+use crate::input::helpers::{mutate, selection_area, Eval};
 use crate::model::{FrontendModel, SafeFontFamily, ToolbarState};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
@@ -40,7 +40,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
         }
         FormatAction::SetFontSize(size) => {
             let size = size.clamp(1.0, 409.0);
-            mutate(model, state, Recalc::No, |m| {
+            mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
                 let val = format!("{}", size as i32 - m.toolbar_state().font_size as i32);
                 warn_if_err(
@@ -51,7 +51,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
         }
         FormatAction::SetFontFamily(family) => {
             let name = family.model_name();
-            mutate(model, state, Recalc::No, |m| {
+            mutate(model, state, Eval::No, |m| {
                 set_font_name(m, name);
             });
         }
@@ -72,7 +72,7 @@ fn toggle_style(
     current_val: fn(&ToolbarState) -> bool,
 ) {
     let path = style_path.to_owned();
-    mutate(model, state, Recalc::No, |m| {
+    mutate(model, state, Eval::No, |m| {
         let ts = m.toolbar_state();
         let new_val = if current_val(&ts) { "false" } else { "true" };
         let area = selection_area(m);

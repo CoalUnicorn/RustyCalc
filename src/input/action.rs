@@ -15,16 +15,8 @@ use crate::input::nav::{execute_nav, NavAction};
 use crate::input::structure::{execute_struct, StructAction};
 use crate::model::{ArrowKey, SafeFontFamily};
 use crate::state::{EditMode, EditingCell, ModelStore, WorkbookState};
-use leptos::prelude::UpdateValue;
 
-/// Pass `Eval::Yes` when the mutation may change formula results
-/// and you want the model to recalculate after the mutation.
-/// Pass `Eval::No` for pure navigation or selection changes.
-#[derive(Clone, Copy)]
-pub enum Eval {
-    Yes,
-    No,
-}
+use leptos::prelude::UpdateValue;
 
 // SpreadsheetAction
 
@@ -207,12 +199,15 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
 // `SpreadsheetAction::Format(FormatAction::ToggleBold)`.
 
 impl SpreadsheetAction {
+    #[cfg(test)]
     pub fn navigate(dir: ArrowKey) -> Self {
         Self::Nav(NavAction::Arrow(dir))
     }
+    #[cfg(test)]
     pub fn start_edit(text: String) -> Self {
         Self::Edit(EditAction::Start(text))
     }
+    #[cfg(test)]
     pub fn commit(dir: ArrowKey) -> Self {
         Self::Edit(EditAction::CommitAndNavigate(dir))
     }
@@ -242,36 +237,13 @@ impl SpreadsheetAction {
     }
 }
 
-// Private helpers
-
-/// Run `f` on the model, optionally call `evaluate`, then trigger a redraw.
-///
-/// Many `UserModel` methods call `evaluate()` internally. We pause
-/// evaluation before `f` so the model is evaluated at most once — after
-/// all mutations are done.
-pub fn mutate(
-    model: ModelStore,
-    state: &WorkbookState,
-    evaluate: Eval,
-    f: impl FnOnce(&mut ironcalc_base::UserModel<'static>),
-) {
-    model.update_value(|m| {
-        m.pause_evaluation();
-        f(m);
-        m.resume_evaluation();
-        if matches!(evaluate, Eval::Yes) {
-            m.evaluate();
-        }
-    });
-    state.request_redraw();
-}
-
 // Tests
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::input::helpers::selection_bounds;
+    use crate::input::helpers::{mutate, Eval};
     use crate::model::ArrowKey;
     use crate::state::{EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;
@@ -682,16 +654,27 @@ mod tests {
         assert_eq!((r_min, r_max, c_min, c_max), (3, 3, 4, 4));
     }
 
+    // Test setup helper to reduce boilerplate
+    #[cfg(test)]
+    fn test_harness() -> (
+        StoredValue<ironcalc_base::UserModel<'static>, LocalStorage>,
+        WorkbookState,
+    ) {
+        (
+            StoredValue::new_local(
+                ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
+            ),
+            crate::state::WorkbookState::new(),
+        )
+    }
+
     // execute: navigation
 
     #[wasm_bindgen_test]
     fn execute_navigate_down_advances_row() {
         let owner = Owner::new();
         owner.with(|| {
-            let model = StoredValue::new_local(
-                ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
-            );
-            let state = crate::state::WorkbookState::new();
+            let (model, state) = test_harness();
             execute(&SpreadsheetAction::navigate(ArrowKey::Down), model, &state);
             let row = model.with_value(|m| m.get_selected_view().row);
             assert_eq!(row, 2);
@@ -702,10 +685,7 @@ mod tests {
     fn execute_navigate_right_advances_column() {
         let owner = Owner::new();
         owner.with(|| {
-            let model = StoredValue::new_local(
-                ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
-            );
-            let state = crate::state::WorkbookState::new();
+            let (model, state) = test_harness();
             execute(&SpreadsheetAction::navigate(ArrowKey::Right), model, &state);
             let col = model.with_value(|m| m.get_selected_view().column);
             assert_eq!(col, 2);

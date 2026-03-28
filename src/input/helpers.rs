@@ -8,25 +8,32 @@ use crate::state::{ModelStore, WorkbookState};
 
 /// Whether `mutate` should recalculate formulas after applying the closure.
 ///
-/// Pass `Recalc::Yes` when the mutation may change formula results
+/// Pass `Eval::Yes` when the mutation may change formula results
 /// (cell writes, row/column inserts/deletes).
-/// Pass `Recalc::No` for pure navigation, selection, or formatting changes.
+/// Pass `Eval::No` for pure navigation, selection, or formatting changes.
 #[derive(Clone, Copy)]
-pub enum Recalc {
+pub enum Eval {
     Yes,
     No,
 }
 
 /// Run `f` on the model, optionally call `evaluate`, then trigger a redraw.
+///
+/// **PERFORMANCE OPTIMIZED:** Many `UserModel` methods call `evaluate()` internally.
+/// We pause evaluation before `f` so the model is evaluated at most once — after
+/// all mutations are done. This prevents double evaluation and can halve execution time.
+/// See docs/performance-evaluation.md for details.
 pub fn mutate(
     model: ModelStore,
     state: &WorkbookState,
-    recalc: Recalc,
+    evaluate: Eval,
     f: impl FnOnce(&mut UserModel<'static>),
 ) {
     model.update_value(|m| {
+        m.pause_evaluation();
         f(m);
-        if matches!(recalc, Recalc::Yes) {
+        m.resume_evaluation();
+        if matches!(evaluate, Eval::Yes) {
             m.evaluate();
         }
     });

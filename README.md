@@ -64,7 +64,7 @@ src/
 │   └── renderer.rs    Canvas 2D drawing (grid, headers, selection, borders)
 ├── input/
 │   ├── action.rs      SpreadsheetAction wrapper enum, classify_key(), execute()
-│   ├── helpers.rs     Shared: mutate(), Recalc, make_area(), selection_bounds()
+│   ├── helpers.rs     Shared: performance-optimized mutate(), Eval, make_area(), selection_bounds()
 │   ├── nav.rs         NavAction — arrows, page, home/end, sheet switch
 │   ├── edit.rs        EditAction — start, commit, cancel cell editing
 │   ├── format.rs      FormatAction — bold, italic, font size/family
@@ -86,9 +86,12 @@ src/
 
 ## Docs
 
-- [docs/adding-actions.md](docs/adding-actions.md) — how to add keyboard shortcuts and toolbar actions
+- [docs/rust-style-guide.md](docs/rust-style-guide.md) — Rust design patterns and type modeling principles
 - [docs/leptos-patterns.md](docs/leptos-patterns.md) — Leptos conventions used in this codebase
 - [docs/building-components.md](docs/building-components.md) — how to create and debug components
+- [docs/adding-actions.md](docs/adding-actions.md) — how to add keyboard shortcuts and toolbar actions  
+- [docs/testing-guide.md](docs/testing-guide.md) — Comprehensive guide to writing and organizing tests
+- [docs/performance-evaluation.md](docs/performance-evaluation.md) — **Critical:** avoid double evaluation performance issues
 
 ## Dependencies
 

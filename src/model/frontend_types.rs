@@ -41,44 +41,69 @@ pub enum SafeFontFamily {
     SystemUi,
 }
 
+/// Font name variants for different contexts.
+#[derive(Debug, Clone, Copy)]
+struct FontNames {
+    css: &'static str,
+    model: &'static str,
+    label: &'static str,
+}
+
 impl SafeFontFamily {
+    /// Get all name variants for this font family.
+    fn names(&self) -> FontNames {
+        match self {
+            Self::Arial => FontNames {
+                css: "Arial",
+                model: "Arial",
+                label: "Arial",
+            },
+            Self::CalibriLike => FontNames {
+                css: "Calibri, system-ui",
+                model: "Calibri",
+                label: "Calibri",
+            },
+            Self::CourierNew => FontNames {
+                css: "Courier New",
+                model: "Courier New",
+                label: "Courier New",
+            },
+            Self::Georgia => FontNames {
+                css: "Georgia",
+                model: "Georgia",
+                label: "Georgia",
+            },
+            Self::TimesNewRoman => FontNames {
+                css: "Times New Roman",
+                model: "Times New Roman",
+                label: "Times New Roman",
+            },
+            Self::Verdana => FontNames {
+                css: "Verdana",
+                model: "Verdana",
+                label: "Verdana",
+            },
+            Self::SystemUi => FontNames {
+                css: "system-ui",
+                model: "Arial",
+                label: "System",
+            },
+        }
+    }
+
     /// CSS `font-family` value (may include fallback).
     pub fn css_name(&self) -> &'static str {
-        match self {
-            Self::Arial => "Arial",
-            Self::CalibriLike => "Calibri, system-ui",
-            Self::CourierNew => "Courier New",
-            Self::Georgia => "Georgia",
-            Self::TimesNewRoman => "Times New Roman",
-            Self::Verdana => "Verdana",
-            Self::SystemUi => "system-ui",
-        }
+        self.names().css
     }
 
     /// The name stored in IronCalc's `Style.font.name`.
     pub fn model_name(&self) -> &'static str {
-        match self {
-            Self::Arial => "Arial",
-            Self::CalibriLike => "Calibri",
-            Self::CourierNew => "Courier New",
-            Self::Georgia => "Georgia",
-            Self::TimesNewRoman => "Times New Roman",
-            Self::Verdana => "Verdana",
-            Self::SystemUi => "Arial",
-        }
+        self.names().model
     }
 
     /// Display label for the toolbar.
     pub fn label(&self) -> &'static str {
-        match self {
-            Self::Arial => "Arial",
-            Self::CalibriLike => "Calibri",
-            Self::CourierNew => "Courier New",
-            Self::Georgia => "Georgia",
-            Self::TimesNewRoman => "Times New Roman",
-            Self::Verdana => "Verdana",
-            Self::SystemUi => "System",
-        }
+        self.names().label
     }
 
     /// All font families in menu order.

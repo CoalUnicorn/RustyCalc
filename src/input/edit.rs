@@ -1,6 +1,6 @@
 //! Edit actions: start/commit/cancel cell editing.
 
-use crate::input::action::{mutate, Eval};
+use crate::input::helpers::{mutate, Eval};
 use crate::model::{ArrowKey, FrontendModel};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;

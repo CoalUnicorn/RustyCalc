@@ -62,9 +62,15 @@ pub enum FormatAction {
 
 ### 3. Add the handler in the same file
 
-Use the `mutate()` helper from `helpers.rs`. Pass `Recalc::Yes` when formula
-results may change (cell writes, row/column inserts/deletes). Pass `Recalc::No`
-for navigation, selection, or formatting changes.
+Use the `mutate()` helper function from `helpers.rs`. It's performance-optimized and handles the pause/resume evaluation pattern automatically to prevent double evaluation.
+
+```rust
+use crate::input::helpers::{mutate, Eval};
+```
+
+See [docs/performance-evaluation.md](performance-evaluation.md) for details on avoiding double evaluation.
+
+Pass `Eval::Yes` when formula results may change (cell writes, row/column inserts/deletes). Pass `Eval::No` for navigation, selection, or formatting changes.
 
 ```rust
 // In format.rs execute_format():
@@ -75,7 +81,7 @@ FormatAction::SetAlignment(align) => {
         HorizontalAlignment::Right => "right",
         HorizontalAlignment::General => "",
     };
-    mutate(model, state, Recalc::No, |m| {
+    mutate(model, state, Eval::No, |m| {
         let area = selection_area(m);
         warn_if_err(
             m.update_range_style(&area, "alignment.horizontal", val),

@@ -1,6 +1,6 @@
 //! Structural mutations: delete, clear, undo/redo, insert/delete rows/columns.
 
-use crate::input::helpers::{make_area, mutate, selection_bounds, Recalc};
+use crate::input::helpers::{make_area, mutate, selection_bounds, Eval};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
@@ -21,7 +21,7 @@ pub enum StructAction {
 pub fn execute_struct(action: &StructAction, model: ModelStore, state: &WorkbookState) {
     match action {
         StructAction::Delete => {
-            mutate(model, state, Recalc::Yes, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 warn_if_err(
@@ -31,7 +31,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
             });
         }
         StructAction::ClearAll => {
-            mutate(model, state, Recalc::Yes, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 warn_if_err(
@@ -41,17 +41,17 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
             });
         }
         StructAction::Undo => {
-            mutate(model, state, Recalc::No, |m| {
+            mutate(model, state, Eval::No, |m| {
                 warn_if_err(m.undo(), "undo");
             });
         }
         StructAction::Redo => {
-            mutate(model, state, Recalc::No, |m| {
+            mutate(model, state, Eval::No, |m| {
                 warn_if_err(m.redo(), "redo");
             });
         }
         StructAction::InsertRows => {
-            mutate(model, state, Recalc::Yes, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
                 warn_if_err(
@@ -61,7 +61,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
             });
         }
         StructAction::InsertColumns => {
-            mutate(model, state, Recalc::Yes, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
                 warn_if_err(
@@ -71,7 +71,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
             });
         }
         StructAction::DeleteRows => {
-            mutate(model, state, Recalc::Yes, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
                 warn_if_err(
@@ -81,7 +81,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
             });
         }
         StructAction::DeleteColumns => {
-            mutate(model, state, Recalc::Yes, |m| {
+            mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
                 warn_if_err(
