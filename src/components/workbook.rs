@@ -47,7 +47,7 @@ pub fn Workbook() -> impl IntoView {
         let is_shift = ev.shift_key();
         let is_alt = ev.alt_key();
 
-        // ── Point-mode pre-check ──────────────────────────────────────────
+        // Point-mode pre-check
         // Arrow keys in Accept mode may enter/extend a cell-reference range
         // inside a formula, rather than committing the edit.  This requires
         // reading the textarea cursor position from the DOM, so it must run
@@ -103,13 +103,13 @@ pub fn Workbook() -> impl IntoView {
             }
         }
 
-        // ── Classify key -> action ─────────────────────────────────────────
+        // Classify key -> action             
         let edit_ref = state.editing_cell.get_untracked();
         let Some(action) = classify_key(&key, is_ctrl, is_shift, is_alt, edit_ref.as_ref()) else {
             return;
         };
 
-        // ── Dispatch ──────────────────────────────────────────────────────
+        // Dispatch
         match &action {
             // Clipboard: needs AppClipboard store + async OS clipboard APIs.
             SpreadsheetAction::Copy => {
@@ -118,7 +118,6 @@ pub fn Workbook() -> impl IntoView {
             }
             SpreadsheetAction::Cut => {
                 copy_to_app_clipboard(model, clipboard_store);
-                // Clear the selected range.
                 model.update_value(|m| {
                     let v = m.get_selected_view();
                     let [r1, c1, r2, c2] = v.range;
@@ -142,29 +141,10 @@ pub fn Workbook() -> impl IntoView {
             }
 
             // Everything else is handled by the centralised execute().
-            SpreadsheetAction::Navigate(_)
-            | SpreadsheetAction::NavigateEdge(_)
-            | SpreadsheetAction::JumpToA1
-            | SpreadsheetAction::JumpToLastCell
-            | SpreadsheetAction::ExpandSelection(_)
-            | SpreadsheetAction::PageDown
-            | SpreadsheetAction::PageUp
-            | SpreadsheetAction::RowHome
-            | SpreadsheetAction::RowEnd
-            | SpreadsheetAction::SwitchSheet(_)
-            | SpreadsheetAction::StartEdit(_)
-            | SpreadsheetAction::EnterEditMode
-            | SpreadsheetAction::CommitAndNavigate(_)
-            | SpreadsheetAction::CancelEdit
-            | SpreadsheetAction::Delete
-            | SpreadsheetAction::ClearAll
-            | SpreadsheetAction::SelectAll
-            | SpreadsheetAction::Undo
-            | SpreadsheetAction::Redo
-            | SpreadsheetAction::InsertRows
-            | SpreadsheetAction::InsertColumns
-            | SpreadsheetAction::DeleteRows
-            | SpreadsheetAction::DeleteColumns => {
+            SpreadsheetAction::Nav(_)
+            | SpreadsheetAction::Edit(_)
+            | SpreadsheetAction::Format(_)
+            | SpreadsheetAction::Structure(_) => {
                 execute(&action, model, &state);
                 ev.prevent_default();
             }
@@ -187,7 +167,7 @@ pub fn Workbook() -> impl IntoView {
     }
 }
 
-// ── Clipboard helpers ─────────────────────────────────────────────────────────
+// Clipboard helpers
 
 /// Copy the selected range to the internal `AppClipboard` and write
 /// tab-separated text to the OS clipboard (fire-and-forget async).

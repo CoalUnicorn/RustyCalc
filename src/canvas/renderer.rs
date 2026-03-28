@@ -52,14 +52,14 @@
 //! This splits the canvas into up to four quadrants:
 //!
 //! ```text
-//! ┌────────────┬──────────────────┐
+//! ┌    ┬      ┐
 //! │ frozen/    │ frozen rows,     │
 //! │ frozen     │ scrollable cols  │
-//! ├────────────┼──────────────────┤
+//! ├    ┼      ┤
 //! │ scrollable │ main scrollable  │
 //! │ rows,      │ area             │
 //! │ frozen cols│                  │
-//! └────────────┴──────────────────┘
+//! └    ┴      ┘
 //! ```
 //!
 //! Each quadrant is rendered by `render_pane()` with different row/col
@@ -98,11 +98,11 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use super::geometry::*;
 use crate::theme::CanvasTheme;
 
-// ── Layout constants ──────────────────────────────────────────────────────────
+// Layout constants                   
 const CELL_PADDING: f64 = 4.0;
 const DEFAULT_FONT_FAMILY: &str = "Inter, Arial, sans-serif";
 
-// ── Pre-computed text for one cell ────────────────────────────────────────────
+// Pre-computed text for one cell              
 
 /// One visual line of text inside a cell, positioned for center-aligned rendering.
 struct TextLine {
@@ -123,7 +123,7 @@ struct CellText {
     lines: Vec<TextLine>,
 }
 
-// ── Parameter structs ─────────────────────────────────────────────────────────
+// Parameter structs
 
 use super::geometry::PixelRect;
 
@@ -182,7 +182,7 @@ pub struct SheetRect {
     pub c2: i32,
 }
 
-// ── CanvasRenderer ────────────────────────────────────────────────────────────
+// CanvasRenderer
 
 pub struct CanvasRenderer {
     ctx: CanvasRenderingContext2d,
@@ -219,7 +219,7 @@ impl CanvasRenderer {
         }
     }
 
-    // ── Entry point ──────────────────────────────────────────────────────────
+    // Entry point                   
 
     /// Full redraw of the spreadsheet canvas.
     pub fn render(&self, model: &UserModel, overlays: &RenderOverlays) {
@@ -243,7 +243,7 @@ impl CanvasRenderer {
         // so they always appear on top of backgrounds, selection fill, and headers.
         let mut cell_texts: Vec<CellText> = Vec::new();
 
-        // ── Phase 1: Cell backgrounds + borders ──────────────────────────────
+        // Phase 1: Cell backgrounds + borders
 
         // Top-left pane (frozen rows ∩ frozen cols)
         self.render_pane(
@@ -258,7 +258,7 @@ impl CanvasRenderer {
             frozen_rows,
         );
 
-        // ── Frozen separators ────────────────────────────────────────────────
+        // Frozen separators
         let sep_y = HEADER_ROW_HEIGHT + frozen_rows_h + 0.5;
         let sep_x = HEADER_COL_WIDTH + frozen_cols_w + 0.5;
         let offset = FROZEN_SEP / 2.0;
@@ -327,7 +327,7 @@ impl CanvasRenderer {
             vis.row_last,
         );
 
-        // ── Phase 2: Headers + corner box ────────────────────────────────────
+        // Phase 2: Headers + corner box
         self.render_row_headers(model, sheet, frozen_rows, frozen_y, &vis);
         self.render_column_headers(model, sheet, frozen_cols, frozen_x, &vis);
 
@@ -345,7 +345,7 @@ impl CanvasRenderer {
         ctx.line_to(HEADER_COL_WIDTH + 0.5, self.height);
         ctx.stroke();
 
-        // ── Phase 3: Selection outline ───────────────────────────────────────
+        // Phase 3: Selection outline
         self.draw_selection(model, sheet, frozen_x, frozen_y);
         if let Some((to_row, to_col)) = overlays.extend_to {
             self.draw_extend_preview(model, sheet, frozen_x, frozen_y, to_row, to_col);
@@ -389,7 +389,7 @@ impl CanvasRenderer {
             );
         }
 
-        // ── Phase 4: Cell text — always on top ───────────────────────────────
+        // Phase 4: Cell text — always on top          
         // Rendered after selection fill so text is readable over the blue tint,
         // and after the active-cell white-fill so text appears on a clean background.
         ctx.set_text_align("center");
@@ -399,7 +399,7 @@ impl CanvasRenderer {
         }
     }
 
-    // ── Pane helper (DRYs the four frozen-pane quadrants) ────────────────────
+    // Pane helper (DRYs the four frozen-pane quadrants)      
 
     /// Render cell backgrounds, borders, and collect text for one pane quadrant.
     fn render_pane(
@@ -444,7 +444,7 @@ impl CanvasRenderer {
         }
     }
 
-    // ── Cell style (background + left/top borders) ───────────────────────────
+    // Cell style (background + left/top borders)
 
     fn render_cell_style(
         &self,
@@ -609,7 +609,7 @@ impl CanvasRenderer {
         }
     }
 
-    // ── Border helper ────────────────────────────────────────────────────────
+    // Border helper                  
 
     fn draw_border(
         &self,
@@ -661,7 +661,7 @@ impl CanvasRenderer {
         ctx.stroke();
     }
 
-    // ── Cell text layout + paint ─────────────────────────────────────────────
+    // Cell text layout + paint
 
     /// Build the text layout for a cell; returns `None` for empty cells.
     fn compute_cell_text(
@@ -823,7 +823,7 @@ impl CanvasRenderer {
         ctx.restore();
     }
 
-    // ── Row headers ──────────────────────────────────────────────────────────
+    // Row headers                   
 
     fn render_row_headers(
         &self,
@@ -881,7 +881,7 @@ impl CanvasRenderer {
         }
     }
 
-    // ── Column headers ───────────────────────────────────────────────────────
+    // Column headers                  
 
     fn render_column_headers(
         &self,
@@ -946,7 +946,7 @@ impl CanvasRenderer {
             .ok();
     }
 
-    // ── Selection outline ────────────────────────────────────────────────────
+    // Selection outline                 
 
     /// Draw the blue selection border directly on canvas.
     fn draw_selection(&self, model: &UserModel, sheet: u32, frozen_x: f64, frozen_y: f64) {
@@ -1074,7 +1074,7 @@ impl CanvasRenderer {
         }
     }
 
-    // ── Coordinate helpers ───────────────────────────────────────────────────
+    // Coordinate helpers
 
     fn cell_x(&self, model: &UserModel, sheet: u32, col: i32, frozen_x: f64) -> f64 {
         let view = model.get_selected_view();
@@ -1153,7 +1153,7 @@ impl CanvasRenderer {
     }
 }
 
-// ── Free helpers ─────────────────────────────────────────────────────────────
+// Free helpers                    
 
 /// Convert a 6-digit hex color (`"#1E6FD9"`) to an `rgba(…)` CSS string with
 /// the given alpha.  Falls back to transparent on malformed input.

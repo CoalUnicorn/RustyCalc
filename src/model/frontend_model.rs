@@ -8,7 +8,7 @@ use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::model::frontend_types::*;
 
 pub trait FrontendModel {
-    // ── Query ─────────────────────────────────────────────────────────────────
+    // Query                     
 
     /// Fully resolved style for one cell.
     ///
@@ -43,7 +43,7 @@ pub trait FrontendModel {
     /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
     fn sheet_dimension(&self) -> SheetDimension;
 
-    // ── Navigation (infallible) ───────────────────────────────────────────────
+    // Navigation (infallible)               
 
     /// Move the active cell one step. No-op at sheet edges.
     fn nav_arrow(&mut self, dir: ArrowKey);
@@ -80,7 +80,7 @@ pub trait FrontendModel {
     fn nav_home_row(&mut self);
 }
 
-// ── Helper: map font name String -> SafeFontFamily ─────────────────────────────
+// Helper: map font name String -> SafeFontFamily         
 
 fn font_family_from_name(name: &str) -> SafeFontFamily {
     if name.is_empty() {
@@ -90,7 +90,7 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
     }
 }
 
-// ── impl ──────────────────────────────────────────────────────────────────────
+// impl                       
 
 impl FrontendModel for UserModel<'_> {
     fn cell_style(
@@ -105,13 +105,13 @@ impl FrontendModel for UserModel<'_> {
             .get_cell_type(sheet, row, col)
             .unwrap_or(CellType::Text);
 
-        // ── Text color ────────────────────────────────────────────────────
+        // Text color                 
         let text_color = match style.font.color.as_deref() {
             None | Some("#000000") => CssColor::new(default_text_color),
             Some(c) => CssColor::new(c),
         };
 
-        // ── Background ────────────────────────────────────────────────────
+        // Background                 
         let bg_color = style
             .fill
             .fg_color
@@ -119,7 +119,7 @@ impl FrontendModel for UserModel<'_> {
             .filter(|c| !c.is_empty())
             .map(CssColor::new);
 
-        // ── Font ──────────────────────────────────────────────────────────
+        // Font                   
         let size_px = style.font.sz as f64;
         let bold = style.font.b;
         let italic = style.font.i;
@@ -135,7 +135,7 @@ impl FrontendModel for UserModel<'_> {
             css,
         };
 
-        // ── Alignment ─────────────────────────────────────────────────────
+        // Alignment                 
         let alignment = style.alignment.as_ref();
         let h_align = match alignment.map(|a| &a.horizontal) {
             Some(HorizontalAlignment::Right) => HorizontalAlignment::Right,
@@ -160,7 +160,7 @@ impl FrontendModel for UserModel<'_> {
             .unwrap_or(VerticalAlignment::Bottom);
         let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
 
-        // ── Borders ───────────────────────────────────────────────────────
+        // Borders                  
         let resolve_edge = |item: &ironcalc_base::types::BorderItem| ResolvedBorderEdge {
             style: item.style.clone(),
             color: CssColor::new(item.color.as_deref().unwrap_or("#000000")),
@@ -276,7 +276,7 @@ impl FrontendModel for UserModel<'_> {
         }
     }
 
-    // ── Navigation ────────────────────────────────────────────────────────────
+    // Navigation                     
 
     fn nav_arrow(&mut self, dir: ArrowKey) {
         let _ = match dir {
@@ -354,7 +354,7 @@ impl FrontendModel for UserModel<'_> {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// Tests                        
 
 #[cfg(test)]
 mod tests {

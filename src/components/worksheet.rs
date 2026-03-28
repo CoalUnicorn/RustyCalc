@@ -28,7 +28,7 @@ pub fn Worksheet() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    // ── ResizeObserver: re-render when the container changes size ────────────
+    // ResizeObserver: re-render when the container changes size     
     // Leptos signals don't fire on DOM resize, so we use a ResizeObserver
     // that bumps the redraw counter whenever the worksheet div is resized
     // (e.g. browser window resize, devtools open/close).
@@ -86,12 +86,12 @@ pub fn Worksheet() -> impl IntoView {
         });
     });
 
-    // ── mousedown: start selection or autofill drag ───────────────────────────
+    // mousedown: start selection or autofill drag          
     let on_mousedown = move |ev: web_sys::MouseEvent| {
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;
 
-        // ── Resize hit-tests (must be first: takes priority over cell click) ──
+        // Resize hit-tests (must be first: takes priority over cell click)
         // A 4-px zone around each column/row boundary in the header acts as a
         // resize handle; dragging it will change that column/row's size.
         const HIT_ZONE: f64 = 4.0;
@@ -184,7 +184,7 @@ pub fn Worksheet() -> impl IntoView {
             (row, col, near_handle)
         });
 
-        // ── Point mode: intercept click during formula entry ─────────────────
+        // Point mode: intercept click during formula entry     
         // When the cursor is at a syntactically valid reference position inside
         // a formula, clicking a cell inserts/replaces the reference rather than
         // committing the edit and navigating away.
@@ -237,7 +237,7 @@ pub fn Worksheet() -> impl IntoView {
         state.request_redraw();
     };
 
-    // ── mousemove: expand selection or autofill preview ──────────────────────
+    // mousemove: expand selection or autofill preview       
     let on_mousemove = move |ev: web_sys::MouseEvent| {
         // If no button is held the drag ended outside the canvas (mouseup was
         // missed). Reset all drag state so the next interaction starts clean.
@@ -248,7 +248,7 @@ pub fn Worksheet() -> impl IntoView {
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;
 
-        // ── Resize drags ──────────────────────────────────────────────────────
+        // Resize drags                   
         match state.drag.get_untracked() {
             DragState::ResizingCol { col, x: last_x } => {
                 let delta = x - last_x;
@@ -360,7 +360,7 @@ pub fn Worksheet() -> impl IntoView {
         }
     };
 
-    // ── mouseup: commit autofill or end selection drag ────────────────────────
+    // mouseup: commit autofill or end selection drag         
     let on_mouseup = move |_ev: web_sys::MouseEvent| {
         // Commit autofill if active, then reset drag state unconditionally.
         if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
@@ -390,7 +390,7 @@ pub fn Worksheet() -> impl IntoView {
         state.drag.set(DragState::Idle);
     };
 
-    // ── dblclick: enter edit mode with existing cell content ──────────────────
+    // dblclick: enter edit mode with existing cell content       
     let on_dblclick = move |ev: web_sys::MouseEvent| {
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;
@@ -412,7 +412,7 @@ pub fn Worksheet() -> impl IntoView {
         });
     };
 
-    // ── contextmenu: right-click on column/row header ────────────────────────
+    // contextmenu: right-click on column/row header         
     let on_contextmenu = move |ev: web_sys::MouseEvent| {
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;
@@ -445,7 +445,7 @@ pub fn Worksheet() -> impl IntoView {
         }
     };
 
-    // ── wheel: scroll with delta-magnitude awareness ──────────────────────────
+    // wheel: scroll with delta-magnitude awareness        
     // Trackpads emit many small-delta events; physical wheels emit large ones.
     // Use arrow-style scroll for small deltas so trackpad users aren't thrown a
     // full page per gesture. Also handle delta_x for horizontal trackpad swipes.

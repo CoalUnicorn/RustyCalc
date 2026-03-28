@@ -10,7 +10,7 @@ use leptos::prelude::{RwSignal, Set};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
-// ── UUID generation ───────────────────────────────────────────────────────────
+// UUID generation                   
 
 /// Produce a UUID v4 string using `window.crypto.getRandomValues` (CSPRNG).
 ///
@@ -40,7 +40,7 @@ pub fn new_uuid() -> String {
     )
 }
 
-// ── Error logging ─────────────────────────────────────────────────────────────
+// Error logging
 
 /// Log a `Result::Err` to the browser console and discard it.
 ///
@@ -57,7 +57,7 @@ pub fn warn_if_err<E: std::fmt::Display>(result: Result<(), E>, ctx: &str) {
     }
 }
 
-// ── Focus management ─────────────────────────────────────────────────────────
+// Focus management
 
 /// Move keyboard focus back to the `#workbook` container.
 ///
@@ -72,7 +72,7 @@ pub fn refocus_workbook() {
     }
 }
 
-// ── Deferred close helper ─────────────────────────────────────────────────────
+// Deferred close helper                 
 // NOTE: this may not be needed anymore.
 /// Schedule `sig.set(false)` in the next macrotask via `setTimeout(0)`.
 ///

@@ -1,6 +1,6 @@
 use ironcalc_base::types::{BorderStyle, HorizontalAlignment, VerticalAlignment};
 
-// ── CssColor ──────────────────────────────────────────────────────────────────
+// CssColor                       
 
 /// A CSS hex color string, e.g. `"#FF0000"`. Never empty.
 /// The inner field is private; construct via `CssColor::new`.
@@ -23,11 +23,11 @@ impl CssColor {
     }
 }
 
-// ── SafeFontFamily ────────────────────────────────────────────────────────────
+// SafeFontFamily                     
 
 /// Font families the browser can reliably render.
 /// Unknown font names from Excel files map to `SystemUi`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SafeFontFamily {
     Arial,
     /// Renders as `"Calibri, system-ui"`. On Linux/Android, `system-ui` activates —
@@ -42,6 +42,7 @@ pub enum SafeFontFamily {
 }
 
 impl SafeFontFamily {
+    /// CSS `font-family` value (may include fallback).
     pub fn css_name(&self) -> &'static str {
         match self {
             Self::Arial => "Arial",
@@ -53,6 +54,42 @@ impl SafeFontFamily {
             Self::SystemUi => "system-ui",
         }
     }
+
+    /// The name stored in IronCalc's `Style.font.name`.
+    pub fn model_name(&self) -> &'static str {
+        match self {
+            Self::Arial => "Arial",
+            Self::CalibriLike => "Calibri",
+            Self::CourierNew => "Courier New",
+            Self::Georgia => "Georgia",
+            Self::TimesNewRoman => "Times New Roman",
+            Self::Verdana => "Verdana",
+            Self::SystemUi => "Arial",
+        }
+    }
+
+    /// Display label for the toolbar.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Arial => "Arial",
+            Self::CalibriLike => "Calibri",
+            Self::CourierNew => "Courier New",
+            Self::Georgia => "Georgia",
+            Self::TimesNewRoman => "Times New Roman",
+            Self::Verdana => "Verdana",
+            Self::SystemUi => "System",
+        }
+    }
+
+    /// All font families in menu order.
+    pub const ALL: &[SafeFontFamily] = &[
+        Self::Arial,
+        Self::CalibriLike,
+        Self::CourierNew,
+        Self::Georgia,
+        Self::TimesNewRoman,
+        Self::Verdana,
+    ];
 }
 
 impl From<Option<&str>> for SafeFontFamily {
@@ -69,7 +106,7 @@ impl From<Option<&str>> for SafeFontFamily {
     }
 }
 
-// ── ResolvedFont ──────────────────────────────────────────────────────────────
+// ResolvedFont                    
 
 #[derive(Debug, Clone)]
 pub struct ResolvedFont {
@@ -91,7 +128,7 @@ impl ResolvedFont {
     }
 }
 
-// ── Borders ───────────────────────────────────────────────────────────────────
+// Borders                      
 
 #[derive(Debug, Clone)]
 pub struct ResolvedBorderEdge {
@@ -107,7 +144,7 @@ pub struct CellBorders {
     pub left: Option<ResolvedBorderEdge>,
 }
 
-// ── ResolvedCellStyle ─────────────────────────────────────────────────────────
+// ResolvedCellStyle                    
 
 /// Everything the renderer needs to paint one cell. No further resolution required.
 #[derive(Debug, Clone)]
@@ -124,7 +161,7 @@ pub struct ResolvedCellStyle {
     pub borders: CellBorders,
 }
 
-// ── ToolbarState ──────────────────────────────────────────────────────────────
+// ToolbarState                    
 
 /// Lean subset of `ResolvedCellStyle` for the toolbar.
 /// Omits `borders`, `v_align`, `wrap_text`, and `font.css` — not needed by toolbar components.
@@ -144,7 +181,7 @@ pub struct ToolbarState {
     pub bg_color: Option<CssColor>,
 }
 
-// ── Sheet dimension ───────────────────────────────────────────────────────────
+// Sheet dimension                   
 
 /// The used data extent of the active sheet.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -155,7 +192,7 @@ pub struct SheetDimension {
     pub max_column: i32,
 }
 
-// ── Direction enums ───────────────────────────────────────────────────────────
+// Direction enums                   
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ArrowKey {
@@ -171,7 +208,7 @@ pub enum PageDir {
     Down,
 }
 
-// ── Active cell address ───────────────────────────────────────────────────────
+// Active cell address                  
 
 /// The active cell's position — the cell the cursor is on.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -181,7 +218,7 @@ pub struct ActiveCell {
     pub column: i32,
 }
 
-// ── Frozen pane state ─────────────────────────────────────────────────────────
+// Frozen pane state                    
 
 /// Number of frozen rows and columns on the active sheet.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -197,7 +234,7 @@ impl FrozenPanes {
     }
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+// Tests                        
 
 #[cfg(test)]
 mod tests {

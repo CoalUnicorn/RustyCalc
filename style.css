@@ -1,4 +1,4 @@
-/* ── App root ────────────────────────────────────────────────────── */
+/* App root                    */
 
 #app {
     width: 100vw;
@@ -9,7 +9,7 @@
     font-family: Inter, Arial, sans-serif;
 }
 
-/* ── Workbook layout ─────────────────────────────────────────────── */
+/* Workbook layout                */
 
 .workbook {
     display: flex;
@@ -20,7 +20,7 @@
     outline: none;
 }
 
-/* ── File bar ───────────────────────────────────────────────────── */
+/* File bar                  */
 
 .file-bar {
     display: flex;
@@ -68,7 +68,7 @@
     user-select: none;
 }
 
-/* ── Toolbar ─────────────────────────────────────────────────────── */
+/* Toolbar                   */
 
 .toolbar {
     display: flex;
@@ -110,7 +110,66 @@
     opacity: 0.9;
 }
 
-/* ── Formula bar ────────────────────────────────────────────────── */
+.toolbar-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+}
+
+.toolbar-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border-inner);
+    margin: 0 4px;
+    flex-shrink: 0;
+}
+
+.toolbar-font-size {
+    width: 36px;
+    height: 28px;
+    padding: 0;
+    font-size: 12px;
+    text-align: center;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    background: var(--btn-bg);
+    color: var(--text-primary);
+}
+
+.toolbar-font-size:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.font-size-btn {
+    padding: 0 6px;
+    font-size: 16px;
+    min-width: 28px;
+    justify-content: center;
+}
+
+.toolbar-font-family {
+    height: 28px;
+    padding: 0 4px;
+    font-size: 13px;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    background: var(--btn-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    min-width: 120px;
+}
+
+.toolbar-font-family:hover {
+    border-color: var(--accent);
+}
+
+.toolbar-font-family:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* Formula bar                 */
 
 .formula-bar {
     display: flex;
@@ -156,7 +215,7 @@
     background: var(--cell-editor-bg);
 }
 
-/* ── Cell editor (textarea overlay) ─────────────────────────────── */
+/* Cell editor (textarea overlay)           */
 
 .cell-editor {
     position: absolute;
@@ -174,7 +233,7 @@
     color: var(--text-strong);
 }
 
-/* ── Worksheet (canvas container) ───────────────────────────────── */
+/* Worksheet (canvas container)             */
 
 .worksheet-container {
     position: relative;
@@ -197,7 +256,7 @@
     cursor: row-resize;
 }
 
-/* ── Sheet tab bar ──────────────────────────────────────────────── */
+/* Sheet tab bar                  */
 
 .tab-bar {
     display: flex;
@@ -252,7 +311,7 @@
     gap: 0;
 }
 
-/* ── Individual sheet tab ───────────────────────────────────────── */
+/* Individual sheet tab              */
 
 .sheet-tab {
     position: relative;
@@ -312,7 +371,7 @@
     border-radius: 3px 3px 0 0;
 }
 
-/* ── Rename input ───────────────────────────────────────────────── */
+/* Rename input                 */
 
 .tab-rename-input {
     width: 80px;
@@ -323,7 +382,7 @@
     color: inherit;
 }
 
-/* ── Click-away backdrop (shared) ───────────────────────────────── */
+/* Click-away backdrop (shared)             */
 
 .click-away-backdrop {
     position: fixed;
@@ -331,7 +390,7 @@
     z-index: 1099;
 }
 
-/* ── Tab context menu ───────────────────────────────────────────── */
+/* Tab context menu                 */
 
 .tab-context-menu {
     position: fixed;
@@ -376,7 +435,7 @@
     margin: 4px 0;
 }
 
-/* ── Color picker (inline in context menu) ──────────────────────── */
+/* Color picker (inline in context menu)          */
 
 .color-picker-inline {
     padding: 6px 10px;
@@ -419,7 +478,7 @@
     background: rgba(128, 128, 128, 0.1);
 }
 
-/* ── All-sheets menu (hamburger) ────────────────────────────────── */
+/* All-sheets menu (hamburger)            */
 
 .all-sheets-menu {
     position: fixed;

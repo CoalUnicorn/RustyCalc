@@ -1,0 +1,58 @@
+//! Shared helpers for action execution.
+
+use ironcalc_base::expressions::types::Area;
+use ironcalc_base::UserModel;
+use leptos::prelude::*;
+
+use crate::state::{ModelStore, WorkbookState};
+
+/// Whether `mutate` should recalculate formulas after applying the closure.
+///
+/// Pass `Recalc::Yes` when the mutation may change formula results
+/// (cell writes, row/column inserts/deletes).
+/// Pass `Recalc::No` for pure navigation, selection, or formatting changes.
+#[derive(Clone, Copy)]
+pub enum Recalc {
+    Yes,
+    No,
+}
+
+/// Run `f` on the model, optionally call `evaluate`, then trigger a redraw.
+pub fn mutate(
+    model: ModelStore,
+    state: &WorkbookState,
+    recalc: Recalc,
+    f: impl FnOnce(&mut UserModel<'static>),
+) {
+    model.update_value(|m| {
+        f(m);
+        if matches!(recalc, Recalc::Yes) {
+            m.evaluate();
+        }
+    });
+    state.request_redraw();
+}
+
+/// Build an `Area` from selection corners, normalising min/max automatically.
+pub fn make_area(sheet: u32, r1: i32, c1: i32, r2: i32, c2: i32) -> Area {
+    Area {
+        sheet,
+        row: r1.min(r2),
+        column: c1.min(c2),
+        height: (r2 - r1).abs() + 1,
+        width: (c2 - c1).abs() + 1,
+    }
+}
+
+/// Build an `Area` covering the current selection (single cell or range).
+pub fn selection_area(m: &UserModel<'static>) -> Area {
+    let v = m.get_selected_view();
+    let [r1, c1, r2, c2] = v.range;
+    make_area(v.sheet, r1, c1, r2, c2)
+}
+
+/// Returns `((min_row, max_row), (min_col, max_col))` from a `[r1,c1,r2,c2]` range.
+pub fn selection_bounds(range: [i32; 4]) -> ((i32, i32), (i32, i32)) {
+    let [r1, c1, r2, c2] = range;
+    ((r1.min(r2), r1.max(r2)), (c1.min(c2), c1.max(c2)))
+}

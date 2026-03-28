@@ -26,7 +26,7 @@ pub fn App() -> impl IntoView {
     provide_context(model);
     provide_context(clipboard);
 
-    // ── Auto-save interval ────────────────────────────────────────────────────
+    // Auto-save interval
     // Every second, flush the model's pending diff queue. If there are unsaved
     // mutations, persist to localStorage. Cleanup is automatic on unmount.
     use_interval_fn(

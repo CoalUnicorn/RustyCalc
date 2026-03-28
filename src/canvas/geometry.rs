@@ -4,7 +4,7 @@
 /// duplicated between `renderer.rs`, `worksheet.rs`, and `cell_editor.rs`.
 use ironcalc_base::UserModel;
 
-// ── Layout constants ──────────────────────────────────────────────────────────
+// Layout constants                   
 
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
 pub const HEADER_COL_WIDTH: f64 = 30.0;
@@ -21,7 +21,7 @@ pub const LAST_ROW: i32 = 1_048_576;
 /// Maximum column index (Excel/OOXML limit).
 pub const LAST_COLUMN: i32 = 16_384;
 
-// ── Dimension helpers ─────────────────────────────────────────────────────────
+// Dimension helpers                    
 
 /// Row height for `row` on `sheet`, falling back to `DEFAULT_ROW_HEIGHT`.
 #[inline]
@@ -35,7 +35,7 @@ pub fn col_width(m: &UserModel, sheet: u32, col: i32) -> f64 {
     m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH)
 }
 
-// ── Pixel rectangle ───────────────────────────────────────────────────────────
+// Pixel rectangle                   
 
 /// A point in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -53,7 +53,7 @@ pub struct PixelRect {
     pub height: f64,
 }
 
-// ── FrozenGeometry ────────────────────────────────────────────────────────────
+// FrozenGeometry                     
 
 /// Pre-computed pixel extents of the frozen-pane region for one sheet.
 pub struct FrozenGeometry {
@@ -81,7 +81,7 @@ pub fn frozen_geometry(m: &UserModel, sheet: u32) -> FrozenGeometry {
     }
 }
 
-// ── pixel -> cell ──────────────────────────────────────────────────────────────
+// pixel -> cell                    
 
 /// Convert a canvas X pixel (from `offset_x`) to a 1-based column index.
 ///
@@ -155,7 +155,7 @@ pub fn pixel_to_row(m: &UserModel, sheet: u32, top_row: i32, y: f64, fg: &Frozen
     }
 }
 
-// ── cell -> pixel ──────────────────────────────────────────────────────────────
+// cell -> pixel                    
 
 /// Return the left-edge X pixel of `col` given current scroll state.
 ///
@@ -197,7 +197,7 @@ pub fn row_to_y(m: &UserModel, sheet: u32, top_row: i32, row: i32, fg: &FrozenGe
     }
 }
 
-// ── Convenience helpers ───────────────────────────────────────────────────────
+// Convenience helpers                  
 
 /// Pixel rectangle for the currently selected cell, accounting for frozen
 /// panes and scroll position.
@@ -229,7 +229,7 @@ pub fn autofill_handle_pos(m: &UserModel) -> Point {
     }
 }
 
-// ── Header boundary hit-testing ───────────────────────────────────────────────
+// Header boundary hit-testing               
 
 /// Returns the 1-based column index whose RIGHT edge is within `hit_zone` px of
 /// `x`, searching from the first scrolled column. Returns `None` if no boundary
@@ -313,7 +313,7 @@ pub fn find_row_boundary_at(m: &UserModel, y: f64, hit_zone: f64) -> Option<i32>
     None
 }
 
-// ── Column number -> letter name (A, B, …, AA, …) ─────────────────────────────
+// Column number -> letter name (A, B, …, AA, …)         
 
 /// Convert a 1-based column index to its spreadsheet letter name (A, B, …, XFD).
 ///

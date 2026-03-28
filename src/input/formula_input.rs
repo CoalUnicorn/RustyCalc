@@ -5,7 +5,7 @@
 use ironcalc_base::expressions::utils::number_to_column;
 use wasm_bindgen::JsCast;
 
-// ── DOM cursor helper ─────────────────────────────────────────────────────────
+// DOM cursor helper                    
 
 // TODO: can this use active_cell?
 /// Return the `selectionEnd` cursor position of the currently focused formula
@@ -29,7 +29,7 @@ pub fn get_formula_cursor() -> usize {
         .unwrap_or(0)
 }
 
-// ── Reference-mode detection ──────────────────────────────────────────────────
+// Reference-mode detection                
 
 /// Returns `true` if the cursor is at a position in `text` where inserting a
 /// cell reference would be syntactically valid.
@@ -52,7 +52,7 @@ pub fn is_in_reference_mode(text: &str, cursor: usize) -> bool {
     )
 }
 
-// ── Reference string formatting ───────────────────────────────────────────────
+// Reference string formatting               
 
 /// Format a single cell as an A1-style reference string, e.g. `"B6"`.
 pub fn cell_ref_str(row: i32, col: i32) -> String {
@@ -87,7 +87,7 @@ pub fn range_ref_str(
     }
 }
 
-// ── In-formula reference splicing ─────────────────────────────────────────────
+// In-formula reference splicing                
 
 /// Replace or insert a reference string inside a formula.
 ///
@@ -117,7 +117,7 @@ mod tests {
     use super::*;
     use wasm_bindgen_test::wasm_bindgen_test;
 
-    // ── is_in_reference_mode ──────────────────────────────────────────────────
+    // is_in_reference_mode                
 
     #[wasm_bindgen_test]
     fn ref_mode_empty_string() {
@@ -197,7 +197,7 @@ mod tests {
         assert_eq!(is_in_reference_mode("=A1 +", 5), true);
     }
 
-    // ── cell_ref_str ──────────────────────────────────────────────────────────
+    // cell_ref_str                   
 
     #[wasm_bindgen_test]
     fn cell_ref_col_a_row_1() {
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(cell_ref_str(100, 52), "AZ100");
     }
 
-    // ── range_ref_str ─────────────────────────────────────────────────────────
+    // range_ref_str                    
 
     #[wasm_bindgen_test]
     fn range_ref_single_cell_same_sheet() {
@@ -252,7 +252,7 @@ mod tests {
         assert_eq!(range_ref_str(3, 2, 1, 1, 1, 1, ""), "A1:B3");
     }
 
-    // ── splice_ref ────────────────────────────────────────────────────────────
+    // splice_ref                     
 
     #[wasm_bindgen_test]
     fn splice_insert_at_cursor_no_prev_span() {

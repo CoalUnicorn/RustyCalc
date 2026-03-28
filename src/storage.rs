@@ -22,7 +22,7 @@ pub struct WorkbookMeta {
     pub name: String,
 }
 
-// ── Registry helpers ──────────────────────────────────────────────────────────
+// Registry helpers                   
 
 /// Load the UUID->metadata registry from localStorage.
 pub fn load_registry() -> HashMap<String, WorkbookMeta> {
@@ -33,7 +33,7 @@ fn save_registry(registry: &HashMap<String, WorkbookMeta>) {
     log_err(LocalStorage::set(MODELS_KEY, registry), "save registry");
 }
 
-// ── Selection helpers ─────────────────────────────────────────────────────────
+// Selection helpers                    
 
 /// Return the UUID of the currently selected workbook, if set.
 pub fn get_selected_uuid() -> Option<String> {
@@ -45,7 +45,7 @@ pub fn set_selected_uuid(uuid: &str) {
     log_err(LocalStorage::set(SELECTED_KEY, uuid), "set selected uuid");
 }
 
-// ── Core CRUD ────────────────────────────────────────────────────────────────
+// Core CRUD                     
 
 /// Serialize `model` to bytes, base64-encode, and write to localStorage.
 /// Also refreshes the workbook's entry in the metadata registry.
