@@ -1301,7 +1301,7 @@ checksum = "71dd52191aae121e8611f1e8dc3e324dd0dd1dee1e6dd91d10ee07a3cfb4d9d8"
 [[package]]
 name = "ironcalc_base"
 version = "0.7.1"
-source = "git+https://github.com/ironcalc/IronCalc/?branch=main#4797deead6853d34f2b30f54776a1d3f3ebc4ac3"
+source = "git+https://github.com/CoalUnicorn/IronCalc?branch=fix-col-iterations#bed8f4bd5dc66f0c5a4709b33a3e4e68656a4267"
 dependencies = [
  "bitcode",
  "chrono",
