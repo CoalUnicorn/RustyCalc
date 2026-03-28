@@ -242,7 +242,7 @@ impl SpreadsheetAction {
     }
 }
 
-// ── Private helpers ───────────────────────────────────────────────────────────
+// Private helpers
 
 /// Run `f` on the model, optionally call `evaluate`, then trigger a redraw.
 ///
@@ -798,10 +798,10 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
+            let state = crate::state::WorkbookState::new();
             mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 1, 1, "hello").ok();
             });
-            let state = crate::state::WorkbookState::new();
             execute(
                 &SpreadsheetAction::Edit(EditAction::EnterEditMode),
                 model,
@@ -822,10 +822,10 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
+            let state = crate::state::WorkbookState::new();
             mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 1, 1, "data").ok();
             });
-            let state = crate::state::WorkbookState::new();
             execute(&struc(StructAction::Delete), model, &state);
             let val = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(val, "");
@@ -839,10 +839,10 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
+            let state = crate::state::WorkbookState::new();
             mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 1, 1, "42").ok();
             });
-            let state = crate::state::WorkbookState::new();
             execute(&SpreadsheetAction::undo(), model, &state);
             let after_undo =
                 model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
@@ -861,10 +861,10 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
+            let state = crate::state::WorkbookState::new();
             mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 1, 1, "original").ok();
             });
-            let state = crate::state::WorkbookState::new();
             execute(&struc(StructAction::InsertRows), model, &state);
             let a1 = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             let a2 = model.with_value(|m| m.get_formatted_cell_value(0, 2, 1).unwrap_or_default());
@@ -880,10 +880,10 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
+            let state = crate::state::WorkbookState::new();
             mutate(model, &state, Eval::Yes, |m| {
                 m.set_user_input(0, 2, 1, "data").ok();
             });
-            let state = crate::state::WorkbookState::new();
             execute(&struc(StructAction::DeleteRows), model, &state);
             let a1 = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(a1, "data");
