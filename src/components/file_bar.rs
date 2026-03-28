@@ -14,12 +14,16 @@ pub fn FileBar() -> impl IntoView {
         apply_theme_to_dom(state.theme.get());
     });
 
-    let on_toggle = move |_: web_sys::MouseEvent| {
+    let on_toggle_theme = move |_: web_sys::MouseEvent| {
         let new_theme = state.theme.get().toggle();
         state.theme.set(new_theme);
         new_theme.save();
         apply_theme_to_dom(new_theme);
         state.request_redraw();
+    };
+
+    let on_toggle_perf = move |_: web_sys::MouseEvent| {
+        state.show_perf_panel.update(|v| *v = !*v);
     };
 
     // Show icon for the CURRENT theme (☀ = light mode active, ☾ = dark mode active).
@@ -31,10 +35,21 @@ pub fn FileBar() -> impl IntoView {
         }
     };
 
+    let perf_icon = move || {
+        if state.show_perf_panel.get() {
+            "⏱ Hide Perf"
+        } else {
+            "⏱ Show Perf"
+        }
+    };
+
     view! {
         <div class="file-bar">
-            <button class="file-bar-btn" on:click=on_toggle title="Toggle theme">
+            <button class="file-bar-btn" on:click=on_toggle_theme title="Toggle theme">
                 {theme_icon}
+            </button>
+            <button class="file-bar-btn" on:click=on_toggle_perf title="Toggle performance panel">
+                {perf_icon}
             </button>
         </div>
     }

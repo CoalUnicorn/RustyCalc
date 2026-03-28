@@ -122,6 +122,8 @@ pub struct WorkbookState {
     pub(crate) show_regional_settings: RwSignal<bool>,
     /// Whether the Named Ranges right panel is open.
     pub(crate) show_named_ranges: RwSignal<bool>,
+    /// Whether the Performance panel is visible.
+    pub(crate) show_perf_panel: RwSignal<bool>,
     /// Active right-click context menu; None when no menu is showing.
     pub(crate) context_menu: RwSignal<Option<ContextMenuState>>,
     /// Range being pointed at during formula entry (`[r1, c1, r2, c2]`, 1-based).
@@ -154,6 +156,7 @@ impl WorkbookState {
             current_lang: RwSignal::new(lang),
             show_regional_settings: RwSignal::new(false),
             show_named_ranges: RwSignal::new(false),
+            show_perf_panel: RwSignal::new(false),
             context_menu: RwSignal::new(None),
             point_range: RwSignal::new(None),
             point_ref_span: RwSignal::new(None),

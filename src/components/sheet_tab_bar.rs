@@ -38,10 +38,27 @@ pub fn SheetTabBar() -> impl IntoView {
         state.request_redraw();
     };
 
+    // let on_toggle_perf = move |_: web_sys::MouseEvent| {
+    //     state.show_perf_panel.update(|v| *v = !*v);
+    // };
+
+    // let perf_icon = move || {
+    //     if state.show_perf_panel.get() {
+    //         "⏱"
+    //     } else {
+    //         "○"
+    //     }
+    // };
+
     view! {
         <div class="tab-bar">
             <button class="tab-bar-add" on:click=on_add title="Add sheet">"+"</button>
             <AllSheetsMenu />
+            /*
+            <button class="tab-bar-add" on:click=on_toggle_perf title="Toggle performance panel">
+                {perf_icon}
+            </button>
+            */
             <div class="tab-bar-divider" />
             <div class="tab-bar-scroll">
                 <For

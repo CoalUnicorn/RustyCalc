@@ -168,7 +168,9 @@ pub fn Workbook() -> impl IntoView {
             <Toolbar />
             <FormulaBar />
             <Worksheet />
-            <PerfPanel />
+            <Show when=move || state.show_perf_panel.get()>
+                <PerfPanel />
+            </Show>
             <SheetTabBar />
         </div>
     }
