@@ -138,12 +138,20 @@ pub struct WorkbookState {
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
     /// Performance timings for the commit→render pipeline.
     pub perf: PerfTimings,
+    /// Recent/custom colors used in the document (hex strings)
+    /// Limited to 16 colors, most recent first
+    pub(crate) recent_colors: RwSignal<Vec<String>>,
 }
 
 impl WorkbookState {
     pub fn new() -> Self {
         let lang: String = <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_lang")
             .unwrap_or_else(|_| "en".to_owned());
+        
+        // Load recent colors from localStorage
+        let recent_colors: Vec<String> = <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_recent_colors")
+            .unwrap_or_else(|_| Vec::new());
+        
         Self {
             editing_cell: RwSignal::new(None),
             drag: RwSignal::new(DragState::Idle),
@@ -162,11 +170,101 @@ impl WorkbookState {
             point_ref_span: RwSignal::new(None),
             formula_input_ref: NodeRef::new(),
             perf: PerfTimings::new(),
+            recent_colors: RwSignal::new(recent_colors),
         }
     }
 
     /// Call after any UserModel mutation to trigger canvas re-render.
     pub fn request_redraw(&self) {
         self.redraw.update(|n| *n += 1);
+    }
+    
+    /// Add a color to the recent colors list
+    /// 
+    /// - Moves color to front if already exists
+    /// - Limits list to 16 colors maximum  
+    /// - Persists to localStorage
+    /// - Ignores colors already in COLOR_PALETTE
+    pub fn add_recent_color(&self, color: &str) {
+        use crate::theme::COLOR_PALETTE;
+        
+        // Don't add colors that are already in the standard palette
+        if COLOR_PALETTE.contains(&color) {
+            return;
+        }
+        
+        // Normalize color (ensure lowercase, with #)
+        let normalized = if color.starts_with('#') {
+            color.to_lowercase()
+        } else {
+            format!("#{}", color.to_lowercase())
+        };
+        
+        self.recent_colors.update(|colors| {
+            // Remove if already exists
+            colors.retain(|c| c != &normalized);
+            
+            // Add to front
+            colors.insert(0, normalized);
+            
+            // Limit to 16 colors
+            colors.truncate(16);
+        });
+        
+        // Persist to localStorage
+        let colors = self.recent_colors.get();
+        <gloo_storage::LocalStorage as GlooStorage>::set("ironcalc_recent_colors", &colors).ok();
+    }
+    
+    /// Get colors from the current document that aren't in the standard palette
+    /// 
+    /// This scans all cells and extracts unique colors for the recent colors section
+    pub fn extract_document_colors(&self, model: ModelStore) -> Vec<String> {
+        use crate::theme::COLOR_PALETTE;
+        use std::collections::HashSet;
+        
+        let mut document_colors = HashSet::new();
+        
+        model.with_value(|m| {
+            // Get all worksheets
+            let sheets = m.get_worksheets_properties();
+            
+            for sheet_props in &sheets {
+                let sheet_idx = sheet_props.sheet_id;
+                
+                // Scan a reasonable range of cells (don't scan infinite sheets)
+                for row in 1..=100 {
+                    for col in 1..=50 {
+                        // Get cell style (only check cells that might have formatting)
+                        if let Ok(style) = m.get_cell_style(sheet_idx, row, col) {
+                            // Only process if the style has non-default values
+                            if style.font.color.is_some() || style.fill.fg_color.is_some() {
+                                    // Collect text color
+                                    if let Some(text_color) = style.font.color.as_ref() {
+                                        if !text_color.is_empty() && text_color != "#000000" {
+                                            let normalized = text_color.to_lowercase();
+                                            if !COLOR_PALETTE.contains(&normalized.as_str()) {
+                                                document_colors.insert(normalized);
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Collect background color
+                                    if let Some(bg_color) = style.fill.fg_color.as_ref() {
+                                        if !bg_color.is_empty() {
+                                            let normalized = bg_color.to_lowercase();
+                                            if !COLOR_PALETTE.contains(&normalized.as_str()) {
+                                                document_colors.insert(normalized);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                    }
+                }
+            }
+        });
+        
+        document_colors.into_iter().collect()
     }
 }

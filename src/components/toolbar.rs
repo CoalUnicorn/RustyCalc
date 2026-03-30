@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::UnwrapThrowExt;
 
+use crate::components::color_picker::{TextColorPicker, BackgroundColorPicker};
 use crate::input::action::{execute, SpreadsheetAction};
 use crate::model::{FrontendModel, SafeFontFamily};
 use crate::state::{ModelStore, WorkbookState};
@@ -20,6 +21,10 @@ pub fn Toolbar() -> impl IntoView {
             <FontFamily />
             <div class="toolbar-sep" />
             <FontSize />
+            <div class="toolbar-sep" />
+            <TextColorPickerToolbar />
+            <div class="toolbar-sep" />
+            <BackgroundColorPickerToolbar />
             <div class="toolbar-sep" />
             <FormatToggles />
             <div class="toolbar-sep" />
@@ -341,5 +346,107 @@ fn FreezePane() -> impl IntoView {
             on:click=on_freeze>
             {freeze_label}
         </button>
+    }
+}
+
+// Text Color Picker
+#[component]
+fn TextColorPickerToolbar() -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+
+    // Current text color from toolbar state
+    let current_color = Signal::derive(move || {
+        let _ = state.redraw.get();
+        model.with_value(|_m| {
+            // toolbar_state().text_color is CssColor, not Option<CssColor>
+            // For now, return None until the model is properly set up
+            None::<String>
+        })
+    });
+
+    // Recent colors signal
+    let recent_colors = Signal::derive(move || {
+        let _ = state.redraw.get(); // Subscribe to updates
+        state.recent_colors.get()
+    });
+
+    // Handle color change
+    let on_color_change = Callback::new(move |color: Option<String>| {
+        // Add to recent colors if it's a custom color
+        if let Some(ref hex) = color {
+            state.add_recent_color(hex);
+        }
+        
+        // TODO: Implement SpreadsheetAction::SetTextColor
+        // For now, just log the color change
+        web_sys::console::log_2(&"Text color changed to:".into(), &format!("{:?}", color).into());
+        
+        // Demo: Add some test colors to show the recent colors feature
+        // Remove this in production
+        if state.recent_colors.get().is_empty() {
+            state.add_recent_color("#ff6b6b"); // Coral red
+            state.add_recent_color("#4ecdc4"); // Turquoise
+            state.add_recent_color("#45b7d1"); // Sky blue
+        }
+        
+        // This is where you'd call:
+        // execute(&SpreadsheetAction::set_text_color(color), model, &state);
+        // crate::util::refocus_workbook();
+    });
+
+    view! {
+        <TextColorPicker
+            current_color=current_color
+            on_change=on_color_change
+            recent_colors=recent_colors
+        />
+    }
+}
+
+// Background Color Picker  
+#[component]
+fn BackgroundColorPickerToolbar() -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+
+    // Current background color from toolbar state
+    let current_color = Signal::derive(move || {
+        let _ = state.redraw.get();
+        model.with_value(|_m| {
+            // toolbar_state().bg_color is Option<CssColor>
+            // For now, return None until the model is properly set up  
+            None::<String>
+        })
+    });
+
+    // Recent colors signal (shared with text color picker)
+    let recent_colors = Signal::derive(move || {
+        let _ = state.redraw.get(); // Subscribe to updates
+        state.recent_colors.get()
+    });
+
+    // Handle color change
+    let on_color_change = Callback::new(move |color: Option<String>| {
+        // Add to recent colors if it's a custom color
+        if let Some(ref hex) = color {
+            state.add_recent_color(hex);
+        }
+        
+        // TODO: Implement SpreadsheetAction::SetBackgroundColor
+        // For now, just log the color change
+        web_sys::console::log_2(&"Background color changed to:".into(), &format!("{:?}", color).into());
+        
+        // This is where you'd call:
+        // execute(&SpreadsheetAction::set_background_color(color), model, &state);
+        // crate::util::refocus_workbook();
+    });
+
+    view! {
+        <BackgroundColorPicker
+            current_color=current_color
+            on_change=on_color_change
+            recent_colors=recent_colors
+        />
     }
 }

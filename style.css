@@ -169,6 +169,237 @@
     border-color: var(--accent);
 }
 
+/* Color Picker Component
+ * 
+ * Reusable color picker with support for:
+ * - Toolbar dropdowns (text/background colors)
+ * - Inline context menu usage (tab colors)
+ * - Custom hex input and palette colors
+ * - Multiple visual variants via color type classes
+ */
+
+/* Base color picker container */
+.color-picker {
+    position: relative;
+}
+
+/* Trigger elements */
+.color-picker-trigger {
+    position: relative;
+    min-width: 32px;
+}
+
+/* Color indicator (small bar showing current color) */
+.color-indicator {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 12px;
+    height: 3px;
+    border-radius: 1px;
+    border: 1px solid var(--border-color);
+}
+
+/* Fill icon positioning for background color picker */
+.fill-icon {
+    font-size: 14px;
+    margin-right: 2px;
+    color: var(--text-secondary);
+}
+
+/* Dropdown container (toolbar usage) */
+.color-picker-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1100;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    min-width: 180px;
+    max-width: 220px;
+}
+
+/* Inline container (context menu usage) */
+.color-picker-inline {
+    background: var(--bg-primary);
+    border-radius: 6px;
+    padding: 8px;
+    margin-top: 4px;
+    border: 1px solid var(--border-inner);
+}
+
+/* Color palette grid */
+.color-picker-palette {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+/* Individual color swatches */
+.color-picker-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: transform 0.1s ease, border-color 0.1s ease;
+    position: relative;
+}
+
+.color-picker-swatch:hover {
+    transform: scale(1.1);
+    border-color: var(--accent);
+    z-index: 1;
+}
+
+/* Selected color swatch (show selection indicator) */
+.color-picker-swatch--selected {
+    border-color: var(--accent);
+    border-width: 2px;
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.color-picker-swatch--selected:hover {
+    transform: scale(1.05); /* Less dramatic for already-selected */
+}
+
+/* Custom color input section */
+.color-picker-custom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border-inner);
+}
+
+.color-picker-custom-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    min-width: 40px;
+}
+
+.color-picker-custom-input {
+    flex: 1;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: 'Monaco', 'Menlo', monospace;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.color-picker-custom-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.color-picker-custom-input::placeholder {
+    color: var(--text-placeholder);
+}
+
+/* Clear color button */
+.color-picker-clear {
+    width: 100%;
+    padding: 4px 8px;
+    font-size: 11px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-primary);
+    transition: background 0.1s ease;
+}
+
+.color-picker-clear:hover {
+    background: var(--bg-hover);
+}
+
+/* Recent colors section */
+.color-picker-recent-section {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-inner);
+}
+
+.color-picker-recent-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+.color-picker-recent-palette {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 3px;
+}
+
+.color-picker-recent-palette .color-picker-swatch {
+    width: 16px;
+    height: 16px;
+}
+
+/* Recent colors in tab context (inline) */
+.color-picker-tab .color-picker-recent-palette {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 2px;
+}
+
+.color-picker-tab .color-picker-recent-palette .color-picker-swatch {
+    width: 14px;
+    height: 14px;
+}
+
+/* Type-specific styling */
+
+/* Text color picker (toolbar) */
+.color-picker-text .color-picker-trigger {
+    font-weight: bold;
+}
+
+/* Background color picker (toolbar) */
+.color-picker-background .fill-icon {
+    opacity: 0.7;
+}
+
+/* Tab color picker (context menu) */
+.color-picker-tab .color-picker-inline {
+    margin: 0;
+    border: none;
+    background: transparent;
+    padding: 4px 0;
+}
+
+.color-picker-tab .color-picker-palette {
+    margin-bottom: 4px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .color-picker-dropdown {
+        min-width: 160px;
+        max-width: 200px;
+    }
+    
+    .color-picker-palette {
+        grid-template-columns: repeat(6, 1fr);
+    }
+    
+    .color-picker-swatch {
+        width: 20px;
+        height: 20px;
+    }
+}
+
 /* Formula bar                 */
 
 .formula-bar {
