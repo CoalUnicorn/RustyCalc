@@ -357,7 +357,7 @@ fn TextColorPickerToolbar() -> impl IntoView {
 
     // Current text color from toolbar state
     let current_color = Signal::derive(move || {
-        let _ = state.redraw.get();
+        let _ = state.redraw.get_untracked(); // Use untracked since this is just to trigger updates
         model.with_value(|_m| {
             // toolbar_state().text_color is CssColor, not Option<CssColor>
             // For now, return None until the model is properly set up
@@ -367,8 +367,8 @@ fn TextColorPickerToolbar() -> impl IntoView {
 
     // Recent colors signal
     let recent_colors = Signal::derive(move || {
-        let _ = state.redraw.get(); // Subscribe to updates
-        state.recent_colors.get()
+        let _ = state.redraw.get_untracked(); // Use untracked to avoid nested tracking
+        state.recent_colors.get() // This one can stay tracked since it's what we want to reactively track
     });
 
     // Handle color change
@@ -384,7 +384,7 @@ fn TextColorPickerToolbar() -> impl IntoView {
         
         // Demo: Add some test colors to show the recent colors feature
         // Remove this in production
-        if state.recent_colors.get().is_empty() {
+        if state.recent_colors.get_untracked().is_empty() {
             state.add_recent_color("#ff6b6b"); // Coral red
             state.add_recent_color("#4ecdc4"); // Turquoise
             state.add_recent_color("#45b7d1"); // Sky blue
@@ -412,7 +412,7 @@ fn BackgroundColorPickerToolbar() -> impl IntoView {
 
     // Current background color from toolbar state
     let current_color = Signal::derive(move || {
-        let _ = state.redraw.get();
+        let _ = state.redraw.get_untracked(); // Use untracked since this is just to trigger updates
         model.with_value(|_m| {
             // toolbar_state().bg_color is Option<CssColor>
             // For now, return None until the model is properly set up  
@@ -422,8 +422,8 @@ fn BackgroundColorPickerToolbar() -> impl IntoView {
 
     // Recent colors signal (shared with text color picker)
     let recent_colors = Signal::derive(move || {
-        let _ = state.redraw.get(); // Subscribe to updates
-        state.recent_colors.get()
+        let _ = state.redraw.get_untracked(); // Use untracked to avoid nested tracking
+        state.recent_colors.get() // This one can stay tracked since it's what we want to reactively track
     });
 
     // Handle color change

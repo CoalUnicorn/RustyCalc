@@ -54,7 +54,8 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
             mutate(model, state, Eval::No, |m| {
                 set_font_name(m, name);
             });
-        }
+        } // SetFontColor
+          //
     }
 }
 
