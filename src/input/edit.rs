@@ -25,7 +25,7 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
         EditAction::Start(text) => {
             model.with_value(|m| {
                 let v = m.get_selected_view();
-                state.editing_cell.set(Some(EditingCell {
+                state.set_editing_cell(Some(EditingCell {
                     sheet: v.sheet,
                     row: v.row,
                     col: v.column,
@@ -42,7 +42,7 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 let text = m
                     .get_cell_content(v.sheet, v.row, v.column)
                     .unwrap_or_default();
-                state.editing_cell.set(Some(EditingCell {
+                state.set_editing_cell(Some(EditingCell {
                     sheet: v.sheet,
                     row: v.row,
                     col: v.column,
@@ -54,7 +54,7 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
             state.request_redraw();
         }
         EditAction::CommitAndNavigate(dir) => {
-            if let Some(edit) = state.editing_cell.get_untracked() {
+            if let Some(edit) = state.get_editing_cell_untracked() {
                 // ── Perf timing ──────────────────────────────────────────
                 let perf = state.perf;
                 perf.commit_start.set(Some(crate::perf::now()));
@@ -72,12 +72,12 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 });
 
                 // Clear all edit-related state.
-                state.editing_cell.set(None);
-                state.point_range.set(None);
-                state.point_ref_span.set(None);
+                state.set_editing_cell(None);
+                state.set_point_range(None);
+                state.set_point_ref_span(None);
                 
                 // Persist the committed change immediately.
-                if let Some(uuid) = state.current_uuid.get_untracked() {
+                if let Some(uuid) = state.get_current_uuid_untracked() {
                     model.with_value(|m| storage::save(&uuid, m));
                 }
                 
@@ -87,9 +87,9 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
             }
         }
         EditAction::Cancel => {
-            state.editing_cell.set(None);
-            state.point_range.set(None);
-            state.point_ref_span.set(None);
+            state.set_editing_cell(None);
+            state.set_point_range(None);
+            state.set_point_ref_span(None);
             state.request_redraw();
             crate::util::refocus_workbook();
         }

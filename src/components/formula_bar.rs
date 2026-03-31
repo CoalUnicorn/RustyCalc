@@ -24,7 +24,7 @@ pub fn FormulaBar() -> impl IntoView {
     let input_ref = state.formula_input_ref;
 
     let cell_address = move || {
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| {
             let ac = m.active_cell();
             format!("{}{}", col_name(ac.column), ac.row)
@@ -34,20 +34,20 @@ pub fn FormulaBar() -> impl IntoView {
     // While editing: live edit buffer (shared with CellEditor).
     // Otherwise: raw cell content (formula text or literal).
     let display_text = move || {
-        if let Some(edit) = state.editing_cell.get() {
+        if let Some(edit) = state.get_editing_cell() {
             return edit.text;
         }
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| m.active_cell_content())
     };
 
-    let is_editing = move || state.editing_cell.get().is_some();
+    let is_editing = move || state.get_editing_cell().is_some();
 
     // Start an edit session with FormulaBar focus (so CellEditor doesn't
     // steal focus back), or switch focus if already editing.
     let on_focus = move |_: web_sys::FocusEvent| {
-        if state.editing_cell.get_untracked().is_some() {
-            state.editing_cell.update(|cell| {
+        if state.get_editing_cell_untracked().is_some() {
+            state.update_editing_cell(|cell| {
                 if let Some(c) = cell {
                     c.focus = EditFocus::FormulaBar;
                 }
@@ -57,7 +57,7 @@ pub fn FormulaBar() -> impl IntoView {
         model.with_value(|m| {
             let ac = m.active_cell();
             let text = m.active_cell_content();
-            state.editing_cell.set(Some(EditingCell {
+            state.set_editing_cell(Some(EditingCell {
                 sheet: ac.sheet,
                 row: ac.row,
                 col: ac.column,
@@ -76,8 +76,8 @@ pub fn FormulaBar() -> impl IntoView {
             .map(|el| el.value())
             .unwrap_or_default();
 
-        if state.editing_cell.get_untracked().is_some() {
-            state.editing_cell.update(|cell| {
+        if state.get_editing_cell_untracked().is_some() {
+            state.update_editing_cell(|cell| {
                 if let Some(c) = cell {
                     c.text = value;
                 }
@@ -86,7 +86,7 @@ pub fn FormulaBar() -> impl IntoView {
             // First keystroke — Accept mode: arrows commit + navigate.
             model.with_value(|m| {
                 let ac = m.active_cell();
-                state.editing_cell.set(Some(EditingCell {
+                state.set_editing_cell(Some(EditingCell {
                     sheet: ac.sheet,
                     row: ac.row,
                     col: ac.column,

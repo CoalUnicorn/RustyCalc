@@ -20,7 +20,7 @@ pub fn SheetTabBar() -> impl IntoView {
     let renaming: RwSignal<Option<u32>> = RwSignal::new(None);
 
     let visible_sheets = move || {
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .into_iter()
@@ -93,12 +93,12 @@ fn SheetTab(
     let model = expect_context::<ModelStore>();
 
     let is_selected = move || {
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| m.get_selected_view().sheet == sheet_idx)
     };
 
     let name = move || {
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .get(sheet_idx as usize)
@@ -108,7 +108,7 @@ fn SheetTab(
     };
 
     let tab_color = move || {
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .get(sheet_idx as usize)
@@ -189,7 +189,7 @@ fn TabContextMenu(
     let color_sub_open: RwSignal<bool> = RwSignal::new(false);
 
     let visible_count = move || {
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .iter()
@@ -401,7 +401,7 @@ fn AllSheetsMenu() -> impl IntoView {
     let menu_pos: RwSignal<(i32, i32)> = RwSignal::new((0, 0));
 
     let all_sheets = move || {
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .into_iter()
@@ -412,7 +412,7 @@ fn AllSheetsMenu() -> impl IntoView {
     };
 
     let selected_sheet = move || {
-        let _ = state.redraw.get();
+        let _ = state.get_redraw();
         model.with_value(|m| m.get_selected_view().sheet)
     };
 

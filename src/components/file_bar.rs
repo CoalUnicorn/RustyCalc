@@ -11,24 +11,24 @@ pub fn FileBar() -> impl IntoView {
     // Apply the initial theme to <html> on mount, so CSS variables match
     // the stored preference from the start.
     Effect::new(move |_| {
-        apply_theme_to_dom(state.theme.get());
+        apply_theme_to_dom(state.get_theme());
     });
 
     let on_toggle_theme = move |_: web_sys::MouseEvent| {
-        let new_theme = state.theme.get().toggle();
-        state.theme.set(new_theme);
+        let new_theme = state.get_theme().toggle();
+        state.set_theme(new_theme);
         new_theme.save();
         apply_theme_to_dom(new_theme);
         state.request_redraw();
     };
 
     let on_toggle_perf = move |_: web_sys::MouseEvent| {
-        state.show_perf_panel.update(|v| *v = !*v);
+        state.show_perf_panel.1.update(|v| *v = !*v);
     };
 
     // Show icon for the CURRENT theme (☀ = light mode active, ☾ = dark mode active).
     let theme_icon = move || {
-        if state.theme.get() == Theme::Dark {
+        if state.get_theme() == Theme::Dark {
             "☀ Light"
         } else {
             "☾ Dark"
@@ -36,7 +36,7 @@ pub fn FileBar() -> impl IntoView {
     };
 
     let perf_icon = move || {
-        if state.show_perf_panel.get() {
+        if state.get_show_perf_panel() {
             "⏱ Hide Perf"
         } else {
             "⏱ Show Perf"

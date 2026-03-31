@@ -13,7 +13,7 @@ pub fn App() -> impl IntoView {
     let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
 
     let wb_state = WorkbookState::new();
-    wb_state.current_uuid.set(Some(uuid));
+    wb_state.set_current_uuid(Some(uuid));
 
     let model = StoredValue::new_local(model);
 
@@ -31,7 +31,7 @@ pub fn App() -> impl IntoView {
     // mutations, persist to localStorage. Cleanup is automatic on unmount.
     use_interval_fn(
         move || {
-            let Some(uuid) = wb_state.current_uuid.get_untracked() else {
+            let Some(uuid) = wb_state.get_current_uuid_untracked() else {
                 return;
             };
             let mut has_changes = false;

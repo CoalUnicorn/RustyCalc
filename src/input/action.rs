@@ -724,7 +724,7 @@ mod tests {
                 model,
                 &state,
             );
-            let cell = state.editing_cell.get_untracked();
+            let cell = state.get_editing_cell_untracked();
             assert!(cell.is_some());
             assert_eq!(cell.unwrap().text, "=SUM");
         });
@@ -743,10 +743,10 @@ mod tests {
                 model,
                 &state,
             );
-            assert!(state.editing_cell.get_untracked().is_some());
+            assert!(state.get_editing_cell_untracked().is_some());
             execute(&SpreadsheetAction::Edit(EditAction::Cancel), model, &state);
-            assert!(state.editing_cell.get_untracked().is_none());
-            assert!(state.point_range.get_untracked().is_none());
+            assert!(state.get_editing_cell_untracked().is_none());
+            assert!(state.get_point_range_untracked().is_none());
         });
     }
 
@@ -766,7 +766,7 @@ mod tests {
             execute(&SpreadsheetAction::commit(ArrowKey::Down), model, &state);
             let val = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(val, "42");
-            assert!(state.editing_cell.get_untracked().is_none());
+            assert!(state.get_editing_cell_untracked().is_none());
             let row = model.with_value(|m| m.get_selected_view().row);
             assert_eq!(row, 2);
         });
@@ -788,7 +788,7 @@ mod tests {
                 model,
                 &state,
             );
-            let cell = state.editing_cell.get_untracked().unwrap();
+            let cell = state.get_editing_cell_untracked().unwrap();
             assert_eq!(cell.mode, EditMode::Edit);
             assert_eq!(cell.text, "hello");
         });
