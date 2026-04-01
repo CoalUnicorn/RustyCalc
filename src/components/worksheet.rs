@@ -89,7 +89,7 @@ pub fn Worksheet() -> impl IntoView {
             m.set_window_height(canvas_h);
         });
         model.with_value(|m| {
-            let renderer = CanvasRenderer::new(&canvas_el, canvas_theme.get());
+            let renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get());
             renderer.render(m, &overlays.get());
         });
         // Record render-done timestamp for the perf panel.

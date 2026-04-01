@@ -149,6 +149,7 @@ impl Theme {
 
 /// Concrete color strings for the Canvas 2D rendering context.
 /// One static instance per theme; passed into `CanvasRenderer::new()`.
+#[derive(Copy, Clone, PartialEq)]
 pub struct CanvasTheme {
     pub grid_color: &'static str,
     pub grid_separator_color: &'static str,

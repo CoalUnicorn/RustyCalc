@@ -156,6 +156,7 @@ struct VisibleRegion {
 }
 
 /// Overlay ranges passed to `render()` for selection preview drawing.
+#[derive(Clone, PartialEq)]
 pub struct RenderOverlays {
     /// Target cell during autofill-handle drag.
     pub extend_to: Option<(i32, i32)>,
@@ -166,6 +167,7 @@ pub struct RenderOverlays {
 }
 
 /// A copied range on a specific sheet.
+#[derive(Copy, Clone, PartialEq)]
 pub struct ClipboardRange {
     pub sheet: u32,
     pub r1: i32,
@@ -175,6 +177,7 @@ pub struct ClipboardRange {
 }
 
 /// A rectangular region of cells (no sheet — always the current sheet).
+#[derive(Copy, Clone, PartialEq)]
 pub struct SheetRect {
     pub r1: i32,
     pub c1: i32,
@@ -188,13 +191,13 @@ pub struct CanvasRenderer {
     ctx: CanvasRenderingContext2d,
     width: f64,
     height: f64,
-    theme: &'static CanvasTheme,
+    theme: CanvasTheme,
 }
 
 impl CanvasRenderer {
     /// Bind a renderer to `canvas` and apply device-pixel-ratio scaling.
     #[allow(clippy::expect_used)]
-    pub fn new(canvas: &HtmlCanvasElement, theme: &'static CanvasTheme) -> Self {
+    pub fn new(canvas: &HtmlCanvasElement, theme: CanvasTheme) -> Self {
         let ctx = canvas
             .get_context("2d")
             .expect("getContext should not throw")
