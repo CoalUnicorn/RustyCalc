@@ -49,7 +49,7 @@ pub fn SheetTabBar() -> impl IntoView {
             crate::events::StructureEvent::WorksheetAdded {
                 sheet: new_sheet_result.1,
                 name: new_sheet_name,
-            }
+            },
         ));
     };
 
@@ -147,7 +147,7 @@ fn SheetTab(
                 crate::events::NavigationEvent::ActiveSheetChanged {
                     from_sheet: previous_sheet,
                     to_sheet: sheet_idx,
-                }
+                },
             ));
         }
     };
@@ -250,7 +250,7 @@ fn TabContextMenu(
                 sheet: sheet_idx,
                 col: None,
                 row: None,
-            }
+            },
         ));
 
         menu_open.set(None);
@@ -266,9 +266,7 @@ fn TabContextMenu(
 
         // Fire specific structure event for sheet hiding (treated as worksheet deletion from UI perspective)
         state.emit_event(crate::events::SpreadsheetEvent::Structure(
-            crate::events::StructureEvent::WorksheetDeleted {
-                sheet: sheet_idx
-            }
+            crate::events::StructureEvent::WorksheetDeleted { sheet: sheet_idx },
         ));
     };
 
@@ -294,9 +292,7 @@ fn TabContextMenu(
 
             // Fire specific structure event for sheet deletion
             state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                crate::events::StructureEvent::WorksheetDeleted {
-                    sheet: sheet_idx
-                }
+                crate::events::StructureEvent::WorksheetDeleted { sheet: sheet_idx },
             ));
         }
     };
@@ -407,7 +403,7 @@ fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView
                     sheet: sheet_idx,
                     old_name,
                     new_name: new_name.clone(),
-                }
+                },
             ));
         }
         renaming.set(None);

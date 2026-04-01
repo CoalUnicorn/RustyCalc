@@ -46,45 +46,15 @@ pub enum EditFocus {
     FormulaBar,
 }
 
-/// Which header was right-clicked to open the context menu.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum ContextMenuTarget {
-    /// Column index (1-based).
-    Column(i32),
-    /// Row index (1-based).
-    Row(i32),
-}
-
-/// Active mouse-drag interaction.
-///
-/// At most one drag mode can be active at a time.  Using a single enum
-/// instead of parallel `bool` / `Option` signals makes illegal combinations
-/// (e.g. selecting while resizing) unrepresentable.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum DragState {
-    /// No drag in progress.
-    Idle,
-    /// Mouse button held for a range-drag selection.
-    Selecting,
-    /// Autofill handle drag: the cell the user is dragging toward.
-    Extending { to_row: i32, to_col: i32 },
-    /// Column header resize: `(col_1based, current_mouse_x)`.
-    ResizingCol { col: i32, x: f64 },
-    /// Row header resize: `(row_1based, current_mouse_y)`.
-    ResizingRow { row: i32, y: f64 },
-    /// Dragging to extend the point-mode range during formula entry.
-    Pointing,
-}
-
 /// Position and target for the active context menu.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct ContextMenuState {
     /// Viewport-relative x (from `ev.client_x()`).
     pub(crate) x: i32,
     /// Viewport-relative y (from `ev.client_y()`).
     pub(crate) y: i32,
     /// Which header triggered the menu.
-    pub(crate) target: ContextMenuTarget,
+    pub(crate) target: HeaderContextMenu,
 }
 
 /// All transient UI state — never persisted, never in the model.
@@ -164,6 +134,18 @@ pub struct WorkbookState {
     /// Recent/custom colors used in the document (hex strings)
     /// Limited to 16 colors, most recent first
     pub(crate) recent_colors: (ReadSignal<Vec<String>>, WriteSignal<Vec<String>>),
+    /// Per-category derived memos.
+    ///
+    /// Filtering runs once inside the Memo when the events Vec changes, not
+    /// once per subscriber per tick.  Downstream components only re-run when
+    /// their specific category actually has new events.
+    pub(crate) format_events_memo: Memo<Vec<FormatEvent>>,
+    pub(crate) theme_events_memo: Memo<Vec<ThemeEvent>>,
+    pub(crate) content_events_memo: Memo<Vec<ContentEvent>>,
+    pub(crate) navigation_events_memo: Memo<Vec<NavigationEvent>>,
+    pub(crate) structure_events_memo: Memo<Vec<StructureEvent>>,
+    pub(crate) mode_events_memo: Memo<Vec<ModeEvent>>,
+    pub(crate) visual_events_memo: Memo<Vec<SpreadsheetEvent>>,
 }
 
 impl WorkbookState {
@@ -176,11 +158,88 @@ impl WorkbookState {
             <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_recent_colors")
                 .unwrap_or_else(|_| Vec::new());
 
+        // Create the events signal up-front so the read half can be captured
+        // by each per-category Memo below.
+        let events: (
+            ReadSignal<Vec<SpreadsheetEvent>>,
+            WriteSignal<Vec<SpreadsheetEvent>>,
+        ) = signal(Vec::new());
+        let ev = events.0;
+
+        let format_events_memo = Memo::new(move |_| {
+            ev.get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Format(f) => Some(f),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let theme_events_memo = Memo::new(move |_| {
+            ev.get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Theme(t) => Some(t),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let content_events_memo = Memo::new(move |_| {
+            ev.get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Content(c) => Some(c),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let navigation_events_memo = Memo::new(move |_| {
+            ev.get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Navigation(n) => Some(n),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let structure_events_memo = Memo::new(move |_| {
+            ev.get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Structure(s) => Some(s),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let mode_events_memo = Memo::new(move |_| {
+            ev.get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Mode(m) => Some(m),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        });
+        let visual_events_memo = Memo::new(move |_| {
+            ev.get()
+                .into_iter()
+                .filter(|e| {
+                    matches!(
+                        e,
+                        SpreadsheetEvent::Content(_)
+                            | SpreadsheetEvent::Format(_)
+                            | SpreadsheetEvent::Navigation(_)
+                            | SpreadsheetEvent::Structure(_)
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+
         Self {
             editing_cell: signal(None),
             drag: signal(DragState::Idle),
             redraw: signal(0_u32),
-            events: signal(Vec::new()),
+            events,
             version: signal(0_u32),
             current_uuid: signal(None),
             theme: signal(Theme::from_storage()),
@@ -197,6 +256,13 @@ impl WorkbookState {
             formula_input_ref: NodeRef::new(),
             perf: PerfTimings::new(),
             recent_colors: signal(recent_colors),
+            format_events_memo,
+            theme_events_memo,
+            content_events_memo,
+            navigation_events_memo,
+            structure_events_memo,
+            mode_events_memo,
+            visual_events_memo,
         }
     }
 
@@ -265,47 +331,20 @@ impl WorkbookState {
 
     /// Subscribe to format-related events only
     pub fn subscribe_to_format_events(&self) -> impl Fn() -> Vec<FormatEvent> + Copy + use<'_> {
-        move || {
-            self.events
-                .0
-                .get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Format(format_event) => Some(format_event),
-                    _ => None,
-                })
-                .collect()
-        }
+        let memo = self.format_events_memo;
+        move || memo.get()
     }
 
     /// Subscribe to theme-related events only
     pub fn subscribe_to_theme_events(&self) -> impl Fn() -> Vec<ThemeEvent> + Copy + use<'_> {
-        move || {
-            self.events
-                .0
-                .get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Theme(theme_event) => Some(theme_event),
-                    _ => None,
-                })
-                .collect()
-        }
+        let memo = self.theme_events_memo;
+        move || memo.get()
     }
 
     /// Subscribe to content-related events only
     pub fn subscribe_to_content_events(&self) -> impl Fn() -> Vec<ContentEvent> + Copy + use<'_> {
-        move || {
-            self.events
-                .0
-                .get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Content(content_event) => Some(content_event),
-                    _ => None,
-                })
-                .collect()
-        }
+        let memo = self.content_events_memo;
+        move || memo.get()
     }
 
     /// Subscribe to events affecting a specific sheet
@@ -371,49 +410,22 @@ impl WorkbookState {
     pub fn subscribe_to_navigation_events(
         &self,
     ) -> impl Fn() -> Vec<NavigationEvent> + Copy + use<'_> {
-        move || {
-            self.events
-                .0
-                .get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Navigation(nav_event) => Some(nav_event),
-                    _ => None,
-                })
-                .collect()
-        }
+        let memo = self.navigation_events_memo;
+        move || memo.get()
     }
 
     /// Subscribe to structure-related events only (sheets, rows, columns)
     pub fn subscribe_to_structure_events(
         &self,
     ) -> impl Fn() -> Vec<StructureEvent> + Copy + use<'_> {
-        move || {
-            self.events
-                .0
-                .get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Structure(structure_event) => Some(structure_event),
-                    _ => None,
-                })
-                .collect()
-        }
+        let memo = self.structure_events_memo;
+        move || memo.get()
     }
 
     /// Subscribe to mode-related events only (edit mode, drag mode)
     pub fn subscribe_to_mode_events(&self) -> impl Fn() -> Vec<ModeEvent> + Copy + use<'_> {
-        move || {
-            self.events
-                .0
-                .get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Mode(mode_event) => Some(mode_event),
-                    _ => None,
-                })
-                .collect()
-        }
+        let memo = self.mode_events_memo;
+        move || memo.get()
     }
 
     /// Subscribe to visual-related events (content, format, navigation, structure)
@@ -421,20 +433,8 @@ impl WorkbookState {
     pub fn subscribe_to_visual_events(
         &self,
     ) -> impl Fn() -> Vec<SpreadsheetEvent> + Copy + use<'_> {
-        move || {
-            self.events
-                .0
-                .get()
-                .into_iter()
-                .filter(|e| match e {
-                    SpreadsheetEvent::Content(_)
-                    | SpreadsheetEvent::Format(_)
-                    | SpreadsheetEvent::Navigation(_)
-                    | SpreadsheetEvent::Structure(_) => true,
-                    SpreadsheetEvent::Mode(_) | SpreadsheetEvent::Theme(_) => false,
-                })
-                .collect()
-        }
+        let memo = self.visual_events_memo;
+        move || memo.get()
     }
 
     /// Legacy compatibility - subscribe to any change via version counter

@@ -210,17 +210,17 @@ pub struct ResolvedCellStyle {
     // pub resolved_font: ResolvedFont,
 }
 
-// impl ResolvedCellStyle {
-//     // Convenience accessors maintain API compatibility
-//     pub fn bold(&self) -> bool { self.text_format.bold }
-//     pub fn italic(&self) -> bool { self.text_format.italic }
-//     pub fn underline(&self) -> bool {self.text_format.underline}
-//     pub fn strikethrough(&self)-> bool {self.text_format.strikethrough}
-//     pub fn font_size(&self) -> f64 {self.text_style.font_size}
-//     pub fn font_family(&self) -> f64 {self.text_style.font_family}
-//     pub fn text_color(&self) -> &CssColor { &self.text_style.text_color }
-//     pub fn bg_color(&self) -> Option<&CssColor> { self.text_style.bg_color.as_ref() }
-// }
+//impl ResolvedCellStyle {
+//    // Convenience accessors maintain API compatibility
+//    pub fn bold(&self) -> bool { self.text_format.bold }
+//    pub fn italic(&self) -> bool { self.text_format.italic }
+//    pub fn underline(&self) -> bool {self.text_format.underline}
+//    pub fn strikethrough(&self)-> bool {self.text_format.strikethrough}
+//    pub fn font_size(&self) -> f64 {self.text_style.font_size}
+//    pub fn font_family(&self) -> f64 {self.text_style.font_family}
+//    pub fn text_color(&self) -> &CssColor { &self.text_style.text_color }
+//    pub fn bg_color(&self) -> Option<&CssColor> { self.text_style.bg_color.as_ref() }
+//}
 
 // ToolbarState
 

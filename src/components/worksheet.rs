@@ -10,7 +10,7 @@ use crate::components::cell_editor::CellEditor;
 use crate::input::formula_input::*;
 use crate::model::{AppClipboard, ArrowKey, CellAddress, FrontendModel, PageDir};
 
-use crate::events::{ContextMenuTarget, DragState};
+use crate::events::{DragState, HeaderContextMenu};
 use crate::state::{ContextMenuState, EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
@@ -38,11 +38,10 @@ pub fn Worksheet() -> impl IntoView {
 
     // Re-render canvas every time visual events occur (content, format, navigation, structure).
     let clipboard_draw = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
-    
+
     // Memo for expensive overlay calculations - only recomputes when dependencies change
     let overlays = create_memo(move |_| {
-        let extend_to = if let DragState::Extending { to_row, to_col } = state.get_drag()
-        {
+        let extend_to = if let DragState::Extending { to_row, to_col } = state.get_drag() {
             Some((to_row, to_col))
         } else {
             None
@@ -66,10 +65,10 @@ pub fn Worksheet() -> impl IntoView {
             point_range: point_range.map(|[r1, c1, r2, c2]| SheetRect { r1, c1, r2, c2 }),
         }
     });
-    
+
     // Memo for canvas theme - cached until theme changes
     let canvas_theme = create_memo(move |_| state.get_theme().canvas_theme());
-    
+
     Effect::new(move |_| {
         // Subscribe to visual events only (excludes theme/mode events that don't affect rendering)
         let _ = state.subscribe_to_visual_events()();
@@ -148,7 +147,7 @@ pub fn Worksheet() -> impl IntoView {
                     start_col,
                     end_row,
                     end_col,
-                }
+                },
             ));
             return;
         }
@@ -182,7 +181,7 @@ pub fn Worksheet() -> impl IntoView {
                     start_col,
                     end_row,
                     end_col,
-                }
+                },
             ));
             return;
         }
@@ -216,7 +215,7 @@ pub fn Worksheet() -> impl IntoView {
                     start_col,
                     end_row,
                     end_col,
-                }
+                },
             ));
             return;
         }
@@ -477,14 +476,14 @@ pub fn Worksheet() -> impl IntoView {
 
         let target = if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
             // Column header
-            Some(ContextMenuTarget::Column(model.with_value(|m| {
+            Some(HeaderContextMenu::Column(model.with_value(|m| {
                 let v = m.get_selected_view();
                 let fg = frozen_geometry(m, v.sheet);
                 pixel_to_col(m, v.sheet, v.left_column, x, &fg)
             })))
         } else if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
             // Row header
-            Some(ContextMenuTarget::Row(model.with_value(|m| {
+            Some(HeaderContextMenu::Row(model.with_value(|m| {
                 let v = m.get_selected_view();
                 let fg = frozen_geometry(m, v.sheet);
                 pixel_to_row(m, v.sheet, v.top_row, y, &fg)
