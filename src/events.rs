@@ -184,7 +184,13 @@ pub struct Location {
 }
 
 impl Location {
-    
+    pub fn new(sheet: u32, start: i32, count: i32) -> Self {
+        Self {
+            sheet,
+            start,
+            count,
+        }
+    }
 }
 
 /// A structural change to rows or columns

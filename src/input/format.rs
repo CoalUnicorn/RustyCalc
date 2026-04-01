@@ -53,6 +53,16 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                     )
                 });
 
+            /*
+            FIXME:  how we handle cell area / columns / rows selection with different
+                    font sizing. How excel handle this?
+                1.  Currently if selection includes empty cell default size 13px and bigger we decrement,
+                    it will throw console err like:
+                    [ironcalc] set_font_size: Invalid value for font size: '-43'.
+                    [ironcalc] set_font_size: Invalid value for font size: '0'.
+                2.  When font size goes below 10px - not able to increment with buttons
+                    This may be `toolbar.rs` issue ?
+            */
             mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
                 let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);

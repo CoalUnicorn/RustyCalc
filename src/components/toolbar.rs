@@ -8,7 +8,7 @@ use crate::events::*;
 use crate::input::action::{execute, SpreadsheetAction};
 use crate::model::{frontend_types::ToolbarState, FrontendModel, SafeFontFamily};
 use crate::state::{ModelStore, WorkbookState};
-use crate::util::warn_if_err;
+use crate::util::{refocus_workbook, warn_if_err};
 
 const FONT_SIZES: &[f64] = &[
     6.0, 7.0, 8.0, 9.0, 10.0, 10.5, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0,
@@ -42,6 +42,8 @@ fn UndoRedo() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
+    // TODO: can it be:
+    // let content_state = expect_context::<Memo<(bool, bool)>>();
     let undo_redo_state = Memo::new(move |_| {
         let content_events = state.subscribe_to_content_events();
         let _ = content_events(); // Single subscription
@@ -88,8 +90,9 @@ fn get_shared_toolbar_state() -> Memo<ToolbarState> {
     let model = expect_context::<ModelStore>();
 
     Memo::new(move |_| {
-        let format_events = state.subscribe_to_format_events();
-        let _ = format_events(); // Single format subscription for all toolbar components
+        let _ = state.subscribe_to_format_events()();
+        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.subscribe_to_visual_events()();
         model.with_value(|m| m.toolbar_state()) // Single model access
     })
 }
@@ -270,22 +273,17 @@ fn FormatToggles() -> impl IntoView {
     let toolbar_state = get_shared_toolbar_state();
     let format = move || toolbar_state.with(|ts| ts.format.clone());
 
-    let on_bold = move |_: web_sys::MouseEvent| {
-        execute(&SpreadsheetAction::toggle_bold(), model, &state);
-        crate::util::refocus_workbook();
+    let create_toggle = move |action: SpreadsheetAction| {
+        move |_: web_sys::MouseEvent| {
+            execute(&action, model, &state);
+            refocus_workbook();
+        }
     };
-    let on_italic = move |_: web_sys::MouseEvent| {
-        execute(&SpreadsheetAction::toggle_italic(), model, &state);
-        crate::util::refocus_workbook();
-    };
-    let on_underline = move |_: web_sys::MouseEvent| {
-        execute(&SpreadsheetAction::toggle_underline(), model, &state);
-        crate::util::refocus_workbook();
-    };
-    let on_strike = move |_: web_sys::MouseEvent| {
-        execute(&SpreadsheetAction::toggle_strikethrough(), model, &state);
-        crate::util::refocus_workbook();
-    };
+
+    let on_bold = create_toggle(SpreadsheetAction::toggle_bold());
+    let on_italic = create_toggle(SpreadsheetAction::toggle_italic());
+    let on_underline = create_toggle(SpreadsheetAction::toggle_underline());
+    let on_strike = create_toggle(SpreadsheetAction::toggle_strikethrough());
 
     view! {
         <button
@@ -393,6 +391,8 @@ fn TextColorPickerToolbar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let _model = expect_context::<ModelStore>();
 
+    let toolbar_state = get_shared_toolbar_state();
+
     let (format_state, _theme_state) = get_shared_color_state();
     let current_color = Signal::derive(move || {
         format_state.with(|_ts| {
@@ -401,6 +401,7 @@ fn TextColorPickerToolbar() -> impl IntoView {
             None::<String>
         })
     });
+    let color = move || toolbar_state.with(|ts| ts.style.text_color.clone());
 
     // Handle color change with event emission
     let on_color_change = Callback::new(move |color: Option<String>| {
