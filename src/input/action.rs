@@ -13,7 +13,7 @@ use crate::input::edit::{execute_edit, EditAction};
 use crate::input::format::{execute_format, FormatAction};
 use crate::input::nav::{execute_nav, NavAction};
 use crate::input::structure::{execute_struct, StructAction};
-use crate::model::{ArrowKey, SafeFontFamily};
+use crate::model::{ArrowKey, CellAddress, SafeFontFamily};
 use crate::state::{EditMode, EditingCell, ModelStore, WorkbookState};
 
 use leptos::prelude::UpdateValue;
@@ -172,7 +172,6 @@ pub fn classify_key(
     }
 }
 
-
 /// True for single printable characters that should start a cell edit.
 fn is_printable(key: &str) -> bool {
     key.chars().count() == 1 && key.as_bytes()[0] >= 0x20
@@ -254,9 +253,11 @@ mod tests {
 
     fn accept_cell() -> EditingCell {
         EditingCell {
-            sheet: 1,
-            row: 1,
-            col: 1,
+            address: CellAddress {
+                sheet: 1,
+                row: 1,
+                column: 1,
+            },
             text: String::new(),
             mode: EditMode::Accept,
             focus: EditFocus::Cell,
@@ -265,9 +266,11 @@ mod tests {
 
     fn edit_cell() -> EditingCell {
         EditingCell {
-            sheet: 1,
-            row: 1,
-            col: 1,
+            address: CellAddress {
+                sheet: 1,
+                row: 1,
+                column: 1,
+            },
             text: String::new(),
             mode: EditMode::Edit,
             focus: EditFocus::Cell,

@@ -19,6 +19,7 @@ Each sub-component has a single responsibility and can be tested/styled independ
 */
 
 use leptos::prelude::*;
+use leptos_use::use_toggle;
 
 use crate::theme::COLOR_PALETTE;
 
@@ -80,8 +81,12 @@ pub fn ColorPicker(
     #[prop(default = Signal::derive(|| Vec::new()))]
     recent_colors: Signal<Vec<String>>,
 ) -> impl IntoView {
-    // Internal state: is the picker currently open?
-    let picker_open: RwSignal<bool> = RwSignal::new(false);
+    // Use leptos-use toggle for efficient boolean state
+    let leptos_use::UseToggleReturn {
+        toggle: toggle_picker_method,
+        value: picker_open,
+        set_value: set_picker_open,
+    } = use_toggle(false);
 
     // Internal state: custom color input field value
     let custom_input: RwSignal<String> = RwSignal::new(String::new());
@@ -89,7 +94,8 @@ pub fn ColorPicker(
     // Handle color selection from any source
     let select_color = move |color: Option<String>| {
         on_color_change.run(color);
-        picker_open.set(false);
+        // Close picker using leptos-use controls
+        set_picker_open.set(false);
         custom_input.set(String::new());
     };
 
@@ -101,6 +107,7 @@ pub fn ColorPicker(
             <ColorPickerTrigger
                 placement=placement
                 picker_open=picker_open
+                toggle_picker=Callback::new(move |_| toggle_picker_method())
             >
                 {children()}
             </ColorPickerTrigger>
@@ -124,19 +131,21 @@ pub fn ColorPicker(
 #[component]
 fn ColorPickerTrigger(
     placement: ColorPickerPlacement,
-    picker_open: RwSignal<bool>,
+    picker_open: Signal<bool>, // Updated to work with leptos-use Signal<bool>
+    toggle_picker: Callback<()>, // Toggle function passed from parent
     children: Children,
 ) -> impl IntoView {
-    let toggle_picker = move |ev: web_sys::MouseEvent| {
+    let toggle_picker_fn = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
-        picker_open.update(|open| *open = !*open);
+        // Toggle picker using leptos-use controls
+        toggle_picker.run(());
     };
 
     if placement == ColorPickerPlacement::Dropdown {
         view! {
             <button
                 class="toolbar-btn color-picker-trigger"
-                on:click=toggle_picker
+                on:click=toggle_picker_fn
             >
                 {children()}
             </button>
@@ -146,7 +155,7 @@ fn ColorPickerTrigger(
         view! {
             <div
                 class="ctx-item color-picker-trigger"
-                on:click=toggle_picker
+                on:click=toggle_picker_fn
             >
                 {children()}
             </div>

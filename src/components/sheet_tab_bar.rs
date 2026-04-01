@@ -20,7 +20,9 @@ pub fn SheetTabBar() -> impl IntoView {
     let renaming: RwSignal<Option<u32>> = RwSignal::new(None);
 
     let visible_sheets = move || {
-        let _ = state.get_redraw();
+        // Subscribe to structure events (sheet list changes) and navigation (active sheet changes)
+        let _ = state.subscribe_to_structure_events()();
+        let _ = state.subscribe_to_navigation_events()();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .into_iter()
@@ -32,10 +34,23 @@ pub fn SheetTabBar() -> impl IntoView {
     };
 
     let on_add = move |_| {
+        let new_sheet_result = model.with_value(|m| {
+            let current_sheets = m.get_worksheets_properties();
+            (current_sheets.len() as u32, current_sheets.len() as u32)
+        });
+
         model.update_value(|m| {
             m.new_sheet().ok();
         });
-        state.request_redraw();
+
+        // Fire specific structure event instead of generic redraw
+        let new_sheet_name = format!("Sheet{}", new_sheet_result.1 + 1);
+        state.emit_event(crate::events::SpreadsheetEvent::Structure(
+            crate::events::StructureEvent::WorksheetAdded {
+                sheet: new_sheet_result.1,
+                name: new_sheet_name,
+            }
+        ));
     };
 
     // let on_toggle_perf = move |_: web_sys::MouseEvent| {
@@ -93,12 +108,14 @@ fn SheetTab(
     let model = expect_context::<ModelStore>();
 
     let is_selected = move || {
-        let _ = state.get_redraw();
+        // Subscribe to navigation events (active sheet changes affect selection state)
+        let _ = state.subscribe_to_navigation_events()();
         model.with_value(|m| m.get_selected_view().sheet == sheet_idx)
     };
 
     let name = move || {
-        let _ = state.get_redraw();
+        // Subscribe to structure events (sheet renaming affects name display)
+        let _ = state.subscribe_to_structure_events()();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .get(sheet_idx as usize)
@@ -108,7 +125,8 @@ fn SheetTab(
     };
 
     let tab_color = move || {
-        let _ = state.get_redraw();
+        // Subscribe to structure events (sheet color changes affect tab appearance)
+        let _ = state.subscribe_to_structure_events()();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .get(sheet_idx as usize)
@@ -117,10 +135,21 @@ fn SheetTab(
     };
 
     let on_click = move |_: web_sys::MouseEvent| {
+        let previous_sheet = model.with_value(|m| m.get_selected_view().sheet);
+
         model.update_value(|m| {
             m.set_selected_sheet(sheet_idx).ok();
         });
-        state.request_redraw();
+
+        // Fire specific navigation event instead of generic redraw
+        if previous_sheet != sheet_idx {
+            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                crate::events::NavigationEvent::ActiveSheetChanged {
+                    from_sheet: previous_sheet,
+                    to_sheet: sheet_idx,
+                }
+            ));
+        }
     };
 
     let on_dblclick = move |ev: web_sys::MouseEvent| {
@@ -189,7 +218,8 @@ fn TabContextMenu(
     let color_sub_open: RwSignal<bool> = RwSignal::new(false);
 
     let visible_count = move || {
-        let _ = state.get_redraw();
+        // Subscribe to structure events (sheet visibility changes affect count)
+        let _ = state.subscribe_to_structure_events()();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .iter()
@@ -213,17 +243,33 @@ fn TabContextMenu(
         model.update_value(|m| {
             m.set_sheet_color(sheet_idx, hex).ok();
         });
-        state.request_redraw();
+
+        // Fire specific format event for sheet color change
+        state.emit_event(crate::events::SpreadsheetEvent::Format(
+            crate::events::FormatEvent::LayoutChanged {
+                sheet: sheet_idx,
+                col: None,
+                row: None,
+            }
+        ));
+
         menu_open.set(None);
     };
 
     let on_hide = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
         menu_open.set(None);
+
         model.update_value(|m| {
             m.hide_sheet(sheet_idx).ok();
         });
-        state.request_redraw();
+
+        // Fire specific structure event for sheet hiding (treated as worksheet deletion from UI perspective)
+        state.emit_event(crate::events::SpreadsheetEvent::Structure(
+            crate::events::StructureEvent::WorksheetDeleted {
+                sheet: sheet_idx
+            }
+        ));
     };
 
     let on_delete = move |ev: web_sys::MouseEvent| {
@@ -245,7 +291,13 @@ fn TabContextMenu(
             model.update_value(|m| {
                 m.delete_sheet(sheet_idx).ok();
             });
-            state.request_redraw();
+
+            // Fire specific structure event for sheet deletion
+            state.emit_event(crate::events::SpreadsheetEvent::Structure(
+                crate::events::StructureEvent::WorksheetDeleted {
+                    sheet: sheet_idx
+                }
+            ));
         }
     };
 
@@ -338,10 +390,25 @@ fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView
 
     let commit_rename = move |new_name: String| {
         if !new_name.trim().is_empty() {
+            let old_name = model.with_value(|m| {
+                m.get_worksheets_properties()
+                    .get(sheet_idx as usize)
+                    .map(|s| s.name.clone())
+                    .unwrap_or_default()
+            });
+
             model.update_value(|m| {
                 m.rename_sheet(sheet_idx, &new_name).ok();
             });
-            state.request_redraw();
+
+            // Fire specific structure event for sheet rename
+            state.emit_event(crate::events::SpreadsheetEvent::Structure(
+                crate::events::StructureEvent::WorksheetRenamed {
+                    sheet: sheet_idx,
+                    old_name,
+                    new_name: new_name.clone(),
+                }
+            ));
         }
         renaming.set(None);
     };
@@ -401,7 +468,8 @@ fn AllSheetsMenu() -> impl IntoView {
     let menu_pos: RwSignal<(i32, i32)> = RwSignal::new((0, 0));
 
     let all_sheets = move || {
-        let _ = state.get_redraw();
+        // Subscribe to structure events (sheet list, names, visibility changes)
+        let _ = state.subscribe_to_structure_events()();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .into_iter()
@@ -412,7 +480,8 @@ fn AllSheetsMenu() -> impl IntoView {
     };
 
     let selected_sheet = move || {
-        let _ = state.get_redraw();
+        // Subscribe to navigation events (active sheet changes affect selection highlight)
+        let _ = state.subscribe_to_navigation_events()();
         model.with_value(|m| m.get_selected_view().sheet)
     };
 
@@ -456,15 +525,36 @@ fn AllSheetsMenu() -> impl IntoView {
                             } else {
                                 "all-sheets-item"
                             };
+                            let name_clone = name.clone(); // Clone for use in closure
                             view! {
                                 <div
                                     class=item_class
                                     on:click=move |_| {
+                                        let previous_sheet = model.with_value(|m| m.get_selected_view().sheet);
+
                                         if is_hidden {
                                             model.update_value(|m| { m.unhide_sheet(idx).ok(); });
+                                            // Fire event for sheet unhiding (opposite of hiding/deletion)
+                                            state.emit_event(crate::events::SpreadsheetEvent::Structure(
+                                                crate::events::StructureEvent::WorksheetAdded {
+                                                    sheet: idx,
+                                                    name: name_clone.clone(),
+                                                }
+                                            ));
                                         }
+
                                         model.update_value(|m| { m.set_selected_sheet(idx).ok(); });
-                                        state.request_redraw();
+
+                                        // Fire navigation event for sheet selection
+                                        if previous_sheet != idx {
+                                            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                                                crate::events::NavigationEvent::ActiveSheetChanged {
+                                                    from_sheet: previous_sheet,
+                                                    to_sheet: idx,
+                                                }
+                                            ));
+                                        }
+
                                         open.set(false);
                                     }
                                 >

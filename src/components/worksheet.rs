@@ -8,7 +8,7 @@ use web_sys::HtmlCanvasElement;
 use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
 use crate::input::formula_input::*;
-use crate::model::{AppClipboard, ArrowKey, FrontendModel, PageDir};
+use crate::model::{AppClipboard, ArrowKey, CellAddress, FrontendModel, PageDir};
 
 use crate::state::{
     ContextMenuState, ContextMenuTarget, DragState, EditFocus, EditMode, EditingCell, ModelStore,
@@ -38,22 +38,18 @@ pub fn Worksheet() -> impl IntoView {
         state.request_redraw();
     });
 
-    // Re-render canvas every time the redraw counter increments.
+    // Re-render canvas every time visual events occur (content, format, navigation, structure).
     let clipboard_draw = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
-    Effect::new(move |_| {
-        let _ = state.get_redraw();
-        let Some(canvas) = canvas_ref.get() else {
-            return;
-        };
-        let canvas_el: HtmlCanvasElement = canvas;
-        let extend_to = if let DragState::Extending { to_row, to_col } = state.get_drag_untracked()
+    
+    // Memo for expensive overlay calculations - only recomputes when dependencies change
+    let overlays = create_memo(move |_| {
+        let extend_to = if let DragState::Extending { to_row, to_col } = state.get_drag()
         {
             Some((to_row, to_col))
         } else {
             None
         };
-        let point_range = state.get_point_range_untracked();
-        let canvas_theme = state.get_theme_untracked().canvas_theme();
+        let point_range = state.get_point_range();
         let clipboard = clipboard_draw.with_value(|opt| {
             opt.as_ref().map(|acb| {
                 let (r1, c1, r2, c2) = acb.range;
@@ -66,11 +62,23 @@ pub fn Worksheet() -> impl IntoView {
                 }
             })
         });
-        let overlays = RenderOverlays {
+        RenderOverlays {
             extend_to,
             clipboard,
             point_range: point_range.map(|[r1, c1, r2, c2]| SheetRect { r1, c1, r2, c2 }),
+        }
+    });
+    
+    // Memo for canvas theme - cached until theme changes
+    let canvas_theme = create_memo(move |_| state.get_theme().canvas_theme());
+    
+    Effect::new(move |_| {
+        // Subscribe to visual events only (excludes theme/mode events that don't affect rendering)
+        let _ = state.subscribe_to_visual_events()();
+        let Some(canvas) = canvas_ref.get() else {
+            return;
         };
+        let canvas_el: HtmlCanvasElement = canvas;
         // Sync canvas dimensions into the model so that on_area_selecting
         // knows how wide/tall the visible area is and only scrolls when the
         // drag target is genuinely outside the viewport (not on every move).
@@ -81,8 +89,8 @@ pub fn Worksheet() -> impl IntoView {
             m.set_window_height(canvas_h);
         });
         model.with_value(|m| {
-            let renderer = CanvasRenderer::new(&canvas_el, canvas_theme);
-            renderer.render(m, &overlays);
+            let renderer = CanvasRenderer::new(&canvas_el, canvas_theme.get());
+            renderer.render(m, &overlays.get());
         });
         // Record render-done timestamp for the perf panel.
         if state.perf.commit_start.get_untracked().is_some() {
@@ -128,7 +136,22 @@ pub fn Worksheet() -> impl IntoView {
                 m.nav_select_all();
             });
             state.set_editing_cell(None);
-            state.request_redraw();
+
+            // Fire navigation event for select all
+            let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
+                let v = m.get_selected_view();
+                let [r1, c1, r2, c2] = v.range;
+                (v.sheet, r1, c1, r2, c2)
+            });
+            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                crate::events::NavigationEvent::SelectionRangeChanged {
+                    sheet,
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                }
+            ));
             return;
         }
 
@@ -147,7 +170,22 @@ pub fn Worksheet() -> impl IntoView {
                 }
             });
             state.set_editing_cell(None);
-            state.request_redraw();
+
+            // Fire navigation event for column selection
+            let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
+                let v = m.get_selected_view();
+                let [r1, c1, r2, c2] = v.range;
+                (v.sheet, r1, c1, r2, c2)
+            });
+            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                crate::events::NavigationEvent::SelectionRangeChanged {
+                    sheet,
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                }
+            ));
             return;
         }
 
@@ -166,7 +204,22 @@ pub fn Worksheet() -> impl IntoView {
                 }
             });
             state.set_editing_cell(None);
-            state.request_redraw();
+
+            // Fire navigation event for row selection
+            let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
+                let v = m.get_selected_view();
+                let [r1, c1, r2, c2] = v.range;
+                (v.sheet, r1, c1, r2, c2)
+            });
+            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                crate::events::NavigationEvent::SelectionRangeChanged {
+                    sheet,
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                }
+            ));
             return;
         }
 
@@ -407,9 +460,11 @@ pub fn Worksheet() -> impl IntoView {
             let ac = m.active_cell();
             let text = m.active_cell_content();
             state.set_editing_cell(Some(EditingCell {
-                sheet: ac.sheet,
-                row: ac.row,
-                col: ac.column,
+                address: CellAddress {
+                    sheet: ac.sheet,
+                    row: ac.row,
+                    column: ac.column,
+                },
                 text,
                 mode: EditMode::Edit,
                 focus: EditFocus::Cell,

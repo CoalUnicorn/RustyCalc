@@ -169,9 +169,30 @@ pub struct CellBorders {
     pub left: Option<ResolvedBorderEdge>,
 }
 
+/// Basic formatting
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextFormat {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+}
+
+/// Visual style properties.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextStyle {
+    pub font_size: f64,
+    pub font_family: SafeFontFamily,
+    pub h_align: HorizontalAlignment,
+    pub text_color: CssColor,
+    pub bg_color: Option<CssColor>,
+}
 // ResolvedCellStyle
 
 /// Everything the renderer needs to paint one cell. No further resolution required.
+// FIXME: ? to use TextFormat & TextStyle ?
+// IMPORTANT: this is style we getting from ironcalc_base /home/mmm/01_Dev/IronCalc/base/src/types.rs
+// Our FrontendModel fn cell_style() returns this. also see /home/mmm/01_Dev/IronCalc/base/src/user_model
 #[derive(Debug, Clone)]
 pub struct ResolvedCellStyle {
     /// Resolved text color; never empty.
@@ -180,30 +201,33 @@ pub struct ResolvedCellStyle {
     pub bg_color: Option<CssColor>,
     pub font: ResolvedFont,
     /// `General` already resolved to `Left` or `Right` based on cell type.
+    // pub text_style: TextStyle,
+    // pub text_format: TextFormat,
     pub h_align: HorizontalAlignment,
     pub v_align: VerticalAlignment,
     pub wrap_text: bool,
     pub borders: CellBorders,
+    // pub resolved_font: ResolvedFont,
 }
+
+// impl ResolvedCellStyle {
+//     // Convenience accessors maintain API compatibility
+//     pub fn bold(&self) -> bool { self.text_format.bold }
+//     pub fn italic(&self) -> bool { self.text_format.italic }
+//     pub fn underline(&self) -> bool {self.text_format.underline}
+//     pub fn strikethrough(&self)-> bool {self.text_format.strikethrough}
+//     pub fn font_size(&self) -> f64 {self.text_style.font_size}
+//     pub fn font_family(&self) -> f64 {self.text_style.font_family}
+//     pub fn text_color(&self) -> &CssColor { &self.text_style.text_color }
+//     pub fn bg_color(&self) -> Option<&CssColor> { self.text_style.bg_color.as_ref() }
+// }
 
 // ToolbarState
 
-/// Lean subset of `ResolvedCellStyle` for the toolbar.
-/// Omits `borders`, `v_align`, `wrap_text`, and `font.css` — not needed by toolbar components.
-///
-/// Note: `h_align` preserves `General` (toolbar shows what's explicitly set,
-/// not the cell-type-resolved value the renderer uses).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ToolbarState {
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-    pub strikethrough: bool,
-    pub font_size: f64,
-    pub font_family: SafeFontFamily,
-    pub h_align: HorizontalAlignment,
-    pub text_color: CssColor,
-    pub bg_color: Option<CssColor>,
+    pub format: TextFormat,
+    pub style: TextStyle,
 }
 
 // Sheet dimension
@@ -233,11 +257,8 @@ pub enum PageDir {
     Down,
 }
 
-// Active cell address
-
-/// The active cell's position — the cell the cursor is on.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ActiveCell {
+pub struct CellAddress {
     pub sheet: u32,
     pub row: i32,
     pub column: i32,

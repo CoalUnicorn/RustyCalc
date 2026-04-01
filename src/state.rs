@@ -1,8 +1,11 @@
 use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
+use std::rc::Rc;
 
 // NOTE: <Meta name="color-scheme" content="dark"/>
+use crate::events::*;
+use crate::model::CellAddress;
 use crate::perf::PerfTimings;
 use crate::theme::Theme;
 
@@ -17,9 +20,10 @@ pub type ModelStore = StoredValue<UserModel<'static>, LocalStorage>;
 /// Mirrors the TypeScript `EditingCell` interface in workbookState.ts.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditingCell {
-    pub(crate) sheet: u32,
-    pub(crate) row: i32,
-    pub(crate) col: i32,
+    // pub(crate) sheet: u32,
+    // pub(crate) row: i32,
+    // pub(crate) col: i32,
+    pub(crate) address: CellAddress,
     /// Text the user has typed; NOT yet written to UserModel
     pub(crate) text: String,
     /// "accept" = arrow keys navigate; "edit" = arrow keys move cursor within text
@@ -100,41 +104,58 @@ pub struct ContextMenuState {
 pub struct WorkbookState {
     /// None = not editing; Some = live edit buffer
     /// Split signals for better granularity: readers don't get notified of writes
-    pub(crate) editing_cell: (ReadSignal<Option<EditingCell>>, WriteSignal<Option<EditingCell>>),
+    pub(crate) editing_cell: (
+        ReadSignal<Option<EditingCell>>,
+        WriteSignal<Option<EditingCell>>,
+    ),
     /// Active mouse-drag interaction (selection, resize, autofill, point-mode).
     pub(crate) drag: (ReadSignal<DragState>, WriteSignal<DragState>),
     /// Increment after any model mutation to force canvas re-renders.
     /// Components that draw the canvas subscribe to the read signal.
     pub(crate) redraw: (ReadSignal<u32>, WriteSignal<u32>),
+    /// Typed event stream for fine-grained reactivity.
+    /// Replaces generic redraw counter with domain-specific events.
+    pub(crate) events: (
+        ReadSignal<Vec<SpreadsheetEvent>>,
+        WriteSignal<Vec<SpreadsheetEvent>>,
+    ),
+    /// Version counter for legacy compatibility during migration.
+    pub(crate) version: (ReadSignal<u32>, WriteSignal<u32>),
     /// UUID of the workbook currently loaded in the model.
     /// Used by `storage::save` to write back to the correct localStorage key.
     /// `None` during the brief window before a workbook is loaded.
     pub(crate) current_uuid: (ReadSignal<Option<String>>, WriteSignal<Option<String>>),
-    /// Active color theme; initialized from localStorage on startup.
+    /// Active color theme; Enhanced with leptos-use auto-detection behind the scenes
     pub(crate) theme: (ReadSignal<Theme>, WriteSignal<Theme>),
     /// Whether the left workbook-list drawer is open.
-    pub(crate) is_drawer_open: (ReadSignal<bool>, WriteSignal<bool>),
+    // pub(crate) is_drawer_open: (ReadSignal<bool>, WriteSignal<bool>),
     /// Controls the Upload xlsx file dialog.
-    pub(crate) show_upload_dialog: (ReadSignal<bool>, WriteSignal<bool>),
+    // pub(crate) show_upload_dialog: (ReadSignal<bool>, WriteSignal<bool>),
     /// Controls the Share dialog; holds the URL returned by the server.
-    pub(crate) share_url: (ReadSignal<Option<String>>, WriteSignal<Option<String>>),
+    // pub(crate) share_url: (ReadSignal<Option<String>>, WriteSignal<Option<String>>),
     /// BCP-47 language tag for formula language, persisted in localStorage.
-    pub(crate) current_lang: (ReadSignal<String>, WriteSignal<String>),
+    // pub(crate) current_lang: (ReadSignal<String>, WriteSignal<String>),
     /// Whether the Regional Settings right panel is open.
-    pub(crate) show_regional_settings: (ReadSignal<bool>, WriteSignal<bool>),
+    // pub(crate) show_regional_settings: (ReadSignal<bool>, WriteSignal<bool>),
     /// Whether the Named Ranges right panel is open.
-    pub(crate) show_named_ranges: (ReadSignal<bool>, WriteSignal<bool>),
+    // pub(crate) show_named_ranges: (ReadSignal<bool>, WriteSignal<bool>),
     /// Whether the Performance panel is visible.
     pub(crate) show_perf_panel: (ReadSignal<bool>, WriteSignal<bool>),
     /// Active right-click context menu; None when no menu is showing.
-    pub(crate) context_menu: (ReadSignal<Option<ContextMenuState>>, WriteSignal<Option<ContextMenuState>>),
+    pub(crate) context_menu: (
+        ReadSignal<Option<ContextMenuState>>,
+        WriteSignal<Option<ContextMenuState>>,
+    ),
     /// Range being pointed at during formula entry (`[r1, c1, r2, c2]`, 1-based).
     /// `None` when not in point mode.
     pub(crate) point_range: (ReadSignal<Option<[i32; 4]>>, WriteSignal<Option<[i32; 4]>>),
     /// Byte span `(start, end)` within `editing_cell.text` that holds the
     /// current point-mode reference text, so it can be replaced in-place
     /// when the user presses arrow keys or clicks another cell.
-    pub(crate) point_ref_span: (ReadSignal<Option<(usize, usize)>>, WriteSignal<Option<(usize, usize)>>),
+    pub(crate) point_ref_span: (
+        ReadSignal<Option<(usize, usize)>>,
+        WriteSignal<Option<(usize, usize)>>,
+    ),
     /// NodeRef to the formula bar <input> — used by FunctionBrowserModal
     /// to read/write cursor position when inserting a function name.
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
@@ -159,14 +180,16 @@ impl WorkbookState {
             editing_cell: signal(None),
             drag: signal(DragState::Idle),
             redraw: signal(0_u32),
+            events: signal(Vec::new()),
+            version: signal(0_u32),
             current_uuid: signal(None),
             theme: signal(Theme::from_storage()),
-            is_drawer_open: signal(false),
-            show_upload_dialog: signal(false),
-            share_url: signal(None),
-            current_lang: signal(lang),
-            show_regional_settings: signal(false),
-            show_named_ranges: signal(false),
+            // is_drawer_open: signal(false),
+            // show_upload_dialog: signal(false),
+            // share_url: signal(None),
+            // current_lang: signal(lang),
+            // show_regional_settings: signal(false),
+            // show_named_ranges: signal(false),
             show_perf_panel: signal(false),
             context_menu: signal(None),
             point_range: signal(None),
@@ -178,121 +201,416 @@ impl WorkbookState {
     }
 
     /// Call after any UserModel mutation to trigger canvas re-render.
+    ///
+    /// Legacy method - prefer `emit_event()` for new code.
     pub fn request_redraw(&self) {
         self.redraw.1.update(|n| *n += 1);
+        // Also emit generic change event for new system
+        self.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+    }
+
+    // ===== Event System =====
+
+    /// Emit a typed event - replaces `request_redraw()` for specific changes.
+    ///
+    /// This method:
+    /// 1. Adds the event to the event stream
+    /// 2. Bumps the version counter for legacy subscribers
+    /// 3. Auto-updates related signals based on event type
+    pub fn emit_event(&self, event: SpreadsheetEvent) {
+        // Add to event stream (keep last 100 events for subscribers)
+        self.events.1.update(|events| {
+            events.push(event.clone());
+            if events.len() > 100 {
+                events.drain(0..events.len() - 100);
+            }
+        });
+
+        // Bump version for generic subscribers
+        self.version.1.update(|v| *v += 1);
+
+        // Auto-update related signals based on event type
+        match event {
+            SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled { new_theme }) => {
+                self.theme.1.set(new_theme);
+            }
+            SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated { colors }) => {
+                self.recent_colors.1.set(colors);
+            }
+            SpreadsheetEvent::Navigation(NavigationEvent::EditingStarted { address: _ }) => {
+                // This would typically be set elsewhere, but we can sync here too
+            }
+            SpreadsheetEvent::Navigation(NavigationEvent::EditingEnded {
+                committed: true, ..
+            }) => {
+                // Clear editing state on successful commit
+                self.editing_cell.1.set(None);
+            }
+            SpreadsheetEvent::Mode(ModeEvent::DragModeChanged { to_mode, .. }) => {
+                self.drag.1.set(to_mode);
+            }
+            _ => {} // Other events don't auto-update signals
+        }
+    }
+
+    /// Subscribe to all events (returns the current event list)
+    pub fn get_events(&self) -> Vec<SpreadsheetEvent> {
+        self.events.0.get()
+    }
+
+    /// Subscribe to events, with reactive updates
+    pub fn subscribe_to_events(&self) -> impl Fn() -> Vec<SpreadsheetEvent> + Copy + use<'_> {
+        move || self.events.0.get()
+    }
+
+    /// Subscribe to format-related events only
+    pub fn subscribe_to_format_events(&self) -> impl Fn() -> Vec<FormatEvent> + Copy + use<'_> {
+        move || {
+            self.events
+                .0
+                .get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Format(format_event) => Some(format_event),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    /// Subscribe to theme-related events only
+    pub fn subscribe_to_theme_events(&self) -> impl Fn() -> Vec<ThemeEvent> + Copy + use<'_> {
+        move || {
+            self.events
+                .0
+                .get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Theme(theme_event) => Some(theme_event),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    /// Subscribe to content-related events only
+    pub fn subscribe_to_content_events(&self) -> impl Fn() -> Vec<ContentEvent> + Copy + use<'_> {
+        move || {
+            self.events
+                .0
+                .get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Content(content_event) => Some(content_event),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    /// Subscribe to events affecting a specific sheet
+    pub fn subscribe_to_sheet_events(
+        &self,
+        sheet: u32,
+    ) -> impl Fn() -> Vec<SpreadsheetEvent> + Copy + use<'_> {
+        move || {
+            self.events
+                .0
+                .get()
+                .into_iter()
+                .filter(|e| e.affects_sheet(sheet))
+                .collect()
+        }
+    }
+
+    // ===== Convenience Methods for Common Events =====
+
+    /// Notify that theme changed
+    pub fn notify_theme_changed(&self, new_theme: Theme) {
+        self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
+            new_theme,
+        }));
+    }
+
+    /// Notify that recent colors were updated
+    pub fn notify_recent_colors_updated(&self, colors: Vec<String>) {
+        self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
+            colors,
+        }));
+    }
+
+    /// Notify that a cell value changed
+    pub fn notify_cell_changed(&self, address: CellAddress) {
+        self.emit_event(SpreadsheetEvent::Content(ContentEvent::CellValueChanged {
+            address,
+        }));
+    }
+
+    /// Notify that a cell's style changed
+    pub fn notify_cell_style_changed(&self, address: CellAddress) {
+        self.emit_event(SpreadsheetEvent::Format(FormatEvent::CellStyleChanged {
+            address,
+        }));
+    }
+
+    /// Notify that editing started
+    pub fn notify_editing_started(&self, address: CellAddress) {
+        self.emit_event(SpreadsheetEvent::Navigation(
+            NavigationEvent::EditingStarted { address },
+        ));
+    }
+
+    /// Notify that editing ended
+    pub fn notify_editing_ended(&self, address: CellAddress, committed: bool) {
+        self.emit_event(SpreadsheetEvent::Navigation(
+            NavigationEvent::EditingEnded { address, committed },
+        ));
+    }
+
+    /// Subscribe to navigation-related events only (selection, sheet changes)
+    pub fn subscribe_to_navigation_events(
+        &self,
+    ) -> impl Fn() -> Vec<NavigationEvent> + Copy + use<'_> {
+        move || {
+            self.events
+                .0
+                .get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Navigation(nav_event) => Some(nav_event),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    /// Subscribe to structure-related events only (sheets, rows, columns)
+    pub fn subscribe_to_structure_events(
+        &self,
+    ) -> impl Fn() -> Vec<StructureEvent> + Copy + use<'_> {
+        move || {
+            self.events
+                .0
+                .get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Structure(structure_event) => Some(structure_event),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    /// Subscribe to mode-related events only (edit mode, drag mode)
+    pub fn subscribe_to_mode_events(&self) -> impl Fn() -> Vec<ModeEvent> + Copy + use<'_> {
+        move || {
+            self.events
+                .0
+                .get()
+                .into_iter()
+                .filter_map(|e| match e {
+                    SpreadsheetEvent::Mode(mode_event) => Some(mode_event),
+                    _ => None,
+                })
+                .collect()
+        }
+    }
+
+    /// Subscribe to visual-related events (content, format, navigation, structure)
+    /// Optimized for components like worksheets that need to re-render on visual changes
+    pub fn subscribe_to_visual_events(
+        &self,
+    ) -> impl Fn() -> Vec<SpreadsheetEvent> + Copy + use<'_> {
+        move || {
+            self.events
+                .0
+                .get()
+                .into_iter()
+                .filter(|e| match e {
+                    SpreadsheetEvent::Content(_)
+                    | SpreadsheetEvent::Format(_)
+                    | SpreadsheetEvent::Navigation(_)
+                    | SpreadsheetEvent::Structure(_) => true,
+                    SpreadsheetEvent::Mode(_) | SpreadsheetEvent::Theme(_) => false,
+                })
+                .collect()
+        }
+    }
+
+    /// Legacy compatibility - subscribe to any change via version counter
+    pub fn subscribe_to_any_change(&self) -> impl Fn() -> u32 + Copy + use<'_> {
+        move || self.version.0.get()
     }
 
     // Convenience methods for commonly used signals
     // These reduce boilerplate and make the API more ergonomic
-    
+
     /// Get the current editing cell (reactive)
     pub fn get_editing_cell(&self) -> Option<EditingCell> {
         self.editing_cell.0.get()
     }
-    
+
     /// Get the current editing cell (non-reactive)
     pub fn get_editing_cell_untracked(&self) -> Option<EditingCell> {
         self.editing_cell.0.get_untracked()
     }
-    
+
     /// Set the editing cell
     pub fn set_editing_cell(&self, cell: Option<EditingCell>) {
         self.editing_cell.1.set(cell);
     }
-    
+
     /// Update the editing cell
     pub fn update_editing_cell(&self, f: impl FnOnce(&mut Option<EditingCell>)) {
         self.editing_cell.1.update(f);
     }
-    
+
     /// Get the current drag state (reactive)
     pub fn get_drag(&self) -> DragState {
         self.drag.0.get()
     }
-    
+
     /// Get the current drag state (non-reactive)
     pub fn get_drag_untracked(&self) -> DragState {
         self.drag.0.get_untracked()
     }
-    
+
     /// Set the drag state
     pub fn set_drag(&self, drag: DragState) {
         self.drag.1.set(drag);
     }
-    
-    /// Get the current theme (reactive)
-    pub fn get_theme(&self) -> Theme {
+
+    /// Get the current theme preference (reactive) - may return Auto
+    pub fn get_theme_preference(&self) -> Theme {
         self.theme.0.get()
     }
-    
-    /// Get the current theme (non-reactive)
-    pub fn get_theme_untracked(&self) -> Theme {
+
+    /// Get the current theme preference (non-reactive) - may return Auto
+    pub fn get_theme_preference_untracked(&self) -> Theme {
         self.theme.0.get_untracked()
     }
-    
-    /// Set the theme
+
+    /// Get the resolved theme (reactive) - Auto resolves to Light/Dark based on system preference
+    pub fn get_theme(&self) -> Theme {
+        self.theme.0.get().resolve_with_system()
+    }
+
+    /// Get the resolved theme (non-reactive) - Auto resolves to Light/Dark based on system preference
+    pub fn get_theme_untracked(&self) -> Theme {
+        self.theme.0.get_untracked().resolve_with_system()
+    }
+
+    /// Set the theme preference and persist to storage
     pub fn set_theme(&self, theme: Theme) {
         self.theme.1.set(theme);
+        theme.save(); // Keep manual persistence for now
+        self.notify_theme_changed(theme);
     }
-    
+
+    /// Toggle theme in cycle: Auto -> Light -> Dark -> Auto
+    pub fn toggle_theme(&self) {
+        let current = self.get_theme_preference();
+        let next = match current {
+            Theme::Auto => Theme::Light,
+            Theme::Light => Theme::Dark,
+            Theme::Dark => Theme::Auto,
+        };
+        self.set_theme(next);
+    }
+
+    /// Toggle between Light and Dark only (preserving Auto if set)
+    pub fn toggle_light_dark(&self) {
+        let current = self.get_theme_preference();
+        match current {
+            Theme::Auto => {} // Keep Auto unchanged
+            Theme::Light => self.set_theme(Theme::Dark),
+            Theme::Dark => self.set_theme(Theme::Light),
+        }
+    }
+
     /// Get the redraw signal (for reactive subscriptions)
     pub fn get_redraw(&self) -> u32 {
         self.redraw.0.get()
     }
-    
+
     /// Get the redraw signal (non-reactive)
     pub fn get_redraw_untracked(&self) -> u32 {
         self.redraw.0.get_untracked()
     }
-    
+
     /// Get point range (reactive)
     pub fn get_point_range(&self) -> Option<[i32; 4]> {
         self.point_range.0.get()
     }
-    
+
     /// Get point range (non-reactive)
     pub fn get_point_range_untracked(&self) -> Option<[i32; 4]> {
         self.point_range.0.get_untracked()
     }
-    
+
     /// Set point range
     pub fn set_point_range(&self, range: Option<[i32; 4]>) {
         self.point_range.1.set(range);
     }
-    
+
     /// Get point ref span (non-reactive)
     pub fn get_point_ref_span_untracked(&self) -> Option<(usize, usize)> {
         self.point_ref_span.0.get_untracked()
     }
-    
+
     /// Set point ref span
     pub fn set_point_ref_span(&self, span: Option<(usize, usize)>) {
         self.point_ref_span.1.set(span);
     }
-    
+
     /// Get context menu (reactive)
     pub fn get_context_menu(&self) -> Option<ContextMenuState> {
         self.context_menu.0.get()
     }
-    
+
     /// Set context menu
     pub fn set_context_menu(&self, menu: Option<ContextMenuState>) {
         self.context_menu.1.set(menu);
     }
-    
+
     /// Get current UUID (non-reactive)
     pub fn get_current_uuid_untracked(&self) -> Option<String> {
         self.current_uuid.0.get_untracked()
     }
-    
+
     /// Set current UUID
     pub fn set_current_uuid(&self, uuid: Option<String>) {
         self.current_uuid.1.set(uuid);
     }
-    
+
     /// Get show perf panel (reactive)
     pub fn get_show_perf_panel(&self) -> bool {
         self.show_perf_panel.0.get()
+    }
+
+    /// Set show perf panel
+    pub fn set_show_perf_panel(&self, show: bool) {
+        self.show_perf_panel.1.set(show);
+    }
+
+    /// Toggle show perf panel
+    pub fn toggle_show_perf_panel(&self) {
+        self.show_perf_panel.1.update(|v| *v = !*v);
+    }
+
+    /// Get recent colors (reactive)
+    pub fn get_recent_colors(&self) -> Vec<String> {
+        self.recent_colors.0.get()
+    }
+
+    /// Get recent colors (non-reactive)
+    pub fn get_recent_colors_untracked(&self) -> Vec<String> {
+        self.recent_colors.0.get_untracked()
+    }
+
+    /// Set recent colors
+    pub fn set_recent_colors(&self, colors: Vec<String>) {
+        self.recent_colors.1.set(colors);
     }
 
     /// Add a color to the recent colors list
@@ -330,6 +648,9 @@ impl WorkbookState {
         // Persist to localStorage (use with_untracked since this is called from callbacks)
         let colors = self.recent_colors.0.with_untracked(|colors| colors.clone());
         <gloo_storage::LocalStorage as GlooStorage>::set("ironcalc_recent_colors", &colors).ok();
+
+        // Emit event for reactive subscribers
+        self.notify_recent_colors_updated(colors);
     }
 
     /// Get colors from the current document that aren't in the standard palette

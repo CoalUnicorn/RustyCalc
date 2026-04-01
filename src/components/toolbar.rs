@@ -1,9 +1,12 @@
 use leptos::prelude::*;
 use wasm_bindgen::UnwrapThrowExt;
 
-use crate::components::color_picker::{TextColorPicker, BackgroundColorPicker};
+use crate::components::color_picker_enhanced::{
+    EnhancedBackgroundColorPicker, EnhancedTextColorPicker,
+};
+use crate::events::*;
 use crate::input::action::{execute, SpreadsheetAction};
-use crate::model::{FrontendModel, SafeFontFamily};
+use crate::model::{frontend_types::ToolbarState, FrontendModel, SafeFontFamily};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
@@ -39,14 +42,15 @@ fn UndoRedo() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    let can_undo = move || {
-        let _ = state.get_redraw();
-        model.with_value(|m| m.can_undo())
-    };
-    let can_redo = move || {
-        let _ = state.get_redraw();
-        model.with_value(|m| m.can_redo())
-    };
+    let undo_redo_state = Memo::new(move |_| {
+        let content_events = state.subscribe_to_content_events();
+        let _ = content_events(); // Single subscription
+        model.with_value(|m| (m.can_undo(), m.can_redo())) // Single model access
+    });
+
+    // Efficient derived computations (no additional subscriptions)
+    let can_undo = move || undo_redo_state.with(|(undo, _)| *undo);
+    let can_redo = move || undo_redo_state.with(|(_, redo)| *redo);
 
     let on_undo = move |_: web_sys::MouseEvent| {
         execute(&SpreadsheetAction::undo(), model, &state);
@@ -77,16 +81,49 @@ fn UndoRedo() -> impl IntoView {
     }
 }
 
+// SHARED TOOLBAR STATE - Single memo for all format-related components
+// This replaces 4+ separate format event subscriptions with one efficient shared subscription
+fn get_shared_toolbar_state() -> Memo<ToolbarState> {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+
+    Memo::new(move |_| {
+        let format_events = state.subscribe_to_format_events();
+        let _ = format_events(); // Single format subscription for all toolbar components
+        model.with_value(|m| m.toolbar_state()) // Single model access
+    })
+}
+
+// SHARED COLOR STATE - Single memo for color components that need both format + theme events
+fn get_shared_color_state() -> (Memo<ToolbarState>, Memo<()>) {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+
+    let format_state = Memo::new(move |_| {
+        let format_events = state.subscribe_to_format_events();
+        let _ = format_events();
+        model.with_value(|m| m.toolbar_state())
+    });
+
+    // FIXME: This need its own place
+    let theme_state = Memo::new(move |_| {
+        let theme_events = state.subscribe_to_theme_events();
+        let _ = theme_events();
+        // Return unit for now, can extend with actual theme data later
+    });
+
+    (format_state, theme_state)
+}
+
 // Font family
 #[component]
 fn FontFamily() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    let current_family = move || {
-        let _ = state.get_redraw();
-        model.with_value(|m| m.toolbar_state().font_family)
-    };
+    // Use shared toolbar state
+    let toolbar_state = get_shared_toolbar_state();
+    let current_family = move || toolbar_state.with(|ts| ts.style.font_family);
 
     let on_change = move |ev: web_sys::Event| {
         use wasm_bindgen::JsCast;
@@ -129,10 +166,9 @@ fn FontSize() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    let current_size = move || {
-        let _ = state.get_redraw();
-        model.with_value(|m| m.toolbar_state().font_size)
-    };
+    // Use shared toolbar state
+    let toolbar_state = get_shared_toolbar_state();
+    let current_size = move || toolbar_state.with(|ts| ts.style.font_size);
 
     fn apply(size: f64, model: ModelStore, state: &WorkbookState) {
         execute(&SpreadsheetAction::set_font_size(size), model, state);
@@ -231,15 +267,8 @@ fn FormatToggles() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    let toolbar_state = move || {
-        let _ = state.get_redraw();
-        model.with_value(|m| m.toolbar_state())
-    };
-
-    let is_bold = move || toolbar_state().bold;
-    let is_italic = move || toolbar_state().italic;
-    let is_underline = move || toolbar_state().underline;
-    let is_strike = move || toolbar_state().strikethrough;
+    let toolbar_state = get_shared_toolbar_state();
+    let format = move || toolbar_state.with(|ts| ts.format.clone());
 
     let on_bold = move |_: web_sys::MouseEvent| {
         execute(&SpreadsheetAction::toggle_bold(), model, &state);
@@ -260,28 +289,28 @@ fn FormatToggles() -> impl IntoView {
 
     view! {
         <button
-            class=move || if is_bold() { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if format().bold { "toolbar-btn active" } else { "toolbar-btn" }
             title="Bold (Ctrl+B)"
             on:click=on_bold
         >
             <strong>"B"</strong>
         </button>
         <button
-            class=move || if is_italic() { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if format().italic { "toolbar-btn active" } else { "toolbar-btn" }
             title="Italic (Ctrl+I)"
             on:click=on_italic
         >
             <em>"I"</em>
         </button>
         <button
-            class=move || if is_underline() { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if format().underline { "toolbar-btn active" } else { "toolbar-btn" }
             title="Underline (Ctrl+U)"
             on:click=on_underline
         >
             <span style="text-decoration:underline">"U"</span>
         </button>
         <button
-            class=move || if is_strike() { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if format().strikethrough { "toolbar-btn active" } else { "toolbar-btn" }
             title="Strikethrough"
             on:click=on_strike
         >
@@ -297,10 +326,12 @@ fn FreezePane() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    let is_frozen = move || {
-        let _ = state.get_redraw();
+    // TODO: Use format events for now (freeze panes affects layout, could be moved to structure events later)
+    let is_frozen = Memo::new(move |_| {
+        let format_events = state.subscribe_to_format_events();
+        let _ = format_events(); // Subscribe to layout changes
         model.with_value(|m| m.frozen_panes().is_frozen())
-    };
+    });
 
     let on_freeze = move |_: web_sys::MouseEvent| {
         model.update_value(|m| {
@@ -328,12 +359,19 @@ fn FreezePane() -> impl IntoView {
                 }
             }
         });
-        state.request_redraw();
+        // Emit layout change event instead of generic redraw
+        state.emit_event(crate::events::SpreadsheetEvent::Format(
+            crate::events::FormatEvent::LayoutChanged {
+                sheet: model.with_value(|m| m.get_selected_view().sheet),
+                col: None,
+                row: None,
+            },
+        ));
         crate::util::refocus_workbook();
     };
 
     let freeze_label = move || {
-        if is_frozen() {
+        if is_frozen.get() {
             "╔"
         } else {
             "╬"
@@ -341,110 +379,99 @@ fn FreezePane() -> impl IntoView {
     };
 
     view! {
-        <button class=move || if is_frozen() {"toolbar-btn active"} else {"toolbar-btn"}
-            title=move || if is_frozen() {"Unfreeze panes"} else {"Freeze panes above and left of active cell"}
+        <button class=move || if is_frozen.get() {"toolbar-btn active"} else {"toolbar-btn"}
+            title=move || if is_frozen.get() {"Unfreeze panes"} else {"Freeze panes above and left of active cell"}
             on:click=on_freeze>
             {freeze_label}
         </button>
     }
 }
 
-// Text Color Picker
+// Text Color Picker - Event-Driven Version
 #[component]
 fn TextColorPickerToolbar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
-    let model = expect_context::<ModelStore>();
+    let _model = expect_context::<ModelStore>();
 
-    // Current text color from toolbar state
+    let (format_state, _theme_state) = get_shared_color_state();
     let current_color = Signal::derive(move || {
-        let _ = state.get_redraw_untracked(); // Use untracked since this is just to trigger updates
-        model.with_value(|_m| {
-            // toolbar_state().text_color is CssColor, not Option<CssColor>
-            // For now, return None until the model is properly set up
+        format_state.with(|_ts| {
+            // TODO: Get actual text color from toolbar state
+            // Some(ts.style.text_color.to_string())
             None::<String>
         })
     });
 
-    // Recent colors signal
-    let recent_colors = Signal::derive(move || {
-        state.recent_colors.0.get() // Get recent colors reactively
-    });
-
-    // Handle color change
+    // Handle color change with event emission
     let on_color_change = Callback::new(move |color: Option<String>| {
-        // Add to recent colors if it's a custom color
+        // Add to recent colors - this automatically emits RecentColorsUpdated event
         if let Some(ref hex) = color {
             state.add_recent_color(hex);
         }
-        
-        // TODO: Implement SpreadsheetAction::SetTextColor
-        // For now, just log the color change
-        web_sys::console::log_2(&"Text color changed to:".into(), &format!("{:?}", color).into());
-        
-        // Demo: Add some test colors to show the recent colors feature
-        // Remove this in production
-        if state.recent_colors.0.get_untracked().is_empty() {
+
+        // TODO: Apply color to selected cells
+        web_sys::console::log_2(
+            &"Text color changed to:".into(),
+            &format!("{:?}", color).into(),
+        );
+
+        // Demo colors for testing
+        if state.get_recent_colors_untracked().is_empty() {
             state.add_recent_color("#ff6b6b"); // Coral red
             state.add_recent_color("#4ecdc4"); // Turquoise
             state.add_recent_color("#45b7d1"); // Sky blue
         }
-        
-        // This is where you'd call:
+
+        // Emit specific format events instead of generic redraw
+        // TODO: When you implement actual formatting:
         // execute(&SpreadsheetAction::set_text_color(color), model, &state);
-        // crate::util::refocus_workbook();
+        // state.notify_cell_style_changed(sheet, row, col);
     });
 
     view! {
-        <TextColorPicker
+        <EnhancedTextColorPicker
             current_color=current_color
             on_change=on_color_change
-            recent_colors=recent_colors
         />
     }
 }
 
-// Background Color Picker  
+// Background Color Picker - Event-Driven Version
 #[component]
 fn BackgroundColorPickerToolbar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
-    let model = expect_context::<ModelStore>();
+    let _model = expect_context::<ModelStore>();
 
-    // Current background color from toolbar state
+    let (format_state, _theme_state) = get_shared_color_state();
     let current_color = Signal::derive(move || {
-        let _ = state.get_redraw_untracked(); // Use untracked since this is just to trigger updates
-        model.with_value(|_m| {
-            // toolbar_state().bg_color is Option<CssColor>
-            // For now, return None until the model is properly set up  
+        format_state.with(|_ts| {
+            // TODO: Get actual background color from toolbar state
+            // Some(ts.style.bg_color.as_ref().map(|c| c.to_string()))
             None::<String>
         })
     });
 
-    // Recent colors signal (shared with text color picker)
-    let recent_colors = Signal::derive(move || {
-        state.recent_colors.0.get() // Get recent colors reactively
-    });
-
-    // Handle color change
+    // Handle color change with event emission
     let on_color_change = Callback::new(move |color: Option<String>| {
-        // Add to recent colors if it's a custom color
+        // Add to recent colors - automatically emits RecentColorsUpdated event
         if let Some(ref hex) = color {
             state.add_recent_color(hex);
         }
-        
-        // TODO: Implement SpreadsheetAction::SetBackgroundColor
-        // For now, just log the color change
-        web_sys::console::log_2(&"Background color changed to:".into(), &format!("{:?}", color).into());
-        
-        // This is where you'd call:
+
+        web_sys::console::log_2(
+            &"Background color changed to:".into(),
+            &format!("{:?}", color).into(),
+        );
+
+        // TODO: Apply background color and emit specific events
         // execute(&SpreadsheetAction::set_background_color(color), model, &state);
-        // crate::util::refocus_workbook();
+        // state.notify_cell_style_changed(sheet, row, col);
     });
 
     view! {
-        <BackgroundColorPicker
+        <EnhancedBackgroundColorPicker
             current_color=current_color
             on_change=on_color_change
-            recent_colors=recent_colors
         />
     }
 }

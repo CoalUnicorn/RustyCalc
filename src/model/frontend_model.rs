@@ -16,6 +16,7 @@ pub trait FrontendModel {
     /// the renderer passes `self.theme.default_text_color`, the toolbar passes `"#000000"`.
     fn cell_style(
         &self,
+        // address: CellAddress,
         sheet: u32,
         row: i32,
         col: i32,
@@ -35,7 +36,7 @@ pub trait FrontendModel {
     fn active_cell_content(&self) -> String;
 
     /// Position of the active cell.
-    fn active_cell(&self) -> ActiveCell;
+    fn active_cell(&self) -> CellAddress;
 
     /// Frozen pane state for the active sheet.
     fn frozen_panes(&self) -> FrozenPanes;
@@ -95,6 +96,7 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
 impl FrontendModel for UserModel<'_> {
     fn cell_style(
         &self,
+        // address: CellAddress,
         sheet: u32,
         row: i32,
         col: i32,
@@ -110,6 +112,7 @@ impl FrontendModel for UserModel<'_> {
             None | Some("#000000") => CssColor::new(default_text_color),
             Some(c) => CssColor::new(c),
         };
+        // let text_color = match style.
 
         // Background
         let bg_color = style
@@ -207,15 +210,20 @@ impl FrontendModel for UserModel<'_> {
             .unwrap_or(HorizontalAlignment::General);
 
         ToolbarState {
-            bold: style.font.b,
-            italic: style.font.i,
-            underline: style.font.u,
-            strikethrough: style.font.strike,
-            font_size: style.font.sz as f64,
-            font_family: font_family_from_name(&style.font.name),
-            h_align,
-            text_color,
-            bg_color,
+            format: TextFormat {
+                bold: style.font.b,
+                italic: style.font.i,
+                underline: style.font.u,
+                strikethrough: style.font.strike,
+            },
+
+            style: TextStyle {
+                font_size: style.font.sz as f64,
+                font_family: font_family_from_name(&style.font.name),
+                h_align,
+                text_color,
+                bg_color,
+            },
         }
     }
 
@@ -238,9 +246,9 @@ impl FrontendModel for UserModel<'_> {
             .unwrap_or_default()
     }
 
-    fn active_cell(&self) -> ActiveCell {
+    fn active_cell(&self) -> CellAddress {
         let view = self.get_selected_view();
-        ActiveCell {
+        CellAddress {
             sheet: view.sheet,
             row: view.row,
             column: view.column,
@@ -389,9 +397,9 @@ mod tests {
     fn toolbar_state_reflects_active_cell() {
         let m = make_model();
         let ts = m.toolbar_state();
-        assert!(!ts.bold);
-        assert!(!ts.italic);
-        assert!(ts.font_size > 0.0);
+        assert!(!ts.format.bold);
+        assert!(!ts.format.italic);
+        assert!(ts.style.font_size > 0.0);
     }
 
     #[test]

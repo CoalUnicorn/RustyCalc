@@ -1,9 +1,45 @@
 //! Navigation actions: arrow keys, page up/down, home/end, sheet switching.
 
+use leptos::prelude::WithValue;
+
 use crate::input::helpers::{mutate, Eval};
 use crate::model::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
+
+/// Helper to emit SelectionChanged event after navigation
+fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
+    let address = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+        let v = m.get_selected_view();
+        crate::model::CellAddress {
+            sheet: v.sheet,
+            row: v.row,
+            column: v.column,
+        }
+    });
+    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+        crate::events::NavigationEvent::SelectionChanged { address },
+    ));
+}
+
+/// Helper to emit SelectionRangeChanged event after range operations
+fn emit_selection_range_changed(model: ModelStore, state: &WorkbookState) {
+    let (sheet, start_row, start_col, end_row, end_col) =
+        model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+            let v = m.get_selected_view();
+            let [r1, c1, r2, c2] = v.range;
+            (v.sheet, r1, c1, r2, c2)
+        });
+    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+        crate::events::NavigationEvent::SelectionRangeChanged {
+            sheet,
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        },
+    ));
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NavAction {
@@ -33,36 +69,48 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
     match action {
         NavAction::Arrow(dir) => {
             mutate(model, state, Eval::No, |m| m.nav_arrow(*dir));
+            emit_selection_changed(model, state);
         }
         NavAction::Edge(dir) => {
             mutate(model, state, Eval::No, |m| m.nav_to_edge(*dir));
+            emit_selection_changed(model, state);
         }
         NavAction::JumpToA1 => {
             mutate(model, state, Eval::No, |m| m.nav_set_cell(1, 1));
+            emit_selection_changed(model, state);
         }
         NavAction::JumpToLastCell => {
             mutate(model, state, Eval::No, |m| {
                 m.nav_to_edge(ArrowKey::Down);
                 m.nav_to_edge(ArrowKey::Right);
             });
+            emit_selection_changed(model, state);
         }
         NavAction::ExpandSelection(dir) => {
             mutate(model, state, Eval::No, |m| m.nav_expand_selection(*dir));
+            emit_selection_range_changed(model, state);
         }
         NavAction::PageDown => {
             mutate(model, state, Eval::No, |m| m.nav_page(PageDir::Down));
+            emit_selection_changed(model, state);
         }
         NavAction::PageUp => {
             mutate(model, state, Eval::No, |m| m.nav_page(PageDir::Up));
+            emit_selection_changed(model, state);
         }
         NavAction::RowHome => {
             mutate(model, state, Eval::No, |m| m.nav_home_row());
+            emit_selection_changed(model, state);
         }
         NavAction::RowEnd => {
             mutate(model, state, Eval::No, |m| m.nav_to_edge(ArrowKey::Right));
+            emit_selection_changed(model, state);
         }
         NavAction::SwitchSheet(delta) => {
             let delta = *delta;
+            let previous_sheet = model
+                .with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_view().sheet);
+
             mutate(model, state, Eval::No, move |m| {
                 let current = m.get_selected_view().sheet;
                 let visible: Vec<u32> = m
@@ -76,12 +124,25 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
                     warn_if_err(m.set_selected_sheet(visible[next]), "set_selected_sheet");
                 }
             });
+
+            // Fire active sheet changed event
+            let new_sheet = model
+                .with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_view().sheet);
+            if previous_sheet != new_sheet {
+                state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                    crate::events::NavigationEvent::ActiveSheetChanged {
+                        from_sheet: previous_sheet,
+                        to_sheet: new_sheet,
+                    },
+                ));
+            }
         }
         NavAction::SelectAll => {
             mutate(model, state, Eval::No, |m| {
                 let d = m.sheet_dimension();
                 m.nav_select_range(d.min_row, d.min_column, d.max_row, d.max_column);
             });
+            emit_selection_range_changed(model, state);
         }
     }
 }

@@ -17,12 +17,15 @@ pub enum Eval {
     No,
 }
 
-/// Run `f` on the model, optionally call `evaluate`, then trigger a redraw.
+/// Run `f` on the model, optionally call `evaluate`.
 ///
 /// **PERFORMANCE OPTIMIZED:** Many `UserModel` methods call `evaluate()` internally.
 /// We pause evaluation before `f` so the model is evaluated at most once — after
 /// all mutations are done. This prevents double evaluation and can halve execution time.
 /// See docs/performance-evaluation.md for details.
+///
+/// **CALLER RESPONSIBILITY:** This function no longer automatically triggers redraws.
+/// The caller must emit appropriate events using `state.emit_event()` or `state.request_redraw()`.
 pub fn mutate(
     model: ModelStore,
     state: &WorkbookState,
@@ -37,9 +40,10 @@ pub fn mutate(
             m.evaluate();
         }
     });
-    state.request_redraw();
+    // No automatic redraw - caller must emit specific events
 }
 
+// Area needs its own type in input
 /// Build an `Area` from selection corners, normalising min/max automatically.
 pub fn make_area(sheet: u32, r1: i32, c1: i32, r2: i32, c2: i32) -> Area {
     Area {

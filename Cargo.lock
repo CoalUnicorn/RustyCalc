@@ -259,6 +259,17 @@ dependencies = [
 
 [[package]]
 name = "codee"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d3ad3122b0001c7f140cf4d605ef9a9e2c24d96ab0b4fb4347b76de2425f445"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "codee"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9dbbdc4b4d349732bc6690de10a9de952bd39ba6a065c586e26600b6b0b91f5"
@@ -1447,7 +1458,7 @@ checksum = "2457c1abaa00dd4601695a989ed796bb19bc44e47ecffe2ad1336cc4c9e4f505"
 dependencies = [
  "cfg-if",
  "chrono",
- "codee",
+ "codee 0.3.5",
  "cookie",
  "default-struct-builder",
  "futures-util",
@@ -1471,7 +1482,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17cded1fffd0646ff028f38552724be36054052a35d293531c8766bbeb25dcc5"
 dependencies = [
  "cfg-if",
- "codee",
+ "codee 0.3.5",
  "cookie",
  "default-struct-builder",
  "js-sys",
@@ -1583,7 +1594,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5b45da8116738d79dc37931ebcdb3de38138f48eb75a301e34dda760be96306"
 dependencies = [
- "codee",
+ "codee 0.3.5",
  "default-struct-builder",
  "icu_calendar",
  "icu_datetime",
@@ -1725,7 +1736,7 @@ checksum = "66985242812ec95e224fb48effe651ba02728beca92c461a9464c811a71aab11"
 dependencies = [
  "any_spawner 0.2.0",
  "base64",
- "codee",
+ "codee 0.3.5",
  "futures",
  "hydration_context 0.2.1",
  "or_poisoned",
@@ -1745,7 +1756,7 @@ checksum = "da974775c5ccbb6bd64be7f53f75e8321542e28f21563a416574dbe4d5447eae"
 dependencies = [
  "any_spawner 0.3.0",
  "base64",
- "codee",
+ "codee 0.3.5",
  "futures",
  "hydration_context 0.3.0",
  "or_poisoned",
@@ -2361,9 +2372,11 @@ name = "rusty-calc"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "codee 0.2.0",
  "gloo-net",
  "gloo-storage",
  "ironcalc_base",
+ "js-sys",
  "leptos 0.7.8",
  "leptos-use 0.15.10",
  "leptos_i18n",

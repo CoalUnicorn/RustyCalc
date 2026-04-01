@@ -1,6 +1,7 @@
 //! Formatting actions: bold, italic, underline, strikethrough, font size/family.
 
 use ironcalc_base::UserModel;
+use leptos::prelude::WithValue;
 
 use crate::input::helpers::{mutate, selection_area, Eval};
 use crate::model::{FrontendModel, SafeFontFamily, ToolbarState};
@@ -27,33 +28,79 @@ pub enum FormatAction {
 pub fn execute_format(action: &FormatAction, model: ModelStore, state: &WorkbookState) {
     match action {
         FormatAction::ToggleBold => {
-            toggle_style(model, state, "font.b", |ts| ts.bold);
+            toggle_style(model, state, "font.b", |ts| ts.format.bold);
         }
         FormatAction::ToggleItalic => {
-            toggle_style(model, state, "font.i", |ts| ts.italic);
+            toggle_style(model, state, "font.i", |ts| ts.format.italic);
         }
         FormatAction::ToggleUnderline => {
-            toggle_style(model, state, "font.u", |ts| ts.underline);
+            toggle_style(model, state, "font.u", |ts| ts.format.underline);
         }
         FormatAction::ToggleStrikethrough => {
-            toggle_style(model, state, "font.strike", |ts| ts.strikethrough);
+            toggle_style(model, state, "font.strike", |ts| ts.format.strikethrough);
         }
         FormatAction::SetFontSize(size) => {
             let size = size.clamp(1.0, 409.0);
+            let (sheet, start_row, start_col, end_row, end_col) =
+                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                    let area = selection_area(m);
+                    (
+                        area.sheet,
+                        area.row,
+                        area.column,
+                        area.row + area.height - 1,
+                        area.column + area.width - 1,
+                    )
+                });
+
             mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
-                let val = format!("{}", size as i32 - m.toolbar_state().font_size as i32);
+                let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);
                 warn_if_err(
                     m.update_range_style(&area, "font.size_delta", &val),
                     "set_font_size",
                 );
             });
+
+            // Fire format event for font size change
+            state.emit_event(crate::events::SpreadsheetEvent::Format(
+                crate::events::FormatEvent::RangeStyleChanged {
+                    sheet,
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                },
+            ));
         }
         FormatAction::SetFontFamily(family) => {
             let name = family.model_name();
+            let (sheet, start_row, start_col, end_row, end_col) =
+                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                    let area = selection_area(m);
+                    (
+                        area.sheet,
+                        area.row,
+                        area.column,
+                        area.row + area.height - 1,
+                        area.column + area.width - 1,
+                    )
+                });
+
             mutate(model, state, Eval::No, |m| {
                 set_font_name(m, name);
             });
+
+            // Fire format event for font family change
+            state.emit_event(crate::events::SpreadsheetEvent::Format(
+                crate::events::FormatEvent::RangeStyleChanged {
+                    sheet,
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                },
+            ));
         } // SetFontColor
           //
     }
@@ -73,12 +120,35 @@ fn toggle_style(
     current_val: fn(&ToolbarState) -> bool,
 ) {
     let path = style_path.to_owned();
+    let (sheet, start_row, start_col, end_row, end_col) =
+        model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+            let area = selection_area(m);
+            (
+                area.sheet,
+                area.row,
+                area.column,
+                area.row + area.height - 1,
+                area.column + area.width - 1,
+            )
+        });
+
     mutate(model, state, Eval::No, |m| {
         let ts = m.toolbar_state();
         let new_val = if current_val(&ts) { "false" } else { "true" };
         let area = selection_area(m);
         warn_if_err(m.update_range_style(&area, &path, new_val), &path);
     });
+
+    // Fire format event for style toggle
+    state.emit_event(crate::events::SpreadsheetEvent::Format(
+        crate::events::FormatEvent::RangeStyleChanged {
+            sheet,
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        },
+    ));
 }
 
 /// Set `font.name` on every cell in the selection.

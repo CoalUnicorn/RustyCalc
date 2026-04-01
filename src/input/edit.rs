@@ -1,12 +1,12 @@
 //! Edit actions: start/commit/cancel cell editing.
 
+use leptos::prelude::{WithValue, *};
+
 use crate::input::helpers::{mutate, Eval};
-use crate::model::{ArrowKey, FrontendModel};
+use crate::model::{ArrowKey, CellAddress, FrontendModel};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
 use crate::util::warn_if_err;
-
-use leptos::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditAction {
@@ -23,35 +23,51 @@ pub enum EditAction {
 pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookState) {
     match action {
         EditAction::Start(text) => {
-            model.with_value(|m| {
+            let address = model.with_value(|m| {
                 let v = m.get_selected_view();
-                state.set_editing_cell(Some(EditingCell {
+                let address = CellAddress {
                     sheet: v.sheet,
                     row: v.row,
-                    col: v.column,
+                    column: v.column,
+                };
+                state.set_editing_cell(Some(EditingCell {
+                    address: address.clone(),
                     text: text.clone(),
                     mode: EditMode::Accept,
                     focus: EditFocus::Cell,
                 }));
+                address
             });
-            state.request_redraw();
+
+            // Fire mode event for edit start
+            state.emit_event(crate::events::SpreadsheetEvent::Mode(
+                crate::events::ModeEvent::EditStarted { address },
+            ));
         }
         EditAction::EnterEditMode => {
-            model.with_value(|m| {
+            let address = model.with_value(|m| {
                 let v = m.get_selected_view();
                 let text = m
                     .get_cell_content(v.sheet, v.row, v.column)
                     .unwrap_or_default();
-                state.set_editing_cell(Some(EditingCell {
+                let address = CellAddress {
                     sheet: v.sheet,
                     row: v.row,
-                    col: v.column,
+                    column: v.column,
+                };
+                state.set_editing_cell(Some(EditingCell {
+                    address: address.clone(),
                     text,
                     mode: EditMode::Edit,
                     focus: EditFocus::Cell,
                 }));
+                address
             });
-            state.request_redraw();
+
+            // Fire mode event for edit mode entry
+            state.emit_event(crate::events::SpreadsheetEvent::Mode(
+                crate::events::ModeEvent::EditStarted { address },
+            ));
         }
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.get_editing_cell_untracked() {
@@ -63,7 +79,12 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 // Write the edit buffer to the model and recalculate.
                 model.update_value(|m| {
                     warn_if_err(
-                        m.set_user_input(edit.sheet, edit.row, edit.col, &edit.text),
+                        m.set_user_input(
+                            edit.address.sheet,
+                            edit.address.row,
+                            edit.address.column,
+                            &edit.text,
+                        ),
                         "set_user_input",
                     );
                     perf.input_done.set(Some(crate::perf::now()));
@@ -71,18 +92,50 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                     perf.eval_done.set(Some(crate::perf::now()));
                 });
 
+                // Fire content changed event for cell edit commit
+                state.emit_event(crate::events::SpreadsheetEvent::Content(
+                    crate::events::ContentEvent::CellChanged {
+                        address: CellAddress {
+                            sheet: edit.address.sheet,
+                            row: edit.address.row,
+                            column: edit.address.column,
+                        },
+                        old_value: String::new(), // TODO: Could track old value if needed
+                        new_value: edit.text.clone(),
+                    },
+                ));
+
                 // Clear all edit-related state.
                 state.set_editing_cell(None);
                 state.set_point_range(None);
                 state.set_point_ref_span(None);
-                
+
+                // Fire mode event for edit end
+                state.emit_event(crate::events::SpreadsheetEvent::Mode(
+                    crate::events::ModeEvent::EditEnded,
+                ));
+
                 // Persist the committed change immediately.
                 if let Some(uuid) = state.get_current_uuid_untracked() {
                     model.with_value(|m| storage::save(&uuid, m));
                 }
-                
-                // Navigate to the next cell and redraw.
+
+                // Navigate to the next cell.
                 mutate(model, state, Eval::No, |m| m.nav_arrow(*dir));
+
+                // Fire navigation event for post-edit navigation
+                let address = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                    let v = m.get_selected_view();
+                    crate::model::CellAddress {
+                        sheet: v.sheet,
+                        row: v.row,
+                        column: v.column,
+                    }
+                });
+                state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                    crate::events::NavigationEvent::SelectionChanged { address },
+                ));
+
                 crate::util::refocus_workbook();
             }
         }
@@ -90,7 +143,12 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
             state.set_editing_cell(None);
             state.set_point_range(None);
             state.set_point_ref_span(None);
-            state.request_redraw();
+
+            // Fire mode event for edit cancellation
+            state.emit_event(crate::events::SpreadsheetEvent::Mode(
+                crate::events::ModeEvent::EditEnded,
+            ));
+
             crate::util::refocus_workbook();
         }
     }

@@ -1,8 +1,8 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
-use gloo_storage::{LocalStorage, Storage};
 use ironcalc_base::UserModel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use gloo_storage::{LocalStorage, Storage}; // Keeping original implementation for stability
 
 /// Log a storage error to the browser console and discard the `Err`.
 /// Used in place of bare `.ok()` so silent failures become visible in DevTools.

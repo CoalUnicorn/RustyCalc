@@ -15,23 +15,31 @@ pub fn FileBar() -> impl IntoView {
     });
 
     let on_toggle_theme = move |_: web_sys::MouseEvent| {
-        let new_theme = state.get_theme().toggle();
-        state.set_theme(new_theme);
-        new_theme.save();
-        apply_theme_to_dom(new_theme);
-        state.request_redraw();
+        state.toggle_theme(); // Use new toggle method with Auto support
+        apply_theme_to_dom(state.get_theme());
+
+        // Theme change event automatically fired by toggle_theme() → set_theme() → notify_theme_changed()
+        web_sys::console::log_1(&format!("Theme changed to: {:?}", state.get_theme()).into());
     };
 
     let on_toggle_perf = move |_: web_sys::MouseEvent| {
-        state.show_perf_panel.1.update(|v| *v = !*v);
+        state.toggle_show_perf_panel();
     };
 
-    // Show icon for the CURRENT theme (☀ = light mode active, ☾ = dark mode active).
+    // Show icon based on theme preference with Auto detection
     let theme_icon = move || {
-        if state.get_theme() == Theme::Dark {
-            "☀ Light"
-        } else {
-            "☾ Dark"
+        let preference = state.get_theme_preference();
+        let resolved = state.get_theme();
+        match preference {
+            Theme::Auto => {
+                if resolved == Theme::Dark {
+                    "🌙 Auto (Dark)"
+                } else {
+                    "☀️ Auto (Light)"
+                }
+            }
+            Theme::Light => "☾ Dark", // Currently light, click to go dark
+            Theme::Dark => "☀ Light", // Currently dark, click to go light
         }
     };
 
