@@ -10,10 +10,8 @@ use crate::components::cell_editor::CellEditor;
 use crate::input::formula_input::*;
 use crate::model::{AppClipboard, ArrowKey, CellAddress, FrontendModel, PageDir};
 
-use crate::state::{
-    ContextMenuState, ContextMenuTarget, DragState, EditFocus, EditMode, EditingCell, ModelStore,
-    WorkbookState,
-};
+use crate::events::{ContextMenuTarget, DragState};
+use crate::state::{ContextMenuState, EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
 /// The spreadsheet canvas element.
