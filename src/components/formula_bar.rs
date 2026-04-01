@@ -174,7 +174,11 @@ pub fn FormulaBar() -> impl IntoView {
     };
 
     let input_class = move || {
-        let base = if is_editing() { "formula-bar-input editing" } else { "formula-bar-input" };
+        let base = if is_editing() {
+            "formula-bar-input editing"
+        } else {
+            "formula-bar-input"
+        };
         let validation = match validation_error.get() {
             Some(_) => " error",
             None if validation_pending.get() => " validating",

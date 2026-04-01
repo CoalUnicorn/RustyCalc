@@ -36,10 +36,10 @@ impl Default for StorageStats {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct EnhancedWorkbookMeta {
     pub name: String,
-    pub created_at: u64,  // JS timestamp
-    pub last_modified: u64,  // JS timestamp
+    pub created_at: u64,    // JS timestamp
+    pub last_modified: u64, // JS timestamp
     pub size_bytes: usize,
-    pub version: u32,  // For future migration support
+    pub version: u32, // For future migration support
 }
 
 impl EnhancedWorkbookMeta {
@@ -81,18 +81,29 @@ const MAX_STORAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB limit (typical localSt
 
 /// Enhanced error handling with user-friendly messages
 pub enum StorageError {
-    QuotaExceeded { current_size: usize, attempted_size: usize },
-    CorruptedData { uuid: String, error: String },
+    QuotaExceeded {
+        current_size: usize,
+        attempted_size: usize,
+    },
+    CorruptedData {
+        uuid: String,
+        error: String,
+    },
     NetworkError(String),
 }
 
 impl StorageError {
     pub fn user_message(&self) -> String {
         match self {
-            StorageError::QuotaExceeded { current_size, attempted_size } => {
-                format!("Storage full! Using {:.1}MB of ~10MB. This workbook needs {:.1}MB more.",
+            StorageError::QuotaExceeded {
+                current_size,
+                attempted_size,
+            } => {
+                format!(
+                    "Storage full! Using {:.1}MB of ~10MB. This workbook needs {:.1}MB more.",
                     *current_size as f64 / 1024.0 / 1024.0,
-                    *attempted_size as f64 / 1024.0 / 1024.0)
+                    *attempted_size as f64 / 1024.0 / 1024.0
+                )
             }
             StorageError::CorruptedData { uuid, error: _ } => {
                 format!("Workbook {} is corrupted and cannot be opened.", uuid)
@@ -110,7 +121,10 @@ pub fn get_storage_stats() -> StorageStats {
 }
 
 /// Update storage statistics
-fn update_stats<F>(updater: F) where F: FnOnce(&mut StorageStats) {
+fn update_stats<F>(updater: F)
+where
+    F: FnOnce(&mut StorageStats),
+{
     let mut stats = get_storage_stats();
     updater(&mut stats);
     let _ = LocalStorage::set(STATS_KEY, &stats);
@@ -147,7 +161,8 @@ pub fn save_enhanced(uuid: &str, model: &UserModel) -> Result<(), StorageError> 
 
     // Update enhanced registry
     let mut registry = get_enhanced_registry();
-    registry.entry(uuid.to_string())
+    registry
+        .entry(uuid.to_string())
         .and_modify(|m| m.update_modified(size))
         .or_insert_with(|| EnhancedWorkbookMeta::new(model.get_name(), size));
     save_enhanced_registry(&registry);
@@ -168,17 +183,17 @@ pub fn load_enhanced(uuid: &str) -> Result<UserModel<'static>, StorageError> {
     let encoded: String = LocalStorage::get(uuid)
         .map_err(|e| StorageError::NetworkError(format!("Load failed: {}", e)))?;
 
-    let bytes = STANDARD.decode(encoded)
+    let bytes = STANDARD
+        .decode(encoded)
         .map_err(|e| StorageError::CorruptedData {
             uuid: uuid.to_string(),
-            error: format!("Base64 decode: {}", e)
+            error: format!("Base64 decode: {}", e),
         })?;
 
-    let model = UserModel::from_bytes(&bytes, "en")
-        .map_err(|e| StorageError::CorruptedData {
-            uuid: uuid.to_string(),
-            error: format!("Model parse: {}", e)
-        })?;
+    let model = UserModel::from_bytes(&bytes, "en").map_err(|e| StorageError::CorruptedData {
+        uuid: uuid.to_string(),
+        error: format!("Model parse: {}", e),
+    })?;
 
     // Update load statistics
     update_stats(|stats| {
@@ -228,7 +243,8 @@ pub fn analyze_storage() -> String {
         0
     };
 
-    let oldest_workbook = registry.values()
+    let oldest_workbook = registry
+        .values()
         .map(|meta| meta.age_minutes())
         .max()
         .unwrap_or(0);
@@ -252,7 +268,8 @@ pub fn analyze_storage() -> String {
 /// Get workbook metadata by UUID
 pub fn get_workbook_metadata(uuid: &str) -> Result<EnhancedWorkbookMeta, StorageError> {
     let registry = crate::storage::load_registry();
-    registry.get(uuid)
+    registry
+        .get(uuid)
         .cloned()
         .map(|meta| EnhancedWorkbookMeta::new(meta.name, 0)) // Convert from basic to enhanced
         .ok_or_else(|| StorageError::CorruptedData {
@@ -280,7 +297,13 @@ pub fn load_compatible(uuid: &str) -> Option<UserModel<'static>> {
     match load_enhanced(uuid) {
         Ok(model) => Some(model),
         Err(e) => {
-            web_sys::console::warn_1(&format!("Enhanced load failed, trying fallback: {}", e.user_message()).into());
+            web_sys::console::warn_1(
+                &format!(
+                    "Enhanced load failed, trying fallback: {}",
+                    e.user_message()
+                )
+                .into(),
+            );
             // Fallback to original load method
             crate::storage::load(uuid)
         }
@@ -303,7 +326,7 @@ mod tests {
     fn storage_error_messages() {
         let error = StorageError::QuotaExceeded {
             current_size: 9_000_000,
-            attempted_size: 2_000_000
+            attempted_size: 2_000_000,
         };
         let message = error.user_message();
         assert!(message.contains("Storage full"));
