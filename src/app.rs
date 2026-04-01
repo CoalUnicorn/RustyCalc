@@ -40,13 +40,8 @@ pub fn App() -> impl IntoView {
                     // 🚀 Use enhanced storage with better error handling
                     storage_enhanced::save_compatible(&uuid, m);
 
-                    // Optional: Log storage statistics periodically
-                    // Use version counter for performance monitoring (legacy compatibility)
-                    if wb_state.subscribe_to_any_change()() % 50 == 0 {
-                        // Every ~50 changes
-                        let analysis = storage_enhanced::analyze_storage();
-                        web_sys::console::debug_1(&analysis.into());
-                    }
+                    let analysis = storage_enhanced::analyze_storage();
+                    web_sys::console::debug_1(&analysis.into());
                 });
             },
             2000.0, // Save 2 seconds after last change (was 1 second interval)

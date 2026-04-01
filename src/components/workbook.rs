@@ -29,15 +29,6 @@ pub fn Workbook() -> impl IntoView {
     let model = expect_context::<ModelStore>();
     let clipboard_store = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
-    // Subscribe to changes for coordination (using existing infrastructure)
-    Effect::new(move |_| {
-        // Subscribe to any change event for general coordination
-        let change_count = state.subscribe_to_any_change()();
-        if change_count > 0 {
-            web_sys::console::debug_1(&format!("Changes detected: #{}", change_count).into());
-        }
-    });
-
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
         // Don't intercept keystrokes from panel form elements (Named Ranges, etc.).
         // Exception: the cell-editor <textarea> formula-bar must bubble Enter/Escape/Tab/Arrow

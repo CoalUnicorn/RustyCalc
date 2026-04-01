@@ -489,12 +489,14 @@ mod tests {
     fn test_event_filtering() {
         // This would test that color picker components only respond to relevant events
         let events = vec![
-            SpreadsheetEvent::Content(ContentEvent::CellValueChanged {
+            SpreadsheetEvent::Content(ContentEvent::CellChanged {
                 address: CellAddress {
                     sheet: 1,
                     row: 1,
                     column: 1,
                 },
+                old_value: None,
+                new_value: None,
             }),
             SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
                 colors: vec!["#ff0000".into()],

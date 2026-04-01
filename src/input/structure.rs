@@ -2,6 +2,7 @@
 
 use leptos::prelude::WithValue;
 
+use crate::events::{Location, StructureEvent};
 use crate::input::helpers::{make_area, mutate, selection_bounds, Eval};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
@@ -39,7 +40,6 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            // Fire content changed event for range deletion
             state.emit_event(crate::events::SpreadsheetEvent::Content(
                 crate::events::ContentEvent::RangeChanged {
                     sheet,
@@ -67,7 +67,6 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            // Fire content changed event for range clear all
             state.emit_event(crate::events::SpreadsheetEvent::Content(
                 crate::events::ContentEvent::RangeChanged {
                     sheet,
@@ -83,7 +82,6 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 warn_if_err(m.undo(), "undo");
             });
 
-            // Fire generic change event for undo (affects potentially everything)
             state.emit_event(crate::events::SpreadsheetEvent::Content(
                 crate::events::ContentEvent::GenericChange,
             ));
@@ -93,18 +91,16 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 warn_if_err(m.redo(), "redo");
             });
 
-            // Fire generic change event for redo (affects potentially everything)
             state.emit_event(crate::events::SpreadsheetEvent::Content(
                 crate::events::ContentEvent::GenericChange,
             ));
         }
         StructAction::InsertRows => {
-            let (sheet, start_row, count) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let v = m.get_selected_view();
-                    let ((r_min, r_max), _) = selection_bounds(v.range);
-                    (v.sheet, r_min, r_max - r_min + 1)
-                });
+            let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                let v = m.get_selected_view();
+                let ((r_min, r_max), _) = selection_bounds(v.range);
+                Location::new(v.sheet, r_min, r_max - r_min + 1)
+            });
 
             mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
@@ -115,20 +111,16 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            // Fire structure changed event for row insertion
             state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                crate::events::StructureEvent::StructureChanged(
-                    crate::events::StructureChange::insert_rows(sheet, start_row, count),
-                ),
+                StructureEvent::rows_inserted(loc),
             ));
         }
         StructAction::InsertColumns => {
-            let (sheet, start_col, count) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let v = m.get_selected_view();
-                    let (_, (c_min, c_max)) = selection_bounds(v.range);
-                    (v.sheet, c_min, c_max - c_min + 1)
-                });
+            let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                let v = m.get_selected_view();
+                let (_, (c_min, c_max)) = selection_bounds(v.range);
+                Location::new(v.sheet, c_min, c_max - c_min + 1)
+            });
 
             mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
@@ -139,20 +131,16 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            // Fire structure changed event for column insertion
             state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                crate::events::StructureEvent::StructureChanged(
-                    crate::events::StructureChange::insert_columns(sheet, start_col, count),
-                ),
+                StructureEvent::columns_inserted(loc),
             ));
         }
         StructAction::DeleteRows => {
-            let (sheet, start_row, count) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let v = m.get_selected_view();
-                    let ((r_min, r_max), _) = selection_bounds(v.range);
-                    (v.sheet, r_min, r_max - r_min + 1)
-                });
+            let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                let v = m.get_selected_view();
+                let ((r_min, r_max), _) = selection_bounds(v.range);
+                Location::new(v.sheet, r_min, r_max - r_min + 1)
+            });
 
             mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
@@ -163,20 +151,16 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            // Fire structure changed event for row deletion
             state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                crate::events::StructureEvent::StructureChanged(
-                    crate::events::StructureChange::delete_rows(sheet, start_row, count),
-                ),
+                StructureEvent::rows_deleted(loc),
             ));
         }
         StructAction::DeleteColumns => {
-            let (sheet, start_col, count) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let v = m.get_selected_view();
-                    let (_, (c_min, c_max)) = selection_bounds(v.range);
-                    (v.sheet, c_min, c_max - c_min + 1)
-                });
+            let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                let v = m.get_selected_view();
+                let (_, (c_min, c_max)) = selection_bounds(v.range);
+                Location::new(v.sheet, c_min, c_max - c_min + 1)
+            });
 
             mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
@@ -187,11 +171,8 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            // Fire structure changed event for column deletion
             state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                crate::events::StructureEvent::StructureChanged(
-                    crate::events::StructureChange::delete_columns(sheet, start_col, count),
-                ),
+                StructureEvent::columns_deleted(loc),
             ));
         }
     }

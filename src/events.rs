@@ -82,13 +82,12 @@ pub enum SpreadsheetEvent {
 /// Cell content, formulas, and calculation results changed
 #[derive(Clone, PartialEq)]
 pub enum ContentEvent {
-    /// A specific cell's value changed
-    CellValueChanged { address: CellAddress },
-    /// A specific cell's content changed (more detailed)
+    /// A specific cell's content changed. `old_value`/`new_value` are `None`
+    /// when the caller doesn't have the previous or next value available.
     CellChanged {
         address: CellAddress,
-        old_value: String,
-        new_value: String,
+        old_value: Option<String>,
+        new_value: Option<String>,
     },
     /// A range of cells changed (bulk operations)
     RangeChanged {
@@ -111,7 +110,6 @@ pub enum ContentEvent {
 impl ContentEvent {
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
-            ContentEvent::CellValueChanged { address } => Some(address.sheet),
             ContentEvent::CellChanged { address, .. } => Some(address.sheet),
             ContentEvent::RangeChanged { sheet, .. } => Some(*sheet),
             ContentEvent::FormulaChanged { address } => Some(address.sheet),
@@ -163,9 +161,9 @@ impl FormatEvent {
     }
 }
 
-/// The type of structural operation
+/// The type of header operation
 #[derive(Clone, PartialEq)]
-pub enum StructureOperation {
+pub enum HeaderOperation {
     Insert,
     Delete,
 }
@@ -177,54 +175,64 @@ pub enum Dimension {
     Column { start_col: i32 },
 }
 
+///
+#[derive(Clone, PartialEq)]
+pub struct Location {
+    sheet: u32,
+    start: i32,
+    count: i32,
+}
+
+impl Location {
+    
+}
+
 /// A structural change to rows or columns
 #[derive(Clone, PartialEq)]
-pub struct StructureChange {
+pub struct HeaderChange {
     pub sheet: u32,
-    pub operation: StructureOperation,
+    pub operation: HeaderOperation,
     pub dimension: Dimension,
     pub count: i32,
 }
 
-impl StructureChange {
-    /// Insert rows starting at the given row
-    pub fn insert_rows(sheet: u32, start_row: i32, count: i32) -> Self {
+impl HeaderChange {
+    fn rows(op: HeaderOperation, location: Location) -> Self {
         Self {
-            sheet,
-            operation: StructureOperation::Insert,
-            dimension: Dimension::Row { start_row },
-            count,
+            sheet: location.sheet,
+            operation: op,
+            dimension: Dimension::Row {
+                start_row: location.start,
+            },
+            count: location.count,
         }
     }
 
-    /// Delete rows starting at the given row
-    pub fn delete_rows(sheet: u32, start_row: i32, count: i32) -> Self {
+    fn columns(op: HeaderOperation, location: Location) -> Self {
         Self {
-            sheet,
-            operation: StructureOperation::Delete,
-            dimension: Dimension::Row { start_row },
-            count,
+            sheet: location.sheet,
+            operation: op,
+            dimension: Dimension::Column {
+                start_col: location.start,
+            },
+            count: location.count,
         }
     }
 
-    /// Insert columns starting at the given column
-    pub fn insert_columns(sheet: u32, start_col: i32, count: i32) -> Self {
-        Self {
-            sheet,
-            operation: StructureOperation::Insert,
-            dimension: Dimension::Column { start_col },
-            count,
-        }
+    pub fn insert_rows(location: Location) -> Self {
+        Self::rows(HeaderOperation::Insert, location)
     }
 
-    /// Delete columns starting at the given column
-    pub fn delete_columns(sheet: u32, start_col: i32, count: i32) -> Self {
-        Self {
-            sheet,
-            operation: StructureOperation::Delete,
-            dimension: Dimension::Column { start_col },
-            count,
-        }
+    pub fn delete_rows(location: Location) -> Self {
+        Self::rows(HeaderOperation::Delete, location)
+    }
+
+    pub fn insert_columns(location: Location) -> Self {
+        Self::columns(HeaderOperation::Insert, location)
+    }
+
+    pub fn delete_columns(location: Location) -> Self {
+        Self::columns(HeaderOperation::Delete, location)
     }
 
     /// Get the starting position (row or column index)
@@ -247,12 +255,12 @@ impl StructureChange {
 
     /// Check if this is an insertion operation
     pub fn is_insert(&self) -> bool {
-        matches!(self.operation, StructureOperation::Insert)
+        matches!(self.operation, HeaderOperation::Insert)
     }
 
     /// Check if this is a deletion operation
     pub fn is_delete(&self) -> bool {
-        matches!(self.operation, StructureOperation::Delete)
+        matches!(self.operation, HeaderOperation::Delete)
     }
 }
 
@@ -272,28 +280,28 @@ pub enum StructureEvent {
     /// Worksheet reordered
     WorksheetsReordered,
     /// Rows or columns inserted/deleted
-    StructureChanged(StructureChange),
+    StructureChanged(HeaderChange),
 }
 
 impl StructureEvent {
     /// Convenience constructor for row insertion
-    pub fn rows_inserted(sheet: u32, start_row: i32, count: i32) -> Self {
-        Self::StructureChanged(StructureChange::insert_rows(sheet, start_row, count))
+    pub fn rows_inserted(location: Location) -> Self {
+        Self::StructureChanged(HeaderChange::insert_rows(location))
     }
 
     /// Convenience constructor for row deletion
-    pub fn rows_deleted(sheet: u32, start_row: i32, count: i32) -> Self {
-        Self::StructureChanged(StructureChange::delete_rows(sheet, start_row, count))
+    pub fn rows_deleted(location: Location) -> Self {
+        Self::StructureChanged(HeaderChange::delete_rows(location))
     }
 
     /// Convenience constructor for column insertion
-    pub fn columns_inserted(sheet: u32, start_col: i32, count: i32) -> Self {
-        Self::StructureChanged(StructureChange::insert_columns(sheet, start_col, count))
+    pub fn columns_inserted(location: Location) -> Self {
+        Self::StructureChanged(HeaderChange::insert_columns(location))
     }
 
     /// Convenience constructor for column deletion
-    pub fn columns_deleted(sheet: u32, start_col: i32, count: i32) -> Self {
-        Self::StructureChanged(StructureChange::delete_columns(sheet, start_col, count))
+    pub fn columns_deleted(location: Location) -> Self {
+        Self::StructureChanged(HeaderChange::delete_columns(location))
     }
 
     pub fn affected_sheet(&self) -> Option<u32> {

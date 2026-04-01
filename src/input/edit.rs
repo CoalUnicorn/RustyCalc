@@ -100,8 +100,8 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                             row: edit.address.row,
                             column: edit.address.column,
                         },
-                        old_value: String::new(), // TODO: Could track old value if needed
-                        new_value: edit.text.clone(),
+                        old_value: None,
+                        new_value: Some(edit.text.clone()),
                     },
                 ));
 

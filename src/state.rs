@@ -80,17 +80,11 @@ pub struct WorkbookState {
     ),
     /// Active mouse-drag interaction (selection, resize, autofill, point-mode).
     pub(crate) drag: (ReadSignal<DragState>, WriteSignal<DragState>),
-    /// Increment after any model mutation to force canvas re-renders.
-    /// Components that draw the canvas subscribe to the read signal.
-    pub(crate) redraw: (ReadSignal<u32>, WriteSignal<u32>),
     /// Typed event stream for fine-grained reactivity.
-    /// Replaces generic redraw counter with domain-specific events.
     pub(crate) events: (
         ReadSignal<Vec<SpreadsheetEvent>>,
         WriteSignal<Vec<SpreadsheetEvent>>,
     ),
-    /// Version counter for legacy compatibility during migration.
-    pub(crate) version: (ReadSignal<u32>, WriteSignal<u32>),
     /// UUID of the workbook currently loaded in the model.
     /// Used by `storage::save` to write back to the correct localStorage key.
     /// `None` during the brief window before a workbook is loaded.
@@ -238,9 +232,7 @@ impl WorkbookState {
         Self {
             editing_cell: signal(None),
             drag: signal(DragState::Idle),
-            redraw: signal(0_u32),
             events,
-            version: signal(0_u32),
             current_uuid: signal(None),
             theme: signal(Theme::from_storage()),
             // is_drawer_open: signal(false),
@@ -266,12 +258,8 @@ impl WorkbookState {
         }
     }
 
-    /// Call after any UserModel mutation to trigger canvas re-render.
-    ///
-    /// Legacy method - prefer `emit_event()` for new code.
+    /// Trigger a canvas re-render by emitting a generic content change event.
     pub fn request_redraw(&self) {
-        self.redraw.1.update(|n| *n += 1);
-        // Also emit generic change event for new system
         self.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
     }
 
@@ -292,9 +280,6 @@ impl WorkbookState {
             }
         });
 
-        // Bump version for generic subscribers
-        self.version.1.update(|v| *v += 1);
-
         // Auto-update related signals based on event type
         match event {
             SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled { new_theme }) => {
@@ -302,15 +287,6 @@ impl WorkbookState {
             }
             SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated { colors }) => {
                 self.recent_colors.1.set(colors);
-            }
-            SpreadsheetEvent::Navigation(NavigationEvent::EditingStarted { address: _ }) => {
-                // This would typically be set elsewhere, but we can sync here too
-            }
-            SpreadsheetEvent::Navigation(NavigationEvent::EditingEnded {
-                committed: true, ..
-            }) => {
-                // Clear editing state on successful commit
-                self.editing_cell.1.set(None);
             }
             SpreadsheetEvent::Mode(ModeEvent::DragModeChanged { to_mode, .. }) => {
                 self.drag.1.set(to_mode);
@@ -362,50 +338,6 @@ impl WorkbookState {
         }
     }
 
-    // ===== Convenience Methods for Common Events =====
-
-    /// Notify that theme changed
-    pub fn notify_theme_changed(&self, new_theme: Theme) {
-        self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
-            new_theme,
-        }));
-    }
-
-    /// Notify that recent colors were updated
-    pub fn notify_recent_colors_updated(&self, colors: Vec<String>) {
-        self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
-            colors,
-        }));
-    }
-
-    /// Notify that a cell value changed
-    pub fn notify_cell_changed(&self, address: CellAddress) {
-        self.emit_event(SpreadsheetEvent::Content(ContentEvent::CellValueChanged {
-            address,
-        }));
-    }
-
-    /// Notify that a cell's style changed
-    pub fn notify_cell_style_changed(&self, address: CellAddress) {
-        self.emit_event(SpreadsheetEvent::Format(FormatEvent::CellStyleChanged {
-            address,
-        }));
-    }
-
-    /// Notify that editing started
-    pub fn notify_editing_started(&self, address: CellAddress) {
-        self.emit_event(SpreadsheetEvent::Navigation(
-            NavigationEvent::EditingStarted { address },
-        ));
-    }
-
-    /// Notify that editing ended
-    pub fn notify_editing_ended(&self, address: CellAddress, committed: bool) {
-        self.emit_event(SpreadsheetEvent::Navigation(
-            NavigationEvent::EditingEnded { address, committed },
-        ));
-    }
-
     /// Subscribe to navigation-related events only (selection, sheet changes)
     pub fn subscribe_to_navigation_events(
         &self,
@@ -437,10 +369,6 @@ impl WorkbookState {
         move || memo.get()
     }
 
-    /// Legacy compatibility - subscribe to any change via version counter
-    pub fn subscribe_to_any_change(&self) -> impl Fn() -> u32 + Copy + use<'_> {
-        move || self.version.0.get()
-    }
 
     // Convenience methods for commonly used signals
     // These reduce boilerplate and make the API more ergonomic
@@ -504,7 +432,7 @@ impl WorkbookState {
     pub fn set_theme(&self, theme: Theme) {
         self.theme.1.set(theme);
         theme.save(); // Keep manual persistence for now
-        self.notify_theme_changed(theme);
+        self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled { new_theme: theme }));
     }
 
     /// Toggle theme in cycle: Auto -> Light -> Dark -> Auto
@@ -528,15 +456,6 @@ impl WorkbookState {
         }
     }
 
-    /// Get the redraw signal (for reactive subscriptions)
-    pub fn get_redraw(&self) -> u32 {
-        self.redraw.0.get()
-    }
-
-    /// Get the redraw signal (non-reactive)
-    pub fn get_redraw_untracked(&self) -> u32 {
-        self.redraw.0.get_untracked()
-    }
 
     /// Get point range (reactive)
     pub fn get_point_range(&self) -> Option<[i32; 4]> {
@@ -650,7 +569,7 @@ impl WorkbookState {
         <gloo_storage::LocalStorage as GlooStorage>::set("ironcalc_recent_colors", &colors).ok();
 
         // Emit event for reactive subscribers
-        self.notify_recent_colors_updated(colors);
+        self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated { colors }));
     }
 
     /// Get colors from the current document that aren't in the standard palette

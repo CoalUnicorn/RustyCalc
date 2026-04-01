@@ -114,7 +114,9 @@ pub fn FormulaBar() -> impl IntoView {
             };
 
             // Fire editing started event
-            state.notify_editing_started(address);
+            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                crate::events::NavigationEvent::EditingStarted { address },
+            ));
 
             state.set_editing_cell(Some(EditingCell {
                 address,
