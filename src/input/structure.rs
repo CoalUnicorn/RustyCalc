@@ -102,10 +102,26 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 Location::new(v.sheet, r_min, r_max - r_min + 1)
             });
 
+            // Can we use this ?
+            // let loc2 = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+            //     let v = m.get_selected_view();
+            //     Location::from_selecton_bounds(
+            //         v.sheet,
+            //         Origin::Row { start: None },
+            //         selection_bounds(v.range),
+            //     )
+            // });
+
             mutate(model, state, Eval::Yes, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
+
                 warn_if_err(
+                    // m.insert_rows(Location::for_insert(
+                    //     v.sheet,
+                    //     Dimension::Row { start: None },
+                    //     selection_bounds(v.range),
+                    // ))
                     m.insert_rows(v.sheet, r_min, r_max - r_min + 1),
                     "insert_rows",
                 );

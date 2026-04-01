@@ -171,8 +171,8 @@ pub enum HeaderOperation {
 /// The dimension being modified
 #[derive(Clone, PartialEq)]
 pub enum Dimension {
-    Row { start_row: i32 },
-    Column { start_col: i32 },
+    Row { start: Option<i32> },
+    Column { start: Option<i32> },
 }
 
 ///
@@ -191,6 +191,37 @@ impl Location {
             count,
         }
     }
+
+    //  ((r_min, r_max), (c_min, c_max))
+    // pub fn from_selecton_bounds(
+    //     sheet: u32,
+    //     header: Origin,
+    //     bounds: ((i32, i32), (i32, i32)),
+    // ) -> Self {
+    //     match header {
+    //         Origin::Row { .. } => {
+    //             let ((start, count), _) = bounds;
+    //             Self::new(sheet, start, count - start + 1)
+    //         }
+    //         Origin::Column { .. } => {
+    //             let (_, (start, count)) = bounds;
+    //             Self::new(sheet, start, count - start + 1)
+    //         }
+    //     }
+    // }
+
+    // pub fn for_insert(sheet: u32, header: Origin, bounds: ((i32, i32), (i32, i32))) -> Self {
+    //     match header {
+    //         Origin::Row { .. } => {
+    //             let ((start, count), _) = bounds;
+    //             Self::new(sheet, start, count - start + 1)
+    //         }
+    //         Origin::Column { .. } => {
+    //             let (_, (start, count)) = bounds;
+    //             Self::new(sheet, start, count - start + 1)
+    //         }
+    //     }
+    // }
 }
 
 /// A structural change to rows or columns
@@ -208,7 +239,7 @@ impl HeaderChange {
             sheet: location.sheet,
             operation: op,
             dimension: Dimension::Row {
-                start_row: location.start,
+                start: Some(location.start),
             },
             count: location.count,
         }
@@ -219,7 +250,7 @@ impl HeaderChange {
             sheet: location.sheet,
             operation: op,
             dimension: Dimension::Column {
-                start_col: location.start,
+                start: Some(location.start),
             },
             count: location.count,
         }
@@ -244,8 +275,8 @@ impl HeaderChange {
     /// Get the starting position (row or column index)
     pub fn start_position(&self) -> i32 {
         match &self.dimension {
-            Dimension::Row { start_row } => *start_row,
-            Dimension::Column { start_col } => *start_col,
+            Dimension::Row { start } => start.expect("Row imposible"),
+            Dimension::Column { start } => start.expect("Row imposible"),
         }
     }
 
