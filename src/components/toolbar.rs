@@ -15,8 +15,35 @@ const FONT_SIZES: &[f64] = &[
     36.0, 48.0, 72.0,
 ];
 
+/// Top toolbar. Creates two shared memos once and provides them via context so
+/// every sub-component reads the same reactive computation instead of each
+/// instantiating its own (was: 4 × Memo, 12 subscriptions → 2 × Memo, 6 subscriptions).
+///
+/// Context provided to children:
+/// - `Memo<ToolbarState>`   — font size/family, bold/italic/color, etc.
+/// - `Memo<(bool, bool)>`   — (can_undo, can_redo)
 #[component]
 pub fn Toolbar() -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+
+    // Re-runs on format changes (cell styling) AND navigation (selection change).
+    // visual_events catches theme/canvas redraws that also affect cell style display.
+    let toolbar_state: Memo<ToolbarState> = Memo::new(move |_| {
+        let _ = state.subscribe_to_format_events()();
+        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.subscribe_to_visual_events()();
+        model.with_value(|m| m.toolbar_state())
+    });
+
+    let undo_redo_state: Memo<(bool, bool)> = Memo::new(move |_| {
+        let _ = state.subscribe_to_content_events()();
+        model.with_value(|m| (m.can_undo(), m.can_redo()))
+    });
+
+    provide_context(toolbar_state);
+    provide_context(undo_redo_state);
+
     view! {
         <div class="toolbar">
             <UndoRedo />
@@ -41,26 +68,18 @@ pub fn Toolbar() -> impl IntoView {
 fn UndoRedo() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
+    let undo_redo_state = expect_context::<Memo<(bool, bool)>>();
 
-    // TODO: can it be:
-    // let content_state = expect_context::<Memo<(bool, bool)>>();
-    let undo_redo_state = Memo::new(move |_| {
-        let content_events = state.subscribe_to_content_events();
-        let _ = content_events(); // Single subscription
-        model.with_value(|m| (m.can_undo(), m.can_redo())) // Single model access
-    });
-
-    // Efficient derived computations (no additional subscriptions)
     let can_undo = move || undo_redo_state.with(|(undo, _)| *undo);
     let can_redo = move || undo_redo_state.with(|(_, redo)| *redo);
 
     let on_undo = move |_: web_sys::MouseEvent| {
         execute(&SpreadsheetAction::undo(), model, &state);
-        crate::util::refocus_workbook();
+        refocus_workbook();
     };
     let on_redo = move |_: web_sys::MouseEvent| {
         execute(&SpreadsheetAction::redo(), model, &state);
-        crate::util::refocus_workbook();
+        refocus_workbook();
     };
 
     view! {
@@ -83,60 +102,24 @@ fn UndoRedo() -> impl IntoView {
     }
 }
 
-// SHARED TOOLBAR STATE - Single memo for all format-related components
-// This replaces 4+ separate format event subscriptions with one efficient shared subscription
-fn get_shared_toolbar_state() -> Memo<ToolbarState> {
-    let state = expect_context::<WorkbookState>();
-    let model = expect_context::<ModelStore>();
-
-    Memo::new(move |_| {
-        let _ = state.subscribe_to_format_events()();
-        let _ = state.subscribe_to_navigation_events()();
-        let _ = state.subscribe_to_visual_events()();
-        model.with_value(|m| m.toolbar_state()) // Single model access
-    })
-}
-
-// SHARED COLOR STATE - Single memo for color components that need both format + theme events
-fn get_shared_color_state() -> (Memo<ToolbarState>, Memo<()>) {
-    let state = expect_context::<WorkbookState>();
-    let model = expect_context::<ModelStore>();
-
-    let format_state = Memo::new(move |_| {
-        let format_events = state.subscribe_to_format_events();
-        let _ = format_events();
-        model.with_value(|m| m.toolbar_state())
-    });
-
-    // FIXME: This need its own place
-    let theme_state = Memo::new(move |_| {
-        let theme_events = state.subscribe_to_theme_events();
-        let _ = theme_events();
-        // Return unit for now, can extend with actual theme data later
-    });
-
-    (format_state, theme_state)
-}
-
 // Font family
 #[component]
 fn FontFamily() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
+    let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
-    // Use shared toolbar state
-    let toolbar_state = get_shared_toolbar_state();
     let current_family = move || toolbar_state.with(|ts| ts.style.font_family);
 
     let on_change = move |ev: web_sys::Event| {
         use wasm_bindgen::JsCast;
         let target = ev
             .target()
-            .unwrap_throw() // NOTE: Can this work ? instead of unwrap
+            .unwrap_throw()
             .unchecked_into::<web_sys::HtmlSelectElement>();
         let family = SafeFontFamily::from(Some(target.value().as_str()));
         execute(&SpreadsheetAction::set_font_family(family), model, &state);
-        crate::util::refocus_workbook();
+        refocus_workbook();
     };
 
     view! {
@@ -163,19 +146,22 @@ fn FontFamily() -> impl IntoView {
     }
 }
 
-// Font size
+// Font size — +/- buttons step through FONT_SIZES ladder; input accepts direct entry.
+//
+// FIXME: Mixed selections with empty cells (default 13px) produce invalid negative
+//        size deltas. Sub-10px increment also broken due to delta calculation in
+//        format.rs. Both deferred — see format.rs FIXME comment.
 #[component]
 fn FontSize() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
+    let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
-    // Use shared toolbar state
-    let toolbar_state = get_shared_toolbar_state();
     let current_size = move || toolbar_state.with(|ts| ts.style.font_size);
 
     fn apply(size: f64, model: ModelStore, state: &WorkbookState) {
         execute(&SpreadsheetAction::set_font_size(size), model, state);
-        crate::util::refocus_workbook();
+        refocus_workbook();
     }
 
     let on_minus = move |_: web_sys::MouseEvent| {
@@ -269,8 +255,8 @@ fn snap_size(current: f64, step: SizeStep) -> f64 {
 fn FormatToggles() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
+    let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
-    let toolbar_state = get_shared_toolbar_state();
     let format = move || toolbar_state.with(|ts| ts.format.clone());
 
     let create_toggle = move |action: SpreadsheetAction| {
@@ -317,17 +303,14 @@ fn FormatToggles() -> impl IntoView {
     }
 }
 
-// Freeze panes
-
+// Freeze panes — has its own layout-specific memo (not toolbar state).
 #[component]
 fn FreezePane() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    // TODO: Use format events for now (freeze panes affects layout, could be moved to structure events later)
     let is_frozen = Memo::new(move |_| {
-        let format_events = state.subscribe_to_format_events();
-        let _ = format_events(); // Subscribe to layout changes
+        let _ = state.subscribe_to_format_events()();
         model.with_value(|m| m.frozen_panes().is_frozen())
     });
 
@@ -357,7 +340,6 @@ fn FreezePane() -> impl IntoView {
                 }
             }
         });
-        // Emit layout change event instead of generic redraw
         state.emit_event(crate::events::SpreadsheetEvent::Format(
             crate::events::FormatEvent::LayoutChanged {
                 sheet: model.with_value(|m| m.get_selected_view().sheet),
@@ -365,68 +347,56 @@ fn FreezePane() -> impl IntoView {
                 row: None,
             },
         ));
-        crate::util::refocus_workbook();
+        refocus_workbook();
     };
 
-    let freeze_label = move || {
-        if is_frozen.get() {
-            "╔"
-        } else {
-            "╬"
-        }
-    };
+    let freeze_label = move || if is_frozen.get() { "╔" } else { "╬" };
 
     view! {
-        <button class=move || if is_frozen.get() {"toolbar-btn active"} else {"toolbar-btn"}
-            title=move || if is_frozen.get() {"Unfreeze panes"} else {"Freeze panes above and left of active cell"}
-            on:click=on_freeze>
+        <button
+            class=move || if is_frozen.get() { "toolbar-btn active" } else { "toolbar-btn" }
+            title=move || if is_frozen.get() {
+                "Unfreeze panes"
+            } else {
+                "Freeze panes above and left of active cell"
+            }
+            on:click=on_freeze
+        >
             {freeze_label}
         </button>
     }
 }
 
-// Text Color Picker - Event-Driven Version
+// Text Color Picker
 #[component]
 fn TextColorPickerToolbar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let _model = expect_context::<ModelStore>();
+    let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
-    let toolbar_state = get_shared_toolbar_state();
-
-    let (format_state, _theme_state) = get_shared_color_state();
+    // TODO: wire current_color into EnhancedTextColorPicker once text color formatting is implemented
     let current_color = Signal::derive(move || {
-        format_state.with(|_ts| {
-            // TODO: Get actual text color from toolbar state
-            // Some(ts.style.text_color.to_string())
-            None::<String>
-        })
+        let _ = toolbar_state.with(|ts| ts.style.text_color.clone());
+        None::<String>
     });
-    let color = move || toolbar_state.with(|ts| ts.style.text_color.clone());
 
-    // Handle color change with event emission
     let on_color_change = Callback::new(move |color: Option<String>| {
-        // Add to recent colors - this automatically emits RecentColorsUpdated event
         if let Some(ref hex) = color {
             state.add_recent_color(hex);
         }
 
-        // TODO: Apply color to selected cells
         web_sys::console::log_2(
             &"Text color changed to:".into(),
             &format!("{:?}", color).into(),
         );
 
-        // Demo colors for testing
         if state.get_recent_colors_untracked().is_empty() {
-            state.add_recent_color("#ff6b6b"); // Coral red
-            state.add_recent_color("#4ecdc4"); // Turquoise
-            state.add_recent_color("#45b7d1"); // Sky blue
+            state.add_recent_color("#ff6b6b");
+            state.add_recent_color("#4ecdc4");
+            state.add_recent_color("#45b7d1");
         }
 
-        // Emit specific format events instead of generic redraw
-        // TODO: When you implement actual formatting:
-        // execute(&SpreadsheetAction::set_text_color(color), model, &state);
-        // state.notify_cell_style_changed(sheet, row, col);
+        // TODO: execute(&SpreadsheetAction::set_text_color(color), model, &state);
     });
 
     view! {
@@ -437,24 +407,20 @@ fn TextColorPickerToolbar() -> impl IntoView {
     }
 }
 
-// Background Color Picker - Event-Driven Version
+// Background Color Picker
 #[component]
 fn BackgroundColorPickerToolbar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let _model = expect_context::<ModelStore>();
+    let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
-    let (format_state, _theme_state) = get_shared_color_state();
+    // TODO: wire current_color into EnhancedBackgroundColorPicker once bg color formatting is implemented
     let current_color = Signal::derive(move || {
-        format_state.with(|_ts| {
-            // TODO: Get actual background color from toolbar state
-            // Some(ts.style.bg_color.as_ref().map(|c| c.to_string()))
-            None::<String>
-        })
+        let _ = toolbar_state.with(|ts| ts.style.bg_color.clone());
+        None::<String>
     });
 
-    // Handle color change with event emission
     let on_color_change = Callback::new(move |color: Option<String>| {
-        // Add to recent colors - automatically emits RecentColorsUpdated event
         if let Some(ref hex) = color {
             state.add_recent_color(hex);
         }
@@ -464,9 +430,7 @@ fn BackgroundColorPickerToolbar() -> impl IntoView {
             &format!("{:?}", color).into(),
         );
 
-        // TODO: Apply background color and emit specific events
-        // execute(&SpreadsheetAction::set_background_color(color), model, &state);
-        // state.notify_cell_style_changed(sheet, row, col);
+        // TODO: execute(&SpreadsheetAction::set_background_color(color), model, &state);
     });
 
     view! {

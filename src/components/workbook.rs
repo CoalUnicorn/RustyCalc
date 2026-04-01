@@ -9,7 +9,6 @@ use crate::components::toolbar::Toolbar;
 use crate::components::worksheet::Worksheet;
 use crate::input::action::{classify_key, execute, SpreadsheetAction};
 use crate::input::formula_input::*;
-use crate::input::helpers::{mutate, Eval};
 use crate::model::AppClipboard;
 use crate::state::{EditMode, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
@@ -113,11 +112,11 @@ pub fn Workbook() -> impl IntoView {
         match &action {
             // Clipboard: needs AppClipboard store + async OS clipboard APIs.
             SpreadsheetAction::Copy => {
-                copy_to_app_clipboard(model, clipboard_store);
+                copy_to_app_clipboard(model, state, clipboard_store);
                 ev.prevent_default();
             }
             SpreadsheetAction::Cut => {
-                copy_to_app_clipboard(model, clipboard_store);
+                copy_to_app_clipboard(model, state, clipboard_store);
                 // Clear the selected range.
                 // Pause evaluation so each set_user_input doesn't trigger a
                 // full recalc; evaluate once at the end.
@@ -136,6 +135,7 @@ pub fn Workbook() -> impl IntoView {
                     m.resume_evaluation();
                     m.evaluate();
                 });
+                state.request_redraw();
                 ev.prevent_default();
             }
             SpreadsheetAction::Paste => {
@@ -180,6 +180,7 @@ pub fn Workbook() -> impl IntoView {
 /// tab-separated text to the OS clipboard (fire-and-forget async).
 fn copy_to_app_clipboard(
     model: ModelStore,
+    state: WorkbookState,
     clipboard_store: StoredValue<Option<AppClipboard>, LocalStorage>,
 ) {
     model.with_value(|m| {
@@ -187,6 +188,9 @@ fn copy_to_app_clipboard(
             let app_cb = AppClipboard::capture(&cb);
             let csv = app_cb.csv.clone();
             clipboard_store.update_value(|c| *c = Some(app_cb));
+            // Repaint immediately so the marching-ants border appears on the
+            // copied range without waiting for the next user interaction.
+            state.request_redraw();
             // Fire-and-forget: write tab-separated text to the OS clipboard.
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(window) = web_sys::window() {

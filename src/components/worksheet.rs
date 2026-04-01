@@ -39,35 +39,8 @@ pub fn Worksheet() -> impl IntoView {
     // Re-render canvas every time visual events occur (content, format, navigation, structure).
     let clipboard_draw = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
-    // Memo for expensive overlay calculations - only recomputes when dependencies change
-    let overlays = create_memo(move |_| {
-        let extend_to = if let DragState::Extending { to_row, to_col } = state.get_drag() {
-            Some((to_row, to_col))
-        } else {
-            None
-        };
-        let point_range = state.get_point_range();
-        let clipboard = clipboard_draw.with_value(|opt| {
-            opt.as_ref().map(|acb| {
-                let (r1, c1, r2, c2) = acb.range;
-                ClipboardRange {
-                    sheet: acb.sheet,
-                    r1,
-                    c1,
-                    r2,
-                    c2,
-                }
-            })
-        });
-        RenderOverlays {
-            extend_to,
-            clipboard,
-            point_range: point_range.map(|[r1, c1, r2, c2]| SheetRect { r1, c1, r2, c2 }),
-        }
-    });
-
     // Memo for canvas theme - cached until theme changes
-    let canvas_theme = create_memo(move |_| state.get_theme().canvas_theme());
+    let canvas_theme = Memo::new(move |_| state.get_theme().canvas_theme());
 
     Effect::new(move |_| {
         // Subscribe to visual events only (excludes theme/mode events that don't affect rendering)
@@ -85,9 +58,30 @@ pub fn Worksheet() -> impl IntoView {
             m.set_window_width(canvas_w);
             m.set_window_height(canvas_h);
         });
+        // Overlays are computed inline (not in a memo) because `clipboard_draw`
+        // is a StoredValue — not reactive. Caching it in a memo would return stale
+        // clipboard data; reading it here guarantees the current value every render.
+        let overlays = {
+            let extend_to = match state.get_drag() {
+                DragState::Extending { to_row, to_col } => Some((to_row, to_col)),
+                _ => None,
+            };
+            let point_range = state.get_point_range();
+            let clipboard = clipboard_draw.with_value(|opt| {
+                opt.as_ref().map(|acb| {
+                    let (r1, c1, r2, c2) = acb.range;
+                    ClipboardRange { sheet: acb.sheet, r1, c1, r2, c2 }
+                })
+            });
+            RenderOverlays {
+                extend_to,
+                clipboard,
+                point_range: point_range.map(|[r1, c1, r2, c2]| SheetRect { r1, c1, r2, c2 }),
+            }
+        };
         model.with_value(|m| {
             let renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get());
-            renderer.render(m, &overlays.get());
+            renderer.render(m, &overlays);
         });
         // Record render-done timestamp for the perf panel.
         if state.perf.commit_start.get_untracked().is_some() {
@@ -288,7 +282,37 @@ pub fn Worksheet() -> impl IntoView {
         }
 
         state.set_editing_cell(None);
-        state.request_redraw();
+
+        // Emit the appropriate navigation event so toolbar/formula-bar
+        // update and the canvas repaints via visual_events.
+        if near_handle {
+            // Autofill start: drag state change alone triggers the Effect.
+        } else {
+            let sheet = model.with_value(|m| m.get_selected_view().sheet);
+            if ev.shift_key() {
+                let (start_row, start_col, end_row, end_col) = model.with_value(|m| {
+                    let [r1, c1, r2, c2] = m.get_selected_view().range;
+                    (r1, c1, r2, c2)
+                });
+                state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                    crate::events::NavigationEvent::SelectionRangeChanged {
+                        sheet,
+                        start_row,
+                        start_col,
+                        end_row,
+                        end_col,
+                    },
+                ));
+            } else {
+                let address = model.with_value(|m| {
+                    let v = m.get_selected_view();
+                    CellAddress { sheet, row: v.row, column: v.column }
+                });
+                state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                    crate::events::NavigationEvent::SelectionChanged { address },
+                ));
+            }
+        }
     };
 
     // mousemove: expand selection or autofill preview
@@ -316,7 +340,10 @@ pub fn Worksheet() -> impl IntoView {
                     );
                 });
                 state.set_drag(DragState::ResizingCol { col, x });
-                state.request_redraw();
+                let sheet = model.with_value(|m| m.active_cell().sheet);
+                state.emit_event(crate::events::SpreadsheetEvent::Format(
+                    crate::events::FormatEvent::LayoutChanged { sheet, col: Some(col), row: None },
+                ));
                 ev.prevent_default();
                 return;
             }
@@ -329,7 +356,10 @@ pub fn Worksheet() -> impl IntoView {
                     warn_if_err(m.set_rows_height(sheet, row, row, new_h), "set_rows_height");
                 });
                 state.set_drag(DragState::ResizingRow { row, y });
-                state.request_redraw();
+                let sheet = model.with_value(|m| m.active_cell().sheet);
+                state.emit_event(crate::events::SpreadsheetEvent::Format(
+                    crate::events::FormatEvent::LayoutChanged { sheet, col: None, row: Some(row) },
+                ));
                 ev.prevent_default();
                 return;
             }
@@ -440,7 +470,22 @@ pub fn Worksheet() -> impl IntoView {
                 m.resume_evaluation();
                 m.evaluate();
             });
-            state.request_redraw();
+            // Autofill wrote content — emit a content event so canvas and
+            // formula bar both repaint with the filled values.
+            let sheet = model.with_value(|m| m.get_selected_view().sheet);
+            let (start_row, start_col, end_row, end_col) = model.with_value(|m| {
+                let [r1, c1, r2, c2] = m.get_selected_view().range;
+                (r1, c1, r2, c2)
+            });
+            state.emit_event(crate::events::SpreadsheetEvent::Content(
+                crate::events::ContentEvent::RangeChanged {
+                    sheet,
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                },
+            ));
         }
         state.set_drag(DragState::Idle);
     };
@@ -534,7 +579,13 @@ pub fn Worksheet() -> impl IntoView {
                 }
             }
         });
-        state.request_redraw();
+        let (sheet, top_row, left_col) = model.with_value(|m| {
+            let v = m.get_selected_view();
+            (v.sheet, v.top_row, v.left_column)
+        });
+        state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+            crate::events::NavigationEvent::ViewportScrolled { sheet, top_row, left_col },
+        ));
     };
 
     view! {
