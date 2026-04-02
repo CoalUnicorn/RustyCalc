@@ -10,7 +10,9 @@ use crate::components::cell_editor::CellEditor;
 use crate::input::formula_input::*;
 use crate::model::{AppClipboard, ArrowKey, CellAddress, FrontendModel, PageDir};
 
-use crate::events::{DragState, HeaderContextMenu};
+use crate::events::{
+    ContentEvent, DragState, FormatEvent, HeaderContextMenu, NavigationEvent, SpreadsheetEvent,
+};
 use crate::state::{ContextMenuState, EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
@@ -193,13 +195,11 @@ pub fn Worksheet() -> impl IntoView {
                 });
                 state.set_drag(DragState::ResizingCol { col, x });
                 let sheet = model.with_value(|m| m.active_cell().sheet);
-                state.emit_event(crate::events::SpreadsheetEvent::Format(
-                    crate::events::FormatEvent::LayoutChanged {
-                        sheet,
-                        col: Some(col),
-                        row: None,
-                    },
-                ));
+                state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
+                    sheet,
+                    col: Some(col),
+                    row: None,
+                }));
                 ev.prevent_default();
                 return;
             }
@@ -213,13 +213,11 @@ pub fn Worksheet() -> impl IntoView {
                 });
                 state.set_drag(DragState::ResizingRow { row, y });
                 let sheet = model.with_value(|m| m.active_cell().sheet);
-                state.emit_event(crate::events::SpreadsheetEvent::Format(
-                    crate::events::FormatEvent::LayoutChanged {
-                        sheet,
-                        col: None,
-                        row: Some(row),
-                    },
-                ));
+                state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
+                    sheet,
+                    col: None,
+                    row: Some(row),
+                }));
                 ev.prevent_default();
                 return;
             }
@@ -337,15 +335,13 @@ pub fn Worksheet() -> impl IntoView {
                 let [r1, c1, r2, c2] = m.get_selected_view().range;
                 (r1, c1, r2, c2)
             });
-            state.emit_event(crate::events::SpreadsheetEvent::Content(
-                crate::events::ContentEvent::RangeChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
-                },
-            ));
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }));
         }
         state.set_drag(DragState::Idle);
     };
@@ -443,8 +439,8 @@ pub fn Worksheet() -> impl IntoView {
             let v = m.get_selected_view();
             (v.sheet, v.top_row, v.left_column)
         });
-        state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-            crate::events::NavigationEvent::ViewportScrolled {
+        state.emit_event(SpreadsheetEvent::Navigation(
+            NavigationEvent::ViewportScrolled {
                 sheet,
                 top_row,
                 left_col,
@@ -531,8 +527,8 @@ fn handle_corner_click(model: ModelStore, state: WorkbookState) {
         let [r1, c1, r2, c2] = v.range;
         (v.sheet, r1, c1, r2, c2)
     });
-    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-        crate::events::NavigationEvent::SelectionRangeChanged {
+    state.emit_event(SpreadsheetEvent::Navigation(
+        NavigationEvent::SelectionRangeChanged {
             sheet,
             start_row,
             start_col,
@@ -567,8 +563,8 @@ fn handle_col_header_click(
         let [r1, c1, r2, c2] = v.range;
         (v.sheet, r1, c1, r2, c2)
     });
-    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-        crate::events::NavigationEvent::SelectionRangeChanged {
+    state.emit_event(SpreadsheetEvent::Navigation(
+        NavigationEvent::SelectionRangeChanged {
             sheet,
             start_row,
             start_col,
@@ -603,8 +599,8 @@ fn handle_row_header_click(
         let [r1, c1, r2, c2] = v.range;
         (v.sheet, r1, c1, r2, c2)
     });
-    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-        crate::events::NavigationEvent::SelectionRangeChanged {
+    state.emit_event(SpreadsheetEvent::Navigation(
+        NavigationEvent::SelectionRangeChanged {
             sheet,
             start_row,
             start_col,
@@ -697,8 +693,8 @@ fn handle_cell_click(
                 let [r1, c1, r2, c2] = m.get_selected_view().range;
                 (r1, c1, r2, c2)
             });
-            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                crate::events::NavigationEvent::SelectionRangeChanged {
+            state.emit_event(SpreadsheetEvent::Navigation(
+                NavigationEvent::SelectionRangeChanged {
                     sheet,
                     start_row,
                     start_col,
@@ -715,8 +711,8 @@ fn handle_cell_click(
                     column: v.column,
                 }
             });
-            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                crate::events::NavigationEvent::SelectionChanged { address },
+            state.emit_event(SpreadsheetEvent::Navigation(
+                NavigationEvent::SelectionChanged { address },
             ));
         }
     }

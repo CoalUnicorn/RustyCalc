@@ -1,6 +1,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
 use crate::state::{ModelStore, WorkbookState};
 use crate::theme::COLOR_PALETTE;
 
@@ -45,8 +46,8 @@ pub fn SheetTabBar() -> impl IntoView {
 
         // Fire specific structure event instead of generic redraw
         let new_sheet_name = format!("Sheet{}", new_sheet_result.1 + 1);
-        state.emit_event(crate::events::SpreadsheetEvent::Structure(
-            crate::events::StructureEvent::WorksheetAdded {
+        state.emit_event(SpreadsheetEvent::Structure(
+            StructureEvent::WorksheetAdded {
                 sheet: new_sheet_result.1,
                 name: new_sheet_name,
             },
@@ -143,8 +144,8 @@ fn SheetTab(
 
         // Fire specific navigation event instead of generic redraw
         if previous_sheet != sheet_idx {
-            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                crate::events::NavigationEvent::ActiveSheetChanged {
+            state.emit_event(SpreadsheetEvent::Navigation(
+                NavigationEvent::ActiveSheetChanged {
                     from_sheet: previous_sheet,
                     to_sheet: sheet_idx,
                 },
@@ -245,13 +246,11 @@ fn TabContextMenu(
         });
 
         // Fire specific format event for sheet color change
-        state.emit_event(crate::events::SpreadsheetEvent::Format(
-            crate::events::FormatEvent::LayoutChanged {
-                sheet: sheet_idx,
-                col: None,
-                row: None,
-            },
-        ));
+        state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
+            sheet: sheet_idx,
+            col: None,
+            row: None,
+        }));
 
         menu_open.set(None);
     };
@@ -265,8 +264,8 @@ fn TabContextMenu(
         });
 
         // Fire specific structure event for sheet hiding (treated as worksheet deletion from UI perspective)
-        state.emit_event(crate::events::SpreadsheetEvent::Structure(
-            crate::events::StructureEvent::WorksheetDeleted { sheet: sheet_idx },
+        state.emit_event(SpreadsheetEvent::Structure(
+            StructureEvent::WorksheetDeleted { sheet: sheet_idx },
         ));
     };
 
@@ -291,8 +290,8 @@ fn TabContextMenu(
             });
 
             // Fire specific structure event for sheet deletion
-            state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                crate::events::StructureEvent::WorksheetDeleted { sheet: sheet_idx },
+            state.emit_event(SpreadsheetEvent::Structure(
+                StructureEvent::WorksheetDeleted { sheet: sheet_idx },
             ));
         }
     };
@@ -398,8 +397,8 @@ fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView
             });
 
             // Fire specific structure event for sheet rename
-            state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                crate::events::StructureEvent::WorksheetRenamed {
+            state.emit_event(SpreadsheetEvent::Structure(
+                StructureEvent::WorksheetRenamed {
                     sheet: sheet_idx,
                     old_name,
                     new_name: new_name.clone(),
@@ -531,8 +530,8 @@ fn AllSheetsMenu() -> impl IntoView {
                                         if is_hidden {
                                             model.update_value(|m| { m.unhide_sheet(idx).ok(); });
                                             // Fire event for sheet unhiding (opposite of hiding/deletion)
-                                            state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                                                crate::events::StructureEvent::WorksheetAdded {
+                                            state.emit_event(SpreadsheetEvent::Structure(
+                                                StructureEvent::WorksheetAdded {
                                                     sheet: idx,
                                                     name: name_clone.clone(),
                                                 }
@@ -543,8 +542,8 @@ fn AllSheetsMenu() -> impl IntoView {
 
                                         // Fire navigation event for sheet selection
                                         if previous_sheet != idx {
-                                            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                                                crate::events::NavigationEvent::ActiveSheetChanged {
+                                            state.emit_event(SpreadsheetEvent::Navigation(
+                                                NavigationEvent::ActiveSheetChanged {
                                                     from_sheet: previous_sheet,
                                                     to_sheet: idx,
                                                 }

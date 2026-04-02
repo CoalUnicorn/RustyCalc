@@ -13,10 +13,8 @@ use crate::input::edit::{execute_edit, EditAction};
 use crate::input::format::{execute_format, FormatAction};
 use crate::input::nav::{execute_nav, NavAction};
 use crate::input::structure::{execute_struct, StructAction};
-use crate::model::{ArrowKey, CellAddress, SafeFontFamily};
+use crate::model::{ArrowKey, SafeFontFamily};
 use crate::state::{EditMode, EditingCell, ModelStore, WorkbookState};
-
-use leptos::prelude::UpdateValue;
 
 // SpreadsheetAction
 
@@ -229,6 +227,12 @@ impl SpreadsheetAction {
     pub fn set_font_family(family: SafeFontFamily) -> Self {
         Self::Format(FormatAction::SetFontFamily(family))
     }
+    pub fn set_text_color(hex: Option<String>) -> Self {
+        Self::Format(FormatAction::SetTextColor(hex))
+    }
+    pub fn set_background_color(hex: Option<String>) -> Self {
+        Self::Format(FormatAction::SetBackgroundColor(hex))
+    }
     pub fn undo() -> Self {
         Self::Structure(StructAction::Undo)
     }
@@ -244,7 +248,7 @@ mod tests {
     use super::*;
     use crate::input::helpers::selection_bounds;
     use crate::input::helpers::{mutate, Eval};
-    use crate::model::ArrowKey;
+    use crate::model::{ArrowKey, CellAddress};
     use crate::state::{EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;
     use wasm_bindgen_test::*;

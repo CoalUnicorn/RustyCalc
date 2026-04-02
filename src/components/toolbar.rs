@@ -1,9 +1,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::UnwrapThrowExt;
 
-use crate::components::color_picker_enhanced::{
-    EnhancedBackgroundColorPicker, EnhancedTextColorPicker,
-};
+use crate::components::color_picker::{BackgroundColorPicker, TextColorPicker};
 use crate::events::*;
 use crate::input::action::{execute, SpreadsheetAction};
 use crate::model::{frontend_types::ToolbarState, FrontendModel, SafeFontFamily};
@@ -341,13 +339,11 @@ fn FreezePane() -> impl IntoView {
                 }
             }
         });
-        state.emit_event(crate::events::SpreadsheetEvent::Format(
-            crate::events::FormatEvent::LayoutChanged {
-                sheet: model.with_value(|m| m.get_selected_view().sheet),
-                col: None,
-                row: None,
-            },
-        ));
+        state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
+            sheet: model.with_value(|m| m.get_selected_view().sheet),
+            col: None,
+            row: None,
+        }));
         refocus_workbook();
     };
 
@@ -372,39 +368,23 @@ fn FreezePane() -> impl IntoView {
 #[component]
 fn TextColorPickerToolbar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
-    let _model = expect_context::<ModelStore>();
+    let model = expect_context::<ModelStore>();
     let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
-    // TODO: wire current_color into EnhancedTextColorPicker once text color formatting is implemented
     let current_color = Signal::derive(move || {
-        let _ = toolbar_state.with(|ts| ts.style.text_color.clone());
-        None::<String>
+        Some(toolbar_state.with(|ts| ts.style.text_color.as_str().to_owned()))
     });
 
     let on_color_change = Callback::new(move |color: Option<String>| {
         if let Some(ref hex) = color {
             state.add_recent_color(hex);
         }
-
-        web_sys::console::log_2(
-            &"Text color changed to:".into(),
-            &format!("{:?}", color).into(),
-        );
-
-        if state.get_recent_colors_untracked().is_empty() {
-            state.add_recent_color("#ff6b6b");
-            state.add_recent_color("#4ecdc4");
-            state.add_recent_color("#45b7d1");
-        }
-
-        // TODO: execute(&SpreadsheetAction::set_text_color(color), model, &state);
+        execute(&SpreadsheetAction::set_text_color(color), model, &state);
+        refocus_workbook();
     });
 
     view! {
-        <EnhancedTextColorPicker
-            current_color=current_color
-            on_change=on_color_change
-        />
+        <TextColorPicker current_color=current_color on_change=on_color_change />
     }
 }
 
@@ -412,32 +392,26 @@ fn TextColorPickerToolbar() -> impl IntoView {
 #[component]
 fn BackgroundColorPickerToolbar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
-    let _model = expect_context::<ModelStore>();
+    let model = expect_context::<ModelStore>();
     let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
-    // TODO: wire current_color into EnhancedBackgroundColorPicker once bg color formatting is implemented
     let current_color = Signal::derive(move || {
-        let _ = toolbar_state.with(|ts| ts.style.bg_color.clone());
-        None::<String>
+        toolbar_state.with(|ts| ts.style.bg_color.as_ref().map(|c| c.as_str().to_owned()))
     });
 
     let on_color_change = Callback::new(move |color: Option<String>| {
         if let Some(ref hex) = color {
             state.add_recent_color(hex);
         }
-
-        web_sys::console::log_2(
-            &"Background color changed to:".into(),
-            &format!("{:?}", color).into(),
+        execute(
+            &SpreadsheetAction::set_background_color(color),
+            model,
+            &state,
         );
-
-        // TODO: execute(&SpreadsheetAction::set_background_color(color), model, &state);
+        refocus_workbook();
     });
 
     view! {
-        <EnhancedBackgroundColorPicker
-            current_color=current_color
-            on_change=on_color_change
-        />
+        <BackgroundColorPicker current_color=current_color on_change=on_color_change />
     }
 }

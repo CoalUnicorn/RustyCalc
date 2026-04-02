@@ -3,6 +3,7 @@
 use ironcalc_base::UserModel;
 use leptos::prelude::WithValue;
 
+use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::helpers::{mutate, selection_area, Eval};
 use crate::model::{FrontendModel, SafeFontFamily, ToolbarState};
 use crate::state::{ModelStore, WorkbookState};
@@ -23,6 +24,10 @@ pub enum FormatAction {
     SetFontSize(f64),
     /// Set font family on the selected range.
     SetFontFamily(SafeFontFamily),
+    /// Set text (font) color. `None` resets to automatic (inherits theme default).
+    SetTextColor(Option<String>),
+    /// Set cell background fill color. `None` clears the fill (transparent).
+    SetBackgroundColor(Option<String>),
 }
 
 pub fn execute_format(action: &FormatAction, model: ModelStore, state: &WorkbookState) {
@@ -73,15 +78,13 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
             });
 
             // Fire format event for font size change
-            state.emit_event(crate::events::SpreadsheetEvent::Format(
-                crate::events::FormatEvent::RangeStyleChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
-                },
-            ));
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }));
         }
         FormatAction::SetFontFamily(family) => {
             let name = family.model_name();
@@ -102,17 +105,97 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
             });
 
             // Fire format event for font family change
-            state.emit_event(crate::events::SpreadsheetEvent::Format(
-                crate::events::FormatEvent::RangeStyleChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
-                },
-            ));
-        } // SetFontColor
-          //
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }));
+        }
+        FormatAction::SetTextColor(hex) => {
+            // IronCalc "font.color": empty string clears (→ None), hex string sets.
+            // Uses the same update_range_style path as bold/italic/size for proper
+            // style-pool persistence and XLSX round-trip.
+            let (sheet, start_row, start_col, end_row, end_col) =
+                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                    let a = selection_area(m);
+                    (
+                        a.sheet,
+                        a.row,
+                        a.column,
+                        a.row + a.height - 1,
+                        a.column + a.width - 1,
+                    )
+                });
+            let value = hex.as_deref().unwrap_or("").to_owned();
+            web_sys::console::log_1(&format!("[color-dbg] SetTextColor: sheet={sheet} row={start_row} col={start_col} value={value:?}").into());
+            mutate(model, state, Eval::No, |m| {
+                let area = selection_area(m);
+                let result = m.update_range_style(&area, "font.color", &value);
+                match &result {
+                    Ok(()) => web_sys::console::log_1(
+                        &format!(
+                            "[color-dbg] font.color OK — reading back: {:?}",
+                            m.get_cell_style(area.sheet, area.row, area.column)
+                                .map(|s| s.font.color)
+                        )
+                        .into(),
+                    ),
+                    Err(e) => web_sys::console::error_1(
+                        &format!("[color-dbg] font.color ERR: {e}").into(),
+                    ),
+                }
+            });
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }));
+        }
+        FormatAction::SetBackgroundColor(hex) => {
+            // IronCalc "fill.fg_color": empty string clears, hex string sets.
+            // IronCalc automatically sets pattern_type = "solid" when a color is given.
+            let (sheet, start_row, start_col, end_row, end_col) =
+                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+                    let a = selection_area(m);
+                    (
+                        a.sheet,
+                        a.row,
+                        a.column,
+                        a.row + a.height - 1,
+                        a.column + a.width - 1,
+                    )
+                });
+            let value = hex.as_deref().unwrap_or("").to_owned();
+            web_sys::console::log_1(&format!("[color-dbg] SetBackgroundColor: sheet={sheet} row={start_row} col={start_col} value={value:?}").into());
+            mutate(model, state, Eval::No, |m| {
+                let area = selection_area(m);
+                let result = m.update_range_style(&area, "fill.fg_color", &value);
+                match &result {
+                    Ok(()) => web_sys::console::log_1(
+                        &format!(
+                            "[color-dbg] fill.fg_color OK — reading back: {:?}",
+                            m.get_cell_style(area.sheet, area.row, area.column)
+                                .map(|s| s.fill.fg_color)
+                        )
+                        .into(),
+                    ),
+                    Err(e) => web_sys::console::error_1(
+                        &format!("[color-dbg] fill.fg_color ERR: {e}").into(),
+                    ),
+                }
+            });
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }));
+        }
     }
 }
 
@@ -150,15 +233,13 @@ fn toggle_style(
     });
 
     // Fire format event for style toggle
-    state.emit_event(crate::events::SpreadsheetEvent::Format(
-        crate::events::FormatEvent::RangeStyleChanged {
-            sheet,
-            start_row,
-            start_col,
-            end_row,
-            end_col,
-        },
-    ));
+    state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+        sheet,
+        start_row,
+        start_col,
+        end_row,
+        end_col,
+    }));
 }
 
 /// Set `font.name` on every cell in the selection.

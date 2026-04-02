@@ -2,7 +2,7 @@
 
 use leptos::prelude::WithValue;
 
-use crate::events::{Location, StructureEvent};
+use crate::events::{ContentEvent, Location, SpreadsheetEvent, StructureEvent};
 use crate::input::helpers::{make_area, mutate, selection_bounds, Eval};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
@@ -40,15 +40,13 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            state.emit_event(crate::events::SpreadsheetEvent::Content(
-                crate::events::ContentEvent::RangeChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
-                },
-            ));
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }));
         }
         StructAction::ClearAll => {
             let (sheet, start_row, start_col, end_row, end_col) =
@@ -67,33 +65,27 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            state.emit_event(crate::events::SpreadsheetEvent::Content(
-                crate::events::ContentEvent::RangeChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
-                },
-            ));
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            }));
         }
         StructAction::Undo => {
             mutate(model, state, Eval::No, |m| {
                 warn_if_err(m.undo(), "undo");
             });
 
-            state.emit_event(crate::events::SpreadsheetEvent::Content(
-                crate::events::ContentEvent::GenericChange,
-            ));
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         }
         StructAction::Redo => {
             mutate(model, state, Eval::No, |m| {
                 warn_if_err(m.redo(), "redo");
             });
 
-            state.emit_event(crate::events::SpreadsheetEvent::Content(
-                crate::events::ContentEvent::GenericChange,
-            ));
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         }
         StructAction::InsertRows => {
             let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
@@ -127,9 +119,9 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                StructureEvent::rows_inserted(loc),
-            ));
+            state.emit_event(SpreadsheetEvent::Structure(StructureEvent::rows_inserted(
+                loc,
+            )));
         }
         StructAction::InsertColumns => {
             let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
@@ -147,7 +139,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            state.emit_event(crate::events::SpreadsheetEvent::Structure(
+            state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::columns_inserted(loc),
             ));
         }
@@ -167,9 +159,9 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            state.emit_event(crate::events::SpreadsheetEvent::Structure(
-                StructureEvent::rows_deleted(loc),
-            ));
+            state.emit_event(SpreadsheetEvent::Structure(StructureEvent::rows_deleted(
+                loc,
+            )));
         }
         StructAction::DeleteColumns => {
             let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
@@ -187,7 +179,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 );
             });
 
-            state.emit_event(crate::events::SpreadsheetEvent::Structure(
+            state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::columns_deleted(loc),
             ));
         }

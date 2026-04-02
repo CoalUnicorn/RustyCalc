@@ -5,8 +5,8 @@
 /// - [`Theme`] provides compatibility layer and extends leptos-use ColorMode
 /// - [`CanvasTheme`] carries concrete color strings for the Canvas 2D API, which cannot consume CSS variables
 use gloo_storage::{LocalStorage, Storage};
-use leptos_use::{use_color_mode_with_options, UseColorModeOptions, ColorMode};
 use leptos::prelude::*;
+use leptos_use::{use_color_mode_with_options, ColorMode, UseColorModeOptions};
 
 // Shared color palette
 // TODO: create a component
@@ -61,7 +61,7 @@ pub fn use_rusty_calc_theme() -> leptos_use::UseColorModeReturn {
             .storage_key("ironcalc_theme") // Use existing storage key for migration
             .initial_value(ColorMode::Auto) // Default to auto-detection
             .attribute("class") // Add light/dark classes to <html>
-            .emit_auto(false) // Never emit Auto in the mode signal, always resolve to Light/Dark
+            .emit_auto(false), // Never emit Auto in the mode signal, always resolve to Light/Dark
     )
 }
 
@@ -118,7 +118,13 @@ impl Theme {
     /// This is needed for canvas theming since Canvas 2D API needs concrete colors
     pub fn resolve_actual_theme(self, system_prefers_dark: bool) -> Theme {
         match self {
-            Theme::Auto => if system_prefers_dark { Theme::Dark } else { Theme::Light },
+            Theme::Auto => {
+                if system_prefers_dark {
+                    Theme::Dark
+                } else {
+                    Theme::Light
+                }
+            }
             Theme::Light => Theme::Light,
             Theme::Dark => Theme::Dark,
         }
@@ -141,7 +147,8 @@ impl Theme {
 
     /// Get canvas theme resolved from system preference
     pub fn canvas_theme_resolved(self, system_prefers_dark: bool) -> &'static CanvasTheme {
-        self.resolve_actual_theme(system_prefers_dark).canvas_theme()
+        self.resolve_actual_theme(system_prefers_dark)
+            .canvas_theme()
     }
 }
 

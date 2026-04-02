@@ -5,6 +5,7 @@ use leptos_use::{use_debounce_fn, use_throttle_fn};
 use wasm_bindgen::JsCast;
 
 use crate::canvas::col_name;
+use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::model::{CellAddress, FrontendModel};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 
@@ -114,8 +115,8 @@ pub fn FormulaBar() -> impl IntoView {
             };
 
             // Fire editing started event
-            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                crate::events::NavigationEvent::EditingStarted { address },
+            state.emit_event(SpreadsheetEvent::Navigation(
+                NavigationEvent::EditingStarted { address },
             ));
 
             state.set_editing_cell(Some(EditingCell {

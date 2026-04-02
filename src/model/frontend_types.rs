@@ -264,6 +264,29 @@ pub struct CellAddress {
     pub column: i32,
 }
 
+use ironcalc_base::UserModel;
+
+use crate::state::EditingCell;
+impl CellAddress {
+    ///
+    pub fn from_view(model: &UserModel<'static>) -> Self {
+        let m = model.get_selected_view();
+        Self {
+            sheet: m.sheet,
+            row: m.row,
+            column: m.column,
+        }
+    }
+
+    pub fn from_editing(cell: &EditingCell) -> Self {
+        Self {
+            sheet: cell.address.sheet,
+            row: cell.address.row,
+            column: cell.address.column,
+        }
+    }
+}
+
 // Frozen pane state
 
 /// Number of frozen rows and columns on the active sheet.

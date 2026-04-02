@@ -2,6 +2,7 @@
 
 use leptos::prelude::WithValue;
 
+use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::helpers::{mutate, Eval};
 use crate::model::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{ModelStore, WorkbookState};
@@ -17,8 +18,8 @@ fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
             column: v.column,
         }
     });
-    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-        crate::events::NavigationEvent::SelectionChanged { address },
+    state.emit_event(SpreadsheetEvent::Navigation(
+        NavigationEvent::SelectionChanged { address },
     ));
 }
 
@@ -30,8 +31,8 @@ fn emit_selection_range_changed(model: ModelStore, state: &WorkbookState) {
             let [r1, c1, r2, c2] = v.range;
             (v.sheet, r1, c1, r2, c2)
         });
-    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-        crate::events::NavigationEvent::SelectionRangeChanged {
+    state.emit_event(SpreadsheetEvent::Navigation(
+        NavigationEvent::SelectionRangeChanged {
             sheet,
             start_row,
             start_col,
@@ -129,8 +130,8 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
             let new_sheet = model
                 .with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_view().sheet);
             if previous_sheet != new_sheet {
-                state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                    crate::events::NavigationEvent::ActiveSheetChanged {
+                state.emit_event(SpreadsheetEvent::Navigation(
+                    NavigationEvent::ActiveSheetChanged {
                         from_sheet: previous_sheet,
                         to_sheet: new_sheet,
                     },

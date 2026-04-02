@@ -369,7 +369,6 @@ impl WorkbookState {
         move || memo.get()
     }
 
-
     // Convenience methods for commonly used signals
     // These reduce boilerplate and make the API more ergonomic
 
@@ -432,7 +431,9 @@ impl WorkbookState {
     pub fn set_theme(&self, theme: Theme) {
         self.theme.1.set(theme);
         theme.save(); // Keep manual persistence for now
-        self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled { new_theme: theme }));
+        self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
+            new_theme: theme,
+        }));
     }
 
     /// Toggle theme in cycle: Auto -> Light -> Dark -> Auto
@@ -455,7 +456,6 @@ impl WorkbookState {
             Theme::Dark => self.set_theme(Theme::Light),
         }
     }
-
 
     /// Get point range (reactive)
     pub fn get_point_range(&self) -> Option<[i32; 4]> {
@@ -569,7 +569,9 @@ impl WorkbookState {
         <gloo_storage::LocalStorage as GlooStorage>::set("ironcalc_recent_colors", &colors).ok();
 
         // Emit event for reactive subscribers
-        self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated { colors }));
+        self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
+            colors,
+        }));
     }
 
     /// Get colors from the current document that aren't in the standard palette
