@@ -95,6 +95,7 @@ use crate::model::frontend_model::FrontendModel;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
+use super::geometry::PixelRect;
 use super::geometry::*;
 use crate::theme::CanvasTheme;
 
@@ -125,8 +126,6 @@ struct CellText {
 
 // Parameter structs
 
-use super::geometry::PixelRect;
-
 /// Line segment passed to the border-drawing helper.
 struct BorderSegment {
     x1: f64,
@@ -144,6 +143,7 @@ struct SheetRange {
 }
 
 /// The four index boundaries of the visible (scrollable) area.
+#[derive(Copy, Clone, Default)]
 struct VisibleRegion {
     /// First scrollable column on screen.
     col_first: i32,
@@ -153,6 +153,25 @@ struct VisibleRegion {
     col_last: i32,
     /// Last scrollable row on screen.
     row_last: i32,
+}
+
+/// Which outer edges of a cell rect should receive a border stroke.
+///
+/// Passed to `render_cell_style` so the intent is clear at every call site
+/// instead of two anonymous `bool` arguments.
+#[derive(Copy, Clone)]
+struct CellEdges {
+    right: bool,
+    bottom: bool,
+}
+
+/// Controls whether `draw_dashed_range` fills the interior with a light tint.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum DashFill {
+    /// Outline only (used for clipboard marching ants).
+    Outline,
+    /// Outline + semi-transparent fill tint (used for point-mode range).
+    Tinted,
 }
 
 /// Overlay ranges passed to `render()` for selection preview drawing.
@@ -192,6 +211,9 @@ pub struct CanvasRenderer {
     width: f64,
     height: f64,
     theme: CanvasTheme,
+    /// Visible cell bounds — populated at the start of each `render()` call.
+    /// Stored on the struct so internal helpers don't need it as a parameter.
+    vis: VisibleRegion,
 }
 
 impl CanvasRenderer {
@@ -241,13 +263,16 @@ impl CanvasRenderer {
             width,
             height,
             theme,
+            vis: VisibleRegion::default(),
         }
     }
 
     // Entry point
 
     /// Full redraw of the spreadsheet canvas.
-    pub fn render(&self, model: &UserModel, overlays: &RenderOverlays) {
+    pub fn render(&mut self, model: &UserModel, overlays: &RenderOverlays) {
+        self.vis = self.visible_cells(model);
+
         let ctx = &self.ctx;
         ctx.set_line_width(1.0);
         ctx.set_text_align("center");
@@ -259,7 +284,7 @@ impl CanvasRenderer {
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
-        let vis = self.visible_cells(model);
+        let vis = self.vis;
 
         let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(model, sheet, r)).sum();
         let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(model, sheet, c)).sum();
@@ -353,8 +378,8 @@ impl CanvasRenderer {
         );
 
         // Phase 2: Headers + corner box
-        self.render_row_headers(model, sheet, frozen_rows, frozen_y, &vis);
-        self.render_column_headers(model, sheet, frozen_cols, frozen_x, &vis);
+        self.render_row_headers(model, sheet, frozen_rows, frozen_y);
+        self.render_column_headers(model, sheet, frozen_cols, frozen_x);
 
         // Corner box (top-left blank square)
         ctx.set_fill_style_str(self.theme.header_bg);
@@ -371,7 +396,7 @@ impl CanvasRenderer {
         ctx.stroke();
 
         // Phase 3: Selection outline
-        self.draw_selection(model, sheet, frozen_x, frozen_y, &vis);
+        self.draw_selection(model, sheet, frozen_x, frozen_y);
         if let Some((to_row, to_col)) = overlays.extend_to {
             self.draw_extend_preview(model, sheet, frozen_x, frozen_y, to_row, to_col);
         }
@@ -391,8 +416,7 @@ impl CanvasRenderer {
                         col_max: cb.c1.max(cb.c2),
                     },
                     self.theme.selection_color,
-                    false,
-                    &vis,
+                    DashFill::Outline,
                 );
             }
         }
@@ -411,8 +435,7 @@ impl CanvasRenderer {
                     col_max: pr.c1.max(pr.c2),
                 },
                 "#1E6FD9",
-                true,
-                &vis,
+                DashFill::Tinted,
             );
         }
 
@@ -460,8 +483,10 @@ impl CanvasRenderer {
                     row,
                     col,
                     rect,
-                    col == last_col,
-                    row == last_row,
+                    CellEdges {
+                        right: col == last_col,
+                        bottom: row == last_row,
+                    },
                 );
                 if let Some(ct) = self.compute_cell_text(model, sheet, row, col, rect) {
                     cell_texts.push(ct);
@@ -482,8 +507,7 @@ impl CanvasRenderer {
         row: i32,
         col: i32,
         rect: PixelRect,
-        draw_right: bool,
-        draw_bottom: bool,
+        edges: CellEdges,
     ) {
         let PixelRect {
             x,
@@ -594,7 +618,7 @@ impl CanvasRenderer {
         // Right border: always draw when the cell has an explicit right border style;
         // also draw the grid line for the rightmost visible column in each pane.
         let draw_right_explicit = style.border.right.is_some();
-        if draw_right || draw_right_explicit {
+        if edges.right || draw_right_explicit {
             let (br_color, br_style) = if let Some(ref br) = style.border.right {
                 (br.color.as_deref().unwrap_or(cell_grid_color), &br.style)
             } else {
@@ -617,7 +641,7 @@ impl CanvasRenderer {
         // Bottom border: always draw when the cell has an explicit bottom border style;
         // also draw the grid line for the bottommost visible row in each pane.
         let draw_bottom_explicit = style.border.bottom.is_some();
-        if draw_bottom || draw_bottom_explicit {
+        if edges.bottom || draw_bottom_explicit {
             let (bb_color, bb_style) = if let Some(ref bb) = style.border.bottom {
                 (bb.color.as_deref().unwrap_or(cell_grid_color), &bb.style)
             } else {
@@ -854,14 +878,7 @@ impl CanvasRenderer {
 
     // Row headers
 
-    fn render_row_headers(
-        &self,
-        model: &UserModel,
-        sheet: u32,
-        frozen_rows: i32,
-        frozen_y: f64,
-        vis: &VisibleRegion,
-    ) {
+    fn render_row_headers(&self, model: &UserModel, sheet: u32, frozen_rows: i32, frozen_y: f64) {
         let ctx = &self.ctx;
         let view = model.get_selected_view();
         let sel_row_start = view.range[0].min(view.range[2]);
@@ -869,7 +886,11 @@ impl CanvasRenderer {
 
         ctx.set_font(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
 
-        let first_row = if frozen_rows == 0 { vis.row_first } else { 1 };
+        let first_row = if frozen_rows == 0 {
+            self.vis.row_first
+        } else {
+            1
+        };
         let mut top_y = if first_row == 1 {
             HEADER_ROW_HEIGHT + 0.5
         } else {
@@ -878,7 +899,7 @@ impl CanvasRenderer {
 
         let mut row = first_row;
         loop {
-            if row > vis.row_last {
+            if row > self.vis.row_last {
                 break;
             }
             let rh = row_height(model, sheet, row);
@@ -903,7 +924,7 @@ impl CanvasRenderer {
             }
             if row == frozen_rows {
                 top_y = frozen_y;
-                row = vis.row_first;
+                row = self.vis.row_first;
             } else {
                 row += 1;
             }
@@ -918,7 +939,6 @@ impl CanvasRenderer {
         sheet: u32,
         frozen_cols: i32,
         frozen_x: f64,
-        vis: &VisibleRegion,
     ) {
         let ctx = &self.ctx;
         let view = model.get_selected_view();
@@ -941,7 +961,7 @@ impl CanvasRenderer {
         } else {
             HEADER_COL_WIDTH + 0.5
         };
-        for col in vis.col_first..=vis.col_last {
+        for col in self.vis.col_first..=self.vis.col_last {
             let cw = col_width(model, sheet, col);
             self.draw_col_header(ctx, col, x, cw, sel_col_start, sel_col_end);
             x += cw;
@@ -978,14 +998,7 @@ impl CanvasRenderer {
     // Selection outline
 
     /// Draw the blue selection border directly on canvas.
-    fn draw_selection(
-        &self,
-        model: &UserModel,
-        sheet: u32,
-        frozen_x: f64,
-        frozen_y: f64,
-        vis: &VisibleRegion,
-    ) {
+    fn draw_selection(&self, model: &UserModel, sheet: u32, frozen_x: f64, frozen_y: f64) {
         let view = model.get_selected_view();
         let [r1, c1, r2, c2] = view.range;
         let (r_min, r_max) = (r1.min(r2), r1.max(r2));
@@ -997,12 +1010,12 @@ impl CanvasRenderer {
         // Clamp to the last visible column/row to avoid O(MAX_COLS/MAX_ROWS) iteration
         // in cell_x/cell_y when a full row or column is selected. The canvas clips
         // anything past its edge anyway, so the visual result is identical.
-        let x2 = if c_max > vis.col_last {
+        let x2 = if c_max > self.vis.col_last {
             self.width
         } else {
             self.cell_x(model, sheet, c_max, frozen_x) + col_width(model, sheet, c_max)
         };
-        let y2 = if r_max > vis.row_last {
+        let y2 = if r_max > self.vis.row_last {
             self.height
         } else {
             self.cell_y(model, sheet, r_max, frozen_y) + row_height(model, sheet, r_max)
@@ -1035,8 +1048,10 @@ impl CanvasRenderer {
                 width: aw,
                 height: ah,
             },
-            true,
-            true,
+            CellEdges {
+                right: true,
+                bottom: true,
+            },
         );
 
         // 2px border around the full selection range
@@ -1094,18 +1109,17 @@ impl CanvasRenderer {
         frozen_y: f64,
         range: SheetRange,
         color: &str,
-        fill_tint: bool,
-        vis: &VisibleRegion,
+        fill: DashFill,
     ) {
         let x1 = self.cell_x(model, sheet, range.col_min, frozen_x);
         let y1 = self.cell_y(model, sheet, range.row_min, frozen_y);
-        let x2 = if range.col_max > vis.col_last {
+        let x2 = if range.col_max > self.vis.col_last {
             self.width
         } else {
             self.cell_x(model, sheet, range.col_max, frozen_x)
                 + col_width(model, sheet, range.col_max)
         };
-        let y2 = if range.row_max > vis.row_last {
+        let y2 = if range.row_max > self.vis.row_last {
             self.height
         } else {
             self.cell_y(model, sheet, range.row_max, frozen_y)
@@ -1121,7 +1135,7 @@ impl CanvasRenderer {
         ctx.set_line_dash(&web_sys::js_sys::Array::new()).ok();
         ctx.set_line_width(1.0);
 
-        if fill_tint {
+        if fill == DashFill::Tinted {
             // Build "rgba(r,g,b,0.08)" from a hex color — only handles 6-digit hex.
             let tint = hex_to_rgba(color, 0.08);
             ctx.set_fill_style_str(&tint);
@@ -1135,36 +1149,30 @@ impl CanvasRenderer {
         let view = model.get_selected_view();
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
         if col <= frozen_cols {
-            let mut x = HEADER_COL_WIDTH + 0.5;
-            for c in 1..col {
-                x += col_width(model, sheet, c);
-            }
-            return x;
+            return HEADER_COL_WIDTH
+                + 0.5
+                + (1..col).map(|c| col_width(model, sheet, c)).sum::<f64>();
         }
         let left_col = view.left_column.max(frozen_cols + 1);
-        let mut x = frozen_x;
-        for c in left_col..col {
-            x += col_width(model, sheet, c);
-        }
-        x
+        frozen_x
+            + (left_col..col)
+                .map(|c| col_width(model, sheet, c))
+                .sum::<f64>()
     }
 
     fn cell_y(&self, model: &UserModel, sheet: u32, row: i32, frozen_y: f64) -> f64 {
         let view = model.get_selected_view();
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         if row <= frozen_rows {
-            let mut y = HEADER_ROW_HEIGHT + 0.5;
-            for r in 1..row {
-                y += row_height(model, sheet, r);
-            }
-            return y;
+            return HEADER_ROW_HEIGHT
+                + 0.5
+                + (1..row).map(|r| row_height(model, sheet, r)).sum::<f64>();
         }
         let top_row = view.top_row.max(frozen_rows + 1);
-        let mut y = frozen_y;
-        for r in top_row..row {
-            y += row_height(model, sheet, r);
-        }
-        y
+        frozen_y
+            + (top_row..row)
+                .map(|r| row_height(model, sheet, r))
+                .sum::<f64>()
     }
 
     /// Compute the visible (scrollable) cell region.
