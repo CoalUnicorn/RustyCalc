@@ -9,12 +9,15 @@
 //
 // See docs/adding-actions.md for how to add or modify actions.
 
+use leptos::prelude::WithValue;
+
 use crate::input::edit::{execute_edit, EditAction};
 use crate::input::format::{execute_format, FormatAction};
 use crate::input::nav::{execute_nav, NavAction};
 use crate::input::structure::{execute_struct, StructAction};
 use crate::model::{ArrowKey, SafeFontFamily};
 use crate::state::{EditMode, EditingCell, ModelStore, WorkbookState};
+use crate::storage;
 
 // SpreadsheetAction
 
@@ -183,12 +186,21 @@ fn is_printable(key: &str) -> bool {
 /// are no-ops here — they require the `AppClipboard` store and async OS
 /// clipboard APIs, so the Workbook component handles them directly.
 pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookState) {
+    let mutates = matches!(
+        action,
+        SpreadsheetAction::Format(_) | SpreadsheetAction::Structure(_)
+    );
     match action {
         SpreadsheetAction::Nav(a) => execute_nav(a, model, state),
         SpreadsheetAction::Edit(a) => execute_edit(a, model, state),
         SpreadsheetAction::Format(a) => execute_format(a, model, state),
         SpreadsheetAction::Structure(a) => execute_struct(a, model, state),
         SpreadsheetAction::Copy | SpreadsheetAction::Cut | SpreadsheetAction::Paste => {}
+    }
+    if mutates {
+        if let Some(uuid) = state.get_current_uuid_untracked() {
+            model.with_value(|m| storage::save(&uuid, m));
+        }
     }
 }
 

@@ -129,23 +129,9 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                     )
                 });
             let value = hex.as_deref().unwrap_or("").to_owned();
-            web_sys::console::log_1(&format!("[color-dbg] SetTextColor: sheet={sheet} row={start_row} col={start_col} value={value:?}").into());
             mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
-                let result = m.update_range_style(&area, "font.color", &value);
-                match &result {
-                    Ok(()) => web_sys::console::log_1(
-                        &format!(
-                            "[color-dbg] font.color OK — reading back: {:?}",
-                            m.get_cell_style(area.sheet, area.row, area.column)
-                                .map(|s| s.font.color)
-                        )
-                        .into(),
-                    ),
-                    Err(e) => web_sys::console::error_1(
-                        &format!("[color-dbg] font.color ERR: {e}").into(),
-                    ),
-                }
+                warn_if_err(m.update_range_style(&area, "font.color", &value), "set_text_color");
             });
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
                 sheet,
@@ -170,23 +156,12 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                     )
                 });
             let value = hex.as_deref().unwrap_or("").to_owned();
-            web_sys::console::log_1(&format!("[color-dbg] SetBackgroundColor: sheet={sheet} row={start_row} col={start_col} value={value:?}").into());
             mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
-                let result = m.update_range_style(&area, "fill.fg_color", &value);
-                match &result {
-                    Ok(()) => web_sys::console::log_1(
-                        &format!(
-                            "[color-dbg] fill.fg_color OK — reading back: {:?}",
-                            m.get_cell_style(area.sheet, area.row, area.column)
-                                .map(|s| s.fill.fg_color)
-                        )
-                        .into(),
-                    ),
-                    Err(e) => web_sys::console::error_1(
-                        &format!("[color-dbg] fill.fg_color ERR: {e}").into(),
-                    ),
-                }
+                warn_if_err(
+                    m.update_range_style(&area, "fill.fg_color", &value),
+                    "set_background_color",
+                );
             });
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
                 sheet,

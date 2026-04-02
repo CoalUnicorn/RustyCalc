@@ -1,6 +1,5 @@
 pub mod cell_editor;
 pub mod color_picker;
-pub mod color_picker_enhanced;
 pub mod file_bar;
 pub mod formula_bar;
 pub mod perf_panel;
