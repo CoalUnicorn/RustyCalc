@@ -371,7 +371,7 @@ impl CanvasRenderer {
         ctx.stroke();
 
         // Phase 3: Selection outline
-        self.draw_selection(model, sheet, frozen_x, frozen_y);
+        self.draw_selection(model, sheet, frozen_x, frozen_y, &vis);
         if let Some((to_row, to_col)) = overlays.extend_to {
             self.draw_extend_preview(model, sheet, frozen_x, frozen_y, to_row, to_col);
         }
@@ -392,6 +392,7 @@ impl CanvasRenderer {
                     },
                     self.theme.selection_color,
                     false,
+                    &vis,
                 );
             }
         }
@@ -411,6 +412,7 @@ impl CanvasRenderer {
                 },
                 "#1E6FD9",
                 true,
+                &vis,
             );
         }
 
@@ -976,7 +978,14 @@ impl CanvasRenderer {
     // Selection outline
 
     /// Draw the blue selection border directly on canvas.
-    fn draw_selection(&self, model: &UserModel, sheet: u32, frozen_x: f64, frozen_y: f64) {
+    fn draw_selection(
+        &self,
+        model: &UserModel,
+        sheet: u32,
+        frozen_x: f64,
+        frozen_y: f64,
+        vis: &VisibleRegion,
+    ) {
         let view = model.get_selected_view();
         let [r1, c1, r2, c2] = view.range;
         let (r_min, r_max) = (r1.min(r2), r1.max(r2));
@@ -985,9 +994,19 @@ impl CanvasRenderer {
         let x1 = self.cell_x(model, sheet, c_min, frozen_x);
         let y1 = self.cell_y(model, sheet, r_min, frozen_y);
 
-        // Right edge = left edge of c_max + its width
-        let x2 = self.cell_x(model, sheet, c_max, frozen_x) + col_width(model, sheet, c_max);
-        let y2 = self.cell_y(model, sheet, r_max, frozen_y) + row_height(model, sheet, r_max);
+        // Clamp to the last visible column/row to avoid O(MAX_COLS/MAX_ROWS) iteration
+        // in cell_x/cell_y when a full row or column is selected. The canvas clips
+        // anything past its edge anyway, so the visual result is identical.
+        let x2 = if c_max > vis.col_last {
+            self.width
+        } else {
+            self.cell_x(model, sheet, c_max, frozen_x) + col_width(model, sheet, c_max)
+        };
+        let y2 = if r_max > vis.row_last {
+            self.height
+        } else {
+            self.cell_y(model, sheet, r_max, frozen_y) + row_height(model, sheet, r_max)
+        };
 
         let w = x2 - x1;
         let h = y2 - y1;
@@ -1076,13 +1095,22 @@ impl CanvasRenderer {
         range: SheetRange,
         color: &str,
         fill_tint: bool,
+        vis: &VisibleRegion,
     ) {
         let x1 = self.cell_x(model, sheet, range.col_min, frozen_x);
         let y1 = self.cell_y(model, sheet, range.row_min, frozen_y);
-        let x2 = self.cell_x(model, sheet, range.col_max, frozen_x)
-            + col_width(model, sheet, range.col_max);
-        let y2 = self.cell_y(model, sheet, range.row_max, frozen_y)
-            + row_height(model, sheet, range.row_max);
+        let x2 = if range.col_max > vis.col_last {
+            self.width
+        } else {
+            self.cell_x(model, sheet, range.col_max, frozen_x)
+                + col_width(model, sheet, range.col_max)
+        };
+        let y2 = if range.row_max > vis.row_last {
+            self.height
+        } else {
+            self.cell_y(model, sheet, range.row_max, frozen_y)
+                + row_height(model, sheet, range.row_max)
+        };
 
         let ctx = &self.ctx;
         let dash = web_sys::js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into());
