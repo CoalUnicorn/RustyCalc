@@ -311,6 +311,7 @@ fn FreezePane() -> impl IntoView {
 
     let is_frozen = Memo::new(move |_| {
         let _ = state.subscribe_to_format_events()();
+        let _ = state.subscribe_to_navigation_events()();
         model.with_value(|m| m.frozen_panes().is_frozen())
     });
 

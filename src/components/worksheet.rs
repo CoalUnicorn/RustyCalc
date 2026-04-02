@@ -14,6 +14,9 @@ use crate::events::{DragState, HeaderContextMenu};
 use crate::state::{ContextMenuState, EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
+/// Pixel tolerance for column/row resize hit-test in the header area.
+const HIT_ZONE: f64 = 4.0;
+
 /// The spreadsheet canvas element.
 ///
 /// Subscribes to `WorkbookState.redraw` so the canvas repaints whenever
@@ -110,7 +113,13 @@ pub fn Worksheet() -> impl IntoView {
         let clipboard = clipboard_draw.with_value(|opt| {
             opt.as_ref().map(|acb| {
                 let (r1, c1, r2, c2) = acb.range;
-                ClipboardRange { sheet: acb.sheet, r1, c1, r2, c2 }
+                ClipboardRange {
+                    sheet: acb.sheet,
+                    r1,
+                    c1,
+                    r2,
+                    c2,
+                }
             })
         });
         let overlays = RenderOverlays {
@@ -119,7 +128,7 @@ pub fn Worksheet() -> impl IntoView {
             point_range: point_range.map(|[r1, c1, r2, c2]| SheetRect { r1, c1, r2, c2 }),
         };
         model.with_value(|m| {
-            let renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get_untracked());
+            let mut renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get_untracked());
             renderer.render(m, &overlays);
         });
         // Record render-done timestamp for the perf panel.
@@ -128,230 +137,34 @@ pub fn Worksheet() -> impl IntoView {
         }
     });
 
-    // mousedown: start selection or autofill drag
+    // mousedown: dispatches to one of the six named handlers below.
     let on_mousedown = move |ev: web_sys::MouseEvent| {
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;
 
-        // Resize hit-tests (must be first: takes priority over cell click)
-        // A 4-px zone around each column/row boundary in the header acts as a
-        // resize handle; dragging it will change that column/row's size.
-        const HIT_ZONE: f64 = 4.0;
-
-        // Column resize: click inside the column header row near a right edge.
         if y < HEADER_ROW_HEIGHT && x > HEADER_COL_WIDTH {
-            if let Some(col) =
-                model.with_value(|m| crate::canvas::geometry::find_col_boundary_at(m, x, HIT_ZONE))
-            {
-                state.set_drag(DragState::ResizingCol { col, x });
-                ev.prevent_default();
+            if try_begin_col_resize(&ev, x, model, state) {
                 return;
             }
         }
-
-        // Row resize: click inside the row header column near a bottom edge.
         if x < HEADER_COL_WIDTH && y > HEADER_ROW_HEIGHT {
-            if let Some(row) =
-                model.with_value(|m| crate::canvas::geometry::find_row_boundary_at(m, y, HIT_ZONE))
-            {
-                state.set_drag(DragState::ResizingRow { row, y });
-                ev.prevent_default();
+            if try_begin_row_resize(&ev, y, model, state) {
                 return;
             }
         }
-
-        // Corner cell (top-left of header area) -> select the entire sheet.
         if x < HEADER_COL_WIDTH && y < HEADER_ROW_HEIGHT {
-            model.update_value(|m| {
-                m.nav_select_all();
-            });
-            state.set_editing_cell(None);
-
-            // Fire navigation event for select all
-            let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
-                let v = m.get_selected_view();
-                let [r1, c1, r2, c2] = v.range;
-                (v.sheet, r1, c1, r2, c2)
-            });
-            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                crate::events::NavigationEvent::SelectionRangeChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
-                },
-            ));
+            handle_corner_click(model, state);
             return;
         }
-
-        // Column header click -> select the entire column.
         if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
-            model.update_value(|m| {
-                let view = m.get_selected_view();
-                let sheet = view.sheet;
-                let fg = frozen_geometry(m, sheet);
-                let col = pixel_to_col(m, sheet, view.left_column, x, &fg);
-                if ev.shift_key() {
-                    // Extend the current selection to this column.
-                    m.nav_extend_selection(1, col);
-                } else {
-                    m.nav_select_column(col);
-                }
-            });
-            state.set_editing_cell(None);
-
-            // Fire navigation event for column selection
-            let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
-                let v = m.get_selected_view();
-                let [r1, c1, r2, c2] = v.range;
-                (v.sheet, r1, c1, r2, c2)
-            });
-            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                crate::events::NavigationEvent::SelectionRangeChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
-                },
-            ));
+            handle_col_header_click(&ev, x, model, state);
             return;
         }
-
-        // Row header click -> select the entire row.
         if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
-            model.update_value(|m| {
-                let view = m.get_selected_view();
-                let sheet = view.sheet;
-                let fg = frozen_geometry(m, sheet);
-                let row = pixel_to_row(m, sheet, view.top_row, y, &fg);
-                if ev.shift_key() {
-                    // Extend the current selection to this row.
-                    m.nav_extend_selection(row, 1);
-                } else {
-                    m.nav_select_row(row);
-                }
-            });
-            state.set_editing_cell(None);
-
-            // Fire navigation event for row selection
-            let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
-                let v = m.get_selected_view();
-                let [r1, c1, r2, c2] = v.range;
-                (v.sheet, r1, c1, r2, c2)
-            });
-            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                crate::events::NavigationEvent::SelectionRangeChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
-                },
-            ));
+            handle_row_header_click(&ev, y, model, state);
             return;
         }
-
-        if x < HEADER_COL_WIDTH || y < HEADER_ROW_HEIGHT {
-            return;
-        }
-
-        // Read model state (row, col, autofill hit-test) without holding a
-        // mutable borrow, so signal writes below don't interleave with the lock.
-        let (row, col, near_handle) = model.with_value(|m| {
-            let view = m.get_selected_view();
-            let sheet = view.sheet;
-            let fg = frozen_geometry(m, sheet);
-            let col = pixel_to_col(m, sheet, view.left_column, x, &fg);
-            let row = pixel_to_row(m, sheet, view.top_row, y, &fg);
-            let handle = autofill_handle_pos(m);
-            let near_handle = (x - handle.x).abs() <= AUTOFILL_HANDLE_PX
-                && (y - handle.y).abs() <= AUTOFILL_HANDLE_PX;
-            (row, col, near_handle)
-        });
-
-        // Point mode: intercept click during formula entry
-        // When the cursor is at a syntactically valid reference position inside
-        // a formula, clicking a cell inserts/replaces the reference rather than
-        // committing the edit and navigating away.
-        if let Some(ref edit) = state.get_editing_cell_untracked() {
-            if edit.mode == crate::state::EditMode::Accept {
-                let cursor = get_formula_cursor();
-                let already_pointing = state.get_point_range_untracked().is_some();
-                if already_pointing || is_in_reference_mode(&edit.text, cursor) {
-                    let sheet = model.with_value(|m| m.active_cell().sheet);
-                    let ref_str = range_ref_str(row, col, row, col, sheet, sheet, "");
-                    let prev_span = state.get_point_ref_span_untracked();
-                    let text = edit.text.clone();
-                    let (new_text, new_start, new_end) =
-                        splice_ref(&text, cursor, &ref_str, prev_span);
-                    state.update_editing_cell(|c| {
-                        if let Some(e) = c {
-                            e.text = new_text;
-                        }
-                    });
-                    state.set_point_range(Some([row, col, row, col]));
-                    state.set_drag(DragState::Pointing);
-                    state.set_point_ref_span(Some((new_start, new_end)));
-                    state.request_redraw();
-                    return;
-                }
-            }
-        }
-
-        // Apply model mutations and signal writes after the read closure.
-        if near_handle {
-            // Begin autofill drag — don't change the selection.
-            state.set_drag(DragState::Extending {
-                to_row: row,
-                to_col: col,
-            });
-        } else if ev.shift_key() {
-            // Shift-click extends the range from the current anchor.
-            model.update_value(|m| {
-                m.nav_extend_selection(row, col);
-            });
-            state.set_drag(DragState::Selecting);
-        } else {
-            model.update_value(|m| {
-                m.nav_set_cell(row, col);
-            });
-            state.set_drag(DragState::Selecting);
-        }
-
-        state.set_editing_cell(None);
-
-        // Emit the appropriate navigation event so toolbar/formula-bar
-        // update and the canvas repaints via visual_events.
-        if near_handle {
-            // Autofill start: drag state change alone triggers the Effect.
-        } else {
-            let sheet = model.with_value(|m| m.get_selected_view().sheet);
-            if ev.shift_key() {
-                let (start_row, start_col, end_row, end_col) = model.with_value(|m| {
-                    let [r1, c1, r2, c2] = m.get_selected_view().range;
-                    (r1, c1, r2, c2)
-                });
-                state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                    crate::events::NavigationEvent::SelectionRangeChanged {
-                        sheet,
-                        start_row,
-                        start_col,
-                        end_row,
-                        end_col,
-                    },
-                ));
-            } else {
-                let address = model.with_value(|m| {
-                    let v = m.get_selected_view();
-                    CellAddress { sheet, row: v.row, column: v.column }
-                });
-                state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-                    crate::events::NavigationEvent::SelectionChanged { address },
-                ));
-            }
-        }
+        handle_cell_click(&ev, x, y, model, state);
     };
 
     // mousemove: expand selection or autofill preview
@@ -381,7 +194,11 @@ pub fn Worksheet() -> impl IntoView {
                 state.set_drag(DragState::ResizingCol { col, x });
                 let sheet = model.with_value(|m| m.active_cell().sheet);
                 state.emit_event(crate::events::SpreadsheetEvent::Format(
-                    crate::events::FormatEvent::LayoutChanged { sheet, col: Some(col), row: None },
+                    crate::events::FormatEvent::LayoutChanged {
+                        sheet,
+                        col: Some(col),
+                        row: None,
+                    },
                 ));
                 ev.prevent_default();
                 return;
@@ -397,7 +214,11 @@ pub fn Worksheet() -> impl IntoView {
                 state.set_drag(DragState::ResizingRow { row, y });
                 let sheet = model.with_value(|m| m.active_cell().sheet);
                 state.emit_event(crate::events::SpreadsheetEvent::Format(
-                    crate::events::FormatEvent::LayoutChanged { sheet, col: None, row: Some(row) },
+                    crate::events::FormatEvent::LayoutChanged {
+                        sheet,
+                        col: None,
+                        row: Some(row),
+                    },
                 ));
                 ev.prevent_default();
                 return;
@@ -623,7 +444,11 @@ pub fn Worksheet() -> impl IntoView {
             (v.sheet, v.top_row, v.left_column)
         });
         state.emit_event(crate::events::SpreadsheetEvent::Navigation(
-            crate::events::NavigationEvent::ViewportScrolled { sheet, top_row, left_col },
+            crate::events::NavigationEvent::ViewportScrolled {
+                sheet,
+                top_row,
+                left_col,
+            },
         ));
     };
 
@@ -653,5 +478,246 @@ pub fn Worksheet() -> impl IntoView {
             />
             <CellEditor />
         </div>
+    }
+}
+
+// on_mousedown helpers
+/// Start a column resize if the click lands within `HIT_ZONE` of a column
+/// boundary in the header row. Returns `true` if a resize was started.
+fn try_begin_col_resize(
+    ev: &web_sys::MouseEvent,
+    x: f64,
+    model: ModelStore,
+    state: WorkbookState,
+) -> bool {
+    if let Some(col) =
+        model.with_value(|m| crate::canvas::geometry::find_col_boundary_at(m, x, HIT_ZONE))
+    {
+        state.set_drag(DragState::ResizingCol { col, x });
+        ev.prevent_default();
+        true
+    } else {
+        false
+    }
+}
+
+/// Start a row resize if the click lands within `HIT_ZONE` of a row
+/// boundary in the header column. Returns `true` if a resize was started.
+fn try_begin_row_resize(
+    ev: &web_sys::MouseEvent,
+    y: f64,
+    model: ModelStore,
+    state: WorkbookState,
+) -> bool {
+    if let Some(row) =
+        model.with_value(|m| crate::canvas::geometry::find_row_boundary_at(m, y, HIT_ZONE))
+    {
+        state.set_drag(DragState::ResizingRow { row, y });
+        ev.prevent_default();
+        true
+    } else {
+        false
+    }
+}
+
+/// Click on the top-left corner cell: select the entire sheet.
+fn handle_corner_click(model: ModelStore, state: WorkbookState) {
+    model.update_value(|m| {
+        m.nav_select_all();
+    });
+    state.set_editing_cell(None);
+    let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
+        let v = m.get_selected_view();
+        let [r1, c1, r2, c2] = v.range;
+        (v.sheet, r1, c1, r2, c2)
+    });
+    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+        crate::events::NavigationEvent::SelectionRangeChanged {
+            sheet,
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        },
+    ));
+}
+
+/// Click on a column header: select the entire column, or extend the current
+/// selection if Shift is held.
+fn handle_col_header_click(
+    ev: &web_sys::MouseEvent,
+    x: f64,
+    model: ModelStore,
+    state: WorkbookState,
+) {
+    model.update_value(|m| {
+        let view = m.get_selected_view();
+        let sheet = view.sheet;
+        let fg = frozen_geometry(m, sheet);
+        let col = pixel_to_col(m, sheet, view.left_column, x, &fg);
+        if ev.shift_key() {
+            m.nav_extend_selection(1, col);
+        } else {
+            m.nav_select_column(col);
+        }
+    });
+    state.set_editing_cell(None);
+    let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
+        let v = m.get_selected_view();
+        let [r1, c1, r2, c2] = v.range;
+        (v.sheet, r1, c1, r2, c2)
+    });
+    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+        crate::events::NavigationEvent::SelectionRangeChanged {
+            sheet,
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        },
+    ));
+}
+
+/// Click on a row header: select the entire row, or extend the current
+/// selection if Shift is held.
+fn handle_row_header_click(
+    ev: &web_sys::MouseEvent,
+    y: f64,
+    model: ModelStore,
+    state: WorkbookState,
+) {
+    model.update_value(|m| {
+        let view = m.get_selected_view();
+        let sheet = view.sheet;
+        let fg = frozen_geometry(m, sheet);
+        let row = pixel_to_row(m, sheet, view.top_row, y, &fg);
+        if ev.shift_key() {
+            m.nav_extend_selection(row, 1);
+        } else {
+            m.nav_select_row(row);
+        }
+    });
+    state.set_editing_cell(None);
+    let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
+        let v = m.get_selected_view();
+        let [r1, c1, r2, c2] = v.range;
+        (v.sheet, r1, c1, r2, c2)
+    });
+    state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+        crate::events::NavigationEvent::SelectionRangeChanged {
+            sheet,
+            start_row,
+            start_col,
+            end_row,
+            end_col,
+        },
+    ));
+}
+
+/// Click in the cell area: handles point-mode formula entry, autofill handle
+/// drag start, Shift-click range extension, and regular single-cell navigation.
+fn handle_cell_click(
+    ev: &web_sys::MouseEvent,
+    x: f64,
+    y: f64,
+    model: ModelStore,
+    state: WorkbookState,
+) {
+    // Read model state (row, col, autofill hit-test) without holding a
+    // mutable borrow, so signal writes below don't interleave with the lock.
+    let (row, col, near_handle) = model.with_value(|m| {
+        let view = m.get_selected_view();
+        let sheet = view.sheet;
+        let fg = frozen_geometry(m, sheet);
+        let col = pixel_to_col(m, sheet, view.left_column, x, &fg);
+        let row = pixel_to_row(m, sheet, view.top_row, y, &fg);
+        let handle = autofill_handle_pos(m);
+        let near_handle = (x - handle.x).abs() <= AUTOFILL_HANDLE_PX
+            && (y - handle.y).abs() <= AUTOFILL_HANDLE_PX;
+        (row, col, near_handle)
+    });
+
+    // Point mode: intercept click during formula entry.
+    // When the cursor is at a syntactically valid reference position inside
+    // a formula, clicking a cell inserts/replaces the reference rather than
+    // committing the edit and navigating away.
+    if let Some(ref edit) = state.get_editing_cell_untracked() {
+        if edit.mode == EditMode::Accept {
+            let cursor = get_formula_cursor();
+            let already_pointing = state.get_point_range_untracked().is_some();
+            if already_pointing || is_in_reference_mode(&edit.text, cursor) {
+                let sheet = model.with_value(|m| m.active_cell().sheet);
+                let ref_str = range_ref_str(row, col, row, col, sheet, sheet, "");
+                let prev_span = state.get_point_ref_span_untracked();
+                let text = edit.text.clone();
+                let (new_text, new_start, new_end) = splice_ref(&text, cursor, &ref_str, prev_span);
+                state.update_editing_cell(|c| {
+                    if let Some(e) = c {
+                        e.text = new_text;
+                    }
+                });
+                state.set_point_range(Some([row, col, row, col]));
+                state.set_drag(DragState::Pointing);
+                state.set_point_ref_span(Some((new_start, new_end)));
+                state.request_redraw();
+                return;
+            }
+        }
+    }
+
+    if near_handle {
+        // Begin autofill drag — don't change the selection.
+        state.set_drag(DragState::Extending {
+            to_row: row,
+            to_col: col,
+        });
+    } else if ev.shift_key() {
+        // Shift-click extends the range from the current anchor.
+        model.update_value(|m| {
+            m.nav_extend_selection(row, col);
+        });
+        state.set_drag(DragState::Selecting);
+    } else {
+        model.update_value(|m| {
+            m.nav_set_cell(row, col);
+        });
+        state.set_drag(DragState::Selecting);
+    }
+
+    state.set_editing_cell(None);
+
+    // Emit the appropriate navigation event so toolbar/formula-bar
+    // update and the canvas repaints via visual_events.
+    if near_handle {
+        // Autofill start: drag state change alone triggers the Effect.
+    } else {
+        let sheet = model.with_value(|m| m.get_selected_view().sheet);
+        if ev.shift_key() {
+            let (start_row, start_col, end_row, end_col) = model.with_value(|m| {
+                let [r1, c1, r2, c2] = m.get_selected_view().range;
+                (r1, c1, r2, c2)
+            });
+            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                crate::events::NavigationEvent::SelectionRangeChanged {
+                    sheet,
+                    start_row,
+                    start_col,
+                    end_row,
+                    end_col,
+                },
+            ));
+        } else {
+            let address = model.with_value(|m| {
+                let v = m.get_selected_view();
+                CellAddress {
+                    sheet,
+                    row: v.row,
+                    column: v.column,
+                }
+            });
+            state.emit_event(crate::events::SpreadsheetEvent::Navigation(
+                crate::events::NavigationEvent::SelectionChanged { address },
+            ));
+        }
     }
 }
