@@ -62,7 +62,7 @@ pub fn Worksheet() -> impl IntoView {
     // never goes stale (the original marching-ants bug).
     let reactive_overlay = Memo::new(move |_| {
         let extend_to = match state.get_drag() {
-            DragState::Extending { to_row, to_col } => Some((to_row, to_col)),
+            DragState::Extending { to_row, to_col } => Some(AutofillTarget { row: to_row, col: to_col }),
             _ => None,
         };
         let point_range = state.get_point_range();
