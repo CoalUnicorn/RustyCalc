@@ -196,6 +196,17 @@ pub struct CanvasRenderer {
 
 impl CanvasRenderer {
     /// Bind a renderer to `canvas` and apply device-pixel-ratio scaling.
+    ///
+    /// **Performance note:** `canvas.set_width()` / `set_height()` resets the
+    /// entire canvas bitmap and all 2D context state — even when the value is
+    /// unchanged.  On a 1920×1080 display at 2× DPR that is a ~32 MB backing
+    /// store reallocation every frame, which causes >500 ms lag on rapid
+    /// navigation (held arrow keys, resize drags).
+    ///
+    /// Fix: only resize when dimensions actually changed.  When the size is
+    /// stable, reset only the transform matrix to the identity before
+    /// re-applying the DPR scale.  `clear_rect` in `render()` handles the
+    /// pixel clear without touching the backing store.
     #[allow(clippy::expect_used)]
     pub fn new(canvas: &HtmlCanvasElement, theme: CanvasTheme) -> Self {
         let ctx = canvas
@@ -210,8 +221,19 @@ impl CanvasRenderer {
             .expect("window must exist in WASM context")
             .device_pixel_ratio();
 
-        canvas.set_width((width * dpr) as u32);
-        canvas.set_height((height * dpr) as u32);
+        let target_w = (width * dpr) as u32;
+        let target_h = (height * dpr) as u32;
+
+        if canvas.width() != target_w || canvas.height() != target_h {
+            // Resize resets canvas bitmap + all context state; necessary here.
+            canvas.set_width(target_w);
+            canvas.set_height(target_h);
+        } else {
+            // Reset only the transform so the DPR scale below is applied to
+            // the identity matrix, not accumulated across frames.
+            ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+                .expect("set_transform should not fail");
+        }
         ctx.scale(dpr, dpr).expect("scale should not fail");
 
         Self {

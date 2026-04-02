@@ -2,7 +2,7 @@ use ironcalc_base::expressions::types::Area;
 
 use leptos::html;
 use leptos::prelude::*;
-use leptos_use::use_resize_observer;
+use leptos_use::{use_raf_fn, use_resize_observer};
 use web_sys::HtmlCanvasElement;
 
 use crate::canvas::*;
@@ -39,48 +39,87 @@ pub fn Worksheet() -> impl IntoView {
     // Re-render canvas every time visual events occur (content, format, navigation, structure).
     let clipboard_draw = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
-    // Memo for canvas theme - cached until theme changes
+    // Memo for canvas theme — cached until theme changes.
     let canvas_theme = Memo::new(move |_| state.get_theme().canvas_theme());
 
+    // Memo for the reactive overlay components (autofill extend target and
+    // point-mode range). These must live in a memo, not be read directly in
+    // the subscription Effect: if the Effect subscribed to drag/point_range
+    // directly, set_drag(Selecting) in on_mousedown would cause an extra
+    // Effect run (and an extra render) before the navigation event fires.
+    //
+    // The memo's PartialEq gate also suppresses spurious renders: Selecting
+    // and Idle both map to extend_to=None, so switching between them doesn't
+    // change the memo output and doesn't re-render.
+    //
+    // The clipboard is NOT in this memo because it lives in a StoredValue
+    // (non-reactive). It is read fresh in the rAF callback each render so it
+    // never goes stale (the original marching-ants bug).
+    let reactive_overlay = Memo::new(move |_| {
+        let extend_to = match state.get_drag() {
+            DragState::Extending { to_row, to_col } => Some((to_row, to_col)),
+            _ => None,
+        };
+        let point_range = state.get_point_range();
+        (extend_to, point_range)
+    });
+
+    // Flag: set by the reactive subscription Effect below, cleared by the
+    // rAF render loop. Starts true so the first animation frame draws the
+    // initial state without waiting for an event.
+    let render_needed = RwSignal::new(true);
+
+    // Reactive subscription Effect — tracks events and overlay changes.
+    // Does NOT render. Only sets the flag so the rAF loop below can do the
+    // draw on the next animation frame.
+    //
+    // Decoupling subscription from rendering is the key to smooth navigation:
+    // holding an arrow key fires ~30 keydown events per second, each emitting
+    // a NavigationEvent. Without rAF coalescing every event would trigger a
+    // synchronous canvas render. With this split, all events in a single
+    // 16 ms frame coalesce into one draw call.
     Effect::new(move |_| {
-        // Subscribe to visual events only (excludes theme/mode events that don't affect rendering)
         let _ = state.subscribe_to_visual_events()();
-        let Some(canvas) = canvas_ref.get() else {
+        let _ = reactive_overlay.get();
+        render_needed.set(true);
+    });
+
+    // rAF render loop — fires on every animation frame (~60 fps).
+    // Renders only when render_needed is true; otherwise returns immediately
+    // (~1 µs overhead when idle — a single untracked signal read + branch).
+    let _ = use_raf_fn(move |_| {
+        if !render_needed.get_untracked() {
+            return;
+        }
+        render_needed.set(false);
+
+        let Some(canvas) = canvas_ref.get_untracked() else {
             return;
         };
         let canvas_el: HtmlCanvasElement = canvas;
-        // Sync canvas dimensions into the model so that on_area_selecting
-        // knows how wide/tall the visible area is and only scrolls when the
-        // drag target is genuinely outside the viewport (not on every move).
+        // Sync canvas dimensions into the model so scroll/autofill knows the
+        // visible viewport size. Dimension check is cheap; CanvasRenderer::new
+        // only reallocates the backing store when dimensions actually changed.
         let canvas_w = canvas_el.client_width() as f64;
         let canvas_h = canvas_el.client_height() as f64;
         model.update_value(|m| {
             m.set_window_width(canvas_w);
             m.set_window_height(canvas_h);
         });
-        // Overlays are computed inline (not in a memo) because `clipboard_draw`
-        // is a StoredValue — not reactive. Caching it in a memo would return stale
-        // clipboard data; reading it here guarantees the current value every render.
-        let overlays = {
-            let extend_to = match state.get_drag() {
-                DragState::Extending { to_row, to_col } => Some((to_row, to_col)),
-                _ => None,
-            };
-            let point_range = state.get_point_range();
-            let clipboard = clipboard_draw.with_value(|opt| {
-                opt.as_ref().map(|acb| {
-                    let (r1, c1, r2, c2) = acb.range;
-                    ClipboardRange { sheet: acb.sheet, r1, c1, r2, c2 }
-                })
-            });
-            RenderOverlays {
-                extend_to,
-                clipboard,
-                point_range: point_range.map(|[r1, c1, r2, c2]| SheetRect { r1, c1, r2, c2 }),
-            }
+        let (extend_to, point_range) = reactive_overlay.get_untracked();
+        let clipboard = clipboard_draw.with_value(|opt| {
+            opt.as_ref().map(|acb| {
+                let (r1, c1, r2, c2) = acb.range;
+                ClipboardRange { sheet: acb.sheet, r1, c1, r2, c2 }
+            })
+        });
+        let overlays = RenderOverlays {
+            extend_to,
+            clipboard,
+            point_range: point_range.map(|[r1, c1, r2, c2]| SheetRect { r1, c1, r2, c2 }),
         };
         model.with_value(|m| {
-            let renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get());
+            let renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get_untracked());
             renderer.render(m, &overlays);
         });
         // Record render-done timestamp for the perf panel.
