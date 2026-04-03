@@ -1,12 +1,13 @@
 //! Formatting actions: bold, italic, underline, strikethrough, font size/family.
 
+use ironcalc_base::expressions::types::Area;
 use ironcalc_base::UserModel;
 use leptos::prelude::WithValue;
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::helpers::{mutate, selection_area, Eval};
-use crate::model::{FrontendModel, SafeFontFamily, ToolbarState};
+use crate::model::{BooleanValue, FrontendModel, SafeFontFamily, StylePath, ToolbarState};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
@@ -40,16 +41,20 @@ pub enum FormatAction {
 pub fn execute_format(action: &FormatAction, model: ModelStore, state: &WorkbookState) {
     match action {
         FormatAction::ToggleBold => {
-            toggle_style(model, state, "font.b", |ts| ts.format.bold);
+            toggle_style(model, state, StylePath::FONT_BOLD, |ts| ts.format.bold);
         }
         FormatAction::ToggleItalic => {
-            toggle_style(model, state, "font.i", |ts| ts.format.italic);
+            toggle_style(model, state, StylePath::FONT_ITALIC, |ts| ts.format.italic);
         }
         FormatAction::ToggleUnderline => {
-            toggle_style(model, state, "font.u", |ts| ts.format.underline);
+            toggle_style(model, state, StylePath::FONT_UNDERLINE, |ts| {
+                ts.format.underline
+            });
         }
         FormatAction::ToggleStrikethrough => {
-            toggle_style(model, state, "font.strike", |ts| ts.format.strikethrough);
+            toggle_style(model, state, StylePath::FONT_STRIKETHROUGH, |ts| {
+                ts.format.strikethrough
+            });
         }
         FormatAction::SetFontSize(size) => {
             let size = size.clamp(1.0, 409.0);
@@ -79,7 +84,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                 let area = selection_area(m);
                 let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);
                 warn_if_err(
-                    m.update_range_style(&area, "font.size_delta", &val),
+                    m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val),
                     "set_font_size",
                 );
             });
@@ -135,11 +140,11 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                         a.column + a.width - 1,
                     )
                 });
-            let value = hex.as_deref().unwrap_or("").to_owned();
+            let value = hex.as_deref().unwrap_or("");
             mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
                 warn_if_err(
-                    m.update_range_style(&area, "font.color", &value),
+                    m.update_range_style(&area, StylePath::TEXT_COLOR.as_str(), value),
                     "set_text_color",
                 );
             });
@@ -165,7 +170,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                         a.column + a.width - 1,
                     )
                 });
-            let value = hex.as_deref().unwrap_or("").to_owned();
+            let value = hex.as_deref().unwrap_or("");
 
             mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
@@ -184,8 +189,11 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                             height: LAST_ROW,
                             width: 1,
                         };
-                        if let Err(e) = m.update_range_style(&column_area, "fill.fg_color", &value)
-                        {
+                        if let Err(e) = m.update_range_style(
+                            &column_area,
+                            StylePath::BACKGROUND_COLOR.as_str(),
+                            value,
+                        ) {
                             // Log error but continue with other columns
                             web_sys::console::warn_1(
                                 &format!("Failed to set column {} background: {}", col, e).into(),
@@ -196,7 +204,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                 } else {
                     // Slow path: O(rows x columns) cell-by-cell styling for partial selections
                     warn_if_err(
-                        m.update_range_style(&area, "fill.fg_color", &value),
+                        m.update_range_style(&area, StylePath::BACKGROUND_COLOR.as_str(), value),
                         "set_background_color",
                     );
                 }
@@ -216,16 +224,12 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
 ///
 /// Reads the current value from `ToolbarState` (active cell) via `current_val`,
 /// then sets the opposite on the full selection via `update_range_style`.
-///
-/// `style_path` is an IronCalc `update_range_style` key (e.g. `"font.b"`) -
-/// foreign string API, not something we can type as an enum.
 fn toggle_style(
     model: ModelStore,
     state: &WorkbookState,
-    style_path: &str,
+    style_path: StylePath,
     current_val: fn(&ToolbarState) -> bool,
 ) {
-    let path = style_path.to_owned();
     let (sheet, start_row, start_col, end_row, end_col) =
         model.with_value(|m: &ironcalc_base::UserModel<'static>| {
             let area = selection_area(m);
@@ -240,9 +244,13 @@ fn toggle_style(
 
     mutate(model, state, Eval::No, |m| {
         let ts = m.toolbar_state();
-        let new_val = if current_val(&ts) { "false" } else { "true" };
+        let current_bool = current_val(&ts);
+        let new_val = BooleanValue::from_bool(!current_bool);
         let area = selection_area(m);
-        warn_if_err(m.update_range_style(&area, &path, new_val), &path);
+        warn_if_err(
+            m.update_range_style(&area, style_path.as_str(), new_val.as_str()),
+            style_path.as_str(),
+        );
     });
 
     // Fire format event for style toggle

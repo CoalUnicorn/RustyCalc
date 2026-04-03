@@ -165,13 +165,6 @@ impl FormatEvent {
     }
 }
 
-/// The type of header operation
-#[derive(Clone, PartialEq)]
-pub enum HeaderOperation {
-    Insert,
-    Delete,
-}
-
 /// The dimension being modified
 #[derive(Clone, PartialEq)]
 pub enum Dimension {
@@ -236,6 +229,13 @@ pub struct HeaderChange {
     pub count: i32,
 }
 
+/// The type of header operation
+#[derive(Clone, PartialEq)]
+pub enum HeaderOperation {
+    Insert,
+    Delete,
+}
+
 #[allow(dead_code)]
 impl HeaderChange {
     fn rows(op: HeaderOperation, location: Location) -> Self {
@@ -279,8 +279,8 @@ impl HeaderChange {
     /// Get the starting position (row or column index)
     pub fn start_position(&self) -> i32 {
         match &self.dimension {
-            Dimension::Row { start } => start.expect("Row imposible"),
-            Dimension::Column { start } => start.expect("Row imposible"),
+            Dimension::Row { start } => start.expect("Row impossible"),
+            Dimension::Column { start } => start.expect("Column impossible"),
         }
     }
 

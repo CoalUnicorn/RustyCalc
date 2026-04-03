@@ -704,11 +704,13 @@ impl CanvasRenderer {
         }
 
         let resolved = model.cell_style(sheet, row, col, self.theme.default_text_color);
-        let font = resolved.font.css.clone();
-        let font_size = resolved.font.size_px;
-        let text_color = resolved.text_color.as_str().to_owned();
-        let effective_h_align = resolved.h_align;
-        let effective_v_align = resolved.v_align;
+        let font = resolved.css_font();
+        let font_size = resolved.font_size();
+        let text_color = resolved.text_color().as_str().to_owned();
+        let effective_h_align = resolved.h_align();
+        let effective_v_align = resolved.v_align.clone();
+        let underlined = resolved.underline();
+        let strike = resolved.strikethrough();
 
         let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
         let line_height = font_size * LINE_HEIGHT_FACTOR;
@@ -792,8 +794,8 @@ impl CanvasRenderer {
             font,
             font_size_px: font_size,
             text_color,
-            underlined: resolved.font.underline,
-            strike: resolved.font.strikethrough,
+            underlined,
+            strike,
             lines,
         })
     }

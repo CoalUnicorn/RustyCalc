@@ -376,6 +376,7 @@ pub fn Worksheet() -> impl IntoView {
     };
 
     // contextmenu: right-click on column/row header
+    // TODO: create context menu component
     let on_contextmenu = move |ev: web_sys::MouseEvent| {
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;

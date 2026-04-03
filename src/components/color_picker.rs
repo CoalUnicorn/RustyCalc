@@ -38,6 +38,7 @@ Custom / without WorkbookState:
 use leptos::prelude::*;
 use leptos_use::{on_click_outside, use_toggle};
 
+use crate::model::is_valid_hex_color;
 use crate::state::WorkbookState;
 use crate::theme::COLOR_PALETTE;
 
@@ -373,14 +374,6 @@ fn ClearColorButton(
     }
 }
 
-fn is_valid_hex_color(hex: &str) -> bool {
-    if !hex.starts_with('#') {
-        return false;
-    }
-    let digits = &hex[1..];
-    matches!(digits.len(), 3 | 6) && digits.chars().all(|c| c.is_ascii_hexdigit())
-}
-
 // Context-aware wrappers
 // These pull recent_colors reactively from WorkbookState so callers don't have
 // to wire it up manually. Adding colors to history remains the caller's job
@@ -474,6 +467,7 @@ mod tests {
 
     #[test]
     fn test_hex_color_validation() {
+        // Testing the unified validation function from style_types
         assert!(is_valid_hex_color("#000"));
         assert!(is_valid_hex_color("#000000"));
         assert!(is_valid_hex_color("#ABC"));

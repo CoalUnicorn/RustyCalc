@@ -106,13 +106,8 @@ pub fn FormulaBar() -> impl IntoView {
             return;
         }
         model.with_value(|m| {
-            let ac = m.active_cell();
             let text = m.active_cell_content();
-            let address = CellAddress {
-                sheet: ac.sheet,
-                row: ac.row,
-                column: ac.column,
-            };
+            let address = m.active_cell();
 
             // Fire editing started event
             state.emit_event(SpreadsheetEvent::Navigation(
