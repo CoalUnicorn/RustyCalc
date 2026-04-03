@@ -17,12 +17,12 @@ pub fn App() -> impl IntoView {
 
     let model = StoredValue::new_local(model);
 
-    // Internal clipboard — mirrors what was last copied/cut, so Ctrl+V can
+    // Internal clipboard - mirrors what was last copied/cut, so Ctrl+V can
     // paste even if the OS clipboard is unavailable (sandboxed iframe, etc.).
     let clipboard: StoredValue<Option<crate::model::AppClipboard>, LocalStorage> =
         StoredValue::new_local(None);
 
-    provide_context(wb_state.clone());
+    provide_context(wb_state);
     provide_context(model);
     provide_context(clipboard);
 
@@ -30,7 +30,6 @@ pub fn App() -> impl IntoView {
     // Debounced save: waits 2 seconds after the last change before saving
     // Uses enhanced storage with quota checking and better error handling
     let debounced_save = {
-        let wb_state = wb_state.clone();
         use_debounce_fn(
             move || {
                 let Some(uuid) = wb_state.get_current_uuid_untracked() else {

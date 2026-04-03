@@ -212,7 +212,7 @@ fn paste_from_clipboard(
     state: WorkbookState,
     clipboard_store: StoredValue<Option<AppClipboard>, LocalStorage>,
 ) -> bool {
-    // Internal paste (synchronous) — from within-app Ctrl+C.
+    // Internal paste (synchronous) - from within-app Ctrl+C.
     let internal_pasted = {
         let mut pasted = false;
         clipboard_store.with_value(|opt| {
@@ -236,7 +236,7 @@ fn paste_from_clipboard(
         clipboard_store.update_value(|c| *c = None);
     }
 
-    // OS clipboard paste (async, fire-and-forget) — from Excel / Google Sheets.
+    // OS clipboard paste (async, fire-and-forget) - from Excel / Google Sheets.
     // Only attempted when no internal clipboard data was available; otherwise
     // the async path would race and overwrite the already-completed paste.
     if !internal_pasted {

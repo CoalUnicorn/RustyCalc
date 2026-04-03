@@ -8,7 +8,6 @@ use gloo_storage::{LocalStorage, Storage};
 use ironcalc_base::UserModel;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use wasm_bindgen::JsValue;
 
 /// Enhanced storage statistics for monitoring and optimization
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +41,7 @@ pub struct EnhancedWorkbookMeta {
     pub version: u32, // For future migration support
 }
 
+#[allow(dead_code)]
 impl EnhancedWorkbookMeta {
     pub fn new(name: String, size_bytes: usize) -> Self {
         let now = js_sys::Date::now() as u64;
@@ -80,6 +80,7 @@ const ENHANCED_MODELS_KEY: &str = "enhanced_models";
 const MAX_STORAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB limit (typical localStorage limit is 5-10MB)
 
 /// Enhanced error handling with user-friendly messages
+#[allow(dead_code)]
 pub enum StorageError {
     QuotaExceeded {
         current_size: usize,
@@ -179,6 +180,7 @@ pub fn save_enhanced(uuid: &str, model: &UserModel) -> Result<(), StorageError> 
 }
 
 /// **Enhanced load with better error handling**
+#[allow(dead_code)]
 pub fn load_enhanced(uuid: &str) -> Result<UserModel<'static>, StorageError> {
     let encoded: String = LocalStorage::get(uuid)
         .map_err(|e| StorageError::NetworkError(format!("Load failed: {}", e)))?;
@@ -204,6 +206,7 @@ pub fn load_enhanced(uuid: &str) -> Result<UserModel<'static>, StorageError> {
 }
 
 /// **Storage cleanup utilities**
+#[allow(dead_code)]
 pub fn cleanup_old_workbooks(max_age_days: u64) -> usize {
     let registry = get_enhanced_registry();
     let now = js_sys::Date::now() as u64;
@@ -237,7 +240,7 @@ pub fn analyze_storage() -> String {
     let registry = get_enhanced_registry();
 
     let total_mb = stats.total_size_bytes as f64 / 1024.0 / 1024.0;
-    let avg_size = if registry.len() > 0 {
+    let avg_size = if !registry.is_empty() {
         stats.total_size_bytes / registry.len()
     } else {
         0
@@ -266,6 +269,7 @@ pub fn analyze_storage() -> String {
 }
 
 /// Get workbook metadata by UUID
+#[allow(dead_code)]
 pub fn get_workbook_metadata(uuid: &str) -> Result<EnhancedWorkbookMeta, StorageError> {
     let registry = crate::storage::load_registry();
     registry
@@ -293,6 +297,7 @@ pub fn save_compatible(uuid: &str, model: &UserModel) {
     }
 }
 
+#[allow(dead_code)]
 pub fn load_compatible(uuid: &str) -> Option<UserModel<'static>> {
     match load_enhanced(uuid) {
         Ok(model) => Some(model),

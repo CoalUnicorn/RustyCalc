@@ -1,7 +1,6 @@
 use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
-use std::rc::Rc;
 
 // NOTE: <Meta name="color-scheme" content="dark"/>
 use crate::events::*;
@@ -47,6 +46,7 @@ pub enum EditFocus {
 }
 
 /// Position and target for the active context menu.
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct ContextMenuState {
     /// Viewport-relative x (from `ev.client_x()`).
@@ -57,20 +57,21 @@ pub struct ContextMenuState {
     pub(crate) target: HeaderContextMenu,
 }
 
-/// All transient UI state — never persisted, never in the model.
+/// All transient UI state - never persisted, never in the model.
 ///
 /// Uses split signals (ReadSignal/WriteSignal) for fine-grained reactivity.
 /// Components that only read can subscribe to ReadSignal without being affected
 /// by writes from other components. This reduces unnecessary re-renders.
 ///
-/// The model itself is NOT stored here — it lives in a `StoredValue::new_local`
+/// The model itself is NOT stored here - it lives in a `StoredValue::new_local`
 /// in `App` and is accessed via `use_context::<StoredValue<UserModel<'static>, LocalStorage>>()`.
 /// A split signal redraw counter (also in context) triggers canvas re-draws.
 ///
-/// Note: row/col/sheet are NOT stored here — they are always derived from
+/// Note: row/col/sheet are NOT stored here - they are always derived from
 /// `UserModel::get_selected_view()` inside a reactive closure that reads the redraw signal
 /// to stay in sync with the model's navigation state.
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub struct WorkbookState {
     /// None = not editing; Some = live edit buffer
     /// Split signals for better granularity: readers don't get notified of writes
@@ -120,7 +121,7 @@ pub struct WorkbookState {
         ReadSignal<Option<(usize, usize)>>,
         WriteSignal<Option<(usize, usize)>>,
     ),
-    /// NodeRef to the formula bar <input> — used by FunctionBrowserModal
+    /// NodeRef to the formula bar <input> - used by FunctionBrowserModal
     /// to read/write cursor position when inserting a function name.
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
     /// Performance timings for the commit→render pipeline.
@@ -142,10 +143,11 @@ pub struct WorkbookState {
     pub(crate) visual_events_memo: Memo<Vec<SpreadsheetEvent>>,
 }
 
+#[allow(dead_code)]
 impl WorkbookState {
     pub fn new() -> Self {
-        let lang: String = <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_lang")
-            .unwrap_or_else(|_| "en".to_owned());
+        // let lang: String = <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_lang")
+        //    .unwrap_or_else(|_| "en".to_owned());
 
         // Load recent colors from localStorage
         let recent_colors: Vec<String> =
@@ -263,9 +265,9 @@ impl WorkbookState {
         self.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
     }
 
-    // ===== Event System =====
+    //  Event System
 
-    /// Emit a typed event - replaces `request_redraw()` for specific changes.
+    /// Emit a typed event.
     ///
     /// This method:
     /// 1. Adds the event to the event stream
@@ -576,6 +578,7 @@ impl WorkbookState {
 
     /// Get colors from the current document that aren't in the standard palette
     ///
+    /// NOTE: Check if this works need import support
     /// This scans all cells and extracts unique colors for the recent colors section
     pub fn extract_document_colors(&self, model: ModelStore) -> Vec<String> {
         use crate::theme::COLOR_PALETTE;

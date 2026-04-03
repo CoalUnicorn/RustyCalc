@@ -4,14 +4,14 @@
 A reusable color picker for toolbar, context menus, and sheet tabs.
 
 ```
-ColorPicker (base — no WorkbookState dep)
-├── ColorPickerTrigger  (button or ctx-item depending on placement)
-├── on_click_outside    (closes picker without swallowing the click)
-└── ColorPickerDropdown (z-index 1100)
-    ├── MainColorPalette
-    ├── RecentColorsPalette
-    ├── CustomColorInput
-    └── ClearColorButton
+ColorPicker (base - no WorkbookState dep)
+├ ColorPickerTrigger  (button or ctx-item depending on placement)
+├ on_click_outside    (closes picker without swallowing the click)
+└ ColorPickerDropdown (z-index 1100)
+    ├ MainColorPalette
+    ├ RecentColorsPalette
+    ├ CustomColorInput
+    └ ClearColorButton
 ```
 
 ## Usage
@@ -41,8 +41,8 @@ use leptos_use::{on_click_outside, use_toggle};
 use crate::state::WorkbookState;
 use crate::theme::COLOR_PALETTE;
 
-// ── Public types ──────────────────────────────────────────────────────────────
-
+//  Public types
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColorType {
     Text,
@@ -70,7 +70,7 @@ pub enum ColorPickerPlacement {
 
 // Base component
 
-/// Generic color picker — no WorkbookState dependency.
+/// Generic color picker - no WorkbookState dependency.
 ///
 /// `on_color_change` is called with `Some(hex)` on selection or `None` on clear.
 /// Adding the color to recent-colors history is the caller's responsibility.
@@ -103,7 +103,7 @@ pub fn ColorPicker(
     };
 
     // on_click_outside fires for any click whose target is outside this div,
-    // without consuming/stopping the event — so a mis-click on Bold closes the
+    // without consuming/stopping the event - so a mis-click on Bold closes the
     // picker AND toggles bold in a single click.
     let container_ref = NodeRef::<leptos::html::Div>::new();
     let _ = on_click_outside(container_ref, move |_| set_picker_open.set(false));
@@ -445,6 +445,7 @@ pub fn BackgroundColorPicker(
     }
 }
 
+#[allow(dead_code)]
 #[component]
 pub fn TabColorPicker(
     current_color: Signal<Option<String>>,

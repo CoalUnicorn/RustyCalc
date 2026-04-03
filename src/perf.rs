@@ -38,6 +38,12 @@ impl PerfTimings {
     }
 }
 
+impl Default for PerfTimings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Read `performance.now()` from the browser.
 pub fn now() -> f64 {
     web_sys::window()

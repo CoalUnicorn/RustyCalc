@@ -2,10 +2,10 @@
 //
 // SpreadsheetAction is a thin wrapper around category-specific sub-enums.
 // Each category lives in its own module with its own execute function:
-//   nav.rs       — arrow keys, page up/down, home/end, sheet switching
-//   edit.rs      — start/commit/cancel cell editing
-//   format.rs    — bold, italic, underline, strikethrough, font size/family
-//   structure.rs — delete, clear, undo/redo, insert/delete rows/columns
+//   nav.rs       - arrow keys, page up/down, home/end, sheet switching
+//   edit.rs      - start/commit/cancel cell editing
+//   format.rs    - bold, italic, underline, strikethrough, font size/family
+//   structure.rs - delete, clear, undo/redo, insert/delete rows/columns
 //
 // See docs/adding-actions.md for how to add or modify actions.
 
@@ -38,7 +38,7 @@ pub enum SpreadsheetAction {
 
 /// Map a keyboard event to a `SpreadsheetAction`, or `None` if unhandled.
 ///
-/// This function is pure — no side effects, no DOM access.
+/// This function is pure - no side effects, no DOM access.
 ///
 /// **Point-mode arrow navigation** is excluded: it requires reading the
 /// textarea cursor position from the DOM, so it is handled as a pre-check
@@ -155,7 +155,7 @@ pub fn classify_key(
         return None;
     }
 
-    // Plain keys — no modifiers.
+    // Plain keys - no modifiers.
     match key {
         "ArrowRight" | "Tab" => Some(Nav(NavAction::Arrow(Right))),
         "ArrowLeft" => Some(Nav(NavAction::Arrow(Left))),
@@ -183,7 +183,7 @@ fn is_printable(key: &str) -> bool {
 /// Apply a `SpreadsheetAction` to the model and reactive state.
 ///
 /// Dispatches to category-specific execute functions. Clipboard actions
-/// are no-ops here — they require the `AppClipboard` store and async OS
+/// are no-ops here - they require the `AppClipboard` store and async OS
 /// clipboard APIs, so the Workbook component handles them directly.
 pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookState) {
     let mutates = matches!(
@@ -293,7 +293,7 @@ mod tests {
         }
     }
 
-    // Shorthand for test assertions — avoids `SpreadsheetAction::Nav(NavAction::...)` verbosity.
+    // Shorthand for test assertions - avoids `SpreadsheetAction::Nav(NavAction::...)` verbosity.
     fn nav(a: NavAction) -> SpreadsheetAction {
         SpreadsheetAction::Nav(a)
     }

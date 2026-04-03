@@ -44,7 +44,7 @@ pub fn Worksheet() -> impl IntoView {
     // Re-render canvas every time visual events occur (content, format, navigation, structure).
     let clipboard_draw = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
-    // Memo for canvas theme — cached until theme changes.
+    // Memo for canvas theme - cached until theme changes.
     let canvas_theme = Memo::new(move |_| state.get_theme().canvas_theme());
 
     // Memo for the reactive overlay components (autofill extend target and
@@ -62,7 +62,10 @@ pub fn Worksheet() -> impl IntoView {
     // never goes stale (the original marching-ants bug).
     let reactive_overlay = Memo::new(move |_| {
         let extend_to = match state.get_drag() {
-            DragState::Extending { to_row, to_col } => Some((to_row, to_col)),
+            DragState::Extending { to_row, to_col } => Some(AutofillTarget {
+                row: to_row,
+                col: to_col,
+            }),
             _ => None,
         };
         let point_range = state.get_point_range();
@@ -74,7 +77,7 @@ pub fn Worksheet() -> impl IntoView {
     // initial state without waiting for an event.
     let render_needed = RwSignal::new(true);
 
-    // Reactive subscription Effect — tracks events and overlay changes.
+    // Reactive subscription Effect - tracks events and overlay changes.
     // Does NOT render. Only sets the flag so the rAF loop below can do the
     // draw on the next animation frame.
     //
@@ -89,9 +92,9 @@ pub fn Worksheet() -> impl IntoView {
         render_needed.set(true);
     });
 
-    // rAF render loop — fires on every animation frame (~60 fps).
+    // rAF render loop - fires on every animation frame (~60 fps).
     // Renders only when render_needed is true; otherwise returns immediately
-    // (~1 µs overhead when idle — a single untracked signal read + branch).
+    // (~1 µs overhead when idle - a single untracked signal read + branch).
     let _ = use_raf_fn(move |_| {
         if !render_needed.get_untracked() {
             return;
@@ -144,15 +147,17 @@ pub fn Worksheet() -> impl IntoView {
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;
 
-        if y < HEADER_ROW_HEIGHT && x > HEADER_COL_WIDTH {
-            if try_begin_col_resize(&ev, x, model, state) {
-                return;
-            }
+        if y < HEADER_ROW_HEIGHT
+            && x > HEADER_COL_WIDTH
+            && try_begin_col_resize(&ev, x, model, state)
+        {
+            return;
         }
-        if x < HEADER_COL_WIDTH && y > HEADER_ROW_HEIGHT {
-            if try_begin_row_resize(&ev, y, model, state) {
-                return;
-            }
+        if x < HEADER_COL_WIDTH
+            && y > HEADER_ROW_HEIGHT
+            && try_begin_row_resize(&ev, y, model, state)
+        {
+            return;
         }
         if x < HEADER_COL_WIDTH && y < HEADER_ROW_HEIGHT {
             handle_corner_click(model, state);
@@ -328,7 +333,7 @@ pub fn Worksheet() -> impl IntoView {
                 m.resume_evaluation();
                 m.evaluate();
             });
-            // Autofill wrote content — emit a content event so canvas and
+            // Autofill wrote content - emit a content event so canvas and
             // formula bar both repaint with the filled values.
             let sheet = model.with_value(|m| m.get_selected_view().sheet);
             let (start_row, start_col, end_row, end_col) = model.with_value(|m| {
@@ -413,7 +418,7 @@ pub fn Worksheet() -> impl IntoView {
         let dx = ev.delta_x();
         model.update_value(|m| {
             if dx.abs() > dy.abs() {
-                // Predominantly horizontal — trackpad swipe.
+                // Predominantly horizontal - trackpad swipe.
                 if dx > 0.0 {
                     m.nav_arrow(ArrowKey::Right);
                 } else {
@@ -662,7 +667,7 @@ fn handle_cell_click(
     }
 
     if near_handle {
-        // Begin autofill drag — don't change the selection.
+        // Begin autofill drag - don't change the selection.
         state.set_drag(DragState::Extending {
             to_row: row,
             to_col: col,

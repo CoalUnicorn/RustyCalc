@@ -1,5 +1,5 @@
 //! Bridge between the webapp and `ironcalc_base`'s `pub(crate)` clipboard
-//! and border internals — without modifying the base crate.
+//! and border internals - without modifying the base crate.
 //!
 //! Both [`Clipboard`] and [`BorderArea`] have `pub(crate)` fields but derive
 //! `Serialize + Deserialize`, so we serde-roundtrip once at construction time
@@ -22,7 +22,7 @@ pub struct AppClipboard {
     pub sheet: u32,
     /// `(r1, c1, r2, c2)` of the copied range (1-based).
     pub range: (i32, i32, i32, i32),
-    /// Opaque cell data — passed back to `paste_from_clipboard`.
+    /// Opaque cell data - passed back to `paste_from_clipboard`.
     data: ClipboardData,
 }
 
@@ -65,6 +65,7 @@ impl AppClipboard {
 // BorderArea construction
 
 /// Serde mirror matching `ironcalc_base::BorderArea`'s JSON shape.
+#[allow(dead_code)]
 #[derive(Serialize)]
 struct BorderAreaMirror {
     item: BorderItem,
@@ -73,6 +74,7 @@ struct BorderAreaMirror {
 
 /// Local copy of `BorderType` with `Copy` (upstream lacks it).
 /// Serializes to the same JSON strings as `ironcalc_base::BorderType`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum BorderKind {
     All,
@@ -88,6 +90,7 @@ pub enum BorderKind {
 }
 
 /// Construct a [`BorderArea`] without accessing its `pub(crate)` fields.
+#[allow(dead_code)]
 pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<String>) -> BorderArea {
     let mirror = BorderAreaMirror {
         item: BorderItem { style, color },

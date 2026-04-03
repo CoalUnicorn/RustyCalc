@@ -148,8 +148,9 @@ pub fn create_new() -> (String, UserModel<'static>) {
 
 /// Persist an already-constructed model under a fresh UUID and set it as selected.
 ///
-/// Used when the user uploads a file — the model is already in memory; we just
+/// Used when the user uploads a file - the model is already in memory; we just
 /// need to register and persist it.
+#[allow(dead_code)]
 pub fn create_new_from(model: UserModel<'static>) -> (String, UserModel<'static>) {
     let uuid = crate::util::new_uuid();
     save(&uuid, &model);
@@ -158,6 +159,7 @@ pub fn create_new_from(model: UserModel<'static>) -> (String, UserModel<'static>
 }
 
 /// Remove a workbook from localStorage and the registry.
+#[allow(dead_code)]
 pub fn delete(uuid: &str) {
     LocalStorage::delete(uuid);
     let mut registry = load_registry();

@@ -1,5 +1,7 @@
 pub mod geometry;
 pub mod renderer;
+pub mod types;
 
 pub use geometry::*;
-pub use renderer::{CanvasRenderer, ClipboardRange, RenderOverlays, SheetRect};
+pub use renderer::CanvasRenderer;
+pub use types::{AutofillTarget, ClipboardRange, RenderOverlays, SheetRect};
