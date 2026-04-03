@@ -27,9 +27,11 @@ pub trait FrontendModel {
     fn toolbar_state(&self) -> ToolbarState;
 
     /// Number-format code of the active cell (e.g. `"general"`, `"#,##0.00"`).
+    #[allow(dead_code)]
     fn active_num_fmt(&self) -> String;
 
     /// Formatted display string of the active cell (what the user sees in the grid).
+    #[allow(dead_code)]
     fn active_cell_display(&self) -> String;
 
     /// Raw content of the active cell (formula text or literal value).
@@ -52,7 +54,7 @@ pub trait FrontendModel {
     /// Move one page up or down.
     fn nav_page(&mut self, dir: PageDir);
 
-    /// Set active cell. Coordinates clamped to valid range — never fails.
+    /// Set active cell. Coordinates clamped to valid range - never fails.
     fn nav_set_cell(&mut self, row: i32, col: i32);
 
     /// Select an entire column (header click).
@@ -149,7 +151,7 @@ impl FrontendModel for UserModel<'_> {
                 HorizontalAlignment::Left
             }
             Some(HorizontalAlignment::Justify) | Some(HorizontalAlignment::Distributed) => {
-                // Canvas 2D has no justify/distributed — fall back to left.
+                // Canvas 2D has no justify/distributed - fall back to left.
                 HorizontalAlignment::Left
             }
             // General or unset: numbers right, everything else left.

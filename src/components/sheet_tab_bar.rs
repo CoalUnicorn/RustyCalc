@@ -313,7 +313,8 @@ fn TabContextMenu(
             <div class="ctx-item" on:click=on_color_toggle>
                 <span class="ctx-icon">"🎨"</span> "Change Color"
             </div>
-            // TODO: extract to component
+            // [x] TODO: extract to component
+            // [ ] Replace with TabColorPicker
             <Show when=move || color_sub_open.get()>
                 <div class="color-picker-inline">
                     <div class="color-picker-grid">

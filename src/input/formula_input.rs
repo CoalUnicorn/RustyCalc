@@ -181,7 +181,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn ref_mode_cursor_at_end_of_ref_token() {
-        // Cursor sits right after a cell reference — not a valid insertion point.
+        // Cursor sits right after a cell reference - not a valid insertion point.
         assert_eq!(is_in_reference_mode("=A1", 3), false);
     }
 
@@ -248,7 +248,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn range_ref_reversed_coords_normalize() {
-        // r1/c1 and r2/c2 are swapped — min/max normalization must produce A1:B3.
+        // r1/c1 and r2/c2 are swapped - min/max normalization must produce A1:B3.
         assert_eq!(range_ref_str(3, 2, 1, 1, 1, 1, ""), "A1:B3");
     }
 
@@ -277,7 +277,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn splice_span_out_of_range_clamps() {
-        // prev_span (10, 15) is beyond text length 3 — clamps to (3, 3) -> append.
+        // prev_span (10, 15) is beyond text length 3 - clamps to (3, 3) -> append.
         assert_eq!(
             splice_ref("=A1", 3, "B2", Some((10, 15))),
             ("=A1B2".to_string(), 3, 5)

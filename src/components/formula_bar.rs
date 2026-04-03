@@ -17,7 +17,7 @@ use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 /// (formula text, not the computed result). Clicking or typing in the input
 /// starts an edit session with `EditFocus::FormulaBar`.
 ///
-/// The text buffer is shared with `CellEditor` via `state.editing_cell` — both
+/// The text buffer is shared with `CellEditor` via `state.editing_cell` - both
 /// components read/write the same `RwSignal`, so they stay in sync.
 #[component]
 pub fn FormulaBar() -> impl IntoView {
@@ -144,7 +144,7 @@ pub fn FormulaBar() -> impl IntoView {
                 }
             });
         } else {
-            // First keystroke — Accept mode: arrows commit + navigate.
+            // First keystroke - Accept mode: arrows commit + navigate.
             model.with_value(|m| {
                 let ac = m.active_cell();
                 state.set_editing_cell(Some(EditingCell {

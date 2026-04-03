@@ -30,7 +30,7 @@ impl CssColor {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SafeFontFamily {
     Arial,
-    /// Renders as `"Calibri, system-ui"`. On Linux/Android, `system-ui` activates —
+    /// Renders as `"Calibri, system-ui"`. On Linux/Android, `system-ui` activates -
     /// accepted approximation.
     CalibriLike,
     CourierNew,
@@ -132,7 +132,7 @@ impl From<Option<&str>> for SafeFontFamily {
 }
 
 // ResolvedFont
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedFont {
     pub size_px: f64,
@@ -154,13 +154,14 @@ impl ResolvedFont {
 }
 
 // Borders
-
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedBorderEdge {
     pub style: BorderStyle,
     pub color: CssColor,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct CellBorders {
     pub top: Option<ResolvedBorderEdge>,
@@ -193,6 +194,7 @@ pub struct TextStyle {
 // FIXME: ? to use TextFormat & TextStyle ?
 // IMPORTANT: this is style we getting from ironcalc_base /home/mmm/01_Dev/IronCalc/base/src/types.rs
 // Our FrontendModel fn cell_style() returns this. also see /home/mmm/01_Dev/IronCalc/base/src/user_model
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedCellStyle {
     /// Resolved text color; never empty.
@@ -268,7 +270,6 @@ use ironcalc_base::UserModel;
 
 use crate::state::EditingCell;
 impl CellAddress {
-    ///
     pub fn from_view(model: &UserModel<'static>) -> Self {
         let m = model.get_selected_view();
         Self {

@@ -170,7 +170,7 @@
 }
 
 /* Color Picker Component
- * 
+ *
  * Reusable color picker with support for:
  * - Toolbar dropdowns (text/background colors)
  * - Inline context menu usage (tab colors)
@@ -247,7 +247,9 @@
     border-radius: 3px;
     border: 1px solid var(--border-color);
     cursor: pointer;
-    transition: transform 0.1s ease, border-color 0.1s ease;
+    transition:
+        transform 0.1s ease,
+        border-color 0.1s ease;
     position: relative;
 }
 
@@ -288,7 +290,7 @@
     flex: 1;
     padding: 2px 6px;
     font-size: 11px;
-    font-family: 'Monaco', 'Menlo', monospace;
+    font-family: "Monaco", "Menlo", monospace;
     border: 1px solid var(--border-color);
     border-radius: 3px;
     background: var(--bg-primary);
@@ -389,11 +391,11 @@
         min-width: 160px;
         max-width: 200px;
     }
-    
+
     .color-picker-palette {
         grid-template-columns: repeat(6, 1fr);
     }
-    
+
     .color-picker-swatch {
         width: 20px;
         height: 20px;
@@ -487,7 +489,7 @@
     cursor: row-resize;
 }
 
-/* ── Perf panel ──────────────────────────────────────────────────── */
+/*  Perf panel  */
 
 .perf-panel {
     display: flex;
@@ -528,7 +530,7 @@
     max-width: 300px;
 }
 
-/* ── Sheet tab bar ──────────────────────────────────────────────── */
+/*  Sheet tab bar  */
 
 .tab-bar {
     display: flex;

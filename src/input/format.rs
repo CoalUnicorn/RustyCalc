@@ -172,9 +172,9 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                 // NOTE: questionable - may not need
                 // **PERFORMANCE OPTIMIZATION**: IronCalc has optimizations for full-column and full-row
                 // ranges, but NOT for full-sheet ranges. Whole-sheet selections fall into the
-                // unoptimized O(rows×columns) path. Fix this by applying column-by-column.
+                // unoptimized O(rowsxcolumns) path. Fix this by applying column-by-column.
                 if is_whole_sheet_selected(&area) {
-                    // Fast path: Apply to all columns individually (O(columns) instead of O(rows×columns))
+                    // Fast path: Apply to all columns individually (O(columns) instead of O(rowsxcolumns))
                     // Each column operation is optimized by IronCalc's full-column logic
                     for col in 1..=LAST_COLUMN {
                         let column_area = ironcalc_base::expressions::types::Area {
@@ -194,7 +194,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                         }
                     }
                 } else {
-                    // Slow path: O(rows × columns) cell-by-cell styling for partial selections
+                    // Slow path: O(rows x columns) cell-by-cell styling for partial selections
                     warn_if_err(
                         m.update_range_style(&area, "fill.fg_color", &value),
                         "set_background_color",
@@ -217,7 +217,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
 /// Reads the current value from `ToolbarState` (active cell) via `current_val`,
 /// then sets the opposite on the full selection via `update_range_style`.
 ///
-/// `style_path` is an IronCalc `update_range_style` key (e.g. `"font.b"`) —
+/// `style_path` is an IronCalc `update_range_style` key (e.g. `"font.b"`) -
 /// foreign string API, not something we can type as an enum.
 fn toggle_style(
     model: ModelStore,

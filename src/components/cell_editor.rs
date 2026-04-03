@@ -17,13 +17,13 @@ pub fn CellEditor() -> impl IntoView {
     let textarea_ref = NodeRef::<html::Textarea>::new();
 
     // Derive a memo that tracks only the EditFocus variant (not the text content).
-    // This prevents the Effect below from re-running on every keystroke — text
+    // This prevents the Effect below from re-running on every keystroke - text
     // updates mutate `editing_cell.text` but leave the focus variant unchanged,
     // so `focus_state` stays stable while the user types.
     let focus_state = Memo::new(move |_| state.get_editing_cell().map(|e| e.focus));
 
     // Auto-focus the textarea only when the edit session *starts* with Cell focus
-    // (click or printable key), NOT when the formula bar triggered the edit —
+    // (click or printable key), NOT when the formula bar triggered the edit -
     // in that case the formula bar input already holds focus and must keep it.
     // Tracking `focus_state` (not `editing_cell`) ensures this Effect fires only
     // when the focus variant transitions, not on every character typed.
@@ -41,7 +41,7 @@ pub fn CellEditor() -> impl IntoView {
         ta.set_selection_range(len, len).ok();
     });
 
-    // Only the pixel position is dynamic — static styles live in style.css (.cell-editor).
+    // Only the pixel position is dynamic - static styles live in style.css (.cell-editor).
     let cell_style = move || {
         // Subscribe to navigation events only (selection changes affect position)
         let _ = state.subscribe_to_navigation_events()();

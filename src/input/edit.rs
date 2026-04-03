@@ -49,7 +49,7 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 let address = CellAddress::from_view(m);
 
                 state.set_editing_cell(Some(EditingCell {
-                    address: address,
+                    address,
                     text,
                     mode: EditMode::Edit,
                     focus: EditFocus::Cell,

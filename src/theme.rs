@@ -5,7 +5,6 @@
 /// - [`Theme`] provides compatibility layer and extends leptos-use ColorMode
 /// - [`CanvasTheme`] carries concrete color strings for the Canvas 2D API, which cannot consume CSS variables
 use gloo_storage::{LocalStorage, Storage};
-use leptos::prelude::*;
 use leptos_use::{use_color_mode_with_options, ColorMode, UseColorModeOptions};
 
 // Shared color palette
@@ -54,7 +53,9 @@ impl From<Theme> for ColorMode {
     }
 }
 
+// NOTE: Theming needs refactoring
 /// Initialize leptos-use color mode with RustyCalc-specific settings
+#[allow(dead_code)]
 pub fn use_rusty_calc_theme() -> leptos_use::UseColorModeReturn {
     use_color_mode_with_options(
         UseColorModeOptions::default()

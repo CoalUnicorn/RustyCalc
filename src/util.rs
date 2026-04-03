@@ -78,10 +78,10 @@ pub fn refocus_workbook() {
 ///
 /// `spawn_local` (Promise microtask) can run between event-propagation steps,
 /// causing panel closures to be dropped before the click event finishes
-/// bubbling — resulting in "closure invoked after being dropped".
+/// bubbling - resulting in "closure invoked after being dropped".
 /// `setTimeout(0)` defers to a full macrotask, which is always after all
 /// current event processing is complete.
-#[allow(clippy::expect_used)]
+#[allow(dead_code)]
 pub fn defer_close(sig: RwSignal<bool>) {
     let cb = Closure::once(move || sig.set(false));
     web_sys::window()

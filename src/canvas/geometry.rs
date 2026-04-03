@@ -1,7 +1,4 @@
 /// Shared pixel↔cell coordinate math for the spreadsheet canvas.
-///
-/// Centralises the constants and walk-loop functions that were previously
-/// duplicated between `renderer.rs`, `worksheet.rs`, and `cell_editor.rs`.
 use ironcalc_base::UserModel;
 
 // Layout constants
@@ -16,9 +13,8 @@ pub const AUTOFILL_HANDLE_PX: f64 = 6.0;
 pub const DEFAULT_ROW_HEIGHT: f64 = 21.0;
 /// Fallback column width when the model returns `None` (column not explicitly sized).
 pub const DEFAULT_COL_WIDTH: f64 = 64.0;
-/// Maximum row index (Excel/OOXML limit).
+/// Min/Max index (Excel/OOXML limit).
 pub const LAST_ROW: i32 = 1_048_576;
-/// Maximum column index (Excel/OOXML limit).
 pub const LAST_COLUMN: i32 = 16_384;
 
 // Dimension helpers
@@ -85,7 +81,7 @@ pub fn frozen_geometry(m: &UserModel, sheet: u32) -> FrozenGeometry {
 
 /// Convert a canvas X pixel (from `offset_x`) to a 1-based column index.
 ///
-/// `left_column` is `view.left_column` — the first scrollable column visible.
+/// `left_column` is `view.left_column` - the first scrollable column visible.
 pub fn pixel_to_col(
     m: &UserModel,
     sheet: u32,
@@ -124,7 +120,7 @@ pub fn pixel_to_col(
 
 /// Convert a canvas Y pixel (from `offset_y`) to a 1-based row index.
 ///
-/// `top_row` is `view.top_row` — the first scrollable row visible.
+/// `top_row` is `view.top_row` - the first scrollable row visible.
 pub fn pixel_to_row(m: &UserModel, sheet: u32, top_row: i32, y: f64, fg: &FrozenGeometry) -> i32 {
     if y < fg.frozen_y {
         // Inside the frozen-row strip
@@ -225,9 +221,12 @@ pub fn autofill_handle_pos(m: &UserModel) -> Point {
     let c2 = c1.max(c2);
     // Full-row / full-column / whole-sheet selections span LAST_ROW or LAST_COLUMN.
     // col_to_x / row_to_y would iterate up to 1M rows to compute an off-screen
-    // pixel — skip it and return a sentinel that can never match a hit-test.
+    // pixel - skip it and return a sentinel that can never match a hit-test.
     if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
-        return Point { x: -100.0, y: -100.0 };
+        return Point {
+            x: -100.0,
+            y: -100.0,
+        };
     }
     Point {
         x: col_to_x(m, sheet, view.left_column, c2, &fg) + col_width(m, sheet, c2),
@@ -323,7 +322,7 @@ pub fn find_row_boundary_at(m: &UserModel, y: f64, hit_zone: f64) -> Option<i32>
 
 /// Convert a 1-based column index to its spreadsheet letter name (A, B, …, XFD).
 ///
-/// Delegates to `ironcalc_base::expressions::utils::number_to_column` — the
+/// Delegates to `ironcalc_base::expressions::utils::number_to_column` - the
 /// single authoritative implementation for this conversion in the codebase.
 pub fn col_name(col: i32) -> String {
     ironcalc_base::expressions::utils::number_to_column(col).unwrap_or_default()

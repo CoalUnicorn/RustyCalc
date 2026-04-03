@@ -1,8 +1,8 @@
-//! Canvas domain types — the authoritative type definitions for the canvas module.
+//! Canvas domain types - the authoritative type definitions for the canvas module.
 //!
 //! Types are split by visibility:
-//! - `pub(crate)` — renderer-internal: text layout, pane geometry, drawing params
-//! - `pub` — worksheet-visible: overlay state passed in from the Leptos component
+//! - `pub(crate)` - renderer-internal: text layout, pane geometry, drawing params
+//! - `pub` - worksheet-visible: overlay state passed in from the Leptos component
 
 use std::ops::RangeInclusive;
 
@@ -12,7 +12,7 @@ use super::geometry::{
     col_width, row_height, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
 
-// ── Frozen-pane geometry ─────────────────────────────────────────────────────
+//  Frozen-pane geometry
 
 /// Pixel origin of the scrollable (non-frozen) grid area.
 ///
@@ -34,8 +34,8 @@ pub(crate) struct FrozenOffset {
 ///
 /// ```text
 /// let frc = FrozenRC::from_model(model, sheet);
-/// // frc.rows, frc.cols — count of frozen rows/cols
-/// // frc.offset.x/y    — pixel origin of the scrollable area
+/// // frc.rows, frc.cols - count of frozen rows/cols
+/// // frc.offset.x/y    - pixel origin of the scrollable area
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct FrozenRC {
@@ -63,7 +63,7 @@ impl FrozenRC {
     }
 }
 
-// ── Pane rendering ───────────────────────────────────────────────────────────
+//  Pane rendering
 
 /// Describes one of the four frozen-pane quadrants for `render_pane`.
 ///
@@ -89,7 +89,7 @@ pub(crate) struct PaneRegion {
 }
 
 impl PaneRegion {
-    /// Frozen rows × frozen cols — top-left quadrant.
+    /// Frozen rows x frozen cols - top-left quadrant.
     pub(crate) fn top_left(frc: &FrozenRC) -> Self {
         PaneRegion {
             rows: 1..=frc.rows,
@@ -101,7 +101,7 @@ impl PaneRegion {
         }
     }
 
-    /// Frozen rows × scrollable cols — top-right quadrant.
+    /// Frozen rows x scrollable cols - top-right quadrant.
     pub(crate) fn top_right(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
         PaneRegion {
             rows: 1..=frc.rows,
@@ -113,7 +113,7 @@ impl PaneRegion {
         }
     }
 
-    /// Scrollable rows × frozen cols — bottom-left quadrant.
+    /// Scrollable rows x frozen cols - bottom-left quadrant.
     pub(crate) fn bottom_left(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
         PaneRegion {
             rows: vis.row_first..=vis.row_last,
@@ -125,7 +125,7 @@ impl PaneRegion {
         }
     }
 
-    /// Scrollable rows × scrollable cols — main area.
+    /// Scrollable rows x scrollable cols - main area.
     pub(crate) fn bottom_right(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
         PaneRegion {
             rows: vis.row_first..=vis.row_last,
@@ -138,7 +138,7 @@ impl PaneRegion {
     }
 }
 
-// ── Pre-computed text layout ─────────────────────────────────────────────────
+// Pre-computed text layout
 
 /// One visual line of text inside a cell, positioned for center-aligned rendering.
 pub(crate) struct TextLine {
@@ -153,7 +153,7 @@ pub(crate) struct TextLine {
 /// Collected during Phase 1 (cell backgrounds) and painted in Phase 4 so
 /// text always renders on top of selection fills and header lines.
 pub(crate) struct CellText {
-    /// Clip rectangle — the cell's pixel bounds.
+    /// Clip rectangle - the cell's pixel bounds.
     pub clip: PixelRect,
     pub font: String,
     pub font_size_px: f64,
@@ -163,7 +163,7 @@ pub(crate) struct CellText {
     pub lines: Vec<TextLine>,
 }
 
-// ── Cell rendering params ────────────────────────────────────────────────────
+// Cell rendering params
 
 /// Row/column rectangle in sheet coordinates (always normalised: min ≤ max).
 pub(crate) struct SheetRange {
@@ -197,7 +197,7 @@ impl SheetRange {
     /// Selection range expanded to include the autofill drag target.
     ///
     /// Takes `view.range` (a `[i32; 4]` from IronCalc) and grows it to cover
-    /// `target` — the cell the user is dragging the autofill handle toward.
+    /// `target` - the cell the user is dragging the autofill handle toward.
     pub(crate) fn from_autofill_extend(range: [i32; 4], target: AutofillTarget) -> Self {
         let [r1, c1, r2, c2] = range;
         SheetRange {
@@ -260,7 +260,7 @@ pub(crate) enum DashFill {
     Tinted,
 }
 
-// ── Public overlay types (used by worksheet.rs) ──────────────────────────────
+//  Public overlay types (used by worksheet.rs)
 
 /// The target cell during an autofill-handle drag.
 ///
@@ -293,7 +293,7 @@ pub struct ClipboardRange {
     pub c2: i32,
 }
 
-/// A rectangular region of cells (no sheet — always the current sheet).
+/// A rectangular region of cells (no sheet - always the current sheet).
 #[derive(Copy, Clone, PartialEq)]
 pub struct SheetRect {
     pub r1: i32,

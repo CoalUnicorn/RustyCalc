@@ -5,9 +5,9 @@ use crate::state::WorkbookState;
 /// Displays the last commit→render timing breakdown.
 ///
 /// Shows four phases:
-/// - **Input**: `set_user_input()` — writing the value into the model
-/// - **Eval**: `evaluate()` — recalculating all formulas
-/// - **Render**: canvas `render()` — drawing the visible grid
+/// - **Input**: `set_user_input()` - writing the value into the model
+/// - **Eval**: `evaluate()` - recalculating all formulas
+/// - **Render**: canvas `render()` - drawing the visible grid
 /// - **Total**: commit start to render complete
 #[component]
 pub fn PerfPanel() -> impl IntoView {
@@ -38,7 +38,7 @@ pub fn PerfPanel() -> impl IntoView {
                         <span class="perf-detail" title="set_user_input()">
                             {format!("In: {input:.1}ms")}
                         </span>
-                        <span class="perf-detail" title="evaluate() — formula recalc">
+                        <span class="perf-detail" title="evaluate() - formula recalc">
                             {format!("Eval: {eval:.1}ms")}
                         </span>
                         <span class="perf-detail" title="Canvas render()">

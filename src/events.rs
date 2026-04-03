@@ -80,6 +80,7 @@ pub enum SpreadsheetEvent {
 }
 
 /// Cell content, formulas, and calculation results changed
+#[allow(dead_code)]
 #[derive(Clone, PartialEq)]
 pub enum ContentEvent {
     /// A specific cell's content changed. `old_value`/`new_value` are `None`
@@ -107,6 +108,7 @@ pub enum ContentEvent {
     GenericChange,
 }
 
+#[allow(dead_code)]
 impl ContentEvent {
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
@@ -121,6 +123,7 @@ impl ContentEvent {
 }
 
 /// Visual formatting and styling changes
+#[allow(dead_code)]
 #[derive(Clone, PartialEq)]
 pub enum FormatEvent {
     /// Cell styling changed (font, colors, borders)
@@ -147,6 +150,7 @@ pub enum FormatEvent {
     ConditionalFormattingChanged { sheet: u32 },
 }
 
+#[allow(dead_code)]
 impl FormatEvent {
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
@@ -175,7 +179,6 @@ pub enum Dimension {
     Column { start: Option<i32> },
 }
 
-///
 #[derive(Clone, PartialEq)]
 pub struct Location {
     sheet: u32,
@@ -233,6 +236,7 @@ pub struct HeaderChange {
     pub count: i32,
 }
 
+#[allow(dead_code)]
 impl HeaderChange {
     fn rows(op: HeaderOperation, location: Location) -> Self {
         Self {
@@ -302,6 +306,7 @@ impl HeaderChange {
 }
 
 /// Structural changes to worksheets, rows, columns
+#[allow(dead_code)]
 #[derive(Clone, PartialEq)]
 pub enum StructureEvent {
     /// New worksheet added
@@ -320,6 +325,7 @@ pub enum StructureEvent {
     StructureChanged(HeaderChange),
 }
 
+#[allow(dead_code)]
 impl StructureEvent {
     /// Convenience constructor for row insertion
     pub fn rows_inserted(location: Location) -> Self {
@@ -353,6 +359,7 @@ impl StructureEvent {
 }
 
 /// Selection, navigation, and editing state changes
+#[allow(dead_code)]
 #[derive(Clone, PartialEq)]
 pub enum NavigationEvent {
     /// Active selection changed
@@ -382,6 +389,7 @@ pub enum NavigationEvent {
     },
 }
 
+#[allow(dead_code)]
 impl NavigationEvent {
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
@@ -397,6 +405,7 @@ impl NavigationEvent {
 }
 
 /// UI interaction modes and tool states
+#[allow(dead_code)]
 #[derive(Clone, PartialEq)]
 pub enum ModeEvent {
     /// Edit mode started for a specific cell
@@ -425,16 +434,18 @@ pub enum ModeEvent {
 }
 
 /// Theme and appearance changes
+#[allow(dead_code)]
 #[derive(Clone, PartialEq)]
 pub enum ThemeEvent {
     /// Light/dark theme toggled
     ThemeToggled { new_theme: Theme },
     /// Color palette changed or updated
     PaletteUpdated,
-    /// FIXE: This needs its own place Language/locale changed
+    /// FIXME: This needs its own place Language/locale changed
     LocaleChanged { new_locale: String },
 }
 
+#[allow(dead_code)]
 impl SpreadsheetEvent {
     /// Check if this event affects cell content
     pub fn affects_content(&self) -> bool {
@@ -463,7 +474,7 @@ impl SpreadsheetEvent {
         match self {
             // Legacy: treat as affecting all sheets
             SpreadsheetEvent::Content(ContentEvent::GenericChange) => true,
-            // Calculation can touch multiple sheets — check the set
+            // Calculation can touch multiple sheets - check the set
             SpreadsheetEvent::Content(ContentEvent::CalculationUpdated { affected_sheets }) => {
                 affected_sheets.contains(&sheet)
             }
@@ -532,12 +543,16 @@ impl SpreadsheetEvent {
     // }
 }
 
+// NOTE: Check if still worth the macro
+//
 /// Event subscription filters for components
+#[allow(dead_code)]
 pub trait EventFilter {
     fn matches(&self, event: &SpreadsheetEvent) -> bool;
 }
 
 /// Filter for format-related events
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct FormatEventFilter;
 
@@ -548,6 +563,7 @@ impl EventFilter for FormatEventFilter {
 }
 
 /// Filter for theme-related events
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ThemeEventFilter;
 
@@ -558,6 +574,7 @@ impl EventFilter for ThemeEventFilter {
 }
 
 /// Filter for content changes that affect calculations
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct ContentEventFilter;
 
@@ -569,6 +586,7 @@ impl EventFilter for ContentEventFilter {
 
 /// Filter for events affecting a specific sheet
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct SheetEventFilter {
     pub sheet: u32,
 }

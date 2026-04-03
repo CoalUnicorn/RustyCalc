@@ -15,11 +15,11 @@ const FONT_SIZES: &[f64] = &[
 
 /// Top toolbar. Creates two shared memos once and provides them via context so
 /// every sub-component reads the same reactive computation instead of each
-/// instantiating its own (was: 4 × Memo, 12 subscriptions → 2 × Memo, 6 subscriptions).
+/// instantiating its own (was: 4 x Memo, 12 subscriptions → 2 x Memo, 6 subscriptions).
 ///
 /// Context provided to children:
-/// - `Memo<ToolbarState>`   — font size/family, bold/italic/color, etc.
-/// - `Memo<(bool, bool)>`   — (can_undo, can_redo)
+/// - `Memo<ToolbarState>`   - font size/family, bold/italic/color, etc.
+/// - `Memo<(bool, bool)>`   - (can_undo, can_redo)
 #[component]
 pub fn Toolbar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
@@ -144,11 +144,11 @@ fn FontFamily() -> impl IntoView {
     }
 }
 
-// Font size — +/- buttons step through FONT_SIZES ladder; input accepts direct entry.
+// Font size - +/- buttons step through FONT_SIZES ladder; input accepts direct entry.
 //
 // FIXME: Mixed selections with empty cells (default 13px) produce invalid negative
 //        size deltas. Sub-10px increment also broken due to delta calculation in
-//        format.rs. Both deferred — see format.rs FIXME comment.
+//        format.rs. Both deferred - see format.rs FIXME comment.
 #[component]
 fn FontSize() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
@@ -301,7 +301,7 @@ fn FormatToggles() -> impl IntoView {
     }
 }
 
-// Freeze panes — has its own layout-specific memo (not toolbar state).
+// Freeze panes - has its own layout-specific memo (not toolbar state).
 #[component]
 fn FreezePane() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
