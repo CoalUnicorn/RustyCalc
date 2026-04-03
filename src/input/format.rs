@@ -3,11 +3,18 @@
 use ironcalc_base::UserModel;
 use leptos::prelude::WithValue;
 
+use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::helpers::{mutate, selection_area, Eval};
 use crate::model::{FrontendModel, SafeFontFamily, ToolbarState};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
+
+/// Check if the selection area covers the entire sheet.
+/// Returns true for whole-sheet selections (corner click + select all).
+fn is_whole_sheet_selected(area: &ironcalc_base::expressions::types::Area) -> bool {
+    area.row == 1 && area.column == 1 && area.height == LAST_ROW && area.width == LAST_COLUMN
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum FormatAction {
@@ -131,7 +138,10 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
             let value = hex.as_deref().unwrap_or("").to_owned();
             mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
-                warn_if_err(m.update_range_style(&area, "font.color", &value), "set_text_color");
+                warn_if_err(
+                    m.update_range_style(&area, "font.color", &value),
+                    "set_text_color",
+                );
             });
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
                 sheet,
@@ -156,12 +166,40 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                     )
                 });
             let value = hex.as_deref().unwrap_or("").to_owned();
+
             mutate(model, state, Eval::No, |m| {
                 let area = selection_area(m);
-                warn_if_err(
-                    m.update_range_style(&area, "fill.fg_color", &value),
-                    "set_background_color",
-                );
+                // NOTE: questionable - may not need
+                // **PERFORMANCE OPTIMIZATION**: IronCalc has optimizations for full-column and full-row
+                // ranges, but NOT for full-sheet ranges. Whole-sheet selections fall into the
+                // unoptimized O(rows×columns) path. Fix this by applying column-by-column.
+                if is_whole_sheet_selected(&area) {
+                    // Fast path: Apply to all columns individually (O(columns) instead of O(rows×columns))
+                    // Each column operation is optimized by IronCalc's full-column logic
+                    for col in 1..=LAST_COLUMN {
+                        let column_area = ironcalc_base::expressions::types::Area {
+                            sheet: area.sheet,
+                            row: 1,
+                            column: col,
+                            height: LAST_ROW,
+                            width: 1,
+                        };
+                        if let Err(e) = m.update_range_style(&column_area, "fill.fg_color", &value)
+                        {
+                            // Log error but continue with other columns
+                            web_sys::console::warn_1(
+                                &format!("Failed to set column {} background: {}", col, e).into(),
+                            );
+                            break; // Stop on first error to avoid spam
+                        }
+                    }
+                } else {
+                    // Slow path: O(rows × columns) cell-by-cell styling for partial selections
+                    warn_if_err(
+                        m.update_range_style(&area, "fill.fg_color", &value),
+                        "set_background_color",
+                    );
+                }
             });
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
                 sheet,
