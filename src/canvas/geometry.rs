@@ -223,6 +223,12 @@ pub fn autofill_handle_pos(m: &UserModel) -> Point {
     // Normalise: the active corner can be above/left of the anchor on drag.
     let r2 = r1.max(r2);
     let c2 = c1.max(c2);
+    // Full-row / full-column / whole-sheet selections span LAST_ROW or LAST_COLUMN.
+    // col_to_x / row_to_y would iterate up to 1M rows to compute an off-screen
+    // pixel — skip it and return a sentinel that can never match a hit-test.
+    if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
+        return Point { x: -100.0, y: -100.0 };
+    }
     Point {
         x: col_to_x(m, sheet, view.left_column, c2, &fg) + col_width(m, sheet, c2),
         y: row_to_y(m, sheet, view.top_row, r2, &fg) + row_height(m, sheet, r2),
