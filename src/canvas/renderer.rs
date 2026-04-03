@@ -704,18 +704,18 @@ impl CanvasRenderer {
         }
 
         let resolved = model.cell_style(sheet, row, col, self.theme.default_text_color);
-        let font = resolved.css_font();
-        let font_size = resolved.font_size();
-        let text_color = resolved.text_color().as_str().to_owned();
-        let effective_h_align = resolved.h_align();
-        let effective_v_align = resolved.v_align.clone();
-        let underlined = resolved.underline();
-        let strike = resolved.strikethrough();
+        let font = resolved.font.family.css_name().to_string(); //css_font();
+        let font_size = resolved.font.size_px; // font_size();
+        let text_color = resolved.text_color.as_str().to_string(); // text_color().as_str().to_owned();
+        let effective_h_align = resolved.h_align; //h_align();
+        let effective_v_align = resolved.v_align; //.clone();
+        let underlined = resolved.font.underline; //underline();
+        let strike = resolved.font.strikethrough; //strikethrough();
+        let wrap = resolved.wrap_text;
 
         let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
         let line_height = font_size * LINE_HEIGHT_FACTOR;
         let usable_w = width - 2.0 * CELL_PADDING;
-        let wrap = resolved.wrap_text;
 
         // Set font on ctx now so measure_text() returns accurate widths.
         self.ctx.set_font(&font);

@@ -16,7 +16,6 @@ pub trait FrontendModel {
     /// the renderer passes `self.theme.default_text_color`, the toolbar passes `"#000000"`.
     fn cell_style(
         &self,
-        // address: CellAddress,
         sheet: u32,
         row: i32,
         col: i32,
@@ -98,7 +97,6 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
 impl FrontendModel for UserModel<'_> {
     fn cell_style(
         &self,
-        // address: CellAddress,
         sheet: u32,
         row: i32,
         col: i32,
@@ -378,6 +376,7 @@ mod tests {
     #[test]
     fn cell_style_defaults_for_empty_cell() {
         let m = make_model();
+        // Empty cell should have sensible defaults
         let style = m.cell_style(0, 1, 1, "#000000");
         assert!(style.bg_color.is_none());
         assert_eq!(style.text_color.as_str(), "#000000");
@@ -391,6 +390,7 @@ mod tests {
     #[test]
     fn cell_style_uses_theme_color_for_automatic() {
         let m = make_model();
+        // Empty cell style - should fall back to theme color
         let style = m.cell_style(0, 1, 1, "#FFFFFF");
         assert_eq!(style.text_color.as_str(), "#FFFFFF");
     }

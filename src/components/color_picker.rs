@@ -38,7 +38,7 @@ Custom / without WorkbookState:
 use leptos::prelude::*;
 use leptos_use::{on_click_outside, use_toggle};
 
-use crate::model::is_valid_hex_color;
+use crate::model::style_types::is_valid_hex_color;
 use crate::state::WorkbookState;
 use crate::theme::COLOR_PALETTE;
 

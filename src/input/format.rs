@@ -7,7 +7,10 @@ use leptos::prelude::WithValue;
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::helpers::{mutate, selection_area, Eval};
-use crate::model::{BooleanValue, FrontendModel, SafeFontFamily, StylePath, ToolbarState};
+use crate::model::{
+    style_types::BooleanValue, style_types::StylePath, FrontendModel, SafeFontFamily, ToolbarState,
+};
+
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
