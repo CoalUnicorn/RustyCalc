@@ -54,7 +54,7 @@ pub enum DragState {
 }
 
 /// Which header was right-clicked to open the context menu.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum HeaderContextMenu {
     /// Column index (1-based).
     Column(i32),
@@ -63,7 +63,7 @@ pub enum HeaderContextMenu {
 }
 
 /// Domain-specific events that represent actual changes in the spreadsheet
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum SpreadsheetEvent {
     /// Content of cells changed (values, formulas)
     Content(ContentEvent),
@@ -81,7 +81,7 @@ pub enum SpreadsheetEvent {
 
 /// Cell content, formulas, and calculation results changed
 #[allow(dead_code)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum ContentEvent {
     /// A specific cell's content changed. `old_value`/`new_value` are `None`
     /// when the caller doesn't have the previous or next value available.
@@ -120,11 +120,31 @@ impl ContentEvent {
             | ContentEvent::GenericChange => None,
         }
     }
+
+    pub fn dbg_description(&self) -> String {
+        match self {
+            ContentEvent::CellChanged { address, new_value, .. } => format!(
+                "Content::CellChanged S{}R{}C{} → {:?}",
+                address.sheet, address.row, address.column, new_value
+            ),
+            ContentEvent::RangeChanged { sheet, start_row, start_col, end_row, end_col } => format!(
+                "Content::RangeChanged S{sheet} {start_col}{start_row}:{end_col}{end_row}"
+            ),
+            ContentEvent::FormulaChanged { address } => format!(
+                "Content::FormulaChanged S{}R{}C{}", address.sheet, address.row, address.column
+            ),
+            ContentEvent::CalculationUpdated { affected_sheets } => format!(
+                "Content::CalculationUpdated ({} sheets)", affected_sheets.len()
+            ),
+            ContentEvent::NamedRangesChanged => "Content::NamedRangesChanged".into(),
+            ContentEvent::GenericChange => "Content::GenericChange".into(),
+        }
+    }
 }
 
 /// Visual formatting and styling changes
 #[allow(dead_code)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum FormatEvent {
     /// Cell styling changed (font, colors, borders)
     CellStyleChanged { address: CellAddress },
@@ -163,16 +183,39 @@ impl FormatEvent {
             }
         }
     }
+
+    pub fn dbg_description(&self) -> String {
+        match self {
+            FormatEvent::CellStyleChanged { address } => format!(
+                "Format::CellStyle S{}R{}C{}", address.sheet, address.row, address.column
+            ),
+            FormatEvent::RangeStyleChanged { sheet, start_row, start_col, end_row, end_col } => format!(
+                "Format::RangeStyle S{sheet} {start_col}{start_row}:{end_col}{end_row}"
+            ),
+            FormatEvent::LayoutChanged { sheet, col, row } => format!(
+                "Format::Layout S{sheet} col={col:?} row={row:?}"
+            ),
+            FormatEvent::RecentColorsUpdated { colors } => format!(
+                "Format::RecentColors ({} colors)", colors.len()
+            ),
+            FormatEvent::DocumentColorsChanged { colors } => format!(
+                "Format::DocColors ({} colors)", colors.len()
+            ),
+            FormatEvent::ConditionalFormattingChanged { sheet } => format!(
+                "Format::CondFmt S{sheet}"
+            ),
+        }
+    }
 }
 
 /// The dimension being modified
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Dimension {
     Row { start: Option<i32> },
     Column { start: Option<i32> },
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Location {
     sheet: u32,
     start: i32,
@@ -221,7 +264,7 @@ impl Location {
 }
 
 /// A structural change to rows or columns
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct HeaderChange {
     pub sheet: u32,
     pub operation: HeaderOperation,
@@ -230,7 +273,7 @@ pub struct HeaderChange {
 }
 
 /// The type of header operation
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum HeaderOperation {
     Insert,
     Delete,
@@ -307,7 +350,7 @@ impl HeaderChange {
 
 /// Structural changes to worksheets, rows, columns
 #[allow(dead_code)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum StructureEvent {
     /// New worksheet added
     WorksheetAdded { sheet: u32, name: String },
@@ -356,11 +399,25 @@ impl StructureEvent {
             StructureEvent::WorksheetsReordered => None,
         }
     }
+
+    pub fn dbg_description(&self) -> String {
+        match self {
+            StructureEvent::WorksheetAdded { sheet, name } => format!("Structure::SheetAdded S{sheet} {name:?}"),
+            StructureEvent::WorksheetDeleted { sheet } => format!("Structure::SheetDeleted S{sheet}"),
+            StructureEvent::WorksheetRenamed { sheet, old_name, new_name } => format!(
+                "Structure::SheetRenamed S{sheet} {old_name:?}→{new_name:?}"
+            ),
+            StructureEvent::WorksheetsReordered => "Structure::Reordered".into(),
+            StructureEvent::StructureChanged(c) => format!(
+                "Structure::Changed S{} {:?} {:?}", c.sheet, c.operation, c.dimension
+            ),
+        }
+    }
 }
 
 /// Selection, navigation, and editing state changes
 #[allow(dead_code)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum NavigationEvent {
     /// Active selection changed
     SelectionChanged { address: CellAddress },
@@ -402,11 +459,34 @@ impl NavigationEvent {
             NavigationEvent::EditingEnded { address, .. } => Some(address.sheet),
         }
     }
+
+    pub fn dbg_description(&self) -> String {
+        match self {
+            NavigationEvent::SelectionChanged { address } => format!(
+                "Nav::Selection S{}R{}C{}", address.sheet, address.row, address.column
+            ),
+            NavigationEvent::SelectionRangeChanged { sheet, start_row, start_col, end_row, end_col } => format!(
+                "Nav::RangeSelect S{sheet} {start_col}{start_row}:{end_col}{end_row}"
+            ),
+            NavigationEvent::ViewportScrolled { sheet, top_row, left_col } => format!(
+                "Nav::Scroll S{sheet} top={top_row} left={left_col}"
+            ),
+            NavigationEvent::ActiveSheetChanged { from_sheet, to_sheet } => format!(
+                "Nav::SheetSwitch S{from_sheet}→S{to_sheet}"
+            ),
+            NavigationEvent::EditingStarted { address } => format!(
+                "Nav::EditStart S{}R{}C{}", address.sheet, address.row, address.column
+            ),
+            NavigationEvent::EditingEnded { address, committed } => format!(
+                "Nav::EditEnd S{}R{}C{} committed={committed}", address.sheet, address.row, address.column
+            ),
+        }
+    }
 }
 
 /// UI interaction modes and tool states
 #[allow(dead_code)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum ModeEvent {
     /// Edit mode started for a specific cell
     EditStarted { address: CellAddress },
@@ -433,9 +513,33 @@ pub enum ModeEvent {
     PanelToggled { panel_name: String, visible: bool },
 }
 
+impl ModeEvent {
+    pub fn dbg_description(&self) -> String {
+        match self {
+            ModeEvent::EditStarted { address } => format!(
+                "Mode::EditStarted S{}R{}C{}", address.sheet, address.row, address.column
+            ),
+            ModeEvent::EditEnded => "Mode::EditEnded".into(),
+            ModeEvent::DragModeChanged { from_mode, to_mode } => format!(
+                "Mode::Drag {from_mode:?}→{to_mode:?}"
+            ),
+            ModeEvent::PointModeChanged { active, .. } => format!("Mode::Point active={active}"),
+            ModeEvent::ContextMenuToggled { visible, target } => format!(
+                "Mode::CtxMenu visible={visible} target={target:?}"
+            ),
+            ModeEvent::DialogToggled { dialog_name, visible } => format!(
+                "Mode::Dialog {dialog_name:?} visible={visible}"
+            ),
+            ModeEvent::PanelToggled { panel_name, visible } => format!(
+                "Mode::Panel {panel_name:?} visible={visible}"
+            ),
+        }
+    }
+}
+
 /// Theme and appearance changes
 #[allow(dead_code)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum ThemeEvent {
     /// Light/dark theme toggled
     ThemeToggled { new_theme: Theme },
@@ -443,6 +547,16 @@ pub enum ThemeEvent {
     PaletteUpdated,
     /// FIXME: This needs its own place Language/locale changed
     LocaleChanged { new_locale: String },
+}
+
+impl ThemeEvent {
+    pub fn dbg_description(&self) -> String {
+        match self {
+            ThemeEvent::ThemeToggled { new_theme } => format!("Theme::Toggled {new_theme:?}"),
+            ThemeEvent::PaletteUpdated => "Theme::PaletteUpdated".into(),
+            ThemeEvent::LocaleChanged { new_locale } => format!("Theme::Locale {new_locale:?}"),
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -508,39 +622,22 @@ impl SpreadsheetEvent {
     // bash for this file
     // Add
     // ```sh
-    // sd '#\[derive\(([^)]+)\)\]' '#[derive($1, Debug)]' src/canvas/renderer.rs
+    // sd '#\[derive\(([^)]+)\)\]' '#[derive($1, Debug, Debug)]' src/events.rs
     // ```
     // Remove
     // ```sh
     // sd ',\s*Debug' '' src/canvas/renderer.rs
     // ```
-    // pub fn description(&self) -> String {
-    //     match self {
-    //         SpreadsheetEvent::Content(ContentEvent::CellValueChanged { address }) => {
-    //             format!(
-    //                 "Cell value changed at {}!{}{}",
-    //                 address.sheet, address.column, address.row
-    //             )
-    //         }
-    //         SpreadsheetEvent::Content(ContentEvent::RangeChanged {
-    //             sheet,
-    //             start_row,
-    //             start_col,
-    //             end_row,
-    //             end_col,
-    //         }) => {
-    //             format!("Range changed {sheet}!{start_col}{start_row}:{end_col}{end_row}")
-    //         }
-    //         SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated { colors }) => {
-    //             format!("Recent colors updated ({} colors)", colors.len())
-    //         }
-    //         SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled { new_theme }) => {
-    //             format!("Theme toggled to {:?}", new_theme)
-    //         }
-    //         // Add more as needed for debugging
-    //         _ => format!("{:?}", self),
-    //     }
-    // }
+    pub fn dbg_description(&self) -> String {
+        match self {
+            SpreadsheetEvent::Content(e)    => e.dbg_description(),
+            SpreadsheetEvent::Format(e)     => e.dbg_description(),
+            SpreadsheetEvent::Navigation(e) => e.dbg_description(),
+            SpreadsheetEvent::Structure(e)  => e.dbg_description(),
+            SpreadsheetEvent::Mode(e)       => e.dbg_description(),
+            SpreadsheetEvent::Theme(e)      => e.dbg_description(),
+        }
+    }
 }
 
 // NOTE: Check if still worth the macro
@@ -553,7 +650,7 @@ pub trait EventFilter {
 
 /// Filter for format-related events
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FormatEventFilter;
 
 impl EventFilter for FormatEventFilter {
@@ -564,7 +661,7 @@ impl EventFilter for FormatEventFilter {
 
 /// Filter for theme-related events
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ThemeEventFilter;
 
 impl EventFilter for ThemeEventFilter {
@@ -575,7 +672,7 @@ impl EventFilter for ThemeEventFilter {
 
 /// Filter for content changes that affect calculations
 #[allow(dead_code)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ContentEventFilter;
 
 impl EventFilter for ContentEventFilter {
@@ -585,7 +682,7 @@ impl EventFilter for ContentEventFilter {
 }
 
 /// Filter for events affecting a specific sheet
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct SheetEventFilter {
     pub sheet: u32,

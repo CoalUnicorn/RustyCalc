@@ -44,7 +44,7 @@ pub fn CellEditor() -> impl IntoView {
     // Only the pixel position is dynamic - static styles live in style.css (.cell-editor).
     let cell_style = move || {
         // Subscribe to navigation events only (selection changes affect position)
-        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.events.navigation.get();
         let r = model.with_value(|m| selected_cell_rect(m));
         format!(
             "left:{:.0}px;top:{:.0}px;width:{:.0}px;height:{:.0}px;",

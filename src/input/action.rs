@@ -259,7 +259,7 @@ impl SpreadsheetAction {
 mod tests {
     use super::*;
     use crate::input::helpers::selection_bounds;
-    use crate::input::helpers::{mutate, Eval};
+    use crate::input::helpers::{mutate, EvaluationMode};
     use crate::model::{ArrowKey, CellAddress};
     use crate::state::{EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;
@@ -799,7 +799,7 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            mutate(model, &state, Eval::Yes, |m| {
+            mutate(model, &state, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 1, 1, "hello").ok();
             });
             execute(
@@ -823,7 +823,7 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            mutate(model, &state, Eval::Yes, |m| {
+            mutate(model, &state, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 1, 1, "data").ok();
             });
             execute(&struc(StructAction::Delete), model, &state);
@@ -840,7 +840,7 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            mutate(model, &state, Eval::Yes, |m| {
+            mutate(model, &state, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 1, 1, "42").ok();
             });
             execute(&SpreadsheetAction::undo(), model, &state);
@@ -862,7 +862,7 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            mutate(model, &state, Eval::Yes, |m| {
+            mutate(model, &state, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 1, 1, "original").ok();
             });
             execute(&struc(StructAction::InsertRows), model, &state);
@@ -881,7 +881,7 @@ mod tests {
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
             let state = crate::state::WorkbookState::new();
-            mutate(model, &state, Eval::Yes, |m| {
+            mutate(model, &state, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 2, 1, "data").ok();
             });
             execute(&struc(StructAction::DeleteRows), model, &state);

@@ -28,14 +28,14 @@ pub fn Toolbar() -> impl IntoView {
     // Re-runs on format changes (cell styling) AND navigation (selection change).
     // visual_events catches theme/canvas redraws that also affect cell style display.
     let toolbar_state: Memo<ToolbarState> = Memo::new(move |_| {
-        let _ = state.subscribe_to_format_events()();
-        let _ = state.subscribe_to_navigation_events()();
-        let _ = state.subscribe_to_visual_events()();
+        let _ = state.events.format.get();
+        let _ = state.events.navigation.get();
+        let _ = state.events.content.get();
         model.with_value(|m| m.toolbar_state())
     });
 
     let undo_redo_state: Memo<(bool, bool)> = Memo::new(move |_| {
-        let _ = state.subscribe_to_content_events()();
+        let _ = state.events.content.get();
         model.with_value(|m| (m.can_undo(), m.can_redo()))
     });
 
@@ -308,8 +308,8 @@ fn FreezePane() -> impl IntoView {
     let model = expect_context::<ModelStore>();
 
     let is_frozen = Memo::new(move |_| {
-        let _ = state.subscribe_to_format_events()();
-        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.events.format.get();
+        let _ = state.events.navigation.get();
         model.with_value(|m| m.frozen_panes().is_frozen())
     });
 

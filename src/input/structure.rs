@@ -3,7 +3,7 @@
 use leptos::prelude::WithValue;
 
 use crate::events::{ContentEvent, Location, SpreadsheetEvent, StructureEvent};
-use crate::input::helpers::{make_area, mutate, selection_bounds, Eval};
+use crate::input::helpers::{make_area, mutate, selection_bounds, EvaluationMode};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
@@ -31,7 +31,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                     (v.sheet, r1, c1, r2, c2)
                 });
 
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, EvaluationMode::Immediate, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 warn_if_err(
@@ -56,7 +56,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                     (v.sheet, r1, c1, r2, c2)
                 });
 
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, EvaluationMode::Immediate, |m| {
                 let v = m.get_selected_view();
                 let [r1, c1, r2, c2] = v.range;
                 warn_if_err(
@@ -74,14 +74,14 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
             }));
         }
         StructAction::Undo => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, EvaluationMode::Deferred, |m| {
                 warn_if_err(m.undo(), "undo");
             });
 
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         }
         StructAction::Redo => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, EvaluationMode::Deferred, |m| {
                 warn_if_err(m.redo(), "redo");
             });
 
@@ -104,7 +104,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
             //     )
             // });
 
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, EvaluationMode::Immediate, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
 
@@ -130,7 +130,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 Location::new(v.sheet, c_min, c_max - c_min + 1)
             });
 
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, EvaluationMode::Immediate, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
                 warn_if_err(
@@ -150,7 +150,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 Location::new(v.sheet, r_min, r_max - r_min + 1)
             });
 
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, EvaluationMode::Immediate, |m| {
                 let v = m.get_selected_view();
                 let ((r_min, r_max), _) = selection_bounds(v.range);
                 warn_if_err(
@@ -170,7 +170,7 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 Location::new(v.sheet, c_min, c_max - c_min + 1)
             });
 
-            mutate(model, state, Eval::Yes, |m| {
+            mutate(model, state, EvaluationMode::Immediate, |m| {
                 let v = m.get_selected_view();
                 let (_, (c_min, c_max)) = selection_bounds(v.range);
                 warn_if_err(

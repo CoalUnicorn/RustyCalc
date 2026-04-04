@@ -57,6 +57,41 @@ pub struct ContextMenuState {
     pub(crate) target: HeaderContextMenu,
 }
 
+/// Per-category event signals.
+///
+/// Replaces the single `Vec<SpreadsheetEvent>` + 7 `Memo` filters.
+/// Each signal holds the events from the most recent `emit_event(s)` call.
+/// Contents are REPLACED (not appended) on each emit — never accumulate
+/// cross-action history here.
+#[derive(Clone, Copy)]
+pub struct EventBus {
+    pub content: RwSignal<Vec<ContentEvent>>,
+    pub format: RwSignal<Vec<FormatEvent>>,
+    pub navigation: RwSignal<Vec<NavigationEvent>>,
+    pub structure: RwSignal<Vec<StructureEvent>>,
+    pub mode: RwSignal<Vec<ModeEvent>>,
+    pub theme: RwSignal<Vec<ThemeEvent>>,
+}
+
+impl EventBus {
+    pub fn new() -> Self {
+        Self {
+            content: RwSignal::new(vec![]),
+            format: RwSignal::new(vec![]),
+            navigation: RwSignal::new(vec![]),
+            structure: RwSignal::new(vec![]),
+            mode: RwSignal::new(vec![]),
+            theme: RwSignal::new(vec![]),
+        }
+    }
+}
+
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// All transient UI state - never persisted, never in the model.
 ///
 /// Uses split signals (ReadSignal/WriteSignal) for fine-grained reactivity.
@@ -81,11 +116,8 @@ pub struct WorkbookState {
     ),
     /// Active mouse-drag interaction (selection, resize, autofill, point-mode).
     pub(crate) drag: (ReadSignal<DragState>, WriteSignal<DragState>),
-    /// Typed event stream for fine-grained reactivity.
-    pub(crate) events: (
-        ReadSignal<Vec<SpreadsheetEvent>>,
-        WriteSignal<Vec<SpreadsheetEvent>>,
-    ),
+    /// Typed per-category event bus.
+    pub events: EventBus,
     /// UUID of the workbook currently loaded in the model.
     /// Used by `storage::save` to write back to the correct localStorage key.
     /// `None` during the brief window before a workbook is loaded.
@@ -129,18 +161,6 @@ pub struct WorkbookState {
     /// Recent/custom colors used in the document (hex strings)
     /// Limited to 16 colors, most recent first
     pub(crate) recent_colors: (ReadSignal<Vec<String>>, WriteSignal<Vec<String>>),
-    /// Per-category derived memos.
-    ///
-    /// Filtering runs once inside the Memo when the events Vec changes, not
-    /// once per subscriber per tick.  Downstream components only re-run when
-    /// their specific category actually has new events.
-    pub(crate) format_events_memo: Memo<Vec<FormatEvent>>,
-    pub(crate) theme_events_memo: Memo<Vec<ThemeEvent>>,
-    pub(crate) content_events_memo: Memo<Vec<ContentEvent>>,
-    pub(crate) navigation_events_memo: Memo<Vec<NavigationEvent>>,
-    pub(crate) structure_events_memo: Memo<Vec<StructureEvent>>,
-    pub(crate) mode_events_memo: Memo<Vec<ModeEvent>>,
-    pub(crate) visual_events_memo: Memo<Vec<SpreadsheetEvent>>,
 }
 
 #[allow(dead_code)]
@@ -154,87 +174,10 @@ impl WorkbookState {
             <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_recent_colors")
                 .unwrap_or_else(|_| Vec::new());
 
-        // Create the events signal up-front so the read half can be captured
-        // by each per-category Memo below.
-        let events: (
-            ReadSignal<Vec<SpreadsheetEvent>>,
-            WriteSignal<Vec<SpreadsheetEvent>>,
-        ) = signal(Vec::new());
-        let ev = events.0;
-
-        let format_events_memo = Memo::new(move |_| {
-            ev.get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Format(f) => Some(f),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        });
-        let theme_events_memo = Memo::new(move |_| {
-            ev.get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Theme(t) => Some(t),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        });
-        let content_events_memo = Memo::new(move |_| {
-            ev.get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Content(c) => Some(c),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        });
-        let navigation_events_memo = Memo::new(move |_| {
-            ev.get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Navigation(n) => Some(n),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        });
-        let structure_events_memo = Memo::new(move |_| {
-            ev.get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Structure(s) => Some(s),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        });
-        let mode_events_memo = Memo::new(move |_| {
-            ev.get()
-                .into_iter()
-                .filter_map(|e| match e {
-                    SpreadsheetEvent::Mode(m) => Some(m),
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        });
-        let visual_events_memo = Memo::new(move |_| {
-            ev.get()
-                .into_iter()
-                .filter(|e| {
-                    matches!(
-                        e,
-                        SpreadsheetEvent::Content(_)
-                            | SpreadsheetEvent::Format(_)
-                            | SpreadsheetEvent::Navigation(_)
-                            | SpreadsheetEvent::Structure(_)
-                    )
-                })
-                .collect::<Vec<_>>()
-        });
-
         Self {
             editing_cell: signal(None),
             drag: signal(DragState::Idle),
-            events,
+            events: EventBus::new(),
             current_uuid: signal(None),
             theme: signal(Theme::from_storage()),
             // is_drawer_open: signal(false),
@@ -250,13 +193,6 @@ impl WorkbookState {
             formula_input_ref: NodeRef::new(),
             perf: PerfTimings::new(),
             recent_colors: signal(recent_colors),
-            format_events_memo,
-            theme_events_memo,
-            content_events_memo,
-            navigation_events_memo,
-            structure_events_memo,
-            mode_events_memo,
-            visual_events_memo,
         }
     }
 
@@ -274,101 +210,49 @@ impl WorkbookState {
     /// 2. Bumps the version counter for legacy subscribers
     /// 3. Auto-updates related signals based on event type
     pub fn emit_event(&self, event: SpreadsheetEvent) {
-        // Add to event stream (keep last 100 events for subscribers)
-        self.events.1.update(|events| {
-            events.push(event.clone());
-            if events.len() > 100 {
-                events.drain(0..events.len() - 100);
-            }
-        });
+        self.emit_events(vec![event]);
+    }
 
-        // Auto-update related signals based on event type
-        match event {
-            SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled { new_theme }) => {
-                self.theme.1.set(new_theme);
+    /// Emit multiple events in a single signal update.
+    /// Use when an action produces several events (e.g. CommitAndNavigate).
+    pub fn emit_events(&self, new_events: impl IntoIterator<Item = SpreadsheetEvent>) {
+        let mut content = vec![];
+        let mut format = vec![];
+        let mut navigation = vec![];
+        let mut structure = vec![];
+        let mut mode_evs = vec![];
+        let mut theme_evs = vec![];
+
+        for event in new_events {
+            #[cfg(debug_assertions)]
+            {
+                use std::cell::Cell;
+                thread_local! { static LAST: Cell<f64> = Cell::new(0.0); }
+                let now = crate::perf::now();
+                LAST.with(|t| {
+                    let delta = now - t.get();
+                    t.set(now);
+                    leptos::logging::log!("[EventBus] +{delta:>8.2}ms  {}", event.dbg_description());
+                });
             }
-            SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated { colors }) => {
-                self.recent_colors.1.set(colors);
+            match event {
+                SpreadsheetEvent::Content(e) => content.push(e),
+                SpreadsheetEvent::Format(e) => format.push(e),
+                SpreadsheetEvent::Navigation(e) => navigation.push(e),
+                SpreadsheetEvent::Structure(e) => structure.push(e),
+                SpreadsheetEvent::Mode(e) => mode_evs.push(e),
+                SpreadsheetEvent::Theme(e) => theme_evs.push(e),
             }
-            SpreadsheetEvent::Mode(ModeEvent::DragModeChanged { to_mode, .. }) => {
-                self.drag.1.set(to_mode);
-            }
-            _ => {} // Other events don't auto-update signals
         }
-    }
 
-    /// Subscribe to all events (returns the current event list)
-    pub fn get_events(&self) -> Vec<SpreadsheetEvent> {
-        self.events.0.get()
-    }
-
-    /// Subscribe to events, with reactive updates
-    pub fn subscribe_to_events(&self) -> impl Fn() -> Vec<SpreadsheetEvent> + Copy + use<'_> {
-        move || self.events.0.get()
-    }
-
-    /// Subscribe to format-related events only
-    pub fn subscribe_to_format_events(&self) -> impl Fn() -> Vec<FormatEvent> + Copy + use<'_> {
-        let memo = self.format_events_memo;
-        move || memo.get()
-    }
-
-    /// Subscribe to theme-related events only
-    pub fn subscribe_to_theme_events(&self) -> impl Fn() -> Vec<ThemeEvent> + Copy + use<'_> {
-        let memo = self.theme_events_memo;
-        move || memo.get()
-    }
-
-    /// Subscribe to content-related events only
-    pub fn subscribe_to_content_events(&self) -> impl Fn() -> Vec<ContentEvent> + Copy + use<'_> {
-        let memo = self.content_events_memo;
-        move || memo.get()
-    }
-
-    /// Subscribe to events affecting a specific sheet
-    pub fn subscribe_to_sheet_events(
-        &self,
-        sheet: u32,
-    ) -> impl Fn() -> Vec<SpreadsheetEvent> + Copy + use<'_> {
-        move || {
-            self.events
-                .0
-                .get()
-                .into_iter()
-                .filter(|e| e.affects_sheet(sheet))
-                .collect()
-        }
-    }
-
-    /// Subscribe to navigation-related events only (selection, sheet changes)
-    pub fn subscribe_to_navigation_events(
-        &self,
-    ) -> impl Fn() -> Vec<NavigationEvent> + Copy + use<'_> {
-        let memo = self.navigation_events_memo;
-        move || memo.get()
-    }
-
-    /// Subscribe to structure-related events only (sheets, rows, columns)
-    pub fn subscribe_to_structure_events(
-        &self,
-    ) -> impl Fn() -> Vec<StructureEvent> + Copy + use<'_> {
-        let memo = self.structure_events_memo;
-        move || memo.get()
-    }
-
-    /// Subscribe to mode-related events only (edit mode, drag mode)
-    pub fn subscribe_to_mode_events(&self) -> impl Fn() -> Vec<ModeEvent> + Copy + use<'_> {
-        let memo = self.mode_events_memo;
-        move || memo.get()
-    }
-
-    /// Subscribe to visual-related events (content, format, navigation, structure)
-    /// Optimized for components like worksheets that need to re-render on visual changes
-    pub fn subscribe_to_visual_events(
-        &self,
-    ) -> impl Fn() -> Vec<SpreadsheetEvent> + Copy + use<'_> {
-        let memo = self.visual_events_memo;
-        move || memo.get()
+        // Set all 6 signals so no stale events from the previous action remain.
+        // Leptos suppresses notifications when new == old (PartialEq), so []→[] is free.
+        self.events.content.set(content);
+        self.events.format.set(format);
+        self.events.navigation.set(navigation);
+        self.events.structure.set(structure);
+        self.events.mode.set(mode_evs);
+        self.events.theme.set(theme_evs);
     }
 
     // Convenience methods for commonly used signals

@@ -27,7 +27,7 @@ pub fn FormulaBar() -> impl IntoView {
 
     let cell_address = move || {
         // Subscribe to navigation events (selection changes affect cell address display)
-        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.events.navigation.get();
         model.with_value(|m| {
             let ac = m.active_cell();
             format!("{}{}", col_name(ac.column), ac.row)
@@ -41,8 +41,8 @@ pub fn FormulaBar() -> impl IntoView {
             return edit.text;
         }
         // Subscribe to content + navigation events (content changes and selection changes affect display)
-        let _ = state.subscribe_to_content_events()();
-        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.events.content.get();
+        let _ = state.events.navigation.get();
         model.with_value(|m| m.active_cell_content())
     };
 

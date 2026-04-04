@@ -1,12 +1,11 @@
 //! Formatting actions: bold, italic, underline, strikethrough, font size/family.
 
-use ironcalc_base::expressions::types::Area;
 use ironcalc_base::UserModel;
 use leptos::prelude::WithValue;
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::events::{FormatEvent, SpreadsheetEvent};
-use crate::input::helpers::{mutate, selection_area, Eval};
+use crate::input::helpers::{mutate, selection_area, EvaluationMode};
 use crate::model::{
     style_types::BooleanValue, style_types::StylePath, FrontendModel, SafeFontFamily, ToolbarState,
 };
@@ -83,7 +82,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                 2.  When font size goes below 10px - not able to increment with buttons
                     This may be `toolbar.rs` issue ?
             */
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, EvaluationMode::Deferred, |m| {
                 let area = selection_area(m);
                 let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);
                 warn_if_err(
@@ -115,7 +114,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                     )
                 });
 
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, EvaluationMode::Deferred, |m| {
                 set_font_name(m, name);
             });
 
@@ -144,7 +143,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                     )
                 });
             let value = hex.as_deref().unwrap_or("");
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, EvaluationMode::Deferred, |m| {
                 let area = selection_area(m);
                 warn_if_err(
                     m.update_range_style(&area, StylePath::TEXT_COLOR.as_str(), value),
@@ -175,7 +174,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                 });
             let value = hex.as_deref().unwrap_or("");
 
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, EvaluationMode::Deferred, |m| {
                 let area = selection_area(m);
                 // NOTE: questionable - may not need
                 // **PERFORMANCE OPTIMIZATION**: IronCalc has optimizations for full-column and full-row
@@ -245,7 +244,7 @@ fn toggle_style(
             )
         });
 
-    mutate(model, state, Eval::No, |m| {
+    mutate(model, state, EvaluationMode::Deferred, |m| {
         let ts = m.toolbar_state();
         let current_bool = current_val(&ts);
         let new_val = BooleanValue::from_bool(!current_bool);

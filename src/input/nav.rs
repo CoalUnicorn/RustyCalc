@@ -3,7 +3,7 @@
 use leptos::prelude::WithValue;
 
 use crate::events::{NavigationEvent, SpreadsheetEvent};
-use crate::input::helpers::{mutate, Eval};
+use crate::input::helpers::{mutate, EvaluationMode};
 use crate::model::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::warn_if_err;
@@ -69,42 +69,42 @@ pub enum NavAction {
 pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState) {
     match action {
         NavAction::Arrow(dir) => {
-            mutate(model, state, Eval::No, |m| m.nav_arrow(*dir));
+            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_arrow(*dir));
             emit_selection_changed(model, state);
         }
         NavAction::Edge(dir) => {
-            mutate(model, state, Eval::No, |m| m.nav_to_edge(*dir));
+            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_to_edge(*dir));
             emit_selection_changed(model, state);
         }
         NavAction::JumpToA1 => {
-            mutate(model, state, Eval::No, |m| m.nav_set_cell(1, 1));
+            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_set_cell(1, 1));
             emit_selection_changed(model, state);
         }
         NavAction::JumpToLastCell => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, EvaluationMode::Deferred, |m| {
                 m.nav_to_edge(ArrowKey::Down);
                 m.nav_to_edge(ArrowKey::Right);
             });
             emit_selection_changed(model, state);
         }
         NavAction::ExpandSelection(dir) => {
-            mutate(model, state, Eval::No, |m| m.nav_expand_selection(*dir));
+            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_expand_selection(*dir));
             emit_selection_range_changed(model, state);
         }
         NavAction::PageDown => {
-            mutate(model, state, Eval::No, |m| m.nav_page(PageDir::Down));
+            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_page(PageDir::Down));
             emit_selection_changed(model, state);
         }
         NavAction::PageUp => {
-            mutate(model, state, Eval::No, |m| m.nav_page(PageDir::Up));
+            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_page(PageDir::Up));
             emit_selection_changed(model, state);
         }
         NavAction::RowHome => {
-            mutate(model, state, Eval::No, |m| m.nav_home_row());
+            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_home_row());
             emit_selection_changed(model, state);
         }
         NavAction::RowEnd => {
-            mutate(model, state, Eval::No, |m| m.nav_to_edge(ArrowKey::Right));
+            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_to_edge(ArrowKey::Right));
             emit_selection_changed(model, state);
         }
         NavAction::SwitchSheet(delta) => {
@@ -112,7 +112,7 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
             let previous_sheet = model
                 .with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_view().sheet);
 
-            mutate(model, state, Eval::No, move |m| {
+            mutate(model, state, EvaluationMode::Deferred, move |m| {
                 let current = m.get_selected_view().sheet;
                 let visible: Vec<u32> = m
                     .get_worksheets_properties()
@@ -139,7 +139,7 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
             }
         }
         NavAction::SelectAll => {
-            mutate(model, state, Eval::No, |m| {
+            mutate(model, state, EvaluationMode::Deferred, |m| {
                 let d = m.sheet_dimension();
                 m.nav_select_range(d.min_row, d.min_column, d.max_row, d.max_column);
             });

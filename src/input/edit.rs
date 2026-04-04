@@ -3,7 +3,7 @@
 use leptos::prelude::{WithValue, *};
 
 use crate::events::{ContentEvent, ModeEvent, NavigationEvent, SpreadsheetEvent};
-use crate::input::helpers::{mutate, Eval};
+use crate::input::helpers::{mutate, EvaluationMode};
 use crate::model::{ArrowKey, CellAddress, FrontendModel};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
@@ -68,7 +68,11 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 perf.last_formula.set(Some(edit.text.clone()));
 
                 // Write the edit buffer to the model and recalculate.
+                // pause_evaluation() prevents set_user_input from triggering an internal
+                // evaluate() call — without it we'd evaluate twice (once inside
+                // set_user_input, once explicitly below).
                 model.update_value(|m| {
+                    m.pause_evaluation();
                     warn_if_err(
                         m.set_user_input(
                             edit.address.sheet,
@@ -79,24 +83,15 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                         "set_user_input",
                     );
                     perf.input_done.set(Some(crate::perf::now()));
+                    m.resume_evaluation();
                     m.evaluate();
                     perf.eval_done.set(Some(crate::perf::now()));
                 });
-
-                // Fire content changed event for cell edit commit
-                state.emit_event(SpreadsheetEvent::Content(ContentEvent::CellChanged {
-                    address: CellAddress::from_editing(&edit),
-                    old_value: None,
-                    new_value: Some(edit.text.clone()),
-                }));
 
                 // Clear all edit-related state.
                 state.set_editing_cell(None);
                 state.set_point_range(None);
                 state.set_point_ref_span(None);
-
-                // Fire mode event for edit end
-                state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditEnded));
 
                 // Persist the committed change immediately.
                 if let Some(uuid) = state.get_current_uuid_untracked() {
@@ -104,15 +99,22 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 }
 
                 // Navigate to the next cell.
-                mutate(model, state, Eval::No, |m| m.nav_arrow(*dir));
+                mutate(model, state, EvaluationMode::Deferred, |m| m.nav_arrow(*dir));
 
-                // Fire navigation event for post-edit navigation
-                let address = model
+                // Fire content + mode + navigation together so EventBus signals update once.
+                let nav_address = model
                     .with_value(|m: &ironcalc_base::UserModel<'static>| CellAddress::from_view(m));
-
-                state.emit_event(SpreadsheetEvent::Navigation(
-                    NavigationEvent::SelectionChanged { address },
-                ));
+                state.emit_events(vec![
+                    SpreadsheetEvent::Content(ContentEvent::CellChanged {
+                        address: CellAddress::from_editing(&edit),
+                        old_value: None,
+                        new_value: Some(edit.text.clone()),
+                    }),
+                    SpreadsheetEvent::Mode(ModeEvent::EditEnded),
+                    SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged {
+                        address: nav_address,
+                    }),
+                ]);
 
                 crate::util::refocus_workbook();
             }

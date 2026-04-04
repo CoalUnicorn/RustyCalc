@@ -8,13 +8,13 @@ use crate::state::{ModelStore, WorkbookState};
 
 /// Whether `mutate` should recalculate formulas after applying the closure.
 ///
-/// Pass `Eval::Yes` when the mutation may change formula results
+/// Pass `EvaluationMode::Immediate` when the mutation may change formula results
 /// (cell writes, row/column inserts/deletes).
-/// Pass `Eval::No` for pure navigation, selection, or formatting changes.
+/// Pass `EvaluationMode::Deferred` for pure navigation, selection, or formatting changes.
 #[derive(Clone, Copy)]
-pub enum Eval {
-    Yes,
-    No,
+pub enum EvaluationMode {
+    Immediate,
+    Deferred,
 }
 
 /// Run `f` on the model, optionally call `evaluate`.
@@ -31,14 +31,14 @@ pub enum Eval {
 pub fn mutate(
     model: ModelStore,
     _state: &WorkbookState,
-    evaluate: Eval,
+    evaluate: EvaluationMode,
     f: impl FnOnce(&mut UserModel<'static>),
 ) {
     model.update_value(|m| {
         m.pause_evaluation();
         f(m);
         m.resume_evaluation();
-        if matches!(evaluate, Eval::Yes) {
+        if matches!(evaluate, EvaluationMode::Immediate) {
             m.evaluate();
         }
     });

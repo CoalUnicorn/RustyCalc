@@ -241,6 +241,49 @@ pub(crate) struct VisibleRegion {
     pub row_last: i32,
 }
 
+/// Precomputed pixel offsets for visible rows and columns.
+///
+/// Built once per render call from the same iteration used to determine
+/// `VisibleRegion`. Eliminates the O(visible_range × R) summation inside
+/// `cell_x`/`cell_y` — each lookup becomes O(1).
+///
+/// Offsets are relative to `FrozenOffset`: `row_tops[i]` is the Y distance
+/// from `frozen.y` to the top edge of row `(row_start + i as i32)`.
+/// `row_start` equals `vis.row_first`.
+#[derive(Default)]
+pub(crate) struct PixelOffsets {
+    pub row_start: i32,
+    /// `row_tops[i]` = cumulative Y from `frozen.y` to top of row `(row_start + i)`.
+    pub row_tops: Vec<f64>,
+    pub col_start: i32,
+    /// `col_lefts[i]` = cumulative X from `frozen.x` to left of col `(col_start + i)`.
+    pub col_lefts: Vec<f64>,
+}
+
+impl PixelOffsets {
+    /// Y distance from `frozen.y` to the top edge of `row`.
+    ///
+    /// Returns `0.0` for rows outside the precomputed range. In practice
+    /// `range_pixel_bounds` clamps oversized selections to the canvas edge
+    /// before calling `cell_y`, so this fallback is never reached.
+    #[inline]
+    pub fn row_top(&self, row: i32) -> f64 {
+        self.row_tops
+            .get((row - self.row_start) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// X distance from `frozen.x` to the left edge of `col`.
+    #[inline]
+    pub fn col_left(&self, col: i32) -> f64 {
+        self.col_lefts
+            .get((col - self.col_start) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+}
+
 /// Which outer edges of a cell rect should receive a border stroke.
 ///
 /// Passed to `render_cell_style` so the intent is clear at every call site
@@ -300,4 +343,21 @@ pub struct SheetRect {
     pub c1: i32,
     pub r2: i32,
     pub c2: i32,
+}
+
+/// Hint to the canvas renderer about the minimum work needed for this repaint.
+///
+/// Currently `CanvasRenderer::render` treats all modes identically.
+/// The enum is in place so future optimisations (skip layout recalc for
+/// `FormatOnly`, skip cell-text for `ViewportUpdate`) can be added
+/// without another architectural change.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum CanvasRenderMode {
+    /// Content or structure changed — repaint all cells (default).
+    #[default]
+    Full,
+    /// Only formatting changed — repaint without model recalculation.
+    FormatOnly,
+    /// Navigation only — update selection box and scroll position.
+    ViewportUpdate,
 }

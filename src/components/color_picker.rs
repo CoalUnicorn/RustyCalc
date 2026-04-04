@@ -380,11 +380,9 @@ fn ClearColorButton(
 // (done in the on_change callback at the toolbar / tab-bar level).
 
 fn workbook_recent_colors(state: WorkbookState) -> Signal<Vec<String>> {
-    Signal::derive(move || {
-        // Re-run when any format event fires (RecentColorsUpdated is a FormatEvent).
-        let _ = state.subscribe_to_format_events()();
-        state.get_recent_colors()
-    })
+    // recent_colors is a split signal; reading it here makes this derived signal
+    // reactive — it re-runs whenever add_recent_color() writes the signal.
+    Signal::derive(move || state.get_recent_colors())
 }
 
 fn color_indicator_style(current_color: Signal<Option<String>>) -> impl Fn() -> String {

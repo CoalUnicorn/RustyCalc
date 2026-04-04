@@ -22,8 +22,8 @@ pub fn SheetTabBar() -> impl IntoView {
 
     let visible_sheets = move || {
         // Subscribe to structure events (sheet list changes) and navigation (active sheet changes)
-        let _ = state.subscribe_to_structure_events()();
-        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.events.structure.get();
+        let _ = state.events.navigation.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .into_iter()
@@ -110,13 +110,13 @@ fn SheetTab(
 
     let is_selected = move || {
         // Subscribe to navigation events (active sheet changes affect selection state)
-        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.events.navigation.get();
         model.with_value(|m| m.get_selected_view().sheet == sheet_idx)
     };
 
     let name = move || {
         // Subscribe to structure events (sheet renaming affects name display)
-        let _ = state.subscribe_to_structure_events()();
+        let _ = state.events.structure.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .get(sheet_idx as usize)
@@ -127,7 +127,7 @@ fn SheetTab(
 
     let tab_color = move || {
         // Subscribe to structure events (sheet color changes affect tab appearance)
-        let _ = state.subscribe_to_structure_events()();
+        let _ = state.events.structure.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .get(sheet_idx as usize)
@@ -220,7 +220,7 @@ fn TabContextMenu(
 
     let visible_count = move || {
         // Subscribe to structure events (sheet visibility changes affect count)
-        let _ = state.subscribe_to_structure_events()();
+        let _ = state.events.structure.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .iter()
@@ -465,7 +465,7 @@ fn AllSheetsMenu() -> impl IntoView {
 
     let all_sheets = move || {
         // Subscribe to structure events (sheet list, names, visibility changes)
-        let _ = state.subscribe_to_structure_events()();
+        let _ = state.events.structure.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .into_iter()
@@ -477,7 +477,7 @@ fn AllSheetsMenu() -> impl IntoView {
 
     let selected_sheet = move || {
         // Subscribe to navigation events (active sheet changes affect selection highlight)
-        let _ = state.subscribe_to_navigation_events()();
+        let _ = state.events.navigation.get();
         model.with_value(|m| m.get_selected_view().sheet)
     };
 

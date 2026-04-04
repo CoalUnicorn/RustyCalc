@@ -77,6 +77,10 @@ pub fn Worksheet() -> impl IntoView {
     // initial state without waiting for an event.
     let render_needed = RwSignal::new(true);
 
+    // Tracks which render path is needed; written by the subscription Effect
+    // below, available to the rAF closure for future per-mode dispatch.
+    let render_mode = RwSignal::new(CanvasRenderMode::Full);
+
     // Reactive subscription Effect - tracks events and overlay changes.
     // Does NOT render. Only sets the flag so the rAF loop below can do the
     // draw on the next animation frame.
@@ -86,9 +90,29 @@ pub fn Worksheet() -> impl IntoView {
     // a NavigationEvent. Without rAF coalescing every event would trigger a
     // synchronous canvas render. With this split, all events in a single
     // 16 ms frame coalesce into one draw call.
+    //
+    // Per-category subscription: reads directly from EventBus signals.
+    // Each category signal is replaced (not appended) on every emit, so
+    // reading any non-empty signal means a new action just happened.
     Effect::new(move |_| {
-        let _ = state.subscribe_to_visual_events()();
-        let _ = reactive_overlay.get();
+        let has_content   = !state.events.content.get().is_empty();
+        let has_structure = !state.events.structure.get().is_empty();
+        let has_format    = !state.events.format.get().is_empty();
+        let has_nav       = !state.events.navigation.get().is_empty();
+        let _overlay      = reactive_overlay.get();
+
+        let mode = if has_content || has_structure {
+            CanvasRenderMode::Full
+        } else if has_format {
+            CanvasRenderMode::FormatOnly
+        } else if has_nav {
+            CanvasRenderMode::ViewportUpdate
+        } else {
+            // Mode or theme event only — no canvas repaint needed.
+            return;
+        };
+
+        render_mode.set(mode);
         render_needed.set(true);
     });
 

@@ -152,6 +152,9 @@ pub struct CanvasRenderer {
     /// Visible cell bounds - populated at the start of each `render()` call.
     /// Stored on the struct so internal helpers don't need it as a parameter.
     vis: VisibleRegion,
+    /// Precomputed pixel offsets for visible rows/cols — populated alongside
+    /// `vis`. Turns `cell_x`/`cell_y` from O(visible×R) into O(1).
+    offsets: PixelOffsets,
 }
 
 impl CanvasRenderer {
@@ -202,6 +205,7 @@ impl CanvasRenderer {
             height,
             theme,
             vis: VisibleRegion::default(),
+            offsets: PixelOffsets::default(),
         }
     }
 
@@ -239,6 +243,8 @@ impl CanvasRenderer {
 
         // Frozen counts + pixel origin, computed once per frame.
         let frc = FrozenRC::from_model(model, sheet);
+        // Build prefix-sum cache now that vis and sheet are both known.
+        self.offsets = self.build_pixel_offsets(model, sheet);
         let vis = self.vis;
 
         // Cell texts are collected across ALL panes and rendered last (Phase 4)
@@ -1101,33 +1107,27 @@ impl CanvasRenderer {
     // Coordinate helpers
 
     fn cell_x(&self, model: &UserModel, sheet: u32, col: i32, frozen: FrozenOffset) -> f64 {
-        let view = model.get_selected_view();
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
         if col <= frozen_cols {
+            // Frozen columns: iterate from 1..col (at most a handful of cols).
             return HEADER_COL_WIDTH
                 + 0.5
                 + (1..col).map(|c| col_width(model, sheet, c)).sum::<f64>();
         }
-        let left_col = view.left_column.max(frozen_cols + 1);
-        frozen.x
-            + (left_col..col)
-                .map(|c| col_width(model, sheet, c))
-                .sum::<f64>()
+        // Scrollable columns: O(1) lookup via precomputed prefix-sum cache.
+        frozen.x + self.offsets.col_left(col)
     }
 
     fn cell_y(&self, model: &UserModel, sheet: u32, row: i32, frozen: FrozenOffset) -> f64 {
-        let view = model.get_selected_view();
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         if row <= frozen_rows {
+            // Frozen rows: iterate from 1..row (at most a handful of rows).
             return HEADER_ROW_HEIGHT
                 + 0.5
                 + (1..row).map(|r| row_height(model, sheet, r)).sum::<f64>();
         }
-        let top_row = view.top_row.max(frozen_rows + 1);
-        frozen.y
-            + (top_row..row)
-                .map(|r| row_height(model, sheet, r))
-                .sum::<f64>()
+        // Scrollable rows: O(1) lookup via precomputed prefix-sum cache.
+        frozen.y + self.offsets.row_top(row)
     }
 
     /// Compute the visible (scrollable) cell region.
@@ -1136,6 +1136,40 @@ impl CanvasRenderer {
     /// performance remains constant regardless of selection size (whole sheet, single cell, etc.).
     /// Scans rows/cols until the canvas is filled, capping at `SCAN_CAP` to
     /// prevent O(LAST_ROW) iteration when many rows are explicitly hidden (height = 0).
+    /// Build a prefix-sum pixel-offset table for all visible rows and columns.
+    ///
+    /// Each `row_tops[i]` is the cumulative Y distance from `frozen.y` to the
+    /// top edge of row `(vis.row_first + i)`.  Built in a single O(visible)
+    /// pass — same rows/cols that `visible_cells` already iterated.  Stored on
+    /// `self.offsets` so `cell_x`/`cell_y` become O(1) array lookups instead of
+    /// O(visible × R) summations (where R = len of IronCalc's `rows` Vec).
+    fn build_pixel_offsets(&self, model: &UserModel, sheet: u32) -> PixelOffsets {
+        let vis = self.vis;
+
+        let mut row_tops = Vec::with_capacity((vis.row_last - vis.row_first + 2) as usize);
+        let mut acc = 0.0_f64;
+        for r in vis.row_first..=vis.row_last {
+            row_tops.push(acc);
+            acc += row_height(model, sheet, r);
+        }
+        row_tops.push(acc); // one-past-end: bottom edge of last visible row
+
+        let mut col_lefts = Vec::with_capacity((vis.col_last - vis.col_first + 2) as usize);
+        acc = 0.0;
+        for c in vis.col_first..=vis.col_last {
+            col_lefts.push(acc);
+            acc += col_width(model, sheet, c);
+        }
+        col_lefts.push(acc); // one-past-end: right edge of last visible col
+
+        PixelOffsets {
+            row_start: vis.row_first,
+            row_tops,
+            col_start: vis.col_first,
+            col_lefts,
+        }
+    }
+
     fn visible_cells(&self, model: &UserModel) -> VisibleRegion {
         // Conservative cap to prevent runaway iteration in pathological cases.
         // This ensures O(1) performance regardless of sheet size or selection.
