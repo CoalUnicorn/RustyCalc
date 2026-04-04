@@ -108,7 +108,10 @@ const STANDARD_BORDER_WIDTH: f64 = 1.0;
 const MEDIUM_BORDER_WIDTH: f64 = 2.0;
 const THICK_BORDER_WIDTH: f64 = 3.0;
 const DASHED_BORDER_WIDTH: f64 = 1.5;
-const UNDERLINE_OFFSET_FACTOR: f64 = 0.12;
+// With textBaseline:"middle", center_y is the em-square midpoint.
+// The typographic baseline sits at ~center_y + font_size*0.15; placing
+// the underline at 0.35× puts it just below the baseline, clear of the glyphs.
+const UNDERLINE_OFFSET_FACTOR: f64 = 0.35;
 const MIN_UNDERLINE_OFFSET: f64 = 2.0;
 const CHAR_WIDTH_FACTOR: f64 = 0.6;
 const LINE_HEIGHT_FACTOR: f64 = 1.5;
