@@ -1,0 +1,34 @@
+[package]
+name = "ironcalc"
+version = "0.7.1"
+authors = ["Nicolás Hatcher <nicolas@theuniverse.today>"]
+edition = "2021"
+homepage = "https://www.ironcalc.com"
+repository = "https://github.com/ironcalc/ironcalc/"
+description = "The democratization of spreadsheets"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+roxmltree = "0.19"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+ironcalc_base = { git = "https://github.com/CoalUnicorn/IronCalc", branch = "fix-col-iterations", features = ["use_regex_lite"] }
+itertools = "0.12"
+chrono = "0.4"
+bitcode = "0.6.8"
+
+[dev-dependencies]
+uuid = { version = "1.2.2", features = ["serde", "v4"] }
+
+[lib]
+name = "ironcalc"
+path = "src/lib.rs"
+
+[[bin]]
+name = "test"
+path = "src/bin/test.rs"

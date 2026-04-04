@@ -230,17 +230,18 @@ impl CanvasRenderer {
         let view = model.get_selected_view();
         let selection_size =
             (view.range[2] - view.range[0] + 1) as i64 * (view.range[3] - view.range[1] + 1) as i64;
-        if selection_size > 10_000 {
-            web_sys::console::log_1(
-                &format!(
-                    "Rendering with large selection: {} cells, visible: {}x{}",
-                    selection_size,
-                    self.vis.col_last - self.vis.col_first + 1,
-                    self.vis.row_last - self.vis.row_first + 1
-                )
-                .into(),
-            );
-        }
+        // DEBUG
+        // if selection_size > 10_000 {
+        //     web_sys::console::log_1(
+        //         &format!(
+        //             "Rendering with large selection: {} cells, visible: {}x{}",
+        //             selection_size,
+        //             self.vis.col_last - self.vis.col_first + 1,
+        //             self.vis.row_last - self.vis.row_first + 1
+        //         )
+        //         .into(),
+        //     );
+        // }
 
         let sheet = view.sheet;
 
