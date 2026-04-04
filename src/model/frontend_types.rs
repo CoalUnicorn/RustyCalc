@@ -4,7 +4,8 @@ use ironcalc_base::types::{BorderStyle, HorizontalAlignment, VerticalAlignment};
 
 /// A CSS hex color string, e.g. `"#FF0000"`. Never empty.
 /// The inner field is private; construct via `CssColor::new`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
 pub struct CssColor(String);
 
 impl CssColor {

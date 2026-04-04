@@ -3,8 +3,9 @@ use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
 // NOTE: <Meta name="color-scheme" content="dark"/>
+use crate::canvas::SheetRect;
 use crate::events::*;
-use crate::model::CellAddress;
+use crate::model::{CellAddress, CssColor};
 use crate::perf::PerfTimings;
 use crate::theme::Theme;
 
@@ -143,9 +144,9 @@ pub struct WorkbookState {
         ReadSignal<Option<ContextMenuState>>,
         WriteSignal<Option<ContextMenuState>>,
     ),
-    /// Range being pointed at during formula entry (`[r1, c1, r2, c2]`, 1-based).
+    /// Range being pointed at during formula entry.
     /// `None` when not in point mode.
-    pub(crate) point_range: (ReadSignal<Option<[i32; 4]>>, WriteSignal<Option<[i32; 4]>>),
+    pub(crate) point_range: (ReadSignal<Option<SheetRect>>, WriteSignal<Option<SheetRect>>),
     /// Byte span `(start, end)` within `editing_cell.text` that holds the
     /// current point-mode reference text, so it can be replaced in-place
     /// when the user presses arrow keys or clicks another cell.
@@ -158,9 +159,9 @@ pub struct WorkbookState {
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
     /// Performance timings for the commit→render pipeline.
     pub perf: PerfTimings,
-    /// Recent/custom colors used in the document (hex strings)
-    /// Limited to 16 colors, most recent first
-    pub(crate) recent_colors: (ReadSignal<Vec<String>>, WriteSignal<Vec<String>>),
+    /// Recent/custom colors used in the document.
+    /// Limited to 16 colors, most recent first.
+    pub(crate) recent_colors: (ReadSignal<Vec<CssColor>>, WriteSignal<Vec<CssColor>>),
 }
 
 #[allow(dead_code)]
@@ -169,10 +170,10 @@ impl WorkbookState {
         // let lang: String = <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_lang")
         //    .unwrap_or_else(|_| "en".to_owned());
 
-        // Load recent colors from localStorage
-        let recent_colors: Vec<String> =
+        // Load recent colors from localStorage (CssColor is serde-transparent, same JSON as String)
+        let recent_colors: Vec<CssColor> =
             <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_recent_colors")
-                .unwrap_or_else(|_| Vec::new());
+                .unwrap_or_default();
 
         Self {
             editing_cell: signal(None),
@@ -346,17 +347,17 @@ impl WorkbookState {
     }
 
     /// Get point range (reactive)
-    pub fn get_point_range(&self) -> Option<[i32; 4]> {
+    pub fn get_point_range(&self) -> Option<SheetRect> {
         self.point_range.0.get()
     }
 
     /// Get point range (non-reactive)
-    pub fn get_point_range_untracked(&self) -> Option<[i32; 4]> {
+    pub fn get_point_range_untracked(&self) -> Option<SheetRect> {
         self.point_range.0.get_untracked()
     }
 
     /// Set point range
-    pub fn set_point_range(&self, range: Option<[i32; 4]>) {
+    pub fn set_point_range(&self, range: Option<SheetRect>) {
         self.point_range.1.set(range);
     }
 
@@ -406,17 +407,17 @@ impl WorkbookState {
     }
 
     /// Get recent colors (reactive)
-    pub fn get_recent_colors(&self) -> Vec<String> {
+    pub fn get_recent_colors(&self) -> Vec<CssColor> {
         self.recent_colors.0.get()
     }
 
     /// Get recent colors (non-reactive)
-    pub fn get_recent_colors_untracked(&self) -> Vec<String> {
+    pub fn get_recent_colors_untracked(&self) -> Vec<CssColor> {
         self.recent_colors.0.get_untracked()
     }
 
     /// Set recent colors
-    pub fn set_recent_colors(&self, colors: Vec<String>) {
+    pub fn set_recent_colors(&self, colors: Vec<CssColor>) {
         self.recent_colors.1.set(colors);
     }
 
@@ -434,12 +435,12 @@ impl WorkbookState {
             return;
         }
 
-        // Normalize color (ensure lowercase, with #)
-        let normalized = if color.starts_with('#') {
+        // Normalize color (ensure lowercase, with #) and wrap in the domain type.
+        let normalized = CssColor::new(if color.starts_with('#') {
             color.to_lowercase()
         } else {
             format!("#{}", color.to_lowercase())
-        };
+        });
 
         self.recent_colors.1.update(|colors| {
             // Remove if already exists
@@ -452,13 +453,17 @@ impl WorkbookState {
             colors.truncate(16);
         });
 
-        // Persist to localStorage (use with_untracked since this is called from callbacks)
-        let colors = self.recent_colors.0.with_untracked(|colors| colors.clone());
-        <gloo_storage::LocalStorage as GlooStorage>::set("ironcalc_recent_colors", &colors).ok();
+        // Convert to Vec<String> for storage and event (same JSON representation)
+        let string_colors: Vec<String> = self
+            .recent_colors
+            .0
+            .with_untracked(|colors| colors.iter().map(|c| c.as_str().to_owned()).collect());
+        <gloo_storage::LocalStorage as GlooStorage>::set("ironcalc_recent_colors", &string_colors)
+            .ok();
 
         // Emit event for reactive subscribers
         self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
-            colors,
+            colors: string_colors,
         }));
     }
 

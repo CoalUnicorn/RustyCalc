@@ -116,17 +116,6 @@ const MIN_UNDERLINE_OFFSET: f64 = 2.0;
 const CHAR_WIDTH_FACTOR: f64 = 0.6;
 const LINE_HEIGHT_FACTOR: f64 = 1.5;
 
-/// Which side of a cell border to render
-// NOTE: this may no longer be needed
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BorderSide {
-    Left,
-    Top,
-    Right,
-    Bottom,
-}
-
 /// Border orientation for rendering logic
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BorderOrientation {
@@ -228,8 +217,8 @@ impl CanvasRenderer {
 
         // Performance check: log when rendering with large selections for debugging
         let view = model.get_selected_view();
-        let selection_size =
-            (view.range[2] - view.range[0] + 1) as i64 * (view.range[3] - view.range[1] + 1) as i64;
+        // let selection_size =
+        //     (view.range[2] - view.range[0] + 1) as i64 * (view.range[3] - view.range[1] + 1) as i64;
         // DEBUG
         // if selection_size > 10_000 {
         //     web_sys::console::log_1(

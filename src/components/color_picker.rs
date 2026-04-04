@@ -382,7 +382,14 @@ fn ClearColorButton(
 fn workbook_recent_colors(state: WorkbookState) -> Signal<Vec<String>> {
     // recent_colors is a split signal; reading it here makes this derived signal
     // reactive — it re-runs whenever add_recent_color() writes the signal.
-    Signal::derive(move || state.get_recent_colors())
+    // Convert CssColor → String at this boundary so component props stay as Vec<String>.
+    Signal::derive(move || {
+        state
+            .get_recent_colors()
+            .into_iter()
+            .map(|c| c.as_str().to_owned())
+            .collect()
+    })
 }
 
 fn color_indicator_style(current_color: Signal<Option<String>>) -> impl Fn() -> String {

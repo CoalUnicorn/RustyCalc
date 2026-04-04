@@ -1,13 +1,14 @@
 use ironcalc_base::expressions::types::Area;
 use leptos::prelude::*;
 
+use crate::canvas::SheetRect;
 use crate::components::file_bar::FileBar;
 use crate::components::formula_bar::FormulaBar;
 use crate::components::perf_panel::PerfPanel;
 use crate::components::sheet_tab_bar::SheetTabBar;
 use crate::components::toolbar::Toolbar;
 use crate::components::worksheet::Worksheet;
-use crate::input::action::{classify_key, execute, SpreadsheetAction};
+use crate::input::action::{classify_key, execute, KeyMod, SpreadsheetAction};
 use crate::input::formula_input::*;
 use crate::model::AppClipboard;
 use crate::state::{EditMode, ModelStore, WorkbookState};
@@ -66,12 +67,18 @@ pub fn Workbook() -> impl IntoView {
                 let already_pointing = state.get_point_range_untracked().is_some();
                 if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                     // Move or extend the point-mode range by one cell.
-                    let [r1, c1, r2, c2] = state.get_point_range_untracked().unwrap_or_else(|| {
+                    let pr = state.get_point_range_untracked().unwrap_or_else(|| {
                         model.with_value(|m| {
                             let v = m.get_selected_view();
-                            [v.row, v.column, v.row, v.column]
+                            SheetRect {
+                                r1: v.row,
+                                c1: v.column,
+                                r2: v.row,
+                                c2: v.column,
+                            }
                         })
                     });
+                    let SheetRect { r1, c1, r2, c2 } = pr;
                     let (new_r2, new_c2) = match key.as_str() {
                         "ArrowDown" => (r2 + 1, c2),
                         "ArrowUp" => ((r2 - 1).max(1), c2),
@@ -93,7 +100,12 @@ pub fn Workbook() -> impl IntoView {
                             e.text = new_text;
                         }
                     });
-                    state.set_point_range(Some([new_r1, new_c1, new_r2, new_c2]));
+                    state.set_point_range(Some(SheetRect {
+                        r1: new_r1,
+                        c1: new_c1,
+                        r2: new_r2,
+                        c2: new_c2,
+                    }));
                     state.set_point_ref_span(Some((new_start, new_end)));
                     state.request_redraw();
                     ev.prevent_default();
@@ -104,7 +116,15 @@ pub fn Workbook() -> impl IntoView {
 
         // Classify key -> action
         let edit_ref = state.get_editing_cell_untracked();
-        let Some(action) = classify_key(&key, is_ctrl, is_shift, is_alt, edit_ref.as_ref()) else {
+        let Some(action) = classify_key(
+            &key,
+            KeyMod {
+                ctrl: is_ctrl,
+                shift: is_shift,
+                alt: is_alt,
+            },
+            edit_ref.as_ref(),
+        ) else {
             return;
         };
 

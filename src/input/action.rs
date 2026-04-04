@@ -1,4 +1,4 @@
-// Key → SpreadsheetAction → model mutation pipeline.
+// Key -> SpreadsheetAction → model mutation pipeline.
 //
 // SpreadsheetAction is a thin wrapper around category-specific sub-enums.
 // Each category lives in its own module with its own execute function:
@@ -36,6 +36,17 @@ pub enum SpreadsheetAction {
 
 // Key classification
 
+/// Keyboard modifier state at the time of a key event.
+///
+/// Replaces three positional `bool` parameters in `classify_key` — callers
+/// can no longer silently swap `ctrl` and `alt`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyMod {
+    pub ctrl: bool,
+    pub shift: bool,
+    pub alt: bool,
+}
+
 /// Map a keyboard event to a `SpreadsheetAction`, or `None` if unhandled.
 ///
 /// This function is pure - no side effects, no DOM access.
@@ -45,11 +56,12 @@ pub enum SpreadsheetAction {
 /// in the keydown closure before this function is called.
 pub fn classify_key(
     key: &str,
-    ctrl: bool,
-    shift: bool,
-    alt: bool,
+    mods: KeyMod,
     edit: Option<&EditingCell>,
 ) -> Option<SpreadsheetAction> {
+    let ctrl = mods.ctrl;
+    let shift = mods.shift;
+    let alt = mods.alt;
     use ArrowKey::*;
     use SpreadsheetAction::*;
 
@@ -204,6 +216,60 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
     }
 }
 
+/// Test-only constructor shortcuts so test call sites don't repeat struct literals.
+#[cfg(test)]
+impl KeyMod {
+    pub fn none() -> Self {
+        Self {
+            ctrl: false,
+            shift: false,
+            alt: false,
+        }
+    }
+    pub fn ctrl() -> Self {
+        Self {
+            ctrl: true,
+            shift: false,
+            alt: false,
+        }
+    }
+    pub fn shift() -> Self {
+        Self {
+            ctrl: false,
+            shift: true,
+            alt: false,
+        }
+    }
+    pub fn alt() -> Self {
+        Self {
+            ctrl: false,
+            shift: false,
+            alt: true,
+        }
+    }
+    pub fn ctrl_shift() -> Self {
+        Self {
+            ctrl: true,
+            shift: true,
+            alt: false,
+        }
+    }
+    pub fn ctrl_alt() -> Self {
+        Self {
+            ctrl: true,
+            shift: false,
+            alt: true,
+        }
+    }
+    pub fn ctrl_shift_alt() -> Self {
+        Self {
+            ctrl: true,
+            shift: true,
+            alt: true,
+        }
+    }
+}
+
 // Convenience constructors
 // Used by the toolbar and other components to avoid deep nesting like
 // `SpreadsheetAction::Format(FormatAction::ToggleBold)`.
@@ -311,7 +377,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn plain_arrows_navigate() {
-        let ck = |k| classify_key(k, false, false, false, None);
+        let ck = |k| classify_key(k, KeyMod::none(), None);
         assert_eq!(
             ck("ArrowRight"),
             Some(nav(NavAction::Arrow(ArrowKey::Right)))
@@ -324,7 +390,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn tab_navigates_right() {
         assert_eq!(
-            classify_key("Tab", false, false, false, None),
+            classify_key("Tab", KeyMod::none(), None),
             Some(nav(NavAction::Arrow(ArrowKey::Right)))
         );
     }
@@ -332,7 +398,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn shift_tab_navigates_left() {
         assert_eq!(
-            classify_key("Tab", false, true, false, None),
+            classify_key("Tab", KeyMod::shift(), None),
             Some(nav(NavAction::Arrow(ArrowKey::Left)))
         );
     }
@@ -340,7 +406,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn enter_navigates_down() {
         assert_eq!(
-            classify_key("Enter", false, false, false, None),
+            classify_key("Enter", KeyMod::none(), None),
             Some(nav(NavAction::Arrow(ArrowKey::Down)))
         );
     }
@@ -348,11 +414,11 @@ mod tests {
     #[wasm_bindgen_test]
     fn page_up_down() {
         assert_eq!(
-            classify_key("PageDown", false, false, false, None),
+            classify_key("PageDown", KeyMod::none(), None),
             Some(nav(NavAction::PageDown))
         );
         assert_eq!(
-            classify_key("PageUp", false, false, false, None),
+            classify_key("PageUp", KeyMod::none(), None),
             Some(nav(NavAction::PageUp))
         );
     }
@@ -360,11 +426,11 @@ mod tests {
     #[wasm_bindgen_test]
     fn home_end() {
         assert_eq!(
-            classify_key("Home", false, false, false, None),
+            classify_key("Home", KeyMod::none(), None),
             Some(nav(NavAction::RowHome))
         );
         assert_eq!(
-            classify_key("End", false, false, false, None),
+            classify_key("End", KeyMod::none(), None),
             Some(nav(NavAction::RowEnd))
         );
     }
@@ -372,11 +438,11 @@ mod tests {
     #[wasm_bindgen_test]
     fn delete_and_escape() {
         assert_eq!(
-            classify_key("Delete", false, false, false, None),
+            classify_key("Delete", KeyMod::none(), None),
             Some(struc(StructAction::Delete))
         );
         assert_eq!(
-            classify_key("Escape", false, false, false, None),
+            classify_key("Escape", KeyMod::none(), None),
             Some(edit(EditAction::Cancel))
         );
     }
@@ -384,7 +450,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn f2_enters_edit_mode() {
         assert_eq!(
-            classify_key("F2", false, false, false, None),
+            classify_key("F2", KeyMod::none(), None),
             Some(edit(EditAction::EnterEditMode))
         );
     }
@@ -392,15 +458,15 @@ mod tests {
     #[wasm_bindgen_test]
     fn printable_chars_start_edit() {
         let start = |k: &str| Some(edit(EditAction::Start(k.to_owned())));
-        assert_eq!(classify_key("a", false, false, false, None), start("a"));
-        assert_eq!(classify_key("=", false, false, false, None), start("="));
-        assert_eq!(classify_key("1", false, false, false, None), start("1"));
-        assert_eq!(classify_key(" ", false, false, false, None), start(" "));
+        assert_eq!(classify_key("a", KeyMod::none(), None), start("a"));
+        assert_eq!(classify_key("=", KeyMod::none(), None), start("="));
+        assert_eq!(classify_key("1", KeyMod::none(), None), start("1"));
+        assert_eq!(classify_key(" ", KeyMod::none(), None), start(" "));
     }
 
     #[wasm_bindgen_test]
     fn non_printable_returns_none() {
-        let none = |k| classify_key(k, false, false, false, None);
+        let none = |k| classify_key(k, KeyMod::none(), None);
         assert_eq!(none("F1"), None);
         assert_eq!(none("Shift"), None);
         assert_eq!(none("Control"), None);
@@ -412,7 +478,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn ctrl_z_y_undo_redo() {
-        let c = |k| classify_key(k, true, false, false, None);
+        let c = |k| classify_key(k, KeyMod::ctrl(), None);
         assert_eq!(c("z"), Some(struc(StructAction::Undo)));
         assert_eq!(c("Z"), Some(struc(StructAction::Undo)));
         assert_eq!(c("y"), Some(struc(StructAction::Redo)));
@@ -422,18 +488,18 @@ mod tests {
     #[wasm_bindgen_test]
     fn ctrl_a_selects_all() {
         assert_eq!(
-            classify_key("a", true, false, false, None),
+            classify_key("a", KeyMod::ctrl(), None),
             Some(nav(NavAction::SelectAll))
         );
         assert_eq!(
-            classify_key("A", true, false, false, None),
+            classify_key("A", KeyMod::ctrl(), None),
             Some(nav(NavAction::SelectAll))
         );
     }
 
     #[wasm_bindgen_test]
     fn ctrl_c_x_v_clipboard() {
-        let c = |k| classify_key(k, true, false, false, None);
+        let c = |k| classify_key(k, KeyMod::ctrl(), None);
         assert_eq!(c("c"), Some(SpreadsheetAction::Copy));
         assert_eq!(c("C"), Some(SpreadsheetAction::Copy));
         assert_eq!(c("x"), Some(SpreadsheetAction::Cut));
@@ -444,7 +510,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn ctrl_b_i_u_formatting() {
-        let c = |k| classify_key(k, true, false, false, None);
+        let c = |k| classify_key(k, KeyMod::ctrl(), None);
         assert_eq!(c("b"), Some(fmt(FormatAction::ToggleBold)));
         assert_eq!(c("B"), Some(fmt(FormatAction::ToggleBold)));
         assert_eq!(c("i"), Some(fmt(FormatAction::ToggleItalic)));
@@ -456,18 +522,18 @@ mod tests {
     #[wasm_bindgen_test]
     fn ctrl_home_end_jump() {
         assert_eq!(
-            classify_key("Home", true, false, false, None),
+            classify_key("Home", KeyMod::ctrl(), None),
             Some(nav(NavAction::JumpToA1))
         );
         assert_eq!(
-            classify_key("End", true, false, false, None),
+            classify_key("End", KeyMod::ctrl(), None),
             Some(nav(NavAction::JumpToLastCell))
         );
     }
 
     #[wasm_bindgen_test]
     fn ctrl_arrows_navigate_to_edge() {
-        let c = |k| classify_key(k, true, false, false, None);
+        let c = |k| classify_key(k, KeyMod::ctrl(), None);
         assert_eq!(c("ArrowRight"), Some(nav(NavAction::Edge(ArrowKey::Right))));
         assert_eq!(c("ArrowLeft"), Some(nav(NavAction::Edge(ArrowKey::Left))));
         assert_eq!(c("ArrowUp"), Some(nav(NavAction::Edge(ArrowKey::Up))));
@@ -477,7 +543,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn ctrl_minus_deletes_rows() {
         assert_eq!(
-            classify_key("-", true, false, false, None),
+            classify_key("-", KeyMod::ctrl(), None),
             Some(struc(StructAction::DeleteRows))
         );
     }
@@ -487,7 +553,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn ctrl_shift_delete_clears_all() {
         assert_eq!(
-            classify_key("Delete", true, true, false, None),
+            classify_key("Delete", KeyMod::ctrl_shift(), None),
             Some(struc(StructAction::ClearAll))
         );
     }
@@ -495,11 +561,11 @@ mod tests {
     #[wasm_bindgen_test]
     fn ctrl_shift_plus_inserts_rows() {
         assert_eq!(
-            classify_key("=", true, true, false, None),
+            classify_key("=", KeyMod::ctrl_shift(), None),
             Some(struc(StructAction::InsertRows))
         );
         assert_eq!(
-            classify_key("+", true, true, false, None),
+            classify_key("+", KeyMod::ctrl_shift(), None),
             Some(struc(StructAction::InsertRows))
         );
     }
@@ -509,7 +575,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn ctrl_alt_minus_deletes_columns() {
         assert_eq!(
-            classify_key("-", true, false, true, None),
+            classify_key("-", KeyMod::ctrl_alt(), None),
             Some(struc(StructAction::DeleteColumns))
         );
     }
@@ -517,11 +583,11 @@ mod tests {
     #[wasm_bindgen_test]
     fn ctrl_shift_alt_plus_inserts_columns() {
         assert_eq!(
-            classify_key("=", true, true, true, None),
+            classify_key("=", KeyMod::ctrl_shift_alt(), None),
             Some(struc(StructAction::InsertColumns))
         );
         assert_eq!(
-            classify_key("+", true, true, true, None),
+            classify_key("+", KeyMod::ctrl_shift_alt(), None),
             Some(struc(StructAction::InsertColumns))
         );
     }
@@ -531,11 +597,11 @@ mod tests {
     #[wasm_bindgen_test]
     fn alt_arrows_switch_sheet() {
         assert_eq!(
-            classify_key("ArrowDown", false, false, true, None),
+            classify_key("ArrowDown", KeyMod::alt(), None),
             Some(nav(NavAction::SwitchSheet(1)))
         );
         assert_eq!(
-            classify_key("ArrowUp", false, false, true, None),
+            classify_key("ArrowUp", KeyMod::alt(), None),
             Some(nav(NavAction::SwitchSheet(-1)))
         );
     }
@@ -544,7 +610,7 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn shift_arrows_expand_selection() {
-        let s = |k| classify_key(k, false, true, false, None);
+        let s = |k| classify_key(k, KeyMod::shift(), None);
         assert_eq!(
             s("ArrowRight"),
             Some(nav(NavAction::ExpandSelection(ArrowKey::Right)))
@@ -569,15 +635,15 @@ mod tests {
     fn accept_mode_enter_tab_commit() {
         let e = accept_cell();
         assert_eq!(
-            classify_key("Enter", false, false, false, Some(&e)),
+            classify_key("Enter", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::CommitAndNavigate(ArrowKey::Down)))
         );
         assert_eq!(
-            classify_key("Tab", false, false, false, Some(&e)),
+            classify_key("Tab", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::CommitAndNavigate(ArrowKey::Right)))
         );
         assert_eq!(
-            classify_key("Tab", false, true, false, Some(&e)),
+            classify_key("Tab", KeyMod::shift(), Some(&e)),
             Some(edit(EditAction::CommitAndNavigate(ArrowKey::Left)))
         );
     }
@@ -586,7 +652,7 @@ mod tests {
     fn accept_mode_escape_cancels() {
         let e = accept_cell();
         assert_eq!(
-            classify_key("Escape", false, false, false, Some(&e)),
+            classify_key("Escape", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::Cancel))
         );
     }
@@ -595,19 +661,19 @@ mod tests {
     fn accept_mode_arrows_commit_and_navigate() {
         let e = accept_cell();
         assert_eq!(
-            classify_key("ArrowDown", false, false, false, Some(&e)),
+            classify_key("ArrowDown", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::CommitAndNavigate(ArrowKey::Down)))
         );
         assert_eq!(
-            classify_key("ArrowUp", false, false, false, Some(&e)),
+            classify_key("ArrowUp", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::CommitAndNavigate(ArrowKey::Up)))
         );
         assert_eq!(
-            classify_key("ArrowLeft", false, false, false, Some(&e)),
+            classify_key("ArrowLeft", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::CommitAndNavigate(ArrowKey::Left)))
         );
         assert_eq!(
-            classify_key("ArrowRight", false, false, false, Some(&e)),
+            classify_key("ArrowRight", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::CommitAndNavigate(ArrowKey::Right)))
         );
     }
@@ -617,30 +683,21 @@ mod tests {
     #[wasm_bindgen_test]
     fn edit_mode_arrows_are_unhandled() {
         let e = edit_cell();
-        assert_eq!(
-            classify_key("ArrowDown", false, false, false, Some(&e)),
-            None
-        );
-        assert_eq!(classify_key("ArrowUp", false, false, false, Some(&e)), None);
-        assert_eq!(
-            classify_key("ArrowLeft", false, false, false, Some(&e)),
-            None
-        );
-        assert_eq!(
-            classify_key("ArrowRight", false, false, false, Some(&e)),
-            None
-        );
+        assert_eq!(classify_key("ArrowDown", KeyMod::none(), Some(&e)), None);
+        assert_eq!(classify_key("ArrowUp", KeyMod::none(), Some(&e)), None);
+        assert_eq!(classify_key("ArrowLeft", KeyMod::none(), Some(&e)), None);
+        assert_eq!(classify_key("ArrowRight", KeyMod::none(), Some(&e)), None);
     }
 
     #[wasm_bindgen_test]
     fn edit_mode_enter_and_escape_still_work() {
         let e = edit_cell();
         assert_eq!(
-            classify_key("Enter", false, false, false, Some(&e)),
+            classify_key("Enter", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::CommitAndNavigate(ArrowKey::Down)))
         );
         assert_eq!(
-            classify_key("Escape", false, false, false, Some(&e)),
+            classify_key("Escape", KeyMod::none(), Some(&e)),
             Some(edit(EditAction::Cancel))
         );
     }
@@ -648,10 +705,10 @@ mod tests {
     #[wasm_bindgen_test]
     fn editing_mode_ctrl_c_returns_none() {
         let e = edit_cell();
-        assert_eq!(classify_key("c", true, false, false, Some(&e)), None);
-        assert_eq!(classify_key("v", true, false, false, Some(&e)), None);
-        assert_eq!(classify_key("z", true, false, false, Some(&e)), None);
-        assert_eq!(classify_key("a", true, false, false, Some(&e)), None);
+        assert_eq!(classify_key("c", KeyMod::ctrl(), Some(&e)), None);
+        assert_eq!(classify_key("v", KeyMod::ctrl(), Some(&e)), None);
+        assert_eq!(classify_key("z", KeyMod::ctrl(), Some(&e)), None);
+        assert_eq!(classify_key("a", KeyMod::ctrl(), Some(&e)), None);
     }
 
     // selection_bounds

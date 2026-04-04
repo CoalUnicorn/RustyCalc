@@ -95,11 +95,11 @@ pub fn Worksheet() -> impl IntoView {
     // Each category signal is replaced (not appended) on every emit, so
     // reading any non-empty signal means a new action just happened.
     Effect::new(move |_| {
-        let has_content   = !state.events.content.get().is_empty();
+        let has_content = !state.events.content.get().is_empty();
         let has_structure = !state.events.structure.get().is_empty();
-        let has_format    = !state.events.format.get().is_empty();
-        let has_nav       = !state.events.navigation.get().is_empty();
-        let _overlay      = reactive_overlay.get();
+        let has_format = !state.events.format.get().is_empty();
+        let has_nav = !state.events.navigation.get().is_empty();
+        let _overlay = reactive_overlay.get();
 
         let mode = if has_content || has_structure {
             CanvasRenderMode::Full
@@ -154,7 +154,7 @@ pub fn Worksheet() -> impl IntoView {
         let overlays = RenderOverlays {
             extend_to,
             clipboard,
-            point_range: point_range.map(|[r1, c1, r2, c2]| SheetRect { r1, c1, r2, c2 }),
+            point_range,
         };
         model.with_value(|m| {
             let mut renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get_untracked());
@@ -281,9 +281,9 @@ pub fn Worksheet() -> impl IntoView {
             }
             DragState::Pointing => {
                 // Extend the point-mode range to the hovered cell.
-                if let Some([r1, c1, _, _]) = state.get_point_range_untracked() {
+                if let Some(pr) = state.get_point_range_untracked() {
                     let sheet = model.with_value(|m| m.active_cell().sheet);
-                    let ref_str = range_ref_str(r1, c1, row, col, sheet, sheet, "");
+                    let ref_str = range_ref_str(pr.r1, pr.c1, row, col, sheet, sheet, "");
                     let prev_span = state.get_point_ref_span_untracked();
                     let cursor = prev_span.map(|(_, end)| end).unwrap_or(0);
                     let new_state = state
@@ -295,7 +295,12 @@ pub fn Worksheet() -> impl IntoView {
                                 e.text = new_text;
                             }
                         });
-                        state.set_point_range(Some([r1, c1, row, col]));
+                        state.set_point_range(Some(SheetRect {
+                            r1: pr.r1,
+                            c1: pr.c1,
+                            r2: row,
+                            c2: col,
+                        }));
                         state.set_point_ref_span(Some((new_start, new_end)));
                         state.request_redraw();
                     }
@@ -682,7 +687,12 @@ fn handle_cell_click(
                         e.text = new_text;
                     }
                 });
-                state.set_point_range(Some([row, col, row, col]));
+                state.set_point_range(Some(SheetRect {
+                    r1: row,
+                    c1: col,
+                    r2: row,
+                    c2: col,
+                }));
                 state.set_drag(DragState::Pointing);
                 state.set_point_ref_span(Some((new_start, new_end)));
                 state.request_redraw();
