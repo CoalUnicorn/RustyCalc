@@ -351,7 +351,7 @@ impl CanvasRenderer {
                 sheet,
                 frc.offset,
                 SheetRange::from_point_range(pr),
-                "#1E6FD9",
+                self.theme.pointing,
                 DashFill::Tinted,
             );
         }

@@ -169,6 +169,7 @@ pub struct CanvasTheme {
     pub default_text_color: &'static str,
     pub selection_color: &'static str,
     pub cell_bg: &'static str,
+    pub pointing: &'static str,
     /// rgba() string for the semi-transparent range selection fill.
     pub selection_fill: &'static str,
 }
@@ -184,6 +185,7 @@ pub static LIGHT: CanvasTheme = CanvasTheme {
     default_text_color: "#2E414D",
     selection_color: "#17A2D3",
     cell_bg: "#FFFFFF",
+    pointing: "#1E6FD9",
     selection_fill: "rgba(23,162,211,0.12)",
 };
 
@@ -198,5 +200,6 @@ pub static DARK: CanvasTheme = CanvasTheme {
     default_text_color: "#D4D4D4",
     selection_color: "#17A2D3",
     cell_bg: "#121212",
+    pointing: "#1E6FD9",
     selection_fill: "rgba(23,162,211,0.18)",
 };
