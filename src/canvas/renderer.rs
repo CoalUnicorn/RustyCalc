@@ -710,7 +710,7 @@ impl CanvasRenderer {
         }
 
         let resolved = model.cell_style(sheet, row, col, self.theme.default_text_color);
-        let font = resolved.font.family.css_name().to_string(); //css_font();
+        let font = resolved.font.css.clone();
         let font_size = resolved.font.size_px; // font_size();
         let text_color = resolved.text_color.as_str().to_string(); // text_color().as_str().to_owned();
         let effective_h_align = resolved.h_align; //h_align();

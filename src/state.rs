@@ -245,14 +245,16 @@ impl WorkbookState {
             }
         }
 
-        // Set all 6 signals so no stale events from the previous action remain.
-        // Leptos suppresses notifications when new == old (PartialEq), so []→[] is free.
-        self.events.content.set(content);
-        self.events.format.set(format);
-        self.events.navigation.set(navigation);
-        self.events.structure.set(structure);
-        self.events.mode.set(mode_evs);
-        self.events.theme.set(theme_evs);
+        // Replace all 6 signals so no stale events from the previous action remain.
+        // Use update() not set(): set() uses PartialEq and suppresses notification when
+        // the same event fires twice on the same range (e.g. toggle bold twice without
+        // navigating). update() always notifies subscribers regardless of value equality.
+        self.events.content.update(|v| *v = content);
+        self.events.format.update(|v| *v = format);
+        self.events.navigation.update(|v| *v = navigation);
+        self.events.structure.update(|v| *v = structure);
+        self.events.mode.update(|v| *v = mode_evs);
+        self.events.theme.update(|v| *v = theme_evs);
     }
 
     // Convenience methods for commonly used signals

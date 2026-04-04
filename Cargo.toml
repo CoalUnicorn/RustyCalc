@@ -23,6 +23,7 @@ serde_json = "1"
 base64 = "0.22"
 leptos-use = "0.15"
 js-sys = "0.3"  # For enhanced storage date/time functions
+thiserror = "1.0"  # For structured error types
 codee = { version = "0.2", features = ["json_serde"] }
 leptos_i18n = "0.6.1"
 
@@ -30,5 +31,12 @@ leptos_i18n = "0.6.1"
 wasm-bindgen-test = "0.3"
 
 [profile.release]
+#inherits = "release"
 opt-level = "z"
 lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[package.metadata.leptos]
+lib-profile-release = "wasm-release"
