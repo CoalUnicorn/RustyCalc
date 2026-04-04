@@ -1,27 +1,28 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::components::color_picker::TabColorPicker;
+use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
 use crate::state::{ModelStore, WorkbookState};
-use crate::theme::COLOR_PALETTE;
+use crate::storage;
 
 // Main component
 
 /// Sheet tab bar: `[ + ][ ≡ ][ Sheet1 ▾ | **Sheet2 ▾** | Sheet3 ▾ ]`
+///
+/// Holds all shared UI state as split signals and passes the appropriate halves
+/// to children. Children that only read get a `ReadSignal`; children that need
+/// to mutate get the paired `WriteSignal`. This matches the `WorkbookState` pattern.
 #[component]
 pub fn SheetTabBar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    // Tracks which tab's context menu is open (by sheet_idx), or None.
-    let menu_open: RwSignal<Option<u32>> = RwSignal::new(None);
-    // Fixed position for the context menu (set on menu click).
-    let menu_pos: RwSignal<(i32, i32)> = RwSignal::new((0, 0));
-    // Tracks which tab is being renamed, or None.
-    let renaming: RwSignal<Option<u32>> = RwSignal::new(None);
+    // Local UI state — split so read-only children don't re-run on writes from siblings.
+    let (renaming, set_renaming) = signal(None::<u32>);
 
     let visible_sheets = move || {
-        // Subscribe to structure events (sheet list changes) and navigation (active sheet changes)
         let _ = state.events.structure.get();
         let _ = state.events.navigation.get();
         model.with_value(|m| {
@@ -35,60 +36,33 @@ pub fn SheetTabBar() -> impl IntoView {
     };
 
     let on_add = move |_| {
-        let new_sheet_result = model.with_value(|m| {
-            let current_sheets = m.get_worksheets_properties();
-            (current_sheets.len() as u32, current_sheets.len() as u32)
-        });
-
-        model.update_value(|m| {
-            m.new_sheet().ok();
-        });
-
-        // Fire specific structure event instead of generic redraw
-        let new_sheet_name = format!("Sheet{}", new_sheet_result.1 + 1);
-        state.emit_event(SpreadsheetEvent::Structure(
-            StructureEvent::WorksheetAdded {
-                sheet: new_sheet_result.1,
-                name: new_sheet_name,
-            },
-        ));
+        // Snapshot count before mutation — that index is the new sheet's position.
+        let sheet_count = model.with_value(|m| m.get_worksheets_properties().len() as u32);
+        model.update_value(|m| { m.new_sheet().ok(); });
+        if let Some(uuid) = state.get_current_uuid_untracked() {
+            model.with_value(|m| storage::save(&uuid, m));
+        }
+        state.emit_event(SpreadsheetEvent::Structure(StructureEvent::WorksheetAdded {
+            sheet: sheet_count,
+            name: format!("Sheet{}", sheet_count + 1),
+        }));
     };
-
-    // let on_toggle_perf = move |_: web_sys::MouseEvent| {
-    //     state.show_perf_panel.update(|v| *v = !*v);
-    // };
-
-    // let perf_icon = move || {
-    //     if state.show_perf_panel.get() {
-    //         "⏱"
-    //     } else {
-    //         "○"
-    //     }
-    // };
 
     view! {
         <div class="tab-bar">
             <button class="tab-bar-add" on:click=on_add title="Add sheet">"+"</button>
             <AllSheetsMenu />
-            /*
-            <button class="tab-bar-add" on:click=on_toggle_perf title="Toggle performance panel">
-                {perf_icon}
-            </button>
-            */
             <div class="tab-bar-divider" />
             <div class="tab-bar-scroll">
                 <For
                     each=visible_sheets
                     key=|(sheet_id, sheet_idx)| (*sheet_id, *sheet_idx)
-                    children=move |(_, sheet_idx)| {
-                        view! {
-                            <SheetTab
-                                sheet_idx=sheet_idx
-                                menu_open=menu_open
-                                menu_pos=menu_pos
-                                renaming=renaming
-                            />
-                        }
+                    children=move |(_, sheet_idx)| view! {
+                        <SheetTab
+                            sheet_idx=sheet_idx
+                            renaming=renaming
+                            set_renaming=set_renaming
+                        />
                     }
                 />
             </div>
@@ -101,21 +75,23 @@ pub fn SheetTabBar() -> impl IntoView {
 #[component]
 fn SheetTab(
     sheet_idx: u32,
-    menu_open: RwSignal<Option<u32>>,
-    menu_pos: RwSignal<(i32, i32)>,
-    renaming: RwSignal<Option<u32>>,
+    renaming: ReadSignal<Option<u32>>,
+    set_renaming: WriteSignal<Option<u32>>,
 ) -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
+    // Each SheetTab owns its own menu state — no parent coordination needed.
+    // ContextMenu's backdrop ensures at most one menu is visible at a time.
+    let (menu_open, set_menu_open) = signal(false);
+    let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
+
     let is_selected = move || {
-        // Subscribe to navigation events (active sheet changes affect selection state)
         let _ = state.events.navigation.get();
         model.with_value(|m| m.get_selected_view().sheet == sheet_idx)
     };
 
     let name = move || {
-        // Subscribe to structure events (sheet renaming affects name display)
         let _ = state.events.structure.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
@@ -125,101 +101,51 @@ fn SheetTab(
         })
     };
 
-    let tab_color = move || {
-        // Subscribe to structure events (sheet color changes affect tab appearance)
+    // Single derived signal for the tab color — used by both color_bar_style
+    // and TabColorPicker to avoid a duplicate reactive subscription.
+    let current_tab_color = Signal::derive(move || {
         let _ = state.events.structure.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .get(sheet_idx as usize)
                 .and_then(|s| s.color.clone())
         })
-    };
+    });
 
     let on_click = move |_: web_sys::MouseEvent| {
         let previous_sheet = model.with_value(|m| m.get_selected_view().sheet);
-
-        model.update_value(|m| {
-            m.set_selected_sheet(sheet_idx).ok();
-        });
-
-        // Fire specific navigation event instead of generic redraw
+        model.update_value(|m| { m.set_selected_sheet(sheet_idx).ok(); });
         if previous_sheet != sheet_idx {
-            state.emit_event(SpreadsheetEvent::Navigation(
-                NavigationEvent::ActiveSheetChanged {
-                    from_sheet: previous_sheet,
-                    to_sheet: sheet_idx,
-                },
-            ));
+            state.emit_event(SpreadsheetEvent::Navigation(NavigationEvent::ActiveSheetChanged {
+                from_sheet: previous_sheet,
+                to_sheet: sheet_idx,
+            }));
         }
     };
 
     let on_dblclick = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
         ev.prevent_default();
-        menu_open.set(None);
-        renaming.set(Some(sheet_idx));
+        set_renaming.set(Some(sheet_idx));
     };
 
-    let menu = move |ev: web_sys::MouseEvent| {
+    let on_menu_toggle = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
-        if menu_open.get_untracked() == Some(sheet_idx) {
-            menu_open.set(None);
-        } else {
-            // Position the fixed menu at the menu's screen location.
-            menu_pos.set((ev.client_x(), ev.client_y()));
-            menu_open.set(Some(sheet_idx));
-        }
+        set_menu_pos.set((ev.client_x(), ev.client_y()));
+        set_menu_open.update(|v| *v = !*v);
     };
 
-    let tab_class = move || {
-        if is_selected() {
-            "sheet-tab selected"
-        } else {
-            "sheet-tab"
-        }
-    };
-
-    // Color accent bar at the bottom of the tab (if a tab color is set).
     let color_bar_style = move || {
-        tab_color()
+        current_tab_color.get()
             .map(|c| format!("background:{c};"))
             .unwrap_or_default()
     };
 
-    view! {
-        <div class=tab_class on:click=on_click on:dblclick=on_dblclick>
-            <Show
-                when=move || renaming.get() == Some(sheet_idx)
-                fallback=move || view! { <span class="tab-name">{name}</span> }
-            >
-                <RenameInput sheet_idx=sheet_idx renaming=renaming />
-            </Show>
-            <span class="sheet-tab-menu" on:click=menu>"≓"</span>
-            <div class="tab-color-bar" style=color_bar_style />
+    // Context menu action handlers — inlined from the old TabContextMenu component.
 
-            <Show when=move || menu_open.get() == Some(sheet_idx)>
-                <TabContextMenu sheet_idx=sheet_idx menu_open=menu_open menu_pos=menu_pos renaming=renaming />
-            </Show>
-        </div>
-    }
-}
-
-// Context menu
-
-#[component]
-fn TabContextMenu(
-    sheet_idx: u32,
-    menu_open: RwSignal<Option<u32>>,
-    menu_pos: RwSignal<(i32, i32)>,
-    renaming: RwSignal<Option<u32>>,
-) -> impl IntoView {
-    let state = expect_context::<WorkbookState>();
-    let model = expect_context::<ModelStore>();
-
-    let color_sub_open: RwSignal<bool> = RwSignal::new(false);
-
+    // Plain closure: avoids Memo::get() panicking when the reactive owner
+    // is disposed mid-event-dispatch after a hide/delete mutation.
     let visible_count = move || {
-        // Subscribe to structure events (sheet visibility changes affect count)
         let _ = state.events.structure.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
@@ -228,50 +154,41 @@ fn TabContextMenu(
                 .count()
         })
     };
+    // `>` inside view! attributes parses as a closing tag — hoist the comparison.
+    let can_hide_or_delete = move || visible_count() > 1;
 
-    let on_rename = move |ev: web_sys::MouseEvent| {
-        ev.stop_propagation();
-        menu_open.set(None);
-        renaming.set(Some(sheet_idx));
+    let on_rename = move || {
+        set_renaming.set(Some(sheet_idx));
     };
 
-    let on_color_toggle = move |ev: web_sys::MouseEvent| {
-        ev.stop_propagation();
-        color_sub_open.update(|v| *v = !*v);
-    };
-
-    let set_color = move |hex: &str| {
-        model.update_value(|m| {
-            m.set_sheet_color(sheet_idx, hex).ok();
-        });
-
-        // Fire specific format event for sheet color change
+    let on_color_change = Callback::new(move |color: Option<String>| {
+        let hex = color.as_deref().unwrap_or("");
+        model.update_value(|m| { m.set_sheet_color(sheet_idx, hex).ok(); });
+        if let Some(uuid) = state.get_current_uuid_untracked() {
+            model.with_value(|m| storage::save(&uuid, m));
+        }
+        if !hex.is_empty() {
+            state.add_recent_color(hex);
+        }
         state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
             sheet: sheet_idx,
             col: None,
             row: None,
         }));
+        set_menu_open.set(false);
+    });
 
-        menu_open.set(None);
-    };
-
-    let on_hide = move |ev: web_sys::MouseEvent| {
-        ev.stop_propagation();
-        menu_open.set(None);
-
-        model.update_value(|m| {
-            m.hide_sheet(sheet_idx).ok();
-        });
-
-        // Fire specific structure event for sheet hiding (treated as worksheet deletion from UI perspective)
+    let on_hide = move || {
+        model.update_value(|m| { m.hide_sheet(sheet_idx).ok(); });
+        if let Some(uuid) = state.get_current_uuid_untracked() {
+            model.with_value(|m| storage::save(&uuid, m));
+        }
         state.emit_event(SpreadsheetEvent::Structure(
             StructureEvent::WorksheetDeleted { sheet: sheet_idx },
         ));
     };
 
-    let on_delete = move |ev: web_sys::MouseEvent| {
-        ev.stop_propagation();
-        menu_open.set(None);
+    let on_delete = move || {
         let sheet_name = model.with_value(|m| {
             m.get_worksheets_properties()
                 .get(sheet_idx as usize)
@@ -285,11 +202,10 @@ fn TabContextMenu(
             })
             .unwrap_or(false);
         if confirmed {
-            model.update_value(|m| {
-                m.delete_sheet(sheet_idx).ok();
-            });
-
-            // Fire specific structure event for sheet deletion
+            model.update_value(|m| { m.delete_sheet(sheet_idx).ok(); });
+            if let Some(uuid) = state.get_current_uuid_untracked() {
+                model.with_value(|m| storage::save(&uuid, m));
+            }
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::WorksheetDeleted { sheet: sheet_idx },
             ));
@@ -297,63 +213,34 @@ fn TabContextMenu(
     };
 
     view! {
-        // Click-away backdrop
-        <div class="click-away-backdrop" on:click=move |_| menu_open.set(None) />
-
         <div
-            class="tab-context-menu"
-            style=move || {
-                let (x, y) = menu_pos.get();
-                format!("left:{x}px;bottom:calc(100vh - {y}px + 4px);")
-            }
+            class=move || if is_selected() { "sheet-tab selected" } else { "sheet-tab" }
+            on:click=on_click
+            on:dblclick=on_dblclick
         >
-            <div class="ctx-item" on:click=on_rename>
-                <span class="ctx-icon">"✏"</span> "Rename"
-            </div>
-            <div class="ctx-item" on:click=on_color_toggle>
-                <span class="ctx-icon">"🎨"</span> "Change Color"
-            </div>
-            // [x] TODO: extract to component
-            // [ ] Replace with TabColorPicker
-            <Show when=move || color_sub_open.get()>
-                <div class="color-picker-inline">
-                    <div class="color-picker-grid">
-                        {COLOR_PALETTE.iter().map(|&hex| {
-                            view! {
-                                <div
-                                    title=hex
-                                    class="color-picker-swatch"
-                                    style=format!("background:{hex};")
-                                    on:click=move |ev: web_sys::MouseEvent| {
-                                        ev.stop_propagation();
-                                        set_color(hex);
-                                    }
-                                />
-                            }
-                        }).collect::<Vec<_>>()}
-                    </div>
-                    <button
-                        class="color-picker-clear"
-                        on:click=move |ev: web_sys::MouseEvent| {
-                            ev.stop_propagation();
-                            set_color("");
-                        }
-                    >
-                        "No color"
-                    </button>
-                </div>
+            <Show
+                when=move || renaming.get() == Some(sheet_idx)
+                fallback=move || view! { <span class="tab-name">{name}</span> }
+            >
+                <RenameInput
+                    sheet_idx=sheet_idx
+                    renaming=renaming
+                    set_renaming=set_renaming
+                />
             </Show>
-            <Show when=move || { visible_count() > 1 }>
-                <div class="ctx-item" on:click=on_hide>
-                    <span class="ctx-icon">"👁"</span> "Hide sheet"
-                </div>
-            </Show>
-            <div class="ctx-divider" />
-            <Show when=move || { visible_count() > 1 }>
-                <div class="ctx-item delete" on:click=on_delete>
-                    <span class="ctx-icon">"🗑"</span> "Delete"
-                </div>
-            </Show>
+            <span class="sheet-tab-menu" on:click=on_menu_toggle>"≓"</span>
+            <div class="tab-color-bar" style=color_bar_style />
+            <ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos above_anchor=true>
+                <ContextMenuItem on_click=on_rename icon="✏">"Rename"</ContextMenuItem>
+                <TabColorPicker current_color=current_tab_color on_change=on_color_change />
+                <Show when=can_hide_or_delete>
+                    <ContextMenuItem on_click=on_hide icon="👁">"Hide sheet"</ContextMenuItem>
+                </Show>
+                <ContextMenuSeparator />
+                <Show when=can_hide_or_delete>
+                    <ContextMenuItem on_click=on_delete icon="🗑" destructive=true>"Delete"</ContextMenuItem>
+                </Show>
+            </ContextMenu>
         </div>
     }
 }
@@ -361,10 +248,13 @@ fn TabContextMenu(
 // Rename input
 
 #[component]
-fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView {
+fn RenameInput(
+    sheet_idx: u32,
+    renaming: ReadSignal<Option<u32>>,
+    set_renaming: WriteSignal<Option<u32>>,
+) -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
-
     let input_ref = NodeRef::<leptos::html::Input>::new();
 
     let initial_name = model.with_value(|m| {
@@ -392,41 +282,42 @@ fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView
                     .map(|s| s.name.clone())
                     .unwrap_or_default()
             });
-
-            model.update_value(|m| {
-                m.rename_sheet(sheet_idx, &new_name).ok();
-            });
-
-            // Fire specific structure event for sheet rename
-            state.emit_event(SpreadsheetEvent::Structure(
-                StructureEvent::WorksheetRenamed {
-                    sheet: sheet_idx,
-                    old_name,
-                    new_name: new_name.clone(),
-                },
-            ));
+            model.update_value(|m| { m.rename_sheet(sheet_idx, &new_name).ok(); });
+            if let Some(uuid) = state.get_current_uuid_untracked() {
+                model.with_value(|m| storage::save(&uuid, m));
+            }
+            state.emit_event(SpreadsheetEvent::Structure(StructureEvent::WorksheetRenamed {
+                sheet: sheet_idx,
+                old_name,
+                new_name,
+            }));
         }
-        renaming.set(None);
+        set_renaming.set(None);
     };
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
         ev.stop_propagation();
-        let key = ev.key();
-        if key == "Enter" {
-            ev.prevent_default();
-            let new_name = ev
-                .target()
-                .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-                .map(|i| i.value())
-                .unwrap_or_default();
-            commit_rename(new_name);
-        } else if key == "Escape" {
-            ev.prevent_default();
-            renaming.set(None);
+        match ev.key().as_str() {
+            "Enter" => {
+                ev.prevent_default();
+                let new_name = ev
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+                    .map(|i| i.value())
+                    .unwrap_or_default();
+                commit_rename(new_name);
+            }
+            "Escape" => {
+                ev.prevent_default();
+                set_renaming.set(None);
+            }
+            _ => {}
         }
     };
 
     let on_blur = move |ev: web_sys::FocusEvent| {
+        // Guard: if Enter already fired commit_rename, set_renaming(None) ran first,
+        // so this tab is no longer the active rename target — skip the double-commit.
         if renaming.get_untracked() != Some(sheet_idx) {
             return;
         }
@@ -459,12 +350,12 @@ fn RenameInput(sheet_idx: u32, renaming: RwSignal<Option<u32>>) -> impl IntoView
 fn AllSheetsMenu() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
-    let open: RwSignal<bool> = RwSignal::new(false);
     let btn_ref = NodeRef::<leptos::html::Button>::new();
-    let menu_pos: RwSignal<(i32, i32)> = RwSignal::new((0, 0));
+
+    let (open, set_open) = signal(false);
+    let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
 
     let all_sheets = move || {
-        // Subscribe to structure events (sheet list, names, visibility changes)
         let _ = state.events.structure.get();
         model.with_value(|m| {
             m.get_worksheets_properties()
@@ -476,7 +367,6 @@ fn AllSheetsMenu() -> impl IntoView {
     };
 
     let selected_sheet = move || {
-        // Subscribe to navigation events (active sheet changes affect selection highlight)
         let _ = state.events.navigation.get();
         model.with_value(|m| m.get_selected_view().sheet)
     };
@@ -484,9 +374,9 @@ fn AllSheetsMenu() -> impl IntoView {
     let on_toggle = move |_: web_sys::MouseEvent| {
         if let Some(el) = btn_ref.get() {
             let rect = el.get_bounding_client_rect();
-            menu_pos.set((rect.left() as i32, rect.top() as i32));
+            set_menu_pos.set((rect.left() as i32, rect.top() as i32));
         }
-        open.update(|v| *v = !*v);
+        set_open.update(|v| *v = !*v);
     };
 
     view! {
@@ -500,7 +390,7 @@ fn AllSheetsMenu() -> impl IntoView {
                 "≡"
             </button>
             <Show when=move || open.get()>
-                <div class="click-away-backdrop" on:click=move |_| open.set(false) />
+                <div class="click-away-backdrop" on:click=move |_| set_open.set(false) />
                 <div
                     class="all-sheets-menu"
                     style=move || {
@@ -521,37 +411,32 @@ fn AllSheetsMenu() -> impl IntoView {
                             } else {
                                 "all-sheets-item"
                             };
-                            let name_clone = name.clone(); // Clone for use in closure
+                            let name_for_event = name.clone();
                             view! {
                                 <div
                                     class=item_class
                                     on:click=move |_| {
-                                        let previous_sheet = model.with_value(|m| m.get_selected_view().sheet);
-
+                                        let previous_sheet =
+                                            model.with_value(|m| m.get_selected_view().sheet);
                                         if is_hidden {
                                             model.update_value(|m| { m.unhide_sheet(idx).ok(); });
-                                            // Fire event for sheet unhiding (opposite of hiding/deletion)
                                             state.emit_event(SpreadsheetEvent::Structure(
                                                 StructureEvent::WorksheetAdded {
                                                     sheet: idx,
-                                                    name: name_clone.clone(),
-                                                }
+                                                    name: name_for_event.clone(),
+                                                },
                                             ));
                                         }
-
                                         model.update_value(|m| { m.set_selected_sheet(idx).ok(); });
-
-                                        // Fire navigation event for sheet selection
                                         if previous_sheet != idx {
                                             state.emit_event(SpreadsheetEvent::Navigation(
                                                 NavigationEvent::ActiveSheetChanged {
                                                     from_sheet: previous_sheet,
                                                     to_sheet: idx,
-                                                }
+                                                },
                                             ));
                                         }
-
-                                        open.set(false);
+                                        set_open.set(false);
                                     }
                                 >
                                     {name}

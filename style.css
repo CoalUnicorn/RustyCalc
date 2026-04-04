@@ -666,7 +666,7 @@
 
 /* Tab context menu                 */
 
-.tab-context-menu {
+.context-menu {
     position: fixed;
     z-index: 1100;
     background: var(--bg-primary);
@@ -692,7 +692,7 @@
     background: rgba(128, 128, 128, 0.1);
 }
 
-.ctx-item.delete {
+.ctx-item.destructive {
     color: #d32f2f;
 }
 
