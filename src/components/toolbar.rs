@@ -4,7 +4,7 @@ use wasm_bindgen::UnwrapThrowExt;
 use crate::components::color_picker::{BackgroundColorPicker, TextColorPicker};
 use crate::events::*;
 use crate::input::action::{execute, SpreadsheetAction};
-use crate::model::{frontend_types::ToolbarState, FrontendModel, SafeFontFamily};
+use crate::model::{frontend_types::ToolbarState, style_types::HexColor, FrontendModel, SafeFontFamily};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::{refocus_workbook, warn_if_err};
 
@@ -379,7 +379,7 @@ fn TextColorPickerToolbar() -> impl IntoView {
         if let Some(ref hex) = color {
             state.add_recent_color(hex);
         }
-        execute(&SpreadsheetAction::set_text_color(color), model, &state);
+        execute(&SpreadsheetAction::set_text_color(HexColor::from_opt(color)), model, &state);
         refocus_workbook();
     });
 
@@ -404,7 +404,7 @@ fn BackgroundColorPickerToolbar() -> impl IntoView {
             state.add_recent_color(hex);
         }
         execute(
-            &SpreadsheetAction::set_background_color(color),
+            &SpreadsheetAction::set_background_color(HexColor::from_opt(color)),
             model,
             &state,
         );

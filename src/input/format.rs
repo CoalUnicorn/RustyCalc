@@ -7,7 +7,8 @@ use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::helpers::{mutate, selection_area, EvaluationMode};
 use crate::model::{
-    style_types::BooleanValue, style_types::StylePath, FrontendModel, SafeFontFamily, ToolbarState,
+    style_types::{BooleanValue, HexColor, StylePath},
+    FrontendModel, SafeFontFamily, ToolbarState,
 };
 
 use crate::state::{ModelStore, WorkbookState};
@@ -34,10 +35,10 @@ pub enum FormatAction {
     SetFontSize(f64),
     /// Set font family on the selected range.
     SetFontFamily(SafeFontFamily),
-    /// Set text (font) color. `None` resets to automatic (inherits theme default).
-    SetTextColor(Option<String>),
-    /// Set cell background fill color. `None` clears the fill (transparent).
-    SetBackgroundColor(Option<String>),
+    /// Set text (font) color. `HexColor::transparent()` resets to automatic.
+    SetTextColor(HexColor),
+    /// Set cell background fill color. `HexColor::transparent()` clears the fill.
+    SetBackgroundColor(HexColor),
 }
 
 pub fn execute_format(action: &FormatAction, model: ModelStore, state: &WorkbookState) {
@@ -128,7 +129,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
             }));
         }
         FormatAction::SetTextColor(hex) => {
-            // IronCalc "font.color": empty string clears (→ None), hex string sets.
+            // IronCalc "font.color": empty string clears (→ transparent), hex string sets.
             // Uses the same update_range_style path as bold/italic/size for proper
             // style-pool persistence and XLSX round-trip.
             let (sheet, start_row, start_col, end_row, end_col) =
@@ -142,7 +143,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                         a.column + a.width - 1,
                     )
                 });
-            let value = hex.as_deref().unwrap_or("");
+            let value = hex.as_str();
             mutate(model, state, EvaluationMode::Deferred, |m| {
                 let area = selection_area(m);
                 warn_if_err(
@@ -172,7 +173,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                         a.column + a.width - 1,
                     )
                 });
-            let value = hex.as_deref().unwrap_or("");
+            let value = hex.as_str();
 
             mutate(model, state, EvaluationMode::Deferred, |m| {
                 let area = selection_area(m);

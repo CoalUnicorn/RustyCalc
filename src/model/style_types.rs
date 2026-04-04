@@ -115,6 +115,18 @@ impl HexColor {
     pub fn is_transparent(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Converts an `Option<String>` to a `HexColor` at a system boundary.
+    ///
+    /// `None` and invalid hex strings both map to `transparent()`.
+    /// Use this in UI callbacks where the color picker may produce unvalidated input.
+    pub fn from_opt(opt: Option<String>) -> Self {
+        match opt {
+            None => Self::transparent(),
+            Some(s) if s.is_empty() => Self::transparent(),
+            Some(s) => Self::new(s).unwrap_or_else(|_| Self::transparent()),
+        }
+    }
 }
 
 impl AsRef<str> for HexColor {

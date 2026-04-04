@@ -15,7 +15,7 @@ use crate::input::edit::{execute_edit, EditAction};
 use crate::input::format::{execute_format, FormatAction};
 use crate::input::nav::{execute_nav, NavAction};
 use crate::input::structure::{execute_struct, StructAction};
-use crate::model::{ArrowKey, SafeFontFamily};
+use crate::model::{style_types::HexColor, ArrowKey, SafeFontFamily};
 use crate::state::{EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
 
@@ -239,10 +239,10 @@ impl SpreadsheetAction {
     pub fn set_font_family(family: SafeFontFamily) -> Self {
         Self::Format(FormatAction::SetFontFamily(family))
     }
-    pub fn set_text_color(hex: Option<String>) -> Self {
+    pub fn set_text_color(hex: HexColor) -> Self {
         Self::Format(FormatAction::SetTextColor(hex))
     }
-    pub fn set_background_color(hex: Option<String>) -> Self {
+    pub fn set_background_color(hex: HexColor) -> Self {
         Self::Format(FormatAction::SetBackgroundColor(hex))
     }
     pub fn undo() -> Self {
