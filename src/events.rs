@@ -123,18 +123,28 @@ impl ContentEvent {
 
     pub fn dbg_description(&self) -> String {
         match self {
-            ContentEvent::CellChanged { address, new_value, .. } => format!(
+            ContentEvent::CellChanged {
+                address, new_value, ..
+            } => format!(
                 "Content::CellChanged S{}R{}C{} → {:?}",
                 address.sheet, address.row, address.column, new_value
             ),
-            ContentEvent::RangeChanged { sheet, start_row, start_col, end_row, end_col } => format!(
-                "Content::RangeChanged S{sheet} {start_col}{start_row}:{end_col}{end_row}"
-            ),
+            ContentEvent::RangeChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            } => {
+                format!("Content::RangeChanged S{sheet} {start_col}{start_row}:{end_col}{end_row}")
+            }
             ContentEvent::FormulaChanged { address } => format!(
-                "Content::FormulaChanged S{}R{}C{}", address.sheet, address.row, address.column
+                "Content::FormulaChanged S{}R{}C{}",
+                address.sheet, address.row, address.column
             ),
             ContentEvent::CalculationUpdated { affected_sheets } => format!(
-                "Content::CalculationUpdated ({} sheets)", affected_sheets.len()
+                "Content::CalculationUpdated ({} sheets)",
+                affected_sheets.len()
             ),
             ContentEvent::NamedRangesChanged => "Content::NamedRangesChanged".into(),
             ContentEvent::GenericChange => "Content::GenericChange".into(),
@@ -187,23 +197,28 @@ impl FormatEvent {
     pub fn dbg_description(&self) -> String {
         match self {
             FormatEvent::CellStyleChanged { address } => format!(
-                "Format::CellStyle S{}R{}C{}", address.sheet, address.row, address.column
+                "Format::CellStyle S{}R{}C{}",
+                address.sheet, address.row, address.column
             ),
-            FormatEvent::RangeStyleChanged { sheet, start_row, start_col, end_row, end_col } => format!(
-                "Format::RangeStyle S{sheet} {start_col}{start_row}:{end_col}{end_row}"
-            ),
-            FormatEvent::LayoutChanged { sheet, col, row } => format!(
-                "Format::Layout S{sheet} col={col:?} row={row:?}"
-            ),
-            FormatEvent::RecentColorsUpdated { colors } => format!(
-                "Format::RecentColors ({} colors)", colors.len()
-            ),
-            FormatEvent::DocumentColorsChanged { colors } => format!(
-                "Format::DocColors ({} colors)", colors.len()
-            ),
-            FormatEvent::ConditionalFormattingChanged { sheet } => format!(
-                "Format::CondFmt S{sheet}"
-            ),
+            FormatEvent::RangeStyleChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            } => format!("Format::RangeStyle S{sheet} {start_col}{start_row}:{end_col}{end_row}"),
+            FormatEvent::LayoutChanged { sheet, col, row } => {
+                format!("Format::Layout S{sheet} col={col:?} row={row:?}")
+            }
+            FormatEvent::RecentColorsUpdated { colors } => {
+                format!("Format::RecentColors ({} colors)", colors.len())
+            }
+            FormatEvent::DocumentColorsChanged { colors } => {
+                format!("Format::DocColors ({} colors)", colors.len())
+            }
+            FormatEvent::ConditionalFormattingChanged { sheet } => {
+                format!("Format::CondFmt S{sheet}")
+            }
         }
     }
 }
@@ -402,14 +417,21 @@ impl StructureEvent {
 
     pub fn dbg_description(&self) -> String {
         match self {
-            StructureEvent::WorksheetAdded { sheet, name } => format!("Structure::SheetAdded S{sheet} {name:?}"),
-            StructureEvent::WorksheetDeleted { sheet } => format!("Structure::SheetDeleted S{sheet}"),
-            StructureEvent::WorksheetRenamed { sheet, old_name, new_name } => format!(
-                "Structure::SheetRenamed S{sheet} {old_name:?}→{new_name:?}"
-            ),
+            StructureEvent::WorksheetAdded { sheet, name } => {
+                format!("Structure::SheetAdded S{sheet} {name:?}")
+            }
+            StructureEvent::WorksheetDeleted { sheet } => {
+                format!("Structure::SheetDeleted S{sheet}")
+            }
+            StructureEvent::WorksheetRenamed {
+                sheet,
+                old_name,
+                new_name,
+            } => format!("Structure::SheetRenamed S{sheet} {old_name:?}→{new_name:?}"),
             StructureEvent::WorksheetsReordered => "Structure::Reordered".into(),
             StructureEvent::StructureChanged(c) => format!(
-                "Structure::Changed S{} {:?} {:?}", c.sheet, c.operation, c.dimension
+                "Structure::Changed S{} {:?} {:?}",
+                c.sheet, c.operation, c.dimension
             ),
         }
     }
@@ -463,22 +485,32 @@ impl NavigationEvent {
     pub fn dbg_description(&self) -> String {
         match self {
             NavigationEvent::SelectionChanged { address } => format!(
-                "Nav::Selection S{}R{}C{}", address.sheet, address.row, address.column
+                "Nav::Selection S{}R{}C{}",
+                address.sheet, address.row, address.column
             ),
-            NavigationEvent::SelectionRangeChanged { sheet, start_row, start_col, end_row, end_col } => format!(
-                "Nav::RangeSelect S{sheet} {start_col}{start_row}:{end_col}{end_row}"
-            ),
-            NavigationEvent::ViewportScrolled { sheet, top_row, left_col } => format!(
-                "Nav::Scroll S{sheet} top={top_row} left={left_col}"
-            ),
-            NavigationEvent::ActiveSheetChanged { from_sheet, to_sheet } => format!(
-                "Nav::SheetSwitch S{from_sheet}→S{to_sheet}"
-            ),
+            NavigationEvent::SelectionRangeChanged {
+                sheet,
+                start_row,
+                start_col,
+                end_row,
+                end_col,
+            } => format!("Nav::RangeSelect S{sheet} {start_col}{start_row}:{end_col}{end_row}"),
+            NavigationEvent::ViewportScrolled {
+                sheet,
+                top_row,
+                left_col,
+            } => format!("Nav::Scroll S{sheet} top={top_row} left={left_col}"),
+            NavigationEvent::ActiveSheetChanged {
+                from_sheet,
+                to_sheet,
+            } => format!("Nav::SheetSwitch S{from_sheet}→S{to_sheet}"),
             NavigationEvent::EditingStarted { address } => format!(
-                "Nav::EditStart S{}R{}C{}", address.sheet, address.row, address.column
+                "Nav::EditStart S{}R{}C{}",
+                address.sheet, address.row, address.column
             ),
             NavigationEvent::EditingEnded { address, committed } => format!(
-                "Nav::EditEnd S{}R{}C{} committed={committed}", address.sheet, address.row, address.column
+                "Nav::EditEnd S{}R{}C{} committed={committed}",
+                address.sheet, address.row, address.column
             ),
         }
     }
@@ -517,22 +549,25 @@ impl ModeEvent {
     pub fn dbg_description(&self) -> String {
         match self {
             ModeEvent::EditStarted { address } => format!(
-                "Mode::EditStarted S{}R{}C{}", address.sheet, address.row, address.column
+                "Mode::EditStarted S{}R{}C{}",
+                address.sheet, address.row, address.column
             ),
             ModeEvent::EditEnded => "Mode::EditEnded".into(),
-            ModeEvent::DragModeChanged { from_mode, to_mode } => format!(
-                "Mode::Drag {from_mode:?}→{to_mode:?}"
-            ),
+            ModeEvent::DragModeChanged { from_mode, to_mode } => {
+                format!("Mode::Drag {from_mode:?}→{to_mode:?}")
+            }
             ModeEvent::PointModeChanged { active, .. } => format!("Mode::Point active={active}"),
-            ModeEvent::ContextMenuToggled { visible, target } => format!(
-                "Mode::CtxMenu visible={visible} target={target:?}"
-            ),
-            ModeEvent::DialogToggled { dialog_name, visible } => format!(
-                "Mode::Dialog {dialog_name:?} visible={visible}"
-            ),
-            ModeEvent::PanelToggled { panel_name, visible } => format!(
-                "Mode::Panel {panel_name:?} visible={visible}"
-            ),
+            ModeEvent::ContextMenuToggled { visible, target } => {
+                format!("Mode::CtxMenu visible={visible} target={target:?}")
+            }
+            ModeEvent::DialogToggled {
+                dialog_name,
+                visible,
+            } => format!("Mode::Dialog {dialog_name:?} visible={visible}"),
+            ModeEvent::PanelToggled {
+                panel_name,
+                visible,
+            } => format!("Mode::Panel {panel_name:?} visible={visible}"),
         }
     }
 }
@@ -630,18 +665,17 @@ impl SpreadsheetEvent {
     // ```
     pub fn dbg_description(&self) -> String {
         match self {
-            SpreadsheetEvent::Content(e)    => e.dbg_description(),
-            SpreadsheetEvent::Format(e)     => e.dbg_description(),
+            SpreadsheetEvent::Content(e) => e.dbg_description(),
+            SpreadsheetEvent::Format(e) => e.dbg_description(),
             SpreadsheetEvent::Navigation(e) => e.dbg_description(),
-            SpreadsheetEvent::Structure(e)  => e.dbg_description(),
-            SpreadsheetEvent::Mode(e)       => e.dbg_description(),
-            SpreadsheetEvent::Theme(e)      => e.dbg_description(),
+            SpreadsheetEvent::Structure(e) => e.dbg_description(),
+            SpreadsheetEvent::Mode(e) => e.dbg_description(),
+            SpreadsheetEvent::Theme(e) => e.dbg_description(),
         }
     }
 }
 
 // NOTE: Check if still worth the macro
-//
 /// Event subscription filters for components
 #[allow(dead_code)]
 pub trait EventFilter {
