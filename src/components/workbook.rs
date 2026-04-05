@@ -85,9 +85,10 @@ pub fn Workbook() -> impl IntoView {
                     let sheet = model.with_value(|m| m.get_selected_view().sheet);
                     let ref_str =
                         range_ref_str(new_pr.r1, new_pr.c1, new_pr.r2, new_pr.c2, sheet, sheet, "");
-                    let prev_span = match current_drag {
-                        DragState::Pointing { ref_span, .. } => Some(ref_span),
-                        _ => None,
+                    let prev_span = if let DragState::Pointing { ref_span, .. } = state.drag.get() {
+                        Some(ref_span)
+                    } else {
+                        None
                     };
                     let splice_at = prev_span.map(|(_, end)| end).unwrap_or(cursor);
                     let text = edit.text.clone();

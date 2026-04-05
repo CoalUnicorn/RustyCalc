@@ -61,17 +61,21 @@ pub fn Worksheet() -> impl IntoView {
     // (non-reactive). It is read fresh in the rAF callback each render so it
     // never goes stale (the original marching-ants bug).
     let reactive_overlay = Memo::new(move |_| {
-        let extend_to = match state.drag.get() {
-            DragState::Extending { to_row, to_col } => Some(AutofillTarget {
+        let extend_to = if let DragState::Extending { to_row, to_col } = state.drag.get() {
+            Some(AutofillTarget {
                 row: to_row,
                 col: to_col,
-            }),
-            _ => None,
+            })
+        } else {
+            None
         };
-        let point_range = match state.drag.get() {
-            DragState::Pointing { range, .. } => Some(range),
-            _ => None,
+
+        let point_range = if let DragState::Pointing { range, .. } = state.drag.get() {
+            Some(range)
+        } else {
+            None
         };
+
         (extend_to, point_range)
     });
 
@@ -687,9 +691,10 @@ fn handle_cell_click(
             if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                 let sheet = model.with_value(|m| m.active_cell().sheet);
                 let ref_str = range_ref_str(row, col, row, col, sheet, sheet, "");
-                let prev_span = match current_drag {
-                    DragState::Pointing { ref_span, .. } => Some(ref_span),
-                    _ => None,
+                let prev_span = if let DragState::Pointing { ref_span, .. } = state.drag.get() {
+                    Some(ref_span)
+                } else {
+                    None
                 };
                 let text = edit.text.clone();
                 let (new_text, new_start, new_end) = splice_ref(&text, cursor, &ref_str, prev_span);
