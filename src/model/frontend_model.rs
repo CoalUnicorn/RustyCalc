@@ -112,15 +112,6 @@ impl FrontendModel for UserModel<'_> {
             None | Some("#000000") => CssColor::new(default_text_color),
             Some(c) => CssColor::new(c),
         };
-        // let text_color = match style.
-
-        // Background
-        let bg_color = style
-            .fill
-            .fg_color
-            .as_deref()
-            .filter(|c| !c.is_empty())
-            .map(CssColor::new);
 
         // Font
         let size_px = style.font.sz as f64;
@@ -130,11 +121,9 @@ impl FrontendModel for UserModel<'_> {
         let css = ResolvedFont::build(size_px, bold, italic, &family);
         let font = ResolvedFont {
             size_px,
-            bold,
-            italic,
             underline: style.font.u,
             strikethrough: style.font.strike,
-            family,
+            // family,
             css,
         };
 
@@ -163,26 +152,12 @@ impl FrontendModel for UserModel<'_> {
             .unwrap_or(VerticalAlignment::Bottom);
         let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
 
-        // Borders
-        let resolve_edge = |item: &ironcalc_base::types::BorderItem| ResolvedBorderEdge {
-            style: item.style.clone(),
-            color: CssColor::new(item.color.as_deref().unwrap_or("#000000")),
-        };
-        let borders = CellBorders {
-            top: style.border.top.as_ref().map(&resolve_edge),
-            right: style.border.right.as_ref().map(&resolve_edge),
-            bottom: style.border.bottom.as_ref().map(&resolve_edge),
-            left: style.border.left.as_ref().map(&resolve_edge),
-        };
-
         ResolvedCellStyle {
             text_color,
-            bg_color,
             font,
             h_align,
             v_align,
             wrap_text,
-            borders,
         }
     }
 
@@ -258,8 +233,8 @@ impl FrontendModel for UserModel<'_> {
     fn frozen_panes(&self) -> FrozenPanes {
         let sheet = self.get_selected_sheet();
         FrozenPanes {
-            rows: self.get_frozen_rows_count(sheet).unwrap_or(0),
-            cols: self.get_frozen_columns_count(sheet).unwrap_or(0),
+            rows: self.get_frozen_rows_count(sheet).unwrap_or(1),
+            cols: self.get_frozen_columns_count(sheet).unwrap_or(1),
         }
     }
 
@@ -363,12 +338,12 @@ impl FrontendModel for UserModel<'_> {
 }
 
 // Tests
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Helper: create a minimal empty workbook model for testing.
+    #[allow(clippy::expect_used)]
     fn make_model() -> UserModel<'static> {
         UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("failed to create test model")
     }
@@ -378,9 +353,8 @@ mod tests {
         let m = make_model();
         // Empty cell should have sensible defaults
         let style = m.cell_style(0, 1, 1, "#000000");
-        assert!(style.bg_color.is_none());
+        // assert!(style.bg_color.is_none());
         assert_eq!(style.text_color.as_str(), "#000000");
-        assert!(!style.font.bold);
         // Empty/missing cells return CellType::Number from the base library,
         // so General alignment resolves to Right (no visible effect since
         // empty cells produce no rendered text).
@@ -475,6 +449,7 @@ mod tests {
         assert_eq!(d.max_column, 1);
     }
 
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn sheet_dimension_after_input() {
         let mut m = make_model();

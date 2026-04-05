@@ -19,6 +19,7 @@
 //! ```
 
 use leptos::prelude::*;
+use leptos_use::on_click_outside;
 
 /// Dropdown container.  Caller owns `open`/`set_open` and `pos`/`set_pos`.
 ///
@@ -27,6 +28,11 @@ use leptos::prelude::*;
 ///
 /// `above_anchor`: when `true`, renders with `bottom: calc(100vh - y + 4px)`
 /// instead of `top: y` — use for menus anchored to a bottom bar.
+///
+/// # Trigger buttons
+/// The button that opens this menu must stop `pointerdown` propagation so
+/// `on_click_outside` does not immediately re-close the menu on the same
+/// event: `on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()`.
 #[component]
 pub fn ContextMenu(
     open: ReadSignal<bool>,
@@ -37,13 +43,23 @@ pub fn ContextMenu(
 ) -> impl IntoView {
     provide_context(set_open);
 
+    let menu_ref = NodeRef::<leptos::html::Div>::new();
+
+    // Close when the user clicks/taps anywhere outside the menu panel.
+    // Guard against spurious fires when the menu is already closed.
+    let _ = on_click_outside(menu_ref, move |_| {
+        if open.get_untracked() {
+            set_open.set(false);
+        }
+    });
+
     // `children()` is FnOnce — must be called exactly once at mount time.
     // We use `display:none` on a wrapper div rather than `<Show>` to avoid
     // the Leptos 0.7 constraint that Show's children closure must be `Fn`.
     view! {
         <div style=move || if open.get() { "" } else { "display:none;" }>
-            <div class="click-away-backdrop" on:click=move |_| set_open.set(false) />
             <div
+                node_ref=menu_ref
                 class="context-menu"
                 style=move || {
                     let (x, y) = pos.get();
@@ -102,9 +118,7 @@ pub fn ContextMenuItem(
     let set_open = use_context::<WriteSignal<bool>>();
     #[cfg(debug_assertions)]
     if set_open.is_none() {
-        web_sys::console::warn_1(
-            &"ContextMenuItem rendered without a ContextMenu ancestor".into(),
-        );
+        web_sys::console::warn_1(&"ContextMenuItem rendered without a ContextMenu ancestor".into());
     }
 
     // Arc so the closure can be called via Fn (not FnOnce) inside the event handler.

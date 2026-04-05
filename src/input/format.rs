@@ -5,14 +5,14 @@ use leptos::prelude::WithValue;
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::events::{FormatEvent, SpreadsheetEvent};
-use crate::input::helpers::{mutate, selection_area, EvaluationMode};
+use crate::input::error::FormatError;
+use crate::input::helpers::{selection_area, try_mutate, EvaluationMode};
 use crate::model::{
     style_types::{BooleanValue, HexColor, StylePath},
     FrontendModel, SafeFontFamily, ToolbarState,
 };
 
 use crate::state::{ModelStore, WorkbookState};
-use crate::util::warn_if_err;
 
 /// Check if the selection area covers the entire sheet.
 /// Returns true for whole-sheet selections (corner click + select all).
@@ -41,23 +41,27 @@ pub enum FormatAction {
     SetBackgroundColor(HexColor),
 }
 
-pub fn execute_format(action: &FormatAction, model: ModelStore, state: &WorkbookState) {
+pub fn execute_format(
+    action: &FormatAction,
+    model: ModelStore,
+    state: &WorkbookState,
+) -> Result<(), FormatError> {
     match action {
         FormatAction::ToggleBold => {
-            toggle_style(model, state, StylePath::FONT_BOLD, |ts| ts.format.bold);
+            toggle_style(model, state, StylePath::FONT_BOLD, |ts| ts.format.bold)?;
         }
         FormatAction::ToggleItalic => {
-            toggle_style(model, state, StylePath::FONT_ITALIC, |ts| ts.format.italic);
+            toggle_style(model, state, StylePath::FONT_ITALIC, |ts| ts.format.italic)?;
         }
         FormatAction::ToggleUnderline => {
             toggle_style(model, state, StylePath::FONT_UNDERLINE, |ts| {
                 ts.format.underline
-            });
+            })?;
         }
         FormatAction::ToggleStrikethrough => {
             toggle_style(model, state, StylePath::FONT_STRIKETHROUGH, |ts| {
                 ts.format.strikethrough
-            });
+            })?;
         }
         FormatAction::SetFontSize(size) => {
             let size = size.clamp(1.0, 409.0);
@@ -83,16 +87,19 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                 2.  When font size goes below 10px - not able to increment with buttons
                     This may be `toolbar.rs` issue ?
             */
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                let area = selection_area(m);
-                let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);
-                warn_if_err(
-                    m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val),
-                    "set_font_size",
-                );
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = selection_area(m);
+                    let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);
+                    m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
 
-            // Fire format event for font size change
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
                 sheet,
                 start_row,
@@ -115,11 +122,13 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                     )
                 });
 
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                set_font_name(m, name);
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> { set_font_name(m, name) },
+            )?;
 
-            // Fire format event for font family change
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
                 sheet,
                 start_row,
@@ -144,13 +153,17 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                     )
                 });
             let value = hex.as_str();
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                let area = selection_area(m);
-                warn_if_err(
-                    m.update_range_style(&area, StylePath::TEXT_COLOR.as_str(), value),
-                    "set_text_color",
-                );
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = selection_area(m);
+                    m.update_range_style(&area, StylePath::TEXT_COLOR.as_str(), value)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
                 sheet,
                 start_row,
@@ -175,43 +188,41 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
                 });
             let value = hex.as_str();
 
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                let area = selection_area(m);
-                // NOTE: questionable - may not need
-                // **PERFORMANCE OPTIMIZATION**: IronCalc has optimizations for full-column and full-row
-                // ranges, but NOT for full-sheet ranges. Whole-sheet selections fall into the
-                // unoptimized O(rowsxcolumns) path. Fix this by applying column-by-column.
-                if is_whole_sheet_selected(&area) {
-                    // Fast path: Apply to all columns individually (O(columns) instead of O(rowsxcolumns))
-                    // Each column operation is optimized by IronCalc's full-column logic
-                    for col in 1..=LAST_COLUMN {
-                        let column_area = ironcalc_base::expressions::types::Area {
-                            sheet: area.sheet,
-                            row: 1,
-                            column: col,
-                            height: LAST_ROW,
-                            width: 1,
-                        };
-                        if let Err(e) = m.update_range_style(
-                            &column_area,
-                            StylePath::BACKGROUND_COLOR.as_str(),
-                            value,
-                        ) {
-                            // Log error but continue with other columns
-                            web_sys::console::warn_1(
-                                &format!("Failed to set column {} background: {}", col, e).into(),
-                            );
-                            break; // Stop on first error to avoid spam
-                        }
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = selection_area(m);
+                    // NOTE: questionable - may not need
+                    // **PERFORMANCE OPTIMIZATION**: IronCalc has optimizations for full-column and full-row
+                    // ranges, but NOT for full-sheet ranges. Whole-sheet selections fall into the
+                    // unoptimized O(rowsxcolumns) path. Fix this by applying column-by-column.
+                    if is_whole_sheet_selected(&area) {
+                        // Fast path: Apply to all columns individually (O(columns) instead of O(rowsxcolumns))
+                        // Each column operation is optimized by IronCalc's full-column logic
+                        (1..=LAST_COLUMN).try_for_each(|col| {
+                            m.update_range_style(
+                                &ironcalc_base::expressions::types::Area {
+                                    sheet: area.sheet,
+                                    row: 1,
+                                    column: col,
+                                    height: LAST_ROW,
+                                    width: 1,
+                                },
+                                StylePath::BACKGROUND_COLOR.as_str(),
+                                value,
+                            )
+                            .map_err(FormatError::Engine)
+                        })?;
+                    } else {
+                        // Slow path: O(rows x columns) cell-by-cell styling for partial selections
+                        m.update_range_style(&area, StylePath::BACKGROUND_COLOR.as_str(), value)
+                            .map_err(FormatError::Engine)?;
                     }
-                } else {
-                    // Slow path: O(rows x columns) cell-by-cell styling for partial selections
-                    warn_if_err(
-                        m.update_range_style(&area, StylePath::BACKGROUND_COLOR.as_str(), value),
-                        "set_background_color",
-                    );
-                }
-            });
+                    Ok(())
+                },
+            )?;
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
                 sheet,
                 start_row,
@@ -221,6 +232,7 @@ pub fn execute_format(action: &FormatAction, model: ModelStore, state: &Workbook
             }));
         }
     }
+    Ok(())
 }
 
 /// Toggle a boolean style property on the selected range.
@@ -232,7 +244,7 @@ fn toggle_style(
     state: &WorkbookState,
     style_path: StylePath,
     current_val: fn(&ToolbarState) -> bool,
-) {
+) -> Result<(), FormatError> {
     let (sheet, start_row, start_col, end_row, end_col) =
         model.with_value(|m: &ironcalc_base::UserModel<'static>| {
             let area = selection_area(m);
@@ -245,18 +257,21 @@ fn toggle_style(
             )
         });
 
-    mutate(model, state, EvaluationMode::Deferred, |m| {
-        let ts = m.toolbar_state();
-        let current_bool = current_val(&ts);
-        let new_val = BooleanValue::from_bool(!current_bool);
-        let area = selection_area(m);
-        warn_if_err(
-            m.update_range_style(&area, style_path.as_str(), new_val.as_str()),
-            style_path.as_str(),
-        );
-    });
+    try_mutate(
+        model,
+        state,
+        EvaluationMode::Deferred,
+        |m| -> Result<(), FormatError> {
+            let ts = m.toolbar_state();
+            let current_bool = current_val(&ts);
+            let new_val = BooleanValue::from_bool(!current_bool);
+            let area = selection_area(m);
+            m.update_range_style(&area, style_path.as_str(), new_val.as_str())
+                .map_err(FormatError::Engine)?;
+            Ok(())
+        },
+    )?;
 
-    // Fire format event for style toggle
     state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
         sheet,
         start_row,
@@ -264,6 +279,7 @@ fn toggle_style(
         end_row,
         end_col,
     }));
+    Ok(())
 }
 
 /// Set `font.name` on every cell in the selection.
@@ -271,21 +287,23 @@ fn toggle_style(
 /// IronCalc's `update_range_style` doesn't support `font.name`, so we
 /// read each cell's style, mutate the name, and write it back via
 /// `on_paste_styles` (which records undo diffs).
-fn set_font_name(m: &mut UserModel<'static>, name: &str) {
+fn set_font_name(m: &mut UserModel<'static>, name: &str) -> Result<(), FormatError> {
     let v = m.get_selected_view();
     let [r1, c1, r2, c2] = v.range;
     let (r_min, r_max) = (r1.min(r2), r1.max(r2));
     let (c_min, c_max) = (c1.min(c2), c1.max(c2));
 
-    let mut rows = Vec::new();
-    for row in r_min..=r_max {
-        let mut cols = Vec::new();
-        for col in c_min..=c_max {
-            let mut style = m.get_cell_style(v.sheet, row, col).unwrap_or_default();
-            style.font.name = name.to_owned();
-            cols.push(style);
-        }
-        rows.push(cols);
-    }
-    warn_if_err(m.on_paste_styles(&rows), "set_font_name");
+    let rows: Vec<Vec<_>> = (r_min..=r_max)
+        .map(|row| {
+            (c_min..=c_max)
+                .map(|col| {
+                    let mut style = m.get_cell_style(v.sheet, row, col).unwrap_or_default();
+                    style.font.name = name.to_owned();
+                    style
+                })
+                .collect()
+        })
+        .collect();
+    m.on_paste_styles(&rows).map_err(FormatError::Engine)?;
+    Ok(())
 }

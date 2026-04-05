@@ -1,10 +1,11 @@
 use crate::components::workbook::Workbook;
 
 use leptos::prelude::*;
-use leptos_use::{use_debounce_fn, use_interval_fn};
+use leptos_use::use_interval_fn;
 
 use crate::state::WorkbookState;
-use crate::{storage, storage_enhanced};
+use crate::storage;
+use crate::theme::use_rusty_calc_theme;
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -14,6 +15,13 @@ pub fn App() -> impl IntoView {
 
     let wb_state = WorkbookState::new();
     wb_state.current_uuid.set(Some(uuid));
+
+    // Wire leptos-use color mode: handles `data-theme` on <html> and localStorage.
+    // An Effect syncs wb_state.theme → set_mode so any toggle propagates automatically.
+    let leptos_use::UseColorModeReturn { set_mode, .. } = use_rusty_calc_theme();
+    Effect::new(move |_| {
+        set_mode.set(wb_state.theme.get().into());
+    });
 
     let model = StoredValue::new_local(model);
 
@@ -26,26 +34,25 @@ pub fn App() -> impl IntoView {
     provide_context(model);
     provide_context(clipboard);
 
-    // 🚀 **Enhanced Auto-save with Debouncing**
+    // TODO: Check if needed
     // Debounced save: waits 2 seconds after the last change before saving
     // Uses enhanced storage with quota checking and better error handling
-    let debounced_save = {
-        use_debounce_fn(
-            move || {
-                let Some(uuid) = wb_state.current_uuid.get_untracked() else {
-                    return;
-                };
-                model.with_value(|m| {
-                    // 🚀 Use enhanced storage with better error handling
-                    storage_enhanced::save_compatible(&uuid, m);
+    // let debounced_save = {
+    //     use_debounce_fn(
+    //         move || {
+    //             let Some(uuid) = wb_state.current_uuid.get_untracked() else {
+    //                 return;
+    //             };
+    //             model.with_value(|m| {
+    //                 storage_enhanced::save_compatible(&uuid, m);
 
-                    let analysis = storage_enhanced::analyze_storage();
-                    web_sys::console::debug_1(&analysis.into());
-                });
-            },
-            2000.0, // Save 2 seconds after last change (was 1 second interval)
-        )
-    };
+    //                 let analysis = storage_enhanced::analyze_storage();
+    //                 web_sys::console::debug_1(&analysis.into());
+    //             });
+    //         },
+    //         2000.0, // Save 2 seconds after last change (was 1 second interval)
+    //     )
+    // };
 
     // Change detection interval (more frequent checks, less frequent saves)
     // Check every 500ms for changes, but only save via debounced function
@@ -60,7 +67,7 @@ pub fn App() -> impl IntoView {
             });
             if has_changes {
                 // Trigger debounced save instead of immediate save
-                debounced_save();
+                // debounced_save();
             }
         },
         500, // Check for changes every 500ms (more responsive)

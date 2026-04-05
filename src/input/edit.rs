@@ -2,12 +2,12 @@
 
 use leptos::prelude::{WithValue, *};
 
-use crate::events::{ContentEvent, ModeEvent, NavigationEvent, SpreadsheetEvent};
+use crate::events::{ContentEvent, DragState, ModeEvent, NavigationEvent, SpreadsheetEvent};
+use crate::input::error::EditError;
 use crate::input::helpers::{mutate, EvaluationMode};
 use crate::model::{ArrowKey, CellAddress, FrontendModel};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
-use crate::util::warn_if_err;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditAction {
@@ -21,7 +21,11 @@ pub enum EditAction {
     Cancel,
 }
 
-pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookState) {
+pub fn execute_edit(
+    action: &EditAction,
+    model: ModelStore,
+    state: &WorkbookState,
+) -> Result<(), EditError> {
     match action {
         EditAction::Start(text) => {
             let address = model.with_value(|m| {
@@ -36,7 +40,6 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 address
             });
 
-            // Fire mode event for edit start
             state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditStarted { address }));
         }
         EditAction::EnterEditMode => {
@@ -57,7 +60,6 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 address
             });
 
-            // Fire mode event for edit mode entry
             state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditStarted { address }));
         }
         EditAction::CommitAndNavigate(dir) => {
@@ -71,27 +73,28 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 // pause_evaluation() prevents set_user_input from triggering an internal
                 // evaluate() call — without it we'd evaluate twice (once inside
                 // set_user_input, once explicitly below).
+                let mut commit_result: Result<(), EditError> = Ok(());
                 model.update_value(|m| {
                     m.pause_evaluation();
-                    warn_if_err(
-                        m.set_user_input(
+                    commit_result = m
+                        .set_user_input(
                             edit.address.sheet,
                             edit.address.row,
                             edit.address.column,
                             &edit.text,
-                        ),
-                        "set_user_input",
-                    );
+                        )
+                        .map_err(EditError::Engine);
                     perf.input_done.set(Some(crate::perf::now()));
                     m.resume_evaluation();
                     m.evaluate();
                     perf.eval_done.set(Some(crate::perf::now()));
                 });
+                // Propagate any engine error before touching reactive state.
+                commit_result?;
 
                 // Clear all edit-related state.
                 state.editing_cell.set(None);
-                state.point_range.set(None);
-                state.point_ref_span.set(None);
+                state.drag.set(DragState::Idle);
 
                 // Persist the committed change immediately.
                 if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -99,7 +102,9 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 }
 
                 // Navigate to the next cell.
-                mutate(model, state, EvaluationMode::Deferred, |m| m.nav_arrow(*dir));
+                mutate(model, state, EvaluationMode::Deferred, |m| {
+                    m.nav_arrow(*dir)
+                });
 
                 // Fire content + mode + navigation together so EventBus signals update once.
                 let nav_address = model
@@ -121,13 +126,12 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
         }
         EditAction::Cancel => {
             state.editing_cell.set(None);
-            state.point_range.set(None);
-            state.point_ref_span.set(None);
+            state.drag.set(DragState::Idle);
 
-            // Fire mode event for edit cancellation
             state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditEnded));
 
             crate::util::refocus_workbook();
         }
     }
+    Ok(())
 }

@@ -4,7 +4,7 @@
 //! in IronCalc's `update_range_style()` API.
 
 /// A validated style property path for IronCalc's `update_range_style()` API.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StylePath(&'static str);
 
 impl StylePath {
@@ -85,17 +85,17 @@ impl HexColor {
     /// ```
     pub fn new(hex: impl Into<String>) -> Result<Self, ColorError> {
         let hex = hex.into();
-        
+
         // Empty string is valid (means transparent/clear)
         if hex.is_empty() {
             return Ok(Self(hex));
         }
-        
+
         // Use unified validation logic
         if !is_valid_hex_color(&hex) {
             return Err(ColorError::InvalidFormat { color: hex });
         }
-        
+
         // Normalize to 6-digit format (#RRGGBB)
         let normalized = normalize_hex_color(&hex);
         Ok(Self(normalized))
@@ -248,24 +248,25 @@ mod tests {
         // Valid colors
         assert!(HexColor::new("#FF0000").is_ok());
         assert!(HexColor::new("#000000").is_ok());
-        assert!(HexColor::new("#ABC").is_ok());     // 3-digit
-        assert!(HexColor::new("").is_ok());         // Transparent
-        
+        assert!(HexColor::new("#ABC").is_ok()); // 3-digit
+        assert!(HexColor::new("").is_ok()); // Transparent
+
         // Invalid colors
-        assert!(HexColor::new("FF0000").is_err());   // No #
-        assert!(HexColor::new("#FF00").is_err());    // Wrong length
-        assert!(HexColor::new("#GG0000").is_err());  // Invalid hex
+        assert!(HexColor::new("FF0000").is_err()); // No #
+        assert!(HexColor::new("#FF00").is_err()); // Wrong length
+        assert!(HexColor::new("#GG0000").is_err()); // Invalid hex
     }
 
+    #[allow(clippy::unwrap_used)]
     #[test]
     fn hex_color_normalization() {
         // 3-digit colors get normalized to 6-digit
         assert_eq!(HexColor::new("#ABC").unwrap().as_str(), "#AABBCC");
         assert_eq!(HexColor::new("#f0a").unwrap().as_str(), "#ff00aa");
-        
+
         // 6-digit colors stay unchanged
         assert_eq!(HexColor::new("#FF0000").unwrap().as_str(), "#FF0000");
-        
+
         // Transparent stays empty
         assert_eq!(HexColor::transparent().as_str(), "");
     }
@@ -278,7 +279,7 @@ mod tests {
         assert!(is_valid_hex_color("#ABC"));
         assert!(is_valid_hex_color("#abcdef"));
         assert!(is_valid_hex_color("#123456"));
-        
+
         assert!(!is_valid_hex_color("000"));
         assert!(!is_valid_hex_color("#"));
         assert!(!is_valid_hex_color("#00"));

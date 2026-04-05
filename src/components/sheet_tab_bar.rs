@@ -248,7 +248,11 @@ fn SheetTab(
                     set_renaming=set_renaming
                 />
             </Show>
-            <span class="sheet-tab-menu" on:click=on_menu_toggle>"≓"</span>
+            <span
+                class="sheet-tab-menu"
+                on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
+                on:click=on_menu_toggle
+            >"≓"</span>
             <div class="tab-color-bar" style=color_bar_style />
             <ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos above_anchor=true>
                 <ContextMenuItem on_click=on_rename icon="✏">"Rename"</ContextMenuItem>
@@ -409,6 +413,7 @@ fn AllSheetsMenu() -> impl IntoView {
                 node_ref=btn_ref
                 class="tab-bar-hamburger"
                 title="All sheets"
+                on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
                 on:click=on_toggle
             >
                 "≡"

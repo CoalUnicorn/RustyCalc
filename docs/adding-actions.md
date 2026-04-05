@@ -8,14 +8,14 @@ appropriate category handler.
 
 ```
 KeyboardEvent / Toolbar click
-  → classify_key()  or  SpreadsheetAction::toggle_bold()
-  → SpreadsheetAction (wrapper enum)
-  → execute()
-     ├─ Nav(a)       → execute_nav()       nav.rs
-     ├─ Edit(a)      → execute_edit()      edit.rs
-     ├─ Format(a)    → execute_format()    format.rs
-     ├─ Structure(a) → execute_struct()    structure.rs
-     └─ Copy/Cut/Paste → handled inline in workbook.rs
+  ->  classify_key()  or  SpreadsheetAction::toggle_bold()
+  ->  SpreadsheetAction (wrapper enum)
+  ->  execute()
+      - Nav(a)       -> execute_nav()       nav.rs
+      - Edit(a)      -> execute_edit()      edit.rs
+      - Format(a)    -> execute_format()    format.rs
+      - Structure(a) -> execute_struct()    structure.rs
+      - Copy/Cut/Paste -> handled inline in workbook.rs
 ```
 
 ### File layout
@@ -23,18 +23,19 @@ KeyboardEvent / Toolbar click
 ```
 src/input/
 ├── action.rs        SpreadsheetAction, classify_key(), execute(), convenience constructors
-├── helpers.rs       mutate(), Recalc, make_area(), selection_area(), selection_bounds()
-├── nav.rs           NavAction      — arrows, page, home/end, sheet switch, select all
-├── edit.rs          EditAction     — start, commit, cancel
-├── format.rs        FormatAction   — bold, italic, underline, strikethrough, font size/family
-├── structure.rs     StructAction   — delete, clear, undo/redo, insert/delete rows/columns
+├── error.rs         FormatError, StructError, NavError, EditError  (thiserror-derived)
+├── helpers.rs       mutate(), try_mutate(), EvaluationMode, selection_area(), selection_bounds()
+├── nav.rs           NavAction      (arrows, page, home/end, sheet switch, select all)
+├── edit.rs          EditAction     (start, commit, cancel)
+├── format.rs        FormatAction   (bold, italic, underline, strikethrough, font size/family)
+├── structure.rs     StructAction   (delete, clear, undo/redo, insert/delete rows/columns)
 └── formula_input.rs (point-mode reference handling, separate from the action pipeline)
 ```
 
 ### Two things bypass `execute()`
 
-- **Clipboard** (`Copy`/`Cut`/`Paste`) — needs the `AppClipboard` store and async OS clipboard APIs. Handled inline in `workbook.rs`.
-- **Point-mode arrows** — needs the textarea cursor position from the DOM. Runs as a pre-check in `workbook.rs` before `classify_key` is called.
+- **Clipboard** (`Copy`/`Cut`/`Paste`) needs the `AppClipboard` store and async OS clipboard APIs. Handled inline in `workbook.rs`.
+- **Point-mode arrows** need the textarea cursor position from the DOM. Runs as a pre-check in `workbook.rs` before `classify_key` is called.
 
 ## Adding a new action
 
@@ -62,15 +63,20 @@ pub enum FormatAction {
 
 ### 3. Add the handler in the same file
 
-Use the `mutate()` helper function from `helpers.rs`. It's performance-optimized and handles the pause/resume evaluation pattern automatically to prevent double evaluation.
+Each `execute_*` function returns `Result<(), XxxError>`. Use `try_mutate()` for
+fallible model mutations — it handles pause/resume evaluation and surfaces the
+error as the function's `Result`. Use plain `mutate()` for infallible arms.
 
 ```rust
-use crate::input::helpers::{mutate, Eval};
+use crate::input::error::FormatError;
+use crate::input::helpers::{try_mutate, EvaluationMode};
 ```
 
 See [docs/performance-evaluation.md](performance-evaluation.md) for details on avoiding double evaluation.
 
-Pass `Eval::Yes` when formula results may change (cell writes, row/column inserts/deletes). Pass `Eval::No` for navigation, selection, or formatting changes.
+Pass `EvaluationMode::Immediate` when formula results may change (cell writes,
+row/column inserts/deletes). Pass `EvaluationMode::Deferred` for formatting changes
+that don't affect formula output.
 
 ```rust
 // In format.rs execute_format():
@@ -81,15 +87,18 @@ FormatAction::SetAlignment(align) => {
         HorizontalAlignment::Right => "right",
         HorizontalAlignment::General => "",
     };
-    mutate(model, state, Eval::No, |m| {
+    try_mutate(model, state, EvaluationMode::Deferred, |m| -> Result<(), FormatError> {
         let area = selection_area(m);
-        warn_if_err(
-            m.update_range_style(&area, "alignment.horizontal", val),
-            "set_alignment",
-        );
-    });
+        m.update_range_style(&area, "alignment.horizontal", val)
+            .map_err(FormatError::Engine)?;
+        Ok(())
+    })?;
 }
 ```
+
+Errors propagate up to `execute()` in `action.rs`, which maps them all to
+`String` and logs a single console warning. Callers of `execute()` never see
+individual error types.
 
 ### 4. (Optional) Add a keyboard shortcut
 
@@ -103,7 +112,7 @@ Wrap the sub-action in the wrapper enum:
 "r" => return Some(Format(FormatAction::SetAlignment(HorizontalAlignment::Right))),
 ```
 
-`classify_key` is pure — no DOM access, no signal writes, no model mutations.
+`classify_key` is pure: no DOM access, no signal writes, no model mutations.
 
 ### 5. (Optional) Add a convenience constructor
 
@@ -139,8 +148,8 @@ so adding variants to a sub-enum doesn't require updating the match.
 
 Tests live in `action.rs` under `#[cfg(test)]`. Two kinds:
 
-- **`classify_key` tests** — pure input/output, no browser needed (but run in browser anyway since the crate is wasm-only).
-- **`execute` tests** — need a real browser environment (`Owner::new()`, `StoredValue::new_local(UserModel)`, `WorkbookState::new()`).
+- **`classify_key` tests**: pure input/output, no browser needed (but run in browser anyway since the crate is wasm-only).
+- **`execute` tests**: need a real browser environment (`Owner::new()`, `StoredValue::new_local(UserModel)`, `WorkbookState::new()`).
 
 ```rust
 #[wasm_bindgen_test]

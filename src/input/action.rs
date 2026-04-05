@@ -202,70 +202,24 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
         action,
         SpreadsheetAction::Format(_) | SpreadsheetAction::Structure(_)
     );
-    match action {
-        SpreadsheetAction::Nav(a) => execute_nav(a, model, state),
-        SpreadsheetAction::Edit(a) => execute_edit(a, model, state),
-        SpreadsheetAction::Format(a) => execute_format(a, model, state),
-        SpreadsheetAction::Structure(a) => execute_struct(a, model, state),
-        SpreadsheetAction::Copy | SpreadsheetAction::Cut | SpreadsheetAction::Paste => {}
+
+    // Each category returns its own Result type; map to String for the single log point.
+    let result: Result<(), String> = match action {
+        SpreadsheetAction::Nav(a) => execute_nav(a, model, state).map_err(|e| e.to_string()),
+        SpreadsheetAction::Edit(a) => execute_edit(a, model, state).map_err(|e| e.to_string()),
+        SpreadsheetAction::Format(a) => execute_format(a, model, state).map_err(|e| e.to_string()),
+        SpreadsheetAction::Structure(a) => {
+            execute_struct(a, model, state).map_err(|e| e.to_string())
+        }
+        SpreadsheetAction::Copy | SpreadsheetAction::Cut | SpreadsheetAction::Paste => Ok(()),
+    };
+    if let Err(msg) = result {
+        web_sys::console::warn_1(&format!("[RustyCalc] {msg}").into());
     }
+
     if mutates {
         if let Some(uuid) = state.current_uuid.get_untracked() {
             model.with_value(|m| storage::save(&uuid, m));
-        }
-    }
-}
-
-/// Test-only constructor shortcuts so test call sites don't repeat struct literals.
-#[cfg(test)]
-impl KeyMod {
-    pub fn none() -> Self {
-        Self {
-            ctrl: false,
-            shift: false,
-            alt: false,
-        }
-    }
-    pub fn ctrl() -> Self {
-        Self {
-            ctrl: true,
-            shift: false,
-            alt: false,
-        }
-    }
-    pub fn shift() -> Self {
-        Self {
-            ctrl: false,
-            shift: true,
-            alt: false,
-        }
-    }
-    pub fn alt() -> Self {
-        Self {
-            ctrl: false,
-            shift: false,
-            alt: true,
-        }
-    }
-    pub fn ctrl_shift() -> Self {
-        Self {
-            ctrl: true,
-            shift: true,
-            alt: false,
-        }
-    }
-    pub fn ctrl_alt() -> Self {
-        Self {
-            ctrl: true,
-            shift: false,
-            alt: true,
-        }
-    }
-    pub fn ctrl_shift_alt() -> Self {
-        Self {
-            ctrl: true,
-            shift: true,
-            alt: true,
         }
     }
 }
@@ -321,9 +275,64 @@ impl SpreadsheetAction {
 
 // Tests
 
+/// Test-only constructor shortcuts so test call sites don't repeat struct literals.
+#[cfg(test)]
+impl KeyMod {
+    pub fn none() -> Self {
+        Self {
+            ctrl: false,
+            shift: false,
+            alt: false,
+        }
+    }
+    pub fn ctrl() -> Self {
+        Self {
+            ctrl: true,
+            shift: false,
+            alt: false,
+        }
+    }
+    pub fn shift() -> Self {
+        Self {
+            ctrl: false,
+            shift: true,
+            alt: false,
+        }
+    }
+    pub fn alt() -> Self {
+        Self {
+            ctrl: false,
+            shift: false,
+            alt: true,
+        }
+    }
+    pub fn ctrl_shift() -> Self {
+        Self {
+            ctrl: true,
+            shift: true,
+            alt: false,
+        }
+    }
+    pub fn ctrl_alt() -> Self {
+        Self {
+            ctrl: true,
+            shift: false,
+            alt: true,
+        }
+    }
+    pub fn ctrl_shift_alt() -> Self {
+        Self {
+            ctrl: true,
+            shift: true,
+            alt: true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::DragState;
     use crate::input::helpers::selection_bounds;
     use crate::input::helpers::{mutate, EvaluationMode};
     use crate::model::{ArrowKey, CellAddress};
@@ -732,6 +741,7 @@ mod tests {
     }
 
     // Test setup helper to reduce boilerplate
+    #[allow(clippy::unwrap_used)]
     #[cfg(test)]
     fn test_harness() -> (
         StoredValue<ironcalc_base::UserModel<'static>, LocalStorage>,
@@ -769,6 +779,7 @@ mod tests {
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_jump_to_a1_resets_position() {
         let owner = Owner::new();
@@ -786,7 +797,7 @@ mod tests {
     }
 
     // execute: editing
-
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_start_edit_sets_editing_cell() {
         let owner = Owner::new();
@@ -806,6 +817,7 @@ mod tests {
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_cancel_edit_clears_editing_state() {
         let owner = Owner::new();
@@ -822,10 +834,14 @@ mod tests {
             assert!(state.editing_cell.get_untracked().is_some());
             execute(&SpreadsheetAction::Edit(EditAction::Cancel), model, &state);
             assert!(state.editing_cell.get_untracked().is_none());
-            assert!(state.point_range.get_untracked().is_none());
+            assert!(!matches!(
+                state.drag.get_untracked(),
+                DragState::Pointing { .. }
+            ));
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_commit_writes_value_and_navigates() {
         let owner = Owner::new();
@@ -848,6 +864,7 @@ mod tests {
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_enter_edit_mode_loads_existing_content() {
         let owner = Owner::new();
@@ -871,7 +888,7 @@ mod tests {
     }
 
     // execute: mutations
-
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_delete_clears_cell_content() {
         let owner = Owner::new();
@@ -889,6 +906,7 @@ mod tests {
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_undo_redo_roundtrip() {
         let owner = Owner::new();
@@ -911,6 +929,7 @@ mod tests {
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_insert_row_pushes_content_down() {
         let owner = Owner::new();
@@ -930,6 +949,7 @@ mod tests {
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_delete_row_pulls_content_up() {
         let owner = Owner::new();

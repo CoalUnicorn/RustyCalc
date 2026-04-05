@@ -35,6 +35,7 @@ struct ClipboardMirror {
     range: (i32, i32, i32, i32),
 }
 
+#[allow(clippy::expect_used)]
 impl AppClipboard {
     /// Extract all fields from an opaque `ironcalc_base::Clipboard` via serde.
     ///
@@ -90,6 +91,7 @@ pub enum BorderKind {
 }
 
 /// Construct a [`BorderArea`] without accessing its `pub(crate)` fields.
+#[allow(clippy::expect_used)]
 #[allow(dead_code)]
 pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<String>) -> BorderArea {
     let mirror = BorderAreaMirror {
@@ -106,6 +108,7 @@ pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<Stri
 mod tests {
     use super::*;
 
+    #[allow(clippy::expect_used)]
     #[test]
     fn capture_roundtrip() {
         let model = UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("create test model");

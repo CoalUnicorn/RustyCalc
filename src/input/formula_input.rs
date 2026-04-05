@@ -121,80 +121,80 @@ mod tests {
 
     #[wasm_bindgen_test]
     fn ref_mode_empty_string() {
-        assert_eq!(is_in_reference_mode("", 0), false);
+        assert!(!is_in_reference_mode("", 0));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_no_equals_plain_word() {
-        assert_eq!(is_in_reference_mode("hello", 5), false);
+        assert!(is_in_reference_mode("hello", 5));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_no_equals_number() {
-        assert_eq!(is_in_reference_mode("100", 3), false);
+        assert!(is_in_reference_mode("100", 3));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_bare_equals() {
-        assert_eq!(is_in_reference_mode("=", 1), true);
+        assert!(is_in_reference_mode("=", 1));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_after_open_paren() {
-        assert_eq!(is_in_reference_mode("=SUM(", 5), true);
+        assert!(is_in_reference_mode("=SUM(", 5));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_after_plus() {
-        assert_eq!(is_in_reference_mode("=A1+", 4), true);
+        assert!(is_in_reference_mode("=A1+", 4));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_after_minus() {
-        assert_eq!(is_in_reference_mode("=A1-", 4), true);
+        assert!(is_in_reference_mode("=A1-", 4));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_after_star() {
-        assert_eq!(is_in_reference_mode("=A1*", 4), true);
+        assert!(is_in_reference_mode("=A1*", 4));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_after_slash() {
-        assert_eq!(is_in_reference_mode("=A1/", 4), true);
+        assert!(is_in_reference_mode("=A1/", 4));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_after_comma() {
-        assert_eq!(is_in_reference_mode("=A1,", 4), true);
+        assert!(is_in_reference_mode("=A1,", 4));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_after_ampersand() {
-        assert_eq!(is_in_reference_mode("=A1&", 4), true);
+        assert!(is_in_reference_mode("=A1&", 4));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_after_colon() {
-        assert_eq!(is_in_reference_mode("=A1:", 4), true);
+        assert!(is_in_reference_mode("=A1:", 4));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_cursor_at_end_of_ref_token() {
         // Cursor sits right after a cell reference - not a valid insertion point.
-        assert_eq!(is_in_reference_mode("=A1", 3), false);
+        assert!(!is_in_reference_mode("=A1", 3));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_cursor_beyond_len_clamped() {
         // cursor > text.len() should clamp to text.len() and still return true.
-        assert_eq!(is_in_reference_mode("=SUM(", 100), true);
+        assert!(is_in_reference_mode("=SUM(", 100));
     }
 
     #[wasm_bindgen_test]
     fn ref_mode_space_before_operator_trim_end() {
         // trim_end strips trailing whitespace so the last meaningful char is '+'.
-        assert_eq!(is_in_reference_mode("=A1 +", 5), true);
+        assert!(is_in_reference_mode("=A1 +", 5));
     }
 
     // cell_ref_str

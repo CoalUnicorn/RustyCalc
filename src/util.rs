@@ -74,6 +74,23 @@ pub fn refocus_workbook() {
 
 // Deferred close helper
 // NOTE: this may not be needed anymore.
+
+#[derive(Debug, thiserror::Error)]
+enum DeferCloseError {
+    #[error("window not available")]
+    NoWindow,
+}
+
+fn defer_close_inner(sig: RwSignal<bool>) -> Result<(), DeferCloseError> {
+    let cb = Closure::once(move || sig.set(false));
+    web_sys::window()
+        .ok_or(DeferCloseError::NoWindow)?
+        .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0)
+        .ok();
+    cb.forget(); // intentional: callback runs once then is garbage-collected by JS
+    Ok(())
+}
+
 /// Schedule `sig.set(false)` in the next macrotask via `setTimeout(0)`.
 ///
 /// `spawn_local` (Promise microtask) can run between event-propagation steps,
@@ -83,10 +100,7 @@ pub fn refocus_workbook() {
 /// current event processing is complete.
 #[allow(dead_code)]
 pub fn defer_close(sig: RwSignal<bool>) {
-    let cb = Closure::once(move || sig.set(false));
-    web_sys::window()
-        .expect("window must exist")
-        .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0)
-        .ok();
-    cb.forget(); // intentional: callback runs once then is garbage-collected by JS
+    if let Err(e) = defer_close_inner(sig) {
+        web_sys::console::warn_1(&format!("[util] defer_close: {e}").into());
+    }
 }

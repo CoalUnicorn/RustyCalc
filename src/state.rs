@@ -43,7 +43,7 @@ impl<T: Clone + Send + Sync + 'static> Clone for Split<T> {
     }
 }
 impl<T: Clone + Send + Sync + 'static> Copy for Split<T> {}
-
+#[allow(dead_code)]
 impl<T: Clone + Send + Sync + 'static> Split<T> {
     pub fn new(initial: T) -> Self {
         let (r, w) = signal(initial);
@@ -203,10 +203,6 @@ pub struct WorkbookState {
     pub(crate) show_perf_panel: Split<bool>,
     /// Active right-click context menu; None when no menu is showing.
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
-    /// Range being pointed at during formula entry. None when not in point mode.
-    pub(crate) point_range: Split<Option<SheetRect>>,
-    /// Byte span within `editing_cell.text` for the current point-mode reference.
-    pub(crate) point_ref_span: Split<Option<(usize, usize)>>,
     /// NodeRef to the formula bar <input>.
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
     /// Performance timings for the commit→render pipeline.
@@ -238,8 +234,6 @@ impl WorkbookState {
             theme: Split::new(Theme::from_storage()),
             show_perf_panel: Split::new(false),
             context_menu: Split::new(None),
-            point_range: Split::new(None),
-            point_ref_span: Split::new(None),
             formula_input_ref: NodeRef::new(),
             perf: PerfTimings::new(),
             recent_colors: Split::new(recent_colors),
@@ -249,6 +243,23 @@ impl WorkbookState {
     /// Trigger a canvas re-render by emitting a generic content change event.
     pub fn request_redraw(&self) {
         self.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+    }
+
+    /// Returns the active point-mode range, or a 1×1 rect at the model's
+    /// current cell when point-mode has not started yet.
+    ///
+    /// Use this in event handlers that need a point-mode anchor regardless of
+    /// whether point-mode is already active (e.g. arrow-key extension in
+    /// `Accept` edit mode).
+    pub(crate) fn effective_point_range(&self, model: ModelStore) -> SheetRect {
+        if let DragState::Pointing { range, .. } = self.drag.get_untracked() {
+            range
+        } else {
+            model.with_value(|m| {
+                let v = m.get_selected_view();
+                SheetRect::from_cell(v.row, v.column)
+            })
+        }
     }
 
     //  Event System
@@ -277,7 +288,7 @@ impl WorkbookState {
             #[cfg(debug_assertions)]
             {
                 use std::cell::Cell;
-                thread_local! { static LAST: Cell<f64> = Cell::new(0.0); }
+                thread_local! { static LAST: Cell<f64> = const { Cell::new(0.0) }; }
                 let now = crate::perf::now();
                 LAST.with(|t| {
                     let delta = now - t.get();
@@ -320,10 +331,11 @@ impl WorkbookState {
         self.theme.get_untracked().resolve_with_system()
     }
 
-    /// Set the theme preference and persist to storage
+    /// Set the theme preference.
+    /// Persistence and DOM update are handled by the `use_rusty_calc_theme`
+    /// sync Effect in `App` — no manual save needed here.
     pub fn set_theme(&self, theme: Theme) {
         self.theme.set(theme);
-        theme.save(); // Keep manual persistence for now
         self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
             new_theme: theme,
         }));

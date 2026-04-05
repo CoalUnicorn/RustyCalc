@@ -1,4 +1,4 @@
-use ironcalc_base::types::{BorderStyle, HorizontalAlignment, VerticalAlignment};
+use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 
 // CssColor
 
@@ -133,15 +133,14 @@ impl From<Option<&str>> for SafeFontFamily {
 }
 
 // ResolvedFont
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedFont {
     pub size_px: f64,
-    pub bold: bool,
-    pub italic: bool,
+    // pub bold: bool,
+    // pub italic: bool,
     pub underline: bool,
     pub strikethrough: bool,
-    pub family: SafeFontFamily,
+    // pub family: SafeFontFamily,
     /// Pre-built canvas `ctx.set_font()` string, e.g. `"bold italic 12px Arial"`.
     pub css: String,
 }
@@ -152,23 +151,6 @@ impl ResolvedFont {
         let i = if italic { "italic " } else { "" };
         format!("{b}{i}{size_px}px {}", family.css_name())
     }
-}
-
-// Borders
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct ResolvedBorderEdge {
-    pub style: BorderStyle,
-    pub color: CssColor,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Default)]
-pub struct CellBorders {
-    pub top: Option<ResolvedBorderEdge>,
-    pub right: Option<ResolvedBorderEdge>,
-    pub bottom: Option<ResolvedBorderEdge>,
-    pub left: Option<ResolvedBorderEdge>,
 }
 
 /// Basic formatting
@@ -192,38 +174,20 @@ pub struct TextStyle {
 // ResolvedCellStyle
 
 /// Everything the renderer needs to paint one cell. No further resolution required.
-// FIXME: ? to use TextFormat & TextStyle ?
 // IMPORTANT: this is style we getting from ironcalc_base /home/mmm/01_Dev/IronCalc/base/src/types.rs
 // Our FrontendModel fn cell_style() returns this. also see /home/mmm/01_Dev/IronCalc/base/src/user_model
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ResolvedCellStyle {
     /// Resolved text color; never empty.
     pub text_color: CssColor,
     /// `None` = transparent (skip the fillRect call).
-    pub bg_color: Option<CssColor>,
+    // pub bg_color: Option<CssColor>,
     pub font: ResolvedFont,
     /// `General` already resolved to `Left` or `Right` based on cell type.
-    // pub text_style: TextStyle,
-    // pub text_format: TextFormat,
     pub h_align: HorizontalAlignment,
     pub v_align: VerticalAlignment,
     pub wrap_text: bool,
-    pub borders: CellBorders,
-    // pub resolved_font: ResolvedFont,
 }
-
-//impl ResolvedCellStyle {
-//    // Convenience accessors maintain API compatibility
-//    pub fn bold(&self) -> bool { self.text_format.bold }
-//    pub fn italic(&self) -> bool { self.text_format.italic }
-//    pub fn underline(&self) -> bool {self.text_format.underline}
-//    pub fn strikethrough(&self)-> bool {self.text_format.strikethrough}
-//    pub fn font_size(&self) -> f64 {self.text_style.font_size}
-//    pub fn font_family(&self) -> f64 {self.text_style.font_family}
-//    pub fn text_color(&self) -> &CssColor { &self.text_style.text_color }
-//    pub fn bg_color(&self) -> Option<&CssColor> { self.text_style.bg_color.as_ref() }
-//}
 
 // ToolbarState
 

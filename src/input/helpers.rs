@@ -45,6 +45,28 @@ pub fn mutate(
     // No automatic redraw - caller must emit specific events
 }
 
+/// Fallible variant of [`mutate`]: the closure returns `Result<(), E>`.
+///
+/// `resume_evaluation()` always runs to leave the model in a consistent state.
+/// `evaluate()` is skipped when the closure returns `Err`.
+pub fn try_mutate<E>(
+    model: ModelStore,
+    _state: &WorkbookState,
+    evaluate: EvaluationMode,
+    f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut outcome: Result<(), E> = Ok(());
+    model.update_value(|m| {
+        m.pause_evaluation();
+        outcome = f(m);
+        m.resume_evaluation();
+        if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
+            m.evaluate();
+        }
+    });
+    outcome
+}
+
 // Area needs its own type in input
 /// Build an `Area` from selection corners, normalising min/max automatically.
 pub fn make_area(sheet: u32, r1: i32, c1: i32, r2: i32, c2: i32) -> Area {

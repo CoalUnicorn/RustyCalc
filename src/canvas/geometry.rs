@@ -158,18 +158,10 @@ pub fn pixel_to_row(m: &UserModel, sheet: u32, top_row: i32, y: f64, fg: &Frozen
 /// `left_column` is `view.left_column`.
 pub fn col_to_x(m: &UserModel, sheet: u32, left_column: i32, col: i32, fg: &FrozenGeometry) -> f64 {
     if col <= fg.frozen_cols {
-        let mut x = HEADER_COL_WIDTH;
-        for c in 1..col {
-            x += col_width(m, sheet, c);
-        }
-        x
+        HEADER_COL_WIDTH + (1..col).map(|c| col_width(m, sheet, c)).sum::<f64>()
     } else {
         let left_col = left_column.max(fg.frozen_cols + 1);
-        let mut x = fg.frozen_x;
-        for c in left_col..col {
-            x += col_width(m, sheet, c);
-        }
-        x
+        fg.frozen_x + (left_col..col).map(|c| col_width(m, sheet, c)).sum::<f64>()
     }
 }
 
@@ -178,18 +170,10 @@ pub fn col_to_x(m: &UserModel, sheet: u32, left_column: i32, col: i32, fg: &Froz
 /// `top_row` is `view.top_row`.
 pub fn row_to_y(m: &UserModel, sheet: u32, top_row: i32, row: i32, fg: &FrozenGeometry) -> f64 {
     if row <= fg.frozen_rows {
-        let mut y = HEADER_ROW_HEIGHT;
-        for r in 1..row {
-            y += row_height(m, sheet, r);
-        }
-        y
+        HEADER_ROW_HEIGHT + (1..row).map(|r| row_height(m, sheet, r)).sum::<f64>()
     } else {
         let top = top_row.max(fg.frozen_rows + 1);
-        let mut y = fg.frozen_y;
-        for r in top..row {
-            y += row_height(m, sheet, r);
-        }
-        y
+        fg.frozen_y + (top..row).map(|r| row_height(m, sheet, r)).sum::<f64>()
     }
 }
 

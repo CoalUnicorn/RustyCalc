@@ -75,9 +75,6 @@
 //! 3. The background color of either cell (for a clean edge between fills)
 //! 4. The grid line color (thin grey default)
 //!
-//! To avoid allocations in this hot path, all colors are borrowed (`&str`)
-//! from the style structs or theme - no `String` cloning per cell.
-//!
 //! # Key types
 //!
 //! - `CanvasRenderer` - short-lived; created per frame from a canvas element
@@ -702,15 +699,24 @@ impl CanvasRenderer {
             return None; // Too small to render meaningful text
         }
 
-        let resolved = model.cell_style(sheet, row, col, self.theme.default_text_color);
-        let font = resolved.font.css.clone();
-        let font_size = resolved.font.size_px; // font_size();
-        let text_color = resolved.text_color.as_str().to_string(); // text_color().as_str().to_owned();
-        let effective_h_align = resolved.h_align; //h_align();
-        let effective_v_align = resolved.v_align; //.clone();
-        let underlined = resolved.font.underline; //underline();
-        let strike = resolved.font.strikethrough; //strikethrough();
-        let wrap = resolved.wrap_text;
+        // Destructure to move fields directly — avoids cloning `css` and
+        // re-allocating `text_color` from a borrow.
+        let crate::model::ResolvedCellStyle {
+            font:
+                crate::model::ResolvedFont {
+                    css: font,
+                    size_px: font_size,
+                    underline: underlined,
+                    strikethrough: strike,
+                    ..
+                },
+            text_color,
+            h_align: effective_h_align,
+            v_align: effective_v_align,
+            wrap_text: wrap,
+            ..
+        } = model.cell_style(sheet, row, col, self.theme.default_text_color);
+        let text_color = text_color.as_str().to_owned();
 
         let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
         let line_height = font_size * LINE_HEIGHT_FACTOR;
@@ -752,10 +758,10 @@ impl CanvasRenderer {
         let line_count = text_lines.len() as f64;
         let mut lines: Vec<TextLine> = Vec::new();
 
-        for (i, line) in text_lines.iter().enumerate() {
+        for (i, line) in text_lines.into_iter().enumerate() {
             let tw = self
                 .ctx
-                .measure_text(line)
+                .measure_text(&line)
                 .map(|m| m.width())
                 .unwrap_or(line.len() as f64 * approx_char_w);
             let i_f = i as f64;
@@ -776,7 +782,7 @@ impl CanvasRenderer {
                 _ => y + font_size / 2.0 + 4.0 + i_f * line_height,
             };
             lines.push(TextLine {
-                text: line.clone(),
+                text: line, // moved from text_lines, no clone
                 center_x,
                 center_y,
                 width: tw,

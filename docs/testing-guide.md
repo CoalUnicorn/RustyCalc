@@ -56,7 +56,7 @@ fn test_my_feature() {
 
 ### Test Categories
 
-#### 1. **Unit Tests** — Pure Functions
+#### 1. **Unit Tests** (Pure Functions)
 Test individual functions without browser dependencies:
 
 ```rust
@@ -75,7 +75,7 @@ fn safe_font_family_unknown_falls_back() {
 }
 ```
 
-#### 2. **State Tests** — Leptos Signals
+#### 2. **State Tests** (Leptos Signals)
 Test state management with Leptos reactive system:
 
 ```rust
@@ -89,9 +89,7 @@ fn workbook_state_creation() {
     
     // Test state updates
     state.editing_cell.set(Some(EditingCell {
-        sheet: 1,
-        row: 1,
-        col: 1,
+        address: CellAddress { sheet: 1, row: 1, column: 1 },
         text: "test".to_owned(),
         mode: EditMode::Edit,
         focus: EditFocus::Cell,
@@ -101,7 +99,7 @@ fn workbook_state_creation() {
 }
 ```
 
-#### 3. **Action Tests** — Action Dispatch System
+#### 3. **Action Tests** (Action Dispatch System)
 Test the action system with model mutations:
 
 ```rust
@@ -113,7 +111,7 @@ fn execute_navigate_down_advances_row() {
         let (model, state) = test_harness();
         
         // Execute action
-        execute(&SpreadsheetAction::navigate(ArrowKey::Down), model, &state);
+        execute(&SpreadsheetAction::Nav(NavAction::Arrow(ArrowKey::Down)), model, &state);
         
         // Verify result
         let row = model.with_value(|m| m.get_selected_view().row);
@@ -133,7 +131,7 @@ fn test_harness() -> (ModelStore, WorkbookState) {
 }
 ```
 
-#### 4. **Storage Tests** — LocalStorage Integration
+#### 4. **Storage Tests** (LocalStorage Integration)
 Test persistence layer:
 
 ```rust
@@ -156,7 +154,7 @@ fn storage_save_load_roundtrip() {
 }
 ```
 
-#### 5. **Component Tests** — UI Components
+#### 5. **Component Tests** (UI Components)
 Test Leptos components:
 
 ```rust
@@ -172,11 +170,8 @@ fn toolbar_renders() {
         provide_context(state);
         provide_context(model);
         
-        // Create component
-        let toolbar = view! { <Toolbar /> };
-        
-        // Component creation should succeed
-        assert!(toolbar.into_view().is_some());
+        // Mounting the component should not panic
+        let _toolbar = view! { <Toolbar /> };
     });
 }
 ```
@@ -227,10 +222,10 @@ mod tests {
 Avoid repeating model/state creation:
 
 ```rust
-// ✅ Good: Use shared test harness
+// Better: Use shared test harness
 let (model, state) = test_harness();
 
-// ❌ Avoid: Repeating setup in every test
+// Verbose: Repeating setup in every test
 let model = StoredValue::new_local(/* long setup */);
 let state = WorkbookState::new();
 ```
@@ -253,7 +248,7 @@ fn mutate_uses_single_evaluation() {
     let (model, state) = test_harness();
     
     // This should not cause double evaluation
-    mutate(model, &state, Eval::Yes, |m| {
+    mutate(model, &state, EvaluationMode::Immediate, |m| {
         warn_if_err(m.set_cell_value(1, 1, 1, "test"), "test");
     });
     
@@ -263,11 +258,11 @@ fn mutate_uses_single_evaluation() {
 
 ### 4. **Clear Test Names**
 ```rust
-// ✅ Good: Descriptive test names
+// Better: Descriptive test names
 #[wasm_bindgen_test]
 fn css_color_empty_input_defaults_to_black() { /* ... */ }
 
-// ❌ Avoid: Unclear names
+// Problematic: Unclear names
 #[wasm_bindgen_test]
 fn test1() { /* ... */ }
 ```
@@ -311,6 +306,20 @@ fn debug_test() {
 }
 ```
 
+### EventBus timing log
+
+In debug builds, every `state.emit_event()` / `emit_events()` call logs to the console:
+
+```
+[EventBus] +    12.34ms  Content::GenericChange
+[EventBus] +     0.08ms  Navigation::SelectionChanged row=2 col=1
+```
+
+The prefix is `[EventBus]` and the delta shows milliseconds since the previous event. This is automatically active in `trunk serve` (debug mode) and suppressed in `--release` builds. Use it to:
+- Confirm an event fires after a mutation (if nothing logs, the emit wasn't reached)
+- Spot unexpected extra events (e.g. two `Content::GenericChange` in a row suggests a missing `emit_events()` batch)
+- Time the gap between a user action and the resulting events
+
 ### Test Isolation
 If tests interfere with each other:
 
@@ -329,18 +338,22 @@ fn isolated_test() {
 
 ### Testing Enums
 ```rust
-#[wasm_bindgen_test] 
-fn exhaustive_enum_matching() {
-    // Test all variants are handled
-    for family in SafeFontFamily::ALL {
-        let css = family.css_name();
-        assert!(!css.is_empty());
-        
-        let model = family.model_name();
-        assert!(!model.is_empty());
-        
-        let label = family.label();
-        assert!(!label.is_empty());
+#[wasm_bindgen_test]
+fn safe_font_family_css_names_non_empty() {
+    // Test each variant explicitly — exhaustive match keeps this in sync
+    let families = [
+        SafeFontFamily::Arial,
+        SafeFontFamily::CalibriLike,
+        SafeFontFamily::CourierNew,
+        SafeFontFamily::Georgia,
+        SafeFontFamily::TimesNewRoman,
+        SafeFontFamily::Verdana,
+        SafeFontFamily::SystemUi,
+    ];
+    for family in families {
+        assert!(!family.css_name().is_empty());
+        assert!(!family.model_name().is_empty());
+        assert!(!family.label().is_empty());
     }
 }
 ```
@@ -390,7 +403,7 @@ fn mutate_prevents_double_evaluation() {
     let (model, state) = test_harness();
     
     // This pattern should use pause/resume internally
-    mutate(model, &state, Eval::Yes, |m| {
+    mutate(model, &state, EvaluationMode::Immediate, |m| {
         // Multiple operations that normally would evaluate
         warn_if_err(m.set_cell_value(1, 1, 1, "=A1"), "set_formula");
         warn_if_err(m.set_cell_value(1, 2, 1, "test"), "set_value");

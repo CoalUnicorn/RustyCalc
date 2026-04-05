@@ -68,7 +68,10 @@ pub fn Worksheet() -> impl IntoView {
             }),
             _ => None,
         };
-        let point_range = state.point_range.get();
+        let point_range = match state.drag.get() {
+            DragState::Pointing { range, .. } => Some(range),
+            _ => None,
+        };
         (extend_to, point_range)
     });
 
@@ -99,16 +102,17 @@ pub fn Worksheet() -> impl IntoView {
         let has_structure = !state.events.structure.get().is_empty();
         let has_format = !state.events.format.get().is_empty();
         let has_nav = !state.events.navigation.get().is_empty();
+        let has_theme = !state.events.theme.get().is_empty();
         let _overlay = reactive_overlay.get();
 
-        let mode = if has_content || has_structure {
+        let mode = if has_content || has_structure || has_theme {
             CanvasRenderMode::Full
         } else if has_format {
             CanvasRenderMode::FormatOnly
         } else if has_nav {
             CanvasRenderMode::ViewportUpdate
         } else {
-            // Mode or theme event only — no canvas repaint needed.
+            // Mode event only — no canvas repaint needed.
             return;
         };
 
@@ -253,7 +257,7 @@ pub fn Worksheet() -> impl IntoView {
             DragState::Idle
             | DragState::Selecting
             | DragState::Extending { .. }
-            | DragState::Pointing => {}
+            | DragState::Pointing { .. } => {}
         }
 
         if x < HEADER_COL_WIDTH || y < HEADER_ROW_HEIGHT {
@@ -279,32 +283,34 @@ pub fn Worksheet() -> impl IntoView {
                 });
                 state.request_redraw();
             }
-            DragState::Pointing => {
+            DragState::Pointing {
+                range: pr,
+                ref_span,
+            } => {
                 // Extend the point-mode range to the hovered cell.
-                if let Some(pr) = state.point_range.get_untracked() {
-                    let sheet = model.with_value(|m| m.active_cell().sheet);
-                    let ref_str = range_ref_str(pr.r1, pr.c1, row, col, sheet, sheet, "");
-                    let prev_span = state.point_ref_span.get_untracked();
-                    let cursor = prev_span.map(|(_, end)| end).unwrap_or(0);
-                    let new_state = state
-                        .editing_cell
-                        .get_untracked()
-                        .map(|edit| splice_ref(&edit.text, cursor, &ref_str, prev_span));
-                    if let Some((new_text, new_start, new_end)) = new_state {
-                        state.editing_cell.update(|c| {
-                            if let Some(e) = c {
-                                e.text = new_text;
-                            }
-                        });
-                        state.point_range.set(Some(SheetRect {
+                let sheet = model.with_value(|m| m.active_cell().sheet);
+                let ref_str = range_ref_str(pr.r1, pr.c1, row, col, sheet, sheet, "");
+                let cursor = ref_span.1;
+                let new_state = state
+                    .editing_cell
+                    .get_untracked()
+                    .map(|edit| splice_ref(&edit.text, cursor, &ref_str, Some(ref_span)));
+                if let Some((new_text, new_start, new_end)) = new_state {
+                    state.editing_cell.update(|c| {
+                        if let Some(e) = c {
+                            e.text = new_text;
+                        }
+                    });
+                    state.drag.set(DragState::Pointing {
+                        range: SheetRect {
                             r1: pr.r1,
                             c1: pr.c1,
                             r2: row,
                             c2: col,
-                        }));
-                        state.point_ref_span.set(Some((new_start, new_end)));
-                        state.request_redraw();
-                    }
+                        },
+                        ref_span: (new_start, new_end),
+                    });
+                    state.request_redraw();
                 }
             }
             DragState::Selecting => {
@@ -497,7 +503,7 @@ pub fn Worksheet() -> impl IntoView {
                         DragState::Idle
                         | DragState::Selecting
                         | DragState::Extending { .. }
-                        | DragState::Pointing => "worksheet-canvas",
+                        | DragState::Pointing { .. } => "worksheet-canvas",
                     }
                 }
                 tabindex="-1"
@@ -676,11 +682,15 @@ fn handle_cell_click(
     if let Some(ref edit) = state.editing_cell.get_untracked() {
         if edit.mode == EditMode::Accept {
             let cursor = get_formula_cursor();
-            let already_pointing = state.point_range.get_untracked().is_some();
+            let current_drag = state.drag.get_untracked();
+            let already_pointing = matches!(current_drag, DragState::Pointing { .. });
             if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                 let sheet = model.with_value(|m| m.active_cell().sheet);
                 let ref_str = range_ref_str(row, col, row, col, sheet, sheet, "");
-                let prev_span = state.point_ref_span.get_untracked();
+                let prev_span = match current_drag {
+                    DragState::Pointing { ref_span, .. } => Some(ref_span),
+                    _ => None,
+                };
                 let text = edit.text.clone();
                 let (new_text, new_start, new_end) = splice_ref(&text, cursor, &ref_str, prev_span);
                 state.editing_cell.update(|c| {
@@ -688,14 +698,10 @@ fn handle_cell_click(
                         e.text = new_text;
                     }
                 });
-                state.point_range.set(Some(SheetRect {
-                    r1: row,
-                    c1: col,
-                    r2: row,
-                    c2: col,
-                }));
-                state.drag.set(DragState::Pointing);
-                state.point_ref_span.set(Some((new_start, new_end)));
+                state.drag.set(DragState::Pointing {
+                    range: SheetRect::from_cell(row, col),
+                    ref_span: (new_start, new_end),
+                });
                 state.request_redraw();
                 return;
             }

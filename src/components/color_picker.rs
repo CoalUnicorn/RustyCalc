@@ -444,7 +444,6 @@ pub fn BackgroundColorPicker(
     }
 }
 
-#[allow(dead_code)]
 #[component]
 pub fn TabColorPicker(
     current_color: Signal<Option<String>>,

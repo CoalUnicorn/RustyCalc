@@ -8,6 +8,7 @@ use crate::components::perf_panel::PerfPanel;
 use crate::components::sheet_tab_bar::SheetTabBar;
 use crate::components::toolbar::Toolbar;
 use crate::components::worksheet::Worksheet;
+use crate::events::DragState;
 use crate::input::action::{classify_key, execute, KeyMod, SpreadsheetAction};
 use crate::input::formula_input::*;
 use crate::model::AppClipboard;
@@ -64,33 +65,30 @@ pub fn Workbook() -> impl IntoView {
                 )
             {
                 let cursor = get_formula_cursor();
-                let already_pointing = state.point_range.get_untracked().is_some();
+                let current_drag = state.drag.get_untracked();
+                let already_pointing = matches!(current_drag, DragState::Pointing { .. });
                 if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                     // Move or extend the point-mode range by one cell.
-                    let pr = state.point_range.get_untracked().unwrap_or_else(|| {
-                        model.with_value(|m| {
-                            let v = m.get_selected_view();
-                            SheetRect {
-                                r1: v.row,
-                                c1: v.column,
-                                r2: v.row,
-                                c2: v.column,
-                            }
-                        })
-                    });
-                    let SheetRect { r1, c1, r2, c2 } = pr;
-                    let (new_r2, new_c2) = match key.as_str() {
-                        "ArrowDown" => (r2 + 1, c2),
-                        "ArrowUp" => ((r2 - 1).max(1), c2),
-                        "ArrowLeft" => (r2, (c2 - 1).max(1)),
-                        "ArrowRight" => (r2, c2 + 1),
-                        _ => (r2, c2),
+                    let pr = state.effective_point_range(model);
+                    let trailing = pr.extend_trailing(&key);
+                    // Shift extends the selection (anchor stays); plain arrow moves the whole range.
+                    let new_pr = if is_shift {
+                        SheetRect {
+                            r1: pr.r1,
+                            c1: pr.c1,
+                            r2: trailing.r2,
+                            c2: trailing.c2,
+                        }
+                    } else {
+                        trailing
                     };
-                    // Shift extends the range; plain arrow moves the whole range.
-                    let (new_r1, new_c1) = if is_shift { (r1, c1) } else { (new_r2, new_c2) };
                     let sheet = model.with_value(|m| m.get_selected_view().sheet);
-                    let ref_str = range_ref_str(new_r1, new_c1, new_r2, new_c2, sheet, sheet, "");
-                    let prev_span = state.point_ref_span.get_untracked();
+                    let ref_str =
+                        range_ref_str(new_pr.r1, new_pr.c1, new_pr.r2, new_pr.c2, sheet, sheet, "");
+                    let prev_span = match current_drag {
+                        DragState::Pointing { ref_span, .. } => Some(ref_span),
+                        _ => None,
+                    };
                     let splice_at = prev_span.map(|(_, end)| end).unwrap_or(cursor);
                     let text = edit.text.clone();
                     let (new_text, new_start, new_end) =
@@ -100,13 +98,10 @@ pub fn Workbook() -> impl IntoView {
                             e.text = new_text;
                         }
                     });
-                    state.point_range.set(Some(SheetRect {
-                        r1: new_r1,
-                        c1: new_c1,
-                        r2: new_r2,
-                        c2: new_c2,
-                    }));
-                    state.point_ref_span.set(Some((new_start, new_end)));
+                    state.drag.set(DragState::Pointing {
+                        range: new_pr,
+                        ref_span: (new_start, new_end),
+                    });
                     state.request_redraw();
                     ev.prevent_default();
                     return;

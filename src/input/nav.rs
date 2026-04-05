@@ -3,10 +3,10 @@
 use leptos::prelude::WithValue;
 
 use crate::events::{NavigationEvent, SpreadsheetEvent};
-use crate::input::helpers::{mutate, EvaluationMode};
+use crate::input::error::NavError;
+use crate::input::helpers::{mutate, try_mutate, EvaluationMode};
 use crate::model::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{ModelStore, WorkbookState};
-use crate::util::warn_if_err;
 
 /// Helper to emit SelectionChanged event after navigation
 fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
@@ -66,18 +66,28 @@ pub enum NavAction {
     SelectAll,
 }
 
-pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState) {
+pub fn execute_nav(
+    action: &NavAction,
+    model: ModelStore,
+    state: &WorkbookState,
+) -> Result<(), NavError> {
     match action {
         NavAction::Arrow(dir) => {
-            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_arrow(*dir));
+            mutate(model, state, EvaluationMode::Deferred, |m| {
+                m.nav_arrow(*dir)
+            });
             emit_selection_changed(model, state);
         }
         NavAction::Edge(dir) => {
-            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_to_edge(*dir));
+            mutate(model, state, EvaluationMode::Deferred, |m| {
+                m.nav_to_edge(*dir)
+            });
             emit_selection_changed(model, state);
         }
         NavAction::JumpToA1 => {
-            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_set_cell(1, 1));
+            mutate(model, state, EvaluationMode::Deferred, |m| {
+                m.nav_set_cell(1, 1)
+            });
             emit_selection_changed(model, state);
         }
         NavAction::JumpToLastCell => {
@@ -88,15 +98,21 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
             emit_selection_changed(model, state);
         }
         NavAction::ExpandSelection(dir) => {
-            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_expand_selection(*dir));
+            mutate(model, state, EvaluationMode::Deferred, |m| {
+                m.nav_expand_selection(*dir)
+            });
             emit_selection_range_changed(model, state);
         }
         NavAction::PageDown => {
-            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_page(PageDir::Down));
+            mutate(model, state, EvaluationMode::Deferred, |m| {
+                m.nav_page(PageDir::Down)
+            });
             emit_selection_changed(model, state);
         }
         NavAction::PageUp => {
-            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_page(PageDir::Up));
+            mutate(model, state, EvaluationMode::Deferred, |m| {
+                m.nav_page(PageDir::Up)
+            });
             emit_selection_changed(model, state);
         }
         NavAction::RowHome => {
@@ -104,7 +120,9 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
             emit_selection_changed(model, state);
         }
         NavAction::RowEnd => {
-            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_to_edge(ArrowKey::Right));
+            mutate(model, state, EvaluationMode::Deferred, |m| {
+                m.nav_to_edge(ArrowKey::Right)
+            });
             emit_selection_changed(model, state);
         }
         NavAction::SwitchSheet(delta) => {
@@ -112,21 +130,27 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
             let previous_sheet = model
                 .with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_view().sheet);
 
-            mutate(model, state, EvaluationMode::Deferred, move |m| {
-                let current = m.get_selected_view().sheet;
-                let visible: Vec<u32> = m
-                    .get_worksheets_properties()
-                    .iter()
-                    .filter(|s| s.state == "visible")
-                    .map(|s| s.sheet_id)
-                    .collect();
-                if let Some(pos) = visible.iter().position(|&id| id == current) {
-                    let next = (pos as i32 + delta).rem_euclid(visible.len() as i32) as usize;
-                    warn_if_err(m.set_selected_sheet(visible[next]), "set_selected_sheet");
-                }
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Deferred,
+                move |m| -> Result<(), NavError> {
+                    let current = m.get_selected_view().sheet;
+                    let visible: Vec<u32> = m
+                        .get_worksheets_properties()
+                        .iter()
+                        .filter(|s| s.state == "visible")
+                        .map(|s| s.sheet_id)
+                        .collect();
+                    if let Some(pos) = visible.iter().position(|&id| id == current) {
+                        let next = (pos as i32 + delta).rem_euclid(visible.len() as i32) as usize;
+                        m.set_selected_sheet(visible[next])
+                            .map_err(|e| NavError::Engine(e.to_string()))?;
+                    }
+                    Ok(())
+                },
+            )?;
 
-            // Fire active sheet changed event
             let new_sheet = model
                 .with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_view().sheet);
             if previous_sheet != new_sheet {
@@ -146,4 +170,5 @@ pub fn execute_nav(action: &NavAction, model: ModelStore, state: &WorkbookState)
             emit_selection_range_changed(model, state);
         }
     }
+    Ok(())
 }

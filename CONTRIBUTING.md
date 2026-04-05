@@ -90,8 +90,11 @@ RustyCalc follows strong Rust design principles. Please review [docs/rust-style-
 - **Exhaustive matching**: No wildcard `_ =>` arms on owned enums
 - **Borrow by default**: Use `&str`, `&[T]` unless ownership is needed
 
+### Error Handling:
+- Each input module (`format.rs`, `nav.rs`, `edit.rs`, `structure.rs`) returns `Result<(), XxxError>` using `thiserror`-derived types from `input/error.rs`. Use `try_mutate()` for fallible model mutations; `execute()` logs at a single point.
+
 ### Performance Guidelines:
-- **Critical**: Read [docs/performance-evaluation.md](docs/performance-evaluation.md) to understand the unified `mutate()` function and avoid double evaluation issues
+- **Critical**: Read [docs/performance-evaluation.md](docs/performance-evaluation.md) to understand `mutate()` / `try_mutate()` and avoid double evaluation issues
 
 ### Adding Features:
 - **Keyboard shortcuts**: See [docs/adding-actions.md](docs/adding-actions.md)
@@ -158,14 +161,14 @@ fn test_my_feature() {
 
 Key directories for contributors:
 
-- `src/model/` — Domain types and data structures
-- `src/state.rs` — UI state management with Leptos signals
-- `src/components/` — Leptos components for UI
-- `src/input/` — Action system for keyboard/mouse input
-- `src/canvas/` — Canvas 2D rendering
-- `src/storage.rs` — LocalStorage persistence
-- `docs/` — Documentation and guides
-- `src-tauri/` — Optional desktop shell
+- `src/model/` - Domain types and data structures
+- `src/state.rs` - UI state management with Leptos signals
+- `src/components/` - Leptos components for UI
+- `src/input/` - Action system for keyboard/mouse input
+- `src/canvas/` - Canvas 2D rendering
+- `src/storage.rs` - LocalStorage persistence
+- `docs/` - Documentation and guides
+- `src-tauri/` - Optional desktop shell
 
 ## Submitting Changes
 

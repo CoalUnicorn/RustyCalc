@@ -7,7 +7,7 @@ This document explains the evaluation performance optimization in RustyCalc and 
 IronCalc's `UserModel` has an internal evaluation system. Many methods call `evaluate()` internally after making changes. However, our UI often needs to call `evaluate()` again to ensure consistency. This creates a **double evaluation problem** that can halve performance in formula-heavy spreadsheets.
 
 ```rust
-// ❌ PERFORMANCE PROBLEM: Double evaluation
+// PERFORMANCE PROBLEM: Double evaluation
 model.update_value(|m| {
     m.set_cell_value(sheet, row, col, value);  // Calls evaluate() internally
     m.evaluate();  // Called again! Doubles the work
@@ -28,50 +28,54 @@ model.update_value(|m| {
 });
 ```
 
-## Single Optimized mutate Function
+## The mutate Helpers
 
-RustyCalc provides a single `mutate` helper function in `src/input/helpers.rs` that always uses the performance optimization:
+`src/input/helpers.rs` provides two helpers. Both wrap pause/resume evaluation — the only difference is whether the closure can fail.
+
+### `mutate` — infallible
+
+Use when the closure cannot return an error (navigation, selection changes):
 
 ```rust
-/// Run `f` on the model, optionally call `evaluate`, then trigger a redraw.
-///
-/// **PERFORMANCE OPTIMIZED:** Many `UserModel` methods call `evaluate()` internally. 
-/// We pause evaluation before `f` so the model is evaluated at most once — after
-/// all mutations are done. This prevents double evaluation and can halve execution time.
 pub fn mutate(
     model: ModelStore,
-    state: &WorkbookState,
-    evaluate: Eval,
+    _state: &WorkbookState,
+    evaluate: EvaluationMode,
     f: impl FnOnce(&mut UserModel<'static>),
-) {
-    model.update_value(|m| {
-        m.pause_evaluation();    // ← KEY PERFORMANCE OPTIMIZATION
-        f(m);
-        m.resume_evaluation();
-        if matches!(evaluate, Eval::Yes) {
-            m.evaluate();
-        }
-    });
-    state.request_redraw();
-}
+)
 ```
 
-**Import from:** `use crate::input::helpers::{mutate, Eval};`
+### `try_mutate` — fallible
 
-**Use for all mutations** — there's no performance penalty, so always use this optimized version.
+Use when the closure returns `Result`. The error is returned to the caller and can be propagated with `?`:
+
+```rust
+pub fn try_mutate<E>(
+    model: ModelStore,
+    _state: &WorkbookState,
+    evaluate: EvaluationMode,
+    f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
+) -> Result<(), E>
+```
+
+Both helpers pause evaluation before calling `f`, then resume and optionally evaluate once — never more.
+
+Neither emits events or triggers redraws. The caller is responsible for `state.emit_event(...)` after the helper returns.
+
+**Import:** `use crate::input::helpers::{mutate, try_mutate, EvaluationMode};`
 
 ## When to Evaluate
 
-The `Eval` enum controls when evaluation happens:
+`EvaluationMode` controls whether `evaluate()` is called after the mutation:
 
-### Eval::Yes
+### EvaluationMode::Immediate
 Use when mutations **may change formula results**:
 - Cell value/formula changes
 - Row/column insertions/deletions
 - Sheet operations that affect references
 - Copy/paste operations
 
-### Eval::No  
+### EvaluationMode::Deferred
 Use for **pure UI state changes** that don't affect calculations:
 - Navigation (arrow keys, selection changes)
 - Formatting (bold, italic, colors, fonts)
@@ -80,36 +84,46 @@ Use for **pure UI state changes** that don't affect calculations:
 
 ## Usage Examples
 
-### Cell Edit (Evaluation Needed)
+### Cell Edit (fallible, evaluation needed)
 ```rust
-// Cell changes affect formulas
-mutate(model, &state, Eval::Yes, |m| {
-    warn_if_err(m.set_cell_value(sheet, row, col, value), "set_cell_value");
-});
+// try_mutate propagates the engine error back to the caller via ?
+try_mutate(model, state, EvaluationMode::Immediate, |m| -> Result<(), EditError> {
+    m.set_user_input(sheet, row, col, value)
+        .map_err(EditError::Engine)?;
+    Ok(())
+})?;
+state.emit_event(SpreadsheetEvent::Content(ContentEvent::CellChanged { .. }));
 ```
 
-### Navigation (No Evaluation Needed)
-```rust  
-// Navigation doesn't affect formulas
-mutate(model, &state, Eval::No, |m| {
-    warn_if_err(m.set_selected_cell(sheet, row, col), "set_selected_cell");
-});
-```
-
-### Formatting (No Evaluation Needed)
+### Navigation (infallible, no evaluation)
 ```rust
-// Formatting doesn't affect formulas  
-mutate(model, &state, Eval::No, |m| {
-    warn_if_err(m.set_bold(area, bold), "set_bold");
+// nav_arrow never fails — plain mutate is fine
+mutate(model, state, EvaluationMode::Deferred, |m| {
+    m.nav_arrow(dir);
 });
+state.emit_event(SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged { .. }));
 ```
 
-### Structure Change (Evaluation Needed)
+### Formatting (fallible, no evaluation)
+```rust
+try_mutate(model, state, EvaluationMode::Deferred, |m| -> Result<(), FormatError> {
+    let area = selection_area(m);
+    m.update_range_style(&area, style_path.as_str(), value)
+        .map_err(FormatError::Engine)?;
+    Ok(())
+})?;
+state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged { .. }));
+```
+
+### Structure Change (fallible, evaluation needed)
 ```rust
 // Row insertion affects formula references
-mutate(model, &state, Eval::Yes, |m| {
-    warn_if_err(m.insert_rows(sheet, row, count), "insert_rows");
-});
+try_mutate(model, state, EvaluationMode::Immediate, |m| -> Result<(), StructError> {
+    m.insert_rows(sheet, row, 1)
+        .map_err(StructError::Engine)?;
+    Ok(())
+})?;
+state.emit_event(SpreadsheetEvent::Structure(StructureEvent::rows_inserted(loc)));
 ```
 
 ## Performance Impact
@@ -125,11 +139,24 @@ The optimization becomes more important as:
 
 ## Guidelines
 
-1. **Always use helpers.rs mutate** for all mutations (single optimized version)
-2. **Import from helpers:** `use crate::input::helpers::{mutate, Eval};`
-3. **Always pass Eval::Yes** when formulas might be affected
-4. **Always pass Eval::No** for pure UI state changes  
-5. **Never call m.evaluate() manually** inside mutate closures - let the helper handle it
+1. Use `try_mutate` when the closure can fail; use `mutate` for infallible arms.
+2. **Import:** `use crate::input::helpers::{mutate, try_mutate, EvaluationMode};`
+3. Pass `EvaluationMode::Immediate` when formulas might be affected (cell writes, row/col inserts).
+4. Pass `EvaluationMode::Deferred` for pure UI changes (navigation, formatting, selection).
+5. Never call `m.evaluate()` manually inside either helper's closure — the helper handles it.
+6. Always emit a typed event after the helper returns — neither helper triggers redraws or notifies subscribers.
+
+## Debugging Evaluation Timing
+
+In debug builds, every event emitted through `state.emit_event()` / `emit_events()` is logged to the browser console with a relative timestamp:
+
+```
+[EventBus] +    12.34ms  Content::GenericChange
+[EventBus] +     0.12ms  Navigation::SelectionChanged row=2 col=1
+[EventBus] +   142.80ms  Content::RangeChanged sheet=1 r1=3 c1=1 r2=3 c2=1
+```
+
+The delta shows time since the previous event. Large gaps (>100ms) in a tight sequence indicate double evaluation or an unpaused `evaluate()` call. Check that `mutate` is being used rather than a bare `model.update_value` + `m.evaluate()`.
 
 ## Implementation Details
 

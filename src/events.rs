@@ -30,7 +30,7 @@ let format_events = state.subscribe_to_format_events();
 ```
 */
 
-use crate::{model::CellAddress, theme::Theme};
+use crate::{canvas::SheetRect, model::CellAddress, theme::Theme};
 
 /// Active mouse-drag interaction.
 ///
@@ -50,7 +50,14 @@ pub enum DragState {
     /// Row header resize: `(row_1based, current_mouse_y)`.
     ResizingRow { row: i32, y: f64 },
     /// Dragging to extend the point-mode range during formula entry.
-    Pointing,
+    ///
+    /// Carries the range anchor + current extent (`range`) and the byte span
+    /// inside the formula text being replaced (`ref_span`). Mirrors the
+    /// payload pattern of `Extending { to_row, to_col }` — no separate signals.
+    Pointing {
+        range: SheetRect,
+        ref_span: (usize, usize),
+    },
 }
 
 /// Which header was right-clicked to open the context menu.
@@ -180,7 +187,6 @@ pub enum FormatEvent {
     ConditionalFormattingChanged { sheet: u32 },
 }
 
-#[allow(dead_code)]
 impl FormatEvent {
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
@@ -349,8 +355,8 @@ impl HeaderChange {
     /// Get the starting position (row or column index)
     pub fn start_position(&self) -> i32 {
         match &self.dimension {
-            Dimension::Row { start } => start.expect("Row impossible"),
-            Dimension::Column { start } => start.expect("Column impossible"),
+            Dimension::Row { start } => start.unwrap_or(1),
+            Dimension::Column { start } => start.unwrap_or(1),
         }
     }
 
@@ -699,74 +705,4 @@ impl SpreadsheetEvent {
             SpreadsheetEvent::Theme(e) => e.dbg_description(),
         }
     }
-}
-
-// NOTE: Check if still worth the macro
-/// Event subscription filters for components
-#[allow(dead_code)]
-pub trait EventFilter {
-    fn matches(&self, event: &SpreadsheetEvent) -> bool;
-}
-
-/// Filter for format-related events
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct FormatEventFilter;
-
-impl EventFilter for FormatEventFilter {
-    fn matches(&self, event: &SpreadsheetEvent) -> bool {
-        matches!(event, SpreadsheetEvent::Format(_))
-    }
-}
-
-/// Filter for theme-related events
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct ThemeEventFilter;
-
-impl EventFilter for ThemeEventFilter {
-    fn matches(&self, event: &SpreadsheetEvent) -> bool {
-        matches!(event, SpreadsheetEvent::Theme(_))
-    }
-}
-
-/// Filter for content changes that affect calculations
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct ContentEventFilter;
-
-impl EventFilter for ContentEventFilter {
-    fn matches(&self, event: &SpreadsheetEvent) -> bool {
-        matches!(event, SpreadsheetEvent::Content(_))
-    }
-}
-
-/// Filter for events affecting a specific sheet
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub struct SheetEventFilter {
-    pub sheet: u32,
-}
-
-impl EventFilter for SheetEventFilter {
-    fn matches(&self, event: &SpreadsheetEvent) -> bool {
-        event.affects_sheet(self.sheet)
-    }
-}
-
-/// Convenience macro for creating event filters
-#[macro_export]
-macro_rules! event_filter {
-    (format) => {
-        $crate::events::FormatEventFilter
-    };
-    (theme) => {
-        $crate::events::ThemeEventFilter
-    };
-    (content) => {
-        $crate::events::ContentEventFilter
-    };
-    (sheet $sheet:expr) => {
-        $crate::events::SheetEventFilter { sheet: $sheet }
-    };
 }

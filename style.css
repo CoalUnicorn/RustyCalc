@@ -32,18 +32,51 @@
     flex-shrink: 0;
 }
 
-.file-bar-btn {
+/* Menu-bar style trigger (e.g. "File") */
+.file-menu-btn {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-family: inherit;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.file-menu-btn:hover {
+    background: rgba(128, 128, 128, 0.15);
+}
+
+/* Spacer that pushes right-side controls to the edge */
+.file-bar-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Circular icon button for theme toggle */
+.theme-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 44px;
-    padding: 0 10px;
-    font-size: 12px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    cursor: pointer;
-    background: var(--btn-bg);
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border-inner);
+    border-radius: 50%;
+    background: transparent;
     color: var(--text-primary);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.theme-btn:hover {
+    background: rgba(128, 128, 128, 0.15);
+    border-color: var(--border-color);
 }
 
 /* Toolbar */
@@ -654,14 +687,6 @@
     outline: none;
     background: transparent;
     color: inherit;
-}
-
-/* Click-away backdrop (shared)             */
-
-.click-away-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 1099;
 }
 
 /* Tab context menu                 */

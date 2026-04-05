@@ -12,7 +12,8 @@ Alpha-stage spreadsheet built with Rust, compiled to WebAssembly. The calculatio
 
 - Cell editing with formula support (IronCalc handles parsing and evaluation)
 - Canvas 2D rendered grid with frozen panes, selection, autofill drag
-- Toolbar: undo/redo, font family, font size (−/+), bold, italic, underline, strikethrough, freeze panes
+- Toolbar: undo/redo, font family, font size (−/+), bold, italic, underline, strikethrough, 
+  freeze panes, color picker
 - Formula bar with live edit sync to the cell overlay
 - Sheet tab bar: add, rename, delete, hide/unhide, tab colors, context menus
 - Column/row resize by dragging header borders
@@ -27,7 +28,6 @@ Alpha-stage spreadsheet built with Rust, compiled to WebAssembly. The calculatio
 ## Known limitations
 
 - `String.leak()` in `storage.rs` for the workbook name. IronCalc's `UserModel::new_empty` requires `&'static str`. Each new workbook leaks a small allocation. Negligible in practice but noted.
-- ~15 compiler warnings (unused fields/methods for components not yet built: named ranges panel, locale panel, etc.).
 
 ## Build
 
@@ -55,7 +55,7 @@ wasm-pack test --headless --firefox
 ```
 src/
 ├── app.rs             Root component, context providers, auto-save
-├── state.rs           WorkbookState — all UI signals
+├── state.rs           WorkbookState - all UI signals
 ├── storage.rs         localStorage serialization
 ├── theme.rs           Light/dark theme, CanvasTheme, COLOR_PALETTE
 ├── util.rs            UUID generation, error logging, focus management
@@ -64,11 +64,12 @@ src/
 │   └── renderer.rs    Canvas 2D drawing (grid, headers, selection, borders)
 ├── input/
 │   ├── action.rs      SpreadsheetAction wrapper enum, classify_key(), execute()
-│   ├── helpers.rs     Shared: performance-optimized mutate(), Eval, make_area(), selection_bounds()
-│   ├── nav.rs         NavAction — arrows, page, home/end, sheet switch
-│   ├── edit.rs        EditAction — start, commit, cancel cell editing
-│   ├── format.rs      FormatAction — bold, italic, font size/family
-│   ├── structure.rs   StructAction — delete, undo/redo, insert/delete rows/cols
+│   ├── error.rs       Per-module error types (FormatError, NavError, EditError, StructError)
+│   ├── helpers.rs     mutate(), try_mutate(), EvaluationMode, selection_area(), selection_bounds()
+│   ├── nav.rs         NavAction - arrows, page, home/end, sheet switch
+│   ├── edit.rs        EditAction - start, commit, cancel cell editing
+│   ├── format.rs      FormatAction - bold, italic, font size/family
+│   ├── structure.rs   StructAction - delete, undo/redo, insert/delete rows/cols
 │   └── formula_input.rs  Formula point-mode helpers (pure string ops)
 ├── components/
 │   ├── cell_editor.rs    Textarea overlay during cell editing
@@ -81,25 +82,26 @@ src/
 └── model/
     ├── clipboard_bridge.rs  Serde bridge for IronCalc's pub(crate) Clipboard
     ├── frontend_model.rs    FrontendModel trait abstracting UserModel
-    └── frontend_types.rs    Domain types (CssColor, SafeFontFamily, ToolbarState, etc.)
+    ├── frontend_types.rs    Domain types (CssColor, SafeFontFamily, ToolbarState, etc.)
+    └── style_types.rs       StylePath, HexColor, BooleanValue for update_range_style API
 ```
 
 ## Docs
 
-- [docs/rust-style-guide.md](docs/rust-style-guide.md) — Rust design patterns and type modeling principles
-- [docs/leptos-patterns.md](docs/leptos-patterns.md) — Leptos conventions used in this codebase
-- [docs/building-components.md](docs/building-components.md) — how to create and debug components
-- [docs/adding-actions.md](docs/adding-actions.md) — how to add keyboard shortcuts and toolbar actions  
-- [docs/testing-guide.md](docs/testing-guide.md) — Comprehensive guide to writing and organizing tests
-- [docs/performance-evaluation.md](docs/performance-evaluation.md) — **Critical:** avoid double evaluation performance issues
+- [docs/rust-style-guide.md](docs/rust-style-guide.md) - Rust design patterns and type modeling principles
+- [docs/leptos-patterns.md](docs/leptos-patterns.md) - Leptos conventions used in this codebase
+- [docs/building-components.md](docs/building-components.md) - how to create and debug components
+- [docs/adding-actions.md](docs/adding-actions.md) - how to add keyboard shortcuts and toolbar actions  
+- [docs/testing-guide.md](docs/testing-guide.md) - Comprehensive guide to writing and organizing tests
+- [docs/performance-evaluation.md](docs/performance-evaluation.md) - **Critical:** avoid double evaluation performance issues
 
 ## Dependencies
 
-- [IronCalc](https://github.com/ironcalc/IronCalc) — spreadsheet engine (formula parsing, evaluation, OOXML support)
-- [Leptos](https://leptos.dev/) 0.7 — reactive UI framework (CSR mode)
-- [leptos-use](https://leptos-use.rs/) 0.15 — browser API hooks (ResizeObserver, setInterval)
-- [Trunk](https://trunkrs.dev/) — WASM build tool
-- [Tauri](https://tauri.app/) 2.x — optional desktop shell
+- [IronCalc](https://github.com/ironcalc/IronCalc) - spreadsheet engine (formula parsing, evaluation, OOXML support)
+- [Leptos](https://leptos.dev/) 0.7 - reactive UI framework (CSR mode)
+- [leptos-use](https://leptos-use.rs/) 0.15 - browser API hooks (ResizeObserver, setInterval)
+- [Trunk](https://trunkrs.dev/) - WASM build tool
+- [Tauri](https://tauri.app/) 2.x - optional desktop shell
 
 
 # License

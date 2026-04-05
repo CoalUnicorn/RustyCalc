@@ -13,8 +13,7 @@ use ironcalc_base::{Model, UserModel};
 ///
 /// Uses the same locale / timezone as the app's default model ("en" / "UTC").
 pub fn import_xlsx(bytes: &[u8], name: &str) -> Result<UserModel<'static>, String> {
-    let workbook = load_from_xlsx_bytes(bytes, name, "en", "UTC")
-        .map_err(|e| e.to_string())?;
+    let workbook = load_from_xlsx_bytes(bytes, name, "en", "UTC").map_err(|e| e.to_string())?;
     let model = Model::from_workbook(workbook, "en").map_err(|e| e.to_string())?;
     Ok(UserModel::from_model(model))
 }
@@ -22,8 +21,7 @@ pub fn import_xlsx(bytes: &[u8], name: &str) -> Result<UserModel<'static>, Strin
 /// Serialize the current workbook to .xlsx bytes.
 pub fn export_xlsx(user_model: &UserModel<'static>) -> Result<Vec<u8>, String> {
     let model = user_model.get_model();
-    let cursor = save_xlsx_to_writer(model, Cursor::new(Vec::new()))
-        .map_err(|e| e.to_string())?;
+    let cursor = save_xlsx_to_writer(model, Cursor::new(Vec::new())).map_err(|e| e.to_string())?;
     Ok(cursor.into_inner())
 }
 

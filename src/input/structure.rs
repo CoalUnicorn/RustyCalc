@@ -3,9 +3,9 @@
 use leptos::prelude::WithValue;
 
 use crate::events::{ContentEvent, Location, SpreadsheetEvent, StructureEvent};
-use crate::input::helpers::{make_area, mutate, selection_bounds, EvaluationMode};
+use crate::input::error::StructError;
+use crate::input::helpers::{make_area, selection_bounds, try_mutate, EvaluationMode};
 use crate::state::{ModelStore, WorkbookState};
-use crate::util::warn_if_err;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum StructAction {
@@ -21,7 +21,11 @@ pub enum StructAction {
     DeleteColumns,
 }
 
-pub fn execute_struct(action: &StructAction, model: ModelStore, state: &WorkbookState) {
+pub fn execute_struct(
+    action: &StructAction,
+    model: ModelStore,
+    state: &WorkbookState,
+) -> Result<(), StructError> {
     match action {
         StructAction::Delete => {
             let (sheet, start_row, start_col, end_row, end_col) =
@@ -31,14 +35,18 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                     (v.sheet, r1, c1, r2, c2)
                 });
 
-            mutate(model, state, EvaluationMode::Immediate, |m| {
-                let v = m.get_selected_view();
-                let [r1, c1, r2, c2] = v.range;
-                warn_if_err(
-                    m.range_clear_contents(&make_area(v.sheet, r1, c1, r2, c2)),
-                    "range_clear_contents",
-                );
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Immediate,
+                |m| -> Result<(), StructError> {
+                    let v = m.get_selected_view();
+                    let [r1, c1, r2, c2] = v.range;
+                    m.range_clear_contents(&make_area(v.sheet, r1, c1, r2, c2))
+                        .map_err(StructError::Engine)?;
+                    Ok(())
+                },
+            )?;
 
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
                 sheet,
@@ -56,14 +64,18 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                     (v.sheet, r1, c1, r2, c2)
                 });
 
-            mutate(model, state, EvaluationMode::Immediate, |m| {
-                let v = m.get_selected_view();
-                let [r1, c1, r2, c2] = v.range;
-                warn_if_err(
-                    m.range_clear_all(&make_area(v.sheet, r1, c1, r2, c2)),
-                    "range_clear_all",
-                );
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Immediate,
+                |m| -> Result<(), StructError> {
+                    let v = m.get_selected_view();
+                    let [r1, c1, r2, c2] = v.range;
+                    m.range_clear_all(&make_area(v.sheet, r1, c1, r2, c2))
+                        .map_err(StructError::Engine)?;
+                    Ok(())
+                },
+            )?;
 
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
                 sheet,
@@ -74,17 +86,27 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
             }));
         }
         StructAction::Undo => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                warn_if_err(m.undo(), "undo");
-            });
-
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), StructError> {
+                    m.undo().map_err(StructError::Engine)?;
+                    Ok(())
+                },
+            )?;
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         }
         StructAction::Redo => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                warn_if_err(m.redo(), "redo");
-            });
-
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), StructError> {
+                    m.redo().map_err(StructError::Engine)?;
+                    Ok(())
+                },
+            )?;
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         }
         StructAction::InsertRows => {
@@ -94,30 +116,18 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 Location::new(v.sheet, r_min, r_max - r_min + 1)
             });
 
-            // Can we use this ?
-            // let loc2 = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-            //     let v = m.get_selected_view();
-            //     Location::from_selecton_bounds(
-            //         v.sheet,
-            //         Origin::Row { start: None },
-            //         selection_bounds(v.range),
-            //     )
-            // });
-
-            mutate(model, state, EvaluationMode::Immediate, |m| {
-                let v = m.get_selected_view();
-                let ((r_min, r_max), _) = selection_bounds(v.range);
-
-                warn_if_err(
-                    // m.insert_rows(Location::for_insert(
-                    //     v.sheet,
-                    //     Dimension::Row { start: None },
-                    //     selection_bounds(v.range),
-                    // ))
-                    m.insert_rows(v.sheet, r_min, r_max - r_min + 1),
-                    "insert_rows",
-                );
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Immediate,
+                |m| -> Result<(), StructError> {
+                    let v = m.get_selected_view();
+                    let ((r_min, r_max), _) = selection_bounds(v.range);
+                    m.insert_rows(v.sheet, r_min, r_max - r_min + 1)
+                        .map_err(StructError::Engine)?;
+                    Ok(())
+                },
+            )?;
 
             state.emit_event(SpreadsheetEvent::Structure(StructureEvent::rows_inserted(
                 loc,
@@ -130,14 +140,18 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 Location::new(v.sheet, c_min, c_max - c_min + 1)
             });
 
-            mutate(model, state, EvaluationMode::Immediate, |m| {
-                let v = m.get_selected_view();
-                let (_, (c_min, c_max)) = selection_bounds(v.range);
-                warn_if_err(
-                    m.insert_columns(v.sheet, c_min, c_max - c_min + 1),
-                    "insert_columns",
-                );
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Immediate,
+                |m| -> Result<(), StructError> {
+                    let v = m.get_selected_view();
+                    let (_, (c_min, c_max)) = selection_bounds(v.range);
+                    m.insert_columns(v.sheet, c_min, c_max - c_min + 1)
+                        .map_err(StructError::Engine)?;
+                    Ok(())
+                },
+            )?;
 
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::columns_inserted(loc),
@@ -150,14 +164,18 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 Location::new(v.sheet, r_min, r_max - r_min + 1)
             });
 
-            mutate(model, state, EvaluationMode::Immediate, |m| {
-                let v = m.get_selected_view();
-                let ((r_min, r_max), _) = selection_bounds(v.range);
-                warn_if_err(
-                    m.delete_rows(v.sheet, r_min, r_max - r_min + 1),
-                    "delete_rows",
-                );
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Immediate,
+                |m| -> Result<(), StructError> {
+                    let v = m.get_selected_view();
+                    let ((r_min, r_max), _) = selection_bounds(v.range);
+                    m.delete_rows(v.sheet, r_min, r_max - r_min + 1)
+                        .map_err(StructError::Engine)?;
+                    Ok(())
+                },
+            )?;
 
             state.emit_event(SpreadsheetEvent::Structure(StructureEvent::rows_deleted(
                 loc,
@@ -170,18 +188,23 @@ pub fn execute_struct(action: &StructAction, model: ModelStore, state: &Workbook
                 Location::new(v.sheet, c_min, c_max - c_min + 1)
             });
 
-            mutate(model, state, EvaluationMode::Immediate, |m| {
-                let v = m.get_selected_view();
-                let (_, (c_min, c_max)) = selection_bounds(v.range);
-                warn_if_err(
-                    m.delete_columns(v.sheet, c_min, c_max - c_min + 1),
-                    "delete_columns",
-                );
-            });
+            try_mutate(
+                model,
+                state,
+                EvaluationMode::Immediate,
+                |m| -> Result<(), StructError> {
+                    let v = m.get_selected_view();
+                    let (_, (c_min, c_max)) = selection_bounds(v.range);
+                    m.delete_columns(v.sheet, c_min, c_max - c_min + 1)
+                        .map_err(StructError::Engine)?;
+                    Ok(())
+                },
+            )?;
 
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::columns_deleted(loc),
             ));
         }
     }
+    Ok(())
 }

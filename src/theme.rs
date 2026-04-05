@@ -53,17 +53,38 @@ impl From<Theme> for ColorMode {
     }
 }
 
-// NOTE: Theming needs refactoring
-/// Initialize leptos-use color mode with RustyCalc-specific settings
-#[allow(dead_code)]
+/// Initialize leptos-use color mode with RustyCalc-specific settings.
+///
+/// Sets `data-theme` on `<html>` to "light" or "dark", matching the CSS
+/// selectors used throughout the app. Persists the preference in localStorage
+/// under `ironcalc_theme`. Auto resolves to the OS preference.
 pub fn use_rusty_calc_theme() -> leptos_use::UseColorModeReturn {
     use_color_mode_with_options(
         UseColorModeOptions::default()
-            .storage_key("ironcalc_theme") // Use existing storage key for migration
-            .initial_value(ColorMode::Auto) // Default to auto-detection
-            .attribute("class") // Add light/dark classes to <html>
-            .emit_auto(false), // Never emit Auto in the mode signal, always resolve to Light/Dark
+            .storage_key("ironcalc_theme")
+            .initial_value(ColorMode::Auto)
+            .attribute("data-theme") // Sets <html data-theme="dark|light">
+            .emit_auto(false), // Always resolve Auto to a concrete mode
     )
+}
+
+#[derive(Debug, thiserror::Error)]
+enum DarkModeQueryError {
+    #[error("window not available")]
+    NoWindow,
+    #[error("media query list not available")]
+    NoMediaQueryList,
+}
+
+/// Inner fallible implementation for [`Theme::system_prefers_dark`].
+fn query_prefers_dark() -> Result<bool, DarkModeQueryError> {
+    let window = web_sys::window().ok_or(DarkModeQueryError::NoWindow)?;
+    let mql = window
+        .match_media("(prefers-color-scheme: dark)")
+        .ok()
+        .flatten()
+        .ok_or(DarkModeQueryError::NoMediaQueryList)?;
+    Ok(mql.matches())
 }
 
 impl Theme {
@@ -84,12 +105,7 @@ impl Theme {
     /// Get system preference (true if system prefers dark mode)
     /// Uses CSS media query to detect system preference
     pub fn system_prefers_dark() -> bool {
-        let window = web_sys::window().unwrap();
-        if let Ok(media_query) = window.match_media("(prefers-color-scheme: dark)") {
-            media_query.unwrap().matches()
-        } else {
-            false // Fallback to light if media query fails
-        }
+        query_prefers_dark().unwrap_or(false)
     }
 
     /// Persist the current preference to localStorage.

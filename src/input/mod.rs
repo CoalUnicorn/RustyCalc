@@ -1,5 +1,6 @@
 pub mod action;
 pub mod edit;
+pub mod error;
 pub mod format;
 pub mod formula_input;
 pub mod helpers;
