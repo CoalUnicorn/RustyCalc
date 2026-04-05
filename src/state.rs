@@ -1,3 +1,14 @@
+//! Transient UI state and reactive signal primitives.
+//!
+//! [`WorkbookState`] holds all ephemeral UI state — nothing persisted, nothing
+//! in the model. Every field is a [`Split<T>`] signal pair. Components read via
+//! `.get()` (reactive) or `.get_untracked()` (in event handlers) and write via
+//! `.set()` / `.update()`.
+//!
+//! The model itself lives in a [`ModelStore`] context value, not here.
+//!
+//! See `docs/state-and-events.md` for usage patterns and a fields reference.
+
 use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
@@ -16,33 +27,102 @@ use crate::theme::Theme;
 /// every `use_context` call.
 pub type ModelStore = StoredValue<UserModel<'static>, LocalStorage>;
 
+/// Thin zero-cost wrapper around a Leptos split-signal pair.
+///
+/// Replaces `(ReadSignal<T>, WriteSignal<T>)` tuple fields so callers use
+/// named methods (`.get()`, `.set()`, `.read()`) rather than `.0` / `.1`.
+/// Reactivity is identical — same two signal nodes, same reactive graph.
+pub struct Split<T: Clone + Send + Sync + 'static>(ReadSignal<T>, WriteSignal<T>);
+
+// Manual impls: ReadSignal<T>/WriteSignal<T> are always Copy (arena IDs),
+// so Split<T> is Copy for any T — even non-Copy types like String or Vec.
+// #[derive(Copy)] would incorrectly add a T: Copy bound.
+impl<T: Clone + Send + Sync + 'static> Clone for Split<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<T: Clone + Send + Sync + 'static> Copy for Split<T> {}
+
+impl<T: Clone + Send + Sync + 'static> Split<T> {
+    pub fn new(initial: T) -> Self {
+        let (r, w) = signal(initial);
+        Self(r, w)
+    }
+
+    /// Reactive read — registers a dependency on the current reactive owner.
+    pub fn get(&self) -> T {
+        self.0.get()
+    }
+
+    /// Non-reactive read — safe to call outside reactive closures.
+    pub fn get_untracked(&self) -> T {
+        self.0.get_untracked()
+    }
+
+    /// Borrow the current value without cloning (reactive).
+    pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        self.0.with(f)
+    }
+
+    /// Borrow the current value without cloning (non-reactive).
+    pub fn with_untracked<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        self.0.with_untracked(f)
+    }
+
+    /// Write a new value. Always notifies subscribers.
+    pub fn set(&self, v: T) {
+        self.1.set(v);
+    }
+
+    /// Update in place.
+    pub fn update(&self, f: impl FnOnce(&mut T)) {
+        self.1.update(f);
+    }
+
+    /// The read half — pass to child components that should only subscribe.
+    pub fn read(&self) -> ReadSignal<T> {
+        self.0
+    }
+
+    /// The write half — pass to child components that should only mutate.
+    pub fn write(&self) -> WriteSignal<T> {
+        self.1
+    }
+}
+
 /// In-progress cell edit not yet committed to the model.
 /// Mirrors the TypeScript `EditingCell` interface in workbookState.ts.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditingCell {
-    // pub(crate) sheet: u32,
-    // pub(crate) row: i32,
-    // pub(crate) col: i32,
+    /// Cell being edited.
     pub(crate) address: CellAddress,
-    /// Text the user has typed; NOT yet written to UserModel
+    /// Text the user has typed; not yet written to `UserModel`.
     pub(crate) text: String,
-    /// "accept" = arrow keys navigate; "edit" = arrow keys move cursor within text
+    /// How arrow keys behave during the edit.
     pub(crate) mode: EditMode,
-    /// Which widget currently has keyboard focus
+    /// Which widget currently holds keyboard focus.
     pub(crate) focus: EditFocus,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditMode {
-    /// Arrow keys commit the edit and navigate to adjacent cells
+    /// Arrow keys commit the edit and navigate to the adjacent cell.
+    ///
+    /// The default mode when editing starts from a printable keypress.
     Accept,
-    /// Arrow keys move the text cursor; entered via F2 or double-click
+    /// Arrow keys move the text cursor within the formula.
+    ///
+    /// Entered via F2 or double-click.
     Edit,
 }
 
+/// Which widget holds keyboard focus during a cell edit.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditFocus {
+    /// The in-cell `<textarea>` overlay positioned over the active cell.
     Cell,
+    /// The formula bar `<input>` at the top of the workbook.
     FormulaBar,
 }
 
@@ -110,62 +190,37 @@ impl Default for EventBus {
 #[allow(dead_code)]
 pub struct WorkbookState {
     /// None = not editing; Some = live edit buffer
-    /// Split signals for better granularity: readers don't get notified of writes
-    pub(crate) editing_cell: (
-        ReadSignal<Option<EditingCell>>,
-        WriteSignal<Option<EditingCell>>,
-    ),
+    pub(crate) editing_cell: Split<Option<EditingCell>>,
     /// Active mouse-drag interaction (selection, resize, autofill, point-mode).
-    pub(crate) drag: (ReadSignal<DragState>, WriteSignal<DragState>),
+    pub(crate) drag: Split<DragState>,
     /// Typed per-category event bus.
     pub events: EventBus,
     /// UUID of the workbook currently loaded in the model.
-    /// Used by `storage::save` to write back to the correct localStorage key.
-    /// `None` during the brief window before a workbook is loaded.
-    pub(crate) current_uuid: (ReadSignal<Option<String>>, WriteSignal<Option<String>>),
-    /// Active color theme; Enhanced with leptos-use auto-detection behind the scenes
-    pub(crate) theme: (ReadSignal<Theme>, WriteSignal<Theme>),
-    /// Whether the left workbook-list drawer is open.
-    // pub(crate) is_drawer_open: (ReadSignal<bool>, WriteSignal<bool>),
-    /// Controls the Upload xlsx file dialog.
-    // pub(crate) show_upload_dialog: (ReadSignal<bool>, WriteSignal<bool>),
-    /// Controls the Share dialog; holds the URL returned by the server.
-    // pub(crate) share_url: (ReadSignal<Option<String>>, WriteSignal<Option<String>>),
-    /// BCP-47 language tag for formula language, persisted in localStorage.
-    // pub(crate) current_lang: (ReadSignal<String>, WriteSignal<String>),
-    /// Whether the Regional Settings right panel is open.
-    // pub(crate) show_regional_settings: (ReadSignal<bool>, WriteSignal<bool>),
-    /// Whether the Named Ranges right panel is open.
-    // pub(crate) show_named_ranges: (ReadSignal<bool>, WriteSignal<bool>),
+    pub(crate) current_uuid: Split<Option<String>>,
+    /// Active color theme preference (may be Auto).
+    pub(crate) theme: Split<Theme>,
     /// Whether the Performance panel is visible.
-    pub(crate) show_perf_panel: (ReadSignal<bool>, WriteSignal<bool>),
+    pub(crate) show_perf_panel: Split<bool>,
     /// Active right-click context menu; None when no menu is showing.
-    pub(crate) context_menu: (
-        ReadSignal<Option<ContextMenuState>>,
-        WriteSignal<Option<ContextMenuState>>,
-    ),
-    /// Range being pointed at during formula entry.
-    /// `None` when not in point mode.
-    pub(crate) point_range: (ReadSignal<Option<SheetRect>>, WriteSignal<Option<SheetRect>>),
-    /// Byte span `(start, end)` within `editing_cell.text` that holds the
-    /// current point-mode reference text, so it can be replaced in-place
-    /// when the user presses arrow keys or clicks another cell.
-    pub(crate) point_ref_span: (
-        ReadSignal<Option<(usize, usize)>>,
-        WriteSignal<Option<(usize, usize)>>,
-    ),
-    /// NodeRef to the formula bar <input> - used by FunctionBrowserModal
-    /// to read/write cursor position when inserting a function name.
+    pub(crate) context_menu: Split<Option<ContextMenuState>>,
+    /// Range being pointed at during formula entry. None when not in point mode.
+    pub(crate) point_range: Split<Option<SheetRect>>,
+    /// Byte span within `editing_cell.text` for the current point-mode reference.
+    pub(crate) point_ref_span: Split<Option<(usize, usize)>>,
+    /// NodeRef to the formula bar <input>.
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
     /// Performance timings for the commit→render pipeline.
     pub perf: PerfTimings,
-    /// Recent/custom colors used in the document.
-    /// Limited to 16 colors, most recent first.
-    pub(crate) recent_colors: (ReadSignal<Vec<CssColor>>, WriteSignal<Vec<CssColor>>),
+    /// Recent/custom colors. Limited to 16, most recent first.
+    pub(crate) recent_colors: Split<Vec<CssColor>>,
 }
 
 #[allow(dead_code)]
 impl WorkbookState {
+    /// Creates a `WorkbookState` with default signal values.
+    ///
+    /// Loads recent colors from `localStorage`. All other fields start at their
+    /// zero values: no active edit, [`DragState::Idle`], theme loaded from storage.
     pub fn new() -> Self {
         // let lang: String = <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_lang")
         //    .unwrap_or_else(|_| "en".to_owned());
@@ -176,24 +231,18 @@ impl WorkbookState {
                 .unwrap_or_default();
 
         Self {
-            editing_cell: signal(None),
-            drag: signal(DragState::Idle),
+            editing_cell: Split::new(None),
+            drag: Split::new(DragState::Idle),
             events: EventBus::new(),
-            current_uuid: signal(None),
-            theme: signal(Theme::from_storage()),
-            // is_drawer_open: signal(false),
-            // show_upload_dialog: signal(false),
-            // share_url: signal(None),
-            // current_lang: signal(lang),
-            // show_regional_settings: signal(false),
-            // show_named_ranges: signal(false),
-            show_perf_panel: signal(false),
-            context_menu: signal(None),
-            point_range: signal(None),
-            point_ref_span: signal(None),
+            current_uuid: Split::new(None),
+            theme: Split::new(Theme::from_storage()),
+            show_perf_panel: Split::new(false),
+            context_menu: Split::new(None),
+            point_range: Split::new(None),
+            point_ref_span: Split::new(None),
             formula_input_ref: NodeRef::new(),
             perf: PerfTimings::new(),
-            recent_colors: signal(recent_colors),
+            recent_colors: Split::new(recent_colors),
         }
     }
 
@@ -233,7 +282,10 @@ impl WorkbookState {
                 LAST.with(|t| {
                     let delta = now - t.get();
                     t.set(now);
-                    leptos::logging::log!("[EventBus] +{delta:>8.2}ms  {}", event.dbg_description());
+                    leptos::logging::log!(
+                        "[EventBus] +{delta:>8.2}ms  {}",
+                        event.dbg_description()
+                    );
                 });
             }
             match event {
@@ -258,67 +310,19 @@ impl WorkbookState {
         self.events.theme.update(|v| *v = theme_evs);
     }
 
-    // Convenience methods for commonly used signals
-    // These reduce boilerplate and make the API more ergonomic
-
-    /// Get the current editing cell (reactive)
-    pub fn get_editing_cell(&self) -> Option<EditingCell> {
-        self.editing_cell.0.get()
-    }
-
-    /// Get the current editing cell (non-reactive)
-    pub fn get_editing_cell_untracked(&self) -> Option<EditingCell> {
-        self.editing_cell.0.get_untracked()
-    }
-
-    /// Set the editing cell
-    pub fn set_editing_cell(&self, cell: Option<EditingCell>) {
-        self.editing_cell.1.set(cell);
-    }
-
-    /// Update the editing cell
-    pub fn update_editing_cell(&self, f: impl FnOnce(&mut Option<EditingCell>)) {
-        self.editing_cell.1.update(f);
-    }
-
-    /// Get the current drag state (reactive)
-    pub fn get_drag(&self) -> DragState {
-        self.drag.0.get()
-    }
-
-    /// Get the current drag state (non-reactive)
-    pub fn get_drag_untracked(&self) -> DragState {
-        self.drag.0.get_untracked()
-    }
-
-    /// Set the drag state
-    pub fn set_drag(&self, drag: DragState) {
-        self.drag.1.set(drag);
-    }
-
-    /// Get the current theme preference (reactive) - may return Auto
-    pub fn get_theme_preference(&self) -> Theme {
-        self.theme.0.get()
-    }
-
-    /// Get the current theme preference (non-reactive) - may return Auto
-    pub fn get_theme_preference_untracked(&self) -> Theme {
-        self.theme.0.get_untracked()
-    }
-
     /// Get the resolved theme (reactive) - Auto resolves to Light/Dark based on system preference
     pub fn get_theme(&self) -> Theme {
-        self.theme.0.get().resolve_with_system()
+        self.theme.get().resolve_with_system()
     }
 
     /// Get the resolved theme (non-reactive) - Auto resolves to Light/Dark based on system preference
     pub fn get_theme_untracked(&self) -> Theme {
-        self.theme.0.get_untracked().resolve_with_system()
+        self.theme.get_untracked().resolve_with_system()
     }
 
     /// Set the theme preference and persist to storage
     pub fn set_theme(&self, theme: Theme) {
-        self.theme.1.set(theme);
+        self.theme.set(theme);
         theme.save(); // Keep manual persistence for now
         self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
             new_theme: theme,
@@ -327,7 +331,7 @@ impl WorkbookState {
 
     /// Toggle theme in cycle: Auto -> Light -> Dark -> Auto
     pub fn toggle_theme(&self) {
-        let current = self.get_theme_preference();
+        let current = self.theme.get();
         let next = match current {
             Theme::Auto => Theme::Light,
             Theme::Light => Theme::Dark,
@@ -338,87 +342,12 @@ impl WorkbookState {
 
     /// Toggle between Light and Dark only (preserving Auto if set)
     pub fn toggle_light_dark(&self) {
-        let current = self.get_theme_preference();
+        let current = self.theme.get();
         match current {
             Theme::Auto => {} // Keep Auto unchanged
             Theme::Light => self.set_theme(Theme::Dark),
             Theme::Dark => self.set_theme(Theme::Light),
         }
-    }
-
-    /// Get point range (reactive)
-    pub fn get_point_range(&self) -> Option<SheetRect> {
-        self.point_range.0.get()
-    }
-
-    /// Get point range (non-reactive)
-    pub fn get_point_range_untracked(&self) -> Option<SheetRect> {
-        self.point_range.0.get_untracked()
-    }
-
-    /// Set point range
-    pub fn set_point_range(&self, range: Option<SheetRect>) {
-        self.point_range.1.set(range);
-    }
-
-    /// Get point ref span (non-reactive)
-    pub fn get_point_ref_span_untracked(&self) -> Option<(usize, usize)> {
-        self.point_ref_span.0.get_untracked()
-    }
-
-    /// Set point ref span
-    pub fn set_point_ref_span(&self, span: Option<(usize, usize)>) {
-        self.point_ref_span.1.set(span);
-    }
-
-    /// Get context menu (reactive)
-    pub fn get_context_menu(&self) -> Option<ContextMenuState> {
-        self.context_menu.0.get()
-    }
-
-    /// Set context menu
-    pub fn set_context_menu(&self, menu: Option<ContextMenuState>) {
-        self.context_menu.1.set(menu);
-    }
-
-    /// Get current UUID (non-reactive)
-    pub fn get_current_uuid_untracked(&self) -> Option<String> {
-        self.current_uuid.0.get_untracked()
-    }
-
-    /// Set current UUID
-    pub fn set_current_uuid(&self, uuid: Option<String>) {
-        self.current_uuid.1.set(uuid);
-    }
-
-    /// Get show perf panel (reactive)
-    pub fn get_show_perf_panel(&self) -> bool {
-        self.show_perf_panel.0.get()
-    }
-
-    /// Set show perf panel
-    pub fn set_show_perf_panel(&self, show: bool) {
-        self.show_perf_panel.1.set(show);
-    }
-
-    /// Toggle show perf panel
-    pub fn toggle_show_perf_panel(&self) {
-        self.show_perf_panel.1.update(|v| *v = !*v);
-    }
-
-    /// Get recent colors (reactive)
-    pub fn get_recent_colors(&self) -> Vec<CssColor> {
-        self.recent_colors.0.get()
-    }
-
-    /// Get recent colors (non-reactive)
-    pub fn get_recent_colors_untracked(&self) -> Vec<CssColor> {
-        self.recent_colors.0.get_untracked()
-    }
-
-    /// Set recent colors
-    pub fn set_recent_colors(&self, colors: Vec<CssColor>) {
-        self.recent_colors.1.set(colors);
     }
 
     /// Add a color to the recent colors list
@@ -442,7 +371,7 @@ impl WorkbookState {
             format!("#{}", color.to_lowercase())
         });
 
-        self.recent_colors.1.update(|colors| {
+        self.recent_colors.update(|colors| {
             // Remove if already exists
             colors.retain(|c| c != &normalized);
 
@@ -456,7 +385,6 @@ impl WorkbookState {
         // Convert to Vec<String> for storage and event (same JSON representation)
         let string_colors: Vec<String> = self
             .recent_colors
-            .0
             .with_untracked(|colors| colors.iter().map(|c| c.as_str().to_owned()).collect());
         <gloo_storage::LocalStorage as GlooStorage>::set("ironcalc_recent_colors", &string_colors)
             .ok();

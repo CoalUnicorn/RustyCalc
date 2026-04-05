@@ -385,7 +385,8 @@ fn workbook_recent_colors(state: WorkbookState) -> Signal<Vec<String>> {
     // Convert CssColor → String at this boundary so component props stay as Vec<String>.
     Signal::derive(move || {
         state
-            .get_recent_colors()
+            .recent_colors
+            .get()
             .into_iter()
             .map(|c| c.as_str().to_owned())
             .collect()

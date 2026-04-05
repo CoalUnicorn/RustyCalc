@@ -755,17 +755,8 @@
 /* All-sheets menu (hamburger)            */
 
 .all-sheets-menu {
-    position: fixed;
-    z-index: 1100;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-    padding: 4px 0;
-    min-width: 160px;
     max-height: 300px;
     overflow-y: auto;
-    font-size: 13px;
 }
 
 .all-sheets-item {

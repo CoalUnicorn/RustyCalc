@@ -61,14 +61,14 @@ pub fn Worksheet() -> impl IntoView {
     // (non-reactive). It is read fresh in the rAF callback each render so it
     // never goes stale (the original marching-ants bug).
     let reactive_overlay = Memo::new(move |_| {
-        let extend_to = match state.get_drag() {
+        let extend_to = match state.drag.get() {
             DragState::Extending { to_row, to_col } => Some(AutofillTarget {
                 row: to_row,
                 col: to_col,
             }),
             _ => None,
         };
-        let point_range = state.get_point_range();
+        let point_range = state.point_range.get();
         (extend_to, point_range)
     });
 
@@ -203,14 +203,14 @@ pub fn Worksheet() -> impl IntoView {
         // If no button is held the drag ended outside the canvas (mouseup was
         // missed). Reset all drag state so the next interaction starts clean.
         if ev.buttons() == 0 {
-            state.set_drag(DragState::Idle);
+            state.drag.set(DragState::Idle);
             return;
         }
         let x = ev.offset_x() as f64;
         let y = ev.offset_y() as f64;
 
         // Resize drags
-        match state.get_drag_untracked() {
+        match state.drag.get_untracked() {
             DragState::ResizingCol { col, x: last_x } => {
                 let delta = x - last_x;
                 model.update_value(|m| {
@@ -222,7 +222,7 @@ pub fn Worksheet() -> impl IntoView {
                         "set_columns_width",
                     );
                 });
-                state.set_drag(DragState::ResizingCol { col, x });
+                state.drag.set(DragState::ResizingCol { col, x });
                 let sheet = model.with_value(|m| m.active_cell().sheet);
                 state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                     sheet,
@@ -240,7 +240,7 @@ pub fn Worksheet() -> impl IntoView {
                     let new_h = (current_h + delta).max(3.0);
                     warn_if_err(m.set_rows_height(sheet, row, row, new_h), "set_rows_height");
                 });
-                state.set_drag(DragState::ResizingRow { row, y });
+                state.drag.set(DragState::ResizingRow { row, y });
                 let sheet = model.with_value(|m| m.active_cell().sheet);
                 state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                     sheet,
@@ -270,10 +270,10 @@ pub fn Worksheet() -> impl IntoView {
             )
         });
 
-        match state.get_drag_untracked() {
+        match state.drag.get_untracked() {
             DragState::Extending { .. } => {
                 // Update autofill preview target.
-                state.set_drag(DragState::Extending {
+                state.drag.set(DragState::Extending {
                     to_row: row,
                     to_col: col,
                 });
@@ -281,27 +281,28 @@ pub fn Worksheet() -> impl IntoView {
             }
             DragState::Pointing => {
                 // Extend the point-mode range to the hovered cell.
-                if let Some(pr) = state.get_point_range_untracked() {
+                if let Some(pr) = state.point_range.get_untracked() {
                     let sheet = model.with_value(|m| m.active_cell().sheet);
                     let ref_str = range_ref_str(pr.r1, pr.c1, row, col, sheet, sheet, "");
-                    let prev_span = state.get_point_ref_span_untracked();
+                    let prev_span = state.point_ref_span.get_untracked();
                     let cursor = prev_span.map(|(_, end)| end).unwrap_or(0);
                     let new_state = state
-                        .get_editing_cell_untracked()
+                        .editing_cell
+                        .get_untracked()
                         .map(|edit| splice_ref(&edit.text, cursor, &ref_str, prev_span));
                     if let Some((new_text, new_start, new_end)) = new_state {
-                        state.update_editing_cell(|c| {
+                        state.editing_cell.update(|c| {
                             if let Some(e) = c {
                                 e.text = new_text;
                             }
                         });
-                        state.set_point_range(Some(SheetRect {
+                        state.point_range.set(Some(SheetRect {
                             r1: pr.r1,
                             c1: pr.c1,
                             r2: row,
                             c2: col,
                         }));
-                        state.set_point_ref_span(Some((new_start, new_end)));
+                        state.point_ref_span.set(Some((new_start, new_end)));
                         state.request_redraw();
                     }
                 }
@@ -338,7 +339,7 @@ pub fn Worksheet() -> impl IntoView {
     // mouseup: commit autofill or end selection drag
     let on_mouseup = move |_ev: web_sys::MouseEvent| {
         // Commit autofill if active, then reset drag state unconditionally.
-        if let DragState::Extending { to_row, to_col } = state.get_drag_untracked() {
+        if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
             model.update_value(|m| {
                 m.pause_evaluation();
                 let view = m.get_selected_view();
@@ -377,7 +378,7 @@ pub fn Worksheet() -> impl IntoView {
                 end_col,
             }));
         }
-        state.set_drag(DragState::Idle);
+        state.drag.set(DragState::Idle);
     };
 
     // dblclick: enter edit mode with existing cell content
@@ -391,7 +392,7 @@ pub fn Worksheet() -> impl IntoView {
         model.with_value(|m| {
             let ac = m.active_cell();
             let text = m.active_cell_content();
-            state.set_editing_cell(Some(EditingCell {
+            state.editing_cell.set(Some(EditingCell {
                 address: CellAddress {
                     sheet: ac.sheet,
                     row: ac.row,
@@ -430,7 +431,7 @@ pub fn Worksheet() -> impl IntoView {
 
         if let Some(target) = target {
             ev.prevent_default();
-            state.set_context_menu(Some(ContextMenuState {
+            state.context_menu.set(Some(ContextMenuState {
                 x: ev.client_x(),
                 y: ev.client_y(),
                 target,
@@ -490,7 +491,7 @@ pub fn Worksheet() -> impl IntoView {
                 role="application"
                 aria-label="Spreadsheet grid"
                 class=move || {
-                    match state.get_drag() {
+                    match state.drag.get() {
                         DragState::ResizingCol { .. } => "worksheet-canvas resize-col",
                         DragState::ResizingRow { .. } => "worksheet-canvas resize-row",
                         DragState::Idle
@@ -524,7 +525,7 @@ fn try_begin_col_resize(
     if let Some(col) =
         model.with_value(|m| crate::canvas::geometry::find_col_boundary_at(m, x, HIT_ZONE))
     {
-        state.set_drag(DragState::ResizingCol { col, x });
+        state.drag.set(DragState::ResizingCol { col, x });
         ev.prevent_default();
         true
     } else {
@@ -543,7 +544,7 @@ fn try_begin_row_resize(
     if let Some(row) =
         model.with_value(|m| crate::canvas::geometry::find_row_boundary_at(m, y, HIT_ZONE))
     {
-        state.set_drag(DragState::ResizingRow { row, y });
+        state.drag.set(DragState::ResizingRow { row, y });
         ev.prevent_default();
         true
     } else {
@@ -556,7 +557,7 @@ fn handle_corner_click(model: ModelStore, state: WorkbookState) {
     model.update_value(|m| {
         m.nav_select_all();
     });
-    state.set_editing_cell(None);
+    state.editing_cell.set(None);
     let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
         let v = m.get_selected_view();
         let [r1, c1, r2, c2] = v.range;
@@ -592,7 +593,7 @@ fn handle_col_header_click(
             m.nav_select_column(col);
         }
     });
-    state.set_editing_cell(None);
+    state.editing_cell.set(None);
     let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
         let v = m.get_selected_view();
         let [r1, c1, r2, c2] = v.range;
@@ -628,7 +629,7 @@ fn handle_row_header_click(
             m.nav_select_row(row);
         }
     });
-    state.set_editing_cell(None);
+    state.editing_cell.set(None);
     let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
         let v = m.get_selected_view();
         let [r1, c1, r2, c2] = v.range;
@@ -672,29 +673,29 @@ fn handle_cell_click(
     // When the cursor is at a syntactically valid reference position inside
     // a formula, clicking a cell inserts/replaces the reference rather than
     // committing the edit and navigating away.
-    if let Some(ref edit) = state.get_editing_cell_untracked() {
+    if let Some(ref edit) = state.editing_cell.get_untracked() {
         if edit.mode == EditMode::Accept {
             let cursor = get_formula_cursor();
-            let already_pointing = state.get_point_range_untracked().is_some();
+            let already_pointing = state.point_range.get_untracked().is_some();
             if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                 let sheet = model.with_value(|m| m.active_cell().sheet);
                 let ref_str = range_ref_str(row, col, row, col, sheet, sheet, "");
-                let prev_span = state.get_point_ref_span_untracked();
+                let prev_span = state.point_ref_span.get_untracked();
                 let text = edit.text.clone();
                 let (new_text, new_start, new_end) = splice_ref(&text, cursor, &ref_str, prev_span);
-                state.update_editing_cell(|c| {
+                state.editing_cell.update(|c| {
                     if let Some(e) = c {
                         e.text = new_text;
                     }
                 });
-                state.set_point_range(Some(SheetRect {
+                state.point_range.set(Some(SheetRect {
                     r1: row,
                     c1: col,
                     r2: row,
                     c2: col,
                 }));
-                state.set_drag(DragState::Pointing);
-                state.set_point_ref_span(Some((new_start, new_end)));
+                state.drag.set(DragState::Pointing);
+                state.point_ref_span.set(Some((new_start, new_end)));
                 state.request_redraw();
                 return;
             }
@@ -703,7 +704,7 @@ fn handle_cell_click(
 
     if near_handle {
         // Begin autofill drag - don't change the selection.
-        state.set_drag(DragState::Extending {
+        state.drag.set(DragState::Extending {
             to_row: row,
             to_col: col,
         });
@@ -712,15 +713,15 @@ fn handle_cell_click(
         model.update_value(|m| {
             m.nav_extend_selection(row, col);
         });
-        state.set_drag(DragState::Selecting);
+        state.drag.set(DragState::Selecting);
     } else {
         model.update_value(|m| {
             m.nav_set_cell(row, col);
         });
-        state.set_drag(DragState::Selecting);
+        state.drag.set(DragState::Selecting);
     }
 
-    state.set_editing_cell(None);
+    state.editing_cell.set(None);
 
     // Emit the appropriate navigation event so toolbar/formula-bar
     // update and the canvas repaints via visual_events.

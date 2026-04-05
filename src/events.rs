@@ -223,17 +223,23 @@ impl FormatEvent {
     }
 }
 
-/// The dimension being modified
+/// The axis being modified in a header operation.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Dimension {
+    /// Row axis. `start` is the 1-based row index where the operation begins.
     Row { start: Option<i32> },
+    /// Column axis. `start` is the 1-based column index where the operation begins.
     Column { start: Option<i32> },
 }
 
+/// A contiguous span of rows or columns on a single sheet.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Location {
+    /// Sheet index (0-based).
     sheet: u32,
+    /// First row or column in the span (1-based).
     start: i32,
+    /// Number of rows or columns in the span.
     count: i32,
 }
 
@@ -278,19 +284,25 @@ impl Location {
     // }
 }
 
-/// A structural change to rows or columns
+/// A structural change to rows or columns on a single sheet.
 #[derive(Clone, PartialEq, Debug)]
 pub struct HeaderChange {
+    /// Sheet where the change occurred (0-based index).
     pub sheet: u32,
+    /// Whether rows/columns were inserted or deleted.
     pub operation: HeaderOperation,
+    /// Which axis was affected and at which position.
     pub dimension: Dimension,
+    /// Number of rows or columns affected.
     pub count: i32,
 }
 
-/// The type of header operation
+/// Whether rows or columns are being inserted or deleted.
 #[derive(Clone, PartialEq, Debug)]
 pub enum HeaderOperation {
+    /// New rows or columns are being inserted before `start`.
     Insert,
+    /// Existing rows or columns are being removed starting at `start`.
     Delete,
 }
 
@@ -381,6 +393,10 @@ pub enum StructureEvent {
     WorksheetsReordered,
     /// Rows or columns inserted/deleted
     StructureChanged(HeaderChange),
+    /// A sheet was hidden. It still exists — not deleted. Use `WorksheetUnhidden` to reverse.
+    WorksheetHidden { sheet: u32 },
+    /// A previously hidden sheet was made visible again.
+    WorksheetUnhidden { sheet: u32, name: String },
 }
 
 #[allow(dead_code)]
@@ -412,6 +428,8 @@ impl StructureEvent {
             StructureEvent::WorksheetRenamed { sheet, .. } => Some(*sheet),
             StructureEvent::StructureChanged(c) => Some(c.sheet),
             StructureEvent::WorksheetsReordered => None,
+            StructureEvent::WorksheetHidden { sheet } => Some(*sheet),
+            StructureEvent::WorksheetUnhidden { sheet, .. } => Some(*sheet),
         }
     }
 
@@ -433,17 +451,23 @@ impl StructureEvent {
                 "Structure::Changed S{} {:?} {:?}",
                 c.sheet, c.operation, c.dimension
             ),
+            StructureEvent::WorksheetHidden { sheet } => {
+                format!("Structure::Hidden(sheet={sheet})")
+            }
+            StructureEvent::WorksheetUnhidden { sheet, name } => {
+                format!("Structure::Unhidden(sheet={sheet}, name={name})")
+            }
         }
     }
 }
 
-/// Selection, navigation, and editing state changes
+/// Selection, navigation, and editing state changes.
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum NavigationEvent {
-    /// Active selection changed
+    /// The active cell moved to a single new address.
     SelectionChanged { address: CellAddress },
-    /// Selection range changed (drag selection)
+    /// A range selection was extended (Shift-click, Shift-arrow, column/row header click).
     SelectionRangeChanged {
         sheet: u32,
         start_row: i32,
@@ -451,17 +475,17 @@ pub enum NavigationEvent {
         end_row: i32,
         end_col: i32,
     },
-    /// User scrolled the viewport
+    /// The canvas viewport scrolled to a new `top_row` / `left_col` origin.
     ViewportScrolled {
         sheet: u32,
         top_row: i32,
         left_col: i32,
     },
-    /// Active worksheet changed
+    /// The active sheet changed.
     ActiveSheetChanged { from_sheet: u32, to_sheet: u32 },
-    /// Cell editing started
+    /// A cell edit session started (formula bar focused or printable key pressed).
     EditingStarted { address: CellAddress },
-    /// Cell editing ended
+    /// A cell edit session ended. `committed = true` when the value was written to the model.
     EditingEnded {
         address: CellAddress,
         committed: bool,
@@ -516,32 +540,34 @@ impl NavigationEvent {
     }
 }
 
-/// UI interaction modes and tool states
+/// UI interaction mode changes.
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum ModeEvent {
-    /// Edit mode started for a specific cell
+    /// A cell edit session started.
     EditStarted { address: CellAddress },
-    /// Edit mode ended (commit or cancel)
+    /// A cell edit session ended (committed or cancelled).
     EditEnded,
-    /// Drag mode changed (selection, resize, autofill, etc.)
+    /// The active [`DragState`] transitioned between modes.
     DragModeChanged {
         from_mode: DragState,
         to_mode: DragState,
     },
-    /// Point mode during formula entry
+    /// Formula point-mode entered or exited.
+    ///
+    /// `range` is `[r1, c1, r2, c2]` when a range is currently highlighted.
     PointModeChanged {
         active: bool,
         range: Option<[i32; 4]>,
     },
-    /// Context menu shown/hidden
+    /// A header context menu was shown or hidden.
     ContextMenuToggled {
         visible: bool,
         target: Option<HeaderContextMenu>,
     },
-    /// Modal dialog shown/hidden
+    /// A modal dialog was shown or hidden.
     DialogToggled { dialog_name: String, visible: bool },
-    /// Panel visibility changed
+    /// A UI panel was shown or hidden.
     PanelToggled { panel_name: String, visible: bool },
 }
 
@@ -572,15 +598,15 @@ impl ModeEvent {
     }
 }
 
-/// Theme and appearance changes
+/// Theme and appearance changes.
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum ThemeEvent {
-    /// Light/dark theme toggled
+    /// The active theme changed (Auto / Light / Dark cycle).
     ThemeToggled { new_theme: Theme },
-    /// Color palette changed or updated
+    /// The color palette was modified.
     PaletteUpdated,
-    /// FIXME: This needs its own place Language/locale changed
+    /// FIXME: This needs its own place — language/locale changed.
     LocaleChanged { new_locale: String },
 }
 

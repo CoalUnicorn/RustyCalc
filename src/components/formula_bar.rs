@@ -37,7 +37,7 @@ pub fn FormulaBar() -> impl IntoView {
     // While editing: live edit buffer (shared with CellEditor).
     // Otherwise: raw cell content (formula text or literal).
     let display_text = move || {
-        if let Some(edit) = state.get_editing_cell() {
+        if let Some(edit) = state.editing_cell.get() {
             return edit.text;
         }
         // Subscribe to content + navigation events (content changes and selection changes affect display)
@@ -46,7 +46,7 @@ pub fn FormulaBar() -> impl IntoView {
         model.with_value(|m| m.active_cell_content())
     };
 
-    let is_editing = move || state.get_editing_cell().is_some();
+    let is_editing = move || state.editing_cell.get().is_some();
 
     // ???: Debounced formula validation (300ms)
     // Create a stored validation state that's updated via debouncing
@@ -57,7 +57,7 @@ pub fn FormulaBar() -> impl IntoView {
     let debounced_validate = use_debounce_fn(
         move || {
             // Get current formula text for validation
-            if let Some(edit) = state.get_editing_cell_untracked() {
+            if let Some(edit) = state.editing_cell.get_untracked() {
                 let text = edit.text;
                 if text.trim().is_empty() || !text.starts_with('=') {
                     set_validation_error.set(None);
@@ -83,7 +83,7 @@ pub fn FormulaBar() -> impl IntoView {
         move || {
             // In a real implementation, this could update CSS classes for syntax highlighting
             // For now, just mark that highlighting occurred
-            if let Some(edit) = state.get_editing_cell_untracked() {
+            if let Some(edit) = state.editing_cell.get_untracked() {
                 let text = edit.text;
                 if text.starts_with('=') && text.len() > 1 {
                     // This could trigger syntax highlighting updates
@@ -97,8 +97,8 @@ pub fn FormulaBar() -> impl IntoView {
     // Start an edit session with FormulaBar focus (so CellEditor doesn't
     // steal focus back), or switch focus if already editing.
     let on_focus = move |_: web_sys::FocusEvent| {
-        if state.get_editing_cell_untracked().is_some() {
-            state.update_editing_cell(|cell| {
+        if state.editing_cell.get_untracked().is_some() {
+            state.editing_cell.update(|cell| {
                 if let Some(c) = cell {
                     c.focus = EditFocus::FormulaBar;
                 }
@@ -114,7 +114,7 @@ pub fn FormulaBar() -> impl IntoView {
                 NavigationEvent::EditingStarted { address },
             ));
 
-            state.set_editing_cell(Some(EditingCell {
+            state.editing_cell.set(Some(EditingCell {
                 address,
                 text,
                 mode: EditMode::Edit,
@@ -132,8 +132,8 @@ pub fn FormulaBar() -> impl IntoView {
             .unwrap_or_default();
 
         // Immediate UI update (no lag in typing experience)
-        if state.get_editing_cell_untracked().is_some() {
-            state.update_editing_cell(|cell| {
+        if state.editing_cell.get_untracked().is_some() {
+            state.editing_cell.update(|cell| {
                 if let Some(c) = cell {
                     c.text = value.clone();
                 }
@@ -142,7 +142,7 @@ pub fn FormulaBar() -> impl IntoView {
             // First keystroke - Accept mode: arrows commit + navigate.
             model.with_value(|m| {
                 let ac = m.active_cell();
-                state.set_editing_cell(Some(EditingCell {
+                state.editing_cell.set(Some(EditingCell {
                     address: CellAddress {
                         sheet: ac.sheet,
                         row: ac.row,

@@ -37,7 +37,7 @@ pub fn Workbook() -> impl IntoView {
             use wasm_bindgen::JsCast;
             if let Ok(el) = target.dyn_into::<web_sys::HtmlElement>() {
                 let tag = el.tag_name().to_ascii_lowercase();
-                let is_editing = state.get_editing_cell_untracked().is_some();
+                let is_editing = state.editing_cell.get_untracked().is_some();
                 if tag == "select" || ((tag == "input" || tag == "textarea") && !is_editing) {
                     return;
                 }
@@ -54,7 +54,7 @@ pub fn Workbook() -> impl IntoView {
         // inside a formula, rather than committing the edit.  This requires
         // reading the textarea cursor position from the DOM, so it must run
         // here before classify_key (which is pure).
-        if let Some(ref edit) = state.get_editing_cell_untracked() {
+        if let Some(ref edit) = state.editing_cell.get_untracked() {
             if edit.mode == EditMode::Accept
                 && !is_ctrl
                 && !is_alt
@@ -64,10 +64,10 @@ pub fn Workbook() -> impl IntoView {
                 )
             {
                 let cursor = get_formula_cursor();
-                let already_pointing = state.get_point_range_untracked().is_some();
+                let already_pointing = state.point_range.get_untracked().is_some();
                 if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                     // Move or extend the point-mode range by one cell.
-                    let pr = state.get_point_range_untracked().unwrap_or_else(|| {
+                    let pr = state.point_range.get_untracked().unwrap_or_else(|| {
                         model.with_value(|m| {
                             let v = m.get_selected_view();
                             SheetRect {
@@ -90,23 +90,23 @@ pub fn Workbook() -> impl IntoView {
                     let (new_r1, new_c1) = if is_shift { (r1, c1) } else { (new_r2, new_c2) };
                     let sheet = model.with_value(|m| m.get_selected_view().sheet);
                     let ref_str = range_ref_str(new_r1, new_c1, new_r2, new_c2, sheet, sheet, "");
-                    let prev_span = state.get_point_ref_span_untracked();
+                    let prev_span = state.point_ref_span.get_untracked();
                     let splice_at = prev_span.map(|(_, end)| end).unwrap_or(cursor);
                     let text = edit.text.clone();
                     let (new_text, new_start, new_end) =
                         splice_ref(&text, splice_at, &ref_str, prev_span);
-                    state.update_editing_cell(|c| {
+                    state.editing_cell.update(|c| {
                         if let Some(e) = c {
                             e.text = new_text;
                         }
                     });
-                    state.set_point_range(Some(SheetRect {
+                    state.point_range.set(Some(SheetRect {
                         r1: new_r1,
                         c1: new_c1,
                         r2: new_r2,
                         c2: new_c2,
                     }));
-                    state.set_point_ref_span(Some((new_start, new_end)));
+                    state.point_ref_span.set(Some((new_start, new_end)));
                     state.request_redraw();
                     ev.prevent_default();
                     return;
@@ -115,7 +115,7 @@ pub fn Workbook() -> impl IntoView {
         }
 
         // Classify key -> action
-        let edit_ref = state.get_editing_cell_untracked();
+        let edit_ref = state.editing_cell.get_untracked();
         let Some(action) = classify_key(
             &key,
             KeyMod {
@@ -186,7 +186,7 @@ pub fn Workbook() -> impl IntoView {
             <Toolbar />
             <FormulaBar />
             <Worksheet />
-            <Show when=move || state.get_show_perf_panel()>
+            <Show when=move || state.show_perf_panel.get()>
                 <PerfPanel />
             </Show>
             <SheetTabBar />

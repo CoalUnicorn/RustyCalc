@@ -27,7 +27,7 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
             let address = model.with_value(|m| {
                 let address = CellAddress::from_view(m);
 
-                state.set_editing_cell(Some(EditingCell {
+                state.editing_cell.set(Some(EditingCell {
                     address,
                     text: text.clone(),
                     mode: EditMode::Accept,
@@ -48,7 +48,7 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
 
                 let address = CellAddress::from_view(m);
 
-                state.set_editing_cell(Some(EditingCell {
+                state.editing_cell.set(Some(EditingCell {
                     address,
                     text,
                     mode: EditMode::Edit,
@@ -61,7 +61,7 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
             state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditStarted { address }));
         }
         EditAction::CommitAndNavigate(dir) => {
-            if let Some(edit) = state.get_editing_cell_untracked() {
+            if let Some(edit) = state.editing_cell.get_untracked() {
                 // Perf timing
                 let perf = state.perf;
                 perf.commit_start.set(Some(crate::perf::now()));
@@ -89,12 +89,12 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
                 });
 
                 // Clear all edit-related state.
-                state.set_editing_cell(None);
-                state.set_point_range(None);
-                state.set_point_ref_span(None);
+                state.editing_cell.set(None);
+                state.point_range.set(None);
+                state.point_ref_span.set(None);
 
                 // Persist the committed change immediately.
-                if let Some(uuid) = state.get_current_uuid_untracked() {
+                if let Some(uuid) = state.current_uuid.get_untracked() {
                     model.with_value(|m| storage::save(&uuid, m));
                 }
 
@@ -120,9 +120,9 @@ pub fn execute_edit(action: &EditAction, model: ModelStore, state: &WorkbookStat
             }
         }
         EditAction::Cancel => {
-            state.set_editing_cell(None);
-            state.set_point_range(None);
-            state.set_point_ref_span(None);
+            state.editing_cell.set(None);
+            state.point_range.set(None);
+            state.point_ref_span.set(None);
 
             // Fire mode event for edit cancellation
             state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditEnded));

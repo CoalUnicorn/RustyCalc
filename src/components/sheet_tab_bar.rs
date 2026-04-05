@@ -38,14 +38,18 @@ pub fn SheetTabBar() -> impl IntoView {
     let on_add = move |_| {
         // Snapshot count before mutation — that index is the new sheet's position.
         let sheet_count = model.with_value(|m| m.get_worksheets_properties().len() as u32);
-        model.update_value(|m| { m.new_sheet().ok(); });
-        if let Some(uuid) = state.get_current_uuid_untracked() {
+        model.update_value(|m| {
+            m.new_sheet().ok();
+        });
+        if let Some(uuid) = state.current_uuid.get_untracked() {
             model.with_value(|m| storage::save(&uuid, m));
         }
-        state.emit_event(SpreadsheetEvent::Structure(StructureEvent::WorksheetAdded {
-            sheet: sheet_count,
-            name: format!("Sheet{}", sheet_count + 1),
-        }));
+        state.emit_event(SpreadsheetEvent::Structure(
+            StructureEvent::WorksheetAdded {
+                sheet: sheet_count,
+                name: format!("Sheet{}", sheet_count + 1),
+            },
+        ));
     };
 
     view! {
@@ -114,12 +118,16 @@ fn SheetTab(
 
     let on_click = move |_: web_sys::MouseEvent| {
         let previous_sheet = model.with_value(|m| m.get_selected_view().sheet);
-        model.update_value(|m| { m.set_selected_sheet(sheet_idx).ok(); });
+        model.update_value(|m| {
+            m.set_selected_sheet(sheet_idx).ok();
+        });
         if previous_sheet != sheet_idx {
-            state.emit_event(SpreadsheetEvent::Navigation(NavigationEvent::ActiveSheetChanged {
-                from_sheet: previous_sheet,
-                to_sheet: sheet_idx,
-            }));
+            state.emit_event(SpreadsheetEvent::Navigation(
+                NavigationEvent::ActiveSheetChanged {
+                    from_sheet: previous_sheet,
+                    to_sheet: sheet_idx,
+                },
+            ));
         }
     };
 
@@ -136,7 +144,8 @@ fn SheetTab(
     };
 
     let color_bar_style = move || {
-        current_tab_color.get()
+        current_tab_color
+            .get()
             .map(|c| format!("background:{c};"))
             .unwrap_or_default()
     };
@@ -163,8 +172,10 @@ fn SheetTab(
 
     let on_color_change = Callback::new(move |color: Option<String>| {
         let hex = color.as_deref().unwrap_or("");
-        model.update_value(|m| { m.set_sheet_color(sheet_idx, hex).ok(); });
-        if let Some(uuid) = state.get_current_uuid_untracked() {
+        model.update_value(|m| {
+            m.set_sheet_color(sheet_idx, hex).ok();
+        });
+        if let Some(uuid) = state.current_uuid.get_untracked() {
             model.with_value(|m| storage::save(&uuid, m));
         }
         if !hex.is_empty() {
@@ -179,12 +190,14 @@ fn SheetTab(
     });
 
     let on_hide = move || {
-        model.update_value(|m| { m.hide_sheet(sheet_idx).ok(); });
-        if let Some(uuid) = state.get_current_uuid_untracked() {
+        model.update_value(|m| {
+            m.hide_sheet(sheet_idx).ok();
+        });
+        if let Some(uuid) = state.current_uuid.get_untracked() {
             model.with_value(|m| storage::save(&uuid, m));
         }
         state.emit_event(SpreadsheetEvent::Structure(
-            StructureEvent::WorksheetDeleted { sheet: sheet_idx },
+            StructureEvent::WorksheetHidden { sheet: sheet_idx },
         ));
     };
 
@@ -202,8 +215,10 @@ fn SheetTab(
             })
             .unwrap_or(false);
         if confirmed {
-            model.update_value(|m| { m.delete_sheet(sheet_idx).ok(); });
-            if let Some(uuid) = state.get_current_uuid_untracked() {
+            model.update_value(|m| {
+                m.delete_sheet(sheet_idx).ok();
+            });
+            if let Some(uuid) = state.current_uuid.get_untracked() {
                 model.with_value(|m| storage::save(&uuid, m));
             }
             state.emit_event(SpreadsheetEvent::Structure(
@@ -282,15 +297,19 @@ fn RenameInput(
                     .map(|s| s.name.clone())
                     .unwrap_or_default()
             });
-            model.update_value(|m| { m.rename_sheet(sheet_idx, &new_name).ok(); });
-            if let Some(uuid) = state.get_current_uuid_untracked() {
+            model.update_value(|m| {
+                m.rename_sheet(sheet_idx, &new_name).ok();
+            });
+            if let Some(uuid) = state.current_uuid.get_untracked() {
                 model.with_value(|m| storage::save(&uuid, m));
             }
-            state.emit_event(SpreadsheetEvent::Structure(StructureEvent::WorksheetRenamed {
-                sheet: sheet_idx,
-                old_name,
-                new_name,
-            }));
+            state.emit_event(SpreadsheetEvent::Structure(
+                StructureEvent::WorksheetRenamed {
+                    sheet: sheet_idx,
+                    old_name,
+                    new_name,
+                },
+            ));
         }
         set_renaming.set(None);
     };
@@ -389,15 +408,8 @@ fn AllSheetsMenu() -> impl IntoView {
             >
                 "≡"
             </button>
-            <Show when=move || open.get()>
-                <div class="click-away-backdrop" on:click=move |_| set_open.set(false) />
-                <div
-                    class="all-sheets-menu"
-                    style=move || {
-                        let (x, y) = menu_pos.get();
-                        format!("left:{x}px;bottom:calc(100vh - {y}px + 4px);")
-                    }
-                >
+            <ContextMenu open=open set_open=set_open pos=menu_pos above_anchor=true>
+                <div class="all-sheets-menu">
                     {move || {
                         let sheets = all_sheets();
                         let selected = selected_sheet();
@@ -421,7 +433,7 @@ fn AllSheetsMenu() -> impl IntoView {
                                         if is_hidden {
                                             model.update_value(|m| { m.unhide_sheet(idx).ok(); });
                                             state.emit_event(SpreadsheetEvent::Structure(
-                                                StructureEvent::WorksheetAdded {
+                                                StructureEvent::WorksheetUnhidden {
                                                     sheet: idx,
                                                     name: name_for_event.clone(),
                                                 },
@@ -446,7 +458,7 @@ fn AllSheetsMenu() -> impl IntoView {
                         }).collect::<Vec<_>>()
                     }}
                 </div>
-            </Show>
+            </ContextMenu>
         </div>
     }
 }

@@ -26,12 +26,12 @@ pub fn FileBar() -> impl IntoView {
     };
 
     let on_toggle_perf = move |_: web_sys::MouseEvent| {
-        state.toggle_show_perf_panel();
+        state.show_perf_panel.update(|v| *v = !*v);
     };
 
     // Show icon based on theme preference with Auto detection
     let theme_icon = move || {
-        let preference = state.get_theme_preference();
+        let preference = state.theme.get();
         let resolved = state.get_theme();
         match preference {
             Theme::Auto => {
@@ -47,7 +47,7 @@ pub fn FileBar() -> impl IntoView {
     };
 
     let perf_icon = move || {
-        if state.get_show_perf_panel() {
+        if state.show_perf_panel.get() {
             "⏱ Hide Perf"
         } else {
             "⏱ Show Perf"

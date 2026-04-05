@@ -20,7 +20,7 @@ pub fn CellEditor() -> impl IntoView {
     // This prevents the Effect below from re-running on every keystroke - text
     // updates mutate `editing_cell.text` but leave the focus variant unchanged,
     // so `focus_state` stays stable while the user types.
-    let focus_state = Memo::new(move |_| state.get_editing_cell().map(|e| e.focus));
+    let focus_state = Memo::new(move |_| state.editing_cell.get().map(|e| e.focus));
 
     // Auto-focus the textarea only when the edit session *starts* with Cell focus
     // (click or printable key), NOT when the formula bar triggered the edit -
@@ -53,7 +53,7 @@ pub fn CellEditor() -> impl IntoView {
     };
 
     // Mirror formula bar: the live text buffer.
-    let text_value = move || state.get_editing_cell().map(|e| e.text).unwrap_or_default();
+    let text_value = move || state.editing_cell.get().map(|e| e.text).unwrap_or_default();
 
     // Keep editing_cell.text in sync as the user types.
     let on_input = move |ev: web_sys::Event| {
@@ -63,7 +63,7 @@ pub fn CellEditor() -> impl IntoView {
             .and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
             .map(|el| el.value())
             .unwrap_or_default();
-        state.update_editing_cell(|cell| {
+        state.editing_cell.update(|cell| {
             if let Some(c) = cell {
                 c.text = value;
             }
@@ -82,7 +82,7 @@ pub fn CellEditor() -> impl IntoView {
     };
 
     view! {
-        <Show when=move || state.get_editing_cell().is_some()>
+        <Show when=move || state.editing_cell.get().is_some()>
             <textarea
                 node_ref=textarea_ref
                 class="cell-editor"

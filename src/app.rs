@@ -13,7 +13,7 @@ pub fn App() -> impl IntoView {
     let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
 
     let wb_state = WorkbookState::new();
-    wb_state.set_current_uuid(Some(uuid));
+    wb_state.current_uuid.set(Some(uuid));
 
     let model = StoredValue::new_local(model);
 
@@ -32,7 +32,7 @@ pub fn App() -> impl IntoView {
     let debounced_save = {
         use_debounce_fn(
             move || {
-                let Some(uuid) = wb_state.get_current_uuid_untracked() else {
+                let Some(uuid) = wb_state.current_uuid.get_untracked() else {
                     return;
                 };
                 model.with_value(|m| {
@@ -51,7 +51,7 @@ pub fn App() -> impl IntoView {
     // Check every 500ms for changes, but only save via debounced function
     use_interval_fn(
         move || {
-            let Some(_uuid) = wb_state.get_current_uuid_untracked() else {
+            let Some(_uuid) = wb_state.current_uuid.get_untracked() else {
                 return;
             };
             let mut has_changes = false;
