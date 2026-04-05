@@ -27,7 +27,6 @@ pub enum EvaluationMode {
 /// **CALLER RESPONSIBILITY:** This function no longer automatically triggers redraws.
 /// The caller must emit appropriate events using `state.emit_event()` or `state.request_redraw()`.
 ///
-//  FIXME: crosscheck state / events
 pub fn mutate(
     model: ModelStore,
     _state: &WorkbookState,

@@ -11,6 +11,7 @@ use crate::components::worksheet::Worksheet;
 use crate::events::DragState;
 use crate::input::action::{classify_key, execute, KeyMod, SpreadsheetAction};
 use crate::input::formula_input::*;
+use crate::input::helpers::{mutate, EvaluationMode};
 use crate::model::AppClipboard;
 use crate::state::{EditMode, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
@@ -136,20 +137,27 @@ pub fn Workbook() -> impl IntoView {
                 // Clear the selected range.
                 // Pause evaluation so each set_user_input doesn't trigger a
                 // full recalc; evaluate once at the end.
-                model.update_value(|m| {
-                    m.pause_evaluation();
+                mutate(model, &state, EvaluationMode::Immediate, |m| {
                     let v = m.get_selected_view();
                     let [r1, c1, r2, c2] = v.range;
-                    for row in r1..=r2 {
-                        for col in c1..=c2 {
+                    (r1..r2)
+                        .flat_map(|row| (c1..=c2).map(move |col| (row, col)))
+                        .for_each(|(row, col)| {
                             warn_if_err(
                                 m.set_user_input(v.sheet, row, col, ""),
                                 "set_user_input (cut)",
                             );
-                        }
-                    }
-                    m.resume_evaluation();
-                    m.evaluate();
+                        });
+                    // for row in r1..=r2 {
+                    //     for col in c1..=c2 {
+                    //         warn_if_err(
+                    //             m.set_user_input(v.sheet, row, col, ""),
+                    //             "set_user_input (cut)",
+                    //         );
+                    //     }
+                    // }
+                    // m.resume_evaluation();
+                    // m.evaluate();
                 });
                 state.request_redraw();
                 ev.prevent_default();
@@ -233,13 +241,10 @@ fn paste_from_clipboard(
         let mut pasted = false;
         clipboard_store.with_value(|opt| {
             if let Some(acb) = opt {
-                model.update_value(|m| {
-                    m.pause_evaluation();
+                mutate(model, &state, EvaluationMode::Immediate, |m| {
                     if let Err(e) = acb.paste(m, false) {
                         web_sys::console::warn_1(&format!("[ironcalc] paste failed: {e}").into());
                     }
-                    m.resume_evaluation();
-                    m.evaluate();
                 });
                 pasted = true;
             }
@@ -268,8 +273,7 @@ fn paste_from_clipboard(
             if text.is_empty() {
                 return;
             }
-            model.update_value(|m| {
-                m.pause_evaluation();
+            mutate(model, &state, EvaluationMode::Immediate, |m| {
                 let v = m.get_selected_view();
                 let area = Area {
                     sheet: v.sheet,
@@ -283,8 +287,6 @@ fn paste_from_clipboard(
                         &format!("[ironcalc] paste_csv_string failed: {e}").into(),
                     );
                 }
-                m.resume_evaluation();
-                m.evaluate();
             });
             state.request_redraw();
         });

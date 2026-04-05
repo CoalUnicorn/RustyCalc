@@ -8,6 +8,8 @@ use web_sys::HtmlCanvasElement;
 use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
 use crate::input::formula_input::*;
+use crate::input::helpers::mutate;
+use crate::input::helpers::EvaluationMode;
 use crate::model::{AppClipboard, ArrowKey, CellAddress, FrontendModel, PageDir};
 
 use crate::events::{
@@ -350,8 +352,8 @@ pub fn Worksheet() -> impl IntoView {
     let on_mouseup = move |_ev: web_sys::MouseEvent| {
         // Commit autofill if active, then reset drag state unconditionally.
         if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
-            model.update_value(|m| {
-                m.pause_evaluation();
+            //model.update_value(|m| {
+            mutate(model, &state, EvaluationMode::Immediate, |m| {
                 let view = m.get_selected_view();
                 let sheet = view.sheet;
                 let [r1, c1, r2, c2] = view.range;
@@ -370,8 +372,6 @@ pub fn Worksheet() -> impl IntoView {
                 } else {
                     warn_if_err(m.auto_fill_columns(&area, to_col), "auto_fill_columns");
                 }
-                m.resume_evaluation();
-                m.evaluate();
             });
             // Autofill wrote content - emit a content event so canvas and
             // formula bar both repaint with the filled values.
