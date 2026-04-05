@@ -112,12 +112,14 @@ fn ImportExport() -> impl IntoView {
                 Ok(new_model) => {
                     model.set_value(new_model);
                     let sheet = model.with_value(|m| m.get_selected_view().sheet);
-                    state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
-                    state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
-                        sheet,
-                        col: None,
-                        row: None,
-                    }));
+                    state.emit_events([
+                        SpreadsheetEvent::Content(ContentEvent::GenericChange),
+                        SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
+                            sheet,
+                            col: None,
+                            row: None,
+                        }),
+                    ]);
                 }
                 Err(e) => {
                     web_sys::console::warn_1(&format!("xlsx import failed: {e}").into());

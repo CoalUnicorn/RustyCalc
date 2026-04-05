@@ -7,6 +7,10 @@ use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEve
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage;
 
+/// IronCalc's canonical string value for a visible worksheet.
+/// Used to guard against silent typos in state comparisons.
+const SHEET_STATE_VISIBLE: &str = "visible";
+
 // Main component
 
 /// Sheet tab bar: `[ + ][ ≡ ][ Sheet1 ▾ | **Sheet2 ▾** | Sheet3 ▾ ]`
@@ -29,7 +33,7 @@ pub fn SheetTabBar() -> impl IntoView {
             m.get_worksheets_properties()
                 .into_iter()
                 .enumerate()
-                .filter(|(_, s)| s.state == "visible")
+                .filter(|(_, s)| s.state == SHEET_STATE_VISIBLE)
                 .map(|(idx, s)| (s.sheet_id, idx as u32))
                 .collect::<Vec<_>>()
         })
@@ -159,7 +163,7 @@ fn SheetTab(
         model.with_value(|m| {
             m.get_worksheets_properties()
                 .iter()
-                .filter(|s| s.state == "visible")
+                .filter(|s| s.state == SHEET_STATE_VISIBLE)
                 .count()
         })
     };
@@ -171,6 +175,7 @@ fn SheetTab(
     };
 
     let on_color_change = Callback::new(move |color: Option<String>| {
+        // IronCalc treats "" as "clear tab color" — intentional sentinel.
         let hex = color.as_deref().unwrap_or("");
         model.update_value(|m| {
             m.set_sheet_color(sheet_idx, hex).ok();
@@ -414,7 +419,7 @@ fn AllSheetsMenu() -> impl IntoView {
                         let sheets = all_sheets();
                         let selected = selected_sheet();
                         sheets.into_iter().map(|(idx, name, sheet_state)| {
-                            let is_hidden = sheet_state != "visible";
+                            let is_hidden = sheet_state != SHEET_STATE_VISIBLE;
                             let is_active = idx == selected;
                             let item_class = if is_active {
                                 "all-sheets-item active"
