@@ -4,8 +4,16 @@ use wasm_bindgen::JsCast;
 use crate::components::color_picker::TabColorPicker;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
+use crate::input::helpers::{mutate, try_mutate, EvaluationMode};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage;
+use crate::util::warn_if_err;
+
+#[derive(Debug, thiserror::Error)]
+enum TabError {
+    #[error("tab: {0}")]
+    Engine(String),
+}
 
 /// IronCalc's canonical string value for a visible worksheet.
 /// Used to guard against silent typos in state comparisons.
@@ -42,7 +50,7 @@ pub fn SheetTabBar() -> impl IntoView {
     let on_add = move |_| {
         // Snapshot count before mutation — that index is the new sheet's position.
         let sheet_count = model.with_value(|m| m.get_worksheets_properties().len() as u32);
-        model.update_value(|m| {
+        mutate(model, &state, EvaluationMode::Deferred, |m| {
             m.new_sheet().ok();
         });
         if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -122,9 +130,12 @@ fn SheetTab(
 
     let on_click = move |_: web_sys::MouseEvent| {
         let previous_sheet = model.with_value(|m| m.get_selected_view().sheet);
-        model.update_value(|m| {
-            m.set_selected_sheet(sheet_idx).ok();
-        });
+        warn_if_err(
+            try_mutate(model, &state, EvaluationMode::Deferred, |m| {
+                m.set_selected_sheet(sheet_idx).map_err(TabError::Engine)
+            }),
+            "set_selected_sheet",
+        );
         if previous_sheet != sheet_idx {
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::ActiveSheetChanged {
@@ -177,9 +188,12 @@ fn SheetTab(
     let on_color_change = Callback::new(move |color: Option<String>| {
         // IronCalc treats "" as "clear tab color" — intentional sentinel.
         let hex = color.as_deref().unwrap_or("");
-        model.update_value(|m| {
-            m.set_sheet_color(sheet_idx, hex).ok();
-        });
+        warn_if_err(
+            try_mutate(model, &state, EvaluationMode::Deferred, |m| {
+                m.set_sheet_color(sheet_idx, hex).map_err(TabError::Engine)
+            }),
+            "set_sheet_color",
+        );
         if let Some(uuid) = state.current_uuid.get_untracked() {
             model.with_value(|m| storage::save(&uuid, m));
         }
@@ -195,7 +209,7 @@ fn SheetTab(
     });
 
     let on_hide = move || {
-        model.update_value(|m| {
+        mutate(model, &state, EvaluationMode::Deferred, |m| {
             m.hide_sheet(sheet_idx).ok();
         });
         if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -220,7 +234,7 @@ fn SheetTab(
             })
             .unwrap_or(false);
         if confirmed {
-            model.update_value(|m| {
+            mutate(model, &state, EvaluationMode::Deferred, |m| {
                 m.delete_sheet(sheet_idx).ok();
             });
             if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -306,7 +320,7 @@ fn RenameInput(
                     .map(|s| s.name.clone())
                     .unwrap_or_default()
             });
-            model.update_value(|m| {
+            mutate(model, &state, EvaluationMode::Deferred, |m| {
                 m.rename_sheet(sheet_idx, &new_name).ok();
             });
             if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -441,7 +455,7 @@ fn AllSheetsMenu() -> impl IntoView {
                                         let previous_sheet =
                                             model.with_value(|m| m.get_selected_view().sheet);
                                         if is_hidden {
-                                            model.update_value(|m| { m.unhide_sheet(idx).ok(); });
+                                            mutate(model, &state, EvaluationMode::Deferred, |m| {m.unhide_sheet(idx).ok(); });
                                             state.emit_event(SpreadsheetEvent::Structure(
                                                 StructureEvent::WorksheetUnhidden {
                                                     sheet: idx,
@@ -449,7 +463,12 @@ fn AllSheetsMenu() -> impl IntoView {
                                                 },
                                             ));
                                         }
-                                        model.update_value(|m| { m.set_selected_sheet(idx).ok(); });
+                                        warn_if_err(
+                            try_mutate(model, &state, EvaluationMode::Deferred, |m| {
+                                m.set_selected_sheet(idx).map_err(TabError::Engine)
+                            }),
+                            "set_selected_sheet",
+                        );
                                         if previous_sheet != idx {
                                             state.emit_event(SpreadsheetEvent::Navigation(
                                                 NavigationEvent::ActiveSheetChanged {
