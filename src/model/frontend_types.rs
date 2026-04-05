@@ -15,7 +15,7 @@ impl CssColor {
         if s.is_empty() {
             Self("#000000".to_owned())
         } else {
-            Self(s)
+            Self(s.to_lowercase())
         }
     }
 

@@ -211,18 +211,13 @@ fn MainColorPalette(
                     view! {
                         <ColorSwatch
                             hex=hex.to_string()
-                            class_name=move || {
-                                if current_color
+                            is_selected=move || {
+                                current_color
                                     .get()
                                     .map(|c| c.eq_ignore_ascii_case(hex))
                                     .unwrap_or(false)
-                                {
-                                    "color-picker-swatch color-picker-swatch--selected".to_string()
-                                } else {
-                                    "color-picker-swatch".to_string()
-                                }
                             }
-                            on_click=move || on_color_select(Some(hex.to_string()))
+                            on_click=Callback::new(move |h: String| on_color_select(Some(h)))
                         />
                     }
                 })
@@ -246,26 +241,22 @@ fn RecentColorsPalette(
                         each=move || recent_colors.get()
                         key=|hex| hex.clone()
                         children=move |hex| {
-                            let hex_for_class = hex.clone();
-                            let hex_for_click = hex.clone();
+                            // One clone: `h` is captured by the reactive `is_selected` closure.
+                            // `hex` itself moves into ColorSwatch; on click the component
+                            // passes it back through on_click so no extra capture is needed.
+                            let h = hex.clone();
                             view! {
                                 <ColorSwatch
                                     hex=hex
-                                    class_name=move || {
-                                        if current_color
+                                    is_selected=move || {
+                                        current_color
                                             .get()
-                                            .map(|c| c.eq_ignore_ascii_case(&hex_for_class))
+                                            .map(|c| c == h)
                                             .unwrap_or(false)
-                                        {
-                                            "color-picker-swatch color-picker-swatch--selected"
-                                                .to_string()
-                                        } else {
-                                            "color-picker-swatch".to_string()
-                                        }
                                     }
-                                    on_click=move || {
-                                        on_color_select(Some(hex_for_click.clone()))
-                                    }
+                                    on_click=Callback::new(move |h: String| {
+                                        on_color_select(Some(h))
+                                    })
                                 />
                             }
                         }
@@ -278,24 +269,30 @@ fn RecentColorsPalette(
 
 /// Individual color swatch.
 ///
-/// `class_name` is a reactive closure so the selected ring updates when
+/// `is_selected` is a reactive closure so the selected ring updates when
 /// `current_color` changes without re-rendering the whole palette.
+/// `on_click` receives the swatch's hex string — the component clones it
+/// internally on click, so callers never need to capture hex separately.
 #[component]
 fn ColorSwatch(
     hex: String,
-    class_name: impl Fn() -> String + Send + Sync + 'static,
-    on_click: impl Fn() + Send + Sync + 'static,
+    is_selected: impl Fn() -> bool + Send + Sync + 'static,
+    on_click: Callback<String>,
 ) -> impl IntoView {
     let style = format!("background-color: {hex};");
     let title = hex.clone();
     view! {
         <div
-            class=class_name
+            class=move || if is_selected() {
+                "color-picker-swatch color-picker-swatch--selected"
+            } else {
+                "color-picker-swatch"
+            }
             style=style
             title=title
             on:click=move |ev: web_sys::MouseEvent| {
                 ev.stop_propagation();
-                on_click();
+                on_click.run(hex.clone());
             }
         />
     }
