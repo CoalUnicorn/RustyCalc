@@ -27,7 +27,7 @@ use leptos_use::on_click_outside;
 /// children can close the menu automatically.
 ///
 /// `above_anchor`: when `true`, renders with `bottom: calc(100vh - y + 4px)`
-/// instead of `top: y` — use for menus anchored to a bottom bar.
+/// instead of `top: y` - use for menus anchored to a bottom bar.
 ///
 /// # Trigger buttons
 /// The button that opens this menu must stop `pointerdown` propagation so
@@ -53,7 +53,7 @@ pub fn ContextMenu(
         }
     });
 
-    // `children()` is FnOnce — must be called exactly once at mount time.
+    // `children()` is FnOnce - must be called exactly once at mount time.
     // We use `display:none` on a wrapper div rather than `<Show>` to avoid
     // the Leptos 0.7 constraint that Show's children closure must be `Fn`.
     view! {
@@ -104,7 +104,7 @@ pub fn ContextMenuButton(
 /// A single menu action row.
 ///
 /// Reads `WriteSignal<bool>` from context (provided by [`ContextMenu`]) and
-/// calls `set_open(false)` after `on_click` — so items always close the menu.
+/// calls `set_open(false)` after `on_click` - so items always close the menu.
 ///
 /// `icon`: optional emoji / text shown in a fixed-width span.
 /// `destructive`: adds `.destructive` CSS modifier (red text).
@@ -132,7 +132,7 @@ pub fn ContextMenuItem(
         }
     };
 
-    // `destructive` is a static bool prop — use a plain format string, not a
+    // `destructive` is a static bool prop - use a plain format string, not a
     // reactive closure, to avoid registering a spurious reactive dependency.
     let class = format!("ctx-item{}", if destructive { " destructive" } else { "" });
 

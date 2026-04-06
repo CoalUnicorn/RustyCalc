@@ -42,6 +42,7 @@ fn emit_selection_range_changed(model: ModelStore, state: &WorkbookState) {
     ));
 }
 
+/// Navigation actions that move or extend the active cell selection.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NavAction {
     /// Move the active cell one step in a direction.
@@ -66,6 +67,7 @@ pub enum NavAction {
     SelectAll,
 }
 
+/// Dispatch a [`NavAction`] against the model and UI state.
 pub fn execute_nav(
     action: &NavAction,
     model: ModelStore,

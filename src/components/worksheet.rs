@@ -118,7 +118,7 @@ pub fn Worksheet() -> impl IntoView {
         } else if has_nav {
             CanvasRenderMode::ViewportUpdate
         } else {
-            // Mode event only — no canvas repaint needed.
+            // Mode event only - no canvas repaint needed.
             return;
         };
 
@@ -128,7 +128,7 @@ pub fn Worksheet() -> impl IntoView {
 
     // rAF render loop - fires on every animation frame (~60 fps).
     // Renders only when render_needed is true; otherwise returns immediately
-    // (~1 µs overhead when idle - a single untracked signal read + branch).
+    // (single untracked signal read + branch).
     let _ = use_raf_fn(move |_| {
         if !render_needed.get_untracked() {
             return;

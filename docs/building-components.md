@@ -136,7 +136,7 @@ The IronCalc model sits outside Leptos's signal graph. To read model state react
 
 ```rust
 let is_frozen = move || {
-    let _ = state.events.navigation.get(); // subscribe — re-runs on any navigation event
+    let _ = state.events.navigation.get(); // subscribe - re-runs on any navigation event
     model.with_value(|m| m.frozen_panes().is_frozen())
 };
 ```
@@ -157,20 +157,38 @@ Subscribing to more categories than necessary causes extra re-renders. A compone
 
 ## Mutating the model
 
-All model mutations follow the same shape:
+All model mutations go through the `mutate` / `try_mutate` helpers in `src/input/helpers.rs`. These wrap `pause_evaluation` / `resume_evaluation` automatically so formulas never evaluate twice per keystroke.
 
 ```rust
-model.update_value(|m| {
-    warn_if_err(m.set_frozen_rows_count(sheet, 0), "set_frozen_rows_count");
+use crate::input::helpers::{mutate, try_mutate, EvaluationMode};
+
+// Infallible (navigation, UI state):
+mutate(model, &state, EvaluationMode::Deferred, |m| {
+    m.set_frozen_rows_count(sheet, 0);
 });
-state.request_redraw();
+
+// Fallible (cell writes, structural changes):
+warn_if_err(
+    try_mutate(model, &state, EvaluationMode::Immediate, |m| {
+        m.insert_columns(sheet, col, 1).map_err(TabError::Engine)
+    }),
+    "insert_columns",
+);
 ```
 
-1. `model.update_value(|m| { ... })` for mutable borrow of UserModel
-2. `warn_if_err(result, "context")` to log failures to browser console instead of silently swallowing with `.ok()`
-3. `state.emit_event(...)` to notify subscribers — pick the right typed event for the mutation (see `events.rs`). Use `state.request_redraw()` only when no specific event applies; it emits a generic `ContentEvent::GenericChange`.
+`EvaluationMode::Immediate` calls `evaluate()` once after the closure - use it when the mutation can affect formula results (cell edits, row/col insert/delete, paste). `EvaluationMode::Deferred` skips evaluation - use it for navigation, formatting, and UI-only changes.
 
-For mutations that change formula results, also call `m.evaluate()` inside the closure.
+After the mutation, emit the right typed event (see `events.rs`):
+
+```rust
+state.emit_event(SpreadsheetEvent::Structure(
+    StructureEvent::columns_inserted(Location::new(sheet, col, 1)),
+));
+```
+
+`state.request_redraw()` is shorthand for `emit_event(Content(GenericChange))` - use it only when no specific event applies.
+
+After edits that should return keyboard focus to the grid:
 
 After edits that should return keyboard focus to the grid:
 
@@ -182,7 +200,7 @@ crate::util::refocus_workbook();
 
 ### The overflow trap
 
-Any scrollable container with `overflow: auto` will clip `position: absolute` children — they won't appear above other components. Always use `position: fixed` for menus and popups, with coordinates read from `ev.client_x()` / `ev.client_y()`.
+Any scrollable container with `overflow: auto` will clip `position: absolute` children - they won't appear above other components. Always use `position: fixed` for menus and popups, with coordinates read from `ev.client_x()` / `ev.client_y()`.
 
 `ContextMenu` handles this automatically (see below).
 
@@ -201,7 +219,7 @@ let (menu_open, set_menu_open) = signal(false);
 let (menu_pos,  set_menu_pos)  = signal((0i32, 0i32));
 ```
 
-**Trigger** — wire `on:contextmenu` on the element that should open it:
+**Trigger** - wire `on:contextmenu` on the element that should open it:
 
 ```rust
 let on_right_click = move |ev: web_sys::MouseEvent| {
@@ -234,7 +252,7 @@ view! {
 }
 ```
 
-`ContextMenuItem` automatically closes the menu after its `on_click` fires — no manual `set_menu_open.set(false)` needed in each handler.
+`ContextMenuItem` automatically closes the menu after its `on_click` fires - no manual `set_menu_open.set(false)` needed in each handler.
 
 #### `above_anchor`
 
@@ -251,6 +269,8 @@ For menus attached to a bottom bar (e.g. sheet tabs), pass `above_anchor=true`. 
 Headers sit inside the canvas area where there are no scrollable wrappers, so a standard right-click menu works without any extra considerations. A full header context menu sub-component looks like:
 
 ```rust
+use crate::input::helpers::{try_mutate, EvaluationMode};
+
 #[component]
 fn ColHeaderMenu(col: i32) -> impl IntoView {
     let state = expect_context::<WorkbookState>();
@@ -267,10 +287,12 @@ fn ColHeaderMenu(col: i32) -> impl IntoView {
 
     let on_insert = move || {
         let sheet = model.with_value(|m| m.get_selected_view().sheet);
-        model.update_value(|m| {
-            warn_if_err(m.insert_columns(sheet, col, 1), "insert_columns");
-            m.evaluate();
-        });
+        warn_if_err(
+            try_mutate(model, &state, EvaluationMode::Immediate, |m| {
+                m.insert_columns(sheet, col, 1).map_err(|e| e.to_string())
+            }),
+            "insert_columns",
+        );
         state.emit_event(SpreadsheetEvent::Structure(
             StructureEvent::columns_inserted(Location::new(sheet, col, 1)),
         ));
@@ -279,10 +301,12 @@ fn ColHeaderMenu(col: i32) -> impl IntoView {
 
     let on_delete = move || {
         let sheet = model.with_value(|m| m.get_selected_view().sheet);
-        model.update_value(|m| {
-            warn_if_err(m.delete_columns(sheet, col, 1), "delete_columns");
-            m.evaluate();
-        });
+        warn_if_err(
+            try_mutate(model, &state, EvaluationMode::Immediate, |m| {
+                m.delete_columns(sheet, col, 1).map_err(|e| e.to_string())
+            }),
+            "delete_columns",
+        );
         state.emit_event(SpreadsheetEvent::Structure(
             StructureEvent::columns_deleted(Location::new(sheet, col, 1)),
         ));
@@ -303,7 +327,7 @@ fn ColHeaderMenu(col: i32) -> impl IntoView {
 ```
 
 Key points:
-- `on:contextmenu` captures `client_x`/`client_y` before storing position — these are only valid during the event.
+- `on:contextmenu` captures `client_x`/`client_y` before storing position - these are only valid during the event.
 - The `ContextMenu` is placed as a sibling of the header div, not a child. Children inside scrollable containers get clipped.
 - Emit a `Structure` event after the mutation so subscribers (e.g. the canvas) re-render.
 - Call `refocus_workbook()` to return keyboard focus to the grid after the menu closes.
@@ -321,7 +345,7 @@ For button-triggered menus (not right-click), use `ContextMenuButton` instead of
 </ContextMenu>
 ```
 
-`ContextMenuButton` captures coordinates and toggles open state. It's a convenience wrapper — use it when the trigger is a visible button element.
+`ContextMenuButton` captures coordinates and toggles open state. It's a convenience wrapper - use it when the trigger is a visible button element.
 
 ## Common compiler errors and fixes
 

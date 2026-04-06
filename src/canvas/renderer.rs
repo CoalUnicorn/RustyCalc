@@ -30,7 +30,7 @@
 //!   Collect text layout (`CellText`) into a Vec for Phase 4.
 //!
 //! Phase 2 - Row and column headers
-//!   Paint the grey header bars with row numbers and column letters (A, B, …).
+//!   Paint the grey header bars with row numbers and column letters (A, B, ...).
 //!   Selected headers get a highlighted background.
 //!
 //! Phase 3 - Selection and overlays
@@ -107,7 +107,7 @@ const THICK_BORDER_WIDTH: f64 = 3.0;
 const DASHED_BORDER_WIDTH: f64 = 1.5;
 // With textBaseline:"middle", center_y is the em-square midpoint.
 // The typographic baseline sits at ~center_y + font_size*0.15; placing
-// the underline at 0.35× puts it just below the baseline, clear of the glyphs.
+// the underline at 0.35x puts it just below the baseline, clear of the glyphs.
 const UNDERLINE_OFFSET_FACTOR: f64 = 0.35;
 const MIN_UNDERLINE_OFFSET: f64 = 2.0;
 const CHAR_WIDTH_FACTOR: f64 = 0.6;
@@ -122,7 +122,7 @@ enum BorderOrientation {
 
 /// Line segment passed to the border-drawing helper.
 ///
-/// A two-point line (`x1,y1` → `x2,y2`), distinct from `PixelRect`.
+/// A two-point line (`x1,y1` -> `x2,y2`), distinct from `PixelRect`.
 /// Used only within this module for resolving and drawing cell border edges.
 struct BorderSegment {
     x1: f64,
@@ -141,8 +141,8 @@ pub struct CanvasRenderer {
     /// Visible cell bounds - populated at the start of each `render()` call.
     /// Stored on the struct so internal helpers don't need it as a parameter.
     vis: VisibleRegion,
-    /// Precomputed pixel offsets for visible rows/cols — populated alongside
-    /// `vis`. Turns `cell_x`/`cell_y` from O(visible×R) into O(1).
+    /// Precomputed pixel offsets for visible rows/cols - populated alongside
+    /// `vis`. Turns `cell_x`/`cell_y` from O(visible x R) into O(1).
     offsets: PixelOffsets,
 }
 
@@ -699,7 +699,7 @@ impl CanvasRenderer {
             return None; // Too small to render meaningful text
         }
 
-        // Destructure to move fields directly — avoids cloning `css` and
+        // Destructure to move fields directly - avoids cloning `css` and
         // re-allocating `text_color` from a borrow.
         let crate::model::ResolvedCellStyle {
             font:
@@ -1139,9 +1139,9 @@ impl CanvasRenderer {
     ///
     /// Each `row_tops[i]` is the cumulative Y distance from `frozen.y` to the
     /// top edge of row `(vis.row_first + i)`.  Built in a single O(visible)
-    /// pass — same rows/cols that `visible_cells` already iterated.  Stored on
+    /// pass - same rows/cols that `visible_cells` already iterated.  Stored on
     /// `self.offsets` so `cell_x`/`cell_y` become O(1) array lookups instead of
-    /// O(visible × R) summations (where R = len of IronCalc's `rows` Vec).
+    /// O(visible x R) summations (where R = len of IronCalc's `rows` Vec).
     fn build_pixel_offsets(&self, model: &UserModel, sheet: u32) -> PixelOffsets {
         let vis = self.vis;
 
@@ -1217,7 +1217,7 @@ impl CanvasRenderer {
 
 // Free helpers
 
-/// Convert a 6-digit hex color (`"#1E6FD9"`) to an `rgba(…)` CSS string with
+/// Convert a 6-digit hex color (`"#1E6FD9"`) to an `rgba(...)` CSS string with
 /// the given alpha.  Falls back to transparent on malformed input.
 fn hex_to_rgba(hex: &str, alpha: f64) -> String {
     let hex = hex.trim_start_matches('#');

@@ -1,4 +1,4 @@
-/// Shared pixel↔cell coordinate math for the spreadsheet canvas.
+/// Shared pixel<->cell coordinate math for the spreadsheet canvas.
 use ironcalc_base::UserModel;
 
 // Layout constants
@@ -302,9 +302,9 @@ pub fn find_row_boundary_at(m: &UserModel, y: f64, hit_zone: f64) -> Option<i32>
     None
 }
 
-// Column number -> letter name (A, B, …, AA, …)
+// Column number -> letter name (A, B, ..., AA, ...)
 
-/// Convert a 1-based column index to its spreadsheet letter name (A, B, …, XFD).
+/// Convert a 1-based column index to its spreadsheet letter name (A, B, ..., XFD).
 ///
 /// Delegates to `ironcalc_base::expressions::utils::number_to_column` - the
 /// single authoritative implementation for this conversion in the codebase.

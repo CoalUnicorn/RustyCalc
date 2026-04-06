@@ -7,6 +7,7 @@ use crate::input::error::StructError;
 use crate::input::helpers::{make_area, selection_bounds, try_mutate, EvaluationMode};
 use crate::state::{ModelStore, WorkbookState};
 
+/// Structural mutations: delete/clear cell content, undo/redo, and row/column insert/delete.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StructAction {
     /// Delete key: clear cell contents, preserve formatting.
@@ -21,6 +22,7 @@ pub enum StructAction {
     DeleteColumns,
 }
 
+/// Dispatch a [`StructAction`] against the model and UI state.
 pub fn execute_struct(
     action: &StructAction,
     model: ModelStore,

@@ -340,7 +340,7 @@ fn isolated_test() {
 ```rust
 #[wasm_bindgen_test]
 fn safe_font_family_css_names_non_empty() {
-    // Test each variant explicitly — exhaustive match keeps this in sync
+    // Test each variant explicitly - exhaustive match keeps this in sync
     let families = [
         SafeFontFamily::Arial,
         SafeFontFamily::CalibriLike,

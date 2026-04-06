@@ -1,4 +1,4 @@
-// Key -> SpreadsheetAction → model mutation pipeline.
+// Key -> SpreadsheetAction -> model mutation pipeline.
 //
 // SpreadsheetAction is a thin wrapper around category-specific sub-enums.
 // Each category lives in its own module with its own execute function:
@@ -21,6 +21,12 @@ use crate::storage;
 
 // SpreadsheetAction
 
+/// Top-level action dispatched from a keyboard event.
+///
+/// [`classify_key`] maps a key + modifier combination to one of these variants.
+/// [`execute`] dispatches to the appropriate category module (`nav`, `edit`,
+/// `format`, `structure`). `Copy`, `Cut`, and `Paste` are handled inline in
+/// `Workbook` because they need `AppClipboard` and async OS clipboard APIs.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SpreadsheetAction {
     Nav(NavAction),
@@ -38,7 +44,7 @@ pub enum SpreadsheetAction {
 
 /// Keyboard modifier state at the time of a key event.
 ///
-/// Replaces three positional `bool` parameters in `classify_key` — callers
+/// Replaces three positional `bool` parameters in `classify_key` - callers
 /// can no longer silently swap `ctrl` and `alt`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyMod {

@@ -31,7 +31,7 @@ pub fn SheetTabBar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    // Local UI state — split so read-only children don't re-run on writes from siblings.
+    // Local UI state - split so read-only children don't re-run on writes from siblings.
     let (renaming, set_renaming) = signal(None::<u32>);
 
     let visible_sheets = move || {
@@ -48,7 +48,7 @@ pub fn SheetTabBar() -> impl IntoView {
     };
 
     let on_add = move |_| {
-        // Snapshot count before mutation — that index is the new sheet's position.
+        // Snapshot count before mutation - that index is the new sheet's position.
         let sheet_count = model.with_value(|m| m.get_worksheets_properties().len() as u32);
         mutate(model, &state, EvaluationMode::Deferred, |m| {
             m.new_sheet().ok();
@@ -97,7 +97,7 @@ fn SheetTab(
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    // Each SheetTab owns its own menu state — no parent coordination needed.
+    // Each SheetTab owns its own menu state - no parent coordination needed.
     // ContextMenu's backdrop ensures at most one menu is visible at a time.
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
@@ -117,7 +117,7 @@ fn SheetTab(
         })
     };
 
-    // Single derived signal for the tab color — used by both color_bar_style
+    // Single derived signal for the tab color - used by both color_bar_style
     // and TabColorPicker to avoid a duplicate reactive subscription.
     let current_tab_color = Signal::derive(move || {
         let _ = state.events.structure.get();
@@ -165,7 +165,7 @@ fn SheetTab(
             .unwrap_or_default()
     };
 
-    // Context menu action handlers — inlined from the old TabContextMenu component.
+    // Context menu action handlers - inlined from the old TabContextMenu component.
 
     // Plain closure: avoids Memo::get() panicking when the reactive owner
     // is disposed mid-event-dispatch after a hide/delete mutation.
@@ -178,7 +178,7 @@ fn SheetTab(
                 .count()
         })
     };
-    // `>` inside view! attributes parses as a closing tag — hoist the comparison.
+    // `>` inside view! attributes parses as a closing tag - hoist the comparison.
     let can_hide_or_delete = move || visible_count() > 1;
 
     let on_rename = move || {
@@ -186,7 +186,7 @@ fn SheetTab(
     };
 
     let on_color_change = Callback::new(move |color: Option<String>| {
-        // IronCalc treats "" as "clear tab color" — intentional sentinel.
+        // IronCalc treats "" as "clear tab color" - intentional sentinel.
         let hex = color.as_deref().unwrap_or("");
         warn_if_err(
             try_mutate(model, &state, EvaluationMode::Deferred, |m| {
@@ -359,7 +359,7 @@ fn RenameInput(
 
     let on_blur = move |ev: web_sys::FocusEvent| {
         // Guard: if Enter already fired commit_rename, set_renaming(None) ran first,
-        // so this tab is no longer the active rename target — skip the double-commit.
+        // so this tab is no longer the active rename target - skip the double-commit.
         if renaming.get_untracked() != Some(sheet_idx) {
             return;
         }

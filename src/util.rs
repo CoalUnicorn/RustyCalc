@@ -15,7 +15,7 @@ use wasm_bindgen::JsCast;
 /// Produce a UUID v4 string using `window.crypto.getRandomValues` (CSPRNG).
 ///
 /// Fills 16 bytes via the Web Crypto API (122 bits of cryptographic randomness),
-/// then stamps the version-4 and variant bits per RFC 9562 §5.4.
+/// then stamps the version-4 and variant bits per RFC 9562 5.4.
 #[allow(clippy::expect_used)]
 pub fn new_uuid() -> String {
     let mut buf = [0u8; 16];

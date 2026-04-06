@@ -159,10 +159,10 @@ pub fn is_valid_hex_color(hex: &str) -> bool {
 
 /// Convert a 3-digit hex color to 6-digit format.
 ///
-/// Examples: `#RGB` → `#RRGGBB`, `#f0a` → `#ff00aa`
+/// Examples: `#RGB` -> `#RRGGBB`, `#f0a` -> `#ff00aa`
 pub fn normalize_hex_color(hex: &str) -> String {
     if hex.len() == 4 && hex.starts_with('#') {
-        // #RGB → #RRGGBB
+        // #RGB -> #RRGGBB
         let r = &hex[1..2];
         let g = &hex[2..3];
         let b = &hex[3..4];

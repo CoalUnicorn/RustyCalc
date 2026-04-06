@@ -132,7 +132,7 @@ impl From<Option<&str>> for SafeFontFamily {
     }
 }
 
-// ResolvedFont
+/// Pre-resolved font parameters ready for the canvas `ctx.font` property.
 #[derive(Debug, Clone)]
 pub struct ResolvedFont {
     pub size_px: f64,
@@ -189,8 +189,8 @@ pub struct ResolvedCellStyle {
     pub wrap_text: bool,
 }
 
-// ToolbarState
-
+/// Resolved style state for the active cell, used to reflect current formatting
+/// in the toolbar (toggle states, font picker, color indicators).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolbarState {
     pub format: TextFormat,
@@ -210,6 +210,7 @@ pub struct SheetDimension {
 
 // Direction enums
 
+/// A cardinal direction - arrow keys and single-step navigation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ArrowKey {
     Up,
@@ -218,12 +219,14 @@ pub enum ArrowKey {
     Right,
 }
 
+/// Page-scroll direction for Page Up / Page Down.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PageDir {
     Up,
     Down,
 }
 
+/// Sheet-relative cell address. All indices are 1-based.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellAddress {
     pub sheet: u32,
@@ -235,6 +238,7 @@ use ironcalc_base::UserModel;
 
 use crate::state::EditingCell;
 impl CellAddress {
+    /// Read the address from the model's current selected view.
     pub fn from_view(model: &UserModel<'static>) -> Self {
         let m = model.get_selected_view();
         Self {
@@ -244,6 +248,7 @@ impl CellAddress {
         }
     }
 
+    /// Read the address from an in-progress [`EditingCell`].
     pub fn from_editing(cell: &EditingCell) -> Self {
         Self {
             sheet: cell.address.sheet,

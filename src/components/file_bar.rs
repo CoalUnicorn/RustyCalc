@@ -19,7 +19,7 @@ enum FileChangeError {
 /// Extract the input element and first selected file from a change event.
 ///
 /// Returns the `HtmlInputElement` alongside the file so callers can clear
-/// the value (`input.set_value("")`) after the async import completes —
+/// the value (`input.set_value("")`) after the async import completes -
 /// allowing the same file to be re-imported without a second pick.
 fn extract_file_input(
     ev: &web_sys::Event,
@@ -35,7 +35,7 @@ pub fn FileBar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    // File menu — owned signals + button anchor ref for positioning.
+    // File menu - owned signals + button anchor ref for positioning.
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
     let file_btn_ref = NodeRef::<leptos::html::Button>::new();
@@ -49,7 +49,7 @@ pub fn FileBar() -> impl IntoView {
         set_menu_open.update(|v| *v = !*v);
     };
 
-    // Hidden file input — triggered by the Import menu item.
+    // Hidden file input - triggered by the Import menu item.
     let file_input_ref: NodeRef<leptos::html::Input> = NodeRef::new();
 
     let on_import = move || {
@@ -114,7 +114,7 @@ pub fn FileBar() -> impl IntoView {
         }
     };
 
-    // Theme toggle — right-aligned icon button.
+    // Theme toggle - right-aligned icon button.
     // DOM update and localStorage persistence are handled by the
     // use_rusty_calc_theme sync Effect in App.
     let on_toggle_theme = move |_: web_sys::MouseEvent| {
@@ -141,7 +141,7 @@ pub fn FileBar() -> impl IntoView {
 
     view! {
         <div class="file-bar">
-            // Hidden file picker — triggered programmatically by Import item.
+            // Hidden file picker - triggered programmatically by Import item.
             <input
                 type="file"
                 accept=".xlsx"
@@ -150,7 +150,7 @@ pub fn FileBar() -> impl IntoView {
                 on:change=on_file_change
             />
 
-            // Left: menu bar trigger — stop pointerdown so on_click_outside
+            // Left: menu bar trigger - stop pointerdown so on_click_outside
             // in ContextMenu doesn't immediately re-close the menu.
             <button
                 node_ref=file_btn_ref

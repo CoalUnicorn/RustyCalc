@@ -132,7 +132,7 @@ one error type; `execute()` maps them all to `String` at the dispatch point so
 there's a single log line per user action.
 
 ```rust
-// error.rs — one type per input module
+// error.rs - one type per input module
 #[derive(Debug, thiserror::Error)]
 pub enum FormatError {
     #[error("format: {0}")]
@@ -280,7 +280,7 @@ This approach prevents the multiple-match problem where you have to update three
 
 ### Signal Organization
 
-Group related signals in a state struct using `Split<T>` — a thin wrapper around
+Group related signals in a state struct using `Split<T>` - a thin wrapper around
 `(ReadSignal<T>, WriteSignal<T>)` that is `Copy` for any `T: Clone + Send + Sync`:
 
 ```rust
@@ -323,7 +323,7 @@ let on_click = move |_| {
 ```
 
 Use `state.request_redraw()` (emits `ContentEvent::GenericChange`) only when no
-specific event applies — e.g. after a viewport resize or canvas-only repaint.
+specific event applies - e.g. after a viewport resize or canvas-only repaint.
 For model mutations, always prefer the typed event so subscribers can filter by
 category.
 

@@ -17,7 +17,7 @@ const FONT_SIZES: &[f64] = &[
 
 /// Top toolbar. Creates two shared memos once and provides them via context so
 /// every sub-component reads the same reactive computation instead of each
-/// instantiating its own (was: 4 x Memo, 12 subscriptions → 2 x Memo, 6 subscriptions).
+/// instantiating its own (was: 4 x Memo, 12 subscriptions -> 2 x Memo, 6 subscriptions).
 ///
 /// Context provided to children:
 /// - `Memo<ToolbarState>`   - font size/family, bold/italic/color, etc.

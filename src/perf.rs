@@ -1,4 +1,4 @@
-//! Commit→render performance measurement.
+//! Commit->render performance measurement.
 //!
 //! Provides a `PerfTimings` context that records timestamps at each stage
 //! of the cell commit pipeline. The `PerfPanel` component reads these

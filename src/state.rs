@@ -1,6 +1,6 @@
 //! Transient UI state and reactive signal primitives.
 //!
-//! [`WorkbookState`] holds all ephemeral UI state — nothing persisted, nothing
+//! [`WorkbookState`] holds all ephemeral UI state - nothing persisted, nothing
 //! in the model. Every field is a [`Split<T>`] signal pair. Components read via
 //! `.get()` (reactive) or `.get_untracked()` (in event handlers) and write via
 //! `.set()` / `.update()`.
@@ -31,11 +31,11 @@ pub type ModelStore = StoredValue<UserModel<'static>, LocalStorage>;
 ///
 /// Replaces `(ReadSignal<T>, WriteSignal<T>)` tuple fields so callers use
 /// named methods (`.get()`, `.set()`, `.read()`) rather than `.0` / `.1`.
-/// Reactivity is identical — same two signal nodes, same reactive graph.
+/// Reactivity is identical - same two signal nodes, same reactive graph.
 pub struct Split<T: Clone + Send + Sync + 'static>(ReadSignal<T>, WriteSignal<T>);
 
 // Manual impls: ReadSignal<T>/WriteSignal<T> are always Copy (arena IDs),
-// so Split<T> is Copy for any T — even non-Copy types like String or Vec.
+// so Split<T> is Copy for any T - even non-Copy types like String or Vec.
 // #[derive(Copy)] would incorrectly add a T: Copy bound.
 impl<T: Clone + Send + Sync + 'static> Clone for Split<T> {
     fn clone(&self) -> Self {
@@ -50,12 +50,12 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
         Self(r, w)
     }
 
-    /// Reactive read — registers a dependency on the current reactive owner.
+    /// Reactive read - registers a dependency on the current reactive owner.
     pub fn get(&self) -> T {
         self.0.get()
     }
 
-    /// Non-reactive read — safe to call outside reactive closures.
+    /// Non-reactive read - safe to call outside reactive closures.
     pub fn get_untracked(&self) -> T {
         self.0.get_untracked()
     }
@@ -80,12 +80,12 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
         self.1.update(f);
     }
 
-    /// The read half — pass to child components that should only subscribe.
+    /// The read half - pass to child components that should only subscribe.
     pub fn read(&self) -> ReadSignal<T> {
         self.0
     }
 
-    /// The write half — pass to child components that should only mutate.
+    /// The write half - pass to child components that should only mutate.
     pub fn write(&self) -> WriteSignal<T> {
         self.1
     }
@@ -142,7 +142,7 @@ pub struct ContextMenuState {
 ///
 /// Replaces the single `Vec<SpreadsheetEvent>` + 7 `Memo` filters.
 /// Each signal holds the events from the most recent `emit_event(s)` call.
-/// Contents are REPLACED (not appended) on each emit — never accumulate
+/// Contents are REPLACED (not appended) on each emit - never accumulate
 /// cross-action history here.
 #[derive(Clone, Copy)]
 pub struct EventBus {
@@ -205,7 +205,7 @@ pub struct WorkbookState {
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
     /// NodeRef to the formula bar <input>.
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
-    /// Performance timings for the commit→render pipeline.
+    /// Performance timings for the commit->render pipeline.
     pub perf: PerfTimings,
     /// Recent/custom colors. Limited to 16, most recent first.
     pub(crate) recent_colors: Split<Vec<CssColor>>,
@@ -245,7 +245,7 @@ impl WorkbookState {
         self.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
     }
 
-    /// Returns the active point-mode range, or a 1×1 rect at the model's
+    /// Returns the active point-mode range, or a 1x1 rect at the model's
     /// current cell when point-mode has not started yet.
     ///
     /// Use this in event handlers that need a point-mode anchor regardless of
@@ -333,7 +333,7 @@ impl WorkbookState {
 
     /// Set the theme preference.
     /// Persistence and DOM update are handled by the `use_rusty_calc_theme`
-    /// sync Effect in `App` — no manual save needed here.
+    /// sync Effect in `App` - no manual save needed here.
     pub fn set_theme(&self, theme: Theme) {
         self.theme.set(theme);
         self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {

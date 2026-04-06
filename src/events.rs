@@ -53,7 +53,7 @@ pub enum DragState {
     ///
     /// Carries the range anchor + current extent (`range`) and the byte span
     /// inside the formula text being replaced (`ref_span`). Mirrors the
-    /// payload pattern of `Extending { to_row, to_col }` — no separate signals.
+    /// payload pattern of `Extending { to_row, to_col }` - no separate signals.
     Pointing {
         range: SheetRect,
         ref_span: (usize, usize),
@@ -133,7 +133,7 @@ impl ContentEvent {
             ContentEvent::CellChanged {
                 address, new_value, ..
             } => format!(
-                "Content::CellChanged S{}R{}C{} → {:?}",
+                "Content::CellChanged S{}R{}C{} -> {:?}",
                 address.sheet, address.row, address.column, new_value
             ),
             ContentEvent::RangeChanged {
@@ -399,7 +399,7 @@ pub enum StructureEvent {
     WorksheetsReordered,
     /// Rows or columns inserted/deleted
     StructureChanged(HeaderChange),
-    /// A sheet was hidden. It still exists — not deleted. Use `WorksheetUnhidden` to reverse.
+    /// A sheet was hidden. It still exists - not deleted. Use `WorksheetUnhidden` to reverse.
     WorksheetHidden { sheet: u32 },
     /// A previously hidden sheet was made visible again.
     WorksheetUnhidden { sheet: u32, name: String },
@@ -451,7 +451,7 @@ impl StructureEvent {
                 sheet,
                 old_name,
                 new_name,
-            } => format!("Structure::SheetRenamed S{sheet} {old_name:?}→{new_name:?}"),
+            } => format!("Structure::SheetRenamed S{sheet} {old_name:?}->{new_name:?}"),
             StructureEvent::WorksheetsReordered => "Structure::Reordered".into(),
             StructureEvent::StructureChanged(c) => format!(
                 "Structure::Changed S{} {:?} {:?}",
@@ -533,7 +533,7 @@ impl NavigationEvent {
             NavigationEvent::ActiveSheetChanged {
                 from_sheet,
                 to_sheet,
-            } => format!("Nav::SheetSwitch S{from_sheet}→S{to_sheet}"),
+            } => format!("Nav::SheetSwitch S{from_sheet}->S{to_sheet}"),
             NavigationEvent::EditingStarted { address } => format!(
                 "Nav::EditStart S{}R{}C{}",
                 address.sheet, address.row, address.column
@@ -586,7 +586,7 @@ impl ModeEvent {
             ),
             ModeEvent::EditEnded => "Mode::EditEnded".into(),
             ModeEvent::DragModeChanged { from_mode, to_mode } => {
-                format!("Mode::Drag {from_mode:?}→{to_mode:?}")
+                format!("Mode::Drag {from_mode:?}->{to_mode:?}")
             }
             ModeEvent::PointModeChanged { active, .. } => format!("Mode::Point active={active}"),
             ModeEvent::ContextMenuToggled { visible, target } => {
@@ -612,7 +612,7 @@ pub enum ThemeEvent {
     ThemeToggled { new_theme: Theme },
     /// The color palette was modified.
     PaletteUpdated,
-    /// FIXME: This needs its own place — language/locale changed.
+    /// FIXME: This needs its own place - language/locale changed.
     LocaleChanged { new_locale: String },
 }
 

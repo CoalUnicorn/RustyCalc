@@ -2,7 +2,7 @@ use leptos::prelude::*;
 
 use crate::state::WorkbookState;
 
-/// Displays the last commit→render timing breakdown.
+/// Displays the last commit->render timing breakdown.
 ///
 /// Shows four phases:
 /// - **Input**: `set_user_input()` - writing the value into the model

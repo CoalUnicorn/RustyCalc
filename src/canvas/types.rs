@@ -165,7 +165,7 @@ pub(crate) struct CellText {
 
 // Cell rendering params
 
-/// Row/column rectangle in sheet coordinates (always normalised: min ≤ max).
+/// Row/column rectangle in sheet coordinates (always normalised: min <= max).
 pub(crate) struct SheetRange {
     pub row_min: i32,
     pub col_min: i32,
@@ -244,8 +244,8 @@ pub(crate) struct VisibleRegion {
 /// Precomputed pixel offsets for visible rows and columns.
 ///
 /// Built once per render call from the same iteration used to determine
-/// `VisibleRegion`. Eliminates the O(visible_range × R) summation inside
-/// `cell_x`/`cell_y` — each lookup becomes O(1).
+/// `VisibleRegion`. Eliminates the O(visible_range x R) summation inside
+/// `cell_x`/`cell_y` - each lookup becomes O(1).
 ///
 /// Offsets are relative to `FrozenOffset`: `row_tops[i]` is the Y distance
 /// from `frozen.y` to the top edge of row `(row_start + i as i32)`.
@@ -351,7 +351,7 @@ pub struct SheetRect {
 }
 
 impl SheetRect {
-    /// Construct a 1×1 rect anchored at a single cell.
+    /// Construct a 1x1 rect anchored at a single cell.
     pub fn from_cell(row: i32, col: i32) -> Self {
         SheetRect {
             r1: row,
@@ -388,11 +388,11 @@ impl SheetRect {
 /// without another architectural change.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum CanvasRenderMode {
-    /// Content or structure changed — repaint all cells (default).
+    /// Content or structure changed - repaint all cells (default).
     #[default]
     Full,
-    /// Only formatting changed — repaint without model recalculation.
+    /// Only formatting changed - repaint without model recalculation.
     FormatOnly,
-    /// Navigation only — update selection box and scroll position.
+    /// Navigation only - update selection box and scroll position.
     ViewportUpdate,
 }

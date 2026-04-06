@@ -9,6 +9,7 @@ use crate::model::{ArrowKey, CellAddress, FrontendModel};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
 
+/// Cell edit lifecycle actions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditAction {
     /// Printable key: start a new edit with this character as the initial text.
@@ -21,6 +22,10 @@ pub enum EditAction {
     Cancel,
 }
 
+/// Dispatch an [`EditAction`] against the model and UI state.
+///
+/// Emits typed events after successful transitions. Returns `Err(EditError)`
+/// when `set_user_input` fails on commit.
 pub fn execute_edit(
     action: &EditAction,
     model: ModelStore,
@@ -71,7 +76,7 @@ pub fn execute_edit(
 
                 // Write the edit buffer to the model and recalculate.
                 // pause_evaluation() prevents set_user_input from triggering an internal
-                // evaluate() call — without it we'd evaluate twice (once inside
+                // evaluate() call - without it we'd evaluate twice (once inside
                 // set_user_input, once explicitly below).
                 let mut commit_result: Result<(), EditError> = Ok(());
                 model.update_value(|m| {

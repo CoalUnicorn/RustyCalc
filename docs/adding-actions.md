@@ -64,7 +64,7 @@ pub enum FormatAction {
 ### 3. Add the handler in the same file
 
 Each `execute_*` function returns `Result<(), XxxError>`. Use `try_mutate()` for
-fallible model mutations — it handles pause/resume evaluation and surfaces the
+fallible model mutations - it handles pause/resume evaluation and surfaces the
 error as the function's `Result`. Use plain `mutate()` for infallible arms.
 
 ```rust

@@ -44,7 +44,7 @@ let model = expect_context::<ModelStore>();
 ```
 
 `WorkbookState` is `Copy` since all its fields are `Split<T>` (which wraps a
-`ReadSignal<T>`/`WriteSignal<T>` pair — both arena indices), `NodeRef<T>`, or
+`ReadSignal<T>`/`WriteSignal<T>` pair - both arena indices), `NodeRef<T>`, or
 similarly arena-allocated types. Closures capture them by implicit copy
 with zero allocation. **Never clone WorkbookState or create aliases like
 `let state_md = state.clone()`.**
@@ -80,7 +80,7 @@ Subscribe to the most specific category that matches what can change the value:
 | Drag mode, context menu, point mode | `state.events.mode.get()` |
 | Light/dark theme | `state.events.theme.get()` |
 
-Over-subscribing causes unnecessary re-renders — a component that only cares
+Over-subscribing causes unnecessary re-renders - a component that only cares
 about sheet switches should subscribe to `structure`, not `content`.
 
 ## View bindings

@@ -20,6 +20,7 @@ fn is_whole_sheet_selected(area: &ironcalc_base::expressions::types::Area) -> bo
     area.row == 1 && area.column == 1 && area.height == LAST_ROW && area.width == LAST_COLUMN
 }
 
+/// Formatting mutations applied to the current selection.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FormatAction {
     /// Ctrl+B: toggle bold on the selected range.
@@ -41,6 +42,7 @@ pub enum FormatAction {
     SetBackgroundColor(HexColor),
 }
 
+/// Dispatch a [`FormatAction`] against the model and UI state.
 pub fn execute_format(
     action: &FormatAction,
     model: ModelStore,
@@ -138,7 +140,7 @@ pub fn execute_format(
             }));
         }
         FormatAction::SetTextColor(hex) => {
-            // IronCalc "font.color": empty string clears (→ transparent), hex string sets.
+            // IronCalc "font.color": empty string clears (-> transparent), hex string sets.
             // Uses the same update_range_style path as bold/italic/size for proper
             // style-pool persistence and XLSX round-trip.
             let (sheet, start_row, start_col, end_row, end_col) =

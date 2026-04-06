@@ -1,6 +1,6 @@
 //! Client-side .xlsx import and export.
 //!
-//! All operations run in WASM — no server required. Import reads bytes from a
+//! All operations run in WASM - no server required. Import reads bytes from a
 //! browser File object; export writes bytes into a Vec and triggers a download.
 
 use std::io::Cursor;

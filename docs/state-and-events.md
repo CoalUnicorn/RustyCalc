@@ -1,6 +1,6 @@
 # State and Events
 
-`WorkbookState` holds all transient UI state — nothing persisted, nothing in the model. `events.rs` defines the typed events that components emit and subscribe to.
+`WorkbookState` holds all transient UI state - nothing persisted, nothing in the model. `events.rs` defines the typed events that components emit and subscribe to.
 
 These two files are tightly coupled: every mutation that should trigger a UI update ends with an `emit_event()` call.
 
@@ -8,15 +8,15 @@ These two files are tightly coupled: every mutation that should trigger a UI upd
 
 ## WorkbookState
 
-`WorkbookState` is a `Copy` struct provided via Leptos context. All fields are public within the crate and accessed directly — no getter methods.
+`WorkbookState` is a `Copy` struct provided via Leptos context. All fields are public within the crate and accessed directly - no getter methods.
 
 ```rust
 let state = expect_context::<WorkbookState>();
 
-// Reading (reactive — registers a dependency):
+// Reading (reactive - registers a dependency):
 let editing = state.editing_cell.get();
 
-// Reading (non-reactive — safe inside event handlers):
+// Reading (non-reactive - safe inside event handlers):
 let uuid = state.current_uuid.get_untracked();
 
 // Writing:
@@ -28,7 +28,7 @@ state.editing_cell.update(|c| {
 
 ### Split\<T\>
 
-Every field is a `Split<T>` — a thin wrapper around a Leptos `(ReadSignal<T>, WriteSignal<T>)` pair. It's `Copy` for any `T: Clone + Send + Sync + 'static`, even non-Copy types, because signal handles are arena IDs.
+Every field is a `Split<T>` - a thin wrapper around a Leptos `(ReadSignal<T>, WriteSignal<T>)` pair. It's `Copy` for any `T: Clone + Send + Sync + 'static`, even non-Copy types, because signal handles are arena IDs.
 
 | Method | What it does |
 |--------|-------------|
@@ -38,10 +38,10 @@ Every field is a `Split<T>` — a thin wrapper around a Leptos `(ReadSignal<T>, 
 | `.with_untracked(f)` | Borrow without cloning (non-reactive). |
 | `.set(v)` | Replace value. Always notifies subscribers. |
 | `.update(f)` | Mutate in place. |
-| `.read()` | Returns `ReadSignal<T>` — pass to read-only child components. |
-| `.write()` | Returns `WriteSignal<T>` — pass to mutating child components. |
+| `.read()` | Returns `ReadSignal<T>` - pass to read-only child components. |
+| `.write()` | Returns `WriteSignal<T>` - pass to mutating child components. |
 
-**`.get()` vs `.get_untracked()`:** Use `.get()` when the enclosing closure should re-run when the signal changes. Use `.get_untracked()` in event handlers — you want the current value but not a subscription.
+**`.get()` vs `.get_untracked()`:** Use `.get()` when the enclosing closure should re-run when the signal changes. Use `.get_untracked()` in event handlers - you want the current value but not a subscription.
 
 ```rust
 // Wrong: registers a reactive dependency inside an event handler.
@@ -60,10 +60,10 @@ let on_click = move |_| {
 
 `state.theme` holds the user's *preference* (Auto/Light/Dark). Auto needs to be resolved against the system dark-mode setting. Two methods on `WorkbookState` do that:
 
-- `state.get_theme()` — reactive, resolves Auto → Light or Dark
-- `state.get_theme_untracked()` — non-reactive version
+- `state.get_theme()` - reactive, resolves Auto -> Light or Dark
+- `state.get_theme_untracked()` - non-reactive version
 
-Don't call `state.theme.get()` directly in components — it won't resolve Auto correctly.
+Don't call `state.theme.get()` directly in components - it won't resolve Auto correctly.
 
 ---
 
@@ -72,17 +72,17 @@ Don't call `state.theme.get()` directly in components — it won't resolve Auto 
 `state.events` has one `RwSignal<Vec<EventType>>` per category:
 
 ```
-state.events.content    →  Vec<ContentEvent>
-state.events.format     →  Vec<FormatEvent>
-state.events.navigation →  Vec<NavigationEvent>
-state.events.structure  →  Vec<StructureEvent>
-state.events.mode       →  Vec<ModeEvent>
-state.events.theme      →  Vec<ThemeEvent>
+state.events.content    ->  Vec<ContentEvent>
+state.events.format     ->  Vec<FormatEvent>
+state.events.navigation ->  Vec<NavigationEvent>
+state.events.structure  ->  Vec<StructureEvent>
+state.events.mode       ->  Vec<ModeEvent>
+state.events.theme      ->  Vec<ThemeEvent>
 ```
 
 Each `emit_event()` call **replaces** all six signals. The previous action's events are gone. Components subscribing to `state.events.navigation.get()` see only the events from the most recent emit.
 
-This is intentional. `state.events` is not a history buffer — it's a snapshot of what just happened. Components read it to decide whether to update.
+This is intentional. `state.events` is not a history buffer - it's a snapshot of what just happened. Components read it to decide whether to update.
 
 ### Emitting
 
@@ -110,7 +110,7 @@ Read the category signal inside a reactive closure. The closure re-runs whenever
 ```rust
 // Re-runs on every structure event:
 let sheet_list = move || {
-    let _ = state.events.structure.get(); // subscribe — value not used
+    let _ = state.events.structure.get(); // subscribe - value not used
     model.with_value(|m| m.get_worksheets_properties())
 };
 
@@ -173,7 +173,7 @@ The compiler flags every exhaustive `match` on `StructureEvent` that doesn't cov
 
 ### Adding a new category
 
-This is rare — most changes fit the existing six. If you need one:
+This is rare - most changes fit the existing six. If you need one:
 
 1. Add an enum in `events.rs`.
 2. Add a variant to `SpreadsheetEvent`.
@@ -189,26 +189,26 @@ This is rare — most changes fit the existing six. If you need one:
 |-------|------|---------|
 | `editing_cell` | `Split<Option<EditingCell>>` | Active in-progress cell edit. `None` when not editing. |
 | `drag` | `Split<DragState>` | Current mouse-drag mode: selecting, resizing, autofill, pointing. |
-| `current_uuid` | `Split<Option<String>>` | UUID of the loaded workbook — used for auto-save. |
+| `current_uuid` | `Split<Option<String>>` | UUID of the loaded workbook - used for auto-save. |
 | `theme` | `Split<Theme>` | User's theme preference (Auto/Light/Dark). Read via `get_theme()`, not `.theme.get()`. |
 | `show_perf_panel` | `Split<bool>` | Whether the performance panel overlay is visible. |
 | `context_menu` | `Split<Option<ContextMenuState>>` | Active right-click menu position and header target. |
-| `point_range` | `Split<Option<SheetRect>>` | Cell range highlighted during formula point-mode entry. |
-| `point_ref_span` | `Split<Option<(usize, usize)>>` | Byte range in `editing_cell.text` for the current point-mode reference. |
-| `formula_input_ref` | `NodeRef<Input>` | DOM ref to the formula bar `<input>` — used to read cursor position for point-mode. |
+| `formula_input_ref` | `NodeRef<Input>` | DOM ref to the formula bar `<input>` - used to read cursor position for point-mode. |
 | `recent_colors` | `Split<Vec<CssColor>>` | Recently used colors (max 16), persisted to localStorage. |
-| `perf` | `PerfTimings` | Timestamps for the commit → render pipeline, displayed in the perf panel. |
+| `perf` | `PerfTimings` | Timestamps for the commit -> render pipeline, displayed in the perf panel. |
 | `events` | `EventBus` | Per-category event signals. |
 
 ### DragState
 
 ```
-Idle                          — no drag active
-Selecting                     — mouse held for range selection
-Extending { to_row, to_col }  — autofill handle drag
-ResizingCol { col, x }        — column header resize
-ResizingRow { row, y }        — row header resize
-Pointing                      — dragging to extend a formula point-mode range
+Idle                                        - no drag active
+Selecting                                   - mouse held for range selection
+Extending { to_row, to_col }                - autofill handle drag
+ResizingCol { col, x }                      - column header resize
+ResizingRow { row, y }                      - row header resize
+Pointing { range: SheetRect,
+           ref_span: (usize, usize) }       - formula point-mode: highlighted range
+                                              + byte span in formula text being replaced
 ```
 
 At most one is active at a time. The enum makes illegal combinations unrepresentable.

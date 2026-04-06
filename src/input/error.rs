@@ -35,7 +35,7 @@ pub enum EditError {
     Engine(String),
 }
 
-// ironcalc returns `Result<(), String>` — `From<String>` lets `?` convert directly.
+// ironcalc returns `Result<(), String>` - `From<String>` lets `?` convert directly.
 impl From<String> for FormatError {
     fn from(s: String) -> Self {
         Self::Engine(s)

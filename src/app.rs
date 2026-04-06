@@ -17,7 +17,7 @@ pub fn App() -> impl IntoView {
     wb_state.current_uuid.set(Some(uuid));
 
     // Wire leptos-use color mode: handles `data-theme` on <html> and localStorage.
-    // An Effect syncs wb_state.theme → set_mode so any toggle propagates automatically.
+    // An Effect syncs wb_state.theme -> set_mode so any toggle propagates automatically.
     let leptos_use::UseColorModeReturn { set_mode, .. } = use_rusty_calc_theme();
     Effect::new(move |_| {
         set_mode.set(wb_state.theme.get().into());

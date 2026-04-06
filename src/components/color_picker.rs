@@ -29,7 +29,7 @@ Context menu / tab bar:
 
 Custom / without WorkbookState:
 ```rust
-<ColorPicker color_type=ColorType::Text … recent_colors=my_sig>
+<ColorPicker color_type=ColorType::Text ... recent_colors=my_sig>
     // trigger content
 </ColorPicker>
 ```
@@ -43,6 +43,10 @@ use crate::state::WorkbookState;
 use crate::theme::COLOR_PALETTE;
 
 //  Public types
+/// Which color role a picker is editing.
+///
+/// Used to build the container's CSS modifier class (e.g. `color-picker-text`)
+/// and to distinguish pickers when multiple appear on the same toolbar.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColorType {
@@ -53,6 +57,7 @@ pub enum ColorType {
 }
 
 impl ColorType {
+    /// CSS modifier suffix appended to `color-picker-` for the container class.
     pub fn css_class(self) -> &'static str {
         match self {
             ColorType::Text => "text",
@@ -63,6 +68,7 @@ impl ColorType {
     }
 }
 
+/// Whether the picker opens as a toolbar dropdown or an inline context-menu item.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColorPickerPlacement {
     Dropdown,
@@ -271,7 +277,7 @@ fn RecentColorsPalette(
 ///
 /// `is_selected` is a reactive closure so the selected ring updates when
 /// `current_color` changes without re-rendering the whole palette.
-/// `on_click` receives the swatch's hex string — the component clones it
+/// `on_click` receives the swatch's hex string - the component clones it
 /// internally on click, so callers never need to capture hex separately.
 #[component]
 fn ColorSwatch(
@@ -378,8 +384,8 @@ fn ClearColorButton(
 
 fn workbook_recent_colors(state: WorkbookState) -> Signal<Vec<String>> {
     // recent_colors is a split signal; reading it here makes this derived signal
-    // reactive — it re-runs whenever add_recent_color() writes the signal.
-    // Convert CssColor → String at this boundary so component props stay as Vec<String>.
+    // reactive - it re-runs whenever add_recent_color() writes the signal.
+    // Convert CssColor -> String at this boundary so component props stay as Vec<String>.
     Signal::derive(move || {
         state
             .recent_colors
@@ -397,6 +403,7 @@ fn color_indicator_style(current_color: Signal<Option<String>>) -> impl Fn() -> 
     }
 }
 
+/// Toolbar text-color picker. Pulls `recent_colors` from [`WorkbookState`] automatically.
 #[component]
 pub fn TextColorPicker(
     current_color: Signal<Option<String>>,
@@ -419,6 +426,7 @@ pub fn TextColorPicker(
     }
 }
 
+/// Toolbar background-fill picker. Pulls `recent_colors` from [`WorkbookState`] automatically.
 #[component]
 pub fn BackgroundColorPicker(
     current_color: Signal<Option<String>>,
@@ -441,6 +449,7 @@ pub fn BackgroundColorPicker(
     }
 }
 
+/// Sheet-tab color picker, rendered as a context-menu item. Pulls `recent_colors` from [`WorkbookState`].
 #[component]
 pub fn TabColorPicker(
     current_color: Signal<Option<String>>,

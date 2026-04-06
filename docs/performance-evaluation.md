@@ -30,9 +30,9 @@ model.update_value(|m| {
 
 ## The mutate Helpers
 
-`src/input/helpers.rs` provides two helpers. Both wrap pause/resume evaluation — the only difference is whether the closure can fail.
+`src/input/helpers.rs` provides two helpers. Both wrap pause/resume evaluation - the only difference is whether the closure can fail.
 
-### `mutate` — infallible
+### `mutate` - infallible
 
 Use when the closure cannot return an error (navigation, selection changes):
 
@@ -45,7 +45,7 @@ pub fn mutate(
 )
 ```
 
-### `try_mutate` — fallible
+### `try_mutate` - fallible
 
 Use when the closure returns `Result`. The error is returned to the caller and can be propagated with `?`:
 
@@ -58,7 +58,7 @@ pub fn try_mutate<E>(
 ) -> Result<(), E>
 ```
 
-Both helpers pause evaluation before calling `f`, then resume and optionally evaluate once — never more.
+Both helpers pause evaluation before calling `f`, then resume and optionally evaluate once - never more.
 
 Neither emits events or triggers redraws. The caller is responsible for `state.emit_event(...)` after the helper returns.
 
@@ -97,7 +97,7 @@ state.emit_event(SpreadsheetEvent::Content(ContentEvent::CellChanged { .. }));
 
 ### Navigation (infallible, no evaluation)
 ```rust
-// nav_arrow never fails — plain mutate is fine
+// nav_arrow never fails - plain mutate is fine
 mutate(model, state, EvaluationMode::Deferred, |m| {
     m.nav_arrow(dir);
 });
@@ -143,8 +143,8 @@ The optimization becomes more important as:
 2. **Import:** `use crate::input::helpers::{mutate, try_mutate, EvaluationMode};`
 3. Pass `EvaluationMode::Immediate` when formulas might be affected (cell writes, row/col inserts).
 4. Pass `EvaluationMode::Deferred` for pure UI changes (navigation, formatting, selection).
-5. Never call `m.evaluate()` manually inside either helper's closure — the helper handles it.
-6. Always emit a typed event after the helper returns — neither helper triggers redraws or notifies subscribers.
+5. Never call `m.evaluate()` manually inside either helper's closure - the helper handles it.
+6. Always emit a typed event after the helper returns - neither helper triggers redraws or notifies subscribers.
 
 ## Debugging Evaluation Timing
 
