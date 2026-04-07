@@ -142,22 +142,9 @@ pub fn Workbook() -> impl IntoView {
                 mutate(model, &state, EvaluationMode::Immediate, |m| {
                     let s = m.get_selected_view().sheet;
                     let range = CellArea::from(m.get_selected_view().range);
-                    range
-                        .rows()
-                        .flat_map(|row| range.columns().map(move |col| (row, col)))
-                        .for_each(|(row, col)| {
-                            warn_if_err(m.set_user_input(s, row, col, ""), "set_user_input (cut)");
-                        });
-                    // let v = m.get_selected_view();
-                    // let [r1, c1, r2, c2] = v.range;
-                    // (r1..r2)
-                    //     .flat_map(|row| (c1..=c2).map(move |col| (row, col)))
-                    //     .for_each(|(row, col)| {
-                    //         warn_if_err(
-                    //             m.set_user_input(v.sheet, row, col, ""),
-                    //             "set_user_input (cut)",
-                    //         );
-                    //     });
+                    range.cells().for_each(|(row, col)| {
+                        warn_if_err(m.set_user_input(s, row, col, ""), "set_user_input (cut)");
+                    });
                 });
                 state.request_redraw();
                 ev.prevent_default();
