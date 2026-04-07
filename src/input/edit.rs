@@ -2,10 +2,13 @@
 
 use leptos::prelude::{WithValue, *};
 
+use crate::coord::CellAddress;
 use crate::events::{ContentEvent, DragState, ModeEvent, NavigationEvent, SpreadsheetEvent};
-use crate::input::error::EditError;
-use crate::input::helpers::{mutate, EvaluationMode};
-use crate::model::{ArrowKey, CellAddress, FrontendModel};
+use crate::input::{
+    error::EditError,
+    helpers::{mutate, EvaluationMode},
+};
+use crate::model::{ArrowKey, FrontendModel};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::storage;
 

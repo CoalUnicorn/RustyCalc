@@ -338,10 +338,11 @@ impl KeyMod {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::coord::CellAddress;
     use crate::events::DragState;
     use crate::input::helpers::selection_bounds;
     use crate::input::helpers::{mutate, EvaluationMode};
-    use crate::model::{ArrowKey, CellAddress};
+    use crate::model::ArrowKey;
     use crate::state::{EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;
     use wasm_bindgen_test::*;

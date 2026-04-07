@@ -2,9 +2,12 @@
 
 use leptos::prelude::WithValue;
 
+use crate::coord::CellAddress;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
-use crate::input::error::NavError;
-use crate::input::helpers::{mutate, try_mutate, EvaluationMode};
+use crate::input::{
+    error::NavError,
+    helpers::{mutate, try_mutate, EvaluationMode},
+};
 use crate::model::{ArrowKey, FrontendModel, PageDir};
 use crate::state::{ModelStore, WorkbookState};
 
@@ -12,7 +15,7 @@ use crate::state::{ModelStore, WorkbookState};
 fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
     let address = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
         let v = m.get_selected_view();
-        crate::model::CellAddress {
+        CellAddress {
             sheet: v.sheet,
             row: v.row,
             column: v.column,

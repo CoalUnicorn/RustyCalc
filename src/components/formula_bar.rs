@@ -5,8 +5,9 @@ use leptos_use::{use_debounce_fn, use_throttle_fn};
 use wasm_bindgen::JsCast;
 
 use crate::canvas::col_name;
+use crate::coord::CellAddress;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
-use crate::model::{CellAddress, FrontendModel};
+use crate::model::FrontendModel;
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 
 /// The formula bar: cell address label + content/formula input.

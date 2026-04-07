@@ -5,83 +5,13 @@
 //! `Serialize + Deserialize`, so we serde-roundtrip once at construction time
 //! to extract/inject the data we need.
 
-use ironcalc_base::expressions::types::Area;
 use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::{BorderArea, ClipboardData, UserModel};
+
+use crate::coord::CellArea;
+
+use super::frontend_model::FrontendModel;
 use serde::{Deserialize, Serialize};
-
-// CellArea
-
-/// An axis-aligned cell range in ironcalc 1-based sheet coordinates.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct CellArea {
-    pub r1: i32,
-    pub c1: i32,
-    pub r2: i32,
-    pub c2: i32,
-}
-
-impl CellArea {
-    pub fn height(self) -> usize {
-        (self.r2 - self.r1 + 1) as usize
-    }
-
-    pub fn width(self) -> usize {
-        (self.c2 - self.c1 + 1) as usize
-    }
-
-    /// Returns `(row_tiles, col_tiles)` if `src` tiles exactly into `self`
-    /// with no remainder, or `None` if any dimension isn't an exact multiple.
-    ///
-    /// A 1×1 source always divides evenly, so it tiles into any destination.
-    pub fn tile_reps_of(self, src: CellArea) -> Option<(usize, usize)> {
-        let row_reps = self.height() / src.height();
-        let col_reps = self.width() / src.width();
-        let fills_exactly =
-            row_reps * src.height() == self.height() && col_reps * src.width() == self.width();
-        let dst_is_larger = row_reps > 1 || col_reps > 1;
-        (fills_exactly && dst_is_larger).then_some((row_reps, col_reps))
-    }
-
-    /// Convert to the `(r1, c1, r2, c2)` tuple the ironcalc API expects.
-    pub(crate) fn as_tuple(self) -> (i32, i32, i32, i32) {
-        (self.r1, self.c1, self.r2, self.c2)
-    }
-
-    /// Convert to an ironcalc `Area` (top-left origin + dimensions) on the given sheet.
-    pub fn to_area(self, sheet: u32) -> Area {
-        Area {
-            sheet,
-            row: self.r1,
-            column: self.c1,
-            height: self.r2 - self.r1 + 1,
-            width: self.c2 - self.c1 + 1,
-        }
-    }
-}
-
-impl From<(i32, i32, i32, i32)> for CellArea {
-    fn from((r1, c1, r2, c2): (i32, i32, i32, i32)) -> Self {
-        Self { r1, c1, r2, c2 }
-    }
-}
-
-impl From<[i32; 4]> for CellArea {
-    fn from(range: [i32; 4]) -> Self {
-        Self {
-            r1: range[0],
-            c1: range[1],
-            r2: range[2],
-            c2: range[3],
-        }
-    }
-}
-
-impl From<CellArea> for [i32; 4] {
-    fn from(a: CellArea) -> Self {
-        [a.r1, a.c1, a.r2, a.c2]
-    }
-}
 
 // PasteMode
 
@@ -153,8 +83,7 @@ impl AppClipboard {
         }
 
         let src = self.range;
-        let view = model.get_selected_view();
-        let dst = CellArea::from(view.range);
+        let dst = CellArea::from(model.get_selected_view().range);
 
         if let Some((row_reps, col_reps)) = dst.tile_reps_of(src) {
             for tr in 0..row_reps {
@@ -166,7 +95,7 @@ impl AppClipboard {
                 }
             }
 
-            model.set_selected_range(dst.r1, dst.c1, dst.r2, dst.c2)?;
+            model.set_selected_area(dst);
             return Ok(());
         }
 

@@ -13,10 +13,9 @@ use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
-// NOTE: <Meta name="color-scheme" content="dark"/>
-use crate::canvas::SheetRect;
+use crate::coord::{CellAddress, CellArea};
 use crate::events::*;
-use crate::model::{CellAddress, CssColor};
+use crate::model::CssColor;
 use crate::perf::PerfTimings;
 use crate::theme::Theme;
 
@@ -251,13 +250,13 @@ impl WorkbookState {
     /// Use this in event handlers that need a point-mode anchor regardless of
     /// whether point-mode is already active (e.g. arrow-key extension in
     /// `Accept` edit mode).
-    pub(crate) fn effective_point_range(&self, model: ModelStore) -> SheetRect {
+    pub(crate) fn effective_point_range(&self, model: ModelStore) -> CellArea {
         if let DragState::Pointing { range, .. } = self.drag.get_untracked() {
             range
         } else {
             model.with_value(|m| {
                 let v = m.get_selected_view();
-                SheetRect::from_cell(v.row, v.column)
+                CellArea::from_cell(v.row, v.column)
             })
         }
     }

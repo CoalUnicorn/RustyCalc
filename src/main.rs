@@ -3,6 +3,7 @@ use leptos::{mount::mount_to_body, prelude::*};
 mod app;
 mod canvas;
 mod components;
+mod coord;
 mod events;
 mod input;
 mod model;

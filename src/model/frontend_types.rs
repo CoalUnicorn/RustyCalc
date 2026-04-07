@@ -226,38 +226,6 @@ pub enum PageDir {
     Down,
 }
 
-/// Sheet-relative cell address. All indices are 1-based.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CellAddress {
-    pub sheet: u32,
-    pub row: i32,
-    pub column: i32,
-}
-
-use ironcalc_base::UserModel;
-
-use crate::state::EditingCell;
-impl CellAddress {
-    /// Read the address from the model's current selected view.
-    pub fn from_view(model: &UserModel<'static>) -> Self {
-        let m = model.get_selected_view();
-        Self {
-            sheet: m.sheet,
-            row: m.row,
-            column: m.column,
-        }
-    }
-
-    /// Read the address from an in-progress [`EditingCell`].
-    pub fn from_editing(cell: &EditingCell) -> Self {
-        Self {
-            sheet: cell.address.sheet,
-            row: cell.address.row,
-            column: cell.address.column,
-        }
-    }
-}
-
 // Frozen pane state
 
 /// Number of frozen rows and columns on the active sheet.

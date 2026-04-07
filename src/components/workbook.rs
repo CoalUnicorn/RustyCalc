@@ -1,22 +1,22 @@
 use ironcalc_base::expressions::types::Area;
 use leptos::prelude::*;
 
-use crate::canvas::SheetRect;
-use crate::components::file_bar::FileBar;
-use crate::components::formula_bar::FormulaBar;
-use crate::components::perf_panel::PerfPanel;
-use crate::components::sheet_tab_bar::SheetTabBar;
-use crate::components::toolbar::Toolbar;
-use crate::components::worksheet::Worksheet;
+use crate::components::{
+    file_bar::FileBar, formula_bar::FormulaBar, perf_panel::PerfPanel, sheet_tab_bar::SheetTabBar,
+    toolbar::Toolbar, worksheet::Worksheet,
+};
+use crate::coord::CellArea;
 use crate::events::DragState;
-use crate::input::action::{classify_key, execute, KeyMod, SpreadsheetAction};
-use crate::input::edit::EditAction;
-use crate::input::formula_input::*;
-use crate::input::helpers::{mutate, EvaluationMode};
+use crate::input::{
+    action::{classify_key, execute, KeyMod, SpreadsheetAction},
+    edit::EditAction,
+    formula_input::*,
+    helpers::{mutate, EvaluationMode},
+};
 use crate::model::{AppClipboard, PasteMode};
 use crate::state::{EditMode, ModelStore, WorkbookState};
-use crate::util::warn_if_err;
 use crate::storage;
+use crate::util::warn_if_err;
 
 /// Top-level editor container.
 ///
@@ -76,7 +76,7 @@ pub fn Workbook() -> impl IntoView {
                     let trailing = pr.extend_trailing(&key);
                     // Shift extends the selection (anchor stays); plain arrow moves the whole range.
                     let new_pr = if is_shift {
-                        SheetRect {
+                        CellArea {
                             r1: pr.r1,
                             c1: pr.c1,
                             r2: trailing.r2,
@@ -140,26 +140,24 @@ pub fn Workbook() -> impl IntoView {
                 // Pause evaluation so each set_user_input doesn't trigger a
                 // full recalc; evaluate once at the end.
                 mutate(model, &state, EvaluationMode::Immediate, |m| {
-                    let v = m.get_selected_view();
-                    let [r1, c1, r2, c2] = v.range;
-                    (r1..r2)
-                        .flat_map(|row| (c1..=c2).map(move |col| (row, col)))
+                    let s = m.get_selected_view().sheet;
+                    let range = CellArea::from(m.get_selected_view().range);
+                    range
+                        .rows()
+                        .flat_map(|row| range.columns().map(move |col| (row, col)))
                         .for_each(|(row, col)| {
-                            warn_if_err(
-                                m.set_user_input(v.sheet, row, col, ""),
-                                "set_user_input (cut)",
-                            );
+                            warn_if_err(m.set_user_input(s, row, col, ""), "set_user_input (cut)");
                         });
-                    // for row in r1..=r2 {
-                    //     for col in c1..=c2 {
+                    // let v = m.get_selected_view();
+                    // let [r1, c1, r2, c2] = v.range;
+                    // (r1..r2)
+                    //     .flat_map(|row| (c1..=c2).map(move |col| (row, col)))
+                    //     .for_each(|(row, col)| {
                     //         warn_if_err(
                     //             m.set_user_input(v.sheet, row, col, ""),
                     //             "set_user_input (cut)",
                     //         );
-                    //     }
-                    // }
-                    // m.resume_evaluation();
-                    // m.evaluate();
+                    //     });
                 });
                 state.request_redraw();
                 ev.prevent_default();
@@ -264,8 +262,6 @@ fn paste_from_clipboard(
         });
         pasted
     };
-
-
 
     // OS clipboard paste (async, fire-and-forget) - from Excel / Google Sheets.
     // Only attempted when no internal clipboard data was available; otherwise

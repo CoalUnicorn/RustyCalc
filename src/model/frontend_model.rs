@@ -1,11 +1,11 @@
 use ironcalc_base::{
-    types::{CellType, HorizontalAlignment, Style, VerticalAlignment},
+    types::{CellType, HorizontalAlignment, VerticalAlignment},
     worksheet::NavigationDirection,
     UserModel,
 };
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
-use crate::model::clipboard_bridge::CellArea;
+use crate::coord::{CellAddress, CellArea};
 use crate::model::frontend_types::*;
 
 pub trait FrontendModel {

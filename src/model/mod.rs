@@ -3,6 +3,6 @@ pub mod frontend_model;
 pub mod frontend_types;
 pub mod style_types;
 
-pub use clipboard_bridge::{AppClipboard, CellArea, PasteMode};
+pub use clipboard_bridge::{AppClipboard, PasteMode};
 pub use frontend_model::FrontendModel;
 pub use frontend_types::*;

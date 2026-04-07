@@ -30,7 +30,8 @@ let format_events = state.subscribe_to_format_events();
 ```
 */
 
-use crate::{canvas::SheetRect, model::CellAddress, theme::Theme};
+use crate::coord::{CellAddress, CellArea};
+use crate::theme::Theme;
 
 /// Active mouse-drag interaction.
 ///
@@ -55,7 +56,7 @@ pub enum DragState {
     /// inside the formula text being replaced (`ref_span`). Mirrors the
     /// payload pattern of `Extending { to_row, to_col }` - no separate signals.
     Pointing {
-        range: SheetRect,
+        range: CellArea,
         ref_span: (usize, usize),
     },
 }

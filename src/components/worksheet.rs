@@ -7,14 +7,13 @@ use web_sys::HtmlCanvasElement;
 
 use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
-use crate::input::formula_input::*;
-use crate::input::helpers::mutate;
-use crate::input::helpers::EvaluationMode;
-use crate::model::{AppClipboard, ArrowKey, CellAddress, CellArea, FrontendModel, PageDir};
-
+use crate::coord::SheetArea;
+use crate::coord::{CellAddress, CellArea};
 use crate::events::{
     ContentEvent, DragState, FormatEvent, HeaderContextMenu, NavigationEvent, SpreadsheetEvent,
 };
+use crate::input::{formula_input::*, helpers::mutate, helpers::EvaluationMode};
+use crate::model::{AppClipboard, ArrowKey, FrontendModel, PageDir};
 use crate::state::{ContextMenuState, EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
 
@@ -150,15 +149,9 @@ pub fn Worksheet() -> impl IntoView {
         });
         let (extend_to, point_range) = reactive_overlay.get_untracked();
         let clipboard = clipboard_draw.with_value(|opt| {
-            opt.as_ref().map(|acb| {
-                let CellArea { r1, c1, r2, c2 } = acb.range;
-                ClipboardRange {
-                    sheet: acb.sheet,
-                    r1,
-                    c1,
-                    r2,
-                    c2,
-                }
+            opt.as_ref().map(|acb| SheetArea {
+                sheet: acb.sheet,
+                area: acb.range,
             })
         });
         let overlays = RenderOverlays {
@@ -308,7 +301,7 @@ pub fn Worksheet() -> impl IntoView {
                         }
                     });
                     state.drag.set(DragState::Pointing {
-                        range: SheetRect {
+                        range: CellArea {
                             r1: pr.r1,
                             c1: pr.c1,
                             r2: row,
@@ -704,7 +697,7 @@ fn handle_cell_click(
                     }
                 });
                 state.drag.set(DragState::Pointing {
-                    range: SheetRect::from_cell(row, col),
+                    range: CellArea::from_cell(row, col),
                     ref_span: (new_start, new_end),
                 });
                 state.request_redraw();

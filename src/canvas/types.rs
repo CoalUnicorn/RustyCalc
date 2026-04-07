@@ -8,6 +8,8 @@ use std::ops::RangeInclusive;
 
 use ironcalc_base::UserModel;
 
+use crate::coord::{CellArea, SheetArea};
+
 use super::geometry::{
     col_width, row_height, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
@@ -175,17 +177,17 @@ pub(crate) struct SheetRange {
 
 impl SheetRange {
     /// Normalised bounding box of a clipboard copy range.
-    pub(crate) fn from_clipboard(cb: &ClipboardRange) -> Self {
+    pub(crate) fn from_clipboard(cb: &SheetArea) -> Self {
         SheetRange {
-            row_min: cb.r1.min(cb.r2),
-            col_min: cb.c1.min(cb.c2),
-            row_max: cb.r1.max(cb.r2),
-            col_max: cb.c1.max(cb.c2),
+            row_min: cb.area.r1.min(cb.area.r2),
+            col_min: cb.area.c1.min(cb.area.c2),
+            row_max: cb.area.r1.max(cb.area.r2),
+            col_max: cb.area.c1.max(cb.area.c2),
         }
     }
 
     /// Normalised bounding box of a point-mode formula range.
-    pub(crate) fn from_point_range(pr: &SheetRect) -> Self {
+    pub(crate) fn from_point_range(pr: &CellArea) -> Self {
         SheetRange {
             row_min: pr.r1.min(pr.r2),
             col_min: pr.c1.min(pr.c2),
@@ -321,63 +323,9 @@ pub struct RenderOverlays {
     /// Target cell during autofill-handle drag.
     pub extend_to: Option<AutofillTarget>,
     /// Last Ctrl+C copied range: `(sheet, r1, c1, r2, c2)`.
-    pub clipboard: Option<ClipboardRange>,
+    pub clipboard: Option<SheetArea>,
     /// Range being pointed at during formula entry.
-    pub point_range: Option<SheetRect>,
-}
-
-/// A copied range on a specific sheet.
-#[derive(Copy, Clone, PartialEq)]
-pub struct ClipboardRange {
-    pub sheet: u32,
-    pub r1: i32,
-    pub c1: i32,
-    pub r2: i32,
-    pub c2: i32,
-}
-
-/// A rectangular region of cells (no sheet - always the current sheet).
-///
-/// Fields are raw and potentially un-normalised: `r1` may be greater than `r2`
-/// during a drag. Use [`SheetRange`] (renderer-internal) when you need a
-/// normalised form, or call [`SheetRect::extend_trailing`] to produce a new
-/// `SheetRect` with the trailing corner moved by one arrow step.
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub struct SheetRect {
-    pub r1: i32,
-    pub c1: i32,
-    pub r2: i32,
-    pub c2: i32,
-}
-
-impl SheetRect {
-    /// Construct a 1x1 rect anchored at a single cell.
-    pub fn from_cell(row: i32, col: i32) -> Self {
-        SheetRect {
-            r1: row,
-            c1: col,
-            r2: row,
-            c2: col,
-        }
-    }
-
-    /// Return a new rect with the trailing corner (r2, c2) moved one step in
-    /// the arrow-key direction. The anchor (r1, c1) is preserved. Clamps at 1.
-    pub fn extend_trailing(self, key: &str) -> Self {
-        let (r2, c2) = match key {
-            "ArrowDown" => (self.r2 + 1, self.c2),
-            "ArrowUp" => ((self.r2 - 1).max(1), self.c2),
-            "ArrowLeft" => (self.r2, (self.c2 - 1).max(1)),
-            "ArrowRight" => (self.r2, self.c2 + 1),
-            _ => (self.r2, self.c2),
-        };
-        SheetRect {
-            r1: self.r1,
-            c1: self.c1,
-            r2,
-            c2,
-        }
-    }
+    pub point_range: Option<CellArea>,
 }
 
 /// Hint to the canvas renderer about the minimum work needed for this repaint.
