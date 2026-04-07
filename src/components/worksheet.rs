@@ -10,7 +10,7 @@ use crate::components::cell_editor::CellEditor;
 use crate::input::formula_input::*;
 use crate::input::helpers::mutate;
 use crate::input::helpers::EvaluationMode;
-use crate::model::{AppClipboard, ArrowKey, CellAddress, FrontendModel, PageDir};
+use crate::model::{AppClipboard, ArrowKey, CellAddress, CellArea, FrontendModel, PageDir};
 
 use crate::events::{
     ContentEvent, DragState, FormatEvent, HeaderContextMenu, NavigationEvent, SpreadsheetEvent,
@@ -151,7 +151,7 @@ pub fn Worksheet() -> impl IntoView {
         let (extend_to, point_range) = reactive_overlay.get_untracked();
         let clipboard = clipboard_draw.with_value(|opt| {
             opt.as_ref().map(|acb| {
-                let (r1, c1, r2, c2) = acb.range;
+                let CellArea { r1, c1, r2, c2 } = acb.range;
                 ClipboardRange {
                     sheet: acb.sheet,
                     r1,

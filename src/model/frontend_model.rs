@@ -1,10 +1,11 @@
 use ironcalc_base::{
-    types::{CellType, HorizontalAlignment, VerticalAlignment},
+    types::{CellType, HorizontalAlignment, Style, VerticalAlignment},
     worksheet::NavigationDirection,
     UserModel,
 };
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
+use crate::model::clipboard_bridge::CellArea;
 use crate::model::frontend_types::*;
 
 pub trait FrontendModel {
@@ -80,6 +81,74 @@ pub trait FrontendModel {
 
     /// Move to column 1 of the current row (Home key).
     fn nav_home_row(&mut self);
+
+    // Selection
+
+    /// Active cell range as a `CellArea`.
+    fn selected_area(&self) -> CellArea;
+
+    /// Active sheet index.
+    fn selected_sheet(&self) -> u32;
+
+    /// Set the selection to `area` (clamped to valid bounds).
+    fn set_selected_area(&mut self, area: CellArea);
+
+    // Cell editing
+
+    /// Write a raw value or formula into a cell.
+    fn input_cell(&mut self, sheet: u32, row: i32, col: i32, value: &str) -> Result<(), String>;
+
+    /// Clear cell contents (values + formulas) in `area`, preserving formatting.
+    fn clear_contents(&mut self, sheet: u32, area: CellArea) -> Result<(), String>;
+
+    /// Clear everything (contents + formatting) in `area`.
+    fn clear_all(&mut self, sheet: u32, area: CellArea) -> Result<(), String>;
+
+    /// Clear only formatting in `area`, preserving cell values.
+    fn clear_formatting(&mut self, sheet: u32, area: CellArea) -> Result<(), String>;
+
+    /// Apply a style property to `area` (delegates to `update_range_style`).
+    fn apply_style(
+        &mut self,
+        sheet: u32,
+        area: CellArea,
+        path: &str,
+        value: &str,
+    ) -> Result<(), String>;
+
+    // Structure
+
+    fn insert_rows(&mut self, sheet: u32, row: i32, count: i32) -> Result<(), String>;
+    fn delete_rows(&mut self, sheet: u32, row: i32, count: i32) -> Result<(), String>;
+    fn insert_cols(&mut self, sheet: u32, col: i32, count: i32) -> Result<(), String>;
+    fn delete_cols(&mut self, sheet: u32, col: i32, count: i32) -> Result<(), String>;
+
+    /// Extend `area` rows downward to `to_row` using autofill.
+    fn auto_fill_rows(&mut self, sheet: u32, area: CellArea, to_row: i32) -> Result<(), String>;
+
+    /// Extend `area` columns rightward to `to_col` using autofill.
+    fn auto_fill_cols(&mut self, sheet: u32, area: CellArea, to_col: i32) -> Result<(), String>;
+
+    // History
+
+    fn undo(&mut self) -> Result<(), String>;
+    fn redo(&mut self) -> Result<(), String>;
+    fn can_undo(&self) -> bool;
+    fn can_redo(&self) -> bool;
+
+    // Frozen panes
+
+    /// Freeze `count` rows from the top on the active sheet.
+    fn set_frozen_rows(&mut self, count: i32) -> Result<(), String>;
+
+    /// Freeze `count` columns from the left on the active sheet.
+    fn set_frozen_cols(&mut self, count: i32) -> Result<(), String>;
+
+    // Dimensions & display
+
+    fn row_height(&self, sheet: u32, row: i32) -> f64;
+    fn col_width(&self, sheet: u32, col: i32) -> f64;
+    fn show_grid_lines(&self) -> bool;
 }
 
 // Helper: map font name String -> SafeFontFamily
@@ -334,6 +403,120 @@ impl FrontendModel for UserModel<'_> {
     fn nav_home_row(&mut self) {
         let row = self.get_selected_view().row;
         let _ = self.set_selected_cell(row, 1);
+    }
+
+    // Selection
+
+    fn selected_area(&self) -> CellArea {
+        CellArea::from(self.get_selected_view().range)
+    }
+
+    fn selected_sheet(&self) -> u32 {
+        self.get_selected_view().sheet
+    }
+
+    fn set_selected_area(&mut self, area: CellArea) {
+        let _ = self.set_selected_cell(area.r1, area.c1);
+        let _ = self.set_selected_range(area.r1, area.c1, area.r2, area.c2);
+    }
+
+    // Cell editing
+
+    fn input_cell(&mut self, sheet: u32, row: i32, col: i32, value: &str) -> Result<(), String> {
+        self.set_user_input(sheet, row, col, value)
+    }
+
+    fn clear_contents(&mut self, sheet: u32, area: CellArea) -> Result<(), String> {
+        self.range_clear_contents(&area.to_area(sheet))
+    }
+
+    fn clear_all(&mut self, sheet: u32, area: CellArea) -> Result<(), String> {
+        self.range_clear_all(&area.to_area(sheet))
+    }
+
+    fn clear_formatting(&mut self, sheet: u32, area: CellArea) -> Result<(), String> {
+        self.range_clear_formatting(&area.to_area(sheet))
+    }
+
+    fn apply_style(
+        &mut self,
+        sheet: u32,
+        area: CellArea,
+        path: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        self.update_range_style(&area.to_area(sheet), path, value)
+    }
+
+    // Structure
+
+    fn insert_rows(&mut self, sheet: u32, row: i32, count: i32) -> Result<(), String> {
+        UserModel::insert_rows(self, sheet, row, count)
+    }
+
+    fn delete_rows(&mut self, sheet: u32, row: i32, count: i32) -> Result<(), String> {
+        UserModel::delete_rows(self, sheet, row, count)
+    }
+
+    fn insert_cols(&mut self, sheet: u32, col: i32, count: i32) -> Result<(), String> {
+        self.insert_columns(sheet, col, count)
+    }
+
+    fn delete_cols(&mut self, sheet: u32, col: i32, count: i32) -> Result<(), String> {
+        self.delete_columns(sheet, col, count)
+    }
+
+    fn auto_fill_rows(&mut self, sheet: u32, area: CellArea, to_row: i32) -> Result<(), String> {
+        UserModel::auto_fill_rows(self, &area.to_area(sheet), to_row)
+    }
+
+    fn auto_fill_cols(&mut self, sheet: u32, area: CellArea, to_col: i32) -> Result<(), String> {
+        self.auto_fill_columns(&area.to_area(sheet), to_col)
+    }
+
+    // History
+
+    fn undo(&mut self) -> Result<(), String> {
+        UserModel::undo(self)
+    }
+
+    fn redo(&mut self) -> Result<(), String> {
+        UserModel::redo(self)
+    }
+
+    fn can_undo(&self) -> bool {
+        UserModel::can_undo(self)
+    }
+
+    fn can_redo(&self) -> bool {
+        UserModel::can_redo(self)
+    }
+
+    // Frozen panes
+
+    fn set_frozen_rows(&mut self, count: i32) -> Result<(), String> {
+        let sheet = self.get_selected_sheet();
+        self.set_frozen_rows_count(sheet, count)
+    }
+
+    fn set_frozen_cols(&mut self, count: i32) -> Result<(), String> {
+        let sheet = self.get_selected_sheet();
+        self.set_frozen_columns_count(sheet, count)
+    }
+
+    // Dimensions & display
+
+    fn row_height(&self, sheet: u32, row: i32) -> f64 {
+        self.get_row_height(sheet, row).unwrap_or(20.0)
+    }
+
+    fn col_width(&self, sheet: u32, col: i32) -> f64 {
+        self.get_column_width(sheet, col).unwrap_or(100.0)
+    }
+
+    fn show_grid_lines(&self) -> bool {
+        let sheet = self.get_selected_sheet();
+        self.get_show_grid_lines(sheet).unwrap_or(true)
     }
 }
 

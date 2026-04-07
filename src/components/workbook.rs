@@ -10,11 +10,13 @@ use crate::components::toolbar::Toolbar;
 use crate::components::worksheet::Worksheet;
 use crate::events::DragState;
 use crate::input::action::{classify_key, execute, KeyMod, SpreadsheetAction};
+use crate::input::edit::EditAction;
 use crate::input::formula_input::*;
 use crate::input::helpers::{mutate, EvaluationMode};
-use crate::model::AppClipboard;
+use crate::model::{AppClipboard, PasteMode};
 use crate::state::{EditMode, ModelStore, WorkbookState};
 use crate::util::warn_if_err;
+use crate::storage;
 
 /// Top-level editor container.
 ///
@@ -164,8 +166,19 @@ pub fn Workbook() -> impl IntoView {
             }
             SpreadsheetAction::Paste => {
                 if paste_from_clipboard(model, state, clipboard_store) {
+                    if let Some(uuid) = state.current_uuid.get_untracked() {
+                        model.with_value(|m| storage::save(&uuid, m));
+                    }
                     ev.prevent_default();
                 }
+            }
+
+            // Escape cancels the marching-ants clipboard selection before
+            // delegating the cancel action itself to execute().
+            SpreadsheetAction::Edit(EditAction::Cancel) => {
+                clipboard_store.update_value(|c| *c = None);
+                execute(&action, model, &state);
+                ev.prevent_default();
             }
 
             // Everything else is handled by the centralised execute().
@@ -242,7 +255,7 @@ fn paste_from_clipboard(
         clipboard_store.with_value(|opt| {
             if let Some(acb) = opt {
                 mutate(model, &state, EvaluationMode::Immediate, |m| {
-                    if let Err(e) = acb.paste(m, false) {
+                    if let Err(e) = acb.paste(m, PasteMode::Copy) {
                         web_sys::console::warn_1(&format!("[ironcalc] paste failed: {e}").into());
                     }
                 });
@@ -252,10 +265,7 @@ fn paste_from_clipboard(
         pasted
     };
 
-    // Clear the dashed "marching ants" border around the copied range.
-    if internal_pasted {
-        clipboard_store.update_value(|c| *c = None);
-    }
+
 
     // OS clipboard paste (async, fire-and-forget) - from Excel / Google Sheets.
     // Only attempted when no internal clipboard data was available; otherwise
@@ -288,6 +298,9 @@ fn paste_from_clipboard(
                     );
                 }
             });
+            if let Some(uuid) = state.current_uuid.get_untracked() {
+                model.with_value(|m| storage::save(&uuid, m));
+            }
             state.request_redraw();
         });
     }

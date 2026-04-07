@@ -5,9 +5,92 @@
 //! `Serialize + Deserialize`, so we serde-roundtrip once at construction time
 //! to extract/inject the data we need.
 
+use ironcalc_base::expressions::types::Area;
 use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::{BorderArea, ClipboardData, UserModel};
 use serde::{Deserialize, Serialize};
+
+// CellArea
+
+/// An axis-aligned cell range in ironcalc 1-based sheet coordinates.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct CellArea {
+    pub r1: i32,
+    pub c1: i32,
+    pub r2: i32,
+    pub c2: i32,
+}
+
+impl CellArea {
+    pub fn height(self) -> usize {
+        (self.r2 - self.r1 + 1) as usize
+    }
+
+    pub fn width(self) -> usize {
+        (self.c2 - self.c1 + 1) as usize
+    }
+
+    /// Returns `(row_tiles, col_tiles)` if `src` tiles exactly into `self`
+    /// with no remainder, or `None` if any dimension isn't an exact multiple.
+    ///
+    /// A 1×1 source always divides evenly, so it tiles into any destination.
+    pub fn tile_reps_of(self, src: CellArea) -> Option<(usize, usize)> {
+        let row_reps = self.height() / src.height();
+        let col_reps = self.width() / src.width();
+        let fills_exactly =
+            row_reps * src.height() == self.height() && col_reps * src.width() == self.width();
+        let dst_is_larger = row_reps > 1 || col_reps > 1;
+        (fills_exactly && dst_is_larger).then_some((row_reps, col_reps))
+    }
+
+    /// Convert to the `(r1, c1, r2, c2)` tuple the ironcalc API expects.
+    pub(crate) fn as_tuple(self) -> (i32, i32, i32, i32) {
+        (self.r1, self.c1, self.r2, self.c2)
+    }
+
+    /// Convert to an ironcalc `Area` (top-left origin + dimensions) on the given sheet.
+    pub fn to_area(self, sheet: u32) -> Area {
+        Area {
+            sheet,
+            row: self.r1,
+            column: self.c1,
+            height: self.r2 - self.r1 + 1,
+            width: self.c2 - self.c1 + 1,
+        }
+    }
+}
+
+impl From<(i32, i32, i32, i32)> for CellArea {
+    fn from((r1, c1, r2, c2): (i32, i32, i32, i32)) -> Self {
+        Self { r1, c1, r2, c2 }
+    }
+}
+
+impl From<[i32; 4]> for CellArea {
+    fn from(range: [i32; 4]) -> Self {
+        Self {
+            r1: range[0],
+            c1: range[1],
+            r2: range[2],
+            c2: range[3],
+        }
+    }
+}
+
+impl From<CellArea> for [i32; 4] {
+    fn from(a: CellArea) -> Self {
+        [a.r1, a.c1, a.r2, a.c2]
+    }
+}
+
+// PasteMode
+
+/// Whether a paste operation originates from a copy or a cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteMode {
+    Copy,
+    Cut,
+}
 
 // AppClipboard
 
@@ -20,8 +103,8 @@ pub struct AppClipboard {
     pub csv: String,
     /// Source sheet index (0-based).
     pub sheet: u32,
-    /// `(r1, c1, r2, c2)` of the copied range (1-based).
-    pub range: (i32, i32, i32, i32),
+    /// Copied cell range (1-based).
+    pub range: CellArea,
     /// Opaque cell data - passed back to `paste_from_clipboard`.
     data: ClipboardData,
 }
@@ -32,6 +115,7 @@ struct ClipboardMirror {
     csv: String,
     data: ClipboardData,
     sheet: u32,
+    /// ironcalc serialises this as a `(r1, c1, r2, c2)` tuple.
     range: (i32, i32, i32, i32),
 }
 
@@ -52,14 +136,41 @@ impl AppClipboard {
         Self {
             csv: m.csv,
             sheet: m.sheet,
-            range: m.range,
+            range: m.range.into(),
             data: m.data,
         }
     }
 
     /// Paste this clipboard into the model at the current selection.
-    pub fn paste(&self, model: &mut UserModel, is_cut: bool) -> Result<(), String> {
-        model.paste_from_clipboard(self.sheet, self.range, &self.data, is_cut)
+    ///
+    /// Tiling rules (matching Excel / Google Sheets behaviour):
+    /// - **Exact multiples** → tiles the source to fill the destination.
+    /// - **Non-multiple destination** → pastes once from the top-left corner.
+    /// - **Cut** → never tiles; always pastes once.
+    pub fn paste(&self, model: &mut UserModel, mode: PasteMode) -> Result<(), String> {
+        if mode == PasteMode::Cut {
+            return model.paste_from_clipboard(self.sheet, self.range.as_tuple(), &self.data, true);
+        }
+
+        let src = self.range;
+        let view = model.get_selected_view();
+        let dst = CellArea::from(view.range);
+
+        if let Some((row_reps, col_reps)) = dst.tile_reps_of(src) {
+            for tr in 0..row_reps {
+                for tc in 0..col_reps {
+                    let row = dst.r1 + (tr * src.height()) as i32;
+                    let col = dst.c1 + (tc * src.width()) as i32;
+                    model.set_selected_cell(row, col)?;
+                    model.paste_from_clipboard(self.sheet, src.as_tuple(), &self.data, false)?;
+                }
+            }
+
+            model.set_selected_range(dst.r1, dst.c1, dst.r2, dst.c2)?;
+            return Ok(());
+        }
+
+        model.paste_from_clipboard(self.sheet, src.as_tuple(), &self.data, false)
     }
 }
 
@@ -108,15 +219,82 @@ pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<Stri
 mod tests {
     use super::*;
 
+    // CellRange::tile_reps_of
+
+    #[test]
+    fn tile_reps_single_cell_into_range() {
+        let src = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 1,
+            c2: 1,
+        };
+        let dst = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 3,
+            c2: 4,
+        };
+        assert_eq!(dst.tile_reps_of(src), Some((3, 4)));
+    }
+
+    #[test]
+    fn tile_reps_exact_multiple() {
+        let src = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 3,
+        };
+        let dst = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 4,
+            c2: 6,
+        };
+        assert_eq!(dst.tile_reps_of(src), Some((2, 2)));
+    }
+
+    #[test]
+    fn tile_reps_non_multiple_returns_none() {
+        let src = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        };
+        let dst = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 3,
+            c2: 3,
+        };
+        assert_eq!(dst.tile_reps_of(src), None);
+    }
+
+    #[test]
+    fn tile_reps_same_size_returns_none() {
+        let src = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        };
+        assert_eq!(src.tile_reps_of(src), None);
+    }
+
+    // AppClipboard::capture roundtrip
+
     #[allow(clippy::expect_used)]
     #[test]
     fn capture_roundtrip() {
         let model = UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("create test model");
         let cb = model.copy_to_clipboard().expect("copy empty range");
         let app = AppClipboard::capture(&cb);
-        assert!(!app.csv.is_empty() || app.csv.is_empty()); // just ensure no panic
         assert_eq!(app.sheet, 0);
     }
+
+    // BorderArea construction
 
     #[test]
     fn make_border_area_all_thin_black() {
@@ -126,7 +304,6 @@ mod tests {
             Some("#000000".to_owned()),
         );
         // If this didn't panic, the serde roundtrip succeeded.
-        // We can't inspect fields (pub(crate)), but set_area_with_border will accept it.
         let _ = ba;
     }
 
