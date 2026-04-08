@@ -44,7 +44,7 @@ pub trait FrontendModel {
     fn frozen_panes(&self) -> FrozenPanes;
 
     /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
-    fn sheet_dimension(&self) -> SheetDimension;
+    fn sheet_dimension(&self) -> CellArea;
 
     // Navigation (infallible)
 
@@ -287,23 +287,23 @@ impl FrontendModel for UserModel<'_> {
         }
     }
 
-    fn sheet_dimension(&self) -> SheetDimension {
+    fn sheet_dimension(&self) -> CellArea {
         let sheet = self.get_selected_sheet();
         match self.get_model().workbook.worksheet(sheet) {
             Ok(ws) => {
                 let d = ws.dimension();
-                SheetDimension {
-                    min_row: d.min_row,
-                    min_column: d.min_column,
-                    max_row: d.max_row,
-                    max_column: d.max_column,
+                CellArea {
+                    r1: d.min_row,
+                    c1: d.min_column,
+                    r2: d.max_row,
+                    c2: d.max_column,
                 }
             }
-            Err(_) => SheetDimension {
-                min_row: 1,
-                min_column: 1,
-                max_row: 1,
-                max_column: 1,
+            Err(_) => CellArea {
+                r1: 1,
+                c1: 1,
+                r2: 1,
+                c2: 1,
             },
         }
     }
@@ -562,10 +562,10 @@ mod tests {
         let m = make_model();
         let d = m.sheet_dimension();
         // Empty sheet defaults to (1,1,1,1).
-        assert_eq!(d.min_row, 1);
-        assert_eq!(d.min_column, 1);
-        assert_eq!(d.max_row, 1);
-        assert_eq!(d.max_column, 1);
+        assert_eq!(d.r1, 1);
+        assert_eq!(d.c1, 1);
+        assert_eq!(d.r2, 1);
+        assert_eq!(d.c2, 1);
     }
 
     #[allow(clippy::unwrap_used)]
@@ -575,7 +575,7 @@ mod tests {
         m.set_user_input(0, 5, 3, "hello").unwrap();
         m.evaluate();
         let d = m.sheet_dimension();
-        assert!(d.max_row >= 5);
-        assert!(d.max_column >= 3);
+        assert!(d.r2 >= 5);
+        assert!(d.c2 >= 3);
     }
 }

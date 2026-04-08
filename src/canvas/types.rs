@@ -165,51 +165,6 @@ pub(crate) struct CellText {
     pub lines: Vec<TextLine>,
 }
 
-// Cell rendering params
-
-/// Row/column rectangle in sheet coordinates (always normalised: min <= max).
-pub(crate) struct SheetRange {
-    pub row_min: i32,
-    pub col_min: i32,
-    pub row_max: i32,
-    pub col_max: i32,
-}
-
-impl SheetRange {
-    /// Normalised bounding box of a clipboard copy range.
-    pub(crate) fn from_clipboard(cb: &SheetArea) -> Self {
-        SheetRange {
-            row_min: cb.area.r1.min(cb.area.r2),
-            col_min: cb.area.c1.min(cb.area.c2),
-            row_max: cb.area.r1.max(cb.area.r2),
-            col_max: cb.area.c1.max(cb.area.c2),
-        }
-    }
-
-    /// Normalised bounding box of a point-mode formula range.
-    pub(crate) fn from_point_range(pr: &CellArea) -> Self {
-        SheetRange {
-            row_min: pr.r1.min(pr.r2),
-            col_min: pr.c1.min(pr.c2),
-            row_max: pr.r1.max(pr.r2),
-            col_max: pr.c1.max(pr.c2),
-        }
-    }
-
-    /// Selection range expanded to include the autofill drag target.
-    ///
-    /// Takes `view.range` (a `[i32; 4]` from IronCalc) and grows it to cover
-    /// `target` - the cell the user is dragging the autofill handle toward.
-    pub(crate) fn from_autofill_extend(range: [i32; 4], target: AutofillTarget) -> Self {
-        let [r1, c1, r2, c2] = range;
-        SheetRange {
-            row_min: r1.min(r2).min(target.row),
-            col_min: c1.min(c2).min(target.col),
-            row_max: r1.max(r2).max(target.row),
-            col_max: c1.max(c2).max(target.col),
-        }
-    }
-}
 
 /// Pixel-space bounding box returned by `range_pixel_bounds`.
 ///

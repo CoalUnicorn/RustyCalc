@@ -154,7 +154,7 @@ pub fn execute_nav(
         NavAction::SelectAll => {
             mutate(model, state, EvaluationMode::Deferred, |m| {
                 let d = m.sheet_dimension();
-                m.nav_select_range(d.min_row, d.min_column, d.max_row, d.max_column);
+                m.nav_select_range(d.r1, d.c1, d.r2, d.c2);
             });
             emit_selection_range_changed(model, state);
         }

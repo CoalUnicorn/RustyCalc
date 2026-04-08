@@ -88,6 +88,7 @@
 use ironcalc_base::types::{BorderStyle, HorizontalAlignment, VerticalAlignment};
 use ironcalc_base::UserModel;
 
+use crate::coord::CellArea;
 use crate::model::frontend_model::FrontendModel;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -323,7 +324,7 @@ impl CanvasRenderer {
                     model,
                     sheet,
                     frc.offset,
-                    SheetRange::from_clipboard(cb),
+                    cb.area.normalized(),
                     self.theme.selection_color,
                     DashFill::Outline,
                 );
@@ -336,7 +337,7 @@ impl CanvasRenderer {
                 model,
                 sheet,
                 frc.offset,
-                SheetRange::from_point_range(pr),
+                pr.normalized(),
                 self.theme.pointing,
                 DashFill::Tinted,
             );
@@ -974,21 +975,19 @@ impl CanvasRenderer {
         model: &UserModel,
         sheet: u32,
         frozen: FrozenOffset,
-        range: SheetRange,
+        range: CellArea,
     ) -> PixelBounds {
-        let x1 = self.cell_x(model, sheet, range.col_min, frozen);
-        let y1 = self.cell_y(model, sheet, range.row_min, frozen);
-        let x2 = if range.col_max > self.vis.col_last {
+        let x1 = self.cell_x(model, sheet, range.c1, frozen);
+        let y1 = self.cell_y(model, sheet, range.r1, frozen);
+        let x2 = if range.c2 > self.vis.col_last {
             self.width
         } else {
-            self.cell_x(model, sheet, range.col_max, frozen)
-                + col_width(model, sheet, range.col_max)
+            self.cell_x(model, sheet, range.c2, frozen) + col_width(model, sheet, range.c2)
         };
-        let y2 = if range.row_max > self.vis.row_last {
+        let y2 = if range.r2 > self.vis.row_last {
             self.height
         } else {
-            self.cell_y(model, sheet, range.row_max, frozen)
-                + row_height(model, sheet, range.row_max)
+            self.cell_y(model, sheet, range.r2, frozen) + row_height(model, sheet, range.r2)
         };
         PixelBounds { x1, y1, x2, y2 }
     }
@@ -996,17 +995,17 @@ impl CanvasRenderer {
     /// Draw the blue selection border directly on canvas.
     fn draw_selection(&self, model: &UserModel, sheet: u32, frozen: FrozenOffset) {
         let view = model.get_selected_view();
-        let [r1, c1, r2, c2] = view.range;
+        //let [r1, c1, r2, c2] = view.range;
         let b = self.range_pixel_bounds(
             model,
             sheet,
             frozen,
-            SheetRange {
-                row_min: r1.min(r2),
-                col_min: c1.min(c2),
-                row_max: r1.max(r2),
-                col_max: c1.max(c2),
-            },
+            CellArea::from_model(model).normalized(), // SheetRange {
+                                                      //     row_min: r1.min(r2),
+                                                      //     col_min: c1.min(c2),
+                                                      //     row_max: r1.max(r2),
+                                                      //     col_max: c1.max(c2),
+                                                      // },
         );
 
         let ctx = &self.ctx;
@@ -1059,8 +1058,13 @@ impl CanvasRenderer {
         frozen: FrozenOffset,
         target: AutofillTarget,
     ) {
-        let view = model.get_selected_view();
-        let range = SheetRange::from_autofill_extend(view.range, target);
+        let sel = CellArea::from_model(model).normalized();
+        let range = CellArea {
+            r1: sel.r1.min(target.row),
+            c1: sel.c1.min(target.col),
+            r2: sel.r2.max(target.row),
+            c2: sel.c2.max(target.col),
+        };
         let b = self.range_pixel_bounds(model, sheet, frozen, range);
 
         let ctx = &self.ctx;
@@ -1081,7 +1085,7 @@ impl CanvasRenderer {
         model: &UserModel,
         sheet: u32,
         frozen: FrozenOffset,
-        range: SheetRange,
+        range: CellArea,
         color: &str,
         fill: DashFill,
     ) {

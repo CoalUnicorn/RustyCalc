@@ -197,17 +197,6 @@ pub struct ToolbarState {
     pub style: TextStyle,
 }
 
-// Sheet dimension
-
-/// The used data extent of the active sheet.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SheetDimension {
-    pub min_row: i32,
-    pub min_column: i32,
-    pub max_row: i32,
-    pub max_column: i32,
-}
-
 // Direction enums
 
 /// A cardinal direction - arrow keys and single-step navigation.
