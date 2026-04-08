@@ -31,8 +31,7 @@ pub fn execute_struct(
 ) -> Result<(), StructError> {
     match action {
         StructAction::Delete => {
-            let sheet_area =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| SheetArea::from_view(m));
+            let sheet_area = model.with_value(SheetArea::from_view);
 
             try_mutate(
                 model,
@@ -50,8 +49,7 @@ pub fn execute_struct(
             }));
         }
         StructAction::ClearAll => {
-            let sheet_area =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| SheetArea::from_view(m));
+            let sheet_area = model.with_value(SheetArea::from_view);
 
             try_mutate(
                 model,

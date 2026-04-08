@@ -155,13 +155,7 @@ pub enum FormatEvent {
     /// Cell styling changed (font, colors, borders)
     CellStyleChanged { address: CellAddress },
     /// Range styling changed (bulk formatting)
-    RangeStyleChanged {
-        sheet: u32,
-        start_row: i32,
-        start_col: i32,
-        end_row: i32,
-        end_col: i32,
-    },
+    RangeStyleChanged { area: SheetArea },
     /// Column width or row height changed
     LayoutChanged {
         sheet: u32,
@@ -180,7 +174,7 @@ impl FormatEvent {
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
             FormatEvent::CellStyleChanged { address } => Some(address.sheet),
-            FormatEvent::RangeStyleChanged { sheet, .. } => Some(*sheet),
+            FormatEvent::RangeStyleChanged { area } => Some(area.sheet),
             FormatEvent::LayoutChanged { sheet, .. } => Some(*sheet),
             FormatEvent::ConditionalFormattingChanged { sheet } => Some(*sheet),
             FormatEvent::RecentColorsUpdated { .. } | FormatEvent::DocumentColorsChanged { .. } => {
@@ -195,13 +189,10 @@ impl FormatEvent {
                 "Format::CellStyle S{}R{}C{}",
                 address.sheet, address.row, address.column
             ),
-            FormatEvent::RangeStyleChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
-            } => format!("Format::RangeStyle S{sheet} {start_col}{start_row}:{end_col}{end_row}"),
+            FormatEvent::RangeStyleChanged { area } => format!(
+                "Format::RangeStyle S{} C{}R{}:C{}R{}",
+                area.sheet, area.area.c1, area.area.r1, area.area.c2, area.area.r2
+            ),
             FormatEvent::LayoutChanged { sheet, col, row } => {
                 format!("Format::Layout S{sheet} col={col:?} row={row:?}")
             }

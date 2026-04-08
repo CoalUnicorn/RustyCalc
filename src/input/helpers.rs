@@ -84,9 +84,3 @@ pub fn selection_area(m: &UserModel<'static>) -> Area {
     let [r1, c1, r2, c2] = v.range;
     make_area(v.sheet, r1, c1, r2, c2)
 }
-
-/// Returns `((min_row, max_row), (min_col, max_col))` from a `[r1,c1,r2,c2]` range.
-pub fn selection_bounds(range: [i32; 4]) -> ((i32, i32), (i32, i32)) {
-    let [r1, c1, r2, c2] = range;
-    ((r1.min(r2), r1.max(r2)), (c1.min(c2), c1.max(c2)))
-}

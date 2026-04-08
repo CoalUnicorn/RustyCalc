@@ -38,9 +38,12 @@ impl SheetArea {
         }
     }
 
-    pub fn contains_address(self, addr: CellAddress) -> bool {
-        self.area.contains(addr.row, addr.column)
-    }
+    // pub fn contains_address(self, addr: CellAddress) -> bool {
+    //     if addr.sheet == self.sheet {
+    //         return self.area.contains(addr.row, addr.column)
+    //     }
+    //     false
+    // }
 
     pub fn on_same_sheet(self, other: SheetArea) -> bool {
         self.sheet == other.sheet

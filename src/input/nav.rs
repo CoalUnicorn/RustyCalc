@@ -22,8 +22,7 @@ fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
 
 /// Helper to emit SelectionRangeChanged event after range operations
 fn emit_selection_range_changed(model: ModelStore, state: &WorkbookState) {
-    let sheet_area =
-        model.with_value(|m: &ironcalc_base::UserModel<'static>| SheetArea::from_view(m));
+    let sheet_area = model.with_value(SheetArea::from_view);
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged { sheet_area },
     ));

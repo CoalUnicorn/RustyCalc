@@ -165,7 +165,6 @@ pub(crate) struct CellText {
     pub lines: Vec<TextLine>,
 }
 
-
 /// Pixel-space bounding box returned by `range_pixel_bounds`.
 ///
 /// Prefer `.width()` / `.height()` over manual `x2 - x1` arithmetic.

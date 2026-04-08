@@ -1,3 +1,4 @@
+use ironcalc_base::UserModel;
 use leptos::html;
 use leptos::prelude::*;
 use leptos_use::{use_raf_fn, use_resize_observer};
@@ -224,7 +225,7 @@ pub fn Worksheet() -> impl IntoView {
                     );
                 });
                 state.drag.set(DragState::ResizingCol { col, x });
-                let sheet = model.with_value(|m| m.active_cell().sheet);
+                let sheet = model.with_value(UserModel::get_selected_sheet);
                 state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                     sheet,
                     col: Some(col),
@@ -242,7 +243,7 @@ pub fn Worksheet() -> impl IntoView {
                     warn_if_err(m.set_rows_height(sheet, row, row, new_h), "set_rows_height");
                 });
                 state.drag.set(DragState::ResizingRow { row, y });
-                let sheet = model.with_value(|m| m.active_cell().sheet);
+                let sheet = model.with_value(UserModel::get_selected_sheet);
                 state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                     sheet,
                     col: None,
@@ -285,7 +286,7 @@ pub fn Worksheet() -> impl IntoView {
                 ref_span,
             } => {
                 // Extend the point-mode range to the hovered cell.
-                let sheet = model.with_value(|m| m.active_cell().sheet);
+                let sheet = model.with_value(UserModel::get_selected_sheet);
                 let ref_str = range_ref_str(pr.r1, pr.c1, row, col, sheet, sheet, "");
                 let cursor = ref_span.1;
                 let new_state = state
@@ -355,7 +356,7 @@ pub fn Worksheet() -> impl IntoView {
             });
             // Autofill wrote content - emit a content event so canvas and
             // formula bar both repaint with the filled values.
-            let sheet_area = model.with_value(|m| SheetArea::from_view(m));
+            let sheet_area = model.with_value(SheetArea::from_view);
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
                 sheet_area,
             }));
@@ -592,7 +593,7 @@ fn handle_row_header_click(
         }
     });
     state.editing_cell.set(None);
-    let sheet_area = model.with_value(|m| SheetArea::from_view(m));
+    let sheet_area = model.with_value(SheetArea::from_view);
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged { sheet_area },
     ));
@@ -682,14 +683,14 @@ fn handle_cell_click(
         // Autofill start: drag state change alone triggers the Effect.
     } else {
         if ev.shift_key() {
-            let sheet_area = model.with_value(|m| SheetArea::from_view(m));
+            let sheet_area = model.with_value(SheetArea::from_view);
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::SelectionRangeChanged {
                     sheet_area: { sheet_area },
                 },
             ));
         } else {
-            let address = model.with_value(|m| CellAddress::from_view(m));
+            let address = model.with_value(CellAddress::from_view);
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::SelectionChanged { address },
             ));

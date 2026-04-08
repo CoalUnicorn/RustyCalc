@@ -4,7 +4,7 @@ use ironcalc_base::UserModel;
 use leptos::prelude::WithValue;
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
-use crate::coord::CellArea;
+use crate::coord::{CellArea, SheetArea};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::input::helpers::{selection_area, try_mutate, EvaluationMode};
@@ -68,17 +68,7 @@ pub fn execute_format(
         }
         FormatAction::SetFontSize(size) => {
             let size = size.clamp(1.0, 409.0);
-            let (sheet, start_row, start_col, end_row, end_col) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let area = selection_area(m);
-                    (
-                        area.sheet,
-                        area.row,
-                        area.column,
-                        area.row + area.height - 1,
-                        area.column + area.width - 1,
-                    )
-                });
+            let sa = model.with_value(SheetArea::from_view);
 
             /*
             FIXME:  how we handle cell area / columns / rows selection with different
@@ -104,26 +94,12 @@ pub fn execute_format(
             )?;
 
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
+                area: sa.area.normalized().with_sheet(sa.sheet),
             }));
         }
         FormatAction::SetFontFamily(family) => {
             let name = family.model_name();
-            let (sheet, start_row, start_col, end_row, end_col) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let area = selection_area(m);
-                    (
-                        area.sheet,
-                        area.row,
-                        area.column,
-                        area.row + area.height - 1,
-                        area.column + area.width - 1,
-                    )
-                });
+            let sa = model.with_value(SheetArea::from_view);
 
             try_mutate(
                 model,
@@ -133,28 +109,14 @@ pub fn execute_format(
             )?;
 
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
+                area: sa.area.normalized().with_sheet(sa.sheet),
             }));
         }
         FormatAction::SetTextColor(hex) => {
             // IronCalc "font.color": empty string clears (-> transparent), hex string sets.
             // Uses the same update_range_style path as bold/italic/size for proper
             // style-pool persistence and XLSX round-trip.
-            let (sheet, start_row, start_col, end_row, end_col) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let a = selection_area(m);
-                    (
-                        a.sheet,
-                        a.row,
-                        a.column,
-                        a.row + a.height - 1,
-                        a.column + a.width - 1,
-                    )
-                });
+            let sa = model.with_value(SheetArea::from_view);
             let value = hex.as_str();
             try_mutate(
                 model,
@@ -168,27 +130,13 @@ pub fn execute_format(
                 },
             )?;
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
+                area: sa.area.normalized().with_sheet(sa.sheet),
             }));
         }
         FormatAction::SetBackgroundColor(hex) => {
             // IronCalc "fill.fg_color": empty string clears, hex string sets.
             // IronCalc automatically sets pattern_type = "solid" when a color is given.
-            let (sheet, start_row, start_col, end_row, end_col) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let a = selection_area(m);
-                    (
-                        a.sheet,
-                        a.row,
-                        a.column,
-                        a.row + a.height - 1,
-                        a.column + a.width - 1,
-                    )
-                });
+            let sa = model.with_value(SheetArea::from_view);
             let value = hex.as_str();
 
             try_mutate(
@@ -227,11 +175,7 @@ pub fn execute_format(
                 },
             )?;
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
+                area: sa.area.normalized().with_sheet(sa.sheet),
             }));
         }
     }
@@ -248,17 +192,7 @@ fn toggle_style(
     style_path: StylePath,
     current_val: fn(&ToolbarState) -> bool,
 ) -> Result<(), FormatError> {
-    let (sheet, start_row, start_col, end_row, end_col) =
-        model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-            let area = selection_area(m);
-            (
-                area.sheet,
-                area.row,
-                area.column,
-                area.row + area.height - 1,
-                area.column + area.width - 1,
-            )
-        });
+    let sa = model.with_value(SheetArea::from_view);
 
     try_mutate(
         model,
@@ -276,11 +210,7 @@ fn toggle_style(
     )?;
 
     state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-        sheet,
-        start_row,
-        start_col,
-        end_row,
-        end_col,
+        area: sa.area.normalized().with_sheet(sa.sheet),
     }));
     Ok(())
 }
