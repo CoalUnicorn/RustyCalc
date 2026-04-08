@@ -1,11 +1,10 @@
-use ironcalc_base::expressions::types::Area;
 use leptos::prelude::*;
 
 use crate::components::{
     file_bar::FileBar, formula_bar::FormulaBar, perf_panel::PerfPanel, sheet_tab_bar::SheetTabBar,
     toolbar::Toolbar, worksheet::Worksheet,
 };
-use crate::coord::CellArea;
+use crate::coord::{CellArea, SheetArea};
 use crate::events::DragState;
 use crate::input::{
     action::{classify_key, execute, KeyMod, SpreadsheetAction},
@@ -85,7 +84,7 @@ pub fn Workbook() -> impl IntoView {
                     } else {
                         trailing
                     };
-                    let sheet = model.with_value(|m| m.get_selected_view().sheet);
+                    let sheet = model.with_value(|m| m.get_selected_sheet());
                     let ref_str =
                         range_ref_str(new_pr.r1, new_pr.c1, new_pr.r2, new_pr.c2, sheet, sheet, "");
                     let prev_span = if let DragState::Pointing { ref_span, .. } = state.drag.get() {
@@ -140,10 +139,12 @@ pub fn Workbook() -> impl IntoView {
                 // Pause evaluation so each set_user_input doesn't trigger a
                 // full recalc; evaluate once at the end.
                 mutate(model, &state, EvaluationMode::Immediate, |m| {
-                    let s = m.get_selected_view().sheet;
-                    let range = CellArea::from(m.get_selected_view().range);
-                    range.cells().for_each(|(row, col)| {
-                        warn_if_err(m.set_user_input(s, row, col, ""), "set_user_input (cut)");
+                    let sheet_area = SheetArea::from_view(m);
+                    sheet_area.area.cells().for_each(|(row, col)| {
+                        warn_if_err(
+                            m.set_user_input(sheet_area.sheet, row, col, ""),
+                            "set_user_input (cut)",
+                        );
                     });
                 });
                 state.request_redraw();
@@ -267,14 +268,7 @@ fn paste_from_clipboard(
                 return;
             }
             mutate(model, &state, EvaluationMode::Immediate, |m| {
-                let v = m.get_selected_view();
-                let area = Area {
-                    sheet: v.sheet,
-                    row: v.row,
-                    column: v.column,
-                    width: 1,
-                    height: 1,
-                };
+                let area = SheetArea::from_view(m).to_ironcalc_area();
                 if let Err(e) = m.paste_csv_string(&area, &text) {
                     web_sys::console::warn_1(
                         &format!("[ironcalc] paste_csv_string failed: {e}").into(),

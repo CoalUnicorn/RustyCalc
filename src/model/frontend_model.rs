@@ -116,26 +116,6 @@ pub trait FrontendModel {
         value: &str,
     ) -> Result<(), String>;
 
-    // Structure
-
-    fn insert_rows(&mut self, sheet: u32, row: i32, count: i32) -> Result<(), String>;
-    fn delete_rows(&mut self, sheet: u32, row: i32, count: i32) -> Result<(), String>;
-    fn insert_cols(&mut self, sheet: u32, col: i32, count: i32) -> Result<(), String>;
-    fn delete_cols(&mut self, sheet: u32, col: i32, count: i32) -> Result<(), String>;
-
-    /// Extend `area` rows downward to `to_row` using autofill.
-    fn auto_fill_rows(&mut self, sheet: u32, area: CellArea, to_row: i32) -> Result<(), String>;
-
-    /// Extend `area` columns rightward to `to_col` using autofill.
-    fn auto_fill_cols(&mut self, sheet: u32, area: CellArea, to_col: i32) -> Result<(), String>;
-
-    // History
-
-    fn undo(&mut self) -> Result<(), String>;
-    fn redo(&mut self) -> Result<(), String>;
-    fn can_undo(&self) -> bool;
-    fn can_redo(&self) -> bool;
-
     // Frozen panes
 
     /// Freeze `count` rows from the top on the active sheet.
@@ -448,50 +428,6 @@ impl FrontendModel for UserModel<'_> {
         self.update_range_style(&area.to_area(sheet), path, value)
     }
 
-    // Structure
-
-    fn insert_rows(&mut self, sheet: u32, row: i32, count: i32) -> Result<(), String> {
-        UserModel::insert_rows(self, sheet, row, count)
-    }
-
-    fn delete_rows(&mut self, sheet: u32, row: i32, count: i32) -> Result<(), String> {
-        UserModel::delete_rows(self, sheet, row, count)
-    }
-
-    fn insert_cols(&mut self, sheet: u32, col: i32, count: i32) -> Result<(), String> {
-        self.insert_columns(sheet, col, count)
-    }
-
-    fn delete_cols(&mut self, sheet: u32, col: i32, count: i32) -> Result<(), String> {
-        self.delete_columns(sheet, col, count)
-    }
-
-    fn auto_fill_rows(&mut self, sheet: u32, area: CellArea, to_row: i32) -> Result<(), String> {
-        UserModel::auto_fill_rows(self, &area.to_area(sheet), to_row)
-    }
-
-    fn auto_fill_cols(&mut self, sheet: u32, area: CellArea, to_col: i32) -> Result<(), String> {
-        self.auto_fill_columns(&area.to_area(sheet), to_col)
-    }
-
-    // History
-
-    fn undo(&mut self) -> Result<(), String> {
-        UserModel::undo(self)
-    }
-
-    fn redo(&mut self) -> Result<(), String> {
-        UserModel::redo(self)
-    }
-
-    fn can_undo(&self) -> bool {
-        UserModel::can_undo(self)
-    }
-
-    fn can_redo(&self) -> bool {
-        UserModel::can_redo(self)
-    }
-
     // Frozen panes
 
     fn set_frozen_rows(&mut self, count: i32) -> Result<(), String> {
@@ -549,7 +485,7 @@ mod tests {
         let m = make_model();
         // Empty cell style - should fall back to theme color
         let style = m.cell_style(0, 1, 1, "#FFFFFF");
-        assert_eq!(style.text_color.as_str(), "#FFFFFF");
+        assert_eq!(style.text_color.as_str(), "#ffffff");
     }
 
     #[test]

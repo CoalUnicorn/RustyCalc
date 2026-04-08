@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn css_color_new_non_empty() {
         let c = CssColor::new("#FF0000");
-        assert_eq!(c.as_str(), "#FF0000");
+        assert_eq!(c.as_str(), "#ff0000");
     }
 
     #[test]

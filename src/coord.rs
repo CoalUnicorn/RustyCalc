@@ -3,7 +3,7 @@ use ironcalc_base::{expressions::types::Area, UserModel};
 use crate::state::EditingCell;
 
 // SheetArea
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SheetArea {
     pub sheet: u32,
     pub area: CellArea,
@@ -38,7 +38,6 @@ impl SheetArea {
         }
     }
 
-    // NOTE: is this correct?
     pub fn contains_address(self, addr: CellAddress) -> bool {
         self.area.contains(addr.row, addr.column)
     }
@@ -64,22 +63,22 @@ pub struct CellArea {
 }
 
 impl CellArea {
-    pub fn height(self) -> usize {
-        (self.r2 - self.r1 + 1) as usize
+    pub fn height(self) -> i32 {
+        self.r2 - self.r1 + 1
     }
 
-    pub fn width(self) -> usize {
-        (self.c2 - self.c1 + 1) as usize
+    pub fn width(self) -> i32 {
+        self.c2 - self.c1 + 1
     }
     pub fn is_single_cell(self) -> bool {
         self.r1 == self.r2 && self.c1 == self.c2
     }
 
     pub fn rows(self) -> std::ops::Range<i32> {
-        self.r1..self.r2
+        self.r1..self.r2 + 1
     }
     pub fn columns(self) -> std::ops::Range<i32> {
-        self.c1..self.c2
+        self.c1..self.c2 + 1
     }
 
     pub fn cells(self) -> impl Iterator<Item = (i32, i32)> {
@@ -140,7 +139,7 @@ impl CellArea {
     /// with no remainder, or `None` if any dimension isn't an exact multiple.
     ///
     /// A 1×1 source always divides evenly, so it tiles into any destination.
-    pub fn tile_reps_of(self, src: CellArea) -> Option<(usize, usize)> {
+    pub fn tile_reps_of(self, src: CellArea) -> Option<(i32, i32)> {
         let row_reps = self.height() / src.height();
         let col_reps = self.width() / src.width();
         let fills_exactly =

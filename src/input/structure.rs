@@ -2,9 +2,10 @@
 
 use leptos::prelude::WithValue;
 
+use crate::coord::{CellArea, SheetArea};
 use crate::events::{ContentEvent, Location, SpreadsheetEvent, StructureEvent};
 use crate::input::error::StructError;
-use crate::input::helpers::{make_area, selection_bounds, try_mutate, EvaluationMode};
+use crate::input::helpers::{try_mutate, EvaluationMode};
 use crate::state::{ModelStore, WorkbookState};
 
 /// Structural mutations: delete/clear cell content, undo/redo, and row/column insert/delete.
@@ -30,61 +31,41 @@ pub fn execute_struct(
 ) -> Result<(), StructError> {
     match action {
         StructAction::Delete => {
-            let (sheet, start_row, start_col, end_row, end_col) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let v = m.get_selected_view();
-                    let [r1, c1, r2, c2] = v.range;
-                    (v.sheet, r1, c1, r2, c2)
-                });
+            let sheet_area =
+                model.with_value(|m: &ironcalc_base::UserModel<'static>| SheetArea::from_view(m));
 
             try_mutate(
                 model,
                 state,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let v = m.get_selected_view();
-                    let [r1, c1, r2, c2] = v.range;
-                    m.range_clear_contents(&make_area(v.sheet, r1, c1, r2, c2))
+                    m.range_clear_contents(&SheetArea::from_view(m).to_ironcalc_area())
                         .map_err(StructError::Engine)?;
                     Ok(())
                 },
             )?;
 
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
+                sheet_area,
             }));
         }
         StructAction::ClearAll => {
-            let (sheet, start_row, start_col, end_row, end_col) =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                    let v = m.get_selected_view();
-                    let [r1, c1, r2, c2] = v.range;
-                    (v.sheet, r1, c1, r2, c2)
-                });
+            let sheet_area =
+                model.with_value(|m: &ironcalc_base::UserModel<'static>| SheetArea::from_view(m));
 
             try_mutate(
                 model,
                 state,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let v = m.get_selected_view();
-                    let [r1, c1, r2, c2] = v.range;
-                    m.range_clear_all(&make_area(v.sheet, r1, c1, r2, c2))
+                    m.range_clear_all(&SheetArea::from_view(m).to_ironcalc_area())
                         .map_err(StructError::Engine)?;
                     Ok(())
                 },
             )?;
 
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
+                sheet_area,
             }));
         }
         StructAction::Undo => {
@@ -113,9 +94,8 @@ pub fn execute_struct(
         }
         StructAction::InsertRows => {
             let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                let v = m.get_selected_view();
-                let ((r_min, r_max), _) = selection_bounds(v.range);
-                Location::new(v.sheet, r_min, r_max - r_min + 1)
+                let area = CellArea::from_model(m).normalized();
+                Location::new(m.get_selected_sheet(), area.r1, area.height())
             });
 
             try_mutate(
@@ -123,9 +103,8 @@ pub fn execute_struct(
                 state,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let v = m.get_selected_view();
-                    let ((r_min, r_max), _) = selection_bounds(v.range);
-                    m.insert_rows(v.sheet, r_min, r_max - r_min + 1)
+                    let area = CellArea::from_model(m).normalized();
+                    m.insert_rows(m.get_selected_sheet(), area.r1, area.height())
                         .map_err(StructError::Engine)?;
                     Ok(())
                 },
@@ -137,9 +116,8 @@ pub fn execute_struct(
         }
         StructAction::InsertColumns => {
             let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                let v = m.get_selected_view();
-                let (_, (c_min, c_max)) = selection_bounds(v.range);
-                Location::new(v.sheet, c_min, c_max - c_min + 1)
+                let area = CellArea::from_model(m).normalized();
+                Location::new(m.get_selected_sheet(), area.c1, area.width())
             });
 
             try_mutate(
@@ -147,9 +125,8 @@ pub fn execute_struct(
                 state,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let v = m.get_selected_view();
-                    let (_, (c_min, c_max)) = selection_bounds(v.range);
-                    m.insert_columns(v.sheet, c_min, c_max - c_min + 1)
+                    let area = CellArea::from_model(m).normalized();
+                    m.insert_columns(m.get_selected_sheet(), area.c1, area.width())
                         .map_err(StructError::Engine)?;
                     Ok(())
                 },
@@ -161,9 +138,8 @@ pub fn execute_struct(
         }
         StructAction::DeleteRows => {
             let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                let v = m.get_selected_view();
-                let ((r_min, r_max), _) = selection_bounds(v.range);
-                Location::new(v.sheet, r_min, r_max - r_min + 1)
+                let area = CellArea::from_model(m).normalized();
+                Location::new(m.get_selected_sheet(), area.r1, area.height())
             });
 
             try_mutate(
@@ -171,9 +147,8 @@ pub fn execute_struct(
                 state,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let v = m.get_selected_view();
-                    let ((r_min, r_max), _) = selection_bounds(v.range);
-                    m.delete_rows(v.sheet, r_min, r_max - r_min + 1)
+                    let area = CellArea::from_model(m).normalized();
+                    m.delete_rows(m.get_selected_sheet(), area.r1, area.height())
                         .map_err(StructError::Engine)?;
                     Ok(())
                 },
@@ -185,9 +160,8 @@ pub fn execute_struct(
         }
         StructAction::DeleteColumns => {
             let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-                let v = m.get_selected_view();
-                let (_, (c_min, c_max)) = selection_bounds(v.range);
-                Location::new(v.sheet, c_min, c_max - c_min + 1)
+                let area = CellArea::from_model(m).normalized();
+                Location::new(m.get_selected_sheet(), area.c1, area.width())
             });
 
             try_mutate(
@@ -195,9 +169,8 @@ pub fn execute_struct(
                 state,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let v = m.get_selected_view();
-                    let (_, (c_min, c_max)) = selection_bounds(v.range);
-                    m.delete_columns(v.sheet, c_min, c_max - c_min + 1)
+                    let area = CellArea::from_model(m).normalized();
+                    m.delete_columns(m.get_selected_sheet(), area.c1, area.width())
                         .map_err(StructError::Engine)?;
                     Ok(())
                 },

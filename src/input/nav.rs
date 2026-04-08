@@ -2,7 +2,7 @@
 
 use leptos::prelude::WithValue;
 
-use crate::coord::CellAddress;
+use crate::coord::{CellAddress, SheetArea};
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::{
     error::NavError,
@@ -13,14 +13,8 @@ use crate::state::{ModelStore, WorkbookState};
 
 /// Helper to emit SelectionChanged event after navigation
 fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
-    let address = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-        let v = m.get_selected_view();
-        CellAddress {
-            sheet: v.sheet,
-            row: v.row,
-            column: v.column,
-        }
-    });
+    let address =
+        model.with_value(|m: &ironcalc_base::UserModel<'static>| CellAddress::from_view(m));
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionChanged { address },
     ));
@@ -28,20 +22,10 @@ fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
 
 /// Helper to emit SelectionRangeChanged event after range operations
 fn emit_selection_range_changed(model: ModelStore, state: &WorkbookState) {
-    let (sheet, start_row, start_col, end_row, end_col) =
-        model.with_value(|m: &ironcalc_base::UserModel<'static>| {
-            let v = m.get_selected_view();
-            let [r1, c1, r2, c2] = v.range;
-            (v.sheet, r1, c1, r2, c2)
-        });
+    let sheet_area =
+        model.with_value(|m: &ironcalc_base::UserModel<'static>| SheetArea::from_view(m));
     state.emit_event(SpreadsheetEvent::Navigation(
-        NavigationEvent::SelectionRangeChanged {
-            sheet,
-            start_row,
-            start_col,
-            end_row,
-            end_col,
-        },
+        NavigationEvent::SelectionRangeChanged { sheet_area },
     ));
 }
 
@@ -132,15 +116,15 @@ pub fn execute_nav(
         }
         NavAction::SwitchSheet(delta) => {
             let delta = *delta;
-            let previous_sheet = model
-                .with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_view().sheet);
+            let previous_sheet =
+                model.with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_sheet());
 
             try_mutate(
                 model,
                 state,
                 EvaluationMode::Deferred,
                 move |m| -> Result<(), NavError> {
-                    let current = m.get_selected_view().sheet;
+                    let current = m.get_selected_sheet();
                     let visible: Vec<u32> = m
                         .get_worksheets_properties()
                         .iter()
@@ -156,8 +140,8 @@ pub fn execute_nav(
                 },
             )?;
 
-            let new_sheet = model
-                .with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_view().sheet);
+            let new_sheet =
+                model.with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_sheet());
             if previous_sheet != new_sheet {
                 state.emit_event(SpreadsheetEvent::Navigation(
                     NavigationEvent::ActiveSheetChanged {

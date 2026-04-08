@@ -1,5 +1,3 @@
-use ironcalc_base::expressions::types::Area;
-
 use leptos::html;
 use leptos::prelude::*;
 use leptos_use::{use_raf_fn, use_resize_observer};
@@ -345,22 +343,11 @@ pub fn Worksheet() -> impl IntoView {
     let on_mouseup = move |_ev: web_sys::MouseEvent| {
         // Commit autofill if active, then reset drag state unconditionally.
         if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
-            //model.update_value(|m| {
             mutate(model, &state, EvaluationMode::Immediate, |m| {
-                let view = m.get_selected_view();
-                let sheet = view.sheet;
-                let [r1, c1, r2, c2] = view.range;
-                let (r_min, r_max) = (r1.min(r2), r1.max(r2));
-                let (c_min, c_max) = (c1.min(c2), c1.max(c2));
-                let area = Area {
-                    sheet,
-                    row: r_min,
-                    column: c_min,
-                    height: r_max - r_min + 1,
-                    width: c_max - c_min + 1,
-                };
-                // Fill rows if the drag crossed a row boundary, else fill columns.
-                if to_row < r_min || to_row > r_max {
+                let norm = CellArea::from_model(m).normalized();
+                let area = norm.to_area(m.get_selected_sheet());
+
+                if to_row < norm.r1 || to_row > norm.r2 {
                     warn_if_err(m.auto_fill_rows(&area, to_row), "auto_fill_rows");
                 } else {
                     warn_if_err(m.auto_fill_columns(&area, to_col), "auto_fill_columns");
@@ -368,17 +355,9 @@ pub fn Worksheet() -> impl IntoView {
             });
             // Autofill wrote content - emit a content event so canvas and
             // formula bar both repaint with the filled values.
-            let sheet = model.with_value(|m| m.get_selected_view().sheet);
-            let (start_row, start_col, end_row, end_col) = model.with_value(|m| {
-                let [r1, c1, r2, c2] = m.get_selected_view().range;
-                (r1, c1, r2, c2)
-            });
+            let sheet_area = model.with_value(|m| SheetArea::from_view(m));
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
+                sheet_area,
             }));
         }
         state.drag.set(DragState::Idle);
@@ -561,19 +540,9 @@ fn handle_corner_click(model: ModelStore, state: WorkbookState) {
         m.nav_select_all();
     });
     state.editing_cell.set(None);
-    let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
-        let v = m.get_selected_view();
-        let [r1, c1, r2, c2] = v.range;
-        (v.sheet, r1, c1, r2, c2)
-    });
+    let sheet_area = model.with_value(|m| SheetArea::from_view(m));
     state.emit_event(SpreadsheetEvent::Navigation(
-        NavigationEvent::SelectionRangeChanged {
-            sheet,
-            start_row,
-            start_col,
-            end_row,
-            end_col,
-        },
+        NavigationEvent::SelectionRangeChanged { sheet_area },
     ));
 }
 
@@ -597,19 +566,9 @@ fn handle_col_header_click(
         }
     });
     state.editing_cell.set(None);
-    let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
-        let v = m.get_selected_view();
-        let [r1, c1, r2, c2] = v.range;
-        (v.sheet, r1, c1, r2, c2)
-    });
+    let sheet_area = model.with_value(|m| SheetArea::from_view(m));
     state.emit_event(SpreadsheetEvent::Navigation(
-        NavigationEvent::SelectionRangeChanged {
-            sheet,
-            start_row,
-            start_col,
-            end_row,
-            end_col,
-        },
+        NavigationEvent::SelectionRangeChanged { sheet_area },
     ));
 }
 
@@ -633,19 +592,9 @@ fn handle_row_header_click(
         }
     });
     state.editing_cell.set(None);
-    let (sheet, start_row, start_col, end_row, end_col) = model.with_value(|m| {
-        let v = m.get_selected_view();
-        let [r1, c1, r2, c2] = v.range;
-        (v.sheet, r1, c1, r2, c2)
-    });
+    let sheet_area = model.with_value(|m| SheetArea::from_view(m));
     state.emit_event(SpreadsheetEvent::Navigation(
-        NavigationEvent::SelectionRangeChanged {
-            sheet,
-            start_row,
-            start_col,
-            end_row,
-            end_col,
-        },
+        NavigationEvent::SelectionRangeChanged { sheet_area },
     ));
 }
 
@@ -732,30 +681,15 @@ fn handle_cell_click(
     if near_handle {
         // Autofill start: drag state change alone triggers the Effect.
     } else {
-        let sheet = model.with_value(|m| m.get_selected_view().sheet);
         if ev.shift_key() {
-            let (start_row, start_col, end_row, end_col) = model.with_value(|m| {
-                let [r1, c1, r2, c2] = m.get_selected_view().range;
-                (r1, c1, r2, c2)
-            });
+            let sheet_area = model.with_value(|m| SheetArea::from_view(m));
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::SelectionRangeChanged {
-                    sheet,
-                    start_row,
-                    start_col,
-                    end_row,
-                    end_col,
+                    sheet_area: { sheet_area },
                 },
             ));
         } else {
-            let address = model.with_value(|m| {
-                let v = m.get_selected_view();
-                CellAddress {
-                    sheet,
-                    row: v.row,
-                    column: v.column,
-                }
-            });
+            let address = model.with_value(|m| CellAddress::from_view(m));
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::SelectionChanged { address },
             ));

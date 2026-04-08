@@ -30,7 +30,7 @@ let format_events = state.subscribe_to_format_events();
 ```
 */
 
-use crate::coord::{CellAddress, CellArea};
+use crate::coord::{CellAddress, CellArea, SheetArea};
 use crate::theme::Theme;
 
 /// Active mouse-drag interaction.
@@ -99,13 +99,7 @@ pub enum ContentEvent {
         new_value: Option<String>,
     },
     /// A range of cells changed (bulk operations)
-    RangeChanged {
-        sheet: u32,
-        start_row: i32,
-        start_col: i32,
-        end_row: i32,
-        end_col: i32,
-    },
+    RangeChanged { sheet_area: SheetArea },
     /// Formula in a cell was modified
     FormulaChanged { address: CellAddress },
     /// Calculation chain updated (dependent cells recalculated)
@@ -121,7 +115,7 @@ impl ContentEvent {
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
             ContentEvent::CellChanged { address, .. } => Some(address.sheet),
-            ContentEvent::RangeChanged { sheet, .. } => Some(*sheet),
+            ContentEvent::RangeChanged { sheet_area } => Some(sheet_area.sheet),
             ContentEvent::FormulaChanged { address } => Some(address.sheet),
             ContentEvent::CalculationUpdated { .. }
             | ContentEvent::NamedRangesChanged
@@ -137,14 +131,8 @@ impl ContentEvent {
                 "Content::CellChanged S{}R{}C{} -> {:?}",
                 address.sheet, address.row, address.column, new_value
             ),
-            ContentEvent::RangeChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
-            } => {
-                format!("Content::RangeChanged S{sheet} {start_col}{start_row}:{end_col}{end_row}")
+            ContentEvent::RangeChanged { sheet_area } => {
+                format!("Content::RangeChanged S{:?}", sheet_area)
             }
             ContentEvent::FormulaChanged { address } => format!(
                 "Content::FormulaChanged S{}R{}C{}",
@@ -258,37 +246,6 @@ impl Location {
             count,
         }
     }
-
-    //  ((r_min, r_max), (c_min, c_max))
-    // pub fn from_selecton_bounds(
-    //     sheet: u32,
-    //     header: Origin,
-    //     bounds: ((i32, i32), (i32, i32)),
-    // ) -> Self {
-    //     match header {
-    //         Origin::Row { .. } => {
-    //             let ((start, count), _) = bounds;
-    //             Self::new(sheet, start, count - start + 1)
-    //         }
-    //         Origin::Column { .. } => {
-    //             let (_, (start, count)) = bounds;
-    //             Self::new(sheet, start, count - start + 1)
-    //         }
-    //     }
-    // }
-
-    // pub fn for_insert(sheet: u32, header: Origin, bounds: ((i32, i32), (i32, i32))) -> Self {
-    //     match header {
-    //         Origin::Row { .. } => {
-    //             let ((start, count), _) = bounds;
-    //             Self::new(sheet, start, count - start + 1)
-    //         }
-    //         Origin::Column { .. } => {
-    //             let (_, (start, count)) = bounds;
-    //             Self::new(sheet, start, count - start + 1)
-    //         }
-    //     }
-    // }
 }
 
 /// A structural change to rows or columns on a single sheet.
@@ -475,13 +432,7 @@ pub enum NavigationEvent {
     /// The active cell moved to a single new address.
     SelectionChanged { address: CellAddress },
     /// A range selection was extended (Shift-click, Shift-arrow, column/row header click).
-    SelectionRangeChanged {
-        sheet: u32,
-        start_row: i32,
-        start_col: i32,
-        end_row: i32,
-        end_col: i32,
-    },
+    SelectionRangeChanged { sheet_area: SheetArea },
     /// The canvas viewport scrolled to a new `top_row` / `left_col` origin.
     ViewportScrolled {
         sheet: u32,
@@ -504,7 +455,7 @@ impl NavigationEvent {
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
             NavigationEvent::SelectionChanged { address } => Some(address.sheet),
-            NavigationEvent::SelectionRangeChanged { sheet, .. } => Some(*sheet),
+            NavigationEvent::SelectionRangeChanged { sheet_area } => Some(sheet_area.sheet),
             NavigationEvent::ViewportScrolled { sheet, .. } => Some(*sheet),
             // Only the destination sheet is considered affected by a sheet switch.
             NavigationEvent::ActiveSheetChanged { to_sheet, .. } => Some(*to_sheet),
@@ -519,13 +470,9 @@ impl NavigationEvent {
                 "Nav::Selection S{}R{}C{}",
                 address.sheet, address.row, address.column
             ),
-            NavigationEvent::SelectionRangeChanged {
-                sheet,
-                start_row,
-                start_col,
-                end_row,
-                end_col,
-            } => format!("Nav::RangeSelect S{sheet} {start_col}{start_row}:{end_col}{end_row}"),
+            NavigationEvent::SelectionRangeChanged { sheet_area } => {
+                format!("Nav::RangeSelect S{:?}", sheet_area)
+            }
             NavigationEvent::ViewportScrolled {
                 sheet,
                 top_row,

@@ -88,8 +88,8 @@ impl AppClipboard {
         if let Some((row_reps, col_reps)) = dst.tile_reps_of(src) {
             for tr in 0..row_reps {
                 for tc in 0..col_reps {
-                    let row = dst.r1 + (tr * src.height()) as i32;
-                    let col = dst.c1 + (tc * src.width()) as i32;
+                    let row = dst.r1 + (tr * src.height());
+                    let col = dst.c1 + (tc * src.width());
                     model.set_selected_cell(row, col)?;
                     model.paste_from_clipboard(self.sheet, src.as_tuple(), &self.data, false)?;
                 }

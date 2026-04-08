@@ -4,6 +4,7 @@ use ironcalc_base::UserModel;
 use leptos::prelude::WithValue;
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
+use crate::coord::CellArea;
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::input::helpers::{selection_area, try_mutate, EvaluationMode};
@@ -290,16 +291,18 @@ fn toggle_style(
 /// read each cell's style, mutate the name, and write it back via
 /// `on_paste_styles` (which records undo diffs).
 fn set_font_name(m: &mut UserModel<'static>, name: &str) -> Result<(), FormatError> {
-    let v = m.get_selected_view();
-    let [r1, c1, r2, c2] = v.range;
-    let (r_min, r_max) = (r1.min(r2), r1.max(r2));
-    let (c_min, c_max) = (c1.min(c2), c1.max(c2));
+    // let v = m.get_selected_view();
+    // let [r1, c1, r2, c2] = v.range;
+    let sheet = m.get_selected_sheet();
+    let norm = CellArea::from_model(m).normalized();
+    // let (r_min, r_max) = (r1.min(r2), r1.max(r2));
+    // let (c_min, c_max) = (c1.min(c2), c1.max(c2));
 
-    let rows: Vec<Vec<_>> = (r_min..=r_max)
+    let rows: Vec<Vec<_>> = (norm.r1..=norm.r2)
         .map(|row| {
-            (c_min..=c_max)
+            (norm.c1..=norm.c2)
                 .map(|col| {
-                    let mut style = m.get_cell_style(v.sheet, row, col).unwrap_or_default();
+                    let mut style = m.get_cell_style(sheet, row, col).unwrap_or_default();
                     style.font.name = name.to_owned();
                     style
                 })
