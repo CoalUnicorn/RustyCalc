@@ -290,6 +290,24 @@ pub enum StructureEvent {
         sheet: u32,
         name: String,
     },
+    /// A column was moved to a new position.
+    ColumnMoved {
+        sheet: u32,
+        from_col: i32,
+        to_col: i32,
+    },
+    /// A row was moved to a new position.
+    RowMoved {
+        sheet: u32,
+        from_row: i32,
+        to_row: i32,
+    },
+    /// Frozen pane configuration changed.
+    FreezeChanged {
+        sheet: u32,
+        frozen_rows: i32,
+        frozen_cols: i32,
+    },
 }
 
 impl StructureEvent {

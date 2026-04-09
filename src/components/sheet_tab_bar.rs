@@ -4,7 +4,7 @@ use wasm_bindgen::JsCast;
 use crate::components::color_picker::TabColorPicker;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
-use crate::input::helpers::{mutate, try_mutate, EvaluationMode};
+use crate::model::{mutate, try_mutate, EvaluationMode};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage;
 use crate::util::warn_if_err;
@@ -50,7 +50,7 @@ pub fn SheetTabBar() -> impl IntoView {
     let on_add = move |_| {
         // Snapshot count before mutation - that index is the new sheet's position.
         let sheet_count = model.with_value(|m| m.get_worksheets_properties().len() as u32);
-        mutate(model, &state, EvaluationMode::Deferred, |m| {
+        mutate(model, EvaluationMode::Deferred, |m| {
             m.new_sheet().ok();
         });
         if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -131,7 +131,7 @@ fn SheetTab(
     let on_click = move |_: web_sys::MouseEvent| {
         let previous_sheet = model.with_value(|m| m.get_selected_view().sheet);
         warn_if_err(
-            try_mutate(model, &state, EvaluationMode::Deferred, |m| {
+            try_mutate(model, EvaluationMode::Deferred, |m| {
                 m.set_selected_sheet(sheet_idx).map_err(TabError::Engine)
             }),
             "set_selected_sheet",
@@ -189,7 +189,7 @@ fn SheetTab(
         // IronCalc treats "" as "clear tab color" - intentional sentinel.
         let hex = color.as_deref().unwrap_or("");
         warn_if_err(
-            try_mutate(model, &state, EvaluationMode::Deferred, |m| {
+            try_mutate(model, EvaluationMode::Deferred, |m| {
                 m.set_sheet_color(sheet_idx, hex).map_err(TabError::Engine)
             }),
             "set_sheet_color",
@@ -209,7 +209,7 @@ fn SheetTab(
     });
 
     let on_hide = move || {
-        mutate(model, &state, EvaluationMode::Deferred, |m| {
+        mutate(model, EvaluationMode::Deferred, |m| {
             m.hide_sheet(sheet_idx).ok();
         });
         if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -234,7 +234,7 @@ fn SheetTab(
             })
             .unwrap_or(false);
         if confirmed {
-            mutate(model, &state, EvaluationMode::Deferred, |m| {
+            mutate(model, EvaluationMode::Deferred, |m| {
                 m.delete_sheet(sheet_idx).ok();
             });
             if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -320,7 +320,7 @@ fn RenameInput(
                     .map(|s| s.name.clone())
                     .unwrap_or_default()
             });
-            mutate(model, &state, EvaluationMode::Deferred, |m| {
+            mutate(model, EvaluationMode::Deferred, |m| {
                 m.rename_sheet(sheet_idx, &new_name).ok();
             });
             if let Some(uuid) = state.current_uuid.get_untracked() {
@@ -455,7 +455,7 @@ fn AllSheetsMenu() -> impl IntoView {
                                         let previous_sheet =
                                             model.with_value(|m| m.get_selected_view().sheet);
                                         if is_hidden {
-                                            mutate(model, &state, EvaluationMode::Deferred, |m| {m.unhide_sheet(idx).ok(); });
+                                            mutate(model,  EvaluationMode::Deferred, |m| {m.unhide_sheet(idx).ok(); });
                                             state.emit_event(SpreadsheetEvent::Structure(
                                                 StructureEvent::WorksheetUnhidden {
                                                     sheet: idx,
@@ -464,7 +464,7 @@ fn AllSheetsMenu() -> impl IntoView {
                                             ));
                                         }
                                         warn_if_err(
-                            try_mutate(model, &state, EvaluationMode::Deferred, |m| {
+                            try_mutate(model,  EvaluationMode::Deferred, |m| {
                                 m.set_selected_sheet(idx).map_err(TabError::Engine)
                             }),
                             "set_selected_sheet",

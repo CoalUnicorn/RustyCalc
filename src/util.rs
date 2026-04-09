@@ -1,13 +1,5 @@
-// ==============================================================================
 // Shared browser utilities
-//
-// Thin wrappers over Web APIs used in more than one module.  Centralised here
-// so the implementations stay in sync and callers don't duplicate the
-// `window().crypto()` boilerplate.
-// ==============================================================================
 
-use leptos::prelude::{RwSignal, Set};
-use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 // UUID generation
@@ -71,35 +63,3 @@ pub fn refocus_workbook() {
         el.unchecked_into::<web_sys::HtmlElement>().focus().ok();
     }
 }
-
-// Deferred close helper
-// NOTE: this may not be needed anymore.
-
-#[derive(Debug, thiserror::Error)]
-enum DeferCloseError {
-    #[error("window not available")]
-    NoWindow,
-}
-
-fn defer_close_inner(sig: RwSignal<bool>) -> Result<(), DeferCloseError> {
-    let cb = Closure::once(move || sig.set(false));
-    web_sys::window()
-        .ok_or(DeferCloseError::NoWindow)?
-        .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 0)
-        .ok();
-    cb.forget(); // intentional: callback runs once then is garbage-collected by JS
-    Ok(())
-}
-
-// Schedule `sig.set(false)` in the next macrotask via `setTimeout(0)`.
-//
-// `spawn_local` (Promise microtask) can run between event-propagation steps,
-// causing panel closures to be dropped before the click event finishes
-// bubbling - resulting in "closure invoked after being dropped".
-// `setTimeout(0)` defers to a full macrotask, which is always after all
-// current event processing is complete.
-// pub fn defer_close(sig: RwSignal<bool>) {
-//     if let Err(e) = defer_close_inner(sig) {
-//         web_sys::console::warn_1(&format!("[util] defer_close: {e}").into());
-//     }
-// }

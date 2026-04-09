@@ -10,8 +10,8 @@ use crate::coord::SheetArea;
 use crate::coord::{CellAddress, CellArea};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 
-use crate::input::{formula_input::*, helpers::mutate, helpers::EvaluationMode};
-use crate::model::{AppClipboard, ArrowKey, FrontendModel, PageDir};
+use crate::input::formula_input::*;
+use crate::model::{mutate, AppClipboard, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
     ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
     WorkbookState,
@@ -355,7 +355,7 @@ pub fn Worksheet() -> impl IntoView {
     let on_mouseup = move |_ev: web_sys::MouseEvent| {
         // Commit autofill if active, then reset drag state unconditionally.
         if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
-            mutate(model, &state, EvaluationMode::Immediate, |m| {
+            mutate(model, EvaluationMode::Immediate, |m| {
                 let norm = CellArea::from_model(m).normalized();
                 let area = norm.to_area(m.get_selected_sheet());
 
@@ -552,7 +552,7 @@ fn handle_corner_click(model: ModelStore, state: WorkbookState) {
         m.nav_select_all();
     });
     state.editing_cell.set(None);
-    let sheet_area = model.with_value(|m| SheetArea::from_view(m));
+    let sheet_area = model.with_value(SheetArea::from_view);
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged { sheet_area },
     ));
@@ -578,7 +578,7 @@ fn handle_col_header_click(
         }
     });
     state.editing_cell.set(None);
-    let sheet_area = model.with_value(|m| SheetArea::from_view(m));
+    let sheet_area = model.with_value(SheetArea::from_view);
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged { sheet_area },
     ));

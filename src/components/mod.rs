@@ -1,4 +1,5 @@
 pub mod cell_editor;
+pub mod left_drawer;
 pub mod color_picker;
 pub mod context_menu;
 pub mod file_bar;

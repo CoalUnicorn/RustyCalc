@@ -7,10 +7,13 @@ use ironcalc_base::{
 
 use crate::coord::{CellAddress, CellArea};
 use crate::model::frontend_types::*;
+use crate::state::ModelStore;
 use crate::{
     canvas::geometry::{LAST_COLUMN, LAST_ROW},
     coord::SheetArea,
 };
+
+use leptos::prelude::UpdateValue;
 
 pub trait FrontendModel {
     // Query
@@ -79,7 +82,7 @@ pub trait FrontendModel {
 
     /// Select a rectangular range with the active cell at `(row, col)`.
     /// Coordinates are clamped to valid bounds.
-    fn nav_select_range(&mut self, row: i32, col: i32, row2: i32, col2: i32);
+    fn nav_select_range(&mut self, area: CellArea);
 
     /// Expand selection by one cell (Shift+Arrow).
     fn nav_expand_selection(&mut self, dir: ArrowKey);
@@ -87,53 +90,8 @@ pub trait FrontendModel {
     /// Move to column 1 of the current row (Home key).
     fn nav_home_row(&mut self);
 
-    // Selection
-
-    /// Active cell range as a `CellArea`.
-    fn selected_area(&self) -> CellArea;
-
-    /// Active sheet index.
-    fn selected_sheet(&self) -> u32;
-
     /// Set the selection to `area` (clamped to valid bounds).
     fn set_selected_area(&mut self, area: CellArea);
-
-    // Cell editing
-
-    /// Write a raw value or formula into a cell.
-    fn input_cell(&mut self, sheet: u32, row: i32, col: i32, value: &str) -> Result<(), String>;
-
-    /// Clear cell contents (values + formulas) in `area`, preserving formatting.
-    fn clear_contents(&mut self, sheet: u32, area: CellArea) -> Result<(), String>;
-
-    /// Clear everything (contents + formatting) in `area`.
-    fn clear_all(&mut self, sheet: u32, area: CellArea) -> Result<(), String>;
-
-    /// Clear only formatting in `area`, preserving cell values.
-    fn clear_formatting(&mut self, sheet: u32, area: CellArea) -> Result<(), String>;
-
-    /// Apply a style property to `area` (delegates to `update_range_style`).
-    fn apply_style(
-        &mut self,
-        sheet: u32,
-        area: CellArea,
-        path: &str,
-        value: &str,
-    ) -> Result<(), String>;
-
-    // Frozen panes
-
-    /// Freeze `count` rows from the top on the active sheet.
-    fn set_frozen_rows(&mut self, count: i32) -> Result<(), String>;
-
-    /// Freeze `count` columns from the left on the active sheet.
-    fn set_frozen_cols(&mut self, count: i32) -> Result<(), String>;
-
-    // Dimensions & display
-
-    fn row_height(&self, sheet: u32, row: i32) -> f64;
-    fn col_width(&self, sheet: u32, col: i32) -> f64;
-    fn show_grid_lines(&self) -> bool;
 }
 
 // Helper: map font name String -> SafeFontFamily
@@ -284,7 +242,7 @@ impl FrontendModel for UserModel<'_> {
         }
     }
 
-    // TODO: rename this returns ironcalc Area type
+    // TODO: rename this, it returns ironcalc Area type
     // atm only added to input/format.rs:91
     // below is selection_area returns CellArea
     fn selection(&self) -> Area {
@@ -373,11 +331,11 @@ impl FrontendModel for UserModel<'_> {
         let _ = self.on_navigate_to_edge_in_direction(nd);
     }
 
-    fn nav_select_range(&mut self, row: i32, col: i32, row2: i32, col2: i32) {
-        let row = row.clamp(1, LAST_ROW);
-        let col = col.clamp(1, LAST_COLUMN);
-        let row2 = row2.clamp(1, LAST_ROW);
-        let col2 = col2.clamp(1, LAST_COLUMN);
+    fn nav_select_range(&mut self, area: CellArea) {
+        let row = area.r1.clamp(1, LAST_ROW);
+        let col = area.c1.clamp(1, LAST_COLUMN);
+        let row2 = area.r2.clamp(1, LAST_ROW);
+        let col2 = area.c2.clamp(1, LAST_COLUMN);
         let _ = self.set_selected_cell(row, col);
         let _ = self.set_selected_range(row, col, row2, col2);
     }
@@ -397,75 +355,68 @@ impl FrontendModel for UserModel<'_> {
         let _ = self.set_selected_cell(row, 1);
     }
 
-    // Selection
-
-    fn selected_area(&self) -> CellArea {
-        CellArea::from(self.get_selected_view().range)
-    }
-
-    fn selected_sheet(&self) -> u32 {
-        self.get_selected_view().sheet
-    }
-
     fn set_selected_area(&mut self, area: CellArea) {
         let _ = self.set_selected_cell(area.r1, area.c1);
         let _ = self.set_selected_range(area.r1, area.c1, area.r2, area.c2);
     }
+}
 
-    // Cell editing
+/// Whether `mutate` should recalculate formulas after applying the closure.
+///
+/// Pass `EvaluationMode::Immediate` when the mutation may change formula results
+/// (cell writes, row/column inserts/deletes).
+/// Pass `EvaluationMode::Deferred` for pure navigation, selection, or formatting changes.
+#[derive(Clone, Copy)]
+pub enum EvaluationMode {
+    Immediate,
+    Deferred,
+}
 
-    fn input_cell(&mut self, sheet: u32, row: i32, col: i32, value: &str) -> Result<(), String> {
-        self.set_user_input(sheet, row, col, value)
-    }
+/// Run `f` on the model, optionally call `evaluate`.
+///
+/// **PERFORMANCE OPTIMIZED:** Many `UserModel` methods call `evaluate()` internally.
+/// We pause evaluation before `f` so the model is evaluated at most once - after
+/// all mutations are done. This prevents double evaluation and can halve execution time.
+/// See docs/performance-evaluation.md for details.
+///
+/// **CALLER RESPONSIBILITY:** This function no longer automatically triggers redraws.
+/// The caller must emit appropriate events using `state.emit_event()`.
+///
+pub fn mutate(
+    model: ModelStore,
+    evaluate: EvaluationMode,
+    f: impl FnOnce(&mut UserModel<'static>),
+) {
+    model.update_value(|m| {
+        m.pause_evaluation();
+        f(m);
+        m.resume_evaluation();
+        if matches!(evaluate, EvaluationMode::Immediate) {
+            m.evaluate();
+        }
+    });
+    // No automatic redraw - caller must emit specific events
+}
 
-    fn clear_contents(&mut self, sheet: u32, area: CellArea) -> Result<(), String> {
-        self.range_clear_contents(&area.to_area(sheet))
-    }
-
-    fn clear_all(&mut self, sheet: u32, area: CellArea) -> Result<(), String> {
-        self.range_clear_all(&area.to_area(sheet))
-    }
-
-    fn clear_formatting(&mut self, sheet: u32, area: CellArea) -> Result<(), String> {
-        self.range_clear_formatting(&area.to_area(sheet))
-    }
-
-    fn apply_style(
-        &mut self,
-        sheet: u32,
-        area: CellArea,
-        path: &str,
-        value: &str,
-    ) -> Result<(), String> {
-        self.update_range_style(&area.to_area(sheet), path, value)
-    }
-
-    // Frozen panes
-
-    fn set_frozen_rows(&mut self, count: i32) -> Result<(), String> {
-        let sheet = self.get_selected_sheet();
-        self.set_frozen_rows_count(sheet, count)
-    }
-
-    fn set_frozen_cols(&mut self, count: i32) -> Result<(), String> {
-        let sheet = self.get_selected_sheet();
-        self.set_frozen_columns_count(sheet, count)
-    }
-
-    // Dimensions & display
-
-    fn row_height(&self, sheet: u32, row: i32) -> f64 {
-        self.get_row_height(sheet, row).unwrap_or(20.0)
-    }
-
-    fn col_width(&self, sheet: u32, col: i32) -> f64 {
-        self.get_column_width(sheet, col).unwrap_or(100.0)
-    }
-
-    fn show_grid_lines(&self) -> bool {
-        let sheet = self.get_selected_sheet();
-        self.get_show_grid_lines(sheet).unwrap_or(true)
-    }
+/// Fallible variant of [`mutate`]: the closure returns `Result<(), E>`.
+///
+/// `resume_evaluation()` always runs to leave the model in a consistent state.
+/// `evaluate()` is skipped when the closure returns `Err`.
+pub fn try_mutate<E>(
+    model: ModelStore,
+    evaluate: EvaluationMode,
+    f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut outcome: Result<(), E> = Ok(());
+    model.update_value(|m| {
+        m.pause_evaluation();
+        outcome = f(m);
+        m.resume_evaluation();
+        if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
+            m.evaluate();
+        }
+    });
+    outcome
 }
 
 // Tests
@@ -530,7 +481,12 @@ mod tests {
     #[test]
     fn nav_select_range_sets_active_cell_and_range() {
         let mut m = make_model();
-        m.nav_select_range(2, 3, 5, 7);
+        m.nav_select_range(CellArea {
+            r1: 2,
+            c1: 3,
+            r2: 5,
+            c2: 7,
+        });
         let v = m.get_selected_view();
         assert_eq!(v.row, 2);
         assert_eq!(v.column, 3);

@@ -4,11 +4,8 @@ use leptos::prelude::WithValue;
 
 use crate::coord::{CellAddress, SheetArea};
 use crate::events::{NavigationEvent, SpreadsheetEvent};
-use crate::input::{
-    error::NavError,
-    helpers::{mutate, try_mutate, EvaluationMode},
-};
-use crate::model::{ArrowKey, FrontendModel, PageDir};
+use crate::input::error::NavError;
+use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{ModelStore, WorkbookState};
 
 /// Helper to emit SelectionChanged event after navigation
@@ -60,54 +57,46 @@ pub fn execute_nav(
 ) -> Result<(), NavError> {
     match action {
         NavAction::Arrow(dir) => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                m.nav_arrow(*dir)
-            });
+            mutate(model, EvaluationMode::Deferred, |m| m.nav_arrow(*dir));
             emit_selection_changed(model, state);
         }
         NavAction::Edge(dir) => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                m.nav_to_edge(*dir)
-            });
+            mutate(model, EvaluationMode::Deferred, |m| m.nav_to_edge(*dir));
             emit_selection_changed(model, state);
         }
         NavAction::JumpToA1 => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                m.nav_set_cell(1, 1)
-            });
+            mutate(model, EvaluationMode::Deferred, |m| m.nav_set_cell(1, 1));
             emit_selection_changed(model, state);
         }
         NavAction::JumpToLastCell => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
+            mutate(model, EvaluationMode::Deferred, |m| {
                 m.nav_to_edge(ArrowKey::Down);
                 m.nav_to_edge(ArrowKey::Right);
             });
             emit_selection_changed(model, state);
         }
         NavAction::ExpandSelection(dir) => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
+            mutate(model, EvaluationMode::Deferred, |m| {
                 m.nav_expand_selection(*dir)
             });
             emit_selection_range_changed(model, state);
         }
         NavAction::PageDown => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
+            mutate(model, EvaluationMode::Deferred, |m| {
                 m.nav_page(PageDir::Down)
             });
             emit_selection_changed(model, state);
         }
         NavAction::PageUp => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                m.nav_page(PageDir::Up)
-            });
+            mutate(model, EvaluationMode::Deferred, |m| m.nav_page(PageDir::Up));
             emit_selection_changed(model, state);
         }
         NavAction::RowHome => {
-            mutate(model, state, EvaluationMode::Deferred, |m| m.nav_home_row());
+            mutate(model, EvaluationMode::Deferred, |m| m.nav_home_row());
             emit_selection_changed(model, state);
         }
         NavAction::RowEnd => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
+            mutate(model, EvaluationMode::Deferred, |m| {
                 m.nav_to_edge(ArrowKey::Right)
             });
             emit_selection_changed(model, state);
@@ -118,7 +107,6 @@ pub fn execute_nav(
 
             try_mutate(
                 model,
-                state,
                 EvaluationMode::Deferred,
                 move |m| -> Result<(), NavError> {
                     let current = m.get_selected_sheet();
@@ -148,9 +136,9 @@ pub fn execute_nav(
             }
         }
         NavAction::SelectAll => {
-            mutate(model, state, EvaluationMode::Deferred, |m| {
-                let d = m.sheet_dimension();
-                m.nav_select_range(d.r1, d.c1, d.r2, d.c2);
+            mutate(model, EvaluationMode::Deferred, |m| {
+                let area = m.sheet_dimension();
+                m.nav_select_range(area);
             });
             emit_selection_range_changed(model, state);
         }

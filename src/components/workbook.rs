@@ -10,9 +10,8 @@ use crate::input::{
     action::{classify_key, execute, KeyMod, SpreadsheetAction},
     edit::EditAction,
     formula_input::*,
-    helpers::{mutate, EvaluationMode},
 };
-use crate::model::{AppClipboard, PasteMode};
+use crate::model::{mutate, AppClipboard, EvaluationMode, PasteMode};
 use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
 use crate::storage;
 use crate::util::warn_if_err;
@@ -137,7 +136,7 @@ pub fn Workbook() -> impl IntoView {
                 // Clear the selected range.
                 // Pause evaluation so each set_user_input doesn't trigger a
                 // full recalc; evaluate once at the end.
-                mutate(model, &state, EvaluationMode::Immediate, |m| {
+                mutate(model, EvaluationMode::Immediate, |m| {
                     let sheet_area = SheetArea::from_view(m);
                     sheet_area.area.cells().for_each(|(row, col)| {
                         warn_if_err(
@@ -241,7 +240,7 @@ fn paste_from_clipboard(
         let mut pasted = false;
         clipboard_store.with_value(|opt| {
             if let Some(acb) = opt {
-                mutate(model, &state, EvaluationMode::Immediate, |m| {
+                mutate(model, EvaluationMode::Immediate, |m| {
                     if let Err(e) = acb.paste(m, PasteMode::Copy) {
                         web_sys::console::warn_1(&format!("[ironcalc] paste failed: {e}").into());
                     }
@@ -268,7 +267,7 @@ fn paste_from_clipboard(
             if text.is_empty() {
                 return;
             }
-            mutate(model, &state, EvaluationMode::Immediate, |m| {
+            mutate(model, EvaluationMode::Immediate, |m| {
                 let area = SheetArea::from_view(m).to_ironcalc_area();
                 if let Err(e) = m.paste_csv_string(&area, &text) {
                     web_sys::console::warn_1(

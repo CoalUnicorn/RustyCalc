@@ -4,11 +4,8 @@ use leptos::prelude::{WithValue, *};
 
 use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
-use crate::input::{
-    error::EditError,
-    helpers::{mutate, EvaluationMode},
-};
-use crate::model::{ArrowKey, FrontendModel};
+use crate::input::error::EditError;
+use crate::model::{mutate, ArrowKey, EvaluationMode, FrontendModel};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
 use crate::storage;
@@ -122,9 +119,7 @@ pub fn execute_edit(
                 }
 
                 // Navigate to the next cell.
-                mutate(model, state, EvaluationMode::Deferred, |m| {
-                    m.nav_arrow(*dir)
-                });
+                mutate(model, EvaluationMode::Deferred, |m| m.nav_arrow(*dir));
 
                 // Fire content + mode + navigation together so EventBus signals update once.
                 let nav_address = model.with_value(CellAddress::from_view);

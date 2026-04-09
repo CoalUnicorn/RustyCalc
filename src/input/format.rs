@@ -6,13 +6,10 @@ use leptos::prelude::WithValue;
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::coord::{CellArea, SheetArea};
 use crate::events::{FormatEvent, SpreadsheetEvent};
-use crate::input::{
-    error::FormatError,
-    helpers::{selection_area, try_mutate, EvaluationMode},
-};
+use crate::input::error::FormatError;
 use crate::model::{
     style_types::{BooleanValue, HexColor, StylePath},
-    FrontendModel, SafeFontFamily, ToolbarState,
+    try_mutate, EvaluationMode, FrontendModel, SafeFontFamily, ToolbarState,
 };
 
 use crate::state::{ModelStore, WorkbookState};
@@ -84,10 +81,8 @@ pub fn execute_format(
             */
             try_mutate(
                 model,
-                state,
                 EvaluationMode::Deferred,
                 |m| -> Result<(), FormatError> {
-                    // let area = selection_area(m);
                     let area = m.selection();
                     let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);
                     m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
@@ -106,7 +101,6 @@ pub fn execute_format(
 
             try_mutate(
                 model,
-                state,
                 EvaluationMode::Deferred,
                 |m| -> Result<(), FormatError> { set_font_name(m, name) },
             )?;
@@ -123,10 +117,9 @@ pub fn execute_format(
             let value = hex.as_str();
             try_mutate(
                 model,
-                state,
                 EvaluationMode::Deferred,
                 |m| -> Result<(), FormatError> {
-                    let area = selection_area(m);
+                    let area = m.selection();
                     m.update_range_style(&area, StylePath::TEXT_COLOR.as_str(), value)
                         .map_err(FormatError::Engine)?;
                     Ok(())
@@ -144,10 +137,9 @@ pub fn execute_format(
 
             try_mutate(
                 model,
-                state,
                 EvaluationMode::Deferred,
                 |m| -> Result<(), FormatError> {
-                    let area = selection_area(m);
+                    let area = m.selection();
                     // NOTE: questionable - may not need
                     // **PERFORMANCE OPTIMIZATION**: IronCalc has optimizations for full-column and full-row
                     // ranges, but NOT for full-sheet ranges. Whole-sheet selections fall into the
@@ -199,13 +191,12 @@ fn toggle_style(
 
     try_mutate(
         model,
-        state,
         EvaluationMode::Deferred,
         |m| -> Result<(), FormatError> {
             let ts = m.toolbar_state();
             let current_bool = current_val(&ts);
             let new_val = BooleanValue::from_bool(!current_bool);
-            let area = selection_area(m);
+            let area = m.selection();
             m.update_range_style(&area, style_path.as_str(), new_val.as_str())
                 .map_err(FormatError::Engine)?;
             Ok(())
