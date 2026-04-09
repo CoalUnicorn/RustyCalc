@@ -28,9 +28,7 @@ pub type ModelStore = StoredValue<UserModel<'static>, LocalStorage>;
 
 /// Thin zero-cost wrapper around a Leptos split-signal pair.
 ///
-/// Replaces `(ReadSignal<T>, WriteSignal<T>)` tuple fields so callers use
-/// named methods (`.get()`, `.set()`, `.read()`) rather than `.0` / `.1`.
-/// Reactivity is identical - same two signal nodes, same reactive graph.
+/// Callers use named methods (`.get()`, `.set()`, `.read()`) .
 pub struct Split<T: Clone + Send + Sync + 'static>(ReadSignal<T>, WriteSignal<T>);
 
 // Manual impls: ReadSignal<T>/WriteSignal<T> are always Copy (arena IDs),
@@ -42,7 +40,7 @@ impl<T: Clone + Send + Sync + 'static> Clone for Split<T> {
     }
 }
 impl<T: Clone + Send + Sync + 'static> Copy for Split<T> {}
-#[allow(dead_code)]
+
 impl<T: Clone + Send + Sync + 'static> Split<T> {
     pub fn new(initial: T) -> Self {
         let (r, w) = signal(initial);
@@ -60,6 +58,7 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
     }
 
     /// Borrow the current value without cloning (reactive).
+    #[allow(dead_code)]
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         self.0.with(f)
     }
@@ -80,30 +79,47 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
     }
 
     /// The read half - pass to child components that should only subscribe.
+    #[allow(dead_code)]
     pub fn read(&self) -> ReadSignal<T> {
         self.0
     }
 
     /// The write half - pass to child components that should only mutate.
+    #[allow(dead_code)]
     pub fn write(&self) -> WriteSignal<T> {
         self.1
     }
 }
 
-/// In-progress cell edit not yet committed to the model.
-/// Mirrors the TypeScript `EditingCell` interface in workbookState.ts.
-#[derive(Clone, Debug, PartialEq)]
-pub struct EditingCell {
-    /// Cell being edited.
-    pub(crate) address: CellAddress,
-    /// Text the user has typed; not yet written to `UserModel`.
-    pub(crate) text: String,
-    /// How arrow keys behave during the edit.
-    pub(crate) mode: EditMode,
-    /// Which widget currently holds keyboard focus.
-    pub(crate) focus: EditFocus,
+/// Active mouse-drag interaction.
+///
+/// At most one drag mode can be active at a time. Using a single enum
+/// instead of parallel `bool` / `Option` signals makes illegal combinations
+/// (e.g. selecting while resizing) unrepresentable.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DragState {
+    /// No drag in progress.
+    Idle,
+    /// Mouse button held for a range-drag selection.
+    Selecting,
+    /// Autofill handle drag: the cell the user is dragging toward.
+    Extending { to_row: i32, to_col: i32 },
+    /// Column header resize: `(col_1based, current_mouse_x)`.
+    ResizingCol { col: i32, x: f64 },
+    /// Row header resize: `(row_1based, current_mouse_y)`.
+    ResizingRow { row: i32, y: f64 },
+    /// Dragging to extend the point-mode range during formula entry.
+    ///
+    /// Carries the range anchor + current extent (`range`) and the byte span
+    /// inside the formula text being replaced (`ref_span`). Mirrors the
+    /// payload pattern of `Extending { to_row, to_col }` - no separate signals.
+    Pointing {
+        range: CellArea,
+        ref_span: (usize, usize),
+    },
 }
 
+/// How arrow keys behave during a cell edit.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EditMode {
     /// Arrow keys commit the edit and navigate to the adjacent cell.
@@ -125,6 +141,29 @@ pub enum EditFocus {
     FormulaBar,
 }
 
+/// In-progress cell edit not yet committed to the model.
+/// Mirrors the TypeScript `EditingCell` interface in workbookState.ts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditingCell {
+    /// Cell being edited.
+    pub(crate) address: CellAddress,
+    /// Text the user has typed; not yet written to `UserModel`.
+    pub(crate) text: String,
+    /// How arrow keys behave during the edit.
+    pub(crate) mode: EditMode,
+    /// Which widget currently holds keyboard focus.
+    pub(crate) focus: EditFocus,
+}
+
+/// Which header was right-clicked to open the context menu.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum HeaderContextMenu {
+    /// Column index (1-based).
+    Column(i32),
+    /// Row index (1-based).
+    Row(i32),
+}
+
 /// Position and target for the active context menu.
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -135,41 +174,6 @@ pub struct ContextMenuState {
     pub(crate) y: i32,
     /// Which header triggered the menu.
     pub(crate) target: HeaderContextMenu,
-}
-
-/// Per-category event signals.
-///
-/// Replaces the single `Vec<SpreadsheetEvent>` + 7 `Memo` filters.
-/// Each signal holds the events from the most recent `emit_event(s)` call.
-/// Contents are REPLACED (not appended) on each emit - never accumulate
-/// cross-action history here.
-#[derive(Clone, Copy)]
-pub struct EventBus {
-    pub content: RwSignal<Vec<ContentEvent>>,
-    pub format: RwSignal<Vec<FormatEvent>>,
-    pub navigation: RwSignal<Vec<NavigationEvent>>,
-    pub structure: RwSignal<Vec<StructureEvent>>,
-    pub mode: RwSignal<Vec<ModeEvent>>,
-    pub theme: RwSignal<Vec<ThemeEvent>>,
-}
-
-impl EventBus {
-    pub fn new() -> Self {
-        Self {
-            content: RwSignal::new(vec![]),
-            format: RwSignal::new(vec![]),
-            navigation: RwSignal::new(vec![]),
-            structure: RwSignal::new(vec![]),
-            mode: RwSignal::new(vec![]),
-            theme: RwSignal::new(vec![]),
-        }
-    }
-}
-
-impl Default for EventBus {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 /// All transient UI state - never persisted, never in the model.
@@ -210,7 +214,6 @@ pub struct WorkbookState {
     pub(crate) recent_colors: Split<Vec<CssColor>>,
 }
 
-#[allow(dead_code)]
 impl WorkbookState {
     /// Creates a `WorkbookState` with default signal values.
     ///
@@ -237,11 +240,6 @@ impl WorkbookState {
             perf: PerfTimings::new(),
             recent_colors: Split::new(recent_colors),
         }
-    }
-
-    /// Trigger a canvas re-render by emitting a generic content change event.
-    pub fn request_redraw(&self) {
-        self.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
     }
 
     /// Returns the active point-mode range, or a 1x1 rect at the model's
@@ -280,8 +278,7 @@ impl WorkbookState {
         let mut format = vec![];
         let mut navigation = vec![];
         let mut structure = vec![];
-        let mut mode_evs = vec![];
-        let mut theme_evs = vec![];
+        let mut theme = vec![];
 
         for event in new_events {
             #[cfg(debug_assertions)]
@@ -290,12 +287,12 @@ impl WorkbookState {
                 thread_local! { static LAST: Cell<f64> = const { Cell::new(0.0) }; }
                 let now = crate::perf::now();
                 LAST.with(|t| {
-                    let delta = now - t.get();
+                    // let delta = now - t.get();
                     t.set(now);
-                    leptos::logging::log!(
-                        "[EventBus] +{delta:>8.2}ms  {}",
-                        event.dbg_description()
-                    );
+                    // leptos::logging::log!(
+                    //     "[EventBus] +{delta:>8.2}ms  {}",
+                    //     event.dbg_description()
+                    // );
                 });
             }
             match event {
@@ -303,12 +300,11 @@ impl WorkbookState {
                 SpreadsheetEvent::Format(e) => format.push(e),
                 SpreadsheetEvent::Navigation(e) => navigation.push(e),
                 SpreadsheetEvent::Structure(e) => structure.push(e),
-                SpreadsheetEvent::Mode(e) => mode_evs.push(e),
-                SpreadsheetEvent::Theme(e) => theme_evs.push(e),
+                SpreadsheetEvent::Theme(e) => theme.push(e),
             }
         }
 
-        // Replace all 6 signals so no stale events from the previous action remain.
+        // Replace all 5 signals so no stale events from the previous action remain.
         // Use update() not set(): set() uses PartialEq and suppresses notification when
         // the same event fires twice on the same range (e.g. toggle bold twice without
         // navigating). update() always notifies subscribers regardless of value equality.
@@ -316,8 +312,7 @@ impl WorkbookState {
         self.events.format.update(|v| *v = format);
         self.events.navigation.update(|v| *v = navigation);
         self.events.structure.update(|v| *v = structure);
-        self.events.mode.update(|v| *v = mode_evs);
-        self.events.theme.update(|v| *v = theme_evs);
+        self.events.theme.update(|v| *v = theme);
     }
 
     /// Get the resolved theme (reactive) - Auto resolves to Light/Dark based on system preference
@@ -326,6 +321,7 @@ impl WorkbookState {
     }
 
     /// Get the resolved theme (non-reactive) - Auto resolves to Light/Dark based on system preference
+    #[allow(dead_code)]
     pub fn get_theme_untracked(&self) -> Theme {
         self.theme.get_untracked().resolve_with_system()
     }
@@ -352,6 +348,7 @@ impl WorkbookState {
     }
 
     /// Toggle between Light and Dark only (preserving Auto if set)
+    #[allow(dead_code)]
     pub fn toggle_light_dark(&self) {
         let current = self.theme.get();
         match current {
@@ -410,6 +407,7 @@ impl WorkbookState {
     ///
     /// NOTE: Check if this works need import support
     /// This scans all cells and extracts unique colors for the recent colors section
+    #[allow(dead_code)]
     pub fn extract_document_colors(&self, model: ModelStore) -> Vec<String> {
         use crate::theme::COLOR_PALETTE;
         use std::collections::HashSet;

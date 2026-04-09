@@ -8,12 +8,14 @@ use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
 use crate::coord::SheetArea;
 use crate::coord::{CellAddress, CellArea};
-use crate::events::{
-    ContentEvent, DragState, FormatEvent, HeaderContextMenu, NavigationEvent, SpreadsheetEvent,
-};
+use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
+
 use crate::input::{formula_input::*, helpers::mutate, helpers::EvaluationMode};
 use crate::model::{AppClipboard, ArrowKey, FrontendModel, PageDir};
-use crate::state::{ContextMenuState, EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
+use crate::state::{
+    ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
+    WorkbookState,
+};
 use crate::util::warn_if_err;
 
 /// Pixel tolerance for column/row resize hit-test in the header area.
@@ -21,8 +23,8 @@ const HIT_ZONE: f64 = 4.0;
 
 /// The spreadsheet canvas element.
 ///
-/// Subscribes to `WorkbookState.redraw` so the canvas repaints whenever
-/// any model mutation calls `WorkbookState::request_redraw()`.
+/// Subscribes to `EventBus` signals and the `reactive_overlay` memo so the
+/// canvas repaints when model state or drag overlays change.
 /// Handles the full mouse interaction set: click-to-select, drag-to-select,
 /// autofill handle drag, double-click-to-edit, and wheel scrolling.
 #[component]
@@ -38,7 +40,7 @@ pub fn Worksheet() -> impl IntoView {
     // Cleanup is automatic when the component unmounts.
     let container_ref = NodeRef::<html::Div>::new();
     let _ = use_resize_observer(container_ref, move |_, _| {
-        state.request_redraw();
+        state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
     });
 
     // Re-render canvas every time visual events occur (content, format, navigation, structure).
@@ -101,28 +103,36 @@ pub fn Worksheet() -> impl IntoView {
     // Per-category subscription: reads directly from EventBus signals.
     // Each category signal is replaced (not appended) on every emit, so
     // reading any non-empty signal means a new action just happened.
-    Effect::new(move |_| {
-        let has_content = !state.events.content.get().is_empty();
-        let has_structure = !state.events.structure.get().is_empty();
-        let has_format = !state.events.format.get().is_empty();
-        let has_nav = !state.events.navigation.get().is_empty();
-        let has_theme = !state.events.theme.get().is_empty();
-        let _overlay = reactive_overlay.get();
+    // The Effect returns the current overlay state so the next run can
+    // detect overlay-only changes (autofill preview, point-mode range)
+    // without needing a fake ContentEvent::GenericChange from request_redraw().
+    Effect::new(
+        move |prev: Option<(Option<AutofillTarget>, Option<CellArea>)>| {
+            let has_content = !state.events.content.get().is_empty();
+            let has_structure = !state.events.structure.get().is_empty();
+            let has_format = !state.events.format.get().is_empty();
+            let has_nav = !state.events.navigation.get().is_empty();
+            let has_theme = !state.events.theme.get().is_empty();
+            let overlay = reactive_overlay.get();
+            let overlay_changed = prev.is_some_and(|p| p != overlay);
 
-        let mode = if has_content || has_structure || has_theme {
-            CanvasRenderMode::Full
-        } else if has_format {
-            CanvasRenderMode::FormatOnly
-        } else if has_nav {
-            CanvasRenderMode::ViewportUpdate
-        } else {
-            // Mode event only - no canvas repaint needed.
-            return;
-        };
+            let mode = if has_content || has_structure || has_theme {
+                CanvasRenderMode::Full
+            } else if has_format {
+                CanvasRenderMode::FormatOnly
+            } else if has_nav {
+                CanvasRenderMode::ViewportUpdate
+            } else if overlay_changed {
+                CanvasRenderMode::Overlay
+            } else {
+                return overlay;
+            };
 
-        render_mode.set(mode);
-        render_needed.set(true);
-    });
+            render_mode.set(mode);
+            render_needed.set(true);
+            overlay
+        },
+    );
 
     // rAF render loop - fires on every animation frame (~60 fps).
     // Renders only when render_needed is true; otherwise returns immediately
@@ -279,7 +289,6 @@ pub fn Worksheet() -> impl IntoView {
                     to_row: row,
                     to_col: col,
                 });
-                state.request_redraw();
             }
             DragState::Pointing {
                 range: pr,
@@ -308,7 +317,6 @@ pub fn Worksheet() -> impl IntoView {
                         },
                         ref_span: (new_start, new_end),
                     });
-                    state.request_redraw();
                 }
             }
             DragState::Selecting => {
@@ -334,7 +342,10 @@ pub fn Worksheet() -> impl IntoView {
                 model.update_value(|m| {
                     m.nav_extend_selection(eff_row, eff_col);
                 });
-                state.request_redraw();
+                let sheet_area = model.with_value(SheetArea::from_view);
+                state.emit_event(SpreadsheetEvent::Navigation(
+                    NavigationEvent::SelectionRangeChanged { sheet_area },
+                ));
             }
             DragState::Idle | DragState::ResizingCol { .. } | DragState::ResizingRow { .. } => {}
         }
@@ -650,7 +661,6 @@ fn handle_cell_click(
                     range: CellArea::from_cell(row, col),
                     ref_span: (new_start, new_end),
                 });
-                state.request_redraw();
                 return;
             }
         }

@@ -1,73 +1,70 @@
 /*!
 # Domain-driven Event System
 
-Replaces the generic `request_redraw()` counter with typed events that represent
-actual changes in the spreadsheet domain. Components can subscribe to specific
-event types, eliminating unnecessary re-renders.
+Typed events representing actual changes in the spreadsheet domain.
+Components subscribe to per-category `EventBus` signals and re-render
+only when their category fires.
 
-## Architecture
+## Event Categories
 
-Instead of all components responding to any change, we model domain events:
 - **Content**: Cell values, formulas, calculations
 - **Format**: Visual styling, colors, layout
 - **Structure**: Sheets, rows, columns
 - **Navigation**: Selection, scrolling, editing state
-- **Mode**: UI interaction modes
 - **Theme**: Appearance settings
-
-Each event carries the minimal data needed to determine if a component should update.
 
 ## Usage
 
 ```rust
-// Emit specific events instead of generic redraw
+// Emit a typed event (via WorkbookState)
 state.emit_event(SpreadsheetEvent::Format(
-    FormatEvent::RecentColorsUpdated { colors: vec!["#ff0000".into()] }
+    FormatEvent::RangeStyleChanged { area: sa }
 ));
 
-// Components subscribe to event types they care about
-let format_events = state.subscribe_to_format_events();
+// Subscribe in an Effect (worksheet.rs pattern)
+Effect::new(move |_| {
+    let _content = state.events.content.get(); // registers dependency
+    // ... render canvas
+});
 ```
 */
 
-use crate::coord::{CellAddress, CellArea, SheetArea};
+use leptos::prelude::*;
+
+use crate::coord::{CellAddress, SheetArea};
 use crate::theme::Theme;
 
-/// Active mouse-drag interaction.
+/// Per-category event signals.
 ///
-/// At most one drag mode can be active at a time. Using a single enum
-/// instead of parallel `bool` / `Option` signals makes illegal combinations
-/// (e.g. selecting while resizing) unrepresentable.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum DragState {
-    /// No drag in progress.
-    Idle,
-    /// Mouse button held for a range-drag selection.
-    Selecting,
-    /// Autofill handle drag: the cell the user is dragging toward.
-    Extending { to_row: i32, to_col: i32 },
-    /// Column header resize: `(col_1based, current_mouse_x)`.
-    ResizingCol { col: i32, x: f64 },
-    /// Row header resize: `(row_1based, current_mouse_y)`.
-    ResizingRow { row: i32, y: f64 },
-    /// Dragging to extend the point-mode range during formula entry.
-    ///
-    /// Carries the range anchor + current extent (`range`) and the byte span
-    /// inside the formula text being replaced (`ref_span`). Mirrors the
-    /// payload pattern of `Extending { to_row, to_col }` - no separate signals.
-    Pointing {
-        range: CellArea,
-        ref_span: (usize, usize),
-    },
+/// Replaces the single `Vec<SpreadsheetEvent>` + 7 `Memo` filters.
+/// Each signal holds the events from the most recent `emit_event(s)` call.
+/// Contents are REPLACED (not appended) on each emit - never accumulate
+/// cross-action history here.
+#[derive(Clone, Copy)]
+pub struct EventBus {
+    pub content: RwSignal<Vec<ContentEvent>>,
+    pub format: RwSignal<Vec<FormatEvent>>,
+    pub navigation: RwSignal<Vec<NavigationEvent>>,
+    pub structure: RwSignal<Vec<StructureEvent>>,
+    pub theme: RwSignal<Vec<ThemeEvent>>,
 }
 
-/// Which header was right-clicked to open the context menu.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum HeaderContextMenu {
-    /// Column index (1-based).
-    Column(i32),
-    /// Row index (1-based).
-    Row(i32),
+impl EventBus {
+    pub fn new() -> Self {
+        Self {
+            content: RwSignal::new(vec![]),
+            format: RwSignal::new(vec![]),
+            navigation: RwSignal::new(vec![]),
+            structure: RwSignal::new(vec![]),
+            theme: RwSignal::new(vec![]),
+        }
+    }
+}
+
+impl Default for EventBus {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Domain-specific events that represent actual changes in the spreadsheet
@@ -81,8 +78,6 @@ pub enum SpreadsheetEvent {
     Structure(StructureEvent),
     /// Selection and navigation state
     Navigation(NavigationEvent),
-    /// UI interaction modes
-    Mode(ModeEvent),
     /// Theme and appearance settings
     Theme(ThemeEvent),
 }
@@ -122,30 +117,6 @@ impl ContentEvent {
             | ContentEvent::GenericChange => None,
         }
     }
-
-    pub fn dbg_description(&self) -> String {
-        match self {
-            ContentEvent::CellChanged {
-                address, new_value, ..
-            } => format!(
-                "Content::CellChanged S{}R{}C{} -> {:?}",
-                address.sheet, address.row, address.column, new_value
-            ),
-            ContentEvent::RangeChanged { sheet_area } => {
-                format!("Content::RangeChanged S{:?}", sheet_area)
-            }
-            ContentEvent::FormulaChanged { address } => format!(
-                "Content::FormulaChanged S{}R{}C{}",
-                address.sheet, address.row, address.column
-            ),
-            ContentEvent::CalculationUpdated { affected_sheets } => format!(
-                "Content::CalculationUpdated ({} sheets)",
-                affected_sheets.len()
-            ),
-            ContentEvent::NamedRangesChanged => "Content::NamedRangesChanged".into(),
-            ContentEvent::GenericChange => "Content::GenericChange".into(),
-        }
-    }
 }
 
 /// Visual formatting and styling changes
@@ -179,31 +150,6 @@ impl FormatEvent {
             FormatEvent::ConditionalFormattingChanged { sheet } => Some(*sheet),
             FormatEvent::RecentColorsUpdated { .. } | FormatEvent::DocumentColorsChanged { .. } => {
                 None
-            }
-        }
-    }
-
-    pub fn dbg_description(&self) -> String {
-        match self {
-            FormatEvent::CellStyleChanged { address } => format!(
-                "Format::CellStyle S{}R{}C{}",
-                address.sheet, address.row, address.column
-            ),
-            FormatEvent::RangeStyleChanged { area } => format!(
-                "Format::RangeStyle S{} C{}R{}:C{}R{}",
-                area.sheet, area.area.c1, area.area.r1, area.area.c2, area.area.r2
-            ),
-            FormatEvent::LayoutChanged { sheet, col, row } => {
-                format!("Format::Layout S{sheet} col={col:?} row={row:?}")
-            }
-            FormatEvent::RecentColorsUpdated { colors } => {
-                format!("Format::RecentColors ({} colors)", colors.len())
-            }
-            FormatEvent::DocumentColorsChanged { colors } => {
-                format!("Format::DocColors ({} colors)", colors.len())
-            }
-            FormatEvent::ConditionalFormattingChanged { sheet } => {
-                format!("Format::CondFmt S{sheet}")
             }
         }
     }
@@ -331,7 +277,6 @@ impl HeaderChange {
 }
 
 /// Structural changes to worksheets, rows, columns
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum StructureEvent {
     /// New worksheet added
@@ -345,6 +290,7 @@ pub enum StructureEvent {
         new_name: String,
     },
     /// Worksheet reordered
+    // TODO
     WorksheetsReordered,
     /// Rows or columns inserted/deleted
     StructureChanged(HeaderChange),
@@ -354,7 +300,6 @@ pub enum StructureEvent {
     WorksheetUnhidden { sheet: u32, name: String },
 }
 
-#[allow(dead_code)]
 impl StructureEvent {
     /// Convenience constructor for row insertion
     pub fn rows_inserted(location: Location) -> Self {
@@ -387,37 +332,9 @@ impl StructureEvent {
             StructureEvent::WorksheetUnhidden { sheet, .. } => Some(*sheet),
         }
     }
-
-    pub fn dbg_description(&self) -> String {
-        match self {
-            StructureEvent::WorksheetAdded { sheet, name } => {
-                format!("Structure::SheetAdded S{sheet} {name:?}")
-            }
-            StructureEvent::WorksheetDeleted { sheet } => {
-                format!("Structure::SheetDeleted S{sheet}")
-            }
-            StructureEvent::WorksheetRenamed {
-                sheet,
-                old_name,
-                new_name,
-            } => format!("Structure::SheetRenamed S{sheet} {old_name:?}->{new_name:?}"),
-            StructureEvent::WorksheetsReordered => "Structure::Reordered".into(),
-            StructureEvent::StructureChanged(c) => format!(
-                "Structure::Changed S{} {:?} {:?}",
-                c.sheet, c.operation, c.dimension
-            ),
-            StructureEvent::WorksheetHidden { sheet } => {
-                format!("Structure::Hidden(sheet={sheet})")
-            }
-            StructureEvent::WorksheetUnhidden { sheet, name } => {
-                format!("Structure::Unhidden(sheet={sheet}, name={name})")
-            }
-        }
-    }
 }
 
 /// Selection, navigation, and editing state changes.
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum NavigationEvent {
     /// The active cell moved to a single new address.
@@ -454,93 +371,6 @@ impl NavigationEvent {
             NavigationEvent::EditingEnded { address, .. } => Some(address.sheet),
         }
     }
-
-    pub fn dbg_description(&self) -> String {
-        match self {
-            NavigationEvent::SelectionChanged { address } => format!(
-                "Nav::Selection S{}R{}C{}",
-                address.sheet, address.row, address.column
-            ),
-            NavigationEvent::SelectionRangeChanged { sheet_area } => {
-                format!("Nav::RangeSelect S{:?}", sheet_area)
-            }
-            NavigationEvent::ViewportScrolled {
-                sheet,
-                top_row,
-                left_col,
-            } => format!("Nav::Scroll S{sheet} top={top_row} left={left_col}"),
-            NavigationEvent::ActiveSheetChanged {
-                from_sheet,
-                to_sheet,
-            } => format!("Nav::SheetSwitch S{from_sheet}->S{to_sheet}"),
-            NavigationEvent::EditingStarted { address } => format!(
-                "Nav::EditStart S{}R{}C{}",
-                address.sheet, address.row, address.column
-            ),
-            NavigationEvent::EditingEnded { address, committed } => format!(
-                "Nav::EditEnd S{}R{}C{} committed={committed}",
-                address.sheet, address.row, address.column
-            ),
-        }
-    }
-}
-
-/// UI interaction mode changes.
-#[allow(dead_code)]
-#[derive(Clone, PartialEq, Debug)]
-pub enum ModeEvent {
-    /// A cell edit session started.
-    EditStarted { address: CellAddress },
-    /// A cell edit session ended (committed or cancelled).
-    EditEnded,
-    /// The active [`DragState`] transitioned between modes.
-    DragModeChanged {
-        from_mode: DragState,
-        to_mode: DragState,
-    },
-    /// Formula point-mode entered or exited.
-    ///
-    /// `range` is `[r1, c1, r2, c2]` when a range is currently highlighted.
-    PointModeChanged {
-        active: bool,
-        range: Option<[i32; 4]>,
-    },
-    /// A header context menu was shown or hidden.
-    ContextMenuToggled {
-        visible: bool,
-        target: Option<HeaderContextMenu>,
-    },
-    /// A modal dialog was shown or hidden.
-    DialogToggled { dialog_name: String, visible: bool },
-    /// A UI panel was shown or hidden.
-    PanelToggled { panel_name: String, visible: bool },
-}
-
-impl ModeEvent {
-    pub fn dbg_description(&self) -> String {
-        match self {
-            ModeEvent::EditStarted { address } => format!(
-                "Mode::EditStarted S{}R{}C{}",
-                address.sheet, address.row, address.column
-            ),
-            ModeEvent::EditEnded => "Mode::EditEnded".into(),
-            ModeEvent::DragModeChanged { from_mode, to_mode } => {
-                format!("Mode::Drag {from_mode:?}->{to_mode:?}")
-            }
-            ModeEvent::PointModeChanged { active, .. } => format!("Mode::Point active={active}"),
-            ModeEvent::ContextMenuToggled { visible, target } => {
-                format!("Mode::CtxMenu visible={visible} target={target:?}")
-            }
-            ModeEvent::DialogToggled {
-                dialog_name,
-                visible,
-            } => format!("Mode::Dialog {dialog_name:?} visible={visible}"),
-            ModeEvent::PanelToggled {
-                panel_name,
-                visible,
-            } => format!("Mode::Panel {panel_name:?} visible={visible}"),
-        }
-    }
 }
 
 /// Theme and appearance changes.
@@ -553,95 +383,4 @@ pub enum ThemeEvent {
     PaletteUpdated,
     /// FIXME: This needs its own place - language/locale changed.
     LocaleChanged { new_locale: String },
-}
-
-impl ThemeEvent {
-    pub fn dbg_description(&self) -> String {
-        match self {
-            ThemeEvent::ThemeToggled { new_theme } => format!("Theme::Toggled {new_theme:?}"),
-            ThemeEvent::PaletteUpdated => "Theme::PaletteUpdated".into(),
-            ThemeEvent::LocaleChanged { new_locale } => format!("Theme::Locale {new_locale:?}"),
-        }
-    }
-}
-
-#[allow(dead_code)]
-impl SpreadsheetEvent {
-    /// Check if this event affects cell content
-    pub fn affects_content(&self) -> bool {
-        matches!(self, SpreadsheetEvent::Content(_))
-    }
-
-    /// Check if this event affects visual appearance
-    pub fn affects_visual(&self) -> bool {
-        matches!(
-            self,
-            SpreadsheetEvent::Format(_) | SpreadsheetEvent::Theme(_)
-        )
-    }
-
-    /// Check if this event affects layout/structure
-    pub fn affects_layout(&self) -> bool {
-        matches!(
-            self,
-            SpreadsheetEvent::Structure(_)
-                | SpreadsheetEvent::Format(FormatEvent::LayoutChanged { .. })
-        )
-    }
-
-    /// Check if this event affects a specific sheet
-    pub fn affects_sheet(&self, sheet: u32) -> bool {
-        match self {
-            // Legacy: treat as affecting all sheets
-            SpreadsheetEvent::Content(ContentEvent::GenericChange) => true,
-            // Calculation can touch multiple sheets - check the set
-            SpreadsheetEvent::Content(ContentEvent::CalculationUpdated { affected_sheets }) => {
-                affected_sheets.contains(&sheet)
-            }
-            // Delegate to per-type method for all other sheet-specific events
-            SpreadsheetEvent::Content(e) => e.affected_sheet() == Some(sheet),
-            SpreadsheetEvent::Format(e) => e.affected_sheet() == Some(sheet),
-            SpreadsheetEvent::Structure(e) => e.affected_sheet() == Some(sheet),
-            SpreadsheetEvent::Navigation(e) => e.affected_sheet() == Some(sheet),
-            // Sheet-agnostic
-            SpreadsheetEvent::Mode(_) | SpreadsheetEvent::Theme(_) => false,
-        }
-    }
-
-    // /// Get a human-readable description of the event (for debugging)
-    // /// Before usage add derive Debug in this file to:
-    //  ContextMenuHeader
-    //  SpreadsheetEvent
-    //  ContentEvent
-    //  FormatEvent
-    //  StructureOperation
-    //  Dimension
-    //  StructureChange
-    //  StructureEvent
-    //  NavigationEvent
-    //  ModeEvent
-    //  ThemeEvent
-    //
-    // /// And in `src/state.rs`
-    // ContextMenuHeader
-    //
-    // bash for this file
-    // Add
-    // ```sh
-    // sd '#\[derive\(([^)]+)\)\]' '#[derive($1, Debug, Debug)]' src/events.rs
-    // ```
-    // Remove
-    // ```sh
-    // sd ',\s*Debug' '' src/canvas/renderer.rs
-    // ```
-    pub fn dbg_description(&self) -> String {
-        match self {
-            SpreadsheetEvent::Content(e) => e.dbg_description(),
-            SpreadsheetEvent::Format(e) => e.dbg_description(),
-            SpreadsheetEvent::Navigation(e) => e.dbg_description(),
-            SpreadsheetEvent::Structure(e) => e.dbg_description(),
-            SpreadsheetEvent::Mode(e) => e.dbg_description(),
-            SpreadsheetEvent::Theme(e) => e.dbg_description(),
-        }
-    }
 }

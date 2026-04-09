@@ -91,16 +91,15 @@ fn defer_close_inner(sig: RwSignal<bool>) -> Result<(), DeferCloseError> {
     Ok(())
 }
 
-/// Schedule `sig.set(false)` in the next macrotask via `setTimeout(0)`.
-///
-/// `spawn_local` (Promise microtask) can run between event-propagation steps,
-/// causing panel closures to be dropped before the click event finishes
-/// bubbling - resulting in "closure invoked after being dropped".
-/// `setTimeout(0)` defers to a full macrotask, which is always after all
-/// current event processing is complete.
-#[allow(dead_code)]
-pub fn defer_close(sig: RwSignal<bool>) {
-    if let Err(e) = defer_close_inner(sig) {
-        web_sys::console::warn_1(&format!("[util] defer_close: {e}").into());
-    }
-}
+// Schedule `sig.set(false)` in the next macrotask via `setTimeout(0)`.
+//
+// `spawn_local` (Promise microtask) can run between event-propagation steps,
+// causing panel closures to be dropped before the click event finishes
+// bubbling - resulting in "closure invoked after being dropped".
+// `setTimeout(0)` defers to a full macrotask, which is always after all
+// current event processing is complete.
+// pub fn defer_close(sig: RwSignal<bool>) {
+//     if let Err(e) = defer_close_inner(sig) {
+//         web_sys::console::warn_1(&format!("[util] defer_close: {e}").into());
+//     }
+// }

@@ -5,7 +5,7 @@ use crate::components::{
     toolbar::Toolbar, worksheet::Worksheet,
 };
 use crate::coord::{CellArea, SheetArea};
-use crate::events::DragState;
+use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::{
     action::{classify_key, execute, KeyMod, SpreadsheetAction},
     edit::EditAction,
@@ -13,7 +13,7 @@ use crate::input::{
     helpers::{mutate, EvaluationMode},
 };
 use crate::model::{AppClipboard, PasteMode};
-use crate::state::{EditMode, ModelStore, WorkbookState};
+use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
 use crate::storage;
 use crate::util::warn_if_err;
 
@@ -105,7 +105,6 @@ pub fn Workbook() -> impl IntoView {
                         range: new_pr,
                         ref_span: (new_start, new_end),
                     });
-                    state.request_redraw();
                     ev.prevent_default();
                     return;
                 }
@@ -147,7 +146,10 @@ pub fn Workbook() -> impl IntoView {
                         );
                     });
                 });
-                state.request_redraw();
+                let sheet_area = model.with_value(SheetArea::from_view);
+                state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
+                    sheet_area,
+                }));
                 ev.prevent_default();
             }
             SpreadsheetAction::Paste => {
@@ -211,9 +213,8 @@ fn copy_to_app_clipboard(
             let app_cb = AppClipboard::capture(&cb);
             let csv = app_cb.csv.clone();
             clipboard_store.update_value(|c| *c = Some(app_cb));
-            // Repaint immediately so the marching-ants border appears on the
-            // copied range without waiting for the next user interaction.
-            state.request_redraw();
+            // Repaint so the marching-ants border appears immediately.
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
             // Fire-and-forget: write tab-separated text to the OS clipboard.
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(window) = web_sys::window() {
@@ -278,12 +279,12 @@ fn paste_from_clipboard(
             if let Some(uuid) = state.current_uuid.get_untracked() {
                 model.with_value(|m| storage::save(&uuid, m));
             }
-            state.request_redraw();
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         });
     }
 
     if internal_pasted {
-        state.request_redraw();
+        state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
     }
 
     internal_pasted

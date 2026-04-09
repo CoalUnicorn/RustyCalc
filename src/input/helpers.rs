@@ -25,7 +25,7 @@ pub enum EvaluationMode {
 /// See docs/performance-evaluation.md for details.
 ///
 /// **CALLER RESPONSIBILITY:** This function no longer automatically triggers redraws.
-/// The caller must emit appropriate events using `state.emit_event()` or `state.request_redraw()`.
+/// The caller must emit appropriate events using `state.emit_event()`.
 ///
 pub fn mutate(
     model: ModelStore,

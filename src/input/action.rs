@@ -11,12 +11,15 @@
 
 use leptos::prelude::WithValue;
 
-use crate::input::edit::{execute_edit, EditAction};
-use crate::input::format::{execute_format, FormatAction};
-use crate::input::nav::{execute_nav, NavAction};
-use crate::input::structure::{execute_struct, StructAction};
+use crate::state::EditMode;
+use crate::input::{
+    edit::{execute_edit, EditAction},
+    format::{execute_format, FormatAction},
+    nav::{execute_nav, NavAction},
+    structure::{execute_struct, StructAction},
+};
 use crate::model::{style_types::HexColor, ArrowKey, SafeFontFamily};
-use crate::state::{EditMode, EditingCell, ModelStore, WorkbookState};
+use crate::state::{EditingCell, ModelStore, WorkbookState};
 use crate::storage;
 
 // SpreadsheetAction
@@ -339,10 +342,9 @@ impl KeyMod {
 mod tests {
     use super::*;
     use crate::coord::CellAddress;
-    use crate::events::DragState;
     use crate::input::helpers::{mutate, EvaluationMode};
     use crate::model::ArrowKey;
-    use crate::state::{EditFocus, EditMode, EditingCell};
+    use crate::state::{DragState, EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;
     use wasm_bindgen_test::*;
 

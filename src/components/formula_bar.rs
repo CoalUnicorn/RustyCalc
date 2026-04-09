@@ -7,8 +7,9 @@ use wasm_bindgen::JsCast;
 use crate::canvas::col_name;
 use crate::coord::CellAddress;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
+use crate::state::{EditFocus, EditMode};
 use crate::model::FrontendModel;
-use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
+use crate::state::{EditingCell, ModelStore, WorkbookState};
 
 /// The formula bar: cell address label + content/formula input.
 ///

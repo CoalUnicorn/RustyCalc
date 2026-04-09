@@ -6,8 +6,10 @@ use leptos::prelude::WithValue;
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::coord::{CellArea, SheetArea};
 use crate::events::{FormatEvent, SpreadsheetEvent};
-use crate::input::error::FormatError;
-use crate::input::helpers::{selection_area, try_mutate, EvaluationMode};
+use crate::input::{
+    error::FormatError,
+    helpers::{selection_area, try_mutate, EvaluationMode},
+};
 use crate::model::{
     style_types::{BooleanValue, HexColor, StylePath},
     FrontendModel, SafeFontFamily, ToolbarState,

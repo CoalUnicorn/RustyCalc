@@ -47,12 +47,12 @@ use crate::theme::COLOR_PALETTE;
 ///
 /// Used to build the container's CSS modifier class (e.g. `color-picker-text`)
 /// and to distinguish pickers when multiple appear on the same toolbar.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ColorType {
     Text,
     Background,
     Tab,
+    #[allow(dead_code)]
     Generic,
 }
 

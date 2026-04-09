@@ -3,13 +3,14 @@
 use leptos::prelude::{WithValue, *};
 
 use crate::coord::CellAddress;
-use crate::events::{ContentEvent, DragState, ModeEvent, NavigationEvent, SpreadsheetEvent};
+use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::{
     error::EditError,
     helpers::{mutate, EvaluationMode},
 };
 use crate::model::{ArrowKey, FrontendModel};
-use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
+use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
+use crate::state::{EditFocus, EditMode};
 use crate::storage;
 
 /// Cell edit lifecycle actions.
@@ -36,39 +37,40 @@ pub fn execute_edit(
 ) -> Result<(), EditError> {
     match action {
         EditAction::Start(text) => {
-            let address = model.with_value(|m| {
-                let address = CellAddress::from_view(m);
-
-                state.editing_cell.set(Some(EditingCell {
-                    address,
-                    text: text.clone(),
-                    mode: EditMode::Accept,
-                    focus: EditFocus::Cell,
-                }));
-                address
-            });
-
-            state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditStarted { address }));
+            state.emit_event(SpreadsheetEvent::Navigation(
+                NavigationEvent::EditingStarted {
+                    address: model.with_value(|m| {
+                        let address = CellAddress::from_view(m);
+                        state.editing_cell.set(Some(EditingCell {
+                            address,
+                            text: text.clone(),
+                            mode: EditMode::Accept,
+                            focus: EditFocus::Cell,
+                        }));
+                        address
+                    }),
+                },
+            ));
         }
         EditAction::EnterEditMode => {
-            let address = model.with_value(|m| {
-                let v = m.get_selected_view();
-                let text = m
-                    .get_cell_content(v.sheet, v.row, v.column)
-                    .unwrap_or_default();
-
-                let address = CellAddress::from_view(m);
-
-                state.editing_cell.set(Some(EditingCell {
-                    address,
-                    text,
-                    mode: EditMode::Edit,
-                    focus: EditFocus::Cell,
-                }));
-                address
-            });
-
-            state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditStarted { address }));
+            state.emit_event(SpreadsheetEvent::Navigation(
+                NavigationEvent::EditingStarted {
+                    address: model.with_value(|m| {
+                        let v = m.get_selected_view();
+                        let text = m
+                            .get_cell_content(v.sheet, v.row, v.column)
+                            .unwrap_or_default();
+                        let address = CellAddress::from_view(m);
+                        state.editing_cell.set(Some(EditingCell {
+                            address,
+                            text,
+                            mode: EditMode::Edit,
+                            focus: EditFocus::Cell,
+                        }));
+                        address
+                    }),
+                },
+            ));
         }
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
@@ -81,6 +83,7 @@ pub fn execute_edit(
                 // pause_evaluation() prevents set_user_input from triggering an internal
                 // evaluate() call - without it we'd evaluate twice (once inside
                 // set_user_input, once explicitly below).
+                // TODO: use mutate?
                 let mut commit_result: Result<(), EditError> = Ok(());
                 model.update_value(|m| {
                     m.pause_evaluation();
@@ -123,7 +126,7 @@ pub fn execute_edit(
                         old_value: None,
                         new_value: Some(edit.text.clone()),
                     }),
-                    SpreadsheetEvent::Mode(ModeEvent::EditEnded),
+                    // SpreadsheetEvent::Mode(ModeEvent::EditEnded),
                     SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged {
                         address: nav_address,
                     }),
@@ -136,7 +139,7 @@ pub fn execute_edit(
             state.editing_cell.set(None);
             state.drag.set(DragState::Idle);
 
-            state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditEnded));
+            // state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditEnded));
 
             crate::util::refocus_workbook();
         }

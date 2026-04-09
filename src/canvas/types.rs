@@ -297,4 +297,6 @@ pub enum CanvasRenderMode {
     FormatOnly,
     /// Navigation only - update selection box and scroll position.
     ViewportUpdate,
+    /// Drag overlay changed (autofill preview, point-mode range) - no model change.
+    Overlay,
 }
