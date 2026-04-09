@@ -28,6 +28,7 @@ pub fn export_xlsx(user_model: &UserModel<'static>) -> Result<Vec<u8>, String> {
 /// Read a browser `File` object into bytes.
 ///
 /// Must be called from an async context (e.g. inside `spawn_local`).
+#[allow(clippy::expect_used)]
 pub async fn read_file_bytes(file: web_sys::File) -> Vec<u8> {
     use wasm_bindgen_futures::JsFuture;
     let buffer = JsFuture::from(file.array_buffer())
@@ -37,6 +38,7 @@ pub async fn read_file_bytes(file: web_sys::File) -> Vec<u8> {
 }
 
 /// Trigger a browser download of `bytes` with the given `filename`.
+#[allow(clippy::expect_used)]
 pub fn trigger_download(bytes: &[u8], filename: &str) {
     use wasm_bindgen::JsCast;
 

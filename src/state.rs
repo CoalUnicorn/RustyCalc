@@ -153,6 +153,14 @@ pub struct EditingCell {
     pub(crate) mode: EditMode,
     /// Which widget currently holds keyboard focus.
     pub(crate) focus: EditFocus,
+    /// `true` when the formula text was modified by user input (typing,
+    /// paste, backspace) since the last arrow key. In `Edit` mode this
+    /// flag gates whether the next arrow key may enter point-mode — it
+    /// distinguishes "cursor passed through a reference-valid position
+    /// via movement" (no pointing) from "user typed an operator here"
+    /// (enter pointing).  Irrelevant in `Accept` mode where arrows
+    /// always check reference mode.
+    pub(crate) text_dirty: bool,
 }
 
 /// Which header was right-clicked to open the context menu.

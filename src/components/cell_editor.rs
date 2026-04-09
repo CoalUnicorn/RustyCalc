@@ -69,6 +69,7 @@ pub fn CellEditor() -> impl IntoView {
         state.editing_cell.update(|cell| {
             if let Some(c) = cell {
                 c.text = value;
+                c.text_dirty = true;
             }
         });
     };

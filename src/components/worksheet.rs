@@ -395,6 +395,7 @@ pub fn Worksheet() -> impl IntoView {
                 text,
                 mode: EditMode::Edit,
                 focus: EditFocus::Cell,
+                text_dirty: false,
             }));
         });
     };
@@ -638,10 +639,10 @@ fn handle_cell_click(
     // a formula, clicking a cell inserts/replaces the reference rather than
     // committing the edit and navigating away.
     if let Some(ref edit) = state.editing_cell.get_untracked() {
-        if edit.mode == EditMode::Accept {
+        let already_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
+        let may_point = edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
+        if may_point {
             let cursor = get_formula_cursor();
-            let current_drag = state.drag.get_untracked();
-            let already_pointing = matches!(current_drag, DragState::Pointing { .. });
             if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                 let sheet = model.with_value(|m| m.active_cell().sheet);
                 let ref_str = range_ref_str(row, col, row, col, sheet, sheet, "");

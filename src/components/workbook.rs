@@ -57,18 +57,49 @@ pub fn Workbook() -> impl IntoView {
         // reading the textarea cursor position from the DOM, so it must run
         // here before classify_key (which is pure).
         if let Some(ref edit) = state.editing_cell.get_untracked() {
-            if edit.mode == EditMode::Accept
-                && !is_ctrl
+            // Exit pointing when user types a non-arrow key (e.g. operator,
+            // digit, backspace). This lets the next arrow press start a fresh
+            // cell reference via is_in_reference_mode.
+            if !matches!(
+                key.as_str(),
+                "ArrowDown"
+                    | "ArrowUp"
+                    | "ArrowLeft"
+                    | "ArrowRight"
+                    | "Shift"
+                    | "Control"
+                    | "Alt"
+                    | "Meta"
+            ) && matches!(state.drag.get_untracked(), DragState::Pointing { .. })
+            {
+                state.drag.set(DragState::Idle);
+            }
+
+            if !is_ctrl
                 && !is_alt
                 && matches!(
                     key.as_str(),
                     "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight"
                 )
             {
+                let already_pointing =
+                    matches!(state.drag.get_untracked(), DragState::Pointing { .. });
+                // Accept mode always checks; Edit mode only when text was just
+                // modified (typed operator/paren) or already in pointing mode.
+                let may_point =
+                    edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
+
+                if may_point {
+                    // Clear the dirty flag — this arrow key consumed it.
+                    state.editing_cell.update(|c| {
+                        if let Some(e) = c {
+                            e.text_dirty = false;
+                        }
+                    });
+                }
+
                 let cursor = get_formula_cursor();
-                let current_drag = state.drag.get_untracked();
-                let already_pointing = matches!(current_drag, DragState::Pointing { .. });
-                if already_pointing || is_in_reference_mode(&edit.text, cursor) {
+                if may_point && (already_pointing || is_in_reference_mode(&edit.text, cursor)) {
                     // Move or extend the point-mode range by one cell.
                     let pr = state.effective_point_range(model);
                     let trailing = pr.extend_trailing(&key);
@@ -81,7 +112,7 @@ pub fn Workbook() -> impl IntoView {
                             c2: trailing.c2,
                         }
                     } else {
-                        trailing
+                        CellArea::from_cell(trailing.r2, trailing.c2)
                     };
                     let sheet = model.with_value(|m| m.get_selected_sheet());
                     let ref_str =

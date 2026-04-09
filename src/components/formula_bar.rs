@@ -120,6 +120,7 @@ pub fn FormulaBar() -> impl IntoView {
                 text,
                 mode: EditMode::Edit,
                 focus: EditFocus::FormulaBar,
+                text_dirty: false,
             }));
         });
     };
@@ -137,6 +138,7 @@ pub fn FormulaBar() -> impl IntoView {
             state.editing_cell.update(|cell| {
                 if let Some(c) = cell {
                     c.text = value.clone();
+                    c.text_dirty = true;
                 }
             });
         } else {
@@ -148,6 +150,7 @@ pub fn FormulaBar() -> impl IntoView {
                     text: value.clone(),
                     mode: EditMode::Accept,
                     focus: EditFocus::FormulaBar,
+                    text_dirty: true,
                 }));
                 state.emit_event(SpreadsheetEvent::Navigation(
                     NavigationEvent::EditingStarted { address },

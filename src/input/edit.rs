@@ -43,6 +43,7 @@ pub fn execute_edit(
                             text: text.clone(),
                             mode: EditMode::Accept,
                             focus: EditFocus::Cell,
+                            text_dirty: true,
                         }));
                         address
                     }),
@@ -63,6 +64,7 @@ pub fn execute_edit(
                             text,
                             mode: EditMode::Edit,
                             focus: EditFocus::Cell,
+                            text_dirty: false,
                         }));
                         address
                     }),

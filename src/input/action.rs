@@ -344,7 +344,6 @@ mod tests {
     use crate::coord::CellAddress;
     use crate::model::{mutate, ArrowKey, EvaluationMode};
     use crate::state::{DragState, EditFocus, EditMode, EditingCell};
-    use leptos::math::mo;
     use leptos::prelude::*;
     use wasm_bindgen_test::*;
 
@@ -360,6 +359,7 @@ mod tests {
             text: String::new(),
             mode: EditMode::Accept,
             focus: EditFocus::Cell,
+            text_dirty: false,
         }
     }
 
@@ -373,6 +373,7 @@ mod tests {
             text: String::new(),
             mode: EditMode::Edit,
             focus: EditFocus::Cell,
+            text_dirty: false,
         }
     }
 
