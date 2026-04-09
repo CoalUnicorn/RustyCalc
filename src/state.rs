@@ -192,26 +192,24 @@ pub struct ContextMenuState {
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
 pub struct WorkbookState {
+    /// Typed per-category event bus.
+    pub events: EventBus,
+    pub(crate) current_uuid: Split<Option<String>>,
+    pub(crate) theme: Split<Theme>,
+    pub(crate) recent_colors: Split<Vec<CssColor>>,
+    pub(crate) sidebar_open: Split<bool>,
+    pub(crate) collapsed_groups: Split<Vec<String>>,
     /// None = not editing; Some = live edit buffer
     pub(crate) editing_cell: Split<Option<EditingCell>>,
     /// Active mouse-drag interaction (selection, resize, autofill, point-mode).
-    pub(crate) drag: Split<DragState>,
-    /// Typed per-category event bus.
-    pub events: EventBus,
-    /// UUID of the workbook currently loaded in the model.
-    pub(crate) current_uuid: Split<Option<String>>,
-    /// Active color theme preference (may be Auto).
-    pub(crate) theme: Split<Theme>,
-    /// Whether the Performance panel is visible.
-    pub(crate) show_perf_panel: Split<bool>,
-    /// Active right-click context menu; None when no menu is showing.
-    pub(crate) context_menu: Split<Option<ContextMenuState>>,
     /// NodeRef to the formula bar <input>.
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
+    pub(crate) drag: Split<DragState>,
+    /// Active right-click context menu; None when no menu is showing.
+    pub(crate) context_menu: Split<Option<ContextMenuState>>,
     /// Performance timings for the commit->render pipeline.
     pub perf: PerfTimings,
-    /// Recent/custom colors. Limited to 16, most recent first.
-    pub(crate) recent_colors: Split<Vec<CssColor>>,
+    pub(crate) show_perf_panel: Split<bool>,
 }
 
 impl WorkbookState {
@@ -229,16 +227,18 @@ impl WorkbookState {
                 .unwrap_or_default();
 
         Self {
-            editing_cell: Split::new(None),
-            drag: Split::new(DragState::Idle),
             events: EventBus::new(),
             current_uuid: Split::new(None),
             theme: Split::new(Theme::from_storage()),
-            show_perf_panel: Split::new(false),
-            context_menu: Split::new(None),
-            formula_input_ref: NodeRef::new(),
-            perf: PerfTimings::new(),
             recent_colors: Split::new(recent_colors),
+            sidebar_open: Split::new(false),
+            collapsed_groups: Split::new(vec![]),
+            editing_cell: Split::new(None),
+            formula_input_ref: NodeRef::new(),
+            drag: Split::new(DragState::Idle),
+            context_menu: Split::new(None),
+            perf: PerfTimings::new(),
+            show_perf_panel: Split::new(false),
         }
     }
 

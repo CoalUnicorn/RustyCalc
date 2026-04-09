@@ -20,6 +20,11 @@ const MODELS_KEY: &str = "models";
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WorkbookMeta {
     pub name: String,
+    #[serde(default)]
+    pub group: Option<String>,
+    /// Last-modified timestamp (ms since epoch). Used for sort-by-recent.
+    #[serde(default)]
+    pub modified: f64,
 }
 
 // Registry helpers
@@ -55,12 +60,16 @@ pub fn save(uuid: &str, model: &UserModel) {
     log_err(LocalStorage::set(uuid, encoded), "save model bytes");
 
     let mut registry = load_registry();
+
     registry.insert(
         uuid.to_string(),
         WorkbookMeta {
             name: model.get_name(),
+            group: registry.get(uuid).and_then(|m| m.group.clone()), // preserve existing group
+            modified: crate::perf::now(),
         },
     );
+
     save_registry(&registry);
 }
 

@@ -279,25 +279,40 @@ impl HeaderChange {
 /// Structural changes to worksheets, rows, columns
 #[derive(Clone, PartialEq, Debug)]
 pub enum StructureEvent {
-    /// New worksheet added
-    WorksheetAdded { sheet: u32, name: String },
-    /// Worksheet deleted
-    WorksheetDeleted { sheet: u32 },
-    /// Worksheet renamed
+    /// Workbook loaded into the model.
+    WorkbookSwitched {
+        from_uuid: Option<String>,
+        to_uuid: String,
+    },
+    WorkbookDeleted {
+        uuid: String,
+    },
+    WorkbookCreated {
+        uuid: String,
+        name: String,
+    },
+    WorksheetAdded {
+        sheet: u32,
+        name: String,
+    },
+    WorksheetDeleted {
+        sheet: u32,
+    },
     WorksheetRenamed {
         sheet: u32,
         old_name: String,
         new_name: String,
     },
-    /// Worksheet reordered
-    // TODO
     WorksheetsReordered,
     /// Rows or columns inserted/deleted
     StructureChanged(HeaderChange),
-    /// A sheet was hidden. It still exists - not deleted. Use `WorksheetUnhidden` to reverse.
-    WorksheetHidden { sheet: u32 },
-    /// A previously hidden sheet was made visible again.
-    WorksheetUnhidden { sheet: u32, name: String },
+    WorksheetHidden {
+        sheet: u32,
+    },
+    WorksheetUnhidden {
+        sheet: u32,
+        name: String,
+    },
 }
 
 impl StructureEvent {
@@ -323,6 +338,9 @@ impl StructureEvent {
 
     pub fn affected_sheet(&self) -> Option<u32> {
         match self {
+            StructureEvent::WorkbookSwitched { .. }
+            | StructureEvent::WorkbookDeleted { .. }
+            | StructureEvent::WorkbookCreated { .. } => None,
             StructureEvent::WorksheetAdded { sheet, .. } => Some(*sheet),
             StructureEvent::WorksheetDeleted { sheet } => Some(*sheet),
             StructureEvent::WorksheetRenamed { sheet, .. } => Some(*sheet),
