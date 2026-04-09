@@ -40,7 +40,7 @@ pub fn execute_edit(
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::EditingStarted {
                     address: model.with_value(|m| {
-                        let address = CellAddress::from_view(m);
+                        let address = m.active_cell();
                         state.editing_cell.set(Some(EditingCell {
                             address,
                             text: text.clone(),
@@ -60,7 +60,7 @@ pub fn execute_edit(
                         let text = m
                             .get_cell_content(v.sheet, v.row, v.column)
                             .unwrap_or_default();
-                        let address = CellAddress::from_view(m);
+                        let address = m.active_cell();
                         state.editing_cell.set(Some(EditingCell {
                             address,
                             text,
@@ -83,7 +83,16 @@ pub fn execute_edit(
                 // pause_evaluation() prevents set_user_input from triggering an internal
                 // evaluate() call - without it we'd evaluate twice (once inside
                 // set_user_input, once explicitly below).
-                // TODO: use mutate?
+                // TODO: use mutate
+                // try_mutate(model, state, EvaluationMode::Immediate, |m| {
+                //    m.set_user_input(
+                //        edit.address.sheet,
+                //        edit.address.row,
+                //        edit.address.column,
+                //        &edit.text,
+                //    )
+                //    .map_err(EditError::Engine)
+                //})?;
                 let mut commit_result: Result<(), EditError> = Ok(());
                 model.update_value(|m| {
                     m.pause_evaluation();
@@ -118,15 +127,17 @@ pub fn execute_edit(
                 });
 
                 // Fire content + mode + navigation together so EventBus signals update once.
-                let nav_address = model
-                    .with_value(|m: &ironcalc_base::UserModel<'static>| CellAddress::from_view(m));
+                let nav_address = model.with_value(CellAddress::from_view);
                 state.emit_events(vec![
                     SpreadsheetEvent::Content(ContentEvent::CellChanged {
                         address: CellAddress::from_editing(&edit),
                         old_value: None,
                         new_value: Some(edit.text.clone()),
                     }),
-                    // SpreadsheetEvent::Mode(ModeEvent::EditEnded),
+                    SpreadsheetEvent::Navigation(NavigationEvent::EditingEnded {
+                        address: CellAddress::from_editing(&edit),
+                        committed: true,
+                    }),
                     SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged {
                         address: nav_address,
                     }),
@@ -136,10 +147,18 @@ pub fn execute_edit(
             }
         }
         EditAction::Cancel => {
+            let edit_address = state.editing_cell.get_untracked().map(|e| e.address);
             state.editing_cell.set(None);
             state.drag.set(DragState::Idle);
 
-            // state.emit_event(SpreadsheetEvent::Mode(ModeEvent::EditEnded));
+            if let Some(address) = edit_address {
+                state.emit_event(SpreadsheetEvent::Navigation(
+                    NavigationEvent::EditingEnded {
+                        address,
+                        committed: false,
+                    },
+                ));
+            }
 
             crate::util::refocus_workbook();
         }

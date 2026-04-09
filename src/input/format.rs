@@ -87,7 +87,8 @@ pub fn execute_format(
                 state,
                 EvaluationMode::Deferred,
                 |m| -> Result<(), FormatError> {
-                    let area = selection_area(m);
+                    // let area = selection_area(m);
+                    let area = m.selection();
                     let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);
                     m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
                         .map_err(FormatError::Engine)?;

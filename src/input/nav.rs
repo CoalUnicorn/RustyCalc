@@ -13,8 +13,7 @@ use crate::state::{ModelStore, WorkbookState};
 
 /// Helper to emit SelectionChanged event after navigation
 fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
-    let address =
-        model.with_value(|m: &ironcalc_base::UserModel<'static>| CellAddress::from_view(m));
+    let address = model.with_value(CellAddress::from_view);
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionChanged { address },
     ));
@@ -115,8 +114,7 @@ pub fn execute_nav(
         }
         NavAction::SwitchSheet(delta) => {
             let delta = *delta;
-            let previous_sheet =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_sheet());
+            let previous_sheet = model.with_value(|m| m.get_selected_sheet());
 
             try_mutate(
                 model,
@@ -139,8 +137,7 @@ pub fn execute_nav(
                 },
             )?;
 
-            let new_sheet =
-                model.with_value(|m: &ironcalc_base::UserModel<'static>| m.get_selected_sheet());
+            let new_sheet = model.with_value(|m| m.get_selected_sheet());
             if previous_sheet != new_sheet {
                 state.emit_event(SpreadsheetEvent::Navigation(
                     NavigationEvent::ActiveSheetChanged {

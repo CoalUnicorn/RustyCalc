@@ -1,12 +1,16 @@
 use ironcalc_base::{
+    expressions::types::Area,
     types::{CellType, HorizontalAlignment, VerticalAlignment},
     worksheet::NavigationDirection,
     UserModel,
 };
 
-use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
 use crate::coord::{CellAddress, CellArea};
 use crate::model::frontend_types::*;
+use crate::{
+    canvas::geometry::{LAST_COLUMN, LAST_ROW},
+    coord::SheetArea,
+};
 
 pub trait FrontendModel {
     // Query
@@ -40,6 +44,7 @@ pub trait FrontendModel {
     /// Position of the active cell.
     fn active_cell(&self) -> CellAddress;
 
+    fn selection(&self) -> Area;
     /// Frozen pane state for the active sheet.
     fn frozen_panes(&self) -> FrozenPanes;
 
@@ -277,6 +282,13 @@ impl FrontendModel for UserModel<'_> {
             row: view.row,
             column: view.column,
         }
+    }
+
+    // TODO: rename this returns ironcalc Area type
+    // atm only added to input/format.rs:91
+    // below is selection_area returns CellArea
+    fn selection(&self) -> Area {
+        SheetArea::from_view(self).to_ironcalc_area()
     }
 
     fn frozen_panes(&self) -> FrozenPanes {

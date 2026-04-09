@@ -93,7 +93,7 @@ pub fn execute_struct(
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         }
         StructAction::InsertRows => {
-            let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+            let loc = model.with_value(|m| {
                 let area = CellArea::from_model(m).normalized();
                 Location::new(m.get_selected_sheet(), area.r1, area.height())
             });
@@ -115,7 +115,7 @@ pub fn execute_struct(
             )));
         }
         StructAction::InsertColumns => {
-            let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+            let loc = model.with_value(|m| {
                 let area = CellArea::from_model(m).normalized();
                 Location::new(m.get_selected_sheet(), area.c1, area.width())
             });
@@ -137,7 +137,7 @@ pub fn execute_struct(
             ));
         }
         StructAction::DeleteRows => {
-            let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+            let loc = model.with_value(|m| {
                 let area = CellArea::from_model(m).normalized();
                 Location::new(m.get_selected_sheet(), area.r1, area.height())
             });
@@ -159,7 +159,7 @@ pub fn execute_struct(
             )));
         }
         StructAction::DeleteColumns => {
-            let loc = model.with_value(|m: &ironcalc_base::UserModel<'static>| {
+            let loc = model.with_value(|m| {
                 let area = CellArea::from_model(m).normalized();
                 Location::new(m.get_selected_sheet(), area.c1, area.width())
             });

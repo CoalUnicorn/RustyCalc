@@ -1,3 +1,6 @@
+// TODO:
+// When finished add validation/highlighting from `formula_bar.rs`
+
 use leptos::html;
 use leptos::prelude::*;
 

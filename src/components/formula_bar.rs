@@ -5,10 +5,9 @@ use leptos_use::{use_debounce_fn, use_throttle_fn};
 use wasm_bindgen::JsCast;
 
 use crate::canvas::col_name;
-use crate::coord::CellAddress;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
-use crate::state::{EditFocus, EditMode};
 use crate::model::FrontendModel;
+use crate::state::{EditFocus, EditMode};
 use crate::state::{EditingCell, ModelStore, WorkbookState};
 
 /// The formula bar: cell address label + content/formula input.
@@ -143,17 +142,16 @@ pub fn FormulaBar() -> impl IntoView {
         } else {
             // First keystroke - Accept mode: arrows commit + navigate.
             model.with_value(|m| {
-                let ac = m.active_cell();
+                let address = m.active_cell(); //CellAddress::from_view(m);
                 state.editing_cell.set(Some(EditingCell {
-                    address: CellAddress {
-                        sheet: ac.sheet,
-                        row: ac.row,
-                        column: ac.column,
-                    },
+                    address,
                     text: value.clone(),
                     mode: EditMode::Accept,
                     focus: EditFocus::FormulaBar,
                 }));
+                state.emit_event(SpreadsheetEvent::Navigation(
+                    NavigationEvent::EditingStarted { address },
+                ));
             });
         }
 

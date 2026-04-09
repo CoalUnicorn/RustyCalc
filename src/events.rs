@@ -83,7 +83,6 @@ pub enum SpreadsheetEvent {
 }
 
 /// Cell content, formulas, and calculation results changed
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum ContentEvent {
     /// A specific cell's content changed. `old_value`/`new_value` are `None`
@@ -96,34 +95,23 @@ pub enum ContentEvent {
     /// A range of cells changed (bulk operations)
     RangeChanged { sheet_area: SheetArea },
     /// Formula in a cell was modified
+    #[allow(dead_code)]
     FormulaChanged { address: CellAddress },
     /// Calculation chain updated (dependent cells recalculated)
+    #[allow(dead_code)]
     CalculationUpdated { affected_sheets: Vec<u32> },
     /// Named range definitions changed
+    #[allow(dead_code)]
     NamedRangesChanged,
     /// Generic content change (legacy compatibility)
     GenericChange,
 }
 
-#[allow(dead_code)]
-impl ContentEvent {
-    pub fn affected_sheet(&self) -> Option<u32> {
-        match self {
-            ContentEvent::CellChanged { address, .. } => Some(address.sheet),
-            ContentEvent::RangeChanged { sheet_area } => Some(sheet_area.sheet),
-            ContentEvent::FormulaChanged { address } => Some(address.sheet),
-            ContentEvent::CalculationUpdated { .. }
-            | ContentEvent::NamedRangesChanged
-            | ContentEvent::GenericChange => None,
-        }
-    }
-}
-
 /// Visual formatting and styling changes
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum FormatEvent {
     /// Cell styling changed (font, colors, borders)
+    #[allow(dead_code)]
     CellStyleChanged { address: CellAddress },
     /// Range styling changed (bulk formatting)
     RangeStyleChanged { area: SheetArea },
@@ -136,23 +124,11 @@ pub enum FormatEvent {
     /// Recent colors list updated
     RecentColorsUpdated { colors: Vec<String> },
     /// Document colors extracted/changed
+    #[allow(dead_code)]
     DocumentColorsChanged { colors: Vec<String> },
     /// Conditional formatting rules changed
+    #[allow(dead_code)]
     ConditionalFormattingChanged { sheet: u32 },
-}
-
-impl FormatEvent {
-    pub fn affected_sheet(&self) -> Option<u32> {
-        match self {
-            FormatEvent::CellStyleChanged { address } => Some(address.sheet),
-            FormatEvent::RangeStyleChanged { area } => Some(area.sheet),
-            FormatEvent::LayoutChanged { sheet, .. } => Some(*sheet),
-            FormatEvent::ConditionalFormattingChanged { sheet } => Some(*sheet),
-            FormatEvent::RecentColorsUpdated { .. } | FormatEvent::DocumentColorsChanged { .. } => {
-                None
-            }
-        }
-    }
 }
 
 /// The axis being modified in a header operation.
@@ -303,6 +279,7 @@ pub enum StructureEvent {
         old_name: String,
         new_name: String,
     },
+    #[allow(dead_code)]
     WorksheetsReordered,
     /// Rows or columns inserted/deleted
     StructureChanged(HeaderChange),
@@ -316,39 +293,20 @@ pub enum StructureEvent {
 }
 
 impl StructureEvent {
-    /// Convenience constructor for row insertion
     pub fn rows_inserted(location: Location) -> Self {
         Self::StructureChanged(HeaderChange::insert_rows(location))
     }
 
-    /// Convenience constructor for row deletion
     pub fn rows_deleted(location: Location) -> Self {
         Self::StructureChanged(HeaderChange::delete_rows(location))
     }
 
-    /// Convenience constructor for column insertion
     pub fn columns_inserted(location: Location) -> Self {
         Self::StructureChanged(HeaderChange::insert_columns(location))
     }
 
-    /// Convenience constructor for column deletion
     pub fn columns_deleted(location: Location) -> Self {
         Self::StructureChanged(HeaderChange::delete_columns(location))
-    }
-
-    pub fn affected_sheet(&self) -> Option<u32> {
-        match self {
-            StructureEvent::WorkbookSwitched { .. }
-            | StructureEvent::WorkbookDeleted { .. }
-            | StructureEvent::WorkbookCreated { .. } => None,
-            StructureEvent::WorksheetAdded { sheet, .. } => Some(*sheet),
-            StructureEvent::WorksheetDeleted { sheet } => Some(*sheet),
-            StructureEvent::WorksheetRenamed { sheet, .. } => Some(*sheet),
-            StructureEvent::StructureChanged(c) => Some(c.sheet),
-            StructureEvent::WorksheetsReordered => None,
-            StructureEvent::WorksheetHidden { sheet } => Some(*sheet),
-            StructureEvent::WorksheetUnhidden { sheet, .. } => Some(*sheet),
-        }
     }
 }
 
@@ -376,29 +334,14 @@ pub enum NavigationEvent {
     },
 }
 
-#[allow(dead_code)]
-impl NavigationEvent {
-    pub fn affected_sheet(&self) -> Option<u32> {
-        match self {
-            NavigationEvent::SelectionChanged { address } => Some(address.sheet),
-            NavigationEvent::SelectionRangeChanged { sheet_area } => Some(sheet_area.sheet),
-            NavigationEvent::ViewportScrolled { sheet, .. } => Some(*sheet),
-            // Only the destination sheet is considered affected by a sheet switch.
-            NavigationEvent::ActiveSheetChanged { to_sheet, .. } => Some(*to_sheet),
-            NavigationEvent::EditingStarted { address } => Some(address.sheet),
-            NavigationEvent::EditingEnded { address, .. } => Some(address.sheet),
-        }
-    }
-}
-
 /// Theme and appearance changes.
-#[allow(dead_code)]
 #[derive(Clone, PartialEq, Debug)]
 pub enum ThemeEvent {
     /// The active theme changed (Auto / Light / Dark cycle).
     ThemeToggled { new_theme: Theme },
     /// The color palette was modified.
+    #[allow(dead_code)]
     PaletteUpdated,
-    /// FIXME: This needs its own place - language/locale changed.
+    #[allow(dead_code)]
     LocaleChanged { new_locale: String },
 }
