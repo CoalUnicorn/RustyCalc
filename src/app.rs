@@ -1,3 +1,4 @@
+use crate::components::left_drawer::LeftDrawer;
 use crate::components::workbook::Workbook;
 
 use leptos::prelude::*;
@@ -77,6 +78,7 @@ pub fn App() -> impl IntoView {
 
     view! {
         <div id="app">
+            <LeftDrawer />
             <Workbook />
         </div>
     }

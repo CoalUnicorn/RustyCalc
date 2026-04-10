@@ -1,9 +1,9 @@
 pub mod cell_editor;
-pub mod left_drawer;
 pub mod color_picker;
 pub mod context_menu;
 pub mod file_bar;
 pub mod formula_bar;
+pub mod left_drawer;
 pub mod perf_panel;
 pub mod sheet_tab_bar;
 pub mod toolbar;

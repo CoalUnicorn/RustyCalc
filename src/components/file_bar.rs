@@ -35,6 +35,8 @@ pub fn FileBar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
+    // Sidebar
+    let on_sidebar = move |_| state.sidebar_open.set(!state.sidebar_open.get_untracked());
     // File menu - owned signals + button anchor ref for positioning.
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
@@ -141,6 +143,11 @@ pub fn FileBar() -> impl IntoView {
 
     view! {
         <div class="file-bar">
+            <button
+            on:click=on_sidebar
+            >
+                "<"
+            </button>
             // Hidden file picker - triggered programmatically by Import item.
             <input
                 type="file"
