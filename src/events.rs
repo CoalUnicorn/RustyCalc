@@ -32,6 +32,7 @@ Effect::new(move |_| {
 use leptos::prelude::*;
 
 use crate::coord::{CellAddress, SheetArea};
+use crate::model::CssColor;
 use crate::theme::Theme;
 
 /// Per-category event signals.
@@ -122,10 +123,10 @@ pub enum FormatEvent {
         row: Option<i32>,
     },
     /// Recent colors list updated
-    RecentColorsUpdated { colors: Vec<String> },
+    RecentColorsUpdated { colors: Vec<CssColor> },
     /// Document colors extracted/changed
     #[allow(dead_code)]
-    DocumentColorsChanged { colors: Vec<String> },
+    DocumentColorsChanged { colors: Vec<CssColor> },
     /// Conditional formatting rules changed
     #[allow(dead_code)]
     ConditionalFormattingChanged { sheet: u32 },

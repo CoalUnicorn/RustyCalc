@@ -122,7 +122,7 @@ pub fn execute_struct(
         }
         StructAction::InsertRows => {
             let loc = model.with_value(|m| {
-                let area = CellArea::from_model(m).normalized();
+                let area = CellArea::from_view(m).normalized();
                 Location::new(m.get_selected_sheet(), area.r1, area.height())
             });
 
@@ -130,7 +130,7 @@ pub fn execute_struct(
                 model,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let area = CellArea::from_model(m).normalized();
+                    let area = CellArea::from_view(m).normalized();
                     m.insert_rows(m.get_selected_sheet(), area.r1, area.height())
                         .map_err(StructError::Engine)?;
                     Ok(())
@@ -143,7 +143,7 @@ pub fn execute_struct(
         }
         StructAction::InsertColumns => {
             let loc = model.with_value(|m| {
-                let area = CellArea::from_model(m).normalized();
+                let area = CellArea::from_view(m).normalized();
                 Location::new(m.get_selected_sheet(), area.c1, area.width())
             });
 
@@ -151,7 +151,7 @@ pub fn execute_struct(
                 model,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let area = CellArea::from_model(m).normalized();
+                    let area = CellArea::from_view(m).normalized();
                     m.insert_columns(m.get_selected_sheet(), area.c1, area.width())
                         .map_err(StructError::Engine)?;
                     Ok(())
@@ -164,7 +164,7 @@ pub fn execute_struct(
         }
         StructAction::DeleteRows => {
             let loc = model.with_value(|m| {
-                let area = CellArea::from_model(m).normalized();
+                let area = CellArea::from_view(m).normalized();
                 Location::new(m.get_selected_sheet(), area.r1, area.height())
             });
 
@@ -172,7 +172,7 @@ pub fn execute_struct(
                 model,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let area = CellArea::from_model(m).normalized();
+                    let area = CellArea::from_view(m).normalized();
                     m.delete_rows(m.get_selected_sheet(), area.r1, area.height())
                         .map_err(StructError::Engine)?;
                     Ok(())
@@ -185,7 +185,7 @@ pub fn execute_struct(
         }
         StructAction::DeleteColumns => {
             let loc = model.with_value(|m| {
-                let area = CellArea::from_model(m).normalized();
+                let area = CellArea::from_view(m).normalized();
                 Location::new(m.get_selected_sheet(), area.c1, area.width())
             });
 
@@ -193,7 +193,7 @@ pub fn execute_struct(
                 model,
                 EvaluationMode::Immediate,
                 |m| -> Result<(), StructError> {
-                    let area = CellArea::from_model(m).normalized();
+                    let area = CellArea::from_view(m).normalized();
                     m.delete_columns(m.get_selected_sheet(), area.c1, area.width())
                         .map_err(StructError::Engine)?;
                     Ok(())

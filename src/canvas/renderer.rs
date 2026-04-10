@@ -1000,12 +1000,7 @@ impl CanvasRenderer {
             model,
             sheet,
             frozen,
-            CellArea::from_model(model).normalized(), // SheetRange {
-                                                      //     row_min: r1.min(r2),
-                                                      //     col_min: c1.min(c2),
-                                                      //     row_max: r1.max(r2),
-                                                      //     col_max: c1.max(c2),
-                                                      // },
+            CellArea::from_view(model).normalized(),
         );
 
         let ctx = &self.ctx;
@@ -1058,7 +1053,7 @@ impl CanvasRenderer {
         frozen: FrozenOffset,
         target: AutofillTarget,
     ) {
-        let sel = CellArea::from_model(model).normalized();
+        let sel = CellArea::from_view(model).normalized();
         let range = CellArea {
             r1: sel.r1.min(target.row),
             c1: sel.c1.min(target.col),

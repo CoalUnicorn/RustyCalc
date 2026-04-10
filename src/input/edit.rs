@@ -127,12 +127,12 @@ pub fn execute_edit(
                 let nav_address = model.with_value(CellAddress::from_view);
                 state.emit_events(vec![
                     SpreadsheetEvent::Content(ContentEvent::CellChanged {
-                        address: CellAddress::from_editing(&edit),
+                        address: model.with_value(|m| m.active_cell()),
                         old_value: None,
                         new_value: Some(edit.text.clone()),
                     }),
                     SpreadsheetEvent::Navigation(NavigationEvent::EditingEnded {
-                        address: CellAddress::from_editing(&edit),
+                        address: model.with_value(|m| m.active_cell()),
                         committed: true,
                     }),
                     SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged {

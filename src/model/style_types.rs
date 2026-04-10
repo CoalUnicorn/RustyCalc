@@ -111,7 +111,6 @@ impl HexColor {
         &self.0
     }
 
-    /// Returns true if this represents a transparent color.
     pub fn is_transparent(&self) -> bool {
         self.0.is_empty()
     }
@@ -183,7 +182,6 @@ pub enum BooleanValue {
 }
 
 impl BooleanValue {
-    /// Creates from a Rust boolean.
     pub fn from_bool(value: bool) -> Self {
         if value {
             Self::True
@@ -200,7 +198,6 @@ impl BooleanValue {
         }
     }
 
-    /// Returns the Rust boolean value.
     pub fn as_bool(&self) -> bool {
         matches!(self, Self::True)
     }

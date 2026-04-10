@@ -356,7 +356,7 @@ pub fn Worksheet() -> impl IntoView {
         // Commit autofill if active, then reset drag state unconditionally.
         if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
             mutate(model, EvaluationMode::Immediate, |m| {
-                let norm = CellArea::from_model(m).normalized();
+                let norm = CellArea::from_view(m).normalized();
                 let area = norm.to_area(m.get_selected_sheet());
 
                 if to_row < norm.r1 || to_row > norm.r2 {

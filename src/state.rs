@@ -398,11 +398,11 @@ impl WorkbookState {
             colors.truncate(16);
         });
 
-        // Convert to Vec<String> for storage and event (same JSON representation)
-        let string_colors: Vec<String> = self
+        // Convert to Vec<CssColor> for storage and event (same JSON representation)
+        let string_colors: Vec<CssColor> = self
             .recent_colors
-            .with_untracked(|colors| colors.iter().map(|c| c.as_str().to_owned()).collect());
-        <gloo_storage::LocalStorage as GlooStorage>::set("ironcalc_recent_colors", &string_colors)
+            .with_untracked(|colors| colors.iter().map(|c| c.to_owned()).collect());
+        <gloo_storage::LocalStorage as GlooStorage>::set("rustycalc_recent_colors", &string_colors)
             .ok();
 
         // Emit event for reactive subscribers

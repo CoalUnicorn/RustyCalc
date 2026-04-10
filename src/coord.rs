@@ -1,9 +1,7 @@
 use ironcalc_base::{expressions::types::Area, UserModel};
 
-use crate::state::EditingCell;
-
 // SheetArea
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SheetArea {
     pub sheet: u32,
     pub area: CellArea,
@@ -24,17 +22,10 @@ impl SheetArea {
         }
     }
 
-    pub fn from_address(addr: CellAddress) -> Self {
-        SheetArea {
-            sheet: addr.sheet,
-            area: CellArea::from_cell(addr.row, addr.column),
-        }
-    }
-
     pub fn from_view(model: &UserModel) -> Self {
         Self {
             sheet: model.get_selected_sheet(),
-            area: CellArea::from_model(model),
+            area: CellArea::from_view(model),
         }
     }
 
@@ -49,8 +40,8 @@ impl SheetArea {
         self.sheet == other.sheet
     }
 
-    pub fn to_ironcalc_area(&self) -> Area {
-        CellArea::to_area(self.area, self.sheet)
+    pub fn to_ironcalc_area(self) -> Area {
+        self.area.to_area(self.sheet)
     }
 }
 
@@ -115,7 +106,7 @@ impl CellArea {
         SheetArea { sheet, area: self }
     }
 
-    pub fn from_model(model: &UserModel) -> Self {
+    pub fn from_view(model: &UserModel) -> Self {
         Self::from(model.get_selected_view().range)
     }
 
@@ -207,15 +198,6 @@ impl CellAddress {
             sheet: m.sheet,
             row: m.row,
             column: m.column,
-        }
-    }
-
-    /// Read the address from an in-progress [`EditingCell`].
-    pub fn from_editing(cell: &EditingCell) -> Self {
-        Self {
-            sheet: cell.address.sheet,
-            row: cell.address.row,
-            column: cell.address.column,
         }
     }
 
