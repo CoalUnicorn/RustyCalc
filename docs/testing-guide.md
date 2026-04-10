@@ -1,6 +1,6 @@
 # Testing Guide
 
-RustyCalc uses `wasm-pack test` for browser-based testing since the codebase is WebAssembly-focused. This guide covers how to write, organize, and run tests effectively.
+RustyCalc uses `wasm-pack test` for browser-based testing. Tests run in a real browser with full DOM, LocalStorage, and Canvas 2D access.
 
 ## Test Setup and Running
 
@@ -24,13 +24,6 @@ wasm-pack test --firefox
 # Run specific test
 wasm-pack test --headless --firefox -- --test test_name
 ```
-
-### Test Environment
-Tests run in a real browser environment with:
-- Full DOM access via `web-sys`
-- LocalStorage available
-- Canvas 2D context available
-- WebAssembly runtime
 
 ## Test Structure
 
@@ -248,7 +241,7 @@ fn mutate_uses_single_evaluation() {
     let (model, state) = test_harness();
     
     // This should not cause double evaluation
-    mutate(model, &state, EvaluationMode::Immediate, |m| {
+    mutate(model, EvaluationMode::Immediate, |m| {
         warn_if_err(m.set_cell_value(1, 1, 1, "test"), "test");
     });
     
@@ -308,17 +301,7 @@ fn debug_test() {
 
 ### EventBus timing log
 
-In debug builds, every `state.emit_event()` / `emit_events()` call logs to the console:
-
-```
-[EventBus] +    12.34ms  Content::GenericChange
-[EventBus] +     0.08ms  Navigation::SelectionChanged row=2 col=1
-```
-
-The prefix is `[EventBus]` and the delta shows milliseconds since the previous event. This is automatically active in `trunk serve` (debug mode) and suppressed in `--release` builds. Use it to:
-- Confirm an event fires after a mutation (if nothing logs, the emit wasn't reached)
-- Spot unexpected extra events (e.g. two `Content::GenericChange` in a row suggests a missing `emit_events()` batch)
-- Time the gap between a user action and the resulting events
+Debug event logging is wired into `emit_events()` but currently commented out. Uncomment the `leptos::logging::log!` call in `state.rs` to see per-event timestamps in the browser console. See [performance-evaluation.md](performance-evaluation.md) for details.
 
 ### Test Isolation
 If tests interfere with each other:
@@ -402,9 +385,7 @@ fn drag_state_transitions() {
 fn mutate_prevents_double_evaluation() {
     let (model, state) = test_harness();
     
-    // This pattern should use pause/resume internally
-    mutate(model, &state, EvaluationMode::Immediate, |m| {
-        // Multiple operations that normally would evaluate
+    mutate(model, EvaluationMode::Immediate, |m| {
         warn_if_err(m.set_cell_value(1, 1, 1, "=A1"), "set_formula");
         warn_if_err(m.set_cell_value(1, 2, 1, "test"), "set_value");
     });
@@ -432,6 +413,3 @@ Planned testing enhancements:
 - End-to-end user interaction tests
 - Accessibility testing
 
----
-
-This testing guide ensures RustyCalc maintains high quality while preserving the excellent type safety and performance characteristics of the codebase.

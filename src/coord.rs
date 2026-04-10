@@ -1,6 +1,13 @@
+//! Shared coordinate primitives for cell ranges and addresses.
+//!
+//! All indices are 1-based, matching ironcalc conventions.
+//! ironcalc boundary types (`Area`, `ClipboardTuple`, `SelectedView.range`)
+//! are converted at the edges via `to_ironcalc_area()`, `as_tuple()`, and
+//! `From<[i32; 4]>` — they never leak past the `FrontendModel` trait.
+
 use ironcalc_base::{expressions::types::Area, UserModel};
 
-// SheetArea
+/// A cell range pinned to a specific sheet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SheetArea {
     pub sheet: u32,
@@ -45,9 +52,7 @@ impl SheetArea {
     }
 }
 
-// CellArea
-
-/// An axis-aligned cell range in ironcalc 1-based sheet coordinates.
+/// Axis-aligned cell range. 1-based sheet coordinates.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct CellArea {
     pub r1: i32,
@@ -110,8 +115,7 @@ impl CellArea {
         Self::from(model.get_selected_view().range)
     }
 
-    /// Return a new rect with the trailing corner (r2, c2) moved one step in
-    /// the arrow-key direction. The anchor (r1, c1) is preserved. Clamps at 1.
+    /// Move trailing corner one step in the arrow direction. Anchor preserved. Clamps at 1.
     pub fn extend_trailing(self, key: &str) -> Self {
         let (r2, c2) = match key {
             "ArrowDown" => (self.r2 + 1, self.c2),
@@ -128,11 +132,8 @@ impl CellArea {
         }
     }
 
-    /// Clipboard
-    /// Returns `(row_tiles, col_tiles)` if `src` tiles exactly into `self`
-    /// with no remainder, or `None` if any dimension isn't an exact multiple.
-    ///
-    /// A 1×1 source always divides evenly, so it tiles into any destination.
+    /// Returns `(row_tiles, col_tiles)` if `src` tiles exactly into `self`,
+    /// or `None` if any dimension has a remainder. A 1x1 source always tiles.
     pub fn tile_reps_of(self, src: CellArea) -> Option<(i32, i32)> {
         let row_reps = self.height() / src.height();
         let col_reps = self.width() / src.width();
@@ -142,12 +143,10 @@ impl CellArea {
         (fills_exactly && dst_is_larger).then_some((row_reps, col_reps))
     }
 
-    /// Convert to the `(r1, c1, r2, c2)` tuple the ironcalc API expects.
     pub(crate) fn as_tuple(self) -> (i32, i32, i32, i32) {
         (self.r1, self.c1, self.r2, self.c2)
     }
 
-    /// Convert to an ironcalc `Area` (top-left origin + dimensions) on the given sheet.
     pub fn to_area(self, sheet: u32) -> Area {
         Area {
             sheet,
@@ -182,7 +181,7 @@ impl From<CellArea> for [i32; 4] {
     }
 }
 
-/// Sheet-relative cell address. All indices are 1-based.
+/// Single cell position on a sheet. 1-based indices.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellAddress {
     pub sheet: u32,
@@ -191,7 +190,6 @@ pub struct CellAddress {
 }
 
 impl CellAddress {
-    /// Read the address from the model's current selected view.
     pub fn from_view(model: &UserModel<'static>) -> Self {
         let m = model.get_selected_view();
         Self {
@@ -205,7 +203,6 @@ impl CellAddress {
         self.sheet == sheet
     }
 
-    /// Wrap this address as a 1×1 [`SheetArea`].
     pub fn to_sheet_area(self) -> SheetArea {
         SheetArea {
             sheet: self.sheet,

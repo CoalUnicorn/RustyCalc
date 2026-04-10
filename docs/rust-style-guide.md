@@ -72,9 +72,8 @@ pub enum DragState {
     Idle,
     Selecting,
     Extending { to_row: i32, to_col: i32 },
-    /// Formula point-mode: range the user is actively selecting, plus the
-    /// text span it occupies in the formula bar so it can be spliced in place.
-    Pointing { range: SheetRect, ref_span: (usize, usize) },
+    /// Formula point-mode: highlighted range + byte span in formula text.
+    Pointing { range: CellArea, ref_span: (usize, usize) },
     ResizingCol { col: i32, x: f64 },
 }
 
@@ -322,16 +321,15 @@ let on_click = move |_| {
 };
 ```
 
-Use `state.request_redraw()` (emits `ContentEvent::GenericChange`) only when no
-specific event applies - e.g. after a viewport resize or canvas-only repaint.
-For model mutations, always prefer the typed event so subscribers can filter by
-category.
+Emit `Content(GenericChange)` only when no specific event applies — e.g. after a
+viewport resize or canvas-only repaint. For model mutations, prefer a typed event
+so subscribers can filter by category.
 
 ## Examples from the Codebase
 
 These patterns come from actual RustyCalc code:
 
-- Domain types: `CssColor`, `SafeFontFamily`, `ActiveCell`, `FrozenPanes`
+- Domain types: `CssColor`, `SafeFontFamily`, `CellAddress`, `CellArea`, `SheetArea`, `FrozenPanes`
 - State enums: `EditMode`, `EditFocus`, `DragState`, `ArrowKey`  
 - Parse-don't-validate: `CssColor::new()`, `SafeFontFamily::from()`
 - Data-driven enums: `SafeFontFamily::names()` with single match block
@@ -339,4 +337,3 @@ These patterns come from actual RustyCalc code:
 - Error utilities: `warn_if_err()`, storage error logging
 - Module organization: `canvas::geometry`, `input::action`, `components::*`
 
-Following these patterns helps catch bugs at compile time and makes the code easier to maintain.

@@ -23,22 +23,14 @@ fn is_whole_sheet_selected(area: &ironcalc_base::expressions::types::Area) -> bo
 /// Formatting mutations applied to the current selection.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FormatAction {
-    /// Ctrl+B: toggle bold on the selected range.
     ToggleBold,
-    /// Ctrl+I: toggle italic on the selected range.
     ToggleItalic,
-    /// Ctrl+U: toggle underline on the selected range.
     ToggleUnderline,
-    /// Toggle strikethrough on the selected range.
     ToggleStrikethrough,
-    /// Set font size (in points) on the selected range.
     /// Clamped to 1–409 in `execute_format()`.
     SetFontSize(f64),
-    /// Set font family on the selected range.
     SetFontFamily(SafeFontFamily),
-    /// Set text (font) color. `HexColor::transparent()` resets to automatic.
     SetTextColor(HexColor),
-    /// Set cell background fill color. `HexColor::transparent()` clears the fill.
     SetBackgroundColor(HexColor),
 }
 

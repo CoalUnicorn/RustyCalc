@@ -1,8 +1,7 @@
-# Building Components in RustyCalc
+# Building Components
 
-Practical guide for writing, debugging, and structuring Leptos components in this codebase. Covers patterns we've settled on after hitting real compiler errors and rendering bugs.
-
-See also: [leptos-patterns.md](leptos-patterns.md) for the reactive model and signal conventions.
+Patterns for writing and debugging Leptos components in RustyCalc.
+See also: [leptos-patterns.md](leptos-patterns.md) for reactivity and signal conventions.
 
 ## Starting a new component
 
@@ -149,7 +148,7 @@ Pick the category that matches what can change the value you're reading:
 | Column widths, row heights, fonts | `state.events.format.get()` |
 | Sheet list, row/col counts | `state.events.structure.get()` |
 | Active cell, selected sheet | `state.events.navigation.get()` |
-| Edit mode, drag state | `state.events.mode.get()` |
+| Light/dark theme | `state.events.theme.get()` |
 
 Forgetting to subscribe is the #1 staleness bug: the closure runs once at mount and never updates. If a value is stale after clicking or typing, check this first.
 
@@ -157,26 +156,26 @@ Subscribing to more categories than necessary causes extra re-renders. A compone
 
 ## Mutating the model
 
-All model mutations go through the `mutate` / `try_mutate` helpers in `src/input/helpers.rs`. These wrap `pause_evaluation` / `resume_evaluation` automatically so formulas never evaluate twice per keystroke.
+All model mutations go through `mutate` / `try_mutate` in `src/model/frontend_model.rs`. These wrap `pause_evaluation` / `resume_evaluation` so formulas never evaluate twice per keystroke.
 
 ```rust
-use crate::input::helpers::{mutate, try_mutate, EvaluationMode};
+use crate::model::{mutate, try_mutate, EvaluationMode};
 
 // Infallible (navigation, UI state):
-mutate(model, &state, EvaluationMode::Deferred, |m| {
+mutate(model, EvaluationMode::Deferred, |m| {
     m.set_frozen_rows_count(sheet, 0);
 });
 
 // Fallible (cell writes, structural changes):
 warn_if_err(
-    try_mutate(model, &state, EvaluationMode::Immediate, |m| {
+    try_mutate(model, EvaluationMode::Immediate, |m| {
         m.insert_columns(sheet, col, 1).map_err(TabError::Engine)
     }),
     "insert_columns",
 );
 ```
 
-`EvaluationMode::Immediate` calls `evaluate()` once after the closure - use it when the mutation can affect formula results (cell edits, row/col insert/delete, paste). `EvaluationMode::Deferred` skips evaluation - use it for navigation, formatting, and UI-only changes.
+`EvaluationMode::Immediate` calls `evaluate()` once after the closure — use when the mutation affects formula results (cell edits, row/col insert/delete, paste). `EvaluationMode::Deferred` skips evaluation — use for navigation, formatting, and UI-only changes.
 
 After the mutation, emit the right typed event (see `events.rs`):
 
@@ -185,10 +184,6 @@ state.emit_event(SpreadsheetEvent::Structure(
     StructureEvent::columns_inserted(Location::new(sheet, col, 1)),
 ));
 ```
-
-`state.request_redraw()` is shorthand for `emit_event(Content(GenericChange))` - use it only when no specific event applies.
-
-After edits that should return keyboard focus to the grid:
 
 After edits that should return keyboard focus to the grid:
 
@@ -269,7 +264,7 @@ For menus attached to a bottom bar (e.g. sheet tabs), pass `above_anchor=true`. 
 Headers sit inside the canvas area where there are no scrollable wrappers, so a standard right-click menu works without any extra considerations. A full header context menu sub-component looks like:
 
 ```rust
-use crate::input::helpers::{try_mutate, EvaluationMode};
+use crate::model::{try_mutate, EvaluationMode};
 
 #[component]
 fn ColHeaderMenu(col: i32) -> impl IntoView {
@@ -288,7 +283,7 @@ fn ColHeaderMenu(col: i32) -> impl IntoView {
     let on_insert = move || {
         let sheet = model.with_value(|m| m.get_selected_view().sheet);
         warn_if_err(
-            try_mutate(model, &state, EvaluationMode::Immediate, |m| {
+            try_mutate(model, EvaluationMode::Immediate, |m| {
                 m.insert_columns(sheet, col, 1).map_err(|e| e.to_string())
             }),
             "insert_columns",
@@ -302,7 +297,7 @@ fn ColHeaderMenu(col: i32) -> impl IntoView {
     let on_delete = move || {
         let sheet = model.with_value(|m| m.get_selected_view().sheet);
         warn_if_err(
-            try_mutate(model, &state, EvaluationMode::Immediate, |m| {
+            try_mutate(model, EvaluationMode::Immediate, |m| {
                 m.delete_columns(sheet, col, 1).map_err(|e| e.to_string())
             }),
             "delete_columns",
@@ -477,7 +472,7 @@ WASM panics show as `unreachable` in the browser console with a cryptic stack tr
 If a component renders stale data:
 
 1. Verify the closure subscribes to the right `state.events` signal (e.g. `let _ = state.events.content.get();`). The category must match what the mutation emits.
-2. Verify the mutation calls `state.emit_event(...)` (or `state.request_redraw()`) after `model.update_value`.
+2. Verify the mutation calls `state.emit_event(...)` after `mutate`/`try_mutate`.
 3. Check if you're reading with `get_untracked()` when you meant `get()` (untracked reads don't subscribe).
 
 ## File checklist for a new component

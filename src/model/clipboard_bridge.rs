@@ -1,9 +1,5 @@
-//! Bridge between the webapp and `ironcalc_base`'s `pub(crate)` clipboard
-//! and border internals - without modifying the base crate.
-//!
-//! Both [`Clipboard`] and [`BorderArea`] have `pub(crate)` fields but derive
-//! `Serialize + Deserialize`, so we serde-roundtrip once at construction time
-//! to extract/inject the data we need.
+//! Serde-roundtrip bridge to access `ironcalc_base`'s `pub(crate)`
+//! clipboard and border fields without modifying the base crate.
 
 use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::{BorderArea, ClipboardData, UserModel};
@@ -13,29 +9,18 @@ use crate::coord::CellArea;
 use super::frontend_model::FrontendModel;
 use serde::{Deserialize, Serialize};
 
-// PasteMode
-
-/// Whether a paste operation originates from a copy or a cut.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PasteMode {
     Copy,
     Cut,
 }
 
-// AppClipboard
-
-/// Webapp-owned mirror of `ironcalc_base::Clipboard` with public fields.
-///
-/// Created once at copy-time via [`AppClipboard::capture`]; the serde
-/// round-trip cost is negligible compared to the user-initiated Ctrl+C.
+/// Public mirror of `ironcalc_base::Clipboard`. Created at copy-time
+/// via `capture()`; serde round-trip extracts the `pub(crate)` fields.
 pub struct AppClipboard {
-    /// Tab-separated text for the OS clipboard API.
     pub csv: String,
-    /// Source sheet index (0-based).
     pub sheet: u32,
-    /// Copied cell range (1-based).
     pub range: CellArea,
-    /// Opaque cell data - passed back to `paste_from_clipboard`.
     data: ClipboardData,
 }
 
@@ -45,7 +30,6 @@ struct ClipboardMirror {
     csv: String,
     data: ClipboardData,
     sheet: u32,
-    /// ironcalc serialises this as a `(r1, c1, r2, c2)` tuple.
     range: (i32, i32, i32, i32),
 }
 
@@ -58,7 +42,6 @@ impl AppClipboard {
     /// directly, since it's not re-exported from `ironcalc_base`.
     ///
     /// # Panics
-    /// Only if the base crate changes `Clipboard`'s serialization shape.
     pub fn capture(clipboard: &impl serde::Serialize) -> Self {
         let json = serde_json::to_value(clipboard).expect("Clipboard must be serializable");
         let m: ClipboardMirror =
@@ -71,12 +54,8 @@ impl AppClipboard {
         }
     }
 
-    /// Paste this clipboard into the model at the current selection.
-    ///
-    /// Tiling rules (matching Excel / Google Sheets behaviour):
-    /// - **Exact multiples** → tiles the source to fill the destination.
-    /// - **Non-multiple destination** → pastes once from the top-left corner.
-    /// - **Cut** → never tiles; always pastes once.
+    /// Tiles source to fill destination if dimensions are exact multiples,
+    /// otherwise pastes once. Cut never tiles.
     pub fn paste(&self, model: &mut UserModel, mode: PasteMode) -> Result<(), String> {
         if mode == PasteMode::Cut {
             return model.paste_from_clipboard(self.sheet, self.range.as_tuple(), &self.data, true);
@@ -103,9 +82,6 @@ impl AppClipboard {
     }
 }
 
-// BorderArea construction
-
-/// Serde mirror matching `ironcalc_base::BorderArea`'s JSON shape.
 #[allow(dead_code)]
 #[derive(Serialize)]
 struct BorderAreaMirror {
@@ -113,8 +89,7 @@ struct BorderAreaMirror {
     r#type: BorderKind,
 }
 
-/// Local copy of `BorderType` with `Copy` (upstream lacks it).
-/// Serializes to the same JSON strings as `ironcalc_base::BorderType`.
+/// Local `Copy` mirror of `ironcalc_base::BorderType`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub enum BorderKind {
@@ -130,7 +105,7 @@ pub enum BorderKind {
     None,
 }
 
-/// Construct a [`BorderArea`] without accessing its `pub(crate)` fields.
+/// Construct a `BorderArea` via serde roundtrip (fields are `pub(crate)`).
 #[allow(clippy::expect_used)]
 #[allow(dead_code)]
 pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<String>) -> BorderArea {

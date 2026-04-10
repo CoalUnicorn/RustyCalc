@@ -54,46 +54,55 @@ wasm-pack test --headless --firefox
 
 ```
 src/
+├── main.rs            Entry point (mounts App)
 ├── app.rs             Root component, context providers, auto-save
+├── coord.rs           CellAddress, CellArea, SheetArea - coordinate primitives
+├── events.rs          Typed event system (ContentEvent, FormatEvent, etc.)
+├── perf.rs            PerfTimings - commit→render pipeline timestamps
 ├── state.rs           WorkbookState - all UI signals
 ├── storage.rs         localStorage serialization
 ├── theme.rs           Light/dark theme, CanvasTheme, COLOR_PALETTE
 ├── util.rs            UUID generation, error logging, focus management
 ├── canvas/
 │   ├── geometry.rs    Pixel<->cell coordinate math
-│   └── renderer.rs    Canvas 2D drawing (grid, headers, selection, borders)
+│   ├── renderer.rs    Canvas 2D drawing (grid, headers, selection, borders)
+│   └── types.rs       CanvasLayout, CellRenderData, resolved cell styles
 ├── input/
 │   ├── action.rs      SpreadsheetAction wrapper enum, classify_key(), execute()
 │   ├── error.rs       Per-module error types (FormatError, NavError, EditError, StructError)
-│   ├── helpers.rs     mutate(), try_mutate(), EvaluationMode, selection_area(), selection_bounds()
 │   ├── nav.rs         NavAction - arrows, page, home/end, sheet switch
 │   ├── edit.rs        EditAction - start, commit, cancel cell editing
 │   ├── format.rs      FormatAction - bold, italic, font size/family
 │   ├── structure.rs   StructAction - delete, undo/redo, insert/delete rows/cols
-│   └── formula_input.rs  Formula point-mode helpers (pure string ops)
+│   ├── formula_input.rs  Formula point-mode helpers (pure string ops)
+│   └── xlsx_io.rs     File import/export
 ├── components/
 │   ├── cell_editor.rs    Textarea overlay during cell editing
-│   ├── file_bar.rs       Theme toggle (more buttons planned)
+│   ├── color_picker.rs   Color palette + recent colors popup
+│   ├── context_menu.rs   Reusable right-click / button-triggered menu
+│   ├── file_bar.rs       Workbook management (new, open, save, import/export)
 │   ├── formula_bar.rs    Cell address + formula input
+│   ├── perf_panel.rs     Debug overlay for commit→render timing
 │   ├── sheet_tab_bar.rs  Sheet tabs with rename, color, hide/delete, context menus
 │   ├── toolbar.rs        Undo/redo, font family/size, B/I/U/S, freeze panes
 │   ├── workbook.rs       Top-level layout + keyboard dispatch
 │   └── worksheet.rs      Canvas element + mouse handlers
 └── model/
     ├── clipboard_bridge.rs  Serde bridge for IronCalc's pub(crate) Clipboard
-    ├── frontend_model.rs    FrontendModel trait abstracting UserModel
+    ├── frontend_model.rs    FrontendModel trait, mutate/try_mutate helpers
     ├── frontend_types.rs    Domain types (CssColor, SafeFontFamily, ToolbarState, etc.)
     └── style_types.rs       StylePath, HexColor, BooleanValue for update_range_style API
 ```
 
 ## Docs
 
-- [docs/rust-style-guide.md](docs/rust-style-guide.md) - Rust design patterns and type modeling principles
-- [docs/leptos-patterns.md](docs/leptos-patterns.md) - Leptos conventions used in this codebase
-- [docs/building-components.md](docs/building-components.md) - how to create and debug components
-- [docs/adding-actions.md](docs/adding-actions.md) - how to add keyboard shortcuts and toolbar actions  
-- [docs/testing-guide.md](docs/testing-guide.md) - Comprehensive guide to writing and organizing tests
-- [docs/performance-evaluation.md](docs/performance-evaluation.md) - **Critical:** avoid double evaluation performance issues
+- [docs/state-and-events.md](docs/state-and-events.md) - WorkbookState fields, EventBus categories, adding events
+- [docs/leptos-patterns.md](docs/leptos-patterns.md) - Leptos conventions (signals, event subscriptions, view bindings)
+- [docs/building-components.md](docs/building-components.md) - creating and debugging components
+- [docs/adding-actions.md](docs/adding-actions.md) - adding keyboard shortcuts and toolbar actions
+- [docs/rust-style-guide.md](docs/rust-style-guide.md) - type modeling patterns (newtypes, enums, error handling)
+- [docs/testing-guide.md](docs/testing-guide.md) - wasm-pack test setup, test categories, examples
+- [docs/performance-evaluation.md](docs/performance-evaluation.md) - avoiding double evaluation with mutate/try_mutate
 
 ## Dependencies
 

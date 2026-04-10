@@ -16,15 +16,9 @@ use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
 use crate::storage;
 use crate::util::warn_if_err;
 
-/// Top-level editor container.
-///
-/// Handles all keyboard events when no overlay input is focused, then
-/// delegates rendering to FormulaBar, Worksheet (canvas), and SheetTabBar.
-///
-/// Key classification and action execution are delegated to [`crate::action`].
-/// Only clipboard operations (which need async OS APIs and the `AppClipboard`
-/// store) and point-mode arrow handling (which needs DOM cursor position) are
-/// handled inline here.
+/// Top-level keyboard router. Clipboard ops and point-mode arrow handling
+/// live here (need async OS APIs / DOM cursor position); everything else
+/// delegates to `classify_key` + `execute`.
 #[component]
 pub fn Workbook() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
@@ -229,10 +223,6 @@ pub fn Workbook() -> impl IntoView {
     }
 }
 
-// Clipboard helpers
-
-/// Copy the selected range to the internal `AppClipboard` and write
-/// tab-separated text to the OS clipboard (fire-and-forget async).
 fn copy_to_app_clipboard(
     model: ModelStore,
     state: WorkbookState,
@@ -256,11 +246,8 @@ fn copy_to_app_clipboard(
     });
 }
 
-/// Attempt to paste from the internal clipboard (synchronous).
-///
-/// If no internal clipboard data is available, falls back to reading the
-/// OS clipboard asynchronously.  Returns `true` if the internal paste
-/// succeeded (caller should call `ev.prevent_default()`).
+/// Returns `true` if internal paste succeeded (caller should `prevent_default`).
+/// Falls back to OS clipboard async read when no internal data is available.
 fn paste_from_clipboard(
     model: ModelStore,
     state: WorkbookState,

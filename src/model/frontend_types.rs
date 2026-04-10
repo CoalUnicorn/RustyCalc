@@ -1,15 +1,11 @@
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 
-// CssColor
-
-/// A CSS hex color string, e.g. `"#FF0000"`. Never empty.
-/// The inner field is private; construct via `CssColor::new`.
+/// CSS hex color string, e.g. `"#FF0000"`. Empty input becomes `"#000000"`.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct CssColor(String);
 
 impl CssColor {
-    /// Constructs a `CssColor`. Substitutes `"#000000"` for empty inputs.
     pub fn new(s: impl Into<String>) -> Self {
         let s = s.into();
         if s.is_empty() {
@@ -24,10 +20,7 @@ impl CssColor {
     }
 }
 
-// SafeFontFamily
-
-/// Font families the browser can reliably render.
-/// Unknown font names from Excel files map to `SystemUi`.
+/// Font families the browser can reliably render. Unknown names map to `SystemUi`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SafeFontFamily {
     Arial,
@@ -42,7 +35,6 @@ pub enum SafeFontFamily {
     SystemUi,
 }
 
-/// Font name variants for different contexts.
 #[derive(Debug, Clone, Copy)]
 struct FontNames {
     css: &'static str,
@@ -92,22 +84,18 @@ impl SafeFontFamily {
         }
     }
 
-    /// CSS `font-family` value (may include fallback).
     pub fn css_name(&self) -> &'static str {
         self.names().css
     }
 
-    /// The name stored in IronCalc's `Style.font.name`.
     pub fn model_name(&self) -> &'static str {
         self.names().model
     }
 
-    /// Display label for the toolbar.
     pub fn label(&self) -> &'static str {
         self.names().label
     }
 
-    /// All font families in menu order.
     pub const ALL: &[SafeFontFamily] = &[
         Self::Arial,
         Self::CalibriLike,
@@ -132,16 +120,13 @@ impl From<Option<&str>> for SafeFontFamily {
     }
 }
 
-/// Pre-resolved font parameters ready for the canvas `ctx.font` property.
+/// Pre-built font parameters for canvas `ctx.font`.
 #[derive(Debug, Clone)]
 pub struct ResolvedFont {
     pub size_px: f64,
-    // pub bold: bool,
-    // pub italic: bool,
     pub underline: bool,
     pub strikethrough: bool,
-    // pub family: SafeFontFamily,
-    /// Pre-built canvas `ctx.set_font()` string, e.g. `"bold italic 12px Arial"`.
+    /// e.g. `"bold italic 12px Arial"`
     pub css: String,
 }
 
@@ -153,7 +138,6 @@ impl ResolvedFont {
     }
 }
 
-/// Basic formatting
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextFormat {
     pub bold: bool,
@@ -162,7 +146,6 @@ pub struct TextFormat {
     pub strikethrough: bool,
 }
 
-/// Visual style properties.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextStyle {
     pub font_size: f64,
@@ -171,35 +154,24 @@ pub struct TextStyle {
     pub text_color: CssColor,
     pub bg_color: Option<CssColor>,
 }
-// ResolvedCellStyle
-
-/// Everything the renderer needs to paint one cell. No further resolution required.
-// IMPORTANT: this is style we getting from ironcalc_base /home/mmm/01_Dev/IronCalc/base/src/types.rs
-// Our FrontendModel fn cell_style() returns this. also see /home/mmm/01_Dev/IronCalc/base/src/user_model
+/// Fully resolved style for one cell. `h_align` has `General` already
+/// resolved to `Left`/`Right` based on cell type.
 #[derive(Debug, Clone)]
 pub struct ResolvedCellStyle {
-    /// Resolved text color; never empty.
     pub text_color: CssColor,
-    /// `None` = transparent (skip the fillRect call).
-    // pub bg_color: Option<CssColor>,
     pub font: ResolvedFont,
-    /// `General` already resolved to `Left` or `Right` based on cell type.
     pub h_align: HorizontalAlignment,
     pub v_align: VerticalAlignment,
     pub wrap_text: bool,
 }
 
-/// Resolved style state for the active cell, used to reflect current formatting
-/// in the toolbar (toggle states, font picker, color indicators).
+/// Active cell style state reflected in the toolbar.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolbarState {
     pub format: TextFormat,
     pub style: TextStyle,
 }
 
-// Direction enums
-
-/// A cardinal direction - arrow keys and single-step navigation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ArrowKey {
     Up,
@@ -208,16 +180,12 @@ pub enum ArrowKey {
     Right,
 }
 
-/// Page-scroll direction for Page Up / Page Down.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PageDir {
     Up,
     Down,
 }
 
-// Frozen pane state
-
-/// Number of frozen rows and columns on the active sheet.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrozenPanes {
     pub rows: i32,
@@ -225,13 +193,10 @@ pub struct FrozenPanes {
 }
 
 impl FrozenPanes {
-    /// True if any rows or columns are frozen.
     pub fn is_frozen(&self) -> bool {
         self.rows > 0 || self.cols > 0
     }
 }
-
-// Tests
 
 #[cfg(test)]
 mod tests {

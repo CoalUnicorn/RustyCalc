@@ -76,13 +76,11 @@ impl FrozenRC {
 /// ```
 #[derive(Clone)]
 pub(crate) struct PaneRegion {
-    /// Row range to render (inclusive).
     pub rows: RangeInclusive<i32>,
-    /// Column range to render (inclusive).
     pub cols: RangeInclusive<i32>,
-    /// Left edge pixel of this pane.
+    /// Left edge
     pub start_x: f64,
-    /// Top edge pixel of this pane.
+    /// Top edge
     pub start_y: f64,
     /// Rightmost column that draws its right border.
     pub last_col: i32,
@@ -276,7 +274,6 @@ pub struct AutofillTarget {
 pub struct RenderOverlays {
     /// Target cell during autofill-handle drag.
     pub extend_to: Option<AutofillTarget>,
-    /// Last Ctrl+C copied range: `(sheet, r1, c1, r2, c2)`.
     pub clipboard: Option<SheetArea>,
     /// Range being pointed at during formula entry.
     pub point_range: Option<CellArea>,
