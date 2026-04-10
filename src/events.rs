@@ -81,11 +81,17 @@ pub enum ContentEvent {
         old_value: Option<String>,
         new_value: Option<String>,
     },
-    RangeChanged { sheet_area: SheetArea },
+    RangeChanged {
+        sheet_area: SheetArea,
+    },
     #[allow(dead_code)]
-    FormulaChanged { address: CellAddress },
+    FormulaChanged {
+        address: CellAddress,
+    },
     #[allow(dead_code)]
-    CalculationUpdated { affected_sheets: Vec<u32> },
+    CalculationUpdated {
+        affected_sheets: Vec<u32>,
+    },
     #[allow(dead_code)]
     NamedRangesChanged,
     GenericChange,
@@ -94,18 +100,28 @@ pub enum ContentEvent {
 #[derive(Clone, PartialEq, Debug)]
 pub enum FormatEvent {
     #[allow(dead_code)]
-    CellStyleChanged { address: CellAddress },
-    RangeStyleChanged { area: SheetArea },
+    CellStyleChanged {
+        address: CellAddress,
+    },
+    RangeStyleChanged {
+        area: SheetArea,
+    },
     LayoutChanged {
         sheet: u32,
         col: Option<i32>,
         row: Option<i32>,
     },
-    RecentColorsUpdated { colors: Vec<CssColor> },
+    RecentColorsUpdated {
+        colors: Vec<CssColor>,
+    },
     #[allow(dead_code)]
-    DocumentColorsChanged { colors: Vec<CssColor> },
+    DocumentColorsChanged {
+        colors: Vec<CssColor>,
+    },
     #[allow(dead_code)]
-    ConditionalFormattingChanged { sheet: u32 },
+    ConditionalFormattingChanged {
+        sheet: u32,
+    },
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -282,16 +298,25 @@ impl StructureEvent {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum NavigationEvent {
-    SelectionChanged { address: CellAddress },
+    SelectionChanged {
+        address: CellAddress,
+    },
     /// Shift-click, Shift-arrow, or header click extended the selection.
-    SelectionRangeChanged { sheet_area: SheetArea },
+    SelectionRangeChanged {
+        sheet_area: SheetArea,
+    },
     ViewportScrolled {
         sheet: u32,
         top_row: i32,
         left_col: i32,
     },
-    ActiveSheetChanged { from_sheet: u32, to_sheet: u32 },
-    EditingStarted { address: CellAddress },
+    ActiveSheetChanged {
+        from_sheet: u32,
+        to_sheet: u32,
+    },
+    EditingStarted {
+        address: CellAddress,
+    },
     EditingEnded {
         address: CellAddress,
         committed: bool,
@@ -300,9 +325,13 @@ pub enum NavigationEvent {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ThemeEvent {
-    ThemeToggled { new_theme: Theme },
+    ThemeToggled {
+        new_theme: Theme,
+    },
     #[allow(dead_code)]
     PaletteUpdated,
     #[allow(dead_code)]
-    LocaleChanged { new_locale: String },
+    LocaleChanged {
+        new_locale: String,
+    },
 }
