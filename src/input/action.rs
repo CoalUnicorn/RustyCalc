@@ -46,9 +46,6 @@ pub enum SpreadsheetAction {
 // Key classification
 
 /// Keyboard modifier state at the time of a key event.
-///
-/// Replaces three positional `bool` parameters in `classify_key` - callers
-/// can no longer silently swap `ctrl` and `alt`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyMod {
     pub ctrl: bool,

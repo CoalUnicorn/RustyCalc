@@ -1,7 +1,6 @@
-# Leptos Patterns in RustyCalc
+# Leptos Patterns
 
-This documents the patterns and conventions used in our Leptos CSR codebase.
-Read this before writing new components.
+Patterns and conventions for the Leptos CSR codebase. Read before writing new components.
 
 ## Component lifecycle
 
@@ -52,7 +51,7 @@ with zero allocation. **Never clone WorkbookState or create aliases like
 ## Reactive closures and the event bus
 
 The IronCalc model lives outside Leptos's reactive system. To bridge the gap,
-`WorkbookState` has a typed `EventBus` (`state.events`) with six category signals.
+`WorkbookState` has a typed `EventBus` (`state.events`) with five category signals.
 After every model mutation an event is emitted, and any closure that subscribed
 to that category re-runs.
 
@@ -77,7 +76,6 @@ Subscribe to the most specific category that matches what can change the value:
 | Fonts, colors, column widths | `state.events.format.get()` |
 | Sheet list, inserted/deleted rows or cols | `state.events.structure.get()` |
 | Active cell, selected sheet, scroll | `state.events.navigation.get()` |
-| Drag mode, context menu, point mode | `state.events.mode.get()` |
 | Light/dark theme | `state.events.theme.get()` |
 
 Over-subscribing causes unnecessary re-renders - a component that only cares

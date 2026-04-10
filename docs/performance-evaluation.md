@@ -1,10 +1,6 @@
 # Performance: Avoiding Double Evaluation
 
-This document explains the evaluation performance optimization in RustyCalc and how to use the `mutate` helper function correctly.
-
-## The Problem: Double Evaluation
-
-IronCalc's `UserModel` has an internal evaluation system. Many methods call `evaluate()` internally after making changes. However, our UI often needs to call `evaluate()` again to ensure consistency. This creates a **double evaluation problem** that can halve performance in formula-heavy spreadsheets.
+IronCalc's `UserModel` calls `evaluate()` internally after many mutations. If the caller also evaluates, performance halves in formula-heavy spreadsheets.
 
 ```rust
 // PERFORMANCE PROBLEM: Double evaluation
@@ -30,39 +26,33 @@ model.update_value(|m| {
 
 ## The mutate Helpers
 
-`src/input/helpers.rs` provides two helpers. Both wrap pause/resume evaluation - the only difference is whether the closure can fail.
+`src/model/frontend_model.rs` provides two helpers. Both wrap pause/resume — the only difference is whether the closure can fail.
 
-### `mutate` - infallible
-
-Use when the closure cannot return an error (navigation, selection changes):
+### `mutate` — infallible
 
 ```rust
 pub fn mutate(
     model: ModelStore,
-    _state: &WorkbookState,
     evaluate: EvaluationMode,
     f: impl FnOnce(&mut UserModel<'static>),
 )
 ```
 
-### `try_mutate` - fallible
-
-Use when the closure returns `Result`. The error is returned to the caller and can be propagated with `?`:
+### `try_mutate` — fallible
 
 ```rust
 pub fn try_mutate<E>(
     model: ModelStore,
-    _state: &WorkbookState,
     evaluate: EvaluationMode,
     f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
 ) -> Result<(), E>
 ```
 
-Both helpers pause evaluation before calling `f`, then resume and optionally evaluate once - never more.
+Both pause evaluation before calling `f`, then resume and optionally evaluate once — never more.
 
-Neither emits events or triggers redraws. The caller is responsible for `state.emit_event(...)` after the helper returns.
+Neither emits events. The caller is responsible for `state.emit_event(...)` after the helper returns.
 
-**Import:** `use crate::input::helpers::{mutate, try_mutate, EvaluationMode};`
+**Import:** `use crate::model::{mutate, try_mutate, EvaluationMode};`
 
 ## When to Evaluate
 
@@ -86,8 +76,7 @@ Use for **pure UI state changes** that don't affect calculations:
 
 ### Cell Edit (fallible, evaluation needed)
 ```rust
-// try_mutate propagates the engine error back to the caller via ?
-try_mutate(model, state, EvaluationMode::Immediate, |m| -> Result<(), EditError> {
+try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), EditError> {
     m.set_user_input(sheet, row, col, value)
         .map_err(EditError::Engine)?;
     Ok(())
@@ -97,8 +86,7 @@ state.emit_event(SpreadsheetEvent::Content(ContentEvent::CellChanged { .. }));
 
 ### Navigation (infallible, no evaluation)
 ```rust
-// nav_arrow never fails - plain mutate is fine
-mutate(model, state, EvaluationMode::Deferred, |m| {
+mutate(model, EvaluationMode::Deferred, |m| {
     m.nav_arrow(dir);
 });
 state.emit_event(SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged { .. }));
@@ -106,7 +94,7 @@ state.emit_event(SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged 
 
 ### Formatting (fallible, no evaluation)
 ```rust
-try_mutate(model, state, EvaluationMode::Deferred, |m| -> Result<(), FormatError> {
+try_mutate(model, EvaluationMode::Deferred, |m| -> Result<(), FormatError> {
     let area = selection_area(m);
     m.update_range_style(&area, style_path.as_str(), value)
         .map_err(FormatError::Engine)?;
@@ -117,8 +105,7 @@ state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged { .. })
 
 ### Structure Change (fallible, evaluation needed)
 ```rust
-// Row insertion affects formula references
-try_mutate(model, state, EvaluationMode::Immediate, |m| -> Result<(), StructError> {
+try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), StructError> {
     m.insert_rows(sheet, row, 1)
         .map_err(StructError::Engine)?;
     Ok(())
@@ -140,31 +127,16 @@ The optimization becomes more important as:
 ## Guidelines
 
 1. Use `try_mutate` when the closure can fail; use `mutate` for infallible arms.
-2. **Import:** `use crate::input::helpers::{mutate, try_mutate, EvaluationMode};`
+2. **Import:** `use crate::model::{mutate, try_mutate, EvaluationMode};`
 3. Pass `EvaluationMode::Immediate` when formulas might be affected (cell writes, row/col inserts).
 4. Pass `EvaluationMode::Deferred` for pure UI changes (navigation, formatting, selection).
-5. Never call `m.evaluate()` manually inside either helper's closure - the helper handles it.
-6. Always emit a typed event after the helper returns - neither helper triggers redraws or notifies subscribers.
+5. Never call `m.evaluate()` manually inside either helper's closure — the helper handles it.
+6. Always emit a typed event after the helper returns — neither helper triggers redraws or notifies subscribers.
 
 ## Debugging Evaluation Timing
 
-In debug builds, every event emitted through `state.emit_event()` / `emit_events()` is logged to the browser console with a relative timestamp:
-
-```
-[EventBus] +    12.34ms  Content::GenericChange
-[EventBus] +     0.12ms  Navigation::SelectionChanged row=2 col=1
-[EventBus] +   142.80ms  Content::RangeChanged sheet=1 r1=3 c1=1 r2=3 c2=1
-```
-
-The delta shows time since the previous event. Large gaps (>100ms) in a tight sequence indicate double evaluation or an unpaused `evaluate()` call. Check that `mutate` is being used rather than a bare `model.update_value` + `m.evaluate()`.
+Debug event logging is wired into `emit_events()` but currently commented out. Uncomment the `leptos::logging::log!` call in `state.rs` to see per-event timestamps. Large gaps (>100ms) between events suggest double evaluation — check that `mutate` is being used rather than bare `model.update_value` + `m.evaluate()`.
 
 ## Implementation Details
 
-The pause/resume pattern works because:
-- IronCalc tracks evaluation state with internal flags
-- `pause_evaluation()` increments a counter  
-- `resume_evaluation()` decrements the counter
-- Internal `evaluate()` calls are no-ops when counter > 0
-- Final `evaluate()` after `resume_evaluation()` does the actual work
-
-This is safe because evaluation is deterministic - pausing and batching doesn't change the final result, only when the work happens.
+IronCalc's `pause_evaluation()` increments an internal counter; `resume_evaluation()` decrements it. Internal `evaluate()` calls are no-ops when the counter > 0. The final `evaluate()` after `resume_evaluation()` does the actual work. Pausing and batching doesn't change results — only when the work happens.

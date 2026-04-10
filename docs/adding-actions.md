@@ -24,12 +24,15 @@ KeyboardEvent / Toolbar click
 src/input/
 ├── action.rs        SpreadsheetAction, classify_key(), execute(), convenience constructors
 ├── error.rs         FormatError, StructError, NavError, EditError  (thiserror-derived)
-├── helpers.rs       mutate(), try_mutate(), EvaluationMode, selection_area(), selection_bounds()
 ├── nav.rs           NavAction      (arrows, page, home/end, sheet switch, select all)
 ├── edit.rs          EditAction     (start, commit, cancel)
 ├── format.rs        FormatAction   (bold, italic, underline, strikethrough, font size/family)
 ├── structure.rs     StructAction   (delete, clear, undo/redo, insert/delete rows/columns)
-└── formula_input.rs (point-mode reference handling, separate from the action pipeline)
+├── formula_input.rs (point-mode reference handling, separate from the action pipeline)
+└── xlsx_io.rs       File import/export
+
+src/model/
+└── frontend_model.rs  mutate(), try_mutate(), EvaluationMode  (pause/resume wrappers)
 ```
 
 ### Two things bypass `execute()`
@@ -64,15 +67,15 @@ pub enum FormatAction {
 ### 3. Add the handler in the same file
 
 Each `execute_*` function returns `Result<(), XxxError>`. Use `try_mutate()` for
-fallible model mutations - it handles pause/resume evaluation and surfaces the
+fallible model mutations — it handles pause/resume evaluation and surfaces the
 error as the function's `Result`. Use plain `mutate()` for infallible arms.
 
 ```rust
 use crate::input::error::FormatError;
-use crate::input::helpers::{try_mutate, EvaluationMode};
+use crate::model::{try_mutate, EvaluationMode};
 ```
 
-See [docs/performance-evaluation.md](performance-evaluation.md) for details on avoiding double evaluation.
+See [performance-evaluation.md](performance-evaluation.md) for details on avoiding double evaluation.
 
 Pass `EvaluationMode::Immediate` when formula results may change (cell writes,
 row/column inserts/deletes). Pass `EvaluationMode::Deferred` for formatting changes
@@ -87,7 +90,7 @@ FormatAction::SetAlignment(align) => {
         HorizontalAlignment::Right => "right",
         HorizontalAlignment::General => "",
     };
-    try_mutate(model, state, EvaluationMode::Deferred, |m| -> Result<(), FormatError> {
+    try_mutate(model, EvaluationMode::Deferred, |m| -> Result<(), FormatError> {
         let area = selection_area(m);
         m.update_range_style(&area, "alignment.horizontal", val)
             .map_err(FormatError::Engine)?;
@@ -154,8 +157,9 @@ Tests live in `action.rs` under `#[cfg(test)]`. Two kinds:
 ```rust
 #[wasm_bindgen_test]
 fn my_new_shortcut_works() {
+    let mods = KeyMod { ctrl: true, shift: false, alt: false };
     assert_eq!(
-        classify_key("l", true, false, false, None),
+        classify_key("l", mods, None),
         Some(SpreadsheetAction::Format(FormatAction::SetAlignment(HorizontalAlignment::Left)))
     );
 }

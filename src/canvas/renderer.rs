@@ -114,7 +114,6 @@ const MIN_UNDERLINE_OFFSET: f64 = 2.0;
 const CHAR_WIDTH_FACTOR: f64 = 0.6;
 const LINE_HEIGHT_FACTOR: f64 = 1.5;
 
-/// Border orientation for rendering logic
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BorderOrientation {
     Vertical,
@@ -201,8 +200,7 @@ impl CanvasRenderer {
 
     // Entry point
 
-    /// Full redraw of the spreadsheet canvas.
-    /// Performance: Renders only visible cells regardless of selection size.
+    /// Renders only visible cells regardless of selection size.
     pub fn render(&mut self, model: &UserModel, overlays: &RenderOverlays) {
         // Calculate visible region FIRST - this is independent of selection
         self.vis = self.visible_cells(model);
@@ -446,7 +444,7 @@ impl CanvasRenderer {
             && (rect.y + rect.height) > 0.0
     }
 
-    // Cell style (background + borders) - Performance optimized
+    // Cell style (background + borders)
 
     fn render_cell_style(
         &self,
@@ -521,7 +519,7 @@ impl CanvasRenderer {
         );
 
         // Top border: use this cell's top, or neighbour's bottom, or grid color.
-        // Performance optimization: only lookup neighbor style when absolutely necessary
+        // Only lookup neighbor style when absolutely necessary
         let top_nb = if row > 1 && style.border.top.is_none() && style.fill.fg_color.is_none() {
             // Only do expensive neighbor lookup when this cell has no styling
             model.get_cell_style(sheet, row - 1, col).ok()
@@ -605,7 +603,7 @@ impl CanvasRenderer {
         }
     }
 
-    // Border helper - Improved version
+    // Border helper
 
     fn draw_border(
         &self,
@@ -663,7 +661,7 @@ impl CanvasRenderer {
     // Cell text layout + paint
 
     /// Build the text layout for a cell; returns `None` for empty cells.
-    /// Optimized to skip expensive calculations for invisible or empty cells.
+    /// Skips expensive calculations for invisible or empty cells.
     fn compute_cell_text(
         &self,
         model: &UserModel,
@@ -679,12 +677,12 @@ impl CanvasRenderer {
             height,
         } = rect;
 
-        // Fast path: skip text computation for invisible cells
+        // skip text computation for invisible cells
         if width <= 0.0 || height <= 0.0 || !self.is_rect_visible(rect) {
             return None;
         }
 
-        // Fast path: get cell value and exit early if empty
+        // get cell value and exit early if empty
         let text = match model.get_formatted_cell_value(sheet, row, col) {
             Ok(value) => value,
             Err(_) => return None, // Cell doesn't exist or has no value
@@ -695,7 +693,7 @@ impl CanvasRenderer {
             return None;
         }
 
-        // Fast path: for very small cells, skip complex text layout
+        // For very small cells, skip complex text layout
         if width < 10.0 || height < 10.0 {
             return None; // Too small to render meaningful text
         }
@@ -783,7 +781,7 @@ impl CanvasRenderer {
                 _ => y + font_size / 2.0 + 4.0 + i_f * line_height,
             };
             lines.push(TextLine {
-                text: line, // moved from text_lines, no clone
+                text: line,
                 center_x,
                 center_y,
                 width: tw,
@@ -995,7 +993,6 @@ impl CanvasRenderer {
     /// Draw the blue selection border directly on canvas.
     fn draw_selection(&self, model: &UserModel, sheet: u32, frozen: FrozenOffset) {
         let view = model.get_selected_view();
-        //let [r1, c1, r2, c2] = view.range;
         let b = self.range_pixel_bounds(
             model,
             sheet,
@@ -1228,5 +1225,3 @@ fn hex_to_rgba(hex: &str, alpha: f64) -> String {
     let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
     format!("rgba({r},{g},{b},{alpha})")
 }
-
-// col_name() lives in canvas::geometry and is imported at the top of this file.

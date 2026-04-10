@@ -104,8 +104,6 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
     }
 }
 
-// impl
-
 impl FrontendModel for UserModel<'_> {
     fn cell_style(
         &self,
@@ -119,7 +117,6 @@ impl FrontendModel for UserModel<'_> {
             .get_cell_type(sheet, row, col)
             .unwrap_or(CellType::Text);
 
-        // Text color
         let text_color = match style.font.color.as_deref() {
             None | Some("#000000") => CssColor::new(default_text_color),
             Some(c) => CssColor::new(c),
@@ -135,7 +132,6 @@ impl FrontendModel for UserModel<'_> {
             size_px,
             underline: style.font.u,
             strikethrough: style.font.strike,
-            // family,
             css,
         };
 

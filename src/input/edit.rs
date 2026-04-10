@@ -1,6 +1,6 @@
 //! Edit actions: start/commit/cancel cell editing.
 
-use leptos::prelude::{WithValue, *};
+use leptos::prelude::*;
 
 use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
@@ -13,9 +13,7 @@ use crate::storage;
 /// Cell edit lifecycle actions.
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditAction {
-    /// Printable key: start a new edit with this character as the initial text.
     Start(String),
-    /// F2: enter edit mode preserving the existing cell content.
     EnterEditMode,
     /// Enter/Tab: write the edit buffer to the model then navigate.
     CommitAndNavigate(ArrowKey),

@@ -1,14 +1,13 @@
 # State and Events
 
-`WorkbookState` holds all transient UI state - nothing persisted, nothing in the model. `events.rs` defines the typed events that components emit and subscribe to.
-
-These two files are tightly coupled: every mutation that should trigger a UI update ends with an `emit_event()` call.
+`WorkbookState` (transient UI state) and `events.rs` (typed events) work together:
+every model mutation that should trigger a UI update ends with `emit_event()`.
 
 ---
 
 ## WorkbookState
 
-`WorkbookState` is a `Copy` struct provided via Leptos context. All fields are public within the crate and accessed directly - no getter methods.
+`Copy` struct provided via Leptos context. Fields are `pub(crate)` — accessed directly, no getters.
 
 ```rust
 let state = expect_context::<WorkbookState>();
@@ -76,13 +75,10 @@ state.events.content    ->  Vec<ContentEvent>
 state.events.format     ->  Vec<FormatEvent>
 state.events.navigation ->  Vec<NavigationEvent>
 state.events.structure  ->  Vec<StructureEvent>
-state.events.mode       ->  Vec<ModeEvent>
 state.events.theme      ->  Vec<ThemeEvent>
 ```
 
-Each `emit_event()` call **replaces** all six signals. The previous action's events are gone. Components subscribing to `state.events.navigation.get()` see only the events from the most recent emit.
-
-This is intentional. `state.events` is not a history buffer - it's a snapshot of what just happened. Components read it to decide whether to update.
+Each `emit_event()` call **replaces** all five signals — it's a snapshot of the most recent action, not a history buffer.
 
 ### Emitting
 
@@ -94,14 +90,14 @@ state.emit_event(SpreadsheetEvent::Structure(
 
 // Multiple events in one call (one signal update, preferred):
 state.emit_events([
-    SpreadsheetEvent::Content(ContentEvent::RangeChanged { sheet, start_row, start_col, end_row, end_col }),
+    SpreadsheetEvent::Content(ContentEvent::RangeChanged { sheet_area }),
     SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged { address }),
 ]);
 ```
 
-Two separate `emit_event()` calls work but fire all six signals twice. Use `emit_events()` when one user action produces more than one event.
+Two separate `emit_event()` calls work but fire all five signals twice. Use `emit_events()` when one user action produces more than one event.
 
-`state.request_redraw()` is shorthand for `emit_event(Content(GenericChange))`. It's used when a canvas repaint is needed without a specific event to describe it (e.g. viewport resize).
+For a canvas repaint with no specific event, emit `Content(GenericChange)` directly.
 
 ### Subscribing
 
@@ -143,29 +139,14 @@ Example: tracking when a sheet is frozen.
 
 ```rust
 // Inside StructureEvent:
-/// Row/column freeze changed on a sheet.
-WorksheetFreezeChanged { sheet: u32, rows: i32, cols: i32 },
+FreezeChanged { sheet: u32, frozen_rows: i32, frozen_cols: i32 },
 ```
 
-**2. Update `affected_sheet()`:**
-
-```rust
-StructureEvent::WorksheetFreezeChanged { sheet, .. } => Some(*sheet),
-```
-
-**3. Update `dbg_description()`:**
-
-```rust
-StructureEvent::WorksheetFreezeChanged { sheet, rows, cols } => {
-    format!("Structure::Freeze S{sheet} rows={rows} cols={cols}")
-}
-```
-
-**4. Emit it from the action handler:**
+**2. Emit it from the action handler:**
 
 ```rust
 state.emit_event(SpreadsheetEvent::Structure(
-    StructureEvent::WorksheetFreezeChanged { sheet: sheet_idx, rows: 1, cols: 0 },
+    StructureEvent::FreezeChanged { sheet: sheet_idx, frozen_rows: 1, frozen_cols: 0 },
 ));
 ```
 
@@ -173,13 +154,12 @@ The compiler flags every exhaustive `match` on `StructureEvent` that doesn't cov
 
 ### Adding a new category
 
-This is rare - most changes fit the existing six. If you need one:
+Rare — most changes fit the existing five. If you need one:
 
 1. Add an enum in `events.rs`.
 2. Add a variant to `SpreadsheetEvent`.
 3. Add a `RwSignal<Vec<NewEvent>>` field to `EventBus` and initialize it in `EventBus::new()`.
 4. Add the dispatch arm in `WorkbookState::emit_events()`.
-5. Add the `dbg_description()` dispatch in `SpreadsheetEvent::dbg_description()`.
 
 ---
 
@@ -206,7 +186,7 @@ Selecting                                   - mouse held for range selection
 Extending { to_row, to_col }                - autofill handle drag
 ResizingCol { col, x }                      - column header resize
 ResizingRow { row, y }                      - row header resize
-Pointing { range: SheetRect,
+Pointing { range: CellArea,
            ref_span: (usize, usize) }       - formula point-mode: highlighted range
                                               + byte span in formula text being replaced
 ```
@@ -223,7 +203,6 @@ At most one is active at a time. The enum makes illegal combinations unrepresent
 | `Format` | Visual styling changed: fonts, colors, column widths, row heights |
 | `Structure` | Sheet added/deleted/renamed/hidden, rows or columns inserted/deleted |
 | `Navigation` | Selection moved, sheet switched, viewport scrolled, edit started/ended |
-| `Mode` | Drag mode changed, context menu toggled, point mode entered/exited |
 | `Theme` | Light/dark theme toggled, color palette updated |
 
 See `adding-actions.md` for the action pipeline that produces these events.

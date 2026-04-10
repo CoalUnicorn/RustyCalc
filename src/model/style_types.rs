@@ -91,7 +91,6 @@ impl HexColor {
             return Ok(Self(hex));
         }
 
-        // Use unified validation logic
         if !is_valid_hex_color(&hex) {
             return Err(ColorError::InvalidFormat { color: hex });
         }
