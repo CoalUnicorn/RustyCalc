@@ -2,6 +2,7 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 
+use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
 use crate::events::*;
 use crate::input::xlsx_io;
@@ -33,10 +34,11 @@ fn extract_file_input(
 #[component]
 pub fn FileBar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
+    let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
 
     // Sidebar
-    let on_sidebar = move |_| state.sidebar_open.set(!state.sidebar_open.get_untracked());
+    let on_sidebar = move |_| app.sidebar_open.set(!app.sidebar_open.get_untracked());
     // File menu - owned signals + button anchor ref for positioning.
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
@@ -104,28 +106,28 @@ pub fn FileBar() -> impl IntoView {
         crate::util::refocus_workbook();
     };
 
-    let on_toggle_perf = move || {
-        state.show_perf_panel.update(|v| *v = !*v);
-    };
+    // let on_toggle_perf = move || {
+    //     app.show_perf_panel.update(|v| *v = !*v);
+    // };
 
-    let perf_label = move || {
-        if state.show_perf_panel.get() {
-            "Hide perf panel"
-        } else {
-            "Show perf panel"
-        }
-    };
+    // let perf_label = move || {
+    //     if app.show_perf_panel.get() {
+    //         "Hide perf panel"
+    //     } else {
+    //         "Show perf panel"
+    //     }
+    // };
 
     // Theme toggle - right-aligned icon button.
     // DOM update and localStorage persistence are handled by the
     // use_rusty_calc_theme sync Effect in App.
     let on_toggle_theme = move |_: web_sys::MouseEvent| {
-        state.toggle_theme();
+        app.toggle_theme();
     };
 
-    let theme_icon = move || match state.theme.get() {
+    let theme_icon = move || match app.theme.get() {
         Theme::Auto => {
-            if state.get_theme() == Theme::Dark {
+            if app.get_theme() == Theme::Dark {
                 "🌙"
             } else {
                 "☀️"
@@ -135,7 +137,7 @@ pub fn FileBar() -> impl IntoView {
         Theme::Dark => "☀️",
     };
 
-    let theme_title = move || match state.theme.get() {
+    let theme_title = move || match app.theme.get() {
         Theme::Auto => "Theme: Auto (click to switch)",
         Theme::Light => "Theme: Light (click for Dark)",
         Theme::Dark => "Theme: Dark (click for Auto)",
@@ -171,9 +173,9 @@ pub fn FileBar() -> impl IntoView {
                 <ContextMenuItem on_click=on_import icon="⬆">"Import .xlsx"</ContextMenuItem>
                 <ContextMenuItem on_click=on_export icon="⬇">"Download .xlsx"</ContextMenuItem>
                 <ContextMenuSeparator />
-                <ContextMenuItem on_click=on_toggle_perf icon="⏱">
+                /*<ContextMenuItem on_click=on_toggle_perf icon="⏱">
                     {perf_label}
-                </ContextMenuItem>
+                </ContextMenuItem>*/
             </ContextMenu>
 
             // Right: theme toggle

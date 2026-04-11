@@ -12,6 +12,7 @@ use crate::input::{
     formula_input::*,
 };
 use crate::model::{mutate, AppClipboard, EvaluationMode, PasteMode};
+use crate::app_state::AppState;
 use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
 use crate::storage;
 use crate::util::warn_if_err;
@@ -22,6 +23,7 @@ use crate::util::warn_if_err;
 #[component]
 pub fn Workbook() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
+    let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
     let clipboard_store = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
@@ -215,7 +217,7 @@ pub fn Workbook() -> impl IntoView {
             <Toolbar />
             <FormulaBar />
             <Worksheet />
-            <Show when=move || state.show_perf_panel.get()>
+            <Show when=move || app.show_perf_panel.get()>
                 <PerfPanel />
             </Show>
             <SheetTabBar />

@@ -56,6 +56,46 @@ impl EventBus {
             theme: RwSignal::new(vec![]),
         }
     }
+
+    pub fn emit_event(&self, event: SpreadsheetEvent) {
+        self.emit_events(vec![event]);
+    }
+
+    pub fn emit_events(&self, new_events: impl IntoIterator<Item = SpreadsheetEvent>) {
+        let mut content = vec![];
+        let mut format = vec![];
+        let mut navigation = vec![];
+        let mut structure = vec![];
+        let mut theme = vec![];
+
+        for event in new_events {
+            #[cfg(debug_assertions)]
+            {
+                use std::cell::Cell;
+                thread_local! { static LAST: Cell<f64> = const { Cell::new(0.0) }; }
+                let now = crate::perf::now();
+                LAST.with(|t| {
+                    t.set(now);
+                });
+            }
+            match event {
+                SpreadsheetEvent::Content(e) => content.push(e),
+                SpreadsheetEvent::Format(e) => format.push(e),
+                SpreadsheetEvent::Navigation(e) => navigation.push(e),
+                SpreadsheetEvent::Structure(e) => structure.push(e),
+                SpreadsheetEvent::Theme(e) => theme.push(e),
+            }
+        }
+
+        // Replace all 5 signals so no stale events from the previous action remain.
+        // Use update() not set(): set() uses PartialEq and suppresses notification
+        // when the same event fires twice on the same range. update() always notifies.
+        self.content.update(|v| *v = content);
+        self.format.update(|v| *v = format);
+        self.navigation.update(|v| *v = navigation);
+        self.structure.update(|v| *v = structure);
+        self.theme.update(|v| *v = theme);
+    }
 }
 
 impl Default for EventBus {
@@ -228,25 +268,6 @@ impl HeaderChange {
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum StructureEvent {
-    WorkbookSwitched {
-        from_uuid: Option<String>,
-        to_uuid: String,
-    },
-    WorkbookDeleted {
-        uuid: String,
-    },
-    WorkbookCreated {
-        uuid: String,
-        name: String,
-    },
-    WorkbookGroupChanged {
-        uuid: String,
-    },
-    WorkbookRenamed {
-        uuid: String,
-        old_name: String,
-        new_name: String,
-    },
     WorksheetAdded {
         sheet: u32,
         name: String,

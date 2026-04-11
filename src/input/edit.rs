@@ -72,9 +72,9 @@ pub fn execute_edit(
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
                 // Perf timing
-                let perf = state.perf;
-                perf.commit_start.set(Some(crate::perf::now()));
-                perf.last_formula.set(Some(edit.text.clone()));
+                // let perf = app.perf;
+                // perf.commit_start.set(Some(crate::perf::now()));
+                // perf.last_formula.set(Some(edit.text.clone()));
 
                 // Write the edit buffer to the model and recalculate.
                 // pause_evaluation() prevents set_user_input from triggering an internal
@@ -101,10 +101,10 @@ pub fn execute_edit(
                             &edit.text,
                         )
                         .map_err(EditError::Engine);
-                    perf.input_done.set(Some(crate::perf::now()));
+                    // perf.input_done.set(Some(crate::perf::now()));
                     m.resume_evaluation();
                     m.evaluate();
-                    perf.eval_done.set(Some(crate::perf::now()));
+                    // perf.eval_done.set(Some(crate::perf::now()));
                 });
                 // Propagate any engine error before touching reactive state.
                 commit_result?;

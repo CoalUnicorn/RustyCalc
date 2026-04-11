@@ -763,7 +763,7 @@ mod tests {
             StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             ),
-            crate::state::WorkbookState::new(),
+            crate::state::WorkbookState::new(crate::events::EventBus::new()),
         )
     }
 
@@ -799,7 +799,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
             execute(&SpreadsheetAction::navigate(ArrowKey::Down), model, &state);
             execute(&SpreadsheetAction::navigate(ArrowKey::Right), model, &state);
             execute(&SpreadsheetAction::Nav(NavAction::JumpToA1), model, &state);
@@ -817,7 +817,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
             execute(
                 &SpreadsheetAction::start_edit("=SUM".to_owned()),
                 model,
@@ -837,7 +837,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
             execute(
                 &SpreadsheetAction::start_edit("hello".to_owned()),
                 model,
@@ -861,7 +861,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
             execute(
                 &SpreadsheetAction::start_edit("42".to_owned()),
                 model,
@@ -884,7 +884,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
 
             mutate(model, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 1, 1, "hello").ok();
@@ -909,7 +909,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
             mutate(model, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 1, 1, "data").ok();
             });
@@ -927,7 +927,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
             mutate(model, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 1, 1, "42").ok();
             });
@@ -950,7 +950,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
             mutate(model, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 1, 1, "original").ok();
             });
@@ -970,7 +970,7 @@ mod tests {
             let model = StoredValue::new_local(
                 ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
             );
-            let state = crate::state::WorkbookState::new();
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
             mutate(model, EvaluationMode::Immediate, |m| {
                 m.set_user_input(0, 2, 1, "data").ok();
             });

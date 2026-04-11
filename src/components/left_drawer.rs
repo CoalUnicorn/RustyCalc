@@ -7,17 +7,18 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::app_state::AppState;
 use crate::components::context_menu::{
     ContextMenu, ContextMenuButton, ContextMenuItem, ContextMenuSeparator,
 };
-use crate::events::{SpreadsheetEvent, StructureEvent};
+use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::state::{DragState, ModelStore, WorkbookState};
-use crate::storage::{self, WorkbookMeta};
+use crate::storage::{self, WorkbookId, WorkbookMeta};
 use std::collections::{HashMap, HashSet};
 
 /// Entry ready for rendering: uuid, metadata, and whether it's the active workbook.
 struct DrawerEntry {
-    uuid: String,
+    uuid: WorkbookId,
     meta: WorkbookMeta,
     active: bool,
 }
@@ -58,22 +59,24 @@ fn group_entries(entries: Vec<DrawerEntry>) -> Vec<DrawerGroup> {
 pub fn LeftDrawer() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
+    let app = expect_context::<AppState>();
 
     // Local UI state - split so read-only children don't re-run on writes from siblings.
-    let (renaming, set_renaming) = signal(None::<String>);
+    let (renaming, set_renaming) = signal(None::<WorkbookId>);
 
     // Workbook list
     //
-    // Re-reads when structure events fire (workbook created/deleted/switched).
+    // Re-reads when registry changes (workbook created/deleted/renamed/grouped)
+    // or active workbook switches (current_uuid).
     let workbook_groups = move || {
-        let _ = state.events.structure.get(); // register dependency
+        let _ = app.registry_version.get();
         let current = state.current_uuid.get();
         let registry = storage::load_registry();
 
         let entries: Vec<DrawerEntry> = registry
             .into_iter()
             .map(|(uuid, meta)| {
-                let active = current.as_deref() == Some(&uuid);
+                let active = current == Some(uuid);
                 DrawerEntry { uuid, meta, active }
             })
             .collect();
@@ -81,17 +84,15 @@ pub fn LeftDrawer() -> impl IntoView {
         group_entries(entries)
     };
 
-    let assign_group = move |(uuid, group): (String, Option<String>)| {
+    let assign_group = move |(uuid, group): (WorkbookId, Option<String>)| {
         storage::update_group(&uuid, group);
-        state.emit_event(SpreadsheetEvent::Structure(
-            StructureEvent::WorkbookGroupChanged { uuid },
-        ));
+        app.bump_registry();
     };
 
     // Switch handler
-    let switch_workbook = move |target_uuid: String| {
+    let switch_workbook = move |target_uuid: WorkbookId| {
         let cur = state.current_uuid.get_untracked();
-        if cur.as_deref() == Some(&target_uuid) {
+        if cur == Some(target_uuid) {
             return;
         }
         // Save current model before switching.
@@ -105,33 +106,33 @@ pub fn LeftDrawer() -> impl IntoView {
             state.current_uuid.set(Some(target_uuid.clone()));
             state.editing_cell.set(None);
             state.drag.set(DragState::Idle);
-
-            state.emit_event(SpreadsheetEvent::Structure(
-                StructureEvent::WorkbookSwitched {
-                    from_uuid: cur,
-                    to_uuid: target_uuid,
-                },
-            ));
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         }
     };
 
     // Delete handler
-    let delete_workbook = move |uuid: String| {
+    let delete_workbook = move |uuid: WorkbookId| {
         let cur = state.current_uuid.get_untracked();
 
-        let wb_name = model.with_value(|m| m.get_name());
+        let wb_name = storage::load_registry()
+            .get(&uuid)
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
         let confirmed = web_sys::window()
             .and_then(|w| {
                 w.confirm_with_message(&format!("Delete '{wb_name}'? This cannot be undone."))
                     .ok()
             })
             .unwrap_or(false);
-        if confirmed {
-            storage::delete(&uuid);
+        if !confirmed {
+            return;
         }
 
+        let is_current = cur == Some(uuid);
+        storage::delete(&uuid);
+
         // If we deleted the active workbook, load the next available (or create fresh).
-        if cur.as_deref() == Some(&uuid) {
+        if is_current {
             let (next_uuid, next_model) =
                 storage::load_selected().unwrap_or_else(storage::create_new);
             model.update_value(|m| *m = next_model);
@@ -139,11 +140,10 @@ pub fn LeftDrawer() -> impl IntoView {
             state.current_uuid.set(Some(next_uuid));
             state.editing_cell.set(None);
             state.drag.set(DragState::Idle);
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         }
 
-        state.emit_event(SpreadsheetEvent::Structure(
-            StructureEvent::WorkbookDeleted { uuid },
-        ));
+        app.bump_registry();
     };
 
     // Create handler
@@ -154,21 +154,16 @@ pub fn LeftDrawer() -> impl IntoView {
         }
         let (new_uuid, new_model) = storage::create_new();
         model.update_value(|m| *m = new_model);
-        state.current_uuid.set(Some(new_uuid.clone()));
+        state.current_uuid.set(Some(new_uuid));
         state.editing_cell.set(None);
         state.drag.set(DragState::Idle);
-
-        state.emit_event(SpreadsheetEvent::Structure(
-            StructureEvent::WorkbookCreated {
-                uuid: new_uuid.clone(),
-                name: model.with_value(|m| m.get_name()),
-            },
-        ));
+        app.bump_registry();
+        state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
     };
 
     // Toggle group collapse
     let toggle_group = move |group_label: String| {
-        state.collapsed_groups.update(|groups| {
+        app.collapsed_groups.update(|groups| {
             if let Some(pos) = groups.iter().position(|g| g == &group_label) {
                 groups.remove(pos);
             } else {
@@ -183,7 +178,7 @@ pub fn LeftDrawer() -> impl IntoView {
     let on_group = Callback::new(assign_group);
 
     view! {
-        <Show when=move || state.sidebar_open.get()>
+        <Show when=move || app.sidebar_open.get()>
             <div class="left-drawer">
                 <div class="left-drawer__header">
                     <span class="left-drawer__title">"Workbooks"</span>
@@ -199,7 +194,7 @@ pub fn LeftDrawer() -> impl IntoView {
                 <div class="left-drawer__body">
                     {move || {
                         let groups = workbook_groups();
-                        let collapsed = state.collapsed_groups.get();
+                        let collapsed = app.collapsed_groups.get();
                         let _ = renaming.get();
 
                         groups.into_iter().map(|group| {
@@ -214,7 +209,7 @@ pub fn LeftDrawer() -> impl IntoView {
                                     <Show when=move || !is_collapsed>
                                         {group.entries.iter().map(|entry| view! {
                                             <EntryRow
-                                                uuid=entry.uuid.clone()
+                                                uuid=entry.uuid
                                                 name=entry.meta.name.clone()
                                                 active=entry.active
                                                 current_group=entry.meta.group.clone().unwrap_or_default()
@@ -256,19 +251,19 @@ fn GroupHeader(label: String, is_collapsed: bool, on_toggle: Callback<String>) -
 
 #[component]
 fn EntryRow(
-    uuid: String,
+    uuid: WorkbookId,
     name: String,
     active: bool,
     current_group: String,
-    on_switch: Callback<String>,
-    on_delete: Callback<String>,
-    on_group: Callback<(String, Option<String>)>,
-    renaming: ReadSignal<Option<String>>,
-    set_renaming: WriteSignal<Option<String>>,
+    on_switch: Callback<WorkbookId>,
+    on_delete: Callback<WorkbookId>,
+    on_group: Callback<(WorkbookId, Option<String>)>,
+    renaming: ReadSignal<Option<WorkbookId>>,
+    set_renaming: WriteSignal<Option<WorkbookId>>,
 ) -> impl IntoView {
     let uuid_switch = uuid.clone();
     let uuid_delete = uuid.clone();
-    let is_renaming = renaming.get_untracked().as_deref() == Some(uuid.as_str());
+    let is_renaming = renaming.get_untracked() == Some(uuid);
 
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
@@ -287,10 +282,10 @@ fn EntryRow(
 
     let has_group = !current_group.is_empty();
 
-    let uuid_for_group = uuid.clone();
+    let uuid_for_group = uuid;
     let commit_group = Callback::new(move |name: String| {
         if !name.trim().is_empty() {
-            on_group.run((uuid_for_group.clone(), Some(name)));
+            on_group.run((uuid_for_group, Some(name)));
         }
         set_group_name.set(String::new());
         set_menu_open.set(false);
@@ -329,20 +324,20 @@ fn EntryRow(
             {if is_renaming {
                 view! {
                     <RenameInput
-                        uuid=uuid.clone()
+                        uuid=uuid
                         initial_name=name.clone()
                         renaming
                         set_renaming
                     />
                 }.into_any()
             } else {
-                let uuid_dbl = uuid.clone();
+                let uuid_dbl = uuid;
                 view! {
                     <span
                         class="left-drawer__entry-name"
                         on:dblclick=move |ev: web_sys::MouseEvent| {
                             ev.stop_propagation();
-                            set_renaming.set(Some(uuid_dbl.clone()));
+                            set_renaming.set(Some(uuid_dbl));
                         }
                     >
                         {name}
@@ -404,12 +399,13 @@ fn EntryRow(
 
 #[component]
 fn RenameInput(
-    uuid: String,
+    uuid: WorkbookId,
     initial_name: String,
-    renaming: ReadSignal<Option<String>>,
-    set_renaming: WriteSignal<Option<String>>,
+    renaming: ReadSignal<Option<WorkbookId>>,
+    set_renaming: WriteSignal<Option<WorkbookId>>,
 ) -> impl IntoView {
     let state = expect_context::<WorkbookState>();
+    let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
     let input_ref = NodeRef::<leptos::html::Input>::new();
 
@@ -426,22 +422,12 @@ fn RenameInput(
     let uuid_for_commit = uuid.clone();
     let commit_rename = Callback::new(move |new_name: String| {
         if !new_name.trim().is_empty() {
-            let old_name = storage::load_registry()
-                .get(&uuid_for_commit)
-                .map(|m| m.name.clone())
-                .unwrap_or_default();
             storage::update_name(&uuid_for_commit, &new_name);
             // Keep the in-memory model in sync so the next save() won't revert the name.
-            if state.current_uuid.get_untracked().as_deref() == Some(&uuid_for_commit) {
+            if state.current_uuid.get_untracked() == Some(uuid_for_commit) {
                 model.update_value(|m| m.set_name(&new_name));
             }
-            state.emit_event(SpreadsheetEvent::Structure(
-                StructureEvent::WorkbookRenamed {
-                    uuid: uuid_for_commit.clone(),
-                    old_name,
-                    new_name,
-                },
-            ));
+            app.bump_registry();
         }
         set_renaming.set(None);
     });
@@ -468,7 +454,7 @@ fn RenameInput(
 
     let uuid_for_blur = uuid.clone();
     let on_blur = move |ev: web_sys::FocusEvent| {
-        if renaming.get_untracked().as_deref() != Some(uuid_for_blur.as_str()) {
+        if renaming.get_untracked() != Some(uuid_for_blur) {
             return;
         }
         let new_name = ev

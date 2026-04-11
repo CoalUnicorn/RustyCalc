@@ -4,6 +4,8 @@ use crate::components::workbook::Workbook;
 use leptos::prelude::*;
 use leptos_use::use_interval_fn;
 
+use crate::app_state::AppState;
+use crate::events::EventBus;
 use crate::state::WorkbookState;
 use crate::storage;
 use crate::theme::use_rusty_calc_theme;
@@ -14,14 +16,16 @@ pub fn App() -> impl IntoView {
     // fresh blank one if localStorage is empty (first launch).
     let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
 
-    let wb_state = WorkbookState::new();
+    let events = EventBus::new();
+    let app_state = AppState::new(events);
+    let wb_state = WorkbookState::new(events);
     wb_state.current_uuid.set(Some(uuid));
 
     // Wire leptos-use color mode: handles `data-theme` on <html> and localStorage.
-    // An Effect syncs wb_state.theme -> set_mode so any toggle propagates automatically.
+    // An Effect syncs app_state.theme -> set_mode so any toggle propagates automatically.
     let leptos_use::UseColorModeReturn { set_mode, .. } = use_rusty_calc_theme();
     Effect::new(move |_| {
-        set_mode.set(wb_state.theme.get().into());
+        set_mode.set(app_state.theme.get().into());
     });
 
     let model = StoredValue::new_local(model);
@@ -31,6 +35,7 @@ pub fn App() -> impl IntoView {
     let clipboard: StoredValue<Option<crate::model::AppClipboard>, LocalStorage> =
         StoredValue::new_local(None);
 
+    provide_context(app_state);
     provide_context(wb_state);
     provide_context(model);
     provide_context(clipboard);

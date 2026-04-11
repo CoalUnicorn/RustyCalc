@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::state::WorkbookState;
+use crate::app_state::AppState;
 
 /// Displays the last commit->render timing breakdown.
 ///
@@ -11,7 +11,7 @@ use crate::state::WorkbookState;
 /// - **Total**: commit start to render complete
 #[component]
 pub fn PerfPanel() -> impl IntoView {
-    let perf = expect_context::<WorkbookState>().perf;
+    let perf = expect_context::<AppState>().perf;
 
     let timing = move || {
         let render_done = perf.render_done.get()?;

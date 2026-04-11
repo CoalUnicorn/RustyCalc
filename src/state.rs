@@ -10,8 +10,7 @@ use leptos::prelude::*;
 use crate::coord::{CellAddress, CellArea};
 use crate::events::*;
 use crate::model::CssColor;
-use crate::perf::PerfTimings;
-use crate::theme::Theme;
+use crate::storage::WorkbookId;
 
 pub type ModelStore = StoredValue<UserModel<'static>, LocalStorage>;
 
@@ -138,42 +137,29 @@ pub struct ContextMenuState {
 #[allow(dead_code)]
 pub struct WorkbookState {
     pub events: EventBus,
-    pub(crate) current_uuid: Split<Option<String>>,
-    pub(crate) theme: Split<Theme>,
+    pub(crate) current_uuid: Split<Option<WorkbookId>>,
     pub(crate) recent_colors: Split<Vec<CssColor>>,
-    pub(crate) sidebar_open: Split<bool>,
-    pub(crate) collapsed_groups: Split<Vec<String>>,
     pub(crate) editing_cell: Split<Option<EditingCell>>,
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
     pub(crate) drag: Split<DragState>,
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
-    pub perf: PerfTimings,
-    pub(crate) show_perf_panel: Split<bool>,
 }
 
 impl WorkbookState {
-    pub fn new() -> Self {
-        // let lang: String = <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_lang")
-        //    .unwrap_or_else(|_| "en".to_owned());
-
+    pub fn new(events: EventBus) -> Self {
         // Load recent colors from localStorage (CssColor is serde-transparent, same JSON as String)
         let recent_colors: Vec<CssColor> =
             <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_recent_colors")
                 .unwrap_or_default();
 
         Self {
-            events: EventBus::new(),
+            events,
             current_uuid: Split::new(None),
-            theme: Split::new(Theme::from_storage()),
             recent_colors: Split::new(recent_colors),
-            sidebar_open: Split::new(false),
-            collapsed_groups: Split::new(vec![]),
             editing_cell: Split::new(None),
             formula_input_ref: NodeRef::new(),
             drag: Split::new(DragState::Idle),
             context_menu: Split::new(None),
-            perf: PerfTimings::new(),
-            show_perf_panel: Split::new(false),
         }
     }
 
@@ -189,95 +175,14 @@ impl WorkbookState {
         }
     }
 
-    //  Event System
+    //  Event System (delegates to EventBus)
 
     pub fn emit_event(&self, event: SpreadsheetEvent) {
-        self.emit_events(vec![event]);
+        self.events.emit_event(event);
     }
 
     pub fn emit_events(&self, new_events: impl IntoIterator<Item = SpreadsheetEvent>) {
-        let mut content = vec![];
-        let mut format = vec![];
-        let mut navigation = vec![];
-        let mut structure = vec![];
-        let mut theme = vec![];
-
-        for event in new_events {
-            #[cfg(debug_assertions)]
-            {
-                use std::cell::Cell;
-                thread_local! { static LAST: Cell<f64> = const { Cell::new(0.0) }; }
-                let now = crate::perf::now();
-                LAST.with(|t| {
-                    // let delta = now - t.get();
-                    t.set(now);
-                    // leptos::logging::log!(
-                    //     "[EventBus] +{delta:>8.2}ms  {}",
-                    //     event.dbg_description()
-                    // );
-                });
-            }
-            match event {
-                SpreadsheetEvent::Content(e) => content.push(e),
-                SpreadsheetEvent::Format(e) => format.push(e),
-                SpreadsheetEvent::Navigation(e) => navigation.push(e),
-                SpreadsheetEvent::Structure(e) => structure.push(e),
-                SpreadsheetEvent::Theme(e) => theme.push(e),
-            }
-        }
-
-        // Replace all 5 signals so no stale events from the previous action remain.
-        // Use update() not set(): set() uses PartialEq and suppresses notification when
-        // the same event fires twice on the same range (e.g. toggle bold twice without
-        // navigating). update() always notifies subscribers regardless of value equality.
-        self.events.content.update(|v| *v = content);
-        self.events.format.update(|v| *v = format);
-        self.events.navigation.update(|v| *v = navigation);
-        self.events.structure.update(|v| *v = structure);
-        self.events.theme.update(|v| *v = theme);
-    }
-
-    /// Get the resolved theme (reactive) - Auto resolves to Light/Dark based on system preference
-    pub fn get_theme(&self) -> Theme {
-        self.theme.get().resolve_with_system()
-    }
-
-    /// Get the resolved theme (non-reactive) - Auto resolves to Light/Dark based on system preference
-    #[allow(dead_code)]
-    pub fn get_theme_untracked(&self) -> Theme {
-        self.theme.get_untracked().resolve_with_system()
-    }
-
-    /// Set the theme preference.
-    /// Persistence and DOM update are handled by the `use_rusty_calc_theme`
-    /// sync Effect in `App` - no manual save needed here.
-    pub fn set_theme(&self, theme: Theme) {
-        self.theme.set(theme);
-        self.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
-            new_theme: theme,
-        }));
-    }
-
-    /// Toggle theme in cycle: Auto -> Light -> Dark -> Auto
-    pub fn toggle_theme(&self) {
-        let current = self.theme.get();
-        let next = match current {
-            Theme::Auto => Theme::Light,
-            Theme::Light => Theme::Dark,
-            Theme::Dark => Theme::Auto,
-        };
-        self.set_theme(next);
-    }
-
-    /// Toggle between Light and Dark only (preserving Auto if set)
-    #[allow(dead_code)]
-    pub fn toggle_light_dark(&self) {
-        let current = self.theme.get();
-        match current {
-            Theme::Auto => {} // Keep Auto unchanged
-            Theme::Light => self.set_theme(Theme::Dark),
-            Theme::Dark => self.set_theme(Theme::Light),
-        }
+        self.events.emit_events(new_events);
     }
 
     /// Add a color to the recent colors list
