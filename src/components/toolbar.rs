@@ -11,8 +11,8 @@ use crate::state::{ModelStore, WorkbookState};
 use crate::util::{refocus_workbook, warn_if_err};
 
 const FONT_SIZES: &[f64] = &[
-    6.0, 7.0, 8.0, 9.0, 10.0, 10.5, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0,
-    36.0, 48.0, 72.0,
+    6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0,
+    48.0, 72.0,
 ];
 
 /// Top toolbar. Creates two shared memos once and provides them via context so
@@ -147,10 +147,6 @@ fn FontFamily() -> impl IntoView {
 }
 
 // Font size - +/- buttons step through FONT_SIZES ladder; input accepts direct entry.
-//
-// FIXME: Mixed selections with empty cells (default 13px) produce invalid negative
-//        size deltas. Sub-10px increment also broken due to delta calculation in
-//        format.rs. Both deferred - see format.rs FIXME comment.
 #[component]
 fn FontSize() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
