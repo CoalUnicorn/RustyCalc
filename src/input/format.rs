@@ -68,15 +68,16 @@ pub fn execute_format(
                     it will throw console err like:
                     [ironcalc] set_font_size: Invalid value for font size: '-43'.
                     [ironcalc] set_font_size: Invalid value for font size: '0'.
-                2.  When font size goes below 10px - not able to increment with buttons
-                    This may be `toolbar.rs` issue ?
             */
             try_mutate(
                 model,
                 EvaluationMode::Deferred,
                 |m| -> Result<(), FormatError> {
                     let area = m.selection();
-                    let val = format!("{}", size as i32 - m.toolbar_state().style.font_size as i32);
+                    let val = format!(
+                        "{}",
+                        size as i32 - m.toolbar_state().style.font_size.round() as i32
+                    );
                     m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
                         .map_err(FormatError::Engine)?;
                     Ok(())
