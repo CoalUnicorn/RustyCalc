@@ -239,6 +239,14 @@ pub enum StructureEvent {
         uuid: String,
         name: String,
     },
+    WorkbookGroupChanged {
+        uuid: String,
+    },
+    WorkbookRenamed {
+        uuid: String,
+        old_name: String,
+        new_name: String,
+    },
     WorksheetAdded {
         sheet: u32,
         name: String,

@@ -27,6 +27,23 @@ pub struct WorkbookMeta {
     pub modified: f64,
 }
 
+/// Update the group label for a workbook in the registry.
+pub fn update_group(uuid: &str, group: Option<String>) {
+    let mut registry = load_registry();
+    if let Some(meta) = registry.get_mut(uuid) {
+        meta.group = group;
+    }
+    save_registry(&registry);
+}
+
+pub fn update_name(uuid: &str, name: &str) {
+    let mut registry = load_registry();
+    if let Some(meta) = registry.get_mut(uuid) {
+        meta.name = name.to_string();
+    }
+    save_registry(&registry);
+}
+
 // Registry helpers
 
 /// Load the UUID->metadata registry from localStorage.
