@@ -5,4 +5,5 @@ pub mod format;
 pub mod formula_input;
 pub mod nav;
 pub mod structure;
+pub mod workbook;
 pub mod xlsx_io;

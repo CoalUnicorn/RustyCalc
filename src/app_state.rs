@@ -19,7 +19,7 @@ pub struct AppState {
     pub(crate) theme: Split<Theme>,
     pub(crate) sidebar_open: Split<bool>,
     pub(crate) collapsed_groups: Split<Vec<String>>,
-    pub(crate) show_perf_panel: Split<bool>,
+    // pub(crate) show_perf_panel: Split<bool>,
     pub perf: PerfTimings,
     /// Bumped when the workbook registry changes (create/delete/rename/group).
     pub registry_version: RwSignal<u64>,
@@ -32,7 +32,7 @@ impl AppState {
             theme: Split::new(Theme::from_storage()),
             sidebar_open: Split::new(false),
             collapsed_groups: Split::new(vec![]),
-            show_perf_panel: Split::new(false),
+            // show_perf_panel: Split::new(false),
             perf: PerfTimings::new(),
             registry_version: RwSignal::new(0),
         }
@@ -53,9 +53,10 @@ impl AppState {
 
     pub fn set_theme(&self, theme: Theme) {
         self.theme.set(theme);
-        self.events.emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
-            new_theme: theme,
-        }));
+        self.events
+            .emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
+                new_theme: theme,
+            }));
     }
 
     pub fn toggle_theme(&self) {

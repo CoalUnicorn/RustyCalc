@@ -11,9 +11,9 @@ use crate::app_state::AppState;
 use crate::components::context_menu::{
     ContextMenu, ContextMenuButton, ContextMenuItem, ContextMenuSeparator,
 };
-use crate::events::{ContentEvent, SpreadsheetEvent};
-use crate::state::{DragState, ModelStore, WorkbookState};
-use crate::storage::{self, WorkbookId, WorkbookMeta};
+use crate::input::workbook::{execute_workbook, WorkbookAction};
+use crate::state::{ModelStore, WorkbookState};
+use crate::storage::{self, WorkbookGroup, WorkbookId, WorkbookMeta};
 use std::collections::{HashMap, HashSet};
 
 /// Entry ready for rendering: uuid, metadata, and whether it's the active workbook.
@@ -23,17 +23,15 @@ struct DrawerEntry {
     active: bool,
 }
 
-/// A group of workbook entries sharing the same `group` label.
 struct DrawerGroup {
-    /// Group label — `None` means ungrouped.
-    label: Option<String>,
+    label: WorkbookGroup,
     entries: Vec<DrawerEntry>,
 }
 
 // Grouping logic
 
 fn group_entries(entries: Vec<DrawerEntry>) -> Vec<DrawerGroup> {
-    let mut map: HashMap<Option<String>, Vec<DrawerEntry>> = HashMap::new();
+    let mut map: HashMap<WorkbookGroup, Vec<DrawerEntry>> = HashMap::new();
 
     for entry in entries {
         map.entry(entry.meta.group.clone()).or_default().push(entry);
@@ -84,36 +82,16 @@ pub fn LeftDrawer() -> impl IntoView {
         group_entries(entries)
     };
 
-    let assign_group = move |(uuid, group): (WorkbookId, Option<String>)| {
+    let assign_group = move |(uuid, group): (WorkbookId, WorkbookGroup)| {
         storage::update_group(&uuid, group);
         app.bump_registry();
     };
 
-    // Switch handler
     let switch_workbook = move |target_uuid: WorkbookId| {
-        let cur = state.current_uuid.get_untracked();
-        if cur == Some(target_uuid) {
-            return;
-        }
-        // Save current model before switching.
-        if let Some(uuid) = &cur {
-            model.with_value(|m| storage::save(uuid, m));
-        }
-        // Load the target workbook into the same ModelStore.
-        if let Some(new_model) = storage::load(&target_uuid) {
-            model.update_value(|m| *m = new_model);
-            storage::set_selected_uuid(&target_uuid);
-            state.current_uuid.set(Some(target_uuid.clone()));
-            state.editing_cell.set(None);
-            state.drag.set(DragState::Idle);
-            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
-        }
+        execute_workbook(&WorkbookAction::Switch(target_uuid), model, &state, app);
     };
 
-    // Delete handler
     let delete_workbook = move |uuid: WorkbookId| {
-        let cur = state.current_uuid.get_untracked();
-
         let wb_name = storage::load_registry()
             .get(&uuid)
             .map(|m| m.name.clone())
@@ -124,41 +102,13 @@ pub fn LeftDrawer() -> impl IntoView {
                     .ok()
             })
             .unwrap_or(false);
-        if !confirmed {
-            return;
+        if confirmed {
+            execute_workbook(&WorkbookAction::Delete(uuid), model, &state, app);
         }
-
-        let is_current = cur == Some(uuid);
-        storage::delete(&uuid);
-
-        // If we deleted the active workbook, load the next available (or create fresh).
-        if is_current {
-            let (next_uuid, next_model) =
-                storage::load_selected().unwrap_or_else(storage::create_new);
-            model.update_value(|m| *m = next_model);
-            storage::set_selected_uuid(&next_uuid);
-            state.current_uuid.set(Some(next_uuid));
-            state.editing_cell.set(None);
-            state.drag.set(DragState::Idle);
-            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
-        }
-
-        app.bump_registry();
     };
 
-    // Create handler
     let create_workbook = move |_| {
-        // Save current before creating.
-        if let Some(uuid) = state.current_uuid.get_untracked() {
-            model.with_value(|m| storage::save(&uuid, m));
-        }
-        let (new_uuid, new_model) = storage::create_new();
-        model.update_value(|m| *m = new_model);
-        state.current_uuid.set(Some(new_uuid));
-        state.editing_cell.set(None);
-        state.drag.set(DragState::Idle);
-        app.bump_registry();
-        state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+        execute_workbook(&WorkbookAction::Create, model, &state, app);
     };
 
     // Toggle group collapse
@@ -198,21 +148,26 @@ pub fn LeftDrawer() -> impl IntoView {
                         let _ = renaming.get();
 
                         groups.into_iter().map(|group| {
-                            let is_collapsed = group.label.as_ref()
-                                .is_some_and(|l| collapsed.contains(l));
+                            let is_collapsed = if let WorkbookGroup::Named(ref l) = group.label {
+                                collapsed.contains(l)
+                            } else {
+                                false
+                            };
 
                             view! {
                                 <div class="left-drawer__group">
-                                    {group.label.clone().map(|label| view! {
-                                        <GroupHeader label is_collapsed on_toggle />
-                                    })}
+                                    {if let WorkbookGroup::Named(label) = group.label.clone() {
+                                        Some(view! { <GroupHeader label is_collapsed on_toggle /> })
+                                    } else {
+                                        None
+                                    }}
                                     <Show when=move || !is_collapsed>
                                         {group.entries.iter().map(|entry| view! {
                                             <EntryRow
                                                 uuid=entry.uuid
                                                 name=entry.meta.name.clone()
                                                 active=entry.active
-                                                current_group=entry.meta.group.clone().unwrap_or_default()
+                                                current_group=entry.meta.group.clone()
                                                 on_switch
                                                 on_delete
                                                 on_group
@@ -254,15 +209,15 @@ fn EntryRow(
     uuid: WorkbookId,
     name: String,
     active: bool,
-    current_group: String,
+    current_group: WorkbookGroup,
     on_switch: Callback<WorkbookId>,
     on_delete: Callback<WorkbookId>,
-    on_group: Callback<(WorkbookId, Option<String>)>,
+    on_group: Callback<(WorkbookId, WorkbookGroup)>,
     renaming: ReadSignal<Option<WorkbookId>>,
     set_renaming: WriteSignal<Option<WorkbookId>>,
 ) -> impl IntoView {
-    let uuid_switch = uuid.clone();
-    let uuid_delete = uuid.clone();
+    let uuid_switch = uuid;
+    let uuid_delete = uuid;
     let is_renaming = renaming.get_untracked() == Some(uuid);
 
     let (menu_open, set_menu_open) = signal(false);
@@ -272,7 +227,13 @@ fn EntryRow(
     let existing_groups: Vec<String> = {
         let mut groups: Vec<String> = storage::load_registry()
             .values()
-            .filter_map(|m| m.group.clone())
+            .filter_map(|m| {
+                if let WorkbookGroup::Named(n) = &m.group {
+                    Some(n.clone())
+                } else {
+                    None
+                }
+            })
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
@@ -280,12 +241,12 @@ fn EntryRow(
         groups
     };
 
-    let has_group = !current_group.is_empty();
+    let has_group = matches!(current_group, WorkbookGroup::Named(_));
 
     let uuid_for_group = uuid;
     let commit_group = Callback::new(move |name: String| {
         if !name.trim().is_empty() {
-            on_group.run((uuid_for_group, Some(name)));
+            on_group.run((uuid_for_group, WorkbookGroup::Named(name)));
         }
         set_group_name.set(String::new());
         set_menu_open.set(false);
@@ -311,7 +272,7 @@ fn EntryRow(
         <div
             class="left-drawer__entry"
             class:active=active
-            on:click=move |_| on_switch.run(uuid_switch.clone())
+            on:click=move |_| on_switch.run(uuid_switch)
         >
             <ContextMenuButton
                 set_open=set_menu_open
@@ -350,7 +311,7 @@ fn EntryRow(
                 title="Delete workbook"
                 on:click=move |ev: web_sys::MouseEvent| {
                     ev.stop_propagation();
-                    on_delete.run(uuid_delete.clone());
+                    on_delete.run(uuid_delete);
                 }
             >
                 "\u{00d7}"
@@ -358,20 +319,20 @@ fn EntryRow(
 
             <ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos>
                 {has_group.then(|| {
-                    let uuid_rm = uuid.clone();
+                    let uuid_rm = uuid;
                     view! {
-                        <ContextMenuItem on_click=move || on_group.run((uuid_rm.clone(), None))>
+                        <ContextMenuItem on_click=move || on_group.run((uuid_rm, WorkbookGroup::Ungrouped))>
                             "No group"
                         </ContextMenuItem>
                     }
                 })}
 
                 {existing_groups.into_iter().map(|group| {
-                    let uuid_g = uuid.clone();
+                    let uuid_g = uuid;
                     let g = group.clone();
-                    let is_current = current_group == group;
+                    let is_current = current_group == WorkbookGroup::Named(group.clone());
                     view! {
-                        <ContextMenuItem on_click=move || on_group.run((uuid_g.clone(), Some(g.clone())))>
+                        <ContextMenuItem on_click=move || on_group.run((uuid_g, WorkbookGroup::Named(g.clone())))>
                             {if is_current { "\u{2713} " } else { "" }}
                             {group}
                         </ContextMenuItem>
@@ -419,7 +380,7 @@ fn RenameInput(
         }
     });
 
-    let uuid_for_commit = uuid.clone();
+    let uuid_for_commit = uuid;
     let commit_rename = Callback::new(move |new_name: String| {
         if !new_name.trim().is_empty() {
             storage::update_name(&uuid_for_commit, &new_name);
@@ -452,7 +413,7 @@ fn RenameInput(
         }
     };
 
-    let uuid_for_blur = uuid.clone();
+    let uuid_for_blur = uuid;
     let on_blur = move |ev: web_sys::FocusEvent| {
         if renaming.get_untracked() != Some(uuid_for_blur) {
             return;

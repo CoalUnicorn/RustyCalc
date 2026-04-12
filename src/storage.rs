@@ -6,6 +6,10 @@ use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
 
+// localStorage key constants mirroring storage.ts
+const SELECTED_KEY: &str = "selected";
+const MODELS_KEY: &str = "models";
+
 /// A 16-byte UUID v4 identifier for a workbook.
 ///
 /// `Copy` with zero heap allocation — unlike `String`, passing by value costs nothing.
@@ -92,27 +96,49 @@ impl<'de> Deserialize<'de> for WorkbookId {
 /// Used in place of bare `.ok()` so silent failures become visible in DevTools.
 fn log_err<E: std::fmt::Display>(result: Result<(), E>, ctx: &str) {
     if let Err(e) = result {
-        web_sys::console::warn_1(&format!("[ironcalc storage] {ctx}: {e}").into());
+        web_sys::console::warn_1(&format!("[rustycalc storage] {ctx}: {e}").into());
     }
 }
-
-// localStorage key constants mirroring storage.ts
-const SELECTED_KEY: &str = "selected";
-const MODELS_KEY: &str = "models";
 
 /// Per-workbook metadata stored in the "models" registry.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WorkbookMeta {
     pub name: String,
     #[serde(default)]
-    pub group: Option<String>,
+    pub group: WorkbookGroup,
     /// Last-modified timestamp (ms since epoch). Used for sort-by-recent.
     #[serde(default)]
     pub modified: f64,
 }
 
+#[derive(Clone, Default, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "Option<String>", into = "Option<String>")]
+pub enum WorkbookGroup {
+    Named(String),
+    #[default]
+    Ungrouped,
+}
+
+impl From<Option<String>> for WorkbookGroup {
+    fn from(s: Option<String>) -> Self {
+        match s {
+            Some(name) => WorkbookGroup::Named(name),
+            None => WorkbookGroup::Ungrouped,
+        }
+    }
+}
+
+impl From<WorkbookGroup> for Option<String> {
+    fn from(g: WorkbookGroup) -> Self {
+        match g {
+            WorkbookGroup::Named(name) => Some(name),
+            WorkbookGroup::Ungrouped => None,
+        }
+    }
+}
+
 /// Update the group label for a workbook in the registry.
-pub fn update_group(uuid: &WorkbookId, group: Option<String>) {
+pub fn update_group(uuid: &WorkbookId, group: WorkbookGroup) {
     let mut registry = load_registry();
     if let Some(meta) = registry.get_mut(uuid) {
         meta.group = group;
@@ -159,7 +185,7 @@ pub fn save(uuid: &WorkbookId, model: &UserModel) {
     let bytes = model.to_bytes();
     let encoded = STANDARD.encode(&bytes);
     log_err(
-        LocalStorage::set(&uuid.to_string(), encoded),
+        LocalStorage::set(uuid.to_string(), encoded),
         "save model bytes",
     );
 
@@ -169,7 +195,10 @@ pub fn save(uuid: &WorkbookId, model: &UserModel) {
         *uuid,
         WorkbookMeta {
             name: model.get_name(),
-            group: registry.get(uuid).and_then(|m| m.group.clone()), // preserve existing group
+            group: registry
+                .get(uuid)
+                .map(|m| m.group.clone())
+                .unwrap_or_default(),
             modified: crate::perf::now(),
         },
     );
@@ -186,7 +215,7 @@ pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
         Ok(b) => b,
         Err(e) => {
             web_sys::console::warn_1(
-                &format!("[ironcalc storage] load {uuid}: base64 decode failed: {e}").into(),
+                &format!("[rustycalc storage] load {uuid}: base64 decode failed: {e}").into(),
             );
             return None;
         }
@@ -196,7 +225,7 @@ pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
         Ok(m) => Some(m),
         Err(e) => {
             web_sys::console::warn_1(
-                &format!("[ironcalc storage] load {uuid}: model parse failed: {e}").into(),
+                &format!("[rustycalc storage] load {uuid}: model parse failed: {e}").into(),
             );
             None
         }
@@ -221,7 +250,7 @@ pub fn load_selected() -> Option<(WorkbookId, UserModel<'static>)> {
     for uuid in &uuids {
         if let Some(model) = load(uuid) {
             set_selected_uuid(uuid);
-            return Some((uuid.clone(), model));
+            return Some((*uuid, model));
         }
     }
 
@@ -272,9 +301,8 @@ pub fn create_new_from(model: UserModel<'static>) -> (WorkbookId, UserModel<'sta
 }
 
 /// Remove a workbook from localStorage and the registry.
-#[allow(dead_code)]
 pub fn delete(uuid: &WorkbookId) {
-    LocalStorage::delete(&uuid.to_string());
+    LocalStorage::delete(uuid.to_string());
     let mut registry = load_registry();
     registry.remove(uuid);
     save_registry(&registry);
