@@ -11,7 +11,7 @@ use std::str::FromStr;
 /// `Copy` with zero heap allocation — unlike `String`, passing by value costs nothing.
 /// Serializes as a hyphenated UUID string (`"550e8400-e29b-41d4-a716-446655440000"`)
 /// so localStorage keys remain human-readable and backward-compatible.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct WorkbookId([u8; 16]);
 
 impl WorkbookId {
@@ -216,8 +216,8 @@ pub fn load_selected() -> Option<(WorkbookId, UserModel<'static>)> {
     // Fall back to the lexicographically first UUID that yields a valid model.
     // Sorting ensures a stable, repeatable result regardless of HashMap iteration order.
     let registry = load_registry();
-    let uuids: Vec<WorkbookId> = registry.keys().cloned().collect();
-    // uuids.sort();
+    let mut uuids: Vec<WorkbookId> = registry.keys().cloned().collect();
+    uuids.sort();
     for uuid in &uuids {
         if let Some(model) = load(uuid) {
             set_selected_uuid(uuid);

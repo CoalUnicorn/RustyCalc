@@ -149,7 +149,7 @@ impl WorkbookState {
     pub fn new(events: EventBus) -> Self {
         // Load recent colors from localStorage (CssColor is serde-transparent, same JSON as String)
         let recent_colors: Vec<CssColor> =
-            <gloo_storage::LocalStorage as GlooStorage>::get("ironcalc_recent_colors")
+            <gloo_storage::LocalStorage as GlooStorage>::get("rustycalc_recent_colors")
                 .unwrap_or_default();
 
         Self {

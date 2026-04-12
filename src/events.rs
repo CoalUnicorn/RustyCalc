@@ -90,11 +90,31 @@ impl EventBus {
         // Replace all 5 signals so no stale events from the previous action remain.
         // Use update() not set(): set() uses PartialEq and suppresses notification
         // when the same event fires twice on the same range. update() always notifies.
-        self.content.update(|v| *v = content);
-        self.format.update(|v| *v = format);
-        self.navigation.update(|v| *v = navigation);
-        self.structure.update(|v| *v = structure);
-        self.theme.update(|v| *v = theme);
+        if content.is_empty() {
+            self.content.set(vec![]);
+        } else {
+            self.content.update(|v| *v = content);
+        }
+        if format.is_empty() {
+            self.format.set(vec![]);
+        } else {
+            self.format.update(|v| *v = format);
+        }
+        if navigation.is_empty() {
+            self.navigation.set(vec![]);
+        } else {
+            self.navigation.update(|v| *v = navigation);
+        }
+        if structure.is_empty() {
+            self.structure.set(vec![]);
+        } else {
+            self.structure.update(|v| *v = structure);
+        }
+        if theme.is_empty() {
+            self.theme.set(vec![]);
+        } else {
+            self.theme.update(|v| *v = theme);
+        }
     }
 }
 

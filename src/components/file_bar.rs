@@ -106,18 +106,6 @@ pub fn FileBar() -> impl IntoView {
         crate::util::refocus_workbook();
     };
 
-    // let on_toggle_perf = move || {
-    //     app.show_perf_panel.update(|v| *v = !*v);
-    // };
-
-    // let perf_label = move || {
-    //     if app.show_perf_panel.get() {
-    //         "Hide perf panel"
-    //     } else {
-    //         "Show perf panel"
-    //     }
-    // };
-
     // Theme toggle - right-aligned icon button.
     // DOM update and localStorage persistence are handled by the
     // use_rusty_calc_theme sync Effect in App.
