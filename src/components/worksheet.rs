@@ -10,6 +10,7 @@ use crate::coord::SheetArea;
 use crate::coord::{CellAddress, CellArea};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 
+use crate::app_state::AppState;
 use crate::input::formula_input::*;
 use crate::model::{mutate, AppClipboard, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
@@ -31,6 +32,7 @@ const HIT_ZONE: f64 = 4.0;
 pub fn Worksheet() -> impl IntoView {
     let canvas_ref = NodeRef::<html::Canvas>::new();
     let state = expect_context::<WorkbookState>();
+    let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
 
     // ResizeObserver: re-render when the container changes size
@@ -47,7 +49,7 @@ pub fn Worksheet() -> impl IntoView {
     let clipboard_draw = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
 
     // Memo for canvas theme - cached until theme changes.
-    let canvas_theme = Memo::new(move |_| state.get_theme().canvas_theme());
+    let canvas_theme = Memo::new(move |_| app.get_theme().canvas_theme());
 
     // Memo for the reactive overlay components (autofill extend target and
     // point-mode range). These must live in a memo, not be read directly in
@@ -173,8 +175,8 @@ pub fn Worksheet() -> impl IntoView {
             renderer.render(m, &overlays);
         });
         // Record render-done timestamp for the perf panel.
-        if state.perf.commit_start.get_untracked().is_some() {
-            state.perf.render_done.set(Some(crate::perf::now()));
+        if app.perf.commit_start.get_untracked().is_some() {
+            app.perf.render_done.set(Some(crate::perf::now()));
         }
     });
 

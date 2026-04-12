@@ -1,7 +1,11 @@
 [package]
 name = "rusty-calc"
-version = "0.1.0"
+version = "0.1.0-alpha.2"
 edition = "2021"
+repository = "https://github.com/CoalUnicorn/RustyCalc"
+homepage = "https://coalunicorn.github.io/RustyCalc/"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
 
 [dependencies]
 leptos = { version = "0.7", features = ["csr"] }

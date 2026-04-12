@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::state::WorkbookState;
+use crate::app_state::AppState;
 
 /// Displays the last commit->render timing breakdown.
 ///
@@ -11,7 +11,7 @@ use crate::state::WorkbookState;
 /// - **Total**: commit start to render complete
 #[component]
 pub fn PerfPanel() -> impl IntoView {
-    let perf = expect_context::<WorkbookState>().perf;
+    let perf = expect_context::<AppState>().perf;
 
     let timing = move || {
         let render_done = perf.render_done.get()?;
@@ -61,3 +61,36 @@ pub fn PerfPanel() -> impl IntoView {
         </div>
     }
 }
+
+// usage code:
+//
+// use crate::app_state::AppState;
+//
+// Component
+// ```rust
+//
+// use crate::components::perf_panel::PerfPanel
+// pub fn Bar() -> impl IntoView {
+//   let state = expect_context::<WorkbookState>();
+//   let app = expect_context::<AppState>();
+//   let model = expect_context::<ModelStore>();
+//
+//   let on_toggle_perf = move || {
+//      app.show_perf_panel.update(|v| *v = !*v);
+//   };
+// ```
+
+// let perf_label = move || {
+//     if app.show_perf_panel.get() {
+//         "Hide perf panel"
+//     } else {
+//         "Show perf panel"
+//     }
+// };
+//
+//   view!{
+//    <Show when=move || app.show_perf_panel.get()>
+//          <PerfPanel />
+//      </Show>
+//  }
+//

@@ -1,7 +1,24 @@
 # State and Events
 
-`WorkbookState` (transient UI state) and `events.rs` (typed events) work together:
-every model mutation that should trigger a UI update ends with `emit_event()`.
+Two context structs carry reactive UI state. `AppState` holds application-level signals (sidebar, theme, group collapse) that are independent of which workbook is loaded. `WorkbookState` holds spreadsheet editing state that is scoped to the active session. Both share the same `EventBus` instance, constructed once in `App` and passed to each.
+
+Every model mutation that should trigger a UI update ends with `emit_event()`.
+
+---
+
+## AppState
+
+`Copy` struct provided via Leptos context. Holds signals that survive workbook switches.
+
+```rust
+let app = expect_context::<AppState>();
+
+app.sidebar_open.set(true);
+app.bump_registry();          // increments registry_version; redraws left drawer
+app.toggle_theme();
+```
+
+Theme resolution: `app.theme` holds the user's preference (`Auto/Light/Dark`). Call `app.get_theme()` to resolve `Auto` against the system setting. Don't read `app.theme.get()` directly in rendering code.
 
 ---
 
@@ -55,14 +72,9 @@ let on_click = move |_| {
 };
 ```
 
-### Theme methods are different
+### Theme methods
 
-`state.theme` holds the user's *preference* (Auto/Light/Dark). Auto needs to be resolved against the system dark-mode setting. Two methods on `WorkbookState` do that:
-
-- `state.get_theme()` - reactive, resolves Auto -> Light or Dark
-- `state.get_theme_untracked()` - non-reactive version
-
-Don't call `state.theme.get()` directly in components - it won't resolve Auto correctly.
+Theme preference lives on `AppState`, not `WorkbookState`. `app.theme` stores the raw preference (`Auto/Light/Dark`); `app.get_theme()` resolves `Auto` against the system setting. Use `app.get_theme()` in rendering code, not `app.theme.get()` directly.
 
 ---
 
@@ -165,18 +177,28 @@ Rare — most changes fit the existing five. If you need one:
 
 ## Fields reference
 
+### WorkbookState fields
+
 | Field | Type | Purpose |
 |-------|------|---------|
 | `editing_cell` | `Split<Option<EditingCell>>` | Active in-progress cell edit. `None` when not editing. |
 | `drag` | `Split<DragState>` | Current mouse-drag mode: selecting, resizing, autofill, pointing. |
-| `current_uuid` | `Split<Option<String>>` | UUID of the loaded workbook - used for auto-save. |
-| `theme` | `Split<Theme>` | User's theme preference (Auto/Light/Dark). Read via `get_theme()`, not `.theme.get()`. |
-| `show_perf_panel` | `Split<bool>` | Whether the performance panel overlay is visible. |
+| `current_uuid` | `Split<Option<WorkbookId>>` | ID of the loaded workbook — used for auto-save and storage lookups. |
 | `context_menu` | `Split<Option<ContextMenuState>>` | Active right-click menu position and header target. |
 | `formula_input_ref` | `NodeRef<Input>` | DOM ref to the formula bar `<input>` - used to read cursor position for point-mode. |
 | `recent_colors` | `Split<Vec<CssColor>>` | Recently used colors (max 16), persisted to localStorage. |
-| `perf` | `PerfTimings` | Timestamps for the commit -> render pipeline, displayed in the perf panel. |
 | `events` | `EventBus` | Per-category event signals. |
+
+### AppState fields
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `theme` | `Split<Theme>` | User's theme preference. Read via `app.get_theme()`, not `.theme.get()`. |
+| `sidebar_open` | `Split<bool>` | Left drawer visibility. |
+| `collapsed_groups` | `Split<Vec<String>>` | Group labels currently collapsed in the left drawer. |
+| `show_perf_panel` | `Split<bool>` | Whether the performance panel overlay is visible. |
+| `perf` | `PerfTimings` | Timestamps for the commit → render pipeline. |
+| `registry_version` | `RwSignal<u64>` | Bumped on workbook CRUD. Left drawer subscribes to this; nothing else should. |
 
 ### DragState
 

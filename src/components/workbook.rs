@@ -1,8 +1,8 @@
 use leptos::prelude::*;
 
 use crate::components::{
-    file_bar::FileBar, formula_bar::FormulaBar, perf_panel::PerfPanel, sheet_tab_bar::SheetTabBar,
-    toolbar::Toolbar, worksheet::Worksheet,
+    file_bar::FileBar, formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar, toolbar::Toolbar,
+    worksheet::Worksheet,
 };
 use crate::coord::{CellArea, SheetArea};
 use crate::events::{ContentEvent, SpreadsheetEvent};
@@ -215,9 +215,7 @@ pub fn Workbook() -> impl IntoView {
             <Toolbar />
             <FormulaBar />
             <Worksheet />
-            <Show when=move || state.show_perf_panel.get()>
-                <PerfPanel />
-            </Show>
+
             <SheetTabBar />
         </div>
     }
