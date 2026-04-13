@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
-use crate::model::{mutate, ArrowKey, EvaluationMode, FrontendModel};
+use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
 use crate::storage;
@@ -71,43 +71,19 @@ pub fn execute_edit(
         }
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
-                // Perf timing
-                // let perf = app.perf;
-                // perf.commit_start.set(Some(crate::perf::now()));
+                // Write the edit buffer to the model and recalculate (timed).
+                // let perf = expect_context::<AppState>().perf;
                 // perf.last_formula.set(Some(edit.text.clone()));
-
                 // Write the edit buffer to the model and recalculate.
-                // pause_evaluation() prevents set_user_input from triggering an internal
-                // evaluate() call - without it we'd evaluate twice (once inside
-                // set_user_input, once explicitly below).
-                // TODO: use mutate
-                // try_mutate(model, state, EvaluationMode::Immediate, |m| {
-                //    m.set_user_input(
-                //        edit.address.sheet,
-                //        edit.address.row,
-                //        edit.address.column,
-                //        &edit.text,
-                //    )
-                //    .map_err(EditError::Engine)
-                //})?;
-                let mut commit_result: Result<(), EditError> = Ok(());
-                model.update_value(|m| {
-                    m.pause_evaluation();
-                    commit_result = m
-                        .set_user_input(
-                            edit.address.sheet,
-                            edit.address.row,
-                            edit.address.column,
-                            &edit.text,
-                        )
-                        .map_err(EditError::Engine);
-                    // perf.input_done.set(Some(crate::perf::now()));
-                    m.resume_evaluation();
-                    m.evaluate();
-                    // perf.eval_done.set(Some(crate::perf::now()));
-                });
-                // Propagate any engine error before touching reactive state.
-                commit_result?;
+                try_mutate(model, EvaluationMode::Immediate, |m| {
+                    m.set_user_input(
+                        edit.address.sheet,
+                        edit.address.row,
+                        edit.address.column,
+                        &edit.text,
+                    )
+                    .map_err(EditError::Engine)
+                })?;
 
                 // Clear all edit-related state.
                 state.editing_cell.set(None);

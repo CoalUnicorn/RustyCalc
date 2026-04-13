@@ -4,6 +4,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
+use crate::components::perf_panel::PerfPanel;
 use crate::events::*;
 use crate::input::xlsx_io;
 use crate::state::{ModelStore, WorkbookState};
@@ -106,6 +107,17 @@ pub fn FileBar() -> impl IntoView {
         crate::util::refocus_workbook();
     };
 
+    // let on_toggle_perf = move || {
+    //     app.show_perf_panel.update(|v| *v = !*v);
+    // };
+
+    // let perf_label = move || {
+    //     if app.show_perf_panel.get() {
+    //         "Hide perf panel"
+    //     } else {
+    //         "Show perf panel"
+    //     }
+    // };
     // Theme toggle - right-aligned icon button.
     // DOM update and localStorage persistence are handled by the
     // use_rusty_calc_theme sync Effect in App.
@@ -134,9 +146,11 @@ pub fn FileBar() -> impl IntoView {
     view! {
         <div class="file-bar">
             <button
-            on:click=on_sidebar
+                class="tab-bar-hamburger"
+                title="Workbooks sidebar"
+                on:click=on_sidebar
             >
-                "<"
+                "≡"
             </button>
             // Hidden file picker - triggered programmatically by Import item.
             <input
@@ -161,9 +175,11 @@ pub fn FileBar() -> impl IntoView {
                 <ContextMenuItem on_click=on_import icon="⬆">"Import .xlsx"</ContextMenuItem>
                 <ContextMenuItem on_click=on_export icon="⬇">"Download .xlsx"</ContextMenuItem>
                 <ContextMenuSeparator />
-                /*<ContextMenuItem on_click=on_toggle_perf icon="⏱">
+                /*
+                <ContextMenuItem on_click=on_toggle_perf icon="⏱">
                     {perf_label}
-                </ContextMenuItem>*/
+                </ContextMenuItem>
+                */
             </ContextMenu>
 
             // Right: theme toggle
@@ -176,6 +192,11 @@ pub fn FileBar() -> impl IntoView {
                     {theme_icon}
                 </button>
             </div>
+            /*
+            <Show when=move || app.show_perf_panel.get()>
+                <PerfPanel />
+            </Show>
+            */
         </div>
     }
 }

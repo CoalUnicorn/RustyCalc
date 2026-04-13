@@ -5,6 +5,8 @@ use ironcalc_base::{
     UserModel,
 };
 
+use leptos::prelude::Set;
+
 use crate::coord::{CellAddress, CellArea};
 use crate::model::frontend_types::*;
 use crate::state::ModelStore;
@@ -460,6 +462,33 @@ pub fn try_mutate<E>(
         m.resume_evaluation();
         if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
             m.evaluate();
+        }
+    });
+    outcome
+}
+
+/// Timed variant of [`try_mutate`]: records phase timestamps into [`PerfTimings`].
+///
+/// Sets `commit_start` before the closure, `input_done` after it, and `eval_done`
+/// after `evaluate()`. The caller sets `last_formula` before calling (context-specific).
+/// `render_done` is set separately by the canvas render effect in `worksheet.rs`.
+#[allow(dead_code)]
+pub fn try_mutate_timed<E>(
+    model: ModelStore,
+    evaluate: EvaluationMode,
+    perf: crate::perf::PerfTimings,
+    f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
+) -> Result<(), E> {
+    let mut outcome: Result<(), E> = Ok(());
+    model.update_value(|m| {
+        perf.commit_start.set(Some(crate::perf::now()));
+        m.pause_evaluation();
+        outcome = f(m);
+        perf.input_done.set(Some(crate::perf::now()));
+        m.resume_evaluation();
+        if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
+            m.evaluate();
+            perf.eval_done.set(Some(crate::perf::now()));
         }
     });
     outcome
