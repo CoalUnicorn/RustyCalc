@@ -114,6 +114,17 @@ pub struct PointingStep {
     pub span: RefSpan,
 }
 
+/// Returns `true` when a keypress should exit point mode.
+///
+/// Any key that is not an arrow key or a bare modifier should drop the
+/// `DragState::Pointing` state so the next arrow press starts a fresh reference.
+pub fn should_exit_pointing(key: &str) -> bool {
+    !matches!(
+        key,
+        "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight" | "Shift" | "Control" | "Alt" | "Meta"
+    )
+}
+
 /// Compute a point-mode arrow move from pure inputs. Returns `None` when:
 /// - `key` is not an arrow key, or
 /// - `already_pointing` is false AND cursor is not at a valid reference insertion point.

@@ -54,17 +54,8 @@ pub fn Workbook() -> impl IntoView {
             // This lets the next arrow press start a fresh cell reference.
             // TODO(future): PointModeDecision — absorb this guard into try_point_move as a
             // 3-way enum. Review DragState/EditMode signal lifecycle in state.rs first.
-            if !matches!(
-                key.as_str(),
-                "ArrowDown"
-                    | "ArrowUp"
-                    | "ArrowLeft"
-                    | "ArrowRight"
-                    | "Shift"
-                    | "Control"
-                    | "Alt"
-                    | "Meta"
-            ) && matches!(state.drag.get_untracked(), DragState::Pointing { .. })
+            if should_exit_pointing(key.as_str())
+                && matches!(state.drag.get_untracked(), DragState::Pointing { .. })
             {
                 state.drag.set(DragState::Idle);
             }
