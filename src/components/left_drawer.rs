@@ -357,7 +357,7 @@ fn EntryRow(
 }
 
 // Rename input
-
+// TODO: Migrate to inline_rename
 #[component]
 fn RenameInput(
     uuid: WorkbookId,

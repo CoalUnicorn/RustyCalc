@@ -15,6 +15,10 @@ use crate::{
 
 use leptos::prelude::UpdateValue;
 
+/// IronCalc's canonical string value for a visible worksheet.
+/// Used to guard against silent typos in state comparisons.
+pub(crate) const SHEET_STATE_VISIBLE: &str = "visible";
+
 pub trait FrontendModel {
     // Query
 
@@ -54,6 +58,15 @@ pub trait FrontendModel {
     /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
     fn sheet_dimension(&self) -> CellArea;
 
+    fn get_sheet_name(&self, sheet_idx: usize) -> String;
+
+    fn get_sheet_visible(&self) -> Vec<(u32, u32)>;
+
+    fn get_sheet_tab_color(&self, sheet_idx: usize) -> Option<String>;
+
+    fn get_sheet_visible_count(&self) -> usize;
+
+    fn get_sheet_all(&self) -> Vec<(u32, String, String)>;
     // Navigation (infallible)
 
     /// Move the active cell one step. No-op at sheet edges.
@@ -272,6 +285,43 @@ impl FrontendModel for UserModel<'_> {
                 c2: 1,
             },
         }
+    }
+
+    fn get_sheet_name(&self, sheet_idx: usize) -> String {
+        self.get_worksheets_properties()
+            .get(sheet_idx)
+            .map(|s| s.name.clone())
+            .unwrap_or_default()
+    }
+
+    fn get_sheet_visible(&self) -> Vec<(u32, u32)> {
+        self.get_worksheets_properties()
+            .into_iter()
+            .enumerate()
+            .filter(|(_, s)| s.state == SHEET_STATE_VISIBLE)
+            .map(|(idx, s)| (s.sheet_id, idx as u32))
+            .collect::<Vec<_>>()
+    }
+
+    fn get_sheet_visible_count(&self) -> usize {
+        self.get_worksheets_properties()
+            .iter()
+            .filter(|s| s.state == SHEET_STATE_VISIBLE)
+            .count()
+    }
+
+    fn get_sheet_tab_color(&self, sheet_idx: usize) -> Option<String> {
+        self.get_worksheets_properties()
+            .get(sheet_idx)
+            .and_then(|s| s.color.clone())
+    }
+
+    fn get_sheet_all(&self) -> Vec<(u32, String, String)> {
+        self.get_worksheets_properties()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, s)| (idx as u32, s.name.clone(), s.state.clone()))
+            .collect::<Vec<_>>()
     }
 
     // Navigation

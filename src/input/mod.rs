@@ -5,6 +5,7 @@ pub mod format;
 pub mod formula_input;
 pub mod mouse;
 pub mod nav;
+pub mod sheet;
 pub mod structure;
 pub mod workbook;
 pub mod xlsx_io;
