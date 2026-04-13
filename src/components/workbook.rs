@@ -4,7 +4,7 @@ use crate::components::{
     file_bar::FileBar, formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar, toolbar::Toolbar,
     worksheet::Worksheet,
 };
-use crate::coord::{CellArea, SheetArea};
+use crate::coord::SheetArea;
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::{
     action::{classify_key, execute, KeyMod, SpreadsheetAction},
@@ -45,15 +45,15 @@ pub fn Workbook() -> impl IntoView {
         let is_shift = ev.shift_key();
         let is_alt = ev.alt_key();
 
-        // Point-mode pre-check
-        // Arrow keys in Accept mode may enter/extend a cell-reference range
-        // inside a formula, rather than committing the edit.  This requires
-        // reading the textarea cursor position from the DOM, so it must run
-        // here before classify_key (which is pure).
+        // Point-mode pre-check: arrow keys in Accept mode may enter/extend a cell-reference
+        // range inside a formula. Runs before classify_key (which is pure). The pure
+        // computation lives in formula_input::try_point_move; only the DOM cursor read and
+        // signal writes stay here.
         if let Some(ref edit) = state.editing_cell.get_untracked() {
-            // Exit pointing when user types a non-arrow key (e.g. operator,
-            // digit, backspace). This lets the next arrow press start a fresh
-            // cell reference via is_in_reference_mode.
+            // Exit pointing when user types a non-arrow key (e.g. operator, digit, backspace).
+            // This lets the next arrow press start a fresh cell reference.
+            // TODO(future): PointModeDecision — absorb this guard into try_point_move as a
+            // 3-way enum. Review DragState/EditMode signal lifecycle in state.rs first.
             if !matches!(
                 key.as_str(),
                 "ArrowDown"
@@ -90,47 +90,37 @@ pub fn Workbook() -> impl IntoView {
                             e.text_dirty = false;
                         }
                     });
-                }
-
-                let cursor = get_formula_cursor();
-                if may_point && (already_pointing || is_in_reference_mode(&edit.text, cursor)) {
-                    // Move or extend the point-mode range by one cell.
+                    let cursor = get_formula_cursor();
                     let pr = state.effective_point_range(model);
-                    let trailing = pr.extend_trailing(&key);
-                    // Shift extends the selection (anchor stays); plain arrow moves the whole range.
-                    let new_pr = if is_shift {
-                        CellArea {
-                            r1: pr.r1,
-                            c1: pr.c1,
-                            r2: trailing.r2,
-                            c2: trailing.c2,
-                        }
-                    } else {
-                        CellArea::from_cell(trailing.r2, trailing.c2)
-                    };
+                    let prev_span =
+                        if let DragState::Pointing { ref_span, .. } = state.drag.get_untracked() {
+                            Some(ref_span)
+                        } else {
+                            None
+                        };
                     let sheet = model.with_value(|m| m.get_selected_sheet());
-                    let ref_str =
-                        range_ref_str(new_pr.r1, new_pr.c1, new_pr.r2, new_pr.c2, sheet, sheet, "");
-                    let prev_span = if let DragState::Pointing { ref_span, .. } = state.drag.get() {
-                        Some(ref_span)
-                    } else {
-                        None
-                    };
-                    let splice_at = prev_span.map(|(_, end)| end).unwrap_or(cursor);
-                    let text = edit.text.clone();
-                    let (new_text, new_start, new_end) =
-                        splice_ref(&text, splice_at, &ref_str, prev_span);
-                    state.editing_cell.update(|c| {
-                        if let Some(e) = c {
-                            e.text = new_text;
-                        }
-                    });
-                    state.drag.set(DragState::Pointing {
-                        range: new_pr,
-                        ref_span: (new_start, new_end),
-                    });
-                    ev.prevent_default();
-                    return;
+                    if let Some(result) = try_point_move(
+                        &edit.text,
+                        &key,
+                        is_shift,
+                        cursor,
+                        already_pointing,
+                        pr,
+                        prev_span,
+                        sheet,
+                    ) {
+                        state.editing_cell.update(|c| {
+                            if let Some(e) = c {
+                                e.text = result.text;
+                            }
+                        });
+                        state.drag.set(DragState::Pointing {
+                            range: result.range,
+                            ref_span: result.span,
+                        });
+                        ev.prevent_default();
+                        return;
+                    }
                 }
             }
         }

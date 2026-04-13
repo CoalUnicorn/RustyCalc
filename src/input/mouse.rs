@@ -13,7 +13,7 @@ use crate::canvas::{
     autofill_handle_pos, frozen_geometry, pixel_to_col, pixel_to_row, AUTOFILL_HANDLE_PX,
     HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
-use crate::coord::{CellAddress, CellArea, SheetArea};
+use crate::coord::{CellAddress, CellArea, RefSpan, SheetArea};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::formula_input::{
     get_formula_cursor, is_in_reference_mode, range_ref_str, splice_ref,
@@ -164,15 +164,17 @@ pub fn handle_cell_click(
         if may_point {
             let cursor = get_formula_cursor();
             if already_pointing || is_in_reference_mode(&edit.text, cursor) {
-                let sheet = model.with_value(|m| m.active_cell().sheet);
-                let ref_str = range_ref_str(row, col, row, col, sheet, sheet, "");
+                let sheet = model.with_value(|m| m.get_selected_sheet()); //active_cell().sheet);
+                let ref_str =
+                    range_ref_str(CellArea::from_cell(row, col).with_sheet(sheet), sheet, "");
                 let prev_span = if let DragState::Pointing { ref_span, .. } = state.drag.get() {
                     Some(ref_span)
                 } else {
                     None
                 };
                 let text = edit.text.clone();
-                let (new_text, new_start, new_end) = splice_ref(&text, cursor, &ref_str, prev_span);
+                let (new_text, ref_span) =
+                    splice_ref(&text, prev_span.unwrap_or(RefSpan::at(cursor)), &ref_str);
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
                         e.text = new_text;
@@ -180,7 +182,7 @@ pub fn handle_cell_click(
                 });
                 state.drag.set(DragState::Pointing {
                     range: CellArea::from_cell(row, col),
-                    ref_span: (new_start, new_end),
+                    ref_span,
                 });
                 return;
             }
@@ -344,16 +346,25 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
             ref_span,
         } => {
             let sheet = model.with_value(UserModel::get_selected_sheet);
-            let ref_str = range_ref_str(pr.r1, pr.c1, row, col, sheet, sheet, "");
-            let cursor = ref_span.1;
+            let ref_str = range_ref_str(
+                CellArea {
+                    r1: pr.r1,
+                    c1: pr.c1,
+                    r2: row,
+                    c2: col,
+                }
+                .with_sheet(sheet),
+                sheet,
+                "",
+            );
             let new_state = state
                 .editing_cell
                 .get_untracked()
-                .map(|edit| splice_ref(&edit.text, cursor, &ref_str, Some(ref_span)));
-            if let Some((new_text, new_start, new_end)) = new_state {
+                .map(|edit| splice_ref(&edit.text, ref_span, &ref_str));
+            if let Some(new) = new_state {
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
-                        e.text = new_text;
+                        e.text = new.0;
                     }
                 });
                 state.drag.set(DragState::Pointing {
@@ -363,7 +374,7 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
                         r2: row,
                         c2: col,
                     },
-                    ref_span: (new_start, new_end),
+                    ref_span: new.1,
                 });
             }
         }

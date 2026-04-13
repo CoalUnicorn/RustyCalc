@@ -56,3 +56,16 @@ impl From<String> for EditError {
         Self::Engine(s)
     }
 }
+
+/// Error from a sheet-level operation (select, add, delete, hide, rename, color).
+#[derive(Debug, Error)]
+pub enum SheetError {
+    #[error("sheet: {0}")]
+    Engine(String),
+}
+
+impl From<String> for SheetError {
+    fn from(s: String) -> Self {
+        Self::Engine(s)
+    }
+}

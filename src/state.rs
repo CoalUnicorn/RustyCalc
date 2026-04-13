@@ -7,7 +7,7 @@ use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
-use crate::coord::{CellAddress, CellArea};
+use crate::coord::{CellAddress, CellArea, RefSpan};
 use crate::events::*;
 use crate::model::CssColor;
 use crate::storage::WorkbookId;
@@ -84,10 +84,7 @@ pub enum DragState {
     /// Row header resize: `(row_1based, current_mouse_y)`.
     ResizingRow { row: i32, y: f64 },
     /// Formula point-mode: highlighted range + byte span in formula text.
-    Pointing {
-        range: CellArea,
-        ref_span: (usize, usize),
-    },
+    Pointing { range: CellArea, ref_span: RefSpan },
 }
 
 /// Arrow key behavior during a cell edit.

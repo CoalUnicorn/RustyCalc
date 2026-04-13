@@ -7,6 +7,22 @@
 
 use ironcalc_base::{expressions::types::Area, UserModel};
 
+/// Byte-offset span within a formula string, marking where the last point-mode
+/// reference was spliced — so it can be replaced on the next arrow press or click.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RefSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl RefSpan {
+    /// A zero-length span at `cursor` — the "no previous span" fallback used
+    /// when entering point mode for the first time at this formula position.
+    pub fn at(cursor: usize) -> Self {
+        Self { start: cursor, end: cursor }
+    }
+}
+
 /// A cell range pinned to a specific sheet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SheetArea {
