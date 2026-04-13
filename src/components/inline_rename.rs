@@ -40,9 +40,11 @@ pub fn InlineRenameInput(
     on_commit: Callback<String>,
     /// Called on Escape. If omitted, Escape calls `on_commit` with the
     /// original value.
-    #[prop(optional)] on_cancel: Option<Callback<()>>,
+    #[prop(optional)]
+    on_cancel: Option<Callback<()>>,
     /// CSS class for the `<input>` element.
-    #[prop(default = "rename-input")] class: &'static str,
+    #[prop(default = "rename-input")]
+    class: &'static str,
 ) -> impl IntoView {
     let input_ref = NodeRef::<leptos::html::Input>::new();
     let committed = RwSignal::new(false);

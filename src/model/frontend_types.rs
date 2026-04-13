@@ -1,6 +1,7 @@
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 
 /// CSS hex color string, e.g. `"#FF0000"`. Empty input becomes `"#000000"`.
+/// CssColor is a wire type — it carries model data zero-copy through the renderer
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
 pub struct CssColor(String);

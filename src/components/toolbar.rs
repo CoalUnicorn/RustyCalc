@@ -370,15 +370,15 @@ fn TextColorPickerToolbar() -> impl IntoView {
     let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
     let current_color = Signal::derive(move || {
-        Some(toolbar_state.with(|ts| ts.style.text_color.as_str().to_owned()))
+        HexColor::new(toolbar_state.with(|ts| ts.style.text_color.as_str().to_owned())).ok()
     });
 
-    let on_color_change = Callback::new(move |color: Option<String>| {
+    let on_color_change = Callback::new(move |color: Option<HexColor>| {
         if let Some(ref hex) = color {
-            state.add_recent_color(hex);
+            state.add_recent_color(hex.as_str());
         }
         execute(
-            &SpreadsheetAction::set_text_color(HexColor::from_opt(color)),
+            &SpreadsheetAction::set_text_color(color.unwrap_or_else(HexColor::transparent)),
             model,
             &state,
         );
@@ -398,15 +398,20 @@ fn BackgroundColorPickerToolbar() -> impl IntoView {
     let toolbar_state = expect_context::<Memo<ToolbarState>>();
 
     let current_color = Signal::derive(move || {
-        toolbar_state.with(|ts| ts.style.bg_color.as_ref().map(|c| c.as_str().to_owned()))
+        toolbar_state.with(|ts| {
+            ts.style
+                .bg_color
+                .as_ref()
+                .and_then(|c| HexColor::new(c.as_str()).ok())
+        })
     });
 
-    let on_color_change = Callback::new(move |color: Option<String>| {
+    let on_color_change = Callback::new(move |color: Option<HexColor>| {
         if let Some(ref hex) = color {
-            state.add_recent_color(hex);
+            state.add_recent_color(hex.as_str());
         }
         execute(
-            &SpreadsheetAction::set_background_color(HexColor::from_opt(color)),
+            &SpreadsheetAction::set_background_color(color.unwrap_or_else(HexColor::transparent)),
             model,
             &state,
         );

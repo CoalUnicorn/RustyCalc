@@ -696,8 +696,7 @@ impl CanvasRenderer {
             return None; // Too small to render meaningful text
         }
 
-        // Destructure to move fields directly - avoids cloning `css` and
-        // re-allocating `text_color` from a borrow.
+        // Destructure to move fields directly - avoids cloning `css`.
         let crate::model::ResolvedCellStyle {
             font:
                 crate::model::ResolvedFont {
@@ -713,7 +712,6 @@ impl CanvasRenderer {
             wrap_text: wrap,
             ..
         } = model.cell_style(sheet, row, col, self.theme.default_text_color);
-        let text_color = text_color.as_str().to_owned();
 
         let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
         let line_height = font_size * LINE_HEIGHT_FACTOR;
@@ -806,7 +804,7 @@ impl CanvasRenderer {
     fn render_cell_text(&self, ct: &CellText) {
         let ctx = &self.ctx;
         ctx.set_font(&ct.font);
-        ctx.set_fill_style_str(&ct.text_color);
+        ctx.set_fill_style_str(ct.text_color.as_str());
 
         ctx.save();
         ctx.begin_path();
@@ -819,7 +817,7 @@ impl CanvasRenderer {
                 let underline_offset =
                     (ct.font_size_px * UNDERLINE_OFFSET_FACTOR).max(MIN_UNDERLINE_OFFSET);
                 ctx.begin_path();
-                ctx.set_stroke_style_str(&ct.text_color);
+                ctx.set_stroke_style_str(ct.text_color.as_str());
                 ctx.set_line_width(STANDARD_BORDER_WIDTH);
                 ctx.move_to(
                     line.center_x - line.width / 2.0,
@@ -833,7 +831,7 @@ impl CanvasRenderer {
             }
             if ct.strike {
                 ctx.begin_path();
-                ctx.set_stroke_style_str(&ct.text_color);
+                ctx.set_stroke_style_str(ct.text_color.as_str());
                 ctx.set_line_width(STANDARD_BORDER_WIDTH);
                 ctx.move_to(line.center_x - line.width / 2.0, line.center_y);
                 ctx.line_to(line.center_x + line.width / 2.0, line.center_y);

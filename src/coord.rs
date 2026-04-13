@@ -19,7 +19,10 @@ impl RefSpan {
     /// A zero-length span at `cursor` — the "no previous span" fallback used
     /// when entering point mode for the first time at this formula position.
     pub fn at(cursor: usize) -> Self {
-        Self { start: cursor, end: cursor }
+        Self {
+            start: cursor,
+            end: cursor,
+        }
     }
 }
 

@@ -9,6 +9,7 @@ use std::ops::RangeInclusive;
 use ironcalc_base::UserModel;
 
 use crate::coord::{CellArea, SheetArea};
+use crate::model::CssColor;
 
 use super::geometry::{
     col_width, row_height, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
@@ -157,7 +158,7 @@ pub(crate) struct CellText {
     pub clip: PixelRect,
     pub font: String,
     pub font_size_px: f64,
-    pub text_color: String,
+    pub text_color: CssColor,
     pub underlined: bool,
     pub strike: bool,
     pub lines: Vec<TextLine>,

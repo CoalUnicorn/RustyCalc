@@ -209,7 +209,7 @@ pub fn save(uuid: &WorkbookId, model: &UserModel) {
 /// Returns `None` if the key is absent or the bytes are corrupt.
 /// Logs a console warning for decode/parse failures so silent data loss is visible.
 pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
-    let encoded: String = LocalStorage::get(&uuid.to_string()).ok()?;
+    let encoded: String = LocalStorage::get(uuid.to_string()).ok()?;
     let bytes = match STANDARD.decode(encoded) {
         Ok(b) => b,
         Err(e) => {

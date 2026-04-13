@@ -2,7 +2,7 @@ use crate::components::color_picker::TabColorPicker;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
 use crate::components::inline_rename::InlineRenameInput;
 use crate::input::sheet::{execute_sheet, SheetAction};
-use crate::model::CssColor;
+use crate::model::style_types::HexColor;
 use crate::model::{frontend_model::SHEET_STATE_VISIBLE, FrontendModel};
 use crate::state::{ModelStore, WorkbookState};
 use leptos::prelude::*;
@@ -84,7 +84,9 @@ fn SheetTab(
     // and TabColorPicker to avoid a duplicate reactive subscription.
     let current_tab_color = Signal::derive(move || {
         let _ = state.events.structure.get();
-        model.with_value(|m| m.get_sheet_tab_color(sheet_idx as usize))
+        model
+            .with_value(|m| m.get_sheet_tab_color(sheet_idx as usize))
+            .and_then(|s| HexColor::new(s).ok())
     });
 
     let on_click = move |_: web_sys::MouseEvent| {
@@ -128,7 +130,7 @@ fn SheetTab(
     let color_bar_style = move || {
         current_tab_color
             .get()
-            .map(|c| format!("background:{c};"))
+            .map(|c| format!("background-color: {};", c.as_str()))
             .unwrap_or_default()
     };
 
@@ -147,11 +149,11 @@ fn SheetTab(
         set_renaming.set(Some(sheet_idx));
     };
 
-    let on_color_change = Callback::new(move |color: Option<String>| {
+    let on_color_change = Callback::new(move |color: Option<HexColor>| {
         execute_sheet(
             &SheetAction::SetColor {
                 sheet: sheet_idx,
-                color,
+                color: color.map(|c| c.as_str().to_string()),
             },
             model,
             &state,

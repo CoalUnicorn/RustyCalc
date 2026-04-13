@@ -38,7 +38,7 @@ Custom / without WorkbookState:
 use leptos::prelude::*;
 use leptos_use::{on_click_outside, use_toggle};
 
-use crate::model::style_types::is_valid_hex_color;
+use crate::model::style_types::HexColor;
 use crate::state::WorkbookState;
 use crate::theme::COLOR_PALETTE;
 
@@ -87,13 +87,13 @@ pub enum ColorPickerPlacement {
 #[component]
 pub fn ColorPicker(
     color_type: ColorType,
-    current_color: Signal<Option<String>>,
-    on_color_change: Callback<Option<String>>,
+    current_color: Signal<Option<HexColor>>,
+    on_color_change: Callback<Option<HexColor>>,
     #[prop(default = ColorPickerPlacement::Dropdown)] placement: ColorPickerPlacement,
     children: Children,
     #[prop(default = true)] allow_custom: bool,
     #[prop(default = true)] allow_clear: bool,
-    #[prop(default = Signal::derive(|| Vec::new()))] recent_colors: Signal<Vec<String>>,
+    #[prop(default = Signal::derive(|| Vec::new()))] recent_colors: Signal<Vec<HexColor>>,
 ) -> impl IntoView {
     let leptos_use::UseToggleReturn {
         toggle: toggle_picker,
@@ -103,7 +103,7 @@ pub fn ColorPicker(
 
     let custom_input = RwSignal::new(String::new());
 
-    let select_color = move |color: Option<String>| {
+    let select_color = move |color: Option<HexColor>| {
         on_color_change.run(color);
         set_picker_open.set(false);
         custom_input.set(String::new());
@@ -174,12 +174,12 @@ fn ColorPickerTrigger(
 #[component]
 fn ColorPickerDropdown(
     placement: ColorPickerPlacement,
-    current_color: Signal<Option<String>>,
-    recent_colors: Signal<Vec<String>>,
+    current_color: Signal<Option<HexColor>>,
+    recent_colors: Signal<Vec<HexColor>>,
     custom_input: RwSignal<String>,
     allow_custom: bool,
     allow_clear: bool,
-    on_color_select: impl Fn(Option<String>) + Copy + Send + Sync + 'static,
+    on_color_select: impl Fn(Option<HexColor>) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let picker_class = match placement {
         ColorPickerPlacement::Dropdown => "color-picker-dropdown",
@@ -206,24 +206,26 @@ fn ColorPickerDropdown(
 
 #[component]
 fn MainColorPalette(
-    current_color: Signal<Option<String>>,
-    on_color_select: impl Fn(Option<String>) + Copy + Send + Sync + 'static,
+    current_color: Signal<Option<HexColor>>,
+    on_color_select: impl Fn(Option<HexColor>) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     view! {
         <div class="color-picker-palette">
             {COLOR_PALETTE
                 .iter()
-                .map(|&hex| {
+                .filter_map(|&hex_str| HexColor::new(hex_str).ok())
+                .map(|swatch| {
+                    let swatch_cmp = swatch.clone();
                     view! {
                         <ColorSwatch
-                            hex=hex.to_string()
+                            hex=swatch
                             is_selected=move || {
                                 current_color
                                     .get()
-                                    .map(|c| c.eq_ignore_ascii_case(hex))
+                                    .map(|c| c == swatch_cmp)
                                     .unwrap_or(false)
                             }
-                            on_click=Callback::new(move |h: String| on_color_select(Some(h)))
+                            on_click=Callback::new(move |h: HexColor| on_color_select(Some(h)))
                         />
                     }
                 })
@@ -234,9 +236,9 @@ fn MainColorPalette(
 
 #[component]
 fn RecentColorsPalette(
-    recent_colors: Signal<Vec<String>>,
-    current_color: Signal<Option<String>>,
-    on_color_select: impl Fn(Option<String>) + Copy + Send + Sync + 'static,
+    recent_colors: Signal<Vec<HexColor>>,
+    current_color: Signal<Option<HexColor>>,
+    on_color_select: impl Fn(Option<HexColor>) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     view! {
         <Show when=move || !recent_colors.get().is_empty()>
@@ -245,11 +247,8 @@ fn RecentColorsPalette(
                 <div class="color-picker-recent-palette">
                     <For
                         each=move || recent_colors.get()
-                        key=|hex| hex.clone()
+                        key=|hex: &HexColor| hex.as_str().to_string()
                         children=move |hex| {
-                            // One clone: `h` is captured by the reactive `is_selected` closure.
-                            // `hex` itself moves into ColorSwatch; on click the component
-                            // passes it back through on_click so no extra capture is needed.
                             let h = hex.clone();
                             view! {
                                 <ColorSwatch
@@ -260,7 +259,7 @@ fn RecentColorsPalette(
                                             .map(|c| c == h)
                                             .unwrap_or(false)
                                     }
-                                    on_click=Callback::new(move |h: String| {
+                                    on_click=Callback::new(move |h: HexColor| {
                                         on_color_select(Some(h))
                                     })
                                 />
@@ -281,12 +280,12 @@ fn RecentColorsPalette(
 /// internally on click, so callers never need to capture hex separately.
 #[component]
 fn ColorSwatch(
-    hex: String,
+    hex: HexColor,
     is_selected: impl Fn() -> bool + Send + Sync + 'static,
-    on_click: Callback<String>,
+    on_click: Callback<HexColor>,
 ) -> impl IntoView {
-    let style = format!("background-color: {hex};");
-    let title = hex.clone();
+    let style = format!("background-color: {};", hex.as_str());
+    let title = hex.as_str().to_string();
     view! {
         <div
             class=move || if is_selected() {
@@ -307,7 +306,7 @@ fn ColorSwatch(
 #[component]
 fn CustomColorInput(
     custom_input: RwSignal<String>,
-    on_color_select: impl Fn(Option<String>) + Copy + Send + Sync + 'static,
+    on_color_select: impl Fn(Option<HexColor>) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let submit = move |raw: String| {
         let trimmed = raw.trim().to_string();
@@ -320,8 +319,8 @@ fn CustomColorInput(
         } else {
             format!("#{trimmed}")
         };
-        if is_valid_hex_color(&normalized) {
-            on_color_select(Some(normalized));
+        if let Ok(color) = HexColor::new(&normalized) {
+            on_color_select(Some(color));
         }
     };
 
@@ -362,7 +361,7 @@ fn CustomColorInput(
 
 #[component]
 fn ClearColorButton(
-    on_color_select: impl Fn(Option<String>) + Send + Sync + 'static,
+    on_color_select: impl Fn(Option<HexColor>) + Send + Sync + 'static,
 ) -> impl IntoView {
     view! {
         <button
@@ -382,23 +381,22 @@ fn ClearColorButton(
 // to wire it up manually. Adding colors to history remains the caller's job
 // (done in the on_change callback at the toolbar / tab-bar level).
 
-fn workbook_recent_colors(state: WorkbookState) -> Signal<Vec<String>> {
+fn workbook_recent_colors(state: WorkbookState) -> Signal<Vec<HexColor>> {
     // recent_colors is a split signal; reading it here makes this derived signal
     // reactive - it re-runs whenever add_recent_color() writes the signal.
-    // Convert CssColor -> String at this boundary so component props stay as Vec<String>.
     Signal::derive(move || {
         state
             .recent_colors
             .get()
             .into_iter()
-            .map(|c| c.as_str().to_owned())
+            .filter_map(|c| HexColor::new(c.as_str()).ok())
             .collect()
     })
 }
 
-fn color_indicator_style(current_color: Signal<Option<String>>) -> impl Fn() -> String {
+fn color_indicator_style(current_color: Signal<Option<HexColor>>) -> impl Fn() -> String {
     move || match current_color.get() {
-        Some(c) => format!("background-color: {c};"),
+        Some(c) => format!("background-color: {};", c.as_str()),
         None => "background-color: transparent; border: 1px solid var(--border-color);".to_string(),
     }
 }
@@ -406,8 +404,8 @@ fn color_indicator_style(current_color: Signal<Option<String>>) -> impl Fn() -> 
 /// Toolbar text-color picker. Pulls `recent_colors` from [`WorkbookState`] automatically.
 #[component]
 pub fn TextColorPicker(
-    current_color: Signal<Option<String>>,
-    on_change: Callback<Option<String>>,
+    current_color: Signal<Option<HexColor>>,
+    on_change: Callback<Option<HexColor>>,
 ) -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let recent_colors = workbook_recent_colors(state);
@@ -429,8 +427,8 @@ pub fn TextColorPicker(
 /// Toolbar background-fill picker. Pulls `recent_colors` from [`WorkbookState`] automatically.
 #[component]
 pub fn BackgroundColorPicker(
-    current_color: Signal<Option<String>>,
-    on_change: Callback<Option<String>>,
+    current_color: Signal<Option<HexColor>>,
+    on_change: Callback<Option<HexColor>>,
 ) -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let recent_colors = workbook_recent_colors(state);
@@ -452,8 +450,8 @@ pub fn BackgroundColorPicker(
 /// Sheet-tab color picker, rendered as a context-menu item. Pulls `recent_colors` from [`WorkbookState`].
 #[component]
 pub fn TabColorPicker(
-    current_color: Signal<Option<String>>,
-    on_change: Callback<Option<String>>,
+    current_color: Signal<Option<HexColor>>,
+    on_change: Callback<Option<HexColor>>,
 ) -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let recent_colors = workbook_recent_colors(state);
@@ -474,7 +472,7 @@ pub fn TabColorPicker(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::model::style_types::is_valid_hex_color;
 
     #[test]
     fn test_hex_color_validation() {
