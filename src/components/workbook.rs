@@ -225,10 +225,8 @@ fn copy_to_app_clipboard(
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
             // Fire-and-forget: write tab-separated text to the OS clipboard.
             wasm_bindgen_futures::spawn_local(async move {
-                if let Some(window) = web_sys::window() {
-                    let clip = window.navigator().clipboard();
-                    let _ = wasm_bindgen_futures::JsFuture::from(clip.write_text(&csv)).await;
-                }
+                let clip = leptos::prelude::window().navigator().clipboard();
+                let _ = wasm_bindgen_futures::JsFuture::from(clip.write_text(&csv)).await;
             });
         }
     });
@@ -262,10 +260,7 @@ fn paste_from_clipboard(
     // the async path would race and overwrite the already-completed paste.
     if !internal_pasted {
         wasm_bindgen_futures::spawn_local(async move {
-            let Some(window) = web_sys::window() else {
-                return;
-            };
-            let clip = window.navigator().clipboard();
+            let clip = leptos::prelude::window().navigator().clipboard();
             let Ok(js_text) = wasm_bindgen_futures::JsFuture::from(clip.read_text()).await else {
                 return;
             };

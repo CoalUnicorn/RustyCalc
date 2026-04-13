@@ -46,8 +46,8 @@ impl Default for PerfTimings {
 
 /// Read `performance.now()` from the browser.
 pub fn now() -> f64 {
-    web_sys::window()
-        .and_then(|w| w.performance())
+    leptos::prelude::window()
+        .performance()
         .map(|p| p.now())
         .unwrap_or(0.0)
 }

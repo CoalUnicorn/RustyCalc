@@ -165,11 +165,8 @@ fn SheetTab(
 
     let on_delete = move || {
         let sheet_name = model.with_value(|m| m.get_sheet_name(sheet_idx as usize));
-        let confirmed = web_sys::window()
-            .and_then(|w| {
-                w.confirm_with_message(&format!("Delete '{sheet_name}'? This cannot be undone."))
-                    .ok()
-            })
+        let confirmed = leptos::prelude::window()
+            .confirm_with_message(&format!("Delete '{sheet_name}'? This cannot be undone."))
             .unwrap_or(false);
         if confirmed {
             execute_sheet(&SheetAction::Delete(sheet_idx), model, &state);

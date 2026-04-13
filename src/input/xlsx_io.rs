@@ -55,10 +55,7 @@ pub fn trigger_download(bytes: &[u8], filename: &str) {
     let url = web_sys::Url::create_object_url_with_blob(&blob)
         .expect("createObjectURL is always available in a secure context");
 
-    let document = web_sys::window()
-        .expect("window is always present in CSR")
-        .document()
-        .expect("document is always present in CSR");
+    let document = leptos::prelude::document();
 
     let a: web_sys::HtmlAnchorElement = document
         .create_element("a")

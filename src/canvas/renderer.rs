@@ -169,9 +169,7 @@ impl CanvasRenderer {
 
         let width = canvas.client_width() as f64;
         let height = canvas.client_height() as f64;
-        let dpr = web_sys::window()
-            .expect("window must exist in WASM context")
-            .device_pixel_ratio();
+        let dpr = leptos::prelude::window().device_pixel_ratio();
 
         let target_w = (width * dpr) as u32;
         let target_h = (height * dpr) as u32;

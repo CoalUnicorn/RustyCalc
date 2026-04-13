@@ -26,10 +26,7 @@ pub fn warn_if_err<E: std::fmt::Display>(result: Result<(), E>, ctx: &str) {
 /// Called after an edit is committed or cancelled so subsequent keystrokes
 /// reach the `Workbook` keydown handler without the user needing to click.
 pub fn refocus_workbook() {
-    if let Some(el) = web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.get_element_by_id("workbook"))
-    {
+    if let Some(el) = leptos::prelude::document().get_element_by_id("workbook") {
         el.unchecked_into::<web_sys::HtmlElement>().focus().ok();
     }
 }

@@ -96,11 +96,8 @@ pub fn LeftDrawer() -> impl IntoView {
             .get(&uuid)
             .map(|m| m.name.clone())
             .unwrap_or_default();
-        let confirmed = web_sys::window()
-            .and_then(|w| {
-                w.confirm_with_message(&format!("Delete '{wb_name}'? This cannot be undone."))
-                    .ok()
-            })
+        let confirmed = leptos::prelude::window()
+            .confirm_with_message(&format!("Delete '{wb_name}'? This cannot be undone."))
             .unwrap_or(false);
         if confirmed {
             execute_workbook(&WorkbookAction::Delete(uuid), model, &state, app);

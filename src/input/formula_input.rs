@@ -8,21 +8,16 @@ use wasm_bindgen::JsCast;
 
 // DOM cursor helper
 
-// TODO: can this use active_cell?
 /// Return the `selectionEnd` cursor position of the currently focused formula
 /// input (cell textarea or formula-bar input). Returns 0 on failure.
 pub fn get_formula_cursor() -> usize {
-    web_sys::window()
-        .and_then(|w| w.document())
-        .and_then(|d| d.active_element())
+    leptos::prelude::document()
+        .active_element()
         .and_then(|el| {
-            el.clone()
-                .dyn_into::<web_sys::HtmlTextAreaElement>()
-                .ok()
+            el.dyn_ref::<web_sys::HtmlTextAreaElement>()
                 .and_then(|ta| ta.selection_end().ok().flatten())
                 .or_else(|| {
-                    el.dyn_into::<web_sys::HtmlInputElement>()
-                        .ok()
+                    el.dyn_ref::<web_sys::HtmlInputElement>()
                         .and_then(|inp| inp.selection_end().ok().flatten())
                 })
         })
@@ -48,7 +43,7 @@ pub fn is_in_reference_mode(text: &str, cursor: usize) -> bool {
     }
     matches!(
         before.trim_end().chars().last(),
-        // NOTE: confirm valid ','
+        // NOTE: confirm valid ',' in other locales ie. German decimals sep is '.'
         Some(',' | '(' | '+' | '-' | '*' | '/' | '<' | '>' | '=' | '&' | ';' | ':')
     )
 }
@@ -134,11 +129,11 @@ pub struct PointingStep {
 ///
 /// # Future work
 ///
-/// A `PointModeDecision` enum (`ExitPointing | Move(PointMoveResult) | NoAction`) could absorb
+/// A `PointingStep` enum (`ExitPointing | Move(PointMoveResult) | NoAction`) could absorb
 /// the "exit pointing on non-arrow key" guard in `workbook.rs` as well, making the component a
 /// pure dispatcher. Before extracting, review the `DragState`/`EditMode` signal lifecycle in
 /// `state.rs` — signal writes from inside an enum producer may change the reactivity shape.
-// TODO(future): PointModeDecision — see doc comment above
+// TODO(future): PointingStep — see doc comment above
 pub fn try_point_move(
     text: &str,
     key: &str,

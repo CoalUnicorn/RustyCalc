@@ -23,8 +23,7 @@ impl WorkbookId {
     #[allow(clippy::expect_used)]
     pub fn new() -> Self {
         let mut buf = [0u8; 16];
-        let crypto = web_sys::window()
-            .expect("window must exist in WASM context")
+        let crypto = leptos::prelude::window()
             .crypto()
             .expect("crypto must be available");
         crypto
