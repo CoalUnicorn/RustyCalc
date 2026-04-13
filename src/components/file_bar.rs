@@ -4,7 +4,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
-use crate::components::perf_panel::PerfPanel;
+// use crate::components::perf_panel::PerfPanel;
 use crate::events::*;
 use crate::input::xlsx_io;
 use crate::state::{ModelStore, WorkbookState};

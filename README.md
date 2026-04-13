@@ -22,6 +22,7 @@ Alpha-stage spreadsheet built with Rust, compiled to WebAssembly. The calculatio
 - Copy/paste (internal clipboard with structural paste, OS clipboard fallback for text)
 - Light/dark theme with localStorage persistence
 - Auto-save to localStorage every second
+- Sidebar with Workbooks - each workbook can be assigned to a group. Rename workbook by double click.
 - Tauri desktop build
 - GitHub Pages deployment
 

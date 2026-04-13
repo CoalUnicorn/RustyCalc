@@ -174,6 +174,9 @@ pub fn LeftDrawer() -> impl IntoView {
                                         }).collect::<Vec<_>>()}
                                     </Show>
                                 </div>
+                                /*HACK*/
+                                <ContextMenuSeparator />
+                                <ContextMenuSeparator />
                             }
                         }).collect::<Vec<_>>()
                     }}
