@@ -199,10 +199,12 @@ impl CellAddress {
         }
     }
 
+    #[allow(dead_code)]
     pub fn on_sheet(self, sheet: u32) -> bool {
         self.sheet == sheet
     }
 
+    #[allow(dead_code)]
     pub fn to_sheet_area(self) -> SheetArea {
         SheetArea {
             sheet: self.sheet,

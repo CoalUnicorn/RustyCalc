@@ -3,6 +3,7 @@ pub mod edit;
 pub mod error;
 pub mod format;
 pub mod formula_input;
+pub mod mouse;
 pub mod nav;
 pub mod structure;
 pub mod workbook;
