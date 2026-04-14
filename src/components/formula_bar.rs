@@ -176,9 +176,9 @@ pub fn FormulaBar() -> impl IntoView {
 
     let input_class = move || {
         let base = if is_editing() {
-            "formula-bar-input editing"
+            "fb-input editing"
         } else {
-            "formula-bar-input"
+            "fb-input"
         };
         let validation = match validation_error.get() {
             Some(_) => " error",
@@ -189,9 +189,9 @@ pub fn FormulaBar() -> impl IntoView {
     };
 
     view! {
-        <div id="formula-bar" class="formula-bar">
-            <div class="formula-bar-address">{cell_address}</div>
-            <div class="formula-bar-fx">"fx"</div>
+        <div id="formula-bar" class="fb">
+            <div class="fb-add">{cell_address}</div>
+            <div class="fb-fx">"fx"</div>
             <input
                 node_ref=input_ref
                 type="text"
@@ -203,16 +203,16 @@ pub fn FormulaBar() -> impl IntoView {
                 placeholder="Enter formula (=SUM(A1:A10)) or value"
             />
             // Validation status indicator
-            <div class="formula-validation">
+            <div class="fb-valid">
                 {move || {
                     if validation_pending.get() {
-                        view! { <span class="validation-pending" title={"Checking formula syntax...".to_string()}>"Validating..."</span> }
+                        view! { <span class="fb-pending" title={"Checking formula syntax...".to_string()}>"Validating..."</span> }
                     } else if let Some(error) = validation_error.get() {
-                        view! { <span class="validation-error" title={error.clone()}>"Error"</span> }
+                        view! { <span class="fb-error" title={error.clone()}>"Error"</span> }
                     } else if is_editing() && display_text().starts_with('=') {
-                        view! { <span class="validation-success" title={"Formula syntax is valid".to_string()}>"Valid"</span> }
+                        view! { <span class="fb-success" title={"Formula syntax is valid".to_string()}>"Valid"</span> }
                     } else {
-                        view! { <span class="validation-neutral" title={"No validation needed".to_string()}>""</span> }
+                        view! { <span class="fb-neutral" title={"No validation needed".to_string()}>""</span> }
                     }
                 }}
             </div>

@@ -30,31 +30,31 @@ pub fn PerfPanel() -> impl IntoView {
     let formula_text = move || perf.last_formula.get().unwrap_or_default();
 
     view! {
-        <div class="perf-panel">
-            <span class="perf-label">"⏱ Perf"</span>
+        <div class="pp">
+            <span class="pp-label">"⏱ Perf"</span>
             {move || match timing() {
                 Some((input, eval, render, total)) => {
                     view! {
-                        <span class="perf-detail" title="set_user_input()">
+                        <span class="pp-detail" title="set_user_input()">
                             {format!("In: {input:.1}ms")}
                         </span>
-                        <span class="perf-detail" title="evaluate() - formula recalc">
+                        <span class="pp-detail" title="evaluate() - formula recalc">
                             {format!("Eval: {eval:.1}ms")}
                         </span>
-                        <span class="perf-detail" title="Canvas render()">
+                        <span class="pp-detail" title="Canvas render()">
                             {format!("Draw: {render:.1}ms")}
                         </span>
-                        <span class="perf-total" title="Total commit-to-pixels">
+                        <span class="pp-total" title="Total commit-to-pixels">
                             {format!("Σ {total:.1}ms")}
                         </span>
-                        <span class="perf-formula" title="Last committed formula">
+                        <span class="pp-formula" title="Last committed formula">
                             {formula_text}
                         </span>
                     }.into_any()
                 }
                 None => {
                     view! {
-                        <span class="perf-detail">"commit a cell to measure"</span>
+                        <span class="pp-detail">"commit a cell to measure"</span>
                     }.into_any()
                 }
             }}

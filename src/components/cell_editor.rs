@@ -89,7 +89,7 @@ pub fn CellEditor() -> impl IntoView {
         <Show when=move || state.editing_cell.get().is_some()>
             <textarea
                 node_ref=textarea_ref
-                class="cell-editor"
+                class="ce"
                 style=cell_style
                 prop:value=text_value
                 on:input=on_input

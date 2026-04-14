@@ -126,11 +126,11 @@ pub fn LeftDrawer() -> impl IntoView {
 
     view! {
         <Show when=move || app.sidebar_open.get()>
-            <div class="left-drawer">
-                <div class="left-drawer__header">
-                    <span class="left-drawer__title">"Workbooks"</span>
+            <div class="ld">
+                <div class="ld-head">
+                    <span class="ld-title">"Workbooks"</span>
                     <button
-                        class="left-drawer__btn left-drawer__btn--add"
+                        class="ld-btn ld-btn-add"
                         title="New workbook"
                         on:click=create_workbook
                     >
@@ -138,7 +138,7 @@ pub fn LeftDrawer() -> impl IntoView {
                     </button>
                 </div>
 
-                <div class="left-drawer__body">
+                <div class="ld-body">
                     {move || {
                         let groups = workbook_groups();
                         let collapsed = app.collapsed_groups.get();
@@ -152,7 +152,7 @@ pub fn LeftDrawer() -> impl IntoView {
                             };
 
                             view! {
-                                <div class="left-drawer__group">
+                                <div class="ld-group">
                                     {if let WorkbookGroup::Named(label) = group.label.clone() {
                                         Some(view! { <GroupHeader label is_collapsed on_toggle /> })
                                     } else {
@@ -193,10 +193,10 @@ fn GroupHeader(label: String, is_collapsed: bool, on_toggle: Callback<String>) -
     let label_click = label.clone();
     view! {
         <div
-            class="left-drawer__group-header"
+            class="ld-group-hd"
             on:click=move |_| on_toggle.run(label_click.clone())
         >
-            <span class="left-drawer__chevron">
+            <span class="ld-chevron">
                 {if is_collapsed { "\u{25b6}" } else { "\u{25bc}" }}
             </span>
             <span>{label}</span>
@@ -270,14 +270,14 @@ fn EntryRow(
 
     view! {
         <div
-            class="left-drawer__entry"
+            class="ld-entry"
             class:active=active
             on:click=move |_| on_switch.run(uuid_switch)
         >
             <ContextMenuButton
                 set_open=set_menu_open
                 set_pos=set_menu_pos
-                class="left-drawer__btn left-drawer__btn--group"
+                class="ld-btn ld-grp"
             >
                 "\u{22ee}"
             </ContextMenuButton>
@@ -295,7 +295,7 @@ fn EntryRow(
                 let uuid_dbl = uuid;
                 view! {
                     <span
-                        class="left-drawer__entry-name"
+                        class="ld-entry"
                         on:dblclick=move |ev: web_sys::MouseEvent| {
                             ev.stop_propagation();
                             set_renaming.set(Some(uuid_dbl));
@@ -307,7 +307,7 @@ fn EntryRow(
             }}
 
             <button
-                class="left-drawer__btn left-drawer__btn--delete"
+                class="ld-btn ld-del"
                 title="Delete workbook"
                 on:click=move |ev: web_sys::MouseEvent| {
                     ev.stop_propagation();
@@ -341,7 +341,7 @@ fn EntryRow(
 
                 <ContextMenuSeparator />
 
-                <div class="left-drawer__group-new">
+                <div class="ld-pop-new">
                     <input
                         type="text"
                         placeholder="New group..."

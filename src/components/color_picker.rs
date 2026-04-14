@@ -115,7 +115,7 @@ pub fn ColorPicker(
     let container_ref = NodeRef::<leptos::html::Div>::new();
     let _ = on_click_outside(container_ref, move |_| set_picker_open.set(false));
 
-    let container_class = format!("color-picker color-picker-{}", color_type.css_class());
+    let container_class = format!("cp cp-{}", color_type.css_class());
 
     view! {
         <div class={container_class} node_ref=container_ref>
@@ -156,14 +156,14 @@ fn ColorPickerTrigger(
 
     if placement == ColorPickerPlacement::Dropdown {
         view! {
-            <button class="toolbar-btn color-picker-trigger" on:click=on_click>
+            <button class="tb-btn cp-trigger" on:click=on_click>
                 {children()}
             </button>
         }
         .into_any()
     } else {
         view! {
-            <div class="ctx-item color-picker-trigger" on:click=on_click>
+            <div class="ctx-item cp-trigger" on:click=on_click>
                 {children()}
             </div>
         }
@@ -182,8 +182,8 @@ fn ColorPickerDropdown(
     on_color_select: impl Fn(Option<HexColor>) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     let picker_class = match placement {
-        ColorPickerPlacement::Dropdown => "color-picker-dropdown",
-        ColorPickerPlacement::Inline => "color-picker-inline",
+        ColorPickerPlacement::Dropdown => "cp-drop",
+        ColorPickerPlacement::Inline => "cp-inline",
     };
 
     view! {
@@ -210,7 +210,7 @@ fn MainColorPalette(
     on_color_select: impl Fn(Option<HexColor>) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
     view! {
-        <div class="color-picker-palette">
+        <div class="cp-palette">
             {COLOR_PALETTE
                 .iter()
                 .filter_map(|&hex_str| HexColor::new(hex_str).ok())
@@ -242,9 +242,9 @@ fn RecentColorsPalette(
 ) -> impl IntoView {
     view! {
         <Show when=move || !recent_colors.get().is_empty()>
-            <div class="color-picker-recent-section">
-                <div class="color-picker-recent-label">"Recent Colors"</div>
-                <div class="color-picker-recent-palette">
+            <div class="cp-recent">
+                <div class="cp-recent-label">"Recent Colors"</div>
+                <div class="cp-recent-grid">
                     <For
                         each=move || recent_colors.get()
                         key=|hex: &HexColor| hex.as_str().to_string()
@@ -289,9 +289,9 @@ fn ColorSwatch(
     view! {
         <div
             class=move || if is_selected() {
-                "color-picker-swatch color-picker-swatch--selected"
+                "cp-swatch cp-swatch selected"
             } else {
-                "color-picker-swatch"
+                "cp-swatch"
             }
             style=style
             title=title
@@ -344,11 +344,11 @@ fn CustomColorInput(
     };
 
     view! {
-        <div class="color-picker-custom">
-            <label class="color-picker-custom-label">"Custom:"</label>
+        <div class="cp-custom">
+            <label class="cp-label">"Custom:"</label>
             <input
                 type="text"
-                class="color-picker-custom-input"
+                class="cp-input"
                 placeholder="#hex"
                 prop:value=move || custom_input.get()
                 on:input=move |ev| custom_input.set(event_target_value(&ev))
@@ -365,7 +365,7 @@ fn ClearColorButton(
 ) -> impl IntoView {
     view! {
         <button
-            class="color-picker-clear"
+            class="cp-clear"
             on:click=move |ev: web_sys::MouseEvent| {
                 ev.stop_propagation();
                 on_color_select(None);
@@ -418,7 +418,7 @@ pub fn TextColorPicker(
             on_color_change=on_change
             recent_colors=recent_colors
         >
-            <div class="color-indicator" style=indicator_style />
+            <div class="cp-bar" style=indicator_style />
             "A"
         </ColorPicker>
     }
@@ -441,8 +441,8 @@ pub fn BackgroundColorPicker(
             on_color_change=on_change
             recent_colors=recent_colors
         >
-            <div class="fill-icon">"■"</div>
-            <div class="color-indicator" style=indicator_style />
+            <div class="cp-fill">"■"</div>
+            <div class="cp-bar" style=indicator_style />
         </ColorPicker>
     }
 }

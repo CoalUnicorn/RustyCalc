@@ -1,0 +1,21 @@
+/* Cell Editor — prefix: ce-
+ *
+ * Mapping:
+ *   cell-editor → ce
+ */
+
+.ce {
+    position: absolute;
+    border: 2px solid var(--accent);
+    padding: 1px 3px;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    resize: none;
+    z-index: 10;
+    outline: none;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: var(--cell-editor-bg);
+    color: var(--text-strong);
+}

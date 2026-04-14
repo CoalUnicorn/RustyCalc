@@ -1,0 +1,48 @@
+/* Perf Panel — prefix: pp-
+ *
+ * Mapping:
+ *   perf-panel   → pp
+ *   perf-label   → pp-label
+ *   perf-detail  → pp-detail
+ *   perf-total   → pp-total
+ *   perf-formula → pp-formula
+ */
+
+.pp {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    height: 24px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-inner);
+    flex-shrink: 0;
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--text-dim);
+    overflow: hidden;
+}
+
+.pp .pp-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    flex-shrink: 0;
+}
+
+.pp .pp-detail {
+    flex-shrink: 0;
+}
+
+.pp .pp-total {
+    font-weight: 600;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.pp .pp-formula {
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 300px;
+}

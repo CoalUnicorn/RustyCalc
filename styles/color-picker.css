@@ -1,0 +1,251 @@
+/* Color Picker — prefix: cp-
+ * Reusable color picker with support for:
+ * - Toolbar dropdowns (text/background colors)
+ * - Inline context menu usage (tab colors)
+ * - Custom hex input and palette colors
+ * - Multiple visual variants via color type classes
+ * Used in toolbar (dropdown) and context menu (inline).
+ * The trigger inherits from its parent (tb-btn or ctx-item).
+ *
+ * Mapping:
+ *   color-picker                → cp
+ *   color-picker-trigger        → cp-trigger
+ *   color-picker-dropdown       → cp-drop
+ *   color-picker-inline         → cp-inline
+ *   color-picker-palette        → cp-palette
+ *   color-picker-swatch         → cp-swatch
+ *   color-picker-swatch--selected → cp-swatch selected
+ *   color-picker-custom         → cp-custom
+ *   color-picker-custom-label   → cp-label
+ *   color-picker-custom-input   → cp-input
+ *   color-picker-clear          → cp-clear
+ *   color-picker-recent-section → cp-recent
+ *   color-picker-recent-label   → cp-recent-label
+ *   color-picker-recent-palette → cp-recent-grid
+ *   color-indicator             → cp-bar
+ *   fill-icon                   → cp-fill
+ *
+ * Type modifiers (on .cp root):
+ *   color-picker-text       → cp-text
+ *   color-picker-background → cp-bg
+ *   color-picker-tab        → cp-tab
+ */
+
+.cp {
+    position: relative;
+}
+
+/* Trigger button — positioned inside toolbar or context menu */
+.cp .cp-trigger {
+    position: relative;
+    min-width: 32px;
+}
+
+/* Color bar under the trigger icon */
+.cp .cp-bar {
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 12px;
+    height: 3px;
+    border-radius: 1px;
+    border: 1px solid var(--border-color);
+}
+
+.cp .cp-fill {
+    font-size: 14px;
+    margin-right: 2px;
+    color: var(--text-secondary);
+}
+
+/* Dropdown (toolbar mode) */
+.cp .cp-drop {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 1100;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    min-width: 180px;
+    max-width: 220px;
+}
+
+/* Inline (context menu mode) */
+.cp .cp-inline {
+    background: var(--bg-primary);
+    border-radius: 6px;
+    padding: 8px;
+    margin-top: 4px;
+    border: 1px solid var(--border-inner);
+}
+
+/* Palette grid */
+.cp .cp-palette {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+/* Swatch */
+.cp .cp-swatch {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition:
+        transform 0.1s ease,
+        border-color 0.1s ease;
+    position: relative;
+}
+
+.cp .cp-swatch:hover {
+    transform: scale(1.1);
+    border-color: var(--accent);
+    z-index: 1;
+}
+
+/* Selected color swatch (show selection indicator) */
+.cp .cp-swatch.selected {
+    border-color: var(--accent);
+    border-width: 2px;
+    box-shadow: 0 0 0 1px var(--accent);
+}
+
+.cp .cp-swatch.selected:hover {
+    transform: scale(1.05);
+}
+
+/* Custom hex input */
+.cp .cp-custom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding-top: 4px;
+    border-top: 1px solid var(--border-inner);
+}
+
+.cp .cp-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+    min-width: 40px;
+}
+
+.cp .cp-input {
+    flex: 1;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: "Monaco", "Menlo", monospace;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.cp .cp-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.cp .cp-input::placeholder {
+    color: var(--text-placeholder);
+}
+
+/* Clear button */
+.cp .cp-clear {
+    width: 100%;
+    padding: 4px 8px;
+    font-size: 11px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-primary);
+    transition: background 0.1s ease;
+}
+
+.cp .cp-clear:hover {
+    background: var(--bg-hover);
+}
+
+/* Recent colors */
+.cp .cp-recent {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-inner);
+}
+
+.cp .cp-recent-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+.cp .cp-recent-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 3px;
+}
+
+.cp .cp-recent-grid .cp-swatch {
+    width: 16px;
+    height: 16px;
+}
+
+/* Type: text color (toolbar) */
+.cp-text .cp-trigger {
+    font-weight: bold;
+}
+
+/* Type: background color (toolbar) */
+.cp-bg .cp-fill {
+    opacity: 0.7;
+}
+
+/* Type: tab color (context menu) */
+.cp-tab .cp-inline {
+    margin: 0;
+    border: none;
+    background: transparent;
+    padding: 4px 0;
+}
+
+.cp-tab .cp-palette {
+    margin-bottom: 4px;
+}
+
+.cp-tab .cp-recent-grid {
+    grid-template-columns: repeat(6, 1fr);
+    gap: 2px;
+}
+
+.cp-tab .cp-recent-grid .cp-swatch {
+    width: 14px;
+    height: 14px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .cp .cp-drop {
+        min-width: 160px;
+        max-width: 200px;
+    }
+
+    .cp .cp-palette {
+        grid-template-columns: repeat(6, 1fr);
+    }
+
+    .cp .cp-swatch {
+        width: 20px;
+        height: 20px;
+    }
+}

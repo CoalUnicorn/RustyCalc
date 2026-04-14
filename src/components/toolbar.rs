@@ -45,19 +45,19 @@ pub fn Toolbar() -> impl IntoView {
     provide_context(undo_redo_state);
 
     view! {
-        <div class="toolbar">
+        <div class="tb">
             <UndoRedo />
-            <div class="toolbar-sep" />
+            <div class="tb-sep" />
             <FontFamily />
-            <div class="toolbar-sep" />
+            <div class="tb-sep" />
             <FontSize />
-            <div class="toolbar-sep" />
+            <div class="tb-sep" />
             <TextColorPickerToolbar />
-            <div class="toolbar-sep" />
+            <div class="tb-sep" />
             <BackgroundColorPickerToolbar />
-            <div class="toolbar-sep" />
+            <div class="tb-sep" />
             <FormatToggles />
-            <div class="toolbar-sep" />
+            <div class="tb-sep" />
             <FreezePane />
         </div>
     }
@@ -84,7 +84,7 @@ fn UndoRedo() -> impl IntoView {
 
     view! {
         <button
-            class="toolbar-btn"
+            class="tb-btn"
             title="Undo (Ctrl+Z)"
             disabled=move || !can_undo()
             on:click=on_undo
@@ -92,7 +92,7 @@ fn UndoRedo() -> impl IntoView {
             "↺"
         </button>
         <button
-            class="toolbar-btn"
+            class="tb-btn"
             title="Redo (Ctrl+Y)"
             disabled=move || !can_redo()
             on:click=on_redo
@@ -123,7 +123,7 @@ fn FontFamily() -> impl IntoView {
     };
 
     view! {
-        <select class="toolbar-font-family" title="Font" on:change=on_change>
+        <select class="tb-font" title="Font" on:change=on_change>
             {SafeFontFamily::ALL
                 .iter()
                 .map(|f| {
@@ -207,18 +207,18 @@ fn FontSize() -> impl IntoView {
     };
 
     view! {
-        <button class="toolbar-btn font-size-btn" title="Decrease font size" on:click=on_minus>
+        <button class="tb-btn tb-size-btn" title="Decrease font size" on:click=on_minus>
             "−"
         </button>
         <input
-            class="toolbar-font-size"
+            class="tb-size"
             type="text"
             title="Font size"
             prop:value=display
             on:blur=on_blur
             on:keydown=on_keydown
         />
-        <button class="toolbar-btn font-size-btn" title="Increase font size" on:click=on_plus>
+        <button class="tb-btn tb-size-btn" title="Increase font size" on:click=on_plus>
             "+"
         </button>
     }
@@ -269,28 +269,28 @@ fn FormatToggles() -> impl IntoView {
 
     view! {
         <button
-            class=move || if format().bold { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if format().bold { "tb-btn active" } else { "tb-btn" }
             title="Bold (Ctrl+B)"
             on:click=on_bold
         >
             <strong>"B"</strong>
         </button>
         <button
-            class=move || if format().italic { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if format().italic { "tb-btn active" } else { "tb-btn" }
             title="Italic (Ctrl+I)"
             on:click=on_italic
         >
             <em>"I"</em>
         </button>
         <button
-            class=move || if format().underline { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if format().underline { "tb-btn active" } else { "tb-btn" }
             title="Underline (Ctrl+U)"
             on:click=on_underline
         >
             <span style="text-decoration:underline">"U"</span>
         </button>
         <button
-            class=move || if format().strikethrough { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if format().strikethrough { "tb-btn active" } else { "tb-btn" }
             title="Strikethrough"
             on:click=on_strike
         >
@@ -349,7 +349,7 @@ fn FreezePane() -> impl IntoView {
 
     view! {
         <button
-            class=move || if is_frozen.get() { "toolbar-btn active" } else { "toolbar-btn" }
+            class=move || if is_frozen.get() { "tb-btn active" } else { "tb-btn" }
             title=move || if is_frozen.get() {
                 "Unfreeze panes"
             } else {

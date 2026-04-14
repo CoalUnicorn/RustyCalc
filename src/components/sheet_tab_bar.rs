@@ -34,10 +34,10 @@ pub fn SheetTabBar() -> impl IntoView {
 
     view! {
         <div class="tab-bar">
-            <button class="tab-bar-add" on:click=on_add title="Add sheet">"+"</button>
+            <button class="tab-add" on:click=on_add title="Add sheet">"+"</button>
             <AllSheetsMenu />
-            <div class="tab-bar-divider" />
-            <div class="tab-bar-scroll">
+            <div class="tab-div" />
+            <div class="tab-scroll">
                 <For
                     each=visible_sheets
                     key=|(sheet_id, sheet_idx)| (*sheet_id, *sheet_idx)
@@ -177,7 +177,7 @@ fn SheetTab(
 
     view! {
         <div
-            class=move || if is_selected() { "sheet-tab selected" } else { "sheet-tab" }
+            class=move || if is_selected() { "tab selected" } else { "tab" }
             on:click=on_click
             on:dblclick=on_dblclick
         >
@@ -189,15 +189,15 @@ fn SheetTab(
                     value=name()
                     on_commit=on_rename_commit
                     on_cancel=on_rename_cancel
-                    class="tab-rename-input"
+                    class="tab-rename"
                 />
             </Show>
             <span
-                class="sheet-tab-menu"
+                class="tab-dots"
                 on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
                 on:click=on_menu_toggle
             >"≓"</span>
-            <div class="tab-color-bar" style=color_bar_style />
+            <div class="tab-color" style=color_bar_style />
             <ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos above_anchor=true>
                 <ContextMenuItem on_click=on_rename icon="✏">"Rename"</ContextMenuItem>
                 <TabColorPicker current_color=current_tab_color on_change=on_color_change />
@@ -247,7 +247,7 @@ fn AllSheetsMenu() -> impl IntoView {
         <div>
             <button
                 node_ref=btn_ref
-                class="tab-bar-hamburger"
+                class="tab-menu"
                 title="All sheets"
                 on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
                 on:click=on_toggle
@@ -255,7 +255,7 @@ fn AllSheetsMenu() -> impl IntoView {
                 "≡"
             </button>
             <ContextMenu open=open set_open=set_open pos=menu_pos above_anchor=true>
-                <div class="all-sheets-menu">
+                <div class="tab-all">
                     {move || {
                         let sheets = all_sheets();
                         let selected = selected_sheet();
@@ -263,11 +263,11 @@ fn AllSheetsMenu() -> impl IntoView {
                             let is_hidden = sheet_state != SHEET_STATE_VISIBLE;
                             let is_active = idx == selected;
                             let item_class = if is_active {
-                                "all-sheets-item active"
+                                "tab-all-item active"
                             } else if is_hidden {
-                                "all-sheets-item hidden"
+                                "tab-all-item hidden"
                             } else {
-                                "all-sheets-item"
+                                "tab-all-item"
                             };
                             view! {
                                 <div

@@ -144,9 +144,9 @@ pub fn FileBar() -> impl IntoView {
     };
 
     view! {
-        <div class="file-bar">
+        <div class="fl">
             <button
-                class="tab-bar-hamburger"
+                class="fl-hamburger"
                 title="Workbooks sidebar"
                 on:click=on_sidebar
             >
@@ -165,7 +165,7 @@ pub fn FileBar() -> impl IntoView {
             // in ContextMenu doesn't immediately re-close the menu.
             <button
                 node_ref=file_btn_ref
-                class="file-menu-btn"
+                class="fl-menu-btn"
                 on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
                 on:click=on_file_click
             >
@@ -183,9 +183,9 @@ pub fn FileBar() -> impl IntoView {
             </ContextMenu>
 
             // Right: theme toggle
-            <div class="file-bar-right">
+            <div class="fl-right">
                 <button
-                    class="theme-btn"
+                    class="fl-theme"
                     on:click=on_toggle_theme
                     title=theme_title
                 >

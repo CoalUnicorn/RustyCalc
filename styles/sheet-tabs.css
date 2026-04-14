@@ -1,0 +1,165 @@
+/* Sheet Tab Bar — prefix: tab-
+ *
+ * Mapping:
+ *   tab-bar           → tab-bar         (kept — already short)
+ *   tab-bar-add       → tab-add
+ *   tab-bar-hamburger → tab-menu
+ *   tab-bar-divider   → tab-div
+ *   tab-bar-scroll    → tab-scroll
+ *   sheet-tab         → tab
+ *   sheet-tab selected → tab selected
+ *   tab-name          → tab-name        (kept)
+ *   sheet-tab-menu    → tab-dots
+ *   tab-color-bar     → tab-color
+ *   tab-rename-input  → tab-rename
+ *   all-sheets-menu   → tab-all
+ *   all-sheets-item   → tab-all-item
+ */
+
+.tab-bar {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    min-height: 36px;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border-inner);
+    background: var(--bg-secondary);
+    overflow: visible;
+    font-size: 13px;
+    position: relative;
+    z-index: 400;
+}
+
+.tab-bar .tab-add,
+.tab-bar .tab-menu {
+    min-width: 30px;
+    min-height: 30px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 18px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tab-bar .tab-add:hover,
+.tab-bar .tab-menu:hover {
+    color: var(--text-primary);
+}
+
+.tab-bar .tab-div {
+    width: 1px;
+    height: 60%;
+    background: var(--border-inner);
+    flex-shrink: 0;
+}
+
+.tab-bar .tab-scroll {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    scrollbar-width: none;
+    flex: 1;
+    height: 100%;
+    align-items: end;
+    padding-left: 4px;
+    gap: 0;
+}
+
+/* Individual tab */
+.tab-bar .tab {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 6px 0 12px;
+    background: var(--bg-secondary);
+    border: none;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    font-weight: 400;
+    color: var(--text-dim);
+    white-space: nowrap;
+    font-size: 13px;
+    gap: 2px;
+    transition: background 0.1s;
+    overflow: visible;
+}
+
+.tab-bar .tab:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+.tab-bar .tab.selected {
+    background: var(--bg-primary);
+    font-weight: 600;
+    color: var(--text-primary);
+    border: 1px solid var(--border-inner);
+    border-bottom: 1px solid var(--bg-primary);
+}
+
+.tab-bar .tab-name {
+    pointer-events: none;
+}
+
+.tab-bar .tab-dots {
+    font-size: 18px;
+    color: var(--text-dim);
+    padding: 5px;
+    border-radius: 3px;
+    line-height: 1;
+}
+
+.tab-bar .tab-dots:hover {
+    background: rgba(128, 128, 128, 0.15);
+}
+
+/* Colored accent bar at the bottom of the tab */
+.tab-bar .tab-color {
+    position: absolute;
+    bottom: 0;
+    left: 4px;
+    right: 4px;
+    height: 3px;
+    border-radius: 3px 3px 0 0;
+}
+
+.tab-bar .tab-rename {
+    width: 80px;
+    font-size: 13px;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: inherit;
+}
+
+/* All-sheets popover */
+.tab-bar .tab-all {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.tab-bar .tab-all-item {
+    padding: 8px 14px;
+    cursor: pointer;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.tab-bar .tab-all-item:hover {
+    background: rgba(128, 128, 128, 0.1);
+}
+
+.tab-bar .tab-all-item.active {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.tab-bar .tab-all-item.hidden {
+    color: var(--text-dim);
+    font-style: italic;
+}

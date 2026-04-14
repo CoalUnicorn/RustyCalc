@@ -1,0 +1,110 @@
+/* Toolbar — prefix: tb-
+ *
+ * Mapping:
+ *   toolbar            → tb
+ *   toolbar-btn        → tb-btn
+ *   toolbar-btn active → tb-btn active
+ *   toolbar-sep        → tb-sep
+ *   toolbar-font-family → tb-font
+ *   toolbar-font-size  → tb-size
+ *   font-size-btn      → tb-size-btn
+ */
+
+.tb {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    height: 36px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-inner);
+    flex-shrink: 0;
+}
+
+.tb .tb-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.tb .tb-btn:hover {
+    background: rgba(128, 128, 128, 0.1);
+    border-color: var(--border-inner);
+}
+
+.tb .tb-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.tb .tb-btn.active:hover {
+    opacity: 0.9;
+}
+
+.tb .tb-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+}
+
+.tb .tb-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border-inner);
+    margin: 0 4px;
+    flex-shrink: 0;
+}
+
+.tb .tb-size {
+    width: 36px;
+    height: 28px;
+    padding: 0;
+    font-size: 12px;
+    text-align: center;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    background: var(--btn-bg);
+    color: var(--text-primary);
+}
+
+.tb .tb-size:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.tb .tb-size-btn {
+    padding: 0 6px;
+    font-size: 16px;
+    min-width: 28px;
+    justify-content: center;
+}
+
+.tb .tb-font {
+    height: 28px;
+    padding: 0 4px;
+    font-size: 13px;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    background: var(--btn-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    min-width: 120px;
+}
+
+.tb .tb-font:hover {
+    border-color: var(--accent);
+}
+
+.tb .tb-font:focus {
+    outline: none;
+    border-color: var(--accent);
+}

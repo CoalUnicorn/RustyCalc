@@ -1,0 +1,27 @@
+/* RustyCalc — Component CSS Index
+ *
+ * Prefixes:
+ *   (none)  layout / app root
+ *   fl-     file bar
+ *   tb-     toolbar
+ *   fb-     formula bar
+ *   cp-     color picker
+ *   ws-     worksheet
+ *   ce-     cell editor
+ *   tab-    sheet tab bar
+ *   ctx-    context menu
+ *   pp-     perf panel
+ *   ld-     left drawer
+ */
+
+@import "layout.css";
+@import "file-bar.css";
+@import "toolbar.css";
+@import "formula-bar.css";
+@import "color-picker.css";
+@import "worksheet.css";
+@import "cell-editor.css";
+@import "sheet-tabs.css";
+@import "context-menu.css";
+@import "perf-panel.css";
+@import "left-drawer.css";

@@ -1,0 +1,30 @@
+/* Worksheet — prefix: ws-
+ *
+ * Mapping:
+ *   worksheet-container → ws
+ *   worksheet-canvas    → ws-canvas
+ *   resize-col          → ws-canvas.resize-col
+ *   resize-row          → ws-canvas.resize-row
+ */
+
+.ws {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+}
+
+.ws .ws-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: cell;
+}
+
+.ws .ws-canvas.resize-col {
+    cursor: col-resize;
+}
+
+.ws .ws-canvas.resize-row {
+    cursor: row-resize;
+}

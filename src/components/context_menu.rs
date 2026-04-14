@@ -60,7 +60,7 @@ pub fn ContextMenu(
         <div style=move || if open.get() { "" } else { "display:none;" }>
             <div
                 node_ref=menu_ref
-                class="context-menu"
+                class="ctx"
                 style=move || {
                     let (x, y) = pos.get();
                     if above_anchor {
@@ -150,5 +150,5 @@ pub fn ContextMenuItem(
 /// Horizontal divider between menu sections.
 #[component]
 pub fn ContextMenuSeparator() -> impl IntoView {
-    view! { <div class="ctx-divider" /> }
+    view! { <div class="ctx-div" /> }
 }

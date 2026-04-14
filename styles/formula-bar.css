@@ -1,0 +1,66 @@
+/* Formula Bar — prefix: fb-
+ *
+ * Mapping:
+ *   formula-bar          → fb
+ *   formula-bar-address  → fb-addr
+ *   formula-bar-fx       → fb-fx
+ *   formula-bar-input    → fb-input
+ *   formula-validation   → fb-valid
+ *   validation-pending   → fb-pending
+ *   validation-error     → fb-error
+ *   validation-success   → fb-ok
+ *   validation-neutral   → fb-neutral
+ */
+
+.fb {
+    display: flex;
+    align-items: center;
+    height: 38px;
+    border-bottom: 1px solid var(--border-inner);
+    background: var(--bg-primary);
+    font-family: Inter, Arial, sans-serif;
+    font-size: 15px;
+    flex-shrink: 0;
+}
+
+.fb .fb-addr {
+    min-width: 60px;
+    padding: 0 8px;
+    font-weight: 600;
+    color: var(--text-strong);
+    border-right: 1px solid var(--border-inner);
+    text-align: center;
+    user-select: none;
+}
+
+.fb .fb-fx {
+    padding: 0 6px;
+    color: var(--text-muted);
+    font-style: italic;
+    user-select: none;
+}
+
+.fb .fb-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    padding: 0 8px;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    background: transparent;
+    color: var(--text-strong);
+    height: 100%;
+}
+
+.fb .fb-input.editing {
+    background: var(--cell-editor-bg);
+}
+
+/* Validation badges — stubs for the stylist */
+/*
+.fb .fb-valid   {  }
+.fb .fb-pending {  }
+.fb .fb-error   {  }
+.fb .fb-ok      {  }
+.fb .fb-neutral {  }
+*/

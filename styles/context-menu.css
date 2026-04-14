@@ -1,0 +1,53 @@
+/* Context Menu — prefix: ctx-
+ *
+ * Shared across sheet tabs, header right-click, etc.
+ *
+ * Mapping:
+ *   context-menu → ctx
+ *   ctx-item     → ctx-item   (kept — already short)
+ *   ctx-icon     → ctx-icon   (kept)
+ *   ctx-divider  → ctx-div
+ */
+
+.ctx {
+    position: fixed;
+    z-index: 1100;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+    min-width: 170px;
+    font-size: 13px;
+}
+
+.ctx .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.ctx .ctx-item:hover {
+    background: rgba(128, 128, 128, 0.1);
+}
+
+.ctx .ctx-item.destructive {
+    color: #d32f2f;
+}
+
+.ctx .ctx-icon {
+    width: 18px;
+    text-align: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.ctx .ctx-div {
+    height: 1px;
+    background: var(--border-inner);
+    margin: 4px 0;
+}
