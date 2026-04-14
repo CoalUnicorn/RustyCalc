@@ -219,3 +219,57 @@ pub static DARK: CanvasTheme = CanvasTheme {
     pointing: "#1E6FD9",
     selection_fill: "rgba(23,162,211,0.18)",
 };
+
+// Get colors from the current document that aren't in the standard palette
+//
+// NOTE: Check if this works need import support
+// This scans all cells and extracts unique colors for the recent colors section
+// #[allow(dead_code)]
+// pub fn extract_document_colors(&self, model: ModelStore) -> Vec<String> {
+//     use crate::theme::COLOR_PALETTE;
+//     use std::collections::HashSet;
+
+//     let mut document_colors = HashSet::new();
+
+//     model.with_value(|m| {
+//         // Get all worksheets
+//         let sheets = m.get_worksheets_properties();
+
+//         for sheet_props in &sheets {
+//             let sheet_idx = sheet_props.sheet_id;
+
+//             // FIXME: Scan a reasonable range of cells (don't scan infinite sheets)
+//             for row in 1..=100 {
+//                 for col in 1..=50 {
+//                     // Get cell style (only check cells that might have formatting)
+//                     if let Ok(style) = m.get_cell_style(sheet_idx, row, col) {
+//                         // Only process if the style has non-default values
+//                         if style.font.color.is_some() || style.fill.fg_color.is_some() {
+//                             // Collect text color
+//                             if let Some(text_color) = style.font.color.as_ref() {
+//                                 if !text_color.is_empty() && text_color != "#000000" {
+//                                     let normalized = text_color.to_lowercase();
+//                                     if !COLOR_PALETTE.contains(&normalized.as_str()) {
+//                                         document_colors.insert(normalized);
+//                                     }
+//                                 }
+//                             }
+
+//                             // Collect background color
+//                             if let Some(bg_color) = style.fill.fg_color.as_ref() {
+//                                 if !bg_color.is_empty() {
+//                                     let normalized = bg_color.to_lowercase();
+//                                     if !COLOR_PALETTE.contains(&normalized.as_str()) {
+//                                         document_colors.insert(normalized);
+//                                     }
+//                                 }
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     });
+
+//     document_colors.into_iter().collect()
+// }

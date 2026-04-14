@@ -1,19 +1,19 @@
 use leptos::prelude::*;
 
 use crate::components::{
-    file_bar::FileBar, formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar, toolbar::Toolbar,
-    worksheet::Worksheet,
+    file_bar::FileBar, formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar, status_bar::StatusBar,
+    toolbar::Toolbar, worksheet::Worksheet,
 };
 use crate::coord::SheetArea;
 use crate::events::{ContentEvent, SpreadsheetEvent};
+use crate::input::error::EditError;
 use crate::input::{
-    action::{classify_key, execute, KeyMod, SpreadsheetAction},
     edit::EditAction,
     formula_input::*,
+    keyboard::{classify_key, execute, KeyMod, SpreadsheetAction},
 };
-use crate::model::{mutate, AppClipboard, EvaluationMode, PasteMode};
-use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
-use crate::util::warn_if_err;
+use crate::model::{mutate, try_mutate, AppClipboard, EvaluationMode, PasteMode};
+use crate::state::{DragState, EditMode, ModelStore, StatusMessage, WorkbookState};
 
 /// Top-level keyboard router. Clipboard ops and point-mode arrow handling
 /// live here (need async OS APIs / DOM cursor position); everything else
@@ -141,15 +141,19 @@ pub fn Workbook() -> impl IntoView {
                 // Clear the selected range.
                 // Pause evaluation so each set_user_input doesn't trigger a
                 // full recalc; evaluate once at the end.
-                mutate(model, EvaluationMode::Immediate, |m| {
-                    let sheet_area = SheetArea::from_view(m);
-                    sheet_area.area.cells().for_each(|(row, col)| {
-                        warn_if_err(
-                            m.set_user_input(sheet_area.sheet, row, col, ""),
-                            "set_user_input (cut)",
-                        );
-                    });
-                });
+                if let Err(e) = try_mutate(
+                    model,
+                    EvaluationMode::Immediate,
+                    |m| -> Result<(), EditError> {
+                        let sheet_area = SheetArea::from_view(m);
+                        sheet_area.area.cells().try_for_each(|(row, col)| {
+                            m.set_user_input(sheet_area.sheet, row, col, "")
+                                .map_err(EditError::Engine)
+                        })
+                    },
+                ) {
+                    state.status.set(Some(StatusMessage::Error(e.to_string())));
+                }
                 let sheet_area = model.with_value(SheetArea::from_view);
                 state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
                     sheet_area,
@@ -192,8 +196,8 @@ pub fn Workbook() -> impl IntoView {
             <Toolbar />
             <FormulaBar />
             <Worksheet />
-
             <SheetTabBar />
+            <StatusBar />
         </div>
     }
 }

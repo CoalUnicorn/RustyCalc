@@ -7,25 +7,17 @@
 
 use thiserror::Error;
 
-/// Error from a formatting mutation (bold, color, font size, etc.).
-#[derive(Debug, Error)]
-pub enum FormatError {
-    #[error("format: {0}")]
-    Engine(String),
-}
-
-/// Error from a structural mutation (delete, insert rows/cols, undo/redo).
-#[derive(Debug, Error)]
-pub enum StructError {
-    #[error("structure: {0}")]
-    Engine(String),
-}
-
 /// Error from a navigation mutation (sheet switch).
 #[derive(Debug, Error)]
 pub enum NavError {
     #[error("navigation: {0}")]
     Engine(String),
+}
+
+impl From<String> for NavError {
+    fn from(s: String) -> Self {
+        Self::Engine(s)
+    }
 }
 
 /// Error from committing a cell edit to the model.
@@ -35,23 +27,33 @@ pub enum EditError {
     Engine(String),
 }
 
+impl From<String> for EditError {
+    fn from(s: String) -> Self {
+        Self::Engine(s)
+    }
+}
+
+/// Error from a formatting mutation (bold, color, font size, etc.).
+#[derive(Debug, Error)]
+pub enum FormatError {
+    #[error("format: {0}")]
+    Engine(String),
+}
 // ironcalc returns `Result<(), String>` - `From<String>` lets `?` convert directly.
 impl From<String> for FormatError {
     fn from(s: String) -> Self {
         Self::Engine(s)
     }
 }
+
+/// Error from a structural mutation (delete, insert rows/cols, undo/redo).
+#[derive(Debug, Error)]
+pub enum StructError {
+    #[error("structure: {0}")]
+    Engine(String),
+}
+
 impl From<String> for StructError {
-    fn from(s: String) -> Self {
-        Self::Engine(s)
-    }
-}
-impl From<String> for NavError {
-    fn from(s: String) -> Self {
-        Self::Engine(s)
-    }
-}
-impl From<String> for EditError {
     fn from(s: String) -> Self {
         Self::Engine(s)
     }

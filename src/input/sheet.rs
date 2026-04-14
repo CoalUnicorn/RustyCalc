@@ -11,8 +11,7 @@ use leptos::prelude::WithValue;
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
 use crate::input::error::SheetError;
 use crate::model::{try_mutate, EvaluationMode, FrontendModel};
-use crate::state::{ModelStore, WorkbookState};
-use crate::util::warn_if_err;
+use crate::state::{ModelStore, StatusMessage, WorkbookState};
 
 /// Sheet-level operations on the current workbook.
 ///
@@ -50,12 +49,14 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
             if previous == *sheet_idx {
                 return;
             }
-            warn_if_err(
-                try_mutate(model, EvaluationMode::Deferred, |m| {
-                    m.set_selected_sheet(*sheet_idx).map_err(SheetError::Engine)
-                }),
-                "set_selected_sheet",
-            );
+
+            if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+                m.set_selected_sheet(*sheet_idx).map_err(SheetError::Engine)
+            }) {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                return;
+            }
+
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::ActiveSheetChanged {
                     from_sheet: previous,
@@ -66,12 +67,14 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
 
         SheetAction::Add => {
             let sheet_idx = model.with_value(|m| m.get_worksheets_properties().len() as u32);
-            warn_if_err(
-                try_mutate(model, EvaluationMode::Deferred, |m| {
-                    m.new_sheet().map_err(SheetError::Engine)
-                }),
-                "new_sheet",
-            );
+
+            if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+                m.new_sheet().map_err(SheetError::Engine)
+            }) {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                return;
+            }
+
             let name = model.with_value(|m| m.get_sheet_name(sheet_idx as usize));
 
             state.emit_event(SpreadsheetEvent::Structure(
@@ -83,24 +86,26 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
         }
 
         SheetAction::Delete(sheet_idx) => {
-            warn_if_err(
-                try_mutate(model, EvaluationMode::Deferred, |m| {
-                    m.delete_sheet(*sheet_idx).map_err(SheetError::Engine)
-                }),
-                "delete_sheet",
-            );
+            if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+                m.delete_sheet(*sheet_idx).map_err(SheetError::Engine)
+            }) {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                return;
+            }
+
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::WorksheetDeleted { sheet: *sheet_idx },
             ));
         }
 
         SheetAction::Hide(sheet_idx) => {
-            warn_if_err(
-                try_mutate(model, EvaluationMode::Deferred, |m| {
-                    m.hide_sheet(*sheet_idx).map_err(SheetError::Engine)
-                }),
-                "hide_sheet",
-            );
+            if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+                m.hide_sheet(*sheet_idx).map_err(SheetError::Engine)
+            }) {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                return;
+            }
+
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::WorksheetHidden { sheet: *sheet_idx },
             ));
@@ -109,18 +114,21 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
         SheetAction::Unhide(sheet_idx) => {
             let name = model.with_value(|m| m.get_sheet_name(*sheet_idx as usize));
             let previous = model.with_value(|m| m.get_selected_view().sheet);
-            warn_if_err(
-                try_mutate(model, EvaluationMode::Deferred, |m| {
-                    m.unhide_sheet(*sheet_idx).map_err(SheetError::Engine)
-                }),
-                "unhide_sheet",
-            );
-            warn_if_err(
-                try_mutate(model, EvaluationMode::Deferred, |m| {
-                    m.set_selected_sheet(*sheet_idx).map_err(SheetError::Engine)
-                }),
-                "set_selected_sheet",
-            );
+
+            if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+                m.unhide_sheet(*sheet_idx).map_err(SheetError::Engine)
+            }) {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                return;
+            }
+
+            if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+                m.set_selected_sheet(*sheet_idx).map_err(SheetError::Engine)
+            }) {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                return;
+            }
+
             state.emit_events([
                 SpreadsheetEvent::Structure(StructureEvent::WorksheetUnhidden {
                     sheet: *sheet_idx,
@@ -136,12 +144,13 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
         SheetAction::Rename { sheet, name } => {
             let old_name = model.with_value(|m| m.get_sheet_name(*sheet as usize));
 
-            warn_if_err(
-                try_mutate(model, EvaluationMode::Deferred, |m| {
-                    m.rename_sheet(*sheet, name).map_err(SheetError::Engine)
-                }),
-                "rename_sheet",
-            );
+            if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+                m.rename_sheet(*sheet, name).map_err(SheetError::Engine)
+            }) {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                return;
+            }
+
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::WorksheetRenamed {
                     sheet: *sheet,
@@ -153,12 +162,13 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
 
         SheetAction::SetColor { sheet, color } => {
             let hex = color.as_deref().unwrap_or("");
-            warn_if_err(
-                try_mutate(model, EvaluationMode::Deferred, |m| {
-                    m.set_sheet_color(*sheet, hex).map_err(SheetError::Engine)
-                }),
-                "set_sheet_color",
-            );
+            if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+                m.set_sheet_color(*sheet, hex).map_err(SheetError::Engine)
+            }) {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                return;
+            }
+
             if !hex.is_empty() {
                 state.add_recent_color(hex);
             }

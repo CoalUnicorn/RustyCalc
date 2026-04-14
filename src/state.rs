@@ -130,6 +130,15 @@ pub struct ContextMenuState {
     pub(crate) target: HeaderContextMenu,
 }
 
+/// A user-visible message set by the input pipeline when an engine operation fails.
+///
+/// Stored on [`WorkbookState`] rather than the EventBus — errors are persistent
+/// UI state (shown until dismissed), not fire-and-forget domain events.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StatusMessage {
+    Error(String),
+}
+
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
 pub struct WorkbookState {
@@ -140,6 +149,7 @@ pub struct WorkbookState {
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
     pub(crate) drag: Split<DragState>,
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
+    pub(crate) status: Split<Option<StatusMessage>>,
 }
 
 impl WorkbookState {
@@ -157,6 +167,7 @@ impl WorkbookState {
             formula_input_ref: NodeRef::new(),
             drag: Split::new(DragState::Idle),
             context_menu: Split::new(None),
+            status: Split::new(None),
         }
     }
 
@@ -226,58 +237,21 @@ impl WorkbookState {
             colors: string_colors,
         }));
     }
+}
 
-    /// Get colors from the current document that aren't in the standard palette
-    ///
-    /// NOTE: Check if this works need import support
-    /// This scans all cells and extracts unique colors for the recent colors section
-    #[allow(dead_code)]
-    pub fn extract_document_colors(&self, model: ModelStore) -> Vec<String> {
-        use crate::theme::COLOR_PALETTE;
-        use std::collections::HashSet;
+#[cfg(test)]
+mod tests {
+    use crate::Owner;
+    use wasm_bindgen_test::*;
 
-        let mut document_colors = HashSet::new();
+    wasm_bindgen_test_configure!(run_in_browser);
 
-        model.with_value(|m| {
-            // Get all worksheets
-            let sheets = m.get_worksheets_properties();
-
-            for sheet_props in &sheets {
-                let sheet_idx = sheet_props.sheet_id;
-
-                // FIXME: Scan a reasonable range of cells (don't scan infinite sheets)
-                for row in 1..=100 {
-                    for col in 1..=50 {
-                        // Get cell style (only check cells that might have formatting)
-                        if let Ok(style) = m.get_cell_style(sheet_idx, row, col) {
-                            // Only process if the style has non-default values
-                            if style.font.color.is_some() || style.fill.fg_color.is_some() {
-                                // Collect text color
-                                if let Some(text_color) = style.font.color.as_ref() {
-                                    if !text_color.is_empty() && text_color != "#000000" {
-                                        let normalized = text_color.to_lowercase();
-                                        if !COLOR_PALETTE.contains(&normalized.as_str()) {
-                                            document_colors.insert(normalized);
-                                        }
-                                    }
-                                }
-
-                                // Collect background color
-                                if let Some(bg_color) = style.fill.fg_color.as_ref() {
-                                    if !bg_color.is_empty() {
-                                        let normalized = bg_color.to_lowercase();
-                                        if !COLOR_PALETTE.contains(&normalized.as_str()) {
-                                            document_colors.insert(normalized);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    #[wasm_bindgen_test]
+    fn status_initializes_to_none() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
+            assert_eq!(state.status.get_untracked(), None);
         });
-
-        document_colors.into_iter().collect()
     }
 }

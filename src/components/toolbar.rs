@@ -3,17 +3,41 @@ use wasm_bindgen::UnwrapThrowExt;
 
 use crate::components::color_picker::{BackgroundColorPicker, TextColorPicker};
 use crate::events::*;
-use crate::input::action::{execute, SpreadsheetAction};
+use crate::input::error::FormatError;
+use crate::input::keyboard::{execute, SpreadsheetAction};
 use crate::model::{
-    frontend_types::ToolbarState, style_types::HexColor, FrontendModel, SafeFontFamily,
+    frontend_types::ToolbarState, style_types::HexColor, try_mutate, EvaluationMode, FrontendModel,
+    SafeFontFamily,
 };
-use crate::state::{ModelStore, WorkbookState};
-use crate::util::{refocus_workbook, warn_if_err};
+use crate::state::{ModelStore, StatusMessage, WorkbookState};
+use crate::util::refocus_workbook;
 
 const FONT_SIZES: &[f64] = &[
     6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 22.0, 24.0, 26.0, 28.0, 36.0,
     48.0, 72.0,
 ];
+
+enum SizeStep {
+    Smaller,
+    Larger,
+}
+
+/// Step through the standard font size ladder.
+fn snap_size(current: f64, step: SizeStep) -> f64 {
+    match step {
+        SizeStep::Larger => FONT_SIZES
+            .iter()
+            .find(|&&s| s > current + 0.01)
+            .copied()
+            .unwrap_or(current + 1.0),
+        SizeStep::Smaller => FONT_SIZES
+            .iter()
+            .rev()
+            .find(|&&s| s < current - 0.01)
+            .copied()
+            .unwrap_or((current - 1.0).max(1.0)),
+    }
+}
 
 /// Top toolbar. Creates two shared memos once and provides them via context so
 /// every sub-component reads the same reactive computation instead of each
@@ -224,28 +248,6 @@ fn FontSize() -> impl IntoView {
     }
 }
 
-enum SizeStep {
-    Smaller,
-    Larger,
-}
-
-/// Step through the standard font size ladder.
-fn snap_size(current: f64, step: SizeStep) -> f64 {
-    match step {
-        SizeStep::Larger => FONT_SIZES
-            .iter()
-            .find(|&&s| s > current + 0.01)
-            .copied()
-            .unwrap_or(current + 1.0),
-        SizeStep::Smaller => FONT_SIZES
-            .iter()
-            .rev()
-            .find(|&&s| s < current - 0.01)
-            .copied()
-            .unwrap_or((current - 1.0).max(1.0)),
-    }
-}
-
 // Bold / Italic / Underline / Strikethrough
 #[component]
 fn FormatToggles() -> impl IntoView {
@@ -312,31 +314,35 @@ fn FreezePane() -> impl IntoView {
     });
 
     let on_freeze = move |_: web_sys::MouseEvent| {
-        model.update_value(|m| {
-            let sheet = m.get_selected_view().sheet;
-            let fp = m.frozen_panes();
-
-            if fp.is_frozen() {
-                warn_if_err(m.set_frozen_rows_count(sheet, 0), "set_frozen_rows_count");
-                warn_if_err(
-                    m.set_frozen_columns_count(sheet, 0),
-                    "set_frozen_columns_count",
-                );
-            } else {
-                let row = m.get_selected_view().row;
-                let col = m.get_selected_view().column;
-                if row > 1 || col > 1 {
-                    warn_if_err(
-                        m.set_frozen_rows_count(sheet, (row - 1).max(0)),
-                        "set_frozen_rows_count",
-                    );
-                    warn_if_err(
-                        m.set_frozen_columns_count(sheet, (col - 1).max(0)),
-                        "set_frozen_columns_count",
-                    );
+        let result = try_mutate(
+            model,
+            EvaluationMode::Deferred,
+            |m| -> Result<(), FormatError> {
+                let sheet = m.get_selected_sheet();
+                let fp = m.frozen_panes();
+                if fp.is_frozen() {
+                    m.set_frozen_rows_count(sheet, 0)
+                        .map_err(FormatError::Engine)?;
+                    m.set_frozen_columns_count(sheet, 0)
+                        .map_err(FormatError::Engine)?;
+                } else {
+                    let row = m.get_selected_view().row;
+                    let col = m.get_selected_view().column;
+                    if row > 1 || col > 1 {
+                        m.set_frozen_rows_count(sheet, (row - 1).max(0))
+                            .map_err(FormatError::Engine)?;
+                        m.set_frozen_columns_count(sheet, (col - 1).max(0))
+                            .map_err(FormatError::Engine)?;
+                    }
                 }
-            }
-        });
+                Ok(())
+            },
+        );
+        if let Err(e) = result {
+            state.status.set(Some(StatusMessage::Error(e.to_string())));
+            refocus_workbook();
+            return;
+        }
         state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
             sheet: model.with_value(|m| m.get_selected_view().sheet),
             col: None,

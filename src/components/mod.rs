@@ -7,6 +7,7 @@ pub mod inline_rename;
 pub mod left_drawer;
 pub mod perf_panel;
 pub mod sheet_tab_bar;
+pub mod status_bar;
 pub mod toolbar;
 pub mod workbook;
 pub mod worksheet;

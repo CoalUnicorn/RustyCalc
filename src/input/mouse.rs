@@ -15,15 +15,15 @@ use crate::canvas::{
 };
 use crate::coord::{CellAddress, CellArea, RefSpan, SheetArea};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
+use crate::input::error::StructError;
 use crate::input::formula_input::{
     get_formula_cursor, is_in_reference_mode, range_ref_str, splice_ref,
 };
-use crate::model::{mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
+use crate::model::{try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
     ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
-    WorkbookState,
+    StatusMessage, WorkbookState,
 };
-use crate::util::warn_if_err;
 use ironcalc_base::UserModel;
 
 /// Pixel tolerance for column/row resize hit-test in the header area.
@@ -164,14 +164,15 @@ pub fn handle_cell_click(
         if may_point {
             let cursor = get_formula_cursor();
             if already_pointing || is_in_reference_mode(&edit.text, cursor) {
-                let sheet = model.with_value(|m| m.get_selected_sheet()); //active_cell().sheet);
+                let sheet = model.with_value(|m| m.get_selected_sheet());
                 let ref_str =
                     range_ref_str(CellArea::from_cell(row, col).with_sheet(sheet), sheet, "");
-                let prev_span = if let DragState::Pointing { ref_span, .. } = state.drag.get() {
-                    Some(ref_span)
-                } else {
-                    None
-                };
+                let prev_span =
+                    if let DragState::Pointing { ref_span, .. } = state.drag.get_untracked() {
+                        Some(ref_span)
+                    } else {
+                        None
+                    };
                 let text = edit.text.clone();
                 let (new_text, ref_span) =
                     splice_ref(&text, prev_span.unwrap_or(RefSpan::at(cursor)), &ref_str);
@@ -212,15 +213,12 @@ pub fn handle_cell_click(
 
     // Emit the appropriate navigation event so toolbar/formula-bar
     // update and the canvas repaints via visual_events.
-    if near_handle {
-        // Autofill start: drag state change alone triggers the Effect.
-    } else {
+    // Autofill start: drag state change alone triggers the canvas repaint; no navigation event.
+    if !near_handle {
         if ev.shift_key() {
             let sheet_area = model.with_value(SheetArea::from_view);
             state.emit_event(SpreadsheetEvent::Navigation(
-                NavigationEvent::SelectionRangeChanged {
-                    sheet_area: { sheet_area },
-                },
+                NavigationEvent::SelectionRangeChanged { sheet_area },
             ));
         } else {
             let address = model.with_value(CellAddress::from_view);
@@ -273,21 +271,27 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
     }
     let x = ev.offset_x() as f64;
     let y = ev.offset_y() as f64;
+    let sheet = model.with_value(UserModel::get_selected_sheet);
 
     match state.drag.get_untracked() {
         DragState::ResizingCol { col, x: last_x } => {
             let delta = x - last_x;
-            model.update_value(|m| {
-                let sheet = m.active_cell().sheet;
-                let current_w = m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH);
-                let new_w = (current_w + delta).max(5.0);
-                warn_if_err(
-                    m.set_columns_width(sheet, col, col, new_w),
-                    "set_columns_width",
-                );
-            });
+            let result = try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), StructError> {
+                    let current_w = m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH);
+                    let new_w = (current_w + delta).max(5.0);
+                    m.set_columns_width(sheet, col, col, new_w)
+                        .map_err(StructError::Engine)
+                },
+            );
             state.drag.set(DragState::ResizingCol { col, x });
-            let sheet = model.with_value(UserModel::get_selected_sheet);
+            if let Err(e) = result {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                ev.prevent_default();
+                return;
+            }
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                 sheet,
                 col: Some(col),
@@ -298,14 +302,22 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
         }
         DragState::ResizingRow { row, y: last_y } => {
             let delta = y - last_y;
-            model.update_value(|m| {
-                let sheet = m.active_cell().sheet;
-                let current_h = m.get_row_height(sheet, row).unwrap_or(DEFAULT_ROW_HEIGHT);
-                let new_h = (current_h + delta).max(3.0);
-                warn_if_err(m.set_rows_height(sheet, row, row, new_h), "set_rows_height");
-            });
+            let result = try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), StructError> {
+                    let current_h = m.get_row_height(sheet, row).unwrap_or(DEFAULT_ROW_HEIGHT);
+                    let new_h = (current_h + delta).max(3.0);
+                    m.set_rows_height(sheet, row, row, new_h)
+                        .map_err(StructError::Engine)
+                },
+            );
             state.drag.set(DragState::ResizingRow { row, y });
-            let sheet = model.with_value(UserModel::get_selected_sheet);
+            if let Err(e) = result {
+                state.status.set(Some(StatusMessage::Error(e.to_string())));
+                ev.prevent_default();
+                return;
+            }
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                 sheet,
                 col: None,
@@ -326,7 +338,6 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
 
     let (row, col) = model.with_value(|m| {
         let view = m.get_selected_view();
-        let sheet = view.sheet;
         let fg = frozen_geometry(m, sheet);
         (
             pixel_to_row(m, sheet, view.top_row, y, &fg),
@@ -345,7 +356,6 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
             range: pr,
             ref_span,
         } => {
-            let sheet = model.with_value(UserModel::get_selected_sheet);
             let ref_str = range_ref_str(
                 CellArea {
                     r1: pr.r1,
@@ -357,16 +367,15 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
                 sheet,
                 "",
             );
-            let new_state = state
-                .editing_cell
-                .get_untracked()
-                .map(|edit| splice_ref(&edit.text, ref_span, &ref_str));
-            if let Some(new) = new_state {
+
+            if let Some(edit) = state.editing_cell.get_untracked() {
+                let (new_text, ref_span) = splice_ref(&edit.text, ref_span, &ref_str);
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
-                        e.text = new.0;
+                        e.text = new_text;
                     }
                 });
+
                 state.drag.set(DragState::Pointing {
                     range: CellArea {
                         r1: pr.r1,
@@ -374,7 +383,7 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
                         r2: row,
                         c2: col,
                     },
-                    ref_span: new.1,
+                    ref_span,
                 });
             }
         }
@@ -410,19 +419,30 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
 /// If no autofill drag was active, this is a no-op beyond resetting to `Idle`.
 pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
     if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
-        mutate(model, EvaluationMode::Immediate, |m| {
-            let norm = CellArea::from_view(m).normalized();
-            let area = norm.to_area(m.get_selected_sheet());
-            if to_row < norm.r1 || to_row > norm.r2 {
-                warn_if_err(m.auto_fill_rows(&area, to_row), "auto_fill_rows");
-            } else {
-                warn_if_err(m.auto_fill_columns(&area, to_col), "auto_fill_columns");
+        match try_mutate(
+            model,
+            EvaluationMode::Immediate,
+            |m| -> Result<(), StructError> {
+                let norm = CellArea::from_view(m).normalized();
+                let area = norm.to_area(m.get_selected_sheet());
+                if to_row < norm.r1 || to_row > norm.r2 {
+                    m.auto_fill_rows(&area, to_row)
+                        .map_err(StructError::Engine)?;
+                } else {
+                    m.auto_fill_columns(&area, to_col)
+                        .map_err(StructError::Engine)?;
+                }
+                Ok(())
+            },
+        ) {
+            Ok(()) => {
+                let sheet_area = model.with_value(SheetArea::from_view);
+                state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
+                    sheet_area,
+                }));
             }
-        });
-        let sheet_area = model.with_value(SheetArea::from_view);
-        state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
-            sheet_area,
-        }));
+            Err(e) => state.status.set(Some(StatusMessage::Error(e.to_string()))),
+        }
     }
     state.drag.set(DragState::Idle);
 }
@@ -434,16 +454,15 @@ pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
 pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
     let x = ev.offset_x() as f64;
     let y = ev.offset_y() as f64;
+    let v = model.with_value(|m| m.get_selected_view());
 
     let target = if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
         Some(HeaderContextMenu::Column(model.with_value(|m| {
-            let v = m.get_selected_view();
             let fg = frozen_geometry(m, v.sheet);
             pixel_to_col(m, v.sheet, v.left_column, x, &fg)
         })))
     } else if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
         Some(HeaderContextMenu::Row(model.with_value(|m| {
-            let v = m.get_selected_view();
             let fg = frozen_geometry(m, v.sheet);
             pixel_to_row(m, v.sheet, v.top_row, y, &fg)
         })))

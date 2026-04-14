@@ -59,23 +59,26 @@ src/
 ├── app.rs             Root component, context providers, auto-save
 ├── coord.rs           CellAddress, CellArea, SheetArea - coordinate primitives
 ├── events.rs          Typed event system (ContentEvent, FormatEvent, etc.)
-├── perf.rs            PerfTimings - commit→render pipeline timestamps
+├── perf.rs            *Not in use* PerfTimings - commit -> render pipeline timestamps
 ├── state.rs           WorkbookState - all UI signals
-├── storage.rs         localStorage serialization
+├── storage.rs         localStorage serialization, UUID, workbook group managment
 ├── theme.rs           Light/dark theme, CanvasTheme, COLOR_PALETTE
-├── util.rs            UUID generation, error logging, focus management
+├── util.rs            Focus management (Note: one last fn it will move elsewhere)
 ├── canvas/
 │   ├── geometry.rs    Pixel<->cell coordinate math
 │   ├── renderer.rs    Canvas 2D drawing (grid, headers, selection, borders)
 │   └── types.rs       CanvasLayout, CellRenderData, resolved cell styles
 ├── input/
-│   ├── action.rs      SpreadsheetAction wrapper enum, classify_key(), execute()
 │   ├── error.rs       Per-module error types (FormatError, NavError, EditError, StructError)
-│   ├── nav.rs         NavAction - arrows, page, home/end, sheet switch
 │   ├── edit.rs        EditAction - start, commit, cancel cell editing
 │   ├── format.rs      FormatAction - bold, italic, font size/family
-│   ├── structure.rs   StructAction - delete, undo/redo, insert/delete rows/cols
 │   ├── formula_input.rs  Formula point-mode helpers (pure string ops)
+│   ├── keyboard.rs    SpreadsheetAction wrapper enum, classify_key(), execute()
+│   ├── sheet.rs       Sheet-level actions: select, add, delete, hide, unhide, rename, set color
+│   ├── structure.rs   StructAction - delete, undo/redo, insert/delete rows/cols
+│   ├── mouse.rs       Mouse event handlers for the worksheet canvas
+│   ├── nav.rs         NavAction - arrows, page, home/end, sheet switch
+│   ├── workbook.rs    Workbook-level lifecycle actions: switch, create, delete
 │   └── xlsx_io.rs     File import/export
 ├── components/
 │   ├── cell_editor.rs    Textarea overlay during cell editing
@@ -83,20 +86,25 @@ src/
 │   ├── context_menu.rs   Reusable right-click / button-triggered menu
 │   ├── file_bar.rs       Workbook management (new, open, save, import/export)
 │   ├── formula_bar.rs    Cell address + formula input
+│   ├── inline_rename.rs  Generic inline rename input component
 │   ├── perf_panel.rs     Debug overlay for commit→render timing
 │   ├── sheet_tab_bar.rs  Sheet tabs with rename, color, hide/delete, context menus
+│   ├── status_bar.rs     Displays the most recent engine error below the sheet tab bar
 │   ├── toolbar.rs        Undo/redo, font family/size, B/I/U/S, freeze panes
 │   ├── workbook.rs       Top-level layout + keyboard dispatch
 │   └── worksheet.rs      Canvas element + mouse handlers
 └── model/
-    ├── clipboard_bridge.rs  Serde bridge for IronCalc's pub(crate) Clipboard
-    ├── frontend_model.rs    FrontendModel trait, mutate/try_mutate helpers
-    ├── frontend_types.rs    Domain types (CssColor, SafeFontFamily, ToolbarState, etc.)
-    └── style_types.rs       StylePath, HexColor, BooleanValue for update_range_style API
+│   ├── clipboard_bridge.rs  Serde bridge for IronCalc's pub(crate) Clipboard
+│   ├── frontend_model.rs    FrontendModel trait, mutate/try_mutate helpers
+│   ├── frontend_types.rs    Domain types (CssColor, SafeFontFamily, ToolbarState, etc.)
+│   └── style_types.rs       StylePath, HexColor, BooleanValue for update_range_style API
+│
+└── styles/   Each component has its own CSS file
 ```
 
 ## Docs
 
+**Note out of date**
 - [docs/state-and-events.md](docs/state-and-events.md) - WorkbookState fields, EventBus categories, adding events
 - [docs/leptos-patterns.md](docs/leptos-patterns.md) - Leptos conventions (signals, event subscriptions, view bindings)
 - [docs/building-components.md](docs/building-components.md) - creating and debugging components

@@ -16,8 +16,7 @@ use crate::input::{
     structure::{execute_struct, StructAction},
 };
 use crate::model::{style_types::HexColor, ArrowKey, SafeFontFamily};
-use crate::state::EditMode;
-use crate::state::{EditingCell, ModelStore, WorkbookState};
+use crate::state::{EditMode, EditingCell, ModelStore, StatusMessage, WorkbookState};
 
 // SpreadsheetAction
 
@@ -38,6 +37,54 @@ pub enum SpreadsheetAction {
     Copy,
     Cut,
     Paste,
+}
+
+// Convenience constructors
+// Used by the toolbar and other components to avoid deep nesting like
+// `SpreadsheetAction::Format(FormatAction::ToggleBold)`.
+impl SpreadsheetAction {
+    #[cfg(test)]
+    pub fn navigate(dir: ArrowKey) -> Self {
+        Self::Nav(NavAction::Arrow(dir))
+    }
+    #[cfg(test)]
+    pub fn start_edit(text: String) -> Self {
+        Self::Edit(EditAction::Start(text))
+    }
+    #[cfg(test)]
+    pub fn commit(dir: ArrowKey) -> Self {
+        Self::Edit(EditAction::CommitAndNavigate(dir))
+    }
+    pub fn toggle_bold() -> Self {
+        Self::Format(FormatAction::ToggleBold)
+    }
+    pub fn toggle_italic() -> Self {
+        Self::Format(FormatAction::ToggleItalic)
+    }
+    pub fn toggle_underline() -> Self {
+        Self::Format(FormatAction::ToggleUnderline)
+    }
+    pub fn toggle_strikethrough() -> Self {
+        Self::Format(FormatAction::ToggleStrikethrough)
+    }
+    pub fn set_font_size(size: f64) -> Self {
+        Self::Format(FormatAction::SetFontSize(size))
+    }
+    pub fn set_font_family(family: SafeFontFamily) -> Self {
+        Self::Format(FormatAction::SetFontFamily(family))
+    }
+    pub fn set_text_color(hex: HexColor) -> Self {
+        Self::Format(FormatAction::SetTextColor(hex))
+    }
+    pub fn set_background_color(hex: HexColor) -> Self {
+        Self::Format(FormatAction::SetBackgroundColor(hex))
+    }
+    pub fn undo() -> Self {
+        Self::Structure(StructAction::Undo)
+    }
+    pub fn redo() -> Self {
+        Self::Structure(StructAction::Redo)
+    }
 }
 
 // Key classification
@@ -211,57 +258,9 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
         }
         SpreadsheetAction::Copy | SpreadsheetAction::Cut | SpreadsheetAction::Paste => Ok(()),
     };
-    if let Err(msg) = result {
-        web_sys::console::warn_1(&format!("[RustyCalc] {msg}").into());
-    }
-}
-
-// Convenience constructors
-// Used by the toolbar and other components to avoid deep nesting like
-// `SpreadsheetAction::Format(FormatAction::ToggleBold)`.
-
-impl SpreadsheetAction {
-    #[cfg(test)]
-    pub fn navigate(dir: ArrowKey) -> Self {
-        Self::Nav(NavAction::Arrow(dir))
-    }
-    #[cfg(test)]
-    pub fn start_edit(text: String) -> Self {
-        Self::Edit(EditAction::Start(text))
-    }
-    #[cfg(test)]
-    pub fn commit(dir: ArrowKey) -> Self {
-        Self::Edit(EditAction::CommitAndNavigate(dir))
-    }
-    pub fn toggle_bold() -> Self {
-        Self::Format(FormatAction::ToggleBold)
-    }
-    pub fn toggle_italic() -> Self {
-        Self::Format(FormatAction::ToggleItalic)
-    }
-    pub fn toggle_underline() -> Self {
-        Self::Format(FormatAction::ToggleUnderline)
-    }
-    pub fn toggle_strikethrough() -> Self {
-        Self::Format(FormatAction::ToggleStrikethrough)
-    }
-    pub fn set_font_size(size: f64) -> Self {
-        Self::Format(FormatAction::SetFontSize(size))
-    }
-    pub fn set_font_family(family: SafeFontFamily) -> Self {
-        Self::Format(FormatAction::SetFontFamily(family))
-    }
-    pub fn set_text_color(hex: HexColor) -> Self {
-        Self::Format(FormatAction::SetTextColor(hex))
-    }
-    pub fn set_background_color(hex: HexColor) -> Self {
-        Self::Format(FormatAction::SetBackgroundColor(hex))
-    }
-    pub fn undo() -> Self {
-        Self::Structure(StructAction::Undo)
-    }
-    pub fn redo() -> Self {
-        Self::Structure(StructAction::Redo)
+    match result {
+        Ok(()) => state.status.set(None),
+        Err(msg) => state.status.set(Some(StatusMessage::Error(msg))),
     }
 }
 
@@ -963,6 +962,27 @@ mod tests {
             execute(&struc(StructAction::DeleteRows), model, &state);
             let a1 = model.with_value(|m| m.get_formatted_cell_value(0, 1, 1).unwrap_or_default());
             assert_eq!(a1, "data");
+        });
+    }
+
+    #[wasm_bindgen_test]
+    fn execute_clears_status_on_success() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let model = StoredValue::new_local(
+                ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap(),
+            );
+            let state = crate::state::WorkbookState::new(crate::events::EventBus::new());
+            // Seed a stale error to confirm it gets cleared
+            state
+                .status
+                .set(Some(crate::state::StatusMessage::Error("stale".into())));
+            execute(
+                &SpreadsheetAction::start_edit("=1+1".to_owned()),
+                model,
+                &state,
+            );
+            assert_eq!(state.status.get_untracked(), None);
         });
     }
 }
