@@ -2,7 +2,7 @@ use crate::components::left_drawer::LeftDrawer;
 use crate::components::workbook::Workbook;
 
 use leptos::prelude::*;
-use leptos_use::use_interval_fn;
+use leptos_use::{use_debounce_fn_with_options, DebounceOptions};
 
 use crate::app_state::AppState;
 use crate::events::EventBus;
@@ -40,44 +40,53 @@ pub fn App() -> impl IntoView {
     provide_context(model);
     provide_context(clipboard);
 
-    // TODO: Check if needed
-    // Debounced save: waits 2 seconds after the last change before saving
-    // Uses enhanced storage with quota checking and better error handling
-    // let debounced_save = {
-    //     use_debounce_fn(
-    //         move || {
-    //             let Some(uuid) = wb_state.current_uuid.get_untracked() else {
-    //                 return;
-    //             };
-    //             model.with_value(|m| {
-    //                 storage_enhanced::save_compatible(&uuid, m);
-
-    //                 let analysis = storage_enhanced::analyze_storage();
-    //                 web_sys::console::debug_1(&analysis.into());
-    //             });
-    //         },
-    //         2000.0, // Save 2 seconds after last change (was 1 second interval)
-    //     )
-    // };
-
-    // Change detection interval (more frequent checks, less frequent saves)
-    // Check every 500ms for changes, but only save via debounced function
-    use_interval_fn(
+    // Centralized auto-save via EventBus subscription.
+    //
+    // Every model mutation emits events for UI updates. This Effect subscribes
+    // to the three mutation categories (content, format, structure) and triggers
+    // a debounced save. Navigation and theme events are ephemeral — no persistence.
+    //
+    // Timing: 1s after last change, max 5s during continuous edits.
+    // Safety net: beforeunload saves unconditionally on tab close.
+    // Lifecycle: workbook switch saves the outgoing model synchronously
+    //            in input/workbook.rs before model replacement.
+    let debounced_save = use_debounce_fn_with_options(
         move || {
-            let Some(_uuid) = wb_state.current_uuid.get_untracked() else {
-                return;
-            };
-            let mut has_changes = false;
-            model.update_value(|m| {
-                has_changes = !m.flush_send_queue().is_empty();
-            });
-            if has_changes {
-                // Trigger debounced save instead of immediate save
-                // debounced_save();
+            if let Some(uuid) = wb_state.current_uuid.get_untracked() {
+                model.with_value(|m| storage::save(&uuid, m));
             }
         },
-        500, // Check for changes every 500ms (more responsive)
+        1000.0,
+        DebounceOptions::default().max_wait(Some(5000.0)),
     );
+
+    Effect::new(move |_| {
+        let has_content = !wb_state.events.content.get().is_empty();
+        let has_format = !wb_state.events.format.get().is_empty();
+        let has_structure = !wb_state.events.structure.get().is_empty();
+        if has_content || has_format || has_structure {
+            debounced_save();
+        }
+    });
+
+    // Emergency save on tab close — unconditional, cheap, runs rarely.
+    {
+        use wasm_bindgen::prelude::*;
+        let cb = Closure::<dyn Fn(web_sys::Event)>::new(move |_: web_sys::Event| {
+            if let Some(uuid) = wb_state.current_uuid.get_untracked() {
+                model.with_value(|m| storage::save(&uuid, m));
+            }
+        });
+        if let Ok(win) = window().add_event_listener_with_callback(
+            "beforeunload",
+            cb.as_ref().unchecked_ref(),
+        ) {
+            // Listener registered; intentionally leak the closure so it
+            // lives until page unload.
+            let _ = win;
+        }
+        cb.forget();
+    }
 
     // Row layout: collapsible drawer on the left, workbook editor fills the rest.
 

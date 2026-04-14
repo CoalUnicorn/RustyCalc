@@ -13,7 +13,6 @@ use crate::input::{
 };
 use crate::model::{mutate, AppClipboard, EvaluationMode, PasteMode};
 use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
-use crate::storage;
 use crate::util::warn_if_err;
 
 /// Top-level keyboard router. Clipboard ops and point-mode arrow handling
@@ -159,9 +158,6 @@ pub fn Workbook() -> impl IntoView {
             }
             SpreadsheetAction::Paste => {
                 if paste_from_clipboard(model, state, clipboard_store) {
-                    if let Some(uuid) = state.current_uuid.get_untracked() {
-                        model.with_value(|m| storage::save(&uuid, m));
-                    }
                     ev.prevent_default();
                 }
             }
@@ -267,9 +263,6 @@ fn paste_from_clipboard(
                     );
                 }
             });
-            if let Some(uuid) = state.current_uuid.get_untracked() {
-                model.with_value(|m| storage::save(&uuid, m));
-            }
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
         });
     }

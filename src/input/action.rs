@@ -9,8 +9,6 @@
 //
 // See docs/adding-actions.md for how to add or modify actions.
 
-use leptos::prelude::WithValue;
-
 use crate::input::{
     edit::{execute_edit, EditAction},
     format::{execute_format, FormatAction},
@@ -20,7 +18,6 @@ use crate::input::{
 use crate::model::{style_types::HexColor, ArrowKey, SafeFontFamily};
 use crate::state::EditMode;
 use crate::state::{EditingCell, ModelStore, WorkbookState};
-use crate::storage;
 
 // SpreadsheetAction
 
@@ -204,11 +201,6 @@ fn is_printable(key: &str) -> bool {
 /// are no-ops here - they require the `AppClipboard` store and async OS
 /// clipboard APIs, so the Workbook component handles them directly.
 pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookState) {
-    let mutates = matches!(
-        action,
-        SpreadsheetAction::Format(_) | SpreadsheetAction::Structure(_)
-    );
-
     // Each category returns its own Result type; map to String for the single log point.
     let result: Result<(), String> = match action {
         SpreadsheetAction::Nav(a) => execute_nav(a, model, state).map_err(|e| e.to_string()),
@@ -221,12 +213,6 @@ pub fn execute(action: &SpreadsheetAction, model: ModelStore, state: &WorkbookSt
     };
     if let Err(msg) = result {
         web_sys::console::warn_1(&format!("[RustyCalc] {msg}").into());
-    }
-
-    if mutates {
-        if let Some(uuid) = state.current_uuid.get_untracked() {
-            model.with_value(|m| storage::save(&uuid, m));
-        }
     }
 }
 

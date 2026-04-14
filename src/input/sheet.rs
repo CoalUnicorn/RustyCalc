@@ -1,8 +1,8 @@
 //! Sheet-level actions: select, add, delete, hide, unhide, rename, set color.
 //!
-//! These operations mutate the current model's sheet structure and persist
-//! to storage. Called directly from components — not routed through the
-//! keyboard `classify_key`/`execute` pipeline.
+//! Called directly from components — not routed through the keyboard
+//! `classify_key`/`execute` pipeline. Persistence is handled centrally
+//! by the EventBus-driven auto-save in `app.rs`.
 //!
 //! Follows the `WorkbookAction` pattern in `workbook.rs`.
 
@@ -12,13 +12,12 @@ use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEve
 use crate::input::error::SheetError;
 use crate::model::{try_mutate, EvaluationMode, FrontendModel};
 use crate::state::{ModelStore, WorkbookState};
-use crate::storage;
 use crate::util::warn_if_err;
 
 /// Sheet-level operations on the current workbook.
 ///
-/// Separate from `StructAction` because these involve storage persistence
-/// and state coordination beyond what the keyboard action pipeline handles.
+/// Separate from `StructAction` because these involve state coordination
+/// beyond what the keyboard action pipeline handles.
 /// Callers are responsible for confirmation dialogs before `Delete`.
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
@@ -43,8 +42,7 @@ pub enum SheetAction {
     Move { sheet: u32, to_index: u32 },
 }
 
-/// Execute a [`SheetAction`] against the model, persisting to storage
-/// and emitting the appropriate events.
+/// Execute a [`SheetAction`] against the model and emit the appropriate events.
 pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookState) {
     match action {
         SheetAction::Select(sheet_idx) => {
@@ -76,7 +74,6 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
             );
             let name = model.with_value(|m| m.get_sheet_name(sheet_idx as usize));
 
-            save_current(model, state);
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::WorksheetAdded {
                     sheet: sheet_idx,
@@ -92,7 +89,6 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
                 }),
                 "delete_sheet",
             );
-            save_current(model, state);
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::WorksheetDeleted { sheet: *sheet_idx },
             ));
@@ -105,7 +101,6 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
                 }),
                 "hide_sheet",
             );
-            save_current(model, state);
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::WorksheetHidden { sheet: *sheet_idx },
             ));
@@ -126,7 +121,6 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
                 }),
                 "set_selected_sheet",
             );
-            save_current(model, state);
             state.emit_events([
                 SpreadsheetEvent::Structure(StructureEvent::WorksheetUnhidden {
                     sheet: *sheet_idx,
@@ -148,7 +142,6 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
                 }),
                 "rename_sheet",
             );
-            save_current(model, state);
             state.emit_event(SpreadsheetEvent::Structure(
                 StructureEvent::WorksheetRenamed {
                     sheet: *sheet,
@@ -166,7 +159,6 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
                 }),
                 "set_sheet_color",
             );
-            save_current(model, state);
             if !hex.is_empty() {
                 state.add_recent_color(hex);
             }
@@ -183,12 +175,5 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
         SheetAction::Move { .. } => {
             todo!("SheetAction::Move not yet implemented")
         }
-    }
-}
-
-/// Persist the current workbook to localStorage.
-fn save_current(model: ModelStore, state: &WorkbookState) {
-    if let Some(uuid) = state.current_uuid.get_untracked() {
-        model.with_value(|m| storage::save(&uuid, m));
     }
 }

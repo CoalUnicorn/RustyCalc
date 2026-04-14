@@ -8,7 +8,6 @@ use crate::input::error::EditError;
 use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
-use crate::storage;
 
 /// Cell edit lifecycle actions.
 #[derive(Debug, Clone, PartialEq)]
@@ -88,11 +87,6 @@ pub fn execute_edit(
                 // Clear all edit-related state.
                 state.editing_cell.set(None);
                 state.drag.set(DragState::Idle);
-
-                // Persist the committed change immediately.
-                if let Some(uuid) = state.current_uuid.get_untracked() {
-                    model.with_value(|m| storage::save(&uuid, m));
-                }
 
                 // Navigate to the next cell.
                 mutate(model, EvaluationMode::Deferred, |m| m.nav_arrow(*dir));
