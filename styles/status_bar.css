@@ -1,0 +1,11 @@
+.status-bar {
+    min-height: 1.5rem;
+    padding: 0 0.5rem;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+}
+
+.status-bar-error {
+    color: var(--color-error, #c0392b);
+}
