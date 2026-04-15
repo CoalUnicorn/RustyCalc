@@ -117,8 +117,8 @@ src/
 ## Dependencies
 
 - [IronCalc](https://github.com/ironcalc/IronCalc) - spreadsheet engine (formula parsing, evaluation, OOXML support)
-- [Leptos](https://leptos.dev/) 0.7 - reactive UI framework (CSR mode)
-- [leptos-use](https://leptos-use.rs/) 0.15 - browser API hooks (ResizeObserver, setInterval)
+- [Leptos](https://leptos.dev/) 0.8 - reactive UI framework (CSR mode)
+- [leptos-use](https://leptos-use.rs/) 0.18 - browser API hooks (ResizeObserver, setInterval)
 - [Trunk](https://trunkrs.dev/) - WASM build tool
 - [Tauri](https://tauri.app/) 2.x - optional desktop shell
 

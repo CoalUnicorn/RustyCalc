@@ -9,7 +9,6 @@ use crate::model::{try_mutate, EvaluationMode};
 use crate::state::{ModelStore, WorkbookState};
 
 /// Structural mutations: delete/clear cell content, undo/redo, and row/column insert/delete.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum StructAction {
     /// Delete key: clear cell contents, preserve formatting.

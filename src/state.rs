@@ -115,11 +115,11 @@ pub struct EditingCell {
     pub(crate) text_dirty: bool,
 }
 
-/// 1-based index of the right-clicked header.
+/// Right-clicked header identity and the count of selected headers in that axis.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum HeaderContextMenu {
-    Column(i32),
-    Row(i32),
+    Column { col: i32, count: i32 },
+    Row { row: i32, count: i32 },
 }
 
 #[allow(dead_code)]

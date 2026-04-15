@@ -92,6 +92,14 @@ pub trait FrontendModel {
     /// Extend selection during mouse drag.
     fn nav_extend_selection(&mut self, row: i32, col: i32);
 
+    /// Shift+click on a column header: extend the full-column selection from
+    /// the anchor column to `col`, without scrolling to LAST_ROW.
+    fn nav_extend_column_selection(&mut self, col: i32);
+
+    /// Shift+click on a row header: extend the full-row selection from the
+    /// anchor row to `row`, without scrolling to LAST_COLUMN.
+    fn nav_extend_row_selection(&mut self, row: i32);
+
     /// Jump to the edge of the current data region (Ctrl+Arrow).
     fn nav_to_edge(&mut self, dir: ArrowKey);
 
@@ -367,6 +375,28 @@ impl FrontendModel for UserModel<'_> {
 
     fn nav_extend_selection(&mut self, row: i32, col: i32) {
         let _ = self.on_area_selecting(row, col);
+    }
+
+    fn nav_extend_column_selection(&mut self, col: i32) {
+        let view = self.get_selected_view();
+        let anchor = view.column;
+        let (c1, c2) = if anchor <= col {
+            (anchor, col)
+        } else {
+            (col, anchor)
+        };
+        let _ = self.set_selected_range(1, c1, LAST_ROW, c2);
+    }
+
+    fn nav_extend_row_selection(&mut self, row: i32) {
+        let view = self.get_selected_view();
+        let anchor = view.row;
+        let (r1, r2) = if anchor <= row {
+            (anchor, row)
+        } else {
+            (row, anchor)
+        };
+        let _ = self.set_selected_range(r1, 1, r2, LAST_COLUMN);
     }
 
     fn nav_to_edge(&mut self, dir: ArrowKey) {

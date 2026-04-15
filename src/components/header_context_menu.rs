@@ -58,19 +58,27 @@ pub fn HeaderContextMenuOverlay() -> impl IntoView {
         <ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos>
             {move || match state.context_menu.get() {
                 Some(ctx) => match ctx.target {
-                    HeaderContextMenu::Column(col) => view! {
+                    HeaderContextMenu::Column { col, count } => view! {
                         <ContextMenuItem
                             icon="+"
-                            on_click=move || dispatch(StructAction::InsertColumnAt { col })
+                            on_click=move || dispatch(if count > 1 {
+                                StructAction::InsertColumns
+                            } else {
+                                StructAction::InsertColumnAt { col }
+                            })
                         >
-                            "Insert Column"
+                            {if count > 1 { format!("Insert {count} Columns") } else { "Insert Column".to_string() }}
                         </ContextMenuItem>
                         <ContextMenuItem
                             icon="×"
                             destructive=true
-                            on_click=move || dispatch(StructAction::DeleteColumnAt { col })
+                            on_click=move || dispatch(if count > 1 {
+                                StructAction::DeleteColumns
+                            } else {
+                                StructAction::DeleteColumnAt { col }
+                            })
                         >
-                            "Delete Column"
+                            {if count > 1 { format!("Delete {count} Columns") } else { "Delete Column".to_string() }}
                         </ContextMenuItem>
                         <ContextMenuSeparator />
                         <ContextMenuItem
@@ -94,19 +102,27 @@ pub fn HeaderContextMenuOverlay() -> impl IntoView {
                         </ContextMenuItem>
                     }
                     .into_any(),
-                    HeaderContextMenu::Row(row) => view! {
+                    HeaderContextMenu::Row { row, count } => view! {
                         <ContextMenuItem
                             icon="+"
-                            on_click=move || dispatch(StructAction::InsertRowAt { row })
+                            on_click=move || dispatch(if count > 1 {
+                                StructAction::InsertRows
+                            } else {
+                                StructAction::InsertRowAt { row }
+                            })
                         >
-                            "Insert Row"
+                            {if count > 1 { format!("Insert {count} Rows") } else { "Insert Row".to_string() }}
                         </ContextMenuItem>
                         <ContextMenuItem
                             icon="×"
                             destructive=true
-                            on_click=move || dispatch(StructAction::DeleteRowAt { row })
+                            on_click=move || dispatch(if count > 1 {
+                                StructAction::DeleteRows
+                            } else {
+                                StructAction::DeleteRowAt { row }
+                            })
                         >
-                            "Delete Row"
+                            {if count > 1 { format!("Delete {count} Rows") } else { "Delete Row".to_string() }}
                         </ContextMenuItem>
                         <ContextMenuSeparator />
                         <ContextMenuItem

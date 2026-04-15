@@ -8,7 +8,7 @@
 
 use leptos::prelude::*;
 
-use crate::canvas::geometry::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
+use crate::canvas::geometry::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW};
 use crate::canvas::{
     autofill_handle_pos, frozen_geometry, pixel_to_col, pixel_to_row, AUTOFILL_HANDLE_PX,
     HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
@@ -93,7 +93,7 @@ pub fn handle_col_header_click(
         let fg = frozen_geometry(m, sheet);
         let col = pixel_to_col(m, sheet, view.left_column, x, &fg);
         if ev.shift_key() {
-            m.nav_extend_selection(1, col);
+            m.nav_extend_column_selection(col);
         } else {
             m.nav_select_column(col);
         }
@@ -119,7 +119,7 @@ pub fn handle_row_header_click(
         let fg = frozen_geometry(m, sheet);
         let row = pixel_to_row(m, sheet, view.top_row, y, &fg);
         if ev.shift_key() {
-            m.nav_extend_selection(row, 1);
+            m.nav_extend_row_selection(row);
         } else {
             m.nav_select_row(row);
         }
@@ -235,6 +235,11 @@ pub fn handle_cell_click(
 /// column-resize hit zone → row-resize hit zone → corner → col header →
 /// row header → cell area.
 pub fn handle_mousedown(ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
+    // Only handle left-click (button 0); right-click is handled by handle_contextmenu.
+    if ev.button() != 0 {
+        return;
+    }
+
     let x = ev.offset_x() as f64;
     let y = ev.offset_y() as f64;
 
@@ -457,15 +462,31 @@ pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: Wor
     let v = model.with_value(|m| m.get_selected_view());
 
     let target = if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
-        Some(HeaderContextMenu::Column(model.with_value(|m| {
+        Some(model.with_value(|m| {
             let fg = frozen_geometry(m, v.sheet);
-            pixel_to_col(m, v.sheet, v.left_column, x, &fg)
-        })))
+            let col = pixel_to_col(m, v.sheet, v.left_column, x, &fg);
+            let area = CellArea::from_view(m).normalized();
+            // Multi-column selection if the clicked col is inside a full-column range.
+            let (col, count) = if area.r2 >= LAST_ROW && area.c1 <= col && col <= area.c2 {
+                (area.c1, area.c2 - area.c1 + 1)
+            } else {
+                (col, 1)
+            };
+            HeaderContextMenu::Column { col, count }
+        }))
     } else if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
-        Some(HeaderContextMenu::Row(model.with_value(|m| {
+        Some(model.with_value(|m| {
             let fg = frozen_geometry(m, v.sheet);
-            pixel_to_row(m, v.sheet, v.top_row, y, &fg)
-        })))
+            let row = pixel_to_row(m, v.sheet, v.top_row, y, &fg);
+            let area = CellArea::from_view(m).normalized();
+            // Multi-row selection if the clicked row is inside a full-row range.
+            let (row, count) = if area.c2 >= LAST_COLUMN && area.r1 <= row && row <= area.r2 {
+                (area.r1, area.r2 - area.r1 + 1)
+            } else {
+                (row, 1)
+            };
+            HeaderContextMenu::Row { row, count }
+        }))
     } else {
         None
     };
