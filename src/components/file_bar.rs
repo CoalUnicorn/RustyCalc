@@ -122,25 +122,18 @@ pub fn FileBar() -> impl IntoView {
     // DOM update and localStorage persistence are handled by the
     // use_rusty_calc_theme sync Effect in App.
     let on_toggle_theme = move |_: web_sys::MouseEvent| {
-        app.toggle_theme();
+        app.toggle_light_dark();
     };
 
-    let theme_icon = move || match app.theme.get() {
-        Theme::Auto => {
-            if app.get_theme() == Theme::Dark {
-                "🌙"
-            } else {
-                "☀️"
-            }
-        }
-        Theme::Light => "🌙",
+    // Resolve Auto to the concrete system value so the icon is always accurate.
+    let theme_icon = move || match app.get_theme() {
         Theme::Dark => "☀️",
+        _ => "🌙",
     };
 
-    let theme_title = move || match app.theme.get() {
-        Theme::Auto => "Theme: Auto (click to switch)",
-        Theme::Light => "Theme: Light (click for Dark)",
-        Theme::Dark => "Theme: Dark (click for Auto)",
+    let theme_title = move || match app.get_theme() {
+        Theme::Dark => "Dark mode (click for Light)",
+        _ => "Light mode (click for Dark)",
     };
 
     view! {

@@ -77,13 +77,12 @@ pub fn App() -> impl IntoView {
                 model.with_value(|m| storage::save(&uuid, m));
             }
         });
-        if let Ok(win) = window().add_event_listener_with_callback(
-            "beforeunload",
-            cb.as_ref().unchecked_ref(),
-        ) {
+        if let Ok(win) =
+            window().add_event_listener_with_callback("beforeunload", cb.as_ref().unchecked_ref())
+        {
             // Listener registered; intentionally leak the closure so it
             // lives until page unload.
-            let _ = win;
+            win
         }
         cb.forget();
     }

@@ -60,21 +60,13 @@ impl AppState {
             }));
     }
 
-    pub fn toggle_theme(&self) {
-        let next = match self.theme.get() {
-            Theme::Auto => Theme::Light,
-            Theme::Light => Theme::Dark,
-            Theme::Dark => Theme::Auto,
+    pub fn toggle_light_dark(&self) {
+        // Resolve Auto to a concrete theme before toggling so Auto → click → Dark
+        // works correctly rather than silently doing nothing.
+        let next = match self.get_theme() {
+            Theme::Light | Theme::Auto => Theme::Dark,
+            Theme::Dark => Theme::Light,
         };
         self.set_theme(next);
-    }
-
-    #[allow(dead_code)]
-    pub fn toggle_light_dark(&self) {
-        match self.theme.get() {
-            Theme::Auto => {}
-            Theme::Light => self.set_theme(Theme::Dark),
-            Theme::Dark => self.set_theme(Theme::Light),
-        }
     }
 }

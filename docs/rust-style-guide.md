@@ -73,7 +73,7 @@ pub enum DragState {
     Selecting,
     Extending { to_row: i32, to_col: i32 },
     /// Formula point-mode: highlighted range + byte span in formula text.
-    Pointing { range: CellArea, ref_span: (usize, usize) },
+    Pointing { range: CellArea, ref_span: RefSpan },
     ResizingCol { col: i32, x: f64 },
 }
 
@@ -144,8 +144,9 @@ let result: Result<(), String> = match action {
     Nav(a)    => execute_nav(a, model, state).map_err(|e| e.to_string()),
     // ...
 };
-if let Err(msg) = result {
-    web_sys::console::warn_1(&format!("[RustyCalc] {msg}").into());
+match result {
+    Ok(()) => state.status.set(None),
+    Err(msg) => state.status.set(Some(StatusMessage::Error(msg))),
 }
 ```
 
@@ -308,13 +309,16 @@ let model = expect_context::<ModelStore>();
 
 ### Error Handling in Components
 
-Log errors but keep the UI functional, then emit the appropriate typed event:
+Surface errors through the status bar via `state.status`, then emit the typed event:
 
 ```rust
 let on_click = move |_| {
-    model.update_value(|m| {
-        warn_if_err(m.delete_sheet(sheet_id), "delete_sheet");
-    });
+    if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
+        m.delete_sheet(sheet_id).map_err(SheetError::Engine)
+    }) {
+        state.status.set(Some(StatusMessage::Error(e.to_string())));
+        return;
+    }
     state.emit_event(SpreadsheetEvent::Structure(
         StructureEvent::WorksheetDeleted { sheet: sheet_id },
     ));
@@ -325,6 +329,70 @@ Emit `Content(GenericChange)` only when no specific event applies — e.g. after
 viewport resize or canvas-only repaint. For model mutations, prefer a typed event
 so subscribers can filter by category.
 
+### Model Mutation and Evaluation Control
+
+The right tool depends on whether the ironcalc method being called might
+internally call `evaluate()`:
+
+| Situation | Use |
+|-----------|-----|
+| ironcalc `nav_*` methods (select, scroll, extend selection) — provably no internal evaluate | `model.update_value(\|m\| { ... })` directly |
+| Mutation that modifies model data but doesn't affect formulas (resize, freeze, formatting) | `mutate` / `try_mutate` with `EvaluationMode::Deferred` |
+| Mutation that writes cell values, formulas, or sheet structure | `mutate` / `try_mutate` with `EvaluationMode::Immediate` |
+
+```rust
+use crate::model::{mutate, try_mutate, EvaluationMode};
+```
+
+**`model.update_value` directly** — appropriate for pure navigation calls
+where the ironcalc method is known not to call `evaluate()` internally:
+
+```rust
+// nav_* methods don't evaluate — no bracketing needed
+model.update_value(|m| {
+    m.nav_set_cell(row, col);
+});
+```
+
+**`mutate` / `try_mutate`** — required when the ironcalc method being called
+may invoke `evaluate()` internally. The helpers bracket with
+`pause_evaluation`/`resume_evaluation` so evaluation happens at most once —
+after all mutations are done — preventing silent double-evaluation:
+
+```rust
+// Infallible — formatting, resize, freeze: modifies data, no formula recalc
+mutate(model, EvaluationMode::Deferred, |m| {
+    m.set_frozen_rows_count(sheet, count);
+});
+
+// Fallible — cell write: must recalculate after
+if let Err(e) = try_mutate(model, EvaluationMode::Immediate, |m| {
+    m.set_user_input(sheet, row, col, value)
+        .map_err(EditError::Engine)
+}) {
+    state.status.set(Some(StatusMessage::Error(e.to_string())));
+    return;
+}
+```
+
+Using `Deferred` for mutations that write cell data is a correctness bug —
+formulas will show stale results until the next `Immediate` mutation triggers
+recalculation.
+
+`try_mutate` always runs `resume_evaluation()` even on `Err` — the model is
+never left in a paused state. `evaluate()` is skipped only on failure, which
+is correct: a partial mutation that errored should not cascade through the
+formula graph.
+
+After every mutation, emit the appropriate typed event. Neither helper does
+this automatically:
+
+```rust
+state.emit_event(SpreadsheetEvent::Navigation(
+    NavigationEvent::ActiveSheetChanged { from_sheet, to_sheet },
+));
+```
+
 ## Examples from the Codebase
 
 These patterns come from actual RustyCalc code:
@@ -334,6 +402,7 @@ These patterns come from actual RustyCalc code:
 - Parse-don't-validate: `CssColor::new()`, `SafeFontFamily::from()`
 - Data-driven enums: `SafeFontFamily::names()` with single match block
 - Structured collections: `HashMap<String, WorkbookMeta>`
-- Error utilities: `warn_if_err()`, storage error logging
-- Module organization: `canvas::geometry`, `input::action`, `components::*`
+- Error handling: `StatusMessage::Error(msg)` via `state.status`, storage error logging
+- Mutation helpers: `mutate`/`try_mutate` with `EvaluationMode` in `model/frontend_model.rs`
+- Module organization: `canvas::geometry`, `input::keyboard`, `components::*`
 

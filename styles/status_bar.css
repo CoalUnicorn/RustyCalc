@@ -4,6 +4,9 @@
     font-size: 0.75rem;
     display: flex;
     align-items: center;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-top: 1px solid var(--border-color);
 }
 
 .status-bar-error {

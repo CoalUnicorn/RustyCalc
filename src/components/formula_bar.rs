@@ -190,7 +190,9 @@ pub fn FormulaBar() -> impl IntoView {
 
     view! {
         <div id="formula-bar" class="fb">
-            <div class="fb-add">{cell_address}</div>
+            <div class="fb-addr">
+                {cell_address}
+            </div>
             <div class="fb-fx">"fx"</div>
             <input
                 node_ref=input_ref
@@ -200,7 +202,7 @@ pub fn FormulaBar() -> impl IntoView {
                 on:focus=on_focus
                 on:input=on_input
                 on:keydown=on_keydown
-                placeholder="Enter formula (=SUM(A1:A10)) or value"
+                placeholder="Enter value or formula"
             />
             // Validation status indicator
             <div class="fb-valid">

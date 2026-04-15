@@ -21,7 +21,7 @@ Alpha-stage spreadsheet built with Rust, compiled to WebAssembly. The calculatio
 - Keyboard shortcuts: Ctrl+B/I/U (bold/italic/underline), Ctrl+Z/Y (undo/redo)
 - Copy/paste (internal clipboard with structural paste, OS clipboard fallback for text)
 - Light/dark theme with localStorage persistence
-- Auto-save to localStorage every second
+- Auto-save to localStorage (500 ms change-poll; immediate save on workbook switch)
 - Sidebar with Workbooks - each workbook can be assigned to a group. Rename workbook by double click.
 - Tauri desktop build
 - GitHub Pages deployment
@@ -59,9 +59,10 @@ src/
 ├── app.rs             Root component, context providers, auto-save
 ├── coord.rs           CellAddress, CellArea, SheetArea - coordinate primitives
 ├── events.rs          Typed event system (ContentEvent, FormatEvent, etc.)
-├── perf.rs            *Not in use* PerfTimings - commit -> render pipeline timestamps
+├── perf.rs            PerfTimings - commit -> render pipeline timestamps (perf panel + try_mutate_timed, not enabled atm)
 ├── state.rs           WorkbookState - all UI signals
-├── storage.rs         localStorage serialization, UUID, workbook group managment
+├── app_state.rs       AppState - application-level signals (sidebar, theme, groups, perf)
+├── storage.rs         localStorage serialization, UUID, workbook group management
 ├── theme.rs           Light/dark theme, CanvasTheme, COLOR_PALETTE
 ├── util.rs            Focus management (Note: one last fn it will move elsewhere)
 ├── canvas/
@@ -87,6 +88,7 @@ src/
 │   ├── file_bar.rs       Workbook management (new, open, save, import/export)
 │   ├── formula_bar.rs    Cell address + formula input
 │   ├── inline_rename.rs  Generic inline rename input component
+│   ├── left_drawer.rs    Collapsible sidebar: workbook list with group support
 │   ├── perf_panel.rs     Debug overlay for commit→render timing
 │   ├── sheet_tab_bar.rs  Sheet tabs with rename, color, hide/delete, context menus
 │   ├── status_bar.rs     Displays the most recent engine error below the sheet tab bar
@@ -104,7 +106,6 @@ src/
 
 ## Docs
 
-**Note out of date**
 - [docs/state-and-events.md](docs/state-and-events.md) - WorkbookState fields, EventBus categories, adding events
 - [docs/leptos-patterns.md](docs/leptos-patterns.md) - Leptos conventions (signals, event subscriptions, view bindings)
 - [docs/building-components.md](docs/building-components.md) - creating and debugging components

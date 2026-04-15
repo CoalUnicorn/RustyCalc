@@ -50,14 +50,36 @@ view! {
 }
 ```
 
-### 4. Add styles to `style.css`
+### 4. Create css file for component
 
-All static styles go in `style.css` (Trunk hashes and minifies it). Use `class=` in the view, not inline `style=`. Only use inline `style=` for values computed at runtime (pixel positions, per-instance colors).
+Each UI component gets its own CSS file in `styles/` with a short 2-3 char prefix.
+All static styles go there (Trunk hashes and minifies). Use `class=` in the view, not
+inline `style=`. Only use inline `style=` for values computed at runtime (pixel
+positions, per-instance colors).
 
 ```css
-.toolbar { display: flex; align-items: center; height: 36px; }
-.toolbar-btn { padding: 0 10px; font-size: 12px; cursor: pointer; }
+/* styles/toolbar.css  — prefix: tb- */
+.tb { display: flex; align-items: center; height: 36px; }
+.tb .tb-btn { padding: 0 10px; font-size: 12px; cursor: pointer; }
 ```
+
+Then add `@import "toolbar.css";` to `styles/index.css`. See `styles/README.md`
+for the full prefix table and naming conventions.
+
+Always include theme variable declarations so the component reacts to light/dark
+switching. Omitting them leaves the element white regardless of the active theme:
+
+```css
+.tb {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--border-color);
+}
+```
+
+Available variables: `--bg-primary`, `--bg-secondary`, `--border-color`,
+`--border-inner`, `--text-primary`, `--text-dim`, `--text-strong`, `--accent`,
+`--btn-bg`. All defined in `index.html` on `:root` and `[data-theme="dark"]`.
 
 ### 5. Check it compiles
 
@@ -81,7 +103,7 @@ fn FreezePane() -> impl IntoView {
 
     let is_frozen = move || { /* reactive query */ };
     let on_click = move |_: web_sys::MouseEvent| { /* model mutation */ };
-    let btn_class = move || if is_frozen() { "toolbar-btn active" } else { "toolbar-btn" };
+    let btn_class = move || if is_frozen() { "tb-btn active" } else { "tb-btn" };
 
     view! {
         <button class=btn_class on:click=on_click>"❄ Freeze"</button>
@@ -100,8 +122,7 @@ When a component has distinct interactive sections, split them into private sub-
 ```
 SheetTabBar          (pub)   (layout, add button, <For> loop)
 ├── SheetTab         (priv)  (one tab: click, dblclick, chevron menu)
-├── RenameInput      (priv)  (inline rename: keydown, blur, commit)
-├── TabContextMenu   (priv)  (right-click menu: rename, color, hide, delete)
+│   └── uses InlineRenameInput from inline_rename.rs
 └── AllSheetsMenu    (priv)  (hamburger dropdown: navigate, unhide)
 ```
 
@@ -167,12 +188,12 @@ mutate(model, EvaluationMode::Deferred, |m| {
 });
 
 // Fallible (cell writes, structural changes):
-warn_if_err(
-    try_mutate(model, EvaluationMode::Immediate, |m| {
-        m.insert_columns(sheet, col, 1).map_err(TabError::Engine)
-    }),
-    "insert_columns",
-);
+if let Err(e) = try_mutate(model, EvaluationMode::Immediate, |m| {
+    m.insert_columns(sheet, col, 1).map_err(TabError::Engine)
+}) {
+    state.status.set(Some(StatusMessage::Error(e.to_string())));
+    return;
+}
 ```
 
 `EvaluationMode::Immediate` calls `evaluate()` once after the closure — use when the mutation affects formula results (cell edits, row/col insert/delete, paste). `EvaluationMode::Deferred` skips evaluation — use for navigation, formatting, and UI-only changes.
@@ -190,6 +211,50 @@ After edits that should return keyboard focus to the grid:
 ```rust
 crate::util::refocus_workbook();
 ```
+
+## When to move logic out of a component
+
+Closures inside components are fine for isolated UI interactions (toggle a signal, call one mutation). Move logic to `src/input/` when a closure does more than one type of thing to application state.
+
+A useful test: if the closure would need to be copied to add a second UI entry point (keyboard shortcut, context menu item, toolbar button), it belongs in an action module.
+
+### The line between component and action
+
+| Stays in component | Moves to `src/input/` |
+|-------------------|----------------------|
+| `window.confirm()` dialogs | Multi-step state transitions |
+| Reading event coordinates (`client_x`, `client_y`) | Model mutations + state reset + event emission |
+| Local UI state (open/closed, hover) | Any logic you'd want a keyboard shortcut to trigger |
+| DOM refs and focus management | Transitions that touch 3+ reactive signals |
+
+### Recognising the pattern
+
+A closure that: saves current state → loads new state → resets transient UI fields → emits an event is a workflow, not a UI handler. The `switch_workbook`, `create_workbook`, and `delete_workbook` operations in `left_drawer.rs` all had this shape before extraction:
+
+```rust
+// Bad: workflow buried in a UI closure
+let switch_workbook = move |uuid: WorkbookId| {
+    model.with_value(|m| storage::save(&cur_uuid, m));
+    let new_model = storage::load(&uuid).unwrap();
+    model.update_value(|m| *m = new_model);
+    storage::set_selected_uuid(&uuid);
+    state.current_uuid.set(Some(uuid));
+    state.editing_cell.set(None);
+    state.drag.set(DragState::Idle);
+    state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+};
+```
+
+After extraction, the component holds only the UI concern:
+
+```rust
+// Good: component owns the decision; action module owns the transition
+let switch_workbook = move |uuid: WorkbookId| {
+    execute_workbook(&WorkbookAction::Switch(uuid), model, &state, app);
+};
+```
+
+See `src/input/workbook.rs` for the full pattern and `docs/adding-actions.md` for how to add new variants.
 
 ## Popups, menus, and z-index
 
@@ -282,12 +347,12 @@ fn ColHeaderMenu(col: i32) -> impl IntoView {
 
     let on_insert = move || {
         let sheet = model.with_value(|m| m.get_selected_view().sheet);
-        warn_if_err(
-            try_mutate(model, EvaluationMode::Immediate, |m| {
-                m.insert_columns(sheet, col, 1).map_err(|e| e.to_string())
-            }),
-            "insert_columns",
-        );
+        if let Err(e) = try_mutate(model, EvaluationMode::Immediate, |m| {
+            m.insert_columns(sheet, col, 1).map_err(|e| e.to_string())
+        }) {
+            state.status.set(Some(StatusMessage::Error(e)));
+            return;
+        }
         state.emit_event(SpreadsheetEvent::Structure(
             StructureEvent::columns_inserted(Location::new(sheet, col, 1)),
         ));
@@ -296,12 +361,12 @@ fn ColHeaderMenu(col: i32) -> impl IntoView {
 
     let on_delete = move || {
         let sheet = model.with_value(|m| m.get_selected_view().sheet);
-        warn_if_err(
-            try_mutate(model, EvaluationMode::Immediate, |m| {
-                m.delete_columns(sheet, col, 1).map_err(|e| e.to_string())
-            }),
-            "delete_columns",
-        );
+        if let Err(e) = try_mutate(model, EvaluationMode::Immediate, |m| {
+            m.delete_columns(sheet, col, 1).map_err(|e| e.to_string())
+        }) {
+            state.status.set(Some(StatusMessage::Error(e)));
+            return;
+        }
         state.emit_event(SpreadsheetEvent::Structure(
             StructureEvent::columns_deleted(Location::new(sheet, col, 1)),
         ));
@@ -327,6 +392,80 @@ Key points:
 - Emit a `Structure` event after the mutation so subscribers (e.g. the canvas) re-render.
 - Call `refocus_workbook()` to return keyboard focus to the grid after the menu closes.
 
+#### Canvas-sourced context menus (overlay pattern)
+
+When the interactive element is canvas-drawn (not a DOM node), there's nothing
+to attach `on:contextmenu` to. Instead, use a two-component split:
+
+1. **Mouse handler** detects the right-click, identifies the target, and writes
+   to `state.context_menu: Split<Option<ContextMenuState>>`.
+2. **Overlay component** lives at workbook layout level and reads
+   `state.context_menu`. Two `Effect`s bridge the external signal to the
+   `(ReadSignal<bool>, WriteSignal<bool>)` pair that `ContextMenu` requires:
+
+```rust
+let (menu_open, set_menu_open) = signal(false);
+let (menu_pos,  set_menu_pos)  = signal((0i32, 0i32));
+
+// When Some(ctx) arrives, update menu_pos and open the menu.
+// When None arrives, close it.
+Effect::new(move |_| {
+    match state.context_menu.get() {
+        Some(ctx) => {
+            set_menu_pos.set((ctx.x, ctx.y));
+            set_menu_open.set(true);
+        }
+        None => set_menu_open.set(false),
+    }
+});
+
+// When menu_open transitions true -> false (outside click or item action),
+// clear state.context_menu so nothing else thinks the menu is still open.
+Effect::new(move |prev: Option<bool>| {
+    let is_open = menu_open.get();
+    if prev == Some(true) && !is_open {
+        state.context_menu.set(None);
+    }
+    is_open   // becomes `prev` on the next run
+});
+```
+
+The cycle terminates cleanly: when Effect 2 clears `state.context_menu`,
+Effect 1 fires and sets `menu_open = false` — a no-op since it's already false.
+
+Because `ContextMenuItem` closes the menu via `use_context::<WriteSignal<bool>>()`,
+and that context doesn't propagate through a reactive `move || match` closure boundary,
+actions dispatched from inside the reactive children block must clear `state.context_menu`
+explicitly. Define a `dispatch` closure that does both:
+
+```rust
+let dispatch = move |action: StructAction| {
+    state.context_menu.set(None);
+    execute(&SpreadsheetAction::Structure(action), model, &state);
+};
+```
+
+To switch content between column and row items, put a reactive closure inside
+`ContextMenu`'s children. Because `ContextMenu` mounts its children once via
+`FnOnce`, the outer wiring is static; the reactive closure re-runs on every
+`state.context_menu` change:
+
+```rust
+<ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos>
+    {move || match state.context_menu.get() {
+        Some(ctx) => match ctx.target {
+            HeaderContextMenu::Column(col) => view! { /* col items */ }.into_any(),
+            HeaderContextMenu::Row(row)    => view! { /* row items */ }.into_any(),
+        },
+        None => ().into_any(),
+    }}
+</ContextMenu>
+```
+
+See `src/components/header_context_menu.rs` for the full implementation and
+`src/input/mouse.rs::handle_contextmenu` for the handler that writes to
+`state.context_menu`.
+
 #### `ContextMenuButton` (toggle trigger)
 
 For button-triggered menus (not right-click), use `ContextMenuButton` instead of wiring `on:contextmenu` manually:
@@ -341,6 +480,44 @@ For button-triggered menus (not right-click), use `ContextMenuButton` instead of
 ```
 
 `ContextMenuButton` captures coordinates and toggles open state. It's a convenience wrapper - use it when the trigger is a visible button element.
+
+### Adding an inline rename
+
+Use `InlineRenameInput` from `src/components/inline_rename.rs`. The component
+owns focus management, keyboard dispatch, and the double-commit guard. The
+caller provides domain logic via `on_commit` / `on_cancel` callbacks.
+
+```rust
+use crate::components::inline_rename::InlineRenameInput;
+
+// In the parent component:
+let (renaming, set_renaming) = signal(false);
+
+let on_commit = Callback::new(move |new_name: String| {
+    if !new_name.trim().is_empty() {
+        // domain: mutate model, save, emit event
+    }
+    set_renaming.set(false);
+});
+
+let on_cancel = Callback::new(move |()| {
+    set_renaming.set(false);
+});
+
+view! {
+    <Show when=move || renaming.get()>
+        <InlineRenameInput
+            value=current_name()
+            on_commit=on_commit
+            on_cancel=on_cancel
+            class="my-rename-input"
+        />
+    </Show>
+}
+```
+
+`on_cancel` is optional. When omitted, Escape calls `on_commit` with the
+original value — useful when the commit callback already handles no-ops.
 
 ## Common compiler errors and fixes
 
@@ -455,7 +632,7 @@ cargo tauri dev
 
 ### Browser DevTools
 
-- **Console warnings**: `warn_if_err` logs IronCalc errors as `[ironcalc] context: message`. If a mutation silently fails, check the console.
+- **Status bar errors**: failed mutations set `state.status` to `StatusMessage::Error(msg)`, displayed in the status bar. If a mutation silently fails, check both the status bar and whether your error is being swallowed before reaching `state.status.set(...)`.
 - **Reactive not updating?** Add `web_sys::console::log_1(&"closure ran".into())` inside the closure. If it doesn't print after a mutation, you forgot to subscribe to the right `state.events` signal (e.g. `let _ = state.events.content.get();`).
 - **Element inspector**: Leptos CSR renders real DOM nodes. Inspect elements normally (no virtual DOM indirection).
 - **Canvas debugging**: The grid is a `<canvas>`, not DOM elements. You can't inspect individual cells. Add `web_sys::console::log_1(...)` in `renderer.rs` to trace draw calls, but remove them before committing since they fire thousands of times per frame.
@@ -479,7 +656,8 @@ If a component renders stale data:
 
 - [ ] `src/components/my_component.rs` (the component code)
 - [ ] `src/components/mod.rs` (add `pub mod my_component;`)
-- [ ] `style.css` (add CSS classes)
+- [ ] `styles/my_component.css` (CSS with a new prefix)
+- [ ] `styles/index.css` (add `@import "my_component.css";`)
 - [ ] Parent component's `view!` (add `<MyComponent />`)
 - [ ] `cargo check --target wasm32-unknown-unknown` (compiles)
 - [ ] `wasm-pack test --headless --firefox` (tests still pass)
