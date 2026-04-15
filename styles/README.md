@@ -19,6 +19,7 @@ styles/
   context-menu.css   ctx-
   perf-panel.css     pp-
   left-drawer.css    ld-
+  status_bar.css     status-bar / status-bar-error
 ```
 
 ## Naming Convention
@@ -51,6 +52,7 @@ prefix as its class (`.tb`, `.cp`, `.ld`).
 | `ctx-` | Context Menu  | `.ctx`     | context-menu.css|
 | `pp-`  | Perf Panel    | `.pp`      | perf-panel.css  |
 | `ld-`  | Left Drawer   | `.ld`      | left-drawer.css |
+| —      | Status Bar    | `.status-bar` | status_bar.css |
 
 ## Cross-Component Usage
 

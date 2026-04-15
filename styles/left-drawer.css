@@ -36,12 +36,14 @@
     border-right: 1px solid var(--border-color);
 }
 
-/* Header bar */
+/* Header bar — height matches .fl (file-bar) so both panels align */
 .ld .ld-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px 12px;
+    height: 44px;
+    padding: 0 12px;
+    flex-shrink: 0;
     border-bottom: 1px solid var(--border-color);
 }
 

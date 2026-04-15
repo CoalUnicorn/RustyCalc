@@ -26,18 +26,22 @@
 .fb .fb-addr {
     min-width: 60px;
     padding: 0 8px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-strong);
     border-right: 1px solid var(--border-inner);
     text-align: center;
     user-select: none;
+    flex-shrink: 0;
 }
 
 .fb .fb-fx {
     padding: 0 6px;
-    color: var(--text-muted);
+    font-size: 13px;
     font-style: italic;
+    color: var(--text-dim);
     user-select: none;
+    flex-shrink: 0;
 }
 
 .fb .fb-input {
