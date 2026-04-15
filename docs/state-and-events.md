@@ -72,6 +72,50 @@ let on_click = move |_| {
 };
 ```
 
+### Bridging a Split signal to component props
+
+Some components (e.g. `ContextMenu`) require a `(ReadSignal<bool>, WriteSignal<bool>)` pair,
+but the source of truth is a `Split<Option<T>>` on `WorkbookState`. Use two `Effect`s to sync
+in both directions:
+
+```rust
+let (menu_open, set_menu_open) = signal(false);
+let (menu_pos,  set_menu_pos)  = signal((0i32, 0i32));
+
+// Effect 1 — state → local signals (runs when the external signal changes)
+Effect::new(move |_| {
+    match state.context_menu.get() {   // reactive read
+        Some(ctx) => {
+            set_menu_pos.set((ctx.x, ctx.y));
+            set_menu_open.set(true);
+        }
+        None => set_menu_open.set(false),
+    }
+});
+
+// Effect 2 — local close → clear state (runs when menu_open changes)
+Effect::new(move |prev: Option<bool>| {
+    let is_open = menu_open.get();          // reactive read
+    if prev == Some(true) && !is_open {
+        state.context_menu.set(None);       // non-reactive write
+    }
+    is_open  // returned value becomes `prev` on the next run
+});
+```
+
+**Why the cycle terminates:** each Effect has exactly one reactive read and writes
+only to things it doesn't read. When Effect 2 clears `state.context_menu`, Effect 1
+fires and calls `set_menu_open.set(false)` — a no-op since it's already false.
+Leptos skips notifying downstream subscribers on a no-op write, so nothing loops.
+
+**Why `prev: Option<bool>` instead of just comparing to false:** on the first run
+`prev` is `None` (the signal was just created). Without the `prev == Some(true)` guard,
+closing logic would fire spuriously at mount time before the menu ever opened.
+
+This pattern applies whenever a canvas mouse handler or other non-component code
+writes to a `Split` field, and a component needs to consume it via
+`(ReadSignal, WriteSignal)` props.
+
 ### Theme methods
 
 Theme preference lives on `AppState`, not `WorkbookState`. `app.theme` stores the raw preference (`Auto/Light/Dark`); `app.get_theme()` resolves `Auto` against the system setting. Use `app.get_theme()` in rendering code, not `app.theme.get()` directly.
@@ -187,6 +231,7 @@ Rare — most changes fit the existing five. If you need one:
 | `context_menu` | `Split<Option<ContextMenuState>>` | Active right-click menu position and header target. |
 | `formula_input_ref` | `NodeRef<Input>` | DOM ref to the formula bar `<input>` - used to read cursor position for point-mode. |
 | `recent_colors` | `Split<Vec<CssColor>>` | Recently used colors (max 16), persisted to localStorage. |
+| `status` | `Split<Option<StatusMessage>>` | Current status bar message. `None` clears the bar; `Some(StatusMessage::Error(msg))` shows an error. Set by `execute()` on every action (clears on `Ok`, sets on `Err`) and by direct sheet/workbook mutations. |
 | `events` | `EventBus` | Per-category event signals. |
 
 ### AppState fields
@@ -209,8 +254,9 @@ Extending { to_row, to_col }                - autofill handle drag
 ResizingCol { col, x }                      - column header resize
 ResizingRow { row, y }                      - row header resize
 Pointing { range: CellArea,
-           ref_span: (usize, usize) }       - formula point-mode: highlighted range
+           ref_span: RefSpan }              - formula point-mode: highlighted range
                                               + byte span in formula text being replaced
+                                              (RefSpan is {start, end: usize} from coord.rs)
 ```
 
 At most one is active at a time. The enum makes illegal combinations unrepresentable.
