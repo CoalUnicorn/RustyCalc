@@ -45,5 +45,8 @@ codegen-units = 1
 panic = "abort"
 strip = true
 
+[features]
+tauri = []
+
 [package.metadata.leptos]
 lib-profile-release = "wasm-release"
