@@ -1,8 +1,14 @@
+use crate::theme::FORMULA_REF_COLORS;
 /// Pure helpers for formula point-mode editing.
 ///
 /// These operate on formula strings and cursor positions; they have no side
 /// effects and do not touch the model.
-use crate::coord::{CellArea, RefSpan, SheetArea};
+use crate::{
+    canvas::types::FormulaRef,
+    coord::{CellArea, RefSpan, SheetArea},
+};
+use ironcalc_base::expressions::lexer::util::get_tokens;
+use ironcalc_base::expressions::token::TokenType;
 use ironcalc_base::expressions::utils::number_to_column;
 use wasm_bindgen::JsCast;
 
@@ -184,6 +190,118 @@ pub fn try_point_move(
         range: new_range,
         span: new_span,
     })
+}
+
+/// Result of tokenizing a formula for UI purposes.
+///
+/// Produced by `analyze_formula()` and stored on `EditingCell` so both
+/// the formula bar and the canvas renderer read from the same source.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct FormulaAnalysis {
+    /// Colored overlays for the canvas, one per distinct cell/range token.
+    pub refs: Vec<FormulaRef>,
+    /// First illegal token error, if any; `None` means syntactically valid
+    /// (or not a formula at all).
+    pub validation_error: Option<String>,
+}
+
+/// Tokenize `formula` and extract cell/range references + validation state.
+///
+/// Returns an empty `FormulaAnalysis` for non-formula text (no leading `=`).
+///
+/// `active_sheet` is the 0-based index of the sheet being edited.
+/// `sheet_names` is a slice of `(sheet_index, sheet_name)` pairs, used to
+/// resolve cross-sheet references like `Sheet2!A1`.
+///
+/// # Named ranges
+/// `Ident` tokens may be named ranges — not yet resolved.
+/// TODO(named_ranges): resolve Ident tokens via model.get_defined_name_list()
+/// when the name manager is implemented.
+pub fn analyze_formula(
+    formula: &str,
+    active_sheet: u32,
+    sheet_names: &[(u32, String)],
+) -> FormulaAnalysis {
+    if !formula.starts_with('=') || formula.len() < 2 {
+        return FormulaAnalysis::default();
+    }
+
+    let tokens = get_tokens(formula);
+    let mut refs = Vec::new();
+    let mut color_idx = 0usize;
+    let mut validation_error: Option<String> = None;
+
+    for token in &tokens {
+        match &token.token {
+            TokenType::Reference {
+                sheet, row, column, ..
+            } => {
+                let sheet_idx = resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names);
+                let color = FORMULA_REF_COLORS[color_idx % FORMULA_REF_COLORS.len()];
+                color_idx += 1;
+                refs.push(FormulaRef {
+                    area: CellArea {
+                        r1: *row,
+                        c1: *column,
+                        r2: *row,
+                        c2: *column,
+                    },
+                    sheet: sheet_idx,
+                    color,
+                    span: RefSpan {
+                        start: token.start as usize,
+                        end: token.end as usize,
+                    },
+                });
+            }
+            TokenType::Range { sheet, left, right } => {
+                let sheet_idx = resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names);
+                let color = FORMULA_REF_COLORS[color_idx % FORMULA_REF_COLORS.len()];
+                color_idx += 1;
+                refs.push(FormulaRef {
+                    area: CellArea {
+                        r1: left.row,
+                        c1: left.column,
+                        r2: right.row,
+                        c2: right.column,
+                    },
+                    sheet: sheet_idx,
+                    color,
+                    span: RefSpan {
+                        start: token.start as usize,
+                        end: token.end as usize,
+                    },
+                });
+            }
+            TokenType::Illegal(e) => {
+                if validation_error.is_none() {
+                    validation_error = Some(format!("{e:?}"));
+                }
+            }
+            // TODO(named_ranges): Ident tokens may be named ranges
+            _ => {}
+        }
+    }
+
+    FormulaAnalysis {
+        refs,
+        validation_error,
+    }
+}
+
+/// Resolve an optional cross-sheet name to a sheet index.
+///
+/// Returns `active_sheet` when `name` is `None` (same-sheet reference).
+/// Falls back to `active_sheet` for unrecognised sheet names.
+fn resolve_sheet_name(name: Option<&str>, active_sheet: u32, sheet_names: &[(u32, String)]) -> u32 {
+    match name {
+        None => active_sheet,
+        Some(n) => sheet_names
+            .iter()
+            .find(|(_, sname)| sname.eq_ignore_ascii_case(n))
+            .map(|(idx, _)| *idx)
+            .unwrap_or(active_sheet),
+    }
 }
 
 #[cfg(test)]
@@ -583,5 +701,64 @@ mod tests {
                 span: RefSpan { start: 1, end: 3 },
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod formula_analysis_tests {
+    use super::*;
+
+    #[test]
+    fn test_single_cell_ref() {
+        let analysis = analyze_formula("=A1+1", 0, &[]);
+        assert_eq!(analysis.refs.len(), 1);
+        assert_eq!(
+            analysis.refs[0].area,
+            CellArea {
+                r1: 1,
+                c1: 1,
+                r2: 1,
+                c2: 1
+            }
+        );
+        assert_eq!(analysis.refs[0].sheet, 0);
+        assert!(analysis.validation_error.is_none());
+    }
+
+    #[test]
+    fn test_range_ref() {
+        let analysis = analyze_formula("=SUM(B2:C4)", 0, &[]);
+        assert_eq!(analysis.refs.len(), 1);
+        assert_eq!(
+            analysis.refs[0].area,
+            CellArea {
+                r1: 2,
+                c1: 2,
+                r2: 4,
+                c2: 3
+            }
+        );
+    }
+
+    #[test]
+    fn test_multiple_refs_get_different_colors() {
+        let analysis = analyze_formula("=A1+B2", 0, &[]);
+        assert_eq!(analysis.refs.len(), 2);
+        assert_ne!(analysis.refs[0].color, analysis.refs[1].color);
+    }
+
+    #[test]
+    fn test_non_formula_returns_empty() {
+        let analysis = analyze_formula("hello", 0, &[]);
+        assert!(analysis.refs.is_empty());
+        assert!(analysis.validation_error.is_none());
+    }
+
+    #[test]
+    fn test_cross_sheet_ref_resolved() {
+        let sheets = vec![(0u32, "Sheet1".to_string()), (1u32, "Sheet2".to_string())];
+        let analysis = analyze_formula("=Sheet2!A1", 0, &sheets);
+        assert_eq!(analysis.refs.len(), 1);
+        assert_eq!(analysis.refs[0].sheet, 1);
     }
 }

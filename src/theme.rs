@@ -220,6 +220,23 @@ pub static DARK: CanvasTheme = CanvasTheme {
     selection_fill: "rgba(23,162,211,0.18)",
 };
 
+/// Color palette for formula reference overlays.
+///
+/// Assigned round-robin by token insertion order. Mirrors IronCalc's
+/// palette so cross-app formulas share a consistent visual language.
+pub const FORMULA_REF_COLORS: &[&str] = &[
+    "#59B9BC", // Cyan
+    "#EC5753", // Flamingo
+    "#3358B7", // Blue
+    "#F0C419", // Yellow
+    "#28A745", // Emerald
+    "#8B5CF6", // Violet
+    "#9B2335", // Burgundy
+    "#8DB600", // Wasabi
+    "#E53E3E", // Red
+    "#0B9A8A", // Teal
+];
+
 // Get colors from the current document that aren't in the standard palette
 //
 // NOTE: Check if this works need import support

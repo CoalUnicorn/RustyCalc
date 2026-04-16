@@ -8,7 +8,7 @@ use std::ops::RangeInclusive;
 
 use ironcalc_base::UserModel;
 
-use crate::coord::{CellArea, SheetArea};
+use crate::coord::{CellArea, RefSpan, SheetArea};
 use crate::model::CssColor;
 
 use super::geometry::{
@@ -268,6 +268,21 @@ pub(crate) enum DashFill {
 pub struct AutofillTarget {
     pub row: i32,
     pub col: i32,
+}
+
+/// A cell or range referenced as editing formula.
+///
+/// Produced by `formula_input::analyze_formula()` and consumed by the canvas
+/// renderer to paint colored overlays over referenced cells.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FormulaRef {
+    pub area: CellArea,
+    pub sheet: u32,
+    /// From `theme::FORMULA_REF_COLORS`
+    pub color: &'static str,
+    /// Byte span of this token in the formula string (for future cursor-aware
+    /// per-token highlighting in the formula bar).
+    pub span: RefSpan,
 }
 
 /// Overlay ranges passed to `render()` for selection preview drawing.
