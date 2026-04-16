@@ -1,12 +1,9 @@
-use crate::theme::FORMULA_REF_COLORS;
 /// Pure helpers for formula point-mode editing.
 ///
 /// These operate on formula strings and cursor positions; they have no side
 /// effects and do not touch the model.
-use crate::{
-    canvas::types::FormulaRef,
-    coord::{CellArea, RefSpan, SheetArea},
-};
+use crate::coord::{CellArea, FormulaRef, SheetArea, SpanRef};
+use crate::theme::FORMULA_REF_COLORS;
 use ironcalc_base::expressions::lexer::util::get_tokens;
 use ironcalc_base::expressions::token::TokenType;
 use ironcalc_base::expressions::utils::number_to_column;
@@ -92,7 +89,7 @@ pub fn range_ref_str(area: SheetArea, active_sheet: u32, sheet_name: &str) -> St
 ///
 /// Returns `(new_text, new_span)` so the caller can store the span and replace
 /// it again on the next arrow keypress or cell click.
-pub fn splice_ref(text: &str, span: RefSpan, ref_str: &str) -> (String, RefSpan) {
+pub fn splice_ref(text: &str, span: SpanRef, ref_str: &str) -> (String, SpanRef) {
     // Guard against out-of-range spans (e.g. after the user typed extra chars).
     let start = span.start.min(text.len());
     let end = span.end.min(text.len()).max(start);
@@ -100,7 +97,7 @@ pub fn splice_ref(text: &str, span: RefSpan, ref_str: &str) -> (String, RefSpan)
     let new_end = start + ref_str.len();
     (
         new_text,
-        RefSpan {
+        SpanRef {
             start,
             end: new_end,
         },
@@ -117,7 +114,7 @@ pub struct PointingStep {
     /// The new pointed-at cell range (for `DragState::Pointing { range }`).
     pub range: CellArea,
     /// Byte span of the spliced reference in `text` (for `DragState::Pointing { ref_span }`).
-    pub span: RefSpan,
+    pub span: SpanRef,
 }
 
 /// Returns `true` when a keypress should exit point mode.
@@ -159,7 +156,7 @@ pub fn try_point_move(
     cursor: usize,
     already_pointing: bool,
     current_range: CellArea,
-    prev_span: Option<RefSpan>,
+    prev_span: Option<SpanRef>,
     sheet: u32,
 ) -> Option<PointingStep> {
     // Only arrow keys trigger point-mode movement.
@@ -184,7 +181,7 @@ pub fn try_point_move(
         CellArea::from_cell(trailing.r2, trailing.c2)
     };
     let ref_str = range_ref_str(new_range.with_sheet(sheet), sheet, "");
-    let (new_text, new_span) = splice_ref(text, prev_span.unwrap_or(RefSpan::at(cursor)), &ref_str);
+    let (new_text, new_span) = splice_ref(text, prev_span.unwrap_or(SpanRef::at(cursor)), &ref_str);
     Some(PointingStep {
         text: new_text,
         range: new_range,
@@ -236,7 +233,11 @@ pub fn analyze_formula(
             TokenType::Reference {
                 sheet, row, column, ..
             } => {
-                let sheet_idx = resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names);
+                let Some(sheet_idx) =
+                    resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names)
+                else {
+                    continue;
+                };
                 let color = FORMULA_REF_COLORS[color_idx % FORMULA_REF_COLORS.len()];
                 color_idx += 1;
                 refs.push(FormulaRef {
@@ -248,14 +249,18 @@ pub fn analyze_formula(
                     },
                     sheet: sheet_idx,
                     color,
-                    span: RefSpan {
+                    span: SpanRef {
                         start: token.start as usize,
                         end: token.end as usize,
                     },
                 });
             }
             TokenType::Range { sheet, left, right } => {
-                let sheet_idx = resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names);
+                let Some(sheet_idx) =
+                    resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names)
+                else {
+                    continue;
+                };
                 let color = FORMULA_REF_COLORS[color_idx % FORMULA_REF_COLORS.len()];
                 color_idx += 1;
                 refs.push(FormulaRef {
@@ -267,7 +272,7 @@ pub fn analyze_formula(
                     },
                     sheet: sheet_idx,
                     color,
-                    span: RefSpan {
+                    span: SpanRef {
                         start: token.start as usize,
                         end: token.end as usize,
                     },
@@ -275,7 +280,7 @@ pub fn analyze_formula(
             }
             TokenType::Illegal(e) => {
                 if validation_error.is_none() {
-                    validation_error = Some(format!("{e:?}"));
+                    validation_error = Some(e.message.clone());
                 }
             }
             // TODO(named_ranges): Ident tokens may be named ranges
@@ -293,14 +298,17 @@ pub fn analyze_formula(
 ///
 /// Returns `active_sheet` when `name` is `None` (same-sheet reference).
 /// Falls back to `active_sheet` for unrecognised sheet names.
-fn resolve_sheet_name(name: Option<&str>, active_sheet: u32, sheet_names: &[(u32, String)]) -> u32 {
+fn resolve_sheet_name(
+    name: Option<&str>,
+    active_sheet: u32,
+    sheet_names: &[(u32, String)],
+) -> Option<u32> {
     match name {
-        None => active_sheet,
+        None => Some(active_sheet),
         Some(n) => sheet_names
             .iter()
-            .find(|(_, sname)| sname.eq_ignore_ascii_case(n))
-            .map(|(idx, _)| *idx)
-            .unwrap_or(active_sheet),
+            .find(|(_, s)| s.eq_ignore_ascii_case(n))
+            .map(|(idx, _)| *idx),
     }
 }
 
@@ -516,44 +524,44 @@ mod tests {
     #[wasm_bindgen_test]
     fn splice_insert_at_cursor_no_prev_span() {
         assert_eq!(
-            splice_ref("=SUM(", RefSpan::at(5), "A1"),
-            ("=SUM(A1".to_string(), RefSpan { start: 5, end: 7 })
+            splice_ref("=SUM(", SpanRef::at(5), "A1"),
+            ("=SUM(A1".to_string(), SpanRef { start: 5, end: 7 })
         );
     }
 
     #[wasm_bindgen_test]
     fn splice_replace_prev_span() {
-        let rs = RefSpan { start: 5, end: 7 };
+        let rs = SpanRef { start: 5, end: 7 };
         assert_eq!(
             splice_ref("=SUM(A1)", rs, "B2"),
-            ("=SUM(B2)".to_string(), RefSpan { start: 5, end: 7 })
+            ("=SUM(B2)".to_string(), SpanRef { start: 5, end: 7 })
         );
     }
 
     #[wasm_bindgen_test]
     fn splice_insert_after_equals() {
         assert_eq!(
-            splice_ref("=", RefSpan::at(1), "A1"),
-            ("=A1".to_string(), RefSpan { start: 1, end: 3 })
+            splice_ref("=", SpanRef::at(1), "A1"),
+            ("=A1".to_string(), SpanRef { start: 1, end: 3 })
         );
     }
 
     #[wasm_bindgen_test]
     fn splice_span_out_of_range_clamps() {
         // prev_span (10, 15) is beyond text length 3 - clamps to (3, 3) -> append.
-        let rs = RefSpan { start: 10, end: 15 };
+        let rs = SpanRef { start: 10, end: 15 };
         assert_eq!(
             splice_ref("=A1", rs, "B2"),
-            ("=A1B2".to_string(), RefSpan { start: 3, end: 5 })
+            ("=A1B2".to_string(), SpanRef { start: 3, end: 5 })
         );
     }
 
     #[wasm_bindgen_test]
     fn splice_replace_extends_span_when_ref_is_longer() {
-        let rs = RefSpan { start: 1, end: 3 };
+        let rs = SpanRef { start: 1, end: 3 };
         assert_eq!(
             splice_ref("=A1", rs, "Sheet2!A1:B100"),
-            ("=Sheet2!A1:B100".to_string(), RefSpan { start: 1, end: 15 })
+            ("=Sheet2!A1:B100".to_string(), SpanRef { start: 1, end: 15 })
         );
     }
 
@@ -606,7 +614,7 @@ mod tests {
             3,
             true,
             range,
-            Some(RefSpan { start: 1, end: 3 }),
+            Some(SpanRef { start: 1, end: 3 }),
             1,
         );
         assert!(result.is_some());
@@ -632,7 +640,7 @@ mod tests {
                     r2: 2,
                     c2: 1
                 },
-                span: RefSpan { start: 1, end: 3 },
+                span: SpanRef { start: 1, end: 3 },
             })
         );
     }
@@ -654,7 +662,7 @@ mod tests {
                 3,
                 true,
                 range,
-                Some(RefSpan { start: 1, end: 3 }),
+                Some(SpanRef { start: 1, end: 3 }),
                 1
             ),
             Some(PointingStep {
@@ -665,7 +673,7 @@ mod tests {
                     r2: 4,
                     c2: 2
                 },
-                span: RefSpan { start: 1, end: 6 },
+                span: SpanRef { start: 1, end: 6 },
             })
         );
     }
@@ -687,7 +695,7 @@ mod tests {
                 3,
                 true,
                 range,
-                Some(RefSpan { start: 1, end: 3 }),
+                Some(SpanRef { start: 1, end: 3 }),
                 1
             ),
             Some(PointingStep {
@@ -698,7 +706,7 @@ mod tests {
                     r2: 3,
                     c2: 3
                 },
-                span: RefSpan { start: 1, end: 3 },
+                span: SpanRef { start: 1, end: 3 },
             })
         );
     }
@@ -760,5 +768,27 @@ mod formula_analysis_tests {
         let analysis = analyze_formula("=Sheet2!A1", 0, &sheets);
         assert_eq!(analysis.refs.len(), 1);
         assert_eq!(analysis.refs[0].sheet, 1);
+    }
+
+    #[test]
+    fn test_unknown_sheet_ref_is_skipped() {
+        // A reference to a sheet that doesn't exist in sheet_names should produce
+        // no overlay rather than a misleading overlay on the active sheet.
+        let sheets = vec![(0u32, "Sheet1".to_string())];
+        let analysis = analyze_formula("=Ghost!A1", 0, &sheets);
+        assert_eq!(analysis.refs.len(), 0);
+        assert!(analysis.validation_error.is_none());
+    }
+
+    #[test]
+    fn test_validation_error_is_human_readable() {
+        // LexerError.message (not Debug format) should be used — no "LexerError {" prefix.
+        let analysis = analyze_formula("=@invalid", 0, &[]);
+        if let Some(ref msg) = analysis.validation_error {
+            assert!(
+                !msg.contains("LexerError"),
+                "validation_error should not contain Rust debug output, got: {msg}"
+            );
+        }
     }
 }

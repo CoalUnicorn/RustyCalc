@@ -7,7 +7,7 @@ use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
-use crate::coord::{CellAddress, CellArea, RefSpan};
+use crate::coord::{CellAddress, CellArea, SpanRef};
 use crate::events::*;
 use crate::input::formula_input::FormulaAnalysis;
 use crate::model::CssColor;
@@ -85,7 +85,7 @@ pub enum DragState {
     /// Row header resize: `(row_1based, current_mouse_y)`.
     ResizingRow { row: i32, y: f64 },
     /// Formula point-mode: highlighted range + byte span in formula text.
-    Pointing { range: CellArea, ref_span: RefSpan },
+    Pointing { range: CellArea, ref_span: SpanRef },
 }
 
 /// Arrow key behavior during a cell edit.
@@ -117,6 +117,8 @@ pub struct EditingCell {
     /// Cached result of the last `analyze_formula()` call.
     /// Updated synchronously on each `on_input` event in formula_bar and cell_editor.
     pub(crate) formula_analysis: FormulaAnalysis,
+    /// Cursor position (byte offset) in `text`, updated on every input event.
+    pub(crate) cursor: usize,
 }
 
 /// Right-clicked header identity and the count of selected headers in that axis.
@@ -151,6 +153,7 @@ pub struct WorkbookState {
     pub(crate) recent_colors: Split<Vec<CssColor>>,
     pub(crate) editing_cell: Split<Option<EditingCell>>,
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
+    pub(crate) cell_editor_ref: NodeRef<leptos::html::Textarea>,
     pub(crate) drag: Split<DragState>,
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
     pub(crate) status: Split<Option<StatusMessage>>,
@@ -169,6 +172,7 @@ impl WorkbookState {
             recent_colors: Split::new(recent_colors),
             editing_cell: Split::new(None),
             formula_input_ref: NodeRef::new(),
+            cell_editor_ref: NodeRef::new(),
             drag: Split::new(DragState::Idle),
             context_menu: Split::new(None),
             status: Split::new(None),
@@ -240,6 +244,29 @@ impl WorkbookState {
         self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
             colors: string_colors,
         }));
+    }
+
+    /// Restore keyboard focus to whichever formula input the user was editing.
+    ///
+    /// Called after point-mode mouse drags so the user can continue typing
+    /// the formula without clicking again.
+    pub fn refocus_formula_input(&self) {
+        use wasm_bindgen::JsCast;
+        let Some(edit) = self.editing_cell.get_untracked() else {
+            return;
+        };
+        match edit.focus {
+            EditFocus::FormulaBar => {
+                if let Some(el) = self.formula_input_ref.get_untracked() {
+                    el.focus().ok();
+                }
+            }
+            EditFocus::Cell => {
+                if let Some(el) = self.cell_editor_ref.get_untracked() {
+                    el.unchecked_into::<web_sys::HtmlElement>().focus().ok();
+                }
+            }
+        }
     }
 }
 

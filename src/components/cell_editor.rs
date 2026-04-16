@@ -1,7 +1,3 @@
-// TODO:
-// When finished add validation/highlighting from `formula_bar.rs`
-
-use leptos::html;
 use leptos::prelude::*;
 
 use crate::canvas::selected_cell_rect;
@@ -18,8 +14,6 @@ use crate::state::WorkbookState;
 pub fn CellEditor() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
-
-    let textarea_ref = NodeRef::<html::Textarea>::new();
 
     // Derive a memo that tracks only the EditFocus variant (not the text content).
     // This prevents the Effect below from re-running on every keystroke - text
@@ -39,7 +33,9 @@ pub fn CellEditor() -> impl IntoView {
         if focus != crate::state::EditFocus::Cell {
             return;
         }
-        let Some(ta) = textarea_ref.get() else { return };
+        let Some(ta) = state.cell_editor_ref.get() else {
+            return;
+        };
         ta.focus().ok();
         // Move cursor to end of pre-filled text.
         let len = ta.value().len() as u32;
@@ -62,21 +58,31 @@ pub fn CellEditor() -> impl IntoView {
 
     // Keep editing_cell.text in sync as the user types.
     let on_input = move |ev: web_sys::Event| {
-        let sheet_names = model.with_value(|m| m.get_sheet_names());
-
         use wasm_bindgen::JsCast;
-        let value = ev
+
+        // Read both value and cursor from the textarea *before* focus can move elsewhere.
+        let Some(el) = ev
             .target()
             .and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
-            .map(|el| el.value())
-            .unwrap_or_default();
+        else {
+            return;
+        };
+        let value = el.value();
+        let cursor = el
+            .selection_end()
+            .ok()
+            .flatten()
+            .map(|n| n as usize)
+            .unwrap_or_else(|| value.len());
+
+        let sheet_names = model.with_value(|m| m.get_sheet_names());
 
         state.editing_cell.update(|cell| {
             if let Some(c) = cell {
                 let active_sheet = c.address.sheet;
-
-                c.text = value;
+                c.text = value.clone();
                 c.text_dirty = true;
+                c.cursor = cursor;
                 c.formula_analysis = analyze_formula(&c.text, active_sheet, &sheet_names);
             }
         });
@@ -96,7 +102,7 @@ pub fn CellEditor() -> impl IntoView {
     view! {
         <Show when=move || state.editing_cell.get().is_some()>
             <textarea
-                node_ref=textarea_ref
+                node_ref=state.cell_editor_ref
                 class="ce"
                 style=cell_style
                 prop:value=text_value

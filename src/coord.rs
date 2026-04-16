@@ -10,12 +10,12 @@ use ironcalc_base::{expressions::types::Area, UserModel};
 /// Byte-offset span within a formula string, marking where the last point-mode
 /// reference was spliced — so it can be replaced on the next arrow press or click.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RefSpan {
+pub struct SpanRef {
     pub start: usize,
     pub end: usize,
 }
 
-impl RefSpan {
+impl SpanRef {
     /// A zero-length span at `cursor` — the "no previous span" fallback used
     /// when entering point mode for the first time at this formula position.
     pub fn at(cursor: usize) -> Self {
@@ -24,6 +24,21 @@ impl RefSpan {
             end: cursor,
         }
     }
+}
+
+/// A cell or range referenced as editing formula.
+///
+/// Produced by `formula_input::analyze_formula()` and consumed by the canvas
+/// renderer to paint colored overlays over referenced cells.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FormulaRef {
+    pub area: CellArea,
+    pub sheet: u32,
+    /// From `theme::FORMULA_REF_COLORS`
+    pub color: &'static str,
+    /// Byte span of this token in the formula string (for future cursor-aware
+    /// per-token highlighting in the formula bar).
+    pub span: SpanRef,
 }
 
 /// A cell range pinned to a specific sheet.

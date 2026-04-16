@@ -4,9 +4,9 @@ use leptos_use::{use_raf_fn, use_resize_observer};
 use web_sys::HtmlCanvasElement;
 
 use crate::app_state::AppState;
-use crate::canvas::types::FormulaRef;
 use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
+use crate::coord::FormulaRef;
 use crate::coord::{CellArea, SheetArea};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::mouse::*;

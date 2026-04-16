@@ -54,7 +54,7 @@ pub fn FormulaBar() -> impl IntoView {
     let get_sheet_names =
         move || -> Vec<(u32, String)> { model.with_value(|m| m.get_sheet_names()) };
 
-    let (validation_error, set_validation_error) = signal(None::<String>);
+    let (validation_error, _set_validation_error) = signal(None::<String>);
 
     // Start an edit session with FormulaBar focus (so CellEditor doesn't
     // steal focus back), or switch focus if already editing.
@@ -78,22 +78,36 @@ pub fn FormulaBar() -> impl IntoView {
 
             state.editing_cell.set(Some(EditingCell {
                 address,
-                text,
+                text: text.clone(),
                 mode: EditMode::Edit,
                 focus: EditFocus::FormulaBar,
                 text_dirty: false,
                 formula_analysis: FormulaAnalysis::default(),
+                cursor: text.len(),
             }));
         });
     };
 
     // Update the shared edit buffer (syncs with CellEditor) + debounced validation.
     let on_input = move |ev: web_sys::Event| {
-        let value = ev
+        let el = ev
             .target()
-            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-            .map(|el| el.value())
-            .unwrap_or_default();
+            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok());
+
+        let (value, cursor) = match el {
+            Some(el) => {
+                let value = el.value();
+                let cursor = el
+                    .selection_end()
+                    .ok()
+                    .flatten()
+                    .map(|n| n as usize)
+                    // fallback: cursor at end of text
+                    .unwrap_or_else(|| value.len());
+                (value, cursor)
+            }
+            None => return,
+        };
 
         let sheet_names = get_sheet_names();
 
@@ -105,6 +119,7 @@ pub fn FormulaBar() -> impl IntoView {
                     c.text = value.clone();
                     c.text_dirty = true;
                     c.formula_analysis = analyze_formula(&value, active_sheet, &sheet_names);
+                    c.cursor = cursor;
                 }
             });
         } else {
@@ -119,6 +134,7 @@ pub fn FormulaBar() -> impl IntoView {
                     focus: EditFocus::FormulaBar,
                     text_dirty: true,
                     formula_analysis: analysis,
+                    cursor,
                 }));
                 state.emit_event(SpreadsheetEvent::Navigation(
                     NavigationEvent::EditingStarted { address },

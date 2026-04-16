@@ -13,11 +13,12 @@ use crate::canvas::{
     autofill_handle_pos, frozen_geometry, pixel_to_col, pixel_to_row, AUTOFILL_HANDLE_PX,
     HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
-use crate::coord::{CellAddress, CellArea, RefSpan, SheetArea};
+use crate::coord::{CellAddress, CellArea, SheetArea, SpanRef};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
 use crate::input::formula_input::{
-    get_formula_cursor, is_in_reference_mode, range_ref_str, splice_ref, FormulaAnalysis,
+    analyze_formula, is_in_reference_mode, range_ref_str, splice_ref,
+    FormulaAnalysis,
 };
 use crate::model::{try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
@@ -162,7 +163,10 @@ pub fn handle_cell_click(
         let already_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
         let may_point = edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
         if may_point {
-            let cursor = get_formula_cursor();
+            // Use the stored cursor (set on last on_input) rather than reading from the
+            // DOM. By click time, focus has already moved to the <canvas>, so
+            // get_formula_cursor() returns 0 and is_in_reference_mode always fails.
+            let cursor = edit.cursor;
             if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                 let sheet = model.with_value(|m| m.get_selected_sheet());
                 let ref_str =
@@ -175,10 +179,14 @@ pub fn handle_cell_click(
                     };
                 let text = edit.text.clone();
                 let (new_text, ref_span) =
-                    splice_ref(&text, prev_span.unwrap_or(RefSpan::at(cursor)), &ref_str);
+                    splice_ref(&text, prev_span.unwrap_or(SpanRef::at(cursor)), &ref_str);
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
-                        e.text = new_text;
+                        let sheet_names = model.with_value(|m| m.get_sheet_names());
+                        e.cursor = ref_span.end;
+                        e.text = new_text.clone();
+                        e.formula_analysis =
+                            analyze_formula(&new_text, e.address.sheet, &sheet_names);
                     }
                 });
                 state.drag.set(DragState::Pointing {
@@ -377,6 +385,10 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
                 let (new_text, ref_span) = splice_ref(&edit.text, ref_span, &ref_str);
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
+                        let sheet_names = model.with_value(|m| m.get_sheet_names());
+                        e.cursor = ref_span.end;
+                        e.formula_analysis =
+                            analyze_formula(&new_text, e.address.sheet, &sheet_names);
                         e.text = new_text;
                     }
                 });
@@ -423,6 +435,8 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
 ///
 /// If no autofill drag was active, this is a no-op beyond resetting to `Idle`.
 pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
+    let was_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
+
     if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
         match try_mutate(
             model,
@@ -450,6 +464,11 @@ pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
         }
     }
     state.drag.set(DragState::Idle);
+    // After a point-mode drag, return focus to the formula input so the user
+    // can continue typing the formula without clicking again.
+    if was_pointing {
+        state.refocus_formula_input();
+    }
 }
 
 /// Right-click on a column or row header: store position and target for
@@ -566,6 +585,7 @@ pub fn handle_dblclick(ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
                 row: ac.row,
                 column: ac.column,
             },
+            cursor: text.len(),
             text,
             mode: EditMode::Edit,
             focus: EditFocus::Cell,

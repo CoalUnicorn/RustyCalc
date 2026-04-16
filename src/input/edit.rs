@@ -38,6 +38,7 @@ pub fn execute_edit(
                         let address = m.active_cell();
                         state.editing_cell.set(Some(EditingCell {
                             address,
+                            cursor: text.len(),
                             text: text.clone(),
                             mode: EditMode::Accept,
                             focus: EditFocus::Cell,
@@ -65,6 +66,7 @@ pub fn execute_edit(
 
                         state.editing_cell.set(Some(EditingCell {
                             address,
+                            cursor: text.len(),
                             text,
                             mode: EditMode::Edit,
                             focus: EditFocus::Cell,
