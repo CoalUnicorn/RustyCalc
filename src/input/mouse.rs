@@ -17,7 +17,7 @@ use crate::coord::{CellAddress, CellArea, RefSpan, SheetArea};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
 use crate::input::formula_input::{
-    get_formula_cursor, is_in_reference_mode, range_ref_str, splice_ref,
+    get_formula_cursor, is_in_reference_mode, range_ref_str, splice_ref, FormulaAnalysis,
 };
 use crate::model::{try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
@@ -570,6 +570,7 @@ pub fn handle_dblclick(ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
             mode: EditMode::Edit,
             focus: EditFocus::Cell,
             text_dirty: false,
+            formula_analysis: FormulaAnalysis::default(),
         }));
     });
 }

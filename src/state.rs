@@ -9,6 +9,7 @@ use leptos::prelude::*;
 
 use crate::coord::{CellAddress, CellArea, RefSpan};
 use crate::events::*;
+use crate::input::formula_input::FormulaAnalysis;
 use crate::model::CssColor;
 use crate::storage::WorkbookId;
 
@@ -113,6 +114,9 @@ pub struct EditingCell {
     /// In `Edit` mode, gates whether arrows enter point-mode — distinguishes
     /// "typed an operator" from "cursor moved through a reference position".
     pub(crate) text_dirty: bool,
+    /// Cached result of the last `analyze_formula()` call.
+    /// Updated synchronously on each `on_input` event in formula_bar and cell_editor.
+    pub(crate) formula_analysis: FormulaAnalysis,
 }
 
 /// Right-clicked header identity and the count of selected headers in that axis.

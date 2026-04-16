@@ -5,6 +5,8 @@ use leptos::html;
 use leptos::prelude::*;
 
 use crate::canvas::selected_cell_rect;
+use crate::input::formula_input::analyze_formula;
+use crate::model::FrontendModel;
 use crate::state::ModelStore;
 use crate::state::WorkbookState;
 
@@ -73,6 +75,7 @@ pub fn CellEditor() -> impl IntoView {
             }
         });
     };
+    
 
     // Intercept Enter / Tab / Escape to stop default textarea behavior
     // (newline insertion, browser focus cycling) and let them bubble up

@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
+use crate::input::formula_input::FormulaAnalysis;
 use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
@@ -41,6 +42,7 @@ pub fn execute_edit(
                             mode: EditMode::Accept,
                             focus: EditFocus::Cell,
                             text_dirty: true,
+                            formula_analysis: FormulaAnalysis::default(),
                         }));
                         address
                     }),
@@ -62,6 +64,7 @@ pub fn execute_edit(
                             mode: EditMode::Edit,
                             focus: EditFocus::Cell,
                             text_dirty: false,
+                            formula_analysis: FormulaAnalysis::default(),
                         }));
                         address
                     }),
