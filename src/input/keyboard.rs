@@ -16,6 +16,7 @@ use crate::input::{
     structure::{execute_struct, StructAction},
 };
 use crate::model::{style_types::HexColor, ArrowKey, SafeFontFamily};
+use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 use crate::state::{EditMode, EditingCell, ModelStore, StatusMessage, WorkbookState};
 
 // SpreadsheetAction
@@ -78,6 +79,24 @@ impl SpreadsheetAction {
     }
     pub fn set_background_color(hex: HexColor) -> Self {
         Self::Format(FormatAction::SetBackgroundColor(hex))
+    }
+    pub fn set_num_fmt(code: &str) -> Self {
+        Self::Format(FormatAction::SetNumFmt(code.to_owned()))
+    }
+    pub fn clear_formatting() -> Self {
+        Self::Format(FormatAction::ClearFormatting)
+    }
+    pub fn set_h_align(align: HorizontalAlignment) -> Self {
+        Self::Format(FormatAction::SetHorizontalAlign(align))
+    }
+    pub fn set_v_align(align: VerticalAlignment) -> Self {
+        Self::Format(FormatAction::SetVerticalAlign(align))
+    }
+    pub fn increase_decimals() -> Self {
+        Self::Format(FormatAction::IncreaseDecimals)
+    }
+    pub fn decrease_decimals() -> Self {
+        Self::Format(FormatAction::DecreaseDecimals)
     }
     pub fn undo() -> Self {
         Self::Structure(StructAction::Undo)

@@ -1,6 +1,9 @@
 //! Formatting actions: bold, italic, underline, strikethrough, font size/family.
 
-use ironcalc_base::UserModel;
+use ironcalc_base::{
+    types::{HorizontalAlignment, VerticalAlignment},
+    UserModel,
+};
 use leptos::prelude::WithValue;
 
 use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
@@ -32,6 +35,18 @@ pub enum FormatAction {
     SetFontFamily(SafeFontFamily),
     SetTextColor(HexColor),
     SetBackgroundColor(HexColor),
+    /// Apply a number format code to the selection. `"general"` resets to auto.
+    SetNumFmt(String),
+    /// Reset all formatting (font, color, borders, number format) on the selection.
+    ClearFormatting,
+    /// Set horizontal text alignment. `General` resets to auto (numbers right, text left).
+    SetHorizontalAlign(HorizontalAlignment),
+    /// Set vertical cell alignment. `Bottom` is the ironcalc default.
+    SetVerticalAlign(VerticalAlignment),
+    /// Add one decimal place to the active cell's number format.
+    IncreaseDecimals,
+    /// Remove one decimal place from the active cell's number format.
+    DecreaseDecimals,
 }
 
 /// Dispatch a [`FormatAction`] against the model and UI state.
@@ -166,6 +181,97 @@ pub fn execute_format(
                 area: sa.area.normalized().with_sheet(sa.sheet),
             }));
         }
+        FormatAction::SetNumFmt(code) => {
+            let sa = model.with_value(SheetArea::from_view);
+            let code = code.clone();
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.update_range_style(&area, "num_fmt", &code)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::SetHorizontalAlign(align) => {
+            // HorizontalAlignment::Display gives the exact lowercase string ironcalc expects.
+            let value = align.to_string();
+            let sa = model.with_value(SheetArea::from_view);
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.update_range_style(&area, StylePath::HORIZONTAL_ALIGN.as_str(), &value)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::SetVerticalAlign(align) => {
+            let value = align.to_string();
+            let sa = model.with_value(SheetArea::from_view);
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.update_range_style(&area, StylePath::VERTICAL_ALIGN.as_str(), &value)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::IncreaseDecimals | FormatAction::DecreaseDecimals => {
+            let delta = if matches!(action, FormatAction::IncreaseDecimals) {
+                1
+            } else {
+                -1
+            };
+            let sa = model.with_value(SheetArea::from_view);
+            let current = model.with_value(|m| m.active_num_fmt());
+            let new_fmt = adjust_decimals(&current, delta);
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.update_range_style(&area, StylePath::NUM_FMT.as_str(), &new_fmt)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::ClearFormatting => {
+            let sa = model.with_value(SheetArea::from_view);
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.range_clear_formatting(&area)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
     }
     Ok(())
 }
@@ -200,6 +306,45 @@ fn toggle_style(
         area: sa.area.normalized().with_sheet(sa.sheet),
     }));
     Ok(())
+}
+
+/// Adjust the number of decimal places in a format string by `delta` (+1 or -1).
+///
+/// Called by `IncreaseDecimals` and `DecreaseDecimals` before applying `SetNumFmt`.
+/// Must handle the most common format shapes: plain numbers (`#,##0`), percentage
+/// (`0%`), currency with leading symbol (`£#,##0.00`), and the `"general"` sentinel.
+fn adjust_decimals(fmt: &str, delta: i32) -> String {
+    // TODO:
+    //
+    // NOTE: PR 777 number format would be a struct
+    // https://github.com/ironcalc/IronCalc/pull/777
+    // ```rust
+    // pub struct Style {
+    //    pub alignment: Option<Alignment>,
+    //    pub num_fmt: NumFmt // Old: String,
+    //
+    // pub struct NumFmt {
+    //    pub num_fmt_id: i32,
+    //    pub format_code: String,
+    //}
+    // ```
+    //
+    //
+    // Inputs: `fmt` is the current num_fmt string (e.g. "#,##0.00", "0%", "general").
+    //         `delta` is +1 (increase) or -1 (decrease).
+    // Return: modified format string.
+    //
+    //   "general" is "0" so increase gives "0.0".
+    // - decimal section '.' followed by '0' chars.
+    // - Increase: insert one '0' right after the existing decimal zeros (or add ".0").
+    // - Decrease: remove the last decimal '0'; if none remain, remove the dot.
+    // - When no dot exists and delta > 0, insert ".0" after the last '0' or '#'
+    //   in the string so currency/percentage qualifiers stay in the right place.
+    // - Decreasing with no decimals is a no-op.
+    //
+    //
+    let _ = delta;
+    fmt.to_owned() // placeholder — remove when implementing
 }
 
 /// Set `font.name` on every cell in the selection.

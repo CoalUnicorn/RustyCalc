@@ -1,7 +1,9 @@
+use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 use leptos::prelude::*;
 use wasm_bindgen::UnwrapThrowExt;
 
 use crate::components::color_picker::{BackgroundColorPicker, TextColorPicker};
+use crate::components::toolbar::number_format::NumberFormatPicker;
 use crate::events::*;
 use crate::input::error::FormatError;
 use crate::input::keyboard::{execute, SpreadsheetAction};
@@ -72,6 +74,9 @@ pub fn Toolbar() -> impl IntoView {
         <div class="tb">
             <UndoRedo />
             <div class="tb-sep" />
+            <NumberFormatPicker />
+            <NumFmtQuickButtons />
+            <div class="tb-sep" />
             <FontFamily />
             <div class="tb-sep" />
             <FontSize />
@@ -81,6 +86,9 @@ pub fn Toolbar() -> impl IntoView {
             <BackgroundColorPickerToolbar />
             <div class="tb-sep" />
             <FormatToggles />
+            <AlignButtons />
+            <VertAlignButtons />
+            <ClearFormat />
             <div class="tb-sep" />
             <FreezePane />
         </div>
@@ -393,6 +401,140 @@ fn TextColorPickerToolbar() -> impl IntoView {
 
     view! {
         <TextColorPicker current_color=current_color on_change=on_color_change />
+    }
+}
+
+// Horizontal alignment — Left / Center / Right
+#[component]
+fn AlignButtons() -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+    let toolbar_state = expect_context::<Memo<ToolbarState>>();
+
+    let h_align = move || toolbar_state.with(|ts| ts.style.h_align.clone());
+
+    // Each button needs: the target alignment, the button glyph, and the tooltip.
+    // `is_active` maps the ironcalc variant to the canonical L/C/R bucket,
+    // because Fill is a visual variant of Left and CenterContinuous of Center.
+    let make_btn = move |target: HorizontalAlignment, label: &'static str, title: &'static str| {
+        // Signal<bool> is Copy — both the class and click closures can capture it independently.
+        let t = target.clone();
+        let is_active = Signal::derive(move || match t {
+            HorizontalAlignment::Left => {
+                matches!(h_align(), HorizontalAlignment::Left | HorizontalAlignment::Fill)
+            }
+            HorizontalAlignment::Center => matches!(
+                h_align(),
+                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous
+            ),
+            HorizontalAlignment::Right => matches!(h_align(), HorizontalAlignment::Right),
+            _ => false,
+        });
+
+        view! {
+            <button
+                class=move || if is_active.get() { "tb-btn active" } else { "tb-btn" }
+                title=title
+                on:click=move |_: web_sys::MouseEvent| {
+                    let next = if is_active.get_untracked() { HorizontalAlignment::General } else { target.clone() };
+                    execute(&SpreadsheetAction::set_h_align(next), model, &state);
+                    refocus_workbook();
+                }
+            >
+                {label}
+            </button>
+        }
+    };
+
+    view! {
+        {make_btn(HorizontalAlignment::Left,   "⇤", "Align left")}
+        {make_btn(HorizontalAlignment::Center, "⇔", "Align center")}
+        {make_btn(HorizontalAlignment::Right,  "⇥", "Align right")}
+    }
+}
+
+// Vertical alignment — Top / Middle / Bottom
+#[component]
+fn VertAlignButtons() -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+    let toolbar_state = expect_context::<Memo<ToolbarState>>();
+
+    let v_align = move || toolbar_state.with(|ts| ts.style.v_align.clone());
+
+    let make_btn = move |target: VerticalAlignment, label: &'static str, title: &'static str| {
+        let t = target.clone();
+        let is_active = Signal::derive(move || v_align() == t);
+        view! {
+            <button
+                class=move || if is_active.get() { "tb-btn active" } else { "tb-btn" }
+                title=title
+                on:click=move |_: web_sys::MouseEvent| {
+                    let next = if is_active.get_untracked() { VerticalAlignment::Bottom } else { target.clone() };
+                    execute(&SpreadsheetAction::set_v_align(next), model, &state);
+                    refocus_workbook();
+                }
+            >
+                {label}
+            </button>
+        }
+    };
+
+    view! {
+        {make_btn(VerticalAlignment::Top,    "⬆", "Align top")}
+        {make_btn(VerticalAlignment::Center, "↕", "Align middle")}
+        {make_btn(VerticalAlignment::Bottom, "⬇", "Align bottom")}
+    }
+}
+
+// Number format quick-access: currency (£), percentage (%), and decimal ±
+#[component]
+fn NumFmtQuickButtons() -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+
+    let on_gbp = move |_: web_sys::MouseEvent| {
+        execute(&SpreadsheetAction::set_num_fmt("£#,##0.00"), model, &state);
+        refocus_workbook();
+    };
+    let on_pct = move |_: web_sys::MouseEvent| {
+        execute(&SpreadsheetAction::set_num_fmt("0%"), model, &state);
+        refocus_workbook();
+    };
+    let on_dec_less = move |_: web_sys::MouseEvent| {
+        execute(&SpreadsheetAction::decrease_decimals(), model, &state);
+        refocus_workbook();
+    };
+    let on_dec_more = move |_: web_sys::MouseEvent| {
+        execute(&SpreadsheetAction::increase_decimals(), model, &state);
+        refocus_workbook();
+    };
+
+    view! {
+        <button class="tb-btn" title="Currency (GBP)" on:click=on_gbp>"£"</button>
+        <button class="tb-btn" title="Percentage" on:click=on_pct>"%"</button>
+        <button class="tb-btn" title="Decrease decimal places" on:click=on_dec_less>".0←"</button>
+        <button class="tb-btn" title="Increase decimal places" on:click=on_dec_more>".0→"</button>
+    }
+}
+
+// Clear all formatting from the selection
+#[component]
+fn ClearFormat() -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+
+    view! {
+        <button
+            class="tb-btn"
+            title="Clear formatting"
+            on:click=move |_: web_sys::MouseEvent| {
+                execute(&SpreadsheetAction::clear_formatting(), model, &state);
+                refocus_workbook();
+            }
+        >
+            "✕"
+        </button>
     }
 }
 

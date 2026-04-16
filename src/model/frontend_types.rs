@@ -152,6 +152,7 @@ pub struct TextStyle {
     pub font_size: f64,
     pub font_family: SafeFontFamily,
     pub h_align: HorizontalAlignment,
+    pub v_align: VerticalAlignment,
     pub text_color: CssColor,
     pub bg_color: Option<CssColor>,
 }

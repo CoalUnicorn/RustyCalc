@@ -209,11 +209,13 @@ impl FrontendModel for UserModel<'_> {
             .filter(|c| !c.is_empty())
             .map(CssColor::new);
 
-        let h_align = style
-            .alignment
-            .as_ref()
+        let alignment = style.alignment.as_ref();
+        let h_align = alignment
             .map(|a| a.horizontal.clone())
             .unwrap_or(HorizontalAlignment::General);
+        let v_align = alignment
+            .map(|a| a.vertical.clone())
+            .unwrap_or_default();
 
         ToolbarState {
             format: TextFormat {
@@ -227,6 +229,7 @@ impl FrontendModel for UserModel<'_> {
                 font_size: style.font.sz as f64,
                 font_family: font_family_from_name(&style.font.name),
                 h_align,
+                v_align,
                 text_color,
                 bg_color,
             },
