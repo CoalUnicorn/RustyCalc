@@ -339,6 +339,22 @@ impl CanvasRenderer {
             );
         }
 
+        // Formula reference overlays — Phase 3, after point-mode.
+        // Each ref gets its own color (dashed border + 8% fill tint).
+        // Only refs on the current sheet are drawn; cross-sheet refs are silently skipped.
+        for fr in &overlays.formula_refs {
+            if fr.sheet == sheet {
+                self.draw_dashed_range(
+                    model,
+                    sheet,
+                    frc.offset,
+                    fr.area.normalized(),
+                    fr.color,
+                    DashFill::Tinted,
+                );
+            }
+        }
+
         // Phase 4: Cell text - always on top
         // Rendered after selection fill so text is readable over the blue tint,
         // and after the active-cell white-fill so text appears on a clean background.

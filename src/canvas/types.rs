@@ -293,6 +293,8 @@ pub struct RenderOverlays {
     pub clipboard: Option<SheetArea>,
     /// Range being pointed at during formula entry.
     pub point_range: Option<CellArea>,
+    /// All formula refs extracted from the current formula (multi-color overlays).
+    pub formula_refs: Vec<FormulaRef>,
 }
 
 /// Hint to the canvas renderer about the minimum work needed for this repaint.

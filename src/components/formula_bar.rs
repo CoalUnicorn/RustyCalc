@@ -51,14 +51,8 @@ pub fn FormulaBar() -> impl IntoView {
 
     // Helper: collect (sheet_index, sheet_name) pairs for analyze_formula().
     // Called at the start of each on_input to get the current sheet list.
-    let get_sheet_names = move || -> Vec<(u32, String)> {
-        model.with_value(|m| {
-            m.get_sheet_all()
-                .into_iter()
-                .map(|(idx, name, _)| (idx, name))
-                .collect()
-        })
-    };
+    let get_sheet_names =
+        move || -> Vec<(u32, String)> { model.with_value(|m| m.get_sheet_names()) };
 
     let (validation_error, set_validation_error) = signal(None::<String>);
 

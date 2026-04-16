@@ -69,6 +69,9 @@ pub trait FrontendModel {
     fn get_sheet_visible_count(&self) -> usize;
 
     fn get_sheet_all(&self) -> Vec<(u32, String, String)>;
+
+    fn get_sheet_names(&self) -> Vec<(u32, String)>;
+
     // Navigation (infallible)
 
     /// Move the active cell one step. No-op at sheet edges.
@@ -213,9 +216,7 @@ impl FrontendModel for UserModel<'_> {
         let h_align = alignment
             .map(|a| a.horizontal.clone())
             .unwrap_or(HorizontalAlignment::General);
-        let v_align = alignment
-            .map(|a| a.vertical.clone())
-            .unwrap_or_default();
+        let v_align = alignment.map(|a| a.vertical.clone()).unwrap_or_default();
 
         ToolbarState {
             format: TextFormat {
@@ -335,6 +336,14 @@ impl FrontendModel for UserModel<'_> {
             .enumerate()
             .map(|(idx, s)| (idx as u32, s.name.clone(), s.state.clone()))
             .collect::<Vec<_>>()
+    }
+
+    // used by analyze_formula
+    fn get_sheet_names(&self) -> Vec<(u32, String)> {
+        self.get_sheet_all()
+            .into_iter()
+            .map(|(idx, name, _)| (idx, name))
+            .collect()
     }
 
     // Navigation

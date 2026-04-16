@@ -4,6 +4,7 @@ use leptos_use::{use_raf_fn, use_resize_observer};
 use web_sys::HtmlCanvasElement;
 
 use crate::app_state::AppState;
+use crate::canvas::types::FormulaRef;
 use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
 use crate::coord::{CellArea, SheetArea};
@@ -70,7 +71,16 @@ pub fn Worksheet() -> impl IntoView {
             None
         };
 
-        (extend_to, point_range)
+        // Reading editing_cell here subscribes the memo to it. Since FormulaRef
+        // derives PartialEq, the memo's PartialEq gate suppresses re-renders when
+        // refs don't change (e.g. text changed but no new refs produced).
+        let formula_refs: Vec<FormulaRef> = state
+            .editing_cell
+            .get()
+            .map(|e| e.formula_analysis.refs)
+            .unwrap_or_default();
+
+        (extend_to, point_range, formula_refs)
     });
 
     // Flag: set by the reactive subscription Effect below, cleared by the
@@ -99,7 +109,7 @@ pub fn Worksheet() -> impl IntoView {
     // detect overlay-only changes (autofill preview, point-mode range)
     // without needing a fake ContentEvent::GenericChange from request_redraw().
     Effect::new(
-        move |prev: Option<(Option<AutofillTarget>, Option<CellArea>)>| {
+        move |prev: Option<(Option<AutofillTarget>, Option<CellArea>, Vec<FormulaRef>)>| {
             let has_content = !state.events.content.get().is_empty();
             let has_structure = !state.events.structure.get().is_empty();
             let has_format = !state.events.format.get().is_empty();
@@ -148,7 +158,7 @@ pub fn Worksheet() -> impl IntoView {
             m.set_window_width(canvas_w);
             m.set_window_height(canvas_h);
         });
-        let (extend_to, point_range) = reactive_overlay.get_untracked();
+        let (extend_to, point_range, formula_refs) = reactive_overlay.get_untracked();
         let clipboard = clipboard_draw.with_value(|opt| {
             opt.as_ref().map(|acb| SheetArea {
                 sheet: acb.sheet,
@@ -159,6 +169,7 @@ pub fn Worksheet() -> impl IntoView {
             extend_to,
             clipboard,
             point_range,
+            formula_refs,
         };
         model.with_value(|m| {
             let mut renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get_untracked());

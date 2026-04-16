@@ -62,20 +62,25 @@ pub fn CellEditor() -> impl IntoView {
 
     // Keep editing_cell.text in sync as the user types.
     let on_input = move |ev: web_sys::Event| {
+        let sheet_names = model.with_value(|m| m.get_sheet_names());
+
         use wasm_bindgen::JsCast;
         let value = ev
             .target()
             .and_then(|t| t.dyn_into::<web_sys::HtmlTextAreaElement>().ok())
             .map(|el| el.value())
             .unwrap_or_default();
+
         state.editing_cell.update(|cell| {
             if let Some(c) = cell {
+                let active_sheet = c.address.sheet;
+
                 c.text = value;
                 c.text_dirty = true;
+                c.formula_analysis = analyze_formula(&c.text, active_sheet, &sheet_names);
             }
         });
     };
-    
 
     // Intercept Enter / Tab / Escape to stop default textarea behavior
     // (newline insertion, browser focus cycling) and let them bubble up

@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
-use crate::input::formula_input::FormulaAnalysis;
+use crate::input::formula_input::{analyze_formula, FormulaAnalysis};
 use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
@@ -58,13 +58,18 @@ pub fn execute_edit(
                             .get_cell_content(v.sheet, v.row, v.column)
                             .unwrap_or_default();
                         let address = m.active_cell();
+                        // Analyze immediately so refs appear as soon as edit mode is entered.
+                        let sheet_names = model.with_value(|m| m.get_sheet_names());
+                        let analysis = analyze_formula(&text, address.sheet, &sheet_names);
+                        // Then set formula_analysis: analysis on the EditingCell being constructed/updated
+
                         state.editing_cell.set(Some(EditingCell {
                             address,
                             text,
                             mode: EditMode::Edit,
                             focus: EditFocus::Cell,
                             text_dirty: false,
-                            formula_analysis: FormulaAnalysis::default(),
+                            formula_analysis: analysis,
                         }));
                         address
                     }),
