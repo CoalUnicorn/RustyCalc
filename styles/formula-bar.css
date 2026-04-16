@@ -1,15 +1,15 @@
 /* Formula Bar — prefix: fb-
  *
  * Mapping:
- *   formula-bar          → fb
- *   formula-bar-address  → fb-addr
- *   formula-bar-fx       → fb-fx
- *   formula-bar-input    → fb-input
- *   formula-validation   → fb-valid
- *   validation-pending   → fb-pending
- *   validation-error     → fb-error
- *   validation-success   → fb-ok
- *   validation-neutral   → fb-neutral
+ *   formula-bar          -> fb
+ *   formula-bar-address  -> fb-addr
+ *   formula-bar-fx       -> fb-fx
+ *   formula-bar-input    -> fb-input
+ *   formula-validation   -> fb-valid
+ *   validation-pending   -> fb-pending
+ *   validation-error     -> fb-error
+ *   validation-success   -> fb-ok
+ *   validation-neutral   -> fb-neutral
  */
 
 .fb {

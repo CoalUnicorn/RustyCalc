@@ -1,10 +1,10 @@
 /* File Bar — prefix: fl-
  *
  * Mapping:
- *   file-bar       → fl
- *   file-menu-btn  → fl-menu-btn
- *   file-bar-right → fl-right
- *   theme-btn      → fl-theme
+ *   file-bar       -> fl
+ *   file-menu-btn  -> fl-menu-btn
+ *   file-bar-right -> fl-right
+ *   theme-btn      -> fl-theme
  */
 
 .fl {
@@ -44,7 +44,7 @@
 }
 
 .fl .fl-menu-btn:hover {
-    background: rgba(128, 128, 128, 0.15);
+    background: var(--bg-hover-strong);
 }
 
 /* Spacer that pushes right-side controls to the edge */
@@ -75,6 +75,6 @@
 }
 
 .fl .fl-theme:hover {
-    background: rgba(128, 128, 128, 0.15);
+    background: var(--bg-hover-strong);
     border-color: var(--border-color);
 }

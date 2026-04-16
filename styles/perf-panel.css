@@ -1,11 +1,11 @@
 /* Perf Panel — prefix: pp-
  *
  * Mapping:
- *   perf-panel   → pp
- *   perf-label   → pp-label
- *   perf-detail  → pp-detail
- *   perf-total   → pp-total
- *   perf-formula → pp-formula
+ *   perf-panel   -> pp
+ *   perf-label   -> pp-label
+ *   perf-detail  -> pp-detail
+ *   perf-total   -> pp-total
+ *   perf-formula -> pp-formula
  */
 
 .pp {

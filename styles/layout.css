@@ -1,8 +1,8 @@
 /* Layout — app root + workbook wrapper
  *
  * Mapping:
- *   #app       → #app       (unchanged, id-based)
- *   .workbook  → .workbook  (unchanged, one-off wrapper)
+ *   #app       -> #app       (unchanged, id-based)
+ *   .workbook  -> .workbook  (unchanged, one-off wrapper)
  */
 
 #app {

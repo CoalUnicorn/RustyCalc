@@ -5,12 +5,12 @@
 //! workbook and loads the selected one.  The x button deletes a workbook.
 
 use leptos::prelude::*;
-use wasm_bindgen::JsCast;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{
     ContextMenu, ContextMenuButton, ContextMenuItem, ContextMenuSeparator,
 };
+use crate::components::inline_rename::InlineRenameInput;
 use crate::input::workbook::{execute_workbook, WorkbookAction};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage::{self, WorkbookGroup, WorkbookId, WorkbookMeta};
@@ -151,6 +151,7 @@ pub fn LeftDrawer() -> impl IntoView {
                                 false
                             };
 
+                            let is_group = matches!(group.label, WorkbookGroup::Named(_));
                             view! {
                                 <div class="ld-group">
                                     {if let WorkbookGroup::Named(label) = group.label.clone() {
@@ -174,9 +175,7 @@ pub fn LeftDrawer() -> impl IntoView {
                                         }).collect::<Vec<_>>()}
                                     </Show>
                                 </div>
-                                /*HACK*/
-                                <ContextMenuSeparator />
-                                <ContextMenuSeparator />
+                                {is_group.then(|| view! { <hr class="ld-sep" /> })}
                             }
                         }).collect::<Vec<_>>()
                     }}
@@ -216,6 +215,10 @@ fn EntryRow(
     renaming: ReadSignal<Option<WorkbookId>>,
     set_renaming: WriteSignal<Option<WorkbookId>>,
 ) -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+    let app = expect_context::<AppState>();
+
     let uuid_switch = uuid;
     let uuid_delete = uuid;
     let is_renaming = renaming.get_untracked() == Some(uuid);
@@ -268,11 +271,36 @@ fn EntryRow(
         }
     };
 
+    let on_dblclick = move |ev: web_sys::MouseEvent| {
+        ev.stop_propagation();
+        set_renaming.set(Some(uuid));
+    };
+
+    let on_rename_commit = Callback::new(move |new_name: String| {
+        if !new_name.trim().is_empty() {
+            storage::update_name(&uuid, &new_name);
+            // Keep the in-memory model in sync so the next save() won't revert the name.
+            if state.current_uuid.get_untracked() == Some(uuid) {
+                model.update_value(|m| m.set_name(&new_name));
+            }
+            app.bump_registry();
+        }
+        set_renaming.set(None);
+    });
+
+    let on_rename_cancel = {
+        Callback::new(move |()| {
+            set_renaming.set(None);
+        })
+    };
+
     view! {
         <div
             class="ld-entry"
             class:active=active
             on:click=move |_| on_switch.run(uuid_switch)
+            on:dblclick=on_dblclick
+
         >
             <ContextMenuButton
                 set_open=set_menu_open
@@ -282,29 +310,17 @@ fn EntryRow(
                 "\u{22ee}"
             </ContextMenuButton>
 
-            {if is_renaming {
-                view! {
-                    <RenameInput
-                        uuid=uuid
-                        initial_name=name.clone()
-                        renaming
-                        set_renaming
-                    />
-                }.into_any()
-            } else {
-                let uuid_dbl = uuid;
-                view! {
-                    <span
-                        class="ld-entry"
-                        on:dblclick=move |ev: web_sys::MouseEvent| {
-                            ev.stop_propagation();
-                            set_renaming.set(Some(uuid_dbl));
-                        }
-                    >
-                        {name}
-                    </span>
-                }.into_any()
-            }}
+            <Show
+                when=move || is_renaming == true
+                fallback={let n = name.clone(); move || view!{ <span class="ld-name">{n.clone()}</span> }}
+            >
+                <InlineRenameInput
+                    value=name.clone()
+                    on_commit=on_rename_commit
+                    on_cancel=on_rename_cancel
+                    class="ld-rename"
+                />
+            </Show>
 
             <button
                 class="ld-btn ld-del"
@@ -353,89 +369,5 @@ fn EntryRow(
                 </div>
             </ContextMenu>
         </div>
-    }
-}
-
-// Rename input
-// TODO: Migrate to inline_rename
-#[component]
-fn RenameInput(
-    uuid: WorkbookId,
-    initial_name: String,
-    renaming: ReadSignal<Option<WorkbookId>>,
-    set_renaming: WriteSignal<Option<WorkbookId>>,
-) -> impl IntoView {
-    let state = expect_context::<WorkbookState>();
-    let app = expect_context::<AppState>();
-    let model = expect_context::<ModelStore>();
-    let input_ref = NodeRef::<leptos::html::Input>::new();
-
-    Effect::new(move |_| {
-        if let Some(el) = input_ref.get() {
-            let el2 = el.clone();
-            wasm_bindgen_futures::spawn_local(async move {
-                el2.focus().ok();
-                el2.select();
-            });
-        }
-    });
-
-    let uuid_for_commit = uuid;
-    let commit_rename = Callback::new(move |new_name: String| {
-        if !new_name.trim().is_empty() {
-            storage::update_name(&uuid_for_commit, &new_name);
-            // Keep the in-memory model in sync so the next save() won't revert the name.
-            if state.current_uuid.get_untracked() == Some(uuid_for_commit) {
-                model.update_value(|m| m.set_name(&new_name));
-            }
-            app.bump_registry();
-        }
-        set_renaming.set(None);
-    });
-
-    let on_keydown = move |ev: web_sys::KeyboardEvent| {
-        ev.stop_propagation();
-        match ev.key().as_str() {
-            "Enter" => {
-                ev.prevent_default();
-                let new_name = ev
-                    .target()
-                    .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-                    .map(|i| i.value())
-                    .unwrap_or_default();
-                commit_rename.run(new_name);
-            }
-            "Escape" => {
-                ev.prevent_default();
-                set_renaming.set(None);
-            }
-            _ => {}
-        }
-    };
-
-    let uuid_for_blur = uuid;
-    let on_blur = move |ev: web_sys::FocusEvent| {
-        if renaming.get_untracked() != Some(uuid_for_blur) {
-            return;
-        }
-        let new_name = ev
-            .target()
-            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-            .map(|i| i.value())
-            .unwrap_or_default();
-        commit_rename.run(new_name);
-    };
-
-    view! {
-        <input
-            node_ref=input_ref
-            type="text"
-            class="left-drawer__rename-input"
-            prop:value=initial_name
-            on:click=|ev: web_sys::MouseEvent| ev.stop_propagation()
-            on:mousedown=|ev: web_sys::MouseEvent| ev.stop_propagation()
-            on:keydown=on_keydown
-            on:blur=on_blur
-        />
     }
 }

@@ -1,13 +1,13 @@
 /* Toolbar — prefix: tb-
  *
  * Mapping:
- *   toolbar            → tb
- *   toolbar-btn        → tb-btn
- *   toolbar-btn active → tb-btn active
- *   toolbar-sep        → tb-sep
- *   toolbar-font-family → tb-font
- *   toolbar-font-size  → tb-size
- *   font-size-btn      → tb-size-btn
+ *   toolbar            -> tb
+ *   toolbar-btn        -> tb-btn
+ *   toolbar-btn active -> tb-btn active
+ *   toolbar-sep        -> tb-sep
+ *   toolbar-font-family -> tb-font
+ *   toolbar-font-size  -> tb-size
+ *   font-size-btn      -> tb-size-btn
  */
 
 .tb {
@@ -36,7 +36,7 @@
 }
 
 .tb .tb-btn:hover {
-    background: rgba(128, 128, 128, 0.1);
+    background: var(--bg-hover);
     border-color: var(--border-inner);
 }
 
@@ -107,4 +107,63 @@
 .tb .tb-font:focus {
     outline: none;
     border-color: var(--accent);
+}
+
+/* ── Number format picker ───────────────────────── */
+
+.tb-num-fmt {
+    position: relative;
+    display: inline-block;
+}
+
+.tb-num-fmt-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 200;
+    min-width: 240px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+    margin-top: 2px;
+}
+
+.tb-num-fmt-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    width: 100%;
+    padding: 5px 10px;
+    font-size: 13px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+    box-sizing: border-box;
+}
+
+.tb-num-fmt-item:hover {
+    background: var(--bg-hover);
+}
+
+.tb-num-fmt-check {
+    width: 1.2em;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.tb-num-fmt-label {
+    flex: 1;
+}
+
+.tb-num-fmt-preview {
+    opacity: 0.5;
+    font-size: 0.85em;
+}
+
+.tb-num-fmt-preview--empty {
+    display: none;
 }

@@ -1,10 +1,10 @@
 /* Worksheet — prefix: ws-
  *
  * Mapping:
- *   worksheet-container → ws
- *   worksheet-canvas    → ws-canvas
- *   resize-col          → ws-canvas.resize-col
- *   resize-row          → ws-canvas.resize-row
+ *   worksheet-container -> ws
+ *   worksheet-canvas    -> ws-canvas
+ *   resize-col          -> ws-canvas.resize-col
+ *   resize-row          -> ws-canvas.resize-row
  */
 
 .ws {

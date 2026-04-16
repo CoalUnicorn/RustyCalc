@@ -3,24 +3,24 @@
  * Prefix: ld-
  * Scoped: all child selectors nest under .ld to prevent collision
  *
- * Class mapping (old BEM → new):
- *   left-drawer                       → ld
- *   left-drawer__header               → ld-head
- *   left-drawer__title                → ld-title
- *   left-drawer__btn                  → ld-btn
- *   left-drawer__btn--add             → ld-btn ld-add
- *   left-drawer__body                 → ld-body
- *   left-drawer__group                → ld-group
- *   left-drawer__group-header         → ld-group-hd
- *   left-drawer__chevron              → ld-chevron
- *   left-drawer__entry                → ld-entry
- *   left-drawer__entry-name           → ld-name
- *   left-drawer__btn--group           → ld-btn ld-grp
- *   left-drawer__btn--delete          → ld-btn ld-del
- *   left-drawer__group-popover        → ld-popover
- *   left-drawer__group-popover-item   → ld-pop-item
- *   left-drawer__group-popover-new    → ld-pop-new
- *   left-drawer__rename-input         → ld-rename
+ * Class mapping (old BEM -> new):
+ *   left-drawer                       -> ld
+ *   left-drawer__header               -> ld-head
+ *   left-drawer__title                -> ld-title
+ *   left-drawer__btn                  -> ld-btn
+ *   left-drawer__btn--add             -> ld-btn ld-add
+ *   left-drawer__body                 -> ld-body
+ *   left-drawer__group                -> ld-group
+ *   left-drawer__group-header         -> ld-group-hd
+ *   left-drawer__chevron              -> ld-chevron
+ *   left-drawer__entry                -> ld-entry
+ *   left-drawer__entry-name           -> ld-name
+ *   left-drawer__btn--group           -> ld-btn ld-grp
+ *   left-drawer__btn--delete          -> ld-btn ld-del
+ *   left-drawer__group-popover        -> ld-popover
+ *   left-drawer__group-popover-item   -> ld-pop-item
+ *   left-drawer__group-popover-new    -> ld-pop-new
+ *   left-drawer__rename-input         -> ld-rename
  *
  * Trunk: add to index.html:
  *   <link data-trunk rel="css" href="styles/left-drawer.css" />
@@ -65,7 +65,7 @@
 }
 
 .ld .ld-btn:hover {
-    background: rgba(128, 128, 128, 0.15);
+    background: var(--bg-hover-strong);
 }
 
 /* Scrollable body */
@@ -110,11 +110,11 @@
 }
 
 .ld .ld-entry:hover {
-    background: rgba(128, 128, 128, 0.1);
+    background: var(--bg-hover);
 }
 
 .ld .ld-entry.active {
-    background: rgba(128, 128, 128, 0.15);
+    background: var(--bg-hover-strong);
     font-weight: 600;
     color: var(--accent);
 }
@@ -151,6 +151,13 @@
 }
 
 .ld .ld-pop-new {
+}
+
+/* Group separator — rendered only after Named groups */
+.ld .ld-sep {
+    border: none;
+    border-top: 1px solid var(--border-color);
+    margin: 4px 8px;
 }
 
 /* Inline rename */
