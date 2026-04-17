@@ -146,7 +146,6 @@ pub enum StatusMessage {
 }
 
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
 pub struct WorkbookState {
     pub events: EventBus,
     pub(crate) current_uuid: Split<Option<WorkbookId>>,
@@ -215,12 +214,8 @@ impl WorkbookState {
             return;
         }
 
-        // Normalize color (ensure lowercase, with #) and wrap in the domain type.
-        let normalized = CssColor::new(if color.starts_with('#') {
-            color.to_lowercase()
-        } else {
-            format!("#{}", color.to_lowercase())
-        });
+        // Normalize color.
+        let normalized = CssColor::new(color);
 
         self.recent_colors.update(|colors| {
             // Remove if already exists

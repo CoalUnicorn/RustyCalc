@@ -312,13 +312,25 @@ mod tests {
         range: CellArea,
         prev_span: Option<SpanRef>,
     ) -> PointMoveCtx<'a> {
-        PointMoveCtx { text, cursor, already_pointing, current_range: range, prev_span, sheet: 1 }
+        PointMoveCtx {
+            text,
+            cursor,
+            already_pointing,
+            current_range: range,
+            prev_span,
+            sheet: 1,
+        }
     }
 
     #[wasm_bindgen_test]
     fn point_move_non_arrow_key_exits_pointing() {
         // Enter is a non-modifier non-arrow key — signals the user is done pointing.
-        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
+        let range = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 1,
+            c2: 1,
+        };
         assert_eq!(
             try_point_move(&ctx("=", 1, false, range, None), "Enter", false),
             PointMoveOutcome::ExitPointing,
@@ -328,7 +340,12 @@ mod tests {
     #[wasm_bindgen_test]
     fn point_move_modifier_key_is_no_action() {
         // Shift alone must not exit pointing (user is extending a selection).
-        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
+        let range = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 1,
+            c2: 1,
+        };
         assert_eq!(
             try_point_move(&ctx("=", 1, true, range, None), "Shift", false),
             PointMoveOutcome::NoAction,
@@ -339,7 +356,12 @@ mod tests {
     fn point_move_cursor_after_ref_token_not_pointing_is_no_action() {
         // Cursor at end of "=A1" (position 3) — last char is '1', not an operator.
         // is_in_reference_mode returns false; already_pointing is false → NoAction.
-        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
+        let range = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 1,
+            c2: 1,
+        };
         assert_eq!(
             try_point_move(&ctx("=A1", 3, false, range, None), "ArrowDown", false),
             PointMoveOutcome::NoAction,
@@ -350,7 +372,12 @@ mod tests {
     fn point_move_already_pointing_bypasses_ref_mode_check() {
         // "=A1" cursor at 3 is not in ref mode normally, but already_pointing=true
         // bypasses the is_in_reference_mode guard → Move.
-        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
+        let range = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 1,
+            c2: 1,
+        };
         assert!(matches!(
             try_point_move(
                 &ctx("=A1", 3, true, range, Some(SpanRef { start: 1, end: 3 })),
@@ -365,12 +392,22 @@ mod tests {
     fn point_move_bare_equals_arrow_down_enters_a2() {
         // "=" cursor=1: is_in_reference_mode returns true (bare equals).
         // ArrowDown from A1 → new_range=A2, ref="A2", splice inserts at cursor.
-        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
+        let range = CellArea {
+            r1: 1,
+            c1: 1,
+            r2: 1,
+            c2: 1,
+        };
         assert_eq!(
             try_point_move(&ctx("=", 1, false, range, None), "ArrowDown", false),
             PointMoveOutcome::Move(PointingStep {
                 text: "=A2".to_string(),
-                range: CellArea { r1: 2, c1: 1, r2: 2, c2: 1 },
+                range: CellArea {
+                    r1: 2,
+                    c1: 1,
+                    r2: 2,
+                    c2: 1
+                },
                 span: SpanRef { start: 1, end: 3 },
             }),
         );
@@ -379,7 +416,12 @@ mod tests {
     #[wasm_bindgen_test]
     fn point_move_shift_extends_anchor() {
         // Already pointing at B3, ArrowDown+Shift: anchor B3 stays, trailing extends to B4.
-        let range = CellArea { r1: 3, c1: 2, r2: 3, c2: 2 };
+        let range = CellArea {
+            r1: 3,
+            c1: 2,
+            r2: 3,
+            c2: 2,
+        };
         assert_eq!(
             try_point_move(
                 &ctx("=B3", 3, true, range, Some(SpanRef { start: 1, end: 3 })),
@@ -388,7 +430,12 @@ mod tests {
             ),
             PointMoveOutcome::Move(PointingStep {
                 text: "=B3:B4".to_string(),
-                range: CellArea { r1: 3, c1: 2, r2: 4, c2: 2 },
+                range: CellArea {
+                    r1: 3,
+                    c1: 2,
+                    r2: 4,
+                    c2: 2
+                },
                 span: SpanRef { start: 1, end: 6 },
             }),
         );
@@ -397,7 +444,12 @@ mod tests {
     #[wasm_bindgen_test]
     fn point_move_plain_arrow_moves_whole_range() {
         // Already pointing at B3, ArrowRight (no shift): whole range moves to C3.
-        let range = CellArea { r1: 3, c1: 2, r2: 3, c2: 2 };
+        let range = CellArea {
+            r1: 3,
+            c1: 2,
+            r2: 3,
+            c2: 2,
+        };
         assert_eq!(
             try_point_move(
                 &ctx("=B3", 3, true, range, Some(SpanRef { start: 1, end: 3 })),
@@ -406,7 +458,12 @@ mod tests {
             ),
             PointMoveOutcome::Move(PointingStep {
                 text: "=C3".to_string(),
-                range: CellArea { r1: 3, c1: 3, r2: 3, c2: 3 },
+                range: CellArea {
+                    r1: 3,
+                    c1: 3,
+                    r2: 3,
+                    c2: 3
+                },
                 span: SpanRef { start: 1, end: 3 },
             }),
         );

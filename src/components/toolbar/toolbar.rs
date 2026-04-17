@@ -421,7 +421,10 @@ fn AlignButtons() -> impl IntoView {
         let t = target.clone();
         let is_active = Signal::derive(move || match t {
             HorizontalAlignment::Left => {
-                matches!(h_align(), HorizontalAlignment::Left | HorizontalAlignment::Fill)
+                matches!(
+                    h_align(),
+                    HorizontalAlignment::Left | HorizontalAlignment::Fill
+                )
             }
             HorizontalAlignment::Center => matches!(
                 h_align(),
