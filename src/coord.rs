@@ -58,7 +58,7 @@ pub struct FormulaRef {
 }
 
 /// A cell range pinned to a specific sheet.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SheetArea {
     pub sheet: u32,
     pub area: CellArea,
@@ -103,7 +103,7 @@ impl SheetArea {
 }
 
 /// Axis-aligned cell range. 1-based sheet coordinates.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct CellArea {
     pub r1: i32,
     pub c1: i32,
@@ -232,7 +232,7 @@ impl From<CellArea> for [i32; 4] {
 }
 
 /// Single cell position on a sheet. 1-based indices.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellAddress {
     pub sheet: u32,
     pub row: i32,
@@ -254,7 +254,6 @@ impl CellAddress {
         self.sheet == sheet
     }
 
-    #[allow(dead_code)]
     pub fn to_sheet_area(self) -> SheetArea {
         SheetArea {
             sheet: self.sheet,

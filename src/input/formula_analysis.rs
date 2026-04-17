@@ -13,9 +13,16 @@
 //! TODO(named_ranges): resolve Ident tokens via `model.get_defined_name_list()`
 //! when the name manager is implemented.
 
-use ironcalc_base::expressions::{lexer::util::get_tokens, token::TokenType};
+use std::collections::HashMap;
 
-use crate::coord::{CellArea, FormulaRef, SheetArea, SpanRef};
+use ironcalc_base::expressions::{
+    lexer::util::get_tokens,
+    parser::{new_parser_english, Node},
+    token::TokenType,
+    types::CellReferenceRC,
+};
+
+use crate::coord::{CellAddress, CellArea, FormulaRef, SheetArea, SpanRef};
 
 /// Result of tokenizing a formula for UI purposes.
 ///
@@ -23,11 +30,30 @@ use crate::coord::{CellArea, FormulaRef, SheetArea, SpanRef};
 /// the formula bar and the canvas renderer read from the same source.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct FormulaAnalysis {
-    /// Colored overlays for the canvas, one per distinct cell/range token.
     pub refs: Vec<FormulaRef>,
-    /// First illegal token error, if any. `None` means syntactically valid
-    /// (or the text is not a formula).
     pub validation_error: Option<String>,
+    /// Parser-level error, distinct from `validation_error` which is lexer-level.
+    pub parse_error: Option<ParseError>,
+    pub invalid_functions: Vec<SpanRef>,
+    pub invalid_refs: Vec<SpanRef>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParseError {
+    pub message: String,
+    pub position: usize,
+}
+
+/// Flat stream of AST leaves in pre-order document order — the ordering
+/// invariant the downstream zip with lexer tokens depends on.
+#[derive(Debug, PartialEq)]
+pub(crate) enum AstLeaf {
+    CellAddress { address: CellAddress },
+    SheetArea { area: SheetArea },
+    WrongReference,
+    WrongRange,
+    InvalidFunction,
+    ParseError { message: String, position: usize },
 }
 
 /// Tokenize `formula` and extract cell/range references + validation state.
@@ -47,85 +73,201 @@ pub fn analyze_formula(
     }
 
     let tokens = get_tokens(formula);
-    let mut refs = Vec::new();
-    let mut color_idx = 0usize;
     let mut validation_error: Option<String> = None;
+    let mut ref_range_token_spans: Vec<SpanRef> = Vec::new();
+    let mut fn_ident_spans: Vec<SpanRef> = Vec::new();
+    for t in &tokens {
+        let span = SpanRef {
+            start: t.start as usize,
+            end: t.end as usize,
+        };
+        match &t.token {
+            TokenType::Reference { .. } | TokenType::Range { .. } => {
+                ref_range_token_spans.push(span);
+            }
+            TokenType::Ident(_) => fn_ident_spans.push(span),
+            TokenType::Illegal(e) if validation_error.is_none() => {
+                validation_error = Some(e.message.clone());
+            }
+            _ => {}
+        }
+    }
 
-    for token in &tokens {
-        match &token.token {
-            TokenType::Reference {
-                sheet, row, column, ..
-            } => {
-                let Some(sheet_idx) =
-                    resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names)
-                else {
-                    continue;
-                };
-                refs.push(FormulaRef {
-                    sheet_area: SheetArea::from_cell(sheet_idx, *row, *column),
-                    color_idx,
-                    span: SpanRef {
-                        start: token.start as usize,
-                        end: token.end as usize,
-                    },
-                });
-                color_idx += 1;
-            }
-            TokenType::Range { sheet, left, right } => {
-                let Some(sheet_idx) =
-                    resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names)
-                else {
-                    continue;
-                };
-                refs.push(FormulaRef {
-                    sheet_area: SheetArea {
-                        sheet: sheet_idx,
-                        area: CellArea {
-                            r1: left.row,
-                            c1: left.column,
-                            r2: right.row,
-                            c2: right.column,
-                        },
-                    },
-                    color_idx,
-                    span: SpanRef {
-                        start: token.start as usize,
-                        end: token.end as usize,
-                    },
-                });
-                color_idx += 1;
-            }
-            TokenType::Illegal(e) => {
-                if validation_error.is_none() {
-                    validation_error = Some(e.message.clone());
+    // Parser needs a non-empty worksheets list with a matching context sheet,
+    // otherwise every bare `A1` resolves to WrongReferenceKind.
+    let (sheet_name_list, active_sheet_name) = if sheet_names.is_empty() {
+        (vec!["Sheet1".to_string()], "Sheet1".to_string())
+    } else {
+        let names: Vec<String> = sheet_names.iter().map(|(_, n)| n.clone()).collect();
+        let active = sheet_names
+            .iter()
+            .find(|(i, _)| *i == active_sheet)
+            .map(|(_, n)| n.clone())
+            .unwrap_or_else(|| names[0].clone());
+        (names, active)
+    };
+    let mut parser = new_parser_english(sheet_name_list, Vec::new(), HashMap::new());
+    // Context (0, 0) cancels the parser's relative-offset math so `ReferenceKind`
+    // always carries 1-based absolute coords regardless of the `$` prefix.
+    let context = CellReferenceRC {
+        sheet: active_sheet_name,
+        row: 0,
+        column: 0,
+    };
+    let ast = parser.parse(&formula[1..], &context);
+    let mut leaves = Vec::new();
+    ast_leaves(&ast, &mut leaves);
+
+    // Option A identity: same target -> same color slot, regardless of
+    // absolute/relative prefix or lexical sheet qualification.
+    let mut color_map: HashMap<SheetArea, usize> = HashMap::new();
+    let mut next_slot = 0usize;
+    let mut refs: Vec<FormulaRef> = Vec::new();
+    let mut invalid_refs: Vec<SpanRef> = Vec::new();
+    let mut invalid_functions: Vec<SpanRef> = Vec::new();
+    let mut parse_error: Option<ParseError> = None;
+    let mut ref_token_idx = 0usize;
+    let mut fn_token_idx = 0usize;
+    let mut assign_slot = |key: SheetArea| -> usize {
+        *color_map.entry(key).or_insert_with(|| {
+            let s = next_slot;
+            next_slot += 1;
+            s
+        })
+    };
+    for leaf in &leaves {
+        match leaf {
+            AstLeaf::CellAddress { address } => {
+                let span = ref_range_token_spans.get(ref_token_idx).copied();
+                ref_token_idx += 1;
+                if let Some(span) = span {
+                    let slot = assign_slot(address.to_sheet_area());
+                    refs.push(FormulaRef {
+                        sheet_area: address.to_sheet_area(),
+                        color_idx: slot,
+                        span,
+                    });
                 }
             }
-            // TODO(named_ranges): Ident tokens may be named ranges
-            _ => {}
+            AstLeaf::SheetArea { area } => {
+                let span = ref_range_token_spans.get(ref_token_idx).copied();
+                ref_token_idx += 1;
+                if let Some(span) = span {
+                    let slot = assign_slot(*area);
+                    refs.push(FormulaRef {
+                        sheet_area: *area,
+                        color_idx: slot,
+                        span,
+                    });
+                }
+            }
+            AstLeaf::WrongReference | AstLeaf::WrongRange => {
+                if let Some(span) = ref_range_token_spans.get(ref_token_idx).copied() {
+                    invalid_refs.push(span);
+                }
+                ref_token_idx += 1;
+            }
+            AstLeaf::InvalidFunction => {
+                if let Some(span) = fn_ident_spans.get(fn_token_idx).copied() {
+                    invalid_functions.push(span);
+                }
+                fn_token_idx += 1;
+            }
+            AstLeaf::ParseError { message, position } => {
+                if parse_error.is_none() {
+                    parse_error = Some(ParseError {
+                        message: message.clone(),
+                        position: *position,
+                    });
+                }
+            }
         }
     }
 
     FormulaAnalysis {
         refs,
         validation_error,
+        parse_error,
+        invalid_functions,
+        invalid_refs,
     }
 }
 
-/// Resolve an optional cross-sheet name to a sheet index.
-///
-/// Returns `Some(active_sheet)` for same-sheet refs (no sheet prefix).
-/// Returns `None` for unrecognised sheet names — callers skip those refs.
-fn resolve_sheet_name(
-    name: Option<&str>,
-    active_sheet: u32,
-    sheet_names: &[(u32, String)],
-) -> Option<u32> {
-    match name {
-        None => Some(active_sheet),
-        Some(n) => sheet_names
-            .iter()
-            .find(|(_, s)| s.eq_ignore_ascii_case(n))
-            .map(|(idx, _)| *idx),
+/// Flatten `node` into a pre-order stream of semantic leaves. Downstream
+/// correlation with lexer tokens relies on this ordering — recurse `left`
+/// before `right` in binary ops, and emit compound markers before their
+/// children so iterator indices stay aligned.
+fn ast_leaves(node: &Node, out: &mut Vec<AstLeaf>) {
+    match node {
+        Node::ReferenceKind {
+            sheet_index,
+            row,
+            column,
+            ..
+        } => out.push(AstLeaf::CellAddress {
+            address: CellAddress {
+                sheet: *sheet_index,
+                row: *row,
+                column: *column,
+            },
+        }),
+        Node::RangeKind {
+            sheet_index,
+            row1,
+            column1,
+            row2,
+            column2,
+            ..
+        } => out.push(AstLeaf::SheetArea {
+            area: SheetArea {
+                sheet: *sheet_index,
+                area: CellArea {
+                    r1: *row1,
+                    c1: *column1,
+                    r2: *row2,
+                    c2: *column2,
+                },
+            },
+        }),
+        Node::WrongReferenceKind { .. } => out.push(AstLeaf::WrongReference),
+        Node::WrongRangeKind { .. } => out.push(AstLeaf::WrongRange),
+        Node::FunctionKind { args, .. } => {
+            for arg in args {
+                ast_leaves(arg, out);
+            }
+        }
+        Node::InvalidFunctionKind { args, .. } => {
+            out.push(AstLeaf::InvalidFunction);
+            for arg in args {
+                ast_leaves(arg, out);
+            }
+        }
+        Node::OpSumKind { left, right, .. }
+        | Node::OpProductKind { left, right, .. }
+        | Node::OpPowerKind { left, right }
+        | Node::OpRangeKind { left, right }
+        | Node::OpConcatenateKind { left, right }
+        | Node::CompareKind { left, right, .. } => {
+            ast_leaves(left, out);
+            ast_leaves(right, out);
+        }
+        Node::UnaryKind { right, .. } => ast_leaves(right, out),
+        Node::ImplicitIntersection { child, .. } => ast_leaves(child, out),
+        Node::ParseErrorKind {
+            message, position, ..
+        } => out.push(AstLeaf::ParseError {
+            message: message.clone(),
+            position: *position,
+        }),
+        Node::BooleanKind(_)
+        | Node::NumberKind(_)
+        | Node::StringKind(_)
+        | Node::ArrayKind(_)
+        | Node::DefinedNameKind(_)
+        | Node::TableNameKind(_)
+        | Node::WrongVariableKind(_)
+        | Node::ErrorKind(_)
+        | Node::EmptyArgKind => {}
     }
 }
 
@@ -235,6 +377,52 @@ mod formula_analysis_tests {
         let analysis = analyze_formula("=Ghost!A1", 0, &sheets);
         assert_eq!(analysis.refs.len(), 0);
         assert!(analysis.validation_error.is_none());
+    }
+
+    #[test]
+    fn test_same_cell_shares_color_slot() {
+        // Option A: A1 and A1 collapse to one color slot, regardless of $-prefix.
+        let analysis = analyze_formula("=A1+$A$1", 0, &[]);
+        assert_eq!(analysis.refs.len(), 2);
+        assert_eq!(analysis.refs[0].color_idx, analysis.refs[1].color_idx);
+    }
+
+    #[test]
+    fn test_distinct_cells_get_distinct_slots() {
+        let analysis = analyze_formula("=A1+B2+A1", 0, &[]);
+        assert_eq!(analysis.refs.len(), 3);
+        assert_eq!(analysis.refs[0].color_idx, analysis.refs[2].color_idx);
+        assert_ne!(analysis.refs[0].color_idx, analysis.refs[1].color_idx);
+    }
+
+    #[test]
+    fn test_range_and_single_share_when_endpoints_match() {
+        // A1:A1 and A1 canonicalise to the same key under Option A.
+        let analysis = analyze_formula("=A1+A1:A1", 0, &[]);
+        assert_eq!(analysis.refs.len(), 2);
+        assert_eq!(analysis.refs[0].color_idx, analysis.refs[1].color_idx);
+    }
+
+    #[test]
+    fn test_invalid_function_captured() {
+        let analysis = analyze_formula("=FOOBAR(1,2)", 0, &[]);
+        assert_eq!(analysis.invalid_functions.len(), 1);
+        let span = analysis.invalid_functions[0];
+        assert_eq!(&"=FOOBAR(1,2)"[span.start..span.end], "FOOBAR");
+    }
+
+    #[test]
+    fn test_known_function_not_flagged() {
+        let analysis = analyze_formula("=SUM(A1:A3)", 0, &[]);
+        assert!(analysis.invalid_functions.is_empty());
+    }
+
+    #[test]
+    fn test_wrong_sheet_ref_captured() {
+        let sheets = vec![(0u32, "Sheet1".to_string())];
+        let analysis = analyze_formula("=Ghost!A1", 0, &sheets);
+        assert_eq!(analysis.invalid_refs.len(), 1);
+        assert!(analysis.refs.is_empty());
     }
 
     #[test]
