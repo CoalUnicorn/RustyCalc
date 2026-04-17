@@ -16,7 +16,7 @@ use crate::canvas::{
 use crate::coord::{CellAddress, CellArea, SheetArea, SpanRef};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
-use crate::input::formula_analysis::{analyze_formula, is_in_reference_mode, FormulaAnalysis};
+use crate::input::formula_analysis::is_in_reference_mode;
 use crate::input::formula_input::{range_ref_str, splice_ref};
 use crate::model::{try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
@@ -177,11 +177,9 @@ pub fn handle_cell_click(
                     splice_ref(&text, prev_span.unwrap_or(SpanRef::at(cursor)), &ref_str);
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
-                        let sheet_names = model.with_value(|m| m.get_sheet_names());
                         e.cursor = ref_span.end;
                         e.text = new_text.clone();
-                        e.formula_analysis =
-                            analyze_formula(&new_text, e.address.sheet, &sheet_names);
+                        e.formula_analysis = model.with_value(|m| m.analyze_in_context(&new_text));
                     }
                 });
                 state.drag.set(DragState::Pointing {
@@ -380,10 +378,8 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
                 let (new_text, ref_span) = splice_ref(&edit.text, ref_span, &ref_str);
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
-                        let sheet_names = model.with_value(|m| m.get_sheet_names());
                         e.cursor = ref_span.end;
-                        e.formula_analysis =
-                            analyze_formula(&new_text, e.address.sheet, &sheet_names);
+                        e.formula_analysis = model.with_value(|m| m.analyze_in_context(&new_text));
                         e.text = new_text;
                     }
                 });
@@ -574,6 +570,7 @@ pub fn handle_dblclick(ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
     model.with_value(|m| {
         let ac = m.active_cell();
         let text = m.active_cell_content();
+        let formula_analysis = model.with_value(|m| m.analyze_in_context(&text));
         state.editing_cell.set(Some(EditingCell {
             address: CellAddress {
                 sheet: ac.sheet,
@@ -585,7 +582,7 @@ pub fn handle_dblclick(ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
             mode: EditMode::Edit,
             focus: EditFocus::Cell,
             text_dirty: false,
-            formula_analysis: FormulaAnalysis::default(),
+            formula_analysis,
         }));
     });
 }

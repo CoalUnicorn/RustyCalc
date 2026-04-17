@@ -1,14 +1,13 @@
 // See docs/leptos-patterns.md for component conventions.
 
 use leptos::prelude::*;
-use wasm_bindgen::JsCast;
 
 use crate::canvas::col_name;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
+use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::input::formula_analysis::analyze_formula;
 use crate::model::FrontendModel;
-use crate::state::{EditFocus, EditMode};
-use crate::state::{EditingCell, ModelStore, WorkbookState};
+use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 
 /// The formula bar: cell address label + content/formula input.
 ///
@@ -56,7 +55,7 @@ pub fn FormulaBar() -> impl IntoView {
 
     let sheet_names = get_sheet_names();
 
-    let (validation_error, _set_validation_error) = signal(None::<String>);
+    let (_validation_error, _set_validation_error) = signal(None::<String>);
 
     // Start an edit session with FormulaBar focus (so CellEditor doesn't
     // steal focus back), or switch focus if already editing.
@@ -92,66 +91,15 @@ pub fn FormulaBar() -> impl IntoView {
 
     // Update the shared edit buffer (syncs with CellEditor) + debounced validation.
     let on_input = move |ev: web_sys::Event| {
-        let el = ev
-            .target()
-            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok());
-
-        let (value, cursor) = match el {
-            Some(el) => {
-                let value = el.value();
-                let cursor = el
-                    .selection_end()
-                    .ok()
-                    .flatten()
-                    .map(|n| n as usize)
-                    // fallback: cursor at end of text
-                    .unwrap_or_else(|| value.len());
-                (value, cursor)
-            }
-            None => return,
+        let Some(target) = ev.target() else { return };
+        let Some((value, cursor)) = read_value_and_cursor(&target) else {
+            return;
         };
-
-        let sheet_names = get_sheet_names();
-
-        // Immediate UI update (no lag in typing experience)
-        if state.editing_cell.get_untracked().is_some() {
-            state.editing_cell.update(|cell| {
-                if let Some(c) = cell {
-                    let active_sheet = c.address.sheet;
-                    c.text = value.clone();
-                    c.text_dirty = true;
-                    c.formula_analysis = analyze_formula(&value, active_sheet, &sheet_names);
-                    c.cursor = cursor;
-                }
-            });
-        } else {
-            // First keystroke - Accept mode: arrows commit + navigate.
-            model.with_value(|m| {
-                let address = m.active_cell();
-                let analysis = analyze_formula(&value, address.sheet, &sheet_names);
-                state.editing_cell.set(Some(EditingCell {
-                    address,
-                    text: value.clone(),
-                    mode: EditMode::Accept,
-                    focus: EditFocus::FormulaBar,
-                    text_dirty: true,
-                    formula_analysis: analysis,
-                    cursor,
-                }));
-                state.emit_event(SpreadsheetEvent::Navigation(
-                    NavigationEvent::EditingStarted { address },
-                ));
-            });
-        }
+        let sheet_names = model.with_value(|m| m.get_sheet_names());
+        sync_edit(state.editing_cell, value, cursor, sheet_names);
     };
 
-    // Suppress browser defaults; let the event bubble to Workbook
-    // which commits or cancels via classify_key -> execute.
-    let on_keydown = move |ev: web_sys::KeyboardEvent| {
-        if matches!(ev.key().as_str(), "Enter" | "Tab" | "Escape") {
-            ev.prevent_default();
-        }
-    };
+    let on_keydown = move |ev: web_sys::KeyboardEvent| suppress_navigation_defaults(&ev);
 
     let input_class = move || {
         let base = if is_editing() {
@@ -186,41 +134,10 @@ pub fn FormulaBar() -> impl IntoView {
                 on:focus=on_focus
                 on:input=on_input
                 on:keydown=on_keydown
-                placeholder="Enter value or formula"
             />
-            /*
-            <div class="fb-valid">
-                {move || {
-                    let Some(edit) = state.editing_cell.get() else {
-                        return view! { <span class="fb-neutral"> title={"No validation needed".to_string()}>""</span> }
-                    };
-                    if !edit.text.starts_with('=') {
-                        return view! { <span class="fb-neutral"></span> };
-                    }
-                    match edit.formula_analysis.validation_error {
-                        Some(ref err) => {
-                            let msg = err.clone();
-                            view! { <span class="fb-error" title={msg}>"Error"</span> }
-                        }
-                        None => view! { <span class="fb-success" title="Formula syntax is valid">"Valid"</span> },
-                    }
-                }}
-            </div>
-            */
-            // Validation status indicator
-            <div class="fb-valid">
-                {move || {
-                    if state.editing_cell.get().is_some() {
-                        view! { <span class="fb-pending" title={"Checking formula syntax...".to_string()}>"Validating..."</span> }
-                    } else if let Some(error) = validation_error.get() {
-                        view! { <span class="fb-error" title={error.clone()}>"Error"</span> }
-                    } else if is_editing() && display_text().starts_with('=') {
-                        view! { <span class="fb-success" title={"Formula syntax is valid".to_string()}>"Valid"</span> }
-                    } else {
-                        view! { <span class="fb-neutral" title={"No validation needed".to_string()}>""</span> }
-                    }
-                }}
-            </div>
+
+            // Validation status indicator — Stage 3 will populate this.
+            <div class="fb-valid"></div>
 
         </div>
     }

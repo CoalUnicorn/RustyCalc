@@ -95,6 +95,9 @@ pub fn analyze_formula(
 
     // Parser needs a non-empty worksheets list with a matching context sheet,
     // otherwise every bare `A1` resolves to WrongReferenceKind.
+
+    // NOTE: this can be better sheet_names: &[(u32, String)] as argument can be cleaner
+    // consider FrontendModel as the callers will be using it
     let (sheet_name_list, active_sheet_name) = if sheet_names.is_empty() {
         (vec!["Sheet1".to_string()], "Sheet1".to_string())
     } else {
@@ -118,7 +121,7 @@ pub fn analyze_formula(
     let mut leaves = Vec::new();
     ast_leaves(&ast, &mut leaves);
 
-    // Option A identity: same target -> same color slot, regardless of
+    // Identity: same target -> same color slot, regardless of
     // absolute/relative prefix or lexical sheet qualification.
     let mut color_map: HashMap<SheetArea, usize> = HashMap::new();
     let mut next_slot = 0usize;

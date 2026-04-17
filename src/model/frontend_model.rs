@@ -7,12 +7,15 @@ use ironcalc_base::{
 
 use leptos::prelude::Set;
 
-use crate::coord::{CellAddress, CellArea};
 use crate::model::frontend_types::*;
 use crate::state::ModelStore;
 use crate::{
     canvas::geometry::{LAST_COLUMN, LAST_ROW},
     coord::SheetArea,
+};
+use crate::{
+    coord::{CellAddress, CellArea},
+    input::formula_analysis::{analyze_formula, FormulaAnalysis},
 };
 
 use leptos::prelude::UpdateValue;
@@ -52,6 +55,8 @@ pub trait FrontendModel {
 
     /// Position of the active cell.
     fn active_cell(&self) -> CellAddress;
+
+    fn analyze_in_context(&self, text: &str) -> FormulaAnalysis;
 
     fn selection(&self) -> Area;
     /// Frozen pane state for the active sheet.
@@ -263,6 +268,10 @@ impl FrontendModel for UserModel<'_> {
             row: view.row,
             column: view.column,
         }
+    }
+
+    fn analyze_in_context(&self, text: &str) -> FormulaAnalysis {
+        analyze_formula(text, self.active_cell().sheet, &self.get_sheet_names())
     }
 
     // TODO: rename this, it returns ironcalc Area type

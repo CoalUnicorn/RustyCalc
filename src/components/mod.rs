@@ -3,6 +3,7 @@ pub mod color_picker;
 pub mod context_menu;
 pub mod file_bar;
 pub mod formula_bar;
+pub mod formula_text_area;
 pub mod header_context_menu;
 pub mod inline_rename;
 pub mod left_drawer;
