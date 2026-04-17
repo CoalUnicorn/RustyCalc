@@ -9,7 +9,7 @@ use leptos::prelude::*;
 
 use crate::coord::{CellAddress, CellArea, SpanRef};
 use crate::events::*;
-use crate::input::formula_input::FormulaAnalysis;
+use crate::input::formula_analysis::FormulaAnalysis;
 use crate::model::CssColor;
 use crate::storage::WorkbookId;
 

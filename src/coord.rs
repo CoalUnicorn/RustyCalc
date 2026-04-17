@@ -26,16 +26,32 @@ impl SpanRef {
     }
 }
 
-/// A cell or range referenced as editing formula.
+// Point-mode move computation
+
+/// Result of a successful point-mode arrow move.
+#[derive(Debug, PartialEq)]
+pub struct PointingStep {
+    /// Formula text with the new reference spliced in.
+    pub text: String,
+    /// The new pointed-at cell range (for `DragState::Pointing { range }`).
+    pub range: CellArea,
+    /// Byte span of the spliced reference in `text` (for `DragState::Pointing { ref_span }`).
+    pub span: SpanRef,
+}
+
+/// A cell or range referenced in an editing formula.
 ///
-/// Produced by `formula_input::analyze_formula()` and consumed by the canvas
+/// Produced by `formula_analysis::analyze_formula()` and consumed by the canvas
 /// renderer to paint colored overlays over referenced cells.
+///
+/// `color_idx` is a sequential index into `theme::FORMULA_REF_COLORS`, assigned
+/// by the parser in token order. The renderer resolves the actual color string —
+/// keeping presentation out of the coordinate/analysis layer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FormulaRef {
-    pub area: CellArea,
-    pub sheet: u32,
-    /// From `theme::FORMULA_REF_COLORS`
-    pub color: &'static str,
+    pub sheet_area: SheetArea,
+    /// Sequential color slot (0-based). Renderer maps this to `FORMULA_REF_COLORS[idx % len]`.
+    pub color_idx: usize,
     /// Byte span of this token in the formula string (for future cursor-aware
     /// per-token highlighting in the formula bar).
     pub span: SpanRef,

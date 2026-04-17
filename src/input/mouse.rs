@@ -16,10 +16,8 @@ use crate::canvas::{
 use crate::coord::{CellAddress, CellArea, SheetArea, SpanRef};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
-use crate::input::formula_input::{
-    analyze_formula, is_in_reference_mode, range_ref_str, splice_ref,
-    FormulaAnalysis,
-};
+use crate::input::formula_analysis::{analyze_formula, is_in_reference_mode, FormulaAnalysis};
+use crate::input::formula_input::{range_ref_str, splice_ref};
 use crate::model::{try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
     ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
@@ -163,9 +161,6 @@ pub fn handle_cell_click(
         let already_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
         let may_point = edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
         if may_point {
-            // Use the stored cursor (set on last on_input) rather than reading from the
-            // DOM. By click time, focus has already moved to the <canvas>, so
-            // get_formula_cursor() returns 0 and is_in_reference_mode always fails.
             let cursor = edit.cursor;
             if already_pointing || is_in_reference_mode(&edit.text, cursor) {
                 let sheet = model.with_value(|m| m.get_selected_sheet());

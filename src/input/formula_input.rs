@@ -2,54 +2,9 @@
 ///
 /// These operate on formula strings and cursor positions; they have no side
 /// effects and do not touch the model.
-use crate::coord::{CellArea, FormulaRef, SheetArea, SpanRef};
-use crate::theme::FORMULA_REF_COLORS;
-use ironcalc_base::expressions::lexer::util::get_tokens;
-use ironcalc_base::expressions::token::TokenType;
+use crate::coord::{CellArea, PointingStep, SheetArea, SpanRef};
+use crate::input::formula_analysis::is_in_reference_mode;
 use ironcalc_base::expressions::utils::number_to_column;
-use wasm_bindgen::JsCast;
-
-// DOM cursor helper
-
-/// Return the `selectionEnd` cursor position of the currently focused formula
-/// input (cell textarea or formula-bar input). Returns 0 on failure.
-pub fn get_formula_cursor() -> usize {
-    leptos::prelude::document()
-        .active_element()
-        .and_then(|el| {
-            el.dyn_ref::<web_sys::HtmlTextAreaElement>()
-                .and_then(|ta| ta.selection_end().ok().flatten())
-                .or_else(|| {
-                    el.dyn_ref::<web_sys::HtmlInputElement>()
-                        .and_then(|inp| inp.selection_end().ok().flatten())
-                })
-        })
-        .map(|n| n as usize)
-        .unwrap_or(0)
-}
-
-// Reference-mode detection
-
-/// Returns `true` if the cursor is at a position in `text` where inserting a
-/// cell reference would be syntactically valid.
-///
-/// Uses a simple heuristic: the text starts with `'='` AND the last
-/// non-whitespace character before `cursor` is an operator or opening paren
-/// (or the text is exactly `"="`).
-pub fn is_in_reference_mode(text: &str, cursor: usize) -> bool {
-    if !text.starts_with('=') {
-        return false;
-    }
-    let before = &text[..cursor.min(text.len())];
-    if before == "=" {
-        return true;
-    }
-    matches!(
-        before.trim_end().chars().last(),
-        // NOTE: confirm valid ',' in other locales ie. German decimals sep is '.'
-        Some(',' | '(' | '+' | '-' | '*' | '/' | '<' | '>' | '=' | '&' | ';' | ':')
-    )
-}
 
 // Reference string formatting
 
@@ -104,212 +59,76 @@ pub fn splice_ref(text: &str, span: SpanRef, ref_str: &str) -> (String, SpanRef)
     )
 }
 
-// Point-mode move computation
-
-/// Result of a successful point-mode arrow move.
-#[derive(Debug, PartialEq)]
-pub struct PointingStep {
-    /// Formula text with the new reference spliced in.
-    pub text: String,
-    /// The new pointed-at cell range (for `DragState::Pointing { range }`).
-    pub range: CellArea,
-    /// Byte span of the spliced reference in `text` (for `DragState::Pointing { ref_span }`).
-    pub span: SpanRef,
-}
-
-/// Returns `true` when a keypress should exit point mode.
+/// All state needed to evaluate a point-mode keypress, drawn from `EditingCell` and `DragState`.
 ///
-/// Any key that is not an arrow key or a bare modifier should drop the
-/// `DragState::Pointing` state so the next arrow press starts a fresh reference.
-pub fn should_exit_pointing(key: &str) -> bool {
-    !matches!(
-        key,
-        "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight" | "Shift" | "Control" | "Alt" | "Meta"
-    )
+/// Passed to `try_point_move` so callers don't manage 8 separate parameters.
+pub struct PointMoveCtx<'a> {
+    pub text: &'a str,
+    pub cursor: usize,
+    pub already_pointing: bool,
+    pub current_range: CellArea,
+    pub prev_span: Option<SpanRef>,
+    pub sheet: u32,
 }
 
-/// Compute a point-mode arrow move from pure inputs. Returns `None` when:
-/// - `key` is not an arrow key, or
-/// - `already_pointing` is false AND cursor is not at a valid reference insertion point.
+/// Outcome of evaluating a keypress in point mode.
+///
+/// Returned by `try_point_move` so callers handle all three paths in a single `match`,
+/// instead of calling `should_exit_pointing` and `try_point_move` separately.
+#[derive(Debug, PartialEq)]
+pub enum PointMoveOutcome {
+    /// Modifier-only key (Shift/Ctrl/Alt/Meta), or arrow key not at a reference insertion point.
+    NoAction,
+    /// Non-arrow, non-modifier key while pointing — caller should set `DragState::Idle`.
+    ExitPointing,
+    /// Arrow key moved the point selection. Caller applies the result.
+    Move(PointingStep),
+}
+
+/// Evaluate a point-mode keypress from pure inputs.
 ///
 /// # Caller responsibilities
 ///
-/// - Check `may_point` (`edit.mode == EditMode::Accept || edit.text_dirty || already_pointing`)
+/// - Gate on `may_point` (`edit.mode == Accept || edit.text_dirty || already_pointing`)
 ///   before calling — this involves `EditMode` (UI state), not formula text.
-/// - Read `cursor` from the DOM via `get_formula_cursor()`.
-/// - Resolve `current_range` from `WorkbookState::effective_point_range`.
-/// - Resolve `prev_span` from `DragState::Pointing { ref_span }`.
-/// - Apply signal writes from the returned `PointMoveResult`.
-///
-/// # Future work
-///
-/// A `PointingStep` enum (`ExitPointing | Move(PointMoveResult) | NoAction`) could absorb
-/// the "exit pointing on non-arrow key" guard in `workbook.rs` as well, making the component a
-/// pure dispatcher. Before extracting, review the `DragState`/`EditMode` signal lifecycle in
-/// `state.rs` — signal writes from inside an enum producer may change the reactivity shape.
-// TODO(future): PointingStep — see doc comment above
-// TODO: to many args
-pub fn try_point_move(
-    text: &str,
-    key: &str,
-    is_shift: bool,
-    cursor: usize,
-    already_pointing: bool,
-    current_range: CellArea,
-    prev_span: Option<SpanRef>,
-    sheet: u32,
-) -> Option<PointingStep> {
-    // Only arrow keys trigger point-mode movement.
+/// - Guard against Ctrl/Alt modifiers before calling — they suppress point mode.
+/// - Apply signal writes from the returned [`PointMoveOutcome`].
+pub fn try_point_move(ctx: &PointMoveCtx, key: &str, is_shift: bool) -> PointMoveOutcome {
+    // Modifier-only keys never change point state.
+    if matches!(key, "Shift" | "Control" | "Alt" | "Meta") {
+        return PointMoveOutcome::NoAction;
+    }
+    // Any non-arrow key signals the user is done pointing (e.g. typed an operator or digit).
     if !matches!(key, "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight") {
-        return None;
+        return PointMoveOutcome::ExitPointing;
     }
-    // Entry guard: must be already pointing or at a valid reference insertion point.
-    if !already_pointing && !is_in_reference_mode(text, cursor) {
-        return None;
+    // Arrow key: enter or extend point mode if cursor is at a valid reference insertion point.
+    if !ctx.already_pointing && !is_in_reference_mode(ctx.text, ctx.cursor) {
+        return PointMoveOutcome::NoAction;
     }
-    // Extend the trailing corner of the range one step in the arrow direction.
-    let trailing = current_range.extend_trailing(key);
+    let trailing = ctx.current_range.extend_trailing(key);
     // Shift extends the selection (anchor stays); plain arrow moves the whole range.
     let new_range = if is_shift {
         CellArea {
-            r1: current_range.r1,
-            c1: current_range.c1,
+            r1: ctx.current_range.r1,
+            c1: ctx.current_range.c1,
             r2: trailing.r2,
             c2: trailing.c2,
         }
     } else {
         CellArea::from_cell(trailing.r2, trailing.c2)
     };
-    let ref_str = range_ref_str(new_range.with_sheet(sheet), sheet, "");
-    let (new_text, new_span) = splice_ref(text, prev_span.unwrap_or(SpanRef::at(cursor)), &ref_str);
-    Some(PointingStep {
+    let ref_str = range_ref_str(new_range.with_sheet(ctx.sheet), ctx.sheet, "");
+    let (new_text, new_span) = splice_ref(
+        ctx.text,
+        ctx.prev_span.unwrap_or(SpanRef::at(ctx.cursor)),
+        &ref_str,
+    );
+    PointMoveOutcome::Move(PointingStep {
         text: new_text,
         range: new_range,
         span: new_span,
     })
-}
-
-/// Result of tokenizing a formula for UI purposes.
-///
-/// Produced by `analyze_formula()` and stored on `EditingCell` so both
-/// the formula bar and the canvas renderer read from the same source.
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct FormulaAnalysis {
-    /// Colored overlays for the canvas, one per distinct cell/range token.
-    pub refs: Vec<FormulaRef>,
-    /// First illegal token error, if any; `None` means syntactically valid
-    /// (or not a formula at all).
-    pub validation_error: Option<String>,
-}
-
-/// Tokenize `formula` and extract cell/range references + validation state.
-///
-/// Returns an empty `FormulaAnalysis` for non-formula text (no leading `=`).
-///
-/// `active_sheet` is the 0-based index of the sheet being edited.
-/// `sheet_names` is a slice of `(sheet_index, sheet_name)` pairs, used to
-/// resolve cross-sheet references like `Sheet2!A1`.
-///
-/// # Named ranges
-/// `Ident` tokens may be named ranges — not yet resolved.
-/// TODO(named_ranges): resolve Ident tokens via model.get_defined_name_list()
-/// when the name manager is implemented.
-pub fn analyze_formula(
-    formula: &str,
-    active_sheet: u32,
-    sheet_names: &[(u32, String)],
-) -> FormulaAnalysis {
-    if !formula.starts_with('=') || formula.len() < 2 {
-        return FormulaAnalysis::default();
-    }
-
-    let tokens = get_tokens(formula);
-    let mut refs = Vec::new();
-    let mut color_idx = 0usize;
-    let mut validation_error: Option<String> = None;
-
-    for token in &tokens {
-        match &token.token {
-            TokenType::Reference {
-                sheet, row, column, ..
-            } => {
-                let Some(sheet_idx) =
-                    resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names)
-                else {
-                    continue;
-                };
-                let color = FORMULA_REF_COLORS[color_idx % FORMULA_REF_COLORS.len()];
-                color_idx += 1;
-                refs.push(FormulaRef {
-                    area: CellArea {
-                        r1: *row,
-                        c1: *column,
-                        r2: *row,
-                        c2: *column,
-                    },
-                    sheet: sheet_idx,
-                    color,
-                    span: SpanRef {
-                        start: token.start as usize,
-                        end: token.end as usize,
-                    },
-                });
-            }
-            TokenType::Range { sheet, left, right } => {
-                let Some(sheet_idx) =
-                    resolve_sheet_name(sheet.as_deref(), active_sheet, sheet_names)
-                else {
-                    continue;
-                };
-                let color = FORMULA_REF_COLORS[color_idx % FORMULA_REF_COLORS.len()];
-                color_idx += 1;
-                refs.push(FormulaRef {
-                    area: CellArea {
-                        r1: left.row,
-                        c1: left.column,
-                        r2: right.row,
-                        c2: right.column,
-                    },
-                    sheet: sheet_idx,
-                    color,
-                    span: SpanRef {
-                        start: token.start as usize,
-                        end: token.end as usize,
-                    },
-                });
-            }
-            TokenType::Illegal(e) => {
-                if validation_error.is_none() {
-                    validation_error = Some(e.message.clone());
-                }
-            }
-            // TODO(named_ranges): Ident tokens may be named ranges
-            _ => {}
-        }
-    }
-
-    FormulaAnalysis {
-        refs,
-        validation_error,
-    }
-}
-
-/// Resolve an optional cross-sheet name to a sheet index.
-///
-/// Returns `active_sheet` when `name` is `None` (same-sheet reference).
-/// Falls back to `active_sheet` for unrecognised sheet names.
-fn resolve_sheet_name(
-    name: Option<&str>,
-    active_sheet: u32,
-    sheet_names: &[(u32, String)],
-) -> Option<u32> {
-    match name {
-        None => Some(active_sheet),
-        Some(n) => sheet_names
-            .iter()
-            .find(|(_, s)| s.eq_ignore_ascii_case(n))
-            .map(|(idx, _)| *idx),
-    }
 }
 
 #[cfg(test)]
@@ -317,87 +136,6 @@ mod tests {
     use super::*;
     use crate::coord::CellArea;
     use wasm_bindgen_test::wasm_bindgen_test;
-
-    // is_in_reference_mode
-
-    #[wasm_bindgen_test]
-    fn ref_mode_empty_string() {
-        assert!(!is_in_reference_mode("", 0));
-    }
-
-    // FIXME
-    // #[wasm_bindgen_test]
-    // fn ref_mode_no_equals_plain_word() {
-    //     assert!(is_in_reference_mode("hello", 5));
-    // }
-
-    // #[wasm_bindgen_test]
-    // fn ref_mode_no_equals_number() {
-    //     assert!(is_in_reference_mode("100", 3));
-    // }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_bare_equals() {
-        assert!(is_in_reference_mode("=", 1));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_after_open_paren() {
-        assert!(is_in_reference_mode("=SUM(", 5));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_after_plus() {
-        assert!(is_in_reference_mode("=A1+", 4));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_after_minus() {
-        assert!(is_in_reference_mode("=A1-", 4));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_after_star() {
-        assert!(is_in_reference_mode("=A1*", 4));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_after_slash() {
-        assert!(is_in_reference_mode("=A1/", 4));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_after_comma() {
-        assert!(is_in_reference_mode("=A1,", 4));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_after_ampersand() {
-        assert!(is_in_reference_mode("=A1&", 4));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_after_colon() {
-        assert!(is_in_reference_mode("=A1:", 4));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_cursor_at_end_of_ref_token() {
-        // Cursor sits right after a cell reference - not a valid insertion point.
-        assert!(!is_in_reference_mode("=A1", 3));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_cursor_beyond_len_clamped() {
-        // cursor > text.len() should clamp to text.len() and still return true.
-        assert!(is_in_reference_mode("=SUM(", 100));
-    }
-
-    #[wasm_bindgen_test]
-    fn ref_mode_space_before_operator_trim_end() {
-        // trim_end strips trailing whitespace so the last meaningful char is '+'.
-        assert!(is_in_reference_mode("=A1 +", 5));
-    }
 
     // cell_ref_str
 
@@ -567,228 +305,110 @@ mod tests {
 
     // try_point_move
 
+    fn ctx<'a>(
+        text: &'a str,
+        cursor: usize,
+        already_pointing: bool,
+        range: CellArea,
+        prev_span: Option<SpanRef>,
+    ) -> PointMoveCtx<'a> {
+        PointMoveCtx { text, cursor, already_pointing, current_range: range, prev_span, sheet: 1 }
+    }
+
     #[wasm_bindgen_test]
-    fn point_move_non_arrow_key_returns_none() {
-        let range = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 1,
-            c2: 1,
-        };
+    fn point_move_non_arrow_key_exits_pointing() {
+        // Enter is a non-modifier non-arrow key — signals the user is done pointing.
+        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
         assert_eq!(
-            try_point_move("=", "Enter", false, 1, false, range, None, 1),
-            None
+            try_point_move(&ctx("=", 1, false, range, None), "Enter", false),
+            PointMoveOutcome::ExitPointing,
         );
     }
 
     #[wasm_bindgen_test]
-    fn point_move_cursor_after_ref_token_not_pointing_returns_none() {
-        // Cursor at end of "=A1" (position 3) — last char is '1', not an operator.
-        // is_in_reference_mode returns false here, and already_pointing is false.
-        let range = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 1,
-            c2: 1,
-        };
+    fn point_move_modifier_key_is_no_action() {
+        // Shift alone must not exit pointing (user is extending a selection).
+        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
         assert_eq!(
-            try_point_move("=A1", "ArrowDown", false, 3, false, range, None, 1),
-            None
+            try_point_move(&ctx("=", 1, true, range, None), "Shift", false),
+            PointMoveOutcome::NoAction,
+        );
+    }
+
+    #[wasm_bindgen_test]
+    fn point_move_cursor_after_ref_token_not_pointing_is_no_action() {
+        // Cursor at end of "=A1" (position 3) — last char is '1', not an operator.
+        // is_in_reference_mode returns false; already_pointing is false → NoAction.
+        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
+        assert_eq!(
+            try_point_move(&ctx("=A1", 3, false, range, None), "ArrowDown", false),
+            PointMoveOutcome::NoAction,
         );
     }
 
     #[wasm_bindgen_test]
     fn point_move_already_pointing_bypasses_ref_mode_check() {
         // "=A1" cursor at 3 is not in ref mode normally, but already_pointing=true
-        // bypasses the is_in_reference_mode guard.
-        let range = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 1,
-            c2: 1,
-        };
-        let result = try_point_move(
-            "=A1",
-            "ArrowDown",
-            false,
-            3,
-            true,
-            range,
-            Some(SpanRef { start: 1, end: 3 }),
-            1,
-        );
-        assert!(result.is_some());
+        // bypasses the is_in_reference_mode guard → Move.
+        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
+        assert!(matches!(
+            try_point_move(
+                &ctx("=A1", 3, true, range, Some(SpanRef { start: 1, end: 3 })),
+                "ArrowDown",
+                false,
+            ),
+            PointMoveOutcome::Move(_),
+        ));
     }
 
     #[wasm_bindgen_test]
     fn point_move_bare_equals_arrow_down_enters_a2() {
         // "=" cursor=1: is_in_reference_mode returns true (bare equals).
         // ArrowDown from A1 → new_range=A2, ref="A2", splice inserts at cursor.
-        let range = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 1,
-            c2: 1,
-        };
+        let range = CellArea { r1: 1, c1: 1, r2: 1, c2: 1 };
         assert_eq!(
-            try_point_move("=", "ArrowDown", false, 1, false, range, None, 1),
-            Some(PointingStep {
+            try_point_move(&ctx("=", 1, false, range, None), "ArrowDown", false),
+            PointMoveOutcome::Move(PointingStep {
                 text: "=A2".to_string(),
-                range: CellArea {
-                    r1: 2,
-                    c1: 1,
-                    r2: 2,
-                    c2: 1
-                },
+                range: CellArea { r1: 2, c1: 1, r2: 2, c2: 1 },
                 span: SpanRef { start: 1, end: 3 },
-            })
+            }),
         );
     }
 
     #[wasm_bindgen_test]
     fn point_move_shift_extends_anchor() {
         // Already pointing at B3, ArrowDown+Shift: anchor B3 stays, trailing extends to B4.
-        let range = CellArea {
-            r1: 3,
-            c1: 2,
-            r2: 3,
-            c2: 2,
-        };
+        let range = CellArea { r1: 3, c1: 2, r2: 3, c2: 2 };
         assert_eq!(
             try_point_move(
-                "=B3",
+                &ctx("=B3", 3, true, range, Some(SpanRef { start: 1, end: 3 })),
                 "ArrowDown",
                 true,
-                3,
-                true,
-                range,
-                Some(SpanRef { start: 1, end: 3 }),
-                1
             ),
-            Some(PointingStep {
+            PointMoveOutcome::Move(PointingStep {
                 text: "=B3:B4".to_string(),
-                range: CellArea {
-                    r1: 3,
-                    c1: 2,
-                    r2: 4,
-                    c2: 2
-                },
+                range: CellArea { r1: 3, c1: 2, r2: 4, c2: 2 },
                 span: SpanRef { start: 1, end: 6 },
-            })
+            }),
         );
     }
 
     #[wasm_bindgen_test]
     fn point_move_plain_arrow_moves_whole_range() {
         // Already pointing at B3, ArrowRight (no shift): whole range moves to C3.
-        let range = CellArea {
-            r1: 3,
-            c1: 2,
-            r2: 3,
-            c2: 2,
-        };
+        let range = CellArea { r1: 3, c1: 2, r2: 3, c2: 2 };
         assert_eq!(
             try_point_move(
-                "=B3",
+                &ctx("=B3", 3, true, range, Some(SpanRef { start: 1, end: 3 })),
                 "ArrowRight",
                 false,
-                3,
-                true,
-                range,
-                Some(SpanRef { start: 1, end: 3 }),
-                1
             ),
-            Some(PointingStep {
+            PointMoveOutcome::Move(PointingStep {
                 text: "=C3".to_string(),
-                range: CellArea {
-                    r1: 3,
-                    c1: 3,
-                    r2: 3,
-                    c2: 3
-                },
+                range: CellArea { r1: 3, c1: 3, r2: 3, c2: 3 },
                 span: SpanRef { start: 1, end: 3 },
-            })
+            }),
         );
-    }
-}
-
-#[cfg(test)]
-mod formula_analysis_tests {
-    use super::*;
-
-    #[test]
-    fn test_single_cell_ref() {
-        let analysis = analyze_formula("=A1+1", 0, &[]);
-        assert_eq!(analysis.refs.len(), 1);
-        assert_eq!(
-            analysis.refs[0].area,
-            CellArea {
-                r1: 1,
-                c1: 1,
-                r2: 1,
-                c2: 1
-            }
-        );
-        assert_eq!(analysis.refs[0].sheet, 0);
-        assert!(analysis.validation_error.is_none());
-    }
-
-    #[test]
-    fn test_range_ref() {
-        let analysis = analyze_formula("=SUM(B2:C4)", 0, &[]);
-        assert_eq!(analysis.refs.len(), 1);
-        assert_eq!(
-            analysis.refs[0].area,
-            CellArea {
-                r1: 2,
-                c1: 2,
-                r2: 4,
-                c2: 3
-            }
-        );
-    }
-
-    #[test]
-    fn test_multiple_refs_get_different_colors() {
-        let analysis = analyze_formula("=A1+B2", 0, &[]);
-        assert_eq!(analysis.refs.len(), 2);
-        assert_ne!(analysis.refs[0].color, analysis.refs[1].color);
-    }
-
-    #[test]
-    fn test_non_formula_returns_empty() {
-        let analysis = analyze_formula("hello", 0, &[]);
-        assert!(analysis.refs.is_empty());
-        assert!(analysis.validation_error.is_none());
-    }
-
-    #[test]
-    fn test_cross_sheet_ref_resolved() {
-        let sheets = vec![(0u32, "Sheet1".to_string()), (1u32, "Sheet2".to_string())];
-        let analysis = analyze_formula("=Sheet2!A1", 0, &sheets);
-        assert_eq!(analysis.refs.len(), 1);
-        assert_eq!(analysis.refs[0].sheet, 1);
-    }
-
-    #[test]
-    fn test_unknown_sheet_ref_is_skipped() {
-        // A reference to a sheet that doesn't exist in sheet_names should produce
-        // no overlay rather than a misleading overlay on the active sheet.
-        let sheets = vec![(0u32, "Sheet1".to_string())];
-        let analysis = analyze_formula("=Ghost!A1", 0, &sheets);
-        assert_eq!(analysis.refs.len(), 0);
-        assert!(analysis.validation_error.is_none());
-    }
-
-    #[test]
-    fn test_validation_error_is_human_readable() {
-        // LexerError.message (not Debug format) should be used — no "LexerError {" prefix.
-        let analysis = analyze_formula("=@invalid", 0, &[]);
-        if let Some(ref msg) = analysis.validation_error {
-            assert!(
-                !msg.contains("LexerError"),
-                "validation_error should not contain Rust debug output, got: {msg}"
-            );
-        }
     }
 }

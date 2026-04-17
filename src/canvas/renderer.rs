@@ -96,7 +96,7 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use super::geometry::PixelRect;
 use super::geometry::*;
 use super::types::*;
-use crate::theme::CanvasTheme;
+use crate::theme::{CanvasTheme, FORMULA_REF_COLORS};
 
 // Layout constants
 const CELL_PADDING: f64 = 4.0;
@@ -343,13 +343,13 @@ impl CanvasRenderer {
         // Each ref gets its own color (dashed border + 8% fill tint).
         // Only refs on the current sheet are drawn; cross-sheet refs are silently skipped.
         for fr in &overlays.formula_refs {
-            if fr.sheet == sheet {
+            if fr.sheet_area.sheet == sheet {
                 self.draw_dashed_range(
                     model,
                     sheet,
                     frc.offset,
-                    fr.area.normalized(),
-                    fr.color,
+                    fr.sheet_area.area.normalized(),
+                    FORMULA_REF_COLORS[fr.color_idx % FORMULA_REF_COLORS.len()],
                     DashFill::Tinted,
                 );
             }

@@ -343,7 +343,7 @@ impl KeyMod {
 mod tests {
     use super::*;
     use crate::coord::CellAddress;
-    use crate::input::formula_input::FormulaAnalysis;
+    use crate::input::formula_analysis::FormulaAnalysis;
     use crate::model::{mutate, ArrowKey, EvaluationMode};
     use crate::state::{DragState, EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;

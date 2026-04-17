@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
-use crate::input::formula_input::{analyze_formula, FormulaAnalysis};
+use crate::input::formula_analysis::{analyze_formula, FormulaAnalysis};
 use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};

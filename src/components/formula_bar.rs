@@ -5,7 +5,7 @@ use wasm_bindgen::JsCast;
 
 use crate::canvas::col_name;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
-use crate::input::formula_input::{analyze_formula, FormulaAnalysis};
+use crate::input::formula_analysis::analyze_formula;
 use crate::model::FrontendModel;
 use crate::state::{EditFocus, EditMode};
 use crate::state::{EditingCell, ModelStore, WorkbookState};
@@ -54,6 +54,8 @@ pub fn FormulaBar() -> impl IntoView {
     let get_sheet_names =
         move || -> Vec<(u32, String)> { model.with_value(|m| m.get_sheet_names()) };
 
+    let sheet_names = get_sheet_names();
+
     let (validation_error, _set_validation_error) = signal(None::<String>);
 
     // Start an edit session with FormulaBar focus (so CellEditor doesn't
@@ -82,7 +84,7 @@ pub fn FormulaBar() -> impl IntoView {
                 mode: EditMode::Edit,
                 focus: EditFocus::FormulaBar,
                 text_dirty: false,
-                formula_analysis: FormulaAnalysis::default(),
+                formula_analysis: analyze_formula(&text, address.sheet, &sheet_names), //FormulaAnalysis::default(),
                 cursor: text.len(),
             }));
         });

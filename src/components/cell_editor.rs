@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 
 use crate::canvas::selected_cell_rect;
-use crate::input::formula_input::analyze_formula;
+use crate::input::formula_analysis::analyze_formula;
 use crate::model::FrontendModel;
 use crate::state::ModelStore;
 use crate::state::WorkbookState;
