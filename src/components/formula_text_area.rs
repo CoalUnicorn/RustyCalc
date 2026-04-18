@@ -63,7 +63,7 @@ pub fn FormulaTextArea() -> impl IntoView {
         });
         format!(
             "left:{:.0}px;top:{:.0}px;width:{:.0}px;height:{:.0}px;",
-            r.x, r.y, r.width, r.height,
+            r.point.x, r.point.y, r.width, r.height,
         )
     };
 

@@ -45,25 +45,21 @@ pub struct Point {
 /// A rectangle in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PixelRect {
-    pub x: f64,
-    pub y: f64,
+    pub point: Point,
     pub width: f64,
     pub height: f64,
 }
 
 impl PixelRect {
     pub fn right(&self) -> f64 {
-        self.x + self.width
+        self.point.x + self.width
     }
     pub fn bottom(&self) -> f64 {
-        self.y + self.height
+        self.point.y + self.height
     }
     #[allow(dead_code)]
     pub fn top_left(&self) -> Point {
-        Point {
-            x: self.x,
-            y: self.y,
-        }
+        self.point
     }
     #[allow(dead_code)]
     pub fn bottom_right(&self) -> Point {
@@ -74,15 +70,17 @@ impl PixelRect {
     }
     pub fn center(&self) -> Point {
         Point {
-            x: self.x + self.width / 2.0,
-            y: self.y + self.height / 2.0,
+            x: self.point.x + self.width / 2.0,
+            y: self.point.y + self.height / 2.0,
         }
     }
     /// Shrink by `dx` / `dy` on each side (negative values grow the rect).
     pub fn inset(&self, dx: f64, dy: f64) -> Self {
         Self {
-            x: self.x + dx,
-            y: self.y + dy,
+            point: Point {
+                x: self.point.x + dx,
+                y: self.point.y + dy,
+            },
             width: self.width - 2.0 * dx,
             height: self.height - 2.0 * dy,
         }
@@ -234,8 +232,10 @@ pub fn cell_rect_at(m: &UserModel, row: i32, col: i32) -> PixelRect {
     let sheet = view.sheet;
     let fg = frozen_geometry(m, sheet);
     PixelRect {
-        x: col_to_x(m, sheet, view.left_column, col, &fg),
-        y: row_to_y(m, sheet, view.top_row, row, &fg),
+        point: Point {
+            x: col_to_x(m, sheet, view.left_column, col, &fg),
+            y: row_to_y(m, sheet, view.top_row, row, &fg),
+        },
         width: col_width(m, sheet, col),
         height: row_height(m, sheet, row),
     }

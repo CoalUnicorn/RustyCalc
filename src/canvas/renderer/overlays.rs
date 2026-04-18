@@ -9,6 +9,7 @@
 
 use ironcalc_base::UserModel;
 
+use crate::canvas::Point;
 use crate::coord::{CellAddress, CellArea};
 
 use super::super::geometry::{PixelRect, AUTOFILL_HANDLE_PX};
@@ -44,8 +45,10 @@ impl CanvasRenderer {
         self.rect_stroke(b, self.theme.selection_color, SELECTION_BORDER_WIDTH);
 
         let handle = PixelRect {
-            x: b.right() - AUTOFILL_HANDLE_PX / 2.0,
-            y: b.bottom() - AUTOFILL_HANDLE_PX / 2.0,
+            point: Point {
+                x: b.right() - AUTOFILL_HANDLE_PX / 2.0,
+                y: b.bottom() - AUTOFILL_HANDLE_PX / 2.0,
+            },
             width: AUTOFILL_HANDLE_PX,
             height: AUTOFILL_HANDLE_PX,
         };

@@ -6,6 +6,7 @@
 
 use ironcalc_base::UserModel;
 
+use crate::canvas::Point;
 use crate::coord::CellArea;
 
 use super::super::geometry::{
@@ -65,8 +66,7 @@ impl CanvasRenderer {
             self.cell_y(model, sheet, range.r2, frozen) + row_height(model, sheet, range.r2)
         };
         Some(PixelRect {
-            x,
-            y,
+            point: Point { x, y },
             width: right - x,
             height: bottom - y,
         })

@@ -8,6 +8,7 @@ use std::ops::RangeInclusive;
 
 use ironcalc_base::UserModel;
 
+use crate::canvas::Point;
 use crate::coord::{CellArea, FormulaRef, SheetArea};
 use crate::model::CssColor;
 
@@ -38,14 +39,12 @@ impl Axis {
     pub(crate) fn header_rect(self, along: f64, thickness: f64) -> PixelRect {
         match self {
             Axis::Row => PixelRect {
-                x: 0.5,
-                y: along,
+                point: Point { x: 0.5, y: along },
                 width: HEADER_COL_WIDTH,
                 height: thickness,
             },
             Axis::Column => PixelRect {
-                x: along,
-                y: 0.5,
+                point: Point { x: along, y: 0.5 },
                 width: thickness,
                 height: HEADER_ROW_HEIGHT,
             },
@@ -61,9 +60,7 @@ impl Axis {
 /// `cell_x(model, sheet, col, frozen)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct FrozenOffset {
-    /// X pixel where the scrollable column area begins.
     pub x: f64,
-    /// Y pixel where the scrollable row area begins.
     pub y: f64,
 }
 
@@ -142,8 +139,6 @@ impl PaneRegion {
             cols,
             start_x: HEADER_COL_WIDTH + 0.5,
             start_y: HEADER_ROW_HEIGHT + 0.5,
-            last_col: frc.cols,
-            last_row: frc.rows,
         }
     }
 
@@ -157,7 +152,6 @@ impl PaneRegion {
             start_x: frc.offset.x,
             start_y: HEADER_ROW_HEIGHT + 0.5,
             last_col: vis.col_last,
-            last_row: frc.rows,
         }
     }
 
@@ -170,7 +164,6 @@ impl PaneRegion {
             cols,
             start_x: HEADER_COL_WIDTH + 0.5,
             start_y: frc.offset.y,
-            last_col: frc.cols,
             last_row: vis.row_last,
         }
     }

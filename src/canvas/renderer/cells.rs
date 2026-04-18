@@ -13,6 +13,7 @@ use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::UserModel;
 use web_sys::CanvasRenderingContext2d;
 
+use crate::canvas::Point;
 use crate::coord::CellAddress;
 
 use super::super::geometry::{col_width, row_height, PixelRect};
@@ -94,8 +95,7 @@ impl BorderEdge {
 
     fn segment(self, rect: PixelRect) -> BorderSegment {
         let PixelRect {
-            x,
-            y,
+            point: Point { x, y },
             width,
             height,
         } = rect;
@@ -207,8 +207,7 @@ impl CanvasRenderer {
                 }
 
                 let rect = PixelRect {
-                    x,
-                    y,
+                    point: Point { x, y },
                     width: *cw,
                     height: rh,
                 };
@@ -242,10 +241,10 @@ impl CanvasRenderer {
 
     /// Check if a rectangle is at least partially visible on the canvas.
     pub(super) fn is_rect_visible(&self, rect: PixelRect) -> bool {
-        rect.x < self.width
-            && (rect.x + rect.width) > 0.0
-            && rect.y < self.height
-            && (rect.y + rect.height) > 0.0
+        rect.point.x < self.width
+            && (rect.point.x + rect.width) > 0.0
+            && rect.point.y < self.height
+            && (rect.point.y + rect.height) > 0.0
     }
 
     /// Paint one cell's background and resolve/draw all four border edges.
@@ -271,7 +270,8 @@ impl CanvasRenderer {
 
         // Background fill.
         self.ctx.set_fill_style_str(bg);
-        self.ctx.fill_rect(rect.x, rect.y, rect.width, rect.height);
+        self.ctx
+            .fill_rect(rect.point.x, rect.point.y, rect.width, rect.height);
 
         // Inner edges (left, top) — each falls back to the matching neighbour's
         // opposite border and fill. The two blocks used to be hand-mirrored;
@@ -337,8 +337,10 @@ impl CanvasRenderer {
         frozen: FrozenOffset,
     ) {
         let rect = PixelRect {
-            x: self.cell_x(model, addr.sheet, addr.column, frozen),
-            y: self.cell_y(model, addr.sheet, addr.row, frozen),
+            point: Point {
+                x: self.cell_x(model, addr.sheet, addr.column, frozen),
+                y: self.cell_y(model, addr.sheet, addr.row, frozen),
+            },
             width: col_width(model, addr.sheet, addr.column),
             height: row_height(model, addr.sheet, addr.row),
         };

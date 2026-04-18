@@ -117,7 +117,7 @@ impl CanvasRenderer {
             let center_x = match effective_h_align {
                 HorizontalAlignment::Right => right - CELL_PADDING - tw / 2.0,
                 HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => center.x,
-                _ => rect.x + CELL_PADDING + tw / 2.0,
+                _ => rect.point.x + CELL_PADDING + tw / 2.0,
             };
             let center_y = match effective_v_align {
                 VerticalAlignment::Bottom => {
@@ -126,7 +126,7 @@ impl CanvasRenderer {
                 VerticalAlignment::Center => {
                     center.y + (i_f + (1.0 - line_count) / 2.0) * line_height
                 }
-                _ => rect.y + font_size / 2.0 + 4.0 + i_f * line_height,
+                _ => rect.point.y + font_size / 2.0 + 4.0 + i_f * line_height,
             };
             lines.push(TextLine {
                 text: line,
