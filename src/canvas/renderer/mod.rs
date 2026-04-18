@@ -244,8 +244,8 @@ impl CanvasRenderer {
         );
 
         // Phase 2: Headers + corner box
-        self.render_row_headers(model, sheet, frc.rows, frc.offset.y);
-        self.render_column_headers(model, sheet, frc.cols, frc.offset.x);
+        self.render_row_headers(model, sheet, frc.row_band.as_ref(), frc.offset.y);
+        self.render_column_headers(model, sheet, frc.col_band.as_ref(), frc.offset.x);
 
         self.draw_corner_box();
 

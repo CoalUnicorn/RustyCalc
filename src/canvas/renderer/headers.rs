@@ -6,6 +6,8 @@
 //! a sequence of intent-revealing calls: `draw_frozen_separators(&frc)`,
 //! `draw_corner_box()`, `render_row_headers(...)`, ... .
 
+use std::ops::RangeInclusive;
+
 use ironcalc_base::UserModel;
 
 use super::super::geometry::{
@@ -25,7 +27,7 @@ impl CanvasRenderer {
         let sep_x = frc.offset.x - FROZEN_SEP + 0.5;
         let half_sep = FROZEN_SEP / 2.0;
 
-        if frc.rows > 0 {
+        if frc.row_band.is_some() {
             ctx.set_line_width(FROZEN_SEP);
             ctx.set_stroke_style_str(self.theme.grid_separator_color);
             ctx.begin_path();
@@ -34,7 +36,7 @@ impl CanvasRenderer {
             ctx.stroke();
             ctx.set_line_width(STANDARD_BORDER_WIDTH);
         }
-        if frc.cols > 0 {
+        if frc.col_band.is_some() {
             ctx.set_line_width(FROZEN_SEP);
             ctx.set_stroke_style_str(self.theme.grid_separator_color);
             ctx.begin_path();
@@ -67,7 +69,7 @@ impl CanvasRenderer {
         &self,
         model: &UserModel,
         sheet: u32,
-        frozen_rows: i32,
+        frozen_band: Option<&RangeInclusive<i32>>,
         frozen_y: f64,
     ) {
         let view = model.get_selected_view();
@@ -79,18 +81,20 @@ impl CanvasRenderer {
 
         // Frozen rows strip.
         let mut y = HEADER_ROW_HEIGHT + 0.5;
-        for row in 1..=frozen_rows {
-            let rh = row_height(model, sheet, row);
-            if rh <= 0.0 {
-                continue;
+        if let Some(band) = frozen_band {
+            for row in band.clone() {
+                let rh = row_height(model, sheet, row);
+                if rh <= 0.0 {
+                    continue;
+                }
+                let selected = row >= sel_start && row <= sel_end;
+                self.draw_header_cell(Axis::Row, row, y, rh, selected);
+                y += rh;
             }
-            let selected = row >= sel_start && row <= sel_end;
-            self.draw_header_cell(Axis::Row, row, y, rh, selected);
-            y += rh;
         }
 
         // Scrollable rows strip.
-        let mut y = if frozen_rows > 0 {
+        let mut y = if frozen_band.is_some() {
             frozen_y
         } else {
             HEADER_ROW_HEIGHT + 0.5
@@ -110,7 +114,7 @@ impl CanvasRenderer {
         &self,
         model: &UserModel,
         sheet: u32,
-        frozen_cols: i32,
+        frozen_band: Option<&RangeInclusive<i32>>,
         frozen_x: f64,
     ) {
         let view = model.get_selected_view();
@@ -122,18 +126,20 @@ impl CanvasRenderer {
 
         // Frozen columns strip.
         let mut x = HEADER_COL_WIDTH + 0.5;
-        for col in 1..=frozen_cols {
-            let cw = col_width(model, sheet, col);
-            if cw <= 0.0 {
-                continue;
+        if let Some(band) = frozen_band {
+            for col in band.clone() {
+                let cw = col_width(model, sheet, col);
+                if cw <= 0.0 {
+                    continue;
+                }
+                let selected = col >= sel_start && col <= sel_end;
+                self.draw_header_cell(Axis::Column, col, x, cw, selected);
+                x += cw;
             }
-            let selected = col >= sel_start && col <= sel_end;
-            self.draw_header_cell(Axis::Column, col, x, cw, selected);
-            x += cw;
         }
 
         // Scrollable columns strip.
-        let mut x = if frozen_cols > 0 {
+        let mut x = if frozen_band.is_some() {
             frozen_x
         } else {
             HEADER_COL_WIDTH + 0.5

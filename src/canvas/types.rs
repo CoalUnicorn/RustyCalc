@@ -67,22 +67,25 @@ pub(crate) struct FrozenOffset {
     pub y: f64,
 }
 
-/// Frozen row/col counts together with their pixel origin.
+/// Frozen rows and columns are grouped with their pixel origin
 ///
-/// Built once per frame from the model. Replaces the five scattered locals
-/// (`frozen_rows`, `frozen_cols`, `frozen_rows_h`, `frozen_cols_w`, `frozen`)
-/// that previously littered the top of `render()`.
-///
-/// ```text
+/// These and recalculated every frame based on the current model state.
+/// The bands use an Option<Range> type. If an axis is None, no freezing occurs.
+/// If Some(range), it specifies the indices of the frozen rows or columns.
+/// Currently, from_model only supports static freezing from the top (e.g., 1..=N).
+/// The Option<Range> structure is intended to support future dynamic freezing,
+/// such as scroll-activated rows (named range header)
+/// or releasing the freeze when a footer is reached.
+///```rust
 /// let frc = FrozenRC::from_model(model, sheet);
-/// // frc.rows, frc.cols - count of frozen rows/cols
-/// // frc.offset.x/y    - pixel origin of the scrollable area
+/// // frc.row_band, frc.col_band - Option<RangeInclusive<i32>>
+/// // frc.offset.x/y             - pixel origin of the scrollable area
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FrozenRC {
-    pub rows: i32,
-    pub cols: i32,
-    /// Pixel origin of the scrollable area, computed from the counts above.
+    pub row_band: Option<RangeInclusive<i32>>,
+    pub col_band: Option<RangeInclusive<i32>>,
+    /// Pixel origin of the scrollable area, computed from the bands above.
     pub offset: FrozenOffset,
 }
 
@@ -94,8 +97,8 @@ impl FrozenRC {
         let h: f64 = (1..=rows).map(|r| row_height(model, sheet, r)).sum();
         let w: f64 = (1..=cols).map(|c| col_width(model, sheet, c)).sum();
         FrozenRC {
-            rows,
-            cols,
+            row_band: (rows > 0).then_some(1..=rows),
+            col_band: (cols > 0).then_some(1..=cols),
             offset: FrozenOffset {
                 x: HEADER_COL_WIDTH + w + if cols > 0 { FROZEN_SEP } else { 0.0 },
                 y: HEADER_ROW_HEIGHT + h + if rows > 0 { FROZEN_SEP } else { 0.0 },
@@ -130,9 +133,13 @@ pub(crate) struct PaneRegion {
 impl PaneRegion {
     /// Frozen rows x frozen cols - top-left quadrant.
     pub(crate) fn top_left(frc: &FrozenRC) -> Self {
+        let rows = frc.row_band.clone().unwrap_or(0..=0);
+        let cols = frc.col_band.clone().unwrap_or(0..=0);
         PaneRegion {
-            rows: 1..=frc.rows,
-            cols: 1..=frc.cols,
+            last_row: *rows.end(),
+            last_col: *cols.end(),
+            rows,
+            cols,
             start_x: HEADER_COL_WIDTH + 0.5,
             start_y: HEADER_ROW_HEIGHT + 0.5,
             last_col: frc.cols,
@@ -142,8 +149,10 @@ impl PaneRegion {
 
     /// Frozen rows x scrollable cols - top-right quadrant.
     pub(crate) fn top_right(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
+        let rows = frc.row_band.clone().unwrap_or(0..=0);
         PaneRegion {
-            rows: 1..=frc.rows,
+            last_row: *rows.end(),
+            rows,
             cols: vis.col_first..=vis.col_last,
             start_x: frc.offset.x,
             start_y: HEADER_ROW_HEIGHT + 0.5,
@@ -154,9 +163,11 @@ impl PaneRegion {
 
     /// Scrollable rows x frozen cols - bottom-left quadrant.
     pub(crate) fn bottom_left(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
+        let cols = frc.col_band.clone().unwrap_or(0..=0);
         PaneRegion {
+            last_col: *cols.end(),
             rows: vis.row_first..=vis.row_last,
-            cols: 1..=frc.cols,
+            cols,
             start_x: HEADER_COL_WIDTH + 0.5,
             start_y: frc.offset.y,
             last_col: frc.cols,
