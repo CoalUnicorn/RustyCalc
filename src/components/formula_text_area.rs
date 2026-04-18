@@ -53,7 +53,10 @@ pub fn FormulaTextArea() -> impl IntoView {
         // Use the editing cell's address, not the live cursor. During point-mode
         // navigation the cursor moves to referenced cells, but the textarea must
         // stay anchored to the cell where the edit started.
-        let addr = state.editing_cell.get().map(|e| (e.address.row, e.address.column));
+        let addr = state
+            .editing_cell
+            .get()
+            .map(|e| (e.address.row, e.address.column));
         let r = model.with_value(|m| match addr {
             Some((row, col)) => cell_rect_at(m, row, col),
             None => selected_cell_rect(m),

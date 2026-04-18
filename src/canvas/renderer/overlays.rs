@@ -11,7 +11,7 @@ use ironcalc_base::UserModel;
 
 use crate::coord::{CellAddress, CellArea};
 
-use super::super::geometry::AUTOFILL_HANDLE_PX;
+use super::super::geometry::{PixelRect, AUTOFILL_HANDLE_PX};
 use super::super::types::{AutofillTarget, DashFill, FrozenOffset};
 use super::{CanvasRenderer, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH, STANDARD_BORDER_WIDTH};
 
@@ -34,25 +34,22 @@ impl CanvasRenderer {
             return;
         };
 
-        let ctx = &self.ctx;
-
-        ctx.set_fill_style_str(self.theme.selection_fill);
-        ctx.fill_rect(b.x1, b.y1, b.width(), b.height());
+        self.rect_fill(b, self.theme.selection_fill);
 
         // Restore the active cell's fill + borders on top of the selection
         // tint so its actual style shows through while selected. Phase 4
         // paints text over everything later.
         self.repaint_active_cell(model, addr, frozen);
 
-        ctx.set_stroke_style_str(self.theme.selection_color);
-        ctx.set_line_width(SELECTION_BORDER_WIDTH);
-        ctx.stroke_rect(b.x1, b.y1, b.width(), b.height());
-        ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        self.rect_stroke(b, self.theme.selection_color, SELECTION_BORDER_WIDTH);
 
-        let hx = b.x2 - (AUTOFILL_HANDLE_PX / 2.0);
-        let hy = b.y2 - (AUTOFILL_HANDLE_PX / 2.0);
-        ctx.set_fill_style_str(self.theme.selection_color);
-        ctx.fill_rect(hx, hy, AUTOFILL_HANDLE_PX, AUTOFILL_HANDLE_PX);
+        let handle = PixelRect {
+            x: b.right() - AUTOFILL_HANDLE_PX / 2.0,
+            y: b.bottom() - AUTOFILL_HANDLE_PX / 2.0,
+            width: AUTOFILL_HANDLE_PX,
+            height: AUTOFILL_HANDLE_PX,
+        };
+        self.rect_fill(handle, self.theme.selection_color);
     }
 
     /// Dashed preview of the autofill-handle drag target.
@@ -74,13 +71,7 @@ impl CanvasRenderer {
             return;
         };
 
-        let ctx = &self.ctx;
-        let dash = web_sys::js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into());
-        ctx.set_line_dash(&dash).ok();
-        ctx.set_stroke_style_str(self.theme.selection_color);
-        ctx.set_line_width(STANDARD_BORDER_WIDTH);
-        ctx.stroke_rect(b.x1, b.y1, b.width(), b.height());
-        ctx.set_line_dash(&web_sys::js_sys::Array::new()).ok();
+        self.rect_dashed(b, self.theme.selection_color, STANDARD_BORDER_WIDTH);
     }
 
     /// Dashed rectangle over `range`. Used for clipboard marching ants
@@ -99,22 +90,11 @@ impl CanvasRenderer {
             return;
         };
 
-        let ctx = &self.ctx;
-        let dash = web_sys::js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into());
-        ctx.set_line_dash(&dash).ok();
-        ctx.set_stroke_style_str(color);
-        ctx.set_line_width(DASHED_BORDER_WIDTH);
-        ctx.stroke_rect(b.x1, b.y1, b.width(), b.height());
-        ctx.set_line_dash(&web_sys::js_sys::Array::new()).ok();
-        ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        self.rect_dashed(b, color, DASHED_BORDER_WIDTH);
 
-        match fill {
-            DashFill::Tinted => {
-                let tint = hex_to_rgba(color, 0.08);
-                ctx.set_fill_style_str(&tint);
-                ctx.fill_rect(b.x1, b.y1, b.width(), b.height());
-            }
-            DashFill::Outline => {}
+        if fill == DashFill::Tinted {
+            let tint = hex_to_rgba(color, 0.08);
+            self.rect_fill(b, &tint);
         }
     }
 }

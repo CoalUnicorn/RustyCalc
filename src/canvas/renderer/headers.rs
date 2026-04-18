@@ -11,15 +11,10 @@ use ironcalc_base::UserModel;
 use super::super::geometry::{
     col_name, col_width, row_height, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
-use super::super::types::FrozenRC;
+use super::super::types::{Axis, FrozenRC};
 use super::text::DEFAULT_FONT_FAMILY;
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 
-#[derive(Copy, Clone)]
-enum HeaderAxis {
-    Row,
-    Column,
-}
 impl CanvasRenderer {
     /// Thick separator strokes between frozen bands and the scrollable grid.
     pub(super) fn draw_frozen_separators(&self, frc: &FrozenRC) {
@@ -90,7 +85,7 @@ impl CanvasRenderer {
                 continue;
             }
             let selected = row >= sel_start && row <= sel_end;
-            self.draw_header_cell(HeaderAxis::Row, row, y, rh, selected);
+            self.draw_header_cell(Axis::Row, row, y, rh, selected);
             y += rh;
         }
 
@@ -106,7 +101,7 @@ impl CanvasRenderer {
                 continue;
             }
             let selected = row >= sel_start && row <= sel_end;
-            self.draw_header_cell(HeaderAxis::Row, row, y, rh, selected);
+            self.draw_header_cell(Axis::Row, row, y, rh, selected);
             y += rh;
         }
     }
@@ -133,7 +128,7 @@ impl CanvasRenderer {
                 continue;
             }
             let selected = col >= sel_start && col <= sel_end;
-            self.draw_header_cell(HeaderAxis::Column, col, x, cw, selected);
+            self.draw_header_cell(Axis::Column, col, x, cw, selected);
             x += cw;
         }
 
@@ -149,26 +144,16 @@ impl CanvasRenderer {
                 continue;
             }
             let selected = col >= sel_start && col <= sel_end;
-            self.draw_header_cell(HeaderAxis::Column, col, x, cw, selected);
+            self.draw_header_cell(Axis::Column, col, x, cw, selected);
             x += cw;
         }
     }
 
     /// Paint one header cell: border strip, body fill, and label.
     ///
-    /// `along` is the cross-axis-fixed position (top_y for rows, x for cols);
+    /// `along` is the position along the axis (top_y for rows, left_x for cols);
     /// `thickness` is the cell's extent along the same axis (rh / cw).
-    /// Both axes follow the identical three-step paint so only the rect
-    /// orientations and label source differ.
-    fn draw_header_cell(
-        &self,
-        axis: HeaderAxis,
-        index: i32,
-        along: f64,
-        thickness: f64,
-        selected: bool,
-    ) {
-        let ctx = &self.ctx;
+    fn draw_header_cell(&self, axis: Axis, index: i32, along: f64, thickness: f64, selected: bool) {
         let body_bg = if selected {
             self.theme.header_selected_bg
         } else {
@@ -180,33 +165,23 @@ impl CanvasRenderer {
             self.theme.header_text_color
         };
 
-        ctx.set_fill_style_str(self.theme.header_border_color);
-        match axis {
-            HeaderAxis::Row => ctx.fill_rect(0.5, along, HEADER_COL_WIDTH, thickness),
-            HeaderAxis::Column => ctx.fill_rect(along, 0.5, thickness, HEADER_ROW_HEIGHT),
-        }
-
-        ctx.set_fill_style_str(body_bg);
-        match axis {
-            HeaderAxis::Row => ctx.fill_rect(0.5, along + 0.5, HEADER_COL_WIDTH, thickness - 1.0),
-            HeaderAxis::Column => {
-                ctx.fill_rect(along + 0.5, 0.5, thickness - 1.0, HEADER_ROW_HEIGHT)
-            }
-        }
-
-        ctx.set_fill_style_str(text_color);
-        let (label, cx, cy) = match axis {
-            HeaderAxis::Row => (
-                index.to_string(),
-                HEADER_COL_WIDTH / 2.0,
-                along + thickness / 2.0,
-            ),
-            HeaderAxis::Column => (
-                col_name(index),
-                along + thickness / 2.0,
-                HEADER_ROW_HEIGHT / 2.0,
-            ),
+        let full = axis.header_rect(along, thickness);
+        // 1px inset on the cross-axis leaves the border strip visible top+bottom (row)
+        // or left+right (column).
+        let body = match axis {
+            Axis::Row => full.inset(0.0, 0.5),
+            Axis::Column => full.inset(0.5, 0.0),
         };
-        ctx.fill_text(&label, cx, cy).ok();
+
+        self.rect_fill(full, self.theme.header_border_color);
+        self.rect_fill(body, body_bg);
+
+        self.ctx.set_fill_style_str(text_color);
+        let center = full.center();
+        let label = match axis {
+            Axis::Row => index.to_string(),
+            Axis::Column => col_name(index),
+        };
+        self.ctx.fill_text(&label, center.x, center.y).ok();
     }
 }

@@ -51,6 +51,44 @@ pub struct PixelRect {
     pub height: f64,
 }
 
+impl PixelRect {
+    pub fn right(&self) -> f64 {
+        self.x + self.width
+    }
+    pub fn bottom(&self) -> f64 {
+        self.y + self.height
+    }
+    #[allow(dead_code)]
+    pub fn top_left(&self) -> Point {
+        Point {
+            x: self.x,
+            y: self.y,
+        }
+    }
+    #[allow(dead_code)]
+    pub fn bottom_right(&self) -> Point {
+        Point {
+            x: self.right(),
+            y: self.bottom(),
+        }
+    }
+    pub fn center(&self) -> Point {
+        Point {
+            x: self.x + self.width / 2.0,
+            y: self.y + self.height / 2.0,
+        }
+    }
+    /// Shrink by `dx` / `dy` on each side (negative values grow the rect).
+    pub fn inset(&self, dx: f64, dy: f64) -> Self {
+        Self {
+            x: self.x + dx,
+            y: self.y + dy,
+            width: self.width - 2.0 * dx,
+            height: self.height - 2.0 * dy,
+        }
+    }
+}
+
 // FrozenGeometry
 
 /// Pre-computed pixel extents of the frozen-pane region for one sheet.

@@ -9,16 +9,10 @@ use ironcalc_base::UserModel;
 use crate::coord::CellArea;
 
 use super::super::geometry::{
-    col_width, row_height, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+    col_width, row_height, PixelRect, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
-use super::super::types::{FrozenOffset, PixelBounds, PixelOffsets, VisibleRegion};
+use super::super::types::{Axis, FrozenOffset, PixelOffsets, VisibleRegion};
 use super::CanvasRenderer;
-
-#[derive(Copy, Clone)]
-enum Axis {
-    Row(i32),
-    Column(i32),
-}
 
 impl CanvasRenderer {
     /// Map a sheet-coordinate range to canvas pixel bounds, clamping oversized
@@ -35,7 +29,7 @@ impl CanvasRenderer {
         sheet: u32,
         frozen: FrozenOffset,
         range: CellArea,
-    ) -> Option<PixelBounds> {
+    ) -> Option<PixelRect> {
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
@@ -58,40 +52,52 @@ impl CanvasRenderer {
             return None;
         }
 
-        let x1 = self.cell_x(model, sheet, range.c1, frozen);
-        let y1 = self.cell_y(model, sheet, range.r1, frozen);
-        let x2 = if range.c2 > self.vis.col_last {
+        let x = self.cell_x(model, sheet, range.c1, frozen);
+        let y = self.cell_y(model, sheet, range.r1, frozen);
+        let right = if range.c2 > self.vis.col_last {
             self.width
         } else {
             self.cell_x(model, sheet, range.c2, frozen) + col_width(model, sheet, range.c2)
         };
-        let y2 = if range.r2 > self.vis.row_last {
+        let bottom = if range.r2 > self.vis.row_last {
             self.height
         } else {
             self.cell_y(model, sheet, range.r2, frozen) + row_height(model, sheet, range.r2)
         };
-        Some(PixelBounds { x1, y1, x2, y2 })
+        Some(PixelRect {
+            x,
+            y,
+            width: right - x,
+            height: bottom - y,
+        })
     }
 
-    fn cell_offset(&self, model: &UserModel, sheet: u32, axis: Axis, frozen: FrozenOffset) -> f64 {
+    fn cell_offset(
+        &self,
+        model: &UserModel,
+        sheet: u32,
+        axis: Axis,
+        index: i32,
+        frozen: FrozenOffset,
+    ) -> f64 {
         match axis {
-            Axis::Column(col) => {
+            Axis::Column => {
                 let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-                if col <= frozen_cols {
+                if index <= frozen_cols {
                     return HEADER_COL_WIDTH
                         + 0.5
-                        + (1..col).map(|c| col_width(model, sheet, c)).sum::<f64>();
+                        + (1..index).map(|c| col_width(model, sheet, c)).sum::<f64>();
                 }
-                frozen.x + self.offsets.col_left(col)
+                frozen.x + self.offsets.col_left(index)
             }
-            Axis::Row(row) => {
+            Axis::Row => {
                 let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
-                if row <= frozen_rows {
+                if index <= frozen_rows {
                     return HEADER_ROW_HEIGHT
                         + 0.5
-                        + (1..row).map(|r| row_height(model, sheet, r)).sum::<f64>();
+                        + (1..index).map(|r| row_height(model, sheet, r)).sum::<f64>();
                 }
-                frozen.y + self.offsets.row_top(row)
+                frozen.y + self.offsets.row_top(index)
             }
         }
     }
@@ -103,7 +109,7 @@ impl CanvasRenderer {
         col: i32,
         frozen: FrozenOffset,
     ) -> f64 {
-        self.cell_offset(model, sheet, Axis::Column(col), frozen)
+        self.cell_offset(model, sheet, Axis::Column, col, frozen)
     }
 
     pub(super) fn cell_y(
@@ -113,7 +119,7 @@ impl CanvasRenderer {
         row: i32,
         frozen: FrozenOffset,
     ) -> f64 {
-        self.cell_offset(model, sheet, Axis::Row(row), frozen)
+        self.cell_offset(model, sheet, Axis::Row, row, frozen)
     }
 
     /// Build a prefix-sum pixel-offset table for all visible rows and columns.

@@ -15,6 +15,44 @@ use super::geometry::{
     col_width, row_height, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
 
+//  Shared axis — row-vs-column symmetry
+
+/// Horizontal vs vertical axis.
+///
+/// Shared across viewport offset math (`cell_offset` dispatches on axis) and
+/// header rect building (`Axis::header_rect`). Carries no payload — the
+/// row/column index travels as a separate parameter so the same enum value
+/// can be used across call sites that don't care about a specific index.
+#[derive(Copy, Clone)]
+pub(crate) enum Axis {
+    Row,
+    Column,
+}
+
+impl Axis {
+    /// Rect that pins a header cell to the corresponding header strip.
+    ///
+    /// `along` is the position along the axis (top_y for rows, left_x for
+    /// cols); `thickness` is the cell's extent along the same axis (`rh` /
+    /// `cw`). The cross-axis extent is always the header strip width/height.
+    pub(crate) fn header_rect(self, along: f64, thickness: f64) -> PixelRect {
+        match self {
+            Axis::Row => PixelRect {
+                x: 0.5,
+                y: along,
+                width: HEADER_COL_WIDTH,
+                height: thickness,
+            },
+            Axis::Column => PixelRect {
+                x: along,
+                y: 0.5,
+                width: thickness,
+                height: HEADER_ROW_HEIGHT,
+            },
+        }
+    }
+}
+
 //  Frozen-pane geometry
 
 /// Pixel origin of the scrollable (non-frozen) grid area.
@@ -162,25 +200,6 @@ pub(crate) struct CellText {
     pub underlined: bool,
     pub strike: bool,
     pub lines: Vec<TextLine>,
-}
-
-/// Pixel-space bounding box returned by `range_pixel_bounds`.
-///
-/// Prefer `.width()` / `.height()` over manual `x2 - x1` arithmetic.
-pub(crate) struct PixelBounds {
-    pub x1: f64,
-    pub y1: f64,
-    pub x2: f64,
-    pub y2: f64,
-}
-
-impl PixelBounds {
-    pub fn width(&self) -> f64 {
-        self.x2 - self.x1
-    }
-    pub fn height(&self) -> f64 {
-        self.y2 - self.y1
-    }
 }
 
 /// The four index boundaries of the visible (scrollable) area.

@@ -88,6 +88,7 @@
 mod cells;
 mod headers;
 mod overlays;
+mod paint;
 mod text;
 mod viewport;
 
