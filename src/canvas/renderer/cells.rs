@@ -11,7 +11,6 @@
 
 use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::UserModel;
-use web_sys::CanvasRenderingContext2d;
 
 use crate::canvas::Point;
 use crate::coord::CellAddress;
@@ -371,44 +370,31 @@ impl CanvasRenderer {
         let ctx = &self.ctx;
         ctx.save();
         ctx.set_stroke_style_str(color);
-        match style {
+
+        let width = match style {
             BorderStyle::Medium
             | BorderStyle::MediumDashed
             | BorderStyle::MediumDashDot
-            | BorderStyle::MediumDashDotDot => {
-                ctx.set_line_width(MEDIUM_BORDER_WIDTH);
-                stroke_line(ctx, x1, y1, x2, y2);
-            }
-            BorderStyle::Thick => {
-                ctx.set_line_width(THICK_BORDER_WIDTH);
-                stroke_line(ctx, x1, y1, x2, y2);
-            }
-            BorderStyle::Double => {
-                ctx.set_line_width(STANDARD_BORDER_WIDTH);
-                match orientation {
-                    BorderOrientation::Vertical => {
-                        stroke_line(ctx, x1 - 1.0, y1, x1 - 1.0, y2);
-                        stroke_line(ctx, x1 + 1.0, y1, x1 + 1.0, y2);
-                    }
-                    BorderOrientation::Horizontal => {
-                        stroke_line(ctx, x1, y1 - 1.0, x2, y1 - 1.0);
-                        stroke_line(ctx, x1, y1 + 1.0, x2, y1 + 1.0);
-                    }
-                }
-            }
-            // Thin, Dotted, SlantDashDot, and anything else → single thin line.
-            _ => {
-                ctx.set_line_width(STANDARD_BORDER_WIDTH);
-                stroke_line(ctx, x1, y1, x2, y2);
+            | BorderStyle::MediumDashDotDot => MEDIUM_BORDER_WIDTH,
+            BorderStyle::Thick => THICK_BORDER_WIDTH,
+            // Thin, Dotted, Double, SlantDashDot, etc. → one pixel wide.
+            _ => STANDARD_BORDER_WIDTH,
+        };
+        ctx.set_line_width(width);
+
+        // Double renders as two parallel thin lines offset ±1px on the cross-axis;
+        // every other style is a single line on the segment itself.
+        let offsets: &[f64] = if matches!(style, BorderStyle::Double) {
+            &[-1.0, 1.0]
+        } else {
+            &[0.0]
+        };
+        for &d in offsets {
+            match orientation {
+                BorderOrientation::Vertical => self.stroke_vline(x1 + d, y1, y2),
+                BorderOrientation::Horizontal => self.stroke_hline(x1, x2, y1 + d),
             }
         }
         ctx.restore();
     }
-}
-
-fn stroke_line(ctx: &CanvasRenderingContext2d, x1: f64, y1: f64, x2: f64, y2: f64) {
-    ctx.begin_path();
-    ctx.move_to(x1, y1);
-    ctx.line_to(x2, y2);
-    ctx.stroke();
 }

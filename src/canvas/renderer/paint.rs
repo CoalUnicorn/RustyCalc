@@ -47,11 +47,21 @@ impl CanvasRenderer {
         result
     }
 
-    /// horizontal
+    /// Horizontal line from (x1, y) to (x2, y). Path-only — caller owns
+    /// `set_stroke_style_str` and `set_line_width`.
     pub(super) fn stroke_hline(&self, x1: f64, x2: f64, y: f64) {
         self.ctx.begin_path();
         self.ctx.move_to(x1, y);
         self.ctx.line_to(x2, y);
+        self.ctx.stroke();
+    }
+
+    /// Vertical line from (x, y1) to (x, y2). Path-only — caller owns
+    /// `set_stroke_style_str` and `set_line_width`.
+    pub(super) fn stroke_vline(&self, x: f64, y1: f64, y2: f64) {
+        self.ctx.begin_path();
+        self.ctx.move_to(x, y1);
+        self.ctx.line_to(x, y2);
         self.ctx.stroke();
     }
 }

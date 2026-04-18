@@ -10,8 +10,10 @@ use std::ops::RangeInclusive;
 
 use ironcalc_base::UserModel;
 
+use crate::canvas::Point;
+
 use super::super::geometry::{
-    col_name, col_width, row_height, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+    col_name, col_width, row_height, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
 use super::super::types::{Axis, FrozenRC};
 use super::text::DEFAULT_FONT_FAMILY;
@@ -20,49 +22,40 @@ use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 impl CanvasRenderer {
     /// Thick separator strokes between frozen bands and the scrollable grid.
     pub(super) fn draw_frozen_separators(&self, frc: &FrozenRC) {
-        let ctx = &self.ctx;
-        // `frc.offset.y = HEADER_ROW_HEIGHT + frozen_h + FROZEN_SEP` (when rows > 0),
-        // so `sep_y = frc.offset.y - FROZEN_SEP + 0.5` gives the correct position.
-        let sep_y = frc.offset.y - FROZEN_SEP + 0.5;
-        let sep_x = frc.offset.x - FROZEN_SEP + 0.5;
-        let half_sep = FROZEN_SEP / 2.0;
+        if frc.row_band.is_none() && frc.col_band.is_none() {
+            return;
+        }
+        self.ctx.set_line_width(FROZEN_SEP);
+        self.ctx
+            .set_stroke_style_str(self.theme.grid_separator_color);
+
+        let sep_y = frc.offset.y - FROZEN_SEP / 2.0 + 0.5;
+        let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + 0.5;
 
         if frc.row_band.is_some() {
-            ctx.set_line_width(FROZEN_SEP);
-            ctx.set_stroke_style_str(self.theme.grid_separator_color);
-            ctx.begin_path();
-            ctx.move_to(0.0, sep_y + half_sep);
-            ctx.line_to(self.width, sep_y + half_sep);
-            ctx.stroke();
-            ctx.set_line_width(STANDARD_BORDER_WIDTH);
+            self.stroke_hline(0.0, self.width, sep_y);
         }
         if frc.col_band.is_some() {
-            ctx.set_line_width(FROZEN_SEP);
-            ctx.set_stroke_style_str(self.theme.grid_separator_color);
-            ctx.begin_path();
-            ctx.move_to(sep_x + half_sep, 0.0);
-            ctx.line_to(sep_x + half_sep, self.height);
-            ctx.stroke();
-            ctx.set_line_width(STANDARD_BORDER_WIDTH);
+            self.stroke_vline(sep_x, 0.0, self.height);
         }
+        self.ctx.set_line_width(STANDARD_BORDER_WIDTH);
     }
 
     /// Top-left blank square plus the two axis lines that separate the
     /// header strips from the cell area.
     pub(super) fn draw_corner_box(&self) {
-        let ctx = &self.ctx;
-        ctx.set_fill_style_str(self.theme.header_bg);
-        ctx.fill_rect(0.0, 0.0, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT);
-        ctx.set_stroke_style_str(self.theme.header_border_color);
-        ctx.set_line_width(STANDARD_BORDER_WIDTH);
-        ctx.begin_path();
-        ctx.move_to(0.0, HEADER_ROW_HEIGHT + 0.5);
-        ctx.line_to(self.width, HEADER_ROW_HEIGHT + 0.5);
-        ctx.stroke();
-        ctx.begin_path();
-        ctx.move_to(HEADER_COL_WIDTH + 0.5, 0.0);
-        ctx.line_to(HEADER_COL_WIDTH + 0.5, self.height);
-        ctx.stroke();
+        let corner = PixelRect {
+            point: Point { x: 0.0, y: 0.0 },
+            width: HEADER_COL_WIDTH,
+            height: HEADER_ROW_HEIGHT,
+        };
+        self.rect_fill(corner, self.theme.header_bg);
+
+        self.ctx
+            .set_stroke_style_str(self.theme.header_border_color);
+        self.ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        self.stroke_hline(0.0, self.width, HEADER_ROW_HEIGHT + 0.5);
+        self.stroke_vline(HEADER_COL_WIDTH + 0.5, 0.0, self.height);
     }
 
     pub(super) fn render_row_headers(
