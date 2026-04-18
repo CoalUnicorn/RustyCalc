@@ -1,6 +1,8 @@
 /// Shared pixel<->cell coordinate math for the spreadsheet canvas.
 use ironcalc_base::UserModel;
 
+use crate::coord::CellArea;
+
 // Layout constants
 
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
@@ -199,22 +201,20 @@ pub fn autofill_handle_pos(m: &UserModel) -> Point {
     let view = m.get_selected_view();
     let sheet = view.sheet;
     let fg = frozen_geometry(m, sheet);
-    let [r1, c1, r2, c2] = view.range;
-    // Normalise: the active corner can be above/left of the anchor on drag.
-    let r2 = r1.max(r2);
-    let c2 = c1.max(c2);
+    let area = CellArea::from_view(m).normalized();
+
     // Full-row / full-column / whole-sheet selections span LAST_ROW or LAST_COLUMN.
     // col_to_x / row_to_y would iterate up to 1M rows to compute an off-screen
     // pixel - skip it and return a sentinel that can never match a hit-test.
-    if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
+    if area.r2 >= LAST_ROW || area.c2 >= LAST_COLUMN {
         return Point {
             x: -100.0,
             y: -100.0,
         };
     }
     Point {
-        x: col_to_x(m, sheet, view.left_column, c2, &fg) + col_width(m, sheet, c2),
-        y: row_to_y(m, sheet, view.top_row, r2, &fg) + row_height(m, sheet, r2),
+        x: col_to_x(m, sheet, view.left_column, area.c2, &fg) + col_width(m, sheet, area.c2),
+        y: row_to_y(m, sheet, view.top_row, area.r2, &fg) + row_height(m, sheet, area.r2),
     }
 }
 
