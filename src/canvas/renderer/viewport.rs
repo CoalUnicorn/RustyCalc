@@ -35,7 +35,7 @@ impl CanvasRenderer {
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
         // Range entirely past the scrollable fold (right or below) and not
-        // anchored in the frozen band → nothing to draw. Guards the
+        // anchored in the frozen band -> nothing to draw. Guards the
         // out-of-bounds `PixelOffsets` lookups that cause the `=BB3`
         // ghost-row artifact.
         if range.c1 > self.vis.col_last && range.c1 > frozen_cols {

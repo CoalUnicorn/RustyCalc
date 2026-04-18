@@ -25,20 +25,20 @@ impl CanvasRenderer {
         if frc.row_band.is_none() && frc.col_band.is_none() {
             return;
         }
-        self.ctx.set_line_width(FROZEN_SEP);
         self.ctx
             .set_stroke_style_str(self.theme.grid_separator_color);
 
         let sep_y = frc.offset.y - FROZEN_SEP / 2.0 + 0.5;
         let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + 0.5;
 
-        if frc.row_band.is_some() {
-            self.stroke_hline(0.0, self.width, sep_y);
-        }
-        if frc.col_band.is_some() {
-            self.stroke_vline(sep_x, 0.0, self.height);
-        }
-        self.ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        self.with_stroke_width(FROZEN_SEP, |this| {
+            if frc.row_band.is_some() {
+                this.stroke_hline(0.0, this.width, sep_y);
+            }
+            if frc.col_band.is_some() {
+                this.stroke_vline(sep_x, 0.0, this.height);
+            }
+        });
     }
 
     /// Top-left blank square plus the two axis lines that separate the

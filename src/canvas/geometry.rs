@@ -87,6 +87,28 @@ impl PixelRect {
     }
 }
 
+/// An axis-aligned line segment on the canvas.
+///
+/// Named fields per variant so callers can't transpose the scalars.
+/// `offset_cross` shifts perpendicular to the line's direction — used by
+/// `BorderStyle::Double`, which draws two parallel lines at ±1 on the
+/// cross-axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Line {
+    H { x1: f64, x2: f64, y: f64 },
+    V { x: f64, y1: f64, y2: f64 },
+}
+
+impl Line {
+    /// Move the line by `d` perpendicular to its direction.
+    pub fn offset_cross(self, d: f64) -> Self {
+        match self {
+            Line::H { x1, x2, y } => Line::H { x1, x2, y: y + d },
+            Line::V { x, y1, y2 } => Line::V { x: x + d, y1, y2 },
+        }
+    }
+}
+
 // FrozenGeometry
 
 /// Pre-computed pixel extents of the frozen-pane region for one sheet.

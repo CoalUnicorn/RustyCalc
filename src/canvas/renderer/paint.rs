@@ -6,7 +6,7 @@
 //! how. `paint_*` prefixes distinguish these from raw `ctx.*` methods at
 //! read time.
 
-use super::super::geometry::PixelRect;
+use super::super::geometry::{Line, PixelRect};
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 
 impl CanvasRenderer {
@@ -17,14 +17,14 @@ impl CanvasRenderer {
             .fill_rect(rect.point.x, rect.point.y, rect.width, rect.height);
     }
 
-    /// Stroke `rect`'s outline at `width` pixels. Restores line_width to
-    /// `STANDARD_BORDER_WIDTH` on exit so subsequent strokes don't inherit.
+    /// Stroke `rect`'s outline at `width` pixels. Width is restored to
+    /// `STANDARD_BORDER_WIDTH` on exit via `with_stroke_width`.
     pub(super) fn rect_stroke(&self, rect: PixelRect, color: &str, width: f64) {
         self.ctx.set_stroke_style_str(color);
-        self.ctx.set_line_width(width);
-        self.ctx
-            .stroke_rect(rect.point.x, rect.point.y, rect.width, rect.height);
-        self.ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        self.with_stroke_width(width, |this| {
+            this.ctx
+                .stroke_rect(rect.point.x, rect.point.y, rect.width, rect.height);
+        });
     }
 
     /// Dashed outline (4-on / 3-off). Resets dash pattern and line_width on exit.
@@ -33,6 +33,25 @@ impl CanvasRenderer {
         self.ctx.set_line_dash(&dash).ok();
         self.rect_stroke(rect, color, width);
         self.ctx.set_line_dash(&web_sys::js_sys::Array::new()).ok();
+    }
+
+    /// Run `f` with `width` as the active stroke `line_width`. Restores
+    /// `STANDARD_BORDER_WIDTH` on exit — makes the reset invariant explicit
+    /// and shared by every helper that would otherwise duplicate it.
+    pub(super) fn with_stroke_width<R>(&self, width: f64, f: impl FnOnce(&Self) -> R) -> R {
+        self.ctx.set_line_width(width);
+        let result = f(self);
+        self.ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        result
+    }
+
+    /// Stroke an axis-aligned `Line`. Dispatches on the enum variant so the
+    /// caller doesn't pick `stroke_hline` vs `stroke_vline` manually.
+    pub(super) fn stroke_line(&self, line: Line) {
+        match line {
+            Line::H { x1, x2, y } => self.stroke_hline(x1, x2, y),
+            Line::V { x, y1, y2 } => self.stroke_vline(x, y1, y2),
+        }
     }
 
     /// Run `f` with `rect` as the active clip region. Save/restore bracketed.

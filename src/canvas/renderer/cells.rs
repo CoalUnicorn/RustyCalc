@@ -15,32 +15,15 @@ use ironcalc_base::UserModel;
 use crate::canvas::Point;
 use crate::coord::CellAddress;
 
-use super::super::geometry::{col_width, row_height, PixelRect};
+use super::super::geometry::{col_width, row_height, Line, PixelRect};
 use super::super::types::{CellEdges, CellText, FrozenOffset, PaneRegion};
 use super::{CanvasRenderer, MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
 //  Local border primitives
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BorderOrientation {
-    Vertical,
-    Horizontal,
-}
-
-/// Line segment passed to the border-drawing helper.
-///
-/// A two-point line (`x1,y1` → `x2,y2`), distinct from `PixelRect`.
-struct BorderSegment {
-    pub x1: f64,
-    pub y1: f64,
-    pub x2: f64,
-    pub y2: f64,
-}
-
 /// Which edge of a cell rectangle is being resolved.
 ///
-/// Lets the four previously-duplicated L/T/R/B branchescolumnlapse into one
-/// loop per cell that asks the enum for orientation + segment.
+/// loop per cell that asks the enum for its `Line` on a given rect.
 #[derive(Copy, Clone)]
 enum BorderEdge {
     Left,
@@ -50,8 +33,8 @@ enum BorderEdge {
 }
 
 /// Inner edges (left / top) — the only edges whose resolved color can be
-/// borrowed from a neighbour cell's opposite border or fill. Carved out as a
-/// separate enum from `BorderEdge` so that inherent methods don't need an
+/// borrowed from a neighbour cell's opposite border or fill.
+/// Carved out as a separate enum from `BorderEdge` to avoid
 /// "unreachable for Right/Bottom" arm.
 #[derive(Copy, Clone)]
 enum InnerEdge {
@@ -85,51 +68,41 @@ impl InnerEdge {
 }
 
 impl BorderEdge {
-    fn orientation(self) -> BorderOrientation {
-        match self {
-            BorderEdge::Left | BorderEdge::Right => BorderOrientation::Vertical,
-            BorderEdge::Top | BorderEdge::Bottom => BorderOrientation::Horizontal,
-        }
-    }
-
-    fn segment(self, rect: PixelRect) -> BorderSegment {
+    /// The axis-aligned `Line` this edge would draw on `rect`.
+    fn line(self, rect: PixelRect) -> Line {
         let PixelRect {
             point: Point { x, y },
             width,
             height,
         } = rect;
         match self {
-            BorderEdge::Left => BorderSegment {
-                x1: x,
+            BorderEdge::Left => Line::V {
+                x,
                 y1: y,
-                x2: x,
                 y2: y + height,
             },
-            BorderEdge::Top => BorderSegment {
+            BorderEdge::Top => Line::H {
                 x1: x,
-                y1: y,
                 x2: x + width,
-                y2: y,
+                y,
             },
-            BorderEdge::Right => BorderSegment {
-                x1: x + width,
+            BorderEdge::Right => Line::V {
+                x: x + width,
                 y1: y,
-                x2: x + width,
                 y2: y + height,
             },
-            BorderEdge::Bottom => BorderSegment {
+            BorderEdge::Bottom => Line::H {
                 x1: x,
-                y1: y + height,
                 x2: x + width,
-                y2: y + height,
+                y: y + height,
             },
         }
     }
 }
 
 /// Resolve the left/top border — where a neighbour's opposite edge or fill
-/// can influence the finalcolumnour. Encodes the fallback chain:
-/// own → neighbour-side → own-bg → neighbour-bg → grid.
+/// can influence the final color. Encodes the fallback chain:
+/// own -> neighbour-side -> own-bg -> neighbour-bg -> grid.
 fn resolve_inner_edge<'a>(
     own: Option<&'a BorderItem>,
     neighbour_side: Option<&'a BorderItem>,
@@ -273,8 +246,7 @@ impl CanvasRenderer {
             .fill_rect(rect.point.x, rect.point.y, rect.width, rect.height);
 
         // Inner edges (left, top) — each falls back to the matching neighbour's
-        // opposite border and fill. The two blocks used to be hand-mirrored;
-        // now a single pass drives both off the `InnerEdge` enum.
+        // opposite border and fill.
         for inner in [InnerEdge::Left, InnerEdge::Top] {
             let own = match inner {
                 InnerEdge::Left => style.border.left.as_ref(),
@@ -308,19 +280,19 @@ impl CanvasRenderer {
                 bg,
                 grid_color,
             );
-            self.draw_edge(inner.as_edge(), rect, border_style, color);
+            self.draw_border(inner.as_edge(), rect, border_style, color);
         }
 
         // Right edge — only at pane boundary or when explicitly set.
         if edges.right || style.border.right.is_some() {
             let (rc, rs) = resolve_outer_edge(style.border.right.as_ref(), grid_color);
-            self.draw_edge(BorderEdge::Right, rect, rs, rc);
+            self.draw_border(BorderEdge::Right, rect, rs, rc);
         }
 
         // Bottom edge — only at pane boundary or when explicitly set.
         if edges.bottom || style.border.bottom.is_some() {
             let (bc, bs) = resolve_outer_edge(style.border.bottom.as_ref(), grid_color);
-            self.draw_edge(BorderEdge::Bottom, rect, bs, bc);
+            self.draw_border(BorderEdge::Bottom, rect, bs, bc);
         }
     }
 
@@ -354,34 +326,17 @@ impl CanvasRenderer {
         );
     }
 
-    fn draw_edge(&self, edge: BorderEdge, rect: PixelRect, style: &BorderStyle, columnor: &str) {
-        let seg = edge.segment(rect);
-        self.draw_border(&seg, style, columnor, edge.orientation());
-    }
-
-    fn draw_border(
-        &self,
-        seg: &BorderSegment,
-        style: &BorderStyle,
-        color: &str,
-        orientation: BorderOrientation,
-    ) {
-        let BorderSegment { x1, y1, x2, y2 } = *seg;
-        let ctx = &self.ctx;
-        ctx.save();
-        ctx.set_stroke_style_str(color);
-
+    fn draw_border(&self, edge: BorderEdge, rect: PixelRect, style: &BorderStyle, color: &str) {
+        let line = edge.line(rect);
         let width = match style {
             BorderStyle::Medium
             | BorderStyle::MediumDashed
             | BorderStyle::MediumDashDot
             | BorderStyle::MediumDashDotDot => MEDIUM_BORDER_WIDTH,
             BorderStyle::Thick => THICK_BORDER_WIDTH,
-            // Thin, Dotted, Double, SlantDashDot, etc. → one pixel wide.
+            // Thin, Dotted, Double, SlantDashDot, etc. -> one pixel wide.
             _ => STANDARD_BORDER_WIDTH,
         };
-        ctx.set_line_width(width);
-
         // Double renders as two parallel thin lines offset ±1px on the cross-axis;
         // every other style is a single line on the segment itself.
         let offsets: &[f64] = if matches!(style, BorderStyle::Double) {
@@ -389,12 +344,14 @@ impl CanvasRenderer {
         } else {
             &[0.0]
         };
-        for &d in offsets {
-            match orientation {
-                BorderOrientation::Vertical => self.stroke_vline(x1 + d, y1, y2),
-                BorderOrientation::Horizontal => self.stroke_hline(x1, x2, y1 + d),
+
+        self.ctx.save();
+        self.ctx.set_stroke_style_str(color);
+        self.with_stroke_width(width, |this| {
+            for &d in offsets {
+                this.stroke_line(line.offset_cross(d));
             }
-        }
-        ctx.restore();
+        });
+        self.ctx.restore();
     }
 }
