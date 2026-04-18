@@ -96,7 +96,7 @@ pub fn FormulaBar() -> impl IntoView {
             return;
         };
         let sheet_names = model.with_value(|m| m.get_sheet_names());
-        sync_edit(state.editing_cell, value, cursor, sheet_names);
+        sync_edit(state.editing_cell, value, cursor, &sheet_names);
     };
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| suppress_navigation_defaults(&ev);
@@ -111,7 +111,7 @@ pub fn FormulaBar() -> impl IntoView {
             if !edit.text.starts_with('=') {
                 return "";
             }
-            if edit.formula_analysis.validation_error.is_some() {
+            if edit.formula_analysis.has_any_error() {
                 " error"
             } else {
                 " valid"

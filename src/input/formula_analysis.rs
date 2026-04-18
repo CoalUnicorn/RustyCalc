@@ -38,6 +38,15 @@ pub struct FormulaAnalysis {
     pub invalid_refs: Vec<SpanRef>,
 }
 
+impl FormulaAnalysis {
+    pub fn has_any_error(&self) -> bool {
+        self.parse_error.is_some()
+            || self.validation_error.is_some()
+            || !self.invalid_refs.is_empty()
+            || !self.invalid_functions.is_empty()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParseError {
     pub message: String,

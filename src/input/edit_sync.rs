@@ -59,7 +59,7 @@ pub fn sync_edit(
     editing: Split<Option<EditingCell>>,
     value: String,
     cursor: usize,
-    sheet_names: Vec<(u32, String)>, //&[(u32, String)],
+    sheet_names: &[(u32, String)],
 ) {
     editing.update(|cell| {
         if let Some(c) = cell {

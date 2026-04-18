@@ -57,6 +57,13 @@ pub fn FormulaTextArea() -> impl IntoView {
         )
     };
 
+    let textarea_class = move || match state.editing_cell.get() {
+        Some(e) if e.text.starts_with('=') && e.formula_analysis.has_any_error() => {
+            "ce formula-error"
+        }
+        _ => "ce",
+    };
+
     let text_value = move || state.editing_cell.get().map(|e| e.text).unwrap_or_default();
 
     let on_input = move |ev: web_sys::Event| {
@@ -65,7 +72,7 @@ pub fn FormulaTextArea() -> impl IntoView {
             return;
         };
         let sheet_names = model.with_value(|m| m.get_sheet_names());
-        sync_edit(state.editing_cell, value, cursor, sheet_names);
+        sync_edit(state.editing_cell, value, cursor, &sheet_names);
     };
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| suppress_navigation_defaults(&ev);
@@ -74,7 +81,7 @@ pub fn FormulaTextArea() -> impl IntoView {
         <Show when=move || state.editing_cell.get().is_some()>
             <textarea
                 node_ref=state.cell_editor_ref
-                class="ce"
+                class=textarea_class
                 style=cell_style
                 prop:value=text_value
                 on:input=on_input
