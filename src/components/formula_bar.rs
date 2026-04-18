@@ -26,7 +26,12 @@ pub fn FormulaBar() -> impl IntoView {
     let input_ref = state.formula_input_ref;
 
     let cell_address = move || {
-        // Subscribe to navigation events (selection changes affect cell address display)
+        // While editing, pin to the editing cell's address. The live cursor
+        // moves during point-mode reference selection, but the label must show
+        // where the edit will be committed.
+        if let Some(edit) = state.editing_cell.get() {
+            return format!("{}{}", col_name(edit.address.column), edit.address.row);
+        }
         let _ = state.events.navigation.get();
         model.with_value(|m| {
             let ac = m.active_cell();

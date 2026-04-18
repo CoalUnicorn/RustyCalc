@@ -15,7 +15,7 @@
 
 use leptos::prelude::*;
 
-use crate::canvas::selected_cell_rect;
+use crate::canvas::{cell_rect_at, selected_cell_rect};
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::model::FrontendModel;
 use crate::state::{EditFocus, ModelStore, WorkbookState};
@@ -50,7 +50,14 @@ pub fn FormulaTextArea() -> impl IntoView {
 
     let cell_style = move || {
         let _ = state.events.navigation.get();
-        let r = model.with_value(|m| selected_cell_rect(m));
+        // Use the editing cell's address, not the live cursor. During point-mode
+        // navigation the cursor moves to referenced cells, but the textarea must
+        // stay anchored to the cell where the edit started.
+        let addr = state.editing_cell.get().map(|e| (e.address.row, e.address.column));
+        let r = model.with_value(|m| match addr {
+            Some((row, col)) => cell_rect_at(m, row, col),
+            None => selected_cell_rect(m),
+        });
         format!(
             "left:{:.0}px;top:{:.0}px;width:{:.0}px;height:{:.0}px;",
             r.x, r.y, r.width, r.height,

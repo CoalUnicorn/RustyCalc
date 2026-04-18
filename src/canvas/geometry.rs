@@ -185,13 +185,21 @@ pub fn row_to_y(m: &UserModel, sheet: u32, top_row: i32, row: i32, fg: &FrozenGe
 /// panes and scroll position.
 pub fn selected_cell_rect(m: &UserModel) -> PixelRect {
     let view = m.get_selected_view();
+    cell_rect_at(m, view.row, view.column)
+}
+
+/// Pixel rectangle for an arbitrary `(row, col)` using the current scroll
+/// position. Used by the cell editor overlay to anchor to the editing cell
+/// even when point-mode navigation has moved `view.row`/`view.column` away.
+pub fn cell_rect_at(m: &UserModel, row: i32, col: i32) -> PixelRect {
+    let view = m.get_selected_view();
     let sheet = view.sheet;
     let fg = frozen_geometry(m, sheet);
     PixelRect {
-        x: col_to_x(m, sheet, view.left_column, view.column, &fg),
-        y: row_to_y(m, sheet, view.top_row, view.row, &fg),
-        width: col_width(m, sheet, view.column),
-        height: row_height(m, sheet, view.row),
+        x: col_to_x(m, sheet, view.left_column, col, &fg),
+        y: row_to_y(m, sheet, view.top_row, row, &fg),
+        width: col_width(m, sheet, col),
+        height: row_height(m, sheet, row),
     }
 }
 
