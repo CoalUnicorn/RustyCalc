@@ -31,13 +31,7 @@ pub trait FrontendModel {
     ///
     /// `default_text_color` is the theme's text color (differs in dark mode);
     /// the renderer passes `self.theme.default_text_color`, the toolbar passes `"#000000"`.
-    fn cell_style(
-        &self,
-        sheet: u32,
-        row: i32,
-        col: i32,
-        default_text_color: &str,
-    ) -> ResolvedCellStyle;
+    fn cell_style(&self, addr: CellAddress, default_text_color: &str) -> ResolvedCellStyle;
 
     /// Formatting state for the toolbar, derived from the active cell.
     fn toolbar_state(&self) -> ToolbarState;
@@ -136,16 +130,12 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
 }
 
 impl FrontendModel for UserModel<'_> {
-    fn cell_style(
-        &self,
-        sheet: u32,
-        row: i32,
-        col: i32,
-        default_text_color: &str,
-    ) -> ResolvedCellStyle {
-        let style = self.get_cell_style(sheet, row, col).unwrap_or_default();
+    fn cell_style(&self, addr: CellAddress, default_text_color: &str) -> ResolvedCellStyle {
+        let style = self
+            .get_cell_style(addr.sheet, addr.row, addr.column)
+            .unwrap_or_default();
         let cell_type = self
-            .get_cell_type(sheet, row, col)
+            .get_cell_type(addr.sheet, addr.row, addr.column)
             .unwrap_or(CellType::Text);
 
         let text_color = match style.font.color.as_deref() {
@@ -560,7 +550,14 @@ mod tests {
     fn cell_style_defaults_for_empty_cell() {
         let m = make_model();
         // Empty cell should have sensible defaults
-        let style = m.cell_style(0, 1, 1, "#000000");
+        let style = m.cell_style(
+            CellAddress {
+                sheet: 0,
+                row: 1,
+                column: 1,
+            },
+            "#000000",
+        );
         // assert!(style.bg_color.is_none());
         assert_eq!(style.text_color.as_str(), "#000000");
         // Empty/missing cells return CellType::Number from the base library,
@@ -573,7 +570,14 @@ mod tests {
     fn cell_style_uses_theme_color_for_automatic() {
         let m = make_model();
         // Empty cell style - should fall back to theme color
-        let style = m.cell_style(0, 1, 1, "#FFFFFF");
+        let style = m.cell_style(
+            CellAddress {
+                sheet: 0,
+                row: 1,
+                column: 1,
+            },
+            "#FFFFFF",
+        );
         assert_eq!(style.text_color.as_str(), "#ffffff");
     }
 

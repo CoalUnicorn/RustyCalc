@@ -1,8 +1,8 @@
 //! Cell background + border rendering.
 //!
-//! `render_pane` walks the rows and columns of a single pane quadrant; for
+//! `render_pane` walks the rows andcolumnumns of a single pane quadrant; for
 //! each cell it calls `render_cell_style` to paint the fill and the four
-//! border edges, then collects the text layout into a `Vec<CellText>` for
+//! border edges, thencolumnlects the text layout into a `Vec<CellText>` for
 //! Phase 4.
 //!
 //! The four edges are resolved through a single `BorderEdge` enum + the two
@@ -13,6 +13,8 @@ use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::UserModel;
 use web_sys::CanvasRenderingContext2d;
 
+use crate::coord::CellAddress;
+
 use super::super::geometry::{col_width, row_height, PixelRect};
 use super::super::types::{CellEdges, CellText, FrozenOffset, PaneRegion};
 use super::{CanvasRenderer, MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
@@ -20,7 +22,7 @@ use super::{CanvasRenderer, MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BO
 //  Local border primitives
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum BorderOrientation {
+enum BorderOrientation {
     Vertical,
     Horizontal,
 }
@@ -28,7 +30,7 @@ pub(super) enum BorderOrientation {
 /// Line segment passed to the border-drawing helper.
 ///
 /// A two-point line (`x1,y1` → `x2,y2`), distinct from `PixelRect`.
-pub(super) struct BorderSegment {
+struct BorderSegment {
     pub x1: f64,
     pub y1: f64,
     pub x2: f64,
@@ -37,7 +39,7 @@ pub(super) struct BorderSegment {
 
 /// Which edge of a cell rectangle is being resolved.
 ///
-/// Lets the four previously-duplicated L/T/R/B branches collapse into one
+/// Lets the four previously-duplicated L/T/R/B branchescolumnlapse into one
 /// loop per cell that asks the enum for orientation + segment.
 #[derive(Copy, Clone)]
 enum BorderEdge {
@@ -45,6 +47,41 @@ enum BorderEdge {
     Top,
     Right,
     Bottom,
+}
+
+/// Inner edges (left / top) — the only edges whose resolved color can be
+/// borrowed from a neighbour cell's opposite border or fill. Carved out as a
+/// separate enum from `BorderEdge` so that inherent methods don't need an
+/// "unreachable for Right/Bottom" arm.
+#[derive(Copy, Clone)]
+enum InnerEdge {
+    Left,
+    Top,
+}
+
+impl InnerEdge {
+    /// Address of the neighbour whose opposite border/fill can influence this
+    /// edge. Returns `None` at the grid's top-left boundary.
+    fn neighbour(self, addr: CellAddress) -> Option<CellAddress> {
+        match self {
+            InnerEdge::Left if addr.column > 1 => Some(CellAddress {
+                column: addr.column - 1,
+                ..addr
+            }),
+            InnerEdge::Top if addr.row > 1 => Some(CellAddress {
+                row: addr.row - 1,
+                ..addr
+            }),
+            _ => None,
+        }
+    }
+
+    fn as_edge(self) -> BorderEdge {
+        match self {
+            InnerEdge::Left => BorderEdge::Left,
+            InnerEdge::Top => BorderEdge::Top,
+        }
+    }
 }
 
 impl BorderEdge {
@@ -56,7 +93,12 @@ impl BorderEdge {
     }
 
     fn segment(self, rect: PixelRect) -> BorderSegment {
-        let PixelRect { x, y, width, height } = rect;
+        let PixelRect {
+            x,
+            y,
+            width,
+            height,
+        } = rect;
         match self {
             BorderEdge::Left => BorderSegment {
                 x1: x,
@@ -87,7 +129,7 @@ impl BorderEdge {
 }
 
 /// Resolve the left/top border — where a neighbour's opposite edge or fill
-/// can influence the final colour. Encodes the fallback chain:
+/// can influence the finalcolumnour. Encodes the fallback chain:
 /// own → neighbour-side → own-bg → neighbour-bg → grid.
 fn resolve_inner_edge<'a>(
     own: Option<&'a BorderItem>,
@@ -137,11 +179,11 @@ impl CanvasRenderer {
             return;
         }
 
-        let col_range = pane.cols.clone();
-        let col_count = (col_range.end() - col_range.start() + 1) as usize;
-        let mut col_widths = Vec::with_capacity(col_count);
-        for col in col_range {
-            col_widths.push((col, col_width(model, sheet, col)));
+        let column_range = pane.cols.clone();
+        let column_count = (column_range.end() - column_range.start() + 1) as usize;
+        let mut column_widths = Vec::with_capacity(column_count);
+        for column in column_range {
+            column_widths.push((column, col_width(model, sheet, column)));
         }
 
         let mut y = pane.start_y;
@@ -155,7 +197,7 @@ impl CanvasRenderer {
             }
 
             let mut x = pane.start_x;
-            for (col, cw) in &col_widths {
+            for (column, cw) in &column_widths {
                 if x >= self.width {
                     break;
                 }
@@ -170,21 +212,24 @@ impl CanvasRenderer {
                     width: *cw,
                     height: rh,
                 };
+                let addr = CellAddress {
+                    sheet,
+                    row,
+                    column: *column,
+                };
 
                 if self.is_rect_visible(rect) {
                     self.render_cell_style(
                         model,
-                        sheet,
-                        row,
-                        *col,
+                        addr,
                         rect,
                         CellEdges {
-                            right: *col == pane.last_col,
+                            right: *column == pane.last_col,
                             bottom: row == pane.last_row,
                         },
                     );
 
-                    if let Some(ct) = self.compute_cell_text(model, sheet, row, *col, rect) {
+                    if let Some(ct) = self.compute_cell_text(model, addr, rect) {
                         cell_texts.push(ct);
                     }
                 }
@@ -207,9 +252,7 @@ impl CanvasRenderer {
     pub(super) fn render_cell_style(
         &self,
         model: &UserModel,
-        sheet: u32,
-        row: i32,
-        col: i32,
+        addr: CellAddress,
         rect: PixelRect,
         edges: CellEdges,
     ) {
@@ -217,11 +260,11 @@ impl CanvasRenderer {
             return;
         }
 
-        let Ok(style) = model.get_cell_style(sheet, row, col) else {
+        let Ok(style) = model.get_cell_style(addr.sheet, addr.row, addr.column) else {
             return;
         };
 
-        let show_grid = model.get_show_grid_lines(sheet).unwrap_or(true);
+        let show_grid = model.get_show_grid_lines(addr.sheet).unwrap_or(true);
         let bg = style.fill.fg_color.as_deref().unwrap_or(self.theme.cell_bg);
         let grid_color = if show_grid { self.theme.grid_color } else { bg };
         let own_bg_set = style.fill.fg_color.is_some();
@@ -230,37 +273,44 @@ impl CanvasRenderer {
         self.ctx.set_fill_style_str(bg);
         self.ctx.fill_rect(rect.x, rect.y, rect.width, rect.height);
 
-        // Left edge — fall back to left neighbour's right border and fill.
-        let left_nb = if col > 1 && style.border.left.is_none() && !own_bg_set {
-            model.get_cell_style(sheet, row, col - 1).ok()
-        } else {
-            None
-        };
-        let (lc, ls) = resolve_inner_edge(
-            style.border.left.as_ref(),
-            left_nb.as_ref().and_then(|n| n.border.right.as_ref()),
-            left_nb.as_ref().and_then(|n| n.fill.fg_color.as_deref()),
-            own_bg_set,
-            bg,
-            grid_color,
-        );
-        self.draw_edge(BorderEdge::Left, rect, ls, lc);
+        // Inner edges (left, top) — each falls back to the matching neighbour's
+        // opposite border and fill. The two blocks used to be hand-mirrored;
+        // now a single pass drives both off the `InnerEdge` enum.
+        for inner in [InnerEdge::Left, InnerEdge::Top] {
+            let own = match inner {
+                InnerEdge::Left => style.border.left.as_ref(),
+                InnerEdge::Top => style.border.top.as_ref(),
+            };
 
-        // Top edge — fall back to top neighbour's bottom border and fill.
-        let top_nb = if row > 1 && style.border.top.is_none() && !own_bg_set {
-            model.get_cell_style(sheet, row - 1, col).ok()
-        } else {
-            None
-        };
-        let (tc, ts) = resolve_inner_edge(
-            style.border.top.as_ref(),
-            top_nb.as_ref().and_then(|n| n.border.bottom.as_ref()),
-            top_nb.as_ref().and_then(|n| n.fill.fg_color.as_deref()),
-            own_bg_set,
-            bg,
-            grid_color,
-        );
-        self.draw_edge(BorderEdge::Top, rect, ts, tc);
+            let neighbour_style = if own.is_none() && !own_bg_set {
+                inner
+                    .neighbour(addr)
+                    .and_then(|a| model.get_cell_style(a.sheet, a.row, a.column).ok())
+            } else {
+                None
+            };
+
+            let neighbour_border = match inner {
+                InnerEdge::Left => neighbour_style
+                    .as_ref()
+                    .and_then(|n| n.border.right.as_ref()),
+                InnerEdge::Top => neighbour_style
+                    .as_ref()
+                    .and_then(|n| n.border.bottom.as_ref()),
+            };
+
+            let (color, border_style) = resolve_inner_edge(
+                own,
+                neighbour_border,
+                neighbour_style
+                    .as_ref()
+                    .and_then(|n| n.fill.fg_color.as_deref()),
+                own_bg_set,
+                bg,
+                grid_color,
+            );
+            self.draw_edge(inner.as_edge(), rect, border_style, color);
+        }
 
         // Right edge — only at pane boundary or when explicitly set.
         if edges.right || style.border.right.is_some() {
@@ -279,26 +329,22 @@ impl CanvasRenderer {
     ///
     /// Used by selection overlay to restore the active cell's real style on
     /// top of the semi-transparent selection fill. Computes pixel position
-    /// internally so the caller only needs logical `(row, col)`.
+    /// internally so the caller only needs logical `(row,column)`.
     pub(super) fn repaint_active_cell(
         &self,
         model: &UserModel,
-        sheet: u32,
-        row: i32,
-        col: i32,
+        addr: CellAddress,
         frozen: FrozenOffset,
     ) {
         let rect = PixelRect {
-            x: self.cell_x(model, sheet, col, frozen),
-            y: self.cell_y(model, sheet, row, frozen),
-            width: col_width(model, sheet, col),
-            height: row_height(model, sheet, row),
+            x: self.cell_x(model, addr.sheet, addr.column, frozen),
+            y: self.cell_y(model, addr.sheet, addr.row, frozen),
+            width: col_width(model, addr.sheet, addr.column),
+            height: row_height(model, addr.sheet, addr.row),
         };
         self.render_cell_style(
             model,
-            sheet,
-            row,
-            col,
+            addr,
             rect,
             CellEdges {
                 right: true,
@@ -307,18 +353,12 @@ impl CanvasRenderer {
         );
     }
 
-    fn draw_edge(
-        &self,
-        edge: BorderEdge,
-        rect: PixelRect,
-        style: &BorderStyle,
-        color: &str,
-    ) {
+    fn draw_edge(&self, edge: BorderEdge, rect: PixelRect, style: &BorderStyle, columnor: &str) {
         let seg = edge.segment(rect);
-        self.draw_border(&seg, style, color, edge.orientation());
+        self.draw_border(&seg, style, columnor, edge.orientation());
     }
 
-    pub(super) fn draw_border(
+    fn draw_border(
         &self,
         seg: &BorderSegment,
         style: &BorderStyle,
@@ -335,44 +375,38 @@ impl CanvasRenderer {
             | BorderStyle::MediumDashDot
             | BorderStyle::MediumDashDotDot => {
                 ctx.set_line_width(MEDIUM_BORDER_WIDTH);
-                Self::stroke_line(ctx, x1, y1, x2, y2);
+                stroke_line(ctx, x1, y1, x2, y2);
             }
             BorderStyle::Thick => {
                 ctx.set_line_width(THICK_BORDER_WIDTH);
-                Self::stroke_line(ctx, x1, y1, x2, y2);
+                stroke_line(ctx, x1, y1, x2, y2);
             }
             BorderStyle::Double => {
                 ctx.set_line_width(STANDARD_BORDER_WIDTH);
                 match orientation {
                     BorderOrientation::Vertical => {
-                        Self::stroke_line(ctx, x1 - 1.0, y1, x1 - 1.0, y2);
-                        Self::stroke_line(ctx, x1 + 1.0, y1, x1 + 1.0, y2);
+                        stroke_line(ctx, x1 - 1.0, y1, x1 - 1.0, y2);
+                        stroke_line(ctx, x1 + 1.0, y1, x1 + 1.0, y2);
                     }
                     BorderOrientation::Horizontal => {
-                        Self::stroke_line(ctx, x1, y1 - 1.0, x2, y1 - 1.0);
-                        Self::stroke_line(ctx, x1, y1 + 1.0, x2, y1 + 1.0);
+                        stroke_line(ctx, x1, y1 - 1.0, x2, y1 - 1.0);
+                        stroke_line(ctx, x1, y1 + 1.0, x2, y1 + 1.0);
                     }
                 }
             }
             // Thin, Dotted, SlantDashDot, and anything else → single thin line.
             _ => {
                 ctx.set_line_width(STANDARD_BORDER_WIDTH);
-                Self::stroke_line(ctx, x1, y1, x2, y2);
+                stroke_line(ctx, x1, y1, x2, y2);
             }
         }
         ctx.restore();
     }
+}
 
-    pub(super) fn stroke_line(
-        ctx: &CanvasRenderingContext2d,
-        x1: f64,
-        y1: f64,
-        x2: f64,
-        y2: f64,
-    ) {
-        ctx.begin_path();
-        ctx.move_to(x1, y1);
-        ctx.line_to(x2, y2);
-        ctx.stroke();
-    }
+fn stroke_line(ctx: &CanvasRenderingContext2d, x1: f64, y1: f64, x2: f64, y2: f64) {
+    ctx.begin_path();
+    ctx.move_to(x1, y1);
+    ctx.line_to(x2, y2);
+    ctx.stroke();
 }

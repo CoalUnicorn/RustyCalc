@@ -14,6 +14,12 @@ use super::super::geometry::{
 use super::super::types::{FrozenOffset, PixelBounds, PixelOffsets, VisibleRegion};
 use super::CanvasRenderer;
 
+#[derive(Copy, Clone)]
+enum Axis {
+    Row(i32),
+    Column(i32),
+}
+
 impl CanvasRenderer {
     /// Map a sheet-coordinate range to canvas pixel bounds, clamping oversized
     /// selections to the canvas edge to avoid O(MAX_COLS) iteration.
@@ -67,6 +73,29 @@ impl CanvasRenderer {
         Some(PixelBounds { x1, y1, x2, y2 })
     }
 
+    fn cell_offset(&self, model: &UserModel, sheet: u32, axis: Axis, frozen: FrozenOffset) -> f64 {
+        match axis {
+            Axis::Column(col) => {
+                let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
+                if col <= frozen_cols {
+                    return HEADER_COL_WIDTH
+                        + 0.5
+                        + (1..col).map(|c| col_width(model, sheet, c)).sum::<f64>();
+                }
+                frozen.x + self.offsets.col_left(col)
+            }
+            Axis::Row(row) => {
+                let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
+                if row <= frozen_rows {
+                    return HEADER_ROW_HEIGHT
+                        + 0.5
+                        + (1..row).map(|r| row_height(model, sheet, r)).sum::<f64>();
+                }
+                frozen.y + self.offsets.row_top(row)
+            }
+        }
+    }
+
     pub(super) fn cell_x(
         &self,
         model: &UserModel,
@@ -74,15 +103,7 @@ impl CanvasRenderer {
         col: i32,
         frozen: FrozenOffset,
     ) -> f64 {
-        let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        if col <= frozen_cols {
-            // Frozen columns: iterate from 1..col (at most a handful of cols).
-            return HEADER_COL_WIDTH
-                + 0.5
-                + (1..col).map(|c| col_width(model, sheet, c)).sum::<f64>();
-        }
-        // Scrollable columns: O(1) lookup via precomputed prefix-sum cache.
-        frozen.x + self.offsets.col_left(col)
+        self.cell_offset(model, sheet, Axis::Column(col), frozen)
     }
 
     pub(super) fn cell_y(
@@ -92,15 +113,7 @@ impl CanvasRenderer {
         row: i32,
         frozen: FrozenOffset,
     ) -> f64 {
-        let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
-        if row <= frozen_rows {
-            // Frozen rows: iterate from 1..row (at most a handful of rows).
-            return HEADER_ROW_HEIGHT
-                + 0.5
-                + (1..row).map(|r| row_height(model, sheet, r)).sum::<f64>();
-        }
-        // Scrollable rows: O(1) lookup via precomputed prefix-sum cache.
-        frozen.y + self.offsets.row_top(row)
+        self.cell_offset(model, sheet, Axis::Row(row), frozen)
     }
 
     /// Build a prefix-sum pixel-offset table for all visible rows and columns.

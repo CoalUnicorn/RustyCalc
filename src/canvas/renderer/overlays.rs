@@ -9,7 +9,7 @@
 
 use ironcalc_base::UserModel;
 
-use crate::coord::CellArea;
+use crate::coord::{CellAddress, CellArea};
 
 use super::super::geometry::AUTOFILL_HANDLE_PX;
 use super::super::types::{AutofillTarget, DashFill, FrozenOffset};
@@ -20,6 +20,11 @@ impl CanvasRenderer {
     /// handle for the current selection.
     pub(super) fn draw_selection(&self, model: &UserModel, sheet: u32, frozen: FrozenOffset) {
         let view = model.get_selected_view();
+        let addr = CellAddress {
+            sheet,
+            row: view.row,
+            column: view.column,
+        };
         let Some(b) = self.range_pixel_bounds(
             model,
             sheet,
@@ -37,7 +42,7 @@ impl CanvasRenderer {
         // Restore the active cell's fill + borders on top of the selection
         // tint so its actual style shows through while selected. Phase 4
         // paints text over everything later.
-        self.repaint_active_cell(model, sheet, view.row, view.column, frozen);
+        self.repaint_active_cell(model, addr, frozen);
 
         ctx.set_stroke_style_str(self.theme.selection_color);
         ctx.set_line_width(SELECTION_BORDER_WIDTH);
@@ -103,10 +108,13 @@ impl CanvasRenderer {
         ctx.set_line_dash(&web_sys::js_sys::Array::new()).ok();
         ctx.set_line_width(STANDARD_BORDER_WIDTH);
 
-        if fill == DashFill::Tinted {
-            let tint = hex_to_rgba(color, 0.08);
-            ctx.set_fill_style_str(&tint);
-            ctx.fill_rect(b.x1, b.y1, b.width(), b.height());
+        match fill {
+            DashFill::Tinted => {
+                let tint = hex_to_rgba(color, 0.08);
+                ctx.set_fill_style_str(&tint);
+                ctx.fill_rect(b.x1, b.y1, b.width(), b.height());
+            }
+            DashFill::Outline => {}
         }
     }
 }

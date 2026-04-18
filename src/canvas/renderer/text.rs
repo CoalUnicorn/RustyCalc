@@ -8,6 +8,7 @@
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 use ironcalc_base::UserModel;
 
+use crate::coord::CellAddress;
 use crate::model::frontend_model::FrontendModel;
 
 use super::super::geometry::PixelRect;
@@ -29,18 +30,23 @@ impl CanvasRenderer {
     pub(super) fn compute_cell_text(
         &self,
         model: &UserModel,
-        sheet: u32,
-        row: i32,
-        col: i32,
+        addr: CellAddress,
         rect: PixelRect,
     ) -> Option<CellText> {
-        let PixelRect { x, y, width, height } = rect;
+        let PixelRect {
+            x,
+            y,
+            width,
+            height,
+        } = rect;
 
         if width <= 0.0 || height <= 0.0 || !self.is_rect_visible(rect) {
             return None;
         }
 
-        let text = model.get_formatted_cell_value(sheet, row, col).ok()?;
+        let text = model
+            .get_formatted_cell_value(addr.sheet, addr.row, addr.column)
+            .ok()?;
         if text.is_empty() {
             return None;
         }
@@ -64,7 +70,7 @@ impl CanvasRenderer {
             v_align: effective_v_align,
             wrap_text: wrap,
             ..
-        } = model.cell_style(sheet, row, col, self.theme.default_text_color);
+        } = model.cell_style(addr, self.theme.default_text_color);
 
         let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
         let line_height = font_size * LINE_HEIGHT_FACTOR;
@@ -137,7 +143,12 @@ impl CanvasRenderer {
         }
 
         Some(CellText {
-            clip: PixelRect { x, y, width, height },
+            clip: PixelRect {
+                x,
+                y,
+                width,
+                height,
+            },
             font,
             font_size_px: font_size,
             text_color,
