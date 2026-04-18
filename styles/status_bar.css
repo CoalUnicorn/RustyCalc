@@ -1,0 +1,25 @@
+.status-bar {
+    min-height: 1.5rem;
+    padding: 0 0.5rem;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-top: 1px solid var(--border-color);
+}
+
+.status-bar-error {
+    color: var(--color-error, #c0392b);
+}
+
+.status-bar-formula-error {
+    color: var(--color-warning, #c8a000);
+}
+
+.status-dirty {
+    color: var(--color-accent, #e66);
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+    line-height: 1;
+}
