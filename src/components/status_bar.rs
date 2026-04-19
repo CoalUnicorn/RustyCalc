@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 
+use crate::input::formula_analysis::FormulaStatus;
 use crate::state::{StatusMessage, WorkbookState};
 
 /// Displays the most recent engine error below the sheet tab bar.
@@ -13,21 +14,18 @@ pub fn StatusBar() -> impl IntoView {
 
     let formula_msg = Memo::new(move |_| -> Option<String> {
         let edit = state.editing_cell.get()?;
-        if !edit.text.starts_with('=') {
-            return None;
+        match &edit.formula_analysis.status {
+            FormulaStatus::NotFormula | FormulaStatus::Valid { .. } => None,
+            FormulaStatus::ParseError(e) => {
+                Some(format!("Parse error at col {}: {}", e.position, e.message))
+            }
+            FormulaStatus::LexerError(e) => {
+                Some(format!("Syntax error at col {}: {}", e.position, e.message))
+            }
+            FormulaStatus::Unresolved {
+                refs, functions, ..
+            } => Some(format!("{} unresolved name(s)", refs.len() + functions.len())),
         }
-        let a = &edit.formula_analysis;
-        if let Some(e) = &a.parse_error {
-            return Some(format!("Parse error at col {}: {}", e.position, e.message));
-        }
-        if a.validation_error.is_some() {
-            return Some("Syntax error in formula".into());
-        }
-        let n = a.invalid_refs.len() + a.invalid_functions.len();
-        if n > 0 {
-            return Some(format!("{n} unresolved name(s)"));
-        }
-        None
     });
 
     view! {

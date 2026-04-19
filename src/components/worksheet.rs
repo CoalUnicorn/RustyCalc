@@ -77,7 +77,7 @@ pub fn Worksheet() -> impl IntoView {
         let formula_refs: Vec<FormulaRef> = state
             .editing_cell
             .get()
-            .map(|e| e.formula_analysis.refs)
+            .map(|e| e.formula_analysis.refs().to_vec())
             .unwrap_or_default();
 
         (extend_to, point_range, formula_refs)

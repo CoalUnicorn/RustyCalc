@@ -68,9 +68,7 @@ pub fn FormulaTextArea() -> impl IntoView {
     };
 
     let textarea_class = move || match state.editing_cell.get() {
-        Some(e) if e.text.starts_with('=') && e.formula_analysis.has_any_error() => {
-            "ce formula-error"
-        }
+        Some(e) if e.formula_analysis.has_any_error() => "ce formula-error",
         _ => "ce",
     };
 

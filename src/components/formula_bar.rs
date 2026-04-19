@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use crate::canvas::col_name;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
-use crate::input::formula_analysis::analyze_formula;
+use crate::input::formula_analysis::{analyze_formula, FormulaStatus};
 use crate::model::FrontendModel;
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 
@@ -53,15 +53,6 @@ pub fn FormulaBar() -> impl IntoView {
 
     let is_editing = move || state.editing_cell.get().is_some();
 
-    // Helper: collect (sheet_index, sheet_name) pairs for analyze_formula().
-    // Called at the start of each on_input to get the current sheet list.
-    let get_sheet_names =
-        move || -> Vec<(u32, String)> { model.with_value(|m| m.get_sheet_names()) };
-
-    let sheet_names = get_sheet_names();
-
-    let (_validation_error, _set_validation_error) = signal(None::<String>);
-
     // Start an edit session with FormulaBar focus (so CellEditor doesn't
     // steal focus back), or switch focus if already editing.
     let on_focus = move |_: web_sys::FocusEvent| {
@@ -76,6 +67,7 @@ pub fn FormulaBar() -> impl IntoView {
         model.with_value(|m| {
             let text = m.active_cell_content();
             let address = m.active_cell();
+            let sheet_names = model.with_value(|m| m.get_sheet_names());
 
             // Fire editing started event
             state.emit_event(SpreadsheetEvent::Navigation(
@@ -113,13 +105,12 @@ pub fn FormulaBar() -> impl IntoView {
             "fb-input"
         };
         let validation = state.editing_cell.get().map_or("", |edit| {
-            if !edit.text.starts_with('=') {
-                return "";
-            }
-            if edit.formula_analysis.has_any_error() {
-                " error"
-            } else {
-                " valid"
+            match edit.formula_analysis.status {
+                FormulaStatus::NotFormula => "",
+                FormulaStatus::Valid { .. } => " valid",
+                FormulaStatus::ParseError(_)
+                | FormulaStatus::LexerError(_)
+                | FormulaStatus::Unresolved { .. } => " error",
             }
         });
         format!("{base}{validation}")
