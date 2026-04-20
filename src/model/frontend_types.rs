@@ -182,6 +182,28 @@ pub enum ArrowKey {
     Right,
 }
 
+impl ArrowKey {
+    /// (row-delta, column-delta) for an arrow key.
+    pub fn delta(&self) -> (i32, i32) {
+        match self {
+            ArrowKey::Down => (1, 0),
+            ArrowKey::Up => (-1, 0),
+            ArrowKey::Left => (0, -1),
+            ArrowKey::Right => (0, 1),
+        }
+    }
+
+    pub fn from_str(key: &str) -> Option<Self> {
+        match key {
+            "ArrowDown" => Some(ArrowKey::Down),
+            "ArrowUp" => Some(ArrowKey::Up),
+            "ArrowLeft" => Some(ArrowKey::Left),
+            "ArrowRight" => Some(ArrowKey::Right),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PageDir {
     Up,

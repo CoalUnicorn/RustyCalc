@@ -4,7 +4,7 @@ use crate::components::{
     file_bar::FileBar, formula_bar::FormulaBar, header_context_menu::HeaderContextMenuOverlay,
     sheet_tab_bar::SheetTabBar, status_bar::StatusBar, toolbar::Toolbar, worksheet::Worksheet,
 };
-use crate::coord::SheetArea;
+use crate::coord::{CellAddress, SheetArea};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::{
@@ -12,7 +12,7 @@ use crate::input::{
     formula_input::*,
     keyboard::{classify_key, execute, KeyMod, SpreadsheetAction},
 };
-use crate::model::{mutate, try_mutate, AppClipboard, EvaluationMode, PasteMode};
+use crate::model::{mutate, try_mutate, AppClipboard, ArrowKey, EvaluationMode, PasteMode};
 use crate::state::{DragState, EditMode, ModelStore, StatusMessage, WorkbookState};
 
 /// Top-level keyboard router. Clipboard ops and point-mode arrow handling
@@ -49,21 +49,21 @@ pub fn Workbook() -> impl IntoView {
             let may_point = edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
 
             if may_point && !is_ctrl && !is_alt {
-                let pr = state.effective_point_range(model);
+                let current_ref = state.effective_point_ref(model);
                 let prev_span =
                     if let DragState::Pointing { ref_span, .. } = state.drag.get_untracked() {
                         Some(ref_span)
                     } else {
                         None
                     };
-                let sheet = model.with_value(|m| m.get_selected_sheet());
+                let editing = model.with_value(CellAddress::from_view);
                 let ctx = PointMoveCtx {
                     text: &edit.text,
                     cursor: edit.cursor,
                     already_pointing,
-                    current_range: pr,
+                    current_ref,
                     prev_span,
-                    sheet,
+                    editing,
                 };
                 match try_point_move(&ctx, &key, is_shift) {
                     PointMoveOutcome::NoAction => {}
@@ -80,7 +80,7 @@ pub fn Workbook() -> impl IntoView {
                             }
                         });
                         state.drag.set(DragState::Pointing {
-                            range: result.range,
+                            ref_node: result.ref_node,
                             ref_span: result.span,
                         });
                         ev.prevent_default();

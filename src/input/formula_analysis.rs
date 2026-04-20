@@ -22,7 +22,7 @@ use ironcalc_base::expressions::{
     types::CellReferenceRC,
 };
 
-use crate::coord::{CellAddress, CellArea, FormulaRef, SheetArea, SpanRef};
+use crate::coord::{CellAddress, CellArea, FormulaRef, SheetArea, TextRef};
 
 /// Empty slice used by [`FormulaAnalysis::refs`] for variants that carry no overlays.
 const NO_REFS: &[FormulaRef] = &[];
@@ -83,8 +83,8 @@ pub enum FormulaStatus {
     /// Parsed cleanly but some names/functions don't resolve.
     /// `valid_refs` is the subset that DID resolve and should still paint.
     Unresolved {
-        refs: Vec<SpanRef>,
-        functions: Vec<SpanRef>,
+        refs: Vec<TextRef>,
+        functions: Vec<TextRef>,
         valid_refs: Vec<FormulaRef>,
     },
 }
@@ -142,10 +142,10 @@ pub fn analyze_formula(
 
     let tokens = get_tokens(formula);
     let mut validation_error: Option<LexerError> = None;
-    let mut ref_range_token_spans: Vec<SpanRef> = Vec::new();
-    let mut fn_ident_spans: Vec<SpanRef> = Vec::new();
+    let mut ref_range_token_spans: Vec<TextRef> = Vec::new();
+    let mut fn_ident_spans: Vec<TextRef> = Vec::new();
     for t in &tokens {
-        let span = SpanRef {
+        let span = TextRef {
             start: t.start as usize,
             end: t.end as usize,
         };
@@ -222,7 +222,7 @@ pub fn analyze_formula(
     };
 
     let mut refs: Vec<FormulaRef> = Vec::new();
-    let mut invalid_refs: Vec<SpanRef> = Vec::new();
+    let mut invalid_refs: Vec<TextRef> = Vec::new();
     for (leaf, span) in ref_leaves.iter().zip(ref_range_token_spans.iter().copied()) {
         match leaf {
             RefLeaf::Resolved(address) => {
@@ -244,7 +244,7 @@ pub fn analyze_formula(
         }
     }
 
-    let mut invalid_functions: Vec<SpanRef> = Vec::new();
+    let mut invalid_functions: Vec<TextRef> = Vec::new();
     for (leaf, span) in fn_leaves.iter().zip(fn_ident_spans.iter().copied()) {
         match leaf {
             FnLeaf::Known => {}

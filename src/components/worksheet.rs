@@ -65,20 +65,23 @@ pub fn Worksheet() -> impl IntoView {
             None
         };
 
-        let point_range = if let DragState::Pointing { range, .. } = state.drag.get() {
-            Some(range)
-        } else {
-            None
-        };
-
         // Reading editing_cell here subscribes the memo to it. Since FormulaRef
         // derives PartialEq, the memo's PartialEq gate suppresses re-renders when
         // refs don't change (e.g. text changed but no new refs produced).
-        let formula_refs: Vec<FormulaRef> = state
-            .editing_cell
-            .get()
+        let editing_cell = state.editing_cell.get();
+        let formula_refs: Vec<FormulaRef> = editing_cell
+            .as_ref()
             .map(|e| e.formula_analysis.refs().to_vec())
             .unwrap_or_default();
+
+        // Point-mode range for overlay painting. RefNode stores relative deltas,
+        // so resolution needs the editing cell's address as anchor.
+        let point_range = match (state.drag.get(), editing_cell.as_ref()) {
+            (DragState::Pointing { ref_node, .. }, Some(e)) => {
+                Some(ref_node.area(&e.address).area)
+            }
+            _ => None,
+        };
 
         (extend_to, point_range, formula_refs)
     });

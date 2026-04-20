@@ -7,7 +7,7 @@ use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
-use crate::coord::{CellAddress, CellArea, SpanRef};
+use crate::coord::{CellAddress, RefNode, SheetArea, TextRef};
 use crate::events::*;
 use crate::input::formula_analysis::FormulaAnalysis;
 use crate::model::CssColor;
@@ -72,7 +72,10 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
 
 /// Single enum ensures at most one drag mode is active — illegal
 /// combinations (e.g. selecting while resizing) are unrepresentable.
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// `Pointing` carries an owned `RefNode` (non-Copy because its inner ironcalc
+/// `Node` holds an `Option<String>` sheet name), so the enum is `Clone` only.
+#[derive(Clone, Debug, PartialEq)]
 pub enum DragState {
     /// No drag in progress.
     Idle,
@@ -84,8 +87,12 @@ pub enum DragState {
     ResizingCol { col: i32, x: f64 },
     /// Row header resize: `(row_1based, current_mouse_y)`.
     ResizingRow { row: i32, y: f64 },
-    /// Formula point-mode: highlighted range + byte span in formula text.
-    Pointing { range: CellArea, ref_span: SpanRef },
+    /// Formula point-mode: carries ironcalc's canonical reference Node plus the
+    /// byte span of its rendered form in the edited formula text.
+    Pointing {
+        ref_node: RefNode,
+        ref_span: TextRef,
+    },
 }
 
 /// Arrow key behavior during a cell edit.
@@ -178,15 +185,19 @@ impl WorkbookState {
         }
     }
 
-    /// Active point-mode range, or 1x1 at the current cell if not pointing yet.
-    pub(crate) fn effective_point_range(&self, model: ModelStore) -> CellArea {
-        if let DragState::Pointing { range, .. } = self.drag.get_untracked() {
-            range
+    /// Active point-mode reference as a `RefNode`, or a 1x1 reference at the
+    /// current cell when point-mode hasn't started yet.
+    ///
+    /// Returning `RefNode` (not `CellArea`) preserves absolute-flag and
+    /// sheet-qualification state end-to-end: `try_point_move` never has to
+    /// rebuild what the drag state already carries.
+    pub(crate) fn effective_point_ref(&self, model: ModelStore) -> RefNode {
+        if let DragState::Pointing { ref_node, .. } = self.drag.get_untracked() {
+            ref_node
         } else {
-            model.with_value(|m| {
-                let v = m.get_selected_view();
-                CellArea::from_cell(v.row, v.column)
-            })
+            let editing = model.with_value(CellAddress::from_view);
+            let area = SheetArea::from_cell(editing.sheet, editing.row, editing.column);
+            RefNode::from_cell_area(area, editing, "")
         }
     }
 
