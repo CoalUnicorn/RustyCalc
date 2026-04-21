@@ -95,6 +95,7 @@ mod viewport;
 use ironcalc_base::UserModel;
 
 use wasm_bindgen::JsCast;
+use web_sys::js_sys;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use super::types::*;
@@ -118,6 +119,13 @@ pub struct CanvasRenderer {
     /// Precomputed pixel offsets for visible rows/cols - populated alongside
     /// `vis`. Turns `cell_x`/`cell_y` from O(visible x R) into O(1).
     offsets: PixelOffsets,
+    /// Cached dash pattern passed to `set_line_dash` on every dashed stroke
+    /// (clipboard ants, point-mode range, formula refs).
+    /// Single overlay pass can hit this N times per frame.
+    /// Allocated once in `new()` so `rect_dashed`.
+    dash_pattern: js_sys::Array,
+    /// Empty array used to clear the dash pattern after a dashed stroke.
+    dash_empty: js_sys::Array,
 }
 
 impl CanvasRenderer {
@@ -167,6 +175,8 @@ impl CanvasRenderer {
             theme,
             vis: VisibleRegion::default(),
             offsets: PixelOffsets::default(),
+            dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
+            dash_empty: js_sys::Array::new(),
         }
     }
 

@@ -31,10 +31,9 @@ impl CanvasRenderer {
 
     /// Dashed outline (4-on / 3-off). Resets dash pattern and line_width on exit.
     pub(super) fn rect_dashed(&self, rect: PixelRect, color: &str, width: f64) {
-        let dash = web_sys::js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into());
-        self.ctx.set_line_dash(&dash).ok();
+        self.ctx.set_line_dash(&self.dash_pattern).ok();
         self.rect_stroke(rect, color, width);
-        self.ctx.set_line_dash(&web_sys::js_sys::Array::new()).ok();
+        self.ctx.set_line_dash(&self.dash_empty).ok();
     }
 
     /// Run `f` with `width` as the active stroke `line_width`. Restores
