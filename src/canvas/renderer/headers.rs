@@ -10,10 +10,10 @@ use std::ops::RangeInclusive;
 
 use ironcalc_base::UserModel;
 
-use crate::canvas::Point;
+use crate::canvas::{Point, Span, HEADER_OFFSET};
 
 use super::super::geometry::{
-    col_name, col_width, row_height, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+    col_name, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
 use super::super::types::{Axis, FrozenRC};
 use super::text::DEFAULT_FONT_FAMILY;
@@ -28,15 +28,27 @@ impl CanvasRenderer {
         self.ctx
             .set_stroke_style_str(self.theme.grid_separator_color);
 
-        let sep_y = frc.offset.y - FROZEN_SEP / 2.0 + 0.5;
-        let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + 0.5;
+        let sep_y = frc.offset.y - FROZEN_SEP / 2.0 + HEADER_OFFSET;
+        let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
 
         self.with_stroke_width(FROZEN_SEP, |this| {
             if frc.row_band.is_some() {
-                this.stroke_hline(0.0, this.width, sep_y);
+                this.stroke_hline(
+                    Span {
+                        from: 0.0,
+                        to: this.width,
+                    },
+                    sep_y,
+                );
             }
             if frc.col_band.is_some() {
-                this.stroke_vline(sep_x, 0.0, this.height);
+                this.stroke_vline(
+                    sep_x,
+                    Span {
+                        from: 0.0,
+                        to: this.height,
+                    },
+                );
             }
         });
     }
@@ -45,106 +57,80 @@ impl CanvasRenderer {
     /// header strips from the cell area.
     pub(super) fn draw_corner_box(&self) {
         let corner = PixelRect {
-            point: Point { x: 0.0, y: 0.0 },
-            width: HEADER_COL_WIDTH,
-            height: HEADER_ROW_HEIGHT,
+            top_left: Point { x: 0.0, y: 0.0 },
+            size: Point {
+                x: HEADER_COL_WIDTH,
+                y: HEADER_ROW_HEIGHT,
+            },
         };
         self.rect_fill(corner, self.theme.header_bg);
 
         self.ctx
             .set_stroke_style_str(self.theme.header_border_color);
         self.ctx.set_line_width(STANDARD_BORDER_WIDTH);
-        self.stroke_hline(0.0, self.width, HEADER_ROW_HEIGHT + 0.5);
-        self.stroke_vline(HEADER_COL_WIDTH + 0.5, 0.0, self.height);
+        self.stroke_hline(
+            Span {
+                from: 0.0,
+                to: self.width,
+            },
+            HEADER_ROW_HEIGHT + HEADER_OFFSET,
+        );
+        self.stroke_vline(
+            HEADER_COL_WIDTH + HEADER_OFFSET,
+            Span {
+                from: 0.0,
+                to: self.height,
+            },
+        );
     }
 
-    pub(super) fn render_row_headers(
+    /// Paint one header strip along `axis`: frozen band first (if any),
+    /// then the scrollable band. Selected indices get a highlighted fill.
+    ///
+    /// `frozen_origin` is where the scrollable band starts when the frozen
+    /// band is present; ignored otherwise.
+    pub(super) fn render_headers(
         &self,
         model: &UserModel,
         sheet: u32,
+        axis: Axis,
         frozen_band: Option<&RangeInclusive<i32>>,
-        frozen_y: f64,
+        frozen_origin: f64,
     ) {
         let view = model.get_selected_view();
-        let sel_start = view.range[0].min(view.range[2]);
-        let sel_end = view.range[0].max(view.range[2]);
+        let (sel_start, sel_end) = axis.selection_range(&view.range);
 
         self.ctx
             .set_font(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
 
-        // Frozen rows strip.
-        let mut y = HEADER_ROW_HEIGHT + 0.5;
+        // Frozen band — pinned to the strip origin.
+        let mut cursor = axis.strip_start();
         if let Some(band) = frozen_band {
-            for row in band.clone() {
-                let rh = row_height(model, sheet, row);
-                if rh <= 0.0 {
+            for i in band.clone() {
+                let t = axis.extent(model, sheet, i);
+                if t <= 0.0 {
                     continue;
                 }
-                let selected = row >= sel_start && row <= sel_end;
-                self.draw_header_cell(Axis::Row, row, y, rh, selected);
-                y += rh;
+                let selected = i >= sel_start && i <= sel_end;
+                self.draw_header_cell(axis, i, cursor, t, selected);
+                cursor += t;
             }
         }
 
-        // Scrollable rows strip.
-        let mut y = if frozen_band.is_some() {
-            frozen_y
+        // Scrollable band — picks up past the frozen band when present.
+        let mut cursor = if frozen_band.is_some() {
+            frozen_origin
         } else {
-            HEADER_ROW_HEIGHT + 0.5
+            axis.strip_start()
         };
-        for row in self.vis.row_first..=self.vis.row_last {
-            let rh = row_height(model, sheet, row);
-            if rh <= 0.0 {
+        for i in axis.visible_band(&self.vis) {
+            let t = axis.extent(model, sheet, i);
+            if t <= 0.0 {
                 continue;
             }
-            let selected = row >= sel_start && row <= sel_end;
-            self.draw_header_cell(Axis::Row, row, y, rh, selected);
-            y += rh;
-        }
-    }
-
-    pub(super) fn render_column_headers(
-        &self,
-        model: &UserModel,
-        sheet: u32,
-        frozen_band: Option<&RangeInclusive<i32>>,
-        frozen_x: f64,
-    ) {
-        let view = model.get_selected_view();
-        let sel_start = view.range[1].min(view.range[3]);
-        let sel_end = view.range[1].max(view.range[3]);
-
-        self.ctx
-            .set_font(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
-
-        // Frozen columns strip.
-        let mut x = HEADER_COL_WIDTH + 0.5;
-        if let Some(band) = frozen_band {
-            for col in band.clone() {
-                let cw = col_width(model, sheet, col);
-                if cw <= 0.0 {
-                    continue;
-                }
-                let selected = col >= sel_start && col <= sel_end;
-                self.draw_header_cell(Axis::Column, col, x, cw, selected);
-                x += cw;
-            }
-        }
-
-        // Scrollable columns strip.
-        let mut x = if frozen_band.is_some() {
-            frozen_x
-        } else {
-            HEADER_COL_WIDTH + 0.5
-        };
-        for col in self.vis.col_first..=self.vis.col_last {
-            let cw = col_width(model, sheet, col);
-            if cw <= 0.0 {
-                continue;
-            }
-            let selected = col >= sel_start && col <= sel_end;
-            self.draw_header_cell(Axis::Column, col, x, cw, selected);
-            x += cw;
+            let selected = i >= sel_start && i <= sel_end;
+            self.draw_header_cell(axis, i, cursor, t, selected);
+            cursor += t;
         }
     }
 

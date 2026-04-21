@@ -13,7 +13,8 @@ use crate::coord::{CellArea, FormulaRef, SheetArea};
 use crate::model::CssColor;
 
 use super::geometry::{
-    col_width, row_height, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+    col_width, row_height, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_OFFSET,
+    HEADER_ROW_HEIGHT,
 };
 
 //  Shared axis — row-vs-column symmetry
@@ -39,16 +40,68 @@ impl Axis {
     pub(crate) fn header_rect(self, along: f64, thickness: f64) -> PixelRect {
         match self {
             Axis::Row => PixelRect {
-                point: Point { x: 0.5, y: along },
-                width: HEADER_COL_WIDTH,
-                height: thickness,
+                top_left: Point {
+                    x: HEADER_OFFSET,
+                    y: along,
+                },
+                size: Point {
+                    x: HEADER_COL_WIDTH,
+                    y: thickness,
+                },
             },
             Axis::Column => PixelRect {
-                point: Point { x: along, y: 0.5 },
-                width: thickness,
-                height: HEADER_ROW_HEIGHT,
+                top_left: Point {
+                    x: along,
+                    y: HEADER_OFFSET,
+                },
+                size: Point {
+                    x: thickness,
+                    y: HEADER_ROW_HEIGHT,
+                },
             },
         }
+    }
+
+    /// Extent of the row/column at `index` on `sheet` (row height or column width).
+    pub(crate) fn extent(self, model: &UserModel, sheet: u32, index: i32) -> f64 {
+        match self {
+            Axis::Row => row_height(model, sheet, index),
+            Axis::Column => col_width(model, sheet, index),
+        }
+    }
+
+    /// Pixel position where the header strip begins along this axis,
+    /// offset by HEADER_OFFSET `0.5` for crisp integer-coordinate strokes.
+    pub(crate) fn strip_start(self) -> f64 {
+        match self {
+            Axis::Row => HEADER_ROW_HEIGHT + HEADER_OFFSET,
+            Axis::Column => HEADER_COL_WIDTH + HEADER_OFFSET,
+        }
+    }
+
+    /// Visible scrollable band in this axis, drawn from `VisibleRegion`.
+    pub(crate) fn visible_band(self, vis: &VisibleRegion) -> RangeInclusive<i32> {
+        match self {
+            Axis::Row => vis.row_first..=vis.row_last,
+            Axis::Column => vis.col_first..=vis.col_last,
+        }
+    }
+
+    /// Inclusive `(start, end)` of the user's selection along this axis,
+    /// read from ironcalc's `SelectedView.range` array laid out as
+    /// `[row1, col1, row2, col2]`. Rows live at indices 0/2; columns at 1/3.
+    pub(crate) fn selection_range(self, view_range: &[i32; 4]) -> (i32, i32) {
+        let (start, end) = match self {
+            Axis::Row => (
+                view_range[0].min(view_range[2]),
+                view_range[0].max(view_range[2]),
+            ),
+            Axis::Column => (
+                view_range[1].min(view_range[3]),
+                view_range[1].max(view_range[3]),
+            ),
+        };
+        (start, end)
     }
 }
 
@@ -64,20 +117,13 @@ pub(crate) struct FrozenOffset {
     pub y: f64,
 }
 
-/// Frozen rows and columns are grouped with their pixel origin
+/// Frozen rows and columns grouped with their pixel origin, recalculated
+/// every frame from the current model state.
 ///
-/// These and recalculated every frame based on the current model state.
-/// The bands use an Option<Range> type. If an axis is None, no freezing occurs.
-/// If Some(range), it specifies the indices of the frozen rows or columns.
-/// Currently, from_model only supports static freezing from the top (e.g., 1..=N).
-/// The Option<Range> structure is intended to support future dynamic freezing,
-/// such as scroll-activated rows (named range header)
-/// or releasing the freeze when a footer is reached.
-///```rust
-/// let frc = FrozenRC::from_model(model, sheet);
-/// // frc.row_band, frc.col_band - Option<RangeInclusive<i32>>
-/// // frc.offset.x/y             - pixel origin of the scrollable area
-/// ```
+/// Each band is `Option<RangeInclusive<i32>>`: `None` means no freezing on
+/// that axis, `Some(range)` names the frozen indices. Today `from_model`
+/// only emits `1..=N`, but the range carries the start index too so a band
+/// that doesn't start at row/col 1 stays expressible.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FrozenRC {
     pub row_band: Option<RangeInclusive<i32>>,
@@ -137,8 +183,8 @@ impl PaneRegion {
             last_col: *cols.end(),
             rows,
             cols,
-            start_x: HEADER_COL_WIDTH + 0.5,
-            start_y: HEADER_ROW_HEIGHT + 0.5,
+            start_x: HEADER_COL_WIDTH + HEADER_OFFSET,
+            start_y: HEADER_ROW_HEIGHT + HEADER_OFFSET,
         }
     }
 
@@ -150,7 +196,7 @@ impl PaneRegion {
             rows,
             cols: vis.col_first..=vis.col_last,
             start_x: frc.offset.x,
-            start_y: HEADER_ROW_HEIGHT + 0.5,
+            start_y: HEADER_ROW_HEIGHT + HEADER_OFFSET,
             last_col: vis.col_last,
         }
     }
@@ -162,7 +208,7 @@ impl PaneRegion {
             last_col: *cols.end(),
             rows: vis.row_first..=vis.row_last,
             cols,
-            start_x: HEADER_COL_WIDTH + 0.5,
+            start_x: HEADER_COL_WIDTH + HEADER_OFFSET,
             start_y: frc.offset.y,
             last_row: vis.row_last,
         }
@@ -322,4 +368,37 @@ pub enum CanvasRenderMode {
     ViewportUpdate,
     /// Drag overlay changed (autofill preview, point-mode range) - no model change.
     Overlay,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn row_header_rect_pins_x_to_left_strip() {
+        let rect = Axis::Row.header_rect(100.0, 20.0);
+        assert_eq!(rect.top_left.x, HEADER_OFFSET);
+        assert_eq!(rect.top_left.y, 100.0);
+        assert_eq!(rect.size.x, HEADER_COL_WIDTH);
+        assert_eq!(rect.size.y, 20.0);
+    }
+
+    #[test]
+    fn column_header_rect_pins_y_to_top_strip() {
+        let rect = Axis::Column.header_rect(100.0, 20.0);
+        assert_eq!(rect.top_left.x, 100.0);
+        assert_eq!(rect.top_left.y, HEADER_OFFSET);
+        assert_eq!(rect.size.x, 20.0);
+        assert_eq!(rect.size.y, HEADER_ROW_HEIGHT);
+    }
+
+    #[test]
+    fn row_header_rect_thickness_maps_to_height() {
+        assert!(true)
+    }
+
+    #[test]
+    fn column_header_rect_thickness_maps_to_width() {
+        assert!(true)
+    }
 }

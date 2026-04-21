@@ -10,7 +10,8 @@
 use ironcalc_base::UserModel;
 
 use crate::canvas::Point;
-use crate::coord::{CellAddress, CellArea};
+use crate::coord::{CellAddress, CellArea, FormulaRef, SheetArea};
+use crate::theme::FORMULA_REF_COLORS;
 
 use super::super::geometry::{PixelRect, AUTOFILL_HANDLE_PX};
 use super::super::types::{AutofillTarget, DashFill, FrozenOffset};
@@ -45,12 +46,14 @@ impl CanvasRenderer {
         self.rect_stroke(b, self.theme.selection_color, SELECTION_BORDER_WIDTH);
 
         let handle = PixelRect {
-            point: Point {
+            top_left: Point {
                 x: b.right() - AUTOFILL_HANDLE_PX / 2.0,
                 y: b.bottom() - AUTOFILL_HANDLE_PX / 2.0,
             },
-            width: AUTOFILL_HANDLE_PX,
-            height: AUTOFILL_HANDLE_PX,
+            size: Point {
+                x: AUTOFILL_HANDLE_PX,
+                y: AUTOFILL_HANDLE_PX,
+            },
         };
         self.rect_fill(handle, self.theme.selection_color);
     }
@@ -75,6 +78,72 @@ impl CanvasRenderer {
         };
 
         self.rect_dashed(b, self.theme.selection_color, STANDARD_BORDER_WIDTH);
+    }
+
+    /// Clipboard marching-ants border around the last Ctrl+C copied range.
+    /// No-op when the clipboard is empty or lives on another sheet.
+    pub(super) fn draw_clipboard_overlay(
+        &self,
+        model: &UserModel,
+        sheet: u32,
+        frozen: FrozenOffset,
+        clipboard: Option<&SheetArea>,
+    ) {
+        let Some(cb) = clipboard else { return };
+        if cb.sheet != sheet {
+            return;
+        }
+        self.draw_dashed_range(
+            model,
+            sheet,
+            frozen,
+            cb.area.normalized(),
+            self.theme.selection_color,
+            DashFill::Outline,
+        );
+    }
+
+    /// Point-mode range highlight — blue dashed outline with an 8% fill tint.
+    pub(super) fn draw_point_overlay(
+        &self,
+        model: &UserModel,
+        sheet: u32,
+        frozen: FrozenOffset,
+        point_range: Option<CellArea>,
+    ) {
+        let Some(pr) = point_range else { return };
+        self.draw_dashed_range(
+            model,
+            sheet,
+            frozen,
+            pr.normalized(),
+            self.theme.pointing,
+            DashFill::Tinted,
+        );
+    }
+
+    /// Per-reference formula highlights for the in-edit cell. One color per
+    /// `color_idx` (mod the palette), off-sheet refs silently skipped.
+    pub(super) fn draw_formula_ref_overlays(
+        &self,
+        model: &UserModel,
+        sheet: u32,
+        frozen: FrozenOffset,
+        refs: &[FormulaRef],
+    ) {
+        for fr in refs {
+            if fr.sheet_area.sheet != sheet {
+                continue;
+            }
+            self.draw_dashed_range(
+                model,
+                sheet,
+                frozen,
+                fr.sheet_area.area.normalized(),
+                FORMULA_REF_COLORS[fr.color_idx % FORMULA_REF_COLORS.len()],
+                DashFill::Tinted,
+            );
+        }
     }
 
     /// Dashed rectangle over `range`. Used for clipboard marching ants

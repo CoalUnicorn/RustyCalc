@@ -3,8 +3,10 @@
 //! Every overlay, cell fill, header strip, and text clip is a rectangle; the
 //! raw `ctx.fill_rect` / `stroke_rect` / `set_line_dash` calls are wrapped
 //! here so callers read "what is being painted" instead of the ceremony of
-//! how. `paint_*` prefixes distinguish these from raw `ctx.*` methods at
-//! read time.
+//! how. `rect_*` / `stroke_*` / `with_*` prefixes distinguish these from
+//! raw `ctx.*` methods at read time.
+
+use crate::canvas::Span;
 
 use super::super::geometry::{Line, PixelRect};
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
@@ -14,7 +16,7 @@ impl CanvasRenderer {
     pub(super) fn rect_fill(&self, rect: PixelRect, color: &str) {
         self.ctx.set_fill_style_str(color);
         self.ctx
-            .fill_rect(rect.point.x, rect.point.y, rect.width, rect.height);
+            .fill_rect(rect.top_left.x, rect.top_left.y, rect.size.x, rect.size.y);
     }
 
     /// Stroke `rect`'s outline at `width` pixels. Width is restored to
@@ -23,7 +25,7 @@ impl CanvasRenderer {
         self.ctx.set_stroke_style_str(color);
         self.with_stroke_width(width, |this| {
             this.ctx
-                .stroke_rect(rect.point.x, rect.point.y, rect.width, rect.height);
+                .stroke_rect(rect.top_left.x, rect.top_left.y, rect.size.x, rect.size.y);
         });
     }
 
@@ -49,8 +51,8 @@ impl CanvasRenderer {
     /// caller doesn't pick `stroke_hline` vs `stroke_vline` manually.
     pub(super) fn stroke_line(&self, line: Line) {
         match line {
-            Line::H { x1, x2, y } => self.stroke_hline(x1, x2, y),
-            Line::V { x, y1, y2 } => self.stroke_vline(x, y1, y2),
+            Line::H { span, y } => self.stroke_hline(span, y),
+            Line::V { x, span } => self.stroke_vline(x, span),
         }
     }
 
@@ -59,7 +61,7 @@ impl CanvasRenderer {
         self.ctx.save();
         self.ctx.begin_path();
         self.ctx
-            .rect(rect.point.x, rect.point.y, rect.width, rect.height);
+            .rect(rect.top_left.x, rect.top_left.y, rect.size.x, rect.size.y);
         self.ctx.clip();
         let result = f(self);
         self.ctx.restore();
@@ -68,19 +70,19 @@ impl CanvasRenderer {
 
     /// Horizontal line from (x1, y) to (x2, y). Path-only — caller owns
     /// `set_stroke_style_str` and `set_line_width`.
-    pub(super) fn stroke_hline(&self, x1: f64, x2: f64, y: f64) {
+    pub(super) fn stroke_hline(&self, span: Span, y: f64) {
         self.ctx.begin_path();
-        self.ctx.move_to(x1, y);
-        self.ctx.line_to(x2, y);
+        self.ctx.move_to(span.from, y);
+        self.ctx.line_to(span.to, y);
         self.ctx.stroke();
     }
 
     /// Vertical line from (x, y1) to (x, y2). Path-only — caller owns
     /// `set_stroke_style_str` and `set_line_width`.
-    pub(super) fn stroke_vline(&self, x: f64, y1: f64, y2: f64) {
+    pub(super) fn stroke_vline(&self, x: f64, span: Span) {
         self.ctx.begin_path();
-        self.ctx.move_to(x, y1);
-        self.ctx.line_to(x, y2);
+        self.ctx.move_to(x, span.from);
+        self.ctx.line_to(x, span.to);
         self.ctx.stroke();
     }
 }

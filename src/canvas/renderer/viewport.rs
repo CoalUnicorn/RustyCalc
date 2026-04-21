@@ -6,7 +6,7 @@
 
 use ironcalc_base::UserModel;
 
-use crate::canvas::Point;
+use crate::canvas::{Point, HEADER_OFFSET};
 use crate::coord::CellArea;
 
 use super::super::geometry::{
@@ -34,22 +34,7 @@ impl CanvasRenderer {
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
-        // Range entirely past the scrollable fold (right or below) and not
-        // anchored in the frozen band -> nothing to draw. Guards the
-        // out-of-bounds `PixelOffsets` lookups that cause the `=BB3`
-        // ghost-row artifact.
-        if range.c1 > self.vis.col_last && range.c1 > frozen_cols {
-            return None;
-        }
-        if range.r1 > self.vis.row_last && range.r1 > frozen_rows {
-            return None;
-        }
-        // Range entirely before the scrollable fold (scrolled past on the
-        // left/top) and not anchored in the frozen band.
-        if range.c2 < self.vis.col_first && range.c2 > frozen_cols {
-            return None;
-        }
-        if range.r2 < self.vis.row_first && range.r2 > frozen_rows {
+        if !self.range_intersects_fold(range, frozen_rows, frozen_cols) {
             return None;
         }
 
@@ -66,10 +51,36 @@ impl CanvasRenderer {
             self.cell_y(model, sheet, range.r2, frozen) + row_height(model, sheet, range.r2)
         };
         Some(PixelRect {
-            point: Point { x, y },
-            width: right - x,
-            height: bottom - y,
+            top_left: Point { x, y },
+            size: Point {
+                x: right - x,
+                y: bottom - y,
+            },
         })
+    }
+
+    /// Does `range` intersect the drawable fold (scrollable viewport plus the
+    /// frozen bands)? Used by `range_pixel_bounds` to guard the out-of-bounds
+    /// `PixelOffsets` lookups that cause the `=BB3` ghost-row artifact.
+    ///
+    /// A range is drawable when neither corner is strictly past the visible
+    /// scrollable band *and* outside the frozen-band anchor on each axis.
+    fn range_intersects_fold(&self, range: CellArea, frozen_rows: i32, frozen_cols: i32) -> bool {
+        // Range entirely past the scrollable fold (right or below).
+        if range.c1 > self.vis.col_last && range.c1 > frozen_cols {
+            return false;
+        }
+        if range.r1 > self.vis.row_last && range.r1 > frozen_rows {
+            return false;
+        }
+        // Range entirely before the scrollable fold (scrolled off to the left/top).
+        if range.c2 < self.vis.col_first && range.c2 > frozen_cols {
+            return false;
+        }
+        if range.r2 < self.vis.row_first && range.r2 > frozen_rows {
+            return false;
+        }
+        true
     }
 
     fn cell_offset(
@@ -85,7 +96,7 @@ impl CanvasRenderer {
                 let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
                 if index <= frozen_cols {
                     return HEADER_COL_WIDTH
-                        + 0.5
+                        + HEADER_OFFSET
                         + (1..index).map(|c| col_width(model, sheet, c)).sum::<f64>();
                 }
                 frozen.x + self.offsets.col_left(index)
@@ -94,7 +105,7 @@ impl CanvasRenderer {
                 let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
                 if index <= frozen_rows {
                     return HEADER_ROW_HEIGHT
-                        + 0.5
+                        + HEADER_OFFSET
                         + (1..index).map(|r| row_height(model, sheet, r)).sum::<f64>();
                 }
                 frozen.y + self.offsets.row_top(index)
@@ -164,8 +175,6 @@ impl CanvasRenderer {
     /// filled, capping at `SCAN_CAP` to prevent O(LAST_ROW) iteration when
     /// many rows are explicitly hidden (height = 0).
     pub(super) fn visible_cells(&self, model: &UserModel) -> VisibleRegion {
-        // Conservative cap to prevent runaway iteration in pathological cases.
-        // This ensures O(1) performance regardless of sheet size or selection.
         const SCAN_CAP: i32 = 2_048;
 
         let view = model.get_selected_view();

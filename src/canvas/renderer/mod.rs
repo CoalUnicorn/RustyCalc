@@ -98,7 +98,7 @@ use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use super::types::*;
-use crate::theme::{CanvasTheme, FORMULA_REF_COLORS};
+use crate::theme::CanvasTheme;
 
 // Layout constants
 pub(super) const SELECTION_BORDER_WIDTH: f64 = 2.0;
@@ -106,11 +106,6 @@ pub(super) const STANDARD_BORDER_WIDTH: f64 = 1.0;
 pub(super) const MEDIUM_BORDER_WIDTH: f64 = 2.0;
 pub(super) const THICK_BORDER_WIDTH: f64 = 3.0;
 pub(super) const DASHED_BORDER_WIDTH: f64 = 1.5;
-// With textBaseline:"middle", center_y is the em-square midpoint.
-// The typographic baseline sits at ~center_y + font_size*0.15; placing
-// the underline at 0.35x puts it just below the baseline, clear of the glyphs.
-
-// CanvasRenderer
 
 pub struct CanvasRenderer {
     ctx: CanvasRenderingContext2d,
@@ -175,8 +170,6 @@ impl CanvasRenderer {
         }
     }
 
-    // Entry point
-
     /// Renders only visible cells regardless of selection size.
     pub fn render(&mut self, model: &UserModel, overlays: &RenderOverlays) {
         // Calculate visible region FIRST - this is independent of selection
@@ -229,8 +222,14 @@ impl CanvasRenderer {
         );
 
         // Phase 2: Headers + corner box
-        self.render_row_headers(model, sheet, frc.row_band.as_ref(), frc.offset.y);
-        self.render_column_headers(model, sheet, frc.col_band.as_ref(), frc.offset.x);
+        self.render_headers(model, sheet, Axis::Row, frc.row_band.as_ref(), frc.offset.y);
+        self.render_headers(
+            model,
+            sheet,
+            Axis::Column,
+            frc.col_band.as_ref(),
+            frc.offset.x,
+        );
 
         self.draw_corner_box();
 
@@ -240,47 +239,12 @@ impl CanvasRenderer {
             self.draw_extend_preview(model, sheet, frc.offset, target);
         }
 
-        // Marching-ants border around the last Ctrl+C copied range.
-        if let Some(ref cb) = overlays.clipboard {
-            if cb.sheet == sheet {
-                self.draw_dashed_range(
-                    model,
-                    sheet,
-                    frc.offset,
-                    cb.area.normalized(),
-                    self.theme.selection_color,
-                    DashFill::Outline,
-                );
-            }
-        }
-
-        // Point-mode range: blue dashed outline + light fill tint.
-        if let Some(ref pr) = overlays.point_range {
-            self.draw_dashed_range(
-                model,
-                sheet,
-                frc.offset,
-                pr.normalized(),
-                self.theme.pointing,
-                DashFill::Tinted,
-            );
-        }
-
-        // Formula reference overlays — Phase 3, after point-mode.
-        // Each ref gets its own color (dashed border + 8% fill tint).
-        // Only refs on the current sheet are drawn; cross-sheet refs are silently skipped.
-        for fr in &overlays.formula_refs {
-            if fr.sheet_area.sheet == sheet {
-                self.draw_dashed_range(
-                    model,
-                    sheet,
-                    frc.offset,
-                    fr.sheet_area.area.normalized(),
-                    FORMULA_REF_COLORS[fr.color_idx % FORMULA_REF_COLORS.len()],
-                    DashFill::Tinted,
-                );
-            }
-        }
+        // Secondary overlays: clipboard marching ants, point-mode range,
+        // formula-ref highlights. Each no-ops if its data is absent or lives
+        // on another sheet.
+        self.draw_clipboard_overlay(model, sheet, frc.offset, overlays.clipboard.as_ref());
+        self.draw_point_overlay(model, sheet, frc.offset, overlays.point_range);
+        self.draw_formula_ref_overlays(model, sheet, frc.offset, &overlays.formula_refs);
 
         // Phase 4: Cell text - always on top
         // Rendered after selection fill so text is readable over the blue tint,

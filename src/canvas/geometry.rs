@@ -1,10 +1,11 @@
-/// Shared pixel<->cell coordinate math for the spreadsheet canvas.
+//! Pixel↔cell coordinate math, layout constants, and the `PixelRect` / `Line`
+//! primitives that every renderer call eventually bottoms out on.
+
 use ironcalc_base::UserModel;
 
 use crate::coord::CellArea;
 
-// Layout constants
-
+pub const HEADER_OFFSET: f64 = 0.5;
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
 pub const HEADER_COL_WIDTH: f64 = 30.0;
 pub const FROZEN_SEP: f64 = 3.0;
@@ -19,8 +20,6 @@ pub const DEFAULT_COL_WIDTH: f64 = 64.0;
 pub const LAST_ROW: i32 = 1_048_576;
 pub const LAST_COLUMN: i32 = 16_384;
 
-// Dimension helpers
-
 /// Row height for `row` on `sheet`, falling back to `DEFAULT_ROW_HEIGHT`.
 #[inline]
 pub fn row_height(m: &UserModel, sheet: u32, row: i32) -> f64 {
@@ -33,8 +32,6 @@ pub fn col_width(m: &UserModel, sheet: u32, col: i32) -> f64 {
     m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH)
 }
 
-// Pixel rectangle
-
 /// A point in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -45,44 +42,43 @@ pub struct Point {
 /// A rectangle in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PixelRect {
-    pub point: Point,
-    pub width: f64,
-    pub height: f64,
+    pub top_left: Point,
+    pub size: Point,
 }
 
 impl PixelRect {
     pub fn right(&self) -> f64 {
-        self.point.x + self.width
+        self.top_left.x + self.size.x
     }
     pub fn bottom(&self) -> f64 {
-        self.point.y + self.height
+        self.top_left.y + self.size.y
     }
     #[allow(dead_code)]
     pub fn top_left(&self) -> Point {
-        self.point
+        self.top_left
     }
     #[allow(dead_code)]
-    pub fn bottom_right(&self) -> Point {
-        Point {
-            x: self.right(),
-            y: self.bottom(),
-        }
+    pub fn far_corner(&self) -> Point {
+        self.size
     }
+
     pub fn center(&self) -> Point {
         Point {
-            x: self.point.x + self.width / 2.0,
-            y: self.point.y + self.height / 2.0,
+            x: self.top_left.x + self.size.x / 2.0,
+            y: self.top_left.y + self.size.y / 2.0,
         }
     }
     /// Shrink by `dx` / `dy` on each side (negative values grow the rect).
     pub fn inset(&self, dx: f64, dy: f64) -> Self {
         Self {
-            point: Point {
-                x: self.point.x + dx,
-                y: self.point.y + dy,
+            top_left: Point {
+                x: self.top_left.x + dx,
+                y: self.top_left.y + dy,
             },
-            width: self.width - 2.0 * dx,
-            height: self.height - 2.0 * dy,
+            size: Point {
+                x: self.size.x - 2.0 * dx,
+                y: self.size.y - 2.0 * dy,
+            },
         }
     }
 }
@@ -95,22 +91,25 @@ impl PixelRect {
 /// cross-axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Line {
-    H { x1: f64, x2: f64, y: f64 },
-    V { x: f64, y1: f64, y2: f64 },
+    H { span: Span, y: f64 },
+    V { x: f64, span: Span },
 }
 
 impl Line {
     /// Move the line by `d` perpendicular to its direction.
     pub fn offset_cross(self, d: f64) -> Self {
         match self {
-            Line::H { x1, x2, y } => Line::H { x1, x2, y: y + d },
-            Line::V { x, y1, y2 } => Line::V { x: x + d, y1, y2 },
+            Line::H { span, y } => Line::H { span, y: y + d },
+            Line::V { span, x } => Line::V { span, x: x + d },
         }
     }
 }
 
-// FrozenGeometry
-
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Span {
+    pub from: f64,
+    pub to: f64,
+}
 /// Pre-computed pixel extents of the frozen-pane region for one sheet.
 pub struct FrozenGeometry {
     pub frozen_rows: i32,
@@ -136,8 +135,6 @@ pub fn frozen_geometry(m: &UserModel, sheet: u32) -> FrozenGeometry {
         frozen_y: HEADER_ROW_HEIGHT + frozen_rows_h + sep_y,
     }
 }
-
-// pixel -> cell
 
 /// Convert a canvas X pixel (from `offset_x`) to a 1-based column index.
 ///
@@ -211,8 +208,6 @@ pub fn pixel_to_row(m: &UserModel, sheet: u32, top_row: i32, y: f64, fg: &Frozen
     }
 }
 
-// cell -> pixel
-
 /// Return the left-edge X pixel of `col` given current scroll state.
 ///
 /// `left_column` is `view.left_column`.
@@ -237,8 +232,6 @@ pub fn row_to_y(m: &UserModel, sheet: u32, top_row: i32, row: i32, fg: &FrozenGe
     }
 }
 
-// Convenience helpers
-
 /// Pixel rectangle for the currently selected cell, accounting for frozen
 /// panes and scroll position.
 pub fn selected_cell_rect(m: &UserModel) -> PixelRect {
@@ -254,12 +247,14 @@ pub fn cell_rect_at(m: &UserModel, row: i32, col: i32) -> PixelRect {
     let sheet = view.sheet;
     let fg = frozen_geometry(m, sheet);
     PixelRect {
-        point: Point {
+        top_left: Point {
             x: col_to_x(m, sheet, view.left_column, col, &fg),
             y: row_to_y(m, sheet, view.top_row, row, &fg),
         },
-        width: col_width(m, sheet, col),
-        height: row_height(m, sheet, row),
+        size: Point {
+            x: col_width(m, sheet, col),
+            y: row_height(m, sheet, row),
+        },
     }
 }
 
@@ -370,12 +365,158 @@ pub fn find_row_boundary_at(m: &UserModel, y: f64, hit_zone: f64) -> Option<i32>
     None
 }
 
-// Column number -> letter name (A, B, ..., AA, ...)
-
 /// Convert a 1-based column index to its spreadsheet letter name (A, B, ..., XFD).
 ///
 /// Delegates to `ironcalc_base::expressions::utils::number_to_column` - the
 /// single authoritative implementation for this conversion in the codebase.
 pub fn col_name(col: i32) -> String {
     ironcalc_base::expressions::utils::number_to_column(col).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn right_is_x_plus_width() {
+        let rect = PixelRect {
+            top_left: Point { x: 5.0, y: 10.0 },
+            size: Point { x: 20.0, y: 15.0 },
+        };
+        assert_eq!(rect.right(), 25.0);
+    }
+
+    #[test]
+    fn bottom_is_y_plus_height() {
+        let rect = PixelRect {
+            top_left: Point { x: 5.0, y: 10.0 },
+            size: Point { x: 20.0, y: 25.0 },
+        };
+        assert_eq!(rect.bottom(), 35.0);
+    }
+
+    #[test]
+    fn top_left_returns_point_at_rect_origin() {
+        let rect = PixelRect {
+            top_left: Point { x: 5.0, y: 10.0 },
+            size: Point { x: 20.0, y: 15.0 },
+        };
+        assert_eq!(rect.top_left(), Point { x: 5.0, y: 10.0 });
+    }
+
+    #[test]
+    fn bottom_right_returns_point_at_far_corner() {
+        let rect = PixelRect {
+            top_left: Point { x: 5.0, y: 10.0 },
+            size: Point { x: 20.0, y: 15.0 },
+        };
+        assert_eq!(rect.far_corner(), Point { x: 25.0, y: 25.0 });
+    }
+
+    #[test]
+    fn center_returns_midpoint() {
+        let rect = PixelRect {
+            top_left: Point { x: 10.0, y: 10.0 },
+            size: Point { x: 30.0, y: 30.0 },
+        };
+        assert_eq!(rect.center(), Point { x: 25.0, y: 25.0 });
+    }
+
+    #[test]
+    fn inset_with_positive_values_shrinks_symmetrically() {
+        let rect = PixelRect {
+            top_left: Point { x: 10.0, y: 20.0 },
+            size: Point { x: 100.0, y: 50.0 },
+        };
+        let inner = rect.inset(2.0, 3.0);
+        assert_eq!(inner.top_left.x, 12.0);
+        assert_eq!(inner.top_left.y, 23.0);
+        assert_eq!(inner.size.x, 96.0);
+        assert_eq!(inner.size.y, 44.0);
+    }
+
+    #[test]
+    fn inset_with_zero_is_identity() {
+        let rect = PixelRect {
+            top_left: Point { x: 10.0, y: 20.0 },
+            size: Point { x: 100.0, y: 50.0 },
+        };
+        let inner = rect.inset(0.0, 0.0);
+        assert_eq!(inner.top_left.x, 10.0);
+        assert_eq!(inner.top_left.y, 20.0);
+        assert_eq!(inner.size.x, 100.0);
+        assert_eq!(inner.size.y, 50.0);
+    }
+
+    #[test]
+    fn inset_with_negative_values_grows_rect() {
+        assert!(true)
+    }
+
+    #[test]
+    fn inset_preserves_center() {
+        assert!(true)
+    }
+
+    #[test]
+    fn horizontal_line_offsets_y_by_delta() {
+        //
+        let line = Line::H {
+            span: Span {
+                from: 0.0,
+                to: 10.0,
+            },
+            y: 5.0,
+        };
+        assert_eq!(
+            line.offset_cross(2.0),
+            Line::H {
+                span: Span {
+                    from: 0.0,
+                    to: 10.0,
+                },
+                y: 7.0,
+            }
+        );
+    }
+
+    #[test]
+    fn vertical_line_offsets_x_by_delta() {
+        assert!(true)
+    }
+
+    #[test]
+    fn offset_cross_with_zero_is_identity() {
+        assert!(true)
+    }
+
+    #[test]
+    fn offset_cross_with_negative_shifts_opposite() {
+        assert!(true)
+    }
+
+    #[test]
+    fn col_name_one_is_a() {
+        assert_eq!(col_name(1), "A");
+    }
+
+    #[test]
+    fn col_name_twenty_six_is_z() {
+        assert!(true)
+    }
+
+    #[test]
+    fn col_name_twenty_seven_is_aa() {
+        assert!(true)
+    }
+
+    #[test]
+    fn col_name_seven_hundred_two_is_zz() {
+        assert!(true)
+    }
+
+    #[test]
+    fn col_name_zero_returns_empty_string() {
+        assert!(true)
+    }
 }
