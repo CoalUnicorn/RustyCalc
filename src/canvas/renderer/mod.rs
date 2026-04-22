@@ -98,6 +98,7 @@ use wasm_bindgen::JsCast;
 use web_sys::js_sys;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
+use super::geometry::CanvasSize;
 use super::types::*;
 use crate::theme::CanvasTheme;
 
@@ -129,6 +130,16 @@ pub struct CanvasRenderer {
 }
 
 impl CanvasRenderer {
+    /// Package the canvas's logical pixel extent for pixel-space predicates
+    /// like `PixelRect::intersects`.
+    #[inline]
+    pub(super) fn canvas_size(&self) -> CanvasSize {
+        CanvasSize {
+            w: self.width,
+            h: self.height,
+        }
+    }
+
     /// Bind a renderer to `canvas` and apply device-pixel-ratio scaling.
     ///
     /// **Performance note:** `canvas.set_width()` / `set_height()` resets the

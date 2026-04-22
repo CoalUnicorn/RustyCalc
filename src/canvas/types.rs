@@ -394,11 +394,13 @@ mod tests {
 
     #[test]
     fn row_header_rect_thickness_maps_to_height() {
-        assert!(true)
+        let rect = Axis::Row.header_rect(100.0, 50.0);
+        assert_eq!(rect.size.y, 50.0);
     }
 
     #[test]
     fn column_header_rect_thickness_maps_to_width() {
-        assert!(true)
+        let rect = Axis::Column.header_rect(100.0, 50.0);
+        assert_eq!(rect.size.x, 50.0);
     }
 }

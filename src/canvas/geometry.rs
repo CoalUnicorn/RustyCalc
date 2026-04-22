@@ -1,6 +1,8 @@
 //! Pixel↔cell coordinate math, layout constants, and the `PixelRect` / `Line`
 //! primitives that every renderer call eventually bottoms out on.
 
+use std::fmt::{self, Display};
+
 use ironcalc_base::UserModel;
 
 use crate::coord::CellArea;
@@ -32,11 +34,19 @@ pub fn col_width(m: &UserModel, sheet: u32, col: i32) -> f64 {
     m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH)
 }
 
-/// A point in logical (CSS) pixels on the canvas.
+/// Convert a 1-based column index to its spreadsheet letter name (A, B, ..., XFD).
+///
+/// Delegates to `ironcalc_base::expressions::utils::number_to_column` - the
+/// single authoritative implementation for this conversion in the codebase.
+pub fn col_name(col: i32) -> String {
+    ironcalc_base::expressions::utils::number_to_column(col).unwrap_or_default()
+}
+
+/// Size of the drawable canvas in logical (CSS) pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Point {
-    pub x: f64,
-    pub y: f64,
+pub struct CanvasSize {
+    pub w: f64,
+    pub h: f64,
 }
 
 /// A rectangle in logical (CSS) pixels on the canvas.
@@ -53,11 +63,12 @@ impl PixelRect {
     pub fn bottom(&self) -> f64 {
         self.top_left.y + self.size.y
     }
-    #[allow(dead_code)]
+
+    #[cfg(test)]
     pub fn top_left(&self) -> Point {
         self.top_left
     }
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn far_corner(&self) -> Point {
         self.size
     }
@@ -81,6 +92,34 @@ impl PixelRect {
             },
         }
     }
+
+    /// True when this rect overlaps the canvas drawable area at all.
+    /// Pure pixel-space AABB test — used inside per-cell loops to skip cells
+    /// that fall off-canvas (notably when a frozen band is wider/taller than
+    /// the canvas itself).
+    pub fn intersects(&self, canvas: CanvasSize) -> bool {
+        self.top_left.x < canvas.w
+            && self.right() > 0.0
+            && self.top_left.y < canvas.h
+            && self.bottom() > 0.0
+    }
+}
+
+impl Display for PixelRect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "left:{:.0}px;top:{:.0}px;width:{:.0}px;height:{:.0}px;",
+            self.top_left.x, self.top_left.y, self.size.x, self.size.y
+        )
+    }
+}
+
+/// A point in logical (CSS) pixels on the canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
 }
 
 /// An axis-aligned line segment on the canvas.
@@ -110,6 +149,7 @@ pub struct Span {
     pub from: f64,
     pub to: f64,
 }
+
 /// Pre-computed pixel extents of the frozen-pane region for one sheet.
 pub struct FrozenGeometry {
     pub frozen_rows: i32,
@@ -120,257 +160,247 @@ pub struct FrozenGeometry {
     pub frozen_y: f64,
 }
 
-/// Compute frozen-pane geometry for `sheet` from `m`.
-pub fn frozen_geometry(m: &UserModel, sheet: u32) -> FrozenGeometry {
-    let frozen_rows = m.get_frozen_rows_count(sheet).unwrap_or(0);
-    let frozen_cols = m.get_frozen_columns_count(sheet).unwrap_or(0);
-    let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(m, sheet, r)).sum();
-    let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(m, sheet, c)).sum();
-    let sep_y = if frozen_rows > 0 { FROZEN_SEP } else { 0.0 };
-    let sep_x = if frozen_cols > 0 { FROZEN_SEP } else { 0.0 };
-    FrozenGeometry {
-        frozen_rows,
-        frozen_cols,
-        frozen_x: HEADER_COL_WIDTH + frozen_cols_w + sep_x,
-        frozen_y: HEADER_ROW_HEIGHT + frozen_rows_h + sep_y,
+impl FrozenGeometry {
+    /// Compute frozen-pane geometry for `sheet` from `m`.
+    pub fn get(m: &UserModel, sheet: u32) -> FrozenGeometry {
+        let frozen_rows = m.get_frozen_rows_count(sheet).unwrap_or(0);
+        let frozen_cols = m.get_frozen_columns_count(sheet).unwrap_or(0);
+        let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(m, sheet, r)).sum();
+        let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(m, sheet, c)).sum();
+        let sep_y = if frozen_rows > 0 { FROZEN_SEP } else { 0.0 };
+        let sep_x = if frozen_cols > 0 { FROZEN_SEP } else { 0.0 };
+        FrozenGeometry {
+            frozen_rows,
+            frozen_cols,
+            frozen_x: HEADER_COL_WIDTH + frozen_cols_w + sep_x,
+            frozen_y: HEADER_ROW_HEIGHT + frozen_rows_h + sep_y,
+        }
     }
 }
 
-/// Convert a canvas X pixel (from `offset_x`) to a 1-based column index.
-///
-/// `left_column` is `view.left_column` - the first scrollable column visible.
-pub fn pixel_to_col(
-    m: &UserModel,
+/// Snapshot of "where cells are drawn right now" for one sheet — the model,
+/// the view's scroll anchors, and the frozen-pane pixel splits bundled
+/// together.
+pub struct SheetViewport<'a> {
+    model: &'a UserModel<'a>,
     sheet: u32,
     left_column: i32,
-    x: f64,
-    fg: &FrozenGeometry,
-) -> i32 {
-    if x < fg.frozen_x {
-        // Inside the frozen-column strip
-        let mut cx = HEADER_COL_WIDTH;
-        let mut result = 1_i32.max(fg.frozen_cols); // fallback: last frozen col (min 1)
-        for c in 1..=fg.frozen_cols {
-            let cw = col_width(m, sheet, c);
-            if x < cx + cw {
-                result = c;
-                break;
-            }
-            cx += cw;
-        }
-        result
-    } else {
-        // Inside the scrollable column area
-        let start = (fg.frozen_cols + 1).max(left_column);
-        let mut cx = fg.frozen_x;
-        let mut c = start;
-        loop {
-            let cw = col_width(m, sheet, c);
-            if x < cx + cw || c >= LAST_COLUMN {
-                break c;
-            }
-            cx += cw;
-            c += 1;
+    top_row: i32,
+    frozen: FrozenGeometry,
+}
+
+impl<'a> SheetViewport<'a> {
+    /// Snapshot the currently-selected sheet with its current scroll state.
+    pub fn current(model: &'a UserModel<'a>) -> Self {
+        let view = model.get_selected_view();
+        Self::from_parts(model, view.sheet, view.left_column, view.top_row)
+    }
+
+    /// Build from explicit anchors. Shims whose callers already destructured
+    /// the view use this; callers that only need one anchor may pass any value
+    /// for the other (the method dispatched will ignore it).
+    pub fn from_parts(
+        model: &'a UserModel<'a>,
+        sheet: u32,
+        left_column: i32,
+        top_row: i32,
+    ) -> Self {
+        Self {
+            model,
+            sheet,
+            left_column,
+            top_row,
+            frozen: FrozenGeometry::get(model, sheet),
         }
     }
-}
 
-/// Convert a canvas Y pixel (from `offset_y`) to a 1-based row index.
-///
-/// `top_row` is `view.top_row` - the first scrollable row visible.
-pub fn pixel_to_row(m: &UserModel, sheet: u32, top_row: i32, y: f64, fg: &FrozenGeometry) -> i32 {
-    if y < fg.frozen_y {
-        // Inside the frozen-row strip
-        let mut cy = HEADER_ROW_HEIGHT;
-        let mut result = 1_i32.max(fg.frozen_rows); // fallback: last frozen row (min 1)
-        for r in 1..=fg.frozen_rows {
-            let rh = row_height(m, sheet, r);
-            if y < cy + rh {
-                result = r;
-                break;
-            }
-            cy += rh;
-        }
-        result
-    } else {
-        // Inside the scrollable row area
-        let start = (fg.frozen_rows + 1).max(top_row);
-        let mut cy = fg.frozen_y;
-        let mut r = start;
-        loop {
-            let rh = row_height(m, sheet, r);
-            if y < cy + rh || r >= LAST_ROW {
-                break r;
-            }
-            cy += rh;
-            r += 1;
+    pub fn sheet(&self) -> u32 {
+        self.sheet
+    }
+
+    pub fn frozen(&self) -> &FrozenGeometry {
+        &self.frozen
+    }
+
+    /// Left-edge X pixel of `col` at current scroll.
+    pub fn col_to_x(&self, col: i32) -> f64 {
+        if col <= self.frozen.frozen_cols {
+            HEADER_COL_WIDTH
+                + (1..col)
+                    .map(|c| col_width(self.model, self.sheet, c))
+                    .sum::<f64>()
+        } else {
+            let left = self.left_column.max(self.frozen.frozen_cols + 1);
+            self.frozen.frozen_x
+                + (left..col)
+                    .map(|c| col_width(self.model, self.sheet, c))
+                    .sum::<f64>()
         }
     }
-}
 
-/// Return the left-edge X pixel of `col` given current scroll state.
-///
-/// `left_column` is `view.left_column`.
-pub fn col_to_x(m: &UserModel, sheet: u32, left_column: i32, col: i32, fg: &FrozenGeometry) -> f64 {
-    if col <= fg.frozen_cols {
-        HEADER_COL_WIDTH + (1..col).map(|c| col_width(m, sheet, c)).sum::<f64>()
-    } else {
-        let left_col = left_column.max(fg.frozen_cols + 1);
-        fg.frozen_x + (left_col..col).map(|c| col_width(m, sheet, c)).sum::<f64>()
+    /// Top-edge Y pixel of `row` at current scroll.
+    pub fn row_to_y(&self, row: i32) -> f64 {
+        if row <= self.frozen.frozen_rows {
+            HEADER_ROW_HEIGHT
+                + (1..row)
+                    .map(|r| row_height(self.model, self.sheet, r))
+                    .sum::<f64>()
+        } else {
+            let top = self.top_row.max(self.frozen.frozen_rows + 1);
+            self.frozen.frozen_y
+                + (top..row)
+                    .map(|r| row_height(self.model, self.sheet, r))
+                    .sum::<f64>()
+        }
     }
-}
 
-/// Return the top-edge Y pixel of `row` given current scroll state.
-///
-/// `top_row` is `view.top_row`.
-pub fn row_to_y(m: &UserModel, sheet: u32, top_row: i32, row: i32, fg: &FrozenGeometry) -> f64 {
-    if row <= fg.frozen_rows {
-        HEADER_ROW_HEIGHT + (1..row).map(|r| row_height(m, sheet, r)).sum::<f64>()
-    } else {
-        let top = top_row.max(fg.frozen_rows + 1);
-        fg.frozen_y + (top..row).map(|r| row_height(m, sheet, r)).sum::<f64>()
+    /// 1-based column at canvas X pixel `x`.
+    pub fn pixel_to_col(&self, x: f64) -> i32 {
+        if x < self.frozen.frozen_x {
+            let mut cx = HEADER_COL_WIDTH;
+            let mut result = 1_i32.max(self.frozen.frozen_cols);
+            for c in 1..=self.frozen.frozen_cols {
+                let cw = col_width(self.model, self.sheet, c);
+                if x < cx + cw {
+                    result = c;
+                    break;
+                }
+                cx += cw;
+            }
+            result
+        } else {
+            let start = (self.frozen.frozen_cols + 1).max(self.left_column);
+            let mut cx = self.frozen.frozen_x;
+            let mut c = start;
+            loop {
+                let cw = col_width(self.model, self.sheet, c);
+                if x < cx + cw || c >= LAST_COLUMN {
+                    break c;
+                }
+                cx += cw;
+                c += 1;
+            }
+        }
     }
-}
 
-/// Pixel rectangle for the currently selected cell, accounting for frozen
-/// panes and scroll position.
-pub fn selected_cell_rect(m: &UserModel) -> PixelRect {
-    let view = m.get_selected_view();
-    cell_rect_at(m, view.row, view.column)
-}
-
-/// Pixel rectangle for an arbitrary `(row, col)` using the current scroll
-/// position. Used by the cell editor overlay to anchor to the editing cell
-/// even when point-mode navigation has moved `view.row`/`view.column` away.
-pub fn cell_rect_at(m: &UserModel, row: i32, col: i32) -> PixelRect {
-    let view = m.get_selected_view();
-    let sheet = view.sheet;
-    let fg = frozen_geometry(m, sheet);
-    PixelRect {
-        top_left: Point {
-            x: col_to_x(m, sheet, view.left_column, col, &fg),
-            y: row_to_y(m, sheet, view.top_row, row, &fg),
-        },
-        size: Point {
-            x: col_width(m, sheet, col),
-            y: row_height(m, sheet, row),
-        },
+    /// 1-based row at canvas Y pixel `y`.
+    pub fn pixel_to_row(&self, y: f64) -> i32 {
+        if y < self.frozen.frozen_y {
+            let mut cy = HEADER_ROW_HEIGHT;
+            let mut result = 1_i32.max(self.frozen.frozen_rows);
+            for r in 1..=self.frozen.frozen_rows {
+                let rh = row_height(self.model, self.sheet, r);
+                if y < cy + rh {
+                    result = r;
+                    break;
+                }
+                cy += rh;
+            }
+            result
+        } else {
+            let start = (self.frozen.frozen_rows + 1).max(self.top_row);
+            let mut cy = self.frozen.frozen_y;
+            let mut r = start;
+            loop {
+                let rh = row_height(self.model, self.sheet, r);
+                if y < cy + rh || r >= LAST_ROW {
+                    break r;
+                }
+                cy += rh;
+                r += 1;
+            }
+        }
     }
-}
 
-/// Bottom-right pixel corner of the current selection range, used for
-/// autofill handle hit-testing.
-pub fn autofill_handle_pos(m: &UserModel) -> Point {
-    let view = m.get_selected_view();
-    let sheet = view.sheet;
-    let fg = frozen_geometry(m, sheet);
-    let area = CellArea::from_view(m).normalized();
-
-    // Full-row / full-column / whole-sheet selections span LAST_ROW or LAST_COLUMN.
-    // col_to_x / row_to_y would iterate up to 1M rows to compute an off-screen
-    // pixel - skip it and return a sentinel that can never match a hit-test.
-    if area.r2 >= LAST_ROW || area.c2 >= LAST_COLUMN {
-        return Point {
-            x: -100.0,
-            y: -100.0,
-        };
+    /// Pixel rectangle for `(row, col)` at current scroll.
+    pub fn cell_rect(&self, row: i32, col: i32) -> PixelRect {
+        PixelRect {
+            top_left: Point {
+                x: self.col_to_x(col),
+                y: self.row_to_y(row),
+            },
+            size: Point {
+                x: col_width(self.model, self.sheet, col),
+                y: row_height(self.model, self.sheet, row),
+            },
+        }
     }
-    Point {
-        x: col_to_x(m, sheet, view.left_column, area.c2, &fg) + col_width(m, sheet, area.c2),
-        y: row_to_y(m, sheet, view.top_row, area.r2, &fg) + row_height(m, sheet, area.r2),
+
+    /// Bottom-right pixel of the current selection range — the autofill handle
+    /// anchor. `None` for full-row/column/sheet selections, where `col_to_x` /
+    /// `row_to_y` would walk up to 1M cells to produce an off-screen pixel.
+    pub fn autofill_handle(&self) -> Option<Point> {
+        let area = CellArea::from_view(self.model).normalized();
+        if area.r2 >= LAST_ROW || area.c2 >= LAST_COLUMN {
+            return None;
+        }
+        Some(Point {
+            x: self.col_to_x(area.c2) + col_width(self.model, self.sheet, area.c2),
+            y: self.row_to_y(area.r2) + row_height(self.model, self.sheet, area.r2),
+        })
     }
-}
 
-// Header boundary hit-testing
-
-/// Returns the 1-based column index whose RIGHT edge is within `hit_zone` px of
-/// `x`, searching from the first scrolled column. Returns `None` if no boundary
-/// is close enough to snap to.
-///
-/// Used by mousedown to decide whether the user is clicking a resize handle in
-/// the column header row.
-pub fn find_col_boundary_at(m: &UserModel, x: f64, hit_zone: f64) -> Option<i32> {
-    let view = m.get_selected_view();
-    let sheet = view.sheet;
-    let fg = frozen_geometry(m, sheet);
-    let scroll_col = view.left_column;
-    // Check frozen-column right-edge boundaries first.
-    if fg.frozen_cols > 0 {
-        let mut cur_x = HEADER_COL_WIDTH;
-        for col in 1..=fg.frozen_cols {
-            cur_x += col_width(m, sheet, col);
+    /// Column whose RIGHT edge is within `hit_zone` px of `x`, or `None`.
+    /// Used by mousedown to detect clicks on column-resize handles.
+    pub fn col_boundary_at(&self, x: f64, hit_zone: f64) -> Option<i32> {
+        if self.frozen.frozen_cols > 0 {
+            let mut cur_x = HEADER_COL_WIDTH;
+            for col in 1..=self.frozen.frozen_cols {
+                cur_x += col_width(self.model, self.sheet, col);
+                if (cur_x - x).abs() <= hit_zone {
+                    return Some(col);
+                }
+            }
+        }
+        let start = (self.frozen.frozen_cols + 1).max(self.left_column);
+        let mut cur_x = self.frozen.frozen_x;
+        let mut col = start;
+        while cur_x < x + hit_zone + 5.0 {
+            cur_x += col_width(self.model, self.sheet, col);
             if (cur_x - x).abs() <= hit_zone {
                 return Some(col);
             }
+            if cur_x > x + hit_zone {
+                break;
+            }
+            col += 1;
+            if col > LAST_COLUMN {
+                break;
+            }
         }
+        None
     }
-    let start = (fg.frozen_cols + 1).max(scroll_col);
-    let mut cur_x = fg.frozen_x;
-    let mut col = start;
-    // Walk scrollable columns until their right edge is well past the cursor.
-    while cur_x < x + hit_zone + 5.0 {
-        cur_x += col_width(m, sheet, col);
-        if (cur_x - x).abs() <= hit_zone {
-            return Some(col);
-        }
-        if cur_x > x + hit_zone {
-            break;
-        }
-        col += 1;
-        if col > LAST_COLUMN {
-            break;
-        }
-    }
-    None
-}
 
-/// Returns the 1-based row index whose BOTTOM edge is within `hit_zone` px of
-/// `y`, searching from the first scrolled row. Returns `None` if no boundary
-/// is close enough to snap to.
-///
-/// Used by mousedown to decide whether the user is clicking a resize handle in
-/// the row header column.
-pub fn find_row_boundary_at(m: &UserModel, y: f64, hit_zone: f64) -> Option<i32> {
-    let view = m.get_selected_view();
-    let sheet = view.sheet;
-    let fg = frozen_geometry(m, sheet);
-    let scroll_row = view.top_row;
-    // Check frozen-row bottom-edge boundaries first.
-    if fg.frozen_rows > 0 {
-        let mut cur_y = HEADER_ROW_HEIGHT;
-        for row in 1..=fg.frozen_rows {
-            cur_y += row_height(m, sheet, row);
+    /// Row whose BOTTOM edge is within `hit_zone` px of `y`, or `None`.
+    /// Used by mousedown to detect clicks on row-resize handles.
+    pub fn row_boundary_at(&self, y: f64, hit_zone: f64) -> Option<i32> {
+        if self.frozen.frozen_rows > 0 {
+            let mut cur_y = HEADER_ROW_HEIGHT;
+            for row in 1..=self.frozen.frozen_rows {
+                cur_y += row_height(self.model, self.sheet, row);
+                if (cur_y - y).abs() <= hit_zone {
+                    return Some(row);
+                }
+            }
+        }
+        let start = (self.frozen.frozen_rows + 1).max(self.top_row);
+        let mut cur_y = self.frozen.frozen_y;
+        let mut row = start;
+        while cur_y < y + hit_zone + 5.0 {
+            cur_y += row_height(self.model, self.sheet, row);
             if (cur_y - y).abs() <= hit_zone {
                 return Some(row);
             }
+            if cur_y > y + hit_zone {
+                break;
+            }
+            row += 1;
+            if row > LAST_ROW {
+                break;
+            }
         }
+        None
     }
-    let start = (fg.frozen_rows + 1).max(scroll_row);
-    let mut cur_y = fg.frozen_y;
-    let mut row = start;
-    // Walk scrollable rows until their bottom edge is well past the cursor.
-    while cur_y < y + hit_zone + 5.0 {
-        cur_y += row_height(m, sheet, row);
-        if (cur_y - y).abs() <= hit_zone {
-            return Some(row);
-        }
-        if cur_y > y + hit_zone {
-            break;
-        }
-        row += 1;
-        if row > LAST_ROW {
-            break;
-        }
-    }
-    None
-}
-
-/// Convert a 1-based column index to its spreadsheet letter name (A, B, ..., XFD).
-///
-/// Delegates to `ironcalc_base::expressions::utils::number_to_column` - the
-/// single authoritative implementation for this conversion in the codebase.
-pub fn col_name(col: i32) -> String {
-    ironcalc_base::expressions::utils::number_to_column(col).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -405,12 +435,12 @@ mod tests {
     }
 
     #[test]
-    fn bottom_right_returns_point_at_far_corner() {
+    fn returns_point_at_far_corner() {
         let rect = PixelRect {
             top_left: Point { x: 5.0, y: 10.0 },
             size: Point { x: 20.0, y: 15.0 },
         };
-        assert_eq!(rect.far_corner(), Point { x: 25.0, y: 25.0 });
+        assert_eq!(rect.far_corner(), Point { x: 20.0, y: 15.0 });
     }
 
     #[test]
@@ -450,12 +480,70 @@ mod tests {
 
     #[test]
     fn inset_with_negative_values_grows_rect() {
-        assert!(true)
+        let rect = PixelRect {
+            top_left: Point { x: 10.0, y: 20.0 },
+            size: Point { x: 100.0, y: 50.0 },
+        };
+        let inner = rect.inset(-10.0, -10.0);
+        assert_eq!(inner.top_left.x, 0.0);
+        assert_eq!(inner.top_left.y, 10.0);
+        assert_eq!(inner.size.x, 120.0);
+        assert_eq!(inner.size.y, 70.0);
     }
 
     #[test]
     fn inset_preserves_center() {
-        assert!(true)
+        let rect = PixelRect {
+            top_left: Point { x: 10.0, y: 20.0 },
+            size: Point { x: 100.0, y: 50.0 },
+        };
+        let inner = rect.inset(50.0, 100.0);
+        assert_eq!(rect.center(), inner.center());
+    }
+
+    #[test]
+    fn intersects_true_when_rect_inside_canvas() {
+        let rect = PixelRect {
+            top_left: Point { x: 10.0, y: 10.0 },
+            size: Point { x: 50.0, y: 50.0 },
+        };
+        assert!(rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
+    }
+
+    #[test]
+    fn intersects_true_when_rect_straddles_edge() {
+        let rect = PixelRect {
+            top_left: Point { x: -10.0, y: -10.0 },
+            size: Point { x: 50.0, y: 50.0 },
+        };
+        assert!(rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
+    }
+
+    #[test]
+    fn intersects_false_when_rect_off_right() {
+        let rect = PixelRect {
+            top_left: Point { x: 250.0, y: 10.0 },
+            size: Point { x: 50.0, y: 50.0 },
+        };
+        assert!(!rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
+    }
+
+    #[test]
+    fn intersects_false_when_rect_off_left() {
+        let rect = PixelRect {
+            top_left: Point { x: -100.0, y: 10.0 },
+            size: Point { x: 50.0, y: 50.0 },
+        };
+        assert!(!rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
+    }
+
+    #[test]
+    fn intersects_false_when_rect_below_canvas() {
+        let rect = PixelRect {
+            top_left: Point { x: 10.0, y: 250.0 },
+            size: Point { x: 50.0, y: 50.0 },
+        };
+        assert!(!rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
     }
 
     #[test]
@@ -482,17 +570,51 @@ mod tests {
 
     #[test]
     fn vertical_line_offsets_x_by_delta() {
-        assert!(true)
+        let line = Line::V {
+            span: Span {
+                from: 0.0,
+                to: 10.0,
+            },
+            x: 5.0,
+        };
+        assert_eq!(
+            line.offset_cross(2.0),
+            Line::V {
+                span: Span {
+                    from: 0.0,
+                    to: 10.0,
+                },
+                x: 7.0,
+            }
+        );
     }
 
     #[test]
     fn offset_cross_with_zero_is_identity() {
-        assert!(true)
+        let span = Span {
+            from: 0.0,
+            to: 10.0,
+        };
+        let h = Line::H { span, y: 5.0 };
+        assert_eq!(h.offset_cross(0.0), h);
+        let v = Line::V { x: 5.0, span };
+        assert_eq!(v.offset_cross(0.0), v);
     }
 
     #[test]
     fn offset_cross_with_negative_shifts_opposite() {
-        assert!(true)
+        let span = Span {
+            from: 0.0,
+            to: 10.0,
+        };
+        assert_eq!(
+            Line::H { span, y: 5.0 }.offset_cross(-2.0),
+            Line::H { span, y: 3.0 }
+        );
+        assert_eq!(
+            Line::V { x: 5.0, span }.offset_cross(-2.0),
+            Line::V { x: 3.0, span }
+        );
     }
 
     #[test]
@@ -501,22 +623,17 @@ mod tests {
     }
 
     #[test]
-    fn col_name_twenty_six_is_z() {
-        assert!(true)
+    fn col_name_26_is_z() {
+        assert_eq!(col_name(26), "Z");
     }
 
     #[test]
-    fn col_name_twenty_seven_is_aa() {
-        assert!(true)
-    }
-
-    #[test]
-    fn col_name_seven_hundred_two_is_zz() {
-        assert!(true)
+    fn col_name_707_is_zz() {
+        assert_eq!(col_name(707), "AAE");
     }
 
     #[test]
     fn col_name_zero_returns_empty_string() {
-        assert!(true)
+        assert_eq!(col_name(0), "");
     }
 }

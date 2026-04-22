@@ -9,10 +9,7 @@
 use leptos::prelude::*;
 
 use crate::canvas::geometry::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW};
-use crate::canvas::{
-    autofill_handle_pos, frozen_geometry, pixel_to_col, pixel_to_row, AUTOFILL_HANDLE_PX,
-    HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
-};
+use crate::canvas::{SheetViewport, AUTOFILL_HANDLE_PX, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use crate::coord::{CellAddress, CellArea, RefNode, SheetArea, TextRef};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
@@ -36,8 +33,7 @@ pub fn try_begin_col_resize(
     model: ModelStore,
     state: WorkbookState,
 ) -> bool {
-    if let Some(col) =
-        model.with_value(|m| crate::canvas::geometry::find_col_boundary_at(m, x, HIT_ZONE))
+    if let Some(col) = model.with_value(|m| SheetViewport::current(m).col_boundary_at(x, HIT_ZONE))
     {
         state.drag.set(DragState::ResizingCol { col, x });
         ev.prevent_default();
@@ -55,8 +51,7 @@ pub fn try_begin_row_resize(
     model: ModelStore,
     state: WorkbookState,
 ) -> bool {
-    if let Some(row) =
-        model.with_value(|m| crate::canvas::geometry::find_row_boundary_at(m, y, HIT_ZONE))
+    if let Some(row) = model.with_value(|m| SheetViewport::current(m).row_boundary_at(y, HIT_ZONE))
     {
         state.drag.set(DragState::ResizingRow { row, y });
         ev.prevent_default();
@@ -89,8 +84,7 @@ pub fn handle_col_header_click(
     model.update_value(|m| {
         let view = m.get_selected_view();
         let sheet = view.sheet;
-        let fg = frozen_geometry(m, sheet);
-        let col = pixel_to_col(m, sheet, view.left_column, x, &fg);
+        let col = SheetViewport::from_parts(m, sheet, view.left_column, 0).pixel_to_col(x);
         if ev.shift_key() {
             m.nav_extend_column_selection(col);
         } else {
@@ -115,8 +109,7 @@ pub fn handle_row_header_click(
     model.update_value(|m| {
         let view = m.get_selected_view();
         let sheet = view.sheet;
-        let fg = frozen_geometry(m, sheet);
-        let row = pixel_to_row(m, sheet, view.top_row, y, &fg);
+        let row = SheetViewport::from_parts(m, sheet, 0, view.top_row).pixel_to_row(y);
         if ev.shift_key() {
             m.nav_extend_row_selection(row);
         } else {
@@ -144,10 +137,11 @@ pub fn handle_cell_click(
     let (row, col, near_handle) = model.with_value(|m| {
         let view = m.get_selected_view();
         let sheet = view.sheet;
-        let fg = frozen_geometry(m, sheet);
-        let col = pixel_to_col(m, sheet, view.left_column, x, &fg);
-        let row = pixel_to_row(m, sheet, view.top_row, y, &fg);
-        let handle = autofill_handle_pos(m);
+        let col = SheetViewport::from_parts(m, sheet, view.left_column, 0).pixel_to_col(x);
+        let row = SheetViewport::from_parts(m, sheet, 0, view.top_row).pixel_to_row(y);
+        let handle = SheetViewport::current(m)
+            .autofill_handle()
+            .unwrap_or_default();
         let near_handle = (x - handle.x).abs() <= AUTOFILL_HANDLE_PX
             && (y - handle.y).abs() <= AUTOFILL_HANDLE_PX;
         (row, col, near_handle)
@@ -171,22 +165,25 @@ pub fn handle_cell_click(
                 );
                 let ref_str = ref_node.to_localized(&editing.as_stringify_ctx());
                 let prev_span =
-                    if let DragState::Pointing { ref_span, .. } = state.drag.get_untracked() {
-                        Some(ref_span)
+                    if let DragState::Pointing { ref_text, .. } = state.drag.get_untracked() {
+                        Some(ref_text)
                     } else {
                         None
                     };
                 let text = edit.text.clone();
-                let (new_text, ref_span) =
+                let (new_text, ref_text) =
                     splice_ref(&text, prev_span.unwrap_or(TextRef::at(cursor)), &ref_str);
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
-                        e.cursor = ref_span.end;
+                        e.cursor = ref_text.end;
                         e.text = new_text.clone();
                         e.formula_analysis = model.with_value(|m| m.analyze_in_context(&new_text));
                     }
                 });
-                state.drag.set(DragState::Pointing { ref_node, ref_span });
+                state.drag.set(DragState::Pointing {
+                    ref_node,
+                    ref_text: ref_text,
+                });
                 return;
             }
         }
@@ -236,6 +233,7 @@ pub fn handle_cell_click(
 /// Checks cursor position against header regions in priority order:
 /// column-resize hit zone → row-resize hit zone → corner → col header →
 /// row header → cell area.
+// TODO: rename
 pub fn handle_mousedown(ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
     // Only handle left-click (button 0); right-click is handled by handle_contextmenu.
     if ev.button() != 0 {
@@ -347,8 +345,8 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
         let view = m.get_selected_view();
         let fg = frozen_geometry(m, sheet);
         (
-            pixel_to_row(m, sheet, view.top_row, y, &fg),
-            pixel_to_col(m, sheet, view.left_column, x, &fg),
+            SheetViewport::from_parts(m, sheet, 0, view.top_row).pixel_to_row(y),
+            SheetViewport::from_parts(m, sheet, view.left_column, 0).pixel_to_col(x),
         )
     });
 
@@ -361,7 +359,7 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
         }
         DragState::Pointing {
             ref_node: pr,
-            ref_span,
+            ref_text: ref_span,
         } => {
             let editing = model.with_value(CellAddress::from_view);
             // Anchor corner is (r1, c1) of the currently-pointed range; mouse
@@ -390,7 +388,10 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
                     }
                 });
 
-                state.drag.set(DragState::Pointing { ref_node, ref_span });
+                state.drag.set(DragState::Pointing {
+                    ref_node,
+                    ref_text: ref_span,
+                });
             }
         }
         DragState::Selecting => {
@@ -471,8 +472,8 @@ pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: Wor
 
     let target = if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
         Some(model.with_value(|m| {
-            let fg = frozen_geometry(m, v.sheet);
-            let col = pixel_to_col(m, v.sheet, v.left_column, x, &fg);
+            //let fg = frozen_geometry(m, v.sheet);
+            let col = SheetViewport::from_parts(m, v.sheet, v.left_column, 0).pixel_to_col(x);
             let area = CellArea::from_view(m).normalized();
             // Multi-column selection if the clicked col is inside a full-column range.
             let (col, count) = if area.r2 >= LAST_ROW && area.c1 <= col && col <= area.c2 {
@@ -484,8 +485,8 @@ pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: Wor
         }))
     } else if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
         Some(model.with_value(|m| {
-            let fg = frozen_geometry(m, v.sheet);
-            let row = pixel_to_row(m, v.sheet, v.top_row, y, &fg);
+            //let fg = frozen_geometry(m, v.sheet);
+            let row = SheetViewport::from_parts(m, v.sheet, 0, v.top_row).pixel_to_row(y);
             let area = CellArea::from_view(m).normalized();
             // Multi-row selection if the clicked row is inside a full-row range.
             let (row, count) = if area.c2 >= LAST_COLUMN && area.r1 <= row && row <= area.r2 {

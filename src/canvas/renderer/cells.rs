@@ -217,7 +217,7 @@ impl CanvasRenderer {
                     },
                     size: Point { x: col_w, y: row_h },
                 };
-                if self.is_rect_visible(rect) {
+                if rect.intersects(self.canvas_size()) {
                     let addr = CellAddress { sheet, row, column };
                     let edges = CellEdges {
                         right: column == pane.last_col,
@@ -231,21 +231,6 @@ impl CanvasRenderer {
             }
             col_left += col_w;
         }
-    }
-
-    /// Check if a rectangle is at least partially visible on the canvas.
-    /// Canvas-local AABB visibility for a pixel rect. Cheap last-line guard
-    /// used inside per-cell loops (`render_pane`, `compute_cell_text`) to skip
-    /// cells that fall off-canvas — notably when a frozen band is wider/taller
-    /// than the canvas itself.
-    ///
-    /// Not a substitute for `range_pixel_bounds`, which operates in sheet-coord
-    /// space and short-circuits expensive offset lookups for out-of-fold ranges.
-    pub(super) fn is_rect_visible(&self, rect: PixelRect) -> bool {
-        rect.top_left.x < self.width
-            && (rect.top_left.x + rect.size.x) > 0.0
-            && rect.top_left.y < self.height
-            && (rect.top_left.y + rect.size.y) > 0.0
     }
 
     /// Paint one cell's background and resolve/draw all four border edges.
@@ -271,12 +256,8 @@ impl CanvasRenderer {
 
         // Background fill.
         self.ctx.set_fill_style_str(bg);
-        self.ctx.fill_rect(
-            rect.top_left.x,
-            rect.top_left.y,
-            rect.size.x,
-            rect.size.y,
-        );
+        self.ctx
+            .fill_rect(rect.top_left.x, rect.top_left.y, rect.size.x, rect.size.y);
 
         // Inner edges (left, top) — each falls back to the matching neighbour's
         // opposite border and fill.
@@ -421,24 +402,50 @@ mod tests {
         };
         assert_eq!(
             BorderEdge::Right.line(rect),
-            Line::H {
+            Line::V {
+                x: 25.0,
                 span: Span {
-                    from: 25.0,
-                    to: 10.0,
+                    from: 10.0,
+                    to: 25.0,
                 },
-                y: 25.0,
             }
         )
     }
 
     #[test]
     fn top_edge_is_horizontal_line_at_rect_y() {
-        assert!(true)
+        let rect = PixelRect {
+            top_left: Point { x: 5.0, y: 10.0 },
+            size: Point { x: 20.0, y: 15.0 },
+        };
+        assert_eq!(
+            BorderEdge::Top.line(rect),
+            Line::H {
+                y: 10.0,
+                span: Span {
+                    from: 5.0,
+                    to: 25.0,
+                },
+            }
+        );
     }
 
     #[test]
     fn bottom_edge_is_horizontal_line_at_rect_bottom() {
-        assert!(true)
+        let rect = PixelRect {
+            top_left: Point { x: 5.0, y: 10.0 },
+            size: Point { x: 20.0, y: 15.0 },
+        };
+        assert_eq!(
+            BorderEdge::Bottom.line(rect),
+            Line::H {
+                y: 25.0,
+                span: Span {
+                    from: 5.0,
+                    to: 25.0,
+                },
+            }
+        );
     }
 
     #[test]
@@ -460,16 +467,38 @@ mod tests {
 
     #[test]
     fn top_neighbour_decrements_row() {
-        assert!(true)
+        let addr = CellAddress {
+            sheet: 0,
+            row: 3,
+            column: 4,
+        };
+        assert_eq!(
+            InnerEdge::Top.neighbour(addr),
+            Some(CellAddress {
+                sheet: 0,
+                row: 2,
+                column: 4,
+            })
+        );
     }
 
     #[test]
     fn left_neighbour_at_column_one_is_none() {
-        assert!(true)
+        let addr = CellAddress {
+            sheet: 0,
+            row: 10,
+            column: 1,
+        };
+        assert_eq!(InnerEdge::Left.neighbour(addr), None);
     }
 
     #[test]
     fn top_neighbour_at_row_one_is_none() {
-        assert!(true)
+        let addr = CellAddress {
+            sheet: 0,
+            row: 1,
+            column: 10,
+        };
+        assert_eq!(InnerEdge::Top.neighbour(addr), None);
     }
 }

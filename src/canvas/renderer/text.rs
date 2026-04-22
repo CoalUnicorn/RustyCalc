@@ -38,7 +38,7 @@ impl CanvasRenderer {
         addr: CellAddress,
         rect: PixelRect,
     ) -> Option<CellText> {
-        if rect.size.x <= 0.0 || rect.size.y <= 0.0 || !self.is_rect_visible(rect) {
+        if rect.size.x <= 0.0 || rect.size.y <= 0.0 || !rect.intersects(self.canvas_size()) {
             return None;
         }
 
