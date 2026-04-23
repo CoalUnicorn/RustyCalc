@@ -20,19 +20,17 @@ use super::{CanvasRenderer, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH, STANDAR
 impl CanvasRenderer {
     /// Draw the blue selection border, semi-transparent fill, and autofill
     /// handle for the current selection.
-    pub(super) fn draw_selection(&self, model: &UserModel, sheet: u32, frozen: FrozenOffset) {
+    pub(super) fn draw_selection(&self, model: &UserModel, frozen: &FrozenOffset) {
         let view = model.get_selected_view();
+        let sheet = model.get_selected_sheet();
         let addr = CellAddress {
             sheet,
             row: view.row,
             column: view.column,
         };
-        let Some(b) = self.range_pixel_bounds(
-            model,
-            sheet,
-            frozen,
-            CellArea::from_view(model).normalized(),
-        ) else {
+        let Some(b) =
+            self.range_pixel_bounds(model, frozen, CellArea::from_view(model).normalized())
+        else {
             return;
         };
 
@@ -62,8 +60,7 @@ impl CanvasRenderer {
     pub(super) fn draw_extend_preview(
         &self,
         model: &UserModel,
-        sheet: u32,
-        frozen: FrozenOffset,
+        frozen: &FrozenOffset,
         target: AutofillTarget,
     ) {
         let sel = CellArea::from_view(model).normalized();
@@ -73,7 +70,7 @@ impl CanvasRenderer {
             r2: sel.r2.max(target.row),
             c2: sel.c2.max(target.col),
         };
-        let Some(b) = self.range_pixel_bounds(model, sheet, frozen, range) else {
+        let Some(b) = self.range_pixel_bounds(model, frozen, range) else {
             return;
         };
 
@@ -85,17 +82,16 @@ impl CanvasRenderer {
     pub(super) fn draw_clipboard_overlay(
         &self,
         model: &UserModel,
-        sheet: u32,
-        frozen: FrozenOffset,
+        frozen: &FrozenOffset,
         clipboard: Option<&SheetArea>,
     ) {
+        let sheet = model.get_selected_sheet();
         let Some(cb) = clipboard else { return };
         if cb.sheet != sheet {
             return;
         }
         self.draw_dashed_range(
             model,
-            sheet,
             frozen,
             cb.area.normalized(),
             self.theme.selection_color,
@@ -107,14 +103,12 @@ impl CanvasRenderer {
     pub(super) fn draw_point_overlay(
         &self,
         model: &UserModel,
-        sheet: u32,
-        frozen: FrozenOffset,
+        frozen: &FrozenOffset,
         point_range: Option<CellArea>,
     ) {
         let Some(pr) = point_range else { return };
         self.draw_dashed_range(
             model,
-            sheet,
             frozen,
             pr.normalized(),
             self.theme.pointing,
@@ -127,17 +121,16 @@ impl CanvasRenderer {
     pub(super) fn draw_formula_ref_overlays(
         &self,
         model: &UserModel,
-        sheet: u32,
-        frozen: FrozenOffset,
+        frozen: &FrozenOffset,
         refs: &[FormulaRef],
     ) {
+        let sheet = model.get_selected_sheet();
         for fr in refs {
             if fr.sheet_area.sheet != sheet {
                 continue;
             }
             self.draw_dashed_range(
                 model,
-                sheet,
                 frozen,
                 fr.sheet_area.area.normalized(),
                 FORMULA_REF_COLORS[fr.color_idx % FORMULA_REF_COLORS.len()],
@@ -152,13 +145,12 @@ impl CanvasRenderer {
     pub(super) fn draw_dashed_range(
         &self,
         model: &UserModel,
-        sheet: u32,
-        frozen: FrozenOffset,
+        frozen: &FrozenOffset,
         range: CellArea,
         color: &str,
         fill: DashFill,
     ) {
-        let Some(b) = self.range_pixel_bounds(model, sheet, frozen, range) else {
+        let Some(b) = self.range_pixel_bounds(model, frozen, range) else {
             return;
         };
 

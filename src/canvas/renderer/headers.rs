@@ -92,7 +92,6 @@ impl CanvasRenderer {
     pub(super) fn render_headers(
         &self,
         model: &UserModel,
-        sheet: u32,
         axis: Axis,
         frozen_band: Option<&RangeInclusive<i32>>,
         frozen_origin: f64,
@@ -107,7 +106,7 @@ impl CanvasRenderer {
         let mut cursor = axis.strip_start();
         if let Some(band) = frozen_band {
             for i in band.clone() {
-                let t = axis.extent(model, sheet, i);
+                let t = axis.extent(model, i);
                 if t <= 0.0 {
                     continue;
                 }
@@ -124,7 +123,7 @@ impl CanvasRenderer {
             axis.strip_start()
         };
         for i in axis.visible_band(&self.vis) {
-            let t = axis.extent(model, sheet, i);
+            let t = axis.extent(model, i);
             if t <= 0.0 {
                 continue;
             }

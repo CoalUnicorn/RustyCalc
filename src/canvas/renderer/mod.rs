@@ -202,14 +202,14 @@ impl CanvasRenderer {
         ctx.set_text_baseline("middle");
         ctx.clear_rect(0.0, 0.0, self.width, self.height);
 
-        let view = model.get_selected_view();
-
-        let sheet = view.sheet;
-
         // Frozen counts + pixel origin, computed once per frame.
-        let frc = FrozenRC::from_model(model, sheet);
+        let frc = FrozenRC::from_model(model);
+
+        //let dyn_row_h = row_height(model, view.row);
+        //let dyn_phase = DynamicFreeze::phase(scroll_y, dyn_row_h, row_top_act, row_top_foot);
+
         // Build prefix-sum cache now that vis and sheet are both known.
-        self.offsets = self.build_pixel_offsets(model, sheet);
+        self.offsets = self.build_pixel_offsets(model);
         let vis = self.vis;
 
         // Cell texts are collected across ALL panes and rendered last (Phase 4)
@@ -219,53 +219,33 @@ impl CanvasRenderer {
         // Phase 1: Cell backgrounds + borders - four frozen-pane quadrants.
         // Performance note: Each pane is bounded by visible region, ensuring O(visible) complexity
         // regardless of selection size (whole sheet vs single cell).
-        self.render_pane(model, sheet, &mut cell_texts, PaneRegion::top_left(&frc));
+        self.render_pane(model, &mut cell_texts, PaneRegion::top_left(&frc));
 
         self.draw_frozen_separators(&frc);
 
-        self.render_pane(
-            model,
-            sheet,
-            &mut cell_texts,
-            PaneRegion::top_right(&frc, &vis),
-        );
-        self.render_pane(
-            model,
-            sheet,
-            &mut cell_texts,
-            PaneRegion::bottom_left(&frc, &vis),
-        );
-        self.render_pane(
-            model,
-            sheet,
-            &mut cell_texts,
-            PaneRegion::bottom_right(&frc, &vis),
-        );
+        self.render_pane(model, &mut cell_texts, PaneRegion::top_right(&frc, &vis));
+        self.render_pane(model, &mut cell_texts, PaneRegion::bottom_left(&frc, &vis));
+        self.render_pane(model, &mut cell_texts, PaneRegion::bottom_right(&frc, &vis));
 
         // Phase 2: Headers + corner box
-        self.render_headers(model, sheet, Axis::Row, frc.row_band.as_ref(), frc.offset.y);
-        self.render_headers(
-            model,
-            sheet,
-            Axis::Column,
-            frc.col_band.as_ref(),
-            frc.offset.x,
-        );
+        self.render_headers(model, Axis::Row, frc.row_band.as_ref(), frc.offset.y);
+        self.render_headers(model, Axis::Row, frc.row_band.as_ref(), frc.offset.y);
+        self.render_headers(model, Axis::Column, frc.col_band.as_ref(), frc.offset.x);
 
         self.draw_corner_box();
 
         // Phase 3: Selection outline
-        self.draw_selection(model, sheet, frc.offset);
+        self.draw_selection(model, &frc.offset);
         if let Some(target) = overlays.extend_to {
-            self.draw_extend_preview(model, sheet, frc.offset, target);
+            self.draw_extend_preview(model, &frc.offset, target);
         }
 
         // Secondary overlays: clipboard marching ants, point-mode range,
         // formula-ref highlights. Each no-ops if its data is absent or lives
         // on another sheet.
-        self.draw_clipboard_overlay(model, sheet, frc.offset, overlays.clipboard.as_ref());
-        self.draw_point_overlay(model, sheet, frc.offset, overlays.point_range);
-        self.draw_formula_ref_overlays(model, sheet, frc.offset, &overlays.formula_refs);
+        self.draw_clipboard_overlay(model, &frc.offset, overlays.clipboard.as_ref());
+        self.draw_point_overlay(model, &frc.offset, overlays.point_range);
+        self.draw_formula_ref_overlays(model, &frc.offset, &overlays.formula_refs);
 
         // Phase 4: Cell text - always on top
         // Rendered after selection fill so text is readable over the blue tint,

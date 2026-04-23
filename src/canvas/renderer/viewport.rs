@@ -27,10 +27,10 @@ impl CanvasRenderer {
     pub(super) fn range_pixel_bounds(
         &self,
         model: &UserModel,
-        sheet: u32,
-        frozen: FrozenOffset,
+        frozen: &FrozenOffset,
         range: CellArea,
     ) -> Option<PixelRect> {
+        let sheet = model.get_selected_sheet();
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
@@ -38,17 +38,17 @@ impl CanvasRenderer {
             return None;
         }
 
-        let x = self.cell_x(model, sheet, range.c1, frozen);
-        let y = self.cell_y(model, sheet, range.r1, frozen);
+        let x = self.cell_x(model, range.c1, frozen);
+        let y = self.cell_y(model, range.r1, frozen);
         let right = if range.c2 > self.vis.col_last {
             self.width
         } else {
-            self.cell_x(model, sheet, range.c2, frozen) + col_width(model, sheet, range.c2)
+            self.cell_x(model, range.c2, frozen) + col_width(model, range.c2)
         };
         let bottom = if range.r2 > self.vis.row_last {
             self.height
         } else {
-            self.cell_y(model, sheet, range.r2, frozen) + row_height(model, sheet, range.r2)
+            self.cell_y(model, range.r2, frozen) + row_height(model, range.r2)
         };
         Some(PixelRect {
             top_left: Point { x, y },
@@ -83,21 +83,15 @@ impl CanvasRenderer {
         true
     }
 
-    fn cell_offset(
-        &self,
-        model: &UserModel,
-        sheet: u32,
-        axis: Axis,
-        index: i32,
-        frozen: FrozenOffset,
-    ) -> f64 {
+    fn cell_offset(&self, model: &UserModel, axis: Axis, index: i32, frozen: &FrozenOffset) -> f64 {
+        let sheet = model.get_selected_sheet();
         match axis {
             Axis::Column => {
                 let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
                 if index <= frozen_cols {
                     return HEADER_COL_WIDTH
                         + HEADER_OFFSET
-                        + (1..index).map(|c| col_width(model, sheet, c)).sum::<f64>();
+                        + (1..index).map(|c| col_width(model, c)).sum::<f64>();
                 }
                 frozen.x + self.offsets.col_left(index)
             }
@@ -106,31 +100,19 @@ impl CanvasRenderer {
                 if index <= frozen_rows {
                     return HEADER_ROW_HEIGHT
                         + HEADER_OFFSET
-                        + (1..index).map(|r| row_height(model, sheet, r)).sum::<f64>();
+                        + (1..index).map(|r| row_height(model, r)).sum::<f64>();
                 }
                 frozen.y + self.offsets.row_top(index)
             }
         }
     }
 
-    pub(super) fn cell_x(
-        &self,
-        model: &UserModel,
-        sheet: u32,
-        col: i32,
-        frozen: FrozenOffset,
-    ) -> f64 {
-        self.cell_offset(model, sheet, Axis::Column, col, frozen)
+    pub(super) fn cell_x(&self, model: &UserModel, col: i32, frozen: &FrozenOffset) -> f64 {
+        self.cell_offset(model, Axis::Column, col, frozen)
     }
 
-    pub(super) fn cell_y(
-        &self,
-        model: &UserModel,
-        sheet: u32,
-        row: i32,
-        frozen: FrozenOffset,
-    ) -> f64 {
-        self.cell_offset(model, sheet, Axis::Row, row, frozen)
+    pub(super) fn cell_y(&self, model: &UserModel, row: i32, frozen: &FrozenOffset) -> f64 {
+        self.cell_offset(model, Axis::Row, row, frozen)
     }
 
     /// Build a prefix-sum pixel-offset table for all visible rows and columns.
@@ -140,14 +122,14 @@ impl CanvasRenderer {
     /// pass — same rows/cols that `visible_cells` already iterated. Stored on
     /// `self.offsets` so `cell_x`/`cell_y` become O(1) array lookups instead
     /// of O(visible × R) summations (where R = len of IronCalc's `rows` Vec).
-    pub(super) fn build_pixel_offsets(&self, model: &UserModel, sheet: u32) -> PixelOffsets {
+    pub(super) fn build_pixel_offsets(&self, model: &UserModel) -> PixelOffsets {
         let vis = self.vis;
 
         let mut row_tops = Vec::with_capacity((vis.row_last - vis.row_first + 2) as usize);
         let mut acc = 0.0_f64;
         for r in vis.row_first..=vis.row_last {
             row_tops.push(acc);
-            acc += row_height(model, sheet, r);
+            acc += row_height(model, r);
         }
         row_tops.push(acc); // one-past-end: bottom edge of last visible row
 
@@ -155,7 +137,7 @@ impl CanvasRenderer {
         acc = 0.0;
         for c in vis.col_first..=vis.col_last {
             col_lefts.push(acc);
-            acc += col_width(model, sheet, c);
+            acc += col_width(model, c);
         }
         col_lefts.push(acc); // one-past-end: right edge of last visible col
 
@@ -181,8 +163,8 @@ impl CanvasRenderer {
         let sheet = view.sheet;
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(model, sheet, r)).sum();
-        let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(model, sheet, c)).sum();
+        let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(model, r)).sum();
+        let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(model, c)).sum();
 
         let row_first = (frozen_rows + 1).max(view.top_row);
         let col_first = (frozen_cols + 1).max(view.left_column);
@@ -195,7 +177,7 @@ impl CanvasRenderer {
                 row_last = row;
                 break;
             }
-            y += row_height(model, sheet, row);
+            y += row_height(model, row);
         }
 
         let col_scan_end = (col_first + SCAN_CAP).min(LAST_COLUMN);
@@ -206,7 +188,7 @@ impl CanvasRenderer {
                 col_last = col;
                 break;
             }
-            x += col_width(model, sheet, col);
+            x += col_width(model, col);
         }
 
         VisibleRegion {

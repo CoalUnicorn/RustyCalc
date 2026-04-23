@@ -63,10 +63,10 @@ impl Axis {
     }
 
     /// Extent of the row/column at `index` on `sheet` (row height or column width).
-    pub(crate) fn extent(self, model: &UserModel, sheet: u32, index: i32) -> f64 {
+    pub(crate) fn extent(self, model: &UserModel, index: i32) -> f64 {
         match self {
-            Axis::Row => row_height(model, sheet, index),
-            Axis::Column => col_width(model, sheet, index),
+            Axis::Row => row_height(model, index),
+            Axis::Column => col_width(model, index),
         }
     }
 
@@ -134,11 +134,12 @@ pub(crate) struct FrozenRC {
 
 impl FrozenRC {
     /// Read frozen geometry from the model for `sheet`.
-    pub fn from_model(model: &UserModel, sheet: u32) -> Self {
+    pub fn from_model(model: &UserModel) -> Self {
+        let sheet = model.get_selected_sheet();
         let rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        let h: f64 = (1..=rows).map(|r| row_height(model, sheet, r)).sum();
-        let w: f64 = (1..=cols).map(|c| col_width(model, sheet, c)).sum();
+        let h: f64 = (1..=rows).map(|r| row_height(model, r)).sum();
+        let w: f64 = (1..=cols).map(|c| col_width(model, c)).sum();
         FrozenRC {
             row_band: (rows > 0).then_some(1..=rows),
             col_band: (cols > 0).then_some(1..=cols),

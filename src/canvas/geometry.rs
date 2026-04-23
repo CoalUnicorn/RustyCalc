@@ -24,14 +24,16 @@ pub const LAST_COLUMN: i32 = 16_384;
 
 /// Row height for `row` on `sheet`, falling back to `DEFAULT_ROW_HEIGHT`.
 #[inline]
-pub fn row_height(m: &UserModel, sheet: u32, row: i32) -> f64 {
-    m.get_row_height(sheet, row).unwrap_or(DEFAULT_ROW_HEIGHT)
+pub fn row_height(m: &UserModel, row: i32) -> f64 {
+    m.get_row_height(m.get_selected_sheet(), row)
+        .unwrap_or(DEFAULT_ROW_HEIGHT)
 }
 
 /// Column width for `col` on `sheet`, falling back to `DEFAULT_COL_WIDTH`.
 #[inline]
-pub fn col_width(m: &UserModel, sheet: u32, col: i32) -> f64 {
-    m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH)
+pub fn col_width(m: &UserModel, col: i32) -> f64 {
+    m.get_column_width(m.get_selected_sheet(), col)
+        .unwrap_or(DEFAULT_COL_WIDTH)
 }
 
 /// Convert a 1-based column index to its spreadsheet letter name (A, B, ..., XFD).
@@ -162,11 +164,12 @@ pub struct FrozenGeometry {
 
 impl FrozenGeometry {
     /// Compute frozen-pane geometry for `sheet` from `m`.
-    pub fn get(m: &UserModel, sheet: u32) -> FrozenGeometry {
+    pub fn get(m: &UserModel) -> FrozenGeometry {
+        let sheet = m.get_selected_sheet();
         let frozen_rows = m.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = m.get_frozen_columns_count(sheet).unwrap_or(0);
-        let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(m, sheet, r)).sum();
-        let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(m, sheet, c)).sum();
+        let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(m, r)).sum();
+        let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(m, c)).sum();
         let sep_y = if frozen_rows > 0 { FROZEN_SEP } else { 0.0 };
         let sep_x = if frozen_cols > 0 { FROZEN_SEP } else { 0.0 };
         FrozenGeometry {
@@ -183,7 +186,6 @@ impl FrozenGeometry {
 /// together.
 pub struct SheetViewport<'a> {
     model: &'a UserModel<'a>,
-    sheet: u32,
     left_column: i32,
     top_row: i32,
     frozen: FrozenGeometry,
@@ -193,29 +195,23 @@ impl<'a> SheetViewport<'a> {
     /// Snapshot the currently-selected sheet with its current scroll state.
     pub fn current(model: &'a UserModel<'a>) -> Self {
         let view = model.get_selected_view();
-        Self::from_parts(model, view.sheet, view.left_column, view.top_row)
+        Self::from_parts(model, view.left_column, view.top_row)
     }
 
     /// Build from explicit anchors. Shims whose callers already destructured
     /// the view use this; callers that only need one anchor may pass any value
     /// for the other (the method dispatched will ignore it).
-    pub fn from_parts(
-        model: &'a UserModel<'a>,
-        sheet: u32,
-        left_column: i32,
-        top_row: i32,
-    ) -> Self {
+    pub fn from_parts(model: &'a UserModel<'a>, left_column: i32, top_row: i32) -> Self {
         Self {
             model,
-            sheet,
             left_column,
             top_row,
-            frozen: FrozenGeometry::get(model, sheet),
+            frozen: FrozenGeometry::get(model),
         }
     }
 
     pub fn sheet(&self) -> u32 {
-        self.sheet
+        self.model.get_selected_sheet()
     }
 
     pub fn frozen(&self) -> &FrozenGeometry {
@@ -225,32 +221,20 @@ impl<'a> SheetViewport<'a> {
     /// Left-edge X pixel of `col` at current scroll.
     pub fn col_to_x(&self, col: i32) -> f64 {
         if col <= self.frozen.frozen_cols {
-            HEADER_COL_WIDTH
-                + (1..col)
-                    .map(|c| col_width(self.model, self.sheet, c))
-                    .sum::<f64>()
+            HEADER_COL_WIDTH + (1..col).map(|c| col_width(self.model, c)).sum::<f64>()
         } else {
             let left = self.left_column.max(self.frozen.frozen_cols + 1);
-            self.frozen.frozen_x
-                + (left..col)
-                    .map(|c| col_width(self.model, self.sheet, c))
-                    .sum::<f64>()
+            self.frozen.frozen_x + (left..col).map(|c| col_width(self.model, c)).sum::<f64>()
         }
     }
 
     /// Top-edge Y pixel of `row` at current scroll.
     pub fn row_to_y(&self, row: i32) -> f64 {
         if row <= self.frozen.frozen_rows {
-            HEADER_ROW_HEIGHT
-                + (1..row)
-                    .map(|r| row_height(self.model, self.sheet, r))
-                    .sum::<f64>()
+            HEADER_ROW_HEIGHT + (1..row).map(|r| row_height(self.model, r)).sum::<f64>()
         } else {
             let top = self.top_row.max(self.frozen.frozen_rows + 1);
-            self.frozen.frozen_y
-                + (top..row)
-                    .map(|r| row_height(self.model, self.sheet, r))
-                    .sum::<f64>()
+            self.frozen.frozen_y + (top..row).map(|r| row_height(self.model, r)).sum::<f64>()
         }
     }
 
@@ -260,7 +244,7 @@ impl<'a> SheetViewport<'a> {
             let mut cx = HEADER_COL_WIDTH;
             let mut result = 1_i32.max(self.frozen.frozen_cols);
             for c in 1..=self.frozen.frozen_cols {
-                let cw = col_width(self.model, self.sheet, c);
+                let cw = col_width(self.model, c);
                 if x < cx + cw {
                     result = c;
                     break;
@@ -273,7 +257,7 @@ impl<'a> SheetViewport<'a> {
             let mut cx = self.frozen.frozen_x;
             let mut c = start;
             loop {
-                let cw = col_width(self.model, self.sheet, c);
+                let cw = col_width(self.model, c);
                 if x < cx + cw || c >= LAST_COLUMN {
                     break c;
                 }
@@ -289,7 +273,7 @@ impl<'a> SheetViewport<'a> {
             let mut cy = HEADER_ROW_HEIGHT;
             let mut result = 1_i32.max(self.frozen.frozen_rows);
             for r in 1..=self.frozen.frozen_rows {
-                let rh = row_height(self.model, self.sheet, r);
+                let rh = row_height(self.model, r);
                 if y < cy + rh {
                     result = r;
                     break;
@@ -302,7 +286,7 @@ impl<'a> SheetViewport<'a> {
             let mut cy = self.frozen.frozen_y;
             let mut r = start;
             loop {
-                let rh = row_height(self.model, self.sheet, r);
+                let rh = row_height(self.model, r);
                 if y < cy + rh || r >= LAST_ROW {
                     break r;
                 }
@@ -320,8 +304,8 @@ impl<'a> SheetViewport<'a> {
                 y: self.row_to_y(row),
             },
             size: Point {
-                x: col_width(self.model, self.sheet, col),
-                y: row_height(self.model, self.sheet, row),
+                x: col_width(self.model, col),
+                y: row_height(self.model, row),
             },
         }
     }
@@ -335,8 +319,8 @@ impl<'a> SheetViewport<'a> {
             return None;
         }
         Some(Point {
-            x: self.col_to_x(area.c2) + col_width(self.model, self.sheet, area.c2),
-            y: self.row_to_y(area.r2) + row_height(self.model, self.sheet, area.r2),
+            x: self.col_to_x(area.c2) + col_width(self.model, area.c2),
+            y: self.row_to_y(area.r2) + row_height(self.model, area.r2),
         })
     }
 
@@ -346,7 +330,7 @@ impl<'a> SheetViewport<'a> {
         if self.frozen.frozen_cols > 0 {
             let mut cur_x = HEADER_COL_WIDTH;
             for col in 1..=self.frozen.frozen_cols {
-                cur_x += col_width(self.model, self.sheet, col);
+                cur_x += col_width(self.model, col);
                 if (cur_x - x).abs() <= hit_zone {
                     return Some(col);
                 }
@@ -356,7 +340,7 @@ impl<'a> SheetViewport<'a> {
         let mut cur_x = self.frozen.frozen_x;
         let mut col = start;
         while cur_x < x + hit_zone + 5.0 {
-            cur_x += col_width(self.model, self.sheet, col);
+            cur_x += col_width(self.model, col);
             if (cur_x - x).abs() <= hit_zone {
                 return Some(col);
             }
@@ -377,7 +361,7 @@ impl<'a> SheetViewport<'a> {
         if self.frozen.frozen_rows > 0 {
             let mut cur_y = HEADER_ROW_HEIGHT;
             for row in 1..=self.frozen.frozen_rows {
-                cur_y += row_height(self.model, self.sheet, row);
+                cur_y += row_height(self.model, row);
                 if (cur_y - y).abs() <= hit_zone {
                     return Some(row);
                 }
@@ -387,7 +371,7 @@ impl<'a> SheetViewport<'a> {
         let mut cur_y = self.frozen.frozen_y;
         let mut row = start;
         while cur_y < y + hit_zone + 5.0 {
-            cur_y += row_height(self.model, self.sheet, row);
+            cur_y += row_height(self.model, row);
             if (cur_y - y).abs() <= hit_zone {
                 return Some(row);
             }

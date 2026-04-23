@@ -151,7 +151,6 @@ impl CanvasRenderer {
     pub(super) fn render_pane(
         &self,
         model: &UserModel,
-        sheet: u32,
         cell_texts: &mut Vec<CellText>,
         pane: PaneRegion,
     ) {
@@ -164,7 +163,7 @@ impl CanvasRenderer {
         let column_widths: Vec<(i32, f64)> = pane
             .cols
             .clone()
-            .map(|column| (column, col_width(model, sheet, column)))
+            .map(|column| (column, col_width(model, column)))
             .collect();
 
         let mut row_top = pane.start_y;
@@ -172,11 +171,10 @@ impl CanvasRenderer {
             if row_top >= self.height {
                 break;
             }
-            let row_h = row_height(model, sheet, row);
+            let row_h = row_height(model, row);
             if row_h > 0.0 {
                 self.render_pane_row(
                     model,
-                    sheet,
                     cell_texts,
                     &pane,
                     row,
@@ -196,7 +194,6 @@ impl CanvasRenderer {
     fn render_pane_row(
         &self,
         model: &UserModel,
-        sheet: u32,
         cell_texts: &mut Vec<CellText>,
         pane: &PaneRegion,
         row: i32,
@@ -218,7 +215,11 @@ impl CanvasRenderer {
                     size: Point { x: col_w, y: row_h },
                 };
                 if rect.intersects(self.canvas_size()) {
-                    let addr = CellAddress { sheet, row, column };
+                    let addr = CellAddress {
+                        sheet: model.get_selected_sheet(),
+                        row,
+                        column,
+                    };
                     let edges = CellEdges {
                         right: column == pane.last_col,
                         bottom: row == pane.last_row,
@@ -319,16 +320,16 @@ impl CanvasRenderer {
         &self,
         model: &UserModel,
         addr: CellAddress,
-        frozen: FrozenOffset,
+        frozen: &FrozenOffset,
     ) {
         let rect = PixelRect {
             top_left: Point {
-                x: self.cell_x(model, addr.sheet, addr.column, frozen),
-                y: self.cell_y(model, addr.sheet, addr.row, frozen),
+                x: self.cell_x(model, addr.column, frozen),
+                y: self.cell_y(model, addr.row, frozen),
             },
             size: Point {
-                x: col_width(model, addr.sheet, addr.column),
-                y: row_height(model, addr.sheet, addr.row),
+                x: col_width(model, addr.column),
+                y: row_height(model, addr.row),
             },
         };
         self.render_cell_style(
