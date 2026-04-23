@@ -7,6 +7,7 @@
 //! closures that delegate here.
 
 use leptos::prelude::*;
+use wasm_bindgen::{closure::Closure, JsCast};
 
 use crate::canvas::geometry::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW};
 use crate::canvas::{SheetViewport, AUTOFILL_HANDLE_PX, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
@@ -24,6 +25,136 @@ use ironcalc_base::UserModel;
 
 /// Pixel tolerance for column/row resize hit-test in the header area.
 const HIT_ZONE: f64 = 4.0;
+/// Pixels from a canvas edge that activate auto-scroll during drag.
+const AUTOSCROLL_ZONE: f64 = 40.0;
+/// Milliseconds between auto-scroll ticks while the cursor is in the edge zone.
+const AUTOSCROLL_MS: i32 = 80;
+
+/// Called on each timer tick while a drag is active near a canvas edge.
+///
+/// Advances the viewport one step in the stored direction, re-resolves the
+/// last-known mouse position into the shifted viewport, then updates the
+/// active drag state so the canvas repaints without the user needing to move
+/// the mouse.
+fn autoscroll_tick(model: ModelStore, state: WorkbookState) {
+    let (dx, dy) = state.autoscroll.dir.get_value();
+    if dx == 0 && dy == 0 {
+        return;
+    }
+    let sheet = model.with_value(UserModel::get_selected_sheet);
+    // nav_expand_selection (→ on_expand_selected_range / Shift+Arrow) extends
+    // the range AND calls set_top_left_visible_cell when the endpoint goes off-screen.
+    // nav_extend_selection (→ on_area_selecting) only updates the range with no scroll.
+    // nav_arrow collapses the selection anchor — never use it during a drag.
+    match state.drag.get_untracked() {
+        DragState::Selecting => {
+            model.update_value(|m| {
+                if dx > 0 {
+                    m.nav_expand_selection(ArrowKey::Right);
+                }
+                if dx < 0 {
+                    m.nav_expand_selection(ArrowKey::Left);
+                }
+                if dy > 0 {
+                    m.nav_expand_selection(ArrowKey::Down);
+                }
+                if dy < 0 {
+                    m.nav_expand_selection(ArrowKey::Up);
+                }
+            });
+            let sheet_area = model.with_value(SheetArea::from_view);
+            state.emit_event(SpreadsheetEvent::Navigation(
+                NavigationEvent::SelectionRangeChanged { sheet_area },
+            ));
+        }
+        DragState::Extending { .. } => {
+            // set_top_left_visible_cell scrolls without touching the selection
+            // range — the source cells the autofill will fill from must stay intact.
+            let (mx, my) = state.autoscroll.pos.get_value();
+            model.update_value(|m| {
+                let view = m.get_selected_view();
+                let new_top = (view.top_row + dy).clamp(1, LAST_ROW);
+                let new_left = (view.left_column + dx).clamp(1, LAST_COLUMN);
+                let _ = m.set_top_left_visible_cell(new_top, new_left);
+            });
+            let (row, col) = model.with_value(|m| {
+                let view = m.get_selected_view();
+                (
+                    SheetViewport::from_parts(m, sheet, 0, view.top_row).pixel_to_row(my),
+                    SheetViewport::from_parts(m, sheet, view.left_column, 0).pixel_to_col(mx),
+                )
+            });
+            state.drag.set(DragState::Extending {
+                to_row: row,
+                to_col: col,
+            });
+        }
+        _ => {
+            state.autoscroll.cancel();
+            return;
+        }
+    }
+    let (top_row, left_col) = model.with_value(|m| {
+        let v = m.get_selected_view();
+        (v.top_row, v.left_column)
+    });
+    state.emit_event(SpreadsheetEvent::Navigation(
+        NavigationEvent::ViewportScrolled {
+            sheet,
+            top_row,
+            left_col,
+        },
+    ));
+}
+
+/// Compute the scroll direction from the cursor position and the canvas bounds,
+/// then start or stop the auto-scroll timer accordingly.
+///
+/// If the cursor has moved back into the safe zone, the running timer is cancelled.
+/// If a timer is already running and the direction changed, the new direction is
+/// stored and the existing timer picks it up on the next tick — no restart needed.
+fn update_autoscroll(
+    x: f64,
+    y: f64,
+    canvas_w: f64,
+    canvas_h: f64,
+    model: ModelStore,
+    state: WorkbookState,
+) {
+    let dx = if x > canvas_w - AUTOSCROLL_ZONE {
+        1
+    } else if x < HEADER_COL_WIDTH + AUTOSCROLL_ZONE {
+        -1
+    } else {
+        0
+    };
+    let dy = if y > canvas_h - AUTOSCROLL_ZONE {
+        1
+    } else if y < HEADER_ROW_HEIGHT + AUTOSCROLL_ZONE {
+        -1
+    } else {
+        0
+    };
+    state.autoscroll.pos.set_value((x, y));
+    state.autoscroll.dir.set_value((dx, dy));
+    if dx == 0 && dy == 0 {
+        state.autoscroll.cancel();
+        return;
+    }
+    if state.autoscroll.id.get_value().is_some() {
+        return; // timer already running; direction update above is enough
+    }
+    // `cb.forget()` hands ownership to the JS GC for the lifetime of the interval.
+    let cb = Closure::<dyn FnMut()>::new(move || autoscroll_tick(model, state));
+    let id = leptos::prelude::window()
+        .set_interval_with_callback_and_timeout_and_arguments_0(
+            cb.as_ref().unchecked_ref::<web_sys::js_sys::Function>(),
+            AUTOSCROLL_MS,
+        )
+        .unwrap_or(-1);
+    cb.forget();
+    state.autoscroll.id.set_value(Some(id));
+}
 
 /// Start a column resize if the click lands within `HIT_ZONE` of a column
 /// boundary in the header row. Returns `true` if a resize was started.
@@ -271,6 +402,7 @@ pub fn handle_mousedown(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
 /// the canvas). Reset drag state so the next interaction starts clean.
 pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
     if ev.buttons() == 0 {
+        state.autoscroll.cancel();
         state.drag.set(DragState::Idle);
         return;
     }
@@ -350,8 +482,15 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
         )
     });
 
+    let (canvas_w, canvas_h) = ev
+        .target()
+        .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+        .map(|el| (el.client_width() as f64, el.client_height() as f64))
+        .unwrap_or((f64::MAX, f64::MAX));
+
     match state.drag.get_untracked() {
         DragState::Extending { .. } => {
+            update_autoscroll(x, y, canvas_w, canvas_h, model, state);
             state.drag.set(DragState::Extending {
                 to_row: row,
                 to_col: col,
@@ -395,6 +534,7 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
             }
         }
         DragState::Selecting => {
+            update_autoscroll(x, y, canvas_w, canvas_h, model, state);
             let (eff_row, eff_col) = model.with_value(|m| {
                 let view = m.get_selected_view();
                 let ec = if col == view.left_column && view.left_column > 1 {
@@ -425,6 +565,7 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
 ///
 /// If no autofill drag was active, this is a no-op beyond resetting to `Idle`.
 pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
+    state.autoscroll.cancel();
     let was_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
 
     if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
