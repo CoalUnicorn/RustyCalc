@@ -16,7 +16,7 @@ impl CanvasRenderer {
     pub(super) fn rect_fill(&self, rect: PixelRect, color: &str) {
         self.ctx.set_fill_style_str(color);
         self.ctx
-            .fill_rect(rect.top_left.x, rect.top_left.y, rect.size.x, rect.size.y);
+            .fill_rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
     }
 
     /// Stroke `rect`'s outline at `width` pixels. Width is restored to
@@ -25,7 +25,7 @@ impl CanvasRenderer {
         self.ctx.set_stroke_style_str(color);
         self.with_stroke_width(width, |this| {
             this.ctx
-                .stroke_rect(rect.top_left.x, rect.top_left.y, rect.size.x, rect.size.y);
+                .stroke_rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
         });
     }
 
@@ -60,7 +60,7 @@ impl CanvasRenderer {
         self.ctx.save();
         self.ctx.begin_path();
         self.ctx
-            .rect(rect.top_left.x, rect.top_left.y, rect.size.x, rect.size.y);
+            .rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
         self.ctx.clip();
         let result = f(self);
         self.ctx.restore();

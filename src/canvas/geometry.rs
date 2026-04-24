@@ -55,30 +55,28 @@ pub struct CanvasSize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PixelRect {
     pub top_left: Point,
-    pub size: Point,
+    //pub size: Point,
+    pub width: f64,
+    pub height: f64,
 }
 
 impl PixelRect {
     pub fn right(&self) -> f64 {
-        self.top_left.x + self.size.x
+        self.top_left.x + self.width
     }
     pub fn bottom(&self) -> f64 {
-        self.top_left.y + self.size.y
+        self.top_left.y + self.height
     }
 
     #[cfg(test)]
     pub fn top_left(&self) -> Point {
         self.top_left
     }
-    #[cfg(test)]
-    pub fn far_corner(&self) -> Point {
-        self.size
-    }
 
     pub fn center(&self) -> Point {
         Point {
-            x: self.top_left.x + self.size.x / 2.0,
-            y: self.top_left.y + self.size.y / 2.0,
+            x: self.top_left.x + self.width / 2.0,
+            y: self.top_left.y + self.height / 2.0,
         }
     }
     /// Shrink by `dx` / `dy` on each side (negative values grow the rect).
@@ -88,10 +86,9 @@ impl PixelRect {
                 x: self.top_left.x + dx,
                 y: self.top_left.y + dy,
             },
-            size: Point {
-                x: self.size.x - 2.0 * dx,
-                y: self.size.y - 2.0 * dy,
-            },
+
+            width: self.width - 2.0 * dx,
+            height: self.height - 2.0 * dy,
         }
     }
 
@@ -112,7 +109,7 @@ impl Display for PixelRect {
         write!(
             f,
             "left:{:.0}px;top:{:.0}px;width:{:.0}px;height:{:.0}px;",
-            self.top_left.x, self.top_left.y, self.size.x, self.size.y
+            self.top_left.x, self.top_left.y, self.width, self.height
         )
     }
 }
@@ -303,10 +300,8 @@ impl<'a> SheetViewport<'a> {
                 x: self.col_to_x(col),
                 y: self.row_to_y(row),
             },
-            size: Point {
-                x: col_width(self.model, col),
-                y: row_height(self.model, row),
-            },
+            width: col_width(self.model, col),
+            height: row_height(self.model, row),
         }
     }
 
@@ -395,7 +390,8 @@ mod tests {
     fn right_is_x_plus_width() {
         let rect = PixelRect {
             top_left: Point { x: 5.0, y: 10.0 },
-            size: Point { x: 20.0, y: 15.0 },
+            width: 20.0,
+            height: 15.0,
         };
         assert_eq!(rect.right(), 25.0);
     }
@@ -404,7 +400,8 @@ mod tests {
     fn bottom_is_y_plus_height() {
         let rect = PixelRect {
             top_left: Point { x: 5.0, y: 10.0 },
-            size: Point { x: 20.0, y: 25.0 },
+            width: 20.0,
+            height: 25.0,
         };
         assert_eq!(rect.bottom(), 35.0);
     }
@@ -413,25 +410,18 @@ mod tests {
     fn top_left_returns_point_at_rect_origin() {
         let rect = PixelRect {
             top_left: Point { x: 5.0, y: 10.0 },
-            size: Point { x: 20.0, y: 15.0 },
+            height: 20.0,
+            width: 15.0,
         };
         assert_eq!(rect.top_left(), Point { x: 5.0, y: 10.0 });
-    }
-
-    #[test]
-    fn returns_point_at_far_corner() {
-        let rect = PixelRect {
-            top_left: Point { x: 5.0, y: 10.0 },
-            size: Point { x: 20.0, y: 15.0 },
-        };
-        assert_eq!(rect.far_corner(), Point { x: 20.0, y: 15.0 });
     }
 
     #[test]
     fn center_returns_midpoint() {
         let rect = PixelRect {
             top_left: Point { x: 10.0, y: 10.0 },
-            size: Point { x: 30.0, y: 30.0 },
+            width: 30.0,
+            height: 30.0,
         };
         assert_eq!(rect.center(), Point { x: 25.0, y: 25.0 });
     }
@@ -440,46 +430,50 @@ mod tests {
     fn inset_with_positive_values_shrinks_symmetrically() {
         let rect = PixelRect {
             top_left: Point { x: 10.0, y: 20.0 },
-            size: Point { x: 100.0, y: 50.0 },
+            width: 100.0,
+            height: 50.0,
         };
         let inner = rect.inset(2.0, 3.0);
         assert_eq!(inner.top_left.x, 12.0);
         assert_eq!(inner.top_left.y, 23.0);
-        assert_eq!(inner.size.x, 96.0);
-        assert_eq!(inner.size.y, 44.0);
+        assert_eq!(inner.width, 96.0);
+        assert_eq!(inner.height, 44.0);
     }
 
     #[test]
     fn inset_with_zero_is_identity() {
         let rect = PixelRect {
             top_left: Point { x: 10.0, y: 20.0 },
-            size: Point { x: 100.0, y: 50.0 },
+            width: 100.0,
+            height: 50.0,
         };
         let inner = rect.inset(0.0, 0.0);
         assert_eq!(inner.top_left.x, 10.0);
         assert_eq!(inner.top_left.y, 20.0);
-        assert_eq!(inner.size.x, 100.0);
-        assert_eq!(inner.size.y, 50.0);
+        assert_eq!(inner.width, 100.0);
+        assert_eq!(inner.height, 50.0);
     }
 
     #[test]
     fn inset_with_negative_values_grows_rect() {
         let rect = PixelRect {
             top_left: Point { x: 10.0, y: 20.0 },
-            size: Point { x: 100.0, y: 50.0 },
+            width: 100.0,
+            height: 50.0,
         };
         let inner = rect.inset(-10.0, -10.0);
         assert_eq!(inner.top_left.x, 0.0);
         assert_eq!(inner.top_left.y, 10.0);
-        assert_eq!(inner.size.x, 120.0);
-        assert_eq!(inner.size.y, 70.0);
+        assert_eq!(inner.width, 120.0);
+        assert_eq!(inner.height, 70.0);
     }
 
     #[test]
     fn inset_preserves_center() {
         let rect = PixelRect {
             top_left: Point { x: 10.0, y: 20.0 },
-            size: Point { x: 100.0, y: 50.0 },
+            width: 100.0,
+            height: 50.0,
         };
         let inner = rect.inset(50.0, 100.0);
         assert_eq!(rect.center(), inner.center());
@@ -489,7 +483,8 @@ mod tests {
     fn intersects_true_when_rect_inside_canvas() {
         let rect = PixelRect {
             top_left: Point { x: 10.0, y: 10.0 },
-            size: Point { x: 50.0, y: 50.0 },
+            width: 50.0,
+            height: 50.0,
         };
         assert!(rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
     }
@@ -498,7 +493,8 @@ mod tests {
     fn intersects_true_when_rect_straddles_edge() {
         let rect = PixelRect {
             top_left: Point { x: -10.0, y: -10.0 },
-            size: Point { x: 50.0, y: 50.0 },
+            width: 50.0,
+            height: 50.0,
         };
         assert!(rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
     }
@@ -507,7 +503,8 @@ mod tests {
     fn intersects_false_when_rect_off_right() {
         let rect = PixelRect {
             top_left: Point { x: 250.0, y: 10.0 },
-            size: Point { x: 50.0, y: 50.0 },
+            width: 50.0,
+            height: 50.0,
         };
         assert!(!rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
     }
@@ -516,7 +513,8 @@ mod tests {
     fn intersects_false_when_rect_off_left() {
         let rect = PixelRect {
             top_left: Point { x: -100.0, y: 10.0 },
-            size: Point { x: 50.0, y: 50.0 },
+            width: 50.0,
+            height: 50.0,
         };
         assert!(!rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
     }
@@ -525,7 +523,8 @@ mod tests {
     fn intersects_false_when_rect_below_canvas() {
         let rect = PixelRect {
             top_left: Point { x: 10.0, y: 250.0 },
-            size: Point { x: 50.0, y: 50.0 },
+            width: 50.0,
+            height: 50.0,
         };
         assert!(!rect.intersects(CanvasSize { w: 200.0, h: 200.0 }));
     }

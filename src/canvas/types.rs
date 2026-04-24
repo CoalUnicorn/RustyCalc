@@ -44,20 +44,16 @@ impl Axis {
                     x: HEADER_OFFSET,
                     y: along,
                 },
-                size: Point {
-                    x: HEADER_COL_WIDTH,
-                    y: thickness,
-                },
+                width: HEADER_COL_WIDTH,
+                height: thickness,
             },
             Axis::Column => PixelRect {
                 top_left: Point {
                     x: along,
                     y: HEADER_OFFSET,
                 },
-                size: Point {
-                    x: thickness,
-                    y: HEADER_ROW_HEIGHT,
-                },
+                width: thickness,
+                height: HEADER_ROW_HEIGHT,
             },
         }
     }
@@ -380,8 +376,8 @@ mod tests {
         let rect = Axis::Row.header_rect(100.0, 20.0);
         assert_eq!(rect.top_left.x, HEADER_OFFSET);
         assert_eq!(rect.top_left.y, 100.0);
-        assert_eq!(rect.size.x, HEADER_COL_WIDTH);
-        assert_eq!(rect.size.y, 20.0);
+        assert_eq!(rect.width, HEADER_COL_WIDTH);
+        assert_eq!(rect.height, 20.0);
     }
 
     #[test]
@@ -389,19 +385,19 @@ mod tests {
         let rect = Axis::Column.header_rect(100.0, 20.0);
         assert_eq!(rect.top_left.x, 100.0);
         assert_eq!(rect.top_left.y, HEADER_OFFSET);
-        assert_eq!(rect.size.x, 20.0);
-        assert_eq!(rect.size.y, HEADER_ROW_HEIGHT);
+        assert_eq!(rect.width, 20.0);
+        assert_eq!(rect.height, HEADER_ROW_HEIGHT);
     }
 
     #[test]
     fn row_header_rect_thickness_maps_to_height() {
         let rect = Axis::Row.header_rect(100.0, 50.0);
-        assert_eq!(rect.size.y, 50.0);
+        assert_eq!(rect.height, 50.0);
     }
 
     #[test]
     fn column_header_rect_thickness_maps_to_width() {
         let rect = Axis::Column.header_rect(100.0, 50.0);
-        assert_eq!(rect.size.x, 50.0);
+        assert_eq!(rect.width, 50.0);
     }
 }

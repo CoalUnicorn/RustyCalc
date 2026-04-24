@@ -38,7 +38,7 @@ impl CanvasRenderer {
         addr: CellAddress,
         rect: PixelRect,
     ) -> Option<CellText> {
-        if rect.size.x <= 0.0 || rect.size.y <= 0.0 || !rect.intersects(self.canvas_size()) {
+        if rect.width <= 0.0 || rect.height <= 0.0 || !rect.intersects(self.canvas_size()) {
             return None;
         }
 
@@ -49,7 +49,7 @@ impl CanvasRenderer {
             return None;
         }
         // Below this size, even a single glyph would overflow the cell.
-        if rect.size.x < 10.0 || rect.size.y < 10.0 {
+        if rect.width < 10.0 || rect.height < 10.0 {
             return None;
         }
 
@@ -72,7 +72,7 @@ impl CanvasRenderer {
 
         let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
         let line_height = font_size * LINE_HEIGHT_FACTOR;
-        let usable_w = rect.size.x - 2.0 * CELL_PADDING;
+        let usable_w = rect.width - 2.0 * CELL_PADDING;
         let right = rect.right();
         let bottom = rect.bottom();
         let center = rect.center();

@@ -70,10 +70,8 @@ impl BorderEdge {
     fn line(self, rect: PixelRect) -> Line {
         let PixelRect {
             top_left: Point { x, y },
-            size: Point {
-                x: width,
-                y: height,
-            },
+            width,
+            height,
         } = rect;
         match self {
             BorderEdge::Left => Line::V {
@@ -212,7 +210,8 @@ impl CanvasRenderer {
                         x: col_left,
                         y: row_top,
                     },
-                    size: Point { x: col_w, y: row_h },
+                    width: col_w,
+                    height: row_h,
                 };
                 if rect.intersects(self.canvas_size()) {
                     let addr = CellAddress {
@@ -242,7 +241,7 @@ impl CanvasRenderer {
         rect: PixelRect,
         edges: CellEdges,
     ) {
-        if rect.size.x <= 0.0 || rect.size.y <= 0.0 {
+        if rect.width <= 0.0 || rect.height <= 0.0 {
             return;
         }
 
@@ -258,7 +257,7 @@ impl CanvasRenderer {
         // Background fill.
         self.ctx.set_fill_style_str(bg);
         self.ctx
-            .fill_rect(rect.top_left.x, rect.top_left.y, rect.size.x, rect.size.y);
+            .fill_rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
 
         // Inner edges (left, top) — each falls back to the matching neighbour's
         // opposite border and fill.
@@ -327,10 +326,8 @@ impl CanvasRenderer {
                 x: self.cell_x(model, addr.column, frozen),
                 y: self.cell_y(model, addr.row, frozen),
             },
-            size: Point {
-                x: col_width(model, addr.column),
-                y: row_height(model, addr.row),
-            },
+            width: col_width(model, addr.column),
+            height: row_height(model, addr.row),
         };
         self.render_cell_style(
             model,
@@ -381,7 +378,8 @@ mod tests {
     fn left_edge_is_vertical_line_at_rect_x() {
         let rect = PixelRect {
             top_left: Point { x: 5.0, y: 10.0 },
-            size: Point { x: 20.0, y: 15.0 },
+            width: 20.0,
+            height: 15.0,
         };
         assert_eq!(
             BorderEdge::Left.line(rect),
@@ -399,7 +397,8 @@ mod tests {
     fn right_edge_is_vertical_line_at_rect_right() {
         let rect = PixelRect {
             top_left: Point { x: 5.0, y: 10.0 },
-            size: Point { x: 20.0, y: 15.0 },
+            width: 20.0,
+            height: 15.0,
         };
         assert_eq!(
             BorderEdge::Right.line(rect),
@@ -417,7 +416,8 @@ mod tests {
     fn top_edge_is_horizontal_line_at_rect_y() {
         let rect = PixelRect {
             top_left: Point { x: 5.0, y: 10.0 },
-            size: Point { x: 20.0, y: 15.0 },
+            width: 20.0,
+            height: 15.0,
         };
         assert_eq!(
             BorderEdge::Top.line(rect),
@@ -435,7 +435,8 @@ mod tests {
     fn bottom_edge_is_horizontal_line_at_rect_bottom() {
         let rect = PixelRect {
             top_left: Point { x: 5.0, y: 10.0 },
-            size: Point { x: 20.0, y: 15.0 },
+            width: 20.0,
+            height: 15.0,
         };
         assert_eq!(
             BorderEdge::Bottom.line(rect),

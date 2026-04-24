@@ -48,10 +48,8 @@ impl CanvasRenderer {
                 x: b.right() - AUTOFILL_HANDLE_PX / 2.0,
                 y: b.bottom() - AUTOFILL_HANDLE_PX / 2.0,
             },
-            size: Point {
-                x: AUTOFILL_HANDLE_PX,
-                y: AUTOFILL_HANDLE_PX,
-            },
+            width: AUTOFILL_HANDLE_PX,
+            height: AUTOFILL_HANDLE_PX,
         };
         self.rect_fill(handle, self.theme.selection_color);
     }

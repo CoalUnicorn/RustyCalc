@@ -52,10 +52,8 @@ impl CanvasRenderer {
         };
         Some(PixelRect {
             top_left: Point { x, y },
-            size: Point {
-                x: right - x,
-                y: bottom - y,
-            },
+            width: right - x,
+            height: bottom - y,
         })
     }
 

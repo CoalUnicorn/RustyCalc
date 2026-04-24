@@ -58,10 +58,8 @@ impl CanvasRenderer {
     pub(super) fn draw_corner_box(&self) {
         let corner = PixelRect {
             top_left: Point { x: 0.0, y: 0.0 },
-            size: Point {
-                x: HEADER_COL_WIDTH,
-                y: HEADER_ROW_HEIGHT,
-            },
+            width: HEADER_COL_WIDTH,
+            height: HEADER_ROW_HEIGHT,
         };
         self.rect_fill(corner, self.theme.header_bg);
 
