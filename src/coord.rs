@@ -8,7 +8,7 @@
 use ironcalc_base::{expressions::types::Area, UserModel};
 
 use ironcalc_base::expressions::parser::stringify::{to_localized_string, to_rc_format};
-use ironcalc_base::expressions::parser::Node;
+use ironcalc_base::expressions::parser::{DefinedNameS, Node};
 use ironcalc_base::expressions::types::CellReferenceRC;
 use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
@@ -308,6 +308,88 @@ impl RefNode {
         };
         Self { inner }
     }
+
+    /// Produce a single-cell `RefNode` at absolute `(abs_row, abs_col)`,
+    /// preserving this RefNode's `absolute_row` / `absolute_column` /
+    /// `sheet_name` / `sheet_index`. A `RangeKind` collapses to a cell
+    /// inheriting the trailing corner's flags — matches `extend_trailing`'s
+    /// "click kills the range selection" semantics.
+    ///
+    /// This is the click-to-replace primitive: when the caret sits on
+    /// `$A$1` and the user clicks B5, the result is `$B$5`. Flag inheritance
+    /// is what makes it Excel-parity instead of "drop to bare relative".
+    pub fn relocate_to(&self, abs_row: i32, abs_col: i32, editing: &CellAddress) -> Self {
+        // Relative fields store `absolute - editing` offsets, so the rebuild
+        // rule is symmetric between the Reference and Range arms — only the
+        // field names differ. Trailing corner's flags win in the Range case.
+        let (sheet_name, sheet_index, abs_r_flag, abs_c_flag) = match &self.inner {
+            Node::ReferenceKind {
+                sheet_name,
+                sheet_index,
+                absolute_row,
+                absolute_column,
+                ..
+            } => (
+                sheet_name.clone(),
+                *sheet_index,
+                *absolute_row,
+                *absolute_column,
+            ),
+            Node::RangeKind {
+                sheet_name,
+                sheet_index,
+                absolute_row2,
+                absolute_column2,
+                ..
+            } => (
+                sheet_name.clone(),
+                *sheet_index,
+                *absolute_row2,
+                *absolute_column2,
+            ),
+            _ => unreachable!("RefNode invariant: inner is ReferenceKind or RangeKind"),
+        };
+        let row = if abs_r_flag {
+            abs_row
+        } else {
+            abs_row - editing.row
+        };
+        let column = if abs_c_flag {
+            abs_col
+        } else {
+            abs_col - editing.column
+        };
+        Self::cell(sheet_index, sheet_name, row, column, abs_r_flag, abs_c_flag)
+    }
+}
+
+// A workbook- or sheet-scoped name that resolves to a formula.
+//
+// Wraps ironcalc's `DefinedNameS = (name, scope, formula)` tuple with named
+// fields at our API boundary. The parser takes the tuple form —
+// `into_ironcalc()` converts only at that single call site.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DefinedName {
+    pub name: String,
+    /// `None` = workbook-scoped. `Some(sheet_index)` = visible only on that sheet.
+    pub scope: Option<u32>,
+    pub formula: String,
+}
+
+impl DefinedName {
+    pub(crate) fn into_ironcalc(self) -> DefinedNameS {
+        (self.name, self.scope, self.formula)
+    }
+}
+
+impl From<DefinedNameS> for DefinedName {
+    fn from((name, scope, formula): DefinedNameS) -> Self {
+        Self {
+            name,
+            scope,
+            formula,
+        }
+    }
 }
 
 /// Byte-offset span within a formula string, marking where the last point-mode
@@ -345,19 +427,27 @@ pub struct PointingStep {
 
 /// A cell or range referenced in an editing formula.
 ///
-/// Produced by `formula_analysis::analyze_formula()` and consumed by the canvas
-/// renderer to paint colored overlays over referenced cells.
+/// Produced by `formula_analysis::analyze_formula()`. Two consumers read it:
+/// the canvas renderer paints colored overlays (needs `sheet_area` + `color_idx`),
+/// and editing-grade features — "fix this ref", point-mode replacement, circular-
+/// dep detection — read `ref_node` to preserve the user's `$`-prefix and sheet-
+/// qualification intent through edits.
 ///
-/// `color_idx` is a sequential index into `theme::FORMULA_REF_COLORS`, assigned
-/// by the parser in token order. The renderer resolves the actual color string —
-/// keeping presentation out of the coordinate/analysis layer.
+/// `sheet_area` is a precomputed projection of `ref_node` via `RefNode::area`,
+/// cached at analysis time so per-frame paint does not re-resolve relative
+/// offsets. `color_idx` is a sequential index into `theme::FORMULA_REF_COLORS`,
+/// assigned in token order by reference identity (same target → same slot).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FormulaRef {
+    /// Full ironcalc Node identity — `ReferenceKind | RangeKind` with
+    /// `absolute_row` / `absolute_column` / `sheet_name` preserved.
+    pub ref_node: RefNode,
+    /// Precomputed projection of `ref_node` for the renderer hot path.
     pub sheet_area: SheetArea,
     /// Sequential color slot (0-based). Renderer maps this to `FORMULA_REF_COLORS[idx % len]`.
     pub color_idx: usize,
-    /// Byte span of this token in the formula string (for future cursor-aware
-    /// per-token highlighting in the formula bar).
+    /// Byte span of this token in the formula string — drives cursor-aware
+    /// per-token highlighting via `FormulaAnalysis::refs_at_cursor`.
     pub span: TextRef,
 }
 
@@ -821,5 +911,63 @@ mod tests {
         let n = RefNode::cell(1, Some("Sheet2".into()), 0, 0, false, false);
         let grown = n.extend_with_anchor(&ArrowKey::from_str("ArrowDown").unwrap());
         assert_eq!(grown.to_localized(&ctx_a1()), "Sheet2!A1:A2");
+    }
+
+    // relocate_to — click-to-replace identity inheritance (Story 2.2).
+    //
+    // Caret on `$A$1`, user clicks B5. The whole point of this primitive:
+    // `$B$5`, not `B5`. Absolute flags are inherited from the receiver.
+    #[test]
+    fn relocate_preserves_absolute_flags() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 1,
+            column: 1,
+        };
+        let abs_a1 = RefNode::cell(0, None, 1, 1, true, true);
+        let moved = abs_a1.relocate_to(5, 2, &editing);
+        assert_eq!(moved.to_localized(&ctx_a1()), "$B$5");
+    }
+
+    // Caret on `Sheet2!B2`, user clicks C4. Sheet qualification follows the
+    // receiver — the click does not "steal" the ref back to the active sheet.
+    #[test]
+    fn relocate_preserves_sheet_name() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 1,
+            column: 1,
+        };
+        let cross = RefNode::cell(1, Some("Sheet2".into()), 1, 1, false, false);
+        let moved = cross.relocate_to(4, 3, &editing);
+        assert_eq!(moved.to_localized(&ctx_a1()), "Sheet2!C4");
+    }
+
+    // Control case: fully relative receiver → no `$` invented.
+    #[test]
+    fn relocate_relative_stays_relative() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 1,
+            column: 1,
+        };
+        let rel = RefNode::cell(0, None, 0, 0, false, false);
+        let moved = rel.relocate_to(3, 3, &editing);
+        assert_eq!(moved.to_localized(&ctx_a1()), "C3");
+    }
+
+    // Caret on `$A$1:$B$3`, user clicks C5. Range collapses to a single
+    // cell whose flags come from the trailing corner (both absolute here) —
+    // same "click kills range selection" rule as `extend_trailing`.
+    #[test]
+    fn relocate_range_collapses_to_cell() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 1,
+            column: 1,
+        };
+        let range = RefNode::range(0, None, 1, 1, true, true, 3, 2, true, true);
+        let moved = range.relocate_to(5, 3, &editing);
+        assert_eq!(moved.to_localized(&ctx_a1()), "$C$5");
     }
 }

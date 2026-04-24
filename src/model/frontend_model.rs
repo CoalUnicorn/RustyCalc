@@ -14,7 +14,7 @@ use crate::{
     coord::SheetArea,
 };
 use crate::{
-    coord::{CellAddress, CellArea},
+    coord::{CellAddress, CellArea, DefinedName},
     input::formula_analysis::{analyze_formula, FormulaAnalysis},
 };
 
@@ -70,6 +70,11 @@ pub trait FrontendModel {
     fn get_sheet_all(&self) -> Vec<(u32, String, String)>;
 
     fn get_sheet_names(&self) -> Vec<(u32, String)>;
+
+    /// Workbook defined names, flattened from ironcalc's `DefinedNameS` tuples
+    /// into our named-field [`DefinedName`]. Fed to the parser so identifiers
+    /// like `=my_range` resolve instead of tripping `WrongVariableKind`.
+    fn get_defined_names(&self) -> Vec<DefinedName>;
 
     // Navigation (infallible)
 
@@ -261,7 +266,12 @@ impl FrontendModel for UserModel<'_> {
     }
 
     fn analyze_in_context(&self, text: &str) -> FormulaAnalysis {
-        analyze_formula(text, self.active_cell().sheet, &self.get_sheet_names())
+        analyze_formula(
+            text,
+            self.active_cell(),
+            &self.get_sheet_names(),
+            &self.get_defined_names(),
+        )
     }
 
     // TODO: rename this, it returns ironcalc Area type
@@ -342,6 +352,13 @@ impl FrontendModel for UserModel<'_> {
         self.get_sheet_all()
             .into_iter()
             .map(|(idx, name, _)| (idx, name))
+            .collect()
+    }
+
+    fn get_defined_names(&self) -> Vec<DefinedName> {
+        self.get_defined_name_list()
+            .into_iter()
+            .map(DefinedName::from)
             .collect()
     }
 

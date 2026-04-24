@@ -47,14 +47,14 @@ pub enum StructAction {
         row: i32,
         delta: i32,
     },
-    /// Freeze columns from the left up to and including this column.
-    FreezeUpToColumn {
-        col: i32,
-    },
-    /// Freeze rows from the top up to and including this row.
-    FreezeUpToRow {
-        row: i32,
-    },
+    // Freeze columns from the left up to and including this column.
+    // FreezeUpToColumn {
+    //    col: i32,
+    //},
+    // Freeze rows from the top up to and including this row.
+    //FreezeUpToRow {
+    //    row: i32,
+    //},
 }
 
 /// Dispatch a [`StructAction`] against the model and UI state.
@@ -315,51 +315,50 @@ pub fn execute_struct(
                 from_row: *row,
                 to_row: *row + *delta,
             }));
-        }
-        StructAction::FreezeUpToColumn { col } => {
-            let sheet = model.with_value(|m| m.get_selected_sheet());
+        } // StructAction::FreezeUpToColumn { col } => {
+          //     let sheet = model.with_value(|m| m.get_selected_sheet());
 
-            try_mutate(
-                model,
-                EvaluationMode::Immediate,
-                |m| -> Result<(), StructError> {
-                    m.set_frozen_columns_count(m.get_selected_sheet(), *col)
-                        .map_err(StructError::Engine)?;
-                    Ok(())
-                },
-            )?;
+          //     try_mutate(
+          //         model,
+          //         EvaluationMode::Immediate,
+          //         |m| -> Result<(), StructError> {
+          //             m.set_frozen_columns_count(m.get_selected_sheet(), *col)
+          //                 .map_err(StructError::Engine)?;
+          //             Ok(())
+          //         },
+          //     )?;
 
-            let frozen_rows =
-                model.with_value(|m| m.get_frozen_rows_count(m.get_selected_sheet()).unwrap_or(0));
-            state.emit_event(SpreadsheetEvent::Structure(StructureEvent::FreezeChanged {
-                sheet,
-                frozen_rows,
-                frozen_cols: *col,
-            }));
-        }
-        StructAction::FreezeUpToRow { row } => {
-            let sheet = model.with_value(|m| m.get_selected_sheet());
+          //     let frozen_rows =
+          //         model.with_value(|m| m.get_frozen_rows_count(m.get_selected_sheet()).unwrap_or(0));
+          //     state.emit_event(SpreadsheetEvent::Structure(StructureEvent::FreezeChanged {
+          //         sheet,
+          //         frozen_rows,
+          //         frozen_cols: *col,
+          //     }));
+          // }
+          // StructAction::FreezeUpToRow { row } => {
+          //     let sheet = model.with_value(|m| m.get_selected_sheet());
 
-            try_mutate(
-                model,
-                EvaluationMode::Immediate,
-                |m| -> Result<(), StructError> {
-                    m.set_frozen_rows_count(m.get_selected_sheet(), *row)
-                        .map_err(StructError::Engine)?;
-                    Ok(())
-                },
-            )?;
+          //     try_mutate(
+          //         model,
+          //         EvaluationMode::Immediate,
+          //         |m| -> Result<(), StructError> {
+          //             m.set_frozen_rows_count(m.get_selected_sheet(), *row)
+          //                 .map_err(StructError::Engine)?;
+          //             Ok(())
+          //         },
+          //     )?;
 
-            let frozen_cols = model.with_value(|m| {
-                m.get_frozen_columns_count(m.get_selected_sheet())
-                    .unwrap_or(0)
-            });
-            state.emit_event(SpreadsheetEvent::Structure(StructureEvent::FreezeChanged {
-                sheet,
-                frozen_cols,
-                frozen_rows: *row,
-            }));
-        }
+          //     let frozen_cols = model.with_value(|m| {
+          //         m.get_frozen_columns_count(m.get_selected_sheet())
+          //             .unwrap_or(0)
+          //     });
+          //     state.emit_event(SpreadsheetEvent::Structure(StructureEvent::FreezeChanged {
+          //         sheet,
+          //         frozen_cols,
+          //         frozen_rows: *row,
+          //     }));
+          // }
     }
     Ok(())
 }

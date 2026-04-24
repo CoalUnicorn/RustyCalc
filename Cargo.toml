@@ -36,6 +36,7 @@ chrono = { version = "0.4", features =  ["serde", "wasmbind"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+console_error_panic_hook = "0.1.7"
 
 [profile.release]
 #inherits = "release"

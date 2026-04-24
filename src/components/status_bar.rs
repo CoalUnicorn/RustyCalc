@@ -23,8 +23,11 @@ pub fn StatusBar() -> impl IntoView {
                 Some(format!("Syntax error at col {}: {}", e.position, e.message))
             }
             FormulaStatus::Unresolved {
-                refs, functions, ..
-            } => Some(format!("{} unresolved name(s)", refs.len() + functions.len())),
+                refs, functions, names, ..
+            } => Some(format!(
+                "{} unresolved reference(s)",
+                refs.len() + functions.len() + names.len()
+            )),
         }
     });
 

@@ -22,7 +22,7 @@ use ironcalc_base::expressions::{
     types::CellReferenceRC,
 };
 
-use crate::coord::{CellAddress, CellArea, FormulaRef, SheetArea, TextRef};
+use crate::coord::{CellAddress, DefinedName, FormulaRef, RefNode, SheetArea, TextRef};
 
 /// Empty slice used by [`FormulaAnalysis::refs`] for variants that carry no overlays.
 const NO_REFS: &[FormulaRef] = &[];
@@ -59,6 +59,25 @@ impl FormulaAnalysis {
             FormulaStatus::Valid { .. } | FormulaStatus::NotFormula
         )
     }
+
+    /// Refs whose byte-span contains `cursor` — drives cursor-aware UX
+    /// (highlight ref under caret, scope autocomplete, arm point-mode replace).
+    ///
+    /// `cursor` is a byte offset into the formula string this analysis was
+    /// produced from; pair it with `EditingCell.cursor`, kept in lock-step by
+    /// `sync_edit`. Returns an iterator so callers pay no allocation on the
+    /// keystroke hot path — `.next()` gives the 0-or-1 result, `.collect()`
+    /// gives all matches (rare, since lexer tokens don't overlap).
+    ///
+    /// Boundary is inclusive at both ends: `cursor == span.end` IS "on" the
+    /// ref. The caret immediately after a ref is the most natural moment to
+    /// want "fix this ref" — the user just typed it — and matches the
+    /// post-token boundary pattern used by `is_in_reference_mode`.
+    pub fn refs_at_cursor(&self, cursor: usize) -> impl Iterator<Item = &FormulaRef> {
+        self.refs()
+            .iter()
+            .filter(move |r| cursor >= r.span.start && cursor <= r.span.end)
+    }
 }
 
 /// Diagnostic state of a formula — exactly one at a time.
@@ -80,11 +99,17 @@ pub enum FormulaStatus {
     /// Lexer rejected a token (e.g. `@` outside a table ref). Carries the
     /// structured error from IronCalc so downstream UIs can surface position.
     LexerError(LexerError),
-    /// Parsed cleanly but some names/functions don't resolve.
+    /// Parsed cleanly but some references, functions, or names don't resolve.
     /// `valid_refs` is the subset that DID resolve and should still paint.
+    // TODO(human): rename `refs` → `invalid_refs` (and `functions` → `invalid_functions`,
+    // `names` → `invalid_names`) so the three "bad" fields pair symmetrically with
+    // `valid_refs`. Update every destructure site: status_bar.rs, formula_bar.rs,
+    // and the tests in this file. The goal: `let Unresolved { invalid_refs, valid_refs, .. }`
+    // reads unambiguously without needing the docs.
     Unresolved {
         refs: Vec<TextRef>,
         functions: Vec<TextRef>,
+        names: Vec<TextRef>,
         valid_refs: Vec<FormulaRef>,
     },
 }
@@ -97,12 +122,16 @@ pub struct ParseError {
 
 /// Leaves that correspond 1:1 with `Reference`/`Range` lexer tokens. Emitted
 /// in document order; pairs by position with `ref_range_token_spans`.
+///
+/// `Resolved` carries the full ironcalc Node identity via `RefNode` — so
+/// downstream consumers keep `absolute_row` / `absolute_column` / `sheet_name`
+/// available for editing-grade features ("fix this ref", point-mode, circular
+/// detection). `RefNode` unifies both cell and range kinds, so one variant
+/// covers what used to require two.
 #[derive(Debug, PartialEq)]
 pub(crate) enum RefLeaf {
-    /// Parser resolved a bare cell reference (e.g. `A1`, `$A$1`, `Sheet2!A1`).
-    Resolved(CellAddress),
-    /// Parser resolved a range reference (e.g. `A1:B3`).
-    ResolvedRange(SheetArea),
+    /// Parser resolved a cell or range reference, with full Node identity.
+    Resolved(RefNode),
     /// Parser rejected the reference — sheet unknown or badly-formed.
     /// Span from the zipped lexer stream flags the source region.
     Unresolved,
@@ -110,12 +139,18 @@ pub(crate) enum RefLeaf {
 
 /// Leaves that correspond to `Ident` lexer tokens — every parser node born
 /// from an identifier emits one, so the zip with `fn_ident_spans` stays in
-/// sync even when multiple functions (valid and invalid) mix in the same
-/// formula. Only `Unknown` triggers the unresolved-function diagnostic.
+/// sync even when functions, defined names, and unknowns mix in the same
+/// formula. `Known` covers resolved functions and tables (no overlay needed);
+/// `DefinedName` carries the formula string so the ident span can be painted
+/// over the resolved range; the two `Unknown*` variants surface diagnostics.
 #[derive(Debug, PartialEq)]
-pub(crate) enum FnLeaf {
+pub(crate) enum IdentLeaf {
     Known,
-    Unknown,
+    /// Resolved defined name. Carries the definition formula (e.g. `"Sheet1!$B$5"`)
+    /// so `analyze_formula` can re-parse it and emit a `FormulaRef` for the ident span.
+    DefinedName(String),
+    UnknownFunction,
+    UnknownName,
 }
 
 /// Leaves that consume no span — pure diagnostic state from the parser.
@@ -128,13 +163,18 @@ pub(crate) enum DiagnosticLeaf {
 ///
 /// Returns an empty [`FormulaAnalysis`] for non-formula text (no leading `=`).
 ///
-/// - `active_sheet` — 0-based index of the sheet being edited.
+/// - `active_cell` — the cell being edited. Its `sheet` drives cross-sheet
+///   ref resolution; its `row` / `column` drive `RefNode::area` when projecting
+///   each resolved ref to the `SheetArea` cached on `FormulaRef` — ironcalc
+///   stores relative coordinates as offsets from the stringify ctx, so the
+///   editing cell is required to recover absolute coords.
 /// - `sheet_names` — `(sheet_index, display_name)` pairs for cross-sheet ref resolution.
 ///   Unknown sheet names produce no overlay (the ref is silently skipped).
 pub fn analyze_formula(
     formula: &str,
-    active_sheet: u32,
+    active_cell: CellAddress,
     sheet_names: &[(u32, String)],
+    defined_names: &[DefinedName],
 ) -> FormulaAnalysis {
     if !formula.starts_with('=') || formula.len() < 2 {
         return FormulaAnalysis::default();
@@ -172,7 +212,7 @@ pub fn analyze_formula(
         let names: Vec<String> = sheet_names.iter().map(|(_, n)| n.clone()).collect();
         let active = sheet_names
             .iter()
-            .find(|(i, _)| *i == active_sheet)
+            .find(|(i, _)| *i == active_cell.sheet)
             .map(|(_, n)| n.clone())
             .unwrap_or_else(|| names[0].clone());
         (names, active)
@@ -182,61 +222,61 @@ pub fn analyze_formula(
     // parser in `WorkbookState` (which adds invalidation work on sheet
     // add/rename/delete), measure with a hyperfine bench over 10/50/200-char
     // inputs and only cache if the cost exceeds ~1ms.
-    let mut parser = new_parser_english(sheet_name_list, Vec::new(), HashMap::new());
-    // Context (0, 0) cancels the parser's relative-offset math so `ReferenceKind`
-    // always carries 1-based absolute coords regardless of the `$` prefix.
+    // Plumb defined names into the parser so `=my_range` resolves to
+    // `Node::DefinedNameKind` instead of `Node::WrongVariableKind`. The parser
+    // takes the tuple form; we convert once here at the boundary.
+    let parser_defined_names = defined_names
+        .iter()
+        .cloned()
+        .map(DefinedName::into_ironcalc)
+        .collect::<Vec<_>>();
+    let mut parser = new_parser_english(sheet_name_list, parser_defined_names, HashMap::new());
+    // Parser context = the editing cell. Nodes encode relative coords as
+    // offsets from this ctx; `RefNode::area(&active_cell)` reverses the math
+    // to recover absolute 1-based coords for the `sheet_area` projection. Keeping
+    // the ctx and the projection base in lockstep is what lets `FormulaRef.ref_node`
+    // round-trip through `RefNode::to_localized` without a separate conversion.
     let context = CellReferenceRC {
         sheet: active_sheet_name,
-        row: 0,
-        column: 0,
+        row: active_cell.row,
+        column: active_cell.column,
     };
     let ast = parser.parse(&formula[1..], &context);
     let mut ref_leaves: Vec<RefLeaf> = Vec::new();
-    let mut fn_leaves: Vec<FnLeaf> = Vec::new();
+    let mut ident_leaves: Vec<IdentLeaf> = Vec::new();
     let mut diag_leaves: Vec<DiagnosticLeaf> = Vec::new();
-    ast_leaves(&ast, &mut ref_leaves, &mut fn_leaves, &mut diag_leaves);
+    ast_leaves(&ast, &mut ref_leaves, &mut ident_leaves, &mut diag_leaves);
 
-    // Three independent correlation passes — each zip pairs one leaf stream
-    // with the lexer span stream it's promised to align with. A future
-    // `RefLeaf` variant can't desync because the zip is over the same
-    // iterator. No manual index tracking needed.
-    //
-    // Refs align strictly: every Reference/Range lexer token produces exactly
-    // one parser Reference/Range/Wrong* node. Functions align loosely: a
-    // parse error can abort before emitting a node for a trailing Ident
-    // (e.g. `=@invalid`), so fn_leaves may be shorter than fn_ident_spans.
-    // The `zip` naturally truncates — we just skip reporting the orphan.
-    debug_assert_eq!(ref_leaves.len(), ref_range_token_spans.len());
-    debug_assert!(fn_leaves.len() <= fn_ident_spans.len());
+    // INVESTIGATE:
+    // lexer emits 1 Reference span, parser aborts on trailing `+` before yielding a RefLeaf,
+    // leaves.len()==0 vs spans.len()==1). Explain the real invariant: BOTH
+    // leaf streams can be shorter than their lexer-span streams when a parse
+    // error truncates the AST; the `zip` handles this naturally.
+    debug_assert!(ref_leaves.len() <= ref_range_token_spans.len());
+    debug_assert!(ident_leaves.len() <= fn_ident_spans.len());
 
     // Identity: same target -> same color slot, regardless of
     // absolute/relative prefix or lexical sheet qualification.
     let mut color_map: HashMap<SheetArea, usize> = HashMap::new();
-    let mut next_slot = 0usize;
     let mut assign_slot = |key: SheetArea| -> usize {
-        *color_map.entry(key).or_insert_with(|| {
-            let s = next_slot;
-            next_slot += 1;
-            s
-        })
+        let next = color_map.len();
+        *color_map.entry(key).or_insert(next)
     };
 
     let mut refs: Vec<FormulaRef> = Vec::new();
     let mut invalid_refs: Vec<TextRef> = Vec::new();
     for (leaf, span) in ref_leaves.iter().zip(ref_range_token_spans.iter().copied()) {
         match leaf {
-            RefLeaf::Resolved(address) => {
-                let sheet_area = address.to_sheet_area();
+            RefLeaf::Resolved(ref_node) => {
+                // Project to SheetArea once so the renderer hot path is a
+                // plain field read. Parser resolved to absolute coords
+                // (context (0,0) above), so `active_cell` here is only used
+                // for the relative-offset math in `RefNode::area`.
+                let sheet_area = ref_node.area(&active_cell);
                 refs.push(FormulaRef {
+                    ref_node: ref_node.clone(),
                     sheet_area,
                     color_idx: assign_slot(sheet_area),
-                    span,
-                });
-            }
-            RefLeaf::ResolvedRange(area) => {
-                refs.push(FormulaRef {
-                    sheet_area: *area,
-                    color_idx: assign_slot(*area),
                     span,
                 });
             }
@@ -245,10 +285,64 @@ pub fn analyze_formula(
     }
 
     let mut invalid_functions: Vec<TextRef> = Vec::new();
-    for (leaf, span) in fn_leaves.iter().zip(fn_ident_spans.iter().copied()) {
+    let mut invalid_names: Vec<TextRef> = Vec::new();
+    for (leaf, span) in ident_leaves.iter().zip(fn_ident_spans.iter().copied()) {
         match leaf {
-            FnLeaf::Known => {}
-            FnLeaf::Unknown => invalid_functions.push(span),
+            IdentLeaf::Known => {}
+            IdentLeaf::DefinedName(formula) => {
+                let maybe_ref = match parser.parse(formula, &context) {
+                    Node::ReferenceKind {
+                        sheet_name,
+                        sheet_index,
+                        absolute_row,
+                        absolute_column,
+                        row,
+                        column,
+                    } => Some(RefNode::cell(
+                        sheet_index,
+                        sheet_name,
+                        row,
+                        column,
+                        absolute_row,
+                        absolute_column,
+                    )),
+                    Node::RangeKind {
+                        sheet_name,
+                        sheet_index,
+                        absolute_row1,
+                        absolute_column1,
+                        row1,
+                        column1,
+                        absolute_row2,
+                        absolute_column2,
+                        row2,
+                        column2,
+                    } => Some(RefNode::range(
+                        sheet_index,
+                        sheet_name,
+                        row1,
+                        column1,
+                        absolute_row1,
+                        absolute_column1,
+                        row2,
+                        column2,
+                        absolute_row2,
+                        absolute_column2,
+                    )),
+                    _ => None,
+                };
+                if let Some(ref_node) = maybe_ref {
+                    let sheet_area = ref_node.area(&active_cell);
+                    refs.push(FormulaRef {
+                        ref_node,
+                        sheet_area,
+                        color_idx: assign_slot(sheet_area),
+                        span,
+                    });
+                }
+            }
+            IdentLeaf::UnknownFunction => invalid_functions.push(span),
+            IdentLeaf::UnknownName => invalid_names.push(span),
         }
     }
 
@@ -265,10 +359,12 @@ pub fn analyze_formula(
         FormulaStatus::ParseError(e)
     } else if let Some(e) = validation_error {
         FormulaStatus::LexerError(e)
-    } else if !invalid_refs.is_empty() || !invalid_functions.is_empty() {
+    } else if !invalid_refs.is_empty() || !invalid_functions.is_empty() || !invalid_names.is_empty()
+    {
         FormulaStatus::Unresolved {
             refs: invalid_refs,
             functions: invalid_functions,
+            names: invalid_names,
             valid_refs: refs,
         }
     } else {
@@ -288,49 +384,66 @@ pub fn analyze_formula(
 fn ast_leaves(
     node: &Node,
     ref_out: &mut Vec<RefLeaf>,
-    fn_out: &mut Vec<FnLeaf>,
+    ident_out: &mut Vec<IdentLeaf>,
     diag_out: &mut Vec<DiagnosticLeaf>,
 ) {
     match node {
+        // Resolved cell or range reference. `RefLeaf::Resolved` carries a
+        // `RefNode` wrapping the original `Node::ReferenceKind | RangeKind`
+        // so `absolute_row` / `absolute_column` / `sheet_name` round-trip to
+        // editing-grade consumers (point-mode splice, "fix this ref"). Split
+        // across two arms because the two Node variants have disjoint fields.
         Node::ReferenceKind {
+            sheet_name,
             sheet_index,
+            absolute_row,
+            absolute_column,
             row,
             column,
-            ..
-        } => ref_out.push(RefLeaf::Resolved(CellAddress {
-            sheet: *sheet_index,
-            row: *row,
-            column: *column,
-        })),
+        } => ref_out.push(RefLeaf::Resolved(RefNode::cell(
+            *sheet_index,
+            sheet_name.clone(),
+            *row,
+            *column,
+            *absolute_row,
+            *absolute_column,
+        ))),
         Node::RangeKind {
+            sheet_name,
             sheet_index,
+            absolute_row1,
+            absolute_column1,
             row1,
             column1,
+            absolute_row2,
+            absolute_column2,
             row2,
             column2,
-            ..
-        } => ref_out.push(RefLeaf::ResolvedRange(SheetArea {
-            sheet: *sheet_index,
-            area: CellArea {
-                r1: *row1,
-                c1: *column1,
-                r2: *row2,
-                c2: *column2,
-            },
-        })),
+        } => ref_out.push(RefLeaf::Resolved(RefNode::range(
+            *sheet_index,
+            sheet_name.clone(),
+            *row1,
+            *column1,
+            *absolute_row1,
+            *absolute_column1,
+            *row2,
+            *column2,
+            *absolute_row2,
+            *absolute_column2,
+        ))),
         Node::WrongReferenceKind { .. } | Node::WrongRangeKind { .. } => {
             ref_out.push(RefLeaf::Unresolved)
         }
         Node::FunctionKind { args, .. } => {
-            fn_out.push(FnLeaf::Known);
+            ident_out.push(IdentLeaf::Known);
             for arg in args {
-                ast_leaves(arg, ref_out, fn_out, diag_out);
+                ast_leaves(arg, ref_out, ident_out, diag_out);
             }
         }
         Node::InvalidFunctionKind { args, .. } => {
-            fn_out.push(FnLeaf::Unknown);
+            ident_out.push(IdentLeaf::UnknownFunction);
             for arg in args {
-                ast_leaves(arg, ref_out, fn_out, diag_out);
+                ast_leaves(arg, ref_out, ident_out, diag_out);
             }
         }
         Node::OpSumKind { left, right, .. }
@@ -339,24 +452,32 @@ fn ast_leaves(
         | Node::OpRangeKind { left, right }
         | Node::OpConcatenateKind { left, right }
         | Node::CompareKind { left, right, .. } => {
-            ast_leaves(left, ref_out, fn_out, diag_out);
-            ast_leaves(right, ref_out, fn_out, diag_out);
+            ast_leaves(left, ref_out, ident_out, diag_out);
+            ast_leaves(right, ref_out, ident_out, diag_out);
         }
-        Node::UnaryKind { right, .. } => ast_leaves(right, ref_out, fn_out, diag_out),
-        Node::ImplicitIntersection { child, .. } => ast_leaves(child, ref_out, fn_out, diag_out),
+        Node::UnaryKind { right, .. } => ast_leaves(right, ref_out, ident_out, diag_out),
+        Node::ImplicitIntersection { child, .. } => ast_leaves(child, ref_out, ident_out, diag_out),
         Node::ParseErrorKind {
             message, position, ..
         } => diag_out.push(DiagnosticLeaf::ParseError {
             message: message.clone(),
             position: *position,
         }),
-        // Identifier-ish nodes that consume an Ident lexer token. Emit
-        // `Known` so the fn_leaves / fn_ident_spans zip stays in lock-step;
-        // none of these are flagged as unresolved today (matching the pre-
-        // split correlation loop).
-        Node::DefinedNameKind(_) | Node::TableNameKind(_) | Node::WrongVariableKind(_) => {
-            fn_out.push(FnLeaf::Known)
+        // Identifier-ish nodes that consume an Ident lexer token.
+        //
+        // These three variants all push ONE leaf so the ident_leaves /
+        // fn_ident_spans zip stays in lock-step. The mapping determines
+        // whether a bare identifier like `=my_range` is silently accepted
+        // (pushed as Known) or surfaced as Unresolved in the status bar
+        // (pushed as UnknownName). TableNameKind has no table support yet
+        // in RustyCalc, so it rides along as Known for now.
+        //
+        Node::DefinedNameKind((_, _, formula)) => {
+            ident_out.push(IdentLeaf::DefinedName(formula.clone()))
         }
+        Node::TableNameKind(_) => ident_out.push(IdentLeaf::Known),
+        Node::WrongVariableKind(..) => ident_out.push(IdentLeaf::UnknownName),
+
         Node::BooleanKind(_)
         | Node::NumberKind(_)
         | Node::StringKind(_)
@@ -410,9 +531,32 @@ mod formula_analysis_tests {
     use super::*;
     use crate::coord::CellArea;
 
+    /// Test editing-cell fixture with row=0, column=0. Matches the pre-refactor
+    /// parser context so Node-relative coords equal their absolute 1-based form
+    /// — every existing assertion on `sheet_area.area` stays valid under the
+    /// new signature without arithmetic adjustment.
+    fn editing_at(sheet: u32) -> CellAddress {
+        CellAddress {
+            sheet,
+            row: 0,
+            column: 0,
+        }
+    }
+
+    /// Stringify ctx paired with `editing_at` — same-sheet context with empty
+    /// sheet name, so `to_localized` emits bare A1-style for same-sheet refs
+    /// and `Sheet!A1` only when the Node carries `sheet_name: Some(_)`.
+    fn ctx_at(sheet_name: &str) -> CellReferenceRC {
+        CellReferenceRC {
+            sheet: sheet_name.to_string(),
+            row: 0,
+            column: 0,
+        }
+    }
+
     #[test]
     fn test_single_cell_ref() {
-        let analysis = analyze_formula("=A1+1", 0, &[]);
+        let analysis = analyze_formula("=A1+1", editing_at(0), &[], &[]);
         assert_eq!(analysis.refs().len(), 1);
         assert_eq!(
             analysis.refs()[0].sheet_area.area,
@@ -429,7 +573,7 @@ mod formula_analysis_tests {
 
     #[test]
     fn test_range_ref() {
-        let analysis = analyze_formula("=SUM(B2:C4)", 0, &[]);
+        let analysis = analyze_formula("=SUM(B2:C4)", editing_at(0), &[], &[]);
         assert_eq!(analysis.refs().len(), 1);
         assert_eq!(
             analysis.refs()[0].sheet_area.area,
@@ -444,14 +588,14 @@ mod formula_analysis_tests {
 
     #[test]
     fn test_multiple_refs_get_different_color_indices() {
-        let analysis = analyze_formula("=A1+B2", 0, &[]);
+        let analysis = analyze_formula("=A1+B2", editing_at(0), &[], &[]);
         assert_eq!(analysis.refs().len(), 2);
         assert_ne!(analysis.refs()[0].color_idx, analysis.refs()[1].color_idx);
     }
 
     #[test]
     fn test_non_formula_returns_empty() {
-        let analysis = analyze_formula("hello", 0, &[]);
+        let analysis = analyze_formula("hello", editing_at(0), &[], &[]);
         assert!(analysis.refs().is_empty());
         assert!(matches!(analysis.status, FormulaStatus::NotFormula));
     }
@@ -459,7 +603,7 @@ mod formula_analysis_tests {
     #[test]
     fn test_cross_sheet_ref_resolved() {
         let sheets = vec![(0u32, "Sheet1".to_string()), (1u32, "Sheet2".to_string())];
-        let analysis = analyze_formula("=Sheet2!A1", 0, &sheets);
+        let analysis = analyze_formula("=Sheet2!A1", editing_at(0), &sheets, &[]);
         assert_eq!(analysis.refs().len(), 1);
         assert_eq!(analysis.refs()[0].sheet_area.sheet, 1);
     }
@@ -469,7 +613,7 @@ mod formula_analysis_tests {
         // A reference to a sheet that doesn't exist in sheet_names should produce
         // no overlay rather than a misleading overlay on the active sheet.
         let sheets = vec![(0u32, "Sheet1".to_string())];
-        let analysis = analyze_formula("=Ghost!A1", 0, &sheets);
+        let analysis = analyze_formula("=Ghost!A1", editing_at(0), &sheets, &[]);
         assert_eq!(analysis.refs().len(), 0);
         assert!(matches!(analysis.status, FormulaStatus::Unresolved { .. }));
     }
@@ -477,14 +621,14 @@ mod formula_analysis_tests {
     #[test]
     fn test_same_cell_shares_color_slot() {
         // Option A: A1 and A1 collapse to one color slot, regardless of $-prefix.
-        let analysis = analyze_formula("=A1+$A$1", 0, &[]);
+        let analysis = analyze_formula("=A1+$A$1", editing_at(0), &[], &[]);
         assert_eq!(analysis.refs().len(), 2);
         assert_eq!(analysis.refs()[0].color_idx, analysis.refs()[1].color_idx);
     }
 
     #[test]
     fn test_distinct_cells_get_distinct_slots() {
-        let analysis = analyze_formula("=A1+B2+A1", 0, &[]);
+        let analysis = analyze_formula("=A1+B2+A1", editing_at(0), &[], &[]);
         assert_eq!(analysis.refs().len(), 3);
         assert_eq!(analysis.refs()[0].color_idx, analysis.refs()[2].color_idx);
         assert_ne!(analysis.refs()[0].color_idx, analysis.refs()[1].color_idx);
@@ -492,7 +636,7 @@ mod formula_analysis_tests {
 
     #[test]
     fn test_range_and_single_share_when_endpoints_match() {
-        let analysis = analyze_formula("=A1+A1:A1", 0, &[]);
+        let analysis = analyze_formula("=A1+A1:A1", editing_at(0), &[], &[]);
         assert!(matches!(analysis.status, FormulaStatus::Valid { .. }));
         assert_eq!(analysis.refs().len(), 2);
         assert_eq!(analysis.refs()[0].color_idx, analysis.refs()[1].color_idx);
@@ -500,7 +644,7 @@ mod formula_analysis_tests {
 
     #[test]
     fn test_invalid_function_captured() {
-        let analysis = analyze_formula("=FOOBAR(1,2)", 0, &[]);
+        let analysis = analyze_formula("=FOOBAR(1,2)", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved { functions, .. } = &analysis.status else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
@@ -511,14 +655,14 @@ mod formula_analysis_tests {
 
     #[test]
     fn test_known_function_not_flagged() {
-        let analysis = analyze_formula("=SUM(A1:A3)", 0, &[]);
+        let analysis = analyze_formula("=SUM(A1:A3)", editing_at(0), &[], &[]);
         assert!(matches!(analysis.status, FormulaStatus::Valid { .. }));
     }
 
     #[test]
     fn test_wrong_sheet_ref_captured() {
         let sheets = vec![(0u32, "Sheet1".to_string())];
-        let analysis = analyze_formula("=Ghost!A1", 0, &sheets);
+        let analysis = analyze_formula("=Ghost!A1", editing_at(0), &sheets, &[]);
         let FormulaStatus::Unresolved { refs, .. } = &analysis.status else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
@@ -527,9 +671,61 @@ mod formula_analysis_tests {
     }
 
     #[test]
+    fn test_known_defined_name_resolves_as_valid() {
+        // With `my_range` plumbed in, the parser emits DefinedNameKind and
+        // the identifier no longer trips the Unresolved path.
+        let defined = vec![DefinedName {
+            name: "my_range".into(),
+            scope: None,
+            formula: "A1:A10".into(),
+        }];
+        let analysis = analyze_formula("=my_range+1", editing_at(0), &[], &defined);
+        assert!(
+            matches!(analysis.status, FormulaStatus::Valid { .. }),
+            "expected Valid, got {:?}",
+            analysis.status
+        );
+    }
+
+    #[test]
+    fn test_unknown_name_captured() {
+        // No defined names → bare identifier parses as WrongVariableKind and
+        // must land in Unresolved.names (NOT Unresolved.functions).
+        let analysis = analyze_formula("=my_undefined", editing_at(0), &[], &[]);
+        let FormulaStatus::Unresolved {
+            names, functions, ..
+        } = &analysis.status
+        else {
+            panic!("expected Unresolved, got {:?}", analysis.status);
+        };
+        assert_eq!(names.len(), 1, "unknown name should be captured");
+        assert!(
+            functions.is_empty(),
+            "unknown name must NOT leak into functions"
+        );
+        let span = names[0];
+        assert_eq!(&"=my_undefined"[span.start..span.end], "my_undefined");
+    }
+
+    #[test]
+    fn test_mixed_unknown_name_and_function() {
+        // Both diagnostics surface independently — the renderer can style
+        // them differently (squiggle vs italic) without ambiguity.
+        let analysis = analyze_formula("=my_undefined + FOOBAR(1)", editing_at(0), &[], &[]);
+        let FormulaStatus::Unresolved {
+            names, functions, ..
+        } = &analysis.status
+        else {
+            panic!("expected Unresolved, got {:?}", analysis.status);
+        };
+        assert_eq!(names.len(), 1);
+        assert_eq!(functions.len(), 1);
+    }
+
+    #[test]
     fn test_validation_error_is_human_readable() {
         // LexerError.message (not Debug format) should be used — no "LexerError {" prefix.
-        let analysis = analyze_formula("=@invalid", 0, &[]);
+        let analysis = analyze_formula("=@invalid", editing_at(0), &[], &[]);
         if let FormulaStatus::LexerError(ref e) = analysis.status {
             assert!(
                 !e.message.contains("LexerError"),
@@ -537,6 +733,118 @@ mod formula_analysis_tests {
                 e.message
             );
         }
+    }
+
+    // Identity preservation — ref_node must carry `absolute_row` /
+    // `absolute_column` / `sheet_name` through analysis. These tests fail
+    // until `ast_leaves` pushes the full Node via `RefNode::cell` /
+    // `RefNode::range` (the TODO(human) hand-off). Until then `refs()` is
+    // empty for resolved refs, so `.refs().len()` is 0 and the `refs()[0]`
+    // indexing panics — by design, making the stub's presence impossible
+    // to miss in test output.
+
+    #[test]
+    fn absolute_flags_preserved() {
+        // `=$A$1` — both axes absolute. Round-tripping `ref_node` via
+        // `to_localized` emits `$A$1` iff the flags reached RefNode. If
+        // ast_leaves dropped them (the pre-refactor bug), stringify → `A1`.
+        let analysis = analyze_formula("=$A$1", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs().len(), 1);
+        assert_eq!(
+            analysis.refs()[0].ref_node.to_localized(&ctx_at("")),
+            "$A$1"
+        );
+    }
+
+    #[test]
+    fn mixed_absolute_preserved() {
+        // Per-axis flags survive independently.
+        let analysis = analyze_formula("=$A1+B$2", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs().len(), 2);
+        let ctx = ctx_at("");
+        assert_eq!(analysis.refs()[0].ref_node.to_localized(&ctx), "$A1");
+        assert_eq!(analysis.refs()[1].ref_node.to_localized(&ctx), "B$2");
+    }
+
+    #[test]
+    fn cross_sheet_name_preserved() {
+        let sheets = vec![(0u32, "Sheet1".to_string()), (1u32, "Sheet2".to_string())];
+        let analysis = analyze_formula("=Sheet2!A1", editing_at(0), &sheets, &[]);
+        assert_eq!(analysis.refs().len(), 1);
+        // Stringify ctx on Sheet1 — so a Sheet2! prefix only appears if the
+        // Node carries `sheet_name: Some("Sheet2")`.
+        assert_eq!(
+            analysis.refs()[0].ref_node.to_localized(&ctx_at("Sheet1")),
+            "Sheet2!A1"
+        );
+    }
+
+    #[test]
+    fn same_sheet_name_is_none() {
+        // Same-sheet ref must NOT acquire a spurious `Sheet1!` prefix just
+        // because sheet_names happens to contain the active sheet's entry.
+        let sheets = vec![(0u32, "Sheet1".to_string())];
+        let analysis = analyze_formula("=A1", editing_at(0), &sheets, &[]);
+        assert_eq!(analysis.refs().len(), 1);
+        assert_eq!(
+            analysis.refs()[0].ref_node.to_localized(&ctx_at("Sheet1")),
+            "A1"
+        );
+    }
+
+    // refs_at_cursor — byte-span hit-test with inclusive boundaries
+
+    #[test]
+    fn cursor_inside_single_ref() {
+        // `=A1+1` — A1 at bytes [1, 3). cursor=2 is strictly inside.
+        let analysis = analyze_formula("=A1+1", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs_at_cursor(2).count(), 1);
+    }
+
+    #[test]
+    fn cursor_at_ref_left_edge() {
+        let analysis = analyze_formula("=A1+1", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs_at_cursor(1).count(), 1);
+    }
+
+    #[test]
+    fn cursor_at_ref_right_edge_is_inclusive() {
+        // cursor=3 sits just after A1's last byte. Under the inclusive
+        // right-edge rule, this IS "on" A1 — matching the just-typed-a-ref
+        // UX moment.
+        let analysis = analyze_formula("=A1+1", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs_at_cursor(3).count(), 1);
+    }
+
+    #[test]
+    fn cursor_between_refs_yields_nothing() {
+        // `=A1 + B2` — whitespace between A1 (ends at 3) and B2 (starts at 6).
+        // cursor=4 sits on the first space — no ref overlap.
+        let analysis = analyze_formula("=A1 + B2", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs_at_cursor(4).count(), 0);
+    }
+
+    #[test]
+    fn cursor_inside_range() {
+        // `=SUM(A1:B3)` — the whole `A1:B3` is ONE Range token. cursor=7 is
+        // on the `:` — inside the range token's span.
+        let analysis = analyze_formula("=SUM(A1:B3)", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs_at_cursor(7).count(), 1);
+    }
+
+    #[test]
+    fn cursor_on_non_formula_yields_nothing() {
+        // NotFormula → refs() is empty; cursor query returns nothing regardless.
+        let analysis = analyze_formula("hello", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs_at_cursor(2).count(), 0);
+    }
+
+    #[test]
+    fn cursor_on_parse_error_yields_nothing() {
+        // `=A1++` — parser rejects the trailing `+`. ParseError variant makes
+        // refs() empty (AST too broken to trust) so cursor query yields none.
+        let analysis = analyze_formula("=A1++", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs_at_cursor(1).count(), 0);
     }
 
     // is_in_reference_mode

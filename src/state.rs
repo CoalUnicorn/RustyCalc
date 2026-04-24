@@ -91,7 +91,7 @@ pub enum DragState {
     /// byte span of its rendered form in the edited formula text.
     Pointing {
         ref_node: RefNode,
-        ref_span: TextRef,
+        ref_text: TextRef,
     },
 }
 

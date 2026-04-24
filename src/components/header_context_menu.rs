@@ -93,13 +93,6 @@ pub fn HeaderContextMenuOverlay() -> impl IntoView {
                         >
                             "Move Right"
                         </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem
-                            icon="❄"
-                            on_click=move || dispatch(StructAction::FreezeUpToColumn { col })
-                        >
-                            "Freeze to Here"
-                        </ContextMenuItem>
                     }
                     .into_any(),
                     HeaderContextMenu::Row { row, count } => view! {
@@ -137,16 +130,8 @@ pub fn HeaderContextMenuOverlay() -> impl IntoView {
                         >
                             "Move Down"
                         </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem
-                            icon="❄"
-                            on_click=move || dispatch(StructAction::FreezeUpToRow { row })
-                        >
-                            "Freeze to Here"
-                        </ContextMenuItem>
-                    }
-                    .into_any(),
-                },
+                    }.into_any(),
+                }.into_any(),
                 None => ().into_any(),
             }}
         </ContextMenu>

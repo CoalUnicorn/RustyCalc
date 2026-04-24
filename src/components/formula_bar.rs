@@ -68,6 +68,7 @@ pub fn FormulaBar() -> impl IntoView {
             let text = m.active_cell_content();
             let address = m.active_cell();
             let sheet_names = model.with_value(|m| m.get_sheet_names());
+            let defined_names = model.with_value(|m| m.get_defined_names());
 
             // Fire editing started event
             state.emit_event(SpreadsheetEvent::Navigation(
@@ -80,7 +81,7 @@ pub fn FormulaBar() -> impl IntoView {
                 mode: EditMode::Edit,
                 focus: EditFocus::FormulaBar,
                 text_dirty: false,
-                formula_analysis: analyze_formula(&text, address.sheet, &sheet_names), //FormulaAnalysis::default(),
+                formula_analysis: analyze_formula(&text, address, &sheet_names, &defined_names),
                 cursor: text.len(),
             }));
         });
@@ -93,10 +94,41 @@ pub fn FormulaBar() -> impl IntoView {
             return;
         };
         let sheet_names = model.with_value(|m| m.get_sheet_names());
-        sync_edit(state.editing_cell, value, cursor, &sheet_names);
+        let defined_names = model.with_value(|m| m.get_defined_names());
+        sync_edit(
+            state.editing_cell,
+            value,
+            cursor,
+            &sheet_names,
+            &defined_names,
+        );
     };
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| suppress_navigation_defaults(&ev);
+
+    // Ref-under-caret tooltip — first visible consumer of the ref_node
+    // identity preserved by analyze_formula. While editing, if the caret
+    // sits on (inclusive right edge) a resolved ref, render its localized
+    // form — `$A$1` stays `$A$1`, `Sheet2!B2` keeps its qualifier — proving
+    // absolute flags and sheet_name round-trip through the pipeline.
+    //
+    // The three primitives this closure composes are:
+    //   - FormulaAnalysis::refs_at_cursor(cursor) → Iterator<&FormulaRef>
+    //   - RefNode::to_localized(&CellReferenceRC) → String
+    //   - CellAddress::as_stringify_ctx() → CellReferenceRC
+    let ref_under_caret = move || -> String {
+        state
+            .editing_cell
+            .get()
+            .and_then(|edit| {
+                let ctx = edit.address.as_stringify_ctx();
+                edit.formula_analysis
+                    .refs_at_cursor(edit.cursor)
+                    .next()
+                    .map(|r| r.ref_node.to_localized(&ctx))
+            })
+            .unwrap_or_default()
+    };
 
     let input_class = move || {
         let base = if is_editing() {
@@ -104,15 +136,17 @@ pub fn FormulaBar() -> impl IntoView {
         } else {
             "fb-input"
         };
-        let validation = state.editing_cell.get().map_or("", |edit| {
-            match edit.formula_analysis.status {
-                FormulaStatus::NotFormula => "",
-                FormulaStatus::Valid { .. } => " valid",
-                FormulaStatus::ParseError(_)
-                | FormulaStatus::LexerError(_)
-                | FormulaStatus::Unresolved { .. } => " error",
-            }
-        });
+        let validation =
+            state
+                .editing_cell
+                .get()
+                .map_or("", |edit| match edit.formula_analysis.status {
+                    FormulaStatus::NotFormula => "",
+                    FormulaStatus::Valid { .. } => " valid",
+                    FormulaStatus::ParseError(_)
+                    | FormulaStatus::LexerError(_)
+                    | FormulaStatus::Unresolved { .. } => " error",
+                });
         format!("{base}{validation}")
     };
 
@@ -132,8 +166,9 @@ pub fn FormulaBar() -> impl IntoView {
                 on:keydown=on_keydown
             />
 
-            // Validation status indicator — Stage 3 will populate this.
-            <div class="fb-valid"></div>
+            // Ref-under-caret indicator. Populated by `ref_under_caret` when
+            // editing and the cursor sits on a resolved ref.
+            <div class="fb-valid">{ref_under_caret}</div>
 
         </div>
     }

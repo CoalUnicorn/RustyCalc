@@ -77,9 +77,7 @@ pub fn Worksheet() -> impl IntoView {
         // Point-mode range for overlay painting. RefNode stores relative deltas,
         // so resolution needs the editing cell's address as anchor.
         let point_range = match (state.drag.get(), editing_cell.as_ref()) {
-            (DragState::Pointing { ref_node, .. }, Some(e)) => {
-                Some(ref_node.area(&e.address).area)
-            }
+            (DragState::Pointing { ref_node, .. }, Some(e)) => Some(ref_node.area(&e.address).area),
             _ => None,
         };
 
@@ -174,10 +172,16 @@ pub fn Worksheet() -> impl IntoView {
             point_range,
             formula_refs,
         };
+        let dpr = window().device_pixel_ratio();
+
+        web_sys::console::time_with_label("render");
+
         model.with_value(|m| {
-            let mut renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get_untracked());
+            let mut renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get_untracked(), dpr);
             renderer.render(m, &overlays);
         });
+        web_sys::console::time_end_with_label("render");
+
         // Record render-done timestamp for the perf panel.
         if app.perf.commit_start.get_untracked().is_some() {
             app.perf.render_done.set(Some(crate::perf::now()));

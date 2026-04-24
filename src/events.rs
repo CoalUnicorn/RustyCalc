@@ -320,11 +320,11 @@ pub enum StructureEvent {
         from_row: i32,
         to_row: i32,
     },
-    FreezeChanged {
-        sheet: u32,
-        frozen_rows: i32,
-        frozen_cols: i32,
-    },
+    // FreezeChanged {
+    //     sheet: u32,
+    //     frozen_rows: i32,
+    //     frozen_cols: i32,
+    // },
 }
 
 impl StructureEvent {

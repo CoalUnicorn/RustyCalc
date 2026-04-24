@@ -80,8 +80,13 @@ pub fn try_point_move(ctx: &PointMoveCtx, key: &str, is_shift: bool) -> PointMov
         return PointMoveOutcome::ExitPointing;
     }
 
-    // Arrow key: enter or extend point mode if cursor is at a valid reference insertion point.
-    if !ctx.already_pointing && !is_in_reference_mode(ctx.text, ctx.cursor) {
+    // Allow entry when the caller seeded prev_span from a caret-hit, even if
+    // `is_in_reference_mode` says no (the cursor is INSIDE a ref, not at an
+    // insertion point — a different path to the same Point outcome).
+    if !ctx.already_pointing
+        && ctx.prev_span.is_none()
+        && !is_in_reference_mode(ctx.text, ctx.cursor)
+    {
         return PointMoveOutcome::NoAction;
     }
 
@@ -319,6 +324,83 @@ mod tests {
             PointMoveOutcome::Move(PointingStep {
                 text: "=C3".to_string(),
                 ref_node: RefNode::cell(1, None, 2, 2, false, false),
+                span: TextRef { start: 1, end: 3 },
+            }),
+        );
+    }
+
+    // Story 2 — "Fix this ref": caret inside an existing resolved ref seeds
+    // `prev_span` + `current_ref` from the refs_at_cursor hit. The new guard
+    // lets entry through without `is_in_reference_mode` and without
+    // `already_pointing`, so arrow keys replace the ref under the caret
+    // while preserving its identity.
+
+    #[test]
+    fn caret_on_absolute_ref_preserves_dollars() {
+        // `=$A$1`, caret between `$A` and `$1`. Not an operator-adjacent
+        // insertion point, but prev_span is seeded from the caret-hit →
+        // the new guard accepts entry. ArrowDown must emit `$A$2`, not
+        // `A2` — both absolute flags survive `extend_trailing`.
+        let ctx = PointMoveCtx {
+            text: "=$A$1",
+            cursor: 3,
+            already_pointing: false,
+            current_ref: RefNode::cell(1, None, 1, 1, true, true),
+            prev_span: Some(TextRef { start: 1, end: 5 }),
+            editing: editing_a1(),
+        };
+        assert_eq!(
+            try_point_move(&ctx, "ArrowDown", false),
+            PointMoveOutcome::Move(PointingStep {
+                text: "=$A$2".to_string(),
+                ref_node: RefNode::cell(1, None, 2, 1, true, true),
+                span: TextRef { start: 1, end: 5 },
+            }),
+        );
+    }
+
+    #[test]
+    fn caret_on_cross_sheet_ref_preserves_sheet() {
+        // `=Sheet2!B2`, caret inside `B2` (position 9). With editing=A1 the
+        // relative deltas for B2 are (+1,+1). ArrowRight moves the column
+        // delta to +2 → absolute C2 on Sheet2. `sheet_name` survives into
+        // the new RefNode; `to_localized` re-emits the `Sheet2!` prefix.
+        let ctx = PointMoveCtx {
+            text: "=Sheet2!B2",
+            cursor: 9,
+            already_pointing: false,
+            current_ref: RefNode::cell(2, Some("Sheet2".to_string()), 1, 1, false, false),
+            prev_span: Some(TextRef { start: 1, end: 10 }),
+            editing: editing_a1(),
+        };
+        assert_eq!(
+            try_point_move(&ctx, "ArrowRight", false),
+            PointMoveOutcome::Move(PointingStep {
+                text: "=Sheet2!C2".to_string(),
+                ref_node: RefNode::cell(2, Some("Sheet2".to_string()), 1, 2, false, false),
+                span: TextRef { start: 1, end: 10 },
+            }),
+        );
+    }
+
+    #[test]
+    fn caret_on_relative_ref_stays_relative() {
+        // `=A1`, caret between A and 1. Fully relative → no `$` introduced.
+        // This is the control case: absence of flags must not cause
+        // `extend_trailing` to invent them.
+        let ctx = PointMoveCtx {
+            text: "=A1",
+            cursor: 2,
+            already_pointing: false,
+            current_ref: RefNode::cell(1, None, 0, 0, false, false),
+            prev_span: Some(TextRef { start: 1, end: 3 }),
+            editing: editing_a1(),
+        };
+        assert_eq!(
+            try_point_move(&ctx, "ArrowDown", false),
+            PointMoveOutcome::Move(PointingStep {
+                text: "=A2".to_string(),
+                ref_node: RefNode::cell(1, None, 1, 0, false, false),
                 span: TextRef { start: 1, end: 3 },
             }),
         );

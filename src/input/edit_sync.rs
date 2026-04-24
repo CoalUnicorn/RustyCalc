@@ -60,11 +60,11 @@ pub fn sync_edit(
     value: String,
     cursor: usize,
     sheet_names: &[(u32, String)],
+    defined_names: &[crate::coord::DefinedName],
 ) {
     editing.update(|cell| {
         if let Some(c) = cell {
-            let active_sheet = c.address.sheet;
-            c.formula_analysis = analyze_formula(&value, active_sheet, &sheet_names);
+            c.formula_analysis = analyze_formula(&value, c.address, sheet_names, defined_names);
             c.text = value;
             c.text_dirty = true;
             c.cursor = cursor;

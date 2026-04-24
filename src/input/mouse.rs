@@ -80,8 +80,8 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState) {
             let (row, col) = model.with_value(|m| {
                 let view = m.get_selected_view();
                 (
-                    SheetViewport::from_parts(m, sheet, 0, view.top_row).pixel_to_row(my),
-                    SheetViewport::from_parts(m, sheet, view.left_column, 0).pixel_to_col(mx),
+                    SheetViewport::from_parts(m, 0, view.top_row).pixel_to_row(my),
+                    SheetViewport::from_parts(m, view.left_column, 0).pixel_to_col(mx),
                 )
             });
             state.drag.set(DragState::Extending {
@@ -194,14 +194,26 @@ pub fn try_begin_row_resize(
 
 /// Click on the top-left corner cell: select the entire sheet.
 pub fn handle_corner_click(model: ModelStore, state: WorkbookState) {
+    web_sys::console::time_with_label("corner:nav_select_all");
     model.update_value(|m| {
         m.nav_select_all();
     });
+    web_sys::console::time_end_with_label("corner:nav_select_all");
+
+    web_sys::console::time_with_label("corner:editing_cell");
+
     state.editing_cell.set(None);
+    web_sys::console::time_end_with_label("corner:editing_cell");
+
+    web_sys::console::time_with_label("corner:from_view");
     let sheet_area = model.with_value(SheetArea::from_view);
+    web_sys::console::time_end_with_label("corner:from_view");
+
+    web_sys::console::time_with_label("corner:emit_event");
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged { sheet_area },
     ));
+    web_sys::console::time_end_with_label("corner:emit_event");
 }
 
 /// Click on a column header: select the entire column, or extend the current
@@ -214,8 +226,7 @@ pub fn handle_col_header_click(
 ) {
     model.update_value(|m| {
         let view = m.get_selected_view();
-        let sheet = view.sheet;
-        let col = SheetViewport::from_parts(m, sheet, view.left_column, 0).pixel_to_col(x);
+        let col = SheetViewport::from_parts(m, view.left_column, 0).pixel_to_col(x);
         if ev.shift_key() {
             m.nav_extend_column_selection(col);
         } else {
@@ -239,8 +250,7 @@ pub fn handle_row_header_click(
 ) {
     model.update_value(|m| {
         let view = m.get_selected_view();
-        let sheet = view.sheet;
-        let row = SheetViewport::from_parts(m, sheet, 0, view.top_row).pixel_to_row(y);
+        let row = SheetViewport::from_parts(m, 0, view.top_row).pixel_to_row(y);
         if ev.shift_key() {
             m.nav_extend_row_selection(row);
         } else {
@@ -267,9 +277,8 @@ pub fn handle_cell_click(
     // mutable borrow, so signal writes below don't interleave with the lock.
     let (row, col, near_handle) = model.with_value(|m| {
         let view = m.get_selected_view();
-        let sheet = view.sheet;
-        let col = SheetViewport::from_parts(m, sheet, view.left_column, 0).pixel_to_col(x);
-        let row = SheetViewport::from_parts(m, sheet, 0, view.top_row).pixel_to_row(y);
+        let col = SheetViewport::from_parts(m, view.left_column, 0).pixel_to_col(x);
+        let row = SheetViewport::from_parts(m, 0, view.top_row).pixel_to_row(y);
         let handle = SheetViewport::current(m)
             .autofill_handle()
             .unwrap_or_default();
@@ -287,20 +296,38 @@ pub fn handle_cell_click(
         let may_point = edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
         if may_point {
             let cursor = edit.cursor;
-            if already_pointing || is_in_reference_mode(&edit.text, cursor) {
+            // Caret-hit: if the cursor sits on an existing resolved ref,
+            // the click REPLACES that ref in place — preserving its `$`
+            // flags and sheet qualification via `relocate_to`.
+            let caret_hit = if !already_pointing {
+                edit.formula_analysis.refs_at_cursor(cursor).next().cloned()
+            } else {
+                None
+            };
+            if already_pointing || caret_hit.is_some() || is_in_reference_mode(&edit.text, cursor) {
                 let editing = model.with_value(CellAddress::from_view);
-                let ref_node = RefNode::from_cell_area(
-                    SheetArea::from_cell(editing.sheet, row, col),
-                    editing,
-                    "",
-                );
+                let (ref_node, prev_span) = if let Some(hit) = caret_hit {
+                    (hit.ref_node.relocate_to(row, col, &editing), Some(hit.span))
+                } else if let DragState::Pointing { ref_text, .. } = state.drag.get_untracked() {
+                    (
+                        RefNode::from_cell_area(
+                            SheetArea::from_cell(editing.sheet, row, col),
+                            editing,
+                            "",
+                        ),
+                        Some(ref_text),
+                    )
+                } else {
+                    (
+                        RefNode::from_cell_area(
+                            SheetArea::from_cell(editing.sheet, row, col),
+                            editing,
+                            "",
+                        ),
+                        None,
+                    )
+                };
                 let ref_str = ref_node.to_localized(&editing.as_stringify_ctx());
-                let prev_span =
-                    if let DragState::Pointing { ref_text, .. } = state.drag.get_untracked() {
-                        Some(ref_text)
-                    } else {
-                        None
-                    };
                 let text = edit.text.clone();
                 let (new_text, ref_text) =
                     splice_ref(&text, prev_span.unwrap_or(TextRef::at(cursor)), &ref_str);
@@ -311,10 +338,7 @@ pub fn handle_cell_click(
                         e.formula_analysis = model.with_value(|m| m.analyze_in_context(&new_text));
                     }
                 });
-                state.drag.set(DragState::Pointing {
-                    ref_node,
-                    ref_text: ref_text,
-                });
+                state.drag.set(DragState::Pointing { ref_node, ref_text });
                 return;
             }
         }
@@ -475,10 +499,9 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
 
     let (row, col) = model.with_value(|m| {
         let view = m.get_selected_view();
-        let fg = frozen_geometry(m, sheet);
         (
-            SheetViewport::from_parts(m, sheet, 0, view.top_row).pixel_to_row(y),
-            SheetViewport::from_parts(m, sheet, view.left_column, 0).pixel_to_col(x),
+            SheetViewport::from_parts(m, 0, view.top_row).pixel_to_row(y),
+            SheetViewport::from_parts(m, view.left_column, 0).pixel_to_col(x),
         )
     });
 
@@ -613,8 +636,7 @@ pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: Wor
 
     let target = if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
         Some(model.with_value(|m| {
-            //let fg = frozen_geometry(m, v.sheet);
-            let col = SheetViewport::from_parts(m, v.sheet, v.left_column, 0).pixel_to_col(x);
+            let col = SheetViewport::from_parts(m, v.left_column, 0).pixel_to_col(x);
             let area = CellArea::from_view(m).normalized();
             // Multi-column selection if the clicked col is inside a full-column range.
             let (col, count) = if area.r2 >= LAST_ROW && area.c1 <= col && col <= area.c2 {
@@ -626,8 +648,7 @@ pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: Wor
         }))
     } else if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
         Some(model.with_value(|m| {
-            //let fg = frozen_geometry(m, v.sheet);
-            let row = SheetViewport::from_parts(m, v.sheet, 0, v.top_row).pixel_to_row(y);
+            let row = SheetViewport::from_parts(m, 0, v.top_row).pixel_to_row(y);
             let area = CellArea::from_view(m).normalized();
             // Multi-row selection if the clicked row is inside a full-row range.
             let (row, count) = if area.c2 >= LAST_COLUMN && area.r1 <= row && row <= area.r2 {

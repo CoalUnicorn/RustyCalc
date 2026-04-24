@@ -77,7 +77,14 @@ pub fn FormulaTextArea() -> impl IntoView {
             return;
         };
         let sheet_names = model.with_value(|m| m.get_sheet_names());
-        sync_edit(state.editing_cell, value, cursor, &sheet_names);
+        let defined_names = model.with_value(|m| m.get_defined_names());
+        sync_edit(
+            state.editing_cell,
+            value,
+            cursor,
+            &sheet_names,
+            &defined_names,
+        );
     };
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| suppress_navigation_defaults(&ev);
