@@ -4,14 +4,14 @@ use leptos_use::{use_raf_fn, use_resize_observer};
 use web_sys::HtmlCanvasElement;
 
 use crate::app_state::AppState;
-use crate::canvas::*;
 use crate::components::cell_editor::CellEditor;
-use crate::coord::FormulaRef;
-use crate::coord::{CellArea, SheetArea};
+use crate::coord::ActiveRef;
+use crate::coord::{CellRange, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::mouse::*;
 use crate::model::AppClipboard;
 use crate::state::{DragState, ModelStore, WorkbookState};
+use iron_canvas::*;
 
 /// The spreadsheet canvas element.
 ///
@@ -69,7 +69,7 @@ pub fn Worksheet() -> impl IntoView {
         // derives PartialEq, the memo's PartialEq gate suppresses re-renders when
         // refs don't change (e.g. text changed but no new refs produced).
         let editing_cell = state.editing_cell.get();
-        let formula_refs: Vec<FormulaRef> = editing_cell
+        let formula_refs: Vec<ActiveRef> = editing_cell
             .as_ref()
             .map(|e| e.formula_analysis.refs().to_vec())
             .unwrap_or_default();
@@ -110,7 +110,7 @@ pub fn Worksheet() -> impl IntoView {
     // detect overlay-only changes (autofill preview, point-mode range)
     // without needing a fake ContentEvent::GenericChange from request_redraw().
     Effect::new(
-        move |prev: Option<(Option<AutofillTarget>, Option<CellArea>, Vec<FormulaRef>)>| {
+        move |prev: Option<(Option<AutofillTarget>, Option<CellRange>, Vec<ActiveRef>)>| {
             let has_content = !state.events.content.get().is_empty();
             let has_structure = !state.events.structure.get().is_empty();
             let has_format = !state.events.format.get().is_empty();
@@ -161,7 +161,7 @@ pub fn Worksheet() -> impl IntoView {
         });
         let (extend_to, point_range, formula_refs) = reactive_overlay.get_untracked();
         let clipboard = clipboard_draw.with_value(|opt| {
-            opt.as_ref().map(|acb| SheetArea {
+            opt.as_ref().map(|acb| SheetRange {
                 sheet: acb.sheet,
                 area: acb.range,
             })

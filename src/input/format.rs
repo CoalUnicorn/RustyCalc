@@ -6,14 +6,14 @@ use ironcalc_base::{
 };
 use leptos::prelude::WithValue;
 
-use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
-use crate::coord::{CellArea, SheetArea};
+use crate::coord::{CellRange, SheetRange};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
     style_types::{BooleanValue, HexColor, StylePath},
     try_mutate, EvaluationMode, FrontendModel, SafeFontFamily, ToolbarState,
 };
+use iron_canvas::geometry::{LAST_COLUMN, LAST_ROW};
 
 use crate::state::{ModelStore, WorkbookState};
 
@@ -74,7 +74,7 @@ pub fn execute_format(
         }
         FormatAction::SetFontSize(size) => {
             let size = size.clamp(1.0, 409.0);
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
 
             /*
             FIXME:  how we handle cell area / columns / rows selection with different
@@ -105,7 +105,7 @@ pub fn execute_format(
         }
         FormatAction::SetFontFamily(family) => {
             let name = family.model_name();
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
 
             try_mutate(
                 model,
@@ -121,7 +121,7 @@ pub fn execute_format(
             // IronCalc "font.color": empty string clears (-> transparent), hex string sets.
             // Uses the same update_range_style path as bold/italic/size for proper
             // style-pool persistence and XLSX round-trip.
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             let value = hex.as_str();
             try_mutate(
                 model,
@@ -140,7 +140,7 @@ pub fn execute_format(
         FormatAction::SetBackgroundColor(hex) => {
             // IronCalc "fill.fg_color": empty string clears, hex string sets.
             // IronCalc automatically sets pattern_type = "solid" when a color is given.
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             let value = hex.as_str();
 
             try_mutate(
@@ -182,7 +182,7 @@ pub fn execute_format(
             }));
         }
         FormatAction::SetNumFmt(code) => {
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             let code = code.clone();
             try_mutate(
                 model,
@@ -201,7 +201,7 @@ pub fn execute_format(
         FormatAction::SetHorizontalAlign(align) => {
             // HorizontalAlignment::Display gives the exact lowercase string ironcalc expects.
             let value = align.to_string();
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             try_mutate(
                 model,
                 EvaluationMode::Deferred,
@@ -218,7 +218,7 @@ pub fn execute_format(
         }
         FormatAction::SetVerticalAlign(align) => {
             let value = align.to_string();
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             try_mutate(
                 model,
                 EvaluationMode::Deferred,
@@ -239,7 +239,7 @@ pub fn execute_format(
             } else {
                 -1
             };
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             let current = model.with_value(|m| m.active_num_fmt());
             let new_fmt = adjust_decimals(&current, delta);
             try_mutate(
@@ -257,7 +257,7 @@ pub fn execute_format(
             }));
         }
         FormatAction::ClearFormatting => {
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             try_mutate(
                 model,
                 EvaluationMode::Deferred,
@@ -286,7 +286,7 @@ fn toggle_style(
     style_path: StylePath,
     current_val: fn(&ToolbarState) -> bool,
 ) -> Result<(), FormatError> {
-    let sa = model.with_value(SheetArea::from_view);
+    let sa = model.with_value(SheetRange::from_view);
 
     try_mutate(
         model,
@@ -354,7 +354,7 @@ fn adjust_decimals(fmt: &str, delta: i32) -> String {
 /// `on_paste_styles` (which records undo diffs).
 fn set_font_name(m: &mut UserModel<'static>, name: &str) -> Result<(), FormatError> {
     let sheet = m.get_selected_sheet();
-    let norm = CellArea::from_view(m).normalized();
+    let norm = CellRange::from_view(m).normalized();
 
     let rows: Vec<Vec<_>> = (norm.r1..=norm.r2)
         .map(|row| {

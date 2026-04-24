@@ -9,11 +9,12 @@
 
 use ironcalc_base::UserModel;
 
-use crate::canvas::Point;
-use crate::coord::{CellAddress, CellArea, FormulaRef, SheetArea};
+use crate::model::{FormulaRef, GridRange, SheetArea};
 use crate::theme::FORMULA_REF_COLORS;
+use crate::Point;
 
 use super::super::geometry::{FrozenOffset, PixelRect, AUTOFILL_HANDLE_PX};
+use super::super::model::CellAddress;
 use super::super::types::{AutofillTarget, DashFill};
 use super::{CanvasRenderer, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH, STANDARD_BORDER_WIDTH};
 
@@ -29,7 +30,7 @@ impl CanvasRenderer {
             column: view.column,
         };
         let Some(b) =
-            self.range_pixel_bounds(model, frozen, CellArea::from_view(model).normalized())
+            self.range_pixel_bounds(model, frozen, GridRange::from_view(model).normalized())
         else {
             return;
         };
@@ -61,8 +62,8 @@ impl CanvasRenderer {
         frozen: &FrozenOffset,
         target: AutofillTarget,
     ) {
-        let sel = CellArea::from_view(model).normalized();
-        let range = CellArea {
+        let sel = GridRange::from_view(model).normalized();
+        let range = GridRange {
             r1: sel.r1.min(target.row),
             c1: sel.c1.min(target.col),
             r2: sel.r2.max(target.row),
@@ -91,7 +92,7 @@ impl CanvasRenderer {
         self.draw_dashed_range(
             model,
             frozen,
-            cb.area.normalized(),
+            cb.range.normalized(),
             self.theme.selection_color,
             DashFill::Outline,
         );
@@ -102,7 +103,7 @@ impl CanvasRenderer {
         &self,
         model: &UserModel,
         frozen: &FrozenOffset,
-        point_range: Option<CellArea>,
+        point_range: Option<GridRange>,
     ) {
         let Some(pr) = point_range else { return };
         self.draw_dashed_range(
@@ -120,7 +121,7 @@ impl CanvasRenderer {
         &self,
         model: &UserModel,
         frozen: &FrozenOffset,
-        refs: &[FormulaRef],
+        refs: &Vec<FormulaRef>,
     ) {
         let sheet = model.get_selected_sheet();
         for fr in refs {
@@ -130,7 +131,7 @@ impl CanvasRenderer {
             self.draw_dashed_range(
                 model,
                 frozen,
-                fr.sheet_area.area.normalized(),
+                fr.sheet_area.range.normalized(),
                 FORMULA_REF_COLORS[fr.color_idx % FORMULA_REF_COLORS.len()],
                 DashFill::Tinted,
             );
@@ -144,7 +145,7 @@ impl CanvasRenderer {
         &self,
         model: &UserModel,
         frozen: &FrozenOffset,
-        range: CellArea,
+        range: GridRange,
         color: &str,
         fill: DashFill,
     ) {

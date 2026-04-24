@@ -6,9 +6,9 @@
 
 use ironcalc_base::UserModel;
 
-use crate::canvas::types::CellRC;
-use crate::canvas::{Point, HEADER_OFFSET};
-use crate::coord::CellArea;
+use crate::model::GridRange;
+use crate::types::CellRC;
+use crate::{Point, HEADER_OFFSET};
 
 use super::super::geometry::{
     col_width, row_height, FrozenOffset, PixelRect, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
@@ -30,7 +30,7 @@ impl CanvasRenderer {
         &self,
         model: &UserModel,
         frozen: &FrozenOffset,
-        range: CellArea,
+        range: GridRange,
     ) -> Option<PixelRect> {
         let sheet = model.get_selected_sheet();
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
@@ -65,7 +65,7 @@ impl CanvasRenderer {
     ///
     /// A range is drawable when neither corner is strictly past the visible
     /// scrollable band *and* outside the frozen-band anchor on each axis.
-    fn range_intersects_fold(&self, range: CellArea, frozen_rows: i32, frozen_cols: i32) -> bool {
+    fn range_intersects_fold(&self, range: GridRange, frozen_rows: i32, frozen_cols: i32) -> bool {
         // Range entirely past the scrollable fold (right or below).
         if range.c1 > self.vis.last.column && range.c1 > frozen_cols {
             return false;

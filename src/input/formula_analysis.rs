@@ -22,10 +22,10 @@ use ironcalc_base::expressions::{
     types::CellReferenceRC,
 };
 
-use crate::coord::{CellAddress, DefinedName, FormulaRef, RefNode, SheetArea, TextRef};
+use crate::coord::{ActiveRef, Cell, DefinedName, RefNode, SheetRange, TextRef};
 
 /// Empty slice used by [`FormulaAnalysis::refs`] for variants that carry no overlays.
-const NO_REFS: &[FormulaRef] = &[];
+const NO_REFS: &[ActiveRef] = &[];
 
 /// Result of tokenizing a formula for UI purposes.
 ///
@@ -43,7 +43,7 @@ pub struct FormulaAnalysis {
 impl FormulaAnalysis {
     /// Returns refs the renderer should paint. Empty for error variants whose
     /// AST was too broken to trust (ParseError, LexerError, NotFormula).
-    pub fn refs(&self) -> &[FormulaRef] {
+    pub fn refs(&self) -> &[ActiveRef] {
         match &self.status {
             FormulaStatus::Valid { refs } => refs,
             FormulaStatus::Unresolved { valid_refs, .. } => valid_refs,
@@ -73,7 +73,7 @@ impl FormulaAnalysis {
     /// ref. The caret immediately after a ref is the most natural moment to
     /// want "fix this ref" — the user just typed it — and matches the
     /// post-token boundary pattern used by `is_in_reference_mode`.
-    pub fn refs_at_cursor(&self, cursor: usize) -> impl Iterator<Item = &FormulaRef> {
+    pub fn refs_at_cursor(&self, cursor: usize) -> impl Iterator<Item = &ActiveRef> {
         self.refs()
             .iter()
             .filter(move |r| cursor >= r.span.start && cursor <= r.span.end)
@@ -93,7 +93,7 @@ pub enum FormulaStatus {
     #[default]
     NotFormula,
     /// AST clean, every name resolved. `refs` carries the per-token overlays.
-    Valid { refs: Vec<FormulaRef> },
+    Valid { refs: Vec<ActiveRef> },
     /// Parser rejected the AST — some leaves may be missing downstream.
     ParseError(ParseError),
     /// Lexer rejected a token (e.g. `@` outside a table ref). Carries the
@@ -110,7 +110,7 @@ pub enum FormulaStatus {
         refs: Vec<TextRef>,
         functions: Vec<TextRef>,
         names: Vec<TextRef>,
-        valid_refs: Vec<FormulaRef>,
+        valid_refs: Vec<ActiveRef>,
     },
 }
 
@@ -172,7 +172,7 @@ pub(crate) enum DiagnosticLeaf {
 ///   Unknown sheet names produce no overlay (the ref is silently skipped).
 pub fn analyze_formula(
     formula: &str,
-    active_cell: CellAddress,
+    active_cell: Cell,
     sheet_names: &[(u32, String)],
     defined_names: &[DefinedName],
 ) -> FormulaAnalysis {
@@ -257,13 +257,13 @@ pub fn analyze_formula(
 
     // Identity: same target -> same color slot, regardless of
     // absolute/relative prefix or lexical sheet qualification.
-    let mut color_map: HashMap<SheetArea, usize> = HashMap::new();
-    let mut assign_slot = |key: SheetArea| -> usize {
+    let mut color_map: HashMap<SheetRange, usize> = HashMap::new();
+    let mut assign_slot = |key: SheetRange| -> usize {
         let next = color_map.len();
         *color_map.entry(key).or_insert(next)
     };
 
-    let mut refs: Vec<FormulaRef> = Vec::new();
+    let mut refs: Vec<ActiveRef> = Vec::new();
     let mut invalid_refs: Vec<TextRef> = Vec::new();
     for (leaf, span) in ref_leaves.iter().zip(ref_range_token_spans.iter().copied()) {
         match leaf {
@@ -273,7 +273,7 @@ pub fn analyze_formula(
                 // (context (0,0) above), so `active_cell` here is only used
                 // for the relative-offset math in `RefNode::area`.
                 let sheet_area = ref_node.area(&active_cell);
-                refs.push(FormulaRef {
+                refs.push(ActiveRef {
                     ref_node: ref_node.clone(),
                     sheet_area,
                     color_idx: assign_slot(sheet_area),
@@ -333,7 +333,7 @@ pub fn analyze_formula(
                 };
                 if let Some(ref_node) = maybe_ref {
                     let sheet_area = ref_node.area(&active_cell);
-                    refs.push(FormulaRef {
+                    refs.push(ActiveRef {
                         ref_node,
                         sheet_area,
                         color_idx: assign_slot(sheet_area),
@@ -529,14 +529,14 @@ pub fn is_in_reference_mode(text: &str, cursor: usize) -> bool {
 #[cfg(test)]
 mod formula_analysis_tests {
     use super::*;
-    use crate::coord::CellArea;
+    use crate::coord::CellRange;
 
     /// Test editing-cell fixture with row=0, column=0. Matches the pre-refactor
     /// parser context so Node-relative coords equal their absolute 1-based form
     /// — every existing assertion on `sheet_area.area` stays valid under the
     /// new signature without arithmetic adjustment.
-    fn editing_at(sheet: u32) -> CellAddress {
-        CellAddress {
+    fn editing_at(sheet: u32) -> Cell {
+        Cell {
             sheet,
             row: 0,
             column: 0,
@@ -560,7 +560,7 @@ mod formula_analysis_tests {
         assert_eq!(analysis.refs().len(), 1);
         assert_eq!(
             analysis.refs()[0].sheet_area.area,
-            CellArea {
+            CellRange {
                 r1: 1,
                 c1: 1,
                 r2: 1,
@@ -577,7 +577,7 @@ mod formula_analysis_tests {
         assert_eq!(analysis.refs().len(), 1);
         assert_eq!(
             analysis.refs()[0].sheet_area.area,
-            CellArea {
+            CellRange {
                 r1: 2,
                 c1: 2,
                 r2: 4,

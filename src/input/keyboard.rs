@@ -342,7 +342,7 @@ impl KeyMod {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coord::CellAddress;
+    use crate::coord::Cell;
     use crate::input::formula_analysis::FormulaAnalysis;
     use crate::model::{mutate, ArrowKey, EvaluationMode};
     use crate::state::{DragState, EditFocus, EditMode, EditingCell};
@@ -353,7 +353,7 @@ mod tests {
 
     fn accept_cell() -> EditingCell {
         EditingCell {
-            address: CellAddress {
+            address: Cell {
                 sheet: 1,
                 row: 1,
                 column: 1,
@@ -369,7 +369,7 @@ mod tests {
 
     fn edit_cell() -> EditingCell {
         EditingCell {
-            address: CellAddress {
+            address: Cell {
                 sheet: 1,
                 row: 1,
                 column: 1,

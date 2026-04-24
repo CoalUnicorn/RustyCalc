@@ -2,12 +2,12 @@
 
 use leptos::prelude::*;
 
-use crate::canvas::col_name;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::input::formula_analysis::{analyze_formula, FormulaStatus};
 use crate::model::FrontendModel;
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
+use iron_canvas::col_name;
 
 /// The formula bar: cell address label + content/formula input.
 ///

@@ -87,11 +87,7 @@ impl RefNode {
     /// 2. Sheet qualification. The stringifier emits a `Sheet!` prefix iff
     ///    `sheet_name` is `Some`. Same-sheet points must therefore carry
     ///    `None` — otherwise every bare `A1` click renders as `Sheet1!A1`.
-    pub fn from_cell_area(
-        area: SheetArea,
-        editing: CellAddress,
-        sheet_name_of_pointed: &str,
-    ) -> Self {
+    pub fn from_cell_area(area: SheetRange, editing: Cell, sheet_name_of_pointed: &str) -> Self {
         let sheet_name = if area.sheet == editing.sheet {
             None
         } else {
@@ -147,7 +143,7 @@ impl RefNode {
     /// Resolution rule per field:
     ///   absolute=true  → stored field already holds the absolute 1-based coord
     ///   absolute=false → absolute = stored + editing.{row|column}
-    pub fn area(&self, editing: &CellAddress) -> SheetArea {
+    pub fn area(&self, editing: &Cell) -> SheetRange {
         match &self.inner {
             Node::ReferenceKind {
                 sheet_index,
@@ -167,7 +163,7 @@ impl RefNode {
                 } else {
                     column + editing.column
                 };
-                SheetArea::from_cell(*sheet_index, r, c)
+                SheetRange::from_cell(*sheet_index, r, c)
             }
             Node::RangeKind {
                 sheet_index,
@@ -201,7 +197,7 @@ impl RefNode {
                 } else {
                     column2 + editing.column
                 };
-                SheetArea::new(*sheet_index, r1, c1, r2, c2)
+                SheetRange::new(*sheet_index, r1, c1, r2, c2)
             }
             _ => unreachable!("RefNode invariant: inner is ReferenceKind or RangeKind"),
         }
@@ -318,7 +314,7 @@ impl RefNode {
     /// This is the click-to-replace primitive: when the caret sits on
     /// `$A$1` and the user clicks B5, the result is `$B$5`. Flag inheritance
     /// is what makes it Excel-parity instead of "drop to bare relative".
-    pub fn relocate_to(&self, abs_row: i32, abs_col: i32, editing: &CellAddress) -> Self {
+    pub fn relocate_to(&self, abs_row: i32, abs_col: i32, editing: &Cell) -> Self {
         // Relative fields store `absolute - editing` offsets, so the rebuild
         // rule is symmetric between the Reference and Range arms — only the
         // field names differ. Trailing corner's flags win in the Range case.
@@ -438,12 +434,12 @@ pub struct PointingStep {
 /// offsets. `color_idx` is a sequential index into `theme::FORMULA_REF_COLORS`,
 /// assigned in token order by reference identity (same target → same slot).
 #[derive(Clone, Debug, PartialEq)]
-pub struct FormulaRef {
+pub struct ActiveRef {
     /// Full ironcalc Node identity — `ReferenceKind | RangeKind` with
     /// `absolute_row` / `absolute_column` / `sheet_name` preserved.
     pub ref_node: RefNode,
     /// Precomputed projection of `ref_node` for the renderer hot path.
-    pub sheet_area: SheetArea,
+    pub sheet_area: SheetRange,
     /// Sequential color slot (0-based). Renderer maps this to `FORMULA_REF_COLORS[idx % len]`.
     pub color_idx: usize,
     /// Byte span of this token in the formula string — drives cursor-aware
@@ -453,30 +449,30 @@ pub struct FormulaRef {
 
 /// A cell range pinned to a specific sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct SheetArea {
+pub struct SheetRange {
     pub sheet: u32,
-    pub area: CellArea,
+    pub area: CellRange,
 }
 
-impl SheetArea {
+impl SheetRange {
     pub fn new(sheet: u32, r1: i32, c1: i32, r2: i32, c2: i32) -> Self {
         Self {
             sheet,
-            area: CellArea { r1, c1, r2, c2 },
+            area: CellRange { r1, c1, r2, c2 },
         }
     }
 
     pub fn from_cell(sheet: u32, row: i32, col: i32) -> Self {
         Self {
             sheet,
-            area: CellArea::from_cell(row, col),
+            area: CellRange::from_cell(row, col),
         }
     }
 
     pub fn from_view(model: &UserModel) -> Self {
         Self {
             sheet: model.get_selected_sheet(),
-            area: CellArea::from_view(model),
+            area: CellRange::from_view(model),
         }
     }
 
@@ -487,7 +483,7 @@ impl SheetArea {
     //     false
     // }
 
-    pub fn on_same_sheet(self, other: SheetArea) -> bool {
+    pub fn on_same_sheet(self, other: SheetRange) -> bool {
         self.sheet == other.sheet
     }
 
@@ -498,14 +494,14 @@ impl SheetArea {
 
 /// Axis-aligned cell range. 1-based sheet coordinates.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct CellArea {
+pub struct CellRange {
     pub r1: i32,
     pub c1: i32,
     pub r2: i32,
     pub c2: i32,
 }
 
-impl CellArea {
+impl CellRange {
     pub fn height(self) -> i32 {
         self.r2 - self.r1 + 1
     }
@@ -530,7 +526,7 @@ impl CellArea {
     }
 
     pub fn from_cell(row: i32, col: i32) -> Self {
-        CellArea {
+        CellRange {
             r1: row,
             c1: col,
             r2: row,
@@ -551,8 +547,8 @@ impl CellArea {
         }
     }
 
-    pub fn with_sheet(self, sheet: u32) -> SheetArea {
-        SheetArea { sheet, area: self }
+    pub fn with_sheet(self, sheet: u32) -> SheetRange {
+        SheetRange { sheet, area: self }
     }
 
     pub fn from_view(model: &UserModel) -> Self {
@@ -567,7 +563,7 @@ impl CellArea {
             ArrowKey::Left => (self.r2, (self.c2 - 1).max(1)),
             ArrowKey::Right => (self.r2, self.c2 + 1),
         };
-        CellArea {
+        CellRange {
             r1: self.r1,
             c1: self.c1,
             r2,
@@ -577,7 +573,7 @@ impl CellArea {
 
     /// Returns `(row_tiles, col_tiles)` if `src` tiles exactly into `self`,
     /// or `None` if any dimension has a remainder. A 1x1 source always tiles.
-    pub fn tile_reps_of(self, src: CellArea) -> Option<(i32, i32)> {
+    pub fn tile_reps_of(self, src: CellRange) -> Option<(i32, i32)> {
         let row_reps = self.height() / src.height();
         let col_reps = self.width() / src.width();
         let fills_exactly =
@@ -601,13 +597,13 @@ impl CellArea {
     }
 }
 
-impl From<(i32, i32, i32, i32)> for CellArea {
+impl From<(i32, i32, i32, i32)> for CellRange {
     fn from((r1, c1, r2, c2): (i32, i32, i32, i32)) -> Self {
         Self { r1, c1, r2, c2 }
     }
 }
 
-impl From<[i32; 4]> for CellArea {
+impl From<[i32; 4]> for CellRange {
     fn from(range: [i32; 4]) -> Self {
         Self {
             r1: range[0],
@@ -618,21 +614,21 @@ impl From<[i32; 4]> for CellArea {
     }
 }
 
-impl From<CellArea> for [i32; 4] {
-    fn from(a: CellArea) -> Self {
+impl From<CellRange> for [i32; 4] {
+    fn from(a: CellRange) -> Self {
         [a.r1, a.c1, a.r2, a.c2]
     }
 }
 
 /// Single cell position on a sheet. 1-based indices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct CellAddress {
+pub struct Cell {
     pub sheet: u32,
     pub row: i32,
     pub column: i32,
 }
 
-impl CellAddress {
+impl Cell {
     pub fn from_view(model: &UserModel<'static>) -> Self {
         let m = model.get_selected_view();
         Self {
@@ -647,10 +643,10 @@ impl CellAddress {
         self.sheet == sheet
     }
 
-    pub fn to_sheet_area(self) -> SheetArea {
-        SheetArea {
+    pub fn to_sheet_area(self) -> SheetRange {
+        SheetRange {
             sheet: self.sheet,
-            area: CellArea::from_cell(self.row, self.column),
+            area: CellRange::from_cell(self.row, self.column),
         }
     }
 
@@ -673,7 +669,7 @@ mod tests {
 
     #[test]
     fn contains_includes_corners() {
-        let a = CellArea {
+        let a = CellRange {
             r1: 1,
             c1: 1,
             r2: 3,
@@ -686,14 +682,14 @@ mod tests {
 
     #[test]
     fn contains_single_cell_area() {
-        let a = CellArea::from_cell(5, 7);
+        let a = CellRange::from_cell(5, 7);
         assert!(a.contains(5, 7));
         assert!(!a.contains(5, 8));
     }
 
     #[test]
     fn normalized_swaps_inverted_coords() {
-        let a = CellArea {
+        let a = CellRange {
             r1: 4,
             c1: 3,
             r2: 1,
@@ -701,7 +697,7 @@ mod tests {
         };
         assert_eq!(
             a.normalized(),
-            CellArea {
+            CellRange {
                 r1: 1,
                 c1: 1,
                 r2: 4,
@@ -712,14 +708,14 @@ mod tests {
 
     #[test]
     fn to_sheet_area_produces_single_cell() {
-        let addr = CellAddress {
+        let addr = Cell {
             sheet: 2,
             row: 4,
             column: 6,
         };
         let sa = addr.to_sheet_area();
         assert_eq!(sa.sheet, 2);
-        assert_eq!(sa.area, CellArea::from_cell(4, 6));
+        assert_eq!(sa.area, CellRange::from_cell(4, 6));
         assert!(sa.area.is_single_cell());
     }
 
@@ -731,8 +727,8 @@ mod tests {
         }
     }
 
-    fn editing_a1() -> CellAddress {
-        CellAddress {
+    fn editing_a1() -> Cell {
+        Cell {
             sheet: 0,
             row: 1,
             column: 1,
@@ -787,19 +783,19 @@ mod tests {
     fn refnode_area_relative_resolves_with_editing() {
         let n = RefNode::cell(3, None, 4, 6, false, false);
         let resolved = n.area(&editing_a1());
-        assert_eq!(resolved, SheetArea::from_cell(3, 5, 7));
+        assert_eq!(resolved, SheetRange::from_cell(3, 5, 7));
     }
 
     // Absolute ref: stored fields are already absolute; editing is ignored.
     #[test]
     fn refnode_area_absolute_ignores_editing() {
         let n = RefNode::cell(3, None, 5, 7, true, true);
-        let editing_far_away = CellAddress {
+        let editing_far_away = Cell {
             sheet: 0,
             row: 100,
             column: 100,
         };
-        assert_eq!(n.area(&editing_far_away), SheetArea::from_cell(3, 5, 7));
+        assert_eq!(n.area(&editing_far_away), SheetRange::from_cell(3, 5, 7));
     }
 
     // Range: each corner resolved independently via its own absolute flags.
@@ -807,32 +803,32 @@ mod tests {
     fn refnode_area_range_mixed_flags() {
         // Anchor absolute at A1, trailing relative at delta (2,1) from editing.
         let n = RefNode::range(2, None, 1, 1, true, true, 2, 1, false, false);
-        let editing = CellAddress {
+        let editing = Cell {
             sheet: 0,
             row: 1,
             column: 1,
         };
-        assert_eq!(n.area(&editing), SheetArea::new(2, 1, 1, 3, 2));
+        assert_eq!(n.area(&editing), SheetRange::new(2, 1, 1, 3, 2));
     }
 
     #[test]
     fn from_cell_area_same_sheet_omits_name() {
-        let area = SheetArea::from_cell(0, 1, 1);
+        let area = SheetRange::from_cell(0, 1, 1);
         let n = RefNode::from_cell_area(area, editing_a1(), "Sheet1");
         assert_eq!(n.to_localized(&ctx_a1()), "A1");
     }
 
     #[test]
     fn from_cell_area_cross_sheet_qualifies() {
-        let area = SheetArea::from_cell(1, 1, 1);
+        let area = SheetRange::from_cell(1, 1, 1);
         let n = RefNode::from_cell_area(area, editing_a1(), "Sheet2");
         assert_eq!(n.to_localized(&ctx_a1()), "Sheet2!A1");
     }
 
     #[test]
     fn from_cell_area_relative_offset() {
-        let area = SheetArea::from_cell(0, 5, 3);
-        let editing = CellAddress {
+        let area = SheetRange::from_cell(0, 5, 3);
+        let editing = Cell {
             sheet: 0,
             row: 2,
             column: 2,
@@ -919,7 +915,7 @@ mod tests {
     // `$B$5`, not `B5`. Absolute flags are inherited from the receiver.
     #[test]
     fn relocate_preserves_absolute_flags() {
-        let editing = CellAddress {
+        let editing = Cell {
             sheet: 0,
             row: 1,
             column: 1,
@@ -933,7 +929,7 @@ mod tests {
     // receiver — the click does not "steal" the ref back to the active sheet.
     #[test]
     fn relocate_preserves_sheet_name() {
-        let editing = CellAddress {
+        let editing = Cell {
             sheet: 0,
             row: 1,
             column: 1,
@@ -946,7 +942,7 @@ mod tests {
     // Control case: fully relative receiver → no `$` invented.
     #[test]
     fn relocate_relative_stays_relative() {
-        let editing = CellAddress {
+        let editing = Cell {
             sheet: 0,
             row: 1,
             column: 1,
@@ -961,7 +957,7 @@ mod tests {
     // same "click kills range selection" rule as `extend_trailing`.
     #[test]
     fn relocate_range_collapses_to_cell() {
-        let editing = CellAddress {
+        let editing = Cell {
             sheet: 0,
             row: 1,
             column: 1,

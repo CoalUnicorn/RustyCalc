@@ -4,7 +4,7 @@
 use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::{BorderArea, ClipboardData, UserModel};
 
-use crate::coord::CellArea;
+use crate::coord::CellRange;
 
 use super::frontend_model::FrontendModel;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ pub enum PasteMode {
 pub struct AppClipboard {
     pub csv: String,
     pub sheet: u32,
-    pub range: CellArea,
+    pub range: CellRange,
     data: ClipboardData,
 }
 
@@ -62,7 +62,7 @@ impl AppClipboard {
         }
 
         let src = self.range;
-        let dst = CellArea::from(model.get_selected_view().range);
+        let dst = CellRange::from(model.get_selected_view().range);
 
         if let Some((row_reps, col_reps)) = dst.tile_reps_of(src) {
             for tr in 0..row_reps {
@@ -127,13 +127,13 @@ mod tests {
 
     #[test]
     fn tile_reps_single_cell_into_range() {
-        let src = CellArea {
+        let src = CellRange {
             r1: 1,
             c1: 1,
             r2: 1,
             c2: 1,
         };
-        let dst = CellArea {
+        let dst = CellRange {
             r1: 1,
             c1: 1,
             r2: 3,
@@ -144,13 +144,13 @@ mod tests {
 
     #[test]
     fn tile_reps_exact_multiple() {
-        let src = CellArea {
+        let src = CellRange {
             r1: 1,
             c1: 1,
             r2: 2,
             c2: 3,
         };
-        let dst = CellArea {
+        let dst = CellRange {
             r1: 1,
             c1: 1,
             r2: 4,
@@ -161,13 +161,13 @@ mod tests {
 
     #[test]
     fn tile_reps_non_multiple_returns_none() {
-        let src = CellArea {
+        let src = CellRange {
             r1: 1,
             c1: 1,
             r2: 2,
             c2: 2,
         };
-        let dst = CellArea {
+        let dst = CellRange {
             r1: 1,
             c1: 1,
             r2: 3,
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn tile_reps_same_size_returns_none() {
-        let src = CellArea {
+        let src = CellRange {
             r1: 1,
             c1: 1,
             r2: 2,

@@ -2,7 +2,7 @@
 ///
 /// These operate on formula strings and cursor positions; they have no side
 /// effects and do not touch the model.
-use crate::coord::{CellAddress, PointingStep, RefNode, TextRef};
+use crate::coord::{Cell, PointingStep, RefNode, TextRef};
 use crate::input::formula_analysis::is_in_reference_mode;
 use crate::model::ArrowKey;
 
@@ -44,7 +44,7 @@ pub struct PointMoveCtx<'a> {
     /// The cell being edited — feeds ironcalc's stringify ctx for relative
     /// ref delta resolution (`row`/`column` fields are offsets when the
     /// matching `absolute_*` flag is false).
-    pub editing: CellAddress,
+    pub editing: Cell,
 }
 
 /// Outcome of evaluating a keypress in point mode.
@@ -172,8 +172,8 @@ mod tests {
     // therefore deltas from (1,1). `RefNode::cell(1, None, 0, 0, false, false)`
     // means "sheet 1, single cell, zero offset from editing" → resolves to A1.
 
-    fn editing_a1() -> CellAddress {
-        CellAddress {
+    fn editing_a1() -> Cell {
+        Cell {
             sheet: 1,
             row: 1,
             column: 1,
@@ -287,13 +287,13 @@ mod tests {
     /// Expected: point-mode engages, splices `C2` producing `=$A$1+C2`.
     #[test]
     fn point_move_reproduce_abs_then_operator_then_arrow() {
-        use crate::coord::SheetArea;
-        let editing = CellAddress {
+        use crate::coord::SheetRange;
+        let editing = Cell {
             sheet: 0,
             row: 1,
             column: 3,
         };
-        let area = SheetArea::from_cell(editing.sheet, editing.row, editing.column);
+        let area = SheetRange::from_cell(editing.sheet, editing.row, editing.column);
         let current_ref = RefNode::from_cell_area(area, editing, "");
         let ctx = PointMoveCtx {
             text: "=$A$1+",

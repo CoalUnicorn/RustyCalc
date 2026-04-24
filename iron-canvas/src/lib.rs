@@ -26,7 +26,10 @@
 //!   for the full walk-through.
 
 pub mod geometry;
+pub mod model;
 pub mod renderer;
+pub mod style;
+pub mod theme;
 pub mod types;
 
 pub use geometry::*;

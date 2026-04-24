@@ -4,7 +4,7 @@ use crate::components::{
     file_bar::FileBar, formula_bar::FormulaBar, header_context_menu::HeaderContextMenuOverlay,
     sheet_tab_bar::SheetTabBar, status_bar::StatusBar, toolbar::Toolbar, worksheet::Worksheet,
 };
-use crate::coord::{CellAddress, SheetArea};
+use crate::coord::{Cell, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::{
@@ -70,7 +70,7 @@ pub fn Workbook() -> impl IntoView {
                     ),
                 };
 
-                let editing = model.with_value(CellAddress::from_view);
+                let editing = model.with_value(Cell::from_view);
                 let ctx = PointMoveCtx {
                     text: &edit.text,
                     cursor: edit.cursor,
@@ -141,7 +141,7 @@ pub fn Workbook() -> impl IntoView {
                     model,
                     EvaluationMode::Immediate,
                     |m| -> Result<(), EditError> {
-                        let sheet_area = SheetArea::from_view(m);
+                        let sheet_area = SheetRange::from_view(m);
                         sheet_area.area.cells().try_for_each(|(row, col)| {
                             m.set_user_input(sheet_area.sheet, row, col, "")
                                 .map_err(EditError::Engine)
@@ -150,7 +150,7 @@ pub fn Workbook() -> impl IntoView {
                 ) {
                     state.status.set(Some(StatusMessage::Error(e.to_string())));
                 }
-                let sheet_area = model.with_value(SheetArea::from_view);
+                let sheet_area = model.with_value(SheetRange::from_view);
                 state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
                     sheet_area,
                 }));
@@ -257,7 +257,7 @@ fn paste_from_clipboard(
                 return;
             }
             mutate(model, EvaluationMode::Immediate, |m| {
-                let area = SheetArea::from_view(m).to_ironcalc_area();
+                let area = SheetRange::from_view(m).to_ironcalc_area();
                 if let Err(e) = m.paste_csv_string(&area, &text) {
                     web_sys::console::warn_1(
                         &format!("[ironcalc] paste_csv_string failed: {e}").into(),

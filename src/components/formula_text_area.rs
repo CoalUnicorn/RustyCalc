@@ -15,10 +15,10 @@
 
 use leptos::prelude::*;
 
-use crate::canvas::SheetViewport;
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::model::FrontendModel;
 use crate::state::{EditFocus, ModelStore, WorkbookState};
+use iron_canvas::SheetViewport;
 
 #[component]
 pub fn FormulaTextArea() -> impl IntoView {

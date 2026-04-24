@@ -10,7 +10,7 @@ use std::ops::RangeInclusive;
 
 use ironcalc_base::UserModel;
 
-use crate::canvas::{Point, Span, HEADER_OFFSET};
+use crate::{Point, Span, HEADER_OFFSET};
 
 use super::super::geometry::{
     col_name, FrozenRC, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,

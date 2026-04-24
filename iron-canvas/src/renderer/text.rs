@@ -11,10 +11,9 @@ use ironcalc_base::UserModel;
 use super::super::geometry::PixelRect;
 use super::super::types::{CellText, TextLine};
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
-use crate::canvas::Span;
-use crate::coord::CellAddress;
-use crate::model::frontend_model::FrontendModel;
-use crate::model::{ResolvedCellStyle, ResolvedFont};
+use crate::model::{CellAddress, CssColor};
+use crate::style::{CellStyle, FontStyle};
+use crate::Span;
 
 pub(super) const CELL_PADDING: f64 = 4.0;
 pub(super) const DEFAULT_FONT_FAMILY: &str = "Inter, Arial, sans-serif";
@@ -54,9 +53,9 @@ impl CanvasRenderer {
         }
 
         // Destructure to move fields directly — avoids cloning `css`.
-        let ResolvedCellStyle {
+        let CellStyle {
             font:
-                ResolvedFont {
+                FontStyle {
                     css: font,
                     size_px: font_size,
                     underline: underlined,
@@ -68,7 +67,7 @@ impl CanvasRenderer {
             v_align: effective_v_align,
             wrap_text: wrap,
             ..
-        } = model.cell_style(addr, self.theme.default_text_color);
+        } = CellStyle::resolve_cell_style(&model, addr.sheet, addr.row, addr.column, &self.theme);
 
         let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
         let line_height = font_size * LINE_HEIGHT_FACTOR;
@@ -119,7 +118,7 @@ impl CanvasRenderer {
             clip: rect,
             font,
             font_size_px: font_size,
-            text_color,
+            text_color: CssColor::new(&text_color),
             underlined,
             strike,
             lines,

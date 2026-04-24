@@ -6,7 +6,7 @@ use std::ops::RangeInclusive;
 
 use ironcalc_base::UserModel;
 
-use crate::coord::CellArea;
+use crate::model::GridRange;
 
 pub const HEADER_OFFSET: f64 = 0.5;
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
@@ -348,7 +348,7 @@ impl<'a> SheetViewport<'a> {
     /// anchor. `None` for full-row/column/sheet selections, where `col_to_x` /
     /// `row_to_y` would walk up to 1M cells to produce an off-screen pixel.
     pub fn autofill_handle(&self) -> Option<Point> {
-        let area = CellArea::from_view(self.model).normalized();
+        let area = GridRange::from_view(&self.model).normalized();
         if area.r2 >= LAST_ROW || area.c2 >= LAST_COLUMN {
             return None;
         }

@@ -11,11 +11,12 @@
 use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::UserModel;
 
-use crate::canvas::{Point, Span};
-use crate::coord::CellAddress;
+use crate::{Point, Span};
 
 use super::super::geometry::{col_width, row_height, FrozenOffset, Line, PixelRect};
+use super::super::model::CellAddress;
 use super::super::types::{CellEdges, CellText, PaneRegion};
+
 use super::{CanvasRenderer, MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
 /// Which edge of a cell rectangle is being resolved.

@@ -8,9 +8,9 @@ use std::ops::RangeInclusive;
 
 use ironcalc_base::UserModel;
 
-use crate::canvas::Point;
-use crate::coord::{CellArea, FormulaRef, SheetArea};
 use crate::model::CssColor;
+use crate::model::{FormulaRef, GridRange, SheetArea};
+use crate::Point;
 
 use super::geometry::{
     col_width, row_height, FrozenRC, PixelRect, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT,
@@ -302,7 +302,7 @@ pub struct RenderOverlays {
     pub extend_to: Option<AutofillTarget>,
     pub clipboard: Option<SheetArea>,
     /// Range being pointed at during formula entry.
-    pub point_range: Option<CellArea>,
+    pub point_range: Option<GridRange>,
     /// All formula refs extracted from the current formula (multi-color overlays).
     pub formula_refs: Vec<FormulaRef>,
 }
