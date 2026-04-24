@@ -98,7 +98,7 @@ use wasm_bindgen::JsCast;
 use web_sys::js_sys;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use super::geometry::CanvasSize;
+use super::geometry::{CanvasSize, FrozenRC};
 use super::types::*;
 use crate::theme::CanvasTheme;
 
@@ -142,6 +142,10 @@ impl CanvasRenderer {
 
     /// Bind a renderer to `canvas` and apply device-pixel-ratio scaling.
     ///
+    /// `dpr` is injected by the caller (typically `window().device_pixel_ratio()`
+    /// from the Leptos shell) so this module stays free of framework globals —
+    /// a prerequisite for the future `rusty-calc-core` crate split.
+    ///
     /// **Performance note:** `canvas.set_width()` / `set_height()` resets the
     /// entire canvas bitmap and all 2D context state - even when the value is
     /// unchanged.  On a 1920x1080 display at 2x DPR that is a ~32 MB backing
@@ -153,7 +157,7 @@ impl CanvasRenderer {
     /// re-applying the DPR scale.  `clear_rect` in `render()` handles the
     /// pixel clear without touching the backing store.
     #[allow(clippy::expect_used)]
-    pub fn new(canvas: &HtmlCanvasElement, theme: CanvasTheme) -> Self {
+    pub fn new(canvas: &HtmlCanvasElement, theme: CanvasTheme, dpr: f64) -> Self {
         let ctx = canvas
             .get_context("2d")
             .expect("getContext should not throw")
@@ -162,7 +166,6 @@ impl CanvasRenderer {
 
         let width = canvas.client_width() as f64;
         let height = canvas.client_height() as f64;
-        let dpr = leptos::prelude::window().device_pixel_ratio();
 
         let target_w = (width * dpr) as u32;
         let target_h = (height * dpr) as u32;
@@ -219,18 +222,21 @@ impl CanvasRenderer {
         // Phase 1: Cell backgrounds + borders - four frozen-pane quadrants.
         // Performance note: Each pane is bounded by visible region, ensuring O(visible) complexity
         // regardless of selection size (whole sheet vs single cell).
-        self.render_pane(model, &mut cell_texts, PaneRegion::top_left(&frc));
-
         self.draw_frozen_separators(&frc);
 
+        self.render_pane(model, &mut cell_texts, PaneRegion::top_left(&frc));
         self.render_pane(model, &mut cell_texts, PaneRegion::top_right(&frc, &vis));
         self.render_pane(model, &mut cell_texts, PaneRegion::bottom_left(&frc, &vis));
         self.render_pane(model, &mut cell_texts, PaneRegion::bottom_right(&frc, &vis));
 
         // Phase 2: Headers + corner box
-        self.render_headers(model, Axis::Row, frc.row_band.as_ref(), frc.offset.y);
-        self.render_headers(model, Axis::Row, frc.row_band.as_ref(), frc.offset.y);
-        self.render_headers(model, Axis::Column, frc.col_band.as_ref(), frc.offset.x);
+        self.render_headers(model, Axis::Row, frc.row_band.as_ref(), frc.offset.origin.y);
+        self.render_headers(
+            model,
+            Axis::Column,
+            frc.col_band.as_ref(),
+            frc.offset.origin.x,
+        );
 
         self.draw_corner_box();
 

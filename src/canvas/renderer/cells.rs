@@ -14,8 +14,8 @@ use ironcalc_base::UserModel;
 use crate::canvas::{Point, Span};
 use crate::coord::CellAddress;
 
-use super::super::geometry::{col_width, row_height, Line, PixelRect};
-use super::super::types::{CellEdges, CellText, FrozenOffset, PaneRegion};
+use super::super::geometry::{col_width, row_height, FrozenOffset, Line, PixelRect};
+use super::super::types::{CellEdges, CellText, PaneRegion};
 use super::{CanvasRenderer, MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
 /// Which edge of a cell rectangle is being resolved.
@@ -164,7 +164,7 @@ impl CanvasRenderer {
             .map(|column| (column, col_width(model, column)))
             .collect();
 
-        let mut row_top = pane.start_y;
+        let mut row_top = pane.origin.y;
         for row in pane.rows.clone() {
             if row_top >= self.height {
                 break;
@@ -199,7 +199,7 @@ impl CanvasRenderer {
         row_h: f64,
         column_widths: &[(i32, f64)],
     ) {
-        let mut col_left = pane.start_x;
+        let mut col_left = pane.origin.x;
         for &(column, col_w) in column_widths {
             if col_left >= self.width {
                 break;

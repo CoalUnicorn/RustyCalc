@@ -6,13 +6,15 @@
 
 use ironcalc_base::UserModel;
 
+use crate::canvas::types::CellRC;
 use crate::canvas::{Point, HEADER_OFFSET};
 use crate::coord::CellArea;
 
 use super::super::geometry::{
-    col_width, row_height, PixelRect, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+    col_width, row_height, FrozenOffset, PixelRect, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+    LAST_COLUMN, LAST_ROW,
 };
-use super::super::types::{Axis, FrozenOffset, PixelOffsets, VisibleRegion};
+use super::super::types::{Axis, PixelOffsets, VisibleRegion};
 use super::CanvasRenderer;
 
 impl CanvasRenderer {
@@ -40,12 +42,12 @@ impl CanvasRenderer {
 
         let x = self.cell_x(model, range.c1, frozen);
         let y = self.cell_y(model, range.r1, frozen);
-        let right = if range.c2 > self.vis.col_last {
+        let right = if range.c2 > self.vis.last.column {
             self.width
         } else {
             self.cell_x(model, range.c2, frozen) + col_width(model, range.c2)
         };
-        let bottom = if range.r2 > self.vis.row_last {
+        let bottom = if range.r2 > self.vis.last.row {
             self.height
         } else {
             self.cell_y(model, range.r2, frozen) + row_height(model, range.r2)
@@ -65,17 +67,17 @@ impl CanvasRenderer {
     /// scrollable band *and* outside the frozen-band anchor on each axis.
     fn range_intersects_fold(&self, range: CellArea, frozen_rows: i32, frozen_cols: i32) -> bool {
         // Range entirely past the scrollable fold (right or below).
-        if range.c1 > self.vis.col_last && range.c1 > frozen_cols {
+        if range.c1 > self.vis.last.column && range.c1 > frozen_cols {
             return false;
         }
-        if range.r1 > self.vis.row_last && range.r1 > frozen_rows {
+        if range.r1 > self.vis.last.row && range.r1 > frozen_rows {
             return false;
         }
         // Range entirely before the scrollable fold (scrolled off to the left/top).
-        if range.c2 < self.vis.col_first && range.c2 > frozen_cols {
+        if range.c2 < self.vis.first.column && range.c2 > frozen_cols {
             return false;
         }
-        if range.r2 < self.vis.row_first && range.r2 > frozen_rows {
+        if range.r2 < self.vis.first.row && range.r2 > frozen_rows {
             return false;
         }
         true
@@ -91,7 +93,7 @@ impl CanvasRenderer {
                         + HEADER_OFFSET
                         + (1..index).map(|c| col_width(model, c)).sum::<f64>();
                 }
-                frozen.x + self.offsets.col_left(index)
+                frozen.origin.x + self.offsets.col_left(index)
             }
             Axis::Row => {
                 let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
@@ -100,7 +102,7 @@ impl CanvasRenderer {
                         + HEADER_OFFSET
                         + (1..index).map(|r| row_height(model, r)).sum::<f64>();
                 }
-                frozen.y + self.offsets.row_top(index)
+                frozen.origin.y + self.offsets.row_top(index)
             }
         }
     }
@@ -123,26 +125,26 @@ impl CanvasRenderer {
     pub(super) fn build_pixel_offsets(&self, model: &UserModel) -> PixelOffsets {
         let vis = self.vis;
 
-        let mut row_tops = Vec::with_capacity((vis.row_last - vis.row_first + 2) as usize);
+        let mut row_tops = Vec::with_capacity((vis.last.row - vis.first.row + 2) as usize);
         let mut acc = 0.0_f64;
-        for r in vis.row_first..=vis.row_last {
+        for r in vis.first.row..=vis.last.row {
             row_tops.push(acc);
             acc += row_height(model, r);
         }
         row_tops.push(acc); // one-past-end: bottom edge of last visible row
 
-        let mut col_lefts = Vec::with_capacity((vis.col_last - vis.col_first + 2) as usize);
+        let mut col_lefts = Vec::with_capacity((vis.last.column - vis.first.column + 2) as usize);
         acc = 0.0;
-        for c in vis.col_first..=vis.col_last {
+        for c in vis.first.column..=vis.last.column {
             col_lefts.push(acc);
             acc += col_width(model, c);
         }
         col_lefts.push(acc); // one-past-end: right edge of last visible col
 
         PixelOffsets {
-            row_start: vis.row_first,
+            row_start: vis.first.row,
             row_tops,
-            col_start: vis.col_first,
+            col_start: vis.first.column,
             col_lefts,
         }
     }
@@ -190,10 +192,14 @@ impl CanvasRenderer {
         }
 
         VisibleRegion {
-            col_first,
-            row_first,
-            col_last,
-            row_last,
+            first: CellRC {
+                column: col_first,
+                row: row_first,
+            },
+            last: CellRC {
+                column: col_last,
+                row: row_last,
+            },
         }
     }
 }

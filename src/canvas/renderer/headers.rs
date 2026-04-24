@@ -13,9 +13,9 @@ use ironcalc_base::UserModel;
 use crate::canvas::{Point, Span, HEADER_OFFSET};
 
 use super::super::geometry::{
-    col_name, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+    col_name, FrozenRC, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
-use super::super::types::{Axis, FrozenRC};
+use super::super::types::Axis;
 use super::text::DEFAULT_FONT_FAMILY;
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 
@@ -28,8 +28,8 @@ impl CanvasRenderer {
         self.ctx
             .set_stroke_style_str(self.theme.grid_separator_color);
 
-        let sep_y = frc.offset.y - FROZEN_SEP / 2.0 + HEADER_OFFSET;
-        let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
+        let sep_y = frc.offset.origin.y - FROZEN_SEP / 2.0 + HEADER_OFFSET;
+        let sep_x = frc.offset.origin.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
 
         self.with_stroke_width(FROZEN_SEP, |this| {
             if frc.row_band.is_some() {

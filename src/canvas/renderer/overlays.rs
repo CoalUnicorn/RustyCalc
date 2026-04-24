@@ -13,8 +13,8 @@ use crate::canvas::Point;
 use crate::coord::{CellAddress, CellArea, FormulaRef, SheetArea};
 use crate::theme::FORMULA_REF_COLORS;
 
-use super::super::geometry::{PixelRect, AUTOFILL_HANDLE_PX};
-use super::super::types::{AutofillTarget, DashFill, FrozenOffset};
+use super::super::geometry::{FrozenOffset, PixelRect, AUTOFILL_HANDLE_PX};
+use super::super::types::{AutofillTarget, DashFill};
 use super::{CanvasRenderer, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH, STANDARD_BORDER_WIDTH};
 
 impl CanvasRenderer {
