@@ -1,8 +1,5 @@
 use ironcalc_base::{
-    expressions::types::Area,
-    types::{CellType, HorizontalAlignment, VerticalAlignment},
-    worksheet::NavigationDirection,
-    UserModel,
+    expressions::types::Area, types::HorizontalAlignment, worksheet::NavigationDirection, UserModel,
 };
 
 use leptos::prelude::Set;
@@ -24,12 +21,6 @@ pub(crate) const SHEET_STATE_VISIBLE: &str = "visible";
 
 pub trait FrontendModel {
     // Query
-
-    /// Fully resolved style for one cell.
-    ///
-    /// `default_text_color` is the theme's text color (differs in dark mode);
-    /// the renderer passes `self.theme.default_text_color`, the toolbar passes `"#000000"`.
-    fn cell_style(&self, addr: Cell, default_text_color: &str) -> ResolvedCellStyle;
 
     /// Formatting state for the toolbar, derived from the active cell.
     fn toolbar_state(&self) -> ToolbarState;
@@ -133,66 +124,6 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
 }
 
 impl FrontendModel for UserModel<'_> {
-    fn cell_style(&self, addr: Cell, default_text_color: &str) -> ResolvedCellStyle {
-        let style = self
-            .get_cell_style(addr.sheet, addr.row, addr.column)
-            .unwrap_or_default();
-        let cell_type = self
-            .get_cell_type(addr.sheet, addr.row, addr.column)
-            .unwrap_or(CellType::Text);
-
-        let text_color = match style.font.color.as_deref() {
-            None | Some("#000000") => CssColor::new(default_text_color),
-            Some(c) => CssColor::new(c),
-        };
-
-        // Font
-        let size_px = style.font.sz as f64;
-        let bold = style.font.b;
-        let italic = style.font.i;
-        let family = font_family_from_name(&style.font.name);
-        let css = ResolvedFont::build(size_px, bold, italic, &family);
-        let font = ResolvedFont {
-            size_px,
-            underline: style.font.u,
-            strikethrough: style.font.strike,
-            css,
-        };
-
-        // Alignment
-        let alignment = style.alignment.as_ref();
-        let h_align = match alignment.map(|a| &a.horizontal) {
-            Some(HorizontalAlignment::Right) => HorizontalAlignment::Right,
-            Some(HorizontalAlignment::Center) | Some(HorizontalAlignment::CenterContinuous) => {
-                HorizontalAlignment::Center
-            }
-            Some(HorizontalAlignment::Left) | Some(HorizontalAlignment::Fill) => {
-                HorizontalAlignment::Left
-            }
-            Some(HorizontalAlignment::Justify) | Some(HorizontalAlignment::Distributed) => {
-                // Canvas 2D has no justify/distributed - fall back to left.
-                HorizontalAlignment::Left
-            }
-            // General or unset: numbers right, everything else left.
-            None | Some(HorizontalAlignment::General) => match cell_type {
-                CellType::Number => HorizontalAlignment::Right,
-                _ => HorizontalAlignment::Left,
-            },
-        };
-        let v_align = alignment
-            .map(|a| a.vertical.clone())
-            .unwrap_or(VerticalAlignment::Bottom);
-        let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
-
-        ResolvedCellStyle {
-            text_color,
-            font,
-            h_align,
-            v_align,
-            wrap_text,
-        }
-    }
-
     fn toolbar_state(&self) -> ToolbarState {
         let view = self.get_selected_view();
         let style = self
@@ -559,41 +490,6 @@ mod tests {
     #[allow(clippy::expect_used)]
     fn make_model() -> UserModel<'static> {
         UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("failed to create test model")
-    }
-
-    #[test]
-    fn cell_style_defaults_for_empty_cell() {
-        let m = make_model();
-        // Empty cell should have sensible defaults
-        let style = m.cell_style(
-            Cell {
-                sheet: 0,
-                row: 1,
-                column: 1,
-            },
-            "#000000",
-        );
-        // assert!(style.bg_color.is_none());
-        assert_eq!(style.text_color.as_str(), "#000000");
-        // Empty/missing cells return CellType::Number from the base library,
-        // so General alignment resolves to Right (no visible effect since
-        // empty cells produce no rendered text).
-        assert_eq!(style.h_align, HorizontalAlignment::Right);
-    }
-
-    #[test]
-    fn cell_style_uses_theme_color_for_automatic() {
-        let m = make_model();
-        // Empty cell style - should fall back to theme color
-        let style = m.cell_style(
-            Cell {
-                sheet: 0,
-                row: 1,
-                column: 1,
-            },
-            "#FFFFFF",
-        );
-        assert_eq!(style.text_color.as_str(), "#ffffff");
     }
 
     #[test]
