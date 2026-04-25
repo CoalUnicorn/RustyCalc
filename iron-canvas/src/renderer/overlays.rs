@@ -64,7 +64,7 @@ impl CanvasRenderer {
         // Restore the active cell's fill + borders on top of the selection
         // tint so its actual style shows through while selected. Phase 4
         // paints text over everything later.
-        self.repaint_active_cell(&frame.offsets, model, addr, frozen);
+        self.repaint_active_cell(model, addr);
 
         self.rect_stroke(b, self.theme.selection_color, SELECTION_BORDER_WIDTH);
 

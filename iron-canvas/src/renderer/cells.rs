@@ -11,12 +11,11 @@
 use ironcalc_base::types::{BorderItem, BorderStyle};
 
 use crate::renderer::text::CellText;
-use crate::renderer::viewport::PixelOffsets;
 use crate::{CanvasModel, Point, Span};
 
-use super::super::geometry::{col_width, row_height, FrozenOffset, Line, PixelRect};
+use super::super::geometry::{Line, PixelRect, SheetViewport};
 use super::super::model::CellAddress;
-use super::super::types::PaneRegion;
+use super::super::types::{OuterEdge, PaneRegion};
 
 use super::{CanvasRenderer, MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
@@ -40,18 +39,6 @@ enum BorderEdge {
 enum InnerEdge {
     Left,
     Top,
-}
-
-/// An outer edge of a cell rect that may receive a forced border stroke
-/// because the cell sits on a pane boundary. Only `Right` and `Bottom` are
-/// valid — left/top are inner edges resolved against neighbours.
-///
-/// Passed to `render_cell_style` as a small `&[OuterEdge]` slice; an empty
-/// slice means the cell is interior to its pane.
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub(crate) enum OuterEdge {
-    Right,
-    Bottom,
 }
 
 impl InnerEdge {
@@ -166,87 +153,12 @@ impl CanvasRenderer {
         cell_texts: &mut Vec<CellText>,
         pane: PaneRegion,
     ) {
-        if pane.rows.is_empty() || pane.cols.is_empty() {
-            return;
-        }
-
-        // Per-column width is read once and reused across every row in the pane.
-        // PixelOffsets caches prefix sums, not raw widths, so this still pays off.
-        let column_widths: Vec<(i32, f64)> = pane
-            .cols
-            .clone()
-            .map(|column| (column, col_width(model, column)))
-            .collect();
-
-        let mut row_top = pane.origin.y;
-        for row in pane.rows.clone() {
-            if row_top >= self.height {
-                break;
+        let canvas = self.canvas_size();
+        for cell in pane.cells(model, canvas) {
+            self.render_cell_style(model, cell.addr, cell.rect, cell.outer_edges);
+            if let Some(ct) = self.compute_cell_text(model, cell.addr, cell.rect) {
+                cell_texts.push(ct);
             }
-            let row_h = row_height(model, row);
-            if row_h > 0.0 {
-                self.render_pane_row(
-                    model,
-                    cell_texts,
-                    &pane,
-                    row,
-                    row_top,
-                    row_h,
-                    &column_widths,
-                );
-            }
-            row_top += row_h;
-        }
-    }
-
-    /// Paint one row of a pane: iterate visible columns, drop zero-width and
-    /// off-canvas cells, forward each visible cell to `render_cell_style` and
-    /// collect its text layout.
-    #[allow(clippy::too_many_arguments)]
-    fn render_pane_row(
-        &self,
-        model: &dyn CanvasModel,
-        cell_texts: &mut Vec<CellText>,
-        pane: &PaneRegion,
-        row: i32,
-        row_top: f64,
-        row_h: f64,
-        column_widths: &[(i32, f64)],
-    ) {
-        let mut col_left = pane.origin.x;
-        for &(column, col_w) in column_widths {
-            if col_left >= self.width {
-                break;
-            }
-            if col_w > 0.0 {
-                let rect = PixelRect {
-                    top_left: Point {
-                        x: col_left,
-                        y: row_top,
-                    },
-                    width: col_w,
-                    height: row_h,
-                };
-                if rect.intersects(self.canvas_size()) {
-                    let addr = CellAddress {
-                        sheet: model.get_selected_sheet(),
-                        row,
-                        column,
-                    };
-                    let pane_outer: &[OuterEdge] =
-                        match (column == pane.last_col, row == pane.last_row) {
-                            (true, true) => &[OuterEdge::Right, OuterEdge::Bottom],
-                            (true, false) => &[OuterEdge::Right],
-                            (false, true) => &[OuterEdge::Bottom],
-                            (false, false) => &[],
-                        };
-                    self.render_cell_style(model, addr, rect, pane_outer);
-                    if let Some(ct) = self.compute_cell_text(model, addr, rect) {
-                        cell_texts.push(ct);
-                    }
-                }
-            }
-            col_left += col_w;
         }
     }
 
@@ -331,22 +243,9 @@ impl CanvasRenderer {
     ///
     /// Used by selection overlay to restore the active cell's real style on
     /// top of the semi-transparent selection fill. Computes pixel position
-    /// internally so the caller only needs logical `(row,column)`.
-    pub(super) fn repaint_active_cell(
-        &self,
-        offsets: &PixelOffsets,
-        model: &dyn CanvasModel,
-        addr: CellAddress,
-        frozen: &FrozenOffset,
-    ) {
-        let rect = PixelRect {
-            top_left: Point {
-                x: self.cell_x(offsets, model, addr.column, frozen),
-                y: self.cell_y(offsets, model, addr.row, frozen),
-            },
-            width: col_width(model, addr.column),
-            height: row_height(model, addr.row),
-        };
+    /// via `SheetViewport` so the caller only needs logical `(row,column)`.
+    pub(super) fn repaint_active_cell(&self, model: &dyn CanvasModel, addr: CellAddress) {
+        let rect = SheetViewport::current(model).cell_rect(addr.row, addr.column);
         self.render_cell_style(model, addr, rect, &[OuterEdge::Right, OuterEdge::Bottom]);
     }
 

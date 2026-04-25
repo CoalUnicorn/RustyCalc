@@ -6,12 +6,13 @@
 
 use std::ops::RangeInclusive;
 
-use crate::model::{FormulaRef, RCRange, SheetArea};
+use crate::model::{CellAddress, FormulaRef, RCRange, SheetArea};
 use crate::renderer::{AutofillTarget, VisibleRegion};
 use crate::{CanvasModel, Point};
 
 use super::geometry::{
-    col_width, row_height, FrozenRC, PixelRect, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT,
+    col_width, row_height, CanvasSize, FrozenRC, PixelRect, HEADER_COL_WIDTH, HEADER_OFFSET,
+    HEADER_ROW_HEIGHT,
 };
 
 //  Shared axis — row-vs-column symmetry
@@ -118,6 +119,16 @@ pub(crate) struct PaneRegion {
     pub last_row: i32,
 }
 
+/// Outer edge of a cell rect that may be forced to stroke a border because
+/// the cell sits on a pane boundary. Only `Right` and `Bottom` are valid —
+/// left/top are inner edges resolved against neighbour cells inside the
+/// pane.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub(crate) enum OuterEdge {
+    Right,
+    Bottom,
+}
+
 impl PaneRegion {
     /// Frozen rows x frozen cols - top-left quadrant.
     pub(crate) fn top_left(frc: &FrozenRC) -> Self {
@@ -176,6 +187,139 @@ impl PaneRegion {
             },
             last_col: vis.last.column,
             last_row: vis.last.row,
+        }
+    }
+
+    /// Outer borders this `(row, col)` must draw because it sits on a pane
+    /// boundary. Empty slice for interior cells. Static slices — no
+    /// allocation per cell.
+    pub(crate) fn outer_edges_at(&self, row: i32, col: i32) -> &'static [OuterEdge] {
+        match (col == self.last_col, row == self.last_row) {
+            (true, true) => &[OuterEdge::Right, OuterEdge::Bottom],
+            (true, false) => &[OuterEdge::Right],
+            (false, true) => &[OuterEdge::Bottom],
+            (false, false) => &[],
+        }
+    }
+
+    /// Walk every visible cell in this pane, yielding pixel rect + outer
+    /// edges per cell. Replaces the open-coded row/col iteration that used
+    /// to live in `render_pane` / `render_pane_row`. The caller passes the
+    /// canvas size so the walker can early-break past the canvas edge.
+    pub(crate) fn cells<'a>(
+        &'a self,
+        model: &'a dyn CanvasModel,
+        canvas: CanvasSize,
+    ) -> PaneCells<'a> {
+        let column_widths: Vec<(i32, f64)> = self
+            .cols
+            .clone()
+            .map(|c| (c, col_width(model, c)))
+            .collect();
+        PaneCells {
+            pane: self,
+            model,
+            sheet: model.get_selected_sheet(),
+            canvas,
+            column_widths,
+            row_iter: self.rows.clone(),
+            row_top: self.origin.y,
+            current_row: None,
+            col_idx: 0,
+            col_left: self.origin.x,
+        }
+    }
+}
+
+/// One cell yielded by a `PaneCells` walk: the address, its pixel rect at
+/// the current scroll, and any outer pane-boundary borders the renderer
+/// must force-draw on it.
+#[derive(Clone, Copy)]
+pub(crate) struct CellSlot {
+    pub addr: CellAddress,
+    pub rect: PixelRect,
+    pub outer_edges: &'static [OuterEdge],
+}
+
+/// Stateful walk over the cells of a `PaneRegion`. Caches per-pane column
+/// widths once, threads a row-top accumulator across rows, and skips
+/// hidden rows/columns as well as cells that fall off the canvas. Replaces
+/// the parameter cluster that used to feed `render_pane_row`.
+pub(crate) struct PaneCells<'a> {
+    pane: &'a PaneRegion,
+    model: &'a dyn CanvasModel,
+    sheet: u32,
+    canvas: CanvasSize,
+    column_widths: Vec<(i32, f64)>,
+    row_iter: RangeInclusive<i32>,
+    row_top: f64,
+    /// `(row, height)` of the row currently being walked. `None` when we
+    /// need to pull the next row from `row_iter`.
+    current_row: Option<(i32, f64)>,
+    col_idx: usize,
+    col_left: f64,
+}
+
+impl<'a> Iterator for PaneCells<'a> {
+    type Item = CellSlot;
+
+    fn next(&mut self) -> Option<CellSlot> {
+        loop {
+            // Acquire a row strip if we don't have one in flight.
+            if self.current_row.is_none() {
+                let row = self.row_iter.next()?;
+                // Past the canvas bottom — nothing more in this pane will
+                // ever be visible.
+                if self.row_top >= self.canvas.h {
+                    return None;
+                }
+                let h = row_height(self.model, row);
+                // Hidden row (height 0): skip without advancing row_top.
+                if h <= 0.0 {
+                    continue;
+                }
+                self.current_row = Some((row, h));
+                self.col_idx = 0;
+                self.col_left = self.pane.origin.x;
+            }
+            let (row, row_h) = self.current_row.expect("set above");
+
+            while self.col_idx < self.column_widths.len() {
+                let (col, col_w) = self.column_widths[self.col_idx];
+                let col_left = self.col_left;
+                self.col_idx += 1;
+                self.col_left += col_w;
+
+                if col_left >= self.canvas.w {
+                    break;
+                }
+                if col_w <= 0.0 {
+                    continue;
+                }
+                let rect = PixelRect {
+                    top_left: Point {
+                        x: col_left,
+                        y: self.row_top,
+                    },
+                    width: col_w,
+                    height: row_h,
+                };
+                if !rect.intersects(self.canvas) {
+                    continue;
+                }
+                return Some(CellSlot {
+                    addr: CellAddress {
+                        sheet: self.sheet,
+                        row,
+                        column: col,
+                    },
+                    rect,
+                    outer_edges: self.pane.outer_edges_at(row, col),
+                });
+            }
+
+            self.row_top += row_h;
+            self.current_row = None;
         }
     }
 }

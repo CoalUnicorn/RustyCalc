@@ -88,9 +88,9 @@ impl CanvasRenderer {
     /// band is present; ignored otherwise.
     pub(super) fn render_headers(
         &self,
-        vis: &VisibleRegion,
         model: &dyn CanvasModel,
         axis: Axis,
+        vis: &VisibleRegion,
         frozen_band: Option<&RangeInclusive<i32>>,
         frozen_origin: f64,
     ) {

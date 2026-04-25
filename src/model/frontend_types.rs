@@ -32,7 +32,7 @@ pub enum SafeFontFamily {
     Georgia,
     TimesNewRoman,
     Verdana,
-    /// Fallback for any unrecognised font name.
+    /// Fallback for any unrecognized font name.
     SystemUi,
 }
 

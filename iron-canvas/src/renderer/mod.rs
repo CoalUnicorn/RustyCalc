@@ -243,16 +243,16 @@ impl CanvasRenderer {
 
         // Phase 2: Headers + corner box
         self.render_headers(
-            &frame.vis,
             model,
             Axis::Row,
+            &frame.vis,
             frc.row_band.as_ref(),
             frc.offset.origin.y,
         );
         self.render_headers(
-            &frame.vis,
             model,
             Axis::Column,
+            &frame.vis,
             frc.col_band.as_ref(),
             frc.offset.origin.x,
         );

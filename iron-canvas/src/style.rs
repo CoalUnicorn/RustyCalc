@@ -32,7 +32,8 @@ impl CellStyle {
         let bold = style.font.b;
         let italic = style.font.i;
         let family = &style.font.name;
-        let css = FontStyle::build(size_px, bold, italic, family, "Arial");
+        // Fallback to default as in IronCalc Font name default.
+        let css = FontStyle::build(size_px, bold, italic, family, "Calibri");
         let font = FontStyle {
             size_px,
             underline: style.font.u,
