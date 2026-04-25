@@ -6,20 +6,18 @@
 //! hands each one to `render_cell_text`.
 
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
-use ironcalc_base::UserModel;
 
 use super::super::geometry::PixelRect;
-use super::super::types::{CellText, TextLine};
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 use crate::model::{CellAddress, CssColor};
 use crate::style::{CellStyle, FontStyle};
-use crate::Span;
+use crate::{CanvasModel, Span};
 
 pub(super) const CELL_PADDING: f64 = 4.0;
 pub(super) const DEFAULT_FONT_FAMILY: &str = "Inter, Arial, sans-serif";
-// With textBaseline:"middle", center_y is the em-square midpoint. The
-// typographic baseline sits at ~center_y + font_size*0.15; 0.35x puts the
-// underline just below the baseline, clear of the glyphs.
+/// With `textBaseline: "middle"`, `center_y` is the em-square midpoint. The
+/// typographic baseline sits at ~`center_y + font_size * 0.15`; `0.35` puts
+/// the underline just below the baseline, clear of the glyphs.
 const UNDERLINE_OFFSET_FACTOR: f64 = 0.35;
 const MIN_UNDERLINE_OFFSET: f64 = 2.0;
 const CHAR_WIDTH_FACTOR: f64 = 0.6;
@@ -28,12 +26,35 @@ const LINE_HEIGHT_FACTOR: f64 = 1.5;
 /// Applied at top-align (rect top) and bottom-align (rect bottom).
 const TEXT_V_INSET_PX: f64 = 4.0;
 
+/// One visual line of text inside a cell, positioned for center-aligned rendering.
+pub struct TextLine {
+    pub text: String,
+    pub center_x: f64,
+    pub center_y: f64,
+    pub width: f64,
+}
+
+/// Pre-computed text layout for one cell.
+///
+/// Collected during Phase 1 (cell backgrounds) and painted in Phase 4 so
+/// text always renders on top of selection fills and header lines.
+pub(crate) struct CellText {
+    /// Clip rectangle - the cell's pixel bounds.
+    pub clip: PixelRect,
+    pub font: String,
+    pub font_size_px: f64,
+    pub text_color: CssColor,
+    pub underlined: bool,
+    pub strike: bool,
+    pub lines: Vec<TextLine>,
+}
+
 impl CanvasRenderer {
     /// Build the text layout for a cell; returns `None` for empty or
     /// too-small cells.
     pub(super) fn compute_cell_text(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         addr: CellAddress,
         rect: PixelRect,
     ) -> Option<CellText> {
@@ -67,7 +88,7 @@ impl CanvasRenderer {
             v_align: effective_v_align,
             wrap_text: wrap,
             ..
-        } = CellStyle::resolve_cell_style(&model, addr.sheet, addr.row, addr.column, &self.theme);
+        } = CellStyle::resolve_cell_style(model, addr.sheet, addr.row, addr.column, &self.theme);
 
         let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
         let line_height = font_size * LINE_HEIGHT_FACTOR;

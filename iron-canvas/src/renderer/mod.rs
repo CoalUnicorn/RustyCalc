@@ -92,15 +92,18 @@ mod paint;
 mod text;
 mod viewport;
 
-use ironcalc_base::UserModel;
-
 use wasm_bindgen::JsCast;
 use web_sys::js_sys;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use super::geometry::{CanvasSize, FrozenRC};
 use super::types::*;
+use crate::renderer::text::CellText;
+use crate::renderer::viewport::PixelOffsets;
 use crate::theme::CanvasTheme;
+use crate::CanvasModel;
+pub use overlays::AutofillTarget;
+pub(crate) use viewport::VisibleRegion;
 
 // Layout constants
 pub(super) const SELECTION_BORDER_WIDTH: f64 = 2.0;
@@ -114,12 +117,6 @@ pub struct CanvasRenderer {
     width: f64,
     height: f64,
     theme: CanvasTheme,
-    /// Visible cell bounds - populated at the start of each `render()` call.
-    /// Stored on the struct so internal helpers don't need it as a parameter.
-    vis: VisibleRegion,
-    /// Precomputed pixel offsets for visible rows/cols - populated alongside
-    /// `vis`. Turns `cell_x`/`cell_y` from O(visible x R) into O(1).
-    offsets: PixelOffsets,
     /// Cached dash pattern passed to `set_line_dash` on every dashed stroke
     /// (clipboard ants, point-mode range, formula refs).
     /// Single overlay pass can hit this N times per frame.
@@ -127,6 +124,12 @@ pub struct CanvasRenderer {
     dash_pattern: js_sys::Array,
     /// Empty array used to clear the dash pattern after a dashed stroke.
     dash_empty: js_sys::Array,
+}
+
+#[derive(Debug)]
+pub(crate) struct FrameContext {
+    pub vis: VisibleRegion,
+    pub offsets: PixelOffsets,
 }
 
 impl CanvasRenderer {
@@ -187,17 +190,17 @@ impl CanvasRenderer {
             width,
             height,
             theme,
-            vis: VisibleRegion::default(),
-            offsets: PixelOffsets::default(),
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
         }
     }
 
     /// Renders only visible cells regardless of selection size.
-    pub fn render(&mut self, model: &UserModel, overlays: &RenderOverlays) {
-        // Calculate visible region FIRST - this is independent of selection
-        self.vis = self.visible_cells(model);
+    pub fn render(&mut self, model: &dyn CanvasModel, overlays: &RenderOverlays) {
+        // Per-frame geometric snapshot: which cells are on screen and where
+        // their pixel offsets sit. Owned on the stack here, passed by reference
+        // into every helper. Never lives between frames.
+        let vis = self.visible_cells(model);
 
         let ctx = &self.ctx;
         ctx.set_line_width(STANDARD_BORDER_WIDTH);
@@ -208,12 +211,9 @@ impl CanvasRenderer {
         // Frozen counts + pixel origin, computed once per frame.
         let frc = FrozenRC::from_model(model);
 
-        //let dyn_row_h = row_height(model, view.row);
-        //let dyn_phase = DynamicFreeze::phase(scroll_y, dyn_row_h, row_top_act, row_top_foot);
-
         // Build prefix-sum cache now that vis and sheet are both known.
-        self.offsets = self.build_pixel_offsets(model);
-        let vis = self.vis;
+        let offsets = self.build_pixel_offsets(&vis, model);
+        let frame = FrameContext { vis, offsets };
 
         // Cell texts are collected across ALL panes and rendered last (Phase 4)
         // so they always appear on top of backgrounds, selection fill, and headers.
@@ -225,13 +225,32 @@ impl CanvasRenderer {
         self.draw_frozen_separators(&frc);
 
         self.render_pane(model, &mut cell_texts, PaneRegion::top_left(&frc));
-        self.render_pane(model, &mut cell_texts, PaneRegion::top_right(&frc, &vis));
-        self.render_pane(model, &mut cell_texts, PaneRegion::bottom_left(&frc, &vis));
-        self.render_pane(model, &mut cell_texts, PaneRegion::bottom_right(&frc, &vis));
+        self.render_pane(
+            model,
+            &mut cell_texts,
+            PaneRegion::top_right(&frc, &frame.vis),
+        );
+        self.render_pane(
+            model,
+            &mut cell_texts,
+            PaneRegion::bottom_left(&frc, &frame.vis),
+        );
+        self.render_pane(
+            model,
+            &mut cell_texts,
+            PaneRegion::bottom_right(&frc, &frame.vis),
+        );
 
         // Phase 2: Headers + corner box
-        self.render_headers(model, Axis::Row, frc.row_band.as_ref(), frc.offset.origin.y);
         self.render_headers(
+            &frame.vis,
+            model,
+            Axis::Row,
+            frc.row_band.as_ref(),
+            frc.offset.origin.y,
+        );
+        self.render_headers(
+            &frame.vis,
             model,
             Axis::Column,
             frc.col_band.as_ref(),
@@ -241,17 +260,17 @@ impl CanvasRenderer {
         self.draw_corner_box();
 
         // Phase 3: Selection outline
-        self.draw_selection(model, &frc.offset);
+        self.draw_selection(model, &frc.offset, &frame);
         if let Some(target) = overlays.extend_to {
-            self.draw_extend_preview(model, &frc.offset, target);
+            self.draw_extend_preview(model, &frc.offset, &frame, target);
         }
 
         // Secondary overlays: clipboard marching ants, point-mode range,
         // formula-ref highlights. Each no-ops if its data is absent or lives
         // on another sheet.
-        self.draw_clipboard_overlay(model, &frc.offset, overlays.clipboard.as_ref());
-        self.draw_point_overlay(model, &frc.offset, overlays.point_range);
-        self.draw_formula_ref_overlays(model, &frc.offset, &overlays.formula_refs);
+        self.draw_clipboard_overlay(model, &frc.offset, &frame, overlays.clipboard.as_ref());
+        self.draw_point_overlay(model, &frc.offset, &frame, overlays.point_range);
+        self.draw_formula_ref_overlays(model, &frc.offset, &frame, &overlays.formula_refs);
 
         // Phase 4: Cell text - always on top
         // Rendered after selection fill so text is readable over the blue tint,

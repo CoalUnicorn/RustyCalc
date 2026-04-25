@@ -4,9 +4,8 @@
 use std::fmt::{self, Display};
 use std::ops::RangeInclusive;
 
-use ironcalc_base::UserModel;
-
-use crate::model::GridRange;
+use crate::model::RCRange;
+use crate::CanvasModel;
 
 pub const HEADER_OFFSET: f64 = 0.5;
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
@@ -25,14 +24,14 @@ pub const LAST_COLUMN: i32 = 16_384;
 
 /// Row height for `row` on `sheet`, falling back to `DEFAULT_ROW_HEIGHT`.
 #[inline]
-pub fn row_height(m: &UserModel, row: i32) -> f64 {
+pub fn row_height(m: &dyn CanvasModel, row: i32) -> f64 {
     m.get_row_height(m.get_selected_sheet(), row)
         .unwrap_or(DEFAULT_ROW_HEIGHT)
 }
 
 /// Column width for `col` on `sheet`, falling back to `DEFAULT_COL_WIDTH`.
 #[inline]
-pub fn col_width(m: &UserModel, col: i32) -> f64 {
+pub fn col_width(m: &dyn CanvasModel, col: i32) -> f64 {
     m.get_column_width(m.get_selected_sheet(), col)
         .unwrap_or(DEFAULT_COL_WIDTH)
 }
@@ -180,7 +179,7 @@ pub struct FrozenRC {
 
 impl FrozenRC {
     /// Read frozen geometry from the currently-selected sheet on `model`.
-    pub fn from_model(model: &UserModel) -> Self {
+    pub fn from_model(model: &dyn CanvasModel) -> Self {
         let sheet = model.get_selected_sheet();
         let rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
@@ -217,7 +216,7 @@ impl FrozenRC {
 /// the view's scroll anchors, and the frozen-pane pixel splits bundled
 /// together.
 pub struct SheetViewport<'a> {
-    model: &'a UserModel<'a>,
+    model: &'a dyn CanvasModel,
     left_column: i32,
     top_row: i32,
     frozen: FrozenRC,
@@ -225,7 +224,7 @@ pub struct SheetViewport<'a> {
 
 impl<'a> SheetViewport<'a> {
     /// Snapshot the currently-selected sheet with its current scroll state.
-    pub fn current(model: &'a UserModel<'a>) -> Self {
+    pub fn current(model: &'a dyn CanvasModel) -> Self {
         let view = model.get_selected_view();
         Self::from_parts(model, view.left_column, view.top_row)
     }
@@ -233,7 +232,7 @@ impl<'a> SheetViewport<'a> {
     /// Build from explicit anchors. Shims whose callers already destructured
     /// the view use this; callers that only need one anchor may pass any value
     /// for the other (the method dispatched will ignore it).
-    pub fn from_parts(model: &'a UserModel<'a>, left_column: i32, top_row: i32) -> Self {
+    pub fn from_parts(model: &'a dyn CanvasModel, left_column: i32, top_row: i32) -> Self {
         Self {
             model,
             left_column,
@@ -348,7 +347,7 @@ impl<'a> SheetViewport<'a> {
     /// anchor. `None` for full-row/column/sheet selections, where `col_to_x` /
     /// `row_to_y` would walk up to 1M cells to produce an off-screen pixel.
     pub fn autofill_handle(&self) -> Option<Point> {
-        let area = GridRange::from_view(&self.model).normalized();
+        let area = RCRange::from_view(self.model).normalized();
         if area.r2 >= LAST_ROW || area.c2 >= LAST_COLUMN {
             return None;
         }

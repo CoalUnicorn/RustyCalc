@@ -4,18 +4,72 @@
 //! All methods in this module are called during a frame and must take `&self`
 //! — only `CanvasRenderer::new` and `render` itself mutate `self`.
 
-use ironcalc_base::UserModel;
-
-use crate::model::GridRange;
-use crate::types::CellRC;
-use crate::{Point, HEADER_OFFSET};
+use crate::model::RCRange;
+use crate::{CanvasModel, Point, HEADER_OFFSET};
 
 use super::super::geometry::{
     col_width, row_height, FrozenOffset, PixelRect, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
     LAST_COLUMN, LAST_ROW,
 };
-use super::super::types::{Axis, PixelOffsets, VisibleRegion};
-use super::CanvasRenderer;
+use super::super::types::Axis;
+use super::{CanvasRenderer, FrameContext};
+
+/// The four index boundaries of the visible (scrollable) area.
+#[derive(Debug, Default)]
+pub struct VisibleRegion {
+    /// First scrollable column on screen.
+    pub first: CellRC,
+    pub last: CellRC,
+}
+
+#[derive(Debug, Default)]
+pub struct CellRC {
+    pub row: i32,
+    pub column: i32,
+}
+
+/// Precomputed pixel offsets for visible rows and columns.
+///
+/// Built once per render call from the same iteration used to determine
+/// `VisibleRegion`. Eliminates the O(visible_range x R) summation inside
+/// `cell_x`/`cell_y` - each lookup becomes O(1).
+///
+/// Offsets are relative to `FrozenOffset`: `row_tops[i]` is the Y distance
+/// from `frozen.y` to the top edge of row `(row_start + i as i32)`.
+/// `row_start` equals `vis.row_first`.
+#[derive(Debug, Default)]
+pub(crate) struct PixelOffsets {
+    pub row_start: i32,
+    /// `row_tops[i]` = cumulative Y from `frozen.y` to top of row `(row_start + i)`.
+    pub row_tops: Vec<f64>,
+    pub col_start: i32,
+    /// `col_lefts[i]` = cumulative X from `frozen.x` to left of col `(col_start + i)`.
+    pub col_lefts: Vec<f64>,
+}
+
+impl PixelOffsets {
+    /// Y distance from `frozen.y` to the top edge of `row`.
+    ///
+    /// Returns `0.0` for rows outside the precomputed range. In practice
+    /// `range_pixel_bounds` clamps oversized selections to the canvas edge
+    /// before calling `cell_y`, so this fallback is never reached.
+    #[inline]
+    pub fn row_top(&self, row: i32) -> f64 {
+        self.row_tops
+            .get((row - self.row_start) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// X distance from `frozen.x` to the left edge of `col`.
+    #[inline]
+    pub fn col_left(&self, col: i32) -> f64 {
+        self.col_lefts
+            .get((col - self.col_start) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+}
 
 impl CanvasRenderer {
     /// Map a sheet-coordinate range to canvas pixel bounds, clamping oversized
@@ -28,29 +82,30 @@ impl CanvasRenderer {
     /// column BB is scrolled out of view.
     pub(super) fn range_pixel_bounds(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         frozen: &FrozenOffset,
-        range: GridRange,
+        frame: &FrameContext,
+        range: RCRange,
     ) -> Option<PixelRect> {
         let sheet = model.get_selected_sheet();
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
-        if !self.range_intersects_fold(range, frozen_rows, frozen_cols) {
+        if !self.range_intersects_fold(&frame.vis, range, frozen_rows, frozen_cols) {
             return None;
         }
 
-        let x = self.cell_x(model, range.c1, frozen);
-        let y = self.cell_y(model, range.r1, frozen);
-        let right = if range.c2 > self.vis.last.column {
+        let x = self.cell_x(&frame.offsets, model, range.c1, frozen);
+        let y = self.cell_y(&frame.offsets, model, range.r1, frozen);
+        let right = if range.c2 > frame.vis.last.column {
             self.width
         } else {
-            self.cell_x(model, range.c2, frozen) + col_width(model, range.c2)
+            self.cell_x(&frame.offsets, model, range.c2, frozen) + col_width(model, range.c2)
         };
-        let bottom = if range.r2 > self.vis.last.row {
+        let bottom = if range.r2 > frame.vis.last.row {
             self.height
         } else {
-            self.cell_y(model, range.r2, frozen) + row_height(model, range.r2)
+            self.cell_y(&frame.offsets, model, range.r2, frozen) + row_height(model, range.r2)
         };
         Some(PixelRect {
             top_left: Point { x, y },
@@ -65,25 +120,38 @@ impl CanvasRenderer {
     ///
     /// A range is drawable when neither corner is strictly past the visible
     /// scrollable band *and* outside the frozen-band anchor on each axis.
-    fn range_intersects_fold(&self, range: GridRange, frozen_rows: i32, frozen_cols: i32) -> bool {
+    fn range_intersects_fold(
+        &self,
+        vis: &VisibleRegion,
+        range: RCRange,
+        frozen_rows: i32,
+        frozen_cols: i32,
+    ) -> bool {
         // Range entirely past the scrollable fold (right or below).
-        if range.c1 > self.vis.last.column && range.c1 > frozen_cols {
+        if range.c1 > vis.last.column && range.c1 > frozen_cols {
             return false;
         }
-        if range.r1 > self.vis.last.row && range.r1 > frozen_rows {
+        if range.r1 > vis.last.row && range.r1 > frozen_rows {
             return false;
         }
         // Range entirely before the scrollable fold (scrolled off to the left/top).
-        if range.c2 < self.vis.first.column && range.c2 > frozen_cols {
+        if range.c2 < vis.first.column && range.c2 > frozen_cols {
             return false;
         }
-        if range.r2 < self.vis.first.row && range.r2 > frozen_rows {
+        if range.r2 < vis.first.row && range.r2 > frozen_rows {
             return false;
         }
         true
     }
 
-    fn cell_offset(&self, model: &UserModel, axis: Axis, index: i32, frozen: &FrozenOffset) -> f64 {
+    fn cell_offset(
+        &self,
+        offsets: &PixelOffsets,
+        model: &dyn CanvasModel,
+        axis: Axis,
+        index: i32,
+        frozen: &FrozenOffset,
+    ) -> f64 {
         let sheet = model.get_selected_sheet();
         match axis {
             Axis::Column => {
@@ -93,7 +161,7 @@ impl CanvasRenderer {
                         + HEADER_OFFSET
                         + (1..index).map(|c| col_width(model, c)).sum::<f64>();
                 }
-                frozen.origin.x + self.offsets.col_left(index)
+                frozen.origin.x + offsets.col_left(index)
             }
             Axis::Row => {
                 let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
@@ -102,29 +170,44 @@ impl CanvasRenderer {
                         + HEADER_OFFSET
                         + (1..index).map(|r| row_height(model, r)).sum::<f64>();
                 }
-                frozen.origin.y + self.offsets.row_top(index)
+                frozen.origin.y + offsets.row_top(index)
             }
         }
     }
 
-    pub(super) fn cell_x(&self, model: &UserModel, col: i32, frozen: &FrozenOffset) -> f64 {
-        self.cell_offset(model, Axis::Column, col, frozen)
+    pub(super) fn cell_x(
+        &self,
+        offsets: &PixelOffsets,
+        model: &dyn CanvasModel,
+        col: i32,
+        frozen: &FrozenOffset,
+    ) -> f64 {
+        self.cell_offset(offsets, model, Axis::Column, col, frozen)
     }
 
-    pub(super) fn cell_y(&self, model: &UserModel, row: i32, frozen: &FrozenOffset) -> f64 {
-        self.cell_offset(model, Axis::Row, row, frozen)
+    pub(super) fn cell_y(
+        &self,
+        offsets: &PixelOffsets,
+        model: &dyn CanvasModel,
+        row: i32,
+        frozen: &FrozenOffset,
+    ) -> f64 {
+        self.cell_offset(offsets, model, Axis::Row, row, frozen)
     }
 
     /// Build a prefix-sum pixel-offset table for all visible rows and columns.
     ///
     /// Each `row_tops[i]` is the cumulative Y distance from `frozen.y` to the
     /// top edge of row `(vis.row_first + i)`. Built in a single O(visible)
-    /// pass — same rows/cols that `visible_cells` already iterated. Stored on
-    /// `self.offsets` so `cell_x`/`cell_y` become O(1) array lookups instead
-    /// of O(visible × R) summations (where R = len of IronCalc's `rows` Vec).
-    pub(super) fn build_pixel_offsets(&self, model: &UserModel) -> PixelOffsets {
-        let vis = self.vis;
-
+    /// pass — same rows/cols that `visible_cells` already iterated. The
+    /// returned table feeds `cell_x`/`cell_y` so they become O(1) array
+    /// lookups instead of O(visible × R) summations (where R = len of
+    /// IronCalc's `rows` Vec).
+    pub(super) fn build_pixel_offsets(
+        &self,
+        vis: &VisibleRegion,
+        model: &dyn CanvasModel,
+    ) -> PixelOffsets {
         let mut row_tops = Vec::with_capacity((vis.last.row - vis.first.row + 2) as usize);
         let mut acc = 0.0_f64;
         for r in vis.first.row..=vis.last.row {
@@ -156,7 +239,7 @@ impl CanvasRenderer {
     /// (whole sheet, single cell, etc.). Scans rows/cols until the canvas is
     /// filled, capping at `SCAN_CAP` to prevent O(LAST_ROW) iteration when
     /// many rows are explicitly hidden (height = 0).
-    pub(super) fn visible_cells(&self, model: &UserModel) -> VisibleRegion {
+    pub(super) fn visible_cells(&self, model: &dyn CanvasModel) -> VisibleRegion {
         const SCAN_CAP: i32 = 2_048;
 
         let view = model.get_selected_view();

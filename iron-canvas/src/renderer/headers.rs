@@ -8,15 +8,14 @@
 
 use std::ops::RangeInclusive;
 
-use ironcalc_base::UserModel;
-
-use crate::{Point, Span, HEADER_OFFSET};
+use crate::{CanvasModel, Point, Span, HEADER_OFFSET};
 
 use super::super::geometry::{
     col_name, FrozenRC, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
 use super::super::types::Axis;
 use super::text::DEFAULT_FONT_FAMILY;
+use super::viewport::VisibleRegion;
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 
 impl CanvasRenderer {
@@ -89,7 +88,8 @@ impl CanvasRenderer {
     /// band is present; ignored otherwise.
     pub(super) fn render_headers(
         &self,
-        model: &UserModel,
+        vis: &VisibleRegion,
+        model: &dyn CanvasModel,
         axis: Axis,
         frozen_band: Option<&RangeInclusive<i32>>,
         frozen_origin: f64,
@@ -120,7 +120,7 @@ impl CanvasRenderer {
         } else {
             axis.strip_start()
         };
-        for i in axis.visible_band(&self.vis) {
+        for i in axis.visible_band(vis) {
             let t = axis.extent(model, i);
             if t <= 0.0 {
                 continue;

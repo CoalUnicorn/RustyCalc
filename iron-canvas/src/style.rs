@@ -1,9 +1,6 @@
-use ironcalc_base::{
-    types::{CellType, HorizontalAlignment, VerticalAlignment},
-    UserModel,
-};
+use ironcalc_base::types::{CellType, HorizontalAlignment, VerticalAlignment};
 
-use crate::{model::CssColor, theme::CanvasTheme};
+use crate::{model::CssColor, theme::CanvasTheme, CanvasModel};
 
 pub struct CellStyle {
     pub text_color: String, // CSS color
@@ -15,7 +12,7 @@ pub struct CellStyle {
 
 impl CellStyle {
     pub fn resolve_cell_style(
-        model: &UserModel,
+        model: &dyn CanvasModel,
         sheet: u32,
         row: i32,
         column: i32,

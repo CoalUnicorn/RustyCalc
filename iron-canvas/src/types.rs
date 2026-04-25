@@ -6,11 +6,9 @@
 
 use std::ops::RangeInclusive;
 
-use ironcalc_base::UserModel;
-
-use crate::model::CssColor;
-use crate::model::{FormulaRef, GridRange, SheetArea};
-use crate::Point;
+use crate::model::{FormulaRef, RCRange, SheetArea};
+use crate::renderer::{AutofillTarget, VisibleRegion};
+use crate::{CanvasModel, Point};
 
 use super::geometry::{
     col_width, row_height, FrozenRC, PixelRect, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT,
@@ -58,7 +56,7 @@ impl Axis {
     }
 
     /// Extent of the row/column at `index` on `sheet` (row height or column width).
-    pub(crate) fn extent(self, model: &UserModel, index: i32) -> f64 {
+    pub(crate) fn extent(self, model: &dyn CanvasModel, index: i32) -> f64 {
         match self {
             Axis::Row => row_height(model, index),
             Axis::Column => col_width(model, index),
@@ -182,119 +180,6 @@ impl PaneRegion {
     }
 }
 
-// Pre-computed text layout
-
-/// One visual line of text inside a cell, positioned for center-aligned rendering.
-pub(crate) struct TextLine {
-    pub text: String,
-    pub center_x: f64,
-    pub center_y: f64,
-    pub width: f64,
-}
-
-/// Pre-computed text layout for one cell.
-///
-/// Collected during Phase 1 (cell backgrounds) and painted in Phase 4 so
-/// text always renders on top of selection fills and header lines.
-pub(crate) struct CellText {
-    /// Clip rectangle - the cell's pixel bounds.
-    pub clip: PixelRect,
-    pub font: String,
-    pub font_size_px: f64,
-    pub text_color: CssColor,
-    pub underlined: bool,
-    pub strike: bool,
-    pub lines: Vec<TextLine>,
-}
-
-/// The four index boundaries of the visible (scrollable) area.
-#[derive(Copy, Clone, Default)]
-pub(crate) struct VisibleRegion {
-    /// First scrollable column on screen.
-    pub first: CellRC,
-    pub last: CellRC,
-}
-
-#[derive(Copy, Clone, Default)]
-pub(crate) struct CellRC {
-    pub row: i32,
-    pub column: i32,
-}
-
-/// Precomputed pixel offsets for visible rows and columns.
-///
-/// Built once per render call from the same iteration used to determine
-/// `VisibleRegion`. Eliminates the O(visible_range x R) summation inside
-/// `cell_x`/`cell_y` - each lookup becomes O(1).
-///
-/// Offsets are relative to `FrozenOffset`: `row_tops[i]` is the Y distance
-/// from `frozen.y` to the top edge of row `(row_start + i as i32)`.
-/// `row_start` equals `vis.row_first`.
-#[derive(Default)]
-pub(crate) struct PixelOffsets {
-    pub row_start: i32,
-    /// `row_tops[i]` = cumulative Y from `frozen.y` to top of row `(row_start + i)`.
-    pub row_tops: Vec<f64>,
-    pub col_start: i32,
-    /// `col_lefts[i]` = cumulative X from `frozen.x` to left of col `(col_start + i)`.
-    pub col_lefts: Vec<f64>,
-}
-
-impl PixelOffsets {
-    /// Y distance from `frozen.y` to the top edge of `row`.
-    ///
-    /// Returns `0.0` for rows outside the precomputed range. In practice
-    /// `range_pixel_bounds` clamps oversized selections to the canvas edge
-    /// before calling `cell_y`, so this fallback is never reached.
-    #[inline]
-    pub fn row_top(&self, row: i32) -> f64 {
-        self.row_tops
-            .get((row - self.row_start) as usize)
-            .copied()
-            .unwrap_or(0.0)
-    }
-
-    /// X distance from `frozen.x` to the left edge of `col`.
-    #[inline]
-    pub fn col_left(&self, col: i32) -> f64 {
-        self.col_lefts
-            .get((col - self.col_start) as usize)
-            .copied()
-            .unwrap_or(0.0)
-    }
-}
-
-/// Which outer edges of a cell rect should receive a border stroke.
-///
-/// Passed to `render_cell_style` so the intent is clear at every call site
-/// instead of two anonymous `bool` arguments.
-#[derive(Copy, Clone)]
-pub(crate) struct CellEdges {
-    pub right: bool,
-    pub bottom: bool,
-}
-
-/// Controls whether `draw_dashed_range` fills the interior with a light tint.
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub(crate) enum DashFill {
-    /// Outline only (used for clipboard marching ants).
-    Outline,
-    /// Outline + semi-transparent fill tint (used for point-mode range).
-    Tinted,
-}
-
-//  Public overlay types (used by worksheet.rs)
-
-/// The target cell during an autofill-handle drag.
-///
-/// Replaces the anonymous `Option<(i32, i32)>` in `RenderOverlays` with a
-/// named struct so the fields are self-documenting at every call site.
-#[derive(Copy, Clone, PartialEq)]
-pub struct AutofillTarget {
-    pub row: i32,
-    pub col: i32,
-}
-
 /// Overlay ranges passed to `render()` for selection preview drawing.
 #[derive(Clone, PartialEq)]
 pub struct RenderOverlays {
@@ -302,7 +187,7 @@ pub struct RenderOverlays {
     pub extend_to: Option<AutofillTarget>,
     pub clipboard: Option<SheetArea>,
     /// Range being pointed at during formula entry.
-    pub point_range: Option<GridRange>,
+    pub point_range: Option<RCRange>,
     /// All formula refs extracted from the current formula (multi-color overlays).
     pub formula_refs: Vec<FormulaRef>,
 }

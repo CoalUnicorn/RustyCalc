@@ -9,13 +9,14 @@
 //! `resolve_*_edge` helpers, each encoding its own fallback chain.
 
 use ironcalc_base::types::{BorderItem, BorderStyle};
-use ironcalc_base::UserModel;
 
-use crate::{Point, Span};
+use crate::renderer::text::CellText;
+use crate::renderer::viewport::PixelOffsets;
+use crate::{CanvasModel, Point, Span};
 
 use super::super::geometry::{col_width, row_height, FrozenOffset, Line, PixelRect};
 use super::super::model::CellAddress;
-use super::super::types::{CellEdges, CellText, PaneRegion};
+use super::super::types::PaneRegion;
 
 use super::{CanvasRenderer, MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
@@ -39,6 +40,18 @@ enum BorderEdge {
 enum InnerEdge {
     Left,
     Top,
+}
+
+/// An outer edge of a cell rect that may receive a forced border stroke
+/// because the cell sits on a pane boundary. Only `Right` and `Bottom` are
+/// valid — left/top are inner edges resolved against neighbours.
+///
+/// Passed to `render_cell_style` as a small `&[OuterEdge]` slice; an empty
+/// slice means the cell is interior to its pane.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub(crate) enum OuterEdge {
+    Right,
+    Bottom,
 }
 
 impl InnerEdge {
@@ -149,7 +162,7 @@ fn resolve_outer_edge<'a>(
 impl CanvasRenderer {
     pub(super) fn render_pane(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         cell_texts: &mut Vec<CellText>,
         pane: PaneRegion,
     ) {
@@ -192,7 +205,7 @@ impl CanvasRenderer {
     #[allow(clippy::too_many_arguments)]
     fn render_pane_row(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         cell_texts: &mut Vec<CellText>,
         pane: &PaneRegion,
         row: i32,
@@ -220,11 +233,14 @@ impl CanvasRenderer {
                         row,
                         column,
                     };
-                    let edges = CellEdges {
-                        right: column == pane.last_col,
-                        bottom: row == pane.last_row,
-                    };
-                    self.render_cell_style(model, addr, rect, edges);
+                    let pane_outer: &[OuterEdge] =
+                        match (column == pane.last_col, row == pane.last_row) {
+                            (true, true) => &[OuterEdge::Right, OuterEdge::Bottom],
+                            (true, false) => &[OuterEdge::Right],
+                            (false, true) => &[OuterEdge::Bottom],
+                            (false, false) => &[],
+                        };
+                    self.render_cell_style(model, addr, rect, pane_outer);
                     if let Some(ct) = self.compute_cell_text(model, addr, rect) {
                         cell_texts.push(ct);
                     }
@@ -237,10 +253,10 @@ impl CanvasRenderer {
     /// Paint one cell's background and resolve/draw all four border edges.
     pub(super) fn render_cell_style(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         addr: CellAddress,
         rect: PixelRect,
-        edges: CellEdges,
+        pane_outer: &[OuterEdge],
     ) {
         if rect.width <= 0.0 || rect.height <= 0.0 {
             return;
@@ -299,13 +315,13 @@ impl CanvasRenderer {
         }
 
         // Right edge — only at pane boundary or when explicitly set.
-        if edges.right || style.border.right.is_some() {
+        if pane_outer.contains(&OuterEdge::Right) || style.border.right.is_some() {
             let (rc, rs) = resolve_outer_edge(style.border.right.as_ref(), grid_color);
             self.draw_border(BorderEdge::Right, rect, rs, rc);
         }
 
         // Bottom edge — only at pane boundary or when explicitly set.
-        if edges.bottom || style.border.bottom.is_some() {
+        if pane_outer.contains(&OuterEdge::Bottom) || style.border.bottom.is_some() {
             let (bc, bs) = resolve_outer_edge(style.border.bottom.as_ref(), grid_color);
             self.draw_border(BorderEdge::Bottom, rect, bs, bc);
         }
@@ -318,27 +334,20 @@ impl CanvasRenderer {
     /// internally so the caller only needs logical `(row,column)`.
     pub(super) fn repaint_active_cell(
         &self,
-        model: &UserModel,
+        offsets: &PixelOffsets,
+        model: &dyn CanvasModel,
         addr: CellAddress,
         frozen: &FrozenOffset,
     ) {
         let rect = PixelRect {
             top_left: Point {
-                x: self.cell_x(model, addr.column, frozen),
-                y: self.cell_y(model, addr.row, frozen),
+                x: self.cell_x(offsets, model, addr.column, frozen),
+                y: self.cell_y(offsets, model, addr.row, frozen),
             },
             width: col_width(model, addr.column),
             height: row_height(model, addr.row),
         };
-        self.render_cell_style(
-            model,
-            addr,
-            rect,
-            CellEdges {
-                right: true,
-                bottom: true,
-            },
-        );
+        self.render_cell_style(model, addr, rect, &[OuterEdge::Right, OuterEdge::Bottom]);
     }
 
     fn draw_border(&self, edge: BorderEdge, rect: PixelRect, style: &BorderStyle, color: &str) {

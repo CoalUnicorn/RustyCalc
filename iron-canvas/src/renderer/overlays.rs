@@ -7,21 +7,45 @@
 //! drawable fold, so overlays never leak onto the canvas for off-screen
 //! refs like `=BB3`.
 
-use ironcalc_base::UserModel;
-
-use crate::model::{FormulaRef, GridRange, SheetArea};
+use crate::model::{FormulaRef, RCRange, SheetArea};
 use crate::theme::FORMULA_REF_COLORS;
-use crate::Point;
+use crate::{CanvasModel, Point};
 
 use super::super::geometry::{FrozenOffset, PixelRect, AUTOFILL_HANDLE_PX};
 use super::super::model::CellAddress;
-use super::super::types::{AutofillTarget, DashFill};
-use super::{CanvasRenderer, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH, STANDARD_BORDER_WIDTH};
+use super::{
+    CanvasRenderer, FrameContext, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH,
+    STANDARD_BORDER_WIDTH,
+};
+
+/// The target cell during an autofill-handle drag.
+///
+/// Replaces the anonymous `Option<(i32, i32)>` in `RenderOverlays` with a
+/// named struct so the fields are self-documenting at every call site.
+#[derive(Copy, Clone, PartialEq)]
+pub struct AutofillTarget {
+    pub row: i32,
+    pub col: i32,
+}
+
+/// Controls whether `draw_dashed_range` fills the interior with a light tint.
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub(crate) enum DashFill {
+    /// Outline only (used for clipboard marching ants).
+    Outline,
+    /// Outline + semi-transparent fill tint (used for point-mode range).
+    Tinted,
+}
 
 impl CanvasRenderer {
     /// Draw the blue selection border, semi-transparent fill, and autofill
     /// handle for the current selection.
-    pub(super) fn draw_selection(&self, model: &UserModel, frozen: &FrozenOffset) {
+    pub(super) fn draw_selection(
+        &self,
+        model: &dyn CanvasModel,
+        frozen: &FrozenOffset,
+        frame: &FrameContext,
+    ) {
         let view = model.get_selected_view();
         let sheet = model.get_selected_sheet();
         let addr = CellAddress {
@@ -30,7 +54,7 @@ impl CanvasRenderer {
             column: view.column,
         };
         let Some(b) =
-            self.range_pixel_bounds(model, frozen, GridRange::from_view(model).normalized())
+            self.range_pixel_bounds(model, frozen, frame, RCRange::from_view(model).normalized())
         else {
             return;
         };
@@ -40,7 +64,7 @@ impl CanvasRenderer {
         // Restore the active cell's fill + borders on top of the selection
         // tint so its actual style shows through while selected. Phase 4
         // paints text over everything later.
-        self.repaint_active_cell(model, addr, frozen);
+        self.repaint_active_cell(&frame.offsets, model, addr, frozen);
 
         self.rect_stroke(b, self.theme.selection_color, SELECTION_BORDER_WIDTH);
 
@@ -58,18 +82,19 @@ impl CanvasRenderer {
     /// Dashed preview of the autofill-handle drag target.
     pub(super) fn draw_extend_preview(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         frozen: &FrozenOffset,
+        frame: &FrameContext,
         target: AutofillTarget,
     ) {
-        let sel = GridRange::from_view(model).normalized();
-        let range = GridRange {
+        let sel = RCRange::from_view(model).normalized();
+        let range = RCRange {
             r1: sel.r1.min(target.row),
             c1: sel.c1.min(target.col),
             r2: sel.r2.max(target.row),
             c2: sel.c2.max(target.col),
         };
-        let Some(b) = self.range_pixel_bounds(model, frozen, range) else {
+        let Some(b) = self.range_pixel_bounds(model, frozen, frame, range) else {
             return;
         };
 
@@ -80,8 +105,9 @@ impl CanvasRenderer {
     /// No-op when the clipboard is empty or lives on another sheet.
     pub(super) fn draw_clipboard_overlay(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         frozen: &FrozenOffset,
+        frame: &FrameContext,
         clipboard: Option<&SheetArea>,
     ) {
         let sheet = model.get_selected_sheet();
@@ -92,6 +118,7 @@ impl CanvasRenderer {
         self.draw_dashed_range(
             model,
             frozen,
+            frame,
             cb.range.normalized(),
             self.theme.selection_color,
             DashFill::Outline,
@@ -101,14 +128,16 @@ impl CanvasRenderer {
     /// Point-mode range highlight — blue dashed outline with an 8% fill tint.
     pub(super) fn draw_point_overlay(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         frozen: &FrozenOffset,
-        point_range: Option<GridRange>,
+        frame: &FrameContext,
+        point_range: Option<RCRange>,
     ) {
         let Some(pr) = point_range else { return };
         self.draw_dashed_range(
             model,
             frozen,
+            frame,
             pr.normalized(),
             self.theme.pointing,
             DashFill::Tinted,
@@ -119,8 +148,9 @@ impl CanvasRenderer {
     /// `color_idx` (mod the palette), off-sheet refs silently skipped.
     pub(super) fn draw_formula_ref_overlays(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         frozen: &FrozenOffset,
+        frame: &FrameContext,
         refs: &Vec<FormulaRef>,
     ) {
         let sheet = model.get_selected_sheet();
@@ -131,6 +161,7 @@ impl CanvasRenderer {
             self.draw_dashed_range(
                 model,
                 frozen,
+                frame,
                 fr.sheet_area.range.normalized(),
                 FORMULA_REF_COLORS[fr.color_idx % FORMULA_REF_COLORS.len()],
                 DashFill::Tinted,
@@ -143,13 +174,14 @@ impl CanvasRenderer {
     /// (`DashFill::Tinted`, which also draws an 8% fill).
     pub(super) fn draw_dashed_range(
         &self,
-        model: &UserModel,
+        model: &dyn CanvasModel,
         frozen: &FrozenOffset,
-        range: GridRange,
+        frame: &FrameContext,
+        range: RCRange,
         color: &str,
         fill: DashFill,
     ) {
-        let Some(b) = self.range_pixel_bounds(model, frozen, range) else {
+        let Some(b) = self.range_pixel_bounds(model, frozen, frame, range) else {
             return;
         };
 

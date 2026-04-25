@@ -13,6 +13,8 @@ use ironcalc_base::expressions::types::CellReferenceRC;
 use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
 
+use iron_canvas::model::{FormulaRef, RCRange, SheetArea};
+
 use crate::model::ArrowKey;
 
 /// Cell or range reference carried through point-mode state as an ironcalc
@@ -447,6 +449,19 @@ pub struct ActiveRef {
     pub span: TextRef,
 }
 
+// Drops `ref_node` and `span` (editing-side state the renderer doesn't need).
+// `active` defaults to false — wire `refs_at_cursor` here when the renderer
+// starts honouring it.
+impl From<ActiveRef> for FormulaRef {
+    fn from(a: ActiveRef) -> Self {
+        Self {
+            sheet_area: a.sheet_area.into(),
+            color_idx: a.color_idx,
+            active: false,
+        }
+    }
+}
+
 /// A cell range pinned to a specific sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SheetRange {
@@ -489,6 +504,15 @@ impl SheetRange {
 
     pub fn to_ironcalc_area(self) -> Area {
         self.area.to_area(self.sheet)
+    }
+}
+
+impl From<SheetRange> for SheetArea {
+    fn from(s: SheetRange) -> Self {
+        Self {
+            sheet: s.sheet,
+            range: s.area.into(),
+        }
     }
 }
 
@@ -617,6 +641,17 @@ impl From<[i32; 4]> for CellRange {
 impl From<CellRange> for [i32; 4] {
     fn from(a: CellRange) -> Self {
         [a.r1, a.c1, a.r2, a.c2]
+    }
+}
+
+impl From<CellRange> for RCRange {
+    fn from(c: CellRange) -> Self {
+        Self {
+            r1: c.r1,
+            c1: c.c1,
+            r2: c.r2,
+            c2: c.c2,
+        }
     }
 }
 

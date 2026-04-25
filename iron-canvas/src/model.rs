@@ -1,13 +1,13 @@
-use ironcalc_base::UserModel;
+use crate::CanvasModel;
 
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
-pub struct GridRange {
+pub struct RCRange {
     pub r1: i32,
     pub c1: i32,
     pub r2: i32,
     pub c2: i32,
 }
-impl GridRange {
+impl RCRange {
     pub fn rows(self) -> std::ops::RangeInclusive<i32> {
         std::ops::RangeInclusive::new(self.r1, self.r2)
     }
@@ -22,7 +22,7 @@ impl GridRange {
     pub fn width(self) -> i32 {
         self.c2 - self.c1 + 1
     }
-    // pub fn normalized(self) -> Self;            // swap so r1≤r2, c1≤c2
+    /// Swap corners so `r1 <= r2` and `c1 <= c2`.
     pub fn normalized(self) -> Self {
         Self {
             r1: self.r1.min(self.r2),
@@ -58,7 +58,7 @@ impl GridRange {
         SheetArea { sheet, range: self }
     }
 }
-impl From<[i32; 4]> for GridRange {
+impl From<[i32; 4]> for RCRange {
     fn from(range: [i32; 4]) -> Self {
         Self {
             r1: range[0],
@@ -69,8 +69,8 @@ impl From<[i32; 4]> for GridRange {
     }
 }
 
-impl GridRange {
-    pub fn from_view(model: &UserModel) -> Self {
+impl RCRange {
+    pub fn from_view(model: &dyn CanvasModel) -> Self {
         Self::from(model.get_selected_view().range)
     }
 }
@@ -85,7 +85,7 @@ pub struct CellAddress {
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct SheetArea {
     pub sheet: u32,
-    pub range: GridRange,
+    pub range: RCRange,
 }
 
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]

@@ -1,3 +1,4 @@
+use iron_canvas::renderer::AutofillTarget;
 use leptos::html;
 use leptos::prelude::*;
 use leptos_use::{use_raf_fn, use_resize_observer};
@@ -168,9 +169,9 @@ pub fn Worksheet() -> impl IntoView {
         });
         let overlays = RenderOverlays {
             extend_to,
-            clipboard,
-            point_range,
-            formula_refs,
+            clipboard: clipboard.map(Into::into),
+            point_range: point_range.map(Into::into),
+            formula_refs: formula_refs.into_iter().map(Into::into).collect(),
         };
         let dpr = window().device_pixel_ratio();
 
