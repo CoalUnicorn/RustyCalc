@@ -1,15 +1,18 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
+#[allow(unused)]
 use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
 // use crate::components::perf_panel::PerfPanel;
+#[allow(unused)]
 use crate::events::*;
 // use crate::input::xlsx_io;
 use crate::state::{ModelStore, WorkbookState};
 use crate::theme::Theme;
 
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 enum FileChangeError {
     #[error("change event has no target")]
@@ -23,6 +26,7 @@ enum FileChangeError {
 /// Returns the `HtmlInputElement` alongside the file so callers can clear
 /// the value (`input.set_value("")`) after the async import completes -
 /// allowing the same file to be re-imported without a second pick.
+#[allow(dead_code)]
 fn extract_file_input(
     ev: &web_sys::Event,
 ) -> Result<(web_sys::HtmlInputElement, Option<web_sys::File>), FileChangeError> {
@@ -34,8 +38,10 @@ fn extract_file_input(
 
 #[component]
 pub fn FileBar() -> impl IntoView {
+    #[allow(unused)]
     let state = expect_context::<WorkbookState>();
     let app = expect_context::<AppState>();
+    #[allow(unused)]
     let model = expect_context::<ModelStore>();
 
     // Sidebar

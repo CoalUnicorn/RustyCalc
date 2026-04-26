@@ -689,7 +689,7 @@ mod formula_analysis_tests {
 
     #[test]
     fn test_unknown_name_captured() {
-        // No defined names → bare identifier parses as WrongVariableKind and
+        // No defined names  bare identifier parses as WrongVariableKind and
         // must land in Unresolved.names (NOT Unresolved.functions).
         let analysis = analyze_formula("=my_undefined", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved {

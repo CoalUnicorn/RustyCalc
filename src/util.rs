@@ -14,6 +14,7 @@ pub fn refocus_workbook() {
     }
 }
 
+#[allow(dead_code)]
 fn canvas_size_from_event(ev: &web_sys::MouseEvent) -> (f64, f64) {
     ev.target()
         .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
