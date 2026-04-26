@@ -814,4 +814,236 @@ mod tests {
     fn col_name_zero_returns_empty_string() {
         assert_eq!(col_name(0), "");
     }
+
+    // Test fixture - a configurable in-memory CanvasModel.
+    //
+    // Only methods exercised by viewport / frozen-pane math are wired up.
+    // Style / cell-content methods stay `unimplemented!()` so a future test
+    // that touches them fails loudly rather than silently consuming defaults.
+    use crate::SelectedView;
+
+    struct MockCanvasModel {
+        sheet: u32,
+        frozen_rows: i32,
+        frozen_cols: i32,
+        row_height: f64,
+        col_width: f64,
+        range: [i32; 4],
+        top_row: i32,
+        left_column: i32,
+    }
+
+    impl Default for MockCanvasModel {
+        fn default() -> Self {
+            Self {
+                sheet: 0,
+                frozen_rows: 0,
+                frozen_cols: 0,
+                row_height: DEFAULT_ROW_HEIGHT,
+                col_width: DEFAULT_COL_WIDTH,
+                range: [1, 1, 1, 1],
+                top_row: 1,
+                left_column: 1,
+            }
+        }
+    }
+
+    impl CanvasModel for MockCanvasModel {
+        fn get_selected_sheet(&self) -> u32 {
+            self.sheet
+        }
+        fn get_selected_view(&self) -> SelectedView {
+            SelectedView {
+                sheet: self.sheet,
+                row: self.range[0],
+                column: self.range[1],
+                range: self.range,
+                top_row: self.top_row,
+                left_column: self.left_column,
+            }
+        }
+        fn get_frozen_rows_count(&self, _sheet: u32) -> Result<i32, String> {
+            Ok(self.frozen_rows)
+        }
+        fn get_frozen_columns_count(&self, _sheet: u32) -> Result<i32, String> {
+            Ok(self.frozen_cols)
+        }
+        fn get_row_height(&self, _sheet: u32, _row: i32) -> Result<f64, String> {
+            Ok(self.row_height)
+        }
+        fn get_column_width(&self, _sheet: u32, _column: i32) -> Result<f64, String> {
+            Ok(self.col_width)
+        }
+        fn get_show_grid_lines(&self, _sheet: u32) -> Result<bool, String> {
+            Ok(true)
+        }
+        fn get_cell_style(
+            &self,
+            _: u32,
+            _: i32,
+            _: i32,
+        ) -> Result<ironcalc_base::types::Style, String> {
+            unimplemented!("style not used by these tests")
+        }
+        fn get_cell_type(
+            &self,
+            _: u32,
+            _: i32,
+            _: i32,
+        ) -> Result<ironcalc_base::types::CellType, String> {
+            unimplemented!("cell type not used by these tests")
+        }
+        fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Result<String, String> {
+            unimplemented!("cell value not used by these tests")
+        }
+    }
+
+    // FrozenRC
+
+    #[test]
+    fn frozen_rc_no_freeze_has_no_bands_and_origin_skips_separator() {
+        let m = MockCanvasModel::default();
+        let frc = FrozenRC::from_model(&m);
+        assert!(frc.row_band.is_none());
+        assert!(frc.col_band.is_none());
+        assert_eq!(frc.frozen_rows_count(), 0);
+        assert_eq!(frc.frozen_cols_count(), 0);
+        assert_eq!(frc.offset.origin.x, HEADER_COL_WIDTH);
+        assert_eq!(frc.offset.origin.y, HEADER_ROW_HEIGHT);
+    }
+
+    #[test]
+    fn frozen_rc_rows_only_adds_separator_on_y_only() {
+        let m = MockCanvasModel {
+            frozen_rows: 2,
+            ..Default::default()
+        };
+        let frc = FrozenRC::from_model(&m);
+        assert_eq!(frc.row_band, Some(1..=2));
+        assert!(frc.col_band.is_none());
+        assert_eq!(frc.frozen_rows_count(), 2);
+        assert_eq!(frc.frozen_cols_count(), 0);
+        assert_eq!(frc.offset.origin.x, HEADER_COL_WIDTH);
+        assert_eq!(
+            frc.offset.origin.y,
+            HEADER_ROW_HEIGHT + 2.0 * DEFAULT_ROW_HEIGHT + FROZEN_SEP
+        );
+    }
+
+    #[test]
+    fn frozen_rc_both_axes_add_separator_on_each() {
+        let m = MockCanvasModel {
+            frozen_rows: 1,
+            frozen_cols: 3,
+            ..Default::default()
+        };
+        let frc = FrozenRC::from_model(&m);
+        assert_eq!(frc.frozen_rows_count(), 1);
+        assert_eq!(frc.frozen_cols_count(), 3);
+        assert_eq!(
+            frc.offset.origin.x,
+            HEADER_COL_WIDTH + 3.0 * DEFAULT_COL_WIDTH + FROZEN_SEP
+        );
+        assert_eq!(
+            frc.offset.origin.y,
+            HEADER_ROW_HEIGHT + DEFAULT_ROW_HEIGHT + FROZEN_SEP
+        );
+    }
+
+    // PixelOffsets
+
+    #[test]
+    fn pixel_offsets_row_top_returns_zero_outside_precomputed_range() {
+        let off = PixelOffsets {
+            row_start: 10,
+            row_tops: vec![0.0, 20.0, 40.0],
+            col_start: 5,
+            col_lefts: vec![0.0, 60.0],
+        };
+        assert_eq!(off.row_top(10), 0.0);
+        assert_eq!(off.row_top(11), 20.0);
+        assert_eq!(off.row_top(99), 0.0);
+        assert_eq!(off.col_left(5), 0.0);
+        assert_eq!(off.col_left(6), 60.0);
+        assert_eq!(off.col_left(99), 0.0);
+    }
+
+    // SheetViewport
+
+    #[test]
+    fn cell_rect_at_origin_starts_at_top_left_header_corner() {
+        let m = MockCanvasModel::default();
+        let vp = SheetViewport::current(&m);
+        let r = vp.cell_rect(1, 1);
+        assert_eq!(r.top_left.x, HEADER_COL_WIDTH);
+        assert_eq!(r.top_left.y, HEADER_ROW_HEIGHT);
+        assert_eq!(r.width, DEFAULT_COL_WIDTH);
+        assert_eq!(r.height, DEFAULT_ROW_HEIGHT);
+    }
+
+    #[test]
+    fn col_to_x_inside_frozen_band_skips_frozen_offset() {
+        let m = MockCanvasModel {
+            frozen_cols: 2,
+            ..Default::default()
+        };
+        let vp = SheetViewport::current(&m);
+        assert_eq!(vp.col_to_x(1), HEADER_COL_WIDTH);
+        assert_eq!(vp.col_to_x(2), HEADER_COL_WIDTH + DEFAULT_COL_WIDTH);
+    }
+
+    #[test]
+    fn col_to_x_past_frozen_seam_uses_frozen_offset_and_left_column() {
+        let m = MockCanvasModel {
+            frozen_cols: 2,
+            left_column: 5,
+            ..Default::default()
+        };
+        let vp = SheetViewport::current(&m);
+        let origin_x = vp.frozen().offset.origin.x;
+        // col 5 is the first scrollable on screen → at the frozen offset
+        assert_eq!(vp.col_to_x(5), origin_x);
+        assert_eq!(vp.col_to_x(6), origin_x + DEFAULT_COL_WIDTH);
+    }
+
+    #[test]
+    fn autofill_handle_is_none_for_full_sheet_selection() {
+        let m = MockCanvasModel {
+            range: [1, 1, LAST_ROW, LAST_COLUMN],
+            ..Default::default()
+        };
+        let vp = SheetViewport::current(&m);
+        assert!(vp.autofill_handle().is_none());
+    }
+
+    #[test]
+    fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
+        let m = MockCanvasModel {
+            range: [2, 3, 4, 5],
+            ..Default::default()
+        };
+        let vp = SheetViewport::current(&m);
+        let p = vp.autofill_handle().expect("finite selection has handle");
+        assert_eq!(p.x, vp.col_to_x(5) + DEFAULT_COL_WIDTH);
+        assert_eq!(p.y, vp.row_to_y(4) + DEFAULT_ROW_HEIGHT);
+    }
+
+    // Round-trip property - handed to a human for the column-sample design.
+    #[test]
+    fn pixel_to_col_round_trips_col_to_x() {
+        // TODO(human): build a `SheetViewport` (use `MockCanvasModel` above)
+        // and prove the contract:
+        //
+        //     viewport.pixel_to_col(viewport.col_to_x(c)) == c
+        //
+        // for a handful of column samples that span the interesting cases:
+        //   - inside the frozen band (col <= frozen_cols)
+        //   - the first scrollable column (the seam, col = frozen_cols + 1)
+        //   - past a non-1 `left_column` scroll
+        //
+        // Pick the freeze layout, the scroll position, and the sample
+        // columns that you think exercise the seam most convincingly.
+        // Mirror the same property for `pixel_to_row(row_to_y(r))` if you
+        // want a second assertion.
+    }
 }

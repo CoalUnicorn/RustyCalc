@@ -1,216 +1,51 @@
-//! Cell text layout (Phase 1 collect) and paint (Phase 4).
+//! Cell text painting.
 //!
-//! Text is deferred to a final paint phase so it renders on top of cell
-//! backgrounds, selection fill, and header strokes. `compute_cell_text`
-//! builds a `CellText` with pre-measured, pre-positioned lines; Phase 4
-//! hands each one to `render_cell_text`.
+//! Layout (font metrics, line wrap, per-line positioning) is resolved
+//! upstream in `crate::types::resolve_text_paint`. This file just paints
+//! a pre-computed `TextPaint` onto the canvas: fill each line, then
+//! optionally stroke an underline / strike.
 
-use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
+use crate::types::TextPaint;
+use crate::Span;
 
-use super::super::geometry::PixelRect;
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
-use crate::model::{CellAddress, CssColor};
-use crate::style::{CellStyle, FontStyle};
-use crate::{CanvasModel, Span};
 
-pub(super) const CELL_PADDING: f64 = 4.0;
+/// Default font stack used by header strips. Cell text uses the per-cell
+/// resolved font from `CellStyle`; only headers fall back to this string.
 pub(super) const DEFAULT_FONT_FAMILY: &str = "Inter, Arial, sans-serif";
+
 /// With `textBaseline: "middle"`, `center_y` is the em-square midpoint. The
 /// typographic baseline sits at ~`center_y + font_size * 0.15`; `0.35` puts
 /// the underline just below the baseline, clear of the glyphs.
 const UNDERLINE_OFFSET_FACTOR: f64 = 0.35;
 const MIN_UNDERLINE_OFFSET: f64 = 2.0;
-const CHAR_WIDTH_FACTOR: f64 = 0.6;
-const LINE_HEIGHT_FACTOR: f64 = 1.5;
-/// Vertical padding between the cell edge and the first/last line of text.
-/// Applied at top-align (rect top) and bottom-align (rect bottom).
-const TEXT_V_INSET_PX: f64 = 4.0;
-
-/// One visual line of text inside a cell, positioned for center-aligned rendering.
-pub struct TextLine {
-    pub text: String,
-    pub center_x: f64,
-    pub center_y: f64,
-    pub width: f64,
-}
-
-/// Pre-computed text layout for one cell.
-///
-/// Collected during Phase 1 (cell backgrounds) and painted in Phase 4 so
-/// text always renders on top of selection fills and header lines.
-pub(crate) struct CellText {
-    /// Clip rectangle - the cell's pixel bounds.
-    pub clip: PixelRect,
-    pub font: String,
-    pub font_size_px: f64,
-    pub text_color: CssColor,
-    pub underlined: bool,
-    pub strike: bool,
-    pub lines: Vec<TextLine>,
-}
 
 impl CanvasRenderer {
-    /// Build the text layout for a cell; returns `None` for empty or
-    /// too-small cells.
-    pub(super) fn compute_cell_text(
-        &self,
-        model: &dyn CanvasModel,
-        addr: CellAddress,
-        rect: PixelRect,
-    ) -> Option<CellText> {
-        if rect.width <= 0.0 || rect.height <= 0.0 || !rect.intersects(self.canvas_size()) {
-            return None;
-        }
+    /// Paint a pre-computed `TextPaint` onto the canvas. Pure pixel pusher:
+    /// no model access, no layout work - everything is already resolved.
+    pub(super) fn paint_text(&self, t: &TextPaint) {
+        let ctx = self.ctx_ref();
+        ctx.set_font(&t.font_css);
+        ctx.set_fill_style_str(t.color.as_str());
 
-        let text = model
-            .get_formatted_cell_value(addr.sheet, addr.row, addr.column)
-            .ok()?;
-        if text.is_empty() {
-            return None;
-        }
-        // Below this size, even a single glyph would overflow the cell.
-        if rect.width < 10.0 || rect.height < 10.0 {
-            return None;
-        }
-
-        // Destructure to move fields directly - avoids cloning `css`.
-        let CellStyle {
-            font:
-                FontStyle {
-                    css: font,
-                    size_px: font_size,
-                    underline: underlined,
-                    strikethrough: strike,
-                    ..
-                },
-            text_color,
-            h_align: effective_h_align,
-            v_align: effective_v_align,
-            wrap_text: wrap,
-            ..
-        } = CellStyle::resolve_cell_style(model, addr.sheet, addr.row, addr.column, &self.theme);
-
-        let approx_char_w = font_size * CHAR_WIDTH_FACTOR;
-        let line_height = font_size * LINE_HEIGHT_FACTOR;
-        let usable_w = rect.width - 2.0 * CELL_PADDING;
-        let right = rect.right();
-        let bottom = rect.bottom();
-        let center = rect.center();
-
-        // Set font on ctx so measure_text() returns accurate widths.
-        self.ctx.set_font(&font);
-
-        let text_lines = self.layout_lines(&text, wrap, usable_w, approx_char_w);
-
-        let line_count = text_lines.len() as f64;
-        let mut lines: Vec<TextLine> = Vec::new();
-
-        for (i, line) in text_lines.into_iter().enumerate() {
-            let tw = self
-                .ctx
-                .measure_text(&line)
-                .map(|m| m.width())
-                .unwrap_or(line.len() as f64 * approx_char_w);
-            let i_f = i as f64;
-            let center_x = match effective_h_align {
-                HorizontalAlignment::Right => right - CELL_PADDING - tw / 2.0,
-                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => center.x,
-                _ => rect.top_left.x + CELL_PADDING + tw / 2.0,
-            };
-            let center_y = match effective_v_align {
-                VerticalAlignment::Bottom => {
-                    bottom - font_size / 2.0 - TEXT_V_INSET_PX
-                        + (i_f - line_count + 1.0) * line_height
-                }
-                VerticalAlignment::Center => {
-                    center.y + (i_f + (1.0 - line_count) / 2.0) * line_height
-                }
-                _ => rect.top_left.y + font_size / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
-            };
-            lines.push(TextLine {
-                text: line,
-                center_x,
-                center_y,
-                width: tw,
-            });
-        }
-
-        Some(CellText {
-            clip: rect,
-            font,
-            font_size_px: font_size,
-            text_color: CssColor::new(&text_color),
-            underlined,
-            strike,
-            lines,
-        })
-    }
-
-    /// Break `text` into render-ready lines: split on `\n` always, then
-    /// word-wrap within each split when `wrap` is on and the cell has width.
-    ///
-    /// `approx_char_w` is the fallback glyph width when `measure_text` fails
-    /// (e.g. before the canvas font has resolved); it biases the wrap point
-    /// slightly but never loses characters.
-    fn layout_lines(
-        &self,
-        text: &str,
-        wrap: bool,
-        usable_w: f64,
-        approx_char_w: f64,
-    ) -> Vec<String> {
-        if !wrap || usable_w <= 0.0 {
-            return text.split('\n').map(str::to_owned).collect();
-        }
-        let mut result: Vec<String> = Vec::new();
-        for raw_line in text.split('\n') {
-            let mut current = String::new();
-            for word in raw_line.split_whitespace() {
-                let candidate = if current.is_empty() {
-                    word.to_owned()
-                } else {
-                    format!("{current} {word}")
-                };
-                let w = self
-                    .ctx
-                    .measure_text(&candidate)
-                    .map(|m| m.width())
-                    .unwrap_or(candidate.len() as f64 * approx_char_w);
-                if w <= usable_w || current.is_empty() {
-                    current = candidate;
-                } else {
-                    result.push(current);
-                    current = word.to_owned();
-                }
-            }
-            result.push(current);
-        }
-        result
-    }
-
-    /// Paint a pre-computed `CellText` onto the canvas.
-    pub(super) fn render_cell_text(&self, ct: &CellText) {
-        self.ctx.set_font(&ct.font);
-        self.ctx.set_fill_style_str(ct.text_color.as_str());
-
-        self.with_clip(ct.clip, |this| {
-            if ct.underlined || ct.strike {
-                this.ctx.set_stroke_style_str(ct.text_color.as_str());
-                this.ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        self.with_clip(t.clip, |this| {
+            if t.underline || t.strike {
+                this.ctx_ref().set_stroke_style_str(t.color.as_str());
+                this.ctx_ref().set_line_width(STANDARD_BORDER_WIDTH);
             }
             let underline_offset =
-                (ct.font_size_px * UNDERLINE_OFFSET_FACTOR).max(MIN_UNDERLINE_OFFSET);
+                (t.font_size_px * UNDERLINE_OFFSET_FACTOR).max(MIN_UNDERLINE_OFFSET);
 
-            for line in &ct.lines {
-                this.ctx
+            for line in &t.lines {
+                this.ctx_ref()
                     .fill_text(&line.text, line.center_x, line.center_y)
                     .ok();
                 let x1 = line.center_x - line.width / 2.0;
                 let x2 = line.center_x + line.width / 2.0;
-                if ct.underlined {
+                if t.underline {
                     this.stroke_hline(Span { from: x1, to: x2 }, line.center_y + underline_offset);
                 }
-                if ct.strike {
+                if t.strike {
                     this.stroke_hline(Span { from: x1, to: x2 }, line.center_y);
                 }
             }

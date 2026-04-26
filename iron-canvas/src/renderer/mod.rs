@@ -99,7 +99,6 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use super::geometry::{CanvasSize, FrameContext, SheetViewport};
 use super::types::*;
 pub(crate) use crate::geometry::VisibleRegion;
-use crate::renderer::text::CellText;
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;
 pub use overlays::AutofillTarget;
@@ -129,11 +128,36 @@ impl CanvasRenderer {
     /// Package the canvas's logical pixel extent for pixel-space predicates
     /// like `PixelRect::intersects`.
     #[inline]
-    pub(super) fn canvas_size(&self) -> CanvasSize {
+    pub(crate) fn canvas_size(&self) -> CanvasSize {
         CanvasSize {
             w: self.width,
             h: self.height,
         }
+    }
+
+    /// Borrow the canvas 2D context (for measurement + font setup during
+    /// paint resolution in `crate::types`).
+    #[inline]
+    pub(crate) fn ctx_ref(&self) -> &CanvasRenderingContext2d {
+        &self.ctx
+    }
+
+    /// Borrow the active theme (for paint resolution in `crate::types`).
+    #[inline]
+    pub(crate) fn theme(&self) -> &CanvasTheme {
+        &self.theme
+    }
+
+    /// Stream of resolved `CellPaint` for a pane. Each yielded paint is
+    /// renderer-ready: bg + four borders + optional text are pre-resolved
+    /// against neighbour styles, so the paint pass touches the model
+    /// zero times.
+    pub(super) fn paints_in<'a>(
+        &'a self,
+        model: &'a dyn CanvasModel,
+        pane: &'a PaneRegion,
+    ) -> CellPaintsIter<'a> {
+        CellPaintsIter::new(self, model, pane)
     }
 
     /// Bind a renderer to `canvas` and apply device-pixel-ratio scaling.
@@ -203,31 +227,17 @@ impl CanvasRenderer {
         ctx.set_text_baseline("middle");
         ctx.clear_rect(0.0, 0.0, self.width, self.height);
 
-        // Cell texts are collected across ALL panes and rendered last (Phase 4)
-        // so they always appear on top of backgrounds, selection fill, and headers.
-        let mut cell_texts: Vec<CellText> = Vec::new();
-
-        // Phase 1: Cell backgrounds + borders - four frozen-pane quadrants.
+        // Phase 1: Cells - four frozen-pane quadrants. Each `render_pane`
+        // streams resolved `CellPaint` (bg + borders + text) and paints
+        // each cell in one pass; no deferred text Vec.
         // Performance note: Each pane is bounded by visible region, ensuring O(visible) complexity
         // regardless of selection size (whole sheet vs single cell).
         self.draw_frozen_separators(&frame.frozen);
 
-        self.render_pane(model, &mut cell_texts, PaneRegion::top_left(&frame.frozen));
-        self.render_pane(
-            model,
-            &mut cell_texts,
-            PaneRegion::top_right(&frame.frozen, &frame.vis),
-        );
-        self.render_pane(
-            model,
-            &mut cell_texts,
-            PaneRegion::bottom_left(&frame.frozen, &frame.vis),
-        );
-        self.render_pane(
-            model,
-            &mut cell_texts,
-            PaneRegion::bottom_right(&frame.frozen, &frame.vis),
-        );
+        self.render_pane(model, PaneRegion::top_left(&frame.frozen));
+        self.render_pane(model, PaneRegion::top_right(&frame.frozen, &frame.vis));
+        self.render_pane(model, PaneRegion::bottom_left(&frame.frozen, &frame.vis));
+        self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis));
 
         // Phase 2: Headers + corner box
         self.render_headers(
@@ -259,14 +269,5 @@ impl CanvasRenderer {
         self.draw_clipboard_overlay(model, &frame, overlays.clipboard.as_ref());
         self.draw_point_overlay(model, &frame, overlays.point_range);
         self.draw_formula_ref_overlays(model, &frame, &overlays.formula_refs);
-
-        // Phase 4: Cell text - always on top
-        // Rendered after selection fill so text is readable over the blue tint,
-        // and after the active-cell white-fill so text appears on a clean background.
-        ctx.set_text_align("center");
-        ctx.set_text_baseline("middle");
-        for ct in &cell_texts {
-            self.render_cell_text(ct);
-        }
     }
 }
