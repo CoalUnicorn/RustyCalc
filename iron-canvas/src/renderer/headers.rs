@@ -11,11 +11,10 @@ use std::ops::RangeInclusive;
 use crate::{CanvasModel, Point, Span, HEADER_OFFSET};
 
 use super::super::geometry::{
-    col_name, FrozenRC, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+    col_name, FrozenRC, PixelRect, VisibleRegion, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
 };
 use super::super::types::Axis;
 use super::text::DEFAULT_FONT_FAMILY;
-use super::viewport::VisibleRegion;
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 
 impl CanvasRenderer {
@@ -100,7 +99,7 @@ impl CanvasRenderer {
         self.ctx
             .set_font(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
 
-        // Frozen band — pinned to the strip origin.
+        // Frozen band - pinned to the strip origin.
         let mut cursor = axis.strip_start();
         if let Some(band) = frozen_band {
             for i in band.clone() {
@@ -114,7 +113,7 @@ impl CanvasRenderer {
             }
         }
 
-        // Scrollable band — picks up past the frozen band when present.
+        // Scrollable band - picks up past the frozen band when present.
         let mut cursor = if frozen_band.is_some() {
             frozen_origin
         } else {

@@ -11,7 +11,7 @@ use crate::model::{FormulaRef, RCRange, SheetArea};
 use crate::theme::FORMULA_REF_COLORS;
 use crate::{CanvasModel, Point};
 
-use super::super::geometry::{FrozenOffset, PixelRect, AUTOFILL_HANDLE_PX};
+use super::super::geometry::{PixelRect, AUTOFILL_HANDLE_PX};
 use super::super::model::CellAddress;
 use super::{
     CanvasRenderer, FrameContext, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH,
@@ -40,12 +40,7 @@ pub(crate) enum DashFill {
 impl CanvasRenderer {
     /// Draw the blue selection border, semi-transparent fill, and autofill
     /// handle for the current selection.
-    pub(super) fn draw_selection(
-        &self,
-        model: &dyn CanvasModel,
-        frozen: &FrozenOffset,
-        frame: &FrameContext,
-    ) {
+    pub(super) fn draw_selection(&self, model: &dyn CanvasModel, frame: &FrameContext) {
         let view = model.get_selected_view();
         let sheet = model.get_selected_sheet();
         let addr = CellAddress {
@@ -54,7 +49,7 @@ impl CanvasRenderer {
             column: view.column,
         };
         let Some(b) =
-            self.range_pixel_bounds(model, frozen, frame, RCRange::from_view(model).normalized())
+            self.range_pixel_bounds(model, frame, RCRange::from_view(model).normalized())
         else {
             return;
         };
@@ -64,7 +59,7 @@ impl CanvasRenderer {
         // Restore the active cell's fill + borders on top of the selection
         // tint so its actual style shows through while selected. Phase 4
         // paints text over everything later.
-        self.repaint_active_cell(model, addr);
+        self.repaint_active_cell(model, addr, frame);
 
         self.rect_stroke(b, self.theme.selection_color, SELECTION_BORDER_WIDTH);
 
@@ -83,7 +78,6 @@ impl CanvasRenderer {
     pub(super) fn draw_extend_preview(
         &self,
         model: &dyn CanvasModel,
-        frozen: &FrozenOffset,
         frame: &FrameContext,
         target: AutofillTarget,
     ) {
@@ -94,7 +88,7 @@ impl CanvasRenderer {
             r2: sel.r2.max(target.row),
             c2: sel.c2.max(target.col),
         };
-        let Some(b) = self.range_pixel_bounds(model, frozen, frame, range) else {
+        let Some(b) = self.range_pixel_bounds(model, frame, range) else {
             return;
         };
 
@@ -106,7 +100,6 @@ impl CanvasRenderer {
     pub(super) fn draw_clipboard_overlay(
         &self,
         model: &dyn CanvasModel,
-        frozen: &FrozenOffset,
         frame: &FrameContext,
         clipboard: Option<&SheetArea>,
     ) {
@@ -117,7 +110,6 @@ impl CanvasRenderer {
         }
         self.draw_dashed_range(
             model,
-            frozen,
             frame,
             cb.range.normalized(),
             self.theme.selection_color,
@@ -125,18 +117,16 @@ impl CanvasRenderer {
         );
     }
 
-    /// Point-mode range highlight — blue dashed outline with an 8% fill tint.
+    /// Point-mode range highlight - blue dashed outline with an 8% fill tint.
     pub(super) fn draw_point_overlay(
         &self,
         model: &dyn CanvasModel,
-        frozen: &FrozenOffset,
         frame: &FrameContext,
         point_range: Option<RCRange>,
     ) {
         let Some(pr) = point_range else { return };
         self.draw_dashed_range(
             model,
-            frozen,
             frame,
             pr.normalized(),
             self.theme.pointing,
@@ -149,7 +139,6 @@ impl CanvasRenderer {
     pub(super) fn draw_formula_ref_overlays(
         &self,
         model: &dyn CanvasModel,
-        frozen: &FrozenOffset,
         frame: &FrameContext,
         refs: &Vec<FormulaRef>,
     ) {
@@ -160,7 +149,6 @@ impl CanvasRenderer {
             }
             self.draw_dashed_range(
                 model,
-                frozen,
                 frame,
                 fr.sheet_area.range.normalized(),
                 FORMULA_REF_COLORS[fr.color_idx % FORMULA_REF_COLORS.len()],
@@ -175,13 +163,12 @@ impl CanvasRenderer {
     pub(super) fn draw_dashed_range(
         &self,
         model: &dyn CanvasModel,
-        frozen: &FrozenOffset,
         frame: &FrameContext,
         range: RCRange,
         color: &str,
         fill: DashFill,
     ) {
-        let Some(b) = self.range_pixel_bounds(model, frozen, frame, range) else {
+        let Some(b) = self.range_pixel_bounds(model, frame, range) else {
             return;
         };
 

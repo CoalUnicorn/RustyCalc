@@ -96,14 +96,13 @@ use wasm_bindgen::JsCast;
 use web_sys::js_sys;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use super::geometry::{CanvasSize, FrozenRC};
+use super::geometry::{CanvasSize, FrameContext, SheetViewport};
 use super::types::*;
+pub(crate) use crate::geometry::VisibleRegion;
 use crate::renderer::text::CellText;
-use crate::renderer::viewport::PixelOffsets;
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;
 pub use overlays::AutofillTarget;
-pub(crate) use viewport::VisibleRegion;
 
 // Layout constants
 pub(super) const SELECTION_BORDER_WIDTH: f64 = 2.0;
@@ -126,12 +125,6 @@ pub struct CanvasRenderer {
     dash_empty: js_sys::Array,
 }
 
-#[derive(Debug)]
-pub(crate) struct FrameContext {
-    pub vis: VisibleRegion,
-    pub offsets: PixelOffsets,
-}
-
 impl CanvasRenderer {
     /// Package the canvas's logical pixel extent for pixel-space predicates
     /// like `PixelRect::intersects`.
@@ -146,7 +139,7 @@ impl CanvasRenderer {
     /// Bind a renderer to `canvas` and apply device-pixel-ratio scaling.
     ///
     /// `dpr` is injected by the caller (typically `window().device_pixel_ratio()`
-    /// from the Leptos shell) so this module stays free of framework globals —
+    /// from the Leptos shell) so this module stays free of framework globals -
     /// a prerequisite for the future `rusty-calc-core` crate split.
     ///
     /// **Performance note:** `canvas.set_width()` / `set_height()` resets the
@@ -197,23 +190,18 @@ impl CanvasRenderer {
 
     /// Renders only visible cells regardless of selection size.
     pub fn render(&mut self, model: &dyn CanvasModel, overlays: &RenderOverlays) {
-        // Per-frame geometric snapshot: which cells are on screen and where
-        // their pixel offsets sit. Owned on the stack here, passed by reference
-        // into every helper. Never lives between frames.
-        let vis = self.visible_cells(model);
+        // One snapshot of "where cells are drawn right now" - model + scroll
+        // anchors + frozen geometry. The `frame` it produces bundles visible
+        // region, pixel-offset prefix sums, and the resolved frozen pane shape
+        // so every render phase reads a single source of truth.
+        let viewport = SheetViewport::current(model);
+        let frame = viewport.frame(self.canvas_size());
 
         let ctx = &self.ctx;
         ctx.set_line_width(STANDARD_BORDER_WIDTH);
         ctx.set_text_align("center");
         ctx.set_text_baseline("middle");
         ctx.clear_rect(0.0, 0.0, self.width, self.height);
-
-        // Frozen counts + pixel origin, computed once per frame.
-        let frc = FrozenRC::from_model(model);
-
-        // Build prefix-sum cache now that vis and sheet are both known.
-        let offsets = self.build_pixel_offsets(&vis, model);
-        let frame = FrameContext { vis, offsets };
 
         // Cell texts are collected across ALL panes and rendered last (Phase 4)
         // so they always appear on top of backgrounds, selection fill, and headers.
@@ -222,23 +210,23 @@ impl CanvasRenderer {
         // Phase 1: Cell backgrounds + borders - four frozen-pane quadrants.
         // Performance note: Each pane is bounded by visible region, ensuring O(visible) complexity
         // regardless of selection size (whole sheet vs single cell).
-        self.draw_frozen_separators(&frc);
+        self.draw_frozen_separators(&frame.frozen);
 
-        self.render_pane(model, &mut cell_texts, PaneRegion::top_left(&frc));
+        self.render_pane(model, &mut cell_texts, PaneRegion::top_left(&frame.frozen));
         self.render_pane(
             model,
             &mut cell_texts,
-            PaneRegion::top_right(&frc, &frame.vis),
+            PaneRegion::top_right(&frame.frozen, &frame.vis),
         );
         self.render_pane(
             model,
             &mut cell_texts,
-            PaneRegion::bottom_left(&frc, &frame.vis),
+            PaneRegion::bottom_left(&frame.frozen, &frame.vis),
         );
         self.render_pane(
             model,
             &mut cell_texts,
-            PaneRegion::bottom_right(&frc, &frame.vis),
+            PaneRegion::bottom_right(&frame.frozen, &frame.vis),
         );
 
         // Phase 2: Headers + corner box
@@ -246,31 +234,31 @@ impl CanvasRenderer {
             model,
             Axis::Row,
             &frame.vis,
-            frc.row_band.as_ref(),
-            frc.offset.origin.y,
+            frame.frozen.row_band.as_ref(),
+            frame.frozen.offset.origin.y,
         );
         self.render_headers(
             model,
             Axis::Column,
             &frame.vis,
-            frc.col_band.as_ref(),
-            frc.offset.origin.x,
+            frame.frozen.col_band.as_ref(),
+            frame.frozen.offset.origin.x,
         );
 
         self.draw_corner_box();
 
         // Phase 3: Selection outline
-        self.draw_selection(model, &frc.offset, &frame);
+        self.draw_selection(model, &frame);
         if let Some(target) = overlays.extend_to {
-            self.draw_extend_preview(model, &frc.offset, &frame, target);
+            self.draw_extend_preview(model, &frame, target);
         }
 
         // Secondary overlays: clipboard marching ants, point-mode range,
         // formula-ref highlights. Each no-ops if its data is absent or lives
         // on another sheet.
-        self.draw_clipboard_overlay(model, &frc.offset, &frame, overlays.clipboard.as_ref());
-        self.draw_point_overlay(model, &frc.offset, &frame, overlays.point_range);
-        self.draw_formula_ref_overlays(model, &frc.offset, &frame, &overlays.formula_refs);
+        self.draw_clipboard_overlay(model, &frame, overlays.clipboard.as_ref());
+        self.draw_point_overlay(model, &frame, overlays.point_range);
+        self.draw_formula_ref_overlays(model, &frame, &overlays.formula_refs);
 
         // Phase 4: Cell text - always on top
         // Rendered after selection fill so text is readable over the blue tint,

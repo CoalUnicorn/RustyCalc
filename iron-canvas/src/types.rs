@@ -15,12 +15,12 @@ use super::geometry::{
     HEADER_ROW_HEIGHT,
 };
 
-//  Shared axis — row-vs-column symmetry
+//  Shared axis - row-vs-column symmetry
 
 /// Horizontal vs vertical axis.
 ///
 /// Shared across viewport offset math (`cell_offset` dispatches on axis) and
-/// header rect building (`Axis::header_rect`). Carries no payload — the
+/// header rect building (`Axis::header_rect`). Carries no payload - the
 /// row/column index travels as a separate parameter so the same enum value
 /// can be used across call sites that don't care about a specific index.
 #[derive(Copy, Clone)]
@@ -33,9 +33,8 @@ impl Axis {
     /// Rect that pins a header cell to the corresponding header strip.
     ///
     /// `along` is the position along the axis (top_y for rows, left_x for
-    /// cols); `thickness` is the cell's extent along the same axis (`rh` /
-    /// `cw`). The cross-axis extent is always the header strip width/height.
-    pub(crate) fn header_rect(self, along: f64, thickness: f64) -> PixelRect {
+    /// cols). The cross-axis extent is always the header strip width/height.
+    pub(crate) fn header_rect(self, along: f64, height: f64) -> PixelRect {
         match self {
             Axis::Row => PixelRect {
                 top_left: Point {
@@ -43,14 +42,14 @@ impl Axis {
                     y: along,
                 },
                 width: HEADER_COL_WIDTH,
-                height: thickness,
+                height,
             },
             Axis::Column => PixelRect {
                 top_left: Point {
                     x: along,
                     y: HEADER_OFFSET,
                 },
-                width: thickness,
+                width: height,
                 height: HEADER_ROW_HEIGHT,
             },
         }
@@ -120,7 +119,7 @@ pub(crate) struct PaneRegion {
 }
 
 /// Outer edge of a cell rect that may be forced to stroke a border because
-/// the cell sits on a pane boundary. Only `Right` and `Bottom` are valid —
+/// the cell sits on a pane boundary. Only `Right` and `Bottom` are valid -
 /// left/top are inner edges resolved against neighbour cells inside the
 /// pane.
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -191,7 +190,7 @@ impl PaneRegion {
     }
 
     /// Outer borders this `(row, col)` must draw because it sits on a pane
-    /// boundary. Empty slice for interior cells. Static slices — no
+    /// boundary. Empty slice for interior cells. Static slices - no
     /// allocation per cell.
     pub(crate) fn outer_edges_at(&self, row: i32, col: i32) -> &'static [OuterEdge] {
         match (col == self.last_col, row == self.last_row) {
@@ -268,7 +267,7 @@ impl<'a> Iterator for PaneCells<'a> {
             // Acquire a row strip if we don't have one in flight.
             if self.current_row.is_none() {
                 let row = self.row_iter.next()?;
-                // Past the canvas bottom — nothing more in this pane will
+                // Past the canvas bottom - nothing more in this pane will
                 // ever be visible.
                 if self.row_top >= self.canvas.h {
                     return None;
@@ -387,5 +386,95 @@ mod tests {
     fn column_header_rect_thickness_maps_to_width() {
         let rect = Axis::Column.header_rect(100.0, 50.0);
         assert_eq!(rect.width, 50.0);
+    }
+
+    #[test]
+    fn row_strip_start_is_below_top_header() {
+        assert_eq!(Axis::Row.strip_start(), HEADER_ROW_HEIGHT + HEADER_OFFSET);
+    }
+
+    #[test]
+    fn column_strip_start_is_right_of_left_header() {
+        assert_eq!(Axis::Column.strip_start(), HEADER_COL_WIDTH + HEADER_OFFSET);
+    }
+
+    fn vis(rows: (i32, i32), cols: (i32, i32)) -> crate::renderer::VisibleRegion {
+        crate::renderer::VisibleRegion {
+            first: crate::geometry::CellRC {
+                row: rows.0,
+                column: cols.0,
+            },
+            last: crate::geometry::CellRC {
+                row: rows.1,
+                column: cols.1,
+            },
+        }
+    }
+
+    #[test]
+    fn row_visible_band_uses_first_last_row() {
+        let v = vis((3, 17), (5, 12));
+        let band = Axis::Row.visible_band(&v);
+        assert_eq!(*band.start(), 3);
+        assert_eq!(*band.end(), 17);
+    }
+
+    #[test]
+    fn column_visible_band_uses_first_last_column() {
+        let v = vis((3, 17), (5, 12));
+        let band = Axis::Column.visible_band(&v);
+        assert_eq!(*band.start(), 5);
+        assert_eq!(*band.end(), 12);
+    }
+
+    fn frozen(rows: Option<(i32, i32)>, cols: Option<(i32, i32)>, origin: Point) -> FrozenRC {
+        FrozenRC {
+            row_band: rows.map(|(s, e)| s..=e),
+            col_band: cols.map(|(s, e)| s..=e),
+            offset: crate::geometry::FrozenOffset { origin },
+        }
+    }
+
+    #[test]
+    fn pane_top_left_origin_is_pinned_to_header_corner() {
+        let frc = frozen(Some((1, 2)), Some((1, 3)), Point { x: 200.0, y: 100.0 });
+        let p = PaneRegion::top_left(&frc);
+        assert_eq!(p.origin.x, HEADER_COL_WIDTH + HEADER_OFFSET);
+        assert_eq!(p.origin.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
+        assert_eq!(p.last_row, 2);
+        assert_eq!(p.last_col, 3);
+    }
+
+    #[test]
+    fn pane_top_right_origin_uses_frozen_x_and_header_y() {
+        let frc = frozen(Some((1, 2)), Some((1, 3)), Point { x: 200.0, y: 100.0 });
+        let v = vis((3, 9), (4, 11));
+        let p = PaneRegion::top_right(&frc, &v);
+        assert_eq!(p.origin.x, 200.0);
+        assert_eq!(p.origin.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
+        assert_eq!(*p.cols.start(), 4);
+        assert_eq!(p.last_col, 11);
+    }
+
+    #[test]
+    fn pane_bottom_left_origin_uses_header_x_and_frozen_y() {
+        let frc = frozen(Some((1, 2)), Some((1, 3)), Point { x: 200.0, y: 100.0 });
+        let v = vis((3, 9), (4, 11));
+        let p = PaneRegion::bottom_left(&frc, &v);
+        assert_eq!(p.origin.x, HEADER_COL_WIDTH + HEADER_OFFSET);
+        assert_eq!(p.origin.y, 100.0);
+        assert_eq!(*p.rows.start(), 3);
+        assert_eq!(p.last_row, 9);
+    }
+
+    #[test]
+    fn pane_bottom_right_origin_matches_frozen_offset() {
+        let frc = frozen(Some((1, 2)), Some((1, 3)), Point { x: 200.0, y: 100.0 });
+        let v = vis((3, 9), (4, 11));
+        let p = PaneRegion::bottom_right(&frc, &v);
+        assert_eq!(p.origin.x, 200.0);
+        assert_eq!(p.origin.y, 100.0);
+        assert_eq!(p.last_row, 9);
+        assert_eq!(p.last_col, 11);
     }
 }

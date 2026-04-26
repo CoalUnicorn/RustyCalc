@@ -55,7 +55,6 @@ pub struct CanvasSize {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PixelRect {
     pub top_left: Point,
-    //pub size: Point,
     pub width: f64,
     pub height: f64,
 }
@@ -93,7 +92,7 @@ impl PixelRect {
     }
 
     /// True when this rect overlaps the canvas drawable area at all.
-    /// Pure pixel-space AABB test — used inside per-cell loops to skip cells
+    /// Pure pixel-space AABB test - used inside per-cell loops to skip cells
     /// that fall off-canvas (notably when a frozen band is wider/taller than
     /// the canvas itself).
     pub fn intersects(&self, canvas: CanvasSize) -> bool {
@@ -124,7 +123,7 @@ pub struct Point {
 /// An axis-aligned line segment on the canvas.
 ///
 /// Named fields per variant so callers can't transpose the scalars.
-/// `offset_cross` shifts perpendicular to the line's direction — used by
+/// `offset_cross` shifts perpendicular to the line's direction - used by
 /// `BorderStyle::Double`, which draws two parallel lines at ±1 on the
 /// cross-axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -165,11 +164,6 @@ pub struct FrozenOffset {
 /// `from_model` only emits `1..=N` (anchored at the top-left), but the range
 /// carries the start index too, so a named-range-anchored freeze becomes a
 /// future variant on the shape without touching the four-quadrant math.
-///
-/// Supersedes the older `FrozenGeometry` (which only knew counts + offsets —
-/// a strict subset of what this type carries). Migration is one-way: every
-/// `FrozenGeometry` field is derivable from a `FrozenRC`, but the reverse
-/// requires an anchor assumption.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrozenRC {
     pub row_band: Option<RangeInclusive<i32>>,
@@ -197,7 +191,7 @@ impl FrozenRC {
         }
     }
 
-    /// Count of frozen rows — derived from `row_band`, preserving the
+    /// Count of frozen rows - derived from `row_band`, preserving the
     /// "no band = 0" invariant. Assumes a band ending at `N` represents
     /// `N` frozen entries (true for the `1..=N` anchor used today).
     #[inline]
@@ -205,14 +199,83 @@ impl FrozenRC {
         self.row_band.as_ref().map_or(0, |r| *r.end())
     }
 
-    /// Count of frozen columns — mirror of `frozen_rows_count`.
+    /// Count of frozen columns - mirror of `frozen_rows_count`.
     #[inline]
     pub fn frozen_cols_count(&self) -> i32 {
         self.col_band.as_ref().map_or(0, |c| *c.end())
     }
 }
 
-/// Snapshot of "where cells are drawn right now" for one sheet — the model,
+/// The four index boundaries of the visible (scrollable) area.
+#[derive(Debug, Default)]
+pub struct VisibleRegion {
+    /// Top-left scrollable cell on screen.
+    pub first: CellRC,
+    /// Bottom-right scrollable cell on screen.
+    pub last: CellRC,
+}
+
+#[derive(Debug, Default)]
+pub struct CellRC {
+    pub row: i32,
+    pub column: i32,
+}
+
+/// Precomputed pixel offsets for visible rows and columns.
+///
+/// Built once per render call from the same iteration used to determine
+/// `VisibleRegion`. Eliminates the O(visible_range × R) summation inside
+/// `cell_x` / `cell_y` - each lookup becomes O(1).
+///
+/// Offsets are relative to `FrozenOffset`: `row_tops[i]` is the Y distance
+/// from `frozen.y` to the top edge of row `(row_start + i as i32)`.
+#[derive(Debug, Default)]
+pub(crate) struct PixelOffsets {
+    pub row_start: i32,
+    pub row_tops: Vec<f64>,
+    pub col_start: i32,
+    pub col_lefts: Vec<f64>,
+}
+
+impl PixelOffsets {
+    /// Y distance from `frozen.y` to the top edge of `row`.
+    ///
+    /// Returns `0.0` for rows outside the precomputed range. In practice
+    /// `range_pixel_bounds` clamps oversized selections to the canvas edge
+    /// before calling `cell_y`, so this fallback is never reached.
+    #[inline]
+    pub fn row_top(&self, row: i32) -> f64 {
+        self.row_tops
+            .get((row - self.row_start) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// X distance from `frozen.x` to the left edge of `col`.
+    #[inline]
+    pub fn col_left(&self, col: i32) -> f64 {
+        self.col_lefts
+            .get((col - self.col_start) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+}
+
+/// Per-frame geometric snapshot threaded into every render phase.
+///
+/// Built once at the start of `CanvasRenderer::render` from a `SheetViewport`,
+/// then borrowed (never owned) by `render_pane`, `render_headers`, and the
+/// overlay drawers. Bundles the visible region, the pixel-offset prefix-sum
+/// cache, and the resolved frozen-pane geometry so phases never re-read those
+/// from the model mid-frame.
+#[derive(Debug)]
+pub(crate) struct FrameContext {
+    pub vis: VisibleRegion,
+    pub offsets: PixelOffsets,
+    pub frozen: FrozenRC,
+}
+
+/// Snapshot of "where cells are drawn right now" for one sheet - the model,
 /// the view's scroll anchors, and the frozen-pane pixel splits bundled
 /// together.
 pub struct SheetViewport<'a> {
@@ -343,7 +406,7 @@ impl<'a> SheetViewport<'a> {
         }
     }
 
-    /// Bottom-right pixel of the current selection range — the autofill handle
+    /// Bottom-right pixel of the current selection range - the autofill handle
     /// anchor. `None` for full-row/column/sheet selections, where `col_to_x` /
     /// `row_to_y` would walk up to 1M cells to produce an off-screen pixel.
     pub fn autofill_handle(&self) -> Option<Point> {
@@ -419,6 +482,98 @@ impl<'a> SheetViewport<'a> {
             }
         }
         None
+    }
+
+    /// Compute the visible scrollable cell region for a canvas of size `canvas`.
+    ///
+    /// Independent of selection state - performance stays constant whether the
+    /// selection is one cell or the whole sheet. Scans rows/cols until the
+    /// canvas is filled, capping at `SCAN_CAP` to prevent O(LAST_ROW) iteration
+    /// when many rows are explicitly hidden (height = 0).
+    pub(crate) fn visible_region(&self, canvas: CanvasSize) -> VisibleRegion {
+        let frozen_rows = self.frozen.frozen_rows_count();
+        let frozen_cols = self.frozen.frozen_cols_count();
+        let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(self.model, r)).sum();
+        let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(self.model, c)).sum();
+
+        let row_first = (frozen_rows + 1).max(self.top_row);
+        let col_first = (frozen_cols + 1).max(self.left_column);
+
+        let mut row_last = row_first;
+        let mut y = HEADER_ROW_HEIGHT + frozen_rows_h;
+        for row in row_first..=LAST_ROW {
+            if y >= canvas.h || row == LAST_ROW {
+                row_last = row;
+                break;
+            }
+            y += row_height(self.model, row);
+        }
+
+        let mut col_last = col_first;
+        let mut x = HEADER_COL_WIDTH + frozen_cols_w;
+        for col in col_first..=LAST_COLUMN {
+            if x >= canvas.w || col == LAST_COLUMN {
+                col_last = col;
+                break;
+            }
+            x += col_width(self.model, col);
+        }
+
+        VisibleRegion {
+            first: CellRC {
+                column: col_first,
+                row: row_first,
+            },
+            last: CellRC {
+                column: col_last,
+                row: row_last,
+            },
+        }
+    }
+
+    /// Build a prefix-sum pixel-offset table for all visible rows and columns.
+    ///
+    /// Each `row_tops[i]` is the cumulative Y distance from `frozen.y` to the
+    /// top edge of row `(vis.first.row + i)`. Built in a single O(visible) pass
+    /// - same rows/cols `visible_region` already iterated. The returned table
+    ///   feeds `cell_x` / `cell_y` so they become O(1) array lookups instead of
+    ///   O(visible × R) summations.
+    pub(crate) fn pixel_offsets(&self, vis: &VisibleRegion) -> PixelOffsets {
+        let mut row_tops = Vec::with_capacity((vis.last.row - vis.first.row + 2) as usize);
+        let mut acc = 0.0_f64;
+        for r in vis.first.row..=vis.last.row {
+            row_tops.push(acc);
+            acc += row_height(self.model, r);
+        }
+        row_tops.push(acc);
+
+        let mut col_lefts = Vec::with_capacity((vis.last.column - vis.first.column + 2) as usize);
+        acc = 0.0;
+        for c in vis.first.column..=vis.last.column {
+            col_lefts.push(acc);
+            acc += col_width(self.model, c);
+        }
+        col_lefts.push(acc);
+
+        PixelOffsets {
+            row_start: vis.first.row,
+            row_tops,
+            col_start: vis.first.column,
+            col_lefts,
+        }
+    }
+
+    /// One-shot per-frame snapshot. Resolves the visible region, the pixel-offset
+    /// prefix sums, and bundles the already-resolved frozen geometry into a
+    /// `FrameContext` ready to thread through every render phase.
+    pub(crate) fn frame(&self, canvas: CanvasSize) -> FrameContext {
+        let vis = self.visible_region(canvas);
+        let offsets = self.pixel_offsets(&vis);
+        FrameContext {
+            vis,
+            offsets,
+            frozen: self.frozen.clone(),
+        }
     }
 }
 

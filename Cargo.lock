@@ -1018,7 +1018,7 @@ checksum = "71dd52191aae121e8611f1e8dc3e324dd0dd1dee1e6dd91d10ee07a3cfb4d9d8"
 
 [[package]]
 name = "iron-canvas"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "ironcalc_base 0.7.1",
  "js-sys",

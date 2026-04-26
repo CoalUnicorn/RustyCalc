@@ -13,8 +13,8 @@ use ironcalc_base::types::{BorderItem, BorderStyle};
 use crate::renderer::text::CellText;
 use crate::{CanvasModel, Point, Span};
 
-use super::super::geometry::{Line, PixelRect, SheetViewport};
-use super::super::model::CellAddress;
+use super::super::geometry::{FrameContext, Line, PixelRect};
+use super::super::model::{CellAddress, RCRange};
 use super::super::types::{OuterEdge, PaneRegion};
 
 use super::{CanvasRenderer, MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
@@ -31,7 +31,7 @@ enum BorderEdge {
     Bottom,
 }
 
-/// Inner edges (left / top) — the only edges whose resolved color can be
+/// Inner edges (left / top) - the only edges whose resolved color can be
 /// borrowed from a neighbour cell's opposite border or fill.
 /// Carved out as a separate enum from `BorderEdge` to avoid
 /// "unreachable for Right/Bottom" arm.
@@ -107,7 +107,7 @@ impl BorderEdge {
     }
 }
 
-/// Resolve the left/top border — where a neighbour's opposite edge or fill
+/// Resolve the left/top border - where a neighbour's opposite edge or fill
 /// can influence the final color. Encodes the fallback chain:
 /// own -> neighbour-side -> own-bg -> neighbour-bg -> grid.
 fn resolve_inner_edge<'a>(
@@ -133,7 +133,7 @@ fn resolve_inner_edge<'a>(
     (grid_color, &BorderStyle::Thin)
 }
 
-/// Resolve the right/bottom border — simpler than inner edges: only drawn
+/// Resolve the right/bottom border - simpler than inner edges: only drawn
 /// when explicit or at a pane boundary, with no neighbour fallback.
 fn resolve_outer_edge<'a>(
     own: Option<&'a BorderItem>,
@@ -188,7 +188,7 @@ impl CanvasRenderer {
         self.ctx
             .fill_rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
 
-        // Inner edges (left, top) — each falls back to the matching neighbour's
+        // Inner edges (left, top) - each falls back to the matching neighbour's
         // opposite border and fill.
         for inner in [InnerEdge::Left, InnerEdge::Top] {
             let own = match inner {
@@ -226,13 +226,13 @@ impl CanvasRenderer {
             self.draw_border(inner.as_edge(), rect, border_style, color);
         }
 
-        // Right edge — only at pane boundary or when explicitly set.
+        // Right edge - only at pane boundary or when explicitly set.
         if pane_outer.contains(&OuterEdge::Right) || style.border.right.is_some() {
             let (rc, rs) = resolve_outer_edge(style.border.right.as_ref(), grid_color);
             self.draw_border(BorderEdge::Right, rect, rs, rc);
         }
 
-        // Bottom edge — only at pane boundary or when explicitly set.
+        // Bottom edge - only at pane boundary or when explicitly set.
         if pane_outer.contains(&OuterEdge::Bottom) || style.border.bottom.is_some() {
             let (bc, bs) = resolve_outer_edge(style.border.bottom.as_ref(), grid_color);
             self.draw_border(BorderEdge::Bottom, rect, bs, bc);
@@ -242,11 +242,18 @@ impl CanvasRenderer {
     /// Repaint one cell's background + borders.
     ///
     /// Used by selection overlay to restore the active cell's real style on
-    /// top of the semi-transparent selection fill. Computes pixel position
-    /// via `SheetViewport` so the caller only needs logical `(row,column)`.
-    pub(super) fn repaint_active_cell(&self, model: &dyn CanvasModel, addr: CellAddress) {
-        let rect = SheetViewport::current(model).cell_rect(addr.row, addr.column);
-        self.render_cell_style(model, addr, rect, &[OuterEdge::Right, OuterEdge::Bottom]);
+    /// top of the semi-transparent selection fill. Pixel position comes from
+    /// the live frame so we don't snapshot a fresh viewport mid-render.
+    pub(super) fn repaint_active_cell(
+        &self,
+        model: &dyn CanvasModel,
+        addr: CellAddress,
+        frame: &FrameContext,
+    ) {
+        let range = RCRange::from_cell(addr.row, addr.column);
+        if let Some(rect) = self.range_pixel_bounds(model, frame, range) {
+            self.render_cell_style(model, addr, rect, &[OuterEdge::Right, OuterEdge::Bottom]);
+        }
     }
 
     fn draw_border(&self, edge: BorderEdge, rect: PixelRect, style: &BorderStyle, color: &str) {

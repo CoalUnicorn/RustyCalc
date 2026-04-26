@@ -73,7 +73,7 @@ impl CanvasRenderer {
             return None;
         }
 
-        // Destructure to move fields directly — avoids cloning `css`.
+        // Destructure to move fields directly - avoids cloning `css`.
         let CellStyle {
             font:
                 FontStyle {

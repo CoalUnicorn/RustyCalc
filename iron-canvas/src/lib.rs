@@ -1,12 +1,12 @@
 //! The spreadsheet's `<canvas>` surface.
 //!
-//! # The Concept — everything is a rectangle or a line
+//! # The Concept - everything is a rectangle or a line
 //!
 //! Every visible artifact in the grid is one of two primitives:
 //!
-//! - [`PixelRect`] — cells, headers, corner box, selection fill, autofill
+//! - [`PixelRect`] - cells, headers, corner box, selection fill, autofill
 //!   handle, point-mode tint, clipboard marching-ants region, text clip.
-//! - [`Line`] — border edges, frozen-pane separators, underline,
+//! - [`Line`] - border edges, frozen-pane separators, underline,
 //!   strikethrough.
 //!
 //! No curves, no arbitrary paths. Border resolution becomes "pick a `Line`
@@ -19,10 +19,10 @@
 //!
 //! # Submodules
 //!
-//! - [`geometry`] — rect/line types and pixel↔cell coordinate math.
-//! - [`types`] — renderer-internal shapes (panes, text layout, visible
+//! - [`geometry`] - rect/line types and pixel↔cell coordinate math.
+//! - [`types`] - renderer-internal shapes (panes, text layout, visible
 //!   region) plus public overlay types.
-//! - [`renderer`] — the four-phase render pipeline. See its module doc
+//! - [`renderer`] - the four-phase render pipeline. See its module doc
 //!   for the full walk-through.
 
 pub mod geometry;
@@ -36,7 +36,7 @@ pub use geometry::*;
 pub use renderer::CanvasRenderer;
 pub use types::{CanvasRenderMode, RenderOverlays};
 
-// CanvasModel — read-only worksheet surface the renderer consumes
+// CanvasModel - read-only worksheet surface the renderer consumes
 //
 // Path A bridge: the renderer's eventual parameter type. Replaces direct
 // `&UserModel` so the IronCalc webapp can plug in a JS-backed adapter that
@@ -49,7 +49,7 @@ pub use types::{CanvasRenderMode, RenderOverlays};
 // `SelectedView` is mirrored locally because `ironcalc_base` re-exports the
 // upstream struct only under `#[cfg(test)]`. When that gate goes away
 // upstream, this mirror and the field-copy in `get_selected_view` below can
-// be deleted in favour of `pub use ironcalc_base::SelectedView;` — no other
+// be deleted in favour of `pub use ironcalc_base::SelectedView;` - no other
 // consumer needs to change.
 
 use ironcalc_base::types::{CellType, Style};
@@ -125,7 +125,7 @@ impl<'a> CanvasModel for UserModel<'a> {
     }
 }
 
-// WASM host surface — IronCanvasView
+// WASM host surface - IronCanvasView
 //
 // Drop-in replacement for IronCalc's
 // `webapp/IronCalc/src/components/WorksheetCanvas/worksheetCanvas.ts`.
@@ -135,29 +135,30 @@ impl<'a> CanvasModel for UserModel<'a> {
 //
 // Architectural decisions in force:
 //
-//   Fork 1 — Model handle: shared `UserModel`. Settings receive the ironcalc
+//   Fork 1 - Model handle: shared `UserModel`. Settings receive the ironcalc
 //   `Model` JS handle and we read it directly via wasm-bindgen. Bridge
 //   mechanism (extern type + `unchecked_ref` cast vs ironcalc-side getter
 //   that exposes the inner `&UserModel`) is wired in a follow-up pass.
 //
-//   Fork 2 — Overlays: canvas-painted (renderer Phase 3). IronCalc's
+//   Fork 2 - Overlays: canvas-painted (renderer Phase 3). IronCalc's
 //   `cellOutline` / `areaOutline` / `extendToOutline` / `cellArrayStructure`
 //   divs are no longer needed.
-//     Option B reserved — drive DOM divs by absolute positioning. Would add
+//     Option B reserved - drive DOM divs by absolute positioning. Would add
 //     `update_cell_outline(rect)`, `update_area_outline(rect)`,
 //     `update_extend_to_outline(rect)`, plus a `disable_internal_overlays()`
 //     toggle that skips Phase 3 inside `CanvasRenderer::render`. Not in v1.
 //
-//   Fork 3 — Theme: read CSS variables off the canvas's closest `.ic-root`
-//   ancestor at construction (`CanvasTheme::from_css_vars(&root)` — to be
+//   Fork 3 - Theme: read CSS variables off the canvas's closest `.ic-root`
+//   ancestor at construction (`CanvasTheme::from_css_vars(&root)` - to be
 //   added on `CanvasTheme`). Caller does not pass colors.
-//     Option B reserved — accept a serialized `CanvasTheme` from JS via
+//     Option B reserved - accept a serialized `CanvasTheme` from JS via
 //     `set_theme(theme: JsValue)`. Useful for hosts that compute theme
 //     outside CSS variables. Not in v1.
 
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+#[allow(dead_code, unused)]
 #[wasm_bindgen]
 pub struct IronCanvasView {
     canvas: HtmlCanvasElement,
@@ -216,13 +217,13 @@ impl IronCanvasView {
         self.height = height;
     }
 
-    // Reserved for Fork 2 (Option B — DOM-driven overlays).
+    // Reserved for Fork 2 (Option B - DOM-driven overlays).
     // pub fn update_cell_outline(&self, _rect: JsValue) { /* unimplemented */ }
     // pub fn update_area_outline(&self, _rect: JsValue) { /* unimplemented */ }
     // pub fn update_extend_to_outline(&self, _rect: JsValue) { /* unimplemented */ }
     // pub fn disable_internal_overlays(&mut self, _disabled: bool) { /* unimplemented */ }
 
-    // Reserved for Fork 3 (Option B — caller-provided theme).
+    // Reserved for Fork 3 (Option B - caller-provided theme).
     // pub fn set_theme(&mut self, _theme: JsValue) { /* unimplemented */ }
 
     // Hit-test surface. Both shapes ship:
@@ -230,20 +231,23 @@ impl IronCanvasView {
     //     `mousemove` cursor flips that don't want a JS object.
     //   - `hit_test` (rich, single-call) for `pointerdown` dispatch that
     //     wants one exhaustive switch on the JS side.
-
+    #[allow(dead_code, unused)]
     pub fn get_cell_by_coordinates(&self, x: f64, y: f64) -> JsValue {
         todo!()
     }
 
+    #[allow(dead_code, unused)]
     /// Returns `{ axis, index }` or null.
     pub fn get_header_by_coordinates(&self, x: f64, y: f64) -> JsValue {
         todo!()
     }
 
+    #[allow(dead_code, unused)]
     pub fn is_on_autofill_handle(&self, x: f64, y: f64) -> bool {
         todo!()
     }
 
+    #[allow(dead_code, unused)]
     pub fn hit_test(&self, x: f64, y: f64) -> JsValue {
         todo!()
     }
