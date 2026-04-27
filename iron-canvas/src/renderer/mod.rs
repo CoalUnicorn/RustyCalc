@@ -228,10 +228,8 @@ impl CanvasRenderer {
         ctx.clear_rect(0.0, 0.0, self.width, self.height);
 
         // Phase 1: Cells - four frozen-pane quadrants. Each `render_pane`
-        // streams resolved `CellPaint` (bg + borders + text) and paints
-        // each cell in one pass; no deferred text Vec.
-        // Performance note: Each pane is bounded by visible region, ensuring O(visible) complexity
-        // regardless of selection size (whole sheet vs single cell).
+        // does two passes: bg+borders first, then text on top so overflow
+        // is never clipped by a neighbour's background fill.
         self.draw_frozen_separators(&frame.frozen);
 
         self.render_pane(model, PaneRegion::top_left(&frame.frozen));

@@ -221,21 +221,15 @@ impl PaneRegion {
         model: &'a dyn CanvasModel,
         canvas: CanvasSize,
     ) -> PaneCells<'a> {
-        let column_widths: Vec<(i32, f64)> = self
-            .cols
-            .clone()
-            .map(|c| (c, col_width(model, c)))
-            .collect();
         PaneCells {
             pane: self,
             model,
             sheet: model.get_selected_sheet(),
             canvas,
-            column_widths,
+            current_row: None,
             row_iter: self.rows.clone(),
             row_top: self.origin.y,
-            current_row: None,
-            col_idx: 0,
+            col_iter: self.cols.clone(),
             col_left: self.origin.x,
         }
     }
@@ -246,7 +240,6 @@ pub(crate) struct CellPaint {
     pub rect: PixelRect,
     pub bg: String, // CSS colour, always set
     pub borders: BordersPaint,
-    pub text: Option<TextPaint>, // None for empty / too-small cells
 }
 
 pub(crate) struct BordersPaint {
@@ -294,6 +287,12 @@ pub(crate) struct CellSlot {
     pub outer_edges: &'static [OuterEdge],
 }
 
+#[derive(Clone, Default)]
+struct RowStrip {
+    row: i32,
+    height: f64,
+}
+
 /// Stateful walk over the cells of a `PaneRegion`. Caches per-pane column
 /// widths once, threads a row-top accumulator across rows, and skips
 /// hidden rows/columns as well as cells that fall off the canvas. Replaces
@@ -303,13 +302,10 @@ pub(crate) struct PaneCells<'a> {
     model: &'a dyn CanvasModel,
     sheet: u32,
     canvas: CanvasSize,
-    column_widths: Vec<(i32, f64)>,
+    current_row: Option<RowStrip>,
     row_iter: RangeInclusive<i32>,
     row_top: f64,
-    /// `(row, height)` of the row currently being walked. `None` when we
-    /// need to pull the next row from `row_iter`.
-    current_row: Option<(i32, f64)>,
-    col_idx: usize,
+    col_iter: RangeInclusive<i32>,
     col_left: f64,
 }
 
@@ -318,61 +314,56 @@ impl<'a> Iterator for PaneCells<'a> {
 
     fn next(&mut self) -> Option<CellSlot> {
         loop {
-            // Acquire a row strip if we don't have one in flight.
             if self.current_row.is_none() {
-                let row = self.row_iter.next()?;
-                // Past the canvas bottom - nothing more in this pane will
-                // ever be visible.
                 if self.row_top >= self.canvas.h {
                     return None;
                 }
-                let h = row_height(self.model, row);
-                // Hidden row (height 0): skip without advancing row_top.
-                if h <= 0.0 {
+                let row = self.row_iter.next()?;
+                let height = row_height(self.model, row);
+                if height <= 0.0 {
                     continue;
                 }
-                self.current_row = Some((row, h));
-                self.col_idx = 0;
+                self.current_row = Some(RowStrip { row, height });
+                self.col_iter = self.pane.cols.clone();
                 self.col_left = self.pane.origin.x;
             }
-            let (row, row_h) = self.current_row.expect("set above");
+            let row_strip = self.current_row.clone().unwrap_or_default();
 
-            while self.col_idx < self.column_widths.len() {
-                let (col, col_w) = self.column_widths[self.col_idx];
-                let col_left = self.col_left;
-                self.col_idx += 1;
-                self.col_left += col_w;
+            let Some(col) = self.col_iter.next() else {
+                self.row_top += row_strip.height;
+                self.current_row = None;
+                continue;
+            };
 
-                if col_left >= self.canvas.w {
-                    break;
-                }
-                if col_w <= 0.0 {
-                    continue;
-                }
-                let rect = PixelRect {
-                    top_left: Point {
-                        x: col_left,
-                        y: self.row_top,
-                    },
-                    width: col_w,
-                    height: row_h,
-                };
-                if !rect.intersects(self.canvas) {
-                    continue;
-                }
-                return Some(CellSlot {
-                    addr: CellAddress {
-                        sheet: self.sheet,
-                        row,
-                        column: col,
-                    },
-                    rect,
-                    outer_edges: self.pane.outer_edges_at(row, col),
-                });
+            let width = col_width(self.model, col);
+            if width <= 0.0 {
+                continue;
+            }
+            if self.col_left >= self.canvas.w {
+                self.row_top += row_strip.height;
+                self.current_row = None;
+                continue;
             }
 
-            self.row_top += row_h;
-            self.current_row = None;
+            let rect = PixelRect {
+                top_left: Point {
+                    x: self.col_left,
+                    y: self.row_top,
+                },
+                width,
+                height: row_strip.height,
+            };
+            self.col_left += width;
+
+            return Some(CellSlot {
+                addr: CellAddress {
+                    sheet: self.sheet,
+                    row: row_strip.row,
+                    column: col,
+                },
+                rect,
+                outer_edges: self.pane.outer_edges_at(row_strip.row, col),
+            });
         }
     }
 }
@@ -596,7 +587,7 @@ impl CellStyle {
 /// Build a `TextPaint` for `addr` at `rect`, or `None` for empty/too-small
 /// cells. Reads the formatted value from the model and resolves font /
 /// alignment / colour via `CellStyle`.
-fn resolve_text_paint(
+pub(crate) fn resolve_text_paint(
     renderer: &CanvasRenderer,
     model: &dyn CanvasModel,
     addr: CellAddress,
@@ -688,16 +679,13 @@ fn resolve_text_paint(
 /// path: neighbour styles are passed in by the iterator.
 pub(crate) fn resolve_cell_paint(
     renderer: &CanvasRenderer,
-    model: &dyn CanvasModel,
     show_grid: bool,
-    addr: CellAddress,
-    rect: PixelRect,
-    outer_edges: &'static [OuterEdge],
+    slot: CellSlot,
     own_style: &Style,
     left_neighbour: Option<&Style>,
     top_neighbour: Option<&Style>,
 ) -> Option<CellPaint> {
-    if rect.width <= 0.0 || rect.height <= 0.0 {
+    if slot.rect.width <= 0.0 || slot.rect.height <= 0.0 {
         return None;
     }
 
@@ -732,7 +720,8 @@ pub(crate) fn resolve_cell_paint(
         grid_color,
     );
 
-    let right = if outer_edges.contains(&OuterEdge::Right) || own_style.border.right.is_some() {
+    let right = if slot.outer_edges.contains(&OuterEdge::Right) || own_style.border.right.is_some()
+    {
         Some(resolve_outer_paint(
             own_style.border.right.as_ref(),
             grid_color,
@@ -740,24 +729,19 @@ pub(crate) fn resolve_cell_paint(
     } else {
         None
     };
-    let bottom = if outer_edges.contains(&OuterEdge::Bottom) || own_style.border.bottom.is_some() {
-        Some(resolve_outer_paint(
-            own_style.border.bottom.as_ref(),
-            grid_color,
-        ))
-    } else {
-        None
-    };
-
-    let text = if rect.intersects(renderer.canvas_size()) {
-        resolve_text_paint(renderer, model, addr, rect)
-    } else {
-        None
-    };
+    let bottom =
+        if slot.outer_edges.contains(&OuterEdge::Bottom) || own_style.border.bottom.is_some() {
+            Some(resolve_outer_paint(
+                own_style.border.bottom.as_ref(),
+                grid_color,
+            ))
+        } else {
+            None
+        };
 
     Some(CellPaint {
-        addr,
-        rect,
+        addr: slot.addr,
+        rect: slot.rect,
         bg,
         borders: BordersPaint {
             left,
@@ -765,7 +749,6 @@ pub(crate) fn resolve_cell_paint(
             right,
             bottom,
         },
-        text,
     })
 }
 
@@ -834,11 +817,8 @@ impl<'a> Iterator for CellPaintsIter<'a> {
 
             let paint = resolve_cell_paint(
                 self.renderer,
-                self.model,
                 self.show_grid,
-                slot.addr,
-                slot.rect,
-                slot.outer_edges,
+                slot,
                 &own_style,
                 self.prev_col_style.as_ref(),
                 self.prev_row_styles.get(&slot.addr.column),

@@ -157,7 +157,7 @@ impl<'a> CanvasModel for UserModel<'a> {
 
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
-use web_sys::OffscreenCanvas;
+// use web_sys::OffscreenCanvas;
 
 #[allow(dead_code, unused)]
 #[wasm_bindgen]

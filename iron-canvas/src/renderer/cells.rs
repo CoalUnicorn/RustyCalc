@@ -4,11 +4,14 @@
 //! and hands each `CellPaint` to `paint_cell`. Nothing in this file talks
 //! to the model: bg, borders, and text are pre-resolved upstream.
 
+use crate::types::CellSlot;
 use crate::{CanvasModel, Point, Span};
 
 use super::super::geometry::{FrameContext, Line, PixelRect};
 use super::super::model::{CellAddress, RCRange};
-use super::super::types::{resolve_cell_paint, BorderPaint, CellPaint, OuterEdge, PaneRegion};
+use super::super::types::{
+    resolve_cell_paint, resolve_text_paint, BorderPaint, CellPaint, OuterEdge, PaneRegion,
+};
 
 use super::CanvasRenderer;
 
@@ -70,17 +73,19 @@ impl BorderEdge {
 const ACTIVE_CELL_OUTER_EDGES: &[OuterEdge] = &[OuterEdge::Right, OuterEdge::Bottom];
 
 impl CanvasRenderer {
-    /// Walk one frozen-pane quadrant and paint each visible cell from the
-    /// resolved-paint stream. The renderer never touches the model here -
-    /// `paints_in` did all the resolution.
+    /// Walk one frozen-pane quadrant. Pass 1 paints bg+borders for every
+    /// cell, then pass 2 paints text on top so overflow is never clipped by
+    /// a neighbour's background.
     pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
-        for paint in self.paints_in(model, &pane) {
-            self.paint_cell(&paint);
+        let paints: Vec<CellPaint> = self.paints_in(model, &pane).collect();
+        for p in &paints {
+            self.paint_cell(p);
         }
+        self.paint_pane_text(model, &paints);
     }
 
-    /// Paint one resolved `CellPaint` onto the canvas: background fill,
-    /// then the four border edges, then the optional text layout.
+    /// Paint bg + borders for one resolved `CellPaint`. Text is handled
+    /// separately in `paint_pane_text`.
     pub(super) fn paint_cell(&self, p: &CellPaint) {
         self.ctx_ref().set_fill_style_str(&p.bg);
         self.ctx_ref().fill_rect(
@@ -98,9 +103,14 @@ impl CanvasRenderer {
         if let Some(b) = &p.borders.bottom {
             self.paint_border(BorderEdge::Bottom, p.rect, b);
         }
+    }
 
-        if let Some(t) = &p.text {
-            self.paint_text(t);
+    /// Pass 2: resolve and paint text for every cell in a collected pane.
+    fn paint_pane_text(&self, model: &dyn CanvasModel, paints: &[CellPaint]) {
+        for p in paints {
+            if let Some(t) = resolve_text_paint(self, model, p.addr, p.rect) {
+                self.paint_text(&t);
+            }
         }
     }
 
@@ -146,11 +156,12 @@ impl CanvasRenderer {
         let show_grid = model.get_show_grid_lines(addr.sheet).unwrap_or(true);
         let Some(paint) = resolve_cell_paint(
             self,
-            model,
             show_grid,
-            addr,
-            rect,
-            ACTIVE_CELL_OUTER_EDGES,
+            CellSlot {
+                addr,
+                rect,
+                outer_edges: ACTIVE_CELL_OUTER_EDGES,
+            },
             &own_style,
             None,
             None,
@@ -158,6 +169,9 @@ impl CanvasRenderer {
             return;
         };
         self.paint_cell(&paint);
+        if let Some(t) = resolve_text_paint(self, model, addr, rect) {
+            self.paint_text(&t);
+        }
     }
 }
 
