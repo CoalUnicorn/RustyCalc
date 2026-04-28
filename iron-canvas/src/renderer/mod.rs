@@ -92,6 +92,7 @@ mod paint;
 mod text;
 mod viewport;
 
+use std::cell::Cell;
 use wasm_bindgen::JsCast;
 use web_sys::js_sys;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
@@ -122,6 +123,13 @@ pub struct CanvasRenderer {
     dash_pattern: js_sys::Array,
     /// Empty array used to clear the dash pattern after a dashed stroke.
     dash_empty: js_sys::Array,
+    /// Per-frame canvas state cache. Avoids redundant JS boundary crossings
+    /// when adjacent cells share the same fill, stroke, font, or line width.
+    /// `Cell<T>` allows mutation through `&self` so paint helpers keep their immutable signature.
+    last_fill: Cell<String>,
+    last_stroke: Cell<String>,
+    last_font: Cell<String>,
+    last_line_width: Cell<f64>,
 }
 
 impl CanvasRenderer {
@@ -209,6 +217,10 @@ impl CanvasRenderer {
             theme,
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
+            last_fill: Cell::new("".to_string()),
+            last_stroke: Cell::new("".to_string()),
+            last_line_width: Cell::new(0.0),
+            last_font: Cell::new("".to_string()),
         }
     }
 

@@ -24,15 +24,17 @@ impl CanvasRenderer {
     /// Paint a pre-computed `TextPaint` onto the canvas. Pure pixel pusher:
     /// no model access, no layout work - everything is already resolved.
     pub(super) fn paint_text(&self, t: &TextPaint) {
-        let ctx = self.ctx_ref();
-        ctx.set_font(&t.font_css);
-        ctx.set_fill_style_str(t.color.as_str());
+        // Set state before `with_clip` so save/restore preserves it — the values
+        // survive the restore and the cache stays valid across consecutive cells
+        // that share the same font or color.
+        self.set_font_cached(&t.font_css);
+        self.set_fill_cached(t.color.as_str());
+        if t.underline || t.strike {
+            self.set_stroke_cached(t.color.as_str());
+            self.set_line_width_cached(STANDARD_BORDER_WIDTH);
+        }
 
         self.with_clip(t.clip, |this| {
-            if t.underline || t.strike {
-                this.ctx_ref().set_stroke_style_str(t.color.as_str());
-                this.ctx_ref().set_line_width(STANDARD_BORDER_WIDTH);
-            }
             let underline_offset =
                 (t.font_size_px * UNDERLINE_OFFSET_FACTOR).max(MIN_UNDERLINE_OFFSET);
 

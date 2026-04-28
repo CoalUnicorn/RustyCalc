@@ -79,22 +79,28 @@ impl CanvasRenderer {
     pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
         let paints: Vec<CellPaint> = self.paints_in(model, &pane).collect();
         for p in &paints {
-            self.paint_cell(p);
+            self.paint_bg(p);
         }
+        self.paint_borders_batched(&paints);
         self.paint_pane_text(model, &paints);
     }
 
-    /// Paint bg + borders for one resolved `CellPaint`. Text is handled
-    /// separately in `paint_pane_text`.
-    pub(super) fn paint_cell(&self, p: &CellPaint) {
-        self.ctx_ref().set_fill_style_str(&p.bg);
+    /// Fill a cell's background rectangle. Border pass is separate (batched).
+    pub(super) fn paint_bg(&self, p: &CellPaint) {
+        self.set_fill_cached(&p.bg);
         self.ctx_ref().fill_rect(
             p.rect.top_left.x,
             p.rect.top_left.y,
             p.rect.width,
             p.rect.height,
         );
+    }
 
+    /// Paint bg + borders for one resolved `CellPaint`. Used by
+    /// `repaint_active_cell` where a single-cell batch is not worth the
+    /// overhead; the main pane pass uses `paint_bg` + `paint_borders_batched`.
+    pub(super) fn paint_cell(&self, p: &CellPaint) {
+        self.paint_bg(p);
         self.paint_border(BorderEdge::Left, p.rect, &p.borders.left);
         self.paint_border(BorderEdge::Top, p.rect, &p.borders.top);
         if let Some(b) = &p.borders.right {
@@ -107,10 +113,84 @@ impl CanvasRenderer {
 
     /// Pass 2: resolve and paint text for every cell in a collected pane.
     fn paint_pane_text(&self, model: &dyn CanvasModel, paints: &[CellPaint]) {
+        // TEST: paints remove later
+        // Damage tracking to skip cells
+        // let mut c = 0;
         for p in paints {
             if let Some(t) = resolve_text_paint(self, model, p.addr, p.rect) {
                 self.paint_text(&t);
+                // c += 1;
             }
+        }
+        // web_sys::console::log_1(&format!("Paint painted texts: {}", c).into());
+    }
+
+    /// Batch all border lines in `paints` into per-style paths so each
+    /// distinct (color, width) combination emits exactly one `begin_path` →
+    /// N×`move_to`/`line_to` → `stroke()` sequence instead of one per edge.
+    ///
+    /// Linear Vec search is fastest here: a pane typically has 2–5 distinct
+    /// border styles (grid gray + maybe 1–2 user-set colors).
+    fn paint_borders_batched(&self, paints: &[CellPaint]) {
+        struct Bucket {
+            color: String,
+            width_px: f64,
+            lines: Vec<Line>,
+        }
+
+        let mut buckets: Vec<Bucket> = Vec::new();
+
+        for p in paints {
+            let edges: [Option<(BorderEdge, &BorderPaint)>; 4] = [
+                Some((BorderEdge::Left, &p.borders.left)),
+                Some((BorderEdge::Top, &p.borders.top)),
+                p.borders.right.as_ref().map(|b| (BorderEdge::Right, b)),
+                p.borders.bottom.as_ref().map(|b| (BorderEdge::Bottom, b)),
+            ];
+            for (edge, border) in edges.into_iter().flatten() {
+                let base = edge.line(p.rect);
+                // Double borders emit two offset lines into the same bucket.
+                let double_lines = [base.offset_cross(-1.0), base.offset_cross(1.0)];
+                let single_line = [base];
+                let lines: &[Line] = if border.stroke.double {
+                    &double_lines
+                } else {
+                    &single_line
+                };
+                for &line in lines {
+                    if let Some(b) = buckets
+                        .iter_mut()
+                        .find(|b| b.color == border.color && b.width_px == border.stroke.width_px)
+                    {
+                        b.lines.push(line);
+                    } else {
+                        buckets.push(Bucket {
+                            color: border.color.clone(),
+                            width_px: border.stroke.width_px,
+                            lines: vec![line],
+                        });
+                    }
+                }
+            }
+        }
+
+        for bucket in &buckets {
+            self.set_stroke_cached(&bucket.color);
+            self.set_line_width_cached(bucket.width_px);
+            self.ctx_ref().begin_path();
+            for line in &bucket.lines {
+                match line {
+                    Line::H { span, y } => {
+                        self.ctx_ref().move_to(span.from, *y);
+                        self.ctx_ref().line_to(span.to, *y);
+                    }
+                    Line::V { x, span } => {
+                        self.ctx_ref().move_to(*x, span.from);
+                        self.ctx_ref().line_to(*x, span.to);
+                    }
+                }
+            }
+            self.ctx_ref().stroke();
         }
     }
 
@@ -123,15 +203,11 @@ impl CanvasRenderer {
         } else {
             &[0.0]
         };
-
-        self.ctx_ref().save();
-        self.ctx_ref().set_stroke_style_str(&b.color);
-        self.with_stroke_width(b.stroke.width_px, |this| {
-            for &d in offsets {
-                this.stroke_line(line.offset_cross(d));
-            }
-        });
-        self.ctx_ref().restore();
+        self.set_stroke_cached(&b.color);
+        self.set_line_width_cached(b.stroke.width_px);
+        for &d in offsets {
+            self.stroke_line(line.offset_cross(d));
+        }
     }
 
     /// Repaint one cell's full paint (bg + borders + text).

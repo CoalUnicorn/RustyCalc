@@ -14,7 +14,7 @@ use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 impl CanvasRenderer {
     /// Fill `rect` with a solid color.
     pub(super) fn rect_fill(&self, rect: PixelRect, color: &str) {
-        self.ctx.set_fill_style_str(color);
+        self.set_fill_cached(color);
         self.ctx
             .fill_rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
     }
@@ -22,7 +22,7 @@ impl CanvasRenderer {
     /// Stroke `rect`'s outline at `width` pixels. Width is restored to
     /// `STANDARD_BORDER_WIDTH` on exit via `with_stroke_width`.
     pub(super) fn rect_stroke(&self, rect: PixelRect, color: &str, width: f64) {
-        self.ctx.set_stroke_style_str(color);
+        self.set_stroke_cached(color);
         self.with_stroke_width(width, |this| {
             this.ctx
                 .stroke_rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
@@ -40,9 +40,9 @@ impl CanvasRenderer {
     /// `STANDARD_BORDER_WIDTH` on exit — makes the reset invariant explicit
     /// and shared by every helper that would otherwise duplicate it.
     pub(super) fn with_stroke_width<R>(&self, width: f64, f: impl FnOnce(&Self) -> R) -> R {
-        self.ctx.set_line_width(width);
+        self.set_line_width_cached(width);
         let result = f(self);
-        self.ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        self.set_line_width_cached(STANDARD_BORDER_WIDTH);
         result
     }
 
@@ -83,5 +83,47 @@ impl CanvasRenderer {
         self.ctx.move_to(x, span.from);
         self.ctx.line_to(x, span.to);
         self.ctx.stroke();
+    }
+
+    /// Set fill style, skipping the JS call when unchanged.
+    /// Uses `Cell::take/set` to compare without allocating on a cache hit.
+    pub(super) fn set_fill_cached(&self, color: &str) {
+        let prev = self.last_fill.take();
+        if prev != color {
+            self.ctx.set_fill_style_str(color);
+            self.last_fill.set(color.to_string());
+        } else {
+            self.last_fill.set(prev);
+        }
+    }
+
+    /// Set stroke style, skipping the JS call when unchanged.
+    pub(super) fn set_stroke_cached(&self, color: &str) {
+        let prev = self.last_stroke.take();
+        if prev != color {
+            self.ctx.set_stroke_style_str(color);
+            self.last_stroke.set(color.to_string());
+        } else {
+            self.last_stroke.set(prev);
+        }
+    }
+
+    /// Set font, skipping the JS call when unchanged.
+    pub(super) fn set_font_cached(&self, font: &str) {
+        let prev = self.last_font.take();
+        if prev != font {
+            self.ctx.set_font(font);
+            self.last_font.set(font.to_string());
+        } else {
+            self.last_font.set(prev);
+        }
+    }
+
+    /// Set line width, skipping the JS call when unchanged.
+    pub(super) fn set_line_width_cached(&self, width: f64) {
+        if self.last_line_width.get() != width {
+            self.ctx.set_line_width(width);
+            self.last_line_width.set(width);
+        }
     }
 }

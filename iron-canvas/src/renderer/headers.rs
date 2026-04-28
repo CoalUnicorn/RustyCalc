@@ -23,8 +23,7 @@ impl CanvasRenderer {
         if frc.row_band.is_none() && frc.col_band.is_none() {
             return;
         }
-        self.ctx
-            .set_stroke_style_str(self.theme.grid_separator_color);
+        self.set_stroke_cached(self.theme.grid_separator_color);
 
         let sep_y = frc.offset.origin.y - FROZEN_SEP / 2.0 + HEADER_OFFSET;
         let sep_x = frc.offset.origin.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
@@ -61,9 +60,8 @@ impl CanvasRenderer {
         };
         self.rect_fill(corner, self.theme.header_bg);
 
-        self.ctx
-            .set_stroke_style_str(self.theme.header_border_color);
-        self.ctx.set_line_width(STANDARD_BORDER_WIDTH);
+        self.set_stroke_cached(self.theme.header_border_color);
+        self.set_line_width_cached(STANDARD_BORDER_WIDTH);
         self.stroke_hline(
             Span {
                 from: 0.0,
@@ -96,8 +94,7 @@ impl CanvasRenderer {
         let view = model.get_selected_view();
         let (sel_start, sel_end) = axis.selection_range(&view.range);
 
-        self.ctx
-            .set_font(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
+        self.set_font_cached(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
 
         // Frozen band - pinned to the strip origin.
         let mut cursor = axis.strip_start();
@@ -157,7 +154,7 @@ impl CanvasRenderer {
         self.rect_fill(full, self.theme.header_border_color);
         self.rect_fill(body, body_bg);
 
-        self.ctx.set_fill_style_str(text_color);
+        self.set_fill_cached(text_color);
         let center = full.center();
         let label = match axis {
             Axis::Row => index.to_string(),
