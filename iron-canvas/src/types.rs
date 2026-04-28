@@ -839,8 +839,11 @@ impl<'a> Iterator for CellPaintsIter<'a> {
 }
 
 /// Overlay ranges passed to `render()` for selection preview drawing.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Default)]
 pub struct RenderOverlays {
+    /// Selection border in CSS pixels, pre-converted by the consumer.
+    /// `None` means no selection is visible (e.g., during a sheet swap).
+    pub selection: Option<super::geometry::PixelRect>,
     /// Target cell during autofill-handle drag.
     pub extend_to: Option<AutofillTarget>,
     pub clipboard: Option<SheetArea>,
@@ -867,6 +870,22 @@ pub enum CanvasRenderMode {
     ViewportUpdate,
     /// Drag overlay changed (autofill preview, point-mode range) - no model change.
     Overlay,
+}
+
+/// Scroll origin for the visible sheet area.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Viewport {
+    /// First visible row in the scrollable region (1-indexed).
+    pub top_row: u32,
+    /// First visible column in the scrollable region (1-indexed).
+    pub left_column: u32,
+}
+
+/// Number of rows/columns pinned by the freeze-panes feature.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct FreezeConfig {
+    pub frozen_rows: u32,
+    pub frozen_cols: u32,
 }
 
 #[cfg(test)]
@@ -991,5 +1010,128 @@ mod tests {
         assert_eq!(p.origin.y, 100.0);
         assert_eq!(p.last_row, 9);
         assert_eq!(p.last_col, 11);
+    }
+
+    #[test]
+    fn viewport_same_value_is_equal() {
+        let vp = Viewport {
+            top_row: 5,
+            left_column: 3,
+        };
+        assert_eq!(vp, vp);
+    }
+
+    #[test]
+    fn viewport_different_top_row_is_not_equal() {
+        let a = Viewport {
+            top_row: 1,
+            left_column: 1,
+        };
+        let b = Viewport {
+            top_row: 2,
+            left_column: 1,
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn viewport_different_left_column_is_not_equal() {
+        let a = Viewport {
+            top_row: 1,
+            left_column: 1,
+        };
+        let b = Viewport {
+            top_row: 1,
+            left_column: 2,
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn freeze_config_same_value_is_equal() {
+        let f = FreezeConfig {
+            frozen_rows: 2,
+            frozen_cols: 1,
+        };
+        assert_eq!(f, f);
+    }
+
+    #[test]
+    fn freeze_config_different_rows_is_not_equal() {
+        let a = FreezeConfig {
+            frozen_rows: 2,
+            frozen_cols: 1,
+        };
+        let b = FreezeConfig {
+            frozen_rows: 3,
+            frozen_cols: 1,
+        };
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn render_overlays_default_equals_itself() {
+        let a = RenderOverlays::default();
+        let b = RenderOverlays::default();
+        assert!(a == b);
+    }
+
+    #[test]
+    fn render_overlays_changed_point_range_is_not_equal() {
+        use crate::model::RCRange;
+        let a = RenderOverlays::default();
+        let mut b = RenderOverlays::default();
+        b.point_range = Some(RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        });
+        assert!(a != b);
+    }
+
+    #[test]
+    fn render_overlays_same_point_range_is_equal() {
+        use crate::model::RCRange;
+        let range = Some(RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        });
+        let a = RenderOverlays {
+            point_range: range,
+            ..Default::default()
+        };
+        let b = RenderOverlays {
+            point_range: range,
+            ..Default::default()
+        };
+        assert!(a == b);
+    }
+
+    #[test]
+    fn render_overlays_changed_selection_is_not_equal() {
+        use crate::geometry::{PixelRect, Point};
+        let a = RenderOverlays::default();
+        let b = RenderOverlays {
+            selection: Some(PixelRect {
+                top_left: Point { x: 10.0, y: 10.0 },
+                width: 80.0,
+                height: 20.0,
+            }),
+            ..Default::default()
+        };
+        assert!(a != b);
+    }
+
+    #[test]
+    fn render_overlays_cleared_selection_equals_default() {
+        let a = RenderOverlays::default();
+        let b = RenderOverlays {
+            selection: None,
+            ..Default::default()
+        };
+        assert!(a == b);
     }
 }
