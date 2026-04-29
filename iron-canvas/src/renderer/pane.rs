@@ -19,21 +19,17 @@ pub struct PaneRegion {
     pub rows: RangeInclusive<i32>,
     pub cols: RangeInclusive<i32>,
     pub origin: Point,
-    /// Rightmost column that draws its right border.
-    pub last_col: i32,
-    /// Bottommost row that draws its bottom border.
-    pub last_row: i32,
 }
 
 /// Outer edge of a cell rect that may be forced to stroke a border because
 /// the cell sits on a pane boundary. Only `Right` and `Bottom` are valid -
 /// left/top are inner edges resolved against neighbour cells inside the
 /// pane.
-#[derive(Copy, Clone, PartialEq, Eq)]
-pub enum OuterEdge {
-    Right,
-    Bottom,
-}
+// #[derive(Copy, Clone, PartialEq, Eq)]
+// pub enum OuterEdge {
+//     Right,
+//     Bottom,
+// }
 
 impl PaneRegion {
     /// Frozen rows x frozen cols - top-left quadrant.
@@ -41,8 +37,6 @@ impl PaneRegion {
         let rows = frc.row_band.clone().unwrap_or(0..=0);
         let cols = frc.col_band.clone().unwrap_or(0..=0);
         PaneRegion {
-            last_row: *rows.end(),
-            last_col: *cols.end(),
             rows,
             cols,
             origin: Point {
@@ -56,14 +50,12 @@ impl PaneRegion {
     pub(crate) fn top_right(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
         let rows = frc.row_band.clone().unwrap_or(0..=0);
         PaneRegion {
-            last_row: *rows.end(),
             rows,
             cols: vis.first.column..=vis.last.column,
             origin: Point {
                 x: frc.offset.origin.x,
                 y: HEADER_ROW_HEIGHT + HEADER_OFFSET,
             },
-            last_col: vis.last.column,
         }
     }
 
@@ -71,14 +63,12 @@ impl PaneRegion {
     pub(crate) fn bottom_left(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
         let cols = frc.col_band.clone().unwrap_or(0..=0);
         PaneRegion {
-            last_col: *cols.end(),
             rows: vis.first.row..=vis.last.row,
             cols,
             origin: Point {
                 x: HEADER_COL_WIDTH + HEADER_OFFSET,
                 y: frc.offset.origin.y,
             },
-            last_row: vis.last.row,
         }
     }
 
@@ -91,22 +81,20 @@ impl PaneRegion {
                 x: frc.offset.origin.x,
                 y: frc.offset.origin.y,
             },
-            last_col: vis.last.column,
-            last_row: vis.last.row,
         }
     }
 
     /// Outer borders this `(row, col)` must draw because it sits on a pane
     /// boundary. Empty slice for interior cells. Static slices - no
     /// allocation per cell.
-    pub(crate) fn outer_edges_at(&self, row: i32, col: i32) -> &'static [OuterEdge] {
-        match (col == self.last_col, row == self.last_row) {
-            (true, true) => &[OuterEdge::Right, OuterEdge::Bottom],
-            (true, false) => &[OuterEdge::Right],
-            (false, true) => &[OuterEdge::Bottom],
-            (false, false) => &[],
-        }
-    }
+    // pub(crate) fn outer_edges_at(&self, row: i32, col: i32) -> &'static [OuterEdge] {
+    //     match (col == self.last_col, row == self.last_row) {
+    //         (true, true) => &[OuterEdge::Right, OuterEdge::Bottom],
+    //         (true, false) => &[OuterEdge::Right],
+    //         (false, true) => &[OuterEdge::Bottom],
+    //         (false, false) => &[],
+    //     }
+    // }
 
     /// Walk every visible cell in this pane, yielding pixel rect + outer
     /// edges per cell. Replaces the open-coded row/col iteration that used

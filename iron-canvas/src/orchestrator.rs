@@ -7,7 +7,8 @@ use crate::geometry::{PixelRect, Point};
 use crate::layer::{GridLayer, OverlayLayer};
 use crate::theme::{CanvasTheme, DARK, LIGHT};
 use crate::types::{FreezeConfig, RenderOverlays, Viewport};
-use crate::{CanvasModel, JsBackedModel};
+use crate::wasm::JsBackedModel;
+use crate::CanvasModel;
 
 /// Public wasm-bindgen handle owning both canvas layers.
 ///

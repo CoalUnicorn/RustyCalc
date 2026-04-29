@@ -22,43 +22,6 @@ pub struct RenderOverlays {
     pub formula_refs: Vec<FormulaRef>,
 }
 
-/// Hint to the canvas renderer about the minimum work needed for this repaint.
-///
-/// All modes are currently treated identically by the renderer.
-/// The enum is in place so future optimisations (skip layout recalc for
-/// `FormatOnly`, skip cell-text for `ViewportUpdate`) can be added
-/// without another architectural change.
-///
-//  In the future it make look more like this
-//`src/components/worksheet.rs`
-// - Second `NodeRef::<html::Canvas>` for the overlay canvas (`canvas_overlay_ref`).
-// - View: two `<canvas>` nodes inside the existing container div.
-// - Effect (`:114-140`): replace `render_mode.set(mode)` with a **monotonic update**:
-//   ```rust
-//   fn promote(cur: CanvasRenderMode, new: CanvasRenderMode) -> CanvasRenderMode {
-//       use CanvasRenderMode::*;
-//       match (cur, new) {
-//           (Full, _) | (_, Full) => Full,
-//           (FormatOnly, _) | (_, FormatOnly) => FormatOnly,
-//           (ViewportUpdate, _) | (_, ViewportUpdate) => ViewportUpdate,
-//           (Overlay, Overlay) => Overlay,
-//       }
-//   }
-//   render_mode.update(|cur| *cur = promote(*cur, mode));
-//   ```
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum CanvasRenderMode {
-    /// Content or structure changed - repaint all cells (default).
-    #[default]
-    Full,
-    /// Only formatting changed - repaint without model recalculation.
-    FormatOnly,
-    /// Navigation only - update selection box and scroll position.
-    ViewportUpdate,
-    /// Drag overlay changed (autofill preview, point-mode range) - no model change.
-    Overlay,
-}
-
 /// Scroll origin for the visible sheet area.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Viewport {
