@@ -43,7 +43,6 @@ impl CanvasRenderer {
         for p in &paints {
             self.paint_bg(p);
         }
-        self.paint_borders_batched(&paints);
         self.paint_pane_text(model, &paints);
     }
 
@@ -63,14 +62,6 @@ impl CanvasRenderer {
     /// overhead; the main pane pass uses `paint_bg` + `paint_borders_batched`.
     pub(super) fn paint_cell(&self, p: &CellPaint) {
         self.paint_bg(p);
-        self.paint_border(BorderEdge::Left, p.rect, &p.borders.left);
-        self.paint_border(BorderEdge::Top, p.rect, &p.borders.top);
-        if let Some(b) = &p.borders.right {
-            self.paint_border(BorderEdge::Right, p.rect, b);
-        }
-        if let Some(b) = &p.borders.bottom {
-            self.paint_border(BorderEdge::Bottom, p.rect, b);
-        }
     }
 
     /// Pass 2: resolve and paint text for every cell in a collected pane.
@@ -85,75 +76,6 @@ impl CanvasRenderer {
             }
         }
         // web_sys::console::log_1(&format!("Paint painted texts: {}", c).into());
-    }
-
-    /// Batch all border lines in `paints` into per-style paths so each
-    /// distinct (color, width) combination emits exactly one `begin_path` →
-    /// N×`move_to`/`line_to` → `stroke()` sequence instead of one per edge.
-    ///
-    /// Linear Vec search is fastest here: a pane typically has 2–5 distinct
-    /// border styles (grid gray + maybe 1–2 user-set colors).
-    fn paint_borders_batched(&self, paints: &[CellPaint]) {
-        struct Bucket {
-            color: String,
-            width_px: f64,
-            lines: Vec<Line>,
-        }
-
-        let mut buckets: Vec<Bucket> = Vec::new();
-
-        for p in paints {
-            let edges: [Option<(BorderEdge, &BorderPaint)>; 4] = [
-                Some((BorderEdge::Left, &p.borders.left)),
-                Some((BorderEdge::Top, &p.borders.top)),
-                p.borders.right.as_ref().map(|b| (BorderEdge::Right, b)),
-                p.borders.bottom.as_ref().map(|b| (BorderEdge::Bottom, b)),
-            ];
-            for (edge, border) in edges.into_iter().flatten() {
-                let base = edge.line(p.rect);
-                // Double borders emit two offset lines into the same bucket.
-                let double_lines = [base.offset_cross(-1.0), base.offset_cross(1.0)];
-                let single_line = [base];
-                let lines: &[Line] = if border.stroke.double {
-                    &double_lines
-                } else {
-                    &single_line
-                };
-                for &line in lines {
-                    if let Some(b) = buckets
-                        .iter_mut()
-                        .find(|b| b.color == border.color && b.width_px == border.stroke.width_px)
-                    {
-                        b.lines.push(line);
-                    } else {
-                        buckets.push(Bucket {
-                            color: border.color.clone(),
-                            width_px: border.stroke.width_px,
-                            lines: vec![line],
-                        });
-                    }
-                }
-            }
-        }
-
-        for bucket in &buckets {
-            self.set_stroke_cached(&bucket.color);
-            self.set_line_width_cached(bucket.width_px);
-            self.ctx_ref().begin_path();
-            for line in &bucket.lines {
-                match line {
-                    Line::H { span, y } => {
-                        self.ctx_ref().move_to(span.from, *y);
-                        self.ctx_ref().line_to(span.to, *y);
-                    }
-                    Line::V { x, span } => {
-                        self.ctx_ref().move_to(*x, span.from);
-                        self.ctx_ref().line_to(*x, span.to);
-                    }
-                }
-            }
-            self.ctx_ref().stroke();
-        }
     }
 
     /// Stroke one resolved border. `Double`-style borders render as two
@@ -195,14 +117,8 @@ impl CanvasRenderer {
         let Some(paint) = CellPaint::resolve_cell_paint(
             self,
             //show_grid,
-            CellSlot {
-                addr,
-                rect,
-                outer_edges: ACTIVE_CELL_OUTER_EDGES,
-            },
+            CellSlot { addr, rect },
             &own_style,
-            None,
-            None,
         ) else {
             return;
         };
@@ -218,7 +134,7 @@ pub(crate) struct CellPaint {
     pub addr: CellAddress,
     pub rect: PixelRect,
     pub bg: String, // CSS colour, always set
-    pub borders: BordersPaint,
+                    //pub borders: BordersPaint,
 }
 
 impl CellPaint {
@@ -231,8 +147,6 @@ impl CellPaint {
         //show_grid: bool,
         slot: CellSlot,
         own_style: &Style,
-        left_neighbour: Option<&Style>,
-        top_neighbour: Option<&Style>,
     ) -> Option<CellPaint> {
         if slot.rect.width <= 0.0 || slot.rect.height <= 0.0 {
             return None;
@@ -245,133 +159,18 @@ impl CellPaint {
             .as_deref()
             .unwrap_or(theme.cell_bg)
             .to_owned();
-        let grid_color = theme.grid_color;
-        // let grid_color = if show_grid {
-        //     theme.grid_color
-        // } else {
-        //     bg.as_str()
-        // };
-        let own_bg_set = own_style.fill.fg_color.is_some();
-
-        let left = resolve_inner_paint(
-            own_style.border.left.as_ref(),
-            left_neighbour.and_then(|n| n.border.right.as_ref()),
-            left_neighbour.and_then(|n| n.fill.fg_color.as_deref()),
-            own_bg_set,
-            &bg,
-            grid_color,
-        );
-        let top = resolve_inner_paint(
-            own_style.border.top.as_ref(),
-            top_neighbour.and_then(|n| n.border.bottom.as_ref()),
-            top_neighbour.and_then(|n| n.fill.fg_color.as_deref()),
-            own_bg_set,
-            &bg,
-            grid_color,
-        );
-
-        let right =
-            if slot.outer_edges.contains(&OuterEdge::Right) || own_style.border.right.is_some() {
-                Some(resolve_outer_paint(
-                    own_style.border.right.as_ref(),
-                    grid_color,
-                ))
-            } else {
-                None
-            };
-        let bottom =
-            if slot.outer_edges.contains(&OuterEdge::Bottom) || own_style.border.bottom.is_some() {
-                Some(resolve_outer_paint(
-                    own_style.border.bottom.as_ref(),
-                    grid_color,
-                ))
-            } else {
-                None
-            };
 
         Some(CellPaint {
             addr: slot.addr,
             rect: slot.rect,
             bg,
-            borders: BordersPaint {
-                left,
-                top,
-                right,
-                bottom,
-            },
+            // borders: BordersPaint {
+            //     left,
+            //     top,
+            //     right,
+            //     bottom,
+            // },
         })
-    }
-}
-//impl CellStyle {}
-
-pub(crate) struct BordersPaint {
-    pub left: BorderPaint,          // always drawn (grid or border)
-    pub top: BorderPaint,           // always drawn
-    pub right: Option<BorderPaint>, // only at pane edge or explicit border
-    pub bottom: Option<BorderPaint>,
-}
-
-pub(crate) struct BorderPaint {
-    pub color: String,
-    pub stroke: BorderStroke, // local enum — see below
-}
-
-impl BorderPaint {}
-
-/// Resolve a left/top edge - the only edges whose colour can be borrowed
-/// from a neighbour's opposite border or fill. Encodes the fallback chain:
-/// own -> neighbour-side -> own-bg -> neighbour-bg -> grid.
-fn resolve_inner_paint(
-    own: Option<&BorderItem>,
-    neighbour_side: Option<&BorderItem>,
-    neighbour_bg: Option<&str>,
-    own_bg_set: bool,
-    bg: &str,
-    grid_color: &str,
-) -> BorderPaint {
-    if let Some(b) = own {
-        return BorderPaint {
-            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
-            stroke: stroke_from_style(&b.style),
-        };
-    }
-    if let Some(b) = neighbour_side {
-        return BorderPaint {
-            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
-            stroke: stroke_from_style(&b.style),
-        };
-    }
-    if own_bg_set {
-        return BorderPaint {
-            color: bg.to_owned(),
-            stroke: stroke_from_style(&BorderStyle::Thin),
-        };
-    }
-    if let Some(nbg) = neighbour_bg {
-        return BorderPaint {
-            color: nbg.to_owned(),
-            stroke: stroke_from_style(&BorderStyle::Thin),
-        };
-    }
-    BorderPaint {
-        color: grid_color.to_owned(),
-        stroke: stroke_from_style(&BorderStyle::Thin),
-    }
-}
-
-/// Resolve a right/bottom edge - simpler than inner edges: only drawn
-/// when explicit or at a pane boundary, no neighbour fallback.
-fn resolve_outer_paint(own: Option<&BorderItem>, grid_color: &str) -> BorderPaint {
-    if let Some(b) = own {
-        BorderPaint {
-            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
-            stroke: stroke_from_style(&b.style),
-        }
-    } else {
-        BorderPaint {
-            color: grid_color.to_owned(),
-            stroke: stroke_from_style(&BorderStyle::Thin),
-        }
     }
 }
 
@@ -380,7 +179,12 @@ pub(crate) struct BorderStroke {
     pub double: bool, // double-line styles render as two parallel strokes
 }
 
-//impl BorderStroke {
+pub(crate) struct BorderPaint {
+    pub color: String,
+    pub stroke: BorderStroke, // local enum — see below
+}
+
+impl BorderPaint {}
 
 /// Translates IronCalc's `BorderStyle` enum into the renderer's local
 /// `BorderStroke`. Verbatim mapping of today's `draw_border` switch
@@ -530,7 +334,6 @@ pub struct TextLine {
 pub struct CellSlot {
     pub addr: CellAddress,
     pub rect: PixelRect,
-    pub outer_edges: &'static [OuterEdge],
 }
 
 #[derive(Clone, Default)]
@@ -608,7 +411,6 @@ impl<'a> Iterator for PaneCells<'a> {
                     column: col,
                 },
                 rect,
-                outer_edges: self.pane.outer_edges_at(row_strip.row, col),
             });
         }
     }
@@ -799,8 +601,6 @@ impl<'a> Iterator for CellPaintsIter<'a> {
                 //self.show_grid,
                 slot,
                 &own_style,
-                self.prev_col_style.as_ref(),
-                self.prev_row_styles.get(&slot.addr.column),
             );
 
             // Cache for the next cell's neighbour lookups. Row cache
