@@ -27,12 +27,19 @@ use web_sys::CanvasRenderingContext2d;
 /// repainted on top of the selection overlay.
 const ACTIVE_CELL_OUTER_EDGES: &[OuterEdge] = &[OuterEdge::Right, OuterEdge::Bottom];
 
+const CELL_PADDING: f64 = 4.0;
+const CHAR_WIDTH_FACTOR: f64 = 0.6;
+const LINE_HEIGHT_FACTOR: f64 = 1.5;
+const TEXT_V_INSET_PX: f64 = 4.0;
+
+const MIN_TEXT_DIM_PX: f64 = 10.0;
+
 impl CanvasRenderer {
     /// Walk one frozen-pane quadrant. Pass 1 paints bg+borders for every
     /// cell, then pass 2 paints text on top so overflow is never clipped by
     /// a neighbour's background.
     pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
-        let paints: Vec<CellStyle> = self.paints_in(model, &pane).collect();
+        let paints: Vec<CellPaint> = self.paints_in(model, &pane).collect();
         for p in &paints {
             self.paint_bg(p);
         }
@@ -41,7 +48,7 @@ impl CanvasRenderer {
     }
 
     /// Fill a cell's background rectangle. Border pass is separate (batched).
-    pub(super) fn paint_bg(&self, p: &CellStyle) {
+    pub(super) fn paint_bg(&self, p: &CellPaint) {
         self.set_fill_cached(&p.bg);
         self.ctx_ref().fill_rect(
             p.rect.top_left.x,
@@ -54,7 +61,7 @@ impl CanvasRenderer {
     /// Paint bg + borders for one resolved `CellPaint`. Used by
     /// `repaint_active_cell` where a single-cell batch is not worth the
     /// overhead; the main pane pass uses `paint_bg` + `paint_borders_batched`.
-    pub(super) fn paint_cell(&self, p: &CellStyle) {
+    pub(super) fn paint_cell(&self, p: &CellPaint) {
         self.paint_bg(p);
         self.paint_border(BorderEdge::Left, p.rect, &p.borders.left);
         self.paint_border(BorderEdge::Top, p.rect, &p.borders.top);
@@ -67,12 +74,12 @@ impl CanvasRenderer {
     }
 
     /// Pass 2: resolve and paint text for every cell in a collected pane.
-    fn paint_pane_text(&self, model: &dyn CanvasModel, paints: &[CellStyle]) {
+    fn paint_pane_text(&self, model: &dyn CanvasModel, paints: &[CellPaint]) {
         // TEST: paints remove later
         // Damage tracking to skip cells
         // let mut c = 0;
         for p in paints {
-            if let Some(t) = resolve_text_paint(self, model, p.addr, p.rect) {
+            if let Some(t) = TextPaint::resolve(self, model, p.addr, p.rect) {
                 self.paint_text(&t);
                 // c += 1;
             }
@@ -86,7 +93,7 @@ impl CanvasRenderer {
     ///
     /// Linear Vec search is fastest here: a pane typically has 2–5 distinct
     /// border styles (grid gray + maybe 1–2 user-set colors).
-    fn paint_borders_batched(&self, paints: &[CellStyle]) {
+    fn paint_borders_batched(&self, paints: &[CellPaint]) {
         struct Bucket {
             color: String,
             width_px: f64,
@@ -184,10 +191,10 @@ impl CanvasRenderer {
         let Ok(own_style) = model.get_cell_style(addr.sheet, addr.row, addr.column) else {
             return;
         };
-        let show_grid = model.get_show_grid_lines(addr.sheet).unwrap_or(true);
-        let Some(paint) = resolve_cell_paint(
+        //let show_grid = model.get_show_grid_lines(addr.sheet).unwrap_or(true);
+        let Some(paint) = CellPaint::resolve_cell_paint(
             self,
-            show_grid,
+            //show_grid,
             CellSlot {
                 addr,
                 rect,
@@ -200,32 +207,33 @@ impl CanvasRenderer {
             return;
         };
         self.paint_cell(&paint);
-        if let Some(t) = resolve_text_paint(self, model, addr, rect) {
+        if let Some(t) = TextPaint::resolve(self, model, addr, rect) {
             self.paint_text(&t);
         }
     }
 }
 
-pub(crate) struct CellStyle {
+//  Cell paint resolution
+pub(crate) struct CellPaint {
     pub addr: CellAddress,
     pub rect: PixelRect,
     pub bg: String, // CSS colour, always set
     pub borders: BordersPaint,
 }
 
-impl CellStyle {
+impl CellPaint {
     /// Resolve one cell into renderer-ready `CellPaint`. Combines the
     /// background fill, four border edges (with neighbour fallback for
     /// left/top), and optional text layout. Infallible on the style-fetch
     /// path: neighbour styles are passed in by the iterator.
-    pub(crate) fn resolve_cell_paint(
+    pub fn resolve_cell_paint(
         renderer: &CanvasRenderer,
-        show_grid: bool,
+        //show_grid: bool,
         slot: CellSlot,
         own_style: &Style,
         left_neighbour: Option<&Style>,
         top_neighbour: Option<&Style>,
-    ) -> Option<CellStyle> {
+    ) -> Option<CellPaint> {
         if slot.rect.width <= 0.0 || slot.rect.height <= 0.0 {
             return None;
         }
@@ -237,11 +245,12 @@ impl CellStyle {
             .as_deref()
             .unwrap_or(theme.cell_bg)
             .to_owned();
-        let grid_color = if show_grid {
-            theme.grid_color
-        } else {
-            bg.as_str()
-        };
+        let grid_color = theme.grid_color;
+        // let grid_color = if show_grid {
+        //     theme.grid_color
+        // } else {
+        //     bg.as_str()
+        // };
         let own_bg_set = own_style.fill.fg_color.is_some();
 
         let left = resolve_inner_paint(
@@ -280,7 +289,7 @@ impl CellStyle {
                 None
             };
 
-        Some(Self {
+        Some(CellPaint {
             addr: slot.addr,
             rect: slot.rect,
             bg,
@@ -293,6 +302,7 @@ impl CellStyle {
         })
     }
 }
+//impl CellStyle {}
 
 pub(crate) struct BordersPaint {
     pub left: BorderPaint,          // always drawn (grid or border)
@@ -306,10 +316,100 @@ pub(crate) struct BorderPaint {
     pub stroke: BorderStroke, // local enum — see below
 }
 
+impl BorderPaint {}
+
+/// Resolve a left/top edge - the only edges whose colour can be borrowed
+/// from a neighbour's opposite border or fill. Encodes the fallback chain:
+/// own -> neighbour-side -> own-bg -> neighbour-bg -> grid.
+fn resolve_inner_paint(
+    own: Option<&BorderItem>,
+    neighbour_side: Option<&BorderItem>,
+    neighbour_bg: Option<&str>,
+    own_bg_set: bool,
+    bg: &str,
+    grid_color: &str,
+) -> BorderPaint {
+    if let Some(b) = own {
+        return BorderPaint {
+            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
+            stroke: stroke_from_style(&b.style),
+        };
+    }
+    if let Some(b) = neighbour_side {
+        return BorderPaint {
+            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
+            stroke: stroke_from_style(&b.style),
+        };
+    }
+    if own_bg_set {
+        return BorderPaint {
+            color: bg.to_owned(),
+            stroke: stroke_from_style(&BorderStyle::Thin),
+        };
+    }
+    if let Some(nbg) = neighbour_bg {
+        return BorderPaint {
+            color: nbg.to_owned(),
+            stroke: stroke_from_style(&BorderStyle::Thin),
+        };
+    }
+    BorderPaint {
+        color: grid_color.to_owned(),
+        stroke: stroke_from_style(&BorderStyle::Thin),
+    }
+}
+
+/// Resolve a right/bottom edge - simpler than inner edges: only drawn
+/// when explicit or at a pane boundary, no neighbour fallback.
+fn resolve_outer_paint(own: Option<&BorderItem>, grid_color: &str) -> BorderPaint {
+    if let Some(b) = own {
+        BorderPaint {
+            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
+            stroke: stroke_from_style(&b.style),
+        }
+    } else {
+        BorderPaint {
+            color: grid_color.to_owned(),
+            stroke: stroke_from_style(&BorderStyle::Thin),
+        }
+    }
+}
+
 pub(crate) struct BorderStroke {
     pub width_px: f64,
     pub double: bool, // double-line styles render as two parallel strokes
 }
+
+//impl BorderStroke {
+
+/// Translates IronCalc's `BorderStyle` enum into the renderer's local
+/// `BorderStroke`. Verbatim mapping of today's `draw_border` switch
+/// (cells.rs); dashed/dotted line patterns degrade to solid 1px in v1.
+fn stroke_from_style(s: &BorderStyle) -> BorderStroke {
+    match s {
+        BorderStyle::Medium
+        | BorderStyle::MediumDashed
+        | BorderStyle::MediumDashDot
+        | BorderStyle::MediumDashDotDot => BorderStroke {
+            width_px: MEDIUM_BORDER_WIDTH,
+            double: false,
+        },
+        BorderStyle::Thick => BorderStroke {
+            width_px: THICK_BORDER_WIDTH,
+            double: false,
+        },
+        BorderStyle::Double => BorderStroke {
+            width_px: STANDARD_BORDER_WIDTH,
+            double: true,
+        },
+        // Thin / Dotted / SlantDashDot / etc.
+        _ => BorderStroke {
+            width_px: STANDARD_BORDER_WIDTH,
+            double: false,
+        },
+    }
+}
+//}
 
 pub(crate) struct TextPaint {
     pub clip: PixelRect,
@@ -319,6 +419,100 @@ pub(crate) struct TextPaint {
     pub underline: bool,
     pub strike: bool,
     pub lines: Vec<TextLine>, // existing struct from text.rs, moves to types.rs
+}
+
+impl TextPaint {
+    /// Build a `TextPaint` for `addr` at `rect`, or `None` for empty/too-small
+    /// cells. Reads the formatted value from the model and resolves font /
+    /// alignment / colour via `CellStyle`.
+    pub fn resolve(
+        renderer: &CanvasRenderer,
+        model: &dyn CanvasModel,
+        addr: CellAddress,
+        rect: PixelRect,
+    ) -> Option<TextPaint> {
+        let text = model
+            .get_formatted_cell_value(addr.sheet, addr.row, addr.column)
+            .ok()?;
+        if text.is_empty() {
+            return None;
+        }
+        if rect.width < MIN_TEXT_DIM_PX || rect.height < MIN_TEXT_DIM_PX {
+            return None;
+        }
+
+        // Destructure to move fields directly - avoids cloning `css`.
+        let CellStyle {
+            font:
+                FontStyle {
+                    css: font_css,
+                    size_px,
+                    underline,
+                    strikethrough: strike,
+                    ..
+                },
+            text_color,
+            h_align,
+            v_align,
+            wrap_text,
+            ..
+        } = CellStyle::resolve(model, addr.sheet, addr.row, addr.column, renderer.theme());
+
+        let approx_char_w = size_px * CHAR_WIDTH_FACTOR;
+        let line_height = size_px * LINE_HEIGHT_FACTOR;
+        let usable_w = rect.width - 2.0 * CELL_PADDING;
+        let right = rect.right();
+        let bottom = rect.bottom();
+        let center = rect.center();
+
+        // Set font on ctx so measure_text() returns accurate widths.
+        let ctx = renderer.ctx_ref();
+        ctx.set_font(&font_css);
+
+        let text_lines = layout_lines(ctx, &text, wrap_text, usable_w, approx_char_w);
+
+        let line_count = text_lines.len() as f64;
+        let mut lines: Vec<TextLine> = Vec::new();
+
+        for (i, line) in text_lines.into_iter().enumerate() {
+            let tw = ctx
+                .measure_text(&line)
+                .map(|m| m.width())
+                .unwrap_or(line.len() as f64 * approx_char_w);
+            let i_f = i as f64;
+            let center_x = match h_align {
+                HorizontalAlignment::Right => right - CELL_PADDING - tw / 2.0,
+                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => center.x,
+                _ => rect.top_left.x + CELL_PADDING + tw / 2.0,
+            };
+            let center_y = match v_align {
+                VerticalAlignment::Bottom => {
+                    bottom - size_px / 2.0 - TEXT_V_INSET_PX
+                        + (i_f - line_count + 1.0) * line_height
+                }
+                VerticalAlignment::Center => {
+                    center.y + (i_f + (1.0 - line_count) / 2.0) * line_height
+                }
+                _ => rect.top_left.y + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
+            };
+            lines.push(TextLine {
+                text: line,
+                center_x,
+                center_y,
+                width: tw,
+            });
+        }
+
+        Some(TextPaint {
+            clip: rect,
+            font_css,
+            font_size_px: size_px,
+            color: CssColor::new(&text_color).0,
+            underline,
+            strike,
+            lines,
+        })
+    }
 }
 
 /// One visual line of text inside a cell, positioned for center-aligned rendering.
@@ -416,105 +610,6 @@ impl<'a> Iterator for PaneCells<'a> {
                 rect,
                 outer_edges: self.pane.outer_edges_at(row_strip.row, col),
             });
-        }
-    }
-}
-
-//  Cell paint resolution
-//
-//  The iterator + free fns below turn raw IronCalc styles into renderer-ready
-//  `CellPaint` data. Once resolved the renderer never queries the model.
-
-const CELL_PADDING: f64 = 4.0;
-const CHAR_WIDTH_FACTOR: f64 = 0.6;
-const LINE_HEIGHT_FACTOR: f64 = 1.5;
-const TEXT_V_INSET_PX: f64 = 4.0;
-
-/// Below this rect width or height even a single glyph would overflow the cell;
-/// text resolution short-circuits and yields no `TextPaint`.
-const MIN_TEXT_DIM_PX: f64 = 10.0;
-
-/// Translates IronCalc's `BorderStyle` enum into the renderer's local
-/// `BorderStroke`. Verbatim mapping of today's `draw_border` switch
-/// (cells.rs); dashed/dotted line patterns degrade to solid 1px in v1.
-fn stroke_from_style(s: &BorderStyle) -> BorderStroke {
-    match s {
-        BorderStyle::Medium
-        | BorderStyle::MediumDashed
-        | BorderStyle::MediumDashDot
-        | BorderStyle::MediumDashDotDot => BorderStroke {
-            width_px: MEDIUM_BORDER_WIDTH,
-            double: false,
-        },
-        BorderStyle::Thick => BorderStroke {
-            width_px: THICK_BORDER_WIDTH,
-            double: false,
-        },
-        BorderStyle::Double => BorderStroke {
-            width_px: STANDARD_BORDER_WIDTH,
-            double: true,
-        },
-        // Thin / Dotted / SlantDashDot / etc.
-        _ => BorderStroke {
-            width_px: STANDARD_BORDER_WIDTH,
-            double: false,
-        },
-    }
-}
-
-/// Resolve a left/top edge - the only edges whose colour can be borrowed
-/// from a neighbour's opposite border or fill. Encodes the fallback chain:
-/// own -> neighbour-side -> own-bg -> neighbour-bg -> grid.
-fn resolve_inner_paint(
-    own: Option<&BorderItem>,
-    neighbour_side: Option<&BorderItem>,
-    neighbour_bg: Option<&str>,
-    own_bg_set: bool,
-    bg: &str,
-    grid_color: &str,
-) -> BorderPaint {
-    if let Some(b) = own {
-        return BorderPaint {
-            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
-            stroke: stroke_from_style(&b.style),
-        };
-    }
-    if let Some(b) = neighbour_side {
-        return BorderPaint {
-            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
-            stroke: stroke_from_style(&b.style),
-        };
-    }
-    if own_bg_set {
-        return BorderPaint {
-            color: bg.to_owned(),
-            stroke: stroke_from_style(&BorderStyle::Thin),
-        };
-    }
-    if let Some(nbg) = neighbour_bg {
-        return BorderPaint {
-            color: nbg.to_owned(),
-            stroke: stroke_from_style(&BorderStyle::Thin),
-        };
-    }
-    BorderPaint {
-        color: grid_color.to_owned(),
-        stroke: stroke_from_style(&BorderStyle::Thin),
-    }
-}
-
-/// Resolve a right/bottom edge - simpler than inner edges: only drawn
-/// when explicit or at a pane boundary, no neighbour fallback.
-fn resolve_outer_paint(own: Option<&BorderItem>, grid_color: &str) -> BorderPaint {
-    if let Some(b) = own {
-        BorderPaint {
-            color: b.color.as_deref().unwrap_or(grid_color).to_owned(),
-            stroke: stroke_from_style(&b.style),
-        }
-    } else {
-        BorderPaint {
-            color: grid_color.to_owned(),
-            stroke: stroke_from_style(&BorderStyle::Thin),
         }
     }
 }
@@ -636,95 +731,6 @@ impl CellStyle {
     }
 }
 
-/// Build a `TextPaint` for `addr` at `rect`, or `None` for empty/too-small
-/// cells. Reads the formatted value from the model and resolves font /
-/// alignment / colour via `CellStyle`.
-pub(crate) fn resolve_text_paint(
-    renderer: &CanvasRenderer,
-    model: &dyn CanvasModel,
-    addr: CellAddress,
-    rect: PixelRect,
-) -> Option<TextPaint> {
-    let text = model
-        .get_formatted_cell_value(addr.sheet, addr.row, addr.column)
-        .ok()?;
-    if text.is_empty() {
-        return None;
-    }
-    if rect.width < MIN_TEXT_DIM_PX || rect.height < MIN_TEXT_DIM_PX {
-        return None;
-    }
-
-    // Destructure to move fields directly - avoids cloning `css`.
-    let CellStyle {
-        font:
-            FontStyle {
-                css: font_css,
-                size_px,
-                underline,
-                strikethrough: strike,
-                ..
-            },
-        text_color,
-        h_align,
-        v_align,
-        wrap_text,
-        ..
-    } = CellStyle::resolve(model, addr.sheet, addr.row, addr.column, renderer.theme());
-
-    let approx_char_w = size_px * CHAR_WIDTH_FACTOR;
-    let line_height = size_px * LINE_HEIGHT_FACTOR;
-    let usable_w = rect.width - 2.0 * CELL_PADDING;
-    let right = rect.right();
-    let bottom = rect.bottom();
-    let center = rect.center();
-
-    // Set font on ctx so measure_text() returns accurate widths.
-    let ctx = renderer.ctx_ref();
-    ctx.set_font(&font_css);
-
-    let text_lines = layout_lines(ctx, &text, wrap_text, usable_w, approx_char_w);
-
-    let line_count = text_lines.len() as f64;
-    let mut lines: Vec<TextLine> = Vec::new();
-
-    for (i, line) in text_lines.into_iter().enumerate() {
-        let tw = ctx
-            .measure_text(&line)
-            .map(|m| m.width())
-            .unwrap_or(line.len() as f64 * approx_char_w);
-        let i_f = i as f64;
-        let center_x = match h_align {
-            HorizontalAlignment::Right => right - CELL_PADDING - tw / 2.0,
-            HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => center.x,
-            _ => rect.top_left.x + CELL_PADDING + tw / 2.0,
-        };
-        let center_y = match v_align {
-            VerticalAlignment::Bottom => {
-                bottom - size_px / 2.0 - TEXT_V_INSET_PX + (i_f - line_count + 1.0) * line_height
-            }
-            VerticalAlignment::Center => center.y + (i_f + (1.0 - line_count) / 2.0) * line_height,
-            _ => rect.top_left.y + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
-        };
-        lines.push(TextLine {
-            text: line,
-            center_x,
-            center_y,
-            width: tw,
-        });
-    }
-
-    Some(TextPaint {
-        clip: rect,
-        font_css,
-        font_size_px: size_px,
-        color: CssColor::new(&text_color).0,
-        underline,
-        strike,
-        lines,
-    })
-}
-
 /// Iterator decorator over `PaneCells` that yields fully resolved
 /// `CellPaint` per visible cell. Threads previous-row/column styles for
 /// inner-edge neighbour fallback so the renderer only paints, never
@@ -733,7 +739,7 @@ pub(crate) struct CellPaintsIter<'a> {
     slots: PaneCells<'a>,
     renderer: &'a CanvasRenderer,
     model: &'a dyn CanvasModel,
-    show_grid: bool,
+    //show_grid: bool,
     /// Previous row's style for each column we've yielded - keyed by
     /// column index. Lookup feeds the **top** edge's fallback chain.
     prev_row_styles: HashMap<i32, Style>,
@@ -753,13 +759,13 @@ impl<'a> CellPaintsIter<'a> {
         model: &'a dyn CanvasModel,
         pane: &'a PaneRegion,
     ) -> Self {
-        let sheet = model.get_selected_sheet();
-        let show_grid = model.get_show_grid_lines(sheet).unwrap_or(true);
+        //let sheet = model.get_selected_sheet();
+        //let show_grid = false; //model.get_show_grid_lines(sheet).unwrap_or(true);
         Self {
             slots: pane.cells(model, renderer.canvas_size()),
             renderer,
             model,
-            show_grid,
+            //show_grid,
             prev_row_styles: HashMap::new(),
             prev_col_style: None,
             last_row: None,
@@ -768,9 +774,9 @@ impl<'a> CellPaintsIter<'a> {
 }
 
 impl<'a> Iterator for CellPaintsIter<'a> {
-    type Item = CellStyle;
+    type Item = CellPaint;
 
-    fn next(&mut self) -> Option<CellStyle> {
+    fn next(&mut self) -> Option<CellPaint> {
         loop {
             let slot = self.slots.next()?;
 
@@ -788,9 +794,9 @@ impl<'a> Iterator for CellPaintsIter<'a> {
                 continue;
             };
 
-            let paint = resolve_cell_paint(
+            let paint = CellPaint::resolve_cell_paint(
                 self.renderer,
-                self.show_grid,
+                //self.show_grid,
                 slot,
                 &own_style,
                 self.prev_col_style.as_ref(),
