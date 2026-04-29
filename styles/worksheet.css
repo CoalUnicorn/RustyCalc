@@ -5,6 +5,8 @@
  *   worksheet-canvas    → ws-canvas
  *   resize-col          → ws-canvas.resize-col
  *   resize-row          → ws-canvas.resize-row
+ *   grid-canvas         → ws-grid
+ *   overlay-canvas      → ws-overlay
  */
 
 .ws {
@@ -14,11 +16,27 @@
     min-height: 0;
 }
 
+/* Both canvases stack at the same rect inside .ws (position: relative).
+ * z-index + pointer-events: none on the overlay route every mouse event
+ * to the grid canvas, so the existing single-source pointer pipeline
+ * (mouse handlers on .ws-grid) is unchanged. */
 .ws .ws-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
     display: block;
     cursor: cell;
+}
+
+.ws .ws-grid {
+    z-index: 0;
+}
+
+.ws .ws-overlay {
+    z-index: 1;
+    pointer-events: none;
 }
 
 .ws .ws-canvas.resize-col {

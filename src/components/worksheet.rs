@@ -1,7 +1,9 @@
 use iron_canvas::renderer::AutofillTarget;
+use ironcalc_base::types::{CellType, Style};
 use leptos::html;
 use leptos::prelude::*;
 use leptos_use::{use_raf_fn, use_resize_observer};
+use std::rc::Rc;
 use web_sys::HtmlCanvasElement;
 
 use crate::app_state::AppState;
@@ -14,6 +16,63 @@ use crate::model::AppClipboard;
 use crate::state::{DragState, ModelStore, WorkbookState};
 use iron_canvas::*;
 
+/// Bridges `ModelStore` (a Leptos `StoredValue` holding `UserModel<'static>`)
+/// to `iron_canvas::CanvasModel`. Each trait method `with_value`-borrows the
+/// current `UserModel` and dispatches through its existing `CanvasModel`
+/// impl. The handle (`ModelStore`) is `Copy`, so the adapter is freely
+/// `'static` and the wrapping `Rc<dyn CanvasModel>` is stable across the
+/// component's lifetime — workbook switches that replace the inner
+/// `UserModel` are picked up automatically on the next render-time read.
+struct WorksheetModelAdapter {
+    store: ModelStore,
+}
+
+impl CanvasModel for WorksheetModelAdapter {
+    fn get_selected_sheet(&self) -> u32 {
+        self.store.with_value(CanvasModel::get_selected_sheet)
+    }
+    fn get_selected_view(&self) -> SelectedView {
+        self.store.with_value(CanvasModel::get_selected_view)
+    }
+    fn get_frozen_rows_count(&self, sheet: u32) -> Result<i32, String> {
+        self.store
+            .with_value(|m| CanvasModel::get_frozen_rows_count(m, sheet))
+    }
+    fn get_frozen_columns_count(&self, sheet: u32) -> Result<i32, String> {
+        self.store
+            .with_value(|m| CanvasModel::get_frozen_columns_count(m, sheet))
+    }
+    fn get_row_height(&self, sheet: u32, row: i32) -> Result<f64, String> {
+        self.store
+            .with_value(|m| CanvasModel::get_row_height(m, sheet, row))
+    }
+    fn get_column_width(&self, sheet: u32, column: i32) -> Result<f64, String> {
+        self.store
+            .with_value(|m| CanvasModel::get_column_width(m, sheet, column))
+    }
+    fn get_show_grid_lines(&self, sheet: u32) -> Result<bool, String> {
+        self.store
+            .with_value(|m| CanvasModel::get_show_grid_lines(m, sheet))
+    }
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Result<Style, String> {
+        self.store
+            .with_value(|m| CanvasModel::get_cell_style(m, sheet, row, column))
+    }
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Result<CellType, String> {
+        self.store
+            .with_value(|m| CanvasModel::get_cell_type(m, sheet, row, column))
+    }
+    fn get_formatted_cell_value(
+        &self,
+        sheet: u32,
+        row: i32,
+        column: i32,
+    ) -> Result<String, String> {
+        self.store
+            .with_value(|m| CanvasModel::get_formatted_cell_value(m, sheet, row, column))
+    }
+}
+
 /// The spreadsheet canvas element.
 ///
 /// Subscribes to `EventBus` signals and the `reactive_overlay` memo so the
@@ -22,7 +81,20 @@ use iron_canvas::*;
 /// autofill handle drag, double-click-to-edit, and wheel scrolling.
 #[component]
 pub fn Worksheet() -> impl IntoView {
-    let canvas_ref = NodeRef::<html::Canvas>::new();
+    let grid_ref = NodeRef::<html::Canvas>::new();
+    let overlay_ref = NodeRef::<html::Canvas>::new();
+    // IronCanvas orchestrator handle. None until both <canvas> elements mount
+    // and the container has nonzero CSS dimensions; then constructed exactly
+    // once by the lazy-construct block in the rAF loop. Disposed in on_cleanup.
+    let canvas_handle: StoredValue<Option<IronCanvas>, LocalStorage> =
+        StoredValue::new_local(None);
+    on_cleanup(move || {
+        canvas_handle.update_value(|slot| {
+            if let Some(ic) = slot.take() {
+                ic.dispose();
+            }
+        });
+    });
     let state = expect_context::<WorkbookState>();
     let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
@@ -35,6 +107,26 @@ pub fn Worksheet() -> impl IntoView {
     let container_ref = NodeRef::<html::Div>::new();
     let _ = use_resize_observer(container_ref, move |_, _| {
         state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+
+        // Mirror the new dims into the orchestrator. Both canvases share
+        // CSS dims, so reading from grid_ref is sufficient. If the ref
+        // hasn't resolved yet, the rAF lazy-construct will pick up the
+        // current size on its next tick.
+        let Some(grid_el) = grid_ref.get_untracked() else {
+            return;
+        };
+        let w = grid_el.client_width() as f64;
+        let h = grid_el.client_height() as f64;
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let dpr = window().device_pixel_ratio();
+        canvas_handle.update_value(|slot| {
+            if let Some(ic) = slot.as_mut() {
+                ic.resize(w, h, dpr);
+                ic.request_repaint();
+            }
+        });
     });
 
     // Re-render canvas every time visual events occur (content, format, navigation, structure).
@@ -90,10 +182,6 @@ pub fn Worksheet() -> impl IntoView {
     // initial state without waiting for an event.
     let render_needed = RwSignal::new(true);
 
-    // Tracks which render path is needed; written by the subscription Effect
-    // below, available to the rAF closure for future per-mode dispatch.
-    let render_mode = RwSignal::new(CanvasRenderMode::Full);
-
     // Reactive subscription Effect - tracks events and overlay changes.
     // Does NOT render. Only sets the flag so the rAF loop below can do the
     // draw on the next animation frame.
@@ -120,20 +208,46 @@ pub fn Worksheet() -> impl IntoView {
             let overlay = reactive_overlay.get();
             let overlay_changed = prev.is_some_and(|p| p != overlay);
 
-            let mode = if has_content || has_structure || has_theme {
-                CanvasRenderMode::Full
-            } else if has_format {
-                CanvasRenderMode::FormatOnly
-            } else if has_nav {
-                CanvasRenderMode::ViewportUpdate
-            } else if overlay_changed {
-                CanvasRenderMode::Overlay
-            } else {
+            if !(has_content
+                || has_structure
+                || has_format
+                || has_nav
+                || has_theme
+                || overlay_changed)
+            {
                 return overlay;
-            };
-
-            render_mode.set(mode);
+            }
             render_needed.set(true);
+
+            // Push the same state into the IronCanvas orchestrator. Each
+            // setter value-compares, so redundant pushes (e.g. format-only
+            // events not touching theme) flip dirty only on the layers that
+            // actually need it. request_repaint() at the end is the safety
+            // net that ensures content/format/structure events still fan
+            // out to both layers even when no value changed locally.
+            let theme = *canvas_theme.get();
+            let (extend_to, point_range, formula_refs) = overlay.clone();
+            let clipboard = clipboard_draw.with_value(|opt| {
+                opt.as_ref().map(|acb| SheetRange {
+                    sheet: acb.sheet,
+                    area: acb.range,
+                })
+            });
+            let overlays = RenderOverlays {
+                selection: None,
+                extend_to,
+                clipboard: clipboard.map(Into::into),
+                point_range: point_range.map(Into::into),
+                formula_refs: formula_refs.into_iter().map(Into::into).collect(),
+            };
+            canvas_handle.update_value(|slot| {
+                if let Some(ic) = slot.as_mut() {
+                    ic.set_theme(theme);
+                    ic.set_overlays(overlays);
+                    ic.request_repaint();
+                }
+            });
+
             overlay
         },
     );
@@ -142,44 +256,81 @@ pub fn Worksheet() -> impl IntoView {
     // Renders only when render_needed is true; otherwise returns immediately
     // (single untracked signal read + branch).
     let _ = use_raf_fn(move |_| {
+        // Lazy IronCanvas construction. Runs every frame until both refs are
+        // Some AND container dims > 0, then becomes a no-op via slot.is_some()
+        // short-circuit. Handles the zero-size-container edge case (refs
+        // resolved but layout pass hasn't measured yet) without extra
+        // ResizeObserver plumbing.
+        canvas_handle.update_value(|slot| {
+            if slot.is_some() {
+                return;
+            }
+            let Some(grid_el) = grid_ref.get_untracked() else {
+                return;
+            };
+            let Some(overlay_el) = overlay_ref.get_untracked() else {
+                return;
+            };
+            let w = grid_el.client_width() as f64;
+            let h = grid_el.client_height() as f64;
+            if w <= 0.0 || h <= 0.0 {
+                return;
+            }
+            let dpr = window().device_pixel_ratio();
+            match IronCanvas::create(grid_el, overlay_el) {
+                Ok(mut ic) => {
+                    ic.resize(w, h, dpr);
+                    // Initial state push: sync current Worksheet state to
+                    // the freshly-constructed orchestrator so Task 5's
+                    // drop-in swap inherits a correct first frame.
+                    // Subsequent pushes are driven by the reactive Effects
+                    // below.
+                    ic.set_theme(*canvas_theme.get_untracked());
+                    ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
+                    let (extend_to, point_range, formula_refs) =
+                        reactive_overlay.get_untracked();
+                    let clipboard = clipboard_draw.with_value(|opt| {
+                        opt.as_ref().map(|acb| SheetRange {
+                            sheet: acb.sheet,
+                            area: acb.range,
+                        })
+                    });
+                    ic.set_overlays(RenderOverlays {
+                        selection: None,
+                        extend_to,
+                        clipboard: clipboard.map(Into::into),
+                        point_range: point_range.map(Into::into),
+                        formula_refs: formula_refs.into_iter().map(Into::into).collect(),
+                    });
+                    *slot = Some(ic);
+                }
+                Err(e) => web_sys::console::error_1(&e),
+            }
+        });
+
         if !render_needed.get_untracked() {
             return;
         }
         render_needed.set(false);
 
-        let Some(canvas) = canvas_ref.get_untracked() else {
+        let Some(canvas) = grid_ref.get_untracked() else {
             return;
         };
         let canvas_el: HtmlCanvasElement = canvas;
         // Sync canvas dimensions into the model so scroll/autofill knows the
-        // visible viewport size. Dimension check is cheap; CanvasRenderer::new
-        // only reallocates the backing store when dimensions actually changed.
+        // visible viewport size.
         let canvas_w = canvas_el.client_width() as f64;
         let canvas_h = canvas_el.client_height() as f64;
         model.update_value(|m| {
             m.set_window_width(canvas_w);
             m.set_window_height(canvas_h);
         });
-        let (extend_to, point_range, formula_refs) = reactive_overlay.get_untracked();
-        let clipboard = clipboard_draw.with_value(|opt| {
-            opt.as_ref().map(|acb| SheetRange {
-                sheet: acb.sheet,
-                area: acb.range,
-            })
-        });
-        let overlays = RenderOverlays {
-            extend_to,
-            clipboard: clipboard.map(Into::into),
-            point_range: point_range.map(Into::into),
-            formula_refs: formula_refs.into_iter().map(Into::into).collect(),
-        };
-        let dpr = window().device_pixel_ratio();
 
         web_sys::console::time_with_label("render");
-
-        model.with_value(|m| {
-            let mut renderer = CanvasRenderer::new(&canvas_el, *canvas_theme.get_untracked(), dpr);
-            renderer.render(m, &overlays);
+        canvas_handle.update_value(|slot| {
+            if let Some(ic) = slot.as_mut() {
+                ic.paint_if_dirty();
+            }
         });
         web_sys::console::time_end_with_label("render");
 
@@ -220,17 +371,17 @@ pub fn Worksheet() -> impl IntoView {
     view! {
         <div node_ref=container_ref class="ws">
             <canvas
-                node_ref=canvas_ref
+                node_ref=grid_ref
                 role="application"
                 aria-label="Spreadsheet grid"
                 class=move || {
                     match state.drag.get() {
-                        DragState::ResizingCol { .. } => "ws-canvas resize-col",
-                        DragState::ResizingRow { .. } => "ws-canvas resize-row",
+                        DragState::ResizingCol { .. } => "ws-canvas ws-grid resize-col",
+                        DragState::ResizingRow { .. } => "ws-canvas ws-grid resize-row",
                         DragState::Idle
                         | DragState::Selecting
                         | DragState::Extending { .. }
-                        | DragState::Pointing { .. } => "ws-canvas",
+                        | DragState::Pointing { .. } => "ws-canvas ws-grid",
                     }
                 }
                 tabindex="-1"
@@ -240,6 +391,11 @@ pub fn Worksheet() -> impl IntoView {
                 on:dblclick=on_dblclick
                 on:wheel=on_wheel
                 on:contextmenu=on_contextmenu
+            />
+            <canvas
+                node_ref=overlay_ref
+                class="ws-canvas ws-overlay"
+                aria-hidden="true"
             />
             <CellEditor />
         </div>

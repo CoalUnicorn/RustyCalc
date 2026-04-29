@@ -5,8 +5,7 @@
 //! a pre-computed `TextPaint` onto the canvas: fill each line, then
 //! optionally stroke an underline / strike.
 
-use crate::types::TextPaint;
-use crate::Span;
+use crate::{renderer::cells::TextPaint, Span};
 
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 

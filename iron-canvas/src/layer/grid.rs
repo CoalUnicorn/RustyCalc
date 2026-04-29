@@ -1,17 +1,21 @@
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{js_sys, CanvasRenderingContext2d, HtmlCanvasElement};
 
-use crate::theme::CanvasTheme;
+use crate::theme::{CanvasTheme, LIGHT};
+use crate::CanvasModel;
+use crate::CanvasRenderer;
 
 use super::PaintGate;
 
 pub(crate) struct GridLayer {
     pub(crate) canvas: HtmlCanvasElement,
-    pub(crate) ctx: CanvasRenderingContext2d,
     pub(crate) css_width: f64,
     pub(crate) css_height: f64,
     pub(crate) dpr: f64,
     gate: PaintGate,
+    /// Long-lived renderer; owns the layer's 2D ctx so paint caches persist
+    /// across frames. Theme is hot-swapped per paint via `set_theme`.
+    renderer: CanvasRenderer,
 }
 
 impl GridLayer {
@@ -20,17 +24,17 @@ impl GridLayer {
         js_sys::Reflect::set(&ctx_opts, &"alpha".into(), &JsValue::from(false))
             .map_err(|_| JsValue::from_str("failed to set grid context alpha option"))?;
         let ctx = canvas
-            .get_context_with_context_options("2d", &ctx_opts)
-            .map_err(|e| e)?
+            .get_context_with_context_options("2d", &ctx_opts)?
             .ok_or_else(|| JsValue::from_str("grid canvas 2d context unavailable"))?
             .unchecked_into::<CanvasRenderingContext2d>();
+        let renderer = CanvasRenderer::for_layer(ctx, 0.0, 0.0, LIGHT);
         Ok(Self {
             canvas,
-            ctx,
             css_width: 0.0,
             css_height: 0.0,
             dpr: 1.0,
             gate: PaintGate::new(),
+            renderer,
         })
     }
 
@@ -38,12 +42,21 @@ impl GridLayer {
         self.gate.mark_dirty();
     }
 
-    /// Clear to theme background when dirty; no-op when clean.
-    pub(crate) fn paint_if_dirty(&mut self, theme: &CanvasTheme) {
-        if self.gate.should_paint() {
-            self.ctx.set_fill_style_str(theme.cell_bg);
-            self.ctx
-                .fill_rect(0.0, 0.0, self.css_width, self.css_height);
+    /// Paint the grid: theme bg + (if model present) the cell/header phases.
+    /// No-op when clean.
+    pub(crate) fn paint_if_dirty(&mut self, theme: &CanvasTheme, model: Option<&dyn CanvasModel>) {
+        if !self.gate.should_paint() {
+            return;
+        }
+        self.renderer.set_theme(*theme);
+        // Bypass the renderer's cached fill helper: this raw write desyncs
+        // `last_fill`, so invalidate the cache before any cached path runs.
+        let ctx = self.renderer.ctx_ref();
+        ctx.set_fill_style_str(theme.cell_bg);
+        ctx.fill_rect(0.0, 0.0, self.css_width, self.css_height);
+        self.renderer.invalidate_paint_cache();
+        if let Some(m) = model {
+            self.renderer.render_grid(m);
         }
     }
 
@@ -58,11 +71,17 @@ impl GridLayer {
             self.canvas.set_width(target_w);
             self.canvas.set_height(target_h);
         } else {
-            self.ctx
+            self.renderer
+                .ctx_ref()
                 .set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
                 .expect("set_transform should not fail");
         }
-        self.ctx.scale(dpr, dpr).expect("scale should not fail");
+        self.renderer
+            .ctx_ref()
+            .scale(dpr, dpr)
+            .expect("scale should not fail");
+        self.renderer.set_size(css_w, css_h);
+        self.renderer.invalidate_paint_cache();
     }
 }
 

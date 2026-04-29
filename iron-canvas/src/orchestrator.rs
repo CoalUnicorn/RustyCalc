@@ -101,8 +101,10 @@ impl IronCanvas {
 
     /// Drive each layer's gate. Layers that are clean skip their paint entirely.
     pub fn paint_if_dirty(&mut self) {
-        self.grid.paint_if_dirty(&self.theme);
-        self.overlay.paint_if_dirty(&self.theme, &self.overlays);
+        let model = self.model.as_deref();
+        self.grid.paint_if_dirty(&self.theme, model);
+        self.overlay
+            .paint_if_dirty(&self.theme, &self.overlays, model);
     }
 
     /// Explicit teardown for React strict-mode / Leptos Effect mount cycles.
@@ -155,6 +157,18 @@ impl IronCanvas {
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
         if overlays != self.overlays {
             self.overlays = overlays;
+            self.overlay.mark_dirty();
+        }
+    }
+
+    /// Rust-level theme push. Mirrors `set_theme_name` minus the string lookup;
+    /// the wasm-bindgen surface keeps `set_theme_name` so the JS handle is
+    /// unchanged. Value-compares against `self.theme`; on change marks both
+    /// layers dirty.
+    pub fn set_theme(&mut self, theme: CanvasTheme) {
+        if theme != self.theme {
+            self.theme = theme;
+            self.grid.mark_dirty();
             self.overlay.mark_dirty();
         }
     }

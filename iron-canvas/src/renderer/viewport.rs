@@ -11,10 +11,10 @@ use crate::model::RCRange;
 use crate::{CanvasModel, Point, HEADER_OFFSET};
 
 use super::super::geometry::{
-    col_width, row_height, FrameContext, PixelRect, VisibleRegion, HEADER_COL_WIDTH,
+    col_width, row_height, Axis, FrameContext, PixelRect, VisibleRegion, HEADER_COL_WIDTH,
     HEADER_ROW_HEIGHT,
 };
-use super::super::types::Axis;
+
 use super::CanvasRenderer;
 
 impl CanvasRenderer {

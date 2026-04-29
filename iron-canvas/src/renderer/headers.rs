@@ -11,9 +11,10 @@ use std::ops::RangeInclusive;
 use crate::{CanvasModel, Point, Span, HEADER_OFFSET};
 
 use super::super::geometry::{
-    col_name, FrozenRC, PixelRect, VisibleRegion, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+    col_name, Axis, FrozenRC, PixelRect, VisibleRegion, FROZEN_SEP, HEADER_COL_WIDTH,
+    HEADER_ROW_HEIGHT,
 };
-use super::super::types::Axis;
+
 use super::text::DEFAULT_FONT_FAMILY;
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 

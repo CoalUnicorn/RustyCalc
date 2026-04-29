@@ -51,6 +51,142 @@ pub struct CanvasSize {
     pub h: f64,
 }
 
+//  Shared axis - row-vs-column symmetry
+
+/// Horizontal vs vertical axis.
+///
+/// Shared across viewport offset math (`cell_offset` dispatches on axis) and
+/// header rect building (`Axis::header_rect`). Carries no payload - the
+/// row/column index travels as a separate parameter so the same enum value
+/// can be used across call sites that don't care about a specific index.
+#[derive(Copy, Clone)]
+pub(crate) enum Axis {
+    Row,
+    Column,
+}
+
+impl Axis {
+    /// Rect that pins a header cell to the corresponding header strip.
+    ///
+    /// `along` is the position along the axis (top_y for rows, left_x for
+    /// cols). The cross-axis extent is always the header strip width/height.
+    pub(crate) fn header_rect(self, along: f64, height: f64) -> PixelRect {
+        match self {
+            Axis::Row => PixelRect {
+                top_left: Point {
+                    x: HEADER_OFFSET,
+                    y: along,
+                },
+                width: HEADER_COL_WIDTH,
+                height,
+            },
+            Axis::Column => PixelRect {
+                top_left: Point {
+                    x: along,
+                    y: HEADER_OFFSET,
+                },
+                width: height,
+                height: HEADER_ROW_HEIGHT,
+            },
+        }
+    }
+
+    /// Extent of the row/column at `index` on `sheet` (row height or column width).
+    pub(crate) fn extent(self, model: &dyn CanvasModel, index: i32) -> f64 {
+        match self {
+            Axis::Row => row_height(model, index),
+            Axis::Column => col_width(model, index),
+        }
+    }
+
+    /// Pixel position where the header strip begins along this axis,
+    /// offset by HEADER_OFFSET `0.5` for crisp integer-coordinate strokes.
+    pub(crate) fn strip_start(self) -> f64 {
+        match self {
+            Axis::Row => HEADER_ROW_HEIGHT + HEADER_OFFSET,
+            Axis::Column => HEADER_COL_WIDTH + HEADER_OFFSET,
+        }
+    }
+
+    /// Visible scrollable band in this axis, drawn from `VisibleRegion`.
+    pub(crate) fn visible_band(self, vis: &VisibleRegion) -> RangeInclusive<i32> {
+        match self {
+            Axis::Row => vis.first.row..=vis.last.row,
+            Axis::Column => vis.first.column..=vis.last.column,
+        }
+    }
+
+    /// Inclusive `(start, end)` of the user's selection along this axis,
+    /// read from ironcalc's `SelectedView.range` array laid out as
+    /// `[row1, col1, row2, col2]`. Rows live at indices 0/2; columns at 1/3.
+    pub(crate) fn selection_range(self, view_range: &[i32; 4]) -> (i32, i32) {
+        let (start, end) = match self {
+            Axis::Row => (
+                view_range[0].min(view_range[2]),
+                view_range[0].max(view_range[2]),
+            ),
+            Axis::Column => (
+                view_range[1].min(view_range[3]),
+                view_range[1].max(view_range[3]),
+            ),
+        };
+        (start, end)
+    }
+}
+
+/// Which edge of a cell rectangle is being stroked.
+///
+/// `line()` projects the edge onto a `PixelRect` to produce the
+/// axis-aligned `Line` segment painted by `paint_border`.
+#[derive(Copy, Clone)]
+pub(super) enum BorderEdge {
+    Left,
+    Top,
+    Right,
+    Bottom,
+}
+
+impl BorderEdge {
+    /// The axis-aligned `Line` this edge would stroke on `rect`.
+    pub fn line(self, rect: PixelRect) -> Line {
+        let PixelRect {
+            top_left: Point { x, y },
+            width,
+            height,
+        } = rect;
+        match self {
+            BorderEdge::Left => Line::V {
+                x,
+                span: Span {
+                    from: y,
+                    to: y + height,
+                },
+            },
+            BorderEdge::Top => Line::H {
+                span: Span {
+                    from: x,
+                    to: x + width,
+                },
+                y,
+            },
+            BorderEdge::Right => Line::V {
+                x: x + width,
+                span: Span {
+                    from: y,
+                    to: y + height,
+                },
+            },
+            BorderEdge::Bottom => Line::H {
+                span: Span {
+                    from: x,
+                    to: x + width,
+                },
+                y: y + height,
+            },
+        }
+    }
+}
+
 /// A rectangle in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PixelRect {
@@ -263,11 +399,11 @@ impl PixelOffsets {
 
 /// Per-frame geometric snapshot threaded into every render phase.
 ///
-/// Built once at the start of `CanvasRenderer::render` from a `SheetViewport`,
-/// then borrowed (never owned) by `render_pane`, `render_headers`, and the
-/// overlay drawers. Bundles the visible region, the pixel-offset prefix-sum
-/// cache, and the resolved frozen-pane geometry so phases never re-read those
-/// from the model mid-frame.
+/// Built once at the start of `render_grid` and `render_overlays` from a
+/// `SheetViewport`, then borrowed (never owned) by `render_pane`,
+/// `render_headers`, and the overlay drawers. Bundles the visible region, the
+/// pixel-offset prefix-sum cache, and the resolved frozen-pane geometry so
+/// phases never re-read those from the model mid-frame.
 #[derive(Debug)]
 pub(crate) struct FrameContext {
     pub vis: VisibleRegion,
@@ -1045,5 +1181,12 @@ mod tests {
         // columns that you think exercise the seam most convincingly.
         // Mirror the same property for `pixel_to_row(row_to_y(r))` if you
         // want a second assertion.
+        // Build a SheetViewport over a MockCanvasModel with both
+        // freezes set and a left_column past the seam, then assert vp.pixel_to_col(vp.col_to_x(c)) == c for column samples that span the interesting cases.
+        //
+        // Guidance: The contract says: every X pixel that falls inside cell c must resolve to c. The interesting samples are: a column inside the frozen band, the seam column
+        // (frozen_cols + 1), and a column past left_column. Note that col_to_x(c) returns the left edge of cell c, which is also the right edge of cell c-1 — decide whether you want
+        // to test the left-edge pixel directly or nudge by +0.5 to land safely inside the cell. The mirror property for rows (pixel_to_row(row_to_y(r)) == r) is optional but doubles
+        // your coverage for two lines of test code. Look at MockCanvasModel's Default impl above the test to see what knobs it exposes.
     }
 }

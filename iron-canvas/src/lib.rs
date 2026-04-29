@@ -26,20 +26,20 @@
 //!   for the full walk-through.
 
 pub mod geometry;
+mod layer;
 pub mod model;
+mod orchestrator;
+#[cfg(test)]
+mod reference;
 pub mod renderer;
 pub mod style;
 pub mod theme;
 pub mod types;
-mod layer;
-mod orchestrator;
-#[cfg(test)]
-mod reference;
 
 pub use geometry::*;
+pub use orchestrator::IronCanvas;
 pub use renderer::CanvasRenderer;
 pub use types::{CanvasRenderMode, RenderOverlays};
-pub use orchestrator::IronCanvas;
 
 // CanvasModel - read-only worksheet surface the renderer consumes
 //
@@ -206,35 +206,6 @@ impl CanvasModel for JsBackedModel {
 }
 
 // WASM host surface - IronCanvasView
-//
-// Drop-in replacement for IronCalc's
-// `webapp/IronCalc/src/components/WorksheetCanvas/worksheetCanvas.ts`.
-// `CanvasRenderer` stays stateless per frame; `IronCanvasView` owns the
-// long-lived inputs (canvas element, theme, scroll state, callbacks) and
-// builds a fresh renderer inside each `render_sheet()` call.
-//
-// Architectural decisions in force:
-//
-//   Fork 1 - Model handle: shared `UserModel`. Settings receive the ironcalc
-//   `Model` JS handle and we read it directly via wasm-bindgen. Bridge
-//   mechanism (extern type + `unchecked_ref` cast vs ironcalc-side getter
-//   that exposes the inner `&UserModel`) is wired in a follow-up pass.
-//
-//   Fork 2 - Overlays: canvas-painted (renderer Phase 3). IronCalc's
-//   `cellOutline` / `areaOutline` / `extendToOutline` / `cellArrayStructure`
-//   divs are no longer needed.
-//     Option B reserved - drive DOM divs by absolute positioning. Would add
-//     `update_cell_outline(rect)`, `update_area_outline(rect)`,
-//     `update_extend_to_outline(rect)`, plus a `disable_internal_overlays()`
-//     toggle that skips Phase 3 inside `CanvasRenderer::render`. Not in v1.
-//
-//   Fork 3 - Theme: read CSS variables off the canvas's closest `.ic-root`
-//   ancestor at construction (`CanvasTheme::from_css_vars(&root)` - to be
-//   added on `CanvasTheme`). Caller does not pass colors.
-//     Option B reserved - accept a serialized `CanvasTheme` from JS via
-//     `set_theme(theme: JsValue)`. Useful for hosts that compute theme
-//     outside CSS variables. Not in v1.
-
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 // use web_sys::OffscreenCanvas;

@@ -124,6 +124,7 @@ impl RefNode {
     /// A1-style via ironcalc's canonical stringifier. `ctx` is the cell
     /// being edited — drives relative-offset math. Locale/language hard-
     /// coded to "en" until we surface them in AppState.
+    #[allow(clippy::expect_used)]
     pub fn to_localized(&self, ctx: &CellReferenceRC) -> String {
         let locale = get_locale("en").expect("builtin 'en' locale ships with ironcalc");
         let language = get_language("en").expect("builtin 'en' language ships with ironcalc");
@@ -699,6 +700,7 @@ impl Cell {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -881,6 +883,7 @@ mod tests {
     // from ctx A1, so +1 to the row field shifts the resolved coord one row
     // down — matching ironcalc's stringify semantics.
     #[test]
+
     fn extend_trailing_single_cell_arrow_down() {
         let n = RefNode::cell(0, None, 0, 0, false, false);
         let moved = n.extend_trailing(&ArrowKey::from_str("ArrowDown").unwrap());

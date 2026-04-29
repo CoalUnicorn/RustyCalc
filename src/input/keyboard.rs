@@ -989,6 +989,7 @@ mod tests {
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_clears_status_on_success() {
         let owner = Owner::new();

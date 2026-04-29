@@ -89,6 +89,7 @@ mod cells;
 mod headers;
 mod overlays;
 mod paint;
+mod pane;
 mod text;
 mod viewport;
 
@@ -97,12 +98,13 @@ use wasm_bindgen::JsCast;
 use web_sys::js_sys;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use super::geometry::{CanvasSize, FrameContext, SheetViewport};
+use super::geometry::{Axis, CanvasSize, FrameContext, SheetViewport};
 use super::types::*;
-pub(crate) use crate::geometry::VisibleRegion;
+use crate::renderer::cells::CellPaintsIter;
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;
 pub use overlays::AutofillTarget;
+pub(crate) use pane::PaneRegion;
 
 // Layout constants
 pub(super) const SELECTION_BORDER_WIDTH: f64 = 2.0;
@@ -224,20 +226,72 @@ impl CanvasRenderer {
         }
     }
 
-    /// Renders only visible cells regardless of selection size.
-    pub fn render(&mut self, model: &dyn CanvasModel, overlays: &RenderOverlays) {
-        // One snapshot of "where cells are drawn right now" - model + scroll
-        // anchors + frozen geometry. The `frame` it produces bundles visible
-        // region, pixel-offset prefix sums, and the resolved frozen pane shape
-        // so every render phase reads a single source of truth.
+    /// Layer-friendly constructor: caller owns canvas sizing + DPR scaling.
+    ///
+    /// Used by `GridLayer` / `OverlayLayer`, which build their own ctx with
+    /// alpha/desynchronized options and apply DPR scale in their own
+    /// `resize()`. This keeps a long-lived `CanvasRenderer` whose ctx is the
+    /// layer's ctx — paint caches survive across frames.
+    pub(crate) fn for_layer(
+        ctx: CanvasRenderingContext2d,
+        css_w: f64,
+        css_h: f64,
+        theme: CanvasTheme,
+    ) -> Self {
+        Self {
+            ctx,
+            width: css_w,
+            height: css_h,
+            theme,
+            dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
+            dash_empty: js_sys::Array::new(),
+            last_fill: Cell::new("".to_string()),
+            last_stroke: Cell::new("".to_string()),
+            last_line_width: Cell::new(0.0),
+            last_font: Cell::new("".to_string()),
+        }
+    }
+
+    /// Sync logical canvas size after a layer resize. Caller is responsible
+    /// for the actual `canvas.set_width/set_height` and DPR scale.
+    pub(crate) fn set_size(&mut self, css_w: f64, css_h: f64) {
+        self.width = css_w;
+        self.height = css_h;
+    }
+
+    /// Reset per-frame ctx state caches to their initial sentinels.
+    ///
+    /// Required after any `canvas.set_width/set_height` because that mutation
+    /// resets all 2D ctx state (fill, stroke, font, line width); without
+    /// invalidation the cache would skip writes that the ctx has actually
+    /// forgotten and the next paint would use the wrong style.
+    pub(crate) fn invalidate_paint_cache(&mut self) {
+        self.last_fill.set(String::new());
+        self.last_stroke.set(String::new());
+        self.last_font.set(String::new());
+        self.last_line_width.set(0.0);
+    }
+
+    /// Live theme swap. `CanvasTheme` is `Copy` so this is a simple field
+    /// replace.
+    pub(crate) fn set_theme(&mut self, theme: CanvasTheme) {
+        self.theme = theme;
+    }
+
+    /// Phases 1+2: cells (bg + borders + text), frozen separators, headers,
+    /// corner box. Does **not** clear the canvas — caller owns the clear so
+    /// layer-owned renderers can paint a background fill instead.
+    ///
+    /// Sticky ctx defaults (`text_align`, `text_baseline`) are re-asserted on
+    /// every paint because `canvas.set_width/set_height` (in the layer's
+    /// resize) wipes them. Per-stroke `line_width` is owned by paint helpers
+    /// via `set_line_width_cached`, so it is not set here.
+    pub(crate) fn render_grid(&mut self, model: &dyn CanvasModel) {
+        self.ctx.set_text_align("center");
+        self.ctx.set_text_baseline("middle");
+
         let viewport = SheetViewport::current(model);
         let frame = viewport.frame(self.canvas_size());
-
-        let ctx = &self.ctx;
-        ctx.set_line_width(STANDARD_BORDER_WIDTH);
-        ctx.set_text_align("center");
-        ctx.set_text_baseline("middle");
-        ctx.clear_rect(0.0, 0.0, self.width, self.height);
 
         // Phase 1: Cells - four frozen-pane quadrants. Each `render_pane`
         // does two passes: bg+borders first, then text on top so overflow
@@ -266,8 +320,23 @@ impl CanvasRenderer {
         );
 
         self.draw_corner_box();
+    }
 
-        // Phase 3: Selection outline
+    /// Phase 3: selection outline, extend preview, clipboard ants,
+    /// point-mode range, formula-ref highlights. Does **not** clear the
+    /// canvas — caller owns the clear (overlay layer needs transparent bg).
+    ///
+    /// `text_align` / `text_baseline` are re-asserted here for the same
+    /// reason as in `render_grid`: the overlay layer's `set_width/set_height`
+    /// resize wipes them, and `repaint_active_cell` paints text whose
+    /// `center_x`/`center_y` assume the centered/middle anchors.
+    pub(crate) fn render_overlays(&mut self, model: &dyn CanvasModel, overlays: &RenderOverlays) {
+        self.ctx.set_text_align("center");
+        self.ctx.set_text_baseline("middle");
+
+        let viewport = SheetViewport::current(model);
+        let frame = viewport.frame(self.canvas_size());
+
         self.draw_selection(model, &frame);
         if let Some(target) = overlays.extend_to {
             self.draw_extend_preview(model, &frame, target);

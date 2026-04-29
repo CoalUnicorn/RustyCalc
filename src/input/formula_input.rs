@@ -76,7 +76,7 @@ pub fn try_point_move(ctx: &PointMoveCtx, key: &str, is_shift: bool) -> PointMov
     }
 
     // Any non-arrow key signals the user is done pointing (e.g. typed an operator or digit).
-    if !ArrowKey::from_str(&key).is_some() {
+    if ArrowKey::from_str(key).is_none() {
         return PointMoveOutcome::ExitPointing;
     }
 
@@ -285,6 +285,7 @@ mod tests {
 
     /// Reproducer: user editing C1 with `=$A$1+` at cursor=6 presses ArrowDown.
     /// Expected: point-mode engages, splices `C2` producing `=$A$1+C2`.
+    #[allow(clippy::panic)]
     #[test]
     fn point_move_reproduce_abs_then_operator_then_arrow() {
         use crate::coord::SheetRange;

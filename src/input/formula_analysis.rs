@@ -154,7 +154,7 @@ pub(crate) enum IdentLeaf {
 }
 
 /// Leaves that consume no span — pure diagnostic state from the parser.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DiagnosticLeaf {
     ParseError { message: String, position: usize },
 }
@@ -346,9 +346,15 @@ pub fn analyze_formula(
         }
     }
 
-    let parse_error = diag_leaves.into_iter().find_map(|d| match d {
-        DiagnosticLeaf::ParseError { message, position } => Some(ParseError { message, position }),
-    });
+    let parse_error = diag_leaves
+        .into_iter()
+        .map(|d| match d {
+            DiagnosticLeaf::ParseError { message, position } => {
+                Some(ParseError { message, position })
+            }
+        })
+        .next()
+        .unwrap_or_default();
 
     // Precedence cascade — matches the order the status bar used to reconstruct
     // by hand. Parser errors win because they leave the AST partial; lexer
@@ -527,6 +533,7 @@ pub fn is_in_reference_mode(text: &str, cursor: usize) -> bool {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod formula_analysis_tests {
     use super::*;
     use crate::coord::CellRange;
