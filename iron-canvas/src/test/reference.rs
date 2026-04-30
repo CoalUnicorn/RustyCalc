@@ -1,3 +1,6 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+
 /// Reference compositor for pixel-parity testing.
 ///
 /// `DrawOp` captures the sequence of drawing commands that the grid and

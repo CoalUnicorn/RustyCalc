@@ -9,7 +9,6 @@ use std::ops::RangeInclusive;
 use crate::model::CssColor;
 use crate::renderer::pane::PaneRegion;
 use crate::renderer::text::TextPaint;
-use crate::style::FontStyle;
 use crate::theme::CanvasTheme;
 use crate::{col_width, row_height, CanvasModel, CanvasSize, Point};
 
@@ -19,9 +18,7 @@ use super::super::model::{CellAddress, RCRange};
 use super::CanvasRenderer;
 use crate::renderer::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
-use ironcalc_base::types::{
-    BorderItem, BorderStyle, CellType, HorizontalAlignment, Style, VerticalAlignment,
-};
+use ironcalc_base::types::{BorderItem, BorderStyle, Style};
 
 impl CanvasRenderer {
     /// Walk one frozen-pane quadrant. Pass 1 paints bg+borders for every
@@ -247,13 +244,13 @@ impl BorderStroke {
 /// the current scroll, and any outer pane-boundary borders the renderer
 /// must force-draw on it.
 #[derive(Clone, Copy)]
-pub struct CellSlot {
+pub(crate) struct CellSlot {
     pub addr: CellAddress,
     pub rect: PixelRect,
 }
 
 #[derive(Clone)]
-pub struct RowStrip {
+pub(crate) struct RowStrip {
     row: i32,
     height: f64,
 }
@@ -262,7 +259,7 @@ pub struct RowStrip {
 /// widths once, threads a row-top accumulator across rows, and skips
 /// hidden rows/columns as well as cells that fall off the canvas. Replaces
 /// the parameter cluster that used to feed `render_pane_row`.
-pub struct PaneCells<'a> {
+pub(crate) struct PaneCells<'a> {
     pub pane: &'a PaneRegion,
     pub model: &'a dyn CanvasModel,
     pub sheet: u32,
@@ -329,84 +326,6 @@ impl<'a> Iterator for PaneCells<'a> {
                     rect,
                 });
             }
-        }
-    }
-}
-
-/// Per-cell text styling resolved from the model's raw `Style`. A private
-/// step inside `resolve_text_paint`; not surfaced beyond `crate::types`.
-pub struct CellStyle {
-    pub text_color: String,
-    pub font: FontStyle,
-    pub h_align: HorizontalAlignment,
-    pub v_align: VerticalAlignment,
-    pub wrap_text: bool,
-}
-
-impl CellStyle {
-    pub fn resolve(
-        model: &dyn CanvasModel,
-        sheet: u32,
-        row: i32,
-        column: i32,
-        theme: &CanvasTheme,
-        style: &Style,
-    ) -> Self {
-        let cell_type = model
-            .get_cell_type(sheet, row, column)
-            .unwrap_or(CellType::Text);
-
-        let text_color = match style.font.color.as_deref() {
-            None | Some("#000000") => CssColor::new(theme.default_text_color),
-            Some(c) => CssColor::new(c),
-        };
-
-        let size_px = style.font.sz as f64;
-        // Fallback to default as in IronCalc Font name default.
-        let css = FontStyle::build(
-            size_px,
-            style.font.b,
-            style.font.i,
-            &style.font.name,
-            "Calibri",
-        );
-        let font = FontStyle {
-            size_px,
-            underline: style.font.u,
-            strikethrough: style.font.strike,
-            css,
-        };
-
-        let alignment = style.alignment.as_ref();
-        let h_align = match alignment.map(|a| &a.horizontal) {
-            Some(HorizontalAlignment::Right) => HorizontalAlignment::Right,
-            Some(HorizontalAlignment::Center) | Some(HorizontalAlignment::CenterContinuous) => {
-                HorizontalAlignment::Center
-            }
-            Some(HorizontalAlignment::Left) | Some(HorizontalAlignment::Fill) => {
-                HorizontalAlignment::Left
-            }
-            // Canvas 2D has no justify/distributed - fall back to left.
-            Some(HorizontalAlignment::Justify) | Some(HorizontalAlignment::Distributed) => {
-                HorizontalAlignment::Left
-            }
-            // General or unset: numbers right, everything else left.
-            None | Some(HorizontalAlignment::General) => match cell_type {
-                CellType::Number => HorizontalAlignment::Right,
-                _ => HorizontalAlignment::Left,
-            },
-        };
-        let v_align = alignment
-            .map(|a| a.vertical.clone())
-            .unwrap_or(VerticalAlignment::Bottom);
-        let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
-
-        Self {
-            text_color: text_color.0,
-            font,
-            h_align,
-            v_align,
-            wrap_text,
         }
     }
 }

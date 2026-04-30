@@ -312,7 +312,7 @@ impl CanvasRenderer {
         self.ctx.set_text_align("center");
         self.ctx.set_text_baseline("middle");
 
-        self.draw_selection(model, &frame);
+        self.draw_selection(model, frame);
         // Header highlights live on the overlay so nav events skip the grid repaint.
         self.render_header_highlights(
             model,
@@ -329,14 +329,14 @@ impl CanvasRenderer {
             frame.frozen.offset.x,
         );
         if let Some(target) = overlays.extend_to {
-            self.draw_extend_preview(model, &frame, target);
+            self.draw_extend_preview(model, frame, target);
         }
 
         // Secondary overlays: clipboard marching ants, point-mode range,
         // formula-ref highlights. Each no-ops if its data is absent or lives
         // on another sheet.
-        self.draw_clipboard_overlay(model, &frame, overlays.clipboard.as_ref());
-        self.draw_point_overlay(model, &frame, overlays.point_range);
-        self.draw_formula_ref_overlays(model, &frame, &overlays.formula_refs);
+        self.draw_clipboard_overlay(model, frame, overlays.clipboard.as_ref());
+        self.draw_point_overlay(model, frame, overlays.point_range);
+        self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
     }
 }

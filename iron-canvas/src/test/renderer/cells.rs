@@ -1,3 +1,6 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
+
 use crate::geometry::BorderEdge;
 use crate::Line;
 use crate::PixelRect;

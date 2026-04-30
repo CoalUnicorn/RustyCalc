@@ -5,13 +5,13 @@
 //! a pre-computed `TextPaint` onto the canvas: fill each line, then
 //! optionally stroke an underline / strike.
 
-use ironcalc_base::types::{HorizontalAlignment, Style, VerticalAlignment};
+use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignment};
 use web_sys::CanvasRenderingContext2d;
 
 use crate::{
     model::{CellAddress, CssColor},
-    renderer::cells::CellStyle,
     style::FontStyle,
+    theme::CanvasTheme,
     CanvasModel, PixelRect, Span,
 };
 
@@ -72,6 +72,84 @@ impl CanvasRenderer {
     }
 }
 
+/// Per-cell text styling resolved from the model's raw `Style`. A private
+/// step inside `resolve_text_paint`; not surfaced beyond `crate::types`.
+pub struct CellTextStyle {
+    pub text_color: String,
+    pub font: FontStyle,
+    pub h_align: HorizontalAlignment,
+    pub v_align: VerticalAlignment,
+    pub wrap_text: bool,
+}
+
+impl CellTextStyle {
+    pub fn resolve(
+        model: &dyn CanvasModel,
+        sheet: u32,
+        row: i32,
+        column: i32,
+        theme: &CanvasTheme,
+        style: &Style,
+    ) -> Self {
+        let cell_type = model
+            .get_cell_type(sheet, row, column)
+            .unwrap_or(CellType::Text);
+
+        let text_color = match style.font.color.as_deref() {
+            None | Some("#000000") => CssColor::new(theme.default_text_color),
+            Some(c) => CssColor::new(c),
+        };
+
+        let size_px = style.font.sz as f64;
+        // Fallback to default as in IronCalc Font name default.
+        let css = FontStyle::build(
+            size_px,
+            style.font.b,
+            style.font.i,
+            &style.font.name,
+            "Calibri",
+        );
+        let font = FontStyle {
+            size_px,
+            underline: style.font.u,
+            strikethrough: style.font.strike,
+            css,
+        };
+
+        let alignment = style.alignment.as_ref();
+        let h_align = match alignment.map(|a| &a.horizontal) {
+            Some(HorizontalAlignment::Right) => HorizontalAlignment::Right,
+            Some(HorizontalAlignment::Center) | Some(HorizontalAlignment::CenterContinuous) => {
+                HorizontalAlignment::Center
+            }
+            Some(HorizontalAlignment::Left) | Some(HorizontalAlignment::Fill) => {
+                HorizontalAlignment::Left
+            }
+            // Canvas 2D has no justify/distributed - fall back to left.
+            Some(HorizontalAlignment::Justify) | Some(HorizontalAlignment::Distributed) => {
+                HorizontalAlignment::Left
+            }
+            // General or unset: numbers right, everything else left.
+            None | Some(HorizontalAlignment::General) => match cell_type {
+                CellType::Number => HorizontalAlignment::Right,
+                _ => HorizontalAlignment::Left,
+            },
+        };
+        let v_align = alignment
+            .map(|a| a.vertical.clone())
+            .unwrap_or(VerticalAlignment::Bottom);
+        let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
+
+        Self {
+            text_color: text_color.0,
+            font,
+            h_align,
+            v_align,
+            wrap_text,
+        }
+    }
+}
+
 pub(crate) struct TextPaint {
     pub clip: PixelRect,
     pub font_css: String,
@@ -104,7 +182,7 @@ impl TextPaint {
         }
 
         // Destructure to move fields directly - avoids cloning `css`.
-        let CellStyle {
+        let CellTextStyle {
             font:
                 FontStyle {
                     css: font_css,
@@ -118,7 +196,7 @@ impl TextPaint {
             v_align,
             wrap_text,
             ..
-        } = CellStyle::resolve(
+        } = CellTextStyle::resolve(
             model,
             addr.sheet,
             addr.row,

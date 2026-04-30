@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::expect_used)]
 // Test fixture - a configurable in-memory CanvasModel.
 //
 // Only methods exercised by viewport / frozen-pane math are wired up.

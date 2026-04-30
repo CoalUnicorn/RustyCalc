@@ -48,8 +48,7 @@ impl CanvasRenderer {
             row: view.row,
             column: view.column,
         };
-        let Some(b) =
-            self.range_pixel_bounds(model, frame, RCRange::from_view(model).normalized())
+        let Some(b) = self.range_pixel_bounds(model, frame, RCRange::from_view(model).normalized())
         else {
             return;
         };
@@ -140,7 +139,7 @@ impl CanvasRenderer {
         &self,
         model: &dyn CanvasModel,
         frame: &FrameContext,
-        refs: &Vec<FormulaRef>,
+        refs: &[FormulaRef],
     ) {
         let sheet = model.get_selected_sheet();
         for fr in refs {
