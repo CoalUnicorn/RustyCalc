@@ -16,14 +16,16 @@
 use leptos::prelude::*;
 
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
+use crate::input::mouse::CanvasHandle;
 use crate::model::FrontendModel;
 use crate::state::{EditFocus, ModelStore, WorkbookState};
-use iron_canvas::geometry::SheetViewport;
+use iron_canvas::PixelRect;
 
 #[component]
 pub fn FormulaTextArea() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
+    let canvas_handle = expect_context::<CanvasHandle>();
 
     // Track only the `EditFocus` variant — not the text buffer — so this
     // memo stays stable while the user types and the auto-focus Effect
@@ -53,14 +55,21 @@ pub fn FormulaTextArea() -> impl IntoView {
         // Use the editing cell's address, not the live cursor. During point-mode
         // navigation the cursor moves to referenced cells, but the textarea must
         // stay anchored to the cell where the edit started.
-        let addr = state.editing_cell.get().map(|a| a.address);
-        let rect = model.with_value(|m| match addr {
-            Some(addr) => SheetViewport::current(m).cell_rect(addr.row, addr.column),
-            None => {
-                let view = m.get_selected_view();
-                SheetViewport::current(m).cell_rect(view.row, view.column)
-            }
-        });
+        //
+        // Pixel rect comes from `IronCanvas::cell_rect`, which reads the LAST
+        // PAINTED frame — keeps the editor positioned over the cell the user
+        // sees, even between a scroll mutation and the next animation frame.
+        let (row, column) = state
+            .editing_cell
+            .get()
+            .map(|e| (e.address.row, e.address.column))
+            .unwrap_or_else(|| {
+                let view = model.with_value(|m| m.get_selected_view());
+                (view.row, view.column)
+            });
+        let rect = canvas_handle
+            .with_value(|slot| slot.as_ref().and_then(|ic| ic.cell_rect(row, column)))
+            .unwrap_or(PixelRect::default());
         format!("{}", rect)
     };
 

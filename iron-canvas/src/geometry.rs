@@ -5,7 +5,7 @@ use std::fmt::{self, Display};
 use std::ops::RangeInclusive;
 
 use crate::model::RCRange;
-use crate::CanvasModel;
+use crate::{CanvasModel, HitTest, ResizeTarget};
 
 pub const HEADER_OFFSET: f64 = 0.5;
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
@@ -196,7 +196,7 @@ impl BorderEdge {
 }
 
 /// A rectangle in logical (CSS) pixels on the canvas.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PixelRect {
     pub top_left: Point,
     pub width: f64,
@@ -292,15 +292,6 @@ pub struct Span {
     pub from: f64,
     pub to: f64,
 }
-
-/// Pixel origin of the scrollable (non-frozen) grid area.
-///
-/// Passed to renderer drawing helpers so call sites read
-/// `cell_x(model, col, frozen)` without a second unrelated tuple parameter.
-// #[derive(Debug, Clone, Copy, PartialEq)]
-// pub struct Point {
-//     pub origin: Point,
-// }
 
 /// Frozen rows and columns grouped with their pixel origin.
 ///
@@ -403,13 +394,15 @@ impl PixelOffsets {
     }
 }
 
-/// Per-frame geometric snapshot threaded into every render phase.
+/// Per-frame geometric snapshot threaded into every render phase AND every
+/// hit-test query.
 ///
-/// Built once at the start of `render_grid` and `render_overlays` from a
-/// `SheetViewport`, then borrowed (never owned) by `render_pane`,
-/// `render_headers`, and the overlay drawers. Bundles the visible region, the
+/// Built once per tick by `FrameContext::current(model, canvas)` — both the
+/// renderer (`paint_if_dirty`) and the input layer (`IronCanvas::hit_test`,
+/// `cell_rect`, `resize_handle_at`) read the same snapshot, so what's painted
+/// and what gets hit always agree. Bundles the visible region, the
 /// pixel-offset prefix-sum cache, and the resolved frozen-pane geometry so
-/// phases never re-read those from the model mid-frame.
+/// neither phase re-reads them from the model mid-frame.
 #[derive(Debug)]
 pub(crate) struct FrameContext {
     pub vis: VisibleRegion,
@@ -419,73 +412,72 @@ pub(crate) struct FrameContext {
     pub left_column: i32,
 }
 
-/// Snapshot of "where cells are drawn right now" for one sheet - the model,
-/// the view's scroll anchors, and the frozen-pane pixel splits bundled
-/// together.
-pub struct SheetViewport<'a> {
-    model: &'a dyn CanvasModel,
-    left_column: i32,
-    top_row: i32,
-    frozen: FrozenRC,
-}
-
-impl<'a> SheetViewport<'a> {
-    /// Snapshot the currently-selected sheet with its current scroll state.
-    pub fn current(model: &'a dyn CanvasModel) -> Self {
+impl FrameContext {
+    /// Build a per-frame snapshot from the model and canvas size.
+    ///
+    /// Resolves the visible cell region, the prefix-sum pixel offsets for
+    /// `cell_x` / `cell_y` lookups, and the frozen-pane geometry. Bundles the
+    /// scroll anchors so change-detection (`set_viewport`, `set_freeze`) has a
+    /// single source of truth — the previously-painted frame.
+    ///
+    /// This is the canonical constructor: every `FrameContext` in the running
+    /// system is built here. Both `paint_if_dirty` (renderer) and the
+    /// `IronCanvas` query methods (`hit_test`, `cell_rect`,
+    /// `resize_handle_at`) read the result.
+    pub(crate) fn current(model: &dyn CanvasModel, canvas: CanvasSize) -> Self {
         let view = model.get_selected_view();
-        Self::from_parts(model, view.left_column, view.top_row)
-    }
-
-    /// Build from explicit anchors. Shims whose callers already destructured
-    /// the view use this; callers that only need one anchor may pass any value
-    /// for the other (the method dispatched will ignore it).
-    pub fn from_parts(model: &'a dyn CanvasModel, left_column: i32, top_row: i32) -> Self {
-        Self {
-            model,
-            left_column,
-            top_row,
-            frozen: FrozenRC::from_model(model),
+        let frozen = FrozenRC::from_model(model);
+        let vis = compute_visible_region(model, &frozen, view.left_column, view.top_row, canvas);
+        let offsets = compute_pixel_offsets(model, &vis);
+        FrameContext {
+            vis,
+            offsets,
+            frozen,
+            top_row: view.top_row,
+            left_column: view.left_column,
         }
     }
 
-    pub fn sheet(&self) -> u32 {
-        self.model.get_selected_sheet()
-    }
+    // Pixel <-> cell mapping
+    //
+    // All take `&dyn CanvasModel` because per-cell extents (row height, col
+    // width) live on the model, not in the cached frame. Frozen geometry,
+    // scroll anchors, and prefix-sum offsets come from `&self`.
 
-    pub fn frozen(&self) -> &FrozenRC {
-        &self.frozen
-    }
-
-    /// Left-edge X pixel of `col` at current scroll.
-    pub fn col_to_x(&self, col: i32) -> f64 {
+    /// Left-edge X pixel of `col` at this frame's scroll/freeze.
+    pub(crate) fn col_to_x(&self, model: &dyn CanvasModel, col: i32) -> f64 {
         let frozen_cols = self.frozen.frozen_cols_count();
         if col <= frozen_cols {
-            HEADER_COL_WIDTH + (1..col).map(|c| col_width(self.model, c)).sum::<f64>()
+            HEADER_COL_WIDTH + (1..col).map(|c| col_width(model, c)).sum::<f64>()
         } else {
             let left = self.left_column.max(frozen_cols + 1);
-            self.frozen.offset.x + (left..col).map(|c| col_width(self.model, c)).sum::<f64>()
+            self.frozen.offset.x + (left..col).map(|c| col_width(model, c)).sum::<f64>()
         }
     }
 
-    /// Top-edge Y pixel of `row` at current scroll.
-    pub fn row_to_y(&self, row: i32) -> f64 {
+    /// Top-edge Y pixel of `row` at this frame's scroll/freeze.
+    pub(crate) fn row_to_y(&self, model: &dyn CanvasModel, row: i32) -> f64 {
         let frozen_rows = self.frozen.frozen_rows_count();
         if row <= frozen_rows {
-            HEADER_ROW_HEIGHT + (1..row).map(|r| row_height(self.model, r)).sum::<f64>()
+            HEADER_ROW_HEIGHT + (1..row).map(|r| row_height(model, r)).sum::<f64>()
         } else {
             let top = self.top_row.max(frozen_rows + 1);
-            self.frozen.offset.y + (top..row).map(|r| row_height(self.model, r)).sum::<f64>()
+            self.frozen.offset.y + (top..row).map(|r| row_height(model, r)).sum::<f64>()
         }
     }
 
     /// 1-based column at canvas X pixel `x`.
-    pub fn pixel_to_col(&self, x: f64) -> i32 {
+    ///
+    /// Past `LAST_COLUMN`, the loop caps. For `x` past the right canvas edge
+    /// the call still returns a real column index — it is the caller's job
+    /// (e.g. `hit_test`) to gate against `Outside` semantics.
+    pub(crate) fn pixel_to_col(&self, model: &dyn CanvasModel, x: f64) -> i32 {
         let frozen_cols = self.frozen.frozen_cols_count();
         if x < self.frozen.offset.x {
             let mut cx = HEADER_COL_WIDTH;
             let mut result = 1_i32.max(frozen_cols);
             for c in 1..=frozen_cols {
-                let cw = col_width(self.model, c);
+                let cw = col_width(model, c);
                 if x < cx + cw {
                     result = c;
                     break;
@@ -498,7 +490,7 @@ impl<'a> SheetViewport<'a> {
             let mut cx = self.frozen.offset.x;
             let mut c = start;
             loop {
-                let cw = col_width(self.model, c);
+                let cw = col_width(model, c);
                 if x < cx + cw || c >= LAST_COLUMN {
                     break c;
                 }
@@ -509,13 +501,13 @@ impl<'a> SheetViewport<'a> {
     }
 
     /// 1-based row at canvas Y pixel `y`.
-    pub fn pixel_to_row(&self, y: f64) -> i32 {
+    pub(crate) fn pixel_to_row(&self, model: &dyn CanvasModel, y: f64) -> i32 {
         let frozen_rows = self.frozen.frozen_rows_count();
         if y < self.frozen.offset.y {
             let mut cy = HEADER_ROW_HEIGHT;
             let mut result = 1_i32.max(frozen_rows);
             for r in 1..=frozen_rows {
-                let rh = row_height(self.model, r);
+                let rh = row_height(model, r);
                 if y < cy + rh {
                     result = r;
                     break;
@@ -528,7 +520,7 @@ impl<'a> SheetViewport<'a> {
             let mut cy = self.frozen.offset.y;
             let mut r = start;
             loop {
-                let rh = row_height(self.model, r);
+                let rh = row_height(model, r);
                 if y < cy + rh || r >= LAST_ROW {
                     break r;
                 }
@@ -538,40 +530,63 @@ impl<'a> SheetViewport<'a> {
         }
     }
 
-    /// Pixel rectangle for `(row, col)` at current scroll.
-    pub fn cell_rect(&self, row: i32, col: i32) -> PixelRect {
-        PixelRect {
-            top_left: Point {
-                x: self.col_to_x(col),
-                y: self.row_to_y(row),
-            },
-            width: col_width(self.model, col),
-            height: row_height(self.model, row),
+    /// Pixel rect of `(row, col)` if it falls inside this frame's painted
+    /// region (frozen bands + visible scrollable area). Returns `None` for
+    /// off-screen cells — the cached frame's offsets only cover what was
+    /// laid out, and computing for off-screen cells would require model
+    /// walks the canvas hasn't performed.
+    pub(crate) fn cell_rect(
+        &self,
+        model: &dyn CanvasModel,
+        row: i32,
+        col: i32,
+    ) -> Option<PixelRect> {
+        let frozen_rows = self.frozen.frozen_rows_count();
+        let frozen_cols = self.frozen.frozen_cols_count();
+        let row_in_frame =
+            row <= frozen_rows || (row >= self.vis.first.row && row <= self.vis.last.row);
+        let col_in_frame =
+            col <= frozen_cols || (col >= self.vis.first.column && col <= self.vis.last.column);
+        if !row_in_frame || !col_in_frame {
+            return None;
         }
+        Some(PixelRect {
+            top_left: Point {
+                x: self.col_to_x(model, col),
+                y: self.row_to_y(model, row),
+            },
+            width: col_width(model, col),
+            height: row_height(model, row),
+        })
     }
 
-    /// Bottom-right pixel of the current selection range - the autofill handle
-    /// anchor. `None` for full-row/column/sheet selections, where `col_to_x` /
-    /// `row_to_y` would walk up to 1M cells to produce an off-screen pixel.
-    pub fn autofill_handle(&self) -> Option<Point> {
-        let area = RCRange::from_view(self.model).normalized();
+    /// Bottom-right pixel of the active selection — the autofill handle
+    /// anchor. `None` for full-row/column/sheet selections, where walking
+    /// to the trailing index would land off-screen.
+    pub(crate) fn autofill_handle(&self, model: &dyn CanvasModel) -> Option<Point> {
+        let area = RCRange::from_view(model).normalized();
         if area.r2 >= LAST_ROW || area.c2 >= LAST_COLUMN {
             return None;
         }
         Some(Point {
-            x: self.col_to_x(area.c2) + col_width(self.model, area.c2),
-            y: self.row_to_y(area.r2) + row_height(self.model, area.r2),
+            x: self.col_to_x(model, area.c2) + col_width(model, area.c2),
+            y: self.row_to_y(model, area.r2) + row_height(model, area.r2),
         })
     }
 
     /// Column whose RIGHT edge is within `hit_zone` px of `x`, or `None`.
-    /// Used by mousedown to detect clicks on column-resize handles.
-    pub fn col_boundary_at(&self, x: f64, hit_zone: f64) -> Option<i32> {
+    /// Restricted to columns visible at the current scroll/freeze.
+    pub(crate) fn col_boundary_at(
+        &self,
+        model: &dyn CanvasModel,
+        x: f64,
+        hit_zone: f64,
+    ) -> Option<i32> {
         let frozen_cols = self.frozen.frozen_cols_count();
         if frozen_cols > 0 {
             let mut cur_x = HEADER_COL_WIDTH;
             for col in 1..=frozen_cols {
-                cur_x += col_width(self.model, col);
+                cur_x += col_width(model, col);
                 if (cur_x - x).abs() <= hit_zone {
                     return Some(col);
                 }
@@ -581,7 +596,7 @@ impl<'a> SheetViewport<'a> {
         let mut cur_x = self.frozen.offset.x;
         let mut col = start;
         while cur_x < x + hit_zone + 5.0 {
-            cur_x += col_width(self.model, col);
+            cur_x += col_width(model, col);
             if (cur_x - x).abs() <= hit_zone {
                 return Some(col);
             }
@@ -597,13 +612,17 @@ impl<'a> SheetViewport<'a> {
     }
 
     /// Row whose BOTTOM edge is within `hit_zone` px of `y`, or `None`.
-    /// Used by mousedown to detect clicks on row-resize handles.
-    pub fn row_boundary_at(&self, y: f64, hit_zone: f64) -> Option<i32> {
+    pub(crate) fn row_boundary_at(
+        &self,
+        model: &dyn CanvasModel,
+        y: f64,
+        hit_zone: f64,
+    ) -> Option<i32> {
         let frozen_rows = self.frozen.frozen_rows_count();
         if frozen_rows > 0 {
             let mut cur_y = HEADER_ROW_HEIGHT;
             for row in 1..=frozen_rows {
-                cur_y += row_height(self.model, row);
+                cur_y += row_height(model, row);
                 if (cur_y - y).abs() <= hit_zone {
                     return Some(row);
                 }
@@ -613,7 +632,7 @@ impl<'a> SheetViewport<'a> {
         let mut cur_y = self.frozen.offset.y;
         let mut row = start;
         while cur_y < y + hit_zone + 5.0 {
-            cur_y += row_height(self.model, row);
+            cur_y += row_height(model, row);
             if (cur_y - y).abs() <= hit_zone {
                 return Some(row);
             }
@@ -628,98 +647,142 @@ impl<'a> SheetViewport<'a> {
         None
     }
 
-    /// Compute the visible scrollable cell region for a canvas of size `canvas`.
+    // Hit-test dispatch
+
+    /// Map `(x, y)` to what the user sees against this frame.
     ///
-    /// Independent of selection state - performance stays constant whether the
-    /// selection is one cell or the whole sheet. Scans rows/cols until the
-    /// canvas is filled, capping at `SCAN_CAP` to prevent O(LAST_ROW) iteration
-    /// when many rows are explicitly hidden (height = 0).
-    pub(crate) fn visible_region(&self, canvas: CanvasSize) -> VisibleRegion {
-        let frozen_rows = self.frozen.frozen_rows_count();
-        let frozen_cols = self.frozen.frozen_cols_count();
-        let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(self.model, r)).sum();
-        let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(self.model, c)).sum();
-
-        let row_first = (frozen_rows + 1).max(self.top_row);
-        let col_first = (frozen_cols + 1).max(self.left_column);
-
-        let mut row_last = row_first;
-        let mut y = HEADER_ROW_HEIGHT + frozen_rows_h;
-        for row in row_first..=LAST_ROW {
-            if y >= canvas.h || row == LAST_ROW {
-                row_last = row;
-                break;
+    /// Negative coordinates return `Outside` (off-canvas). Past the right /
+    /// bottom edge we still return the trailing visible cell — the canvas
+    /// element's own bounds clip the event before it reaches us in practice.
+    /// Header detection uses the same `HEADER_*` constants the renderer paints
+    /// against, so click targets match exactly.
+    pub(crate) fn hit_test(&self, model: &dyn CanvasModel, x: f64, y: f64) -> HitTest {
+        if x < 0.0 || y < 0.0 {
+            return HitTest::Outside;
+        }
+        if x < HEADER_COL_WIDTH && y < HEADER_ROW_HEIGHT {
+            return HitTest::Corner;
+        }
+        if y < HEADER_ROW_HEIGHT {
+            return HitTest::ColHeader(self.pixel_to_col(model, x));
+        }
+        if x < HEADER_COL_WIDTH {
+            return HitTest::RowHeader(self.pixel_to_row(model, y));
+        }
+        // Compute cell coords once — both the autofill-handle branch and the
+        // Cell fall-through need them, and `pixel_to_*` walks the model so we
+        // don't want to do it twice.
+        let row = self.pixel_to_row(model, y);
+        let column = self.pixel_to_col(model, x);
+        if let Some(p) = self.autofill_handle(model) {
+            if (x - p.x).abs() <= AUTOFILL_HANDLE_PX && (y - p.y).abs() <= AUTOFILL_HANDLE_PX {
+                return HitTest::AutofillHandle { row, column };
             }
-            y += row_height(self.model, row);
         }
-
-        let mut col_last = col_first;
-        let mut x = HEADER_COL_WIDTH + frozen_cols_w;
-        for col in col_first..=LAST_COLUMN {
-            if x >= canvas.w || col == LAST_COLUMN {
-                col_last = col;
-                break;
-            }
-            x += col_width(self.model, col);
-        }
-
-        VisibleRegion {
-            first: CellRC {
-                column: col_first,
-                row: row_first,
-            },
-            last: CellRC {
-                column: col_last,
-                row: row_last,
-            },
-        }
+        HitTest::Cell { row, column }
     }
 
-    /// Build a prefix-sum pixel-offset table for all visible rows and columns.
-    ///
-    /// Each `row_tops[i]` is the cumulative Y distance from `frozen.y` to the
-    /// top edge of row `(vis.first.row + i)`. Built in a single O(visible) pass
-    /// - same rows/cols `visible_region` already iterated. The returned table
-    ///   feeds `cell_x` / `cell_y` so they become O(1) array lookups instead of
-    ///   O(visible × R) summations.
-    pub(crate) fn pixel_offsets(&self, vis: &VisibleRegion) -> PixelOffsets {
-        let mut row_tops = Vec::with_capacity((vis.last.row - vis.first.row + 2) as usize);
-        let mut acc = 0.0_f64;
-        for r in vis.first.row..=vis.last.row {
-            row_tops.push(acc);
-            acc += row_height(self.model, r);
+    /// Probe for a row/column resize handle near `(x, y)`. Dispatched by
+    /// header strip — column boundaries are only hit-tested inside the
+    /// column-header strip, and vice versa.
+    pub(crate) fn resize_handle_at(
+        &self,
+        model: &dyn CanvasModel,
+        x: f64,
+        y: f64,
+        tolerance: f64,
+    ) -> Option<ResizeTarget> {
+        if y < HEADER_ROW_HEIGHT && x > HEADER_COL_WIDTH {
+            return self
+                .col_boundary_at(model, x, tolerance)
+                .map(ResizeTarget::Column);
         }
+        if x < HEADER_COL_WIDTH && y > HEADER_ROW_HEIGHT {
+            return self
+                .row_boundary_at(model, y, tolerance)
+                .map(ResizeTarget::Row);
+        }
+        None
+    }
+}
+
+/// Visible-region scan called once per tick by `FrameContext::current`.
+/// Iterates rows/cols from the scroll anchor until the canvas is filled,
+/// capping at `LAST_ROW` / `LAST_COLUMN` to prevent runaway loops over
+/// hidden ranges.
+pub(crate) fn compute_visible_region(
+    model: &dyn CanvasModel,
+    frozen: &FrozenRC,
+    left_column: i32,
+    top_row: i32,
+    canvas: CanvasSize,
+) -> VisibleRegion {
+    let frozen_rows = frozen.frozen_rows_count();
+    let frozen_cols = frozen.frozen_cols_count();
+    let frozen_rows_h: f64 = (1..=frozen_rows).map(|r| row_height(model, r)).sum();
+    let frozen_cols_w: f64 = (1..=frozen_cols).map(|c| col_width(model, c)).sum();
+
+    let row_first = (frozen_rows + 1).max(top_row);
+    let col_first = (frozen_cols + 1).max(left_column);
+
+    let mut row_last = row_first;
+    let mut y = HEADER_ROW_HEIGHT + frozen_rows_h;
+    for row in row_first..=LAST_ROW {
+        if y >= canvas.h || row == LAST_ROW {
+            row_last = row;
+            break;
+        }
+        y += row_height(model, row);
+    }
+
+    let mut col_last = col_first;
+    let mut x = HEADER_COL_WIDTH + frozen_cols_w;
+    for col in col_first..=LAST_COLUMN {
+        if x >= canvas.w || col == LAST_COLUMN {
+            col_last = col;
+            break;
+        }
+        x += col_width(model, col);
+    }
+
+    VisibleRegion {
+        first: CellRC {
+            column: col_first,
+            row: row_first,
+        },
+        last: CellRC {
+            column: col_last,
+            row: row_last,
+        },
+    }
+}
+
+/// Prefix-sum pixel-offset table built once per tick by
+/// `FrameContext::current`. Each `row_tops[i]` is cumulative Y distance from
+/// `frozen.y` to the top of row `(vis.first.row + i)`. Single O(visible)
+/// pass — the same iteration `compute_visible_region` already performed.
+pub(crate) fn compute_pixel_offsets(model: &dyn CanvasModel, vis: &VisibleRegion) -> PixelOffsets {
+    let mut row_tops = Vec::with_capacity((vis.last.row - vis.first.row + 2) as usize);
+    let mut acc = 0.0_f64;
+    for r in vis.first.row..=vis.last.row {
         row_tops.push(acc);
-
-        let mut col_lefts = Vec::with_capacity((vis.last.column - vis.first.column + 2) as usize);
-        acc = 0.0;
-        for c in vis.first.column..=vis.last.column {
-            col_lefts.push(acc);
-            acc += col_width(self.model, c);
-        }
-        col_lefts.push(acc);
-
-        PixelOffsets {
-            row_start: vis.first.row,
-            row_tops,
-            col_start: vis.first.column,
-            col_lefts,
-        }
+        acc += row_height(model, r);
     }
+    row_tops.push(acc);
 
-    /// One-shot per-frame snapshot. Resolves the visible region, the pixel-offset
-    /// prefix sums, and bundles the already-resolved frozen geometry into a
-    /// `FrameContext` ready to thread through every render phase.
-    pub(crate) fn frame(&self, canvas: CanvasSize) -> FrameContext {
-        let vis = self.visible_region(canvas);
-        let offsets = self.pixel_offsets(&vis);
-        FrameContext {
-            vis,
-            offsets,
-            frozen: self.frozen.clone(),
-            top_row: self.top_row,
-            left_column: self.left_column,
-        }
+    let mut col_lefts = Vec::with_capacity((vis.last.column - vis.first.column + 2) as usize);
+    acc = 0.0;
+    for c in vis.first.column..=vis.last.column {
+        col_lefts.push(acc);
+        acc += col_width(model, c);
+    }
+    col_lefts.push(acc);
+
+    PixelOffsets {
+        row_start: vis.first.row,
+        row_tops,
+        col_start: vis.first.column,
+        col_lefts,
     }
 }
 
@@ -755,7 +818,6 @@ mod tests {
             (150, 76)
         );
     }
-
 
     #[test]
     fn right_is_x_plus_width() {
@@ -1144,13 +1206,26 @@ mod tests {
         assert_eq!(off.col_left(99), 0.0);
     }
 
-    // SheetViewport
+    // FrameContext: pixel ↔ cell math
+    //
+    // The frame is built fresh per test from the mock model and a canvas
+    // size large enough to make the test cells fall inside the visible
+    // region (so `cell_rect` returns Some). Methods that need per-cell
+    // extents take `&m` as an explicit param — frame caches geometry, model
+    // caches dimensions.
+
+    fn test_canvas() -> CanvasSize {
+        CanvasSize {
+            w: 1000.0,
+            h: 800.0,
+        }
+    }
 
     #[test]
     fn cell_rect_at_origin_starts_at_top_left_header_corner() {
         let m = MockCanvasModel::default();
-        let vp = SheetViewport::current(&m);
-        let r = vp.cell_rect(1, 1);
+        let frame = FrameContext::current(&m, test_canvas());
+        let r = frame.cell_rect(&m, 1, 1).expect("origin cell is on screen");
         assert_eq!(r.top_left.x, HEADER_COL_WIDTH);
         assert_eq!(r.top_left.y, HEADER_ROW_HEIGHT);
         assert_eq!(r.width, DEFAULT_COL_WIDTH);
@@ -1163,9 +1238,9 @@ mod tests {
             frozen_cols: 2,
             ..Default::default()
         };
-        let vp = SheetViewport::current(&m);
-        assert_eq!(vp.col_to_x(1), HEADER_COL_WIDTH);
-        assert_eq!(vp.col_to_x(2), HEADER_COL_WIDTH + DEFAULT_COL_WIDTH);
+        let frame = FrameContext::current(&m, test_canvas());
+        assert_eq!(frame.col_to_x(&m, 1), HEADER_COL_WIDTH);
+        assert_eq!(frame.col_to_x(&m, 2), HEADER_COL_WIDTH + DEFAULT_COL_WIDTH);
     }
 
     #[test]
@@ -1175,11 +1250,11 @@ mod tests {
             left_column: 5,
             ..Default::default()
         };
-        let vp = SheetViewport::current(&m);
-        let origin_x = vp.frozen().offset.x;
+        let frame = FrameContext::current(&m, test_canvas());
+        let origin_x = frame.frozen.offset.x;
         // col 5 is the first scrollable on screen → at the frozen offset
-        assert_eq!(vp.col_to_x(5), origin_x);
-        assert_eq!(vp.col_to_x(6), origin_x + DEFAULT_COL_WIDTH);
+        assert_eq!(frame.col_to_x(&m, 5), origin_x);
+        assert_eq!(frame.col_to_x(&m, 6), origin_x + DEFAULT_COL_WIDTH);
     }
 
     #[test]
@@ -1188,8 +1263,8 @@ mod tests {
             range: [1, 1, LAST_ROW, LAST_COLUMN],
             ..Default::default()
         };
-        let vp = SheetViewport::current(&m);
-        assert!(vp.autofill_handle().is_none());
+        let frame = FrameContext::current(&m, test_canvas());
+        assert!(frame.autofill_handle(&m).is_none());
     }
 
     #[test]
@@ -1198,35 +1273,86 @@ mod tests {
             range: [2, 3, 4, 5],
             ..Default::default()
         };
-        let vp = SheetViewport::current(&m);
-        let p = vp.autofill_handle().expect("finite selection has handle");
-        assert_eq!(p.x, vp.col_to_x(5) + DEFAULT_COL_WIDTH);
-        assert_eq!(p.y, vp.row_to_y(4) + DEFAULT_ROW_HEIGHT);
+        let frame = FrameContext::current(&m, test_canvas());
+        let p = frame
+            .autofill_handle(&m)
+            .expect("finite selection has handle");
+        assert_eq!(p.x, frame.col_to_x(&m, 5) + DEFAULT_COL_WIDTH);
+        assert_eq!(p.y, frame.row_to_y(&m, 4) + DEFAULT_ROW_HEIGHT);
     }
 
-    // Round-trip property - handed to a human for the column-sample design.
+    #[test]
+    fn cell_rect_off_screen_returns_none() {
+        // Mock with default ~21px rows; canvas height 100 fits ~3 rows past
+        // header, so row 50 is well past the visible region.
+        let m = MockCanvasModel::default();
+        let frame = FrameContext::current(&m, CanvasSize { w: 200.0, h: 100.0 });
+        assert!(frame.cell_rect(&m, 50, 1).is_none());
+    }
+
+    #[test]
+    fn hit_test_corner() {
+        let m = MockCanvasModel::default();
+        let frame = FrameContext::current(&m, test_canvas());
+        assert_eq!(frame.hit_test(&m, 5.0, 5.0), HitTest::Corner);
+    }
+
+    #[test]
+    fn hit_test_negative_is_outside() {
+        let m = MockCanvasModel::default();
+        let frame = FrameContext::current(&m, test_canvas());
+        assert_eq!(frame.hit_test(&m, -1.0, 10.0), HitTest::Outside);
+        assert_eq!(frame.hit_test(&m, 10.0, -1.0), HitTest::Outside);
+    }
+
+    #[test]
+    fn hit_test_col_header_when_y_in_strip() {
+        let m = MockCanvasModel::default();
+        let frame = FrameContext::current(&m, test_canvas());
+        // y inside header strip, x past row-header strip
+        match frame.hit_test(&m, HEADER_COL_WIDTH + 5.0, 5.0) {
+            HitTest::ColHeader(c) => assert!(c >= 1),
+            other => panic!("expected ColHeader, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn hit_test_cell_in_grid() {
+        let m = MockCanvasModel::default();
+        let frame = FrameContext::current(&m, test_canvas());
+        match frame.hit_test(&m, HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0) {
+            HitTest::Cell { row, column } => {
+                assert!(row >= 1 && column >= 1);
+            }
+            other => panic!("expected Cell, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn resize_handle_at_off_strip_is_none() {
+        let m = MockCanvasModel::default();
+        let frame = FrameContext::current(&m, test_canvas());
+        // Inside cell grid → no resize handle
+        assert!(frame
+            .resize_handle_at(&m, HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0, 4.0)
+            .is_none());
+    }
+
     #[test]
     fn pixel_to_col_round_trips_col_to_x() {
-        // TODO(human): build a `SheetViewport` (use `MockCanvasModel` above)
-        // and prove the contract:
-        //
-        //     viewport.pixel_to_col(viewport.col_to_x(c)) == c
-        //
-        // for a handful of column samples that span the interesting cases:
-        //   - inside the frozen band (col <= frozen_cols)
-        //   - the first scrollable column (the seam, col = frozen_cols + 1)
-        //   - past a non-1 `left_column` scroll
-        //
-        // Pick the freeze layout, the scroll position, and the sample
-        // columns that you think exercise the seam most convincingly.
-        // Mirror the same property for `pixel_to_row(row_to_y(r))` if you
-        // want a second assertion.
-        // Build a SheetViewport over a MockCanvasModel with both
-        // freezes set and a left_column past the seam, then assert vp.pixel_to_col(vp.col_to_x(c)) == c for column samples that span the interesting cases.
-        //
-        // Guidance: The contract says: every X pixel that falls inside cell c must resolve to c. The interesting samples are: a column inside the frozen band, the seam column
-        // (frozen_cols + 1), and a column past left_column. Note that col_to_x(c) returns the left edge of cell c, which is also the right edge of cell c-1 — decide whether you want
-        // to test the left-edge pixel directly or nudge by +0.5 to land safely inside the cell. The mirror property for rows (pixel_to_row(row_to_y(r)) == r) is optional but doubles
-        // your coverage for two lines of test code. Look at MockCanvasModel's Default impl above the test to see what knobs it exposes.
+        // Round-trip the seam: col_to_x returns the LEFT edge of column c,
+        // which is also the right edge of c-1. pixel_to_col on the left edge
+        // resolves to c (strict-less-than break in the inner loop).
+        let m = MockCanvasModel {
+            frozen_cols: 2,
+            left_column: 5,
+            ..Default::default()
+        };
+        let frame = FrameContext::current(&m, test_canvas());
+        for &c in &[1_i32, 2, 5, 6, 8] {
+            let x = frame.col_to_x(&m, c);
+            // Nudge +0.5 to land safely inside the cell (avoid the edge).
+            assert_eq!(frame.pixel_to_col(&m, x + 0.5), c, "round-trip col {}", c);
+        }
     }
 }

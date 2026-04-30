@@ -2,8 +2,8 @@
 //! the sheet-coordinate range → canvas pixel bounds mapping used by every
 //! overlay draw.
 //!
-//! The visible-region scan and pixel-offset prefix-sum table now live on
-//! `SheetViewport` in `geometry.rs`; this module only holds the methods that
+//! The visible-region scan and pixel-offset prefix-sum table live in
+//! `FrameContext` in `geometry.rs`; this module only holds the methods that
 //! need access to the renderer's canvas dimensions for clamping (`self.width`,
 //! `self.height`).
 

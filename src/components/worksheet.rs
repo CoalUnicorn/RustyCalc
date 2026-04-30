@@ -87,6 +87,9 @@ pub fn Worksheet() -> impl IntoView {
     // and the container has nonzero CSS dimensions; then constructed exactly
     // once by the lazy-construct block in the rAF loop. Disposed in on_cleanup.
     let canvas_handle: StoredValue<Option<IronCanvas>, LocalStorage> = StoredValue::new_local(None);
+    // Expose the handle to descendant components (e.g. FormulaTextArea needs
+    // `cell_rect` to position the in-cell editor against the painted frame).
+    provide_context(canvas_handle);
     on_cleanup(move || {
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.take() {
@@ -344,14 +347,15 @@ pub fn Worksheet() -> impl IntoView {
         }
     });
 
-    // mousedown: dispatches to one of the six named handlers below.
+    // mousedown: dispatches via IronCanvas::hit_test (canvas_handle owns the
+    // painted-frame snapshot every event resolves against).
     let on_mousedown = move |ev: web_sys::MouseEvent| {
-        handle_mousedown(ev, model, state);
+        handle_mousedown(ev, model, state, canvas_handle);
     };
 
     // mousemove: expand selection or autofill preview
     let on_mousemove = move |ev: web_sys::MouseEvent| {
-        handle_mousemove(ev, model, state);
+        handle_mousemove(ev, model, state, canvas_handle);
     };
 
     let on_mouseup = move |ev: web_sys::MouseEvent| {
@@ -359,12 +363,12 @@ pub fn Worksheet() -> impl IntoView {
     };
 
     let on_dblclick = move |ev: web_sys::MouseEvent| {
-        handle_dblclick(ev, model, state);
+        handle_dblclick(ev, model, state, canvas_handle);
     };
 
     // contextmenu: right-click on column/row header
     let on_contextmenu = move |ev: web_sys::MouseEvent| {
-        handle_contextmenu(ev, model, state);
+        handle_contextmenu(ev, model, state, canvas_handle);
     };
 
     // wheel: scroll with delta-magnitude awareness

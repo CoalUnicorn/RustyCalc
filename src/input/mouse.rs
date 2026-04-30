@@ -19,11 +19,24 @@ use crate::state::{
     ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
     StatusMessage, WorkbookState,
 };
-use iron_canvas::geometry::{
-    SheetViewport, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
-};
-use iron_canvas::{AUTOFILL_HANDLE_PX, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
+use iron_canvas::geometry::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW};
+use iron_canvas::{HitTest, IronCanvas, ResizeTarget, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use ironcalc_base::UserModel;
+
+/// Storage type for the IronCanvas orchestrator handle. `LocalStorage`
+/// because `IronCanvas` is `!Send` (holds web_sys handles); `StoredValue`
+/// because we don't want event listeners to subscribe to changes — the
+/// handle is created once on mount, dropped on unmount.
+pub type CanvasHandle = StoredValue<Option<IronCanvas>, LocalStorage>;
+
+/// Read a value from the canvas handle. Used by every event handler that
+/// needs to query the painted state — hit-tests, resize probes, cell
+/// rectangles. Returns the closure's result wrapped in `Option`, since the
+/// handle is `None` until both `<canvas>` elements mount and the lazy
+/// rAF construction runs (see `worksheet.rs`).
+fn with_canvas<R>(handle: CanvasHandle, f: impl FnOnce(&IronCanvas) -> R) -> Option<R> {
+    handle.with_value(|slot| slot.as_ref().map(f))
+}
 
 /// Pixel tolerance for column/row resize hit-test in the header area.
 const HIT_ZONE: f64 = 4.0;
@@ -38,7 +51,7 @@ const AUTOSCROLL_MS: i32 = 80;
 /// last-known mouse position into the shifted viewport, then updates the
 /// active drag state so the canvas repaints without the user needing to move
 /// the mouse.
-fn autoscroll_tick(model: ModelStore, state: WorkbookState) {
+fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
     let (dx, dy) = state.autoscroll.dir.get_value();
     if dx == 0 && dy == 0 {
         return;
@@ -79,17 +92,17 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState) {
                 let new_left = (view.left_column + dx).clamp(1, LAST_COLUMN);
                 let _ = m.set_top_left_visible_cell(new_top, new_left);
             });
-            let (row, col) = model.with_value(|m| {
-                let view = m.get_selected_view();
-                (
-                    SheetViewport::from_parts(m, 0, view.top_row).pixel_to_row(my),
-                    SheetViewport::from_parts(m, view.left_column, 0).pixel_to_col(mx),
-                )
-            });
-            state.drag.set(DragState::Extending {
-                to_row: row,
-                to_col: col,
-            });
+            // Resolve the new drag-target against the *previous* painted frame.
+            // The scroll mutation above won't be reflected on canvas until the
+            // next paint_if_dirty — so hit_test against last_frame matches
+            // what the user still sees.
+            if let Some(HitTest::Cell { row, column }) = with_canvas(icv, |ic| ic.hit_test(mx, my))
+            {
+                state.drag.set(DragState::Extending {
+                    to_row: row,
+                    to_col: column,
+                });
+            }
         }
         _ => {
             state.autoscroll.cancel();
@@ -122,6 +135,7 @@ fn update_autoscroll(
     canvas_h: f64,
     model: ModelStore,
     state: WorkbookState,
+    icv: CanvasHandle,
 ) {
     let dx = if x > canvas_w - AUTOSCROLL_ZONE {
         1
@@ -147,7 +161,7 @@ fn update_autoscroll(
         return; // timer already running; direction update above is enough
     }
     // `cb.forget()` hands ownership to the JS GC for the lifetime of the interval.
-    let cb = Closure::<dyn FnMut()>::new(move || autoscroll_tick(model, state));
+    let cb = Closure::<dyn FnMut()>::new(move || autoscroll_tick(model, state, icv));
     let id = leptos::prelude::window()
         .set_interval_with_callback_and_timeout_and_arguments_0(
             cb.as_ref().unchecked_ref::<web_sys::js_sys::Function>(),
@@ -156,42 +170,6 @@ fn update_autoscroll(
         .unwrap_or(-1);
     cb.forget();
     state.autoscroll.id.set_value(Some(id));
-}
-
-/// Start a column resize if the click lands within `HIT_ZONE` of a column
-/// boundary in the header row. Returns `true` if a resize was started.
-pub fn try_begin_col_resize(
-    ev: &web_sys::MouseEvent,
-    x: f64,
-    model: ModelStore,
-    state: WorkbookState,
-) -> bool {
-    if let Some(col) = model.with_value(|m| SheetViewport::current(m).col_boundary_at(x, HIT_ZONE))
-    {
-        state.drag.set(DragState::ResizingCol { col, x });
-        ev.prevent_default();
-        true
-    } else {
-        false
-    }
-}
-
-/// Start a row resize if the click lands within `HIT_ZONE` of a row
-/// boundary in the header column. Returns `true` if a resize was started.
-pub fn try_begin_row_resize(
-    ev: &web_sys::MouseEvent,
-    y: f64,
-    model: ModelStore,
-    state: WorkbookState,
-) -> bool {
-    if let Some(row) = model.with_value(|m| SheetViewport::current(m).row_boundary_at(y, HIT_ZONE))
-    {
-        state.drag.set(DragState::ResizingRow { row, y });
-        ev.prevent_default();
-        true
-    } else {
-        false
-    }
 }
 
 /// Click on the top-left corner cell: select the entire sheet.
@@ -219,16 +197,15 @@ pub fn handle_corner_click(model: ModelStore, state: WorkbookState) {
 }
 
 /// Click on a column header: select the entire column, or extend the current
-/// selection if Shift is held.
+/// selection if Shift is held. `col` is the column index resolved by the
+/// dispatcher's `IronCanvas::hit_test` against the painted frame.
 pub fn handle_col_header_click(
     ev: &web_sys::MouseEvent,
-    x: f64,
+    col: i32,
     model: ModelStore,
     state: WorkbookState,
 ) {
     model.update_value(|m| {
-        let view = m.get_selected_view();
-        let col = SheetViewport::from_parts(m, view.left_column, 0).pixel_to_col(x);
         if ev.shift_key() {
             m.nav_extend_column_selection(col);
         } else {
@@ -246,13 +223,11 @@ pub fn handle_col_header_click(
 /// selection if Shift is held.
 pub fn handle_row_header_click(
     ev: &web_sys::MouseEvent,
-    y: f64,
+    row: i32,
     model: ModelStore,
     state: WorkbookState,
 ) {
     model.update_value(|m| {
-        let view = m.get_selected_view();
-        let row = SheetViewport::from_parts(m, 0, view.top_row).pixel_to_row(y);
         if ev.shift_key() {
             m.nav_extend_row_selection(row);
         } else {
@@ -268,27 +243,18 @@ pub fn handle_row_header_click(
 
 /// Click in the cell area: handles point-mode formula entry, autofill handle
 /// drag start, Shift-click range extension, and regular single-cell navigation.
+///
+/// `row` / `col` are the cell under the cursor, resolved upstream by
+/// `IronCanvas::hit_test` against the painted frame. `near_handle` is `true`
+/// iff the dispatcher classified the hit as `HitTest::AutofillHandle`.
 pub fn handle_cell_click(
     ev: &web_sys::MouseEvent,
-    x: f64,
-    y: f64,
+    row: i32,
+    col: i32,
+    near_handle: bool,
     model: ModelStore,
     state: WorkbookState,
 ) {
-    // Read model state (row, col, autofill hit-test) without holding a
-    // mutable borrow, so signal writes below don't interleave with the lock.
-    let (row, col, near_handle) = model.with_value(|m| {
-        let view = m.get_selected_view();
-        let col = SheetViewport::from_parts(m, view.left_column, 0).pixel_to_col(x);
-        let row = SheetViewport::from_parts(m, 0, view.top_row).pixel_to_row(y);
-        let handle = SheetViewport::current(m)
-            .autofill_handle()
-            .unwrap_or_default();
-        let near_handle = (x - handle.x).abs() <= AUTOFILL_HANDLE_PX
-            && (y - handle.y).abs() <= AUTOFILL_HANDLE_PX;
-        (row, col, near_handle)
-    });
-
     // Point mode: intercept click during formula entry.
     // When the cursor is at a syntactically valid reference position inside
     // a formula, clicking a cell inserts/replaces the reference rather than
@@ -387,11 +353,16 @@ pub fn handle_cell_click(
 
 /// Dispatch a mousedown event to the appropriate region handler.
 ///
-/// Checks cursor position against header regions in priority order:
-/// column-resize hit zone → row-resize hit zone → corner → col header →
-/// row header → cell area.
-// TODO: rename
-pub fn handle_mousedown(ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
+/// Resize-handle proximity wins over plain header clicks (the cursor is on
+/// the boundary, not the strip body), so it is probed first. Everything
+/// else falls out of `IronCanvas::hit_test` against the painted frame —
+/// the renderer owns the layout, so it owns the dispatch.
+pub fn handle_mousedown(
+    ev: web_sys::MouseEvent,
+    model: ModelStore,
+    state: WorkbookState,
+    icv: CanvasHandle,
+) {
     // Only handle left-click (button 0); right-click is handled by handle_contextmenu.
     if ev.button() != 0 {
         return;
@@ -400,25 +371,30 @@ pub fn handle_mousedown(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
     let x = ev.offset_x() as f64;
     let y = ev.offset_y() as f64;
 
-    if y < HEADER_ROW_HEIGHT && x > HEADER_COL_WIDTH && try_begin_col_resize(&ev, x, model, state) {
+    // 1. Resize handle (column or row boundary in its header strip).
+    if let Some(target) = with_canvas(icv, |ic| ic.resize_handle_at(x, y, HIT_ZONE)).flatten() {
+        match target {
+            ResizeTarget::Column(col) => state.drag.set(DragState::ResizingCol { col, x }),
+            ResizeTarget::Row(row) => state.drag.set(DragState::ResizingRow { row, y }),
+        }
+        ev.prevent_default();
         return;
     }
-    if x < HEADER_COL_WIDTH && y > HEADER_ROW_HEIGHT && try_begin_row_resize(&ev, y, model, state) {
-        return;
+
+    // 2. Click target.
+    let hit = with_canvas(icv, |ic| ic.hit_test(x, y)).unwrap_or(HitTest::Outside);
+    match hit {
+        HitTest::Corner => handle_corner_click(model, state),
+        HitTest::ColHeader(col) => handle_col_header_click(&ev, col, model, state),
+        HitTest::RowHeader(row) => handle_row_header_click(&ev, row, model, state),
+        HitTest::AutofillHandle { row, column } => {
+            handle_cell_click(&ev, row, column, true, model, state)
+        }
+        HitTest::Cell { row, column } => {
+            handle_cell_click(&ev, row, column, false, model, state)
+        }
+        HitTest::Outside => {}
     }
-    if x < HEADER_COL_WIDTH && y < HEADER_ROW_HEIGHT {
-        handle_corner_click(model, state);
-        return;
-    }
-    if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
-        handle_col_header_click(&ev, x, model, state);
-        return;
-    }
-    if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
-        handle_row_header_click(&ev, y, model, state);
-        return;
-    }
-    handle_cell_click(&ev, x, y, model, state);
 }
 
 /// Expand selection, update resize drag, or update autofill/point-mode
@@ -426,7 +402,12 @@ pub fn handle_mousedown(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
 ///
 /// If no button is held when this fires, mouseup was missed (pointer left
 /// the canvas). Reset drag state so the next interaction starts clean.
-pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
+pub fn handle_mousemove(
+    ev: web_sys::MouseEvent,
+    model: ModelStore,
+    state: WorkbookState,
+    icv: CanvasHandle,
+) {
     if ev.buttons() == 0 {
         state.autoscroll.cancel();
         state.drag.set(DragState::Idle);
@@ -495,17 +476,13 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
         | DragState::Pointing { .. } => {}
     }
 
-    if x < HEADER_COL_WIDTH || y < HEADER_ROW_HEIGHT {
+    // Hit-test against the painted frame. Anything that isn't a Cell (header,
+    // corner, autofill handle, off-canvas) means the drag-target sits outside
+    // the scrollable grid — bail and let the autoscroll timer (if any)
+    // continue to advance the viewport on its own cadence.
+    let Some(HitTest::Cell { row, column: col }) = with_canvas(icv, |ic| ic.hit_test(x, y)) else {
         return;
-    }
-
-    let (row, col) = model.with_value(|m| {
-        let view = m.get_selected_view();
-        (
-            SheetViewport::from_parts(m, 0, view.top_row).pixel_to_row(y),
-            SheetViewport::from_parts(m, view.left_column, 0).pixel_to_col(x),
-        )
-    });
+    };
 
     let (canvas_w, canvas_h) = ev
         .target()
@@ -515,7 +492,7 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
 
     match state.drag.get_untracked() {
         DragState::Extending { .. } => {
-            update_autoscroll(x, y, canvas_w, canvas_h, model, state);
+            update_autoscroll(x, y, canvas_w, canvas_h, model, state, icv);
             state.drag.set(DragState::Extending {
                 to_row: row,
                 to_col: col,
@@ -559,7 +536,7 @@ pub fn handle_mousemove(ev: web_sys::MouseEvent, model: ModelStore, state: Workb
             }
         }
         DragState::Selecting => {
-            update_autoscroll(x, y, canvas_w, canvas_h, model, state);
+            update_autoscroll(x, y, canvas_w, canvas_h, model, state, icv);
             let (eff_row, eff_col) = model.with_value(|m| {
                 let view = m.get_selected_view();
                 let ec = if col == view.left_column && view.left_column > 1 {
@@ -631,14 +608,17 @@ pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
 /// the header context menu overlay.
 ///
 /// Clicks in the cell grid are ignored — cell context menu not yet implemented.
-pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
+pub fn handle_contextmenu(
+    ev: web_sys::MouseEvent,
+    model: ModelStore,
+    state: WorkbookState,
+    icv: CanvasHandle,
+) {
     let x = ev.offset_x() as f64;
     let y = ev.offset_y() as f64;
-    let v = model.with_value(|m| m.get_selected_view());
 
-    let target = if y < HEADER_ROW_HEIGHT && x >= HEADER_COL_WIDTH {
-        Some(model.with_value(|m| {
-            let col = SheetViewport::from_parts(m, v.left_column, 0).pixel_to_col(x);
+    let target = match with_canvas(icv, |ic| ic.hit_test(x, y)) {
+        Some(HitTest::ColHeader(col)) => Some(model.with_value(|m| {
             let area = CellRange::from_view(m).normalized();
             // Multi-column selection if the clicked col is inside a full-column range.
             let (col, count) = if area.r2 >= LAST_ROW && area.c1 <= col && col <= area.c2 {
@@ -647,10 +627,8 @@ pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: Wor
                 (col, 1)
             };
             HeaderContextMenu::Column { col, count }
-        }))
-    } else if x < HEADER_COL_WIDTH && y >= HEADER_ROW_HEIGHT {
-        Some(model.with_value(|m| {
-            let row = SheetViewport::from_parts(m, 0, v.top_row).pixel_to_row(y);
+        })),
+        Some(HitTest::RowHeader(row)) => Some(model.with_value(|m| {
             let area = CellRange::from_view(m).normalized();
             // Multi-row selection if the clicked row is inside a full-row range.
             let (row, count) = if area.c2 >= LAST_COLUMN && area.r1 <= row && row <= area.r2 {
@@ -659,9 +637,8 @@ pub fn handle_contextmenu(ev: web_sys::MouseEvent, model: ModelStore, state: Wor
                 (row, 1)
             };
             HeaderContextMenu::Row { row, count }
-        }))
-    } else {
-        None
+        })),
+        _ => None,
     };
 
     if let Some(target) = target {
@@ -723,12 +700,20 @@ pub fn handle_wheel(ev: web_sys::WheelEvent, model: ModelStore, state: WorkbookS
 /// Enter edit mode with the existing cell content on double-click.
 ///
 /// The preceding mousedown already navigated to the target cell, so this
-/// only needs to open the editor at the current address.
-pub fn handle_dblclick(ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
+/// only needs to open the editor at the current address — but only for
+/// double-clicks that land inside the cell grid (or the autofill handle,
+/// which sits at a cell corner). Header / corner double-clicks fall through.
+pub fn handle_dblclick(
+    ev: web_sys::MouseEvent,
+    model: ModelStore,
+    state: WorkbookState,
+    icv: CanvasHandle,
+) {
     let x = ev.offset_x() as f64;
     let y = ev.offset_y() as f64;
-    if x < HEADER_COL_WIDTH || y < HEADER_ROW_HEIGHT {
-        return;
+    match with_canvas(icv, |ic| ic.hit_test(x, y)) {
+        Some(HitTest::Cell { .. }) | Some(HitTest::AutofillHandle { .. }) => {}
+        _ => return,
     }
     model.with_value(|m| {
         let ac = m.active_cell();

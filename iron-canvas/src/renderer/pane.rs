@@ -21,16 +21,6 @@ pub struct PaneRegion {
     pub origin: Point,
 }
 
-/// Outer edge of a cell rect that may be forced to stroke a border because
-/// the cell sits on a pane boundary. Only `Right` and `Bottom` are valid -
-/// left/top are inner edges resolved against neighbour cells inside the
-/// pane.
-// #[derive(Copy, Clone, PartialEq, Eq)]
-// pub enum OuterEdge {
-//     Right,
-//     Bottom,
-// }
-
 impl PaneRegion {
     /// Frozen rows x frozen cols - top-left quadrant.
     pub(crate) fn top_left(frc: &FrozenRC) -> Self {
@@ -83,18 +73,6 @@ impl PaneRegion {
             },
         }
     }
-
-    /// Outer borders this `(row, col)` must draw because it sits on a pane
-    /// boundary. Empty slice for interior cells. Static slices - no
-    /// allocation per cell.
-    // pub(crate) fn outer_edges_at(&self, row: i32, col: i32) -> &'static [OuterEdge] {
-    //     match (col == self.last_col, row == self.last_row) {
-    //         (true, true) => &[OuterEdge::Right, OuterEdge::Bottom],
-    //         (true, false) => &[OuterEdge::Right],
-    //         (false, true) => &[OuterEdge::Bottom],
-    //         (false, false) => &[],
-    //     }
-    // }
 
     /// Walk every visible cell in this pane, yielding pixel rect + outer
     /// edges per cell. Replaces the open-coded row/col iteration that used

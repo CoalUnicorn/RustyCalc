@@ -3,12 +3,12 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::geometry::{FrameContext, PixelRect, Point, SheetViewport};
+use crate::geometry::{FrameContext, PixelRect, Point};
 use crate::layer::{GridLayer, OverlayLayer};
 use crate::theme::{CanvasTheme, DARK, LIGHT};
 use crate::types::RenderOverlays;
 use crate::wasm::JsBackedModel;
-use crate::CanvasModel;
+use crate::{CanvasModel, HitTest, ResizeTarget};
 
 /// Public wasm-bindgen handle owning both canvas layers.
 ///
@@ -118,7 +118,9 @@ impl IronCanvas {
 
         // One viewport snapshot per tick — both layers paint against the same
         // visible region, frozen geometry, and prefix-sum pixel offsets.
-        let frame = SheetViewport::current(model).frame(self.grid.canvas_size());
+        // The same `last_frame` is later read by `hit_test`, `cell_rect`, and
+        // `resize_handle_at` so input handlers see exactly what was painted.
+        let frame = FrameContext::current(model, self.grid.canvas_size());
 
         if grid_dirty {
             self.grid.paint(self.theme, model, &frame);
@@ -208,6 +210,59 @@ impl IronCanvas {
             self.model = Some(model);
             self.grid.mark_dirty();
         }
+    }
+
+    // Query API
+    //
+    // The mirror of the command surface above. Where `set_*` push state INTO
+    // the canvas + model, these read what's currently *painted*: every query
+    // resolves against `last_frame`, the snapshot built by the most recent
+    // `paint_if_dirty`. That makes hit-tests provably consistent with what
+    // the user sees on screen — even between a scroll mutation and the next
+    // animation frame, when the model and the painted state disagree.
+    //
+    // Before the first paint, `last_frame` is `None` and queries fall back
+    // to absent variants (`Outside`, `None`). Defensive — surfaces missing-
+    // paint bugs rather than masking them with a hidden frame rebuild.
+
+    /// What the user sees at canvas-space `(x, y)`, against the last painted
+    /// frame. Returns `Outside` before the first paint or for off-canvas
+    /// points (negative coordinates).
+    pub fn hit_test(&self, x: f64, y: f64) -> HitTest {
+        let (Some(frame), Some(model)) = (self.last_frame.as_ref(), self.model.as_deref()) else {
+            return HitTest::Outside;
+        };
+        frame.hit_test(model, x, y)
+    }
+
+    /// Probe for a row/column resize handle near `(x, y)`. `tolerance` is the
+    /// half-width of the hit-zone in CSS pixels — caller-controlled because
+    /// it tracks cursor styling, not paint geometry. Returns `None` before
+    /// the first paint.
+    pub fn resize_handle_at(&self, x: f64, y: f64, tolerance: f64) -> Option<ResizeTarget> {
+        let frame = self.last_frame.as_ref()?;
+        let model = self.model.as_deref()?;
+        frame.resize_handle_at(model, x, y, tolerance)
+    }
+
+    /// Pixel rect of `(row, column)` in the last painted frame's coordinate
+    /// space. Returns `None` before the first paint or for cells outside the
+    /// frame's visible region (frozen bands + scrollable area).
+    pub fn cell_rect(&self, row: i32, column: i32) -> Option<PixelRect> {
+        let frame = self.last_frame.as_ref()?;
+        let model = self.model.as_deref()?;
+        frame.cell_rect(model, row, column)
+    }
+
+    /// Pixel position of the autofill handle for the active selection in the
+    /// last painted frame, or `None` for full-row/column/sheet selections.
+    /// Used by callers that need the handle's *position* (e.g. drag-start
+    /// state); for "is the cursor *over* it?" use `hit_test` and match on
+    /// `HitTest::AutofillHandle` instead.
+    pub fn autofill_handle(&self) -> Option<Point> {
+        let frame = self.last_frame.as_ref()?;
+        let model = self.model.as_deref()?;
+        frame.autofill_handle(model)
     }
 
     pub fn request_overlay_repaint(&mut self) {
