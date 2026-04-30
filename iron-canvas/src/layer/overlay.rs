@@ -1,22 +1,14 @@
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{js_sys, CanvasRenderingContext2d, HtmlCanvasElement};
 
+use crate::layer::LayerBase;
 use crate::theme::{CanvasTheme, LIGHT};
-use crate::types::RenderOverlays;
-use crate::CanvasModel;
-use crate::CanvasRenderer;
+use crate::{CanvasModel, CanvasRenderer, RenderOverlays};
 
-use super::{grid::target_backing_size, PaintGate};
+use crate::geometry::FrameContext;
 
 pub(crate) struct OverlayLayer {
-    pub(crate) canvas: HtmlCanvasElement,
-    pub(crate) css_width: f64,
-    pub(crate) css_height: f64,
-    pub(crate) dpr: f64,
-    gate: PaintGate,
-    /// Long-lived renderer; owns the layer's 2D ctx so paint caches persist
-    /// across frames. Theme is hot-swapped per paint via `set_theme`.
-    renderer: CanvasRenderer,
+    base: LayerBase,
 }
 
 impl OverlayLayer {
@@ -34,59 +26,35 @@ impl OverlayLayer {
             .unchecked_into::<CanvasRenderingContext2d>();
         let renderer = CanvasRenderer::for_layer(ctx, 0.0, 0.0, LIGHT);
         Ok(Self {
-            canvas,
-            css_width: 0.0,
-            css_height: 0.0,
-            dpr: 1.0,
-            gate: PaintGate::new(),
-            renderer,
+            base: LayerBase::new(canvas, renderer),
         })
     }
 
     pub(crate) fn mark_dirty(&mut self) {
-        self.gate.mark_dirty();
+        self.base.gate.mark_dirty();
     }
 
-    /// Clear to transparent, then (if model present) draw the full overlay
-    /// phase via the shared renderer. No-op when clean.
-    pub(crate) fn paint_if_dirty(
+    pub(crate) fn should_paint(&mut self) -> bool {
+        self.base.gate.should_paint()
+    }
+
+    pub(crate) fn paint(
         &mut self,
-        theme: &CanvasTheme,
+        theme: CanvasTheme,
         overlays: &RenderOverlays,
-        model: Option<&dyn CanvasModel>,
+        model: &dyn CanvasModel,
+        frame: &FrameContext,
     ) {
-        if !self.gate.should_paint() {
-            return;
-        }
-        self.renderer.set_theme(*theme);
-        self.renderer
+        self.base.renderer.set_theme(theme);
+        let size = self.base.canvas_size();
+        self.base
+            .renderer
             .ctx_ref()
-            .clear_rect(0.0, 0.0, self.css_width, self.css_height);
-        if let Some(m) = model {
-            self.renderer.render_overlays(m, overlays);
-        }
+            .clear_rect(0.0, 0.0, size.w, size.h);
+        self.base.renderer.render_overlays(model, overlays, frame);
     }
 
     pub(crate) fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.css_width = css_w;
-        self.css_height = css_h;
-        self.dpr = dpr;
-        let (target_w, target_h) = target_backing_size(css_w, css_h, dpr);
-        if self.canvas.width() != target_w || self.canvas.height() != target_h {
-            self.canvas.set_width(target_w);
-            self.canvas.set_height(target_h);
-        } else {
-            self.renderer
-                .ctx_ref()
-                .set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-                .expect("set_transform should not fail");
-        }
-        self.renderer
-            .ctx_ref()
-            .scale(dpr, dpr)
-            .expect("scale should not fail");
-        self.renderer.set_size(css_w, css_h);
-        self.renderer.set_dpr(dpr);
-        self.renderer.invalidate_paint_cache();
+        self.base.resize(css_w, css_h, dpr);
     }
 }

@@ -37,7 +37,12 @@ pub mod theme;
 pub mod types;
 pub mod wasm;
 
-pub use geometry::*;
+pub use geometry::{
+    col_name, col_width, row_height, CanvasSize, CellRC, FrozenRC, Line, PixelRect, Point, Span,
+    VisibleRegion, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
+    HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+};
+
 pub use orchestrator::IronCanvas;
 pub use renderer::CanvasRenderer;
 pub use types::RenderOverlays;

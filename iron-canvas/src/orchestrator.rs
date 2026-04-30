@@ -3,10 +3,10 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::geometry::{PixelRect, Point};
+use crate::geometry::{FrameContext, PixelRect, Point, SheetViewport};
 use crate::layer::{GridLayer, OverlayLayer};
 use crate::theme::{CanvasTheme, DARK, LIGHT};
-use crate::types::{FreezeConfig, RenderOverlays, Viewport};
+use crate::types::RenderOverlays;
 use crate::wasm::JsBackedModel;
 use crate::CanvasModel;
 
@@ -23,11 +23,10 @@ use crate::CanvasModel;
 pub struct IronCanvas {
     grid: GridLayer,
     overlay: OverlayLayer,
-    viewport: Viewport,
     theme: CanvasTheme,
-    freeze: FreezeConfig,
     overlays: RenderOverlays,
     model: Option<Rc<dyn CanvasModel>>,
+    last_frame: Option<FrameContext>,
 }
 
 #[wasm_bindgen]
@@ -42,11 +41,10 @@ impl IronCanvas {
         Ok(IronCanvas {
             grid,
             overlay,
-            viewport: Viewport::default(),
             theme: LIGHT,
-            freeze: FreezeConfig::default(),
             overlays: RenderOverlays::default(),
             model: None,
+            last_frame: None,
         })
     }
 
@@ -59,15 +57,16 @@ impl IronCanvas {
 
     /// Push a new scroll origin. Fans out to grid + overlay; no-op if unchanged.
     pub fn set_viewport(&mut self, top_row: i32, left_column: i32) {
-        let vp = Viewport {
-            top_row,
-            left_column,
-        };
-        if vp != self.viewport {
-            self.viewport = vp;
-            self.grid.mark_dirty();
-            self.overlay.mark_dirty();
+        if self
+            .last_frame
+            .as_ref()
+            .map(|f| f.top_row == top_row && f.left_column == left_column)
+            .unwrap_or(false)
+        {
+            return;
         }
+        self.grid.mark_dirty();
+        self.overlay.mark_dirty();
     }
 
     /// Push a new theme by name ("light" | "dark"). Fans out to grid + overlay; no-op if unchanged.
@@ -82,14 +81,18 @@ impl IronCanvas {
 
     /// Push a freeze configuration. Grid-only; no-op if unchanged.
     pub fn set_freeze(&mut self, frozen_rows: u32, frozen_cols: u32) {
-        let freeze = FreezeConfig {
-            frozen_rows,
-            frozen_cols,
-        };
-        if freeze != self.freeze {
-            self.freeze = freeze;
-            self.grid.mark_dirty();
+        if self
+            .last_frame
+            .as_ref()
+            .map(|f| {
+                f.frozen.frozen_rows_count() == frozen_rows as i32
+                    && f.frozen.frozen_cols_count() == frozen_cols as i32
+            })
+            .unwrap_or(false)
+        {
+            return;
         }
+        self.grid.mark_dirty();
     }
 
     /// Mark both layers dirty. JS calls this after any state mutation
@@ -102,10 +105,30 @@ impl IronCanvas {
 
     /// Drive each layer's gate. Layers that are clean skip their paint entirely.
     pub fn paint_if_dirty(&mut self) {
-        let model = self.model.as_deref();
-        self.grid.paint_if_dirty(&self.theme, model);
-        self.overlay
-            .paint_if_dirty(&self.theme, &self.overlays, model);
+        let grid_dirty = self.grid.should_paint();
+        let overlay_dirty = self.overlay.should_paint();
+
+        if !grid_dirty && !overlay_dirty {
+            return;
+        }
+
+        let Some(model) = self.model.as_deref() else {
+            return;
+        };
+
+        // One viewport snapshot per tick — both layers paint against the same
+        // visible region, frozen geometry, and prefix-sum pixel offsets.
+        let frame = SheetViewport::current(model).frame(self.grid.canvas_size());
+
+        if grid_dirty {
+            self.grid.paint(self.theme, model, &frame);
+        }
+        if overlay_dirty {
+            self.overlay
+                .paint(self.theme, &self.overlays, model, &frame);
+        }
+
+        self.last_frame = Some(frame);
     }
 
     /// Explicit teardown for React strict-mode / Leptos Effect mount cycles.
@@ -190,12 +213,12 @@ impl IronCanvas {
     pub fn request_overlay_repaint(&mut self) {
         if let Some(model) = self.model.as_deref() {
             let view = model.get_selected_view();
-            let vp = Viewport {
-                top_row: view.top_row,
-                left_column: view.left_column,
-            };
-            if vp != self.viewport {
-                self.viewport = vp;
+            let scrolled = self
+                .last_frame
+                .as_ref()
+                .map(|f| f.top_row != view.top_row || f.left_column != view.left_column)
+                .unwrap_or(true);
+            if scrolled {
                 self.grid.mark_dirty();
             }
         }

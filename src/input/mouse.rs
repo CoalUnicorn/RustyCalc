@@ -19,8 +19,10 @@ use crate::state::{
     ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
     StatusMessage, WorkbookState,
 };
-use iron_canvas::geometry::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW};
-use iron_canvas::{SheetViewport, AUTOFILL_HANDLE_PX, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
+use iron_canvas::geometry::{
+    SheetViewport, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+};
+use iron_canvas::{AUTOFILL_HANDLE_PX, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use ironcalc_base::UserModel;
 
 /// Pixel tolerance for column/row resize hit-test in the header area.

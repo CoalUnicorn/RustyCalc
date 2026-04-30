@@ -51,6 +51,14 @@ pub struct CanvasSize {
     pub h: f64,
 }
 
+impl CanvasSize {
+    /// Physical backing-store dimensions from CSS size and DPR.
+    /// Truncates fractional pixels — matches browser canvas rounding behaviour.
+    pub(crate) fn to_backing_size(self, dpr: f64) -> (u32, u32) {
+        ((self.w * dpr) as u32, (self.h * dpr) as u32)
+    }
+}
+
 //  Shared axis - row-vs-column symmetry
 
 /// Horizontal vs vertical axis.
@@ -407,6 +415,8 @@ pub(crate) struct FrameContext {
     pub vis: VisibleRegion,
     pub offsets: PixelOffsets,
     pub frozen: FrozenRC,
+    pub top_row: i32, // from model.get_selected_view() — used by orchestrator change detection
+    pub left_column: i32,
 }
 
 /// Snapshot of "where cells are drawn right now" for one sheet - the model,
@@ -707,6 +717,8 @@ impl<'a> SheetViewport<'a> {
             vis,
             offsets,
             frozen: self.frozen.clone(),
+            top_row: self.top_row,
+            left_column: self.left_column,
         }
     }
 }
@@ -714,6 +726,36 @@ impl<'a> SheetViewport<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backing_size_scales_by_dpr() {
+        assert_eq!(
+            CanvasSize { w: 100.0, h: 200.0 }.to_backing_size(2.0),
+            (200, 400)
+        );
+    }
+
+    #[test]
+    fn backing_size_at_1x_dpr_equals_css() {
+        assert_eq!(
+            CanvasSize {
+                w: 1920.0,
+                h: 1080.0
+            }
+            .to_backing_size(1.0),
+            (1920, 1080)
+        );
+    }
+
+    #[test]
+    fn backing_size_truncates_fractional_pixels() {
+        // (100.3 * 1.5) = 150.45 → truncates to 150; (50.7 * 1.5) = 76.05 → 76
+        assert_eq!(
+            CanvasSize { w: 100.3, h: 50.7 }.to_backing_size(1.5),
+            (150, 76)
+        );
+    }
+
 
     #[test]
     fn right_is_x_plus_width() {
@@ -1042,8 +1084,8 @@ mod tests {
         assert!(frc.col_band.is_none());
         assert_eq!(frc.frozen_rows_count(), 0);
         assert_eq!(frc.frozen_cols_count(), 0);
-        assert_eq!(frc.offset.origin.x, HEADER_COL_WIDTH);
-        assert_eq!(frc.offset.origin.y, HEADER_ROW_HEIGHT);
+        assert_eq!(frc.offset.x, HEADER_COL_WIDTH);
+        assert_eq!(frc.offset.y, HEADER_ROW_HEIGHT);
     }
 
     #[test]
@@ -1057,9 +1099,9 @@ mod tests {
         assert!(frc.col_band.is_none());
         assert_eq!(frc.frozen_rows_count(), 2);
         assert_eq!(frc.frozen_cols_count(), 0);
-        assert_eq!(frc.offset.origin.x, HEADER_COL_WIDTH);
+        assert_eq!(frc.offset.x, HEADER_COL_WIDTH);
         assert_eq!(
-            frc.offset.origin.y,
+            frc.offset.y,
             HEADER_ROW_HEIGHT + 2.0 * DEFAULT_ROW_HEIGHT + FROZEN_SEP
         );
     }
@@ -1075,11 +1117,11 @@ mod tests {
         assert_eq!(frc.frozen_rows_count(), 1);
         assert_eq!(frc.frozen_cols_count(), 3);
         assert_eq!(
-            frc.offset.origin.x,
+            frc.offset.x,
             HEADER_COL_WIDTH + 3.0 * DEFAULT_COL_WIDTH + FROZEN_SEP
         );
         assert_eq!(
-            frc.offset.origin.y,
+            frc.offset.y,
             HEADER_ROW_HEIGHT + DEFAULT_ROW_HEIGHT + FROZEN_SEP
         );
     }
@@ -1134,7 +1176,7 @@ mod tests {
             ..Default::default()
         };
         let vp = SheetViewport::current(&m);
-        let origin_x = vp.frozen().offset.origin.x;
+        let origin_x = vp.frozen().offset.x;
         // col 5 is the first scrollable on screen → at the frozen offset
         assert_eq!(vp.col_to_x(5), origin_x);
         assert_eq!(vp.col_to_x(6), origin_x + DEFAULT_COL_WIDTH);

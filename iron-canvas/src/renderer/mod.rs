@@ -94,11 +94,10 @@ mod text;
 mod viewport;
 
 use std::cell::Cell;
-use wasm_bindgen::JsCast;
 use web_sys::js_sys;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
+use web_sys::CanvasRenderingContext2d;
 
-use super::geometry::{Axis, CanvasSize, FrameContext, SheetViewport};
+use super::geometry::{Axis, CanvasSize, FrameContext};
 use super::types::*;
 use crate::renderer::cells::CellPaintsIter;
 use crate::theme::CanvasTheme;
@@ -113,6 +112,7 @@ pub(super) const MEDIUM_BORDER_WIDTH: f64 = 2.0;
 pub(super) const THICK_BORDER_WIDTH: f64 = 3.0;
 pub(super) const DASHED_BORDER_WIDTH: f64 = 1.5;
 
+//#[derive(Clone)]
 pub struct CanvasRenderer {
     ctx: CanvasRenderingContext2d,
     width: f64,
@@ -169,63 +169,6 @@ impl CanvasRenderer {
         pane: &'a PaneRegion,
     ) -> CellPaintsIter<'a> {
         CellPaintsIter::new(self, model, pane)
-    }
-
-    /// Bind a renderer to `canvas` and apply device-pixel-ratio scaling.
-    ///
-    /// `dpr` is injected by the caller (typically `window().device_pixel_ratio()`
-    /// from the Leptos shell) so this module stays free of framework globals -
-    /// a prerequisite for the future `rusty-calc-core` crate split.
-    ///
-    /// **Performance note:** `canvas.set_width()` / `set_height()` resets the
-    /// entire canvas bitmap and all 2D context state - even when the value is
-    /// unchanged.  On a 1920x1080 display at 2x DPR that is a ~32 MB backing
-    /// store reallocation every frame, which causes >500 ms lag on rapid
-    /// navigation (held arrow keys, resize drags).
-    ///
-    /// Fix: only resize when dimensions actually changed.  When the size is
-    /// stable, reset only the transform matrix to the identity before
-    /// re-applying the DPR scale.  `clear_rect` in `render()` handles the
-    /// pixel clear without touching the backing store.
-    #[allow(clippy::expect_used)]
-    pub fn new(canvas: &HtmlCanvasElement, theme: CanvasTheme, dpr: f64) -> Self {
-        let ctx = canvas
-            .get_context("2d")
-            .expect("getContext should not throw")
-            .expect("2d context must exist")
-            .unchecked_into::<CanvasRenderingContext2d>();
-
-        let width = canvas.client_width() as f64;
-        let height = canvas.client_height() as f64;
-
-        let target_w = (width * dpr) as u32;
-        let target_h = (height * dpr) as u32;
-
-        if canvas.width() != target_w || canvas.height() != target_h {
-            // Resize resets canvas bitmap + all context state; necessary here.
-            canvas.set_width(target_w);
-            canvas.set_height(target_h);
-        } else {
-            // Reset only the transform so the DPR scale below is applied to
-            // the identity matrix, not accumulated across frames.
-            ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-                .expect("set_transform should not fail");
-        }
-        ctx.scale(dpr, dpr).expect("scale should not fail");
-
-        Self {
-            ctx,
-            width,
-            height,
-            dpr,
-            theme,
-            dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
-            dash_empty: js_sys::Array::new(),
-            last_fill: Cell::new("".to_string()),
-            last_stroke: Cell::new("".to_string()),
-            last_line_width: Cell::new(0.0),
-            last_font: Cell::new("".to_string()),
-        }
     }
 
     /// Layer-friendly constructor: caller owns canvas sizing + DPR scaling.
@@ -311,19 +254,9 @@ impl CanvasRenderer {
     /// every paint because `canvas.set_width/set_height` (in the layer's
     /// resize) wipes them. Per-stroke `line_width` is owned by paint helpers
     /// via `set_line_width_cached`, so it is not set here.
-    pub(crate) fn render_grid(&mut self, model: &dyn CanvasModel) {
+    pub(crate) fn render_grid(&mut self, model: &dyn CanvasModel, frame: &FrameContext) {
         self.ctx.set_text_align("center");
         self.ctx.set_text_baseline("middle");
-        // Text render experiments
-        // js_sys::Reflect::set(
-        //     self.ctx.as_ref(),
-        //     &"textRendering".into(),
-        //     &"optimizeSpeed".into(),
-        // )
-        // .ok();
-
-        let viewport = SheetViewport::current(model);
-        let frame = viewport.frame(self.canvas_size());
 
         // Phase 1: Cells - four frozen-pane quadrants. Each `render_pane`
         // does two passes: bg+borders first, then text on top so overflow
@@ -362,18 +295,22 @@ impl CanvasRenderer {
     /// reason as in `render_grid`: the overlay layer's `set_width/set_height`
     /// resize wipes them, and `repaint_active_cell` paints text whose
     /// `center_x`/`center_y` assume the centered/middle anchors.
-    pub(crate) fn render_overlays(&mut self, model: &dyn CanvasModel, overlays: &RenderOverlays) {
+    // NOTE: may try later
+    // ```
+    // js_sys::Reflect::set(
+    //     self.ctx.as_ref(),
+    //     &"textRendering".into(),
+    //     &"optimizeSpeed".into(),
+    // )
+    // .ok();
+    pub(crate) fn render_overlays(
+        &mut self,
+        model: &dyn CanvasModel,
+        overlays: &RenderOverlays,
+        frame: &FrameContext,
+    ) {
         self.ctx.set_text_align("center");
         self.ctx.set_text_baseline("middle");
-        // js_sys::Reflect::set(
-        //     self.ctx.as_ref(),
-        //     &"textRendering".into(),
-        //     &"optimizeSpeed".into(),
-        // )
-        // .ok();
-
-        let viewport = SheetViewport::current(model);
-        let frame = viewport.frame(self.canvas_size());
 
         self.draw_selection(model, &frame);
         // Header highlights live on the overlay so nav events skip the grid repaint.

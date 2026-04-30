@@ -41,10 +41,10 @@ pub struct FreezeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::geometry::Axis;
     use crate::renderer::PaneRegion;
     use crate::{
-        Axis, FrozenRC, Point, Span, VisibleRegion, HEADER_COL_WIDTH, HEADER_OFFSET,
-        HEADER_ROW_HEIGHT,
+        FrozenRC, Point, VisibleRegion, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT,
     };
 
     #[test]
