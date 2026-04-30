@@ -86,8 +86,7 @@ pub fn Worksheet() -> impl IntoView {
     // IronCanvas orchestrator handle. None until both <canvas> elements mount
     // and the container has nonzero CSS dimensions; then constructed exactly
     // once by the lazy-construct block in the rAF loop. Disposed in on_cleanup.
-    let canvas_handle: StoredValue<Option<IronCanvas>, LocalStorage> =
-        StoredValue::new_local(None);
+    let canvas_handle: StoredValue<Option<IronCanvas>, LocalStorage> = StoredValue::new_local(None);
     on_cleanup(move || {
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.take() {
@@ -244,7 +243,13 @@ pub fn Worksheet() -> impl IntoView {
                 if let Some(ic) = slot.as_mut() {
                     ic.set_theme(theme);
                     ic.set_overlays(overlays);
-                    ic.request_repaint();
+                    // Grid repaint only when cell data, format, or structure changed.
+                    // Nav and overlay-only changes are covered by set_overlays() above.
+                    if has_content || has_structure || has_format {
+                        ic.request_repaint();
+                    } else if has_nav {
+                        ic.request_overlay_repaint(); // overlay only
+                    }
                 }
             });
 
@@ -287,8 +292,7 @@ pub fn Worksheet() -> impl IntoView {
                     // below.
                     ic.set_theme(*canvas_theme.get_untracked());
                     ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
-                    let (extend_to, point_range, formula_refs) =
-                        reactive_overlay.get_untracked();
+                    let (extend_to, point_range, formula_refs) = reactive_overlay.get_untracked();
                     let clipboard = clipboard_draw.with_value(|opt| {
                         opt.as_ref().map(|acb| SheetRange {
                             sheet: acb.sheet,

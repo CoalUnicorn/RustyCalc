@@ -53,7 +53,11 @@ impl CanvasRenderer {
 
             for line in &t.lines {
                 this.ctx_ref()
-                    .fill_text(&line.text, line.center_x, line.center_y)
+                    .fill_text(
+                        &line.text,
+                        this.snap_pixel(line.center_x),
+                        this.snap_pixel(line.center_y),
+                    )
                     .ok();
                 let x1 = line.center_x - line.width / 2.0;
                 let x2 = line.center_x + line.width / 2.0;

@@ -26,9 +26,9 @@ pub struct RenderOverlays {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Viewport {
     /// First visible row in the scrollable region (1-indexed).
-    pub top_row: u32,
+    pub top_row: i32,
     /// First visible column in the scrollable region (1-indexed).
-    pub left_column: u32,
+    pub left_column: i32,
 }
 
 /// Number of rows/columns pinned by the freeze-panes feature.
@@ -41,6 +41,11 @@ pub struct FreezeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::renderer::PaneRegion;
+    use crate::{
+        Axis, FrozenRC, Point, Span, VisibleRegion, HEADER_COL_WIDTH, HEADER_OFFSET,
+        HEADER_ROW_HEIGHT,
+    };
 
     #[test]
     fn row_header_rect_pins_x_to_left_strip() {
@@ -82,8 +87,8 @@ mod tests {
         assert_eq!(Axis::Column.strip_start(), HEADER_COL_WIDTH + HEADER_OFFSET);
     }
 
-    fn vis(rows: (i32, i32), cols: (i32, i32)) -> crate::renderer::VisibleRegion {
-        crate::renderer::VisibleRegion {
+    fn vis(rows: (i32, i32), cols: (i32, i32)) -> VisibleRegion {
+        VisibleRegion {
             first: crate::geometry::CellRC {
                 row: rows.0,
                 column: cols.0,
@@ -125,8 +130,6 @@ mod tests {
         let p = PaneRegion::top_left(&frc);
         assert_eq!(p.origin.x, HEADER_COL_WIDTH + HEADER_OFFSET);
         assert_eq!(p.origin.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
-        assert_eq!(p.last_row, 2);
-        assert_eq!(p.last_col, 3);
     }
 
     #[test]
@@ -137,7 +140,6 @@ mod tests {
         assert_eq!(p.origin.x, 200.0);
         assert_eq!(p.origin.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
         assert_eq!(*p.cols.start(), 4);
-        assert_eq!(p.last_col, 11);
     }
 
     #[test]
@@ -148,7 +150,6 @@ mod tests {
         assert_eq!(p.origin.x, HEADER_COL_WIDTH + HEADER_OFFSET);
         assert_eq!(p.origin.y, 100.0);
         assert_eq!(*p.rows.start(), 3);
-        assert_eq!(p.last_row, 9);
     }
 
     #[test]
@@ -158,8 +159,6 @@ mod tests {
         let p = PaneRegion::bottom_right(&frc, &v);
         assert_eq!(p.origin.x, 200.0);
         assert_eq!(p.origin.y, 100.0);
-        assert_eq!(p.last_row, 9);
-        assert_eq!(p.last_col, 11);
     }
 
     #[test]

@@ -31,11 +31,11 @@
 //!
 //! Phase 2 - Row and column headers
 //!   Paint the grey header bars with row numbers and column letters (A, B, ...).
-//!   Selected headers get a highlighted background.
 //!
 //! Phase 3 - Selection and overlays
 //!   Draw the blue selection rectangle, autofill handle, clipboard marching
-//!   ants, and point-mode range highlight on top of the cell grid.
+//!   ants, point-mode range highlight, and selected header highlights on top
+//!   of the cell grid.
 //!
 //! Phase 4 - Cell text
 //!   Paint all collected `CellText` entries last so text always appears
@@ -117,6 +117,7 @@ pub struct CanvasRenderer {
     ctx: CanvasRenderingContext2d,
     width: f64,
     height: f64,
+    dpr: f64,
     theme: CanvasTheme,
     /// Cached dash pattern passed to `set_line_dash` on every dashed stroke
     /// (clipboard ants, point-mode range, formula refs).
@@ -216,6 +217,7 @@ impl CanvasRenderer {
             ctx,
             width,
             height,
+            dpr,
             theme,
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
@@ -242,6 +244,7 @@ impl CanvasRenderer {
             ctx,
             width: css_w,
             height: css_h,
+            dpr: 1.0,
             theme,
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
@@ -257,6 +260,28 @@ impl CanvasRenderer {
     pub(crate) fn set_size(&mut self, css_w: f64, css_h: f64) {
         self.width = css_w;
         self.height = css_h;
+    }
+
+    /// Sync device-pixel ratio after a layer resize. Must be called
+    /// alongside `set_size` so snap helpers reflect the current DPR.
+    pub(crate) fn set_dpr(&mut self, dpr: f64) {
+        self.dpr = dpr;
+    }
+
+    /// Snap a coordinate to the center of the nearest device pixel.
+    /// Applied to stroke axes so 1-px lines land on one physical pixel
+    /// rather than bleeding across two.
+    #[inline]
+    fn snap_stroke(&self, coord: f64) -> f64 {
+        ((coord * self.dpr).floor() + 0.5) / self.dpr
+    }
+
+    /// Snap a coordinate to the nearest device pixel boundary.
+    /// Applied to text draw positions so glyphs don't smear across
+    /// sub-pixel boundaries.
+    #[inline]
+    fn snap_pixel(&self, coord: f64) -> f64 {
+        (coord * self.dpr).round() / self.dpr
     }
 
     /// Reset per-frame ctx state caches to their initial sentinels.
@@ -289,6 +314,13 @@ impl CanvasRenderer {
     pub(crate) fn render_grid(&mut self, model: &dyn CanvasModel) {
         self.ctx.set_text_align("center");
         self.ctx.set_text_baseline("middle");
+        // Text render experiments
+        // js_sys::Reflect::set(
+        //     self.ctx.as_ref(),
+        //     &"textRendering".into(),
+        //     &"optimizeSpeed".into(),
+        // )
+        // .ok();
 
         let viewport = SheetViewport::current(model);
         let frame = viewport.frame(self.canvas_size());
@@ -304,14 +336,14 @@ impl CanvasRenderer {
         self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis));
 
         // Phase 2: Headers + corner box
-        self.render_headers(
+        self.render_headers_base(
             model,
             Axis::Row,
             &frame.vis,
             frame.frozen.row_band.as_ref(),
             frame.frozen.offset.origin.y,
         );
-        self.render_headers(
+        self.render_headers_base(
             model,
             Axis::Column,
             &frame.vis,
@@ -333,11 +365,32 @@ impl CanvasRenderer {
     pub(crate) fn render_overlays(&mut self, model: &dyn CanvasModel, overlays: &RenderOverlays) {
         self.ctx.set_text_align("center");
         self.ctx.set_text_baseline("middle");
+        // js_sys::Reflect::set(
+        //     self.ctx.as_ref(),
+        //     &"textRendering".into(),
+        //     &"optimizeSpeed".into(),
+        // )
+        // .ok();
 
         let viewport = SheetViewport::current(model);
         let frame = viewport.frame(self.canvas_size());
 
         self.draw_selection(model, &frame);
+        // Header highlights live on the overlay so nav events skip the grid repaint.
+        self.render_header_highlights(
+            model,
+            Axis::Row,
+            &frame.vis,
+            frame.frozen.row_band.as_ref(),
+            frame.frozen.offset.origin.y,
+        );
+        self.render_header_highlights(
+            model,
+            Axis::Column,
+            &frame.vis,
+            frame.frozen.col_band.as_ref(),
+            frame.frozen.offset.origin.x,
+        );
         if let Some(target) = overlays.extend_to {
             self.draw_extend_preview(model, &frame, target);
         }

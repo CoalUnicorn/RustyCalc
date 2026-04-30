@@ -81,6 +81,7 @@ impl GridLayer {
             .scale(dpr, dpr)
             .expect("scale should not fail");
         self.renderer.set_size(css_w, css_h);
+        self.renderer.set_dpr(dpr);
         self.renderer.invalidate_paint_cache();
     }
 }

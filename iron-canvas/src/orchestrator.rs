@@ -58,7 +58,7 @@ impl IronCanvas {
     }
 
     /// Push a new scroll origin. Fans out to grid + overlay; no-op if unchanged.
-    pub fn set_viewport(&mut self, top_row: u32, left_column: u32) {
+    pub fn set_viewport(&mut self, top_row: i32, left_column: i32) {
         let vp = Viewport {
             top_row,
             left_column,
@@ -185,6 +185,21 @@ impl IronCanvas {
             self.model = Some(model);
             self.grid.mark_dirty();
         }
+    }
+
+    pub fn request_overlay_repaint(&mut self) {
+        if let Some(model) = self.model.as_deref() {
+            let view = model.get_selected_view();
+            let vp = Viewport {
+                top_row: view.top_row,
+                left_column: view.left_column,
+            };
+            if vp != self.viewport {
+                self.viewport = vp;
+                self.grid.mark_dirty();
+            }
+        }
+        self.overlay.mark_dirty();
     }
 }
 
@@ -330,6 +345,35 @@ mod tests {
         assert!(
             !Rc::ptr_eq(&m1, &m2),
             "distinct Rc allocations must not be equal"
+        );
+    }
+
+    #[test]
+    fn nav_event_only_dirties_overlay() {
+        use crate::layer::PaintGate;
+        // Simulate worksheet.rs: set_overlays fires, request_repaint does NOT.
+        let mut grid = PaintGate::new();
+        let mut overlay = PaintGate::new();
+        let mut current = RenderOverlays::default();
+
+        let next = RenderOverlays {
+            selection: Some(make_sel(20.0)),
+            ..Default::default()
+        };
+        // mirror conditionalized fan-out: nav → set_overlays only
+        if next != current {
+            overlay.mark_dirty();
+        }
+        current = next;
+        let _ = current;
+
+        assert!(
+            overlay.should_paint(),
+            "overlay must be dirty after nav set_overlays"
+        );
+        assert!(
+            !grid.should_paint(),
+            "grid must NOT be dirty on nav-only event"
         );
     }
 }

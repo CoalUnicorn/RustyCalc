@@ -79,12 +79,48 @@ impl CanvasRenderer {
         );
     }
 
-    /// Paint one header strip along `axis`: frozen band first (if any),
-    /// then the scrollable band. Selected indices get a highlighted fill.
-    ///
-    /// `frozen_origin` is where the scrollable band starts when the frozen
-    /// band is present; ignored otherwise.
-    pub(super) fn render_headers(
+    /// Paint one header strip along `axis` with no selection highlighting.
+    /// Selected indices are tracked for highlight rendering via `render_header_highlights`.
+    pub(super) fn render_headers_base(
+        &self,
+        model: &dyn CanvasModel,
+        axis: Axis,
+        vis: &VisibleRegion,
+        frozen_band: Option<&RangeInclusive<i32>>,
+        frozen_origin: f64,
+    ) {
+        self.set_font_cached(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
+
+        let mut frozen_cursor = axis.strip_start();
+        if let Some(band) = frozen_band {
+            for i in band.clone() {
+                let t = axis.extent(model, i);
+                if t <= 0.0 {
+                    continue;
+                }
+                self.draw_header_cell(axis, i, frozen_cursor, t, false);
+                frozen_cursor += t;
+            }
+        }
+
+        let mut scroll_cursor = if frozen_band.is_some() {
+            frozen_origin
+        } else {
+            axis.strip_start()
+        };
+        for i in axis.visible_band(vis) {
+            let t = axis.extent(model, i);
+            if t <= 0.0 {
+                continue;
+            }
+            self.draw_header_cell(axis, i, scroll_cursor, t, false);
+            scroll_cursor += t;
+        }
+    }
+
+    /// Overlay pass repainting only selected header cells so the grid layer
+    /// never redraws on navigation — the base pass beneath stays intact.
+    pub(super) fn render_header_highlights(
         &self,
         model: &dyn CanvasModel,
         axis: Axis,
@@ -95,24 +131,21 @@ impl CanvasRenderer {
         let view = model.get_selected_view();
         let (sel_start, sel_end) = axis.selection_range(&view.range);
 
-        self.set_font_cached(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
-
-        // Frozen band - pinned to the strip origin.
-        let mut cursor = axis.strip_start();
+        let mut frozen_cursor = axis.strip_start();
         if let Some(band) = frozen_band {
             for i in band.clone() {
                 let t = axis.extent(model, i);
                 if t <= 0.0 {
                     continue;
                 }
-                let selected = i >= sel_start && i <= sel_end;
-                self.draw_header_cell(axis, i, cursor, t, selected);
-                cursor += t;
+                if i >= sel_start && i <= sel_end {
+                    self.draw_header_cell(axis, i, frozen_cursor, t, true);
+                }
+                frozen_cursor += t;
             }
         }
 
-        // Scrollable band - picks up past the frozen band when present.
-        let mut cursor = if frozen_band.is_some() {
+        let mut scroll_cursor = if frozen_band.is_some() {
             frozen_origin
         } else {
             axis.strip_start()
@@ -122,13 +155,14 @@ impl CanvasRenderer {
             if t <= 0.0 {
                 continue;
             }
-            let selected = i >= sel_start && i <= sel_end;
-            self.draw_header_cell(axis, i, cursor, t, selected);
-            cursor += t;
+            if i >= sel_start && i <= sel_end {
+                self.draw_header_cell(axis, i, scroll_cursor, t, true);
+            }
+            scroll_cursor += t;
         }
     }
 
-    /// Paint one header cell: border strip, body fill, and label.
+    /// Paint a single header cell: border strip, body fill, and label.
     ///
     /// `along` is the position along the axis (top_y for rows, left_x for cols);
     /// `thickness` is the cell's extent along the same axis (rh / cw).
@@ -161,6 +195,36 @@ impl CanvasRenderer {
             Axis::Row => index.to_string(),
             Axis::Column => col_name(index),
         };
-        self.ctx.fill_text(&label, center.x, center.y).ok();
+        self.ctx
+            .fill_text(&label, self.snap_pixel(center.x), self.snap_pixel(center.y))
+            .ok();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ops::RangeInclusive;
+
+    fn _assert_base_exists(
+        r: &CanvasRenderer,
+        m: &dyn crate::CanvasModel,
+        ax: Axis,
+        v: &VisibleRegion,
+        fb: Option<&RangeInclusive<i32>>,
+        fo: f64,
+    ) {
+        r.render_headers_base(m, ax, v, fb, fo);
+    }
+
+    fn _assert_highlights_exists(
+        r: &CanvasRenderer,
+        m: &dyn crate::CanvasModel,
+        ax: Axis,
+        v: &VisibleRegion,
+        fb: Option<&RangeInclusive<i32>>,
+        fo: f64,
+    ) {
+        r.render_header_highlights(m, ax, v, fb, fo);
     }
 }

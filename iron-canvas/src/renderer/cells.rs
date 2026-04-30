@@ -80,14 +80,14 @@ impl CanvasRenderer {
     fn paint_pane_text(&self, model: &dyn CanvasModel, paints: &[CellPaint]) {
         // TEST: paints remove later
         // Damage tracking to skip cells
-        let mut c = 0;
+        // let mut c = 0;
         for p in paints {
             if let Some(t) = TextPaint::resolve(self, model, p.addr, p.rect, &p.style) {
                 self.paint_text(&t);
-                c += 1;
+                // c += 1;
             }
         }
-        web_sys::console::log_1(&format!("Pane painted texts: {}", c).into());
+        //web_sys::console::log_1(&format!("Pane painted texts: {}", c).into());
     }
 
     /// Stroke one resolved border. `Double`-style borders render as two
@@ -473,6 +473,9 @@ impl<'a> Iterator for CellPaintsIter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Line;
+    use crate::Point;
+    use crate::Span;
 
     #[test]
     fn left_edge_is_vertical_line_at_rect_x() {
