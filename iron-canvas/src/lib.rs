@@ -29,13 +29,14 @@ pub mod geometry;
 mod layer;
 pub mod model;
 mod orchestrator;
-#[cfg(test)]
-mod reference;
 pub mod renderer;
 pub mod style;
 pub mod theme;
 pub mod types;
 pub mod wasm;
+
+#[cfg(test)]
+mod test;
 
 pub use geometry::{
     col_name, col_width, row_height, CanvasSize, CellRC, FrozenRC, Line, PixelRect, Point, Span,
