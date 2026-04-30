@@ -341,14 +341,14 @@ impl CanvasRenderer {
             Axis::Row,
             &frame.vis,
             frame.frozen.row_band.as_ref(),
-            frame.frozen.offset.origin.y,
+            frame.frozen.offset.y,
         );
         self.render_headers_base(
             model,
             Axis::Column,
             &frame.vis,
             frame.frozen.col_band.as_ref(),
-            frame.frozen.offset.origin.x,
+            frame.frozen.offset.x,
         );
 
         self.draw_corner_box();
@@ -382,14 +382,14 @@ impl CanvasRenderer {
             Axis::Row,
             &frame.vis,
             frame.frozen.row_band.as_ref(),
-            frame.frozen.offset.origin.y,
+            frame.frozen.offset.y,
         );
         self.render_header_highlights(
             model,
             Axis::Column,
             &frame.vis,
             frame.frozen.col_band.as_ref(),
-            frame.frozen.offset.origin.x,
+            frame.frozen.offset.x,
         );
         if let Some(target) = overlays.extend_to {
             self.draw_extend_preview(model, &frame, target);

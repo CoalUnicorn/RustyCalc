@@ -289,10 +289,10 @@ pub struct Span {
 ///
 /// Passed to renderer drawing helpers so call sites read
 /// `cell_x(model, col, frozen)` without a second unrelated tuple parameter.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FrozenOffset {
-    pub origin: Point,
-}
+// #[derive(Debug, Clone, Copy, PartialEq)]
+// pub struct Point {
+//     pub origin: Point,
+// }
 
 /// Frozen rows and columns grouped with their pixel origin.
 ///
@@ -304,7 +304,7 @@ pub struct FrozenOffset {
 pub struct FrozenRC {
     pub row_band: Option<RangeInclusive<i32>>,
     pub col_band: Option<RangeInclusive<i32>>,
-    pub offset: FrozenOffset,
+    pub offset: Point,
 }
 
 impl FrozenRC {
@@ -318,11 +318,9 @@ impl FrozenRC {
         FrozenRC {
             row_band: (rows > 0).then_some(1..=rows),
             col_band: (cols > 0).then_some(1..=cols),
-            offset: FrozenOffset {
-                origin: Point {
-                    x: HEADER_COL_WIDTH + w + if cols > 0 { FROZEN_SEP } else { 0.0 },
-                    y: HEADER_ROW_HEIGHT + h + if rows > 0 { FROZEN_SEP } else { 0.0 },
-                },
+            offset: Point {
+                x: HEADER_COL_WIDTH + w + if cols > 0 { FROZEN_SEP } else { 0.0 },
+                y: HEADER_ROW_HEIGHT + h + if rows > 0 { FROZEN_SEP } else { 0.0 },
             },
         }
     }
@@ -455,7 +453,7 @@ impl<'a> SheetViewport<'a> {
             HEADER_COL_WIDTH + (1..col).map(|c| col_width(self.model, c)).sum::<f64>()
         } else {
             let left = self.left_column.max(frozen_cols + 1);
-            self.frozen.offset.origin.x + (left..col).map(|c| col_width(self.model, c)).sum::<f64>()
+            self.frozen.offset.x + (left..col).map(|c| col_width(self.model, c)).sum::<f64>()
         }
     }
 
@@ -466,14 +464,14 @@ impl<'a> SheetViewport<'a> {
             HEADER_ROW_HEIGHT + (1..row).map(|r| row_height(self.model, r)).sum::<f64>()
         } else {
             let top = self.top_row.max(frozen_rows + 1);
-            self.frozen.offset.origin.y + (top..row).map(|r| row_height(self.model, r)).sum::<f64>()
+            self.frozen.offset.y + (top..row).map(|r| row_height(self.model, r)).sum::<f64>()
         }
     }
 
     /// 1-based column at canvas X pixel `x`.
     pub fn pixel_to_col(&self, x: f64) -> i32 {
         let frozen_cols = self.frozen.frozen_cols_count();
-        if x < self.frozen.offset.origin.x {
+        if x < self.frozen.offset.x {
             let mut cx = HEADER_COL_WIDTH;
             let mut result = 1_i32.max(frozen_cols);
             for c in 1..=frozen_cols {
@@ -487,7 +485,7 @@ impl<'a> SheetViewport<'a> {
             result
         } else {
             let start = (frozen_cols + 1).max(self.left_column);
-            let mut cx = self.frozen.offset.origin.x;
+            let mut cx = self.frozen.offset.x;
             let mut c = start;
             loop {
                 let cw = col_width(self.model, c);
@@ -503,7 +501,7 @@ impl<'a> SheetViewport<'a> {
     /// 1-based row at canvas Y pixel `y`.
     pub fn pixel_to_row(&self, y: f64) -> i32 {
         let frozen_rows = self.frozen.frozen_rows_count();
-        if y < self.frozen.offset.origin.y {
+        if y < self.frozen.offset.y {
             let mut cy = HEADER_ROW_HEIGHT;
             let mut result = 1_i32.max(frozen_rows);
             for r in 1..=frozen_rows {
@@ -517,7 +515,7 @@ impl<'a> SheetViewport<'a> {
             result
         } else {
             let start = (frozen_rows + 1).max(self.top_row);
-            let mut cy = self.frozen.offset.origin.y;
+            let mut cy = self.frozen.offset.y;
             let mut r = start;
             loop {
                 let rh = row_height(self.model, r);
@@ -570,7 +568,7 @@ impl<'a> SheetViewport<'a> {
             }
         }
         let start = (frozen_cols + 1).max(self.left_column);
-        let mut cur_x = self.frozen.offset.origin.x;
+        let mut cur_x = self.frozen.offset.x;
         let mut col = start;
         while cur_x < x + hit_zone + 5.0 {
             cur_x += col_width(self.model, col);
@@ -602,7 +600,7 @@ impl<'a> SheetViewport<'a> {
             }
         }
         let start = (frozen_rows + 1).max(self.top_row);
-        let mut cur_y = self.frozen.offset.origin.y;
+        let mut cur_y = self.frozen.offset.y;
         let mut row = start;
         while cur_y < y + hit_zone + 5.0 {
             cur_y += row_height(self.model, row);

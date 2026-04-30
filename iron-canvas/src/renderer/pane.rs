@@ -53,7 +53,7 @@ impl PaneRegion {
             rows,
             cols: vis.first.column..=vis.last.column,
             origin: Point {
-                x: frc.offset.origin.x,
+                x: frc.offset.x,
                 y: HEADER_ROW_HEIGHT + HEADER_OFFSET,
             },
         }
@@ -67,7 +67,7 @@ impl PaneRegion {
             cols,
             origin: Point {
                 x: HEADER_COL_WIDTH + HEADER_OFFSET,
-                y: frc.offset.origin.y,
+                y: frc.offset.y,
             },
         }
     }
@@ -78,8 +78,8 @@ impl PaneRegion {
             rows: vis.first.row..=vis.last.row,
             cols: vis.first.column..=vis.last.column,
             origin: Point {
-                x: frc.offset.origin.x,
-                y: frc.offset.origin.y,
+                x: frc.offset.x,
+                y: frc.offset.y,
             },
         }
     }

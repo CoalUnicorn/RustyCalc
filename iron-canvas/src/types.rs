@@ -120,7 +120,7 @@ mod tests {
         FrozenRC {
             row_band: rows.map(|(s, e)| s..=e),
             col_band: cols.map(|(s, e)| s..=e),
-            offset: crate::geometry::FrozenOffset { origin },
+            offset: origin,
         }
     }
 

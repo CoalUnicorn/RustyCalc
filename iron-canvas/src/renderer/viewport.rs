@@ -101,7 +101,7 @@ impl CanvasRenderer {
                         + HEADER_OFFSET
                         + (1..index).map(|c| col_width(model, c)).sum::<f64>();
                 }
-                frame.frozen.offset.origin.x + frame.offsets.col_left(index)
+                frame.frozen.offset.x + frame.offsets.col_left(index)
             }
             Axis::Row => {
                 let frozen_rows = frame.frozen.frozen_rows_count();
@@ -110,7 +110,7 @@ impl CanvasRenderer {
                         + HEADER_OFFSET
                         + (1..index).map(|r| row_height(model, r)).sum::<f64>();
                 }
-                frame.frozen.offset.origin.y + frame.offsets.row_top(index)
+                frame.frozen.offset.y + frame.offsets.row_top(index)
             }
         }
     }

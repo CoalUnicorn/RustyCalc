@@ -26,8 +26,8 @@ impl CanvasRenderer {
         }
         self.set_stroke_cached(self.theme.grid_separator_color);
 
-        let sep_y = frc.offset.origin.y - FROZEN_SEP / 2.0 + HEADER_OFFSET;
-        let sep_x = frc.offset.origin.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
+        let sep_y = frc.offset.y - FROZEN_SEP / 2.0 + HEADER_OFFSET;
+        let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
 
         self.with_stroke_width(FROZEN_SEP, |this| {
             if frc.row_band.is_some() {
