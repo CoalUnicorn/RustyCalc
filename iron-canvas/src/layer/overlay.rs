@@ -31,11 +31,11 @@ impl OverlayLayer {
     }
 
     pub(crate) fn mark_dirty(&mut self) {
-        self.base.gate.mark_dirty();
+        self.base.mark_dirty();
     }
 
     pub(crate) fn should_paint(&mut self) -> bool {
-        self.base.gate.should_paint()
+        self.base.should_paint()
     }
 
     pub(crate) fn paint(

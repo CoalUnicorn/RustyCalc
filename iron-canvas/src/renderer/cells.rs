@@ -8,7 +8,7 @@ use std::ops::RangeInclusive;
 
 use crate::model::CssColor;
 use crate::renderer::pane::PaneRegion;
-use crate::renderer::text::TextPaint;
+use crate::types::text_paint::TextPaint;
 use crate::theme::CanvasTheme;
 use crate::{col_width, row_height, CanvasModel, CanvasSize, Point};
 
@@ -21,18 +21,26 @@ use crate::renderer::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_W
 use ironcalc_base::types::{BorderItem, BorderStyle, Style};
 
 impl CanvasRenderer {
-    /// Walk one frozen-pane quadrant. Pass 1 paints bg+borders for every
-    /// cell, then pass 2 paints text on top so overflow is never clipped by
-    /// a neighbour's background.
+    /// Walk one frozen-pane quadrant. Streams bg+borders directly from the
+    /// paint iterator and parks per-cell text inputs in `text_slots` for a
+    /// second pass. Text paints last so overflow is never clipped by a
+    /// neighbour's background.
     pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
-        let paints: Vec<CellPaint> = self.paints_in(model, &pane).collect();
-        for p in &paints {
-            self.paint_bg(p);
+        let mut text_slots: Vec<TextSlot> = Vec::new();
+        for p in self.paints_in(model, &pane) {
+            self.paint_bg(&p);
+            self.paint_borders(&p);
+            text_slots.push(TextSlot {
+                addr: p.addr,
+                rect: p.rect,
+                style: p.style,
+            });
         }
-        for p in &paints {
-            self.paint_borders(p);
+        for t in &text_slots {
+            if let Some(tp) = TextPaint::resolve(self, model, t.addr, t.rect, &t.style) {
+                self.paint_text(&tp);
+            }
         }
-        self.paint_pane_text(model, &paints);
     }
 
     /// Fill a cell's background rectangle. Border pass is separate (batched).
@@ -71,20 +79,6 @@ impl CanvasRenderer {
                 self.paint_border(edge, p.rect, &BorderPaint::resolve(item, theme));
             }
         }
-    }
-
-    /// Pass 2: resolve and paint text for every cell in a collected pane.
-    fn paint_pane_text(&self, model: &dyn CanvasModel, paints: &[CellPaint]) {
-        // TEST: paints remove later
-        // Damage tracking to skip cells
-        // let mut c = 0;
-        for p in paints {
-            if let Some(t) = TextPaint::resolve(self, model, p.addr, p.rect, &p.style) {
-                self.paint_text(&t);
-                // c += 1;
-            }
-        }
-        //web_sys::console::log_1(&format!("Pane painted texts: {}", c).into());
     }
 
     /// Stroke one resolved border. `Double`-style borders render as two
@@ -144,6 +138,14 @@ pub(crate) struct CellPaint {
     pub rect: PixelRect,
     pub bg: String,
     pub style: Style,
+}
+
+/// Text-pass input parked during the streaming bg/border walk so the second
+/// pass can paint text on top of every neighbour's already-laid background.
+struct TextSlot {
+    addr: CellAddress,
+    rect: PixelRect,
+    style: Style,
 }
 
 impl CellPaint {

@@ -4,7 +4,6 @@
 use std::fmt::{self, Display};
 use std::ops::RangeInclusive;
 
-use crate::model::RCRange;
 use crate::{CanvasModel, HitTest, ResizeTarget};
 
 pub const HEADER_OFFSET: f64 = 0.5;
@@ -354,24 +353,33 @@ pub struct CellRC {
     pub column: i32,
 }
 
-/// Precomputed pixel offsets for visible rows and columns.
+/// Precomputed pixel offsets for the painted frame.
 ///
-/// Built once per render call from the same iteration used to determine
-/// `VisibleRegion`. Eliminates the O(visible_range × R) summation inside
-/// `cell_x` / `cell_y` - each lookup becomes O(1).
+/// Built once per render call alongside `VisibleRegion`. Every geometry
+/// query (`col_to_x`, `pixel_to_col`, `cell_rect`, …) reads from here, not
+/// from the model — so a hit-test always sees exactly what the renderer
+/// painted on this tick.
 ///
-/// Offsets are relative to `FrozenOffset`: `row_tops[i]` is the Y distance
-/// from `frozen.y` to the top edge of row `(row_start + i as i32)`.
+/// Two cumulative tables, each with one trailing entry so deltas yield
+/// per-cell extents:
+///
+/// * `row_tops` / `col_lefts` cover the **scrollable** band, relative to
+///   `FrozenRC::offset`. Length = `visible_count + 1`.
+/// * `frozen_row_tops` / `frozen_col_lefts` cover the **frozen** band,
+///   relative to the header strip (i.e. start at `0.0`, indexed by
+///   `frozen_index - 1`). Length = `frozen_count + 1`.
 #[derive(Debug, Default)]
 pub(crate) struct PixelOffsets {
     pub row_start: i32,
     pub row_tops: Vec<f64>,
     pub col_start: i32,
     pub col_lefts: Vec<f64>,
+    pub frozen_row_tops: Vec<f64>,
+    pub frozen_col_lefts: Vec<f64>,
 }
 
 impl PixelOffsets {
-    /// Y distance from `frozen.y` to the top edge of `row`.
+    /// Y distance from `frozen.y` to the top edge of visible-band `row`.
     ///
     /// Returns `0.0` for rows outside the precomputed range. In practice
     /// `range_pixel_bounds` clamps oversized selections to the canvas edge
@@ -384,13 +392,78 @@ impl PixelOffsets {
             .unwrap_or(0.0)
     }
 
-    /// X distance from `frozen.x` to the left edge of `col`.
+    /// X distance from `frozen.x` to the left edge of visible-band `col`.
     #[inline]
     pub fn col_left(&self, col: i32) -> f64 {
         self.col_lefts
             .get((col - self.col_start) as usize)
             .copied()
             .unwrap_or(0.0)
+    }
+
+    /// Y distance from the column-header strip to the top of frozen `row`
+    /// (1-based, must be ≤ frozen-rows count). Returns `0.0` for rows
+    /// outside the cached range — caller is expected to gate on the frozen
+    /// band before calling.
+    #[inline]
+    pub fn frozen_row_top(&self, row: i32) -> f64 {
+        self.frozen_row_tops
+            .get((row - 1) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// X distance from the row-header strip to the left of frozen `col`.
+    #[inline]
+    pub fn frozen_col_left(&self, col: i32) -> f64 {
+        self.frozen_col_lefts
+            .get((col - 1) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    /// Height of the visible-band row at `row`, derived from cumulative deltas.
+    /// `0.0` if `row` is outside the visible range.
+    #[inline]
+    pub fn row_extent(&self, row: i32) -> f64 {
+        let i = (row - self.row_start) as usize;
+        match (self.row_tops.get(i), self.row_tops.get(i + 1)) {
+            (Some(a), Some(b)) => b - a,
+            _ => 0.0,
+        }
+    }
+
+    /// Width of the visible-band column at `col`.
+    #[inline]
+    pub fn col_extent(&self, col: i32) -> f64 {
+        let i = (col - self.col_start) as usize;
+        match (self.col_lefts.get(i), self.col_lefts.get(i + 1)) {
+            (Some(a), Some(b)) => b - a,
+            _ => 0.0,
+        }
+    }
+
+    /// Height of the frozen-band row at `row` (1-based).
+    #[inline]
+    pub fn frozen_row_extent(&self, row: i32) -> f64 {
+        let i = (row - 1) as usize;
+        match (self.frozen_row_tops.get(i), self.frozen_row_tops.get(i + 1)) {
+            (Some(a), Some(b)) => b - a,
+            _ => 0.0,
+        }
+    }
+
+    /// Width of the frozen-band column at `col`.
+    #[inline]
+    pub fn frozen_col_extent(&self, col: i32) -> f64 {
+        let i = (col - 1) as usize;
+        match (
+            self.frozen_col_lefts.get(i),
+            self.frozen_col_lefts.get(i + 1),
+        ) {
+            (Some(a), Some(b)) => b - a,
+            _ => 0.0,
+        }
     }
 }
 
@@ -410,6 +483,12 @@ pub(crate) struct FrameContext {
     pub frozen: FrozenRC,
     pub top_row: i32, // from model.get_selected_view() — used by orchestrator change detection
     pub left_column: i32,
+    /// Active selection at paint time, raw `[r1, c1, r2, c2]` from
+    /// `SelectedView.range`. Snapshotting it here keeps `autofill_handle`
+    /// pure (no model read) and pins the handle position to the *painted*
+    /// selection, even if the model's selection mutated between paint and
+    /// the next hit-test.
+    pub selection_range: [i32; 4],
 }
 
 impl FrameContext {
@@ -428,183 +507,181 @@ impl FrameContext {
         let view = model.get_selected_view();
         let frozen = FrozenRC::from_model(model);
         let vis = compute_visible_region(model, &frozen, view.left_column, view.top_row, canvas);
-        let offsets = compute_pixel_offsets(model, &vis);
+        let offsets = compute_pixel_offsets(model, &vis, &frozen);
         FrameContext {
             vis,
             offsets,
             frozen,
             top_row: view.top_row,
             left_column: view.left_column,
+            selection_range: view.range,
         }
     }
 
-    // Pixel <-> cell mapping
+    // ===========================================================
+    // Pixel <-> cell mapping  (snapshot-only)
+    // ===========================================================
     //
-    // All take `&dyn CanvasModel` because per-cell extents (row height, col
-    // width) live on the model, not in the cached frame. Frozen geometry,
-    // scroll anchors, and prefix-sum offsets come from `&self`.
+    // Every method here reads exclusively from `self.offsets`,
+    // `self.frozen`, `self.vis`, and `self.selection_range`. No model
+    // access — what the renderer painted is what gets hit-tested.
+    //
+    // Off-frame inputs are clamped to the painted region (`pixel_to_*`)
+    // or rejected with `None` (`cell_rect`, `autofill_handle`).
+
+    #[inline]
+    fn row_in_frame(&self, row: i32) -> bool {
+        row <= self.frozen.frozen_rows_count()
+            || (row >= self.vis.first.row && row <= self.vis.last.row)
+    }
+
+    #[inline]
+    fn col_in_frame(&self, col: i32) -> bool {
+        col <= self.frozen.frozen_cols_count()
+            || (col >= self.vis.first.column && col <= self.vis.last.column)
+    }
+
+    /// Width of `col` from the snapshot — frozen-band or visible-band.
+    #[inline]
+    fn col_extent_at(&self, col: i32) -> f64 {
+        if col <= self.frozen.frozen_cols_count() {
+            self.offsets.frozen_col_extent(col)
+        } else {
+            self.offsets.col_extent(col)
+        }
+    }
+
+    /// Height of `row` from the snapshot.
+    #[inline]
+    fn row_extent_at(&self, row: i32) -> f64 {
+        if row <= self.frozen.frozen_rows_count() {
+            self.offsets.frozen_row_extent(row)
+        } else {
+            self.offsets.row_extent(row)
+        }
+    }
 
     /// Left-edge X pixel of `col` at this frame's scroll/freeze.
-    pub(crate) fn col_to_x(&self, model: &dyn CanvasModel, col: i32) -> f64 {
-        let frozen_cols = self.frozen.frozen_cols_count();
-        if col <= frozen_cols {
-            HEADER_COL_WIDTH + (1..col).map(|c| col_width(model, c)).sum::<f64>()
+    /// Caller is expected to gate on `col_in_frame`; off-frame yields the
+    /// cumulative-table fallback (`0.0`).
+    pub(crate) fn col_to_x(&self, col: i32) -> f64 {
+        if col <= self.frozen.frozen_cols_count() {
+            HEADER_COL_WIDTH + self.offsets.frozen_col_left(col)
         } else {
-            let left = self.left_column.max(frozen_cols + 1);
-            self.frozen.offset.x + (left..col).map(|c| col_width(model, c)).sum::<f64>()
+            self.frozen.offset.x + self.offsets.col_left(col)
         }
     }
 
-    /// Top-edge Y pixel of `row` at this frame's scroll/freeze.
-    pub(crate) fn row_to_y(&self, model: &dyn CanvasModel, row: i32) -> f64 {
-        let frozen_rows = self.frozen.frozen_rows_count();
-        if row <= frozen_rows {
-            HEADER_ROW_HEIGHT + (1..row).map(|r| row_height(model, r)).sum::<f64>()
+    /// Top-edge Y pixel of `row`.
+    pub(crate) fn row_to_y(&self, row: i32) -> f64 {
+        if row <= self.frozen.frozen_rows_count() {
+            HEADER_ROW_HEIGHT + self.offsets.frozen_row_top(row)
         } else {
-            let top = self.top_row.max(frozen_rows + 1);
-            self.frozen.offset.y + (top..row).map(|r| row_height(model, r)).sum::<f64>()
+            self.frozen.offset.y + self.offsets.row_top(row)
         }
     }
 
-    /// 1-based column at canvas X pixel `x`.
-    ///
-    /// Past `LAST_COLUMN`, the loop caps. For `x` past the right canvas edge
-    /// the call still returns a real column index — it is the caller's job
-    /// (e.g. `hit_test`) to gate against `Outside` semantics.
-    pub(crate) fn pixel_to_col(&self, model: &dyn CanvasModel, x: f64) -> i32 {
+    /// 1-based column at canvas X pixel `x`. Clamps to the painted region:
+    /// past the right edge of the visible band, returns `vis.last.column`
+    /// (rather than walking to `LAST_COLUMN` as the model-walking version
+    /// did — what's not painted can't be hit-tested).
+    pub(crate) fn pixel_to_col(&self, x: f64) -> i32 {
         let frozen_cols = self.frozen.frozen_cols_count();
         if x < self.frozen.offset.x {
-            let mut cx = HEADER_COL_WIDTH;
-            let mut result = 1_i32.max(frozen_cols);
+            let rel = x - HEADER_COL_WIDTH;
             for c in 1..=frozen_cols {
-                let cw = col_width(model, c);
-                if x < cx + cw {
-                    result = c;
-                    break;
+                if rel < self.offsets.frozen_col_lefts[c as usize] {
+                    return c;
                 }
-                cx += cw;
             }
-            result
-        } else {
-            let start = (frozen_cols + 1).max(self.left_column);
-            let mut cx = self.frozen.offset.x;
-            let mut c = start;
-            loop {
-                let cw = col_width(model, c);
-                if x < cx + cw || c >= LAST_COLUMN {
-                    break c;
-                }
-                cx += cw;
-                c += 1;
+            return frozen_cols.max(1);
+        }
+        let rel = x - self.frozen.offset.x;
+        let count = (self.vis.last.column - self.vis.first.column + 1) as usize;
+        for i in 0..count {
+            if rel < self.offsets.col_lefts[i + 1] {
+                return self.offsets.col_start + i as i32;
             }
         }
+        self.vis.last.column
     }
 
-    /// 1-based row at canvas Y pixel `y`.
-    pub(crate) fn pixel_to_row(&self, model: &dyn CanvasModel, y: f64) -> i32 {
+    /// 1-based row at canvas Y pixel `y`. Clamps to the painted region.
+    pub(crate) fn pixel_to_row(&self, y: f64) -> i32 {
         let frozen_rows = self.frozen.frozen_rows_count();
         if y < self.frozen.offset.y {
-            let mut cy = HEADER_ROW_HEIGHT;
-            let mut result = 1_i32.max(frozen_rows);
+            let rel = y - HEADER_ROW_HEIGHT;
             for r in 1..=frozen_rows {
-                let rh = row_height(model, r);
-                if y < cy + rh {
-                    result = r;
-                    break;
+                if rel < self.offsets.frozen_row_tops[r as usize] {
+                    return r;
                 }
-                cy += rh;
             }
-            result
-        } else {
-            let start = (frozen_rows + 1).max(self.top_row);
-            let mut cy = self.frozen.offset.y;
-            let mut r = start;
-            loop {
-                let rh = row_height(model, r);
-                if y < cy + rh || r >= LAST_ROW {
-                    break r;
-                }
-                cy += rh;
-                r += 1;
+            return frozen_rows.max(1);
+        }
+        let rel = y - self.frozen.offset.y;
+        let count = (self.vis.last.row - self.vis.first.row + 1) as usize;
+        for i in 0..count {
+            if rel < self.offsets.row_tops[i + 1] {
+                return self.offsets.row_start + i as i32;
             }
         }
+        self.vis.last.row
     }
 
     /// Pixel rect of `(row, col)` if it falls inside this frame's painted
     /// region (frozen bands + visible scrollable area). Returns `None` for
-    /// off-screen cells — the cached frame's offsets only cover what was
-    /// laid out, and computing for off-screen cells would require model
-    /// walks the canvas hasn't performed.
-    pub(crate) fn cell_rect(
-        &self,
-        model: &dyn CanvasModel,
-        row: i32,
-        col: i32,
-    ) -> Option<PixelRect> {
-        let frozen_rows = self.frozen.frozen_rows_count();
-        let frozen_cols = self.frozen.frozen_cols_count();
-        let row_in_frame =
-            row <= frozen_rows || (row >= self.vis.first.row && row <= self.vis.last.row);
-        let col_in_frame =
-            col <= frozen_cols || (col >= self.vis.first.column && col <= self.vis.last.column);
-        if !row_in_frame || !col_in_frame {
+    /// off-screen cells — the snapshot only describes what was painted.
+    pub(crate) fn cell_rect(&self, row: i32, col: i32) -> Option<PixelRect> {
+        if !self.row_in_frame(row) || !self.col_in_frame(col) {
             return None;
         }
         Some(PixelRect {
             top_left: Point {
-                x: self.col_to_x(model, col),
-                y: self.row_to_y(model, row),
+                x: self.col_to_x(col),
+                y: self.row_to_y(row),
             },
-            width: col_width(model, col),
-            height: row_height(model, row),
+            width: self.col_extent_at(col),
+            height: self.row_extent_at(row),
         })
     }
 
-    /// Bottom-right pixel of the active selection — the autofill handle
-    /// anchor. `None` for full-row/column/sheet selections, where walking
-    /// to the trailing index would land off-screen.
-    pub(crate) fn autofill_handle(&self, model: &dyn CanvasModel) -> Option<Point> {
-        let area = RCRange::from_view(model).normalized();
-        if area.r2 >= LAST_ROW || area.c2 >= LAST_COLUMN {
+    /// Bottom-right pixel of the painted selection — the autofill handle
+    /// anchor. `None` for full-row/column/sheet selections (trailing index
+    /// at the spreadsheet bound) and for selections whose bottom-right is
+    /// off-frame. Reads `selection_range` captured at paint time, so the
+    /// handle position is locked to what's on screen even if the model's
+    /// selection has since moved.
+    pub(crate) fn autofill_handle(&self) -> Option<Point> {
+        let r2 = self.selection_range[0].max(self.selection_range[2]);
+        let c2 = self.selection_range[1].max(self.selection_range[3]);
+        if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
+            return None;
+        }
+        if !self.row_in_frame(r2) || !self.col_in_frame(c2) {
             return None;
         }
         Some(Point {
-            x: self.col_to_x(model, area.c2) + col_width(model, area.c2),
-            y: self.row_to_y(model, area.r2) + row_height(model, area.r2),
+            x: self.col_to_x(c2) + self.col_extent_at(c2),
+            y: self.row_to_y(r2) + self.row_extent_at(r2),
         })
     }
 
     /// Column whose RIGHT edge is within `hit_zone` px of `x`, or `None`.
-    /// Restricted to columns visible at the current scroll/freeze.
-    pub(crate) fn col_boundary_at(
-        &self,
-        model: &dyn CanvasModel,
-        x: f64,
-        hit_zone: f64,
-    ) -> Option<i32> {
+    pub(crate) fn col_boundary_at(&self, x: f64, hit_zone: f64) -> Option<i32> {
         let frozen_cols = self.frozen.frozen_cols_count();
-        if frozen_cols > 0 {
-            let mut cur_x = HEADER_COL_WIDTH;
-            for col in 1..=frozen_cols {
-                cur_x += col_width(model, col);
-                if (cur_x - x).abs() <= hit_zone {
-                    return Some(col);
-                }
+        for c in 1..=frozen_cols {
+            let cur_x = HEADER_COL_WIDTH + self.offsets.frozen_col_lefts[c as usize];
+            if (cur_x - x).abs() <= hit_zone {
+                return Some(c);
             }
         }
-        let start = (frozen_cols + 1).max(self.left_column);
-        let mut cur_x = self.frozen.offset.x;
-        let mut col = start;
-        while cur_x < x + hit_zone + 5.0 {
-            cur_x += col_width(model, col);
+        let count = (self.vis.last.column - self.vis.first.column + 1) as usize;
+        for i in 0..count {
+            let cur_x = self.frozen.offset.x + self.offsets.col_lefts[i + 1];
             if (cur_x - x).abs() <= hit_zone {
-                return Some(col);
+                return Some(self.offsets.col_start + i as i32);
             }
             if cur_x > x + hit_zone {
-                break;
-            }
-            col += 1;
-            if col > LAST_COLUMN {
                 break;
             }
         }
@@ -612,35 +689,21 @@ impl FrameContext {
     }
 
     /// Row whose BOTTOM edge is within `hit_zone` px of `y`, or `None`.
-    pub(crate) fn row_boundary_at(
-        &self,
-        model: &dyn CanvasModel,
-        y: f64,
-        hit_zone: f64,
-    ) -> Option<i32> {
+    pub(crate) fn row_boundary_at(&self, y: f64, hit_zone: f64) -> Option<i32> {
         let frozen_rows = self.frozen.frozen_rows_count();
-        if frozen_rows > 0 {
-            let mut cur_y = HEADER_ROW_HEIGHT;
-            for row in 1..=frozen_rows {
-                cur_y += row_height(model, row);
-                if (cur_y - y).abs() <= hit_zone {
-                    return Some(row);
-                }
+        for r in 1..=frozen_rows {
+            let cur_y = HEADER_ROW_HEIGHT + self.offsets.frozen_row_tops[r as usize];
+            if (cur_y - y).abs() <= hit_zone {
+                return Some(r);
             }
         }
-        let start = (frozen_rows + 1).max(self.top_row);
-        let mut cur_y = self.frozen.offset.y;
-        let mut row = start;
-        while cur_y < y + hit_zone + 5.0 {
-            cur_y += row_height(model, row);
+        let count = (self.vis.last.row - self.vis.first.row + 1) as usize;
+        for i in 0..count {
+            let cur_y = self.frozen.offset.y + self.offsets.row_tops[i + 1];
             if (cur_y - y).abs() <= hit_zone {
-                return Some(row);
+                return Some(self.offsets.row_start + i as i32);
             }
             if cur_y > y + hit_zone {
-                break;
-            }
-            row += 1;
-            if row > LAST_ROW {
                 break;
             }
         }
@@ -652,11 +715,9 @@ impl FrameContext {
     /// Map `(x, y)` to what the user sees against this frame.
     ///
     /// Negative coordinates return `Outside` (off-canvas). Past the right /
-    /// bottom edge we still return the trailing visible cell — the canvas
+    /// bottom edge the trailing visible cell is returned — the canvas
     /// element's own bounds clip the event before it reaches us in practice.
-    /// Header detection uses the same `HEADER_*` constants the renderer paints
-    /// against, so click targets match exactly.
-    pub(crate) fn hit_test(&self, model: &dyn CanvasModel, x: f64, y: f64) -> HitTest {
+    pub(crate) fn hit_test(&self, x: f64, y: f64) -> HitTest {
         if x < 0.0 || y < 0.0 {
             return HitTest::Outside;
         }
@@ -664,17 +725,14 @@ impl FrameContext {
             return HitTest::Corner;
         }
         if y < HEADER_ROW_HEIGHT {
-            return HitTest::ColHeader(self.pixel_to_col(model, x));
+            return HitTest::ColHeader(self.pixel_to_col(x));
         }
         if x < HEADER_COL_WIDTH {
-            return HitTest::RowHeader(self.pixel_to_row(model, y));
+            return HitTest::RowHeader(self.pixel_to_row(y));
         }
-        // Compute cell coords once — both the autofill-handle branch and the
-        // Cell fall-through need them, and `pixel_to_*` walks the model so we
-        // don't want to do it twice.
-        let row = self.pixel_to_row(model, y);
-        let column = self.pixel_to_col(model, x);
-        if let Some(p) = self.autofill_handle(model) {
+        let row = self.pixel_to_row(y);
+        let column = self.pixel_to_col(x);
+        if let Some(p) = self.autofill_handle() {
             if (x - p.x).abs() <= AUTOFILL_HANDLE_PX && (y - p.y).abs() <= AUTOFILL_HANDLE_PX {
                 return HitTest::AutofillHandle { row, column };
             }
@@ -687,20 +745,15 @@ impl FrameContext {
     /// column-header strip, and vice versa.
     pub(crate) fn resize_handle_at(
         &self,
-        model: &dyn CanvasModel,
         x: f64,
         y: f64,
         tolerance: f64,
     ) -> Option<ResizeTarget> {
         if y < HEADER_ROW_HEIGHT && x > HEADER_COL_WIDTH {
-            return self
-                .col_boundary_at(model, x, tolerance)
-                .map(ResizeTarget::Column);
+            return self.col_boundary_at(x, tolerance).map(ResizeTarget::Column);
         }
         if x < HEADER_COL_WIDTH && y > HEADER_ROW_HEIGHT {
-            return self
-                .row_boundary_at(model, y, tolerance)
-                .map(ResizeTarget::Row);
+            return self.row_boundary_at(y, tolerance).map(ResizeTarget::Row);
         }
         None
     }
@@ -757,11 +810,16 @@ pub(crate) fn compute_visible_region(
     }
 }
 
-/// Prefix-sum pixel-offset table built once per tick by
-/// `FrameContext::current`. Each `row_tops[i]` is cumulative Y distance from
-/// `frozen.y` to the top of row `(vis.first.row + i)`. Single O(visible)
-/// pass — the same iteration `compute_visible_region` already performed.
-pub(crate) fn compute_pixel_offsets(model: &dyn CanvasModel, vis: &VisibleRegion) -> PixelOffsets {
+/// Prefix-sum pixel-offset tables built once per tick by
+/// `FrameContext::current`. Covers both the frozen band and the scrollable
+/// visible band — every downstream geometry query reads from here, never
+/// the model. Each table has a trailing entry so `[i+1] - [i]` yields the
+/// per-cell extent.
+pub(crate) fn compute_pixel_offsets(
+    model: &dyn CanvasModel,
+    vis: &VisibleRegion,
+    frozen: &FrozenRC,
+) -> PixelOffsets {
     let mut row_tops = Vec::with_capacity((vis.last.row - vis.first.row + 2) as usize);
     let mut acc = 0.0_f64;
     for r in vis.first.row..=vis.last.row {
@@ -778,10 +836,30 @@ pub(crate) fn compute_pixel_offsets(model: &dyn CanvasModel, vis: &VisibleRegion
     }
     col_lefts.push(acc);
 
+    let frozen_rows = frozen.frozen_rows_count();
+    let mut frozen_row_tops = Vec::with_capacity((frozen_rows + 1) as usize);
+    acc = 0.0;
+    for r in 1..=frozen_rows {
+        frozen_row_tops.push(acc);
+        acc += row_height(model, r);
+    }
+    frozen_row_tops.push(acc);
+
+    let frozen_cols = frozen.frozen_cols_count();
+    let mut frozen_col_lefts = Vec::with_capacity((frozen_cols + 1) as usize);
+    acc = 0.0;
+    for c in 1..=frozen_cols {
+        frozen_col_lefts.push(acc);
+        acc += col_width(model, c);
+    }
+    frozen_col_lefts.push(acc);
+
     PixelOffsets {
         row_start: vis.first.row,
         row_tops,
         col_start: vis.first.column,
         col_lefts,
+        frozen_row_tops,
+        frozen_col_lefts,
     }
 }

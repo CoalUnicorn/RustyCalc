@@ -129,10 +129,45 @@ pub struct CanvasRenderer {
     /// Per-frame canvas state cache. Avoids redundant JS boundary crossings
     /// when adjacent cells share the same fill, stroke, font, or line width.
     /// `Cell<T>` allows mutation through `&self` so paint helpers keep their immutable signature.
-    last_fill: Cell<String>,
-    last_stroke: Cell<String>,
-    last_font: Cell<String>,
+    last_fill: Cell<CachedColor>,
+    last_stroke: Cell<CachedColor>,
+    last_font: Cell<CachedColor>,
     last_line_width: Cell<f64>,
+}
+
+/// Per-frame ctx-state cache entry. The `Static` arm carries `&'static str`
+/// for theme-driven calls so cache misses skip the `to_string()` allocation
+/// the previous `Cell<String>` cache forced. `Owned` keeps the dynamic path
+/// (per-cell colors built from `CssColor::new`) intact.
+#[derive(Default)]
+pub(super) enum CachedColor {
+    #[default]
+    Empty,
+    Static(&'static str),
+    Owned(String),
+}
+
+impl CachedColor {
+    /// Compare against an arbitrary `&str` without forcing a new allocation
+    /// on a cache hit. `Static` and `Owned` both fall back to value compare.
+    pub(super) fn matches(&self, color: &str) -> bool {
+        match self {
+            CachedColor::Empty => false,
+            CachedColor::Static(s) => *s == color,
+            CachedColor::Owned(s) => s == color,
+        }
+    }
+
+    /// Pointer-equality compare against a `&'static str`. The two `Static`
+    /// arms are cheap; `Owned` still falls back to value compare so a
+    /// dynamic→static transition is detected correctly.
+    pub(super) fn matches_static(&self, color: &'static str) -> bool {
+        match self {
+            CachedColor::Empty => false,
+            CachedColor::Static(s) => std::ptr::eq(*s, color),
+            CachedColor::Owned(s) => s == color,
+        }
+    }
 }
 
 impl CanvasRenderer {
@@ -191,10 +226,10 @@ impl CanvasRenderer {
             theme,
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
-            last_fill: Cell::new("".to_string()),
-            last_stroke: Cell::new("".to_string()),
+            last_fill: Cell::new(CachedColor::Empty),
+            last_stroke: Cell::new(CachedColor::Empty),
             last_line_width: Cell::new(0.0),
-            last_font: Cell::new("".to_string()),
+            last_font: Cell::new(CachedColor::Empty),
         }
     }
 
@@ -234,9 +269,9 @@ impl CanvasRenderer {
     /// invalidation the cache would skip writes that the ctx has actually
     /// forgotten and the next paint would use the wrong style.
     pub(crate) fn invalidate_paint_cache(&mut self) {
-        self.last_fill.set(String::new());
-        self.last_stroke.set(String::new());
-        self.last_font.set(String::new());
+        self.last_fill.set(CachedColor::Empty);
+        self.last_stroke.set(CachedColor::Empty);
+        self.last_font.set(CachedColor::Empty);
         self.last_line_width.set(0.0);
     }
 

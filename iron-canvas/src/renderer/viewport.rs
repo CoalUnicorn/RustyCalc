@@ -39,6 +39,8 @@ impl CanvasRenderer {
             return None;
         }
 
+        //let xn =
+
         let x = self.cell_x(model, range.c1, frame);
         let y = self.cell_y(model, range.r1, frame);
         let right = if range.c2 > frame.vis.last.column {

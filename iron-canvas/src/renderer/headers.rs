@@ -24,7 +24,7 @@ impl CanvasRenderer {
         if frc.row_band.is_none() && frc.col_band.is_none() {
             return;
         }
-        self.set_stroke_cached(self.theme.grid_separator_color);
+        self.set_stroke_static(self.theme.grid_separator_color);
 
         let sep_y = frc.offset.y - FROZEN_SEP / 2.0 + HEADER_OFFSET;
         let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
@@ -61,7 +61,7 @@ impl CanvasRenderer {
         };
         self.rect_fill(corner, self.theme.header_bg);
 
-        self.set_stroke_cached(self.theme.header_border_color);
+        self.set_stroke_static(self.theme.header_border_color);
         self.set_line_width_cached(STANDARD_BORDER_WIDTH);
         self.stroke_hline(
             Span {
@@ -90,32 +90,9 @@ impl CanvasRenderer {
         frozen_origin: f64,
     ) {
         self.set_font_cached(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
-
-        let mut frozen_cursor = axis.strip_start();
-        if let Some(band) = frozen_band {
-            for i in band.clone() {
-                let t = axis.extent(model, i);
-                if t <= 0.0 {
-                    continue;
-                }
-                self.draw_header_cell(axis, i, frozen_cursor, t, false);
-                frozen_cursor += t;
-            }
-        }
-
-        let mut scroll_cursor = if frozen_band.is_some() {
-            frozen_origin
-        } else {
-            axis.strip_start()
-        };
-        for i in axis.visible_band(vis) {
-            let t = axis.extent(model, i);
-            if t <= 0.0 {
-                continue;
-            }
-            self.draw_header_cell(axis, i, scroll_cursor, t, false);
-            scroll_cursor += t;
-        }
+        self.walk_header_strip(model, axis, vis, frozen_band, frozen_origin, |this, i, along, t| {
+            this.draw_header_cell(axis, i, along, t, false);
+        });
     }
 
     /// Overlay pass repainting only selected header cells so the grid layer
@@ -131,6 +108,26 @@ impl CanvasRenderer {
         let view = model.get_selected_view();
         let (sel_start, sel_end) = axis.selection_range(&view.range);
 
+        self.walk_header_strip(model, axis, vis, frozen_band, frozen_origin, |this, i, along, t| {
+            if i >= sel_start && i <= sel_end {
+                this.draw_header_cell(axis, i, along, t, true);
+            }
+        });
+    }
+
+    /// Shared scaffold: walk the frozen band (if any) then the visible band,
+    /// threading per-cell extents through a moving cursor along `axis`.
+    /// `visit` receives `(self, index, along, thickness)` per non-collapsed
+    /// cell — base/highlight passes diverge only in what they paint.
+    fn walk_header_strip(
+        &self,
+        model: &dyn CanvasModel,
+        axis: Axis,
+        vis: &VisibleRegion,
+        frozen_band: Option<&RangeInclusive<i32>>,
+        frozen_origin: f64,
+        mut visit: impl FnMut(&Self, i32, f64, f64),
+    ) {
         let mut frozen_cursor = axis.strip_start();
         if let Some(band) = frozen_band {
             for i in band.clone() {
@@ -138,9 +135,7 @@ impl CanvasRenderer {
                 if t <= 0.0 {
                     continue;
                 }
-                if i >= sel_start && i <= sel_end {
-                    self.draw_header_cell(axis, i, frozen_cursor, t, true);
-                }
+                visit(self, i, frozen_cursor, t);
                 frozen_cursor += t;
             }
         }
@@ -155,9 +150,7 @@ impl CanvasRenderer {
             if t <= 0.0 {
                 continue;
             }
-            if i >= sel_start && i <= sel_end {
-                self.draw_header_cell(axis, i, scroll_cursor, t, true);
-            }
+            visit(self, i, scroll_cursor, t);
             scroll_cursor += t;
         }
     }
@@ -189,7 +182,7 @@ impl CanvasRenderer {
         self.rect_fill(full, self.theme.header_border_color);
         self.rect_fill(body, body_bg);
 
-        self.set_fill_cached(text_color);
+        self.set_fill_static(text_color);
         let center = full.center();
         let label = match axis {
             Axis::Row => index.to_string(),

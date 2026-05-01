@@ -8,7 +8,7 @@
 //! refs like `=BB3`.
 
 use crate::model::{FormulaRef, RCRange, SheetArea};
-use crate::theme::FORMULA_REF_COLORS;
+use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
 use crate::{CanvasModel, Point};
 
 use super::super::geometry::{PixelRect, AUTOFILL_HANDLE_PX};
@@ -33,8 +33,10 @@ pub struct AutofillTarget {
 pub(crate) enum DashFill {
     /// Outline only (used for clipboard marching ants).
     Outline,
-    /// Outline + semi-transparent fill tint (used for point-mode range).
-    Tinted,
+    /// Outline + semi-transparent fill tint (used for point-mode range and
+    /// formula refs). Carries a precomputed `rgba(...)` tint so paint never
+    /// allocates per frame.
+    Tinted(&'static str),
 }
 
 impl CanvasRenderer {
@@ -129,7 +131,7 @@ impl CanvasRenderer {
             frame,
             pr.normalized(),
             self.theme.pointing,
-            DashFill::Tinted,
+            DashFill::Tinted(self.theme.pointing_tint),
         );
     }
 
@@ -146,19 +148,20 @@ impl CanvasRenderer {
             if fr.sheet_area.sheet != sheet {
                 continue;
             }
+            let idx = fr.color_idx % FORMULA_REF_COLORS.len();
             self.draw_dashed_range(
                 model,
                 frame,
                 fr.sheet_area.range.normalized(),
-                FORMULA_REF_COLORS[fr.color_idx % FORMULA_REF_COLORS.len()],
-                DashFill::Tinted,
+                FORMULA_REF_COLORS[idx],
+                DashFill::Tinted(FORMULA_REF_TINTS[idx]),
             );
         }
     }
 
     /// Dashed rectangle over `range`. Used for clipboard marching ants
     /// (`DashFill::Outline`) and point-mode / formula-ref highlights
-    /// (`DashFill::Tinted`, which also draws an 8% fill).
+    /// (`DashFill::Tinted`, which also draws the carried 8% fill).
     pub(super) fn draw_dashed_range(
         &self,
         model: &dyn CanvasModel,
@@ -173,22 +176,8 @@ impl CanvasRenderer {
 
         self.rect_dashed(b, color, DASHED_BORDER_WIDTH);
 
-        if fill == DashFill::Tinted {
-            let tint = hex_to_rgba(color, 0.08);
-            self.rect_fill(b, &tint);
+        if let DashFill::Tinted(tint) = fill {
+            self.rect_fill(b, tint);
         }
     }
-}
-
-/// Convert a 6-digit hex color (`"#1E6FD9"`) to an `rgba(...)` CSS string
-/// with the given alpha. Falls back to transparent black on malformed input.
-fn hex_to_rgba(hex: &str, alpha: f64) -> String {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() != 6 {
-        return format!("rgba(0,0,0,{alpha})");
-    }
-    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-    format!("rgba({r},{g},{b},{alpha})")
 }

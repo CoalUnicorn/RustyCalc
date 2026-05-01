@@ -7,7 +7,6 @@ use crate::theme::CanvasTheme;
 use crate::theme::LIGHT;
 use crate::CanvasModel;
 use crate::CanvasRenderer;
-use crate::CanvasSize;
 
 pub(crate) struct GridLayer {
     base: LayerBase,
@@ -56,10 +55,6 @@ impl GridLayer {
 
     pub(crate) fn should_paint(&mut self) -> bool {
         self.base.should_paint()
-    }
-
-    pub(crate) fn canvas_size(&self) -> CanvasSize {
-        self.base.canvas_size()
     }
 
     /// Resize the backing store. Ports the guard from `CanvasRenderer::new`:

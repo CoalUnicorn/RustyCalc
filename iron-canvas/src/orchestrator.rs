@@ -3,7 +3,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::geometry::{FrameContext, PixelRect, Point};
+use crate::geometry::{CanvasSize, FrameContext, PixelRect, Point};
 use crate::layer::{GridLayer, OverlayLayer};
 use crate::theme::{CanvasTheme, DARK, LIGHT};
 use crate::types::RenderOverlays;
@@ -27,6 +27,12 @@ pub struct IronCanvas {
     overlays: RenderOverlays,
     model: Option<Rc<dyn CanvasModel>>,
     last_frame: Option<FrameContext>,
+    /// Logical (CSS) canvas size — written by `resize`, read by `paint_if_dirty`
+    /// when building the shared `FrameContext`. Owning it here removes the
+    /// per-paint `grid.canvas_size()` peek and makes the "both layers are the
+    /// same size" invariant a property of the orchestrator, not a coincidence
+    /// of the atomic resize fan-out.
+    size: CanvasSize,
 }
 
 #[wasm_bindgen]
@@ -45,12 +51,14 @@ impl IronCanvas {
             overlays: RenderOverlays::default(),
             model: None,
             last_frame: None,
+            size: CanvasSize { w: 0.0, h: 0.0 },
         })
     }
 
     /// Fan out resize atomically. Both layers resize in one call; partial-resize
     /// state is unreachable because there is no public per-layer resize method.
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
+        self.size = CanvasSize { w: css_w, h: css_h };
         self.grid.resize(css_w, css_h, dpr);
         self.overlay.resize(css_w, css_h, dpr);
     }
@@ -120,7 +128,7 @@ impl IronCanvas {
         // visible region, frozen geometry, and prefix-sum pixel offsets.
         // The same `last_frame` is later read by `hit_test`, `cell_rect`, and
         // `resize_handle_at` so input handlers see exactly what was painted.
-        let frame = FrameContext::current(model, self.grid.canvas_size());
+        let frame = FrameContext::current(model, self.size);
 
         if grid_dirty {
             self.grid.paint(self.theme, model, &frame);
@@ -229,10 +237,10 @@ impl IronCanvas {
     /// frame. Returns `Outside` before the first paint or for off-canvas
     /// points (negative coordinates).
     pub fn hit_test(&self, x: f64, y: f64) -> HitTest {
-        let (Some(frame), Some(model)) = (self.last_frame.as_ref(), self.model.as_deref()) else {
+        let Some(frame) = self.last_frame.as_ref() else {
             return HitTest::Outside;
         };
-        frame.hit_test(model, x, y)
+        frame.hit_test(x, y)
     }
 
     /// Probe for a row/column resize handle near `(x, y)`. `tolerance` is the
@@ -240,29 +248,24 @@ impl IronCanvas {
     /// it tracks cursor styling, not paint geometry. Returns `None` before
     /// the first paint.
     pub fn resize_handle_at(&self, x: f64, y: f64, tolerance: f64) -> Option<ResizeTarget> {
-        let frame = self.last_frame.as_ref()?;
-        let model = self.model.as_deref()?;
-        frame.resize_handle_at(model, x, y, tolerance)
+        self.last_frame.as_ref()?.resize_handle_at(x, y, tolerance)
     }
 
     /// Pixel rect of `(row, column)` in the last painted frame's coordinate
     /// space. Returns `None` before the first paint or for cells outside the
     /// frame's visible region (frozen bands + scrollable area).
     pub fn cell_rect(&self, row: i32, column: i32) -> Option<PixelRect> {
-        let frame = self.last_frame.as_ref()?;
-        let model = self.model.as_deref()?;
-        frame.cell_rect(model, row, column)
+        self.last_frame.as_ref()?.cell_rect(row, column)
     }
 
     /// Pixel position of the autofill handle for the active selection in the
-    /// last painted frame, or `None` for full-row/column/sheet selections.
-    /// Used by callers that need the handle's *position* (e.g. drag-start
-    /// state); for "is the cursor *over* it?" use `hit_test` and match on
+    /// last painted frame, or `None` for full-row/column/sheet selections
+    /// or selections whose bottom-right is off-frame. Used by callers that
+    /// need the handle's *position* (e.g. drag-start state); for "is the
+    /// cursor *over* it?" use `hit_test` and match on
     /// `HitTest::AutofillHandle` instead.
     pub fn autofill_handle(&self) -> Option<Point> {
-        let frame = self.last_frame.as_ref()?;
-        let model = self.model.as_deref()?;
-        frame.autofill_handle(model)
+        self.last_frame.as_ref()?.autofill_handle()
     }
 
     pub fn request_overlay_repaint(&mut self) {

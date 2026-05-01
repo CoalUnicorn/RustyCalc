@@ -149,6 +149,8 @@ fn pixel_offsets_row_top_returns_zero_outside_precomputed_range() {
         row_tops: vec![0.0, 20.0, 40.0],
         col_start: 5,
         col_lefts: vec![0.0, 60.0],
+        frozen_row_tops: vec![0.0],
+        frozen_col_lefts: vec![0.0],
     };
     assert_eq!(off.row_top(10), 0.0);
     assert_eq!(off.row_top(11), 20.0);
@@ -162,9 +164,8 @@ fn pixel_offsets_row_top_returns_zero_outside_precomputed_range() {
 //
 // The frame is built fresh per test from the mock model and a canvas
 // size large enough to make the test cells fall inside the visible
-// region (so `cell_rect` returns Some). Methods that need per-cell
-// extents take `&m` as an explicit param — frame caches geometry, model
-// caches dimensions.
+// region (so `cell_rect` returns Some). Queries are snapshot-only —
+// every position lookup reads from the frame, never the model.
 
 fn test_canvas() -> CanvasSize {
     CanvasSize {
@@ -177,7 +178,7 @@ fn test_canvas() -> CanvasSize {
 fn cell_rect_at_origin_starts_at_top_left_header_corner() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
-    let r = frame.cell_rect(&m, 1, 1).expect("origin cell is on screen");
+    let r = frame.cell_rect(1, 1).expect("origin cell is on screen");
     assert_eq!(r.top_left.x, HEADER_COL_WIDTH);
     assert_eq!(r.top_left.y, HEADER_ROW_HEIGHT);
     assert_eq!(r.width, DEFAULT_COL_WIDTH);
@@ -191,8 +192,8 @@ fn col_to_x_inside_frozen_band_skips_frozen_offset() {
         ..Default::default()
     };
     let frame = FrameContext::current(&m, test_canvas());
-    assert_eq!(frame.col_to_x(&m, 1), HEADER_COL_WIDTH);
-    assert_eq!(frame.col_to_x(&m, 2), HEADER_COL_WIDTH + DEFAULT_COL_WIDTH);
+    assert_eq!(frame.col_to_x(1), HEADER_COL_WIDTH);
+    assert_eq!(frame.col_to_x(2), HEADER_COL_WIDTH + DEFAULT_COL_WIDTH);
 }
 
 #[test]
@@ -205,8 +206,8 @@ fn col_to_x_past_frozen_seam_uses_frozen_offset_and_left_column() {
     let frame = FrameContext::current(&m, test_canvas());
     let origin_x = frame.frozen.offset.x;
     // col 5 is the first scrollable on screen → at the frozen offset
-    assert_eq!(frame.col_to_x(&m, 5), origin_x);
-    assert_eq!(frame.col_to_x(&m, 6), origin_x + DEFAULT_COL_WIDTH);
+    assert_eq!(frame.col_to_x(5), origin_x);
+    assert_eq!(frame.col_to_x(6), origin_x + DEFAULT_COL_WIDTH);
 }
 
 #[test]
@@ -216,7 +217,7 @@ fn autofill_handle_is_none_for_full_sheet_selection() {
         ..Default::default()
     };
     let frame = FrameContext::current(&m, test_canvas());
-    assert!(frame.autofill_handle(&m).is_none());
+    assert!(frame.autofill_handle().is_none());
 }
 
 #[test]
@@ -227,10 +228,10 @@ fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
     };
     let frame = FrameContext::current(&m, test_canvas());
     let p = frame
-        .autofill_handle(&m)
+        .autofill_handle()
         .expect("finite selection has handle");
-    assert_eq!(p.x, frame.col_to_x(&m, 5) + DEFAULT_COL_WIDTH);
-    assert_eq!(p.y, frame.row_to_y(&m, 4) + DEFAULT_ROW_HEIGHT);
+    assert_eq!(p.x, frame.col_to_x(5) + DEFAULT_COL_WIDTH);
+    assert_eq!(p.y, frame.row_to_y(4) + DEFAULT_ROW_HEIGHT);
 }
 
 #[test]
@@ -239,22 +240,22 @@ fn cell_rect_off_screen_returns_none() {
     // header, so row 50 is well past the visible region.
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, CanvasSize { w: 200.0, h: 100.0 });
-    assert!(frame.cell_rect(&m, 50, 1).is_none());
+    assert!(frame.cell_rect(50, 1).is_none());
 }
 
 #[test]
 fn hit_test_corner() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
-    assert_eq!(frame.hit_test(&m, 5.0, 5.0), HitTest::Corner);
+    assert_eq!(frame.hit_test(5.0, 5.0), HitTest::Corner);
 }
 
 #[test]
 fn hit_test_negative_is_outside() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
-    assert_eq!(frame.hit_test(&m, -1.0, 10.0), HitTest::Outside);
-    assert_eq!(frame.hit_test(&m, 10.0, -1.0), HitTest::Outside);
+    assert_eq!(frame.hit_test(-1.0, 10.0), HitTest::Outside);
+    assert_eq!(frame.hit_test(10.0, -1.0), HitTest::Outside);
 }
 
 #[test]
@@ -262,7 +263,7 @@ fn hit_test_col_header_when_y_in_strip() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
     // y inside header strip, x past row-header strip
-    match frame.hit_test(&m, HEADER_COL_WIDTH + 5.0, 5.0) {
+    match frame.hit_test(HEADER_COL_WIDTH + 5.0, 5.0) {
         HitTest::ColHeader(c) => assert!(c >= 1),
         other => panic!("expected ColHeader, got {:?}", other),
     }
@@ -272,7 +273,7 @@ fn hit_test_col_header_when_y_in_strip() {
 fn hit_test_cell_in_grid() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
-    match frame.hit_test(&m, HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0) {
+    match frame.hit_test(HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0) {
         HitTest::Cell { row, column } => {
             assert!(row >= 1 && column >= 1);
         }
@@ -286,7 +287,7 @@ fn resize_handle_at_off_strip_is_none() {
     let frame = FrameContext::current(&m, test_canvas());
     // Inside cell grid → no resize handle
     assert!(frame
-        .resize_handle_at(&m, HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0, 4.0)
+        .resize_handle_at(HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0, 4.0)
         .is_none());
 }
 
@@ -302,8 +303,8 @@ fn pixel_to_col_round_trips_col_to_x() {
     };
     let frame = FrameContext::current(&m, test_canvas());
     for &c in &[1_i32, 2, 5, 6, 8] {
-        let x = frame.col_to_x(&m, c);
+        let x = frame.col_to_x(c);
         // Nudge +0.5 to land safely inside the cell (avoid the edge).
-        assert_eq!(frame.pixel_to_col(&m, x + 0.5), c, "round-trip col {}", c);
+        assert_eq!(frame.pixel_to_col(x + 0.5), c, "round-trip col {}", c);
     }
 }

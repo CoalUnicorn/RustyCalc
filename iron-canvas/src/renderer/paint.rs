@@ -9,7 +9,7 @@
 use crate::Span;
 
 use super::super::geometry::{Line, PixelRect};
-use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
+use super::{CachedColor, CanvasRenderer, STANDARD_BORDER_WIDTH};
 
 impl CanvasRenderer {
     /// Fill `rect` with a solid color.
@@ -87,37 +87,63 @@ impl CanvasRenderer {
         self.ctx.stroke();
     }
 
-    /// Set fill style, skipping the JS call when unchanged.
-    /// Uses `Cell::take/set` to compare without allocating on a cache hit.
+    /// Set fill style, skipping the JS call when unchanged. The cache hit
+    /// path takes the previous value out and compares without allocating;
+    /// the miss path allocates a fresh `String` because the input is dynamic.
+    /// Static (theme) callsites should prefer `set_fill_static`.
     pub(super) fn set_fill_cached(&self, color: &str) {
         let prev = self.last_fill.take();
-        if prev != color {
-            self.ctx.set_fill_style_str(color);
-            self.last_fill.set(color.to_string());
-        } else {
+        if prev.matches(color) {
             self.last_fill.set(prev);
+        } else {
+            self.ctx.set_fill_style_str(color);
+            self.last_fill.set(CachedColor::Owned(color.to_string()));
+        }
+    }
+
+    /// Theme-driven fill: pointer-equality compare on hit, no allocation on
+    /// miss. Use whenever the color is a `&'static str` (theme constant,
+    /// precomputed tint).
+    pub(super) fn set_fill_static(&self, color: &'static str) {
+        let prev = self.last_fill.take();
+        if prev.matches_static(color) {
+            self.last_fill.set(prev);
+        } else {
+            self.ctx.set_fill_style_str(color);
+            self.last_fill.set(CachedColor::Static(color));
         }
     }
 
     /// Set stroke style, skipping the JS call when unchanged.
     pub(super) fn set_stroke_cached(&self, color: &str) {
         let prev = self.last_stroke.take();
-        if prev != color {
-            self.ctx.set_stroke_style_str(color);
-            self.last_stroke.set(color.to_string());
-        } else {
+        if prev.matches(color) {
             self.last_stroke.set(prev);
+        } else {
+            self.ctx.set_stroke_style_str(color);
+            self.last_stroke.set(CachedColor::Owned(color.to_string()));
+        }
+    }
+
+    /// Theme-driven stroke variant — see `set_fill_static`.
+    pub(super) fn set_stroke_static(&self, color: &'static str) {
+        let prev = self.last_stroke.take();
+        if prev.matches_static(color) {
+            self.last_stroke.set(prev);
+        } else {
+            self.ctx.set_stroke_style_str(color);
+            self.last_stroke.set(CachedColor::Static(color));
         }
     }
 
     /// Set font, skipping the JS call when unchanged.
     pub(super) fn set_font_cached(&self, font: &str) {
         let prev = self.last_font.take();
-        if prev != font {
-            self.ctx.set_font(font);
-            self.last_font.set(font.to_string());
-        } else {
+        if prev.matches(font) {
             self.last_font.set(prev);
+        } else {
+            self.ctx.set_font(font);
+            self.last_font.set(CachedColor::Owned(font.to_string()));
         }
     }
 

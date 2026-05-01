@@ -15,6 +15,22 @@ pub const FORMULA_REF_COLORS: &[&str] = &[
     "#0B9A8A", // Teal
 ];
 
+/// 8% alpha tints of `FORMULA_REF_COLORS`, indexed in lockstep. Used as the
+/// fill for tinted dashed overlays so paint never needs to allocate an
+/// `rgba(...)` string per frame.
+pub const FORMULA_REF_TINTS: &[&str] = &[
+    "rgba(89,185,188,0.08)",  // Cyan
+    "rgba(236,87,83,0.08)",   // Flamingo
+    "rgba(51,88,183,0.08)",   // Blue
+    "rgba(240,196,25,0.08)",  // Yellow
+    "rgba(40,167,69,0.08)",   // Emerald
+    "rgba(139,92,246,0.08)",  // Violet
+    "rgba(155,35,53,0.08)",   // Burgundy
+    "rgba(141,182,0,0.08)",   // Wasabi
+    "rgba(229,62,62,0.08)",   // Red
+    "rgba(11,154,138,0.08)",  // Teal
+];
+
 /// Concrete color strings for the Canvas 2D rendering context.
 /// One static instance per theme; passed into `CanvasRenderer::new()`.
 #[derive(Copy, Clone, PartialEq)]
@@ -32,6 +48,8 @@ pub struct CanvasTheme {
     pub pointing: &'static str,
     /// rgba() string for the semi-transparent range selection fill.
     pub selection_fill: &'static str,
+    /// 8% alpha tint of `pointing`, used as the point-mode range fill.
+    pub pointing_tint: &'static str,
 }
 
 pub static LIGHT: CanvasTheme = CanvasTheme {
@@ -47,6 +65,7 @@ pub static LIGHT: CanvasTheme = CanvasTheme {
     cell_bg: "#FFFFFF",
     pointing: "#1E6FD9",
     selection_fill: "rgba(23,162,211,0.12)",
+    pointing_tint: "rgba(30,111,217,0.08)",
 };
 
 pub static DARK: CanvasTheme = CanvasTheme {
@@ -62,4 +81,5 @@ pub static DARK: CanvasTheme = CanvasTheme {
     cell_bg: "#121212",
     pointing: "#1E6FD9",
     selection_fill: "rgba(23,162,211,0.18)",
+    pointing_tint: "rgba(30,111,217,0.08)",
 };
