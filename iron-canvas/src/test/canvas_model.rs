@@ -73,7 +73,7 @@ impl CanvasModel for MockCanvasModel {
         _: i32,
         _: i32,
     ) -> Result<ironcalc_base::types::Style, String> {
-        unimplemented!("style not used by these tests")
+        Err("mock: no cell styles".into())
     }
     fn get_cell_type(
         &self,

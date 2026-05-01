@@ -390,9 +390,7 @@ pub fn handle_mousedown(
         HitTest::AutofillHandle { row, column } => {
             handle_cell_click(&ev, row, column, true, model, state)
         }
-        HitTest::Cell { row, column } => {
-            handle_cell_click(&ev, row, column, false, model, state)
-        }
+        HitTest::Cell { row, column } => handle_cell_click(&ev, row, column, false, model, state),
         HitTest::Outside => {}
     }
 }
@@ -489,6 +487,12 @@ pub fn handle_mousemove(
         .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
         .map(|el| (el.client_width() as f64, el.client_height() as f64))
         .unwrap_or((f64::MAX, f64::MAX));
+
+    // let (canvas_w, canvas_h) =
+    //     match model.with_value(|m| (&m.get_window_width(), &m.get_window_height())) {
+    //         (Ok(canvas_w), Ok(canvas_h)) => (canvas_w, canvas_h),
+    //         _ => (&0i64, &0i64),
+    //     };
 
     match state.drag.get_untracked() {
         DragState::Extending { .. } => {

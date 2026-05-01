@@ -50,8 +50,7 @@ impl CanvasRenderer {
             row: view.row,
             column: view.column,
         };
-        let Some(b) = self.range_pixel_bounds(model, frame, RCRange::from_view(model).normalized())
-        else {
+        let Some(b) = self.range_pixel_bounds(frame, RCRange::from_view(model).normalized()) else {
             return;
         };
 
@@ -89,7 +88,7 @@ impl CanvasRenderer {
             r2: sel.r2.max(target.row),
             c2: sel.c2.max(target.col),
         };
-        let Some(b) = self.range_pixel_bounds(model, frame, range) else {
+        let Some(b) = self.range_pixel_bounds(frame, range) else {
             return;
         };
 
@@ -110,7 +109,6 @@ impl CanvasRenderer {
             return;
         }
         self.draw_dashed_range(
-            model,
             frame,
             cb.range.normalized(),
             self.theme.selection_color,
@@ -119,15 +117,9 @@ impl CanvasRenderer {
     }
 
     /// Point-mode range highlight - blue dashed outline with an 8% fill tint.
-    pub(super) fn draw_point_overlay(
-        &self,
-        model: &dyn CanvasModel,
-        frame: &FrameContext,
-        point_range: Option<RCRange>,
-    ) {
+    pub(super) fn draw_point_overlay(&self, frame: &FrameContext, point_range: Option<RCRange>) {
         let Some(pr) = point_range else { return };
         self.draw_dashed_range(
-            model,
             frame,
             pr.normalized(),
             self.theme.pointing,
@@ -150,7 +142,6 @@ impl CanvasRenderer {
             }
             let idx = fr.color_idx % FORMULA_REF_COLORS.len();
             self.draw_dashed_range(
-                model,
                 frame,
                 fr.sheet_area.range.normalized(),
                 FORMULA_REF_COLORS[idx],
@@ -164,13 +155,12 @@ impl CanvasRenderer {
     /// (`DashFill::Tinted`, which also draws the carried 8% fill).
     pub(super) fn draw_dashed_range(
         &self,
-        model: &dyn CanvasModel,
         frame: &FrameContext,
         range: RCRange,
         color: &str,
         fill: DashFill,
     ) {
-        let Some(b) = self.range_pixel_bounds(model, frame, range) else {
+        let Some(b) = self.range_pixel_bounds(frame, range) else {
             return;
         };
 

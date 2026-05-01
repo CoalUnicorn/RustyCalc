@@ -1,6 +1,6 @@
 use std::ops::RangeInclusive;
 
-use crate::{renderer::cells::PaneCells, CanvasModel, Point, VisibleRegion};
+use crate::{renderer::cells::PaneCells, CanvasModel, Point, VisibleCells};
 
 use super::super::geometry::{
     CanvasSize, FrozenRC, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT,
@@ -37,7 +37,7 @@ impl PaneRegion {
     }
 
     /// Frozen rows x scrollable cols - top-right quadrant.
-    pub(crate) fn top_right(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
+    pub(crate) fn top_right(frc: &FrozenRC, vis: &VisibleCells) -> Self {
         let rows = frc.row_band.clone().unwrap_or(0..=0);
         PaneRegion {
             rows,
@@ -50,7 +50,7 @@ impl PaneRegion {
     }
 
     /// Scrollable rows x frozen cols - bottom-left quadrant.
-    pub(crate) fn bottom_left(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
+    pub(crate) fn bottom_left(frc: &FrozenRC, vis: &VisibleCells) -> Self {
         let cols = frc.col_band.clone().unwrap_or(0..=0);
         PaneRegion {
             rows: vis.first.row..=vis.last.row,
@@ -63,7 +63,7 @@ impl PaneRegion {
     }
 
     /// Scrollable rows x scrollable cols - main area.
-    pub(crate) fn bottom_right(frc: &FrozenRC, vis: &VisibleRegion) -> Self {
+    pub(crate) fn bottom_right(frc: &FrozenRC, vis: &VisibleCells) -> Self {
         PaneRegion {
             rows: vis.first.row..=vis.last.row,
             cols: vis.first.column..=vis.last.column,

@@ -2,7 +2,7 @@
 #![allow(clippy::expect_used)]
 use std::ops::RangeInclusive;
 
-use crate::{geometry::Axis, CanvasRenderer, VisibleRegion};
+use crate::{geometry::Axis, CanvasRenderer, PaneRegion};
 
 // TODO: render_headers_base path
 //

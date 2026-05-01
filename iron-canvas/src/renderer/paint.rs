@@ -147,6 +147,18 @@ impl CanvasRenderer {
         }
     }
 
+    /// Static-font variant — pointer-equality compare on hit, no allocation on
+    /// miss. Use for constant font strings (header font, etc.).
+    pub(super) fn set_font_static(&self, font: &'static str) {
+        let prev = self.last_font.take();
+        if prev.matches_static(font) {
+            self.last_font.set(prev);
+        } else {
+            self.ctx.set_font(font);
+            self.last_font.set(CachedColor::Static(font));
+        }
+    }
+
     /// Set line width, skipping the JS call when unchanged.
     pub(super) fn set_line_width_cached(&self, width: f64) {
         if self.last_line_width.get() != width {

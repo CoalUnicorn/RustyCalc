@@ -40,7 +40,7 @@ mod test;
 
 pub use geometry::{
     col_name, col_width, row_height, CanvasSize, CellRC, FrozenRC, Line, PixelRect, Point, Span,
-    VisibleRegion, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
+    VisibleCells, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
     HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
 

@@ -8,8 +8,8 @@ use std::ops::RangeInclusive;
 
 use crate::model::CssColor;
 use crate::renderer::pane::PaneRegion;
-use crate::types::text_paint::TextPaint;
 use crate::theme::CanvasTheme;
+use crate::types::text_paint::TextPaint;
 use crate::{col_width, row_height, CanvasModel, CanvasSize, Point};
 
 use super::super::geometry::{BorderEdge, FrameContext, PixelRect};
@@ -26,7 +26,8 @@ impl CanvasRenderer {
     /// second pass. Text paints last so overflow is never clipped by a
     /// neighbour's background.
     pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
-        let mut text_slots: Vec<TextSlot> = Vec::new();
+        let mut text_slots = self.text_slots.take();
+        text_slots.clear();
         for p in self.paints_in(model, &pane) {
             self.paint_bg(&p);
             self.paint_borders(&p);
@@ -41,6 +42,7 @@ impl CanvasRenderer {
                 self.paint_text(&tp);
             }
         }
+        self.text_slots.set(text_slots);
     }
 
     /// Fill a cell's background rectangle. Border pass is separate (batched).
@@ -90,7 +92,10 @@ impl CanvasRenderer {
         } else {
             &[0.0]
         };
-        self.set_stroke_cached(&b.color);
+        match &b.color {
+            BorderColor::Static(s) => self.set_stroke_static(s),
+            BorderColor::Owned(s) => self.set_stroke_cached(s),
+        }
         self.set_line_width_cached(b.stroke.width_px);
         for &d in offsets {
             self.stroke_line(line.offset_cross(d));
@@ -110,13 +115,12 @@ impl CanvasRenderer {
         frame: &FrameContext,
     ) {
         let range = RCRange::from_cell(addr.row, addr.column);
-        let Some(rect) = self.range_pixel_bounds(model, frame, range) else {
+        let Some(rect) = self.range_pixel_bounds(frame, range) else {
             return;
         };
         let Ok(own_style) = model.get_cell_style(addr.sheet, addr.row, addr.column) else {
             return;
         };
-        //let show_grid = model.get_show_grid_lines(addr.sheet).unwrap_or(true);
         let Some(paint) = CellPaint::resolve_cell_paint(
             self,
             //show_grid,
@@ -142,10 +146,10 @@ pub(crate) struct CellPaint {
 
 /// Text-pass input parked during the streaming bg/border walk so the second
 /// pass can paint text on top of every neighbour's already-laid background.
-struct TextSlot {
-    addr: CellAddress,
-    rect: PixelRect,
-    style: Style,
+pub(super) struct TextSlot {
+    pub(super) addr: CellAddress,
+    pub(super) rect: PixelRect,
+    pub(super) style: Style,
 }
 
 impl CellPaint {
@@ -185,17 +189,25 @@ pub(crate) struct BorderStroke {
     pub double: bool, // double-line styles render as two parallel strokes
 }
 
+/// Color for a resolved border edge. `Static` avoids any allocation for the
+/// common grid-line base coat (theme color is `&'static str`); `Owned` carries
+/// a dynamic color built from the cell's explicit `BorderItem`.
+pub(crate) enum BorderColor {
+    Static(&'static str),
+    Owned(String),
+}
+
 pub(crate) struct BorderPaint {
-    pub color: String,
+    pub color: BorderColor,
     pub stroke: BorderStroke,
 }
 
 impl BorderPaint {
     /// Thin grid-color stroke — the base coat painted on every edge before
-    /// any explicit border style.
+    /// any explicit border style. Zero allocation: theme color is `&'static str`.
     fn grid_line(theme: &CanvasTheme) -> Self {
         Self {
-            color: theme.grid_color.to_owned(),
+            color: BorderColor::Static(theme.grid_color),
             stroke: BorderStroke {
                 width_px: STANDARD_BORDER_WIDTH,
                 double: false,
@@ -207,7 +219,9 @@ impl BorderPaint {
     /// Color falls back to `theme.grid_color` when the item carries no explicit color.
     fn resolve(item: &BorderItem, theme: &CanvasTheme) -> Self {
         Self {
-            color: CssColor::new(item.color.as_deref().unwrap_or(theme.grid_color)).0,
+            color: BorderColor::Owned(
+                CssColor::new(item.color.as_deref().unwrap_or(theme.grid_color)).0,
+            ),
             stroke: BorderStroke::from_border_style(&item.style),
         }
     }

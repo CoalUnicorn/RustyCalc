@@ -124,10 +124,20 @@ impl IronCanvas {
             return;
         };
 
-        // One viewport snapshot per tick — both layers paint against the same
-        // visible region, frozen geometry, and prefix-sum pixel offsets.
-        // The same `last_frame` is later read by `hit_test`, `cell_rect`, and
-        // `resize_handle_at` so input handlers see exactly what was painted.
+        // Overlay-only repaint with unchanged geometry: reuse the last frame's
+        // prefix-sum tables rather than walking the model again. Triggered by
+        // autofill drag, clipboard state change, formula-ref highlight updates —
+        // all of which call set_overlays() without touching scroll or freeze.
+        if !grid_dirty {
+            if let Some(prev) = &self.last_frame {
+                if prev.is_still_valid(model, self.size) {
+                    self.overlay.paint(self.theme, &self.overlays, model, prev);
+                    return;
+                }
+            }
+        }
+
+        // Full rebuild: scroll/freeze/size changed, or grid is dirty.
         let frame = FrameContext::current(model, self.size);
 
         if grid_dirty {

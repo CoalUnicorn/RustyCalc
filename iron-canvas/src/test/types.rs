@@ -2,7 +2,7 @@ use crate::geometry::Axis;
 use crate::renderer::PaneRegion;
 use crate::types::{FreezeConfig, Viewport};
 use crate::{
-    FrozenRC, Point, RenderOverlays, VisibleRegion, HEADER_COL_WIDTH, HEADER_OFFSET,
+    FrozenRC, Point, RenderOverlays, PaneRegion, HEADER_COL_WIDTH, HEADER_OFFSET,
     HEADER_ROW_HEIGHT,
 };
 
@@ -46,8 +46,8 @@ fn column_strip_start_is_right_of_left_header() {
     assert_eq!(Axis::Column.strip_start(), HEADER_COL_WIDTH + HEADER_OFFSET);
 }
 
-fn vis(rows: (i32, i32), cols: (i32, i32)) -> VisibleRegion {
-    VisibleRegion {
+fn vis(rows: (i32, i32), cols: (i32, i32)) -> PaneRegion {
+    PaneRegion {
         first: crate::geometry::CellRC {
             row: rows.0,
             column: cols.0,

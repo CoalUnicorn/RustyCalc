@@ -6,17 +6,16 @@
 //! a sequence of intent-revealing calls: `draw_frozen_separators(&frc)`,
 //! `draw_corner_box()`, `render_row_headers(...)`, ... .
 
-use std::ops::RangeInclusive;
-
-use crate::{CanvasModel, Point, Span, HEADER_OFFSET};
+use crate::{Point, Span, HEADER_OFFSET};
 
 use super::super::geometry::{
-    col_name, Axis, FrozenRC, PixelRect, VisibleRegion, FROZEN_SEP, HEADER_COL_WIDTH,
+    col_name, Axis, FrameContext, FrozenRC, PixelRect, FROZEN_SEP, HEADER_COL_WIDTH,
     HEADER_ROW_HEIGHT,
 };
 
-use super::text::DEFAULT_FONT_FAMILY;
 use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
+
+const HEADER_FONT: &str = "bold 12px Inter, Arial, sans-serif";
 
 impl CanvasRenderer {
     /// Thick separator strokes between frozen bands and the scrollable grid.
@@ -80,35 +79,18 @@ impl CanvasRenderer {
     }
 
     /// Paint one header strip along `axis` with no selection highlighting.
-    /// Selected indices are tracked for highlight rendering via `render_header_highlights`.
-    pub(super) fn render_headers_base(
-        &self,
-        model: &dyn CanvasModel,
-        axis: Axis,
-        vis: &VisibleRegion,
-        frozen_band: Option<&RangeInclusive<i32>>,
-        frozen_origin: f64,
-    ) {
-        self.set_font_cached(&format!("bold 12px {DEFAULT_FONT_FAMILY}"));
-        self.walk_header_strip(model, axis, vis, frozen_band, frozen_origin, |this, i, along, t| {
+    pub(super) fn render_headers_base(&self, axis: Axis, frame: &FrameContext) {
+        self.set_font_static(HEADER_FONT);
+        self.walk_header_strip(axis, frame, |this, i, along, t| {
             this.draw_header_cell(axis, i, along, t, false);
         });
     }
 
     /// Overlay pass repainting only selected header cells so the grid layer
     /// never redraws on navigation — the base pass beneath stays intact.
-    pub(super) fn render_header_highlights(
-        &self,
-        model: &dyn CanvasModel,
-        axis: Axis,
-        vis: &VisibleRegion,
-        frozen_band: Option<&RangeInclusive<i32>>,
-        frozen_origin: f64,
-    ) {
-        let view = model.get_selected_view();
-        let (sel_start, sel_end) = axis.selection_range(&view.range);
-
-        self.walk_header_strip(model, axis, vis, frozen_band, frozen_origin, |this, i, along, t| {
+    pub(super) fn render_header_highlights(&self, axis: Axis, frame: &FrameContext) {
+        let (sel_start, sel_end) = axis.selection_range(&frame.selection_range);
+        self.walk_header_strip(axis, frame, |this, i, along, t| {
             if i >= sel_start && i <= sel_end {
                 this.draw_header_cell(axis, i, along, t, true);
             }
@@ -116,22 +98,20 @@ impl CanvasRenderer {
     }
 
     /// Shared scaffold: walk the frozen band (if any) then the visible band,
-    /// threading per-cell extents through a moving cursor along `axis`.
-    /// `visit` receives `(self, index, along, thickness)` per non-collapsed
-    /// cell — base/highlight passes diverge only in what they paint.
+    /// reading extents from the frame's prefix-sum snapshot — zero model access.
     fn walk_header_strip(
         &self,
-        model: &dyn CanvasModel,
         axis: Axis,
-        vis: &VisibleRegion,
-        frozen_band: Option<&RangeInclusive<i32>>,
-        frozen_origin: f64,
+        frame: &FrameContext,
         mut visit: impl FnMut(&Self, i32, f64, f64),
     ) {
+        let frozen_band = axis.frozen_band(frame);
+        let frozen_origin = axis.frozen_origin(frame);
+
         let mut frozen_cursor = axis.strip_start();
         if let Some(band) = frozen_band {
             for i in band.clone() {
-                let t = axis.extent(model, i);
+                let t = axis.frame_extent(frame, i);
                 if t <= 0.0 {
                     continue;
                 }
@@ -145,8 +125,8 @@ impl CanvasRenderer {
         } else {
             axis.strip_start()
         };
-        for i in axis.visible_band(vis) {
-            let t = axis.extent(model, i);
+        for i in axis.visible_band(&frame.vis) {
+            let t = axis.frame_extent(frame, i);
             if t <= 0.0 {
                 continue;
             }

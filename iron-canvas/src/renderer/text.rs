@@ -11,10 +11,6 @@ use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
 
 pub(crate) use crate::types::text_paint::TextPaint;
 
-/// Default font stack used by header strips. Cell text uses the per-cell
-/// resolved font from `CellStyle`; only headers fall back to this string.
-pub(super) const DEFAULT_FONT_FAMILY: &str = "Inter, Arial, sans-serif";
-
 /// With `textBaseline: "middle"`, `center_y` is the em-square midpoint. The
 /// typographic baseline sits at ~`center_y + font_size * 0.15`; `0.35` puts
 /// the underline just below the baseline, clear of the glyphs.
@@ -59,4 +55,3 @@ impl CanvasRenderer {
         });
     }
 }
-

@@ -99,7 +99,7 @@ use web_sys::CanvasRenderingContext2d;
 
 use super::geometry::{Axis, CanvasSize, FrameContext};
 use super::types::*;
-use crate::renderer::cells::CellPaintsIter;
+use crate::renderer::cells::{CellPaintsIter, TextSlot};
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;
 pub use overlays::AutofillTarget;
@@ -133,6 +133,9 @@ pub struct CanvasRenderer {
     last_stroke: Cell<CachedColor>,
     last_font: Cell<CachedColor>,
     last_line_width: Cell<f64>,
+    /// Scratch buffer for the text-pass in `render_pane`. Reused across pane
+    /// calls to avoid 4 Vec allocations per frame.
+    text_slots: Cell<Vec<TextSlot>>,
 }
 
 /// Per-frame ctx-state cache entry. The `Static` arm carries `&'static str`
@@ -230,6 +233,7 @@ impl CanvasRenderer {
             last_stroke: Cell::new(CachedColor::Empty),
             last_line_width: Cell::new(0.0),
             last_font: Cell::new(CachedColor::Empty),
+            text_slots: Cell::new(Vec::new()),
         }
     }
 
@@ -265,14 +269,18 @@ impl CanvasRenderer {
     /// Reset per-frame ctx state caches to their initial sentinels.
     ///
     /// Required after any `canvas.set_width/set_height` because that mutation
-    /// resets all 2D ctx state (fill, stroke, font, line width); without
-    /// invalidation the cache would skip writes that the ctx has actually
+    /// resets all 2D ctx state (fill, stroke, font, line width, text alignment);
+    /// without invalidation the cache would skip writes that the ctx has actually
     /// forgotten and the next paint would use the wrong style.
     pub(crate) fn invalidate_paint_cache(&mut self) {
         self.last_fill.set(CachedColor::Empty);
         self.last_stroke.set(CachedColor::Empty);
         self.last_font.set(CachedColor::Empty);
         self.last_line_width.set(0.0);
+        // Sticky text defaults wiped by set_width/set_height — restore here
+        // so per-frame render_grid / render_overlays calls don't need to.
+        self.ctx.set_text_align("center");
+        self.ctx.set_text_baseline("middle");
     }
 
     /// Live theme swap. `CanvasTheme` is `Copy` so this is a simple field
@@ -284,15 +292,7 @@ impl CanvasRenderer {
     /// Phases 1+2: cells (bg + borders + text), frozen separators, headers,
     /// corner box. Does **not** clear the canvas — caller owns the clear so
     /// layer-owned renderers can paint a background fill instead.
-    ///
-    /// Sticky ctx defaults (`text_align`, `text_baseline`) are re-asserted on
-    /// every paint because `canvas.set_width/set_height` (in the layer's
-    /// resize) wipes them. Per-stroke `line_width` is owned by paint helpers
-    /// via `set_line_width_cached`, so it is not set here.
     pub(crate) fn render_grid(&mut self, model: &dyn CanvasModel, frame: &FrameContext) {
-        self.ctx.set_text_align("center");
-        self.ctx.set_text_baseline("middle");
-
         // Phase 1: Cells - four frozen-pane quadrants. Each `render_pane`
         // does two passes: bg+borders first, then text on top so overflow
         // is never clipped by a neighbour's background fill.
@@ -304,20 +304,8 @@ impl CanvasRenderer {
         self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis));
 
         // Phase 2: Headers + corner box
-        self.render_headers_base(
-            model,
-            Axis::Row,
-            &frame.vis,
-            frame.frozen.row_band.as_ref(),
-            frame.frozen.offset.y,
-        );
-        self.render_headers_base(
-            model,
-            Axis::Column,
-            &frame.vis,
-            frame.frozen.col_band.as_ref(),
-            frame.frozen.offset.x,
-        );
+        self.render_headers_base(Axis::Row, frame);
+        self.render_headers_base(Axis::Column, frame);
 
         self.draw_corner_box();
     }
@@ -325,44 +313,16 @@ impl CanvasRenderer {
     /// Phase 3: selection outline, extend preview, clipboard ants,
     /// point-mode range, formula-ref highlights. Does **not** clear the
     /// canvas — caller owns the clear (overlay layer needs transparent bg).
-    ///
-    /// `text_align` / `text_baseline` are re-asserted here for the same
-    /// reason as in `render_grid`: the overlay layer's `set_width/set_height`
-    /// resize wipes them, and `repaint_active_cell` paints text whose
-    /// `center_x`/`center_y` assume the centered/middle anchors.
-    // NOTE: may try later
-    // ```
-    // js_sys::Reflect::set(
-    //     self.ctx.as_ref(),
-    //     &"textRendering".into(),
-    //     &"optimizeSpeed".into(),
-    // )
-    // .ok();
     pub(crate) fn render_overlays(
         &mut self,
         model: &dyn CanvasModel,
         overlays: &RenderOverlays,
         frame: &FrameContext,
     ) {
-        self.ctx.set_text_align("center");
-        self.ctx.set_text_baseline("middle");
-
         self.draw_selection(model, frame);
         // Header highlights live on the overlay so nav events skip the grid repaint.
-        self.render_header_highlights(
-            model,
-            Axis::Row,
-            &frame.vis,
-            frame.frozen.row_band.as_ref(),
-            frame.frozen.offset.y,
-        );
-        self.render_header_highlights(
-            model,
-            Axis::Column,
-            &frame.vis,
-            frame.frozen.col_band.as_ref(),
-            frame.frozen.offset.x,
-        );
+        self.render_header_highlights(Axis::Row, frame);
+        self.render_header_highlights(Axis::Column, frame);
         if let Some(target) = overlays.extend_to {
             self.draw_extend_preview(model, frame, target);
         }
@@ -371,7 +331,7 @@ impl CanvasRenderer {
         // formula-ref highlights. Each no-ops if its data is absent or lives
         // on another sheet.
         self.draw_clipboard_overlay(model, frame, overlays.clipboard.as_ref());
-        self.draw_point_overlay(model, frame, overlays.point_range);
+        self.draw_point_overlay(frame, overlays.point_range);
         self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
     }
 }
