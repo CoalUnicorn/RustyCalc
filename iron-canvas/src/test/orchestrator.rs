@@ -55,14 +55,14 @@ impl CanvasModel for StubModel {
     }
 }
 
-// ── Drag-frame isolation tests ──────────────────────────────────────────
+// Drag-frame isolation tests
 //
 // These simulate the headline acceptance criterion without a browser: two
 // `PaintGate` instances stand in for the real layers. The logic mirrors
 // exactly what `IronCanvas::set_overlays` and `paint_if_dirty` do in
 // production, so a pass here proves the fan-out policy is correct.
 
-fn make_sel(x: f64) -> crate::geometry::PixelRect {
+fn cell_rect(x: f64) -> crate::geometry::PixelRect {
     use crate::geometry::{PixelRect, Point};
     PixelRect {
         top_left: Point { x, y: 0.0 },
@@ -79,7 +79,7 @@ fn set_overlays_only_dirties_overlay() {
     let mut current = RenderOverlays::default();
 
     let next = RenderOverlays {
-        selection: Some(make_sel(10.0)),
+        selection: Some(cell_rect(10.0)),
         ..Default::default()
     };
     // mirror set_overlays fan-out policy
@@ -108,7 +108,7 @@ fn sixty_drag_frames_increment_overlay_only() {
 
     for i in 0..60_u32 {
         let next = RenderOverlays {
-            selection: Some(make_sel(i as f64 * 2.0)),
+            selection: Some(cell_rect(i as f64 * 2.0)),
             ..Default::default()
         };
         // mirror set_overlays
@@ -154,7 +154,7 @@ fn nav_event_only_dirties_overlay() {
     let mut current = RenderOverlays::default();
 
     let next = RenderOverlays {
-        selection: Some(make_sel(20.0)),
+        selection: Some(cell_rect(20.0)),
         ..Default::default()
     };
     // mirror conditionalized fan-out: nav → set_overlays only

@@ -6,7 +6,7 @@ use std::ops::RangeInclusive;
 
 use crate::{CanvasModel, HitTest, ResizeTarget};
 
-pub const HEADER_OFFSET: f64 = 0.5;
+pub const HEADER_OFFSET: f64 = 1.0;
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
 pub const HEADER_COL_WIDTH: f64 = 30.0;
 pub const FROZEN_SEP: f64 = 3.0;
@@ -397,9 +397,7 @@ pub(crate) struct PixelOffsets {
 impl PixelOffsets {
     /// Y distance from `frozen.y` to the top edge of visible-band `row`.
     ///
-    /// Returns `0.0` for rows outside the precomputed range. In practice
-    /// `range_pixel_bounds` clamps oversized selections to the canvas edge
-    /// before calling `cell_y`, so this fallback is never reached.
+    /// Returns `0.0` for rows outside the precomputed range.
     #[inline]
     pub fn row_top(&self, row: i32) -> f64 {
         self.row_tops
@@ -524,7 +522,7 @@ impl FrameContext {
         let frozen_rows = frozen.frozen_rows_count();
         let frozen_cols = frozen.frozen_cols_count();
 
-        // --- Frozen prefix sums ---
+        // Frozen prefix sums
         // One walk per axis; the totals (last entry) give the Y/X offset where
         // the scrollable band starts, avoiding a redundant sum in the scan below.
         let mut frozen_row_tops = Vec::with_capacity((frozen_rows + 1) as usize);
@@ -546,7 +544,7 @@ impl FrameContext {
         let row_first = (frozen_rows + 1).max(view.top_row);
         let col_first = (frozen_cols + 1).max(view.left_column);
 
-        // --- Scrollable rows: visible extent + prefix-sum in one pass ---
+        // Scrollable rows: visible extent + prefix-sum in one pass
         // `y` tracks the canvas Y of each row's top edge. When y reaches the
         // canvas bottom we record that row as `row_last` (it may be partially
         // visible), push its trailing entry, and stop. This exactly replicates
@@ -569,7 +567,7 @@ impl FrameContext {
             y += h;
         }
 
-        // --- Scrollable columns: same merged pattern ---
+        // Scrollable columns: same merged pattern
         let mut col_lefts: Vec<f64> = Vec::new();
         let mut col_last = col_first;
         let mut x = HEADER_COL_WIDTH + frozen_w;
@@ -638,9 +636,7 @@ impl FrameContext {
             && frozen_cols == self.frozen.frozen_cols_count()
     }
 
-    // ===========================================================
     // Pixel <-> cell mapping  (snapshot-only)
-    // ===========================================================
     //
     // Every method here reads exclusively from `self.offsets`,
     // `self.frozen`, `self.vis`, and `self.selection_range`. No model
@@ -701,10 +697,7 @@ impl FrameContext {
         }
     }
 
-    /// 1-based column at canvas X pixel `x`. Clamps to the painted region:
-    /// past the right edge of the visible band, returns `vis.last.column`
-    /// (rather than walking to `LAST_COLUMN` as the model-walking version
-    /// did — what's not painted can't be hit-tested).
+    /// 1-based column at canvas X pixel `x`. Clamps to the painted region
     pub(crate) fn pixel_to_col(&self, x: f64) -> i32 {
         let frozen_cols = self.frozen.frozen_cols_count();
         if x < self.frozen.offset.x {

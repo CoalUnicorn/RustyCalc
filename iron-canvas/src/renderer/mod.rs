@@ -24,22 +24,7 @@
 //! `render()` runs four phases in order, each building on the previous:
 //!
 //! ```text
-//! Phase 1 - Cell backgrounds and borders
-//!   For each of the four frozen-pane quadrants, iterate visible cells.
-//!   Paint the fill color, then resolve and draw all four border edges.
-//!   Collect text layout (`CellText`) into a Vec for Phase 4.
-//!
-//! Phase 2 - Row and column headers
-//!   Paint the grey header bars with row numbers and column letters (A, B, ...).
-//!
-//! Phase 3 - Selection and overlays
-//!   Draw the blue selection rectangle, autofill handle, clipboard marching
-//!   ants, point-mode range highlight, and selected header highlights on top
-//!   of the cell grid.
-//!
-//! Phase 4 - Cell text
-//!   Paint all collected `CellText` entries last so text always appears
-//!   above backgrounds, selection tint, and header lines.
+//! TODO
 //! ```
 //!
 //! Text is deferred to Phase 4 because earlier phases may paint over cells
@@ -68,12 +53,7 @@
 //!
 //! # Border resolution
 //!
-//! Each cell has four border edges (left, top, right, bottom). The
-//! renderer resolves each edge by checking, in order:
-//! 1. The cell's own explicit border (from styling)
-//! 2. The adjacent neighbour's matching border (left cell's right, etc.)
-//! 3. The background color of either cell (for a clean edge between fills)
-//! 4. The grid line color (thin grey default)
+//! TODO
 //!
 //! # Key types
 //!
@@ -332,6 +312,11 @@ impl CanvasRenderer {
         // on another sheet.
         self.draw_clipboard_overlay(model, frame, overlays.clipboard.as_ref());
         self.draw_point_overlay(frame, overlays.point_range);
-        self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
+
+        if overlays.formula_refs.len() > 0 {
+            self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
+        } else {
+            return;
+        };
     }
 }

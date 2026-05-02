@@ -11,8 +11,7 @@ use super::super::geometry::{
 ///
 /// Build with a named constructor so the quadrant name appears at the call site:
 /// ```text
-/// render_pane(model, sheet, &mut texts, PaneRegion::top_left(&frc));
-/// render_pane(model, sheet, &mut texts, PaneRegion::bottom_right(&frc, &vis));
+/// render_pane(&self, model: &dyn CanvasModel, pane:PaneRegion)
 /// ```
 #[derive(Clone)]
 pub struct PaneRegion {
@@ -76,7 +75,7 @@ impl PaneRegion {
 
     /// Walk every visible cell in this pane, yielding pixel rect + outer
     /// edges per cell. Replaces the open-coded row/col iteration that used
-    /// to live in `render_pane` / `render_pane_row`. The caller passes the
+    /// to live in `render_pane`. The caller passes the
     /// canvas size so the walker can early-break past the canvas edge.
     pub(crate) fn cells<'a>(
         &'a self,

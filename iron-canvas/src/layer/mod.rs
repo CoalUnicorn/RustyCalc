@@ -58,9 +58,9 @@ impl LayerBase {
             .expect("scale should not fail");
         self.renderer.set_size(css_w, css_h);
         self.renderer.set_dpr(dpr);
-        // Only invalidate when backing store was reallocated (set_width/set_height resets ctx state).
-        // For the identity-transform path, ctx state survives — skip the unnecessary invalidation.
-        // Note: keep calling it in both paths for now; tighten in a follow-up if profiling warrants.
+
+        // Note: keep calling it in both paths for now;
+        // tighten in a follow-up if profiling warrants.
         self.renderer.invalidate_paint_cache();
     }
 }

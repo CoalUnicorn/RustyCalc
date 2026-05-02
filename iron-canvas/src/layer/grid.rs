@@ -10,10 +10,6 @@ use crate::CanvasRenderer;
 
 pub(crate) struct GridLayer {
     base: LayerBase,
-    // gate: PaintGate,
-    // Long-lived renderer; owns the layer's 2D ctx so paint caches persist
-    // across frames. Theme is hot-swapped per paint via `set_theme`.
-    //renderer: CanvasRenderer,
 }
 
 impl GridLayer {
@@ -27,9 +23,6 @@ impl GridLayer {
             .unchecked_into::<CanvasRenderingContext2d>();
         let renderer = CanvasRenderer::for_layer(ctx, 0.0, 0.0, LIGHT);
         Ok(Self {
-            //canvas: canvas.clone(),
-            //gate: PaintGate::new(),
-            //renderer: renderer.clone(),
             base: LayerBase::new(canvas, renderer),
         })
     }

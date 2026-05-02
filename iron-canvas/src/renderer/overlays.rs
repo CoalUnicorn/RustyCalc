@@ -133,10 +133,10 @@ impl CanvasRenderer {
         &self,
         model: &dyn CanvasModel,
         frame: &FrameContext,
-        refs: &[FormulaRef],
+        formula_refs: &[FormulaRef],
     ) {
         let sheet = model.get_selected_sheet();
-        for fr in refs {
+        for fr in formula_refs {
             if fr.sheet_area.sheet != sheet {
                 continue;
             }

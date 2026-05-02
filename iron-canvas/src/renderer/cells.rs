@@ -58,7 +58,7 @@ impl CanvasRenderer {
 
     /// Paint bg + borders for one resolved `CellPaint`. Used by
     /// `repaint_active_cell` where a single-cell batch is not worth the
-    /// overhead; the main pane pass uses `paint_bg` + `paint_borders_batched`.
+    /// overhead; the main pane pass uses `paint_borders`.
     pub(super) fn paint_cell(&self, p: &CellPaint) {
         self.paint_bg(p);
         self.paint_borders(p);
@@ -76,7 +76,7 @@ impl CanvasRenderer {
             (BorderEdge::Bottom, &b.bottom),
         ];
         for (edge, item) in edges {
-            self.paint_border(edge, p.rect, &BorderPaint::grid_line(theme));
+            //self.paint_border(edge, p.rect, &BorderPaint::grid_line(theme));
             if let Some(item) = item {
                 self.paint_border(edge, p.rect, &BorderPaint::resolve(item, theme));
             }
@@ -105,9 +105,7 @@ impl CanvasRenderer {
     /// Repaint one cell's full paint (bg + borders + text).
     ///
     /// Used by the selection overlay to restore the active cell on top of
-    /// the semi-transparent selection fill. Resolves the paint inline -
-    /// neighbour styles are skipped (passed as `None`); the visual
-    /// difference is imperceptible at a single cell boundary.
+    /// the semi-transparent selection fill.
     pub(super) fn repaint_active_cell(
         &self,
         model: &dyn CanvasModel,
@@ -153,13 +151,9 @@ pub(super) struct TextSlot {
 }
 
 impl CellPaint {
-    /// Resolve one cell into renderer-ready `CellPaint`. Combines the
-    /// background fill, four border edges (with neighbour fallback for
-    /// left/top), and optional text layout. Infallible on the style-fetch
-    /// path: neighbour styles are passed in by the iterator.
+    /// Resolve one cell Style into renderer-ready `CellPaint`.
     pub fn resolve_cell_paint(
         renderer: &CanvasRenderer,
-        //show_grid: bool,
         slot: CellSlot,
         own_style: &Style,
     ) -> Option<CellPaint> {
@@ -205,15 +199,16 @@ pub(crate) struct BorderPaint {
 impl BorderPaint {
     /// Thin grid-color stroke — the base coat painted on every edge before
     /// any explicit border style. Zero allocation: theme color is `&'static str`.
-    fn grid_line(theme: &CanvasTheme) -> Self {
-        Self {
-            color: BorderColor::Static(theme.grid_color),
-            stroke: BorderStroke {
-                width_px: STANDARD_BORDER_WIDTH,
-                double: false,
-            },
-        }
-    }
+    // TODO: togle one pass
+    // fn grid_line(theme: &CanvasTheme) -> Self {
+    //     Self {
+    //         color: BorderColor::Static(theme.grid_color),
+    //         stroke: BorderStroke {
+    //             width_px: STANDARD_BORDER_WIDTH,
+    //             double: false,
+    //         },
+    //     }
+    // }
 
     /// Resolve a `BorderItem` from the cell style into a renderer-ready paint.
     /// Color falls back to `theme.grid_color` when the item carries no explicit color.
@@ -346,9 +341,7 @@ impl<'a> Iterator for PaneCells<'a> {
     }
 }
 
-/// Iterator decorator over `PaneCells` that yields fully resolved
-/// `CellPaint` per visible cell. Threads previous-row/column styles for
-/// inner-edge neighbour fallback so the renderer only paints, never
+/// Iterator decorator over `PaneCells`
 /// queries the model.
 pub(crate) struct CellPaintsIter<'a> {
     slots: PaneCells<'a>,
@@ -357,16 +350,11 @@ pub(crate) struct CellPaintsIter<'a> {
 }
 
 impl<'a> CellPaintsIter<'a> {
-    /// Build the resolved-paint stream for one pane. `show_grid` is read
-    /// **once** here from the model and cached - replaces today's
-    /// per-cell `get_show_grid_lines` call inside `render_cell_style`.
     pub(crate) fn new(
         renderer: &'a CanvasRenderer,
         model: &'a dyn CanvasModel,
         pane: &'a PaneRegion,
     ) -> Self {
-        //let sheet = model.get_selected_sheet();
-        //let show_grid = false; //model.get_show_grid_lines(sheet).unwrap_or(true);
         Self {
             slots: pane.cells(model, renderer.canvas_size()),
             renderer,

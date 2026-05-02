@@ -1,17 +1,4 @@
-// JS-side model bridge — Fork 1, "tactical" form.
-//
-// The IronCalc webapp instantiates a wasm-bindgen `Model` class on the JS
-// side. We accept it as `JsValue` and `unchecked_into`-cast to this opaque
-// extern type, faith-based: there is no runtime check that the handle is
-// actually an IronCalc Model. The cost of a wrong handle is a method-call
-// throw at render time, not unsoundness.
-//
-// Method bindings on `IronCalcModelHandle` are intentionally empty for now:
-// `JsBackedModel` below stubs every `CanvasModel` method with `todo!()`.
-// Wiring lands in a follow-up pass once `IronCanvasView::render_sheet` is
-// implemented and we know which methods the renderer actually calls per
-// frame. Adding bindings before then risks misnaming JS methods we never
-// invoke.
+// JS-side model bridge
 
 use ironcalc_base::types::CellType;
 use ironcalc_base::types::Style;

@@ -67,8 +67,7 @@ impl CanvasRenderer {
         result
     }
 
-    /// Horizontal line from (x1, y) to (x2, y). Path-only — caller owns
-    /// `set_stroke_style_str` and `set_line_width`.
+    /// Horizontal line from (x1, y) to (x2, y).
     pub(super) fn stroke_hline(&self, span: Span, y: f64) {
         let y = self.snap_stroke(y);
         self.ctx.begin_path();
@@ -77,8 +76,7 @@ impl CanvasRenderer {
         self.ctx.stroke();
     }
 
-    /// Vertical line from (x, y1) to (x, y2). Path-only — caller owns
-    /// `set_stroke_style_str` and `set_line_width`.
+    /// Vertical line from (x, y1) to (x, y2).
     pub(super) fn stroke_vline(&self, x: f64, span: Span) {
         let x = self.snap_stroke(x);
         self.ctx.begin_path();

@@ -50,9 +50,7 @@ pub use types::RenderOverlays;
 
 /// What the user sees at a given canvas point, against the last painted frame.
 ///
-/// All variants carry **model coordinates** (row/column indices on the active
-/// sheet) — the canvas-internal pixel mapping does not leak to callers. The
-/// active sheet is whatever `IronCanvas` is reflecting at the time of the
+/// The active sheet is whatever `IronCanvas` is reflecting at the time of the
 /// query, so it is implicit and not encoded into the variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HitTest {
@@ -85,20 +83,6 @@ pub enum ResizeTarget {
 }
 
 // CanvasModel - read-only worksheet surface the renderer consumes
-//
-// Path A bridge: the renderer's eventual parameter type. Replaces direct
-// `&UserModel` so the IronCalc webapp can plug in a JS-backed adapter that
-// batch-fetches cell data into a frame snapshot before each `render_sheet()`.
-//
-// Method signatures match `ironcalc_base::UserModel` verbatim (T1-A) in a
-// single trait (T2-A). RustyCalc gets a free `impl CanvasModel for UserModel`
-// below.
-//
-// `SelectedView` is mirrored locally because `ironcalc_base` re-exports the
-// upstream struct only under `#[cfg(test)]`. When that gate goes away
-// upstream, this mirror and the field-copy in `get_selected_view` below can
-// be deleted in favour of `pub use ironcalc_base::SelectedView;` - no other
-// consumer needs to change.
 
 use ironcalc_base::types::{CellType, Style};
 use ironcalc_base::UserModel;
