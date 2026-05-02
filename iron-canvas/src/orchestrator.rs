@@ -175,32 +175,6 @@ impl IronCanvas {
         let backed: Rc<dyn CanvasModel> = Rc::new(JsBackedModel::from_js_value(model));
         self.set_model(backed);
     }
-
-    /// Push the active selection rectangle (CSS pixels). Overlay-only;
-    /// value-compare in `set_overlays` makes redundant pushes free.
-    pub fn set_selection_rect(&mut self, x: f64, y: f64, width: f64, height: f64) {
-        let next = RenderOverlays {
-            selection: Some(PixelRect {
-                top_left: Point { x, y },
-                width,
-                height,
-            }),
-            ..self.overlays.clone()
-        };
-        self.set_overlays(next);
-    }
-
-    /// Drop the active selection rectangle. Other overlay fields are preserved.
-    pub fn clear_selection(&mut self) {
-        if self.overlays.selection.is_none() {
-            return;
-        }
-        let next = RenderOverlays {
-            selection: None,
-            ..self.overlays.clone()
-        };
-        self.set_overlays(next);
-    }
 }
 
 impl IronCanvas {

@@ -10,7 +10,7 @@
 /// This module is `#[cfg(test)]` only and never ships in production.
 /// The full browser-side pixel comparison (getImageData) lives in the future
 /// wasm-bindgen-test suite once wasm-pack is wired up.
-use crate::geometry::{PixelRect, Point};
+use crate::model::RCRange;
 use crate::theme::CanvasTheme;
 use crate::types::RenderOverlays;
 
@@ -52,6 +52,14 @@ pub(crate) fn grid_ops(theme: &CanvasTheme, w: f64, h: f64) -> Vec<DrawOp> {
 }
 
 /// Ops the overlay layer emits for the stub paint.
+///
+/// The variable scene is `point_range`: when present, the overlay paints a
+/// dashed-style outline (modeled here as a `StrokeRect` for compositing
+/// purposes). This is a *test-only* parallel painter — the production overlay
+/// derives the selection rect from the model via `range_pixel_bounds`. The
+/// reference module only asserts that two-canvas compositing equals the
+/// single-canvas reference for the same scene; it does not assert geometry
+/// correctness against the production renderer.
 pub(crate) fn overlay_ops(
     theme: &CanvasTheme,
     overlays: &RenderOverlays,
@@ -64,17 +72,26 @@ pub(crate) fn overlay_ops(
         w,
         h,
     }];
-    if let Some(sel) = overlays.selection {
-        ops.push(DrawOp::StrokeRect {
-            color: theme.selection_color,
-            line_width: 2.0,
-            x: sel.top_left.x,
-            y: sel.top_left.y,
-            w: sel.width,
-            h: sel.height,
-        });
+    if let Some(range) = overlays.point_range {
+        ops.push(stub_range_stroke(theme, range));
     }
     ops
+}
+
+/// Deterministic test-only mapping from `RCRange` → `StrokeRect` op. Both
+/// `overlay_ops` and `reference_ops` route through this so they paint the
+/// same shape for the same range.
+fn stub_range_stroke(theme: &CanvasTheme, range: RCRange) -> DrawOp {
+    const COL_W: f64 = 80.0;
+    const ROW_H: f64 = 20.0;
+    DrawOp::StrokeRect {
+        color: theme.selection_color,
+        line_width: 2.0,
+        x: range.c1 as f64 * COL_W,
+        y: range.r1 as f64 * ROW_H,
+        w: (range.c2 - range.c1 + 1) as f64 * COL_W,
+        h: (range.r2 - range.r1 + 1) as f64 * ROW_H,
+    }
 }
 
 /// Composite grid + overlay ops into a single-canvas op sequence.
@@ -109,15 +126,8 @@ pub(crate) fn reference_ops(
         w,
         h,
     }];
-    if let Some(sel) = overlays.selection {
-        ops.push(DrawOp::StrokeRect {
-            color: theme.selection_color,
-            line_width: 2.0,
-            x: sel.top_left.x,
-            y: sel.top_left.y,
-            w: sel.width,
-            h: sel.height,
-        });
+    if let Some(range) = overlays.point_range {
+        ops.push(stub_range_stroke(theme, range));
     }
     ops
 }
@@ -130,11 +140,12 @@ mod tests {
     const W: f64 = 800.0;
     const H: f64 = 600.0;
 
-    fn sel(x: f64) -> PixelRect {
-        PixelRect {
-            top_left: Point { x, y: 10.0 },
-            width: 80.0,
-            height: 20.0,
+    fn range(start_col: i32) -> RCRange {
+        RCRange {
+            r1: 1,
+            c1: start_col,
+            r2: 1,
+            c2: start_col + 4,
         }
     }
 
@@ -147,9 +158,9 @@ mod tests {
     }
 
     #[test]
-    fn scene_with_selection_compose_equals_reference() {
+    fn scene_with_point_range_compose_equals_reference() {
         let overlays = RenderOverlays {
-            selection: Some(sel(40.0)),
+            point_range: Some(range(3)),
             ..Default::default()
         };
         let composed = compose(grid_ops(&LIGHT, W, H), overlay_ops(&LIGHT, &overlays, W, H));
@@ -158,23 +169,26 @@ mod tests {
     }
 
     #[test]
-    fn clearing_selection_returns_to_background_only() {
-        let with_sel = RenderOverlays {
-            selection: Some(sel(40.0)),
+    fn clearing_point_range_returns_to_background_only() {
+        let with_range = RenderOverlays {
+            point_range: Some(range(3)),
             ..Default::default()
         };
-        let without_sel = RenderOverlays::default();
+        let without_range = RenderOverlays::default();
 
-        let composed_with = compose(grid_ops(&LIGHT, W, H), overlay_ops(&LIGHT, &with_sel, W, H));
+        let composed_with = compose(
+            grid_ops(&LIGHT, W, H),
+            overlay_ops(&LIGHT, &with_range, W, H),
+        );
         let composed_without = compose(
             grid_ops(&LIGHT, W, H),
-            overlay_ops(&LIGHT, &without_sel, W, H),
+            overlay_ops(&LIGHT, &without_range, W, H),
         );
-        let reference_without = reference_ops(&LIGHT, &without_sel, W, H);
+        let reference_without = reference_ops(&LIGHT, &without_range, W, H);
 
         assert_ne!(
             composed_with, composed_without,
-            "clearing selection must change ops"
+            "clearing point_range must change ops"
         );
         assert_eq!(composed_without, reference_without);
     }

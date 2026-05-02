@@ -12,12 +12,13 @@ pub(crate) mod text_paint;
 use crate::model::{FormulaRef, RCRange, SheetArea};
 use crate::renderer::AutofillTarget;
 
-/// Overlay ranges passed to `render()` for selection preview drawing.
+/// Overlay ranges passed to `render()`.
+///
+/// Selection is not stored here — it is paint-time-derived from
+/// `model.get_selected_view()`. The consumer signals selection changes via
+/// `IronCanvas::request_overlay_repaint()`.
 #[derive(Clone, PartialEq, Default)]
 pub struct RenderOverlays {
-    /// Selection border in CSS pixels, pre-converted by the consumer.
-    /// `None` means no selection is visible (e.g., during a sheet swap).
-    pub selection: Option<super::geometry::PixelRect>,
     /// Target cell during autofill-handle drag.
     pub extend_to: Option<AutofillTarget>,
     pub clipboard: Option<SheetArea>,

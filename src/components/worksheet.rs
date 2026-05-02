@@ -236,7 +236,6 @@ pub fn Worksheet() -> impl IntoView {
                 })
             });
             let overlays = RenderOverlays {
-                selection: None,
                 extend_to,
                 clipboard: clipboard.map(Into::into),
                 point_range: point_range.map(Into::into),
@@ -303,7 +302,6 @@ pub fn Worksheet() -> impl IntoView {
                         })
                     });
                     ic.set_overlays(RenderOverlays {
-                        selection: None,
                         extend_to,
                         clipboard: clipboard.map(Into::into),
                         point_range: point_range.map(Into::into),

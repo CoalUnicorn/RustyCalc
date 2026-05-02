@@ -62,13 +62,11 @@ impl CanvasModel for StubModel {
 // exactly what `IronCanvas::set_overlays` and `paint_if_dirty` do in
 // production, so a pass here proves the fan-out policy is correct.
 
-fn cell_rect(x: f64) -> crate::geometry::PixelRect {
-    use crate::geometry::{PixelRect, Point};
-    PixelRect {
-        top_left: Point { x, y: 0.0 },
-        width: 80.0,
-        height: 20.0,
-    }
+// Per-frame overlay state used to drive the value-compare path. Autofill drag
+// is the canonical scenario where `set_overlays` fires once per frame with a
+// changing target — selection no longer lives on `RenderOverlays`.
+fn drag_target(col: i32) -> crate::renderer::AutofillTarget {
+    crate::renderer::AutofillTarget { row: 1, col }
 }
 
 #[test]
@@ -79,7 +77,7 @@ fn set_overlays_only_dirties_overlay() {
     let mut current = RenderOverlays::default();
 
     let next = RenderOverlays {
-        selection: Some(cell_rect(10.0)),
+        extend_to: Some(drag_target(2)),
         ..Default::default()
     };
     // mirror set_overlays fan-out policy
@@ -106,9 +104,9 @@ fn sixty_drag_frames_increment_overlay_only() {
     let mut overlay = PaintGate::new();
     let mut current = RenderOverlays::default();
 
-    for i in 0..60_u32 {
+    for i in 0..60_i32 {
         let next = RenderOverlays {
-            selection: Some(cell_rect(i as f64 * 2.0)),
+            extend_to: Some(drag_target(i)),
             ..Default::default()
         };
         // mirror set_overlays
@@ -142,34 +140,5 @@ fn set_model_different_rc_is_change() {
     assert!(
         !Rc::ptr_eq(&m1, &m2),
         "distinct Rc allocations must not be equal"
-    );
-}
-
-#[test]
-fn nav_event_only_dirties_overlay() {
-    use crate::layer::PaintGate;
-    // Simulate worksheet.rs: set_overlays fires, request_repaint does NOT.
-    let mut grid = PaintGate::new();
-    let mut overlay = PaintGate::new();
-    let mut current = RenderOverlays::default();
-
-    let next = RenderOverlays {
-        selection: Some(cell_rect(20.0)),
-        ..Default::default()
-    };
-    // mirror conditionalized fan-out: nav → set_overlays only
-    if next != current {
-        overlay.mark_dirty();
-    }
-    current = next;
-    let _ = current;
-
-    assert!(
-        overlay.should_paint(),
-        "overlay must be dirty after nav set_overlays"
-    );
-    assert!(
-        !grid.should_paint(),
-        "grid must NOT be dirty on nav-only event"
     );
 }

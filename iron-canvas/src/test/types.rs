@@ -159,28 +159,3 @@ fn render_overlays_same_point_range_is_equal() {
     };
     assert!(a == b);
 }
-
-#[test]
-fn render_overlays_changed_selection_is_not_equal() {
-    use crate::geometry::{PixelRect, Point};
-    let a = RenderOverlays::default();
-    let b = RenderOverlays {
-        selection: Some(PixelRect {
-            top_left: Point { x: 10.0, y: 10.0 },
-            width: 80.0,
-            height: 20.0,
-        }),
-        ..Default::default()
-    };
-    assert!(a != b);
-}
-
-#[test]
-fn render_overlays_cleared_selection_equals_default() {
-    let a = RenderOverlays::default();
-    let b = RenderOverlays {
-        selection: None,
-        ..Default::default()
-    };
-    assert!(a == b);
-}
