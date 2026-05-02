@@ -74,17 +74,17 @@ fn column_visible_band_uses_first_last_column() {
     assert_eq!(*band.end(), 12);
 }
 
-fn frozen(rows: Option<(i32, i32)>, cols: Option<(i32, i32)>, origin: Point) -> FrozenRC {
+fn frozen(rows: i32, cols: i32, origin: Point) -> FrozenRC {
     FrozenRC {
-        row_band: rows.map(|(s, e)| s..=e),
-        col_band: cols.map(|(s, e)| s..=e),
+        rows,
+        cols,
         offset: origin,
     }
 }
 
 #[test]
 fn pane_top_left_origin_is_pinned_to_header_corner() {
-    let frc = frozen(Some((1, 2)), Some((1, 3)), Point { x: 200.0, y: 100.0 });
+    let frc = frozen(2, 3, Point { x: 200.0, y: 100.0 });
     let p = PaneRegion::top_left(&frc);
     assert_eq!(p.origin.x, HEADER_COL_WIDTH + HEADER_OFFSET);
     assert_eq!(p.origin.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
@@ -92,7 +92,7 @@ fn pane_top_left_origin_is_pinned_to_header_corner() {
 
 #[test]
 fn pane_top_right_origin_uses_frozen_x_and_header_y() {
-    let frc = frozen(Some((1, 2)), Some((1, 3)), Point { x: 200.0, y: 100.0 });
+    let frc = frozen(2, 3, Point { x: 200.0, y: 100.0 });
     let v = vis((3, 9), (4, 11));
     let p = PaneRegion::top_right(&frc, &v);
     assert_eq!(p.origin.x, 200.0);
@@ -102,7 +102,7 @@ fn pane_top_right_origin_uses_frozen_x_and_header_y() {
 
 #[test]
 fn pane_bottom_left_origin_uses_header_x_and_frozen_y() {
-    let frc = frozen(Some((1, 2)), Some((1, 3)), Point { x: 200.0, y: 100.0 });
+    let frc = frozen(2, 3, Point { x: 200.0, y: 100.0 });
     let v = vis((3, 9), (4, 11));
     let p = PaneRegion::bottom_left(&frc, &v);
     assert_eq!(p.origin.x, HEADER_COL_WIDTH + HEADER_OFFSET);
@@ -112,7 +112,7 @@ fn pane_bottom_left_origin_uses_header_x_and_frozen_y() {
 
 #[test]
 fn pane_bottom_right_origin_matches_frozen_offset() {
-    let frc = frozen(Some((1, 2)), Some((1, 3)), Point { x: 200.0, y: 100.0 });
+    let frc = frozen(2, 3, Point { x: 200.0, y: 100.0 });
     let v = vis((3, 9), (4, 11));
     let p = PaneRegion::bottom_right(&frc, &v);
     assert_eq!(p.origin.x, 200.0);

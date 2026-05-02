@@ -22,12 +22,11 @@ pub struct PaneRegion {
 
 impl PaneRegion {
     /// Frozen rows x frozen cols - top-left quadrant.
+    /// `1..=0` is the empty range, so a no-freeze build paints nothing here.
     pub(crate) fn top_left(frc: &FrozenRC) -> Self {
-        let rows = frc.row_band.clone().unwrap_or(0..=0);
-        let cols = frc.col_band.clone().unwrap_or(0..=0);
         PaneRegion {
-            rows,
-            cols,
+            rows: 1..=frc.rows,
+            cols: 1..=frc.cols,
             origin: Point {
                 x: HEADER_COL_WIDTH + HEADER_OFFSET,
                 y: HEADER_ROW_HEIGHT + HEADER_OFFSET,
@@ -37,9 +36,8 @@ impl PaneRegion {
 
     /// Frozen rows x scrollable cols - top-right quadrant.
     pub(crate) fn top_right(frc: &FrozenRC, vis: &VisibleCells) -> Self {
-        let rows = frc.row_band.clone().unwrap_or(0..=0);
         PaneRegion {
-            rows,
+            rows: 1..=frc.rows,
             cols: vis.first.column..=vis.last.column,
             origin: Point {
                 x: frc.offset.x,
@@ -50,10 +48,9 @@ impl PaneRegion {
 
     /// Scrollable rows x frozen cols - bottom-left quadrant.
     pub(crate) fn bottom_left(frc: &FrozenRC, vis: &VisibleCells) -> Self {
-        let cols = frc.col_band.clone().unwrap_or(0..=0);
         PaneRegion {
             rows: vis.first.row..=vis.last.row,
-            cols,
+            cols: 1..=frc.cols,
             origin: Point {
                 x: HEADER_COL_WIDTH + HEADER_OFFSET,
                 y: frc.offset.y,

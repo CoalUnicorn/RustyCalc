@@ -94,8 +94,6 @@ impl CanvasModel for MockCanvasModel {
 fn frozen_rc_no_freeze_has_no_bands_and_origin_skips_separator() {
     let m = MockCanvasModel::default();
     let frc = FrozenRC::from_model(&m);
-    assert!(frc.row_band.is_none());
-    assert!(frc.col_band.is_none());
     assert_eq!(frc.frozen_rows_count(), 0);
     assert_eq!(frc.frozen_cols_count(), 0);
     assert_eq!(frc.offset.x, HEADER_COL_WIDTH);
@@ -109,8 +107,6 @@ fn frozen_rc_rows_only_adds_separator_on_y_only() {
         ..Default::default()
     };
     let frc = FrozenRC::from_model(&m);
-    assert_eq!(frc.row_band, Some(1..=2));
-    assert!(frc.col_band.is_none());
     assert_eq!(frc.frozen_rows_count(), 2);
     assert_eq!(frc.frozen_cols_count(), 0);
     assert_eq!(frc.offset.x, HEADER_COL_WIDTH);

@@ -132,11 +132,11 @@ impl Axis {
         }
     }
 
-    /// The frozen band for this axis from the frame, if any.
-    pub(crate) fn frozen_band(self, frame: &FrameContext) -> Option<&RangeInclusive<i32>> {
+    /// Count of frozen cells along this axis (0 when nothing is frozen).
+    pub(crate) fn frozen_count(self, frame: &FrameContext) -> i32 {
         match self {
-            Axis::Row => frame.frozen.row_band.as_ref(),
-            Axis::Column => frame.frozen.col_band.as_ref(),
+            Axis::Row => frame.frozen.rows,
+            Axis::Column => frame.frozen.cols,
         }
     }
 
@@ -319,14 +319,13 @@ pub struct Span {
 
 /// Frozen rows and columns grouped with their pixel origin.
 ///
-/// The band shape (`Option<RangeInclusive<i32>>`) is the extension seam: today
-/// `from_model` only emits `1..=N` (anchored at the top-left), but the range
-/// carries the start index too, so a named-range-anchored freeze becomes a
-/// future variant on the shape without touching the four-quadrant math.
+/// `rows` / `cols` are counts: today every freeze is anchored at the top-left
+/// so `1..=rows` / `1..=cols` is the full extent. A future named-range-anchored
+/// freeze would replace these counts with a richer shape.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrozenRC {
-    pub row_band: Option<RangeInclusive<i32>>,
-    pub col_band: Option<RangeInclusive<i32>>,
+    pub rows: i32,
+    pub cols: i32,
     pub offset: Point,
 }
 
@@ -339,8 +338,8 @@ impl FrozenRC {
         let h: f64 = (1..=rows).map(|r| row_height(model, r)).sum();
         let w: f64 = (1..=cols).map(|c| col_width(model, c)).sum();
         FrozenRC {
-            row_band: (rows > 0).then_some(1..=rows),
-            col_band: (cols > 0).then_some(1..=cols),
+            rows,
+            cols,
             offset: Point {
                 x: HEADER_COL_WIDTH + w + if cols > 0 { FROZEN_SEP } else { 0.0 },
                 y: HEADER_ROW_HEIGHT + h + if rows > 0 { FROZEN_SEP } else { 0.0 },
@@ -348,16 +347,14 @@ impl FrozenRC {
         }
     }
 
-    /// Count of frozen rows - derived from `row_band`.
     #[inline]
     pub fn frozen_rows_count(&self) -> i32 {
-        self.row_band.as_ref().map_or(0, |r| *r.end())
+        self.rows
     }
 
-    /// Count of frozen columns - mirror of `frozen_rows_count`.
     #[inline]
     pub fn frozen_cols_count(&self) -> i32 {
-        self.col_band.as_ref().map_or(0, |c| *c.end())
+        self.cols
     }
 }
 

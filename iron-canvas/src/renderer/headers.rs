@@ -20,7 +20,7 @@ const HEADER_FONT: &str = "bold 12px Inter, Arial, sans-serif";
 impl CanvasRenderer {
     /// Thick separator strokes between frozen bands and the scrollable grid.
     pub(super) fn draw_frozen_separators(&self, frc: &FrozenRC) {
-        if frc.row_band.is_none() && frc.col_band.is_none() {
+        if frc.rows == 0 && frc.cols == 0 {
             return;
         }
         self.set_stroke_static(self.theme.grid_separator_color);
@@ -29,7 +29,7 @@ impl CanvasRenderer {
         let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
 
         self.with_stroke_width(FROZEN_SEP, |this| {
-            if frc.row_band.is_some() {
+            if frc.rows > 0 {
                 this.stroke_hline(
                     Span {
                         from: 0.0,
@@ -38,7 +38,7 @@ impl CanvasRenderer {
                     sep_y,
                 );
             }
-            if frc.col_band.is_some() {
+            if frc.cols > 0 {
                 this.stroke_vline(
                     sep_x,
                     Span {
@@ -105,22 +105,20 @@ impl CanvasRenderer {
         frame: &FrameContext,
         mut visit: impl FnMut(&Self, i32, f64, f64),
     ) {
-        let frozen_band = axis.frozen_band(frame);
+        let frozen_count = axis.frozen_count(frame);
         let frozen_origin = axis.frozen_origin(frame);
 
         let mut frozen_cursor = axis.strip_start();
-        if let Some(band) = frozen_band {
-            for i in band.clone() {
-                let t = axis.frame_extent(frame, i);
-                if t <= 0.0 {
-                    continue;
-                }
-                visit(self, i, frozen_cursor, t);
-                frozen_cursor += t;
+        for i in 1..=frozen_count {
+            let t = axis.frame_extent(frame, i);
+            if t <= 0.0 {
+                continue;
             }
+            visit(self, i, frozen_cursor, t);
+            frozen_cursor += t;
         }
 
-        let mut scroll_cursor = if frozen_band.is_some() {
+        let mut scroll_cursor = if frozen_count > 0 {
             frozen_origin
         } else {
             axis.strip_start()
