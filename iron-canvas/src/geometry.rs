@@ -152,11 +152,11 @@ impl Axis {
     /// Inclusive `(start, end)` of the user's selection along this axis,
     /// read from ironcalc's `SelectedView.range`
     pub(crate) fn selection_range(self, view_range: RCRange) -> (i32, i32) {
-        let (start, end) = match self {
-            Axis::Row => (view_range.normalized().r1, view_range.normalized().c1),
-            Axis::Column => (view_range.normalized().r2, view_range.normalized().c2),
-        };
-        (start, end)
+        let norm = view_range.normalized();
+        match self {
+            Axis::Row => (norm.r1, norm.r2),
+            Axis::Column => (norm.c1, norm.c2),
+        }
     }
 }
 
@@ -763,8 +763,9 @@ impl FrameContext {
     /// handle position is locked to what's on screen even if the model's
     /// selection has since moved.
     pub(crate) fn autofill_handle(&self) -> Option<Point> {
-        let r2 = self.selection_range.normalized().r1;
-        let c2 = self.selection_range.normalized().c1;
+        let norm = self.selection_range.normalized();
+        let r2 = norm.r2;
+        let c2 = norm.c2;
         if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
             return None;
         }
@@ -785,7 +786,10 @@ impl FrameContext {
     pub(crate) fn autofill_handle_rect(&self) -> PixelRect {
         if let Some(p) = self.autofill_handle() {
             PixelRect {
-                top_left: p,
+                top_left: Point {
+                    x: p.x - AUTOFILL_HANDLE_PX,
+                    y: p.y - AUTOFILL_HANDLE_PX,
+                },
                 width: AUTOFILL_HANDLE_PX,
                 height: AUTOFILL_HANDLE_PX,
             }
