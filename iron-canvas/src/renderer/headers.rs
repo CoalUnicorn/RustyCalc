@@ -89,7 +89,7 @@ impl CanvasRenderer {
     /// Overlay pass repainting only selected header cells so the grid layer
     /// never redraws on navigation — the base pass beneath stays intact.
     pub(super) fn render_header_highlights(&self, axis: Axis, frame: &FrameContext) {
-        let (sel_start, sel_end) = axis.selection_range(&frame.selection_range);
+        let (sel_start, sel_end) = axis.selection_range(frame.selection_range);
         self.walk_header_strip(axis, frame, |this, i, along, t| {
             if i >= sel_start && i <= sel_end {
                 this.draw_header_cell(axis, i, along, t, true);

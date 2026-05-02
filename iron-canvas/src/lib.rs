@@ -87,12 +87,14 @@ pub enum ResizeTarget {
 use ironcalc_base::types::{CellType, Style};
 use ironcalc_base::UserModel;
 
+use crate::model::RCRange;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectedView {
     pub sheet: u32,
     pub row: i32,
     pub column: i32,
-    pub range: [i32; 4],
+    pub range: RCRange,
     pub top_row: i32,
     pub left_column: i32,
 }
@@ -121,7 +123,12 @@ impl<'a> CanvasModel for UserModel<'a> {
             sheet: v.sheet,
             row: v.row,
             column: v.column,
-            range: v.range,
+            range: RCRange {
+                r1: v.range[0],
+                c1: v.range[1],
+                r2: v.range[2],
+                c2: v.range[3],
+            },
             top_row: v.top_row,
             left_column: v.left_column,
         }

@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use crate::{CanvasModel, RenderOverlays};
+use crate::{model::RCRange, CanvasModel, RenderOverlays};
 use std::rc::Rc;
 
 struct StubModel;
@@ -14,7 +14,7 @@ impl CanvasModel for StubModel {
             sheet: 0,
             row: 1,
             column: 1,
-            range: [1, 1, 1, 1],
+            range: RCRange::from([1, 1, 1, 1]),
             top_row: 1,
             left_column: 1,
         }

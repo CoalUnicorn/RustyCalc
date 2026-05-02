@@ -6,6 +6,7 @@
 // Style / cell-content methods stay `unimplemented!()` so a future test
 // that touches them fails loudly rather than silently consuming defaults.
 use crate::geometry::{PixelOffsets, AUTOFILL_HIT_PAD_PX};
+use crate::model::RCRange;
 use crate::{geometry::FrameContext, FrozenRC, SelectedView};
 use crate::{
     CanvasModel, CanvasSize, HitTest, PixelRect, Point, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH,
@@ -47,7 +48,7 @@ impl CanvasModel for MockCanvasModel {
             sheet: self.sheet,
             row: self.range[0],
             column: self.range[1],
-            range: self.range,
+            range: RCRange::from(self.range),
             top_row: self.top_row,
             left_column: self.left_column,
         }
@@ -312,7 +313,12 @@ fn autofill_handle_tracks_in_place_selection_range_update() {
     let mut frame = FrameContext::current(&m, test_canvas());
     let before = frame.autofill_handle().expect("initial handle");
 
-    frame.selection_range = [5, 6, 5, 6];
+    frame.selection_range = RCRange {
+        r1: 5,
+        c1: 6,
+        r2: 5,
+        c2: 6,
+    };
     let after = frame.autofill_handle().expect("post-update handle");
 
     assert_ne!(before, after, "handle must move with selection_range");

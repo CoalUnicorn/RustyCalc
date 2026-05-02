@@ -95,7 +95,7 @@ pub struct FormulaRef {
     pub active: bool,          // emphasize the ref under cursor
 }
 
-pub struct CssColor(pub String);
+pub struct CssColor(String);
 
 impl CssColor {
     pub fn new(s: impl Into<String>) -> Self {
@@ -109,5 +109,9 @@ impl CssColor {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
     }
 }

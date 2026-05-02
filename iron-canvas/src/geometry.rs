@@ -4,6 +4,7 @@
 use std::fmt::{self, Display};
 use std::ops::RangeInclusive;
 
+use crate::model::RCRange;
 use crate::{CanvasModel, HitTest, ResizeTarget};
 
 pub const HEADER_OFFSET: f64 = 1.0;
@@ -149,18 +150,11 @@ impl Axis {
     }
 
     /// Inclusive `(start, end)` of the user's selection along this axis,
-    /// read from ironcalc's `SelectedView.range` array laid out as
-    /// `[row1, col1, row2, col2]`. Rows live at indices 0/2; columns at 1/3.
-    pub(crate) fn selection_range(self, view_range: &[i32; 4]) -> (i32, i32) {
+    /// read from ironcalc's `SelectedView.range`
+    pub(crate) fn selection_range(self, view_range: RCRange) -> (i32, i32) {
         let (start, end) = match self {
-            Axis::Row => (
-                view_range[0].min(view_range[2]),
-                view_range[0].max(view_range[2]),
-            ),
-            Axis::Column => (
-                view_range[1].min(view_range[3]),
-                view_range[1].max(view_range[3]),
-            ),
+            Axis::Row => (view_range.normalized().r1, view_range.normalized().c1),
+            Axis::Column => (view_range.normalized().r2, view_range.normalized().c2),
         };
         (start, end)
     }
@@ -506,7 +500,7 @@ pub(crate) struct FrameContext {
     /// pure (no model read) and pins the handle position to the *painted*
     /// selection, even if the model's selection mutated between paint and
     /// the next hit-test.
-    pub selection_range: [i32; 4],
+    pub selection_range: RCRange, //[i32; 4],
     /// Canvas size at which this frame was built. Stored so `is_still_valid`
     /// can detect a resize without the orchestrator passing size separately.
     pub canvas_size: CanvasSize,
@@ -769,8 +763,8 @@ impl FrameContext {
     /// handle position is locked to what's on screen even if the model's
     /// selection has since moved.
     pub(crate) fn autofill_handle(&self) -> Option<Point> {
-        let r2 = self.selection_range[0].max(self.selection_range[2]);
-        let c2 = self.selection_range[1].max(self.selection_range[3]);
+        let r2 = self.selection_range.normalized().r1;
+        let c2 = self.selection_range.normalized().c1;
         if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
             return None;
         }

@@ -250,7 +250,7 @@ impl BorderPaint {
     fn resolve(item: &BorderItem, theme: &CanvasTheme) -> Self {
         Self {
             color: BorderColor::Owned(
-                CssColor::new(item.color.as_deref().unwrap_or(theme.grid_color)).0,
+                CssColor::new(item.color.as_deref().unwrap_or(theme.grid_color)).into_string(),
             ),
             stroke: BorderStroke::from_border_style(&item.style),
         }

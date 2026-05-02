@@ -136,7 +136,7 @@ impl TextPaint {
             clip: rect,
             font_css,
             font_size_px: size_px,
-            color: CssColor::new(&text_color).0,
+            color: CssColor::new(&text_color).into_string(),
             underline,
             strike,
             lines,
@@ -213,7 +213,7 @@ impl CellTextStyle {
         let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
 
         Self {
-            text_color: text_color.0,
+            text_color: text_color.into_string(),
             font,
             h_align,
             v_align,
