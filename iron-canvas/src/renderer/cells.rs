@@ -47,7 +47,13 @@ impl CanvasRenderer {
 
     /// Fill a cell's background rectangle. Border pass is separate (batched).
     pub(super) fn paint_bg(&self, p: &CellPaint) {
-        self.set_fill_cached(&p.bg);
+        // Theme-fallback path uses set_fill_static so the pointer-eq fast path
+        // in CachedColor::matches_static fires when the same theme color
+        // repeats across cells.
+        match p.style.fill.fg_color.as_deref() {
+            Some(c) => self.set_fill_cached(c),
+            None => self.set_fill_static(self.theme().cell_bg),
+        }
         self.ctx_ref().fill_rect(
             p.rect.top_left.x,
             p.rect.top_left.y,
@@ -123,7 +129,7 @@ impl CanvasRenderer {
             self,
             //show_grid,
             CellSlot { addr, rect },
-            &own_style,
+            own_style,
         ) else {
             return;
         };
@@ -138,7 +144,6 @@ impl CanvasRenderer {
 pub(crate) struct CellPaint {
     pub addr: CellAddress,
     pub rect: PixelRect,
-    pub bg: String,
     pub style: Style,
 }
 
@@ -152,28 +157,20 @@ pub(super) struct TextSlot {
 
 impl CellPaint {
     /// Resolve one cell Style into renderer-ready `CellPaint`.
+    /// Takes Style by value — the caller's owned copy is moved straight through
+    /// to the paint, eliminating the per-cell clone on the hot pane walk.
     pub fn resolve_cell_paint(
-        renderer: &CanvasRenderer,
+        _renderer: &CanvasRenderer,
         slot: CellSlot,
-        own_style: &Style,
+        own_style: Style,
     ) -> Option<CellPaint> {
         if slot.rect.width <= 0.0 || slot.rect.height <= 0.0 {
             return None;
         }
-
-        let theme = renderer.theme();
-        let bg = own_style
-            .fill
-            .fg_color
-            .as_deref()
-            .unwrap_or(theme.cell_bg)
-            .to_owned();
-
         Some(CellPaint {
             addr: slot.addr,
             rect: slot.rect,
-            bg,
-            style: own_style.clone(),
+            style: own_style,
         })
     }
 }
@@ -383,7 +380,7 @@ impl<'a> Iterator for CellPaintsIter<'a> {
                 self.renderer,
                 //self.show_grid,
                 slot,
-                &own_style,
+                own_style,
             );
 
             if let Some(p) = paint {
