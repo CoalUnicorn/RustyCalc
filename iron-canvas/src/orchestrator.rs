@@ -126,11 +126,18 @@ impl IronCanvas {
 
         // Overlay-only repaint with unchanged geometry: reuse the last frame's
         // prefix-sum tables rather than walking the model again. Triggered by
-        // autofill drag, clipboard state change, formula-ref highlight updates —
-        // all of which call set_overlays() without touching scroll or freeze.
+        // autofill drag, clipboard state change, formula-ref highlight updates,
+        // and active-cell moves — all of which call set_overlays() without
+        // touching scroll or freeze.
+        //
+        // `selection_range` is refreshed in place: the prefix-sum tables are
+        // selection-independent, but the autofill handle and hit-test must
+        // track the current active cell, not the selection that was live at
+        // the previous full paint.
         if !grid_dirty {
-            if let Some(prev) = &self.last_frame {
+            if let Some(prev) = self.last_frame.as_mut() {
                 if prev.is_still_valid(model, self.size) {
+                    prev.selection_range = model.get_selected_view().range;
                     self.overlay.paint(self.theme, &self.overlays, model, prev);
                     return;
                 }

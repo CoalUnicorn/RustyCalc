@@ -10,8 +10,17 @@ pub const HEADER_OFFSET: f64 = 1.0;
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
 pub const HEADER_COL_WIDTH: f64 = 30.0;
 pub const FROZEN_SEP: f64 = 3.0;
-/// Half-side of the autofill handle square drawn at the range's bottom-right.
+/// Side length of the autofill handle square. The handle's top-left sits at
+/// the selection's bottom-right corner (Excel anchor) so it visually pokes
+/// outside the selection rectangle.
 pub const AUTOFILL_HANDLE_PX: f64 = 6.0;
+/// Width of the contrasting outline ring stroked around the handle. Sourced
+/// from `theme.cell_bg` so the handle pops against any cell fill underneath.
+pub const AUTOFILL_HANDLE_BORDER_PX: f64 = 1.0;
+/// Extra forgiveness around the handle's visual rect on every side when
+/// hit-testing pointer events — keeps the click target a couple pixels
+/// larger than the painted square.
+pub const AUTOFILL_HIT_PAD_PX: f64 = 2.0;
 
 /// Fallback row height when the model returns `None` (row not explicitly sized).
 pub const DEFAULT_ROW_HEIGHT: f64 = 21.0;
@@ -339,9 +348,7 @@ impl FrozenRC {
         }
     }
 
-    /// Count of frozen rows - derived from `row_band`, preserving the
-    /// "no band = 0" invariant. Assumes a band ending at `N` represents
-    /// `N` frozen entries (true for the `1..=N` anchor used today).
+    /// Count of frozen rows - derived from `row_band`.
     #[inline]
     pub fn frozen_rows_count(&self) -> i32 {
         self.row_band.as_ref().map_or(0, |r| *r.end())
@@ -779,6 +786,27 @@ impl FrameContext {
         })
     }
 
+    /// Visual rect of the autofill handle — the small square stroked over
+    /// the selection's bottom-right corner. Top-left sits exactly at
+    /// `autofill_handle()` so the handle pokes outside the selection.
+    /// Single source of truth: `draw_selection` paints from this rect and
+    /// `hit_test` accepts clicks against an inflated copy of it.
+    pub(crate) fn autofill_handle_rect(&self) -> PixelRect {
+        if let Some(p) = self.autofill_handle() {
+            PixelRect {
+                top_left: p,
+                width: AUTOFILL_HANDLE_PX,
+                height: AUTOFILL_HANDLE_PX,
+            }
+        } else {
+            PixelRect {
+                top_left: Point::default(),
+                width: AUTOFILL_HANDLE_PX,
+                height: AUTOFILL_HANDLE_PX,
+            }
+        }
+    }
+
     /// Column whose RIGHT edge is within `hit_zone` px of `x`, or `None`.
     pub(crate) fn col_boundary_at(&self, x: f64, hit_zone: f64) -> Option<i32> {
         let frozen_cols = self.frozen.frozen_cols_count();
@@ -845,10 +873,15 @@ impl FrameContext {
         }
         let row = self.pixel_to_row(y);
         let column = self.pixel_to_col(x);
-        if let Some(p) = self.autofill_handle() {
-            if (x - p.x).abs() <= AUTOFILL_HANDLE_PX && (y - p.y).abs() <= AUTOFILL_HANDLE_PX {
-                return HitTest::AutofillHandle { row, column };
-            }
+        let h = self.autofill_handle_rect();
+
+        let pad = AUTOFILL_HIT_PAD_PX;
+        if x >= h.top_left.x - pad
+            && x <= h.right() + pad
+            && y >= h.top_left.y - pad
+            && y <= h.bottom() + pad
+        {
+            return HitTest::AutofillHandle { row, column };
         }
         HitTest::Cell { row, column }
     }

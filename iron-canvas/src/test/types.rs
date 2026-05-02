@@ -1,8 +1,7 @@
 use crate::geometry::Axis;
 use crate::renderer::PaneRegion;
-use crate::types::{FreezeConfig, Viewport};
 use crate::{
-    FrozenRC, PaneRegion, Point, RenderOverlays, VisibleCells, HEADER_COL_WIDTH, HEADER_OFFSET,
+    FrozenRC, Point, RenderOverlays, VisibleCells, HEADER_COL_WIDTH, HEADER_OFFSET,
     HEADER_ROW_HEIGHT,
 };
 
@@ -118,63 +117,6 @@ fn pane_bottom_right_origin_matches_frozen_offset() {
     let p = PaneRegion::bottom_right(&frc, &v);
     assert_eq!(p.origin.x, 200.0);
     assert_eq!(p.origin.y, 100.0);
-}
-
-#[test]
-fn viewport_same_value_is_equal() {
-    let vp = Viewport {
-        top_row: 5,
-        left_column: 3,
-    };
-    assert_eq!(vp, vp);
-}
-
-#[test]
-fn viewport_different_top_row_is_not_equal() {
-    let a = Viewport {
-        top_row: 1,
-        left_column: 1,
-    };
-    let b = Viewport {
-        top_row: 2,
-        left_column: 1,
-    };
-    assert_ne!(a, b);
-}
-
-#[test]
-fn viewport_different_left_column_is_not_equal() {
-    let a = Viewport {
-        top_row: 1,
-        left_column: 1,
-    };
-    let b = Viewport {
-        top_row: 1,
-        left_column: 2,
-    };
-    assert_ne!(a, b);
-}
-
-#[test]
-fn freeze_config_same_value_is_equal() {
-    let f = FreezeConfig {
-        frozen_rows: 2,
-        frozen_cols: 1,
-    };
-    assert_eq!(f, f);
-}
-
-#[test]
-fn freeze_config_different_rows_is_not_equal() {
-    let a = FreezeConfig {
-        frozen_rows: 2,
-        frozen_cols: 1,
-    };
-    let b = FreezeConfig {
-        frozen_rows: 3,
-        frozen_cols: 1,
-    };
-    assert_ne!(a, b);
 }
 
 #[test]

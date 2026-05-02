@@ -14,35 +14,49 @@ use crate::{col_width, row_height, CanvasModel, CanvasSize, Point};
 
 use super::super::geometry::{BorderEdge, FrameContext, PixelRect};
 use super::super::model::{CellAddress, RCRange};
-// use super::super::types::{resolve_cell_paint, resolve_text_paint, BorderPaint, CellPaint};
 use super::CanvasRenderer;
 use crate::renderer::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
 use ironcalc_base::types::{BorderItem, BorderStyle, Style};
 
 impl CanvasRenderer {
-    /// Walk one frozen-pane quadrant. Streams bg+borders directly from the
-    /// paint iterator and parks per-cell text inputs in `text_slots` for a
-    /// second pass. Text paints last so overflow is never clipped by a
-    /// neighbour's background.
+    /// Walk one frozen-pane quadrant in four deferred passes:
+    /// bg -> grid borders -> explicit borders -> text.
+    ///
+    /// `BorderEdge::Right`/`Bottom` strokes at `x+width` snap (via
+    /// `snap_stroke`) into the NEXT cell's pixel column, where they'd land
+    /// inside that neighbour's bg. So this cell can only safely paint a
+    /// 1 px stroke on its OWN territory — i.e. its left and top edges
+    /// (which snap onto the cell's first column / first row). The grid
+    /// fallback therefore lives on left+top only and is suppressed when
+    /// the cell carries an explicit fill — colored cells extend cleanly to
+    /// every boundary, matching Excel/Sheets (image 5).
+    ///
+    /// The grid sub-pass runs across all cells before the explicit-border
+    /// sub-pass so an explicit `BorderItem::right` on cell A wins over
+    /// cell B's grid left at the shared pixel column (paint order: grid
+    /// across all → explicit across all → A.right strokes last on the
+    /// shared edge). Text remains the final pass so overflow is never
+    /// clipped by a neighbour's bg.
     pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
-        let mut text_slots = self.text_slots.take();
-        text_slots.clear();
+        let mut slots = self.text_slots.take();
+        slots.clear();
         for p in self.paints_in(model, &pane) {
             self.paint_bg(&p);
-            self.paint_borders(&p);
-            text_slots.push(TextSlot {
-                addr: p.addr,
-                rect: p.rect,
-                style: p.style,
-            });
+            slots.push(p);
         }
-        for t in &text_slots {
-            if let Some(tp) = TextPaint::resolve(self, model, t.addr, t.rect, &t.style) {
+        for p in &slots {
+            self.paint_borders_grid(p);
+        }
+        for p in &slots {
+            self.paint_borders_explicit(p);
+        }
+        for p in &slots {
+            if let Some(tp) = TextPaint::resolve(self, model, p.addr, p.rect, &p.style) {
                 self.paint_text(&tp);
             }
         }
-        self.text_slots.set(text_slots);
+        self.text_slots.set(slots);
     }
 
     /// Fill a cell's background rectangle. Border pass is separate (batched).
@@ -70,23 +84,59 @@ impl CanvasRenderer {
         self.paint_borders(p);
     }
 
-    /// Stroke all four edges of a cell. Grid color is the base coat on every
-    /// edge; any explicit `BorderItem` from the cell's style paints over it.
-    pub(super) fn paint_borders(&self, p: &CellPaint) {
+    /// Grid-fallback strokes on left+top
+    fn paint_borders_grid(&self, p: &CellPaint) {
+        if !self.show_grid.get() {
+            return;
+        }
+        if p.style.fill.fg_color.is_some() {
+            return;
+        }
         let theme = self.theme();
         let b = &p.style.border;
-        let edges = [
-            (BorderEdge::Left, &b.left),
-            (BorderEdge::Top, &b.top),
-            (BorderEdge::Right, &b.right),
-            (BorderEdge::Bottom, &b.bottom),
-        ];
-        for (edge, item) in edges {
-            //self.paint_border(edge, p.rect, &BorderPaint::grid_line(theme));
-            if let Some(item) = item {
-                self.paint_border(edge, p.rect, &BorderPaint::resolve(item, theme));
-            }
+        if b.left.is_none() {
+            self.paint_border(BorderEdge::Left, p.rect, &BorderPaint::grid_line(theme));
         }
+        if b.top.is_none() {
+            self.paint_border(BorderEdge::Top, p.rect, &BorderPaint::grid_line(theme));
+        }
+    }
+
+    /// Stroke any explicit `BorderItem`s on the cell's four edges. Run
+    /// across every slot AFTER the grid sub-pass so an explicit right on
+    /// cell A wins over cell B's grid left at the shared pixel column.
+    fn paint_borders_explicit(&self, p: &CellPaint) {
+        let theme = self.theme();
+        let b = &p.style.border;
+        if let Some(item) = &b.left {
+            self.paint_border(BorderEdge::Left, p.rect, &BorderPaint::resolve(item, theme));
+        }
+        if let Some(item) = &b.top {
+            self.paint_border(BorderEdge::Top, p.rect, &BorderPaint::resolve(item, theme));
+        }
+        if let Some(item) = &b.right {
+            self.paint_border(
+                BorderEdge::Right,
+                p.rect,
+                &BorderPaint::resolve(item, theme),
+            );
+        }
+        if let Some(item) = &b.bottom {
+            self.paint_border(
+                BorderEdge::Bottom,
+                p.rect,
+                &BorderPaint::resolve(item, theme),
+            );
+        }
+    }
+
+    /// Single-cell border paint used by `repaint_active_cell` where there
+    /// are no neighbour interactions to worry about. Composes the two
+    /// sub-passes in their canonical order: grid fallback first, explicit
+    /// over the top.
+    pub(super) fn paint_borders(&self, p: &CellPaint) {
+        self.paint_borders_grid(p);
+        self.paint_borders_explicit(p);
     }
 
     /// Stroke one resolved border. `Double`-style borders render as two
@@ -125,12 +175,8 @@ impl CanvasRenderer {
         let Ok(own_style) = model.get_cell_style(addr.sheet, addr.row, addr.column) else {
             return;
         };
-        let Some(paint) = CellPaint::resolve_cell_paint(
-            self,
-            //show_grid,
-            CellSlot { addr, rect },
-            own_style,
-        ) else {
+        let Some(paint) = CellPaint::resolve_cell_paint(self, CellSlot { addr, rect }, own_style)
+        else {
             return;
         };
         self.paint_cell(&paint);
@@ -145,14 +191,6 @@ pub(crate) struct CellPaint {
     pub addr: CellAddress,
     pub rect: PixelRect,
     pub style: Style,
-}
-
-/// Text-pass input parked during the streaming bg/border walk so the second
-/// pass can paint text on top of every neighbour's already-laid background.
-pub(super) struct TextSlot {
-    pub(super) addr: CellAddress,
-    pub(super) rect: PixelRect,
-    pub(super) style: Style,
 }
 
 impl CellPaint {
@@ -194,18 +232,18 @@ pub(crate) struct BorderPaint {
 }
 
 impl BorderPaint {
-    /// Thin grid-color stroke — the base coat painted on every edge before
-    /// any explicit border style. Zero allocation: theme color is `&'static str`.
-    // TODO: togle one pass
-    // fn grid_line(theme: &CanvasTheme) -> Self {
-    //     Self {
-    //         color: BorderColor::Static(theme.grid_color),
-    //         stroke: BorderStroke {
-    //             width_px: STANDARD_BORDER_WIDTH,
-    //             double: false,
-    //         },
-    //     }
-    // }
+    /// Thin grid-color stroke used as the right/bottom fallback when a cell
+    /// has no explicit border on that edge. Zero alloc — `theme.grid_color`
+    /// is `&'static str` so the `Static` arm avoids any per-cell `String`.
+    fn grid_line(theme: &CanvasTheme) -> Self {
+        Self {
+            color: BorderColor::Static(theme.grid_color),
+            stroke: BorderStroke {
+                width_px: STANDARD_BORDER_WIDTH,
+                double: false,
+            },
+        }
+    }
 
     /// Resolve a `BorderItem` from the cell style into a renderer-ready paint.
     /// Color falls back to `theme.grid_color` when the item carries no explicit color.

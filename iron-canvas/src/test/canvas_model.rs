@@ -5,11 +5,11 @@
 // Only methods exercised by viewport / frozen-pane math are wired up.
 // Style / cell-content methods stay `unimplemented!()` so a future test
 // that touches them fails loudly rather than silently consuming defaults.
-use crate::geometry::PixelOffsets;
+use crate::geometry::{PixelOffsets, AUTOFILL_HIT_PAD_PX};
 use crate::{geometry::FrameContext, FrozenRC, SelectedView};
 use crate::{
-    CanvasModel, CanvasSize, HitTest, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
-    HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+    CanvasModel, CanvasSize, HitTest, PixelRect, Point, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH,
+    DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
 
 struct MockCanvasModel {
@@ -232,6 +232,96 @@ fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
         .expect("finite selection has handle");
     assert_eq!(p.x, frame.col_to_x(5) + DEFAULT_COL_WIDTH);
     assert_eq!(p.y, frame.row_to_y(4) + DEFAULT_ROW_HEIGHT);
+}
+
+#[test]
+fn autofill_handle_rect_anchors_top_left_at_corner() {
+    // Excel anchor: handle's top-left == selection's bottom-right corner,
+    // so the handle visually pokes outside the selection rectangle.
+    let m = MockCanvasModel {
+        range: [2, 3, 4, 5],
+        ..Default::default()
+    };
+    let frame = FrameContext::current(&m, test_canvas());
+    let corner = frame.autofill_handle();
+    let rect = frame.autofill_handle_rect();
+    assert_eq!(rect.top_left.x, corner.unwrap().x);
+    assert_eq!(rect.top_left.y, corner.unwrap().y);
+    assert_eq!(rect.width, AUTOFILL_HANDLE_PX);
+    assert_eq!(rect.height, AUTOFILL_HANDLE_PX);
+}
+
+#[test]
+fn no_autofill_handle_rect_full_sheet_selection() {
+    let m = MockCanvasModel {
+        range: [1, 1, LAST_ROW, LAST_COLUMN],
+        ..Default::default()
+    };
+    let frame = FrameContext::current(&m, test_canvas());
+    assert_eq!(
+        frame.autofill_handle_rect(),
+        PixelRect {
+            top_left: Point { x: 0.0, y: 0.0 },
+            width: 6.0,
+            height: 6.0,
+        }
+    );
+}
+
+#[test]
+fn hit_test_accepts_click_within_handle_pad() {
+    // A click 1 px past the handle's bottom-right corner — inside the
+    // 2-px forgiveness pad — must classify as AutofillHandle.
+    let m = MockCanvasModel {
+        range: [2, 3, 4, 5],
+        ..Default::default()
+    };
+    let frame = FrameContext::current(&m, test_canvas());
+    let rect = frame.autofill_handle_rect();
+    let x = rect.right() + 1.0;
+    let y = rect.bottom() + 1.0;
+    match frame.hit_test(x, y) {
+        HitTest::AutofillHandle { .. } => {}
+        other => panic!("expected AutofillHandle within pad, got {:?}", other),
+    }
+}
+
+#[test]
+fn hit_test_rejects_click_past_handle_pad() {
+    // One pixel past the pad on each axis — must fall through to Cell.
+    let m = MockCanvasModel {
+        range: [2, 3, 4, 5],
+        ..Default::default()
+    };
+    let frame = FrameContext::current(&m, test_canvas());
+    let rect = frame.autofill_handle_rect();
+    let x = rect.right() + AUTOFILL_HIT_PAD_PX + 1.0;
+    let y = rect.bottom() + AUTOFILL_HIT_PAD_PX + 1.0;
+    match frame.hit_test(x, y) {
+        HitTest::Cell { .. } => {}
+        other => panic!("expected Cell past pad, got {:?}", other),
+    }
+}
+
+#[test]
+fn autofill_handle_tracks_in_place_selection_range_update() {
+    // Mirrors the orchestrator's overlay-only repaint path: when the active
+    // cell moves without scrolling, `paint_if_dirty` mutates the reused
+    // frame's `selection_range` in place. The handle must land on the new
+    // bottom-right, not the position captured by the previous full paint.
+    let m = MockCanvasModel {
+        range: [2, 3, 2, 3],
+        ..Default::default()
+    };
+    let mut frame = FrameContext::current(&m, test_canvas());
+    let before = frame.autofill_handle().expect("initial handle");
+
+    frame.selection_range = [5, 6, 5, 6];
+    let after = frame.autofill_handle().expect("post-update handle");
+
+    assert_ne!(before, after, "handle must move with selection_range");
+    assert_eq!(after.x, frame.col_to_x(6) + DEFAULT_COL_WIDTH);
+    assert_eq!(after.y, frame.row_to_y(5) + DEFAULT_ROW_HEIGHT);
 }
 
 #[test]

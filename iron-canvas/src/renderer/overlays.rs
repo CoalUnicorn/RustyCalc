@@ -9,9 +9,9 @@
 
 use crate::model::{FormulaRef, RCRange, SheetArea};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
-use crate::{CanvasModel, Point};
+use crate::CanvasModel;
 
-use super::super::geometry::{PixelRect, AUTOFILL_HANDLE_PX};
+use super::super::geometry::AUTOFILL_HANDLE_BORDER_PX;
 use super::super::model::CellAddress;
 use super::{
     CanvasRenderer, FrameContext, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH,
@@ -63,15 +63,15 @@ impl CanvasRenderer {
 
         self.rect_stroke(b, self.theme.selection_color, SELECTION_BORDER_WIDTH);
 
-        let handle = PixelRect {
-            top_left: Point {
-                x: b.right() - AUTOFILL_HANDLE_PX / 2.0,
-                y: b.bottom() - AUTOFILL_HANDLE_PX / 2.0,
-            },
-            width: AUTOFILL_HANDLE_PX,
-            height: AUTOFILL_HANDLE_PX,
-        };
+        // Autofill handle: top-left at the selection's bottom-right corner
+        // (Excel anchor — pokes outside the selection). Filled with
+        // selection_color, ringed in cell_bg so it stays visible against any
+        // cell fill underneath. Skips full-row/col selections — handle_rect
+        // returns None there, matching `autofill_handle()` semantics.
+        let handle = frame.autofill_handle_rect();
+
         self.rect_fill(handle, self.theme.selection_color);
+        self.rect_stroke(handle, self.theme.cell_bg, AUTOFILL_HANDLE_BORDER_PX);
     }
 
     /// Dashed preview of the autofill-handle drag target.

@@ -17,8 +17,8 @@ use crate::CanvasModel;
 
 /// Below this in either pixel dimension, no text is laid out at all.
 pub(crate) const MIN_TEXT_DIM_PX: f64 = 10.0;
-const CHAR_WIDTH_FACTOR: f64 = 0.6;
-const LINE_HEIGHT_FACTOR: f64 = 1.5;
+const CHAR_WIDTH_FACTOR: f64 = 1.0;
+const LINE_HEIGHT_FACTOR: f64 = 2.0;
 const TEXT_V_INSET_PX: f64 = 4.0;
 const CELL_PADDING: f64 = 4.0;
 

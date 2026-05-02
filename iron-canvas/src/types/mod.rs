@@ -26,19 +26,3 @@ pub struct RenderOverlays {
     /// All formula refs extracted from the current formula (multi-color overlays).
     pub formula_refs: Vec<FormulaRef>,
 }
-
-/// Scroll origin for the visible sheet area.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct Viewport {
-    /// First visible row in the scrollable region (1-indexed).
-    pub top_row: i32,
-    /// First visible column in the scrollable region (1-indexed).
-    pub left_column: i32,
-}
-
-/// Number of rows/columns pinned by the freeze-panes feature.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct FreezeConfig {
-    pub frozen_rows: u32,
-    pub frozen_cols: u32,
-}

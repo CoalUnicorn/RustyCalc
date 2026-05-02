@@ -15,9 +15,13 @@
 //! creates a fresh `CanvasRenderer` from the `NodeRef`, and calls
 //! `renderer.render(model, overlays)`. That single call redraws everything.
 //!
-//! The renderer is intentionally stateless between frames - it's
-//! constructed, used, and dropped each redraw. This avoids stale-state
-//! bugs: canvas size, DPR, and theme can change between frames.
+//!  Each canvas gets its own `LayerBase` (canvas + `PaintGate` + `CanvasRenderer`).
+//!  `GridLayer` requests a 2D context with `alpha: false` (opaque, lets the
+//!  browser skip alpha compositing); `OverlayLayer` requests
+//!  `alpha: true, desynchronized: true`. The renderer constructed with
+//!  `CanvasRenderer::for_layer` is **long-lived per layer** — it owns the 2D ctx,
+//!  so the cached `set_fill`/`set_stroke`/`set_font`/`set_line_width` state
+//!  persists across frames.
 //!
 //! # Render pipeline
 //!
@@ -54,16 +58,6 @@
 //! # Border resolution
 //!
 //! TODO
-//!
-//! # Key types
-//!
-//! - `CanvasRenderer` - short-lived; created per frame from a canvas element
-//! - `CellText` / `TextLine` - pre-computed text layout collected during
-//!   Phase 1 and painted in Phase 4
-//! - `RenderOverlays` - selection/clipboard/point-mode state passed in from
-//!   the Worksheet component each frame
-//! - `CanvasTheme` (`src/model/theme.rs`) - static color palette; the Canvas 2D
-//!   API can't read CSS variables, so concrete color strings are needed
 
 mod cells;
 mod headers;
@@ -79,7 +73,7 @@ use web_sys::CanvasRenderingContext2d;
 
 use super::geometry::{Axis, CanvasSize, FrameContext};
 use super::types::*;
-use crate::renderer::cells::{CellPaintsIter, TextSlot};
+use crate::renderer::cells::{CellPaint, CellPaintsIter};
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;
 pub use overlays::AutofillTarget;
@@ -113,9 +107,16 @@ pub struct CanvasRenderer {
     last_stroke: Cell<CachedColor>,
     last_font: Cell<CachedColor>,
     last_line_width: Cell<f64>,
-    /// Scratch buffer for the text-pass in `render_pane`. Reused across pane
-    /// calls to avoid 4 Vec allocations per frame.
-    text_slots: Cell<Vec<TextSlot>>,
+    /// Scratch buffer parking each pane's resolved `CellPaint`s during the
+    /// streaming bg pass so the deferred border + text passes can iterate
+    /// them without re-querying the model. Reused across pane calls to
+    /// avoid 4 Vec allocations per frame.
+    text_slots: Cell<Vec<CellPaint>>,
+    /// Per-frame cache of the active sheet's `get_show_grid_lines` flag.
+    /// Set once at the top of `render_grid`; read per-cell by `paint_borders`
+    /// to gate the right/bottom grid-line fallback. Avoids a model call per
+    /// cell on the hot pane walk.
+    pub(super) show_grid: Cell<bool>,
 }
 
 /// Per-frame ctx-state cache entry. The `Static` arm carries `&'static str`
@@ -214,6 +215,7 @@ impl CanvasRenderer {
             last_line_width: Cell::new(0.0),
             last_font: Cell::new(CachedColor::Empty),
             text_slots: Cell::new(Vec::new()),
+            show_grid: Cell::new(true),
         }
     }
 
@@ -235,7 +237,7 @@ impl CanvasRenderer {
     /// rather than bleeding across two.
     #[inline]
     fn snap_stroke(&self, coord: f64) -> f64 {
-        ((coord * self.dpr).floor() + 0.5) / self.dpr
+        ((coord * self.dpr).floor() + 1.0) / self.dpr
     }
 
     /// Snap a coordinate to the nearest device pixel boundary.
@@ -273,15 +275,26 @@ impl CanvasRenderer {
     /// corner box. Does **not** clear the canvas — caller owns the clear so
     /// layer-owned renderers can paint a background fill instead.
     pub(crate) fn render_grid(&mut self, model: &dyn CanvasModel, frame: &FrameContext) {
-        // Phase 1: Cells - four frozen-pane quadrants. Each `render_pane`
-        // does two passes: bg+borders first, then text on top so overflow
-        // is never clipped by a neighbour's background fill.
-        self.draw_frozen_separators(&frame.frozen);
+        // Cache the per-sheet grid-line toggle once for this frame so the
+        // hot per-cell `paint_borders` walk doesn't re-enter the model. Falls
+        // back to "show" on model failure, matching Excel's default-on.
+        let sheet = model.get_selected_sheet();
+        self.show_grid
+            .set(model.get_show_grid_lines(sheet).unwrap_or(true));
 
+        // Phase 1: Cells — four frozen-pane quadrants. `render_pane` paints
+        // bg+borders, then text on top. Each cell now owns its right+bottom
+        // grid stroke directly (see `paint_borders`), so colored fills
+        // overpaint the previous-cell's grid edge naturally and explicit
+        // 2 px borders win by stroke width.
         self.render_pane(model, PaneRegion::top_left(&frame.frozen));
         self.render_pane(model, PaneRegion::top_right(&frame.frozen, &frame.vis));
         self.render_pane(model, PaneRegion::bottom_left(&frame.frozen, &frame.vis));
         self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis));
+
+        // Frozen separators paint AFTER cells so the thick divider wins its
+        // pixels over the rightmost/bottommost frozen cell's grid stroke.
+        self.draw_frozen_separators(&frame.frozen);
 
         // Phase 2: Headers + corner box
         self.render_headers_base(Axis::Row, frame);
