@@ -8,7 +8,7 @@
 use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignment};
 use web_sys::CanvasRenderingContext2d;
 
-use crate::geometry::PixelRect;
+use crate::geometry::pixel_rect::PixelRect;
 use crate::renderer::CanvasRenderer;
 use crate::style::FontStyle;
 use crate::theme::CanvasTheme;

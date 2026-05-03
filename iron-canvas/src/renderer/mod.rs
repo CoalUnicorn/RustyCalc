@@ -71,8 +71,10 @@ use std::cell::Cell;
 use web_sys::js_sys;
 use web_sys::CanvasRenderingContext2d;
 
-use super::geometry::{Axis, CanvasSize, FrameContext};
+use super::geometry::CanvasSize;
 use super::types::*;
+use crate::geometry::frame::FrameContext;
+use crate::geometry::prim::Axis;
 use crate::renderer::cells::{CellPaint, CellPaintsIter};
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;

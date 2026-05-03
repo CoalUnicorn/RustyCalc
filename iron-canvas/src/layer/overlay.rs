@@ -6,7 +6,7 @@ use crate::theme::{CanvasTheme, LIGHT};
 use crate::types::RenderOverlays;
 use crate::{CanvasModel, CanvasRenderer};
 
-use crate::geometry::FrameContext;
+use crate::geometry::frame::FrameContext;
 
 pub(crate) struct OverlayLayer {
     base: LayerBase,

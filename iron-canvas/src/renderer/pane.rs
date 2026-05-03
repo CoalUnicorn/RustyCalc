@@ -1,10 +1,16 @@
 use std::ops::RangeInclusive;
 
-use crate::{renderer::cells::PaneCells, CanvasModel, Point, VisibleCells};
-
-use super::super::geometry::{
-    CanvasSize, FrozenRC, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT,
+use crate::{
+    geometry::{
+        frame::{frozen::FrozenRC, VisibleCells},
+        prim::Point,
+        CanvasSize,
+    },
+    renderer::cells::PaneCells,
+    CanvasModel,
 };
+
+use super::super::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
 //  Pane rendering
 
 /// Describes one of the four frozen-pane quadrants for `render_pane`.

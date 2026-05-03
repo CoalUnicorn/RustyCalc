@@ -1,7 +1,7 @@
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{js_sys, CanvasRenderingContext2d, HtmlCanvasElement};
 
-use crate::geometry::FrameContext;
+use crate::geometry::frame::FrameContext;
 use crate::layer::LayerBase;
 use crate::theme::CanvasTheme;
 use crate::theme::LIGHT;

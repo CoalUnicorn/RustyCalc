@@ -26,6 +26,7 @@
 //!   for the full walk-through.
 
 pub mod geometry;
+
 mod layer;
 pub mod model_adapter;
 mod orchestrator;
@@ -39,9 +40,15 @@ pub mod wasm;
 mod test;
 
 pub use geometry::{
-    col_name, col_width, row_height, CanvasSize, CellRC, FrozenRC, Line, PixelRect, Point, Span,
-    VisibleCells, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
-    HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+    constants::{
+        AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
+        HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+    },
+    frame::CellRC,
+    pixel_rect::PixelRect,
+    prim::{Line, Point, Span},
+    utils::{col_name, col_width, row_height},
+    CanvasSize,
 };
 
 pub use model_adapter::{CanvasModel, CanvasView};

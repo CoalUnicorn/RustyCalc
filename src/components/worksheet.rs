@@ -1,4 +1,5 @@
 use iron_canvas::renderer::AutofillTarget;
+use iron_canvas::types::RenderOverlays;
 use ironcalc_base::types::{CellType, Style};
 use leptos::html;
 use leptos::prelude::*;

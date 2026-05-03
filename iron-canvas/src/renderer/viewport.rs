@@ -3,10 +3,10 @@
 //! All pixel↔cell math uses the `FrameContext` prefix-sum tables built once
 //! per tick in `geometry.rs`. No model access happens here.
 
+use crate::geometry::frame::{FrameContext, VisibleCells};
+use crate::geometry::pixel_rect::PixelRect;
+use crate::geometry::prim::Point;
 use crate::types::coord::RCRange;
-use crate::{Point, VisibleCells};
-
-use super::super::geometry::{FrameContext, PixelRect};
 
 use super::CanvasRenderer;
 

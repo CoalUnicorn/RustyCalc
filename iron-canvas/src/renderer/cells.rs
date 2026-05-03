@@ -6,13 +6,16 @@
 
 use std::ops::RangeInclusive;
 
+use crate::geometry::pixel_rect::PixelRect;
+use crate::geometry::prim::{BorderEdge, Point};
+use crate::geometry::utils::{col_width, row_height};
 use crate::renderer::pane::PaneRegion;
 use crate::theme::CanvasTheme;
 use crate::types::coord::CssColor;
 use crate::types::text_paint::TextPaint;
-use crate::{col_width, row_height, CanvasModel, CanvasSize, Point};
+use crate::{CanvasModel, CanvasSize};
 
-use super::super::geometry::{BorderEdge, FrameContext, PixelRect};
+use super::super::geometry::frame::FrameContext;
 use super::super::types::coord::{CellAddress, RCRange};
 use super::CanvasRenderer;
 use crate::renderer::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};

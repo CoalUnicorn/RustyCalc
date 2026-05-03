@@ -11,7 +11,7 @@ use crate::{
     coord::{Cell, CellRange, DefinedName},
     input::formula_analysis::{analyze_formula, FormulaAnalysis},
 };
-use iron_canvas::geometry::{LAST_COLUMN, LAST_ROW};
+use iron_canvas::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use leptos::prelude::UpdateValue;
 

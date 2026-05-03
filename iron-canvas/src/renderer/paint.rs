@@ -6,9 +6,11 @@
 //! how. `rect_*` / `stroke_*` / `with_*` prefixes distinguish these from
 //! raw `ctx.*` methods at read time.
 
-use crate::Span;
+use crate::geometry::{
+    pixel_rect::PixelRect,
+    prim::{Line, Span},
+};
 
-use super::super::geometry::{Line, PixelRect};
 use super::{CachedColor, CanvasRenderer, STANDARD_BORDER_WIDTH};
 
 impl CanvasRenderer {
