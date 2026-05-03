@@ -4,8 +4,9 @@
 use std::fmt::{self, Display};
 use std::ops::RangeInclusive;
 
-use crate::model::RCRange;
-use crate::{CanvasModel, HitTest, ResizeTarget};
+use crate::types::coord::RCRange;
+use crate::types::ui::{HitTest, ResizeTarget};
+use crate::CanvasModel;
 
 pub const HEADER_OFFSET: f64 = 1.0;
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;

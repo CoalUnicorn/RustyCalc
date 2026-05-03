@@ -7,12 +7,12 @@
 //! drawable fold, so overlays never leak onto the canvas for off-screen
 //! refs like `=BB3`.
 
-use crate::model::{FormulaRef, RCRange, SheetArea};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
+use crate::types::coord::{FormulaRef, RCRange, SheetArea};
 use crate::CanvasModel;
 
 use super::super::geometry::AUTOFILL_HANDLE_BORDER_PX;
-use super::super::model::CellAddress;
+use super::super::types::coord::CellAddress;
 use super::{
     CanvasRenderer, FrameContext, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH,
     STANDARD_BORDER_WIDTH,

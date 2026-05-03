@@ -3,7 +3,8 @@ use web_sys::{js_sys, CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::layer::LayerBase;
 use crate::theme::{CanvasTheme, LIGHT};
-use crate::{CanvasModel, CanvasRenderer, RenderOverlays};
+use crate::types::RenderOverlays;
+use crate::{CanvasModel, CanvasRenderer};
 
 use crate::geometry::FrameContext;
 

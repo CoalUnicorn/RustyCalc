@@ -5,11 +5,13 @@
 // Only methods exercised by viewport / frozen-pane math are wired up.
 // Style / cell-content methods stay `unimplemented!()` so a future test
 // that touches them fails loudly rather than silently consuming defaults.
+use crate::coord::RCRange;
+use crate::ui::HitTest;
+
 use crate::geometry::{PixelOffsets, AUTOFILL_HIT_PAD_PX};
-use crate::model::RCRange;
-use crate::{geometry::FrameContext, FrozenRC, SelectedView};
+use crate::{geometry::FrameContext, FrozenRC, CanvasView};
 use crate::{
-    CanvasModel, CanvasSize, HitTest, PixelRect, Point, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH,
+    CanvasModel, CanvasSize, PixelRect, Point, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH,
     DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
 
@@ -43,8 +45,8 @@ impl CanvasModel for MockCanvasModel {
     fn get_selected_sheet(&self) -> u32 {
         self.sheet
     }
-    fn get_selected_view(&self) -> SelectedView {
-        SelectedView {
+    fn get_selected_view(&self) -> CanvasView {
+        CanvasView {
             sheet: self.sheet,
             row: self.range[0],
             column: self.range[1],

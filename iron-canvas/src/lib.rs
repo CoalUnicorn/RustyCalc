@@ -27,7 +27,7 @@
 
 pub mod geometry;
 mod layer;
-pub mod model;
+pub mod model_adapter;
 mod orchestrator;
 pub mod renderer;
 pub mod style;
@@ -44,122 +44,8 @@ pub use geometry::{
     HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
 
+pub use model_adapter::{CanvasModel, CanvasView};
 pub use orchestrator::IronCanvas;
 pub use renderer::CanvasRenderer;
-pub use types::RenderOverlays;
-
-/// What the user sees at a given canvas point, against the last painted frame.
-///
-/// The active sheet is whatever `IronCanvas` is reflecting at the time of the
-/// query, so it is implicit and not encoded into the variants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HitTest {
-    Cell {
-        row: i32,
-        column: i32,
-    },
-    RowHeader(i32),
-    ColHeader(i32),
-    Corner,
-    /// Cursor is on the autofill handle. Carries the cell under the cursor
-    /// because callers always need both — the variant says "begin autofill",
-    /// the fields say "drag-target starts here".
-    AutofillHandle {
-        row: i32,
-        column: i32,
-    },
-    Outside,
-}
-
-/// A row or column boundary the cursor is currently within tolerance of.
-///
-/// Returned by `IronCanvas::resize_handle_at` for cursor-style and
-/// drag-start decisions. Holds the index of the row/column **whose trailing
-/// edge** the cursor is near (i.e. dragging right enlarges that row/column).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResizeTarget {
-    Column(i32),
-    Row(i32),
-}
-
-// CanvasModel - read-only worksheet surface the renderer consumes
-
-use ironcalc_base::types::{CellType, Style};
-use ironcalc_base::UserModel;
-
-use crate::model::RCRange;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SelectedView {
-    pub sheet: u32,
-    pub row: i32,
-    pub column: i32,
-    pub range: RCRange,
-    pub top_row: i32,
-    pub left_column: i32,
-}
-
-pub trait CanvasModel {
-    fn get_selected_sheet(&self) -> u32;
-    fn get_selected_view(&self) -> SelectedView;
-    fn get_frozen_rows_count(&self, sheet: u32) -> Result<i32, String>;
-    fn get_frozen_columns_count(&self, sheet: u32) -> Result<i32, String>;
-    fn get_row_height(&self, sheet: u32, row: i32) -> Result<f64, String>;
-    fn get_column_width(&self, sheet: u32, column: i32) -> Result<f64, String>;
-    fn get_show_grid_lines(&self, sheet: u32) -> Result<bool, String>;
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Result<Style, String>;
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Result<CellType, String>;
-    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32)
-        -> Result<String, String>;
-}
-
-impl<'a> CanvasModel for UserModel<'a> {
-    fn get_selected_sheet(&self) -> u32 {
-        UserModel::get_selected_sheet(self)
-    }
-    fn get_selected_view(&self) -> SelectedView {
-        let v = UserModel::get_selected_view(self);
-        SelectedView {
-            sheet: v.sheet,
-            row: v.row,
-            column: v.column,
-            range: RCRange {
-                r1: v.range[0],
-                c1: v.range[1],
-                r2: v.range[2],
-                c2: v.range[3],
-            },
-            top_row: v.top_row,
-            left_column: v.left_column,
-        }
-    }
-    fn get_frozen_rows_count(&self, sheet: u32) -> Result<i32, String> {
-        UserModel::get_frozen_rows_count(self, sheet)
-    }
-    fn get_frozen_columns_count(&self, sheet: u32) -> Result<i32, String> {
-        UserModel::get_frozen_columns_count(self, sheet)
-    }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Result<f64, String> {
-        UserModel::get_row_height(self, sheet, row)
-    }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Result<f64, String> {
-        UserModel::get_column_width(self, sheet, column)
-    }
-    fn get_show_grid_lines(&self, sheet: u32) -> Result<bool, String> {
-        UserModel::get_show_grid_lines(self, sheet)
-    }
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Result<Style, String> {
-        UserModel::get_cell_style(self, sheet, row, column)
-    }
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Result<CellType, String> {
-        UserModel::get_cell_type(self, sheet, row, column)
-    }
-    fn get_formatted_cell_value(
-        &self,
-        sheet: u32,
-        row: i32,
-        column: i32,
-    ) -> Result<String, String> {
-        UserModel::get_formatted_cell_value(self, sheet, row, column)
-    }
-}
+pub use types::coord::{FormulaRef, RCRange};
+//pub use types::RenderOverlays;

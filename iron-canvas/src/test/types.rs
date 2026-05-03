@@ -1,9 +1,7 @@
 use crate::geometry::Axis;
 use crate::renderer::PaneRegion;
-use crate::{
-    FrozenRC, Point, RenderOverlays, VisibleCells, HEADER_COL_WIDTH, HEADER_OFFSET,
-    HEADER_ROW_HEIGHT,
-};
+use crate::types::RenderOverlays;
+use crate::{FrozenRC, Point, VisibleCells, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
 
 #[test]
 fn row_header_rect_pins_x_to_left_strip() {
@@ -128,7 +126,7 @@ fn render_overlays_default_equals_itself() {
 
 #[test]
 fn render_overlays_changed_point_range_is_not_equal() {
-    use crate::model::RCRange;
+    use crate::coord::RCRange;
     let a = RenderOverlays::default();
     let mut b = RenderOverlays::default();
     b.point_range = Some(RCRange {
@@ -142,7 +140,7 @@ fn render_overlays_changed_point_range_is_not_equal() {
 
 #[test]
 fn render_overlays_same_point_range_is_equal() {
-    use crate::model::RCRange;
+    use crate::coord::RCRange;
     let range = Some(RCRange {
         r1: 1,
         c1: 1,

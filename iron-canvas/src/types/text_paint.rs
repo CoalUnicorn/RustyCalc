@@ -9,10 +9,10 @@ use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignme
 use web_sys::CanvasRenderingContext2d;
 
 use crate::geometry::PixelRect;
-use crate::model::{CellAddress, CssColor};
 use crate::renderer::CanvasRenderer;
 use crate::style::FontStyle;
 use crate::theme::CanvasTheme;
+use crate::types::coord::{CellAddress, CssColor};
 use crate::CanvasModel;
 
 /// Below this in either pixel dimension, no text is laid out at all.

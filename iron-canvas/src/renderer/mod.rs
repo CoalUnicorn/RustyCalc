@@ -326,10 +326,9 @@ impl CanvasRenderer {
         self.draw_clipboard_overlay(model, frame, overlays.clipboard.as_ref());
         self.draw_point_overlay(frame, overlays.point_range);
 
-        if overlays.formula_refs.len() > 0 {
+        if !overlays.formula_refs.is_empty() {
             self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
         } else {
-            return;
         };
     }
 }

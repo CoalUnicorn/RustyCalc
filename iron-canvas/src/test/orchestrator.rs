@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use crate::{model::RCRange, CanvasModel, RenderOverlays};
+use crate::{coord::RCRange, types::RenderOverlays, CanvasModel};
 use std::rc::Rc;
 
 struct StubModel;
@@ -9,8 +9,8 @@ impl CanvasModel for StubModel {
     fn get_selected_sheet(&self) -> u32 {
         0
     }
-    fn get_selected_view(&self) -> crate::SelectedView {
-        crate::SelectedView {
+    fn get_selected_view(&self) -> crate::CanvasView {
+        crate::CanvasView {
             sheet: 0,
             row: 1,
             column: 1,

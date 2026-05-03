@@ -6,9 +6,10 @@ use web_sys::HtmlCanvasElement;
 use crate::geometry::{CanvasSize, FrameContext, PixelRect, Point};
 use crate::layer::{GridLayer, OverlayLayer};
 use crate::theme::{CanvasTheme, DARK, LIGHT};
+use crate::types::ui::{HitTest, ResizeTarget};
 use crate::types::RenderOverlays;
 use crate::wasm::JsBackedModel;
-use crate::{CanvasModel, HitTest, ResizeTarget};
+use crate::CanvasModel;
 
 /// Public wasm-bindgen handle owning both canvas layers.
 ///

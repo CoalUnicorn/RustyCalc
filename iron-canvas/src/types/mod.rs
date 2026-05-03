@@ -7,10 +7,12 @@
 //! `*Paint` submodules hold renderer-ready snapshots resolved from the model.
 //! Convention: resolve in `crate::types`, paint in `crate::renderer`.
 
+pub mod coord;
 pub(crate) mod text_paint;
+pub mod ui;
 
-use crate::model::{FormulaRef, RCRange, SheetArea};
 use crate::renderer::AutofillTarget;
+use coord::{FormulaRef, RCRange, SheetArea};
 
 /// Overlay ranges passed to `render()`.
 ///

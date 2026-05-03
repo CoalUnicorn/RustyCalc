@@ -1,5 +1,6 @@
 mod canvas_model;
 mod geometry;
+mod layer;
 mod model;
 mod orchestrator;
 mod reference;

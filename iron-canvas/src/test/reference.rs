@@ -10,7 +10,7 @@
 /// This module is `#[cfg(test)]` only and never ships in production.
 /// The full browser-side pixel comparison (getImageData) lives in the future
 /// wasm-bindgen-test suite once wasm-pack is wired up.
-use crate::model::RCRange;
+use crate::coord::RCRange;
 use crate::theme::CanvasTheme;
 use crate::types::RenderOverlays;
 

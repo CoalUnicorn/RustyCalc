@@ -1,8 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
-use std::ops::RangeInclusive;
 
-use crate::{geometry::Axis, CanvasRenderer};
+// use crate::{geometry::Axis, CanvasRenderer};
 
 // TODO: render_headers_base path
 //

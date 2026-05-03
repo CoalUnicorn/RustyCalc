@@ -6,7 +6,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::CanvasModel;
-use crate::SelectedView;
+use crate::CanvasView;
 
 #[wasm_bindgen]
 extern "C" {
@@ -32,7 +32,7 @@ impl CanvasModel for JsBackedModel {
         let _ = &self.handle;
         todo!("bind IronCalcModelHandle.getSelectedSheet via wasm-bindgen extern method")
     }
-    fn get_selected_view(&self) -> SelectedView {
+    fn get_selected_view(&self) -> CanvasView {
         todo!("bind IronCalcModelHandle.getSelectedView; bridge field-by-field")
     }
     fn get_frozen_rows_count(&self, _sheet: u32) -> Result<i32, String> {

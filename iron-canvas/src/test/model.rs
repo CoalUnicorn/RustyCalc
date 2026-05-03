@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use crate::model::{CssColor, RCRange};
+use crate::coord::{CssColor, RCRange};
 
 #[test]
 fn normalized_swaps_corners_when_inverted() {
