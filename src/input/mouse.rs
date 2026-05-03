@@ -20,7 +20,9 @@ use crate::state::{
     StatusMessage, WorkbookState,
 };
 use iron_canvas::geometry::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW};
-use iron_canvas::{HitTest, IronCanvas, ResizeTarget, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
+use iron_canvas::{
+    CanvasSize, HitTest, IronCanvas, ResizeTarget, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
+};
 use ironcalc_base::UserModel;
 
 /// Storage type for the IronCanvas orchestrator handle. `LocalStorage`
@@ -482,17 +484,16 @@ pub fn handle_mousemove(
         return;
     };
 
-    let (canvas_w, canvas_h) = ev
-        .target()
-        .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
-        .map(|el| (el.client_width() as f64, el.client_height() as f64))
-        .unwrap_or((f64::MAX, f64::MAX));
-
-    // let (canvas_w, canvas_h) =
-    //     match model.with_value(|m| (&m.get_window_width(), &m.get_window_height())) {
-    //         (Ok(canvas_w), Ok(canvas_h)) => (canvas_w, canvas_h),
-    //         _ => (&0i64, &0i64),
-    //     };
+    // Sentinel size when the canvas isn't mounted yet: f64::MAX guarantees the
+    // cursor is never within AUTOSCROLL_ZONE of any edge, so update_autoscroll
+    // is a no-op pre-mount instead of latching onto a zero-sized canvas.
+    let CanvasSize {
+        w: canvas_w,
+        h: canvas_h,
+    } = with_canvas(icv, |ic| ic.canvas_size()).unwrap_or(CanvasSize {
+        w: f64::MAX,
+        h: f64::MAX,
+    });
 
     match state.drag.get_untracked() {
         DragState::Extending { .. } => {

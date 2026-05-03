@@ -211,6 +211,14 @@ impl IronCanvas {
         }
     }
 
+    /// Logical (CSS) canvas size as last set by `resize`. Frame-independent —
+    /// callers that need to compare a cursor position against the canvas
+    /// bounds (autoscroll edge zones, drag clamping) read this instead of
+    /// re-deriving it from a DOM element on every event.
+    pub fn canvas_size(&self) -> CanvasSize {
+        self.size
+    }
+
     // Query API
     //
     // The mirror of the command surface above. Where `set_*` push state INTO
