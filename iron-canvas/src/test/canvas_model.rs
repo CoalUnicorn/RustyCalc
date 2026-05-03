@@ -232,7 +232,7 @@ fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
 }
 
 #[test]
-fn autofill_handle_rect_anchors_top_left_at_corner() {
+fn autofill_handle_rect_anchors_at_bot_right_corner() {
     // Excel anchor: handle's top-left == selection's bottom-right corner,
     // so the handle visually pokes outside the selection rectangle.
     let m = MockCanvasModel {
@@ -242,8 +242,8 @@ fn autofill_handle_rect_anchors_top_left_at_corner() {
     let frame = FrameContext::current(&m, test_canvas());
     let corner = frame.autofill_handle();
     let rect = frame.autofill_handle_rect();
-    assert_eq!(rect.top_left.x, corner.unwrap().x);
-    assert_eq!(rect.top_left.y, corner.unwrap().y);
+    assert_eq!(rect.top_left.x, corner.unwrap().x - AUTOFILL_HANDLE_PX);
+    assert_eq!(rect.top_left.y, corner.unwrap().y - AUTOFILL_HANDLE_PX);
     assert_eq!(rect.width, AUTOFILL_HANDLE_PX);
     assert_eq!(rect.height, AUTOFILL_HANDLE_PX);
 }

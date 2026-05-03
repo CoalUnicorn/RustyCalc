@@ -43,6 +43,9 @@ pub struct CanvasTheme {
     pub header_selected_bg: &'static str,
     pub header_selected_color: &'static str,
     pub default_text_color: &'static str,
+    /// Text color for cells whose value is an IronCalc error
+    /// (`CellType::ErrorValue` — `#VALUE!`, `#DIV/0!`, `#REF!`, etc.).
+    pub error_text_color: &'static str,
     pub selection_color: &'static str,
     pub cell_bg: &'static str,
     pub pointing: &'static str,
@@ -61,6 +64,7 @@ pub static LIGHT: CanvasTheme = CanvasTheme {
     header_selected_bg: "#EEEEEE",
     header_selected_color: "#333",
     default_text_color: "#2E414D",
+    error_text_color: "#CC0000",
     selection_color: "#17A2D3",
     cell_bg: "#FFFFFF",
     pointing: "#1E6FD9",
@@ -77,6 +81,7 @@ pub static DARK: CanvasTheme = CanvasTheme {
     header_selected_bg: "#2D2D2D",
     header_selected_color: "#CCC",
     default_text_color: "#D4D4D4",
+    error_text_color: "#FF6B6B",
     selection_color: "#17A2D3",
     cell_bg: "#121212",
     pointing: "#1E6FD9",

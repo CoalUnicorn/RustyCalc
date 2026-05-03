@@ -414,12 +414,7 @@ impl<'a> Iterator for CellPaintsIter<'a> {
                 continue;
             };
 
-            let paint = CellPaint::resolve_cell_paint(
-                self.renderer,
-                //self.show_grid,
-                slot,
-                own_style,
-            );
+            let paint = CellPaint::resolve_cell_paint(self.renderer, slot, own_style);
 
             if let Some(p) = paint {
                 return Some(p);

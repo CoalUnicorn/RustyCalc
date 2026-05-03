@@ -167,9 +167,18 @@ impl CellTextStyle {
             .get_cell_type(sheet, row, column)
             .unwrap_or(CellType::Text);
 
-        let text_color = match style.font.color.as_deref() {
-            None | Some("#000000") => CssColor::new(theme.default_text_color),
-            Some(c) => CssColor::new(c),
+        // IronCalc collapses every error variant (#VALUE!, #DIV/0!, #REF!, #NAME?,
+        // #NUM!, #N/A, #NULL!, #SPILL!, #CIRC!, plus IronCalc-only #ERROR!/#N/IMPL!)
+        // into the single CellType::ErrorValue discriminator. Color them all the
+        // same theme red — per-error-kind styling would require a new model
+        // accessor (see xlsm_err.md "Renderer-side categorisation").
+        let text_color = if matches!(cell_type, CellType::ErrorValue) {
+            CssColor::new(theme.error_text_color)
+        } else {
+            match style.font.color.as_deref() {
+                None | Some("#000000") => CssColor::new(theme.default_text_color),
+                Some(c) => CssColor::new(c),
+            }
         };
 
         let size_px = style.font.sz as f64;
