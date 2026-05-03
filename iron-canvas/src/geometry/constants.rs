@@ -1,3 +1,10 @@
+// Layout constants
+pub(crate) const SELECTION_BORDER_WIDTH: f64 = 2.0;
+pub(crate) const STANDARD_BORDER_WIDTH: f64 = 1.0;
+pub(crate) const MEDIUM_BORDER_WIDTH: f64 = 2.0;
+pub(crate) const THICK_BORDER_WIDTH: f64 = 3.0;
+pub(crate) const DASHED_BORDER_WIDTH: f64 = 1.5;
+
 pub const HEADER_OFFSET: f64 = 1.0;
 pub const HEADER_ROW_HEIGHT: f64 = 28.0;
 pub const HEADER_COL_WIDTH: f64 = 30.0;

@@ -3,10 +3,26 @@ use web_sys::{js_sys, CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::layer::LayerBase;
 use crate::theme::{CanvasTheme, LIGHT};
-use crate::types::RenderOverlays;
-use crate::{CanvasModel, CanvasRenderer};
+use crate::types::coord::{AutofillTarget, SheetArea};
+use crate::{CanvasModel, CanvasRenderer, FormulaRef, RCRange};
 
 use crate::geometry::frame::FrameContext;
+
+/// Overlay ranges passed to `render()`.
+///
+/// Selection is not stored here — it is paint-time-derived from
+/// `model.get_selected_view()`. The consumer signals selection changes via
+/// `IronCanvas::request_overlay_repaint()`.
+#[derive(Clone, PartialEq, Default)]
+pub struct RenderOverlays {
+    /// Target cell during autofill-handle drag.
+    pub extend_to: Option<AutofillTarget>,
+    pub clipboard: Option<SheetArea>,
+    /// Range being pointed at during formula entry.
+    pub point_range: Option<RCRange>,
+    /// All formula refs extracted from the current formula (multi-color overlays).
+    pub formula_refs: Vec<FormulaRef>,
+}
 
 pub(crate) struct OverlayLayer {
     base: LayerBase,

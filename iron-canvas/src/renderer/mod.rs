@@ -59,12 +59,14 @@
 //!
 //! TODO
 
+mod cache;
 mod cells;
 mod headers;
 mod overlays;
 mod paint;
 mod pane;
 mod text;
+mod text_paint;
 mod viewport;
 
 use std::cell::Cell;
@@ -72,21 +74,15 @@ use web_sys::js_sys;
 use web_sys::CanvasRenderingContext2d;
 
 use super::geometry::CanvasSize;
-use super::types::*;
 use crate::geometry::frame::FrameContext;
 use crate::geometry::prim::Axis;
-use crate::renderer::cells::{CellPaint, CellPaintsIter};
+use crate::layer::RenderOverlays;
+use crate::renderer::cache::CachedColor;
+use crate::renderer::cache::FrameCache;
+use crate::renderer::cells::CellPaintsIter;
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;
-pub use overlays::AutofillTarget;
 pub(crate) use pane::PaneRegion;
-
-// Layout constants
-pub(super) const SELECTION_BORDER_WIDTH: f64 = 2.0;
-pub(super) const STANDARD_BORDER_WIDTH: f64 = 1.0;
-pub(super) const MEDIUM_BORDER_WIDTH: f64 = 2.0;
-pub(super) const THICK_BORDER_WIDTH: f64 = 3.0;
-pub(super) const DASHED_BORDER_WIDTH: f64 = 1.5;
 
 //#[derive(Clone)]
 pub struct CanvasRenderer {
@@ -102,58 +98,7 @@ pub struct CanvasRenderer {
     dash_pattern: js_sys::Array,
     /// Empty array used to clear the dash pattern after a dashed stroke.
     dash_empty: js_sys::Array,
-    /// Per-frame canvas state cache. Avoids redundant JS boundary crossings
-    /// when adjacent cells share the same fill, stroke, font, or line width.
-    /// `Cell<T>` allows mutation through `&self` so paint helpers keep their immutable signature.
-    last_fill: Cell<CachedColor>,
-    last_stroke: Cell<CachedColor>,
-    last_font: Cell<CachedColor>,
-    last_line_width: Cell<f64>,
-    /// Scratch buffer parking each pane's resolved `CellPaint`s during the
-    /// streaming bg pass so the deferred border + text passes can iterate
-    /// them without re-querying the model. Reused across pane calls to
-    /// avoid 4 Vec allocations per frame.
-    text_slots: Cell<Vec<CellPaint>>,
-    /// Per-frame cache of the active sheet's `get_show_grid_lines` flag.
-    /// Set once at the top of `render_grid`; read per-cell by `paint_borders`
-    /// to gate the right/bottom grid-line fallback. Avoids a model call per
-    /// cell on the hot pane walk.
-    pub(super) show_grid: Cell<bool>,
-}
-
-/// Per-frame ctx-state cache entry. The `Static` arm carries `&'static str`
-/// for theme-driven calls so cache misses skip the `to_string()` allocation
-/// the previous `Cell<String>` cache forced. `Owned` keeps the dynamic path
-/// (per-cell colors built from `CssColor::new`) intact.
-#[derive(Default)]
-pub(super) enum CachedColor {
-    #[default]
-    Empty,
-    Static(&'static str),
-    Owned(String),
-}
-
-impl CachedColor {
-    /// Compare against an arbitrary `&str` without forcing a new allocation
-    /// on a cache hit. `Static` and `Owned` both fall back to value compare.
-    pub(super) fn matches(&self, color: &str) -> bool {
-        match self {
-            CachedColor::Empty => false,
-            CachedColor::Static(s) => *s == color,
-            CachedColor::Owned(s) => s == color,
-        }
-    }
-
-    /// Pointer-equality compare against a `&'static str`. The two `Static`
-    /// arms are cheap; `Owned` still falls back to value compare so a
-    /// dynamic→static transition is detected correctly.
-    pub(super) fn matches_static(&self, color: &'static str) -> bool {
-        match self {
-            CachedColor::Empty => false,
-            CachedColor::Static(s) => std::ptr::eq(*s, color),
-            CachedColor::Owned(s) => s == color,
-        }
-    }
+    frame_cache: FrameCache,
 }
 
 impl CanvasRenderer {
@@ -212,12 +157,14 @@ impl CanvasRenderer {
             theme,
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
-            last_fill: Cell::new(CachedColor::Empty),
-            last_stroke: Cell::new(CachedColor::Empty),
-            last_line_width: Cell::new(0.0),
-            last_font: Cell::new(CachedColor::Empty),
-            text_slots: Cell::new(Vec::new()),
-            show_grid: Cell::new(true),
+            frame_cache: FrameCache {
+                last_fill: Cell::new(CachedColor::Empty),
+                last_stroke: Cell::new(CachedColor::Empty),
+                last_line_width: Cell::new(0.0),
+                last_font: Cell::new(CachedColor::Empty),
+                text_slots: Cell::new(Vec::new()),
+                show_grid: Cell::new(true),
+            },
         }
     }
 
@@ -257,10 +204,10 @@ impl CanvasRenderer {
     /// without invalidation the cache would skip writes that the ctx has actually
     /// forgotten and the next paint would use the wrong style.
     pub(crate) fn invalidate_paint_cache(&mut self) {
-        self.last_fill.set(CachedColor::Empty);
-        self.last_stroke.set(CachedColor::Empty);
-        self.last_font.set(CachedColor::Empty);
-        self.last_line_width.set(0.0);
+        self.frame_cache.last_fill.set(CachedColor::Empty);
+        self.frame_cache.last_stroke.set(CachedColor::Empty);
+        self.frame_cache.last_font.set(CachedColor::Empty);
+        self.frame_cache.last_line_width.set(0.0);
         // Sticky text defaults wiped by set_width/set_height — restore here
         // so per-frame render_grid / render_overlays calls don't need to.
         self.ctx.set_text_align("center");
@@ -281,7 +228,8 @@ impl CanvasRenderer {
         // hot per-cell `paint_borders` walk doesn't re-enter the model. Falls
         // back to "show" on model failure, matching Excel's default-on.
         let sheet = model.get_selected_sheet();
-        self.show_grid
+        self.frame_cache
+            .show_grid
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
 
         // Phase 1: Cells — four frozen-pane quadrants. `render_pane` paints

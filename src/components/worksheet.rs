@@ -1,5 +1,4 @@
-use iron_canvas::renderer::AutofillTarget;
-use iron_canvas::types::RenderOverlays;
+use iron_canvas::types::coord::AutofillTarget;
 use ironcalc_base::types::{CellType, Style};
 use leptos::html;
 use leptos::prelude::*;
@@ -32,7 +31,7 @@ impl CanvasModel for WorksheetModelAdapter {
     fn get_selected_sheet(&self) -> u32 {
         self.store.with_value(CanvasModel::get_selected_sheet)
     }
-    fn get_selected_view(&self) -> SelectedView {
+    fn get_selected_view(&self) -> CanvasView {
         self.store.with_value(CanvasModel::get_selected_view)
     }
     fn get_frozen_rows_count(&self, sheet: u32) -> Result<i32, String> {

@@ -82,6 +82,16 @@ pub struct CellAddress {
     pub column: i32,
 }
 
+/// The target cell during an autofill-handle drag.
+///
+/// Replaces the anonymous `Option<(i32, i32)>` in `RenderOverlays` with a
+/// named struct so the fields are self-documenting at every call site.
+#[derive(Copy, Clone, PartialEq)]
+pub struct AutofillTarget {
+    pub row: i32,
+    pub col: i32,
+}
+
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct SheetArea {
     pub sheet: u32,

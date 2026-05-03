@@ -3,6 +3,7 @@ mod overlay;
 
 pub(crate) use grid::GridLayer;
 pub(crate) use overlay::OverlayLayer;
+pub use overlay::RenderOverlays;
 use web_sys::HtmlCanvasElement;
 
 use crate::{CanvasRenderer, CanvasSize};

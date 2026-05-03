@@ -6,7 +6,7 @@
 //! a sequence of intent-revealing calls: `draw_frozen_separators(&frc)`,
 //! `draw_corner_box()`, `render_row_headers(...)`, ... .
 
-use crate::geometry::constants::HEADER_OFFSET;
+use crate::geometry::constants::{HEADER_OFFSET, STANDARD_BORDER_WIDTH};
 use crate::geometry::frame::frozen::FrozenRC;
 use crate::geometry::frame::FrameContext;
 use crate::geometry::pixel_rect::PixelRect;
@@ -15,7 +15,7 @@ use crate::geometry::utils::col_name;
 
 use super::super::geometry::constants::{FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 
-use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
+use super::CanvasRenderer;
 
 const HEADER_FONT: &str = "bold 12px Inter, Arial, sans-serif";
 

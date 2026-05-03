@@ -10,15 +10,15 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{BorderEdge, Point};
 use crate::geometry::utils::{col_width, row_height};
 use crate::renderer::pane::PaneRegion;
+use crate::renderer::text_paint::TextPaint;
 use crate::theme::CanvasTheme;
 use crate::types::coord::CssColor;
-use crate::types::text_paint::TextPaint;
 use crate::{CanvasModel, CanvasSize};
 
 use super::super::geometry::frame::FrameContext;
 use super::super::types::coord::{CellAddress, RCRange};
 use super::CanvasRenderer;
-use crate::renderer::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
+use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
 use ironcalc_base::types::{BorderItem, BorderStyle, Style};
 
@@ -42,7 +42,7 @@ impl CanvasRenderer {
     /// shared edge). Text remains the final pass so overflow is never
     /// clipped by a neighbour's bg.
     pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
-        let mut slots = self.text_slots.take();
+        let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
         for p in self.paints_in(model, &pane) {
             self.paint_bg(&p);
@@ -59,7 +59,7 @@ impl CanvasRenderer {
                 self.paint_text(&tp);
             }
         }
-        self.text_slots.set(slots);
+        self.frame_cache.text_slots.set(slots);
     }
 
     /// Fill a cell's background rectangle. Border pass is separate (batched).
@@ -89,7 +89,7 @@ impl CanvasRenderer {
 
     /// Grid-fallback strokes on left+top
     fn paint_borders_grid(&self, p: &CellPaint) {
-        if !self.show_grid.get() {
+        if !self.frame_cache.show_grid.get() {
             return;
         }
         if p.style.fill.fg_color.is_some() {

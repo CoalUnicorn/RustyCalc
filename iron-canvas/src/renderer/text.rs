@@ -5,10 +5,12 @@
 //! pre-computed `TextPaint` onto the canvas: fill each line, then
 //! optionally stroke an underline / strike.
 
-use super::{CanvasRenderer, STANDARD_BORDER_WIDTH};
+use super::CanvasRenderer;
 
-use crate::geometry::prim::Span;
-pub(crate) use crate::types::text_paint::TextPaint;
+use crate::{
+    geometry::{constants::STANDARD_BORDER_WIDTH, prim::Span},
+    renderer::text_paint::TextPaint,
+};
 
 /// With `textBaseline: "middle"`, `center_y` is the em-square midpoint. The
 /// typographic baseline sits at ~`center_y + font_size * 0.15`; `0.35` puts

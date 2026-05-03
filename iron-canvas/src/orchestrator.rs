@@ -7,10 +7,9 @@ use crate::geometry::frame::FrameContext;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::geometry::CanvasSize;
-use crate::layer::{GridLayer, OverlayLayer};
+use crate::layer::{GridLayer, OverlayLayer, RenderOverlays};
 use crate::theme::{CanvasTheme, DARK, LIGHT};
 use crate::types::ui::{HitTest, ResizeTarget};
-use crate::types::RenderOverlays;
 use crate::wasm::JsBackedModel;
 use crate::CanvasModel;
 

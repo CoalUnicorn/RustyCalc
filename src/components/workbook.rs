@@ -2,9 +2,10 @@ use leptos::prelude::*;
 
 use crate::components::{
     file_bar::FileBar, formula_bar::FormulaBar, header_context_menu::HeaderContextMenuOverlay,
-    sheet_tab_bar::SheetTabBar, status_bar::StatusBar, toolbar::Toolbar, worksheet::Worksheet,
+    named_ranges::NamedRangesDialog, sheet_tab_bar::SheetTabBar, status_bar::StatusBar,
+    toolbar::Toolbar, worksheet::Worksheet,
 };
-use crate::coord::{Cell, SheetRange};
+use crate::coord::{CellRC, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::{
@@ -70,7 +71,7 @@ pub fn Workbook() -> impl IntoView {
                     ),
                 };
 
-                let editing = model.with_value(Cell::from_view);
+                let editing = model.with_value(CellRC::from_view);
                 let ctx = PointMoveCtx {
                     text: &edit.text,
                     cursor: edit.cursor,
@@ -195,6 +196,7 @@ pub fn Workbook() -> impl IntoView {
             <HeaderContextMenuOverlay />
             <SheetTabBar />
             <StatusBar />
+            <NamedRangesDialog />
         </div>
     }
 }

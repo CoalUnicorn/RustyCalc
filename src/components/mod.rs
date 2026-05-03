@@ -7,6 +7,8 @@ pub mod formula_text_area;
 pub mod header_context_menu;
 pub mod inline_rename;
 pub mod left_drawer;
+pub mod modal;
+pub mod named_ranges;
 pub mod perf_panel;
 pub mod sheet_tab_bar;
 pub mod status_bar;

@@ -7,26 +7,16 @@
 //! drawable fold, so overlays never leak onto the canvas for off-screen
 //! refs like `=BB3`.
 
+use crate::geometry::constants::{
+    DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH, STANDARD_BORDER_WIDTH,
+};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
-use crate::types::coord::{FormulaRef, RCRange, SheetArea};
+use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::CanvasModel;
 
 use super::super::geometry::constants::AUTOFILL_HANDLE_BORDER_PX;
 use super::super::types::coord::CellAddress;
-use super::{
-    CanvasRenderer, FrameContext, DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH,
-    STANDARD_BORDER_WIDTH,
-};
-
-/// The target cell during an autofill-handle drag.
-///
-/// Replaces the anonymous `Option<(i32, i32)>` in `RenderOverlays` with a
-/// named struct so the fields are self-documenting at every call site.
-#[derive(Copy, Clone, PartialEq)]
-pub struct AutofillTarget {
-    pub row: i32,
-    pub col: i32,
-}
+use super::{CanvasRenderer, FrameContext};
 
 /// Controls whether `draw_dashed_range` fills the interior with a light tint.
 #[derive(Copy, Clone, PartialEq, Eq)]
