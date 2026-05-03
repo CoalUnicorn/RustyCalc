@@ -1,11 +1,8 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use crate::geometry::BorderEdge;
-use crate::Line;
-use crate::PixelRect;
-use crate::Point;
-use crate::Span;
+use crate::geometry::pixel_rect::PixelRect;
+use crate::geometry::prim::{BorderEdge, Line, Point, Span};
 
 #[test]
 fn left_edge_is_vertical_line_at_rect_x() {

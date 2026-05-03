@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use crate::{coord::RCRange, types::RenderOverlays, CanvasModel};
+use crate::{CanvasModel, RCRange, RenderOverlays};
 use std::rc::Rc;
 
 struct StubModel;
@@ -65,8 +65,8 @@ impl CanvasModel for StubModel {
 // Per-frame overlay state used to drive the value-compare path. Autofill drag
 // is the canonical scenario where `set_overlays` fires once per frame with a
 // changing target — selection no longer lives on `RenderOverlays`.
-fn drag_target(col: i32) -> crate::renderer::AutofillTarget {
-    crate::renderer::AutofillTarget { row: 1, col }
+fn drag_target(col: i32) -> crate::types::coord::AutofillTarget {
+    crate::types::coord::AutofillTarget { row: 1, col }
 }
 
 #[test]

@@ -1,7 +1,10 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use crate::{col_name, CanvasSize, Line, PixelRect, Point, Span};
+use crate::geometry::pixel_rect::PixelRect;
+use crate::geometry::prim::{Line, Point, Span};
+use crate::geometry::utils::col_name;
+use crate::CanvasSize;
 
 #[test]
 fn backing_size_scales_by_dpr() {

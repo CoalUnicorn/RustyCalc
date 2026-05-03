@@ -71,7 +71,7 @@ impl From<[i32; 4]> for RCRange {
 
 impl RCRange {
     pub fn from_view(model: &dyn CanvasModel) -> Self {
-        Self::from(model.get_selected_view().range)
+        model.get_selected_view().range
     }
 }
 

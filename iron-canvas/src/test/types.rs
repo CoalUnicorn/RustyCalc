@@ -1,7 +1,9 @@
-use crate::geometry::Axis;
+use crate::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
+use crate::geometry::frame::frozen::FrozenRC;
+use crate::geometry::frame::VisibleCells;
+use crate::geometry::prim::{Axis, Point};
+use crate::layer::RenderOverlays;
 use crate::renderer::PaneRegion;
-use crate::types::RenderOverlays;
-use crate::{FrozenRC, Point, VisibleCells, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
 
 #[test]
 fn row_header_rect_pins_x_to_left_strip() {
@@ -45,11 +47,11 @@ fn column_strip_start_is_right_of_left_header() {
 
 fn vis(rows: (i32, i32), cols: (i32, i32)) -> VisibleCells {
     VisibleCells {
-        first: crate::geometry::CellRC {
+        first: crate::CellRC {
             row: rows.0,
             column: cols.0,
         },
-        last: crate::geometry::CellRC {
+        last: crate::CellRC {
             row: rows.1,
             column: cols.1,
         },
@@ -126,9 +128,19 @@ fn render_overlays_default_equals_itself() {
 
 #[test]
 fn render_overlays_changed_point_range_is_not_equal() {
-    use crate::coord::RCRange;
+    use crate::RCRange;
     let a = RenderOverlays::default();
-    let mut b = RenderOverlays::default();
+    let mut b = RenderOverlays {
+        point_range: Some(RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        }),
+        extend_to: None,
+        clipboard: None,
+        formula_refs: vec![],
+    };
     b.point_range = Some(RCRange {
         r1: 1,
         c1: 1,
@@ -140,7 +152,7 @@ fn render_overlays_changed_point_range_is_not_equal() {
 
 #[test]
 fn render_overlays_same_point_range_is_equal() {
-    use crate::coord::RCRange;
+    use crate::RCRange;
     let range = Some(RCRange {
         r1: 1,
         c1: 1,

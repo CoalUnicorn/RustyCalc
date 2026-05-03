@@ -278,7 +278,6 @@ impl CanvasRenderer {
 
         if !overlays.formula_refs.is_empty() {
             self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
-        } else {
         };
     }
 }

@@ -1,19 +1,22 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
+#![allow(clippy::panic_used)]
+
 // Test fixture - a configurable in-memory CanvasModel.
 //
 // Only methods exercised by viewport / frozen-pane math are wired up.
 // Style / cell-content methods stay `unimplemented!()` so a future test
 // that touches them fails loudly rather than silently consuming defaults.
-use crate::coord::RCRange;
-use crate::ui::HitTest;
 
-use crate::geometry::{PixelOffsets, AUTOFILL_HIT_PAD_PX};
-use crate::{geometry::FrameContext, FrozenRC, CanvasView};
-use crate::{
-    CanvasModel, CanvasSize, PixelRect, Point, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH,
-    DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+use crate::geometry::constants::{
+    AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
+    HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
+use crate::geometry::frame::frozen::FrozenRC;
+use crate::geometry::frame::pixel_offset::PixelOffsets;
+use crate::types::ui::HitTest;
+use crate::{geometry::frame::FrameContext, CanvasView};
+use crate::{CanvasModel, CanvasSize, PixelRect, Point, RCRange};
 
 struct MockCanvasModel {
     sheet: u32,

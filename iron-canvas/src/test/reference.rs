@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
+use crate::theme::CanvasTheme;
 /// Reference compositor for pixel-parity testing.
 ///
 /// `DrawOp` captures the sequence of drawing commands that the grid and
@@ -10,9 +11,8 @@
 /// This module is `#[cfg(test)]` only and never ships in production.
 /// The full browser-side pixel comparison (getImageData) lives in the future
 /// wasm-bindgen-test suite once wasm-pack is wired up.
-use crate::coord::RCRange;
-use crate::theme::CanvasTheme;
-use crate::types::RenderOverlays;
+use crate::RCRange;
+use crate::RenderOverlays;
 
 /// A single canvas drawing command, captured for comparison.
 #[derive(Debug, Clone, PartialEq)]
