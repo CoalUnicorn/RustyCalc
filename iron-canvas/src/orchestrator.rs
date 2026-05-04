@@ -116,7 +116,7 @@ impl IronCanvas {
 
     /// Drive each layer's gate. Layers that are clean skip their paint entirely.
     pub fn paint_if_dirty(&mut self) {
-        let grid_dirty = self.grid.should_paint();
+        let mut grid_dirty = self.grid.should_paint();
         let overlay_dirty = self.overlay.should_paint();
 
         if !grid_dirty && !overlay_dirty {
@@ -140,14 +140,21 @@ impl IronCanvas {
         if !grid_dirty {
             if let Some(prev) = self.last_frame.as_mut() {
                 if prev.is_still_valid(model, self.size) {
-                    prev.selection_range = model.get_selected_view().range;
+                    prev.selection_range = model.get_selected_view().selection;
                     self.overlay.paint(self.theme, &self.overlays, model, prev);
                     return;
                 }
+                // Stale cache (sheet/scroll/freeze/size diverged from model)
+                // but no set_* marked the grid dirty — IronCalc's UserModel
+                // is imperative, so a sheet swap can change `FrameContext`
+                // identity without going through `set_viewport`/`set_freeze`.
+                // Escalate so the rebuild branch repaints the grid layer
+                // whose pixels are now for an obsolete frame.
+                grid_dirty = true;
             }
         }
 
-        // Full rebuild: scroll/freeze/size changed, or grid is dirty.
+        // Full rebuild: scroll/freeze/size/sheet changed, or grid is dirty.
         let frame = FrameContext::current(model, self.size);
 
         if grid_dirty {

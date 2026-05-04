@@ -41,6 +41,7 @@ pub struct CellRC {
 /// neither phase re-reads them from the model mid-frame.
 #[derive(Debug)]
 pub(crate) struct FrameContext {
+    pub sheet: u32,
     pub vis: VisibleCells,
     pub offsets: PixelOffsets,
     pub frozen: FrozenRC,
@@ -155,6 +156,7 @@ impl FrameContext {
         };
 
         FrameContext {
+            sheet: model.get_selected_sheet(),
             vis,
             offsets,
             frozen,
@@ -183,6 +185,7 @@ impl FrameContext {
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
         frozen_rows == self.frozen.frozen_rows_count()
             && frozen_cols == self.frozen.frozen_cols_count()
+            && sheet == self.sheet
     }
 
     // Pixel <-> cell mapping  (snapshot-only)
