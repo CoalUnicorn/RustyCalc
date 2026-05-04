@@ -74,20 +74,6 @@ impl IronCanvas {
         );
     }
 
-    /// Push a new scroll origin. Fans out to grid + overlay; no-op if unchanged.
-    pub fn set_viewport(&mut self, top_row: i32, left_column: i32) {
-        if self
-            .last_frame
-            .as_ref()
-            .map(|f| f.top_row == top_row && f.left_column == left_column)
-            .unwrap_or(false)
-        {
-            return;
-        }
-        self.grid.mark_dirty();
-        self.overlay.mark_dirty();
-    }
-
     /// Push a new theme by name ("light" | "dark"). Fans out to grid + overlay; no-op if unchanged.
     pub fn set_theme_name(&mut self, name: &str) {
         let theme = if name == "dark" { DARK } else { LIGHT };
@@ -96,22 +82,6 @@ impl IronCanvas {
             self.grid.mark_dirty();
             self.overlay.mark_dirty();
         }
-    }
-
-    /// Push a freeze configuration. Grid-only; no-op if unchanged.
-    pub fn set_freeze(&mut self, frozen_rows: u32, frozen_cols: u32) {
-        if self
-            .last_frame
-            .as_ref()
-            .map(|f| {
-                f.frozen.frozen_rows_count() == frozen_rows as i32
-                    && f.frozen.frozen_cols_count() == frozen_cols as i32
-            })
-            .unwrap_or(false)
-        {
-            return;
-        }
-        self.grid.mark_dirty();
     }
 
     /// Mark both layers dirty. JS calls this after any state mutation
@@ -135,30 +105,24 @@ impl IronCanvas {
             return;
         };
 
-        // Overlay-only repaint with unchanged geometry: reuse the last frame's
-        // prefix-sum tables rather than walking the model again. Triggered by
-        // autofill drag, clipboard state change, formula-ref highlight updates,
-        // and active-cell moves — all of which call set_overlays() without
-        // touching scroll or freeze.
+        // Overlay-only fast path: reuse the last frame's prefix-sum tables
+        // when scroll / freeze / sheet / canvas size are unchanged. Triggered
+        // by autofill drag, clipboard state change, formula-ref highlight
+        // updates, and active-cell moves.
         //
-        // `selection_range` is refreshed in place: the prefix-sum tables are
-        // selection-independent, but the autofill handle and hit-test must
-        // track the current active cell, not the selection that was live at
-        // the previous full paint.
+        // Falls through to a full rebuild when geometry diverged (IronCalc's
+        // UserModel is imperative — a sheet swap can mutate `FrameContext`
+        // identity without going through any setter) OR when no prior frame
+        // exists, so the grid layer never sits beneath an overlay it didn't
+        // paint with.
         if !grid_dirty {
-            if let Some(prev) = self.last_frame.as_mut() {
-                if prev.is_still_valid(model, self.size) {
-                    prev.selection_range = model.get_selected_view().selection;
+            match self.last_frame.as_mut() {
+                Some(prev) if prev.is_still_valid(model, self.size) => {
+                    prev.refresh_overlay_inputs(model);
                     self.overlay.paint(self.theme, &self.overlays, model, prev);
                     return;
                 }
-                // Stale cache (sheet/scroll/freeze/size diverged from model)
-                // but no set_* marked the grid dirty — IronCalc's UserModel
-                // is imperative, so a sheet swap can change `FrameContext`
-                // identity without going through `set_viewport`/`set_freeze`.
-                // Escalate so the rebuild branch repaints the grid layer
-                // whose pixels are now for an obsolete frame.
-                grid_dirty = true;
+                _ => grid_dirty = true,
             }
         }
 
@@ -289,18 +253,11 @@ impl IronCanvas {
         self.last_frame.as_ref()?.autofill_handle()
     }
 
+    /// Mark the overlay layer dirty. Selection / autofill / formula-ref /
+    /// clipboard signals funnel through here. Grid escalation when scroll /
+    /// freeze / sheet / size diverged is handled by `paint_if_dirty`'s
+    /// `is_still_valid` check, not duplicated here.
     pub fn request_overlay_repaint(&mut self) {
-        if let Some(model) = self.model.as_deref() {
-            let view = model.get_selected_view();
-            let scrolled = self
-                .last_frame
-                .as_ref()
-                .map(|f| f.top_row != view.top_row || f.left_column != view.left_column)
-                .unwrap_or(true);
-            if scrolled {
-                self.grid.mark_dirty();
-            }
-        }
         self.overlay.mark_dirty();
     }
 }

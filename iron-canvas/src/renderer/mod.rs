@@ -84,8 +84,6 @@ pub(crate) use pane::PaneRegion;
 
 pub struct CanvasRenderer {
     ctx: CanvasRenderingContext2d,
-    width: i32,
-    height: i32,
     dpr: i32,
     theme: CanvasTheme,
     /// Cached dash pattern passed to `set_line_dash` on every dashed stroke
@@ -103,16 +101,6 @@ pub struct CanvasRenderer {
 }
 
 impl CanvasRenderer {
-    /// Package the canvas's logical pixel extent for pixel-space predicates
-    /// like `PixelRect::intersects`.
-    #[inline]
-    pub(crate) fn canvas_size(&self) -> CanvasSize {
-        CanvasSize {
-            w: f64::from(self.width),
-            h: f64::from(self.height),
-        }
-    }
-
     /// Borrow the canvas 2D context (for measurement + font setup during
     /// paint resolution in `crate::types`).
     #[inline]
@@ -134,8 +122,9 @@ impl CanvasRenderer {
         &'a self,
         model: &'a dyn CanvasModel,
         pane: &'a PaneRegion,
+        canvas: CanvasSize,
     ) -> CellPaintsIter<'a> {
-        CellPaintsIter::new(self, model, pane)
+        CellPaintsIter::new(self, model, pane, canvas)
     }
 
     /// Layer-friendly constructor: caller owns canvas sizing + DPR scaling.
@@ -143,17 +132,11 @@ impl CanvasRenderer {
     /// Used by `GridLayer` / `OverlayLayer`, which build their own ctx with
     /// alpha/desynchronized options and apply DPR scale in their own
     /// `resize()`. This keeps a long-lived `CanvasRenderer` whose ctx is the
-    /// layer's ctx — paint caches survive across frames.
-    pub(crate) fn for_layer(
-        ctx: CanvasRenderingContext2d,
-        css_w: i32,
-        css_h: i32,
-        theme: CanvasTheme,
-    ) -> Self {
+    /// layer's ctx — paint caches survive across frames. Canvas size lives
+    /// on the per-frame `FrameContext`, not on the renderer.
+    pub(crate) fn for_layer(ctx: CanvasRenderingContext2d, theme: CanvasTheme) -> Self {
         Self {
             ctx,
-            width: css_w,
-            height: css_h,
             dpr: 1,
             theme,
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
@@ -170,15 +153,8 @@ impl CanvasRenderer {
         }
     }
 
-    /// Sync logical canvas size after a layer resize. Caller is responsible
-    /// for the actual `canvas.set_width/set_height` and DPR scale.
-    pub(crate) fn set_size(&mut self, css_w: i32, css_h: i32) {
-        self.width = css_w;
-        self.height = css_h;
-    }
-
-    /// Sync device-pixel ratio after a layer resize. Must be called
-    /// alongside `set_size` so snap helpers reflect the current DPR.
+    /// Sync device-pixel ratio after a layer resize. The snap helpers read
+    /// `dpr` so this must be called whenever the backing-store DPR changes.
     pub(crate) fn set_dpr(&mut self, dpr: i32) {
         self.dpr = dpr;
     }
@@ -235,19 +211,20 @@ impl CanvasRenderer {
             .show_grid
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
 
-        self.render_pane(model, PaneRegion::top_left(&frame.frozen));
-        self.render_pane(model, PaneRegion::top_right(&frame.frozen, &frame.vis));
-        self.render_pane(model, PaneRegion::bottom_left(&frame.frozen, &frame.vis));
-        self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis));
+        let canvas = frame.canvas_size;
+        self.render_pane(model, PaneRegion::top_left(&frame.frozen), canvas);
+        self.render_pane(model, PaneRegion::top_right(&frame.frozen, &frame.vis), canvas);
+        self.render_pane(model, PaneRegion::bottom_left(&frame.frozen, &frame.vis), canvas);
+        self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis), canvas);
 
         // Frozen separators paint AFTER cells so the thick divider wins
         // its pixels over the rightmost/bottommost frozen cell's grid stroke.
-        self.draw_frozen_separators(&frame.frozen);
+        self.draw_frozen_separators(frame);
 
         self.render_headers_base(Axis::Row, frame);
         self.render_headers_base(Axis::Column, frame);
 
-        self.draw_corner_box();
+        self.draw_corner_box(canvas);
     }
 
     /// Paint the overlay layer: selection outline + autofill handle, header

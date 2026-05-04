@@ -32,12 +32,12 @@ impl CanvasRenderer {
         let x = frame.col_to_x(range.c1);
         let y = frame.row_to_y(range.r1);
         let right = if range.c2 > frame.vis.last.column && range.c2 > frozen_cols {
-            self.width
+            frame.canvas_size.w as i32
         } else {
             frame.col_to_x(range.c2) + frame.col_extent_at(range.c2)
         };
         let bottom = if range.r2 > frame.vis.last.row && range.r2 > frozen_rows {
-            self.height
+            frame.canvas_size.h as i32
         } else {
             frame.row_to_y(range.r2) + frame.row_extent_at(range.r2)
         };

@@ -7,11 +7,11 @@
 //! `draw_corner_box()`, `render_row_headers(...)`, ... .
 
 use crate::geometry::constants::{HEADER_OFFSET, STANDARD_BORDER_WIDTH};
-use crate::geometry::frame::frozen::FrozenRC;
 use crate::geometry::frame::FrameContext;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point, Span};
 use crate::geometry::utils::col_name;
+use crate::geometry::CanvasSize;
 
 use super::super::geometry::constants::{FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 
@@ -21,7 +21,8 @@ const HEADER_FONT: &str = "bold 12px Inter, Arial, sans-serif";
 
 impl CanvasRenderer {
     /// Thick separator strokes between frozen bands and the scrollable grid.
-    pub(super) fn draw_frozen_separators(&self, frc: &FrozenRC) {
+    pub(super) fn draw_frozen_separators(&self, frame: &FrameContext) {
+        let frc = &frame.frozen;
         if frc.rows == 0 && frc.cols == 0 {
             return;
         }
@@ -29,13 +30,15 @@ impl CanvasRenderer {
 
         let sep_y = frc.offset.y - FROZEN_SEP / 2 + HEADER_OFFSET;
         let sep_x = frc.offset.x - FROZEN_SEP / 2 + HEADER_OFFSET;
+        let canvas_w = frame.canvas_size.w as i32;
+        let canvas_h = frame.canvas_size.h as i32;
 
         self.with_stroke_width(FROZEN_SEP, |this| {
             if frc.rows > 0 {
                 this.stroke_hline(
                     Span {
                         from: 0,
-                        to: this.width,
+                        to: canvas_w,
                     },
                     f64::from(sep_y),
                 );
@@ -45,7 +48,7 @@ impl CanvasRenderer {
                     f64::from(sep_x),
                     Span {
                         from: 0,
-                        to: this.height,
+                        to: canvas_h,
                     },
                 );
             }
@@ -54,7 +57,7 @@ impl CanvasRenderer {
 
     /// Top-left blank square plus the two axis lines that separate the
     /// header strips from the cell area.
-    pub(super) fn draw_corner_box(&self) {
+    pub(super) fn draw_corner_box(&self, canvas: CanvasSize) {
         let corner = PixelRect {
             top_left: Point { x: 0, y: 0 },
             width: HEADER_COL_WIDTH,
@@ -67,7 +70,7 @@ impl CanvasRenderer {
         self.stroke_hline(
             Span {
                 from: 0,
-                to: self.width,
+                to: canvas.w as i32,
             },
             f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET),
         );
@@ -75,7 +78,7 @@ impl CanvasRenderer {
             f64::from(HEADER_COL_WIDTH + HEADER_OFFSET),
             Span {
                 from: 0,
-                to: self.height,
+                to: canvas.h as i32,
             },
         );
     }

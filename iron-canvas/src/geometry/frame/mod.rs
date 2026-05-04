@@ -169,9 +169,12 @@ impl FrameContext {
 
     /// True when the painted geometry is identical to the current model state.
     ///
-    /// Checks scroll origin, frozen band counts, and canvas size — the three
-    /// inputs that determine `PixelOffsets`. When all match, the overlay layer
-    /// can repaint against this frame without calling `FrameContext::current`.
+    /// Checks scroll origin, frozen band counts, sheet, and canvas size — the
+    /// inputs that determine `PixelOffsets` and visible-region indices. When
+    /// all match, the overlay layer can repaint against this frame without
+    /// rebuilding via `FrameContext::current`. Selection is *not* part of this
+    /// predicate — refresh it via `refresh_overlay_inputs` after a positive
+    /// answer, before painting the overlay.
     pub(crate) fn is_still_valid(&self, model: &dyn CanvasModel, size: CanvasSize) -> bool {
         if size != self.canvas_size {
             return false;
@@ -186,6 +189,15 @@ impl FrameContext {
         frozen_rows == self.frozen.frozen_rows_count()
             && frozen_cols == self.frozen.frozen_cols_count()
             && sheet == self.sheet
+    }
+
+    /// Refresh frame fields that the overlay paints from but that are
+    /// independent of the prefix-sum tables. Call on the overlay-only fast
+    /// path after `is_still_valid` returned true, before painting. Keeps the
+    /// "snapshot of what's painted" invariant on `selection_range`: the
+    /// orchestrator never reaches into the field directly.
+    pub(crate) fn refresh_overlay_inputs(&mut self, model: &dyn CanvasModel) {
+        self.selection_range = model.get_selected_view().selection;
     }
 
     // Pixel <-> cell mapping  (snapshot-only)

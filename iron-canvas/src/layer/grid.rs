@@ -21,7 +21,7 @@ impl GridLayer {
             .get_context_with_context_options("2d", &ctx_opts)?
             .ok_or_else(|| JsValue::from_str("grid canvas 2d context unavailable"))?
             .unchecked_into::<CanvasRenderingContext2d>();
-        let renderer = CanvasRenderer::for_layer(ctx, 0, 0, LIGHT);
+        let renderer = CanvasRenderer::for_layer(ctx, LIGHT);
         Ok(Self {
             base: LayerBase::new(canvas, renderer),
         })
@@ -34,7 +34,7 @@ impl GridLayer {
         frame: &FrameContext, // pre-built by orchestrator
     ) {
         self.base.renderer.set_theme(theme);
-        let size = self.base.canvas_size();
+        let size = frame.canvas_size;
         let ctx = self.base.renderer.ctx_ref();
         ctx.set_fill_style_str(theme.cell_bg);
         ctx.fill_rect(0.0, 0.0, size.w, size.h);

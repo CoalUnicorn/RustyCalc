@@ -41,7 +41,7 @@ impl OverlayLayer {
             .get_context_with_context_options("2d", &ctx_opts)?
             .ok_or_else(|| JsValue::from_str("overlay canvas 2d context unavailable"))?
             .unchecked_into::<CanvasRenderingContext2d>();
-        let renderer = CanvasRenderer::for_layer(ctx, 0, 0, LIGHT);
+        let renderer = CanvasRenderer::for_layer(ctx, LIGHT);
         Ok(Self {
             base: LayerBase::new(canvas, renderer),
         })
@@ -63,7 +63,7 @@ impl OverlayLayer {
         frame: &FrameContext,
     ) {
         self.base.renderer.set_theme(theme);
-        let size = self.base.canvas_size();
+        let size = frame.canvas_size;
         self.base
             .renderer
             .ctx_ref()

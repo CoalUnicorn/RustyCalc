@@ -6,7 +6,8 @@ pub(crate) use overlay::OverlayLayer;
 pub use overlay::RenderOverlays;
 use web_sys::HtmlCanvasElement;
 
-use crate::{CanvasRenderer, CanvasSize};
+use crate::CanvasRenderer;
+use crate::CanvasSize;
 
 pub(crate) struct PaintGate {
     dirty: bool,
@@ -38,10 +39,6 @@ impl LayerBase {
         self.gate.should_paint()
     }
 
-    pub(crate) fn canvas_size(&self) -> CanvasSize {
-        self.renderer.canvas_size()
-    }
-
     pub(crate) fn resize(&mut self, css_w: i32, css_h: i32, dpr: i32) {
         let (target_w, target_h) = CanvasSize {
             w: f64::from(css_w),
@@ -61,7 +58,6 @@ impl LayerBase {
             .ctx_ref()
             .scale(f64::from(dpr), f64::from(dpr))
             .expect("scale should not fail");
-        self.renderer.set_size(css_w, css_h);
         self.renderer.set_dpr(dpr);
         self.renderer.invalidate_paint_cache();
     }

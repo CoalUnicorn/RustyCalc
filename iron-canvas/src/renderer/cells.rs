@@ -44,10 +44,15 @@ impl CanvasRenderer {
     /// across all -> explicit across all -> A.right strokes last on the
     /// shared edge). Text remains the final pass so overflow is never
     /// clipped by a neighbour's bg.
-    pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
+    pub(super) fn render_pane(
+        &self,
+        model: &dyn CanvasModel,
+        pane: PaneRegion,
+        canvas: CanvasSize,
+    ) {
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
-        for p in self.paints_in(model, &pane) {
+        for p in self.paints_in(model, &pane, canvas) {
             self.paint_bg(&p);
             slots.push(p);
         }
@@ -387,9 +392,10 @@ impl<'a> CellPaintsIter<'a> {
         renderer: &'a CanvasRenderer,
         model: &'a dyn CanvasModel,
         pane: &'a PaneRegion,
+        canvas: CanvasSize,
     ) -> Self {
         Self {
-            slots: pane.cells(model, renderer.canvas_size()),
+            slots: pane.cells(model, canvas),
             renderer,
             model,
         }
