@@ -5,12 +5,13 @@
 //! `CanvasRenderer::paint_text`. Per the `*Paint` convention, every
 //! allocation that depends on cell content lives here, not at paint time.
 
+use std::rc::Rc;
+
 use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignment};
 use web_sys::CanvasRenderingContext2d;
 
 use crate::geometry::pixel_rect::PixelRect;
 use crate::renderer::CanvasRenderer;
-use crate::style::FontStyle;
 use crate::theme::CanvasTheme;
 use crate::types::coord::{CellAddress, CssColor};
 use crate::CanvasModel;
@@ -26,12 +27,22 @@ const CELL_PADDING: f64 = 4.0;
 /// during paint.
 pub(crate) struct TextPaint {
     pub clip: PixelRect,
-    pub font_css: String,
+    /// Interned `ctx.font` string. `Rc::clone` on cache hit; one alloc per
+    /// unique (size, bold, italic, family) tuple per renderer lifetime.
+    pub font_css: Rc<str>,
     pub font_size_px: f64,
-    pub color: String,
+    pub color: TextColor,
     pub underline: bool,
     pub strike: bool,
     pub lines: Vec<TextLine>,
+}
+
+/// Per-cell text color split between the zero-alloc theme-default fast path
+/// (`Static`) and the allocating per-cell-override path (`Owned`).
+/// Mirrors `BorderColor` in `renderer/cells.rs`.
+pub(crate) enum TextColor {
+    Static(&'static str),
+    Owned(Box<str>),
 }
 
 /// One visual line of text inside a cell, positioned for center-aligned rendering.
@@ -53,9 +64,7 @@ impl TextPaint {
         rect: PixelRect,
         style: &Style,
     ) -> Option<TextPaint> {
-        let text = model
-            .get_formatted_cell_value(addr.sheet, addr.row, addr.column)
-            .ok()?;
+        let text = model.get_formatted_cell_value(addr.sheet, addr.row, addr.column)?;
         if text.is_empty() {
             return None;
         }
@@ -63,21 +72,13 @@ impl TextPaint {
             return None;
         }
 
-        // Destructure to move fields directly - avoids cloning `css`.
         let CellTextStyle {
-            font:
-                FontStyle {
-                    css: font_css,
-                    size_px,
-                    underline,
-                    strikethrough: strike,
-                    ..
-                },
             text_color,
+            underline,
+            strike,
             h_align,
             v_align,
             wrap_text,
-            ..
         } = CellTextStyle::resolve(
             model,
             addr.sheet,
@@ -85,6 +86,17 @@ impl TextPaint {
             addr.column,
             renderer.theme(),
             style,
+        );
+
+        // Font interning: skips `FontStyle::build` on cache hit. Same lookup
+        // is shared across cells with identical (size, weight, slant, family).
+        let size_px = style.font.sz as f64;
+        let font_css = renderer.font_intern.get_or_build(
+            size_px,
+            style.font.b,
+            style.font.i,
+            &style.font.name,
+            "Calibri",
         );
 
         let approx_char_w = size_px * CHAR_WIDTH_FACTOR;
@@ -136,7 +148,7 @@ impl TextPaint {
             clip: rect,
             font_css,
             font_size_px: size_px,
-            color: CssColor::new(&text_color).into_string(),
+            color: text_color,
             underline,
             strike,
             lines,
@@ -145,10 +157,12 @@ impl TextPaint {
 }
 
 /// Per-cell text styling resolved from the model's raw `Style`. Private step
-/// inside `TextPaint::resolve`; not exported.
+/// inside `TextPaint::resolve`; not exported. Font css is interned separately
+/// via `FontIntern` so this struct carries no per-cell `String`.
 struct CellTextStyle {
-    text_color: String,
-    font: FontStyle,
+    text_color: TextColor,
+    underline: bool,
+    strike: bool,
     h_align: HorizontalAlignment,
     v_align: VerticalAlignment,
     wrap_text: bool,
@@ -173,28 +187,14 @@ impl CellTextStyle {
         // same theme red — per-error-kind styling would require a new model
         // accessor (see xlsm_err.md "Renderer-side categorisation").
         let text_color = if matches!(cell_type, CellType::ErrorValue) {
-            CssColor::new(theme.error_text_color)
+            TextColor::Static(theme.error_text_color)
         } else {
             match style.font.color.as_deref() {
-                None | Some("#000000") => CssColor::new(theme.default_text_color),
-                Some(c) => CssColor::new(c),
+                None | Some("#000000") => TextColor::Static(theme.default_text_color),
+                Some(c) => {
+                    TextColor::Owned(CssColor::new(c).into_string().into_boxed_str())
+                }
             }
-        };
-
-        let size_px = style.font.sz as f64;
-        // Fallback to default as in IronCalc Font name default.
-        let css = FontStyle::build(
-            size_px,
-            style.font.b,
-            style.font.i,
-            &style.font.name,
-            "Calibri",
-        );
-        let font = FontStyle {
-            size_px,
-            underline: style.font.u,
-            strikethrough: style.font.strike,
-            css,
         };
 
         let alignment = style.alignment.as_ref();
@@ -222,8 +222,9 @@ impl CellTextStyle {
         let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
 
         Self {
-            text_color: text_color.into_string(),
-            font,
+            text_color,
+            underline: style.font.u,
+            strike: style.font.strike,
             h_align,
             v_align,
             wrap_text,

@@ -35,25 +35,25 @@ impl CanvasModel for JsBackedModel {
     fn get_selected_view(&self) -> CanvasView {
         todo!("bind IronCalcModelHandle.getSelectedView; bridge field-by-field")
     }
-    fn get_frozen_rows_count(&self, _sheet: u32) -> Result<i32, String> {
+    fn get_frozen_rows_count(&self, _sheet: u32) -> Option<i32> {
         todo!("bind IronCalcModelHandle.getFrozenRowsCount")
     }
-    fn get_frozen_columns_count(&self, _sheet: u32) -> Result<i32, String> {
+    fn get_frozen_columns_count(&self, _sheet: u32) -> Option<i32> {
         todo!("bind IronCalcModelHandle.getFrozenColumnsCount")
     }
-    fn get_row_height(&self, _sheet: u32, _row: i32) -> Result<f64, String> {
+    fn get_row_height(&self, _sheet: u32, _row: i32) -> Option<f64> {
         todo!("bind IronCalcModelHandle.getRowHeight")
     }
-    fn get_column_width(&self, _sheet: u32, _column: i32) -> Result<f64, String> {
+    fn get_column_width(&self, _sheet: u32, _column: i32) -> Option<f64> {
         todo!("bind IronCalcModelHandle.getColumnWidth")
     }
-    fn get_show_grid_lines(&self, _sheet: u32) -> Result<bool, String> {
+    fn get_show_grid_lines(&self, _sheet: u32) -> Option<bool> {
         todo!("bind IronCalcModelHandle.getShowGridLines")
     }
-    fn get_cell_style(&self, _sheet: u32, _row: i32, _column: i32) -> Result<Style, String> {
+    fn get_cell_style(&self, _sheet: u32, _row: i32, _column: i32) -> Option<Style> {
         todo!("bind IronCalcModelHandle.getCellStyle; needs serde or per-field bridge")
     }
-    fn get_cell_type(&self, _sheet: u32, _row: i32, _column: i32) -> Result<CellType, String> {
+    fn get_cell_type(&self, _sheet: u32, _row: i32, _column: i32) -> Option<CellType> {
         todo!("bind IronCalcModelHandle.getCellType; needs enum-tag bridge")
     }
     fn get_formatted_cell_value(
@@ -61,7 +61,7 @@ impl CanvasModel for JsBackedModel {
         _sheet: u32,
         _row: i32,
         _column: i32,
-    ) -> Result<String, String> {
+    ) -> Option<String> {
         todo!("bind IronCalcModelHandle.getFormattedCellValue")
     }
 }

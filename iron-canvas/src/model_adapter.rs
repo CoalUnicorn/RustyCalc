@@ -18,15 +18,14 @@ pub struct CanvasView {
 pub trait CanvasModel {
     fn get_selected_sheet(&self) -> u32;
     fn get_selected_view(&self) -> CanvasView;
-    fn get_frozen_rows_count(&self, sheet: u32) -> Result<i32, String>;
-    fn get_frozen_columns_count(&self, sheet: u32) -> Result<i32, String>;
-    fn get_row_height(&self, sheet: u32, row: i32) -> Result<f64, String>;
-    fn get_column_width(&self, sheet: u32, column: i32) -> Result<f64, String>;
-    fn get_show_grid_lines(&self, sheet: u32) -> Result<bool, String>;
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Result<Style, String>;
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Result<CellType, String>;
-    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32)
-        -> Result<String, String>;
+    fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
+    fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
+    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
+    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
+    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
+    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
 }
 
 impl<'a> CanvasModel for UserModel<'a> {
@@ -49,33 +48,28 @@ impl<'a> CanvasModel for UserModel<'a> {
             left_column: v.left_column,
         }
     }
-    fn get_frozen_rows_count(&self, sheet: u32) -> Result<i32, String> {
-        UserModel::get_frozen_rows_count(self, sheet)
+    fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32> {
+        UserModel::get_frozen_rows_count(self, sheet).ok()
     }
-    fn get_frozen_columns_count(&self, sheet: u32) -> Result<i32, String> {
-        UserModel::get_frozen_columns_count(self, sheet)
+    fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32> {
+        UserModel::get_frozen_columns_count(self, sheet).ok()
     }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Result<f64, String> {
-        UserModel::get_row_height(self, sheet, row)
+    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
+        UserModel::get_row_height(self, sheet, row).ok()
     }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Result<f64, String> {
-        UserModel::get_column_width(self, sheet, column)
+    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
+        UserModel::get_column_width(self, sheet, column).ok()
     }
-    fn get_show_grid_lines(&self, sheet: u32) -> Result<bool, String> {
-        UserModel::get_show_grid_lines(self, sheet)
+    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
+        UserModel::get_show_grid_lines(self, sheet).ok()
     }
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Result<Style, String> {
-        UserModel::get_cell_style(self, sheet, row, column)
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style> {
+        UserModel::get_cell_style(self, sheet, row, column).ok()
     }
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Result<CellType, String> {
-        UserModel::get_cell_type(self, sheet, row, column)
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType> {
+        UserModel::get_cell_type(self, sheet, row, column).ok()
     }
-    fn get_formatted_cell_value(
-        &self,
-        sheet: u32,
-        row: i32,
-        column: i32,
-    ) -> Result<String, String> {
-        UserModel::get_formatted_cell_value(self, sheet, row, column)
+    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
+        UserModel::get_formatted_cell_value(self, sheet, row, column).ok()
     }
 }

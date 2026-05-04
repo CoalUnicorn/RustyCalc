@@ -19,39 +19,29 @@ impl CanvasModel for StubModel {
             left_column: 1,
         }
     }
-    fn get_frozen_rows_count(&self, _: u32) -> Result<i32, String> {
-        Ok(0)
+    fn get_frozen_rows_count(&self, _: u32) -> Option<i32> {
+        Some(0)
     }
-    fn get_frozen_columns_count(&self, _: u32) -> Result<i32, String> {
-        Ok(0)
+    fn get_frozen_columns_count(&self, _: u32) -> Option<i32> {
+        Some(0)
     }
-    fn get_row_height(&self, _: u32, _: i32) -> Result<f64, String> {
-        Ok(20.0)
+    fn get_row_height(&self, _: u32, _: i32) -> Option<f64> {
+        Some(20.0)
     }
-    fn get_column_width(&self, _: u32, _: i32) -> Result<f64, String> {
-        Ok(80.0)
+    fn get_column_width(&self, _: u32, _: i32) -> Option<f64> {
+        Some(80.0)
     }
-    fn get_show_grid_lines(&self, _: u32) -> Result<bool, String> {
-        Ok(true)
+    fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
+        Some(true)
     }
-    fn get_cell_style(
-        &self,
-        _: u32,
-        _: i32,
-        _: i32,
-    ) -> Result<ironcalc_base::types::Style, String> {
-        Ok(ironcalc_base::types::Style::default())
+    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<ironcalc_base::types::Style> {
+        Some(ironcalc_base::types::Style::default())
     }
-    fn get_cell_type(
-        &self,
-        _: u32,
-        _: i32,
-        _: i32,
-    ) -> Result<ironcalc_base::types::CellType, String> {
-        Ok(ironcalc_base::types::CellType::Number)
+    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<ironcalc_base::types::CellType> {
+        Some(ironcalc_base::types::CellType::Number)
     }
-    fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Result<String, String> {
-        Ok(String::new())
+    fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Option<String> {
+        Some(String::new())
     }
 }
 

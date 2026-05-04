@@ -178,7 +178,7 @@ impl CanvasRenderer {
         let Some(rect) = self.range_pixel_bounds(frame, range) else {
             return;
         };
-        let Ok(own_style) = model.get_cell_style(addr.sheet, addr.row, addr.column) else {
+        let Some(own_style) = model.get_cell_style(addr.sheet, addr.row, addr.column) else {
             return;
         };
         let Some(paint) = CellPaint::resolve_cell_paint(self, CellSlot { addr, rect }, own_style)
@@ -411,7 +411,7 @@ impl<'a> Iterator for CellPaintsIter<'a> {
         loop {
             let slot = self.slots.next()?;
 
-            let Ok(own_style) =
+            let Some(own_style) =
                 self.model
                     .get_cell_style(slot.addr.sheet, slot.addr.row, slot.addr.column)
             else {

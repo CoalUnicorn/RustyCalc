@@ -58,38 +58,28 @@ impl CanvasModel for MockCanvasModel {
             left_column: self.left_column,
         }
     }
-    fn get_frozen_rows_count(&self, _sheet: u32) -> Result<i32, String> {
-        Ok(self.frozen_rows)
+    fn get_frozen_rows_count(&self, _sheet: u32) -> Option<i32> {
+        Some(self.frozen_rows)
     }
-    fn get_frozen_columns_count(&self, _sheet: u32) -> Result<i32, String> {
-        Ok(self.frozen_cols)
+    fn get_frozen_columns_count(&self, _sheet: u32) -> Option<i32> {
+        Some(self.frozen_cols)
     }
-    fn get_row_height(&self, _sheet: u32, _row: i32) -> Result<f64, String> {
-        Ok(self.row_height)
+    fn get_row_height(&self, _sheet: u32, _row: i32) -> Option<f64> {
+        Some(self.row_height)
     }
-    fn get_column_width(&self, _sheet: u32, _column: i32) -> Result<f64, String> {
-        Ok(self.col_width)
+    fn get_column_width(&self, _sheet: u32, _column: i32) -> Option<f64> {
+        Some(self.col_width)
     }
-    fn get_show_grid_lines(&self, _sheet: u32) -> Result<bool, String> {
-        Ok(true)
+    fn get_show_grid_lines(&self, _sheet: u32) -> Option<bool> {
+        Some(true)
     }
-    fn get_cell_style(
-        &self,
-        _: u32,
-        _: i32,
-        _: i32,
-    ) -> Result<ironcalc_base::types::Style, String> {
-        Err("mock: no cell styles".into())
+    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<ironcalc_base::types::Style> {
+        None
     }
-    fn get_cell_type(
-        &self,
-        _: u32,
-        _: i32,
-        _: i32,
-    ) -> Result<ironcalc_base::types::CellType, String> {
+    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<ironcalc_base::types::CellType> {
         unimplemented!("cell type not used by these tests")
     }
-    fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Result<String, String> {
+    fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Option<String> {
         unimplemented!("cell value not used by these tests")
     }
 }
