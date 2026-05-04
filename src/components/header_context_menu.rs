@@ -82,13 +82,13 @@ pub fn HeaderContextMenuOverlay() -> impl IntoView {
                         </ContextMenuItem>
                         <ContextMenuSeparator />
                         <ContextMenuItem
-                            icon="←"
+                            icon="<-"
                             on_click=move || dispatch(StructAction::MoveColumn { col, delta: -1 })
                         >
                             "Move Left"
                         </ContextMenuItem>
                         <ContextMenuItem
-                            icon="→"
+                            icon="->"
                             on_click=move || dispatch(StructAction::MoveColumn { col, delta: 1 })
                         >
                             "Move Right"

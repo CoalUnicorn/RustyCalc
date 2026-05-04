@@ -8,7 +8,7 @@ use crate::coord::SheetRange;
 use crate::model::frontend_types::*;
 use crate::state::ModelStore;
 use crate::{
-    coord::{Cell, CellRange, DefinedName},
+    coord::{CellAddress, CellArea, DefinedName},
     input::formula_analysis::{analyze_formula, FormulaAnalysis},
 };
 use iron_canvas::geometry::constants::{LAST_COLUMN, LAST_ROW};
@@ -37,7 +37,7 @@ pub trait FrontendModel {
     fn active_cell_content(&self) -> String;
 
     /// Position of the active cell.
-    fn active_cell(&self) -> Cell;
+    fn active_cell(&self) -> CellAddress;
 
     fn analyze_in_context(&self, text: &str) -> FormulaAnalysis;
 
@@ -46,7 +46,7 @@ pub trait FrontendModel {
     fn frozen_panes(&self) -> FrozenPanes;
 
     /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
-    fn sheet_dimension(&self) -> CellRange;
+    fn sheet_dimension(&self) -> CellArea;
 
     fn get_sheet_name(&self, sheet_idx: usize) -> String;
 
@@ -101,7 +101,7 @@ pub trait FrontendModel {
 
     /// Select a rectangular range with the active cell at `(row, col)`.
     /// Coordinates are clamped to valid bounds.
-    fn nav_select_range(&mut self, area: CellRange);
+    fn nav_select_range(&mut self, area: CellArea);
 
     /// Expand selection by one cell (Shift+Arrow).
     fn nav_expand_selection(&mut self, dir: ArrowKey);
@@ -110,7 +110,7 @@ pub trait FrontendModel {
     fn nav_home_row(&mut self);
 
     /// Set the selection to `area` (clamped to valid bounds).
-    fn set_selected_area(&mut self, area: CellRange);
+    fn set_selected_area(&mut self, area: CellArea);
 }
 
 // Helper: map font name String -> SafeFontFamily
@@ -185,9 +185,9 @@ impl FrontendModel for UserModel<'_> {
             .unwrap_or_default()
     }
 
-    fn active_cell(&self) -> Cell {
+    fn active_cell(&self) -> CellAddress {
         let view = self.get_selected_view();
-        Cell {
+        CellAddress {
             sheet: view.sheet,
             row: view.row,
             column: view.column,
@@ -218,19 +218,19 @@ impl FrontendModel for UserModel<'_> {
         }
     }
 
-    fn sheet_dimension(&self) -> CellRange {
+    fn sheet_dimension(&self) -> CellArea {
         let sheet = self.get_selected_sheet();
         match self.get_model().workbook.worksheet(sheet) {
             Ok(ws) => {
                 let d = ws.dimension();
-                CellRange {
+                CellArea {
                     r1: d.min_row,
                     c1: d.min_column,
                     r2: d.max_row,
                     c2: d.max_column,
                 }
             }
-            Err(_) => CellRange {
+            Err(_) => CellArea {
                 r1: 1,
                 c1: 1,
                 r2: 1,
@@ -366,7 +366,7 @@ impl FrontendModel for UserModel<'_> {
         let _ = self.on_navigate_to_edge_in_direction(nd);
     }
 
-    fn nav_select_range(&mut self, area: CellRange) {
+    fn nav_select_range(&mut self, area: CellArea) {
         let row = area.r1.clamp(1, LAST_ROW);
         let col = area.c1.clamp(1, LAST_COLUMN);
         let row2 = area.r2.clamp(1, LAST_ROW);
@@ -390,7 +390,7 @@ impl FrontendModel for UserModel<'_> {
         let _ = self.set_selected_cell(row, 1);
     }
 
-    fn set_selected_area(&mut self, area: CellRange) {
+    fn set_selected_area(&mut self, area: CellArea) {
         let _ = self.set_selected_cell(area.r1, area.c1);
         let _ = self.set_selected_range(area.r1, area.c1, area.r2, area.c2);
     }
@@ -522,7 +522,7 @@ mod tests {
     #[test]
     fn nav_select_range_sets_active_cell_and_range() {
         let mut m = make_model();
-        m.nav_select_range(CellRange {
+        m.nav_select_range(CellArea {
             r1: 2,
             c1: 3,
             r2: 5,

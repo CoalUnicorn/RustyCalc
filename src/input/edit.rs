@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::coord::Cell;
+use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::formula_analysis::FormulaAnalysis;
@@ -100,7 +100,7 @@ pub fn execute_edit(
                 mutate(model, EvaluationMode::Deferred, |m| m.nav_arrow(*dir));
 
                 // Fire content + mode + navigation together so EventBus signals update once.
-                let nav_address = model.with_value(Cell::from_view);
+                let nav_address = model.with_value(CellAddress::from_view);
                 state.emit_events(vec![
                     SpreadsheetEvent::Content(ContentEvent::CellChanged {
                         address: model.with_value(|m| m.active_cell()),

@@ -6,14 +6,14 @@ use ironcalc_base::{
 };
 use leptos::prelude::WithValue;
 
-use crate::coord::{CellRange, SheetRange};
+use crate::coord::{CellArea, SheetRange};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
     style_types::{BooleanValue, HexColor, StylePath},
     try_mutate, EvaluationMode, FrontendModel, SafeFontFamily, ToolbarState,
 };
-use iron_canvas::geometry::{LAST_COLUMN, LAST_ROW};
+use iron_canvas::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use crate::state::{ModelStore, WorkbookState};
 
@@ -354,7 +354,7 @@ fn adjust_decimals(fmt: &str, delta: i32) -> String {
 /// `on_paste_styles` (which records undo diffs).
 fn set_font_name(m: &mut UserModel<'static>, name: &str) -> Result<(), FormatError> {
     let sheet = m.get_selected_sheet();
-    let norm = CellRange::from_view(m).normalized();
+    let norm = CellArea::from_view(m).normalized();
 
     let rows: Vec<Vec<_>> = (norm.r1..=norm.r2)
         .map(|row| {

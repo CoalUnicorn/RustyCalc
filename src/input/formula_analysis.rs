@@ -22,7 +22,7 @@ use ironcalc_base::expressions::{
     types::CellReferenceRC,
 };
 
-use crate::coord::{ActiveRef, Cell, DefinedName, RefNode, SheetRange, TextRef};
+use crate::coord::{ActiveRef, CellAddress, DefinedName, RefNode, SheetRange, TextRef};
 
 /// Empty slice used by [`FormulaAnalysis::refs`] for variants that carry no overlays.
 const NO_REFS: &[ActiveRef] = &[];
@@ -101,8 +101,8 @@ pub enum FormulaStatus {
     LexerError(LexerError),
     /// Parsed cleanly but some references, functions, or names don't resolve.
     /// `valid_refs` is the subset that DID resolve and should still paint.
-    // TODO(human): rename `refs` → `invalid_refs` (and `functions` → `invalid_functions`,
-    // `names` → `invalid_names`) so the three "bad" fields pair symmetrically with
+    // TODO(human): rename `refs` -> `invalid_refs` (and `functions` -> `invalid_functions`,
+    // `names` -> `invalid_names`) so the three "bad" fields pair symmetrically with
     // `valid_refs`. Update every destructure site: status_bar.rs, formula_bar.rs,
     // and the tests in this file. The goal: `let Unresolved { invalid_refs, valid_refs, .. }`
     // reads unambiguously without needing the docs.
@@ -172,7 +172,7 @@ pub(crate) enum DiagnosticLeaf {
 ///   Unknown sheet names produce no overlay (the ref is silently skipped).
 pub fn analyze_formula(
     formula: &str,
-    active_cell: Cell,
+    active_cell: CellAddress,
     sheet_names: &[(u32, String)],
     defined_names: &[DefinedName],
 ) -> FormulaAnalysis {
@@ -536,14 +536,14 @@ pub fn is_in_reference_mode(text: &str, cursor: usize) -> bool {
 #[allow(clippy::panic)]
 mod formula_analysis_tests {
     use super::*;
-    use crate::coord::CellRange;
+    use crate::coord::CellArea;
 
     /// Test editing-cell fixture with row=0, column=0. Matches the pre-refactor
     /// parser context so Node-relative coords equal their absolute 1-based form
     /// — every existing assertion on `sheet_area.area` stays valid under the
     /// new signature without arithmetic adjustment.
-    fn editing_at(sheet: u32) -> Cell {
-        Cell {
+    fn editing_at(sheet: u32) -> CellAddress {
+        CellAddress {
             sheet,
             row: 0,
             column: 0,
@@ -567,7 +567,7 @@ mod formula_analysis_tests {
         assert_eq!(analysis.refs().len(), 1);
         assert_eq!(
             analysis.refs()[0].sheet_area.area,
-            CellRange {
+            CellArea {
                 r1: 1,
                 c1: 1,
                 r2: 1,
@@ -584,7 +584,7 @@ mod formula_analysis_tests {
         assert_eq!(analysis.refs().len(), 1);
         assert_eq!(
             analysis.refs()[0].sheet_area.area,
-            CellRange {
+            CellArea {
                 r1: 2,
                 c1: 2,
                 r2: 4,
@@ -754,7 +754,7 @@ mod formula_analysis_tests {
     fn absolute_flags_preserved() {
         // `=$A$1` — both axes absolute. Round-tripping `ref_node` via
         // `to_localized` emits `$A$1` iff the flags reached RefNode. If
-        // ast_leaves dropped them (the pre-refactor bug), stringify → `A1`.
+        // ast_leaves dropped them (the pre-refactor bug), stringify -> `A1`.
         let analysis = analyze_formula("=$A$1", editing_at(0), &[], &[]);
         assert_eq!(analysis.refs().len(), 1);
         assert_eq!(
@@ -841,7 +841,7 @@ mod formula_analysis_tests {
 
     #[test]
     fn cursor_on_non_formula_yields_nothing() {
-        // NotFormula → refs() is empty; cursor query returns nothing regardless.
+        // NotFormula -> refs() is empty; cursor query returns nothing regardless.
         let analysis = analyze_formula("hello", editing_at(0), &[], &[]);
         assert_eq!(analysis.refs_at_cursor(2).count(), 0);
     }

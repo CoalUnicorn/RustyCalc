@@ -31,7 +31,7 @@ Effect::new(move |_| {
 
 use leptos::prelude::*;
 
-use crate::coord::{Cell, SheetRange};
+use crate::coord::{CellAddress, SheetRange};
 use crate::model::CssColor;
 use crate::theme::Theme;
 
@@ -137,7 +137,7 @@ pub enum SpreadsheetEvent {
 pub enum ContentEvent {
     /// `old_value`/`new_value` are `None` when unavailable at the call site.
     CellChanged {
-        address: Cell,
+        address: CellAddress,
         old_value: Option<String>,
         new_value: Option<String>,
     },
@@ -146,7 +146,7 @@ pub enum ContentEvent {
     },
     #[allow(dead_code)]
     FormulaChanged {
-        address: Cell,
+        address: CellAddress,
     },
     #[allow(dead_code)]
     CalculationUpdated {
@@ -161,7 +161,7 @@ pub enum ContentEvent {
 pub enum FormatEvent {
     #[allow(dead_code)]
     CellStyleChanged {
-        address: Cell,
+        address: CellAddress,
     },
     RangeStyleChanged {
         area: SheetRange,
@@ -348,7 +348,7 @@ impl StructureEvent {
 #[derive(Clone, PartialEq, Debug)]
 pub enum NavigationEvent {
     SelectionChanged {
-        address: Cell,
+        address: CellAddress,
     },
     /// Shift-click, Shift-arrow, or header click extended the selection.
     SelectionRangeChanged {
@@ -364,10 +364,10 @@ pub enum NavigationEvent {
         to_sheet: u32,
     },
     EditingStarted {
-        address: Cell,
+        address: CellAddress,
     },
     EditingEnded {
-        address: Cell,
+        address: CellAddress,
         committed: bool,
     },
 }

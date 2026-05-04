@@ -7,7 +7,7 @@ use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
-use crate::coord::{Cell, RefNode, SheetRange, TextRef};
+use crate::coord::{CellAddress, RefNode, SheetRange, TextRef};
 use crate::events::*;
 use crate::input::formula_analysis::FormulaAnalysis;
 use crate::model::CssColor;
@@ -113,7 +113,7 @@ pub enum EditFocus {
 /// In-progress cell edit not yet committed to the model.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditingCell {
-    pub(crate) address: Cell,
+    pub(crate) address: CellAddress,
     pub(crate) text: String,
     pub(crate) mode: EditMode,
     pub(crate) focus: EditFocus,
@@ -225,7 +225,7 @@ impl WorkbookState {
         if let DragState::Pointing { ref_node, .. } = self.drag.get_untracked() {
             ref_node
         } else {
-            let editing = model.with_value(Cell::from_view);
+            let editing = model.with_value(CellAddress::from_view);
             let area = SheetRange::from_cell(editing.sheet, editing.row, editing.column);
             RefNode::from_cell_area(area, editing, "")
         }

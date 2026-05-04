@@ -536,8 +536,8 @@ fn NumFmtQuickButtons() -> impl IntoView {
     view! {
         <button class="tb-btn" title="Currency (GBP)" on:click=on_gbp>"£"</button>
         <button class="tb-btn" title="Percentage" on:click=on_pct>"%"</button>
-        <button class="tb-btn" title="Decrease decimal places" on:click=on_dec_less>".0←"</button>
-        <button class="tb-btn" title="Increase decimal places" on:click=on_dec_more>".0→"</button>
+        <button class="tb-btn" title="Decrease decimal places" on:click=on_dec_less>".0<-"</button>
+        <button class="tb-btn" title="Increase decimal places" on:click=on_dec_more>".0->"</button>
     }
 }
 

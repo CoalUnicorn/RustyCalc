@@ -9,7 +9,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::{closure::Closure, JsCast};
 
-use crate::coord::{Cell, CellRange, RefNode, SheetRange, TextRef};
+use crate::coord::{CellAddress, CellArea, RefNode, SheetRange, TextRef};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
 use crate::input::formula_analysis::is_in_reference_mode;
@@ -60,9 +60,9 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
         return;
     }
     let sheet = model.with_value(UserModel::get_selected_sheet);
-    // nav_expand_selection (→ on_expand_selected_range / Shift+Arrow) extends
+    // nav_expand_selection (-> on_expand_selected_range / Shift+Arrow) extends
     // the range AND calls set_top_left_visible_cell when the endpoint goes off-screen.
-    // nav_extend_selection (→ on_area_selecting) only updates the range with no scroll.
+    // nav_extend_selection (-> on_area_selecting) only updates the range with no scroll.
     // nav_arrow collapses the selection anchor — never use it during a drag.
     match state.drag.get_untracked() {
         DragState::Selecting => {
@@ -276,7 +276,7 @@ pub fn handle_cell_click(
                 None
             };
             if already_pointing || caret_hit.is_some() || is_in_reference_mode(&edit.text, cursor) {
-                let editing = model.with_value(Cell::from_view);
+                let editing = model.with_value(CellAddress::from_view);
                 let (ref_node, prev_span) = if let Some(hit) = caret_hit {
                     (hit.ref_node.relocate_to(row, col, &editing), Some(hit.span))
                 } else if let DragState::Pointing { ref_text, .. } = state.drag.get_untracked() {
@@ -346,7 +346,7 @@ pub fn handle_cell_click(
                 NavigationEvent::SelectionRangeChanged { sheet_area },
             ));
         } else {
-            let address = model.with_value(Cell::from_view);
+            let address = model.with_value(CellAddress::from_view);
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::SelectionChanged { address },
             ));
@@ -508,13 +508,13 @@ pub fn handle_mousemove(
             ref_node: pr,
             ref_text: ref_span,
         } => {
-            let editing = model.with_value(Cell::from_view);
+            let editing = model.with_value(CellAddress::from_view);
             // Anchor corner is (r1, c1) of the currently-pointed range; mouse
             // position supplies the new trailing corner. Normalize so the
             // endpoints stay ordered after drag inversions (e.g. mouse crosses
             // the anchor).
             let anchor = pr.area(&editing).area;
-            let dragged = CellRange {
+            let dragged = CellArea {
                 r1: anchor.r1,
                 c1: anchor.c1,
                 r2: row,
@@ -581,7 +581,7 @@ pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
             model,
             EvaluationMode::Immediate,
             |m| -> Result<(), StructError> {
-                let norm = CellRange::from_view(m).normalized();
+                let norm = CellArea::from_view(m).normalized();
                 let area = norm.to_area(m.get_selected_sheet());
                 if to_row < norm.r1 || to_row > norm.r2 {
                     m.auto_fill_rows(&area, to_row)
@@ -625,7 +625,7 @@ pub fn handle_contextmenu(
 
     let target = match with_canvas(icv, |ic| ic.hit_test(x, y)) {
         Some(HitTest::ColHeader(col)) => Some(model.with_value(|m| {
-            let area = CellRange::from_view(m).normalized();
+            let area = CellArea::from_view(m).normalized();
             // Multi-column selection if the clicked col is inside a full-column range.
             let (col, count) = if area.r2 >= LAST_ROW && area.c1 <= col && col <= area.c2 {
                 (area.c1, area.c2 - area.c1 + 1)
@@ -635,7 +635,7 @@ pub fn handle_contextmenu(
             HeaderContextMenu::Column { col, count }
         })),
         Some(HitTest::RowHeader(row)) => Some(model.with_value(|m| {
-            let area = CellRange::from_view(m).normalized();
+            let area = CellArea::from_view(m).normalized();
             // Multi-row selection if the clicked row is inside a full-row range.
             let (row, count) = if area.c2 >= LAST_COLUMN && area.r1 <= row && row <= area.r2 {
                 (area.r1, area.r2 - area.r1 + 1)
@@ -726,7 +726,7 @@ pub fn handle_dblclick(
         let text = m.active_cell_content();
         let formula_analysis = model.with_value(|m| m.analyze_in_context(&text));
         state.editing_cell.set(Some(EditingCell {
-            address: Cell {
+            address: CellAddress {
                 sheet: ac.sheet,
                 row: ac.row,
                 column: ac.column,

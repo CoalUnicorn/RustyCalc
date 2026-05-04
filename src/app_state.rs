@@ -61,7 +61,7 @@ impl AppState {
     }
 
     pub fn toggle_light_dark(&self) {
-        // Resolve Auto to a concrete theme before toggling so Auto → click → Dark
+        // Resolve Auto to a concrete theme before toggling so Auto -> click -> Dark
         // works correctly rather than silently doing nothing.
         let next = match self.get_theme() {
             Theme::Light | Theme::Auto => Theme::Dark,

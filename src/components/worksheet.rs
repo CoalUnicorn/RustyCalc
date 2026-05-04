@@ -9,7 +9,7 @@ use web_sys::HtmlCanvasElement;
 use crate::app_state::AppState;
 use crate::components::cell_editor::CellEditor;
 use crate::coord::ActiveRef;
-use crate::coord::{CellRange, SheetRange};
+use crate::coord::{CellArea, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::mouse::*;
 use crate::model::AppClipboard;
@@ -196,7 +196,7 @@ pub fn Worksheet() -> impl IntoView {
     // detect overlay-only changes (autofill preview, point-mode range)
     // without needing a fake ContentEvent::GenericChange from request_redraw().
     Effect::new(
-        move |prev: Option<(Option<AutofillTarget>, Option<CellRange>, Vec<ActiveRef>)>| {
+        move |prev: Option<(Option<AutofillTarget>, Option<CellArea>, Vec<ActiveRef>)>| {
             let has_content = !state.events.content.get().is_empty();
             let has_structure = !state.events.structure.get().is_empty();
             let has_format = !state.events.format.get().is_empty();

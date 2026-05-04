@@ -2,7 +2,7 @@
 ///
 /// These operate on formula strings and cursor positions; they have no side
 /// effects and do not touch the model.
-use crate::coord::{Cell, PointingStep, RefNode, TextRef};
+use crate::coord::{CellAddress, PointingStep, RefNode, TextRef};
 use crate::input::formula_analysis::is_in_reference_mode;
 use crate::model::ArrowKey;
 
@@ -44,7 +44,7 @@ pub struct PointMoveCtx<'a> {
     /// The cell being edited — feeds ironcalc's stringify ctx for relative
     /// ref delta resolution (`row`/`column` fields are offsets when the
     /// matching `absolute_*` flag is false).
-    pub editing: Cell,
+    pub editing: CellAddress,
 }
 
 /// Outcome of evaluating a keypress in point mode.
@@ -170,10 +170,10 @@ mod tests {
     //
     // All tests use editing=A1 on sheet 1; the RefNode's stored fields are
     // therefore deltas from (1,1). `RefNode::cell(1, None, 0, 0, false, false)`
-    // means "sheet 1, single cell, zero offset from editing" → resolves to A1.
+    // means "sheet 1, single cell, zero offset from editing" -> resolves to A1.
 
-    fn editing_a1() -> Cell {
-        Cell {
+    fn editing_a1() -> CellAddress {
+        CellAddress {
             sheet: 1,
             row: 1,
             column: 1,
@@ -230,7 +230,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn point_move_cursor_after_ref_token_not_pointing_is_no_action() {
         // Cursor at end of "=A1" (position 3) — last char is '1', not an operator.
-        // is_in_reference_mode returns false; already_pointing is false → NoAction.
+        // is_in_reference_mode returns false; already_pointing is false -> NoAction.
         assert_eq!(
             try_point_move(&ctx("=A1", 3, false, at_a1(), None), "ArrowDown", false),
             PointMoveOutcome::NoAction,
@@ -240,7 +240,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn point_move_already_pointing_bypasses_ref_mode_check() {
         // "=A1" cursor at 3 is not in ref mode normally, but already_pointing=true
-        // bypasses the is_in_reference_mode guard → Move.
+        // bypasses the is_in_reference_mode guard -> Move.
         assert!(matches!(
             try_point_move(
                 &ctx("=A1", 3, true, at_a1(), Some(TextRef { start: 1, end: 3 })),
@@ -254,7 +254,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn point_move_bare_equals_arrow_down_enters_a2() {
         // "=" cursor=1: is_in_reference_mode returns true (bare equals).
-        // ArrowDown from A1 (zero delta) → stored row delta becomes +1, stringifies "A2".
+        // ArrowDown from A1 (zero delta) -> stored row delta becomes +1, stringifies "A2".
         assert_eq!(
             try_point_move(&ctx("=", 1, false, at_a1(), None), "ArrowDown", false),
             PointMoveOutcome::Move(PointingStep {
@@ -268,7 +268,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn point_move_shift_extends_anchor() {
         // Already pointing at B3 with editing A1: anchor stored as (2,1) delta.
-        // Shift+ArrowDown extends trailing only → RangeKind (2,1)..(3,1) → "B3:B4".
+        // Shift+ArrowDown extends trailing only -> RangeKind (2,1)..(3,1) -> "B3:B4".
         assert_eq!(
             try_point_move(
                 &ctx("=B3", 3, true, at_b3(), Some(TextRef { start: 1, end: 3 })),
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn point_move_reproduce_abs_then_operator_then_arrow() {
         use crate::coord::SheetRange;
-        let editing = Cell {
+        let editing = CellAddress {
             sheet: 0,
             row: 1,
             column: 3,
@@ -315,7 +315,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn point_move_plain_arrow_moves_whole_range() {
         // Already pointing at B3, plain ArrowRight collapses to trailing+delta:
-        // delta (2,1) + (0,1) = (2,2) → stringify C3.
+        // delta (2,1) + (0,1) = (2,2) -> stringify C3.
         assert_eq!(
             try_point_move(
                 &ctx("=B3", 3, true, at_b3(), Some(TextRef { start: 1, end: 3 })),
@@ -339,7 +339,7 @@ mod tests {
     #[test]
     fn caret_on_absolute_ref_preserves_dollars() {
         // `=$A$1`, caret between `$A` and `$1`. Not an operator-adjacent
-        // insertion point, but prev_span is seeded from the caret-hit →
+        // insertion point, but prev_span is seeded from the caret-hit ->
         // the new guard accepts entry. ArrowDown must emit `$A$2`, not
         // `A2` — both absolute flags survive `extend_trailing`.
         let ctx = PointMoveCtx {
@@ -364,7 +364,7 @@ mod tests {
     fn caret_on_cross_sheet_ref_preserves_sheet() {
         // `=Sheet2!B2`, caret inside `B2` (position 9). With editing=A1 the
         // relative deltas for B2 are (+1,+1). ArrowRight moves the column
-        // delta to +2 → absolute C2 on Sheet2. `sheet_name` survives into
+        // delta to +2 -> absolute C2 on Sheet2. `sheet_name` survives into
         // the new RefNode; `to_localized` re-emits the `Sheet2!` prefix.
         let ctx = PointMoveCtx {
             text: "=Sheet2!B2",
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     fn caret_on_relative_ref_stays_relative() {
-        // `=A1`, caret between A and 1. Fully relative → no `$` introduced.
+        // `=A1`, caret between A and 1. Fully relative -> no `$` introduced.
         // This is the control case: absence of flags must not cause
         // `extend_trailing` to invent them.
         let ctx = PointMoveCtx {
