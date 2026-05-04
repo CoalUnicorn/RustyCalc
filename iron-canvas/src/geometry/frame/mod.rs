@@ -160,7 +160,7 @@ impl FrameContext {
             frozen,
             top_row: view.top_row,
             left_column: view.left_column,
-            selection_range: view.range,
+            selection_range: view.selection,
             canvas_size: canvas,
         }
     }

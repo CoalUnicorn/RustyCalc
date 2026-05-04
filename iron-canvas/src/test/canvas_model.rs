@@ -53,7 +53,7 @@ impl CanvasModel for MockCanvasModel {
             sheet: self.sheet,
             row: self.range[0],
             column: self.range[1],
-            range: RCRange::from(self.range),
+            selection: RCRange::from(self.range),
             top_row: self.top_row,
             left_column: self.left_column,
         }

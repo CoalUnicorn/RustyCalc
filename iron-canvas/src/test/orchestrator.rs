@@ -14,7 +14,7 @@ impl CanvasModel for StubModel {
             sheet: 0,
             row: 1,
             column: 1,
-            range: RCRange::from([1, 1, 1, 1]),
+            selection: RCRange::from([1, 1, 1, 1]),
             top_row: 1,
             left_column: 1,
         }

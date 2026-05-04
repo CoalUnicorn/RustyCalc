@@ -10,7 +10,7 @@ pub struct CanvasView {
     pub sheet: u32,
     pub row: i32,
     pub column: i32,
-    pub range: RCRange,
+    pub selection: RCRange,
     pub top_row: i32,
     pub left_column: i32,
 }
@@ -38,7 +38,7 @@ impl<'a> CanvasModel for UserModel<'a> {
             sheet: v.sheet,
             row: v.row,
             column: v.column,
-            range: RCRange {
+            selection: RCRange {
                 r1: v.range[0],
                 c1: v.range[1],
                 r2: v.range[2],
