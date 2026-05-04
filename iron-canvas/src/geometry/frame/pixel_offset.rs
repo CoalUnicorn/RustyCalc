@@ -16,11 +16,11 @@
 #[derive(Debug, Default)]
 pub(crate) struct PixelOffsets {
     pub row_start: i32,
-    pub row_tops: Vec<f64>,
+    pub row_tops: Vec<i32>,
     pub col_start: i32,
-    pub col_lefts: Vec<f64>,
-    pub frozen_row_tops: Vec<f64>,
-    pub frozen_col_lefts: Vec<f64>,
+    pub col_lefts: Vec<i32>,
+    pub frozen_row_tops: Vec<i32>,
+    pub frozen_col_lefts: Vec<i32>,
 }
 
 impl PixelOffsets {
@@ -28,20 +28,20 @@ impl PixelOffsets {
     ///
     /// Returns `0.0` for rows outside the precomputed range.
     #[inline]
-    pub fn row_top(&self, row: i32) -> f64 {
+    pub fn row_top(&self, row: i32) -> i32 {
         self.row_tops
             .get((row - self.row_start) as usize)
             .copied()
-            .unwrap_or(0.0)
+            .unwrap_or(0)
     }
 
     /// X distance from `frozen.x` to the left edge of visible-band `col`.
     #[inline]
-    pub fn col_left(&self, col: i32) -> f64 {
+    pub fn col_left(&self, col: i32) -> i32 {
         self.col_lefts
             .get((col - self.col_start) as usize)
             .copied()
-            .unwrap_or(0.0)
+            .unwrap_or(0)
     }
 
     /// Y distance from the column-header strip to the top of frozen `row`
@@ -49,63 +49,63 @@ impl PixelOffsets {
     /// outside the cached range — caller is expected to gate on the frozen
     /// band before calling.
     #[inline]
-    pub fn frozen_row_top(&self, row: i32) -> f64 {
+    pub fn frozen_row_top(&self, row: i32) -> i32 {
         self.frozen_row_tops
             .get((row - 1) as usize)
             .copied()
-            .unwrap_or(0.0)
+            .unwrap_or(0)
     }
 
     /// X distance from the row-header strip to the left of frozen `col`.
     #[inline]
-    pub fn frozen_col_left(&self, col: i32) -> f64 {
+    pub fn frozen_col_left(&self, col: i32) -> i32 {
         self.frozen_col_lefts
             .get((col - 1) as usize)
             .copied()
-            .unwrap_or(0.0)
+            .unwrap_or(0)
     }
 
     /// Height of the visible-band row at `row`, derived from cumulative deltas.
     /// `0.0` if `row` is outside the visible range.
     #[inline]
-    pub fn row_extent(&self, row: i32) -> f64 {
+    pub fn row_extent(&self, row: i32) -> i32 {
         let i = (row - self.row_start) as usize;
         match (self.row_tops.get(i), self.row_tops.get(i + 1)) {
             (Some(a), Some(b)) => b - a,
-            _ => 0.0,
+            _ => 0,
         }
     }
 
     /// Width of the visible-band column at `col`.
     #[inline]
-    pub fn col_extent(&self, col: i32) -> f64 {
+    pub fn col_extent(&self, col: i32) -> i32 {
         let i = (col - self.col_start) as usize;
         match (self.col_lefts.get(i), self.col_lefts.get(i + 1)) {
             (Some(a), Some(b)) => b - a,
-            _ => 0.0,
+            _ => 0,
         }
     }
 
     /// Height of the frozen-band row at `row` (1-based).
     #[inline]
-    pub fn frozen_row_extent(&self, row: i32) -> f64 {
+    pub fn frozen_row_extent(&self, row: i32) -> i32 {
         let i = (row - 1) as usize;
         match (self.frozen_row_tops.get(i), self.frozen_row_tops.get(i + 1)) {
             (Some(a), Some(b)) => b - a,
-            _ => 0.0,
+            _ => 0,
         }
     }
 
     /// Width of the frozen-band column at `col`.
     #[inline]
-    pub fn frozen_col_extent(&self, col: i32) -> f64 {
+    pub fn frozen_col_extent(&self, col: i32) -> i32 {
         let i = (col - 1) as usize;
         match (
             self.frozen_col_lefts.get(i),
             self.frozen_col_lefts.get(i + 1),
         ) {
             (Some(a), Some(b)) => b - a,
-            _ => 0.0,
+            _ => 0,
         }
     }
 }

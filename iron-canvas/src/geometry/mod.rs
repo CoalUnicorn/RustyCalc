@@ -14,7 +14,10 @@ pub struct CanvasSize {
 impl CanvasSize {
     /// Physical backing-store dimensions from CSS size and DPR.
     /// Truncates fractional pixels — matches browser canvas rounding behaviour.
-    pub(crate) fn to_backing_size(self, dpr: f64) -> (u32, u32) {
-        ((self.w * dpr) as u32, (self.h * dpr) as u32)
+    pub(crate) fn to_backing_size(self, dpr: i32) -> (u32, u32) {
+        (
+            (self.w * f64::from(dpr)) as u32,
+            (self.h * f64::from(dpr)) as u32,
+        )
     }
 }

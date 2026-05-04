@@ -19,7 +19,7 @@
 //!
 //! # Submodules
 //!
-//! - [`geometry`] - rect/line types and pixel↔cell coordinate math.
+//! - [`geometry`] - rect/line types and pixel <-> cell coordinate math.
 //! - [`types`] - renderer-internal shapes (panes, text layout, visible
 //!   region) plus public overlay types.
 //! - [`renderer`] - the render pipeline. See its module doc for the

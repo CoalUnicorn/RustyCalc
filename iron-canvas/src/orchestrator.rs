@@ -62,8 +62,16 @@ impl IronCanvas {
     /// state is unreachable because there is no public per-layer resize method.
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
         self.size = CanvasSize { w: css_w, h: css_h };
-        self.grid.resize(css_w, css_h, dpr);
-        self.overlay.resize(css_w, css_h, dpr);
+        self.grid.resize(
+            css_w.round() as i32,
+            css_h.round() as i32,
+            dpr.round() as i32,
+        );
+        self.overlay.resize(
+            css_w.round() as i32,
+            css_h.round() as i32,
+            dpr.round() as i32,
+        );
     }
 
     /// Push a new scroll origin. Fans out to grid + overlay; no-op if unchanged.
@@ -249,7 +257,7 @@ impl IronCanvas {
         let Some(frame) = self.last_frame.as_ref() else {
             return HitTest::Outside;
         };
-        frame.hit_test(x, y)
+        frame.hit_test(x.round() as i32, y.round() as i32)
     }
 
     /// Probe for a row/column resize handle near `(x, y)`. `tolerance` is the
@@ -257,7 +265,11 @@ impl IronCanvas {
     /// it tracks cursor styling, not paint geometry. Returns `None` before
     /// the first paint.
     pub fn resize_handle_at(&self, x: f64, y: f64, tolerance: f64) -> Option<ResizeTarget> {
-        self.last_frame.as_ref()?.resize_handle_at(x, y, tolerance)
+        self.last_frame.as_ref()?.resize_handle_at(
+            x.round() as i32,
+            y.round() as i32,
+            tolerance.round() as i32,
+        )
     }
 
     /// Pixel rect of `(row, column)` in the last painted frame's coordinate

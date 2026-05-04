@@ -76,7 +76,7 @@ impl FrameContext {
         // One walk per axis; the totals (last entry) give the Y/X offset where
         // the scrollable band starts, avoiding a redundant sum in the scan below.
         let mut frozen_row_tops = Vec::with_capacity((frozen_rows + 1) as usize);
-        let mut frozen_h = 0.0_f64;
+        let mut frozen_h = 0;
         for r in 1..=frozen_rows {
             frozen_row_tops.push(frozen_h);
             frozen_h += row_height(model, r);
@@ -84,7 +84,7 @@ impl FrameContext {
         frozen_row_tops.push(frozen_h);
 
         let mut frozen_col_lefts = Vec::with_capacity((frozen_cols + 1) as usize);
-        let mut frozen_w = 0.0_f64;
+        let mut frozen_w = 0;
         for c in 1..=frozen_cols {
             frozen_col_lefts.push(frozen_w);
             frozen_w += col_width(model, c);
@@ -99,12 +99,12 @@ impl FrameContext {
         // canvas bottom we record that row as `row_last` (it may be partially
         // visible), push its trailing entry, and stop. This exactly replicates
         // the semantics of the old two-pass pair.
-        let mut row_tops: Vec<f64> = Vec::new();
+        let mut row_tops: Vec<i32> = Vec::new();
         let mut row_last = row_first;
         let mut y = HEADER_ROW_HEIGHT + frozen_h;
-        let mut acc = 0.0_f64;
+        let mut acc = 0;
         for row in row_first..=LAST_ROW {
-            if y >= canvas.h || row == LAST_ROW {
+            if f64::from(y) >= canvas.h || row == LAST_ROW {
                 row_last = row;
                 row_tops.push(acc);
                 acc += row_height(model, row);
@@ -118,12 +118,12 @@ impl FrameContext {
         }
 
         // Scrollable columns: same merged pattern
-        let mut col_lefts: Vec<f64> = Vec::new();
+        let mut col_lefts: Vec<i32> = Vec::new();
         let mut col_last = col_first;
         let mut x = HEADER_COL_WIDTH + frozen_w;
-        acc = 0.0;
+        acc = 0;
         for col in col_first..=LAST_COLUMN {
-            if x >= canvas.w || col == LAST_COLUMN {
+            if f64::from(x) >= canvas.w || col == LAST_COLUMN {
                 col_last = col;
                 col_lefts.push(acc);
                 acc += col_width(model, col);
@@ -211,7 +211,7 @@ impl FrameContext {
 
     /// Width of `col` from the snapshot — frozen-band or visible-band.
     #[inline]
-    pub(crate) fn col_extent_at(&self, col: i32) -> f64 {
+    pub(crate) fn col_extent_at(&self, col: i32) -> i32 {
         if col <= self.frozen.frozen_cols_count() {
             self.offsets.frozen_col_extent(col)
         } else {
@@ -221,7 +221,7 @@ impl FrameContext {
 
     /// Height of `row` from the snapshot.
     #[inline]
-    pub(crate) fn row_extent_at(&self, row: i32) -> f64 {
+    pub(crate) fn row_extent_at(&self, row: i32) -> i32 {
         if row <= self.frozen.frozen_rows_count() {
             self.offsets.frozen_row_extent(row)
         } else {
@@ -232,7 +232,7 @@ impl FrameContext {
     /// Left-edge X pixel of `col` at this frame's scroll/freeze.
     /// Caller is expected to gate on `col_in_frame`; off-frame yields the
     /// cumulative-table fallback (`0.0`).
-    pub(crate) fn col_to_x(&self, col: i32) -> f64 {
+    pub(crate) fn col_to_x(&self, col: i32) -> i32 {
         if col <= self.frozen.frozen_cols_count() {
             HEADER_COL_WIDTH + self.offsets.frozen_col_left(col)
         } else {
@@ -241,7 +241,7 @@ impl FrameContext {
     }
 
     /// Top-edge Y pixel of `row`.
-    pub(crate) fn row_to_y(&self, row: i32) -> f64 {
+    pub(crate) fn row_to_y(&self, row: i32) -> i32 {
         if row <= self.frozen.frozen_rows_count() {
             HEADER_ROW_HEIGHT + self.offsets.frozen_row_top(row)
         } else {
@@ -250,7 +250,7 @@ impl FrameContext {
     }
 
     /// 1-based column at canvas X pixel `x`. Clamps to the painted region
-    pub(crate) fn pixel_to_col(&self, x: f64) -> i32 {
+    pub(crate) fn pixel_to_col(&self, x: i32) -> i32 {
         let frozen_cols = self.frozen.frozen_cols_count();
         if x < self.frozen.offset.x {
             let rel = x - HEADER_COL_WIDTH;
@@ -272,7 +272,7 @@ impl FrameContext {
     }
 
     /// 1-based row at canvas Y pixel `y`. Clamps to the painted region.
-    pub(crate) fn pixel_to_row(&self, y: f64) -> i32 {
+    pub(crate) fn pixel_to_row(&self, y: i32) -> i32 {
         let frozen_rows = self.frozen.frozen_rows_count();
         if y < self.frozen.offset.y {
             let rel = y - HEADER_ROW_HEIGHT;
@@ -357,7 +357,7 @@ impl FrameContext {
     }
 
     /// Column whose RIGHT edge is within `hit_zone` px of `x`, or `None`.
-    pub(crate) fn col_boundary_at(&self, x: f64, hit_zone: f64) -> Option<i32> {
+    pub(crate) fn col_boundary_at(&self, x: i32, hit_zone: i32) -> Option<i32> {
         let frozen_cols = self.frozen.frozen_cols_count();
         for c in 1..=frozen_cols {
             let cur_x = HEADER_COL_WIDTH + self.offsets.frozen_col_lefts[c as usize];
@@ -379,7 +379,7 @@ impl FrameContext {
     }
 
     /// Row whose BOTTOM edge is within `hit_zone` px of `y`, or `None`.
-    pub(crate) fn row_boundary_at(&self, y: f64, hit_zone: f64) -> Option<i32> {
+    pub(crate) fn row_boundary_at(&self, y: i32, hit_zone: i32) -> Option<i32> {
         let frozen_rows = self.frozen.frozen_rows_count();
         for r in 1..=frozen_rows {
             let cur_y = HEADER_ROW_HEIGHT + self.offsets.frozen_row_tops[r as usize];
@@ -407,8 +407,8 @@ impl FrameContext {
     /// Negative coordinates return `Outside` (off-canvas). Past the right /
     /// bottom edge the trailing visible cell is returned — the canvas
     /// element's own bounds clip the event before it reaches us in practice.
-    pub(crate) fn hit_test(&self, x: f64, y: f64) -> HitTest {
-        if x < 0.0 || y < 0.0 {
+    pub(crate) fn hit_test(&self, x: i32, y: i32) -> HitTest {
+        if x < 0 || y < 0 {
             return HitTest::Outside;
         }
         if x < HEADER_COL_WIDTH && y < HEADER_ROW_HEIGHT {
@@ -438,7 +438,7 @@ impl FrameContext {
     /// Probe for a row/column resize handle near `(x, y)`. Dispatched by
     /// header strip — column boundaries are only hit-tested inside the
     /// column-header strip, and vice versa.
-    pub(crate) fn resize_handle_at(&self, x: f64, y: f64, tolerance: f64) -> Option<ResizeTarget> {
+    pub(crate) fn resize_handle_at(&self, x: i32, y: i32, tolerance: i32) -> Option<ResizeTarget> {
         if y < HEADER_ROW_HEIGHT && x > HEADER_COL_WIDTH {
             return self.col_boundary_at(x, tolerance).map(ResizeTarget::Column);
         }

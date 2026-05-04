@@ -42,8 +42,12 @@ impl LayerBase {
         self.renderer.canvas_size()
     }
 
-    pub(crate) fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        let (target_w, target_h) = CanvasSize { w: css_w, h: css_h }.to_backing_size(dpr);
+    pub(crate) fn resize(&mut self, css_w: i32, css_h: i32, dpr: i32) {
+        let (target_w, target_h) = CanvasSize {
+            w: f64::from(css_w),
+            h: f64::from(css_h),
+        }
+        .to_backing_size(dpr);
         if self.canvas.width() != target_w || self.canvas.height() != target_h {
             self.canvas.set_width(target_w);
             self.canvas.set_height(target_h);
@@ -55,7 +59,7 @@ impl LayerBase {
         }
         self.renderer
             .ctx_ref()
-            .scale(dpr, dpr)
+            .scale(f64::from(dpr), f64::from(dpr))
             .expect("scale should not fail");
         self.renderer.set_size(css_w, css_h);
         self.renderer.set_dpr(dpr);

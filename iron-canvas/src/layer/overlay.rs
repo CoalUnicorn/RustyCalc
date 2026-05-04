@@ -41,7 +41,7 @@ impl OverlayLayer {
             .get_context_with_context_options("2d", &ctx_opts)?
             .ok_or_else(|| JsValue::from_str("overlay canvas 2d context unavailable"))?
             .unchecked_into::<CanvasRenderingContext2d>();
-        let renderer = CanvasRenderer::for_layer(ctx, 0.0, 0.0, LIGHT);
+        let renderer = CanvasRenderer::for_layer(ctx, 0, 0, LIGHT);
         Ok(Self {
             base: LayerBase::new(canvas, renderer),
         })
@@ -71,7 +71,7 @@ impl OverlayLayer {
         self.base.renderer.render_overlays(model, overlays, frame);
     }
 
-    pub(crate) fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
+    pub(crate) fn resize(&mut self, css_w: i32, css_h: i32, dpr: i32) {
         self.base.resize(css_w, css_h, dpr);
     }
 }

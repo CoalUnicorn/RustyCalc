@@ -108,7 +108,8 @@ fn frozen_rc_rows_only_adds_separator_on_y_only() {
     assert_eq!(frc.offset.x, HEADER_COL_WIDTH);
     assert_eq!(
         frc.offset.y,
-        HEADER_ROW_HEIGHT + 2.0 * DEFAULT_ROW_HEIGHT + FROZEN_SEP
+        (f64::from(HEADER_ROW_HEIGHT) + 2.0 * DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP)).round()
+            as i32
     );
 }
 
@@ -124,11 +125,12 @@ fn frozen_rc_both_axes_add_separator_on_each() {
     assert_eq!(frc.frozen_cols_count(), 3);
     assert_eq!(
         frc.offset.x,
-        HEADER_COL_WIDTH + 3.0 * DEFAULT_COL_WIDTH + FROZEN_SEP
+        (f64::from(HEADER_COL_WIDTH) + 3.0 * DEFAULT_COL_WIDTH + f64::from(FROZEN_SEP)).round()
+            as i32
     );
     assert_eq!(
         frc.offset.y,
-        HEADER_ROW_HEIGHT + DEFAULT_ROW_HEIGHT + FROZEN_SEP
+        (f64::from(HEADER_ROW_HEIGHT) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP)).round() as i32
     );
 }
 
@@ -138,18 +140,18 @@ fn frozen_rc_both_axes_add_separator_on_each() {
 fn pixel_offsets_row_top_returns_zero_outside_precomputed_range() {
     let off = PixelOffsets {
         row_start: 10,
-        row_tops: vec![0.0, 20.0, 40.0],
+        row_tops: vec![0, 20, 40],
         col_start: 5,
-        col_lefts: vec![0.0, 60.0],
-        frozen_row_tops: vec![0.0],
-        frozen_col_lefts: vec![0.0],
+        col_lefts: vec![0, 60],
+        frozen_row_tops: vec![0],
+        frozen_col_lefts: vec![0],
     };
-    assert_eq!(off.row_top(10), 0.0);
-    assert_eq!(off.row_top(11), 20.0);
-    assert_eq!(off.row_top(99), 0.0);
-    assert_eq!(off.col_left(5), 0.0);
-    assert_eq!(off.col_left(6), 60.0);
-    assert_eq!(off.col_left(99), 0.0);
+    assert_eq!(off.row_top(10), 0);
+    assert_eq!(off.row_top(11), 20);
+    assert_eq!(off.row_top(99), 0);
+    assert_eq!(off.col_left(5), 0);
+    assert_eq!(off.col_left(6), 60);
+    assert_eq!(off.col_left(99), 0);
 }
 
 // FrameContext: pixel ↔ cell math
@@ -173,8 +175,8 @@ fn cell_rect_at_origin_starts_at_top_left_header_corner() {
     let r = frame.cell_rect(1, 1).expect("origin cell is on screen");
     assert_eq!(r.top_left.x, HEADER_COL_WIDTH);
     assert_eq!(r.top_left.y, HEADER_ROW_HEIGHT);
-    assert_eq!(r.width, DEFAULT_COL_WIDTH);
-    assert_eq!(r.height, DEFAULT_ROW_HEIGHT);
+    assert_eq!(f64::from(r.width), DEFAULT_COL_WIDTH);
+    assert_eq!(f64::from(r.height), DEFAULT_ROW_HEIGHT);
 }
 
 #[test]
@@ -185,7 +187,10 @@ fn col_to_x_inside_frozen_band_skips_frozen_offset() {
     };
     let frame = FrameContext::current(&m, test_canvas());
     assert_eq!(frame.col_to_x(1), HEADER_COL_WIDTH);
-    assert_eq!(frame.col_to_x(2), HEADER_COL_WIDTH + DEFAULT_COL_WIDTH);
+    assert_eq!(
+        frame.col_to_x(2),
+        (f64::from(HEADER_COL_WIDTH) + DEFAULT_COL_WIDTH).round() as i32
+    );
 }
 
 #[test]
@@ -199,7 +204,10 @@ fn col_to_x_past_frozen_seam_uses_frozen_offset_and_left_column() {
     let origin_x = frame.frozen.offset.x;
     // col 5 is the first scrollable on screen -> at the frozen offset
     assert_eq!(frame.col_to_x(5), origin_x);
-    assert_eq!(frame.col_to_x(6), origin_x + DEFAULT_COL_WIDTH);
+    assert_eq!(
+        frame.col_to_x(6),
+        (f64::from(origin_x) + DEFAULT_COL_WIDTH).round() as i32
+    );
 }
 
 #[test]
@@ -222,8 +230,14 @@ fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
     let p = frame
         .autofill_handle()
         .expect("finite selection has handle");
-    assert_eq!(p.x, frame.col_to_x(5) + DEFAULT_COL_WIDTH);
-    assert_eq!(p.y, frame.row_to_y(4) + DEFAULT_ROW_HEIGHT);
+    assert_eq!(
+        p.x,
+        (f64::from(frame.col_to_x(5)) + DEFAULT_COL_WIDTH).round() as i32
+    );
+    assert_eq!(
+        p.y,
+        (f64::from(frame.row_to_y(4)) + DEFAULT_ROW_HEIGHT).round() as i32
+    );
 }
 
 #[test]
@@ -253,9 +267,9 @@ fn no_autofill_handle_rect_full_sheet_selection() {
     assert_eq!(
         frame.autofill_handle_rect(),
         PixelRect {
-            top_left: Point { x: 0.0, y: 0.0 },
-            width: 6.0,
-            height: 6.0,
+            top_left: Point { x: 0, y: 0 },
+            width: 6,
+            height: 6,
         }
     );
 }
@@ -270,8 +284,8 @@ fn hit_test_accepts_click_within_handle_pad() {
     };
     let frame = FrameContext::current(&m, test_canvas());
     let rect = frame.autofill_handle_rect();
-    let x = rect.right() + 1.0;
-    let y = rect.bottom() + 1.0;
+    let x = rect.right() + 1;
+    let y = rect.bottom() + 1;
     match frame.hit_test(x, y) {
         HitTest::AutofillHandle { .. } => {}
         other => panic!("expected AutofillHandle within pad, got {:?}", other),
@@ -287,8 +301,8 @@ fn hit_test_rejects_click_past_handle_pad() {
     };
     let frame = FrameContext::current(&m, test_canvas());
     let rect = frame.autofill_handle_rect();
-    let x = rect.right() + AUTOFILL_HIT_PAD_PX + 1.0;
-    let y = rect.bottom() + AUTOFILL_HIT_PAD_PX + 1.0;
+    let x = rect.right() + AUTOFILL_HIT_PAD_PX + 1;
+    let y = rect.bottom() + AUTOFILL_HIT_PAD_PX + 1;
     match frame.hit_test(x, y) {
         HitTest::Cell { .. } => {}
         other => panic!("expected Cell past pad, got {:?}", other),
@@ -317,8 +331,14 @@ fn autofill_handle_tracks_in_place_selection_range_update() {
     let after = frame.autofill_handle().expect("post-update handle");
 
     assert_ne!(before, after, "handle must move with selection_range");
-    assert_eq!(after.x, frame.col_to_x(6) + DEFAULT_COL_WIDTH);
-    assert_eq!(after.y, frame.row_to_y(5) + DEFAULT_ROW_HEIGHT);
+    assert_eq!(
+        after.x,
+        (f64::from(frame.col_to_x(6)) + DEFAULT_COL_WIDTH).round() as i32
+    );
+    assert_eq!(
+        after.y,
+        (f64::from(frame.row_to_y(5)) + DEFAULT_ROW_HEIGHT).round() as i32
+    );
 }
 
 #[test]
@@ -334,15 +354,15 @@ fn cell_rect_off_screen_returns_none() {
 fn hit_test_corner() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
-    assert_eq!(frame.hit_test(5.0, 5.0), HitTest::Corner);
+    assert_eq!(frame.hit_test(5, 5), HitTest::Corner);
 }
 
 #[test]
 fn hit_test_negative_is_outside() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
-    assert_eq!(frame.hit_test(-1.0, 10.0), HitTest::Outside);
-    assert_eq!(frame.hit_test(10.0, -1.0), HitTest::Outside);
+    assert_eq!(frame.hit_test(-1, 10), HitTest::Outside);
+    assert_eq!(frame.hit_test(10, -1), HitTest::Outside);
 }
 
 #[test]
@@ -350,7 +370,7 @@ fn hit_test_col_header_when_y_in_strip() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
     // y inside header strip, x past row-header strip
-    match frame.hit_test(HEADER_COL_WIDTH + 5.0, 5.0) {
+    match frame.hit_test(HEADER_COL_WIDTH + 5, 5) {
         HitTest::ColHeader(c) => assert!(c >= 1),
         other => panic!("expected ColHeader, got {:?}", other),
     }
@@ -360,7 +380,7 @@ fn hit_test_col_header_when_y_in_strip() {
 fn hit_test_cell_in_grid() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
-    match frame.hit_test(HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0) {
+    match frame.hit_test(HEADER_COL_WIDTH + 50, HEADER_ROW_HEIGHT + 50) {
         HitTest::Cell { row, column } => {
             assert!(row >= 1 && column >= 1);
         }
@@ -374,7 +394,7 @@ fn resize_handle_at_off_strip_is_none() {
     let frame = FrameContext::current(&m, test_canvas());
     // Inside cell grid -> no resize handle
     assert!(frame
-        .resize_handle_at(HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0, 4.0)
+        .resize_handle_at(HEADER_COL_WIDTH + 50, HEADER_ROW_HEIGHT + 50, 4)
         .is_none());
 }
 
@@ -392,6 +412,6 @@ fn pixel_to_col_round_trips_col_to_x() {
     for &c in &[1_i32, 2, 5, 6, 8] {
         let x = frame.col_to_x(c);
         // Nudge +0.5 to land safely inside the cell (avoid the edge).
-        assert_eq!(frame.pixel_to_col(x + 0.5), c, "round-trip col {}", c);
+        assert_eq!(frame.pixel_to_col(x + 1), c, "round-trip col {}", c);
     }
 }

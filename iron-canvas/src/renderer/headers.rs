@@ -27,24 +27,24 @@ impl CanvasRenderer {
         }
         self.set_stroke_static(self.theme.grid_separator_color);
 
-        let sep_y = frc.offset.y - FROZEN_SEP / 2.0 + HEADER_OFFSET;
-        let sep_x = frc.offset.x - FROZEN_SEP / 2.0 + HEADER_OFFSET;
+        let sep_y = frc.offset.y - FROZEN_SEP / 2 + HEADER_OFFSET;
+        let sep_x = frc.offset.x - FROZEN_SEP / 2 + HEADER_OFFSET;
 
         self.with_stroke_width(FROZEN_SEP, |this| {
             if frc.rows > 0 {
                 this.stroke_hline(
                     Span {
-                        from: 0.0,
+                        from: 0,
                         to: this.width,
                     },
-                    sep_y,
+                    f64::from(sep_y),
                 );
             }
             if frc.cols > 0 {
                 this.stroke_vline(
-                    sep_x,
+                    f64::from(sep_x),
                     Span {
-                        from: 0.0,
+                        from: 0,
                         to: this.height,
                     },
                 );
@@ -56,7 +56,7 @@ impl CanvasRenderer {
     /// header strips from the cell area.
     pub(super) fn draw_corner_box(&self) {
         let corner = PixelRect {
-            top_left: Point { x: 0.0, y: 0.0 },
+            top_left: Point { x: 0, y: 0 },
             width: HEADER_COL_WIDTH,
             height: HEADER_ROW_HEIGHT,
         };
@@ -66,15 +66,15 @@ impl CanvasRenderer {
         self.set_line_width_cached(STANDARD_BORDER_WIDTH);
         self.stroke_hline(
             Span {
-                from: 0.0,
+                from: 0,
                 to: self.width,
             },
-            HEADER_ROW_HEIGHT + HEADER_OFFSET,
+            f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET),
         );
         self.stroke_vline(
-            HEADER_COL_WIDTH + HEADER_OFFSET,
+            f64::from(HEADER_COL_WIDTH + HEADER_OFFSET),
             Span {
-                from: 0.0,
+                from: 0,
                 to: self.height,
             },
         );
@@ -105,7 +105,7 @@ impl CanvasRenderer {
         &self,
         axis: Axis,
         frame: &FrameContext,
-        mut visit: impl FnMut(&Self, i32, f64, f64),
+        mut visit: impl FnMut(&Self, i32, i32, i32),
     ) {
         let frozen_count = axis.frozen_count(frame);
         let frozen_origin = axis.frozen_origin(frame);
@@ -113,7 +113,7 @@ impl CanvasRenderer {
         let mut frozen_cursor = axis.strip_start();
         for i in 1..=frozen_count {
             let t = axis.frame_extent(frame, i);
-            if t <= 0.0 {
+            if t <= 0 {
                 continue;
             }
             visit(self, i, frozen_cursor, t);
@@ -127,7 +127,7 @@ impl CanvasRenderer {
         };
         for i in axis.visible_band(&frame.vis) {
             let t = axis.frame_extent(frame, i);
-            if t <= 0.0 {
+            if t <= 0 {
                 continue;
             }
             visit(self, i, scroll_cursor, t);
@@ -139,7 +139,7 @@ impl CanvasRenderer {
     ///
     /// `along` is the position along the axis (top_y for rows, left_x for cols);
     /// `thickness` is the cell's extent along the same axis (rh / cw).
-    fn draw_header_cell(&self, axis: Axis, index: i32, along: f64, thickness: f64, selected: bool) {
+    fn draw_header_cell(&self, axis: Axis, index: i32, along: i32, thickness: i32, selected: bool) {
         let body_bg = if selected {
             self.theme.header_selected_bg
         } else {
@@ -155,8 +155,8 @@ impl CanvasRenderer {
         // 1px inset on the cross-axis leaves the border strip visible top+bottom (row)
         // or left+right (column).
         let body = match axis {
-            Axis::Row => full.inset(0.0, 0.5),
-            Axis::Column => full.inset(0.5, 0.0),
+            Axis::Row => full.inset(0, 1),
+            Axis::Column => full.inset(1, 0),
         };
 
         self.rect_fill(full, self.theme.header_border_color);
@@ -169,7 +169,11 @@ impl CanvasRenderer {
             Axis::Column => col_name(index),
         };
         self.ctx
-            .fill_text(&label, self.snap_pixel(center.x), self.snap_pixel(center.y))
+            .fill_text(
+                &label,
+                f64::from(self.snap_pixel(center.x)),
+                f64::from(self.snap_pixel(center.y)),
+            )
             .ok();
     }
 }

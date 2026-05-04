@@ -68,7 +68,7 @@ impl TextPaint {
         if text.is_empty() {
             return None;
         }
-        if rect.width < MIN_TEXT_DIM_PX || rect.height < MIN_TEXT_DIM_PX {
+        if f64::from(rect.width) < MIN_TEXT_DIM_PX || f64::from(rect.height) < MIN_TEXT_DIM_PX {
             return None;
         }
 
@@ -90,7 +90,7 @@ impl TextPaint {
 
         // Font interning: skips `FontStyle::build` on cache hit. Same lookup
         // is shared across cells with identical (size, weight, slant, family).
-        let size_px = style.font.sz as f64;
+        let size_px = f64::from(style.font.sz);
         let font_css = renderer.font_intern.get_or_build(
             size_px,
             style.font.b,
@@ -101,7 +101,7 @@ impl TextPaint {
 
         let approx_char_w = size_px * CHAR_WIDTH_FACTOR;
         let line_height = size_px * LINE_HEIGHT_FACTOR;
-        let usable_w = rect.width - 2.0 * CELL_PADDING;
+        let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
         let right = rect.right();
         let bottom = rect.bottom();
         let center = rect.center();
@@ -122,19 +122,23 @@ impl TextPaint {
                 .unwrap_or(line.len() as f64 * approx_char_w);
             let i_f = i as f64;
             let center_x = match h_align {
-                HorizontalAlignment::Right => right - CELL_PADDING - tw / 2.0,
-                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => center.x,
-                _ => rect.top_left.x + CELL_PADDING + tw / 2.0,
+                HorizontalAlignment::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
+                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => {
+                    f64::from(center.x)
+                }
+                _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
             };
             let center_y = match v_align {
                 VerticalAlignment::Bottom => {
-                    bottom - size_px / 2.0 - TEXT_V_INSET_PX
+                    f64::from(bottom) - size_px / 2.0 - TEXT_V_INSET_PX
                         + (i_f - line_count + 1.0) * line_height
                 }
                 VerticalAlignment::Center => {
-                    center.y + (i_f + (1.0 - line_count) / 2.0) * line_height
+                    f64::from(center.y) + (i_f + (1.0 - line_count) / 2.0) * line_height
                 }
-                _ => rect.top_left.y + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
+                _ => {
+                    f64::from(rect.top_left.y) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height
+                }
             };
             lines.push(TextLine {
                 text: line,
@@ -191,9 +195,7 @@ impl CellTextStyle {
         } else {
             match style.font.color.as_deref() {
                 None | Some("#000000") => TextColor::Static(theme.default_text_color),
-                Some(c) => {
-                    TextColor::Owned(CssColor::new(c).into_string().into_boxed_str())
-                }
+                Some(c) => TextColor::Owned(CssColor::new(c).into_string().into_boxed_str()),
             }
         };
 

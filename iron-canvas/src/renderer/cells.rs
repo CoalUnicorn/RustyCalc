@@ -74,12 +74,8 @@ impl CanvasRenderer {
             Some(c) => self.set_fill_cached(c),
             None => self.set_fill_static(self.theme().cell_bg),
         }
-        self.ctx_ref().fill_rect(
-            p.rect.top_left.x,
-            p.rect.top_left.y,
-            p.rect.width,
-            p.rect.height,
-        );
+        let (x, y, w, h) = p.rect.as_f64_tuple();
+        self.ctx_ref().fill_rect(x, y, w, h);
     }
 
     /// Paint bg + borders for one resolved `CellPaint`. Used by
@@ -149,11 +145,7 @@ impl CanvasRenderer {
     /// parallel strokes offset ±1px on the cross-axis.
     fn paint_border(&self, edge: BorderEdge, rect: PixelRect, b: &BorderPaint) {
         let line = edge.line(rect);
-        let offsets: &[f64] = if b.stroke.double {
-            &[-1.0, 1.0]
-        } else {
-            &[0.0]
-        };
+        let offsets: &[i32] = if b.stroke.double { &[-1, 1] } else { &[0] };
         match &b.color {
             BorderColor::Static(s) => self.set_stroke_static(s),
             BorderColor::Owned(s) => self.set_stroke_cached(s),
@@ -208,7 +200,7 @@ impl CellPaint {
         slot: CellSlot,
         own_style: Style,
     ) -> Option<CellPaint> {
-        if slot.rect.width <= 0.0 || slot.rect.height <= 0.0 {
+        if slot.rect.width <= 0 || slot.rect.height <= 0 {
             return None;
         }
         Some(CellPaint {
@@ -220,7 +212,7 @@ impl CellPaint {
 }
 
 pub(crate) struct BorderStroke {
-    pub width_px: f64,
+    pub width_px: i32,
     pub double: bool, // double-line styles render as two parallel strokes
 }
 
@@ -304,7 +296,7 @@ pub(crate) struct CellSlot {
 #[derive(Clone)]
 pub(crate) struct RowStrip {
     row: i32,
-    height: f64,
+    height: i32,
 }
 
 /// Stateful walk over the cells of a `PaneRegion`. Caches per-pane column
@@ -318,9 +310,9 @@ pub(crate) struct PaneCells<'a> {
     pub canvas: CanvasSize,
     pub current_row: Option<RowStrip>,
     pub row_iter: RangeInclusive<i32>,
-    pub row_top: f64,
+    pub row_top: i32,
     pub col_iter: RangeInclusive<i32>,
-    pub col_left: f64,
+    pub col_left: i32,
 }
 
 impl<'a> Iterator for PaneCells<'a> {
@@ -329,12 +321,12 @@ impl<'a> Iterator for PaneCells<'a> {
     fn next(&mut self) -> Option<CellSlot> {
         loop {
             if self.current_row.is_none() {
-                if self.row_top >= self.canvas.h {
+                if f64::from(self.row_top) >= self.canvas.h {
                     return None;
                 }
                 let row = self.row_iter.next()?;
                 let height = row_height(self.model, row);
-                if height <= 0.0 {
+                if height <= 0 {
                     continue;
                 }
                 self.current_row = Some(RowStrip { row, height });
@@ -350,10 +342,10 @@ impl<'a> Iterator for PaneCells<'a> {
                 };
 
                 let width = col_width(self.model, col);
-                if width <= 0.0 {
+                if width <= 0 {
                     continue;
                 }
-                if self.col_left >= self.canvas.w {
+                if f64::from(self.col_left) >= self.canvas.w {
                     self.row_top += row_strip.height;
                     self.current_row = None;
                     continue;

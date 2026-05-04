@@ -7,32 +7,32 @@ use crate::renderer::PaneRegion;
 
 #[test]
 fn row_header_rect_pins_x_to_left_strip() {
-    let rect = Axis::Row.header_rect(100.0, 20.0);
+    let rect = Axis::Row.header_rect(100, 20);
     assert_eq!(rect.top_left.x, HEADER_OFFSET);
-    assert_eq!(rect.top_left.y, 100.0);
+    assert_eq!(rect.top_left.y, 100);
     assert_eq!(rect.width, HEADER_COL_WIDTH);
-    assert_eq!(rect.height, 20.0);
+    assert_eq!(rect.height, 20);
 }
 
 #[test]
 fn column_header_rect_pins_y_to_top_strip() {
-    let rect = Axis::Column.header_rect(100.0, 20.0);
-    assert_eq!(rect.top_left.x, 100.0);
+    let rect = Axis::Column.header_rect(100, 20);
+    assert_eq!(rect.top_left.x, 100);
     assert_eq!(rect.top_left.y, HEADER_OFFSET);
-    assert_eq!(rect.width, 20.0);
+    assert_eq!(rect.width, 20);
     assert_eq!(rect.height, HEADER_ROW_HEIGHT);
 }
 
 #[test]
 fn row_header_rect_thickness_maps_to_height() {
-    let rect = Axis::Row.header_rect(100.0, 50.0);
-    assert_eq!(rect.height, 50.0);
+    let rect = Axis::Row.header_rect(100, 50);
+    assert_eq!(rect.height, 50);
 }
 
 #[test]
 fn column_header_rect_thickness_maps_to_width() {
-    let rect = Axis::Column.header_rect(100.0, 50.0);
-    assert_eq!(rect.width, 50.0);
+    let rect = Axis::Column.header_rect(100, 50);
+    assert_eq!(rect.width, 50);
 }
 
 #[test]
@@ -84,7 +84,7 @@ fn frozen(rows: i32, cols: i32, origin: Point) -> FrozenRC {
 
 #[test]
 fn pane_top_left_origin_is_pinned_to_header_corner() {
-    let frc = frozen(2, 3, Point { x: 200.0, y: 100.0 });
+    let frc = frozen(2, 3, Point { x: 200, y: 100 });
     let p = PaneRegion::top_left(&frc);
     assert_eq!(p.origin.x, HEADER_COL_WIDTH + HEADER_OFFSET);
     assert_eq!(p.origin.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
@@ -92,31 +92,31 @@ fn pane_top_left_origin_is_pinned_to_header_corner() {
 
 #[test]
 fn pane_top_right_origin_uses_frozen_x_and_header_y() {
-    let frc = frozen(2, 3, Point { x: 200.0, y: 100.0 });
+    let frc = frozen(2, 3, Point { x: 200, y: 100 });
     let v = vis((3, 9), (4, 11));
     let p = PaneRegion::top_right(&frc, &v);
-    assert_eq!(p.origin.x, 200.0);
+    assert_eq!(p.origin.x, 200);
     assert_eq!(p.origin.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
     assert_eq!(*p.cols.start(), 4);
 }
 
 #[test]
 fn pane_bottom_left_origin_uses_header_x_and_frozen_y() {
-    let frc = frozen(2, 3, Point { x: 200.0, y: 100.0 });
+    let frc = frozen(2, 3, Point { x: 200, y: 100 });
     let v = vis((3, 9), (4, 11));
     let p = PaneRegion::bottom_left(&frc, &v);
     assert_eq!(p.origin.x, HEADER_COL_WIDTH + HEADER_OFFSET);
-    assert_eq!(p.origin.y, 100.0);
+    assert_eq!(p.origin.y, 100);
     assert_eq!(*p.rows.start(), 3);
 }
 
 #[test]
 fn pane_bottom_right_origin_matches_frozen_offset() {
-    let frc = frozen(2, 3, Point { x: 200.0, y: 100.0 });
+    let frc = frozen(2, 3, Point { x: 200, y: 100 });
     let v = vis((3, 9), (4, 11));
     let p = PaneRegion::bottom_right(&frc, &v);
-    assert_eq!(p.origin.x, 200.0);
-    assert_eq!(p.origin.y, 100.0);
+    assert_eq!(p.origin.x, 200);
+    assert_eq!(p.origin.y, 100);
 }
 
 #[test]

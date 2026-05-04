@@ -6,15 +6,15 @@ use crate::{geometry::prim::Point, CanvasSize};
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PixelRect {
     pub top_left: Point,
-    pub width: f64,
-    pub height: f64,
+    pub width: i32,
+    pub height: i32,
 }
 
 impl PixelRect {
-    pub fn right(&self) -> f64 {
+    pub fn right(&self) -> i32 {
         self.top_left.x + self.width
     }
-    pub fn bottom(&self) -> f64 {
+    pub fn bottom(&self) -> i32 {
         self.top_left.y + self.height
     }
 
@@ -25,20 +25,20 @@ impl PixelRect {
 
     pub fn center(&self) -> Point {
         Point {
-            x: self.top_left.x + self.width / 2.0,
-            y: self.top_left.y + self.height / 2.0,
+            x: self.top_left.x + self.width / 2,
+            y: self.top_left.y + self.height / 2,
         }
     }
     /// Shrink by `dx` / `dy` on each side (negative values grow the rect).
-    pub fn inset(&self, dx: f64, dy: f64) -> Self {
+    pub fn inset(&self, dx: i32, dy: i32) -> Self {
         Self {
             top_left: Point {
                 x: self.top_left.x + dx,
                 y: self.top_left.y + dy,
             },
 
-            width: self.width - 2.0 * dx,
-            height: self.height - 2.0 * dy,
+            width: self.width - 2 * dx,
+            height: self.height - 2 * dy,
         }
     }
 
@@ -47,10 +47,19 @@ impl PixelRect {
     /// that fall off-canvas (notably when a frozen band is wider/taller than
     /// the canvas itself).
     pub fn intersects(&self, canvas: CanvasSize) -> bool {
-        self.top_left.x < canvas.w
-            && self.right() > 0.0
-            && self.top_left.y < canvas.h
-            && self.bottom() > 0.0
+        f64::from(self.top_left.x) < canvas.w
+            && self.right() > 0
+            && f64::from(self.top_left.y) < canvas.h
+            && self.bottom() > 0
+    }
+
+    pub fn as_f64_tuple(self) -> (f64, f64, f64, f64) {
+        (
+            f64::from(self.top_left.x),
+            f64::from(self.top_left.y),
+            f64::from(self.width),
+            f64::from(self.height),
+        )
     }
 }
 

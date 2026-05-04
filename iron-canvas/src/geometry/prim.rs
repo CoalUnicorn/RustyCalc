@@ -12,8 +12,8 @@ use crate::{
 /// A point in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Point {
-    pub x: f64,
-    pub y: f64,
+    pub x: i32,
+    pub y: i32,
 }
 
 /// An axis-aligned line segment on the canvas.
@@ -24,13 +24,13 @@ pub struct Point {
 /// cross-axis.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Line {
-    H { span: Span, y: f64 },
-    V { x: f64, span: Span },
+    H { span: Span, y: i32 },
+    V { x: i32, span: Span },
 }
 
 impl Line {
     /// Move the line by `d` perpendicular to its direction.
-    pub fn offset_cross(self, d: f64) -> Self {
+    pub fn offset_cross(self, d: i32) -> Self {
         match self {
             Line::H { span, y } => Line::H { span, y: y + d },
             Line::V { span, x } => Line::V { span, x: x + d },
@@ -41,8 +41,8 @@ impl Line {
 /// Line length
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
-    pub from: f64,
-    pub to: f64,
+    pub from: i32,
+    pub to: i32,
 }
 
 //  Shared axis - row-vs-column symmetry
@@ -64,7 +64,7 @@ impl Axis {
     ///
     /// `along` is the position along the axis (top_y for rows, left_x for
     /// cols). The cross-axis extent is always the header strip width/height.
-    pub(crate) fn header_rect(self, along: f64, height: f64) -> PixelRect {
+    pub(crate) fn header_rect(self, along: i32, height: i32) -> PixelRect {
         match self {
             Axis::Row => PixelRect {
                 top_left: Point {
@@ -86,7 +86,7 @@ impl Axis {
     }
 
     /// Extent from the frame's prefix-sum snapshot — zero model access.
-    pub(crate) fn frame_extent(self, frame: &FrameContext, index: i32) -> f64 {
+    pub(crate) fn frame_extent(self, frame: &FrameContext, index: i32) -> i32 {
         match self {
             Axis::Row => frame.row_extent_at(index),
             Axis::Column => frame.col_extent_at(index),
@@ -95,7 +95,7 @@ impl Axis {
 
     /// Pixel position where the header strip begins along this axis,
     /// offset by HEADER_OFFSET `0.5` for crisp integer-coordinate strokes.
-    pub(crate) fn strip_start(self) -> f64 {
+    pub(crate) fn strip_start(self) -> i32 {
         match self {
             Axis::Row => HEADER_ROW_HEIGHT + HEADER_OFFSET,
             Axis::Column => HEADER_COL_WIDTH + HEADER_OFFSET,
@@ -119,7 +119,7 @@ impl Axis {
     }
 
     /// Pixel origin where the scrollable strip for this axis begins.
-    pub(crate) fn frozen_origin(self, frame: &FrameContext) -> f64 {
+    pub(crate) fn frozen_origin(self, frame: &FrameContext) -> i32 {
         match self {
             Axis::Row => frame.frozen.offset.y,
             Axis::Column => frame.frozen.offset.x,

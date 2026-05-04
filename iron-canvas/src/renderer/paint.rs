@@ -18,22 +18,39 @@ impl CanvasRenderer {
     /// Fill `rect` with a solid color.
     pub(super) fn rect_fill(&self, rect: PixelRect, color: &str) {
         self.set_fill_cached(color);
-        self.ctx
-            .fill_rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
+        self.ctx.fill_rect(
+            f64::from(rect.top_left.x),
+            f64::from(rect.top_left.y),
+            f64::from(rect.width),
+            f64::from(rect.height),
+        );
     }
 
+    pub fn rect_fill_px(&self, rect: PixelRect, color: &str) {
+        self.set_fill_cached(color);
+        self.ctx.fill_rect(
+            f64::from(rect.top_left.x),
+            f64::from(rect.top_left.y),
+            f64::from(rect.width),
+            f64::from(rect.height),
+        )
+    }
     /// Stroke `rect`'s outline at `width` pixels. Width is restored to
     /// `STANDARD_BORDER_WIDTH` on exit via `with_stroke_width`.
-    pub(super) fn rect_stroke(&self, rect: PixelRect, color: &str, width: f64) {
+    pub(super) fn rect_stroke(&self, rect: PixelRect, color: &str, width: i32) {
         self.set_stroke_cached(color);
         self.with_stroke_width(width, |this| {
-            this.ctx
-                .stroke_rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
+            this.ctx.stroke_rect(
+                f64::from(rect.top_left.x),
+                f64::from(rect.top_left.y),
+                f64::from(rect.width),
+                f64::from(rect.height),
+            );
         });
     }
 
     /// Dashed outline (4-on / 3-off). Resets dash pattern and line_width on exit.
-    pub(super) fn rect_dashed(&self, rect: PixelRect, color: &str, width: f64) {
+    pub(super) fn rect_dashed(&self, rect: PixelRect, color: &str, width: i32) {
         self.ctx.set_line_dash(&self.dash_pattern).ok();
         self.rect_stroke(rect, color, width);
         self.ctx.set_line_dash(&self.dash_empty).ok();
@@ -42,7 +59,7 @@ impl CanvasRenderer {
     /// Run `f` with `width` as the active stroke `line_width`. Restores
     /// `STANDARD_BORDER_WIDTH` on exit — makes the reset invariant explicit
     /// and shared by every helper that would otherwise duplicate it.
-    pub(super) fn with_stroke_width<R>(&self, width: f64, f: impl FnOnce(&Self) -> R) -> R {
+    pub(super) fn with_stroke_width<R>(&self, width: i32, f: impl FnOnce(&Self) -> R) -> R {
         self.set_line_width_cached(width);
         let result = f(self);
         self.set_line_width_cached(STANDARD_BORDER_WIDTH);
@@ -53,8 +70,8 @@ impl CanvasRenderer {
     /// caller doesn't pick `stroke_hline` vs `stroke_vline` manually.
     pub(super) fn stroke_line(&self, line: Line) {
         match line {
-            Line::H { span, y } => self.stroke_hline(span, y),
-            Line::V { x, span } => self.stroke_vline(x, span),
+            Line::H { span, y } => self.stroke_hline(span, f64::from(y)),
+            Line::V { x, span } => self.stroke_vline(f64::from(x), span),
         }
     }
 
@@ -62,8 +79,12 @@ impl CanvasRenderer {
     pub(super) fn with_clip<R>(&self, rect: PixelRect, f: impl FnOnce(&Self) -> R) -> R {
         self.ctx.save();
         self.ctx.begin_path();
-        self.ctx
-            .rect(rect.top_left.x, rect.top_left.y, rect.width, rect.height);
+        self.ctx.rect(
+            f64::from(rect.top_left.x),
+            f64::from(rect.top_left.y),
+            f64::from(rect.width),
+            f64::from(rect.height),
+        );
         self.ctx.clip();
         let result = f(self);
         self.ctx.restore();
@@ -74,8 +95,17 @@ impl CanvasRenderer {
     pub(super) fn stroke_hline(&self, span: Span, y: f64) {
         let y = self.snap_stroke(y);
         self.ctx.begin_path();
-        self.ctx.move_to(span.from, y);
-        self.ctx.line_to(span.to, y);
+        self.ctx.move_to(f64::from(span.from), y);
+        self.ctx.line_to(f64::from(span.to), y);
+        self.ctx.stroke();
+    }
+
+    /// Horizontal line from (x1, y) to (x2, y).
+    pub(super) fn stroke_text_hline(&self, x1: f64, x2: f64, y: f64) {
+        let y = self.snap_stroke(y);
+        self.ctx.begin_path();
+        self.ctx.move_to(x1, y);
+        self.ctx.line_to(x2, y);
         self.ctx.stroke();
     }
 
@@ -83,8 +113,8 @@ impl CanvasRenderer {
     pub(super) fn stroke_vline(&self, x: f64, span: Span) {
         let x = self.snap_stroke(x);
         self.ctx.begin_path();
-        self.ctx.move_to(x, span.from);
-        self.ctx.line_to(x, span.to);
+        self.ctx.move_to(x, f64::from(span.from));
+        self.ctx.line_to(x, f64::from(span.to));
         self.ctx.stroke();
     }
 
@@ -167,10 +197,10 @@ impl CanvasRenderer {
     }
 
     /// Set line width, skipping the JS call when unchanged.
-    pub(super) fn set_line_width_cached(&self, width: f64) {
-        if self.frame_cache.last_line_width.get() != width {
-            self.ctx.set_line_width(width);
-            self.frame_cache.last_line_width.set(width);
+    pub(super) fn set_line_width_cached(&self, width: i32) {
+        if self.frame_cache.last_line_width.get() != f64::from(width) {
+            self.ctx.set_line_width(f64::from(width));
+            self.frame_cache.last_line_width.set(f64::from(width));
         }
     }
 }

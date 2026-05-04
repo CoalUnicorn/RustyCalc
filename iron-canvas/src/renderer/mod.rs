@@ -79,13 +79,14 @@ use crate::renderer::cache::FrameCache;
 use crate::renderer::cells::CellPaintsIter;
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;
+pub(crate) use cache::FontIntern;
 pub(crate) use pane::PaneRegion;
 
 pub struct CanvasRenderer {
     ctx: CanvasRenderingContext2d,
-    width: f64,
-    height: f64,
-    dpr: f64,
+    width: i32,
+    height: i32,
+    dpr: i32,
     theme: CanvasTheme,
     /// Cached dash pattern passed to `set_line_dash` on every dashed stroke
     /// (clipboard ants, point-mode range, formula refs).
@@ -95,6 +96,10 @@ pub struct CanvasRenderer {
     /// Empty array used to clear the dash pattern after a dashed stroke.
     dash_empty: js_sys::Array,
     frame_cache: FrameCache,
+    /// Renderer-lifetime intern table for `ctx.font` strings. Lives outside
+    /// `FrameCache` because identical fonts repeat across frames, not just
+    /// within a single paint.
+    pub(in crate::renderer) font_intern: FontIntern,
 }
 
 impl CanvasRenderer {
@@ -103,8 +108,8 @@ impl CanvasRenderer {
     #[inline]
     pub(crate) fn canvas_size(&self) -> CanvasSize {
         CanvasSize {
-            w: self.width,
-            h: self.height,
+            w: f64::from(self.width),
+            h: f64::from(self.height),
         }
     }
 
@@ -141,15 +146,15 @@ impl CanvasRenderer {
     /// layer's ctx — paint caches survive across frames.
     pub(crate) fn for_layer(
         ctx: CanvasRenderingContext2d,
-        css_w: f64,
-        css_h: f64,
+        css_w: i32,
+        css_h: i32,
         theme: CanvasTheme,
     ) -> Self {
         Self {
             ctx,
             width: css_w,
             height: css_h,
-            dpr: 1.0,
+            dpr: 1,
             theme,
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
@@ -161,19 +166,20 @@ impl CanvasRenderer {
                 text_slots: Cell::new(Vec::new()),
                 show_grid: Cell::new(true),
             },
+            font_intern: FontIntern::new(),
         }
     }
 
     /// Sync logical canvas size after a layer resize. Caller is responsible
     /// for the actual `canvas.set_width/set_height` and DPR scale.
-    pub(crate) fn set_size(&mut self, css_w: f64, css_h: f64) {
+    pub(crate) fn set_size(&mut self, css_w: i32, css_h: i32) {
         self.width = css_w;
         self.height = css_h;
     }
 
     /// Sync device-pixel ratio after a layer resize. Must be called
     /// alongside `set_size` so snap helpers reflect the current DPR.
-    pub(crate) fn set_dpr(&mut self, dpr: f64) {
+    pub(crate) fn set_dpr(&mut self, dpr: i32) {
         self.dpr = dpr;
     }
 
@@ -182,15 +188,15 @@ impl CanvasRenderer {
     /// rather than bleeding across two.
     #[inline]
     fn snap_stroke(&self, coord: f64) -> f64 {
-        ((coord * self.dpr).floor() + 1.0) / self.dpr
+        ((coord * f64::from(self.dpr)) + 1.0) / f64::from(self.dpr)
     }
 
     /// Snap a coordinate to the nearest device pixel boundary.
     /// Applied to text draw positions so glyphs don't smear across
     /// sub-pixel boundaries.
     #[inline]
-    fn snap_pixel(&self, coord: f64) -> f64 {
-        (coord * self.dpr).round() / self.dpr
+    fn snap_pixel(&self, coord: i32) -> i32 {
+        (coord * self.dpr) / self.dpr
     }
 
     /// Reset per-frame ctx state caches to their initial sentinels.

@@ -25,14 +25,14 @@ impl FrozenRC {
         let sheet = model.get_selected_sheet();
         let rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        let h: f64 = (1..=rows).map(|r| row_height(model, r)).sum();
-        let w: f64 = (1..=cols).map(|c| col_width(model, c)).sum();
+        let h: i32 = (1..=rows).map(|r| row_height(model, r)).sum();
+        let w: i32 = (1..=cols).map(|c| col_width(model, c)).sum();
         FrozenRC {
             rows,
             cols,
             offset: Point {
-                x: HEADER_COL_WIDTH + w + if cols > 0 { FROZEN_SEP } else { 0.0 },
-                y: HEADER_ROW_HEIGHT + h + if rows > 0 { FROZEN_SEP } else { 0.0 },
+                x: HEADER_COL_WIDTH + w + if cols > 0 { FROZEN_SEP } else { 0 },
+                y: HEADER_ROW_HEIGHT + h + if rows > 0 { FROZEN_SEP } else { 0 },
             },
         }
     }
