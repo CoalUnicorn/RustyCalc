@@ -47,7 +47,7 @@ impl CachedColor {
 
     /// Pointer-equality compare against a `&'static str`. The two `Static`
     /// arms are cheap; `Owned` still falls back to value compare so a
-    /// dynamic→static transition is detected correctly.
+    /// dynamic -> static transition is detected correctly.
     pub(super) fn matches_static(&self, color: &'static str) -> bool {
         match self {
             CachedColor::Empty => false,

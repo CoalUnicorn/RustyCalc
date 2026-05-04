@@ -1,7 +1,7 @@
-//! Renderer-side viewport math: range → canvas pixel bounds used by overlays.
+//! Renderer-side viewport math: range -> canvas pixel bounds used by overlays.
 //!
 //! All pixel↔cell math uses the `FrameContext` prefix-sum tables built once
-//! per tick in `geometry.rs`. No model access happens here.
+//! per tick in `geometry/frame`. No model access happens here.
 
 use crate::geometry::frame::{FrameContext, VisibleCells};
 use crate::geometry::pixel_rect::PixelRect;

@@ -59,9 +59,6 @@ impl LayerBase {
             .expect("scale should not fail");
         self.renderer.set_size(css_w, css_h);
         self.renderer.set_dpr(dpr);
-
-        // Note: keep calling it in both paths for now;
-        // tighten in a follow-up if profiling warrants.
         self.renderer.invalidate_paint_cache();
     }
 }

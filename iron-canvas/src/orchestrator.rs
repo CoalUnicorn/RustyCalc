@@ -163,7 +163,7 @@ impl IronCanvas {
 
     /// Explicit teardown for React strict-mode / Leptos Effect mount cycles.
     /// Rust's `Drop` handles resource cleanup on scope exit; this provides a
-    /// named JS callsite for `create → drop → create` patterns.
+    /// named JS callsite for `create -> drop -> create` patterns.
     pub fn dispose(self) {}
 
     /// JS-facing model push. Accepts the IronCalc `Model` JS handle as a raw

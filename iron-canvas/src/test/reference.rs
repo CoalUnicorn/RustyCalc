@@ -78,7 +78,7 @@ pub(crate) fn overlay_ops(
     ops
 }
 
-/// Deterministic test-only mapping from `RCRange` → `StrokeRect` op. Both
+/// Deterministic test-only mapping from `RCRange` -> `StrokeRect` op. Both
 /// `overlay_ops` and `reference_ops` route through this so they paint the
 /// same shape for the same range.
 fn stub_range_stroke(theme: &CanvasTheme, range: RCRange) -> DrawOp {

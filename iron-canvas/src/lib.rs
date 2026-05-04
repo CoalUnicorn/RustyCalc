@@ -22,13 +22,13 @@
 //! - [`geometry`] - rect/line types and pixel↔cell coordinate math.
 //! - [`types`] - renderer-internal shapes (panes, text layout, visible
 //!   region) plus public overlay types.
-//! - [`renderer`] - the four-phase render pipeline. See its module doc
-//!   for the full walk-through.
+//! - [`renderer`] - the render pipeline. See its module doc for the
+//!   full walk-through.
 
 pub mod geometry;
 
 mod layer;
-pub mod model_adapter;
+mod model_adapter;
 mod orchestrator;
 pub mod renderer;
 pub mod style;

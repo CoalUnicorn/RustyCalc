@@ -7,33 +7,34 @@
 //! element drawn imperatively, because HTML tables/divs can't keep up with
 //! thousands of cells at 60fps.
 //!
-//! # How it connects to Leptos
+//! # Lifecycle
 //!
-//! The `Worksheet` component (`src/components/worksheet.rs`) owns the
-//! `<canvas>` element and holds a `NodeRef` to it. Whenever
-//! `state.redraw` (an `RwSignal<u32>`) increments, an `Effect` fires,
-//! creates a fresh `CanvasRenderer` from the `NodeRef`, and calls
-//! `renderer.render(model, overlays)`. That single call redraws everything.
+//! Two stacked `<canvas>` elements are wrapped by [`crate::IronCanvas`];
+//! each canvas owns a `LayerBase` (canvas + `PaintGate` + `CanvasRenderer`).
+//! `GridLayer` builds its 2D context with `alpha: false` (opaque, skips
+//! alpha compositing); `OverlayLayer` uses `alpha: true, desynchronized: true`.
+//! The renderer is **long-lived per layer** — it owns the 2D ctx, so the
+//! cached fill/stroke/font/line-width state persists across frames.
 //!
-//!  Each canvas gets its own `LayerBase` (canvas + `PaintGate` + `CanvasRenderer`).
-//!  `GridLayer` requests a 2D context with `alpha: false` (opaque, lets the
-//!  browser skip alpha compositing); `OverlayLayer` requests
-//!  `alpha: true, desynchronized: true`. The renderer constructed with
-//!  `CanvasRenderer::for_layer` is **long-lived per layer** — it owns the 2D ctx,
-//!  so the cached `set_fill`/`set_stroke`/`set_font`/`set_line_width` state
-//!  persists across frames.
+//! State pushes from JS mark layers dirty; `IronCanvas::paint_if_dirty`
+//! drives each dirty layer's `paint`, which calls into [`CanvasRenderer::render_grid`]
+//! / [`CanvasRenderer::render_overlays`].
 //!
 //! # Render pipeline
 //!
-//! `render()` runs four phases in order, each building on the previous:
+//! Two paint entry points, each driven by `paint_if_dirty` per dirty layer:
 //!
-//! ```text
-//! TODO
-//! ```
+//! - [`CanvasRenderer::render_grid`] — cells (4 frozen-pane quadrants, each
+//!   running 4 cell sub-passes: bg -> grid borders -> explicit borders -> text),
+//!   frozen separators, headers, corner box.
+//! - [`CanvasRenderer::render_overlays`] — selection rectangle + autofill handle,
+//!   header highlights, extend preview, clipboard marching ants, point-mode
+//!   range, formula-ref highlights.
 //!
-//! Text is deferred to Phase 4 because earlier phases may paint over cells
-//! (e.g. the selection fill tint covers an area). Drawing text last keeps
-//! it readable.
+//! The cell sub-pass order matters: grid borders run across the whole pane
+//! before explicit borders so an explicit `right` on cell A wins over cell B's
+//! grid `left` at the shared pixel column. Text runs last so overflow is never
+//! clipped by a neighbour's bg.
 //!
 //! # Frozen panes
 //!
@@ -54,10 +55,6 @@
 //! Each quadrant is rendered by `render_pane()` with different row/col
 //! ranges and pixel offsets. A thick separator line marks the freeze
 //! boundary.
-//!
-//! # Border resolution
-//!
-//! TODO
 
 mod cache;
 mod cells;
@@ -84,7 +81,6 @@ use crate::theme::CanvasTheme;
 use crate::CanvasModel;
 pub(crate) use pane::PaneRegion;
 
-//#[derive(Clone)]
 pub struct CanvasRenderer {
     ctx: CanvasRenderingContext2d,
     width: f64,
@@ -125,10 +121,10 @@ impl CanvasRenderer {
         &self.theme
     }
 
-    /// Stream of resolved `CellPaint` for a pane. Each yielded paint is
-    /// renderer-ready: bg + four borders + optional text are pre-resolved
-    /// against neighbour styles, so the paint pass touches the model
-    /// zero times.
+    /// Stream of `CellPaint` for a pane. Each yielded paint carries the
+    /// cell's address, pixel rect, and `Style` (fetched from the model
+    /// during iteration). Border + text resolution happens later, inside
+    /// `render_pane`'s deferred sub-passes.
     pub(super) fn paints_in<'a>(
         &'a self,
         model: &'a dyn CanvasModel,
@@ -220,42 +216,38 @@ impl CanvasRenderer {
         self.theme = theme;
     }
 
-    /// Phases 1+2: cells (bg + borders + text), frozen separators, headers,
-    /// corner box. Does **not** clear the canvas — caller owns the clear so
-    /// layer-owned renderers can paint a background fill instead.
+    /// Paint the grid layer: cells (per quadrant), frozen separators,
+    /// headers, corner box. Does **not** clear the canvas — caller owns
+    /// the clear so layer-owned renderers can paint a background fill
+    /// instead.
     pub(crate) fn render_grid(&mut self, model: &dyn CanvasModel, frame: &FrameContext) {
         // Cache the per-sheet grid-line toggle once for this frame so the
-        // hot per-cell `paint_borders` walk doesn't re-enter the model. Falls
-        // back to "show" on model failure, matching Excel's default-on.
+        // hot per-cell `paint_borders_grid` walk doesn't re-enter the model.
+        // Falls back to "show" on model failure, matching Excel's default-on.
         let sheet = model.get_selected_sheet();
         self.frame_cache
             .show_grid
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
 
-        // Phase 1: Cells — four frozen-pane quadrants. `render_pane` paints
-        // bg+borders, then text on top. Each cell now owns its right+bottom
-        // grid stroke directly (see `paint_borders`), so colored fills
-        // overpaint the previous-cell's grid edge naturally and explicit
-        // 2 px borders win by stroke width.
         self.render_pane(model, PaneRegion::top_left(&frame.frozen));
         self.render_pane(model, PaneRegion::top_right(&frame.frozen, &frame.vis));
         self.render_pane(model, PaneRegion::bottom_left(&frame.frozen, &frame.vis));
         self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis));
 
-        // Frozen separators paint AFTER cells so the thick divider wins its
-        // pixels over the rightmost/bottommost frozen cell's grid stroke.
+        // Frozen separators paint AFTER cells so the thick divider wins
+        // its pixels over the rightmost/bottommost frozen cell's grid stroke.
         self.draw_frozen_separators(&frame.frozen);
 
-        // Phase 2: Headers + corner box
         self.render_headers_base(Axis::Row, frame);
         self.render_headers_base(Axis::Column, frame);
 
         self.draw_corner_box();
     }
 
-    /// Phase 3: selection outline, extend preview, clipboard ants,
-    /// point-mode range, formula-ref highlights. Does **not** clear the
-    /// canvas — caller owns the clear (overlay layer needs transparent bg).
+    /// Paint the overlay layer: selection outline + autofill handle, header
+    /// highlights, extend preview, clipboard marching ants, point-mode range,
+    /// formula-ref highlights. Does **not** clear the canvas — caller owns
+    /// the clear (overlay layer needs transparent bg).
     pub(crate) fn render_overlays(
         &mut self,
         model: &dyn CanvasModel,

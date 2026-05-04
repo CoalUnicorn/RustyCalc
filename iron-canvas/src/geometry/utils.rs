@@ -3,14 +3,14 @@ use crate::{
     CanvasModel,
 };
 
-/// Row height for `row` on `sheet`, falling back to `DEFAULT_ROW_HEIGHT`.
+/// Row height for `row`, falling back to `DEFAULT_ROW_HEIGHT`.
 #[inline]
 pub fn row_height(m: &dyn CanvasModel, row: i32) -> f64 {
     m.get_row_height(m.get_selected_sheet(), row)
         .unwrap_or(DEFAULT_ROW_HEIGHT)
 }
 
-/// Column width for `col` on `sheet`, falling back to `DEFAULT_COL_WIDTH`.
+/// Column width for `col`, falling back to `DEFAULT_COL_WIDTH`.
 #[inline]
 pub fn col_width(m: &dyn CanvasModel, col: i32) -> f64 {
     m.get_column_width(m.get_selected_sheet(), col)

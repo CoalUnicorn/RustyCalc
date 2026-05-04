@@ -28,7 +28,7 @@ fn backing_size_at_1x_dpr_equals_css() {
 
 #[test]
 fn backing_size_truncates_fractional_pixels() {
-    // (100.3 * 1.5) = 150.45 → truncates to 150; (50.7 * 1.5) = 76.05 → 76
+    // (100.3 * 1.5) = 150.45 -> truncates to 150; (50.7 * 1.5) = 76.05 -> 76
     assert_eq!(
         CanvasSize { w: 100.3, h: 50.7 }.to_backing_size(1.5),
         (150, 76)

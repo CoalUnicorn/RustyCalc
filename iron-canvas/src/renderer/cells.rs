@@ -1,8 +1,11 @@
-//! Cell painting - pure pixel pusher.
+//! Cell painting.
 //!
-//! `render_pane` iterates the resolved-paint stream from `CellPaintsIter`
-//! and hands each `CellPaint` to `paint_cell`. Nothing in this file talks
-//! to the model: bg, borders, and text are pre-resolved upstream.
+//! `render_pane` walks one frozen-pane quadrant in four deferred sub-passes
+//! over the same `CellPaint` slots: bg -> grid borders -> explicit borders ->
+//! text. `CellPaint` carries the cell's address, pixel rect, and `Style`
+//! pre-fetched by `CellPaintsIter`; `BorderPaint::resolve` and
+//! `TextPaint::resolve` run inside their respective sub-passes so border
+//! and text work happens only on cells that reach them.
 
 use std::ops::RangeInclusive;
 
@@ -38,7 +41,7 @@ impl CanvasRenderer {
     /// The grid sub-pass runs across all cells before the explicit-border
     /// sub-pass so an explicit `BorderItem::right` on cell A wins over
     /// cell B's grid left at the shared pixel column (paint order: grid
-    /// across all → explicit across all → A.right strokes last on the
+    /// across all -> explicit across all -> A.right strokes last on the
     /// shared edge). Text remains the final pass so overflow is never
     /// clipped by a neighbour's bg.
     pub(super) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion) {
@@ -261,7 +264,7 @@ impl BorderPaint {
 }
 
 impl BorderStroke {
-    /// Map `BorderStyle` → pixel width + double-line flag.
+    /// Map `BorderStyle` -> pixel width + double-line flag.
     /// Dashed/dotted patterns degrade to solid 1 px in v1.
     fn from_border_style(s: &BorderStyle) -> Self {
         match s {

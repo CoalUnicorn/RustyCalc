@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
-#![allow(clippy::panic_used)]
+#![allow(clippy::panic_in_result_fn)]
 
 // Test fixture - a configurable in-memory CanvasModel.
 //
@@ -207,7 +207,7 @@ fn col_to_x_past_frozen_seam_uses_frozen_offset_and_left_column() {
     };
     let frame = FrameContext::current(&m, test_canvas());
     let origin_x = frame.frozen.offset.x;
-    // col 5 is the first scrollable on screen → at the frozen offset
+    // col 5 is the first scrollable on screen -> at the frozen offset
     assert_eq!(frame.col_to_x(5), origin_x);
     assert_eq!(frame.col_to_x(6), origin_x + DEFAULT_COL_WIDTH);
 }
@@ -382,7 +382,7 @@ fn hit_test_cell_in_grid() {
 fn resize_handle_at_off_strip_is_none() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas());
-    // Inside cell grid → no resize handle
+    // Inside cell grid -> no resize handle
     assert!(frame
         .resize_handle_at(HEADER_COL_WIDTH + 50.0, HEADER_ROW_HEIGHT + 50.0, 4.0)
         .is_none());
