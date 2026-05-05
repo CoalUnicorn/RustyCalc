@@ -20,12 +20,12 @@ use crate::{CanvasModel, CanvasSize};
 
 use super::super::geometry::frame::FrameContext;
 use super::super::types::coord::{CellAddress, RCRange};
-use super::CanvasRenderer;
+use super::RendererCore;
 use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
 use ironcalc_base::types::{BorderItem, BorderStyle, Style};
 
-impl CanvasRenderer {
+impl RendererCore {
     /// Walk one frozen-pane quadrant in four deferred passes:
     /// bg -> grid borders -> explicit borders -> text.
     ///
@@ -48,22 +48,23 @@ impl CanvasRenderer {
         &self,
         model: &dyn CanvasModel,
         pane: PaneRegion,
-        canvas: CanvasSize,
+        frame: &FrameContext,
     ) {
+        let theme = &frame.theme;
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
-        for p in self.paints_in(model, &pane, canvas) {
-            self.paint_bg(&p);
+        for p in self.paints_in(model, &pane, frame) {
+            self.paint_bg(&p, theme);
             slots.push(p);
         }
         for p in &slots {
-            self.paint_borders_grid(p);
+            self.paint_borders_grid(p, theme);
         }
         for p in &slots {
-            self.paint_borders_explicit(p);
+            self.paint_borders_explicit(p, theme);
         }
         for p in &slots {
-            if let Some(tp) = TextPaint::resolve(self, model, p.addr, p.rect, &p.style) {
+            if let Some(tp) = TextPaint::resolve(self, model, p.addr, p.rect, theme, &p.style) {
                 self.paint_text(&tp);
             }
         }
@@ -71,13 +72,13 @@ impl CanvasRenderer {
     }
 
     /// Fill a cell's background rectangle. Border pass is separate (batched).
-    pub(super) fn paint_bg(&self, p: &CellPaint) {
+    pub(super) fn paint_bg(&self, p: &CellPaint, theme: &CanvasTheme) {
         // Theme-fallback path uses set_fill_static so the pointer-eq fast path
         // in CachedColor::matches_static fires when the same theme color
         // repeats across cells.
         match p.style.fill.fg_color.as_deref() {
             Some(c) => self.set_fill_cached(c),
-            None => self.set_fill_static(self.theme().cell_bg),
+            None => self.set_fill_static(theme.cell_bg),
         }
         let (x, y, w, h) = p.rect.as_f64_tuple();
         self.ctx_ref().fill_rect(x, y, w, h);
@@ -86,20 +87,19 @@ impl CanvasRenderer {
     /// Paint bg + borders for one resolved `CellPaint`. Used by
     /// `repaint_active_cell` where a single-cell batch is not worth the
     /// overhead; the main pane pass uses `paint_borders`.
-    pub(super) fn paint_cell(&self, p: &CellPaint) {
-        self.paint_bg(p);
-        self.paint_borders(p);
+    pub(super) fn paint_cell(&self, p: &CellPaint, theme: &CanvasTheme) {
+        self.paint_bg(p, theme);
+        self.paint_borders(p, theme);
     }
 
     /// Grid-fallback strokes on left+top
-    fn paint_borders_grid(&self, p: &CellPaint) {
+    fn paint_borders_grid(&self, p: &CellPaint, theme: &CanvasTheme) {
         if !self.frame_cache.show_grid.get() {
             return;
         }
         if p.style.fill.fg_color.is_some() {
             return;
         }
-        let theme = self.theme();
         let b = &p.style.border;
         if b.left.is_none() {
             self.paint_border(BorderEdge::Left, p.rect, &BorderPaint::grid_line(theme));
@@ -112,8 +112,7 @@ impl CanvasRenderer {
     /// Stroke any explicit `BorderItem`s on the cell's four edges. Run
     /// across every slot AFTER the grid sub-pass so an explicit right on
     /// cell A wins over cell B's grid left at the shared pixel column.
-    fn paint_borders_explicit(&self, p: &CellPaint) {
-        let theme = self.theme();
+    fn paint_borders_explicit(&self, p: &CellPaint, theme: &CanvasTheme) {
         let b = &p.style.border;
         if let Some(item) = &b.left {
             self.paint_border(BorderEdge::Left, p.rect, &BorderPaint::resolve(item, theme));
@@ -141,9 +140,9 @@ impl CanvasRenderer {
     /// are no neighbour interactions to worry about. Composes the two
     /// sub-passes in their canonical order: grid fallback first, explicit
     /// over the top.
-    pub(super) fn paint_borders(&self, p: &CellPaint) {
-        self.paint_borders_grid(p);
-        self.paint_borders_explicit(p);
+    pub(super) fn paint_borders(&self, p: &CellPaint, theme: &CanvasTheme) {
+        self.paint_borders_grid(p, theme);
+        self.paint_borders_explicit(p, theme);
     }
 
     /// Stroke one resolved border. `Double`-style borders render as two
@@ -182,8 +181,9 @@ impl CanvasRenderer {
         else {
             return;
         };
-        self.paint_cell(&paint);
-        if let Some(t) = TextPaint::resolve(self, model, addr, rect, &paint.style) {
+        let theme = &frame.theme;
+        self.paint_cell(&paint, theme);
+        if let Some(t) = TextPaint::resolve(self, model, addr, rect, theme, &paint.style) {
             self.paint_text(&t);
         }
     }
@@ -201,7 +201,7 @@ impl CellPaint {
     /// Takes Style by value — the caller's owned copy is moved straight through
     /// to the paint, eliminating the per-cell clone on the hot pane walk.
     pub fn resolve_cell_paint(
-        _renderer: &CanvasRenderer,
+        _renderer: &RendererCore,
         slot: CellSlot,
         own_style: Style,
     ) -> Option<CellPaint> {
@@ -383,19 +383,19 @@ impl<'a> Iterator for PaneCells<'a> {
 /// queries the model.
 pub(crate) struct CellPaintsIter<'a> {
     slots: PaneCells<'a>,
-    renderer: &'a CanvasRenderer,
+    renderer: &'a RendererCore,
     model: &'a dyn CanvasModel,
 }
 
 impl<'a> CellPaintsIter<'a> {
     pub(crate) fn new(
-        renderer: &'a CanvasRenderer,
+        renderer: &'a RendererCore,
         model: &'a dyn CanvasModel,
         pane: &'a PaneRegion,
-        canvas: CanvasSize,
+        frame: &'a FrameContext,
     ) -> Self {
         Self {
-            slots: pane.cells(model, canvas),
+            slots: pane.cells(model, frame.canvas_size),
             renderer,
             model,
         }

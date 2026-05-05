@@ -4,9 +4,10 @@ mod overlay;
 pub(crate) use grid::GridLayer;
 pub(crate) use overlay::OverlayLayer;
 pub use overlay::RenderOverlays;
-use web_sys::HtmlCanvasElement;
+use wasm_bindgen::{JsCast, JsValue};
+use web_sys::{js_sys, CanvasRenderingContext2d, HtmlCanvasElement};
 
-use crate::CanvasRenderer;
+use crate::renderer::LayerOps;
 use crate::CanvasSize;
 
 pub(crate) struct PaintGate {
@@ -15,14 +16,38 @@ pub(crate) struct PaintGate {
     pub(crate) paint_count: u32,
 }
 
-pub(crate) struct LayerBase {
+pub(crate) struct LayerBase<R: LayerOps> {
     pub(crate) canvas: HtmlCanvasElement,
     gate: PaintGate,
-    pub(crate) renderer: CanvasRenderer,
+    pub(crate) renderer: R,
 }
 
-impl LayerBase {
-    pub(crate) fn new(canvas: HtmlCanvasElement, renderer: CanvasRenderer) -> Self {
+/// Build the 2D context with the given options. Both layers want the same
+/// `js_sys::Object` + `Reflect::set` dance; only the booleans differ. Grid
+/// uses `alpha: false` for opaque compositing; overlay uses
+/// `alpha: true, desynchronized: true` so transparent updates can land
+/// without a full present. Free fn rather than a method on `LayerBase<R>`
+/// because R can't be inferred at the create-time call site.
+pub(crate) fn create_2d_context(
+    canvas: &HtmlCanvasElement,
+    alpha: bool,
+    desynchronized: bool,
+) -> Result<CanvasRenderingContext2d, JsValue> {
+    let ctx_opts = js_sys::Object::new();
+    js_sys::Reflect::set(&ctx_opts, &"alpha".into(), &JsValue::from(alpha))
+        .map_err(|_| JsValue::from_str("failed to set canvas context alpha option"))?;
+    if desynchronized {
+        js_sys::Reflect::set(&ctx_opts, &"desynchronized".into(), &JsValue::from(true))
+            .map_err(|_| JsValue::from_str("failed to set canvas context desynchronized option"))?;
+    }
+    canvas
+        .get_context_with_context_options("2d", &ctx_opts)?
+        .ok_or_else(|| JsValue::from_str("canvas 2d context unavailable"))
+        .map(|c| c.unchecked_into::<CanvasRenderingContext2d>())
+}
+
+impl<R: LayerOps> LayerBase<R> {
+    pub(crate) fn new(canvas: HtmlCanvasElement, renderer: R) -> Self {
         Self {
             canvas,
             gate: PaintGate::new(),

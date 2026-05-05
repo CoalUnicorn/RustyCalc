@@ -2,7 +2,7 @@
 //!
 //! Owns layout (font metrics, line wrap, per-line positioning). The output
 //! `TextPaint` is the renderer-ready snapshot consumed by
-//! `CanvasRenderer::paint_text`. Per the `*Paint` convention, every
+//! `RendererCore::paint_text`. Per the `*Paint` convention, every
 //! allocation that depends on cell content lives here, not at paint time.
 
 use std::rc::Rc;
@@ -11,7 +11,7 @@ use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignme
 use web_sys::CanvasRenderingContext2d;
 
 use crate::geometry::pixel_rect::PixelRect;
-use crate::renderer::CanvasRenderer;
+use crate::renderer::RendererCore;
 use crate::theme::CanvasTheme;
 use crate::types::coord::{CellAddress, CssColor};
 use crate::CanvasModel;
@@ -58,10 +58,11 @@ impl TextPaint {
     /// cells. Reads the formatted value from the model and resolves font /
     /// alignment / colour via `CellTextStyle`.
     pub fn resolve(
-        renderer: &CanvasRenderer,
+        renderer: &RendererCore,
         model: &dyn CanvasModel,
         addr: CellAddress,
         rect: PixelRect,
+        theme: &CanvasTheme,
         style: &Style,
     ) -> Option<TextPaint> {
         let text = model.get_formatted_cell_value(addr.sheet, addr.row, addr.column)?;
@@ -84,7 +85,7 @@ impl TextPaint {
             addr.sheet,
             addr.row,
             addr.column,
-            renderer.theme(),
+            theme,
             style,
         );
 

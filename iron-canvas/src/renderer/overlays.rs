@@ -16,7 +16,7 @@ use crate::CanvasModel;
 
 use super::super::geometry::constants::AUTOFILL_HANDLE_BORDER_PX;
 use super::super::types::coord::CellAddress;
-use super::{CanvasRenderer, FrameContext};
+use super::{RendererCore, FrameContext};
 
 /// Controls whether `draw_dashed_range` fills the interior with a light tint.
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub(crate) enum DashFill {
     Tinted(&'static str),
 }
 
-impl CanvasRenderer {
+impl RendererCore {
     /// Draw the blue selection border, semi-transparent fill, and autofill
     /// handle for the current selection.
     pub(super) fn draw_selection(&self, model: &dyn CanvasModel, frame: &FrameContext) {
@@ -44,14 +44,14 @@ impl CanvasRenderer {
             return;
         };
 
-        self.rect_fill(b, self.theme.selection_fill);
+        self.rect_fill(b, frame.theme.selection_fill);
 
         // Restore the active cell's fill + borders on top of the selection
         // tint so its actual style shows through while selected. Phase 4
         // paints text over everything later.
         self.repaint_active_cell(model, addr, frame);
 
-        self.rect_stroke(b, self.theme.selection_color, SELECTION_BORDER_WIDTH);
+        self.rect_stroke(b, frame.theme.selection_color, SELECTION_BORDER_WIDTH);
 
         // Autofill handle: top-left at the selection's bottom-right corner
         // (Excel anchor — pokes outside the selection). Filled with
@@ -60,8 +60,8 @@ impl CanvasRenderer {
         // returns None there, matching `autofill_handle()` semantics.
         let handle = frame.autofill_handle_rect();
 
-        self.rect_fill(handle, self.theme.selection_color);
-        self.rect_stroke(handle, self.theme.cell_bg, AUTOFILL_HANDLE_BORDER_PX);
+        self.rect_fill(handle, frame.theme.selection_color);
+        self.rect_stroke(handle, frame.theme.cell_bg, AUTOFILL_HANDLE_BORDER_PX);
     }
 
     /// Dashed preview of the autofill-handle drag target.
@@ -82,7 +82,7 @@ impl CanvasRenderer {
             return;
         };
 
-        self.rect_dashed(b, self.theme.selection_color, STANDARD_BORDER_WIDTH);
+        self.rect_dashed(b, frame.theme.selection_color, STANDARD_BORDER_WIDTH);
     }
 
     /// Clipboard marching-ants border around the last Ctrl+C copied range.
@@ -101,7 +101,7 @@ impl CanvasRenderer {
         self.draw_dashed_range(
             frame,
             cb.range.normalized(),
-            self.theme.selection_color,
+            frame.theme.selection_color,
             DashFill::Outline,
         );
     }
@@ -112,8 +112,8 @@ impl CanvasRenderer {
         self.draw_dashed_range(
             frame,
             pr.normalized(),
-            self.theme.pointing,
-            DashFill::Tinted(self.theme.pointing_tint),
+            frame.theme.pointing,
+            DashFill::Tinted(frame.theme.pointing_tint),
         );
     }
 

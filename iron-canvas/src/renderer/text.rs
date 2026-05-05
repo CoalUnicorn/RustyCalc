@@ -5,7 +5,7 @@
 //! pre-computed `TextPaint` onto the canvas: fill each line, then
 //! optionally stroke an underline / strike.
 
-use super::CanvasRenderer;
+use super::RendererCore;
 
 use crate::{
     geometry::constants::STANDARD_BORDER_WIDTH,
@@ -18,7 +18,7 @@ use crate::{
 const UNDERLINE_OFFSET_FACTOR: f64 = 0.35;
 const MIN_UNDERLINE_OFFSET: i32 = 2;
 
-impl CanvasRenderer {
+impl RendererCore {
     /// Paint a pre-computed `TextPaint` onto the canvas. Pure pixel pusher:
     /// no model access, no layout work - everything is already resolved.
     pub(super) fn paint_text(&self, t: &TextPaint) {

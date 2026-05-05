@@ -9,6 +9,7 @@ use crate::{
         prim::Point,
         utils::{col_width, row_height},
     },
+    theme::CanvasTheme,
     types::ui::{HitTest, ResizeTarget},
     CanvasModel, CanvasSize, RCRange,
 };
@@ -56,6 +57,11 @@ pub(crate) struct FrameContext {
     /// Canvas size at which this frame was built. Stored so `is_still_valid`
     /// can detect a resize without the orchestrator passing size separately.
     pub canvas_size: CanvasSize,
+    /// Theme this frame was painted with. Snapshot mirrors `canvas_size`:
+    /// renderer methods read `frame.theme.*` instead of holding a renderer
+    /// field. `IronCanvas::set_theme` marks both layers dirty on change, so
+    /// the overlay-only fast path never paints against a stale theme.
+    pub theme: CanvasTheme,
 }
 
 impl FrameContext {
@@ -65,7 +71,11 @@ impl FrameContext {
     /// scrollable prefix sums are all built in one model-walk per axis instead
     /// of the two separate walks the old `compute_visible_region` +
     /// `compute_pixel_offsets` pair required.
-    pub(crate) fn current(model: &dyn CanvasModel, canvas: CanvasSize) -> Self {
+    pub(crate) fn current(
+        model: &dyn CanvasModel,
+        canvas: CanvasSize,
+        theme: CanvasTheme,
+    ) -> Self {
         let view = model.get_selected_view();
         let frozen = FrozenRC::from_model(model);
 
@@ -164,6 +174,7 @@ impl FrameContext {
             left_column: view.left_column,
             selection_range: view.selection,
             canvas_size: canvas,
+            theme,
         }
     }
 

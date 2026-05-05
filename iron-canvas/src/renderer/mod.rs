@@ -10,24 +10,24 @@
 //! # Lifecycle
 //!
 //! Two stacked `<canvas>` elements are wrapped by [`crate::IronCanvas`];
-//! each canvas owns a `LayerBase` (canvas + `PaintGate` + `CanvasRenderer`).
+//! each canvas owns a `LayerBase` (canvas + `PaintGate` + `RendererCore`).
 //! `GridLayer` builds its 2D context with `alpha: false` (opaque, skips
 //! alpha compositing); `OverlayLayer` uses `alpha: true, desynchronized: true`.
 //! The renderer is **long-lived per layer** — it owns the 2D ctx, so the
 //! cached fill/stroke/font/line-width state persists across frames.
 //!
 //! State pushes from JS mark layers dirty; `IronCanvas::paint_if_dirty`
-//! drives each dirty layer's `paint`, which calls into [`CanvasRenderer::render_grid`]
-//! / [`CanvasRenderer::render_overlays`].
+//! drives each dirty layer's `paint`, which calls into [`RendererCore::render_grid`]
+//! / [`RendererCore::render_overlays`].
 //!
 //! # Render pipeline
 //!
 //! Two paint entry points, each driven by `paint_if_dirty` per dirty layer:
 //!
-//! - [`CanvasRenderer::render_grid`] — cells (4 frozen-pane quadrants, each
+//! - [`RendererCore::render_grid`] — cells (4 frozen-pane quadrants, each
 //!   running 4 cell sub-passes: bg -> grid borders -> explicit borders -> text),
 //!   frozen separators, headers, corner box.
-//! - [`CanvasRenderer::render_overlays`] — selection rectangle + autofill handle,
+//! - [`RendererCore::render_overlays`] — selection rectangle + autofill handle,
 //!   header highlights, extend preview, clipboard marching ants, point-mode
 //!   range, formula-ref highlights.
 //!
@@ -70,22 +70,25 @@ use std::cell::Cell;
 use web_sys::js_sys;
 use web_sys::CanvasRenderingContext2d;
 
-use super::geometry::CanvasSize;
 use crate::geometry::frame::FrameContext;
 use crate::geometry::prim::Axis;
 use crate::layer::RenderOverlays;
 use crate::renderer::cache::CachedColor;
 use crate::renderer::cache::FrameCache;
 use crate::renderer::cells::CellPaintsIter;
-use crate::theme::CanvasTheme;
 use crate::CanvasModel;
 pub(crate) use cache::FontIntern;
 pub(crate) use pane::PaneRegion;
 
-pub struct CanvasRenderer {
+/// Shared renderer core. Holds the 2D ctx, dpr, paint caches, and font intern,
+/// plus every drawing primitive. The two layer wrappers (`GridRenderer`,
+/// `OverlayRenderer`) each own a `RendererCore` and re-export only the entry
+/// point that belongs to their layer — `render_grid` for the grid, `render_overlays`
+/// for the overlay. This keeps each layer's public surface honest: a grid layer
+/// cannot accidentally call `render_overlays` and vice versa.
+pub(crate) struct RendererCore {
     ctx: CanvasRenderingContext2d,
     dpr: i32,
-    theme: CanvasTheme,
     /// Cached dash pattern passed to `set_line_dash` on every dashed stroke
     /// (clipboard ants, point-mode range, formula refs).
     /// Single overlay pass can hit this N times per frame.
@@ -100,18 +103,12 @@ pub struct CanvasRenderer {
     pub(in crate::renderer) font_intern: FontIntern,
 }
 
-impl CanvasRenderer {
+impl RendererCore {
     /// Borrow the canvas 2D context (for measurement + font setup during
     /// paint resolution in `crate::types`).
     #[inline]
     pub(crate) fn ctx_ref(&self) -> &CanvasRenderingContext2d {
         &self.ctx
-    }
-
-    /// Borrow the active theme (for paint resolution in `crate::types`).
-    #[inline]
-    pub(crate) fn theme(&self) -> &CanvasTheme {
-        &self.theme
     }
 
     /// Stream of `CellPaint` for a pane. Each yielded paint carries the
@@ -122,23 +119,22 @@ impl CanvasRenderer {
         &'a self,
         model: &'a dyn CanvasModel,
         pane: &'a PaneRegion,
-        canvas: CanvasSize,
+        frame: &'a FrameContext,
     ) -> CellPaintsIter<'a> {
-        CellPaintsIter::new(self, model, pane, canvas)
+        CellPaintsIter::new(self, model, pane, frame)
     }
 
     /// Layer-friendly constructor: caller owns canvas sizing + DPR scaling.
     ///
     /// Used by `GridLayer` / `OverlayLayer`, which build their own ctx with
     /// alpha/desynchronized options and apply DPR scale in their own
-    /// `resize()`. This keeps a long-lived `CanvasRenderer` whose ctx is the
-    /// layer's ctx — paint caches survive across frames. Canvas size lives
-    /// on the per-frame `FrameContext`, not on the renderer.
-    pub(crate) fn for_layer(ctx: CanvasRenderingContext2d, theme: CanvasTheme) -> Self {
+    /// `resize()`. This keeps a long-lived `RendererCore` whose ctx is the
+    /// layer's ctx — paint caches survive across frames. Canvas size and
+    /// theme both live on the per-frame `FrameContext`, not on the renderer.
+    pub(crate) fn for_layer(ctx: CanvasRenderingContext2d) -> Self {
         Self {
             ctx,
             dpr: 1,
-            theme,
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
             frame_cache: FrameCache {
@@ -192,12 +188,6 @@ impl CanvasRenderer {
         self.ctx.set_text_baseline("middle");
     }
 
-    /// Live theme swap. `CanvasTheme` is `Copy` so this is a simple field
-    /// replace.
-    pub(crate) fn set_theme(&mut self, theme: CanvasTheme) {
-        self.theme = theme;
-    }
-
     /// Paint the grid layer: cells (per quadrant), frozen separators,
     /// headers, corner box. Does **not** clear the canvas — caller owns
     /// the clear so layer-owned renderers can paint a background fill
@@ -211,11 +201,10 @@ impl CanvasRenderer {
             .show_grid
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
 
-        let canvas = frame.canvas_size;
-        self.render_pane(model, PaneRegion::top_left(&frame.frozen), canvas);
-        self.render_pane(model, PaneRegion::top_right(&frame.frozen, &frame.vis), canvas);
-        self.render_pane(model, PaneRegion::bottom_left(&frame.frozen, &frame.vis), canvas);
-        self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis), canvas);
+        self.render_pane(model, PaneRegion::top_left(&frame.frozen), frame);
+        self.render_pane(model, PaneRegion::top_right(&frame.frozen, &frame.vis), frame);
+        self.render_pane(model, PaneRegion::bottom_left(&frame.frozen, &frame.vis), frame);
+        self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis), frame);
 
         // Frozen separators paint AFTER cells so the thick divider wins
         // its pixels over the rightmost/bottommost frozen cell's grid stroke.
@@ -224,7 +213,7 @@ impl CanvasRenderer {
         self.render_headers_base(Axis::Row, frame);
         self.render_headers_base(Axis::Column, frame);
 
-        self.draw_corner_box(canvas);
+        self.draw_corner_box(frame);
     }
 
     /// Paint the overlay layer: selection outline + autofill handle, header
@@ -254,5 +243,83 @@ impl CanvasRenderer {
         if !overlays.formula_refs.is_empty() {
             self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
         };
+    }
+}
+
+// Layer-facing wrappers
+//
+// `GridRenderer` and `OverlayRenderer` each own a `RendererCore` and re-export
+// only the operations their layer is allowed to perform. `LayerOps` is the
+// shared subset (`ctx_ref` for clear/fill, `set_dpr`/`invalidate_paint_cache`
+// for resize); the only divergence is the entry point — `render_grid` vs
+// `render_overlays`. Calling one on the wrong layer is a compile error,
+// not a runtime mistake.
+
+/// The slice of `RendererCore` that both layers need access to during
+/// `LayerBase::resize` and per-layer paint setup.
+pub(crate) trait LayerOps {
+    fn ctx_ref(&self) -> &CanvasRenderingContext2d;
+    fn set_dpr(&mut self, dpr: i32);
+    fn invalidate_paint_cache(&mut self);
+}
+
+pub(crate) struct GridRenderer {
+    core: RendererCore,
+}
+
+impl GridRenderer {
+    pub(crate) fn for_layer(ctx: CanvasRenderingContext2d) -> Self {
+        Self {
+            core: RendererCore::for_layer(ctx),
+        }
+    }
+
+    pub(crate) fn render_grid(&mut self, model: &dyn CanvasModel, frame: &FrameContext) {
+        self.core.render_grid(model, frame);
+    }
+}
+
+impl LayerOps for GridRenderer {
+    fn ctx_ref(&self) -> &CanvasRenderingContext2d {
+        self.core.ctx_ref()
+    }
+    fn set_dpr(&mut self, dpr: i32) {
+        self.core.set_dpr(dpr);
+    }
+    fn invalidate_paint_cache(&mut self) {
+        self.core.invalidate_paint_cache();
+    }
+}
+
+pub(crate) struct OverlayRenderer {
+    core: RendererCore,
+}
+
+impl OverlayRenderer {
+    pub(crate) fn for_layer(ctx: CanvasRenderingContext2d) -> Self {
+        Self {
+            core: RendererCore::for_layer(ctx),
+        }
+    }
+
+    pub(crate) fn render_overlays(
+        &mut self,
+        model: &dyn CanvasModel,
+        overlays: &RenderOverlays,
+        frame: &FrameContext,
+    ) {
+        self.core.render_overlays(model, overlays, frame);
+    }
+}
+
+impl LayerOps for OverlayRenderer {
+    fn ctx_ref(&self) -> &CanvasRenderingContext2d {
+        self.core.ctx_ref()
+    }
+    fn set_dpr(&mut self, dpr: i32) {
+        self.core.set_dpr(dpr);
+    }
+    fn invalidate_paint_cache(&mut self) {
+        self.core.invalidate_paint_cache();
     }
 }

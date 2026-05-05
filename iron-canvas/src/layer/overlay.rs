@@ -1,10 +1,10 @@
-use wasm_bindgen::{JsCast, JsValue};
-use web_sys::{js_sys, CanvasRenderingContext2d, HtmlCanvasElement};
+use wasm_bindgen::JsValue;
+use web_sys::HtmlCanvasElement;
 
-use crate::layer::LayerBase;
-use crate::theme::{CanvasTheme, LIGHT};
+use crate::layer::{create_2d_context, LayerBase};
+use crate::renderer::{LayerOps, OverlayRenderer};
 use crate::types::coord::{AutofillTarget, SheetArea};
-use crate::{CanvasModel, CanvasRenderer, FormulaRef, RCRange};
+use crate::{CanvasModel, FormulaRef, RCRange};
 
 use crate::geometry::frame::FrameContext;
 
@@ -25,23 +25,13 @@ pub struct RenderOverlays {
 }
 
 pub(crate) struct OverlayLayer {
-    base: LayerBase,
+    base: LayerBase<OverlayRenderer>,
 }
 
 impl OverlayLayer {
     pub(crate) fn create(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
-        let ctx_opts = js_sys::Object::new();
-
-        js_sys::Reflect::set(&ctx_opts, &"alpha".into(), &JsValue::from(true))
-            .map_err(|_| JsValue::from_str("failed to set overlay context alpha option"))?;
-        js_sys::Reflect::set(&ctx_opts, &"desynchronized".into(), &JsValue::from(true)).map_err(
-            |_| JsValue::from_str("failed to set overlay context desynchronized option"),
-        )?;
-        let ctx = canvas
-            .get_context_with_context_options("2d", &ctx_opts)?
-            .ok_or_else(|| JsValue::from_str("overlay canvas 2d context unavailable"))?
-            .unchecked_into::<CanvasRenderingContext2d>();
-        let renderer = CanvasRenderer::for_layer(ctx, LIGHT);
+        let ctx = create_2d_context(&canvas, true, true)?;
+        let renderer = OverlayRenderer::for_layer(ctx);
         Ok(Self {
             base: LayerBase::new(canvas, renderer),
         })
@@ -57,12 +47,10 @@ impl OverlayLayer {
 
     pub(crate) fn paint(
         &mut self,
-        theme: CanvasTheme,
         overlays: &RenderOverlays,
         model: &dyn CanvasModel,
         frame: &FrameContext,
     ) {
-        self.base.renderer.set_theme(theme);
         let size = frame.canvas_size;
         self.base
             .renderer

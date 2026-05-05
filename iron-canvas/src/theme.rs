@@ -33,7 +33,7 @@ pub const FORMULA_REF_TINTS: &[&str] = &[
 
 /// Concrete color strings for the Canvas 2D rendering context.
 /// One static instance per theme; passed into `CanvasRenderer::new()`.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub struct CanvasTheme {
     pub grid_color: &'static str,
     pub grid_separator_color: &'static str,

@@ -12,9 +12,9 @@ use crate::geometry::{
     prim::{Line, Span},
 };
 
-use super::{CachedColor, CanvasRenderer};
+use super::{CachedColor, RendererCore};
 
-impl CanvasRenderer {
+impl RendererCore {
     /// Fill `rect` with a solid color.
     pub(super) fn rect_fill(&self, rect: PixelRect, color: &str) {
         self.set_fill_cached(color);

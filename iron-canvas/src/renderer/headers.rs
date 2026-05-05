@@ -2,7 +2,7 @@
 //! separator strokes.
 //!
 //! The inline corner box + separator drawing used to live in `render()`.
-//! Both are now `CanvasRenderer` methods so the main render loop reads as
+//! Both are now `RendererCore` methods so the main render loop reads as
 //! a sequence of intent-revealing calls: `draw_frozen_separators(&frc)`,
 //! `draw_corner_box()`, `render_row_headers(...)`, ... .
 
@@ -11,22 +11,21 @@ use crate::geometry::frame::FrameContext;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point, Span};
 use crate::geometry::utils::col_name;
-use crate::geometry::CanvasSize;
 
 use super::super::geometry::constants::{FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 
-use super::CanvasRenderer;
+use super::RendererCore;
 
 const HEADER_FONT: &str = "bold 12px Inter, Arial, sans-serif";
 
-impl CanvasRenderer {
+impl RendererCore {
     /// Thick separator strokes between frozen bands and the scrollable grid.
     pub(super) fn draw_frozen_separators(&self, frame: &FrameContext) {
         let frc = &frame.frozen;
         if frc.rows == 0 && frc.cols == 0 {
             return;
         }
-        self.set_stroke_static(self.theme.grid_separator_color);
+        self.set_stroke_static(frame.theme.grid_separator_color);
 
         let sep_y = frc.offset.y - FROZEN_SEP / 2 + HEADER_OFFSET;
         let sep_x = frc.offset.x - FROZEN_SEP / 2 + HEADER_OFFSET;
@@ -57,20 +56,20 @@ impl CanvasRenderer {
 
     /// Top-left blank square plus the two axis lines that separate the
     /// header strips from the cell area.
-    pub(super) fn draw_corner_box(&self, canvas: CanvasSize) {
+    pub(super) fn draw_corner_box(&self, frame: &FrameContext) {
         let corner = PixelRect {
             top_left: Point { x: 0, y: 0 },
             width: HEADER_COL_WIDTH,
             height: HEADER_ROW_HEIGHT,
         };
-        self.rect_fill(corner, self.theme.header_bg);
+        self.rect_fill(corner, frame.theme.header_bg);
 
-        self.set_stroke_static(self.theme.header_border_color);
+        self.set_stroke_static(frame.theme.header_border_color);
         self.set_line_width_cached(STANDARD_BORDER_WIDTH);
         self.stroke_hline(
             Span {
                 from: 0,
-                to: canvas.w as i32,
+                to: frame.canvas_size.w as i32,
             },
             f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET),
         );
@@ -78,7 +77,7 @@ impl CanvasRenderer {
             f64::from(HEADER_COL_WIDTH + HEADER_OFFSET),
             Span {
                 from: 0,
-                to: canvas.h as i32,
+                to: frame.canvas_size.h as i32,
             },
         );
     }
@@ -87,7 +86,7 @@ impl CanvasRenderer {
     pub(super) fn render_headers_base(&self, axis: Axis, frame: &FrameContext) {
         self.set_font_static(HEADER_FONT);
         self.walk_header_strip(axis, frame, |this, i, along, t| {
-            this.draw_header_cell(axis, i, along, t, false);
+            this.draw_header_cell(axis, frame, i, along, t, false);
         });
     }
 
@@ -97,7 +96,7 @@ impl CanvasRenderer {
         let (sel_start, sel_end) = axis.selection_range(frame.selection_range);
         self.walk_header_strip(axis, frame, |this, i, along, t| {
             if i >= sel_start && i <= sel_end {
-                this.draw_header_cell(axis, i, along, t, true);
+                this.draw_header_cell(axis, frame, i, along, t, true);
             }
         });
     }
@@ -142,16 +141,24 @@ impl CanvasRenderer {
     ///
     /// `along` is the position along the axis (top_y for rows, left_x for cols);
     /// `thickness` is the cell's extent along the same axis (rh / cw).
-    fn draw_header_cell(&self, axis: Axis, index: i32, along: i32, thickness: i32, selected: bool) {
+    fn draw_header_cell(
+        &self,
+        axis: Axis,
+        frame: &FrameContext,
+        index: i32,
+        along: i32,
+        thickness: i32,
+        selected: bool,
+    ) {
         let body_bg = if selected {
-            self.theme.header_selected_bg
+            frame.theme.header_selected_bg
         } else {
-            self.theme.header_bg
+            frame.theme.header_bg
         };
         let text_color = if selected {
-            self.theme.header_selected_color
+            frame.theme.header_selected_color
         } else {
-            self.theme.header_text_color
+            frame.theme.header_text_color
         };
 
         let full = axis.header_rect(along, thickness);
@@ -162,7 +169,7 @@ impl CanvasRenderer {
             Axis::Column => full.inset(1, 0),
         };
 
-        self.rect_fill(full, self.theme.header_border_color);
+        self.rect_fill(full, frame.theme.header_border_color);
         self.rect_fill(body, body_bg);
 
         self.set_fill_static(text_color);

@@ -54,5 +54,4 @@ pub use geometry::{
 pub use layer::RenderOverlays;
 pub use model_adapter::{CanvasModel, CanvasView};
 pub use orchestrator::IronCanvas;
-pub use renderer::CanvasRenderer;
 pub use types::coord::{FormulaRef, RCRange};

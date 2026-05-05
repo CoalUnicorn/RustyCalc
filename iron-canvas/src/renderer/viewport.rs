@@ -8,9 +8,9 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::types::coord::RCRange;
 
-use super::CanvasRenderer;
+use super::RendererCore;
 
-impl CanvasRenderer {
+impl RendererCore {
     /// Map a sheet-coordinate range to canvas pixel bounds, clamping oversized
     /// selections to the canvas edge.
     ///

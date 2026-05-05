@@ -119,7 +119,7 @@ impl IronCanvas {
             match self.last_frame.as_mut() {
                 Some(prev) if prev.is_still_valid(model, self.size) => {
                     prev.refresh_overlay_inputs(model);
-                    self.overlay.paint(self.theme, &self.overlays, model, prev);
+                    self.overlay.paint(&self.overlays, model, prev);
                     return;
                 }
                 _ => grid_dirty = true,
@@ -127,14 +127,13 @@ impl IronCanvas {
         }
 
         // Full rebuild: scroll/freeze/size/sheet changed, or grid is dirty.
-        let frame = FrameContext::current(model, self.size);
+        let frame = FrameContext::current(model, self.size, self.theme);
 
         if grid_dirty {
-            self.grid.paint(self.theme, model, &frame);
+            self.grid.paint(model, &frame);
         }
         if overlay_dirty {
-            self.overlay
-                .paint(self.theme, &self.overlays, model, &frame);
+            self.overlay.paint(&self.overlays, model, &frame);
         }
 
         self.last_frame = Some(frame);
