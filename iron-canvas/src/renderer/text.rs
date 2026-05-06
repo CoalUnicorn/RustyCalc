@@ -9,7 +9,7 @@ use super::RendererCore;
 
 use crate::{
     geometry::constants::STANDARD_BORDER_WIDTH,
-    renderer::text_paint::{TextColor, TextPaint},
+    renderer::text_paint::{TextColor, TextLine, TextPaint},
 };
 
 /// With `textBaseline: "middle"`, `center_y` is the em-square midpoint. The
@@ -20,8 +20,12 @@ const MIN_UNDERLINE_OFFSET: i32 = 2;
 
 impl RendererCore {
     /// Paint a pre-computed `TextPaint` onto the canvas. Pure pixel pusher:
-    /// no model access, no layout work - everything is already resolved.
-    pub(super) fn paint_text(&self, t: &TextPaint) {
+    /// no model access, no layout work — everything is already resolved.
+    /// `lines` is the externally owned line buffer that `TextPaint::resolve_into`
+    /// just filled; passing it alongside `t` keeps the per-cell allocation off
+    /// the path while preserving the old "set state then clip then stroke"
+    /// ordering.
+    pub(super) fn paint_text(&self, t: &TextPaint, lines: &[TextLine]) {
         // Set state before `with_clip` so save/restore preserves it — the values
         // survive the restore and the cache stays valid across consecutive cells
         // that share the same font or color.
@@ -45,7 +49,7 @@ impl RendererCore {
             let underline_offset =
                 (t.font_size_px * UNDERLINE_OFFSET_FACTOR).max(f64::from(MIN_UNDERLINE_OFFSET));
 
-            for line in &t.lines {
+            for line in lines {
                 this.ctx_ref()
                     .fill_text(&line.text, line.center_x, line.center_y)
                     .ok();

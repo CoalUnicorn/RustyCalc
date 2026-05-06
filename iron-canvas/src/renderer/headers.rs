@@ -6,11 +6,12 @@
 //! a sequence of intent-revealing calls: `draw_frozen_separators(&frc)`,
 //! `draw_corner_box()`, `render_row_headers(...)`, ... .
 
+use std::fmt::Write as _;
+
 use crate::geometry::constants::{HEADER_OFFSET, STANDARD_BORDER_WIDTH};
 use crate::geometry::frame::FrameContext;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point, Span};
-use crate::geometry::utils::col_name;
 
 use super::super::geometry::constants::{FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 
@@ -93,6 +94,7 @@ impl RendererCore {
     /// Overlay pass repainting only selected header cells so the grid layer
     /// never redraws on navigation — the base pass beneath stays intact.
     pub(super) fn render_header_highlights(&self, axis: Axis, frame: &FrameContext) {
+        self.set_font_static(HEADER_FONT);
         let (sel_start, sel_end) = axis.selection_range(frame.selection_range);
         self.walk_header_strip(axis, frame, |this, i, along, t| {
             if i >= sel_start && i <= sel_end {
@@ -174,16 +176,22 @@ impl RendererCore {
 
         self.set_fill_static(text_color);
         let center = full.center();
-        let label = match axis {
-            Axis::Row => index.to_string(),
-            Axis::Column => col_name(index),
-        };
-        self.ctx
-            .fill_text(
-                &label,
-                f64::from(self.snap_pixel(center.x)),
-                f64::from(self.snap_pixel(center.y)),
-            )
-            .ok();
+        let snap_x = f64::from(center.x);
+        let snap_y = f64::from(center.y);
+        // Row labels: write the integer into the renderer-owned scratch String
+        // (zero-alloc steady-state). Column labels: pull from the per-renderer
+        // intern (one alloc per unique column over the renderer's lifetime).
+        match axis {
+            Axis::Row => {
+                let mut buf = self.frame_cache.label_buf.borrow_mut();
+                buf.clear();
+                let _ = write!(&mut *buf, "{}", index);
+                self.ctx.fill_text(&buf, snap_x, snap_y).ok();
+            }
+            Axis::Column => {
+                let label = self.col_intern.get(index);
+                self.ctx.fill_text(&label, snap_x, snap_y).ok();
+            }
+        }
     }
 }

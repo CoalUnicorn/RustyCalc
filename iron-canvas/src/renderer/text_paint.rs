@@ -23,8 +23,9 @@ const LINE_HEIGHT_FACTOR: f64 = 2.0;
 const TEXT_V_INSET_PX: f64 = 4.0;
 const CELL_PADDING: f64 = 4.0;
 
-/// Pre-resolved text paint for one cell. Pure pixel inputs - no model access
-/// during paint.
+/// Pre-resolved text paint for one cell. Pure pixel inputs — no model access
+/// during paint. The `Vec<TextLine>` lives on the caller's reusable buffer
+/// (parked on `FrameCache::text_lines`) so resolve never allocates per cell.
 pub(crate) struct TextPaint {
     pub clip: PixelRect,
     /// Interned `ctx.font` string. `Rc::clone` on cache hit; one alloc per
@@ -34,7 +35,6 @@ pub(crate) struct TextPaint {
     pub color: TextColor,
     pub underline: bool,
     pub strike: bool,
-    pub lines: Vec<TextLine>,
 }
 
 /// Per-cell text color split between the zero-alloc theme-default fast path
@@ -54,17 +54,26 @@ pub struct TextLine {
 }
 
 impl TextPaint {
-    /// Build a `TextPaint` for `addr` at `rect`, or `None` for empty/too-small
-    /// cells. Reads the formatted value from the model and resolves font /
-    /// alignment / colour via `CellTextStyle`.
-    pub fn resolve(
+    /// Build a `TextPaint` for `addr` at `rect` and fill `lines` with the
+    /// resolved per-line text/width/position. Returns `None` (with `lines`
+    /// left empty) for empty/too-small cells. Reads the formatted value from
+    /// the model and resolves font / alignment / colour via `CellTextStyle`.
+    ///
+    /// The split between `TextPaint` (per-cell scalars) and the externally
+    /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
+    /// the caller takes the buffer once at the top of `render_pane`, hands it
+    /// to every cell, and parks it back on `FrameCache::text_lines`.
+    pub fn resolve_into(
         renderer: &RendererCore,
         model: &dyn CanvasModel,
         addr: CellAddress,
         rect: PixelRect,
         theme: &CanvasTheme,
         style: &Style,
+        lines: &mut Vec<TextLine>,
     ) -> Option<TextPaint> {
+        lines.clear();
+
         let text = model.get_formatted_cell_value(addr.sheet, addr.row, addr.column)?;
         if text.is_empty() {
             return None;
@@ -80,14 +89,7 @@ impl TextPaint {
             h_align,
             v_align,
             wrap_text,
-        } = CellTextStyle::resolve(
-            model,
-            addr.sheet,
-            addr.row,
-            addr.column,
-            theme,
-            style,
-        );
+        } = CellTextStyle::resolve(model, addr.sheet, addr.row, addr.column, theme, style);
 
         // Font interning: skips `FontStyle::build` on cache hit. Same lookup
         // is shared across cells with identical (size, weight, slant, family).
@@ -107,29 +109,26 @@ impl TextPaint {
         let bottom = rect.bottom();
         let center = rect.center();
 
-        // Set font on ctx so measure_text() returns accurate widths.
         let ctx = renderer.ctx_ref();
         ctx.set_font(&font_css);
 
-        let text_lines = layout_lines(ctx, &text, wrap_text, usable_w, approx_char_w);
+        // Layout pass: split + wrap, measuring once. `lines` comes back with
+        // text + width populated and `center_x/y` left at 0.0 for the position
+        // pass below.
+        layout_into(ctx, &text, wrap_text, usable_w, approx_char_w, lines);
 
-        let line_count = text_lines.len() as f64;
-        let mut lines: Vec<TextLine> = Vec::new();
-
-        for (i, line) in text_lines.into_iter().enumerate() {
-            let tw = ctx
-                .measure_text(&line)
-                .map(|m| m.width())
-                .unwrap_or(line.len() as f64 * approx_char_w);
+        let line_count = lines.len() as f64;
+        for (i, line) in lines.iter_mut().enumerate() {
             let i_f = i as f64;
-            let center_x = match h_align {
+            let tw = line.width;
+            line.center_x = match h_align {
                 HorizontalAlignment::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
                 HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => {
                     f64::from(center.x)
                 }
                 _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
             };
-            let center_y = match v_align {
+            line.center_y = match v_align {
                 VerticalAlignment::Bottom => {
                     f64::from(bottom) - size_px / 2.0 - TEXT_V_INSET_PX
                         + (i_f - line_count + 1.0) * line_height
@@ -141,12 +140,6 @@ impl TextPaint {
                     f64::from(rect.top_left.y) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height
                 }
             };
-            lines.push(TextLine {
-                text: line,
-                center_x,
-                center_y,
-                width: tw,
-            });
         }
 
         Some(TextPaint {
@@ -156,7 +149,6 @@ impl TextPaint {
             color: text_color,
             underline,
             strike,
-            lines,
         })
     }
 }
@@ -239,37 +231,75 @@ impl CellTextStyle {
 /// within each split when `wrap` is on and the cell has width. `approx_char_w`
 /// is the fallback glyph width when `measure_text` fails; biases the wrap
 /// point slightly but never loses characters.
-fn layout_lines(
+///
+/// Fills `out` with `TextLine`s carrying `text` + `width` (the layout-pass
+/// measurement); `center_x`/`center_y` are left at `0.0` for the caller's
+/// positioning pass. Each candidate line is built with `push_str` / `truncate`
+/// so the wrap loop avoids the per-word `format!` allocation the previous
+/// `layout_lines` used. Lines are measured exactly once.
+fn layout_into(
     ctx: &CanvasRenderingContext2d,
     text: &str,
     wrap: bool,
     usable_w: f64,
     approx_char_w: f64,
-) -> Vec<String> {
+    out: &mut Vec<TextLine>,
+) {
+    out.clear();
+    let measure = |s: &str| -> f64 {
+        ctx.measure_text(s)
+            .map(|m| m.width())
+            .unwrap_or(s.len() as f64 * approx_char_w)
+    };
+
     if !wrap || usable_w <= 0.0 {
-        return text.split('\n').map(str::to_owned).collect();
+        for line in text.split('\n') {
+            let width = measure(line);
+            out.push(TextLine {
+                text: line.to_owned(),
+                center_x: 0.0,
+                center_y: 0.0,
+                width,
+            });
+        }
+        return;
     }
-    let mut result: Vec<String> = Vec::new();
+
     for raw_line in text.split('\n') {
         let mut current = String::new();
+        let mut current_w = 0.0;
         for word in raw_line.split_whitespace() {
-            let candidate = if current.is_empty() {
-                word.to_owned()
+            let prev_len = current.len();
+            if current.is_empty() {
+                current.push_str(word);
             } else {
-                format!("{current} {word}")
-            };
-            let w = ctx
-                .measure_text(&candidate)
-                .map(|m| m.width())
-                .unwrap_or(candidate.len() as f64 * approx_char_w);
-            if w <= usable_w || current.is_empty() {
-                current = candidate;
+                current.push(' ');
+                current.push_str(word);
+            }
+            let w = measure(&current);
+            if w > usable_w && prev_len > 0 {
+                // Overflow with at least one prior word committed: roll back to
+                // the pre-word state, push that line, then start a fresh line
+                // with this word alone (re-measured because the standalone
+                // width differs from the tentative concatenated width).
+                current.truncate(prev_len);
+                out.push(TextLine {
+                    text: std::mem::take(&mut current),
+                    center_x: 0.0,
+                    center_y: 0.0,
+                    width: current_w,
+                });
+                current.push_str(word);
+                current_w = measure(&current);
             } else {
-                result.push(current);
-                current = word.to_owned();
+                current_w = w;
             }
         }
-        result.push(current);
+        out.push(TextLine {
+            text: current,
+            center_x: 0.0,
+            center_y: 0.0,
+            width: current_w,
+        });
     }
-    result
 }

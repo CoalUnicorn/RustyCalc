@@ -66,7 +66,7 @@ mod text;
 mod text_paint;
 mod viewport;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use web_sys::js_sys;
 use web_sys::CanvasRenderingContext2d;
 
@@ -77,6 +77,7 @@ use crate::renderer::cache::CachedColor;
 use crate::renderer::cache::FrameCache;
 use crate::renderer::cells::CellPaintsIter;
 use crate::CanvasModel;
+pub(crate) use cache::ColNameIntern;
 pub(crate) use cache::FontIntern;
 pub(crate) use pane::PaneRegion;
 
@@ -101,6 +102,10 @@ pub(crate) struct RendererCore {
     /// `FrameCache` because identical fonts repeat across frames, not just
     /// within a single paint.
     pub(in crate::renderer) font_intern: FontIntern,
+    /// Renderer-lifetime intern of column-letter labels. Same rationale as
+    /// `font_intern` — column names repeat every frame; cache once, clone the
+    /// `Rc<str>` thereafter.
+    pub(in crate::renderer) col_intern: ColNameIntern,
 }
 
 impl RendererCore {
@@ -121,7 +126,7 @@ impl RendererCore {
         pane: &'a PaneRegion,
         frame: &'a FrameContext,
     ) -> CellPaintsIter<'a> {
-        CellPaintsIter::new(self, model, pane, frame)
+        CellPaintsIter::new(model, pane, frame)
     }
 
     /// Layer-friendly constructor: caller owns canvas sizing + DPR scaling.
@@ -144,8 +149,11 @@ impl RendererCore {
                 last_font: Cell::new(CachedColor::Empty),
                 text_slots: Cell::new(Vec::new()),
                 show_grid: Cell::new(true),
+                label_buf: RefCell::new(String::new()),
+                text_lines: Cell::new(Vec::new()),
             },
             font_intern: FontIntern::new(),
+            col_intern: ColNameIntern::new(),
         }
     }
 
@@ -161,14 +169,6 @@ impl RendererCore {
     #[inline]
     fn snap_stroke(&self, coord: f64) -> f64 {
         ((coord * f64::from(self.dpr)) + 1.0) / f64::from(self.dpr)
-    }
-
-    /// Snap a coordinate to the nearest device pixel boundary.
-    /// Applied to text draw positions so glyphs don't smear across
-    /// sub-pixel boundaries.
-    #[inline]
-    fn snap_pixel(&self, coord: i32) -> i32 {
-        (coord * self.dpr) / self.dpr
     }
 
     /// Reset per-frame ctx state caches to their initial sentinels.
@@ -202,9 +202,21 @@ impl RendererCore {
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
 
         self.render_pane(model, PaneRegion::top_left(&frame.frozen), frame);
-        self.render_pane(model, PaneRegion::top_right(&frame.frozen, &frame.vis), frame);
-        self.render_pane(model, PaneRegion::bottom_left(&frame.frozen, &frame.vis), frame);
-        self.render_pane(model, PaneRegion::bottom_right(&frame.frozen, &frame.vis), frame);
+        self.render_pane(
+            model,
+            PaneRegion::top_right(&frame.frozen, &frame.vis),
+            frame,
+        );
+        self.render_pane(
+            model,
+            PaneRegion::bottom_left(&frame.frozen, &frame.vis),
+            frame,
+        );
+        self.render_pane(
+            model,
+            PaneRegion::bottom_right(&frame.frozen, &frame.vis),
+            frame,
+        );
 
         // Frozen separators paint AFTER cells so the thick divider wins
         // its pixels over the rightmost/bottommost frozen cell's grid stroke.

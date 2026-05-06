@@ -53,6 +53,10 @@ impl RendererCore {
         let theme = &frame.theme;
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
+        // Take both scratch buffers up-front so the deferred passes never touch
+        // the cache after this point — `text_lines` is reused across every cell
+        // that has text in this pane.
+        let mut text_lines = self.frame_cache.text_lines.take();
         for p in self.paints_in(model, &pane, frame) {
             self.paint_bg(&p, theme);
             slots.push(p);
@@ -64,11 +68,20 @@ impl RendererCore {
             self.paint_borders_explicit(p, theme);
         }
         for p in &slots {
-            if let Some(tp) = TextPaint::resolve(self, model, p.addr, p.rect, theme, &p.style) {
-                self.paint_text(&tp);
+            if let Some(tp) = TextPaint::resolve_into(
+                self,
+                model,
+                p.addr,
+                p.rect,
+                theme,
+                &p.style,
+                &mut text_lines,
+            ) {
+                self.paint_text(&tp, &text_lines);
             }
         }
         self.frame_cache.text_slots.set(slots);
+        self.frame_cache.text_lines.set(text_lines);
     }
 
     /// Fill a cell's background rectangle. Border pass is separate (batched).
@@ -177,15 +190,24 @@ impl RendererCore {
         let Some(own_style) = model.get_cell_style(addr.sheet, addr.row, addr.column) else {
             return;
         };
-        let Some(paint) = CellPaint::resolve_cell_paint(self, CellSlot { addr, rect }, own_style)
-        else {
+        let Some(paint) = CellPaint::resolve_cell_paint(CellSlot { addr, rect }, own_style) else {
             return;
         };
         let theme = &frame.theme;
         self.paint_cell(&paint, theme);
-        if let Some(t) = TextPaint::resolve(self, model, addr, rect, theme, &paint.style) {
-            self.paint_text(&t);
+        let mut text_lines = self.frame_cache.text_lines.take();
+        if let Some(t) = TextPaint::resolve_into(
+            self,
+            model,
+            addr,
+            rect,
+            theme,
+            &paint.style,
+            &mut text_lines,
+        ) {
+            self.paint_text(&t, &text_lines);
         }
+        self.frame_cache.text_lines.set(text_lines);
     }
 }
 
@@ -200,11 +222,7 @@ impl CellPaint {
     /// Resolve one cell Style into renderer-ready `CellPaint`.
     /// Takes Style by value — the caller's owned copy is moved straight through
     /// to the paint, eliminating the per-cell clone on the hot pane walk.
-    pub fn resolve_cell_paint(
-        _renderer: &RendererCore,
-        slot: CellSlot,
-        own_style: Style,
-    ) -> Option<CellPaint> {
+    pub fn resolve_cell_paint(slot: CellSlot, own_style: Style) -> Option<CellPaint> {
         if slot.rect.width <= 0 || slot.rect.height <= 0 {
             return None;
         }
@@ -249,12 +267,15 @@ impl BorderPaint {
     }
 
     /// Resolve a `BorderItem` from the cell style into a renderer-ready paint.
-    /// Color falls back to `theme.grid_color` when the item carries no explicit color.
+    /// Color falls back to `theme.grid_color` when the item carries no explicit color —
+    /// that path stays zero-alloc by reusing the static theme string.
     fn resolve(item: &BorderItem, theme: &CanvasTheme) -> Self {
+        let color = match item.color.as_deref() {
+            None => BorderColor::Static(theme.grid_color),
+            Some(c) => BorderColor::Owned(CssColor::new(c).into_string()),
+        };
         Self {
-            color: BorderColor::Owned(
-                CssColor::new(item.color.as_deref().unwrap_or(theme.grid_color)).into_string(),
-            ),
+            color,
             stroke: BorderStroke::from_border_style(&item.style),
         }
     }
@@ -383,20 +404,17 @@ impl<'a> Iterator for PaneCells<'a> {
 /// queries the model.
 pub(crate) struct CellPaintsIter<'a> {
     slots: PaneCells<'a>,
-    renderer: &'a RendererCore,
     model: &'a dyn CanvasModel,
 }
 
 impl<'a> CellPaintsIter<'a> {
     pub(crate) fn new(
-        renderer: &'a RendererCore,
         model: &'a dyn CanvasModel,
         pane: &'a PaneRegion,
         frame: &'a FrameContext,
     ) -> Self {
         Self {
             slots: pane.cells(model, frame.canvas_size),
-            renderer,
             model,
         }
     }
@@ -418,7 +436,7 @@ impl<'a> Iterator for CellPaintsIter<'a> {
                 continue;
             };
 
-            let paint = CellPaint::resolve_cell_paint(self.renderer, slot, own_style);
+            let paint = CellPaint::resolve_cell_paint(slot, own_style);
 
             if let Some(p) = paint {
                 return Some(p);

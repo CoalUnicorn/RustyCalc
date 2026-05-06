@@ -26,15 +26,6 @@ impl RendererCore {
         );
     }
 
-    pub fn rect_fill_px(&self, rect: PixelRect, color: &str) {
-        self.set_fill_cached(color);
-        self.ctx.fill_rect(
-            f64::from(rect.top_left.x),
-            f64::from(rect.top_left.y),
-            f64::from(rect.width),
-            f64::from(rect.height),
-        )
-    }
     /// Stroke `rect`'s outline at `width` pixels. Width is restored to
     /// `STANDARD_BORDER_WIDTH` on exit via `with_stroke_width`.
     pub(super) fn rect_stroke(&self, rect: PixelRect, color: &str, width: i32) {
