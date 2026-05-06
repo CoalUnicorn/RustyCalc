@@ -1,20 +1,28 @@
-//! Shared wiring between text editors (formula bar, in-cell overlay) and
-//! the [`EditingCell`] signal.
+//! Shared wiring between formula text editors (cell editor / formula bar /
+//! Manage Named Ranges dialog) and their backing edit-state signals.
 //!
-//! Both editor sites agree on one invariant: every keystroke must atomically
-//! update `text`, `cursor`, `text_dirty`, and `formula_analysis` in lockstep.
-//! Workbook's point-mode router reads `cursor` on every arrow key
+//! Every editor site agrees on one invariant: a keystroke must atomically
+//! update `text`, `cursor`, and `formula_analysis` in lockstep. Workbook's
+//! point-mode router reads `cursor` on every arrow key
 //! (`components/workbook.rs` on_keydown), so drift here breaks reference
 //! splicing. These helpers are the single authoritative place that upholds
 //! that invariant — the editor components are thin DOM wrappers around them.
+//!
+//! [`FormulaEditState`] abstracts over the two flavours of in-progress edit
+//! the project carries today:
+//! - [`crate::state::EditingCell`] — a cell edit, also flips `text_dirty`
+//!   to arm point-mode.
+//! - [`crate::state::EditingDefinedName`] — a row in the Manage Named Ranges
+//!   dialog, no point-mode (V1).
 //!
 //! Policy (when to *start* an edit session, or how to focus) stays with the
 //! caller. These helpers only care about syncing state that already exists.
 
 use wasm_bindgen::JsCast;
 
-use crate::input::formula_analysis::analyze_formula;
-use crate::state::{EditingCell, Split};
+use crate::coord::CellAddress;
+use crate::input::formula_analysis::{analyze_formula, FormulaAnalysis};
+use crate::state::{EditingCell, EditingDefinedName, Split};
 
 /// Extract `(value, cursor)` from an input or textarea event target.
 ///
@@ -50,24 +58,65 @@ pub fn read_value_and_cursor(target: &web_sys::EventTarget) -> Option<(String, u
     None
 }
 
-/// Mirror a keystroke into the active [`EditingCell`] signal.
+/// What [`sync_edit`] needs from any in-progress formula edit.
 ///
-/// No-ops when no session exists — the caller owns the decision to start one
-/// (e.g. formula bar's first-keystroke Accept path). Keeping that policy out
-/// here means both editor sites can share the body without coupling.
-pub fn sync_edit(
-    editing: Split<Option<EditingCell>>,
+/// Two methods, no more: `context_cell()` is the address `analyze_formula`
+/// uses to interpret relative refs, and `apply_edit()` is the atomic writer
+/// each implementor uses to update its own fields. The split lets
+/// [`EditingCell`] additionally flip `text_dirty` (to arm point-mode) and
+/// lets [`EditingDefinedName`] write to a different field name (`formula`,
+/// not `text`) without either implementor leaking through the trait.
+pub trait FormulaEditState {
+    fn context_cell(&self) -> CellAddress;
+    fn apply_edit(&mut self, text: String, cursor: usize, analysis: FormulaAnalysis);
+}
+
+impl FormulaEditState for EditingCell {
+    fn context_cell(&self) -> CellAddress {
+        self.address
+    }
+    fn apply_edit(&mut self, text: String, cursor: usize, analysis: FormulaAnalysis) {
+        // text_dirty arms point-mode for the next arrow keypress — the cell
+        // editor is the only edit site where arrows can splice a reference.
+        self.text = text;
+        self.cursor = cursor;
+        self.formula_analysis = analysis;
+        self.text_dirty = true;
+    }
+}
+
+impl FormulaEditState for EditingDefinedName {
+    fn context_cell(&self) -> CellAddress {
+        self.context_cell
+    }
+    fn apply_edit(&mut self, text: String, cursor: usize, analysis: FormulaAnalysis) {
+        // No `text_dirty`: the dialog has no point-mode in V1, so there's
+        // nothing to arm. If/when V2 adds point-mode here, add the flag and
+        // mirror the cell-editor branch.
+        self.formula = text;
+        self.cursor = cursor;
+        self.formula_analysis = analysis;
+    }
+}
+
+/// Mirror a keystroke into any active formula-edit signal.
+///
+/// No-ops when no session exists — the caller owns the decision to start
+/// one (e.g. formula bar's first-keystroke Accept path). Keeping that policy
+/// out here means every editor site can share the body without coupling.
+pub fn sync_edit<T>(
+    editing: Split<Option<T>>,
     value: String,
     cursor: usize,
     sheet_names: &[(u32, String)],
     defined_names: &[crate::coord::DefinedName],
-) {
-    editing.update(|cell| {
-        if let Some(c) = cell {
-            c.formula_analysis = analyze_formula(&value, c.address, sheet_names, defined_names);
-            c.text = value;
-            c.text_dirty = true;
-            c.cursor = cursor;
+) where
+    T: FormulaEditState + Clone + Send + Sync + 'static,
+{
+    editing.update(|slot| {
+        if let Some(c) = slot {
+            let analysis = analyze_formula(&value, c.context_cell(), sheet_names, defined_names);
+            c.apply_edit(value, cursor, analysis);
         }
     });
 }

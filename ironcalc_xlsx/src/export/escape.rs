@@ -69,11 +69,11 @@ impl Extend<(usize, Value)> for Process<'_> {
 /// This function replaces several important markup characters with their
 /// entity equivalents:
 ///
-/// * `<` → `&lt;`
-/// * `>` → `&gt;`
-/// * `"` → `&quot;`
-/// * `'` → `&apos;`
-/// * `&` → `&amp;`
+/// * `<` -> `&lt;`
+/// * `>` -> `&gt;`
+/// * `"` -> `&quot;`
+/// * `'` -> `&apos;`
+/// * `&` -> `&amp;`
 ///
 /// The resulting string is safe to use inside XML attribute values.
 ///

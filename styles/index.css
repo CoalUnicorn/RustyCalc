@@ -12,6 +12,8 @@
  *   ctx-    context menu
  *   pp-     perf panel
  *   ld-     left drawer
+ *   md-     modal dialog primitive
+ *   nrm-    named-ranges modal
  */
 
 @import "layout.css";
@@ -26,3 +28,5 @@
 @import "perf-panel.css";
 @import "left-drawer.css";
 @import "status_bar.css";
+@import "modal.css";
+@import "named-ranges.css";

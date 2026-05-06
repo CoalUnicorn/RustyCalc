@@ -65,6 +65,34 @@ pub trait FrontendModel {
     /// like `=my_range` resolve instead of tripping `WrongVariableKind`.
     fn get_defined_names(&self) -> Vec<DefinedName>;
 
+    // Defined-name mutations — every variant may change formula evaluation,
+    // so call sites must wrap these in `try_mutate(EvaluationMode::Immediate, …)`.
+    // Errors are surfaced verbatim from ironcalc as `Result<_, String>`.
+
+    /// Create a new defined name. `Err` if the name is invalid, duplicates an
+    /// existing name in the same scope, or the formula won't parse.
+    fn create_defined_name(
+        &mut self,
+        name: &str,
+        scope: Option<u32>,
+        formula: &str,
+    ) -> Result<(), String>;
+
+    /// Rename / re-scope / re-formula an existing defined name, identified by
+    /// `(old_name, old_scope)`.
+    fn rename_defined_name(
+        &mut self,
+        old_name: &str,
+        old_scope: Option<u32>,
+        new_name: &str,
+        new_scope: Option<u32>,
+        new_formula: &str,
+    ) -> Result<(), String>;
+
+    /// Delete a defined name. Cells that referenced it surface `#NAME?` after
+    /// the next evaluate.
+    fn remove_defined_name(&mut self, name: &str, scope: Option<u32>) -> Result<(), String>;
+
     // Navigation (infallible)
 
     /// Move the active cell one step. No-op at sheet edges.
@@ -289,6 +317,34 @@ impl FrontendModel for UserModel<'_> {
             .into_iter()
             .map(DefinedName::from)
             .collect()
+    }
+
+    // Defined-name mutations — wrap each call site in
+    // `try_mutate(EvaluationMode::Immediate, …)`. ironcalc's `Result` errors
+    // (invalid name, duplicate, parse failure) bubble up unchanged.
+
+    fn create_defined_name(
+        &mut self,
+        name: &str,
+        scope: Option<u32>,
+        formula: &str,
+    ) -> Result<(), String> {
+        self.new_defined_name(name, scope, formula)
+    }
+
+    fn rename_defined_name(
+        &mut self,
+        old_name: &str,
+        old_scope: Option<u32>,
+        new_name: &str,
+        new_scope: Option<u32>,
+        new_formula: &str,
+    ) -> Result<(), String> {
+        self.update_defined_name(old_name, old_scope, new_name, new_scope, new_formula)
+    }
+
+    fn remove_defined_name(&mut self, name: &str, scope: Option<u32>) -> Result<(), String> {
+        self.delete_defined_name(name, scope)
     }
 
     // Navigation

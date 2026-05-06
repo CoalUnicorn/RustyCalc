@@ -1,0 +1,178 @@
+/* Manage Named Ranges dialog — list + form layout.
+ *
+ * Class map (full BEM → short alias):
+ *   .named-ranges-modal      → .nrm
+ *   .named-ranges-list-wrap  → .nrm-list-wrap
+ *   .named-ranges-list       → .nrm-list
+ *   .named-ranges-row        → .nrm-row
+ *   .named-ranges-row-active → .nrm-row.active
+ *   .named-ranges-name       → .nrm-name
+ *   .named-ranges-scope      → .nrm-scope
+ *   .named-ranges-formula    → .nrm-formula
+ *   .named-ranges-empty      → .nrm-empty
+ *   .named-ranges-form       → .nrm-form
+ *   .named-ranges-hint       → .nrm-hint
+ *   .named-ranges-form-row   → .nrm-form-row
+ *   .named-ranges-input         → .nrm-input
+ *   .named-ranges-input-error   → .nrm-input-error
+ *   .named-ranges-buttons    → .nrm-btns
+ */
+
+.nrm {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 320px;
+}
+
+.nrm-list-wrap {
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 4px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+.nrm-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.nrm-list thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-header, #f6f8fa);
+  text-align: left;
+  padding: 8px 10px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color, #d0d7de);
+}
+
+.nrm-row td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-color-soft, #eaecef);
+}
+.nrm-row:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+  cursor: pointer;
+}
+.nrm-row.active {
+  background: var(--bg-active, rgba(9, 105, 218, 0.1));
+}
+
+.nrm-name {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-weight: 500;
+}
+
+.nrm-scope {
+  color: var(--text-muted, #57606a);
+}
+
+.nrm-formula code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  color: var(--text-color, #1f2328);
+}
+
+.nrm-empty {
+  text-align: center;
+  padding: 32px 8px;
+  color: var(--text-muted, #57606a);
+  font-style: italic;
+}
+
+.nrm-form {
+  border-top: 1px solid var(--border-color, #d0d7de);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.nrm-form-placeholder {
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
+.nrm-hint {
+  color: var(--text-muted, #57606a);
+  font-style: italic;
+  margin: 0;
+}
+
+.nrm-form-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.nrm-form-row label {
+  font-size: 13px;
+  color: var(--text-muted, #57606a);
+}
+
+.nrm-form-row input,
+.nrm-form-row select,
+.nrm-form-row textarea {
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color, #d0d7de);
+  border-radius: 4px;
+  background: var(--bg-color, #ffffff);
+  color: var(--text-color, #1f2328);
+  font-family: inherit;
+}
+
+.nrm-form-row textarea {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  resize: vertical;
+  min-height: 32px;
+}
+
+/* FormulaInput textarea — inherits the .nrm-form-row textarea base. The
+ * `.nrm-input-error` modifier mirrors the formula bar's `formula-error`
+ * red-border treatment so users see the same validation cue here. */
+.nrm-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.nrm-input-error {
+  border-color: var(--danger, #cf222e);
+}
+
+.nrm-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.nrm-btns button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #d0d7de);
+  background: var(--bg-color, #ffffff);
+  cursor: pointer;
+  font-size: 13px;
+}
+.nrm-btns button:hover:not(:disabled) {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+}
+.nrm-btns button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.nrm-btns .nrm-btn-primary {
+  background: var(--accent, #0969da);
+  color: #ffffff;
+  border-color: var(--accent, #0969da);
+}
+.nrm-btns .nrm-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover, #0860c2);
+}
+.nrm-btns .nrm-btn-danger {
+  color: var(--danger, #cf222e);
+}

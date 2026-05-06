@@ -38,9 +38,19 @@ const NO_REFS: &[ActiveRef] = &[];
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct FormulaAnalysis {
     pub status: FormulaStatus,
+    /// Spans of cell/range tokens written without a sheet qualifier (e.g. `A1`
+    /// vs `Sheet1!A1`). Orthogonal to `status`: a Valid formula can still have
+    /// bare refs. Consumers that care about scope-relative resolution (the
+    /// Manage Named Ranges dialog under Workbook scope) read these to flag
+    /// formulas that would otherwise be ambiguous.
+    pub bare_ref_spans: Vec<TextRef>,
 }
 
 impl FormulaAnalysis {
+    pub fn has_bare_refs(&self) -> bool {
+        !self.bare_ref_spans.is_empty()
+    }
+
     /// Returns refs the renderer should paint. Empty for error variants whose
     /// AST was too broken to trust (ParseError, LexerError, NotFormula).
     pub fn refs(&self) -> &[ActiveRef] {
@@ -184,12 +194,20 @@ pub fn analyze_formula(
     let mut validation_error: Option<LexerError> = None;
     let mut ref_range_token_spans: Vec<TextRef> = Vec::new();
     let mut fn_ident_spans: Vec<TextRef> = Vec::new();
+    // Bare = lexer saw the ref without a `Sheet!` qualifier. Detected here
+    // (purely lexical) rather than after parse, since parse fills `sheet_name`
+    // from the resolution context and erases the distinction.
+    let mut bare_ref_spans: Vec<TextRef> = Vec::new();
     for t in &tokens {
         let span = TextRef {
             start: t.start as usize,
             end: t.end as usize,
         };
         match &t.token {
+            TokenType::Reference { sheet: None, .. } | TokenType::Range { sheet: None, .. } => {
+                bare_ref_spans.push(span);
+                ref_range_token_spans.push(span);
+            }
             TokenType::Reference { .. } | TokenType::Range { .. } => {
                 ref_range_token_spans.push(span);
             }
@@ -377,7 +395,10 @@ pub fn analyze_formula(
         FormulaStatus::Valid { refs }
     };
 
-    FormulaAnalysis { status }
+    FormulaAnalysis {
+        status,
+        bare_ref_spans,
+    }
 }
 
 /// Flatten `node` into three pre-order streams — one per consumer.

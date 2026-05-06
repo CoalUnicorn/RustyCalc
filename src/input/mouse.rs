@@ -142,14 +142,14 @@ fn update_autoscroll(
 ) {
     let dx = if x > canvas_w - AUTOSCROLL_ZONE {
         1
-    } else if x < HEADER_COL_WIDTH + AUTOSCROLL_ZONE {
+    } else if x < f64::from(HEADER_COL_WIDTH) + AUTOSCROLL_ZONE {
         -1
     } else {
         0
     };
     let dy = if y > canvas_h - AUTOSCROLL_ZONE {
         1
-    } else if y < HEADER_ROW_HEIGHT + AUTOSCROLL_ZONE {
+    } else if y < f64::from(HEADER_ROW_HEIGHT) + AUTOSCROLL_ZONE {
         -1
     } else {
         0
