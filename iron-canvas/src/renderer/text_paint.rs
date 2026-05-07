@@ -8,12 +8,13 @@
 use std::rc::Rc;
 
 use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignment};
-use web_sys::CanvasRenderingContext2d;
 
 use crate::geometry::pixel_rect::PixelRect;
+use crate::painter::{Painter, TextMetrics};
+use crate::renderer::cache::ColorIntern;
 use crate::renderer::RendererCore;
 use crate::theme::CanvasTheme;
-use crate::types::coord::{CellAddress, CssColor};
+use crate::types::coord::CellAddress;
 use crate::CanvasModel;
 
 /// Below this in either pixel dimension, no text is laid out at all.
@@ -35,14 +36,22 @@ pub(crate) struct TextPaint {
     pub color: TextColor,
     pub underline: bool,
     pub strike: bool,
+    /// True when at least one line overflows horizontally or there are
+    /// multiple lines (which can overflow vertically). Resolved here so
+    /// `paint_text` can skip `push_clip`/`pop_clip` when the cell can't
+    /// spill — clip = save/restore on Canvas2D, which wipes the painter's
+    /// font/fill state cache and forces the next cell's binds to miss.
+    pub needs_clip: bool,
 }
 
 /// Per-cell text color split between the zero-alloc theme-default fast path
-/// (`Static`) and the allocating per-cell-override path (`Owned`).
-/// Mirrors `BorderColor` in `renderer/cells.rs`.
+/// (`Static`) and the per-cell-override path (`Owned`). `Owned` carries an
+/// interned `Rc<str>` from `ColorIntern`, so steady-state text resolution is
+/// `Rc::clone` after the first sighting of each color. Mirrors `BorderColor`
+/// in `renderer/cells.rs`.
 pub(crate) enum TextColor {
     Static(&'static str),
-    Owned(Box<str>),
+    Owned(Rc<str>),
 }
 
 /// One visual line of text inside a cell, positioned for center-aligned rendering.
@@ -63,8 +72,8 @@ impl TextPaint {
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
     /// the caller takes the buffer once at the top of `render_pane`, hands it
     /// to every cell, and parks it back on `FrameCache::text_lines`.
-    pub fn resolve_into(
-        renderer: &RendererCore,
+    pub fn resolve_into<P: Painter>(
+        renderer: &RendererCore<P>,
         model: &dyn CanvasModel,
         addr: CellAddress,
         rect: PixelRect,
@@ -72,8 +81,6 @@ impl TextPaint {
         style: &Style,
         lines: &mut Vec<TextLine>,
     ) -> Option<TextPaint> {
-        lines.clear();
-
         let text = model.get_formatted_cell_value(addr.sheet, addr.row, addr.column)?;
         if text.is_empty() {
             return None;
@@ -89,7 +96,15 @@ impl TextPaint {
             h_align,
             v_align,
             wrap_text,
-        } = CellTextStyle::resolve(model, addr.sheet, addr.row, addr.column, theme, style);
+        } = CellTextStyle::resolve(
+            model,
+            addr.sheet,
+            addr.row,
+            addr.column,
+            theme,
+            style,
+            &renderer.color_intern,
+        );
 
         // Font interning: skips `FontStyle::build` on cache hit. Same lookup
         // is shared across cells with identical (size, weight, slant, family).
@@ -109,13 +124,22 @@ impl TextPaint {
         let bottom = rect.bottom();
         let center = rect.center();
 
-        let ctx = renderer.ctx_ref();
-        ctx.set_font(&font_css);
-
         // Layout pass: split + wrap, measuring once. `lines` comes back with
         // text + width populated and `center_x/y` left at 0.0 for the position
-        // pass below.
-        layout_into(ctx, &text, wrap_text, usable_w, approx_char_w, lines);
+        // pass below. Routed through `&dyn TextMetrics` so resolution stays
+        // backend-agnostic — see Task 3 in the painter-trait extraction plan.
+        let mut wrap_buf = renderer.frame_cache.wrap_buf.borrow_mut();
+        layout_into(
+            renderer.painter(),
+            &font_css,
+            &text,
+            wrap_text,
+            usable_w,
+            approx_char_w,
+            lines,
+            &mut wrap_buf,
+        );
+        drop(wrap_buf);
 
         let line_count = lines.len() as f64;
         for (i, line) in lines.iter_mut().enumerate() {
@@ -142,6 +166,8 @@ impl TextPaint {
             };
         }
 
+        let needs_clip = lines.len() > 1 || lines.iter().any(|l| l.width > usable_w);
+
         Some(TextPaint {
             clip: rect,
             font_css,
@@ -149,6 +175,7 @@ impl TextPaint {
             color: text_color,
             underline,
             strike,
+            needs_clip,
         })
     }
 }
@@ -173,6 +200,7 @@ impl CellTextStyle {
         column: i32,
         theme: &CanvasTheme,
         style: &Style,
+        intern: &ColorIntern,
     ) -> Self {
         let cell_type = model
             .get_cell_type(sheet, row, column)
@@ -188,7 +216,7 @@ impl CellTextStyle {
         } else {
             match style.font.color.as_deref() {
                 None | Some("#000000") => TextColor::Static(theme.default_text_color),
-                Some(c) => TextColor::Owned(CssColor::new(c).into_string().into_boxed_str()),
+                Some(c) => TextColor::Owned(intern.get(c)),
             }
         };
 
@@ -232,74 +260,95 @@ impl CellTextStyle {
 /// is the fallback glyph width when `measure_text` fails; biases the wrap
 /// point slightly but never loses characters.
 ///
-/// Fills `out` with `TextLine`s carrying `text` + `width` (the layout-pass
-/// measurement); `center_x`/`center_y` are left at `0.0` for the caller's
-/// positioning pass. Each candidate line is built with `push_str` / `truncate`
-/// so the wrap loop avoids the per-word `format!` allocation the previous
-/// `layout_lines` used. Lines are measured exactly once.
-fn layout_into(
-    ctx: &CanvasRenderingContext2d,
+/// Fills `out` with `TextLine`s carrying `text` + `width`; `center_x`/`center_y`
+/// are left at `0.0` for the caller's positioning pass.
+///
+/// **Measurement strategy.** Non-wrap path measures each `\n`-split line once.
+/// Wrap path measures each word once plus one space-width per call, then sums
+/// additively (`current_w + space_w + word_w`). Adjacent-glyph kerning across
+/// a space is sub-pixel for the proportional fonts this renderer ships, well
+/// below the rounding the position pass already does — additive sum is within
+/// 1px of a fresh `measureText(full_line)` and avoids the O(words²) re-measure
+/// the previous algorithm did on long wrapping cells.
+pub(crate) fn layout_into(
+    metrics: &dyn TextMetrics,
+    font_css: &str,
     text: &str,
     wrap: bool,
     usable_w: f64,
     approx_char_w: f64,
     out: &mut Vec<TextLine>,
+    wrap_buf: &mut String,
 ) {
-    out.clear();
+    // Slot-reuse contract: do not `out.clear()` — that would drop every
+    // `TextLine.text` String and free its capacity, defeating the cache.
+    // Overwrite slots in place via `write_line`, then `truncate(idx)` so the
+    // tail of stale lines from a previous (longer) cell isn't iterated.
+    let mut idx = 0usize;
+    // Backends without sticky font state (Recorder, future SVG) need the font
+    // passed per-measurement; CanvasPainter caches the value internally.
     let measure = |s: &str| -> f64 {
-        ctx.measure_text(s)
-            .map(|m| m.width())
-            .unwrap_or(s.len() as f64 * approx_char_w)
+        let w = metrics.measure_text_width(s, font_css);
+        if w > 0.0 {
+            w
+        } else {
+            s.len() as f64 * approx_char_w
+        }
     };
 
     if !wrap || usable_w <= 0.0 {
         for line in text.split('\n') {
             let width = measure(line);
+            write_line(out, &mut idx, line, width);
+        }
+        out.truncate(idx);
+        return;
+    }
+
+    let space_w = measure(" ");
+
+    for raw_line in text.split('\n') {
+        wrap_buf.clear();
+        let mut current_w = 0.0;
+        for word in raw_line.split_whitespace() {
+            let word_w = measure(word);
+            let separator_w = if wrap_buf.is_empty() { 0.0 } else { space_w };
+            let tentative_w = current_w + separator_w + word_w;
+
+            if tentative_w > usable_w && !wrap_buf.is_empty() {
+                // Overflow with prior content: commit the line as-is, start
+                // fresh with this word alone (no leading space → no separator).
+                write_line(out, &mut idx, wrap_buf, current_w);
+                wrap_buf.clear();
+                wrap_buf.push_str(word);
+                current_w = word_w;
+            } else {
+                if !wrap_buf.is_empty() {
+                    wrap_buf.push(' ');
+                }
+                wrap_buf.push_str(word);
+                current_w = tentative_w;
+            }
+        }
+        write_line(out, &mut idx, wrap_buf, current_w);
+    }
+    out.truncate(idx);
+
+    fn write_line(out: &mut Vec<TextLine>, idx: &mut usize, text: &str, width: f64) {
+        if let Some(slot) = out.get_mut(*idx) {
+            slot.text.clear();
+            slot.text.push_str(text);
+            slot.center_x = 0.0;
+            slot.center_y = 0.0;
+            slot.width = width;
+        } else {
             out.push(TextLine {
-                text: line.to_owned(),
+                text: text.to_owned(),
                 center_x: 0.0,
                 center_y: 0.0,
                 width,
             });
         }
-        return;
-    }
-
-    for raw_line in text.split('\n') {
-        let mut current = String::new();
-        let mut current_w = 0.0;
-        for word in raw_line.split_whitespace() {
-            let prev_len = current.len();
-            if current.is_empty() {
-                current.push_str(word);
-            } else {
-                current.push(' ');
-                current.push_str(word);
-            }
-            let w = measure(&current);
-            if w > usable_w && prev_len > 0 {
-                // Overflow with at least one prior word committed: roll back to
-                // the pre-word state, push that line, then start a fresh line
-                // with this word alone (re-measured because the standalone
-                // width differs from the tentative concatenated width).
-                current.truncate(prev_len);
-                out.push(TextLine {
-                    text: std::mem::take(&mut current),
-                    center_x: 0.0,
-                    center_y: 0.0,
-                    width: current_w,
-                });
-                current.push_str(word);
-                current_w = measure(&current);
-            } else {
-                current_w = w;
-            }
-        }
-        out.push(TextLine {
-            text: current,
-            center_x: 0.0,
-            center_y: 0.0,
-            width: current_w,
-        });
+        *idx += 1;
     }
 }

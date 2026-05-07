@@ -4,7 +4,7 @@ use crate::{
             AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
             LAST_COLUMN, LAST_ROW,
         },
-        frame::{frozen::FrozenRC, pixel_offset::PixelOffsets},
+        frame::frozen::FrozenRC,
         pixel_rect::PixelRect,
         prim::Point,
         utils::{col_width, row_height},
@@ -13,41 +13,28 @@ use crate::{
     types::ui::{HitTest, ResizeTarget},
     CanvasModel, CanvasSize, RCRange,
 };
+use crate::geometry::frame::slot::{ColSlot, RowSlot};
 
 pub mod frozen;
-pub mod pixel_offset;
+pub mod slot;
 
-/// The four index boundaries of the visible (scrollable) area.
-#[derive(Debug, Default)]
-pub struct VisibleCells {
-    /// Top-left scrollable cell on screen.
-    pub first: CellRC,
-    /// Bottom-right scrollable cell on screen.
-    pub last: CellRC,
-}
-
-#[derive(Debug, Default)]
-pub struct CellRC {
-    pub row: i32,
-    pub column: i32,
-}
 /// Per-frame geometric snapshot threaded into every render phase AND every
 /// hit-test query.
 ///
 /// Built once per tick by `FrameContext::current(model, canvas)` — both the
 /// renderer (`paint_if_dirty`) and the input layer (`IronCanvas::hit_test`,
 /// `cell_rect`, `resize_handle_at`) read the same snapshot, so what's painted
-/// and what gets hit always agree. Bundles the visible region, the
-/// pixel-offset prefix-sum cache, and the resolved frozen-pane geometry so
-/// neither phase re-reads them from the model mid-frame.
+/// and what gets hit always agree. Bundles the per-axis slot vecs and the
+/// resolved frozen-pane geometry so neither phase re-reads them from the
+/// model mid-frame.
 #[derive(Debug)]
 pub(crate) struct FrameContext {
     pub sheet: u32,
-    pub vis: VisibleCells,
-    pub offsets: PixelOffsets,
     pub frozen: FrozenRC,
-    pub top_row: i32, // from model.get_selected_view() — used by orchestrator change detection
-    pub left_column: i32,
+    pub frozen_rows: Vec<RowSlot>,
+    pub scroll_rows: Vec<RowSlot>,
+    pub frozen_cols: Vec<ColSlot>,
+    pub scroll_cols: Vec<ColSlot>,
     /// Active selection at paint time, raw `[r1, c1, r2, c2]` from
     /// `SelectedView.range`. Snapshotting it here keeps `autofill_handle`
     /// pure (no model read) and pins the handle position to the *painted*
@@ -67,111 +54,74 @@ pub(crate) struct FrameContext {
 impl FrameContext {
     /// Build a per-frame snapshot from the model and canvas size.
     ///
-    /// Single-pass construction: frozen prefix sums, visible-region scan, and
-    /// scrollable prefix sums are all built in one model-walk per axis instead
-    /// of the two separate walks the old `compute_visible_region` +
-    /// `compute_pixel_offsets` pair required.
-    pub(crate) fn current(
-        model: &dyn CanvasModel,
-        canvas: CanvasSize,
-        theme: CanvasTheme,
-    ) -> Self {
+    /// One model-walk per axis populates the four slot vecs (`frozen_rows`,
+    /// `scroll_rows`, `frozen_cols`, `scroll_cols`); each scan breaks early at
+    /// `canvas.{w,h}` or the sheet bound.
+    pub(crate) fn current(model: &dyn CanvasModel, canvas: CanvasSize, theme: CanvasTheme) -> Self {
         let view = model.get_selected_view();
         let frozen = FrozenRC::from_model(model);
 
-        let frozen_rows = frozen.frozen_rows_count();
-        let frozen_cols = frozen.frozen_cols_count();
+        let frozen_rows_count = frozen.frozen_rows_count();
+        let frozen_cols_count = frozen.frozen_cols_count();
 
-        // Frozen prefix sums
-        // One walk per axis; the totals (last entry) give the Y/X offset where
-        // the scrollable band starts, avoiding a redundant sum in the scan below.
-        let mut frozen_row_tops = Vec::with_capacity((frozen_rows + 1) as usize);
-        let mut frozen_h = 0;
-        for r in 1..=frozen_rows {
-            frozen_row_tops.push(frozen_h);
-            frozen_h += row_height(model, r);
+        // Frozen rows: absolute Y starts at HEADER_ROW_HEIGHT and grows.
+        let mut frozen_rows = Vec::with_capacity(frozen_rows_count as usize);
+        let mut y_cursor = HEADER_ROW_HEIGHT;
+        for r in 1..=frozen_rows_count {
+            let h = row_height(model, r);
+            frozen_rows.push(RowSlot { row: r, top: y_cursor, height: h });
+            y_cursor += h;
         }
-        frozen_row_tops.push(frozen_h);
 
-        let mut frozen_col_lefts = Vec::with_capacity((frozen_cols + 1) as usize);
-        let mut frozen_w = 0;
-        for c in 1..=frozen_cols {
-            frozen_col_lefts.push(frozen_w);
-            frozen_w += col_width(model, c);
+        // Frozen cols
+        let mut frozen_cols = Vec::with_capacity(frozen_cols_count as usize);
+        let mut x_cursor = HEADER_COL_WIDTH;
+        for c in 1..=frozen_cols_count {
+            let w = col_width(model, c);
+            frozen_cols.push(ColSlot { col: c, left: x_cursor, width: w });
+            x_cursor += w;
         }
-        frozen_col_lefts.push(frozen_w);
 
-        let row_first = (frozen_rows + 1).max(view.top_row);
-        let col_first = (frozen_cols + 1).max(view.left_column);
+        let row_first = (frozen_rows_count + 1).max(view.top_row);
+        let col_first = (frozen_cols_count + 1).max(view.left_column);
 
-        // Scrollable rows: visible extent + prefix-sum in one pass
-        // `y` tracks the canvas Y of each row's top edge. When y reaches the
-        // canvas bottom we record that row as `row_last` (it may be partially
-        // visible), push its trailing entry, and stop. This exactly replicates
-        // the semantics of the old two-pass pair.
-        let mut row_tops: Vec<i32> = Vec::new();
-        let mut row_last = row_first;
-        let mut y = HEADER_ROW_HEIGHT + frozen_h;
-        let mut acc = 0;
+        // Scrollable rows: walk until the next slot would start at or past canvas.h.
+        // Match existing semantics: the row whose top crosses the bottom edge IS
+        // pushed (partial visibility), then we stop.
+        let mut scroll_rows: Vec<RowSlot> = Vec::new();
+        let mut y_cursor = frozen.offset.y;
         for row in row_first..=LAST_ROW {
-            if f64::from(y) >= canvas.h || row == LAST_ROW {
-                row_last = row;
-                row_tops.push(acc);
-                acc += row_height(model, row);
-                row_tops.push(acc); // trailing: bottom of row_last
+            if f64::from(y_cursor) >= canvas.h || row == LAST_ROW {
+                let h = row_height(model, row);
+                scroll_rows.push(RowSlot { row, top: y_cursor, height: h });
                 break;
             }
-            row_tops.push(acc);
             let h = row_height(model, row);
-            acc += h;
-            y += h;
+            scroll_rows.push(RowSlot { row, top: y_cursor, height: h });
+            y_cursor += h;
         }
 
-        // Scrollable columns: same merged pattern
-        let mut col_lefts: Vec<i32> = Vec::new();
-        let mut col_last = col_first;
-        let mut x = HEADER_COL_WIDTH + frozen_w;
-        acc = 0;
+        // Scrollable cols: same shape.
+        let mut scroll_cols: Vec<ColSlot> = Vec::new();
+        let mut x_cursor = frozen.offset.x;
         for col in col_first..=LAST_COLUMN {
-            if f64::from(x) >= canvas.w || col == LAST_COLUMN {
-                col_last = col;
-                col_lefts.push(acc);
-                acc += col_width(model, col);
-                col_lefts.push(acc);
+            if f64::from(x_cursor) >= canvas.w || col == LAST_COLUMN {
+                let w = col_width(model, col);
+                scroll_cols.push(ColSlot { col, left: x_cursor, width: w });
                 break;
             }
-            col_lefts.push(acc);
             let w = col_width(model, col);
-            acc += w;
-            x += w;
+            scroll_cols.push(ColSlot { col, left: x_cursor, width: w });
+            x_cursor += w;
         }
-
-        let vis = VisibleCells {
-            first: CellRC {
-                row: row_first,
-                column: col_first,
-            },
-            last: CellRC {
-                row: row_last,
-                column: col_last,
-            },
-        };
-        let offsets = PixelOffsets {
-            row_start: row_first,
-            row_tops,
-            col_start: col_first,
-            col_lefts,
-            frozen_row_tops,
-            frozen_col_lefts,
-        };
 
         FrameContext {
             sheet: model.get_selected_sheet(),
-            vis,
-            offsets,
             frozen,
-            top_row: view.top_row,
-            left_column: view.left_column,
+            frozen_rows,
+            scroll_rows,
+            frozen_cols,
+            scroll_cols,
             selection_range: view.selection,
             canvas_size: canvas,
             theme,
@@ -181,7 +131,7 @@ impl FrameContext {
     /// True when the painted geometry is identical to the current model state.
     ///
     /// Checks scroll origin, frozen band counts, sheet, and canvas size — the
-    /// inputs that determine `PixelOffsets` and visible-region indices. When
+    /// inputs that determine the slot vecs and visible-region indices. When
     /// all match, the overlay layer can repaint against this frame without
     /// rebuilding via `FrameContext::current`. Selection is *not* part of this
     /// predicate — refresh it via `refresh_overlay_inputs` after a positive
@@ -191,31 +141,79 @@ impl FrameContext {
             return false;
         }
         let view = model.get_selected_view();
-        if self.top_row != view.top_row || self.left_column != view.left_column {
-            return false;
-        }
         let sheet = model.get_selected_sheet();
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
+        let want_top = (frozen_rows + 1).max(view.top_row);
+        let want_left = (frozen_cols + 1).max(view.left_column);
+        if self.top_row() != want_top || self.left_column() != want_left {
+            return false;
+        }
         frozen_rows == self.frozen.frozen_rows_count()
             && frozen_cols == self.frozen.frozen_cols_count()
             && sheet == self.sheet
     }
 
     /// Refresh frame fields that the overlay paints from but that are
-    /// independent of the prefix-sum tables. Call on the overlay-only fast
-    /// path after `is_still_valid` returned true, before painting. Keeps the
+    /// independent of the slot vecs. Call on the overlay-only fast path
+    /// after `is_still_valid` returned true, before painting. Keeps the
     /// "snapshot of what's painted" invariant on `selection_range`: the
     /// orchestrator never reaches into the field directly.
     pub(crate) fn refresh_overlay_inputs(&mut self, model: &dyn CanvasModel) {
         self.selection_range = model.get_selected_view().selection;
     }
 
+    #[inline]
+    fn row_slot(&self, row: i32) -> Option<&RowSlot> {
+        if row <= self.frozen.frozen_rows_count() {
+            self.frozen_rows.get((row - 1) as usize)
+        } else {
+            // Scroll rows are dense from `scroll_rows[0].row` upward.
+            let first = self.scroll_rows.first()?.row;
+            self.scroll_rows.get((row - first) as usize)
+        }
+    }
+
+    #[inline]
+    fn col_slot(&self, col: i32) -> Option<&ColSlot> {
+        if col <= self.frozen.frozen_cols_count() {
+            self.frozen_cols.get((col - 1) as usize)
+        } else {
+            let first = self.scroll_cols.first()?.col;
+            self.scroll_cols.get((col - first) as usize)
+        }
+    }
+
+    /// The 1-based row index of the first scrollable row painted this frame.
+    /// Equals `(frozen_rows + 1).max(view.top_row)` at build time — the clamp
+    /// is preserved in `scroll_rows[0].row`. Falls back to `1` only if the
+    /// scrollable band is empty (canvas too small to fit any row, which the
+    /// builder treats as a degenerate frame).
+    #[inline]
+    pub(crate) fn top_row(&self) -> i32 {
+        self.scroll_rows.first().map(|s| s.row).unwrap_or(1)
+    }
+
+    #[inline]
+    pub(crate) fn left_column(&self) -> i32 {
+        self.scroll_cols.first().map(|s| s.col).unwrap_or(1)
+    }
+
+    #[inline]
+    pub(crate) fn last_visible_row(&self) -> i32 {
+        self.scroll_rows.last().map(|s| s.row).unwrap_or(self.top_row())
+    }
+
+    #[inline]
+    pub(crate) fn last_visible_col(&self) -> i32 {
+        self.scroll_cols.last().map(|s| s.col).unwrap_or(self.left_column())
+    }
+
     // Pixel <-> cell mapping  (snapshot-only)
     //
-    // Every method here reads exclusively from `self.offsets`,
-    // `self.frozen`, `self.vis`, and `self.selection_range`. No model
-    // access — what the renderer painted is what gets hit-tested.
+    // Every method here reads exclusively from the slot vecs,
+    // `self.frozen`, and `self.selection_range`. No model access —
+    // what the renderer painted is what gets hit-tested.
     //
     // Off-frame inputs are clamped to the painted region (`pixel_to_*`)
     // or rejected with `None` (`cell_rect`, `autofill_handle`).
@@ -223,97 +221,67 @@ impl FrameContext {
     #[inline]
     fn row_in_frame(&self, row: i32) -> bool {
         row <= self.frozen.frozen_rows_count()
-            || (row >= self.vis.first.row && row <= self.vis.last.row)
+            || (row >= self.top_row() && row <= self.last_visible_row())
     }
 
     #[inline]
     fn col_in_frame(&self, col: i32) -> bool {
         col <= self.frozen.frozen_cols_count()
-            || (col >= self.vis.first.column && col <= self.vis.last.column)
+            || (col >= self.left_column() && col <= self.last_visible_col())
     }
 
     /// Width of `col` from the snapshot — frozen-band or visible-band.
     #[inline]
     pub(crate) fn col_extent_at(&self, col: i32) -> i32 {
-        if col <= self.frozen.frozen_cols_count() {
-            self.offsets.frozen_col_extent(col)
-        } else {
-            self.offsets.col_extent(col)
-        }
+        self.col_slot(col).map(|s| s.width).unwrap_or(0)
     }
 
     /// Height of `row` from the snapshot.
     #[inline]
     pub(crate) fn row_extent_at(&self, row: i32) -> i32 {
-        if row <= self.frozen.frozen_rows_count() {
-            self.offsets.frozen_row_extent(row)
-        } else {
-            self.offsets.row_extent(row)
-        }
+        self.row_slot(row).map(|s| s.height).unwrap_or(0)
     }
 
     /// Left-edge X pixel of `col` at this frame's scroll/freeze.
-    /// Caller is expected to gate on `col_in_frame`; off-frame yields the
-    /// cumulative-table fallback (`0.0`).
     pub(crate) fn col_to_x(&self, col: i32) -> i32 {
-        if col <= self.frozen.frozen_cols_count() {
-            HEADER_COL_WIDTH + self.offsets.frozen_col_left(col)
-        } else {
-            self.frozen.offset.x + self.offsets.col_left(col)
-        }
+        self.col_slot(col).map(|s| s.left).unwrap_or(0)
     }
 
     /// Top-edge Y pixel of `row`.
     pub(crate) fn row_to_y(&self, row: i32) -> i32 {
-        if row <= self.frozen.frozen_rows_count() {
-            HEADER_ROW_HEIGHT + self.offsets.frozen_row_top(row)
-        } else {
-            self.frozen.offset.y + self.offsets.row_top(row)
-        }
+        self.row_slot(row).map(|s| s.top).unwrap_or(0)
     }
 
-    /// 1-based column at canvas X pixel `x`. Clamps to the painted region
-    pub(crate) fn pixel_to_col(&self, x: i32) -> i32 {
-        let frozen_cols = self.frozen.frozen_cols_count();
-        if x < self.frozen.offset.x {
-            let rel = x - HEADER_COL_WIDTH;
-            for c in 1..=frozen_cols {
-                if rel < self.offsets.frozen_col_lefts[c as usize] {
-                    return c;
-                }
-            }
-            return frozen_cols.max(1);
-        }
-        let rel = x - self.frozen.offset.x;
-        let count = (self.vis.last.column - self.vis.first.column + 1) as usize;
-        for i in 0..count {
-            if rel < self.offsets.col_lefts[i + 1] {
-                return self.offsets.col_start + i as i32;
+    /// 1-based column at canvas X pixel `x`, or `None` if `x` is outside the
+    /// painted region (frozen + scrollable bands). The snapshot only describes
+    /// what was painted — clicks in the void are surfaced as `Outside`, not as
+    /// the trailing visible cell.
+    pub(crate) fn pixel_to_col(&self, x: i32) -> Option<i32> {
+        for s in &self.frozen_cols {
+            if x >= s.left && x < s.right() {
+                return Some(s.col);
             }
         }
-        self.vis.last.column
+        for s in &self.scroll_cols {
+            if x >= s.left && x < s.right() {
+                return Some(s.col);
+            }
+        }
+        None
     }
 
-    /// 1-based row at canvas Y pixel `y`. Clamps to the painted region.
-    pub(crate) fn pixel_to_row(&self, y: i32) -> i32 {
-        let frozen_rows = self.frozen.frozen_rows_count();
-        if y < self.frozen.offset.y {
-            let rel = y - HEADER_ROW_HEIGHT;
-            for r in 1..=frozen_rows {
-                if rel < self.offsets.frozen_row_tops[r as usize] {
-                    return r;
-                }
-            }
-            return frozen_rows.max(1);
-        }
-        let rel = y - self.frozen.offset.y;
-        let count = (self.vis.last.row - self.vis.first.row + 1) as usize;
-        for i in 0..count {
-            if rel < self.offsets.row_tops[i + 1] {
-                return self.offsets.row_start + i as i32;
+    pub(crate) fn pixel_to_row(&self, y: i32) -> Option<i32> {
+        for s in &self.frozen_rows {
+            if y >= s.top && y < s.bottom() {
+                return Some(s.row);
             }
         }
-        self.vis.last.row
+        for s in &self.scroll_rows {
+            if y >= s.top && y < s.bottom() {
+                return Some(s.row);
+            }
+        }
+        None
     }
 
     /// Pixel rect of `(row, col)` if it falls inside this frame's painted
@@ -381,20 +349,16 @@ impl FrameContext {
 
     /// Column whose RIGHT edge is within `hit_zone` px of `x`, or `None`.
     pub(crate) fn col_boundary_at(&self, x: i32, hit_zone: i32) -> Option<i32> {
-        let frozen_cols = self.frozen.frozen_cols_count();
-        for c in 1..=frozen_cols {
-            let cur_x = HEADER_COL_WIDTH + self.offsets.frozen_col_lefts[c as usize];
-            if (cur_x - x).abs() <= hit_zone {
-                return Some(c);
+        for s in &self.frozen_cols {
+            if (s.right() - x).abs() <= hit_zone {
+                return Some(s.col);
             }
         }
-        let count = (self.vis.last.column - self.vis.first.column + 1) as usize;
-        for i in 0..count {
-            let cur_x = self.frozen.offset.x + self.offsets.col_lefts[i + 1];
-            if (cur_x - x).abs() <= hit_zone {
-                return Some(self.offsets.col_start + i as i32);
+        for s in &self.scroll_cols {
+            if (s.right() - x).abs() <= hit_zone {
+                return Some(s.col);
             }
-            if cur_x > x + hit_zone {
+            if s.right() > x + hit_zone {
                 break;
             }
         }
@@ -403,20 +367,16 @@ impl FrameContext {
 
     /// Row whose BOTTOM edge is within `hit_zone` px of `y`, or `None`.
     pub(crate) fn row_boundary_at(&self, y: i32, hit_zone: i32) -> Option<i32> {
-        let frozen_rows = self.frozen.frozen_rows_count();
-        for r in 1..=frozen_rows {
-            let cur_y = HEADER_ROW_HEIGHT + self.offsets.frozen_row_tops[r as usize];
-            if (cur_y - y).abs() <= hit_zone {
-                return Some(r);
+        for s in &self.frozen_rows {
+            if (s.bottom() - y).abs() <= hit_zone {
+                return Some(s.row);
             }
         }
-        let count = (self.vis.last.row - self.vis.first.row + 1) as usize;
-        for i in 0..count {
-            let cur_y = self.frozen.offset.y + self.offsets.row_tops[i + 1];
-            if (cur_y - y).abs() <= hit_zone {
-                return Some(self.offsets.row_start + i as i32);
+        for s in &self.scroll_rows {
+            if (s.bottom() - y).abs() <= hit_zone {
+                return Some(s.row);
             }
-            if cur_y > y + hit_zone {
+            if s.bottom() > y + hit_zone {
                 break;
             }
         }
@@ -428,8 +388,8 @@ impl FrameContext {
     /// Map `(x, y)` to what the user sees against this frame.
     ///
     /// Negative coordinates return `Outside` (off-canvas). Past the right /
-    /// bottom edge the trailing visible cell is returned — the canvas
-    /// element's own bounds clip the event before it reaches us in practice.
+    /// bottom edge of the painted region returns `Outside` — the canvas
+    /// element's own bounds clip events before they reach us in practice.
     pub(crate) fn hit_test(&self, x: i32, y: i32) -> HitTest {
         if x < 0 || y < 0 {
             return HitTest::Outside;
@@ -438,15 +398,21 @@ impl FrameContext {
             return HitTest::Corner;
         }
         if y < HEADER_ROW_HEIGHT {
-            return HitTest::ColHeader(self.pixel_to_col(x));
+            return match self.pixel_to_col(x) {
+                Some(c) => HitTest::ColHeader(c),
+                None => HitTest::Outside,
+            };
         }
         if x < HEADER_COL_WIDTH {
-            return HitTest::RowHeader(self.pixel_to_row(y));
+            return match self.pixel_to_row(y) {
+                Some(r) => HitTest::RowHeader(r),
+                None => HitTest::Outside,
+            };
         }
-        let row = self.pixel_to_row(y);
-        let column = self.pixel_to_col(x);
+        let (Some(row), Some(column)) = (self.pixel_to_row(y), self.pixel_to_col(x)) else {
+            return HitTest::Outside;
+        };
         let h = self.autofill_handle_rect();
-
         let pad = AUTOFILL_HIT_PAD_PX;
         if x >= h.top_left.x - pad
             && x <= h.right() + pad

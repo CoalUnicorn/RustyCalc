@@ -241,7 +241,7 @@ pub fn analyze_formula(
     // add/rename/delete), measure with a hyperfine bench over 10/50/200-char
     // inputs and only cache if the cost exceeds ~1ms.
     // Plumb defined names into the parser so `=my_range` resolves to
-    // `Node::DefinedNameKind` instead of `Node::WrongVariableKind`. The parser
+    // `Node::DefinedNameKind` instead of `Node::NamedVariableKind`. The parser
     // takes the tuple form; we convert once here at the boundary.
     let parser_defined_names = defined_names
         .iter()
@@ -406,7 +406,7 @@ pub fn analyze_formula(
 /// Document order matters: `ref_out` is zipped with the lexer's
 /// `Reference`/`Range` token spans, and `fn_out` with its `Ident` spans. Any
 /// reordering here silently desynchronises colors from formula text. Emit
-/// compound markers (`InvalidFunctionKind`) before their children so the
+/// compound markers (`NamedFunctionKind`) before their children so the
 /// parent-first invariant lines up with the lexer's left-to-right order.
 fn ast_leaves(
     node: &Node,
@@ -467,7 +467,7 @@ fn ast_leaves(
                 ast_leaves(arg, ref_out, ident_out, diag_out);
             }
         }
-        Node::InvalidFunctionKind { args, .. } => {
+        Node::NamedFunctionKind { args, .. } => {
             ident_out.push(IdentLeaf::UnknownFunction);
             for arg in args {
                 ast_leaves(arg, ref_out, ident_out, diag_out);
@@ -484,6 +484,14 @@ fn ast_leaves(
         }
         Node::UnaryKind { right, .. } => ast_leaves(right, ref_out, ident_out, diag_out),
         Node::ImplicitIntersection { child, .. } => ast_leaves(child, ref_out, ident_out, diag_out),
+        Node::SpillRangeOperator { child } => ast_leaves(child, ref_out, ident_out, diag_out),
+        Node::LambdaDefKind { body, .. } => ast_leaves(body, ref_out, ident_out, diag_out),
+        Node::LambdaCallKind { lambda, args } => {
+            ast_leaves(lambda, ref_out, ident_out, diag_out);
+            for arg in args {
+                ast_leaves(arg, ref_out, ident_out, diag_out);
+            }
+        }
         Node::ParseErrorKind {
             message, position, ..
         } => diag_out.push(DiagnosticLeaf::ParseError {
@@ -503,7 +511,7 @@ fn ast_leaves(
             ident_out.push(IdentLeaf::DefinedName(formula.clone()))
         }
         Node::TableNameKind(_) => ident_out.push(IdentLeaf::Known),
-        Node::WrongVariableKind(..) => ident_out.push(IdentLeaf::UnknownName),
+        Node::NamedVariableKind { .. } => ident_out.push(IdentLeaf::UnknownName),
 
         Node::BooleanKind(_)
         | Node::NumberKind(_)
@@ -717,7 +725,7 @@ mod formula_analysis_tests {
 
     #[test]
     fn test_unknown_name_captured() {
-        // No defined names  bare identifier parses as WrongVariableKind and
+        // No defined names  bare identifier parses as NamedVariableKind and
         // must land in Unresolved.names (NOT Unresolved.functions).
         let analysis = analyze_formula("=my_undefined", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved {

@@ -13,7 +13,7 @@ use crate::geometry::constants::{
     HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
 use crate::geometry::frame::frozen::FrozenRC;
-use crate::geometry::frame::pixel_offset::PixelOffsets;
+use crate::geometry::prim::Axis;
 use crate::types::ui::HitTest;
 use crate::{geometry::frame::FrameContext, CanvasView};
 use crate::theme::LIGHT;
@@ -135,24 +135,15 @@ fn frozen_rc_both_axes_add_separator_on_each() {
     );
 }
 
-// PixelOffsets
-
 #[test]
-fn pixel_offsets_row_top_returns_zero_outside_precomputed_range() {
-    let off = PixelOffsets {
-        row_start: 10,
-        row_tops: vec![0, 20, 40],
-        col_start: 5,
-        col_lefts: vec![0, 60],
-        frozen_row_tops: vec![0],
-        frozen_col_lefts: vec![0],
-    };
-    assert_eq!(off.row_top(10), 0);
-    assert_eq!(off.row_top(11), 20);
-    assert_eq!(off.row_top(99), 0);
-    assert_eq!(off.col_left(5), 0);
-    assert_eq!(off.col_left(6), 60);
-    assert_eq!(off.col_left(99), 0);
+fn frame_geometry_returns_zero_for_out_of_range_indices() {
+    let frame = FrameContext::current(&MockCanvasModel::default(), test_canvas(), LIGHT);
+    assert_ne!(frame.col_to_x(1), 0);
+    assert_ne!(frame.row_to_y(1), 0);
+    assert_eq!(frame.row_to_y(99999), 0);
+    assert_eq!(frame.col_to_x(99999), 0);
+    assert_eq!(frame.row_extent_at(99999), 0);
+    assert_eq!(frame.col_extent_at(99999), 0);
 }
 
 // FrameContext: pixel ↔ cell math
@@ -343,6 +334,30 @@ fn autofill_handle_tracks_in_place_selection_range_update() {
 }
 
 #[test]
+fn row_visible_band_uses_top_and_last_visible_row() {
+    let m = MockCanvasModel {
+        top_row: 3,
+        ..Default::default()
+    };
+    let frame = FrameContext::current(&m, test_canvas(), LIGHT);
+    let band = Axis::Row.visible_band(&frame);
+    assert_eq!(*band.start(), frame.top_row());
+    assert_eq!(*band.end(), frame.last_visible_row());
+}
+
+#[test]
+fn column_visible_band_uses_left_column_and_last_visible_col() {
+    let m = MockCanvasModel {
+        left_column: 5,
+        ..Default::default()
+    };
+    let frame = FrameContext::current(&m, test_canvas(), LIGHT);
+    let band = Axis::Column.visible_band(&frame);
+    assert_eq!(*band.start(), frame.left_column());
+    assert_eq!(*band.end(), frame.last_visible_col());
+}
+
+#[test]
 fn cell_rect_off_screen_returns_none() {
     // Mock with default ~21px rows; canvas height 100 fits ~3 rows past
     // header, so row 50 is well past the visible region.
@@ -413,6 +428,6 @@ fn pixel_to_col_round_trips_col_to_x() {
     for &c in &[1_i32, 2, 5, 6, 8] {
         let x = frame.col_to_x(c);
         // Nudge +0.5 to land safely inside the cell (avoid the edge).
-        assert_eq!(frame.pixel_to_col(x + 1), c, "round-trip col {}", c);
+        assert_eq!(frame.pixel_to_col(x + 1), Some(c), "round-trip col {}", c);
     }
 }

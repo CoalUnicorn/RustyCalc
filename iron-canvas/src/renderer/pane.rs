@@ -1,100 +1,69 @@
-use std::ops::RangeInclusive;
-
 use crate::{
-    geometry::{
-        frame::{frozen::FrozenRC, VisibleCells},
-        prim::Point,
-        CanvasSize,
+    geometry::frame::{
+        slot::{ColSlot, RowSlot},
+        FrameContext,
     },
     renderer::cells::PaneCells,
-    CanvasModel,
 };
 
-use super::super::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
-//  Pane rendering
-
-/// Describes one of the four frozen-pane quadrants for `render_pane`.
+/// Identifies one of the four frozen-pane quadrants.
 ///
-/// Build with a named constructor so the quadrant name appears at the call site:
-/// ```text
-/// render_pane(&self, model: &dyn CanvasModel, pane:PaneRegion)
-/// ```
-#[derive(Clone)]
+/// `PaneRegion::cells(frame)` selects which of the frame's row-slot and
+/// col-slot vecs to walk. There is no longer an `origin` field — slot
+/// `.left`/`.top` are absolute canvas coordinates.
+#[derive(Clone, Copy)]
 pub struct PaneRegion {
-    pub rows: RangeInclusive<i32>,
-    pub cols: RangeInclusive<i32>,
-    pub origin: Point,
+    pub row_band: Band,
+    pub col_band: Band,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Band {
+    Frozen,
+    Scroll,
 }
 
 impl PaneRegion {
-    /// Frozen rows x frozen cols - top-left quadrant.
-    /// `1..=0` is the empty range, so a no-freeze build paints nothing here.
-    pub(crate) fn top_left(frc: &FrozenRC) -> Self {
-        PaneRegion {
-            rows: 1..=frc.rows,
-            cols: 1..=frc.cols,
-            origin: Point {
-                x: HEADER_COL_WIDTH + HEADER_OFFSET,
-                y: HEADER_ROW_HEIGHT + HEADER_OFFSET,
-            },
+    pub(crate) fn top_left() -> Self {
+        Self {
+            row_band: Band::Frozen,
+            col_band: Band::Frozen,
+        }
+    }
+    pub(crate) fn top_right() -> Self {
+        Self {
+            row_band: Band::Frozen,
+            col_band: Band::Scroll,
+        }
+    }
+    pub(crate) fn bottom_left() -> Self {
+        Self {
+            row_band: Band::Scroll,
+            col_band: Band::Frozen,
+        }
+    }
+    pub(crate) fn bottom_right() -> Self {
+        Self {
+            row_band: Band::Scroll,
+            col_band: Band::Scroll,
         }
     }
 
-    /// Frozen rows x scrollable cols - top-right quadrant.
-    pub(crate) fn top_right(frc: &FrozenRC, vis: &VisibleCells) -> Self {
-        PaneRegion {
-            rows: 1..=frc.rows,
-            cols: vis.first.column..=vis.last.column,
-            origin: Point {
-                x: frc.offset.x,
-                y: HEADER_ROW_HEIGHT + HEADER_OFFSET,
-            },
+    pub(crate) fn rows<'a>(&self, frame: &'a FrameContext) -> &'a [RowSlot] {
+        match self.row_band {
+            Band::Frozen => &frame.frozen_rows,
+            Band::Scroll => &frame.scroll_rows,
         }
     }
 
-    /// Scrollable rows x frozen cols - bottom-left quadrant.
-    pub(crate) fn bottom_left(frc: &FrozenRC, vis: &VisibleCells) -> Self {
-        PaneRegion {
-            rows: vis.first.row..=vis.last.row,
-            cols: 1..=frc.cols,
-            origin: Point {
-                x: HEADER_COL_WIDTH + HEADER_OFFSET,
-                y: frc.offset.y,
-            },
+    pub(crate) fn cols<'a>(&self, frame: &'a FrameContext) -> &'a [ColSlot] {
+        match self.col_band {
+            Band::Frozen => &frame.frozen_cols,
+            Band::Scroll => &frame.scroll_cols,
         }
     }
 
-    /// Scrollable rows x scrollable cols - main area.
-    pub(crate) fn bottom_right(frc: &FrozenRC, vis: &VisibleCells) -> Self {
-        PaneRegion {
-            rows: vis.first.row..=vis.last.row,
-            cols: vis.first.column..=vis.last.column,
-            origin: Point {
-                x: frc.offset.x,
-                y: frc.offset.y,
-            },
-        }
-    }
-
-    /// Walk every visible cell in this pane, yielding pixel rect + outer
-    /// edges per cell. Replaces the open-coded row/col iteration that used
-    /// to live in `render_pane`. The caller passes the
-    /// canvas size so the walker can early-break past the canvas edge.
-    pub(crate) fn cells<'a>(
-        &'a self,
-        model: &'a dyn CanvasModel,
-        canvas: CanvasSize,
-    ) -> PaneCells<'a> {
-        PaneCells {
-            pane: self,
-            model,
-            sheet: model.get_selected_sheet(),
-            canvas,
-            current_row: None,
-            row_iter: self.rows.clone(),
-            row_top: self.origin.y,
-            col_iter: self.cols.clone(),
-            col_left: self.origin.x,
-        }
+    pub(crate) fn cells<'a>(&'a self, frame: &'a FrameContext) -> PaneCells<'a> {
+        PaneCells::new(self, frame)
     }
 }

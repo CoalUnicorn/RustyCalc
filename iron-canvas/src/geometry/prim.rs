@@ -3,7 +3,7 @@ use std::ops::RangeInclusive;
 use crate::{
     geometry::{
         constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT},
-        frame::{FrameContext, VisibleCells},
+        frame::FrameContext,
         pixel_rect::PixelRect,
     },
     RCRange,
@@ -102,11 +102,11 @@ impl Axis {
         }
     }
 
-    /// Visible scrollable band in this axis, drawn from `VisibleRegion`.
-    pub(crate) fn visible_band(self, vis: &VisibleCells) -> RangeInclusive<i32> {
+    /// Visible scrollable band in this axis, derived from the frame's slot vecs.
+    pub(crate) fn visible_band(self, frame: &FrameContext) -> RangeInclusive<i32> {
         match self {
-            Axis::Row => vis.first.row..=vis.last.row,
-            Axis::Column => vis.first.column..=vis.last.column,
+            Axis::Row => frame.top_row()..=frame.last_visible_row(),
+            Axis::Column => frame.left_column()..=frame.last_visible_col(),
         }
     }
 

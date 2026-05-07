@@ -7,6 +7,7 @@
 
 use super::RendererCore;
 
+use crate::painter::{PaintColor, Painter, TextAlign, TextBaseline};
 use crate::{
     geometry::constants::STANDARD_BORDER_WIDTH,
     renderer::text_paint::{TextColor, TextLine, TextPaint},
@@ -18,7 +19,7 @@ use crate::{
 const UNDERLINE_OFFSET_FACTOR: f64 = 0.35;
 const MIN_UNDERLINE_OFFSET: i32 = 2;
 
-impl RendererCore {
+impl<P: Painter> RendererCore<P> {
     /// Paint a pre-computed `TextPaint` onto the canvas. Pure pixel pusher:
     /// no model access, no layout work — everything is already resolved.
     /// `lines` is the externally owned line buffer that `TextPaint::resolve_into`
@@ -26,42 +27,47 @@ impl RendererCore {
     /// the path while preserving the old "set state then clip then stroke"
     /// ordering.
     pub(super) fn paint_text(&self, t: &TextPaint, lines: &[TextLine]) {
-        // Set state before `with_clip` so save/restore preserves it — the values
-        // survive the restore and the cache stays valid across consecutive cells
-        // that share the same font or color.
-        self.set_font_cached(&t.font_css);
-        // Static dispatch mirrors paint_bg in cells.rs: theme-default text
-        // colors hit the pointer-eq cache fast path; per-cell overrides take
-        // the value-compare path.
-        match &t.color {
-            TextColor::Static(s) => self.set_fill_static(s),
-            TextColor::Owned(s) => self.set_fill_cached(s),
-        }
-        if t.underline || t.strike {
-            match &t.color {
-                TextColor::Static(s) => self.set_stroke_static(s),
-                TextColor::Owned(s) => self.set_stroke_cached(s),
-            }
-            self.set_line_width_cached(STANDARD_BORDER_WIDTH);
-        }
+        // TextColor::Static is the theme-default fast path (zero alloc).
+        // TextColor::Owned carries a per-cell custom color from the font's
+        // explicit color attribute.
+        let color = match &t.color {
+            TextColor::Static(s) => PaintColor::Static(s),
+            TextColor::Owned(s) => PaintColor::Borrowed(s),
+        };
+        // `font_css` is interned `Rc<str>` per (size, weight, slant, family);
+        // not `&'static`, so it goes through Borrowed (content-eq cache hit
+        // across cells with the same interned font).
+        let font_css = PaintColor::Borrowed(&t.font_css);
+        let underline_offset =
+            (t.font_size_px * UNDERLINE_OFFSET_FACTOR).max(f64::from(MIN_UNDERLINE_OFFSET));
+        let stroke_w = f64::from(STANDARD_BORDER_WIDTH);
 
-        self.with_clip(t.clip, |this| {
-            let underline_offset =
-                (t.font_size_px * UNDERLINE_OFFSET_FACTOR).max(f64::from(MIN_UNDERLINE_OFFSET));
-
-            for line in lines {
-                this.ctx_ref()
-                    .fill_text(&line.text, line.center_x, line.center_y)
-                    .ok();
-                let x1 = line.center_x - line.width / 2.0;
-                let x2 = line.center_x + line.width / 2.0;
-                if t.underline {
-                    this.stroke_text_hline(x1, x2, line.center_y + underline_offset);
-                }
-                if t.strike {
-                    this.stroke_text_hline(x1, x2, line.center_y);
-                }
+        if t.needs_clip {
+            self.painter.push_clip(t.clip);
+        }
+        for line in lines {
+            self.painter.fill_text(
+                &line.text,
+                line.center_x,
+                line.center_y,
+                font_css,
+                color,
+                TextAlign::Center,
+                TextBaseline::Middle,
+            );
+            let x1 = line.center_x - line.width / 2.0;
+            let x2 = line.center_x + line.width / 2.0;
+            if t.underline {
+                self.painter
+                    .stroke_text_hline(x1, x2, line.center_y + underline_offset, color, stroke_w);
             }
-        });
+            if t.strike {
+                self.painter
+                    .stroke_text_hline(x1, x2, line.center_y, color, stroke_w);
+            }
+        }
+        if t.needs_clip {
+            self.painter.pop_clip();
+        }
     }
 }

@@ -10,13 +10,14 @@
 use crate::geometry::constants::{
     DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH, STANDARD_BORDER_WIDTH,
 };
+use crate::painter::{PaintColor, Painter};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::CanvasModel;
 
 use super::super::geometry::constants::AUTOFILL_HANDLE_BORDER_PX;
 use super::super::types::coord::CellAddress;
-use super::{RendererCore, FrameContext};
+use super::{FrameContext, RendererCore};
 
 /// Controls whether `draw_dashed_range` fills the interior with a light tint.
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -29,7 +30,7 @@ pub(crate) enum DashFill {
     Tinted(&'static str),
 }
 
-impl RendererCore {
+impl<P: Painter> RendererCore<P> {
     /// Draw the blue selection border, semi-transparent fill, and autofill
     /// handle for the current selection.
     pub(super) fn draw_selection(&self, model: &dyn CanvasModel, frame: &FrameContext) {
@@ -40,18 +41,24 @@ impl RendererCore {
             row: view.row,
             column: view.column,
         };
-        let Some(b) = self.range_pixel_bounds(frame, RCRange::from_view(model).normalized()) else {
+        let Some(cell) = self.range_pixel_bounds(frame, RCRange::from_view(model).normalized())
+        else {
             return;
         };
 
-        self.rect_fill(b, frame.theme.selection_fill);
+        self.painter
+            .rect_fill(cell, PaintColor::Static(frame.theme.selection_fill));
 
         // Restore the active cell's fill + borders on top of the selection
         // tint so its actual style shows through while selected. Phase 4
         // paints text over everything later.
         self.repaint_active_cell(model, addr, frame);
 
-        self.rect_stroke(b, frame.theme.selection_color, SELECTION_BORDER_WIDTH);
+        self.painter.rect_stroke(
+            cell,
+            PaintColor::Static(frame.theme.selection_color),
+            f64::from(SELECTION_BORDER_WIDTH),
+        );
 
         // Autofill handle: top-left at the selection's bottom-right corner
         // (Excel anchor — pokes outside the selection). Filled with
@@ -60,8 +67,13 @@ impl RendererCore {
         // returns None there, matching `autofill_handle()` semantics.
         let handle = frame.autofill_handle_rect();
 
-        self.rect_fill(handle, frame.theme.selection_color);
-        self.rect_stroke(handle, frame.theme.cell_bg, AUTOFILL_HANDLE_BORDER_PX);
+        self.painter
+            .rect_fill(handle, PaintColor::Static(frame.theme.selection_color));
+        self.painter.rect_stroke(
+            handle,
+            PaintColor::Static(frame.theme.cell_bg),
+            f64::from(AUTOFILL_HANDLE_BORDER_PX),
+        );
     }
 
     /// Dashed preview of the autofill-handle drag target.
@@ -82,7 +94,11 @@ impl RendererCore {
             return;
         };
 
-        self.rect_dashed(b, frame.theme.selection_color, STANDARD_BORDER_WIDTH);
+        self.painter.rect_dashed(
+            b,
+            PaintColor::Static(frame.theme.selection_color),
+            f64::from(STANDARD_BORDER_WIDTH),
+        );
     }
 
     /// Clipboard marching-ants border around the last Ctrl+C copied range.
@@ -101,7 +117,7 @@ impl RendererCore {
         self.draw_dashed_range(
             frame,
             cb.range.normalized(),
-            frame.theme.selection_color,
+            PaintColor::Static(frame.theme.selection_color),
             DashFill::Outline,
         );
     }
@@ -112,7 +128,7 @@ impl RendererCore {
         self.draw_dashed_range(
             frame,
             pr.normalized(),
-            frame.theme.pointing,
+            PaintColor::Static(frame.theme.pointing),
             DashFill::Tinted(frame.theme.pointing_tint),
         );
     }
@@ -134,7 +150,7 @@ impl RendererCore {
             self.draw_dashed_range(
                 frame,
                 fr.sheet_area.range.normalized(),
-                FORMULA_REF_COLORS[idx],
+                PaintColor::Static(FORMULA_REF_COLORS[idx]),
                 DashFill::Tinted(FORMULA_REF_TINTS[idx]),
             );
         }
@@ -147,17 +163,22 @@ impl RendererCore {
         &self,
         frame: &FrameContext,
         range: RCRange,
-        color: &str,
+        color: PaintColor,
         fill: DashFill,
     ) {
         let Some(b) = self.range_pixel_bounds(frame, range) else {
             return;
         };
 
-        self.rect_dashed(b, color, DASHED_BORDER_WIDTH);
-
+        // Tint first so the dashed outline lands cleanly on top — the 8%
+        // alpha would otherwise wash over the dashes and dim them.
+        // `DashFill::Tinted` carries `&'static str` so the tint stays on
+        // the zero-alloc Static path.
         if let DashFill::Tinted(tint) = fill {
-            self.rect_fill(b, tint);
+            self.painter.rect_fill(b, PaintColor::Static(tint));
         }
+
+        self.painter
+            .rect_dashed(b, color, f64::from(DASHED_BORDER_WIDTH));
     }
 }

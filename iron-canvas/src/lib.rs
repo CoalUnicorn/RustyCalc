@@ -30,6 +30,7 @@ pub mod geometry;
 mod layer;
 mod model_adapter;
 mod orchestrator;
+mod painter;
 pub mod renderer;
 pub mod style;
 pub mod theme;
@@ -44,7 +45,6 @@ pub use geometry::{
         AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
         HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
     },
-    frame::CellRC,
     pixel_rect::PixelRect,
     prim::{Line, Point, Span},
     utils::{col_name, col_width, row_height},

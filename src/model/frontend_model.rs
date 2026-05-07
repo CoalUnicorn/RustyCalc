@@ -62,7 +62,7 @@ pub trait FrontendModel {
 
     /// Workbook defined names, flattened from ironcalc's `DefinedNameS` tuples
     /// into our named-field [`DefinedName`]. Fed to the parser so identifiers
-    /// like `=my_range` resolve instead of tripping `WrongVariableKind`.
+    /// like `=my_range` resolve instead of tripping `NamedVariableKind`.
     fn get_defined_names(&self) -> Vec<DefinedName>;
 
     // Defined-name mutations — every variant may change formula evaluation,

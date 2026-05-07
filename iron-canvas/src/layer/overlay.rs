@@ -2,7 +2,8 @@ use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
 use crate::layer::{create_2d_context, LayerBase};
-use crate::renderer::{LayerOps, OverlayRenderer};
+use crate::painter::CanvasPainter;
+use crate::renderer::OverlayRenderer;
 use crate::types::coord::{AutofillTarget, SheetArea};
 use crate::{CanvasModel, FormulaRef, RCRange};
 
@@ -25,7 +26,7 @@ pub struct RenderOverlays {
 }
 
 pub(crate) struct OverlayLayer {
-    base: LayerBase<OverlayRenderer>,
+    base: LayerBase<OverlayRenderer<CanvasPainter>>,
 }
 
 impl OverlayLayer {

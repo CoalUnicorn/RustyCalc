@@ -73,18 +73,12 @@ impl<R: LayerOps> LayerBase<R> {
         if self.canvas.width() != target_w || self.canvas.height() != target_h {
             self.canvas.set_width(target_w);
             self.canvas.set_height(target_h);
-        } else {
-            self.renderer
-                .ctx_ref()
-                .set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-                .expect("set_transform should not fail");
         }
-        self.renderer
-            .ctx_ref()
-            .scale(f64::from(dpr), f64::from(dpr))
-            .expect("scale should not fail");
-        self.renderer.set_dpr(dpr);
-        self.renderer.invalidate_paint_cache();
+        // resize_for_dpr unconditionally resets the transform before scaling,
+        // so the prior `else { set_transform(identity) }` branch is no longer
+        // needed — the path taken when only DPR changed is now the same as
+        // the path taken after a backing-store reallocation.
+        self.renderer.resize_for_dpr(dpr);
     }
 }
 

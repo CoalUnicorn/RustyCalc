@@ -12,6 +12,7 @@ use crate::geometry::constants::{HEADER_OFFSET, STANDARD_BORDER_WIDTH};
 use crate::geometry::frame::FrameContext;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point, Span};
+use crate::painter::{PaintColor, Painter, TextAlign, TextBaseline};
 
 use super::super::geometry::constants::{FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 
@@ -19,40 +20,42 @@ use super::RendererCore;
 
 const HEADER_FONT: &str = "bold 12px Inter, Arial, sans-serif";
 
-impl RendererCore {
+impl<P: Painter> RendererCore<P> {
     /// Thick separator strokes between frozen bands and the scrollable grid.
     pub(super) fn draw_frozen_separators(&self, frame: &FrameContext) {
         let frc = &frame.frozen;
         if frc.rows == 0 && frc.cols == 0 {
             return;
         }
-        self.set_stroke_static(frame.theme.grid_separator_color);
-
+        let color = PaintColor::Static(frame.theme.grid_separator_color);
+        let width = f64::from(FROZEN_SEP);
         let sep_y = frc.offset.y - FROZEN_SEP / 2 + HEADER_OFFSET;
         let sep_x = frc.offset.x - FROZEN_SEP / 2 + HEADER_OFFSET;
         let canvas_w = frame.canvas_size.w as i32;
         let canvas_h = frame.canvas_size.h as i32;
 
-        self.with_stroke_width(FROZEN_SEP, |this| {
-            if frc.rows > 0 {
-                this.stroke_hline(
-                    Span {
-                        from: 0,
-                        to: canvas_w,
-                    },
-                    f64::from(sep_y),
-                );
-            }
-            if frc.cols > 0 {
-                this.stroke_vline(
-                    f64::from(sep_x),
-                    Span {
-                        from: 0,
-                        to: canvas_h,
-                    },
-                );
-            }
-        });
+        if frc.rows > 0 {
+            self.painter.stroke_hline(
+                Span {
+                    from: 0,
+                    to: canvas_w,
+                },
+                f64::from(sep_y),
+                color,
+                width,
+            );
+        }
+        if frc.cols > 0 {
+            self.painter.stroke_vline(
+                f64::from(sep_x),
+                Span {
+                    from: 0,
+                    to: canvas_h,
+                },
+                color,
+                width,
+            );
+        }
     }
 
     /// Top-left blank square plus the two axis lines that separate the
@@ -63,42 +66,44 @@ impl RendererCore {
             width: HEADER_COL_WIDTH,
             height: HEADER_ROW_HEIGHT,
         };
-        self.rect_fill(corner, frame.theme.header_bg);
+        self.painter
+            .rect_fill(corner, PaintColor::Static(frame.theme.header_bg));
 
-        self.set_stroke_static(frame.theme.header_border_color);
-        self.set_line_width_cached(STANDARD_BORDER_WIDTH);
-        self.stroke_hline(
+        let border_color = PaintColor::Static(frame.theme.header_border_color);
+        self.painter.stroke_hline(
             Span {
                 from: 0,
                 to: frame.canvas_size.w as i32,
             },
             f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET),
+            border_color,
+            f64::from(STANDARD_BORDER_WIDTH),
         );
-        self.stroke_vline(
+        self.painter.stroke_vline(
             f64::from(HEADER_COL_WIDTH + HEADER_OFFSET),
             Span {
                 from: 0,
                 to: frame.canvas_size.h as i32,
             },
+            border_color,
+            f64::from(STANDARD_BORDER_WIDTH),
         );
     }
 
     /// Paint one header strip along `axis` with no selection highlighting.
     pub(super) fn render_headers_base(&self, axis: Axis, frame: &FrameContext) {
-        self.set_font_static(HEADER_FONT);
-        self.walk_header_strip(axis, frame, |this, i, along, t| {
-            this.draw_header_cell(axis, frame, i, along, t, false);
+        self.walk_header_strip(axis, frame, |i, along, t| {
+            self.draw_header_cell(axis, frame, i, along, t, false);
         });
     }
 
     /// Overlay pass repainting only selected header cells so the grid layer
     /// never redraws on navigation — the base pass beneath stays intact.
     pub(super) fn render_header_highlights(&self, axis: Axis, frame: &FrameContext) {
-        self.set_font_static(HEADER_FONT);
         let (sel_start, sel_end) = axis.selection_range(frame.selection_range);
-        self.walk_header_strip(axis, frame, |this, i, along, t| {
+        self.walk_header_strip(axis, frame, |i, along, t| {
             if i >= sel_start && i <= sel_end {
-                this.draw_header_cell(axis, frame, i, along, t, true);
+                self.draw_header_cell(axis, frame, i, along, t, true);
             }
         });
     }
@@ -109,7 +114,7 @@ impl RendererCore {
         &self,
         axis: Axis,
         frame: &FrameContext,
-        mut visit: impl FnMut(&Self, i32, i32, i32),
+        mut visit: impl FnMut(i32, i32, i32),
     ) {
         let frozen_count = axis.frozen_count(frame);
         let frozen_origin = axis.frozen_origin(frame);
@@ -120,7 +125,7 @@ impl RendererCore {
             if t <= 0 {
                 continue;
             }
-            visit(self, i, frozen_cursor, t);
+            visit(i, frozen_cursor, t);
             frozen_cursor += t;
         }
 
@@ -129,12 +134,12 @@ impl RendererCore {
         } else {
             axis.strip_start()
         };
-        for i in axis.visible_band(&frame.vis) {
+        for i in axis.visible_band(frame) {
             let t = axis.frame_extent(frame, i);
             if t <= 0 {
                 continue;
             }
-            visit(self, i, scroll_cursor, t);
+            visit(i, scroll_cursor, t);
             scroll_cursor += t;
         }
     }
@@ -152,16 +157,16 @@ impl RendererCore {
         thickness: i32,
         selected: bool,
     ) {
-        let body_bg = if selected {
+        let body_bg = PaintColor::Static(if selected {
             frame.theme.header_selected_bg
         } else {
             frame.theme.header_bg
-        };
-        let text_color = if selected {
+        });
+        let text_color = PaintColor::Static(if selected {
             frame.theme.header_selected_color
         } else {
             frame.theme.header_text_color
-        };
+        });
 
         let full = axis.header_rect(along, thickness);
         // 1px inset on the cross-axis leaves the border strip visible top+bottom (row)
@@ -171,10 +176,9 @@ impl RendererCore {
             Axis::Column => full.inset(1, 0),
         };
 
-        self.rect_fill(full, frame.theme.header_border_color);
-        self.rect_fill(body, body_bg);
-
-        self.set_fill_static(text_color);
+        self.painter
+            .rect_fill(full, PaintColor::Static(frame.theme.header_border_color));
+        self.painter.rect_fill(body, body_bg);
         let center = full.center();
         let snap_x = f64::from(center.x);
         let snap_y = f64::from(center.y);
@@ -186,11 +190,27 @@ impl RendererCore {
                 let mut buf = self.frame_cache.label_buf.borrow_mut();
                 buf.clear();
                 let _ = write!(&mut *buf, "{}", index);
-                self.ctx.fill_text(&buf, snap_x, snap_y).ok();
+                self.painter.fill_text(
+                    &buf,
+                    snap_x,
+                    snap_y,
+                    PaintColor::Static(HEADER_FONT),
+                    text_color,
+                    TextAlign::Center,
+                    TextBaseline::Middle,
+                );
             }
             Axis::Column => {
                 let label = self.col_intern.get(index);
-                self.ctx.fill_text(&label, snap_x, snap_y).ok();
+                self.painter.fill_text(
+                    &label,
+                    snap_x,
+                    snap_y,
+                    PaintColor::Static(HEADER_FONT),
+                    text_color,
+                    TextAlign::Center,
+                    TextBaseline::Middle,
+                );
             }
         }
     }

@@ -3,11 +3,12 @@ use web_sys::HtmlCanvasElement;
 
 use crate::geometry::frame::FrameContext;
 use crate::layer::{create_2d_context, LayerBase};
-use crate::renderer::{GridRenderer, LayerOps};
+use crate::painter::CanvasPainter;
+use crate::renderer::GridRenderer;
 use crate::CanvasModel;
 
 pub(crate) struct GridLayer {
-    base: LayerBase<GridRenderer>,
+    base: LayerBase<GridRenderer<CanvasPainter>>,
 }
 
 impl GridLayer {

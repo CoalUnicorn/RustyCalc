@@ -4,15 +4,9 @@ use std::rc::Rc;
 use crate::renderer::cells::CellPaint;
 use crate::renderer::text_paint::TextLine;
 use crate::style::FontStyle;
+use crate::types::coord::CssColor;
 
 pub(crate) struct FrameCache {
-    /// Per-frame canvas state cache. Avoids redundant JS boundary crossings
-    /// when adjacent cells share the same fill, stroke, font, or line width.
-    /// `Cell<T>` allows mutation through `&self` so paint helpers keep their immutable signature.
-    pub(crate) last_fill: Cell<CachedColor>,
-    pub(crate) last_stroke: Cell<CachedColor>,
-    pub(crate) last_font: Cell<CachedColor>,
-    pub(crate) last_line_width: Cell<f64>,
     /// Scratch buffer parking each pane's resolved `CellPaint`s during the
     /// streaming bg pass so the deferred border + text passes can iterate
     /// them without re-querying the model. Reused across pane calls to
@@ -28,44 +22,15 @@ pub(crate) struct FrameCache {
     /// frames so steady-state row-label paints don't re-allocate.
     pub(crate) label_buf: RefCell<String>,
     /// Scratch line buffer parked here so `TextPaint::resolve_into` doesn't
-    /// allocate a fresh `Vec<TextLine>` per cell with text. Each cell `clear()`s
-    /// and refills; the inner per-line `String` capacities also survive.
+    /// allocate a fresh `Vec<TextLine>` per cell with text. `layout_into`
+    /// overwrites slots in place via a counter and `truncate`s the tail, so
+    /// inner `String` capacities for slots `[0..line_count)` survive across
+    /// cells. Slots beyond the count are dropped on shrink.
     pub(crate) text_lines: Cell<Vec<TextLine>>,
-}
-
-/// Per-frame ctx-state cache entry. The `Static` arm carries `&'static str`
-/// for theme-driven calls so cache misses skip the `to_string()` allocation
-/// the previous `Cell<String>` cache forced. `Owned` keeps the dynamic path
-/// (per-cell colors built from `CssColor::new`) intact.
-#[derive(Default)]
-pub(crate) enum CachedColor {
-    #[default]
-    Empty,
-    Static(&'static str),
-    Owned(String),
-}
-
-impl CachedColor {
-    /// Compare against an arbitrary `&str` without forcing a new allocation
-    /// on a cache hit. `Static` and `Owned` both fall back to value compare.
-    pub(super) fn matches(&self, color: &str) -> bool {
-        match self {
-            CachedColor::Empty => false,
-            CachedColor::Static(s) => *s == color,
-            CachedColor::Owned(s) => s == color,
-        }
-    }
-
-    /// Pointer-equality compare against a `&'static str`. The two `Static`
-    /// arms are cheap; `Owned` still falls back to value compare so a
-    /// dynamic -> static transition is detected correctly.
-    pub(super) fn matches_static(&self, color: &'static str) -> bool {
-        match self {
-            CachedColor::Empty => false,
-            CachedColor::Static(s) => std::ptr::eq(*s, color),
-            CachedColor::Owned(s) => s == color,
-        }
-    }
+    /// Scratch line-builder for the wrap path. `layout_into` reuses this
+    /// `String` across every wrapped raw-line of every cell, so the wrap
+    /// branch is alloc-free in steady state. Renderer-lifetime, not per-cell.
+    pub(crate) wrap_buf: RefCell<String>,
 }
 
 /// Renderer-lifetime intern table for `ctx.font` strings.
@@ -158,5 +123,38 @@ impl ColNameIntern {
             entries.push(crate::geometry::utils::col_name(next).into());
         }
         Rc::clone(&entries[idx])
+    }
+}
+
+/// Renderer-lifetime intern table for per-cell color strings (border + text
+/// overrides). Keyed by the **raw** `&str` from the model so cache-hit lookups
+/// stay zero-alloc (no normalization on the hit path); the value is the
+/// `CssColor`-normalized output the painter actually consumes. Two raws that
+/// normalize to the same color produce two entries — accepted, cardinality is
+/// bounded by the small set of distinct colors a sheet uses.
+pub(crate) struct ColorIntern {
+    entries: RefCell<Vec<(Box<str>, Rc<str>)>>,
+}
+
+impl ColorIntern {
+    pub(crate) fn new() -> Self {
+        Self {
+            entries: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Returns the interned normalized color for `raw`. Hit: `Rc::clone`.
+    /// Miss: one `CssColor::new(raw).into_string()` + one `Box<str>` key +
+    /// one `Rc<str>` value, then `Rc::clone` for the return.
+    pub(crate) fn get(&self, raw: &str) -> Rc<str> {
+        let mut entries = self.entries.borrow_mut();
+        for (key, css) in entries.iter() {
+            if &**key == raw {
+                return Rc::clone(css);
+            }
+        }
+        let css: Rc<str> = CssColor::new(raw).into_string().into();
+        entries.push((raw.into(), Rc::clone(&css)));
+        css
     }
 }
