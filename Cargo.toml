@@ -9,8 +9,10 @@ readme = "README.md"
 
 [dependencies]
 leptos = { version = "0.8", features = ["csr"] }
-ironcalc_base = { git = "https://github.com/CoalUnicorn/IronCalc",branch = "fix-col-iterations", features = ["use_regex_lite"] }
-ironcalc = { path = "ironcalc_xlsx" }
+#ironcalc_base = { git = "https://github.com/CoalUnicorn/IronCalc",branch = "fix-col-iterations", features = ["use_regex_lite"] }
+ironcalc_base = { version = "0.7.1", path = "../IronCalc/base"  }
+ironcalc = { version = "0.7.1", path = "../IronCalc/xlsx" }
+iron-canvas = { path = "iron-canvas" }
 web-sys = { version = "0.3", features = [
     "Window", "Document", "HtmlCanvasElement", "HtmlElement",
     "CanvasRenderingContext2d", "TextMetrics", "Element",
@@ -36,6 +38,7 @@ chrono = { version = "0.4", features =  ["serde", "wasmbind"] }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+console_error_panic_hook = "0.1.7"
 
 [profile.release]
 #inherits = "release"
@@ -44,6 +47,9 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[features]
+tauri = []
 
 [package.metadata.leptos]
 lib-profile-release = "wasm-release"

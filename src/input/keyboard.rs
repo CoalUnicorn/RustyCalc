@@ -17,6 +17,7 @@ use crate::input::{
 };
 use crate::model::{style_types::HexColor, ArrowKey, SafeFontFamily};
 use crate::state::{EditMode, EditingCell, ModelStore, StatusMessage, WorkbookState};
+use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 
 // SpreadsheetAction
 
@@ -78,6 +79,24 @@ impl SpreadsheetAction {
     }
     pub fn set_background_color(hex: HexColor) -> Self {
         Self::Format(FormatAction::SetBackgroundColor(hex))
+    }
+    pub fn set_num_fmt(code: &str) -> Self {
+        Self::Format(FormatAction::SetNumFmt(code.to_owned()))
+    }
+    pub fn clear_formatting() -> Self {
+        Self::Format(FormatAction::ClearFormatting)
+    }
+    pub fn set_h_align(align: HorizontalAlignment) -> Self {
+        Self::Format(FormatAction::SetHorizontalAlign(align))
+    }
+    pub fn set_v_align(align: VerticalAlignment) -> Self {
+        Self::Format(FormatAction::SetVerticalAlign(align))
+    }
+    pub fn increase_decimals() -> Self {
+        Self::Format(FormatAction::IncreaseDecimals)
+    }
+    pub fn decrease_decimals() -> Self {
+        Self::Format(FormatAction::DecreaseDecimals)
     }
     pub fn undo() -> Self {
         Self::Structure(StructAction::Undo)
@@ -324,6 +343,7 @@ impl KeyMod {
 mod tests {
     use super::*;
     use crate::coord::CellAddress;
+    use crate::input::formula_analysis::FormulaAnalysis;
     use crate::model::{mutate, ArrowKey, EvaluationMode};
     use crate::state::{DragState, EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;
@@ -338,10 +358,12 @@ mod tests {
                 row: 1,
                 column: 1,
             },
+            cursor: 0,
             text: String::new(),
             mode: EditMode::Accept,
             focus: EditFocus::Cell,
             text_dirty: false,
+            formula_analysis: FormulaAnalysis::default(),
         }
     }
 
@@ -352,10 +374,12 @@ mod tests {
                 row: 1,
                 column: 1,
             },
+            cursor: 0,
             text: String::new(),
             mode: EditMode::Edit,
             focus: EditFocus::Cell,
             text_dirty: false,
+            formula_analysis: FormulaAnalysis::default(),
         }
     }
 
@@ -965,6 +989,7 @@ mod tests {
         });
     }
 
+    #[allow(clippy::unwrap_used)]
     #[wasm_bindgen_test]
     fn execute_clears_status_on_success() {
         let owner = Owner::new();

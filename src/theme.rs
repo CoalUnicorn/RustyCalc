@@ -1,14 +1,21 @@
-/// Enhanced Theme system for IronCalc Leptos with leptos-use integration.
+/// Theme system for RustyCalc.
 ///
-/// Three parallel mechanisms:
-/// - leptos-use `use_color_mode()` handles system theme detection, localStorage persistence, and DOM class management
-/// - [`Theme`] provides compatibility layer and extends leptos-use ColorMode
-/// - [`CanvasTheme`] carries concrete color strings for the Canvas 2D API, which cannot consume CSS variables
-use gloo_storage::{LocalStorage, Storage};
+/// - leptos-use `use_color_mode()` handles system theme detection,
+///   localStorage persistence, and writes `data-theme="light|dark"` on
+///   `<html>`.
+/// - [`Theme`] enum mirrors leptos-use `ColorMode` (Auto/Light/Dark) for
+///   the consumer-side UI bits that need a strongly-typed handle.
+/// - The canvas palette is no longer plumbed through this module: iron-canvas
+///   reads its theme directly from CSS custom properties on `<html>` via
+///   `IronCanvas::set_theme_from_element`. `CanvasTheme` and
+///   [`ThemeVariables`] are re-exported here only for callers that want to
+///   build a theme programmatically (e.g. tests).
 use leptos_use::{use_color_mode_with_options, ColorMode, UseColorModeOptions};
 
+#[allow(unused_imports)]
+pub use iron_canvas::theme::{CanvasTheme, ThemeVariables};
+
 // Shared color palette
-// TODO: create a component
 /// 40-color palette used by the tab color picker and future color pickers.
 pub const COLOR_PALETTE: &[&str] = &[
     "#000000", "#FFFFFF", "#FF0000", "#FF4500", "#FF8C00", "#FFD700", "#00CC44", "#008000",
@@ -67,209 +74,3 @@ pub fn use_rusty_calc_theme() -> leptos_use::UseColorModeReturn {
             .emit_auto(false), // Always resolve Auto to a concrete mode
     )
 }
-
-#[derive(Debug, thiserror::Error)]
-enum DarkModeQueryError {
-    #[error("window not available")]
-    NoWindow,
-    #[error("media query list not available")]
-    NoMediaQueryList,
-}
-
-/// Inner fallible implementation for [`Theme::system_prefers_dark`].
-fn query_prefers_dark() -> Result<bool, DarkModeQueryError> {
-    let window = web_sys::window().ok_or(DarkModeQueryError::NoWindow)?;
-    let mql = window
-        .match_media("(prefers-color-scheme: dark)")
-        .ok()
-        .flatten()
-        .ok_or(DarkModeQueryError::NoMediaQueryList)?;
-    Ok(mql.matches())
-}
-
-impl Theme {
-    pub const STORAGE_KEY: &'static str = "ironcalc_theme";
-
-    /// Retrieve the last saved preference from localStorage with Auto support.
-    /// Enhanced to detect system theme when Auto is selected.
-    /// Falls back to `Light` if nothing is stored.
-    pub fn from_storage() -> Self {
-        let s: String = LocalStorage::get(Self::STORAGE_KEY).unwrap_or_default();
-        match s.as_str() {
-            "auto" => Theme::Auto,
-            "dark" => Theme::Dark,
-            _ => Theme::Light,
-        }
-    }
-
-    /// Get system preference (true if system prefers dark mode)
-    /// Uses CSS media query to detect system preference
-    pub fn system_prefers_dark() -> bool {
-        query_prefers_dark().unwrap_or(false)
-    }
-
-    /// Persist the current preference to localStorage.
-    /// DEPRECATED: leptos-use handles storage automatically
-    pub fn save(self) {
-        LocalStorage::set(Self::STORAGE_KEY, self.as_str()).ok();
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Theme::Auto => "auto",
-            Theme::Light => "light",
-            Theme::Dark => "dark",
-        }
-    }
-
-    /// Toggle between Light and Dark (preserves Auto mode)
-    pub fn toggle(self) -> Self {
-        match self {
-            Theme::Auto => Theme::Auto, // Keep auto mode
-            Theme::Light => Theme::Dark,
-            Theme::Dark => Theme::Light,
-        }
-    }
-
-    /// Resolve theme to actual Light/Dark value, considering system preference
-    /// This is needed for canvas theming since Canvas 2D API needs concrete colors
-    pub fn resolve_actual_theme(self, system_prefers_dark: bool) -> Theme {
-        match self {
-            Theme::Auto => {
-                if system_prefers_dark {
-                    Theme::Dark
-                } else {
-                    Theme::Light
-                }
-            }
-            Theme::Light => Theme::Light,
-            Theme::Dark => Theme::Dark,
-        }
-    }
-
-    /// Resolve theme using current system preference (convenience method)
-    pub fn resolve_with_system(self) -> Theme {
-        self.resolve_actual_theme(Self::system_prefers_dark())
-    }
-
-    /// Return the canvas color palette for this theme.
-    /// For Auto themes, pass the resolved theme from system preference.
-    pub fn canvas_theme(self) -> &'static CanvasTheme {
-        match self {
-            Theme::Auto => &LIGHT, // Fallback, should use resolve_actual_theme() first
-            Theme::Light => &LIGHT,
-            Theme::Dark => &DARK,
-        }
-    }
-
-    /// Get canvas theme resolved from system preference
-    pub fn canvas_theme_resolved(self, system_prefers_dark: bool) -> &'static CanvasTheme {
-        self.resolve_actual_theme(system_prefers_dark)
-            .canvas_theme()
-    }
-}
-
-// CanvasTheme
-
-/// Concrete color strings for the Canvas 2D rendering context.
-/// One static instance per theme; passed into `CanvasRenderer::new()`.
-#[derive(Copy, Clone, PartialEq)]
-pub struct CanvasTheme {
-    pub grid_color: &'static str,
-    pub grid_separator_color: &'static str,
-    pub header_bg: &'static str,
-    pub header_border_color: &'static str,
-    pub header_text_color: &'static str,
-    pub header_selected_bg: &'static str,
-    pub header_selected_color: &'static str,
-    pub default_text_color: &'static str,
-    pub selection_color: &'static str,
-    pub cell_bg: &'static str,
-    pub pointing: &'static str,
-    /// rgba() string for the semi-transparent range selection fill.
-    pub selection_fill: &'static str,
-}
-
-pub static LIGHT: CanvasTheme = CanvasTheme {
-    grid_color: "#E0E0E0",
-    grid_separator_color: "#E0E0E0",
-    header_bg: "#FFF",
-    header_border_color: "#E0E0E0",
-    header_text_color: "#333",
-    header_selected_bg: "#EEEEEE",
-    header_selected_color: "#333",
-    default_text_color: "#2E414D",
-    selection_color: "#17A2D3",
-    cell_bg: "#FFFFFF",
-    pointing: "#1E6FD9",
-    selection_fill: "rgba(23,162,211,0.12)",
-};
-
-pub static DARK: CanvasTheme = CanvasTheme {
-    grid_color: "#3A3A3A",
-    grid_separator_color: "#3A3A3A",
-    header_bg: "#1E1E1E",
-    header_border_color: "#3A3A3A",
-    header_text_color: "#CCC",
-    header_selected_bg: "#2D2D2D",
-    header_selected_color: "#CCC",
-    default_text_color: "#D4D4D4",
-    selection_color: "#17A2D3",
-    cell_bg: "#121212",
-    pointing: "#1E6FD9",
-    selection_fill: "rgba(23,162,211,0.18)",
-};
-
-// Get colors from the current document that aren't in the standard palette
-//
-// NOTE: Check if this works need import support
-// This scans all cells and extracts unique colors for the recent colors section
-// #[allow(dead_code)]
-// pub fn extract_document_colors(&self, model: ModelStore) -> Vec<String> {
-//     use crate::theme::COLOR_PALETTE;
-//     use std::collections::HashSet;
-
-//     let mut document_colors = HashSet::new();
-
-//     model.with_value(|m| {
-//         // Get all worksheets
-//         let sheets = m.get_worksheets_properties();
-
-//         for sheet_props in &sheets {
-//             let sheet_idx = sheet_props.sheet_id;
-
-//             // FIXME: Scan a reasonable range of cells (don't scan infinite sheets)
-//             for row in 1..=100 {
-//                 for col in 1..=50 {
-//                     // Get cell style (only check cells that might have formatting)
-//                     if let Ok(style) = m.get_cell_style(sheet_idx, row, col) {
-//                         // Only process if the style has non-default values
-//                         if style.font.color.is_some() || style.fill.fg_color.is_some() {
-//                             // Collect text color
-//                             if let Some(text_color) = style.font.color.as_ref() {
-//                                 if !text_color.is_empty() && text_color != "#000000" {
-//                                     let normalized = text_color.to_lowercase();
-//                                     if !COLOR_PALETTE.contains(&normalized.as_str()) {
-//                                         document_colors.insert(normalized);
-//                                     }
-//                                 }
-//                             }
-
-//                             // Collect background color
-//                             if let Some(bg_color) = style.fill.fg_color.as_ref() {
-//                                 if !bg_color.is_empty() {
-//                                     let normalized = bg_color.to_lowercase();
-//                                     if !COLOR_PALETTE.contains(&normalized.as_str()) {
-//                                         document_colors.insert(normalized);
-//                                     }
-//                                 }
-//                             }
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-//     });
-
-//     document_colors.into_iter().collect()
-// }

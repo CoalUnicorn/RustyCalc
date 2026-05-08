@@ -31,7 +31,7 @@ Effect::new(move |_| {
 
 use leptos::prelude::*;
 
-use crate::coord::{CellAddress, SheetArea};
+use crate::coord::{CellAddress, SheetRange};
 use crate::model::CssColor;
 use crate::theme::Theme;
 
@@ -142,7 +142,7 @@ pub enum ContentEvent {
         new_value: Option<String>,
     },
     RangeChanged {
-        sheet_area: SheetArea,
+        sheet_area: SheetRange,
     },
     #[allow(dead_code)]
     FormulaChanged {
@@ -164,7 +164,7 @@ pub enum FormatEvent {
         address: CellAddress,
     },
     RangeStyleChanged {
-        area: SheetArea,
+        area: SheetRange,
     },
     LayoutChanged {
         sheet: u32,
@@ -320,11 +320,11 @@ pub enum StructureEvent {
         from_row: i32,
         to_row: i32,
     },
-    FreezeChanged {
-        sheet: u32,
-        frozen_rows: i32,
-        frozen_cols: i32,
-    },
+    // FreezeChanged {
+    //     sheet: u32,
+    //     frozen_rows: i32,
+    //     frozen_cols: i32,
+    // },
 }
 
 impl StructureEvent {
@@ -352,7 +352,7 @@ pub enum NavigationEvent {
     },
     /// Shift-click, Shift-arrow, or header click extended the selection.
     SelectionRangeChanged {
-        sheet_area: SheetArea,
+        sheet_area: SheetRange,
     },
     ViewportScrolled {
         sheet: u32,

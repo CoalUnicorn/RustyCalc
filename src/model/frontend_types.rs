@@ -32,7 +32,7 @@ pub enum SafeFontFamily {
     Georgia,
     TimesNewRoman,
     Verdana,
-    /// Fallback for any unrecognised font name.
+    /// Fallback for any unrecognized font name.
     SystemUi,
 }
 
@@ -121,24 +121,6 @@ impl From<Option<&str>> for SafeFontFamily {
     }
 }
 
-/// Pre-built font parameters for canvas `ctx.font`.
-#[derive(Debug, Clone)]
-pub struct ResolvedFont {
-    pub size_px: f64,
-    pub underline: bool,
-    pub strikethrough: bool,
-    /// e.g. `"bold italic 12px Arial"`
-    pub css: String,
-}
-
-impl ResolvedFont {
-    pub(crate) fn build(size_px: f64, bold: bool, italic: bool, family: &SafeFontFamily) -> String {
-        let b = if bold { "bold " } else { "" };
-        let i = if italic { "italic " } else { "" };
-        format!("{b}{i}{size_px}px {}", family.css_name())
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextFormat {
     pub bold: bool,
@@ -152,18 +134,9 @@ pub struct TextStyle {
     pub font_size: f64,
     pub font_family: SafeFontFamily,
     pub h_align: HorizontalAlignment,
+    pub v_align: VerticalAlignment,
     pub text_color: CssColor,
     pub bg_color: Option<CssColor>,
-}
-/// Fully resolved style for one cell. `h_align` has `General` already
-/// resolved to `Left`/`Right` based on cell type.
-#[derive(Debug, Clone)]
-pub struct ResolvedCellStyle {
-    pub text_color: CssColor,
-    pub font: ResolvedFont,
-    pub h_align: HorizontalAlignment,
-    pub v_align: VerticalAlignment,
-    pub wrap_text: bool,
 }
 
 /// Active cell style state reflected in the toolbar.
@@ -179,6 +152,28 @@ pub enum ArrowKey {
     Down,
     Left,
     Right,
+}
+
+impl ArrowKey {
+    /// (row-delta, column-delta) for an arrow key.
+    pub fn delta(&self) -> (i32, i32) {
+        match self {
+            ArrowKey::Down => (1, 0),
+            ArrowKey::Up => (-1, 0),
+            ArrowKey::Left => (0, -1),
+            ArrowKey::Right => (0, 1),
+        }
+    }
+
+    pub fn from_str(key: &str) -> Option<Self> {
+        match key {
+            "ArrowDown" => Some(ArrowKey::Down),
+            "ArrowUp" => Some(ArrowKey::Up),
+            "ArrowLeft" => Some(ArrowKey::Left),
+            "ArrowRight" => Some(ArrowKey::Right),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -246,17 +241,5 @@ mod tests {
         assert_eq!(SafeFontFamily::Arial.css_name(), "Arial");
         assert_eq!(SafeFontFamily::CourierNew.css_name(), "Courier New");
         assert_eq!(SafeFontFamily::SystemUi.css_name(), "system-ui");
-    }
-
-    #[test]
-    fn resolved_font_build_bold_italic() {
-        let css = ResolvedFont::build(12.0, true, true, &SafeFontFamily::Arial);
-        assert_eq!(css, "bold italic 12px Arial");
-    }
-
-    #[test]
-    fn resolved_font_build_plain() {
-        let css = ResolvedFont::build(11.0, false, false, &SafeFontFamily::CalibriLike);
-        assert_eq!(css, "11px Calibri, system-ui");
     }
 }

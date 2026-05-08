@@ -12,3 +12,14 @@
 .status-bar-error {
     color: var(--color-error, #c0392b);
 }
+
+.status-bar-formula-error {
+    color: var(--color-warning, #c8a000);
+}
+
+.status-dirty {
+    color: var(--color-accent, #e66);
+    font-size: 0.75rem;
+    margin-left: 0.5rem;
+    line-height: 1;
+}

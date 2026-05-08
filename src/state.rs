@@ -7,8 +7,9 @@ use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
-use crate::coord::{CellAddress, CellArea, RefSpan};
+use crate::coord::{CellAddress, RefNode, SheetRange, TextRef};
 use crate::events::*;
+use crate::input::formula_analysis::FormulaAnalysis;
 use crate::model::CssColor;
 use crate::storage::WorkbookId;
 
@@ -71,7 +72,10 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
 
 /// Single enum ensures at most one drag mode is active — illegal
 /// combinations (e.g. selecting while resizing) are unrepresentable.
-#[derive(Clone, Copy, Debug, PartialEq)]
+///
+/// `Pointing` carries an owned `RefNode` (non-Copy because its inner ironcalc
+/// `Node` holds an `Option<String>` sheet name), so the enum is `Clone` only.
+#[derive(Clone, Debug, PartialEq)]
 pub enum DragState {
     /// No drag in progress.
     Idle,
@@ -83,8 +87,12 @@ pub enum DragState {
     ResizingCol { col: i32, x: f64 },
     /// Row header resize: `(row_1based, current_mouse_y)`.
     ResizingRow { row: i32, y: f64 },
-    /// Formula point-mode: highlighted range + byte span in formula text.
-    Pointing { range: CellArea, ref_span: RefSpan },
+    /// Formula point-mode: carries ironcalc's canonical reference Node plus the
+    /// byte span of its rendered form in the edited formula text.
+    Pointing {
+        ref_node: RefNode,
+        ref_text: TextRef,
+    },
 }
 
 /// Arrow key behavior during a cell edit.
@@ -102,6 +110,53 @@ pub enum EditFocus {
     FormulaBar,
 }
 
+/// In-progress edit of a row in the Manage Named Ranges dialog.
+///
+/// Slim shape: every field is load-bearing. Compare with [`EditingCell`],
+/// which carries `mode` / `focus` / `text_dirty` / a real `address` because
+/// it lives inside the canvas's keyboard router. The dialog has none of
+/// those concerns (no point-mode, no focus arbitration with the canvas), so
+/// those fields would be dead weight here.
+///
+/// `sync_edit` works for both kinds of edit via the
+/// [`crate::input::edit_sync::FormulaEditState`] trait.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditingDefinedName {
+    /// `None` when creating a new row; `Some((name, scope))` when editing an
+    /// existing one. Identifies the row to call `rename_defined_name` against
+    /// on save (vs. `create_defined_name` when `None`).
+    pub(crate) original: Option<(String, Option<u32>)>,
+    pub(crate) name: String,
+    pub(crate) scope: Option<u32>,
+    /// Formula body without the leading `=`. Stored bare so it round-trips
+    /// against ironcalc's `new_defined_name` / `update_defined_name` (both
+    /// expect the body, not the `=…` form).
+    pub(crate) formula: String,
+    pub(crate) cursor: usize,
+    pub(crate) formula_analysis: FormulaAnalysis,
+    /// Cell whose position interprets relative refs in `formula`. Captured
+    /// from the active cell at dialog-open time (Excel's convention) and
+    /// frozen for the lifetime of the edit, so toggling sheet tabs behind
+    /// the modal can't shift the parser's frame underneath the user.
+    pub(crate) context_cell: CellAddress,
+}
+
+impl EditingDefinedName {
+    /// Formula side of the save gate: an analyzer error, or bare refs under
+    /// Workbook scope. Workbook-scoped names need fully-qualified refs
+    /// (`Sheet1!A1`) so they round-trip unambiguously regardless of the
+    /// active view sheet.
+    pub(crate) fn formula_invalid(&self) -> bool {
+        self.formula_analysis.has_any_error()
+            || (self.scope.is_none() && self.formula_analysis.has_bare_refs())
+    }
+
+    /// Full save gate: blank name, or [`Self::formula_invalid`].
+    pub(crate) fn save_blockers(&self) -> bool {
+        self.name.trim().is_empty() || self.formula_invalid()
+    }
+}
+
 /// In-progress cell edit not yet committed to the model.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditingCell {
@@ -113,6 +168,11 @@ pub struct EditingCell {
     /// In `Edit` mode, gates whether arrows enter point-mode — distinguishes
     /// "typed an operator" from "cursor moved through a reference position".
     pub(crate) text_dirty: bool,
+    /// Cached result of the last `analyze_formula()` call.
+    /// Updated synchronously on each `on_input` event in formula_bar and cell_editor.
+    pub(crate) formula_analysis: FormulaAnalysis,
+    /// Cursor position (byte offset) in `text`, updated on every input event.
+    pub(crate) cursor: usize,
 }
 
 /// Right-clicked header identity and the count of selected headers in that axis.
@@ -139,17 +199,54 @@ pub enum StatusMessage {
     Error(String),
 }
 
+/// Non-reactive edge-scroll state: JS interval handle, scroll direction, last
+/// mouse position. `StoredValue` (not `Split`) so start/stop never triggers
+/// a reactive re-render.
 #[derive(Clone, Copy)]
-#[allow(dead_code)]
+pub struct AutoscrollState {
+    pub(crate) id: StoredValue<Option<i32>>,
+    pub(crate) dir: StoredValue<(i32, i32)>,
+    pub(crate) pos: StoredValue<(f64, f64)>,
+}
+
+impl AutoscrollState {
+    fn new() -> Self {
+        Self {
+            id: StoredValue::new(None),
+            dir: StoredValue::new((0, 0)),
+            pos: StoredValue::new((0.0, 0.0)),
+        }
+    }
+
+    pub(crate) fn cancel(&self) {
+        if let Some(id) = self.id.get_value() {
+            leptos::prelude::window().clear_interval_with_handle(id);
+            self.id.set_value(None);
+        }
+        self.dir.set_value((0, 0));
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct WorkbookState {
     pub events: EventBus,
     pub(crate) current_uuid: Split<Option<WorkbookId>>,
     pub(crate) recent_colors: Split<Vec<CssColor>>,
     pub(crate) editing_cell: Split<Option<EditingCell>>,
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
+    pub(crate) cell_editor_ref: NodeRef<leptos::html::Textarea>,
     pub(crate) drag: Split<DragState>,
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
     pub(crate) status: Split<Option<StatusMessage>>,
+    pub(crate) autoscroll: AutoscrollState,
+    /// Whether the "Manage Named Ranges" modal is mounted.
+    /// Toggled by the toolbar `Names` button and the dialog's close handlers.
+    pub(crate) named_ranges_modal_open: Split<bool>,
+    /// Selected / in-progress row in the Manage Named Ranges dialog.
+    /// `None` while no row is being edited (initial state, or after Save /
+    /// Cancel). The dialog's `<FormulaInput>` reads/writes through this signal
+    /// via the shared [`crate::input::edit_sync::sync_edit`] helper.
+    pub(crate) editing_named_range: Split<Option<EditingDefinedName>>,
 }
 
 impl WorkbookState {
@@ -165,21 +262,29 @@ impl WorkbookState {
             recent_colors: Split::new(recent_colors),
             editing_cell: Split::new(None),
             formula_input_ref: NodeRef::new(),
+            cell_editor_ref: NodeRef::new(),
             drag: Split::new(DragState::Idle),
             context_menu: Split::new(None),
             status: Split::new(None),
+            autoscroll: AutoscrollState::new(),
+            named_ranges_modal_open: Split::new(false),
+            editing_named_range: Split::new(None),
         }
     }
 
-    /// Active point-mode range, or 1x1 at the current cell if not pointing yet.
-    pub(crate) fn effective_point_range(&self, model: ModelStore) -> CellArea {
-        if let DragState::Pointing { range, .. } = self.drag.get_untracked() {
-            range
+    /// Active point-mode reference as a `RefNode`, or a 1x1 reference at the
+    /// current cell when point-mode hasn't started yet.
+    ///
+    /// Returning `RefNode` (not `CellArea`) preserves absolute-flag and
+    /// sheet-qualification state end-to-end: `try_point_move` never has to
+    /// rebuild what the drag state already carries.
+    pub(crate) fn effective_point_ref(&self, model: ModelStore) -> RefNode {
+        if let DragState::Pointing { ref_node, .. } = self.drag.get_untracked() {
+            ref_node
         } else {
-            model.with_value(|m| {
-                let v = m.get_selected_view();
-                CellArea::from_cell(v.row, v.column)
-            })
+            let editing = model.with_value(CellAddress::from_view);
+            let area = SheetRange::from_cell(editing.sheet, editing.row, editing.column);
+            RefNode::from_cell_area(area, editing, "")
         }
     }
 
@@ -207,12 +312,8 @@ impl WorkbookState {
             return;
         }
 
-        // Normalize color (ensure lowercase, with #) and wrap in the domain type.
-        let normalized = CssColor::new(if color.starts_with('#') {
-            color.to_lowercase()
-        } else {
-            format!("#{}", color.to_lowercase())
-        });
+        // Normalize color.
+        let normalized = CssColor::new(color);
 
         self.recent_colors.update(|colors| {
             // Remove if already exists
@@ -236,6 +337,29 @@ impl WorkbookState {
         self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
             colors: string_colors,
         }));
+    }
+
+    /// Restore keyboard focus to whichever formula input the user was editing.
+    ///
+    /// Called after point-mode mouse drags so the user can continue typing
+    /// the formula without clicking again.
+    pub fn refocus_formula_input(&self) {
+        use wasm_bindgen::JsCast;
+        let Some(edit) = self.editing_cell.get_untracked() else {
+            return;
+        };
+        match edit.focus {
+            EditFocus::FormulaBar => {
+                if let Some(el) = self.formula_input_ref.get_untracked() {
+                    el.focus().ok();
+                }
+            }
+            EditFocus::Cell => {
+                if let Some(el) = self.cell_editor_ref.get_untracked() {
+                    el.unchecked_into::<web_sys::HtmlElement>().focus().ok();
+                }
+            }
+        }
     }
 }
 

@@ -2,7 +2,7 @@
 
 use leptos::prelude::WithValue;
 
-use crate::coord::{CellAddress, SheetArea};
+use crate::coord::{CellAddress, SheetRange};
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::error::NavError;
 use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
@@ -18,7 +18,7 @@ fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
 
 /// Helper to emit SelectionRangeChanged event after range operations
 fn emit_selection_range_changed(model: ModelStore, state: &WorkbookState) {
-    let sheet_area = model.with_value(SheetArea::from_view);
+    let sheet_area = model.with_value(SheetRange::from_view);
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged { sheet_area },
     ));

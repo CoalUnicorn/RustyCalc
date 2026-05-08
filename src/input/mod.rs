@@ -1,6 +1,8 @@
 pub mod edit;
+pub mod edit_sync;
 pub mod error;
 pub mod format;
+pub mod formula_analysis;
 pub mod formula_input;
 pub mod keyboard;
 pub mod mouse;
@@ -8,4 +10,4 @@ pub mod nav;
 pub mod sheet;
 pub mod structure;
 pub mod workbook;
-pub mod xlsx_io;
+//pub mod xlsx_io;

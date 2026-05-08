@@ -1,16 +1,19 @@
 //! Formatting actions: bold, italic, underline, strikethrough, font size/family.
 
-use ironcalc_base::UserModel;
+use ironcalc_base::{
+    types::{HorizontalAlignment, VerticalAlignment},
+    UserModel,
+};
 use leptos::prelude::WithValue;
 
-use crate::canvas::geometry::{LAST_COLUMN, LAST_ROW};
-use crate::coord::{CellArea, SheetArea};
+use crate::coord::{CellArea, SheetRange};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
     style_types::{BooleanValue, HexColor, StylePath},
     try_mutate, EvaluationMode, FrontendModel, SafeFontFamily, ToolbarState,
 };
+use iron_canvas::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use crate::state::{ModelStore, WorkbookState};
 
@@ -32,6 +35,18 @@ pub enum FormatAction {
     SetFontFamily(SafeFontFamily),
     SetTextColor(HexColor),
     SetBackgroundColor(HexColor),
+    /// Apply a number format code to the selection. `"general"` resets to auto.
+    SetNumFmt(String),
+    /// Reset all formatting (font, color, borders, number format) on the selection.
+    ClearFormatting,
+    /// Set horizontal text alignment. `General` resets to auto (numbers right, text left).
+    SetHorizontalAlign(HorizontalAlignment),
+    /// Set vertical cell alignment. `Bottom` is the ironcalc default.
+    SetVerticalAlign(VerticalAlignment),
+    /// Add one decimal place to the active cell's number format.
+    IncreaseDecimals,
+    /// Remove one decimal place from the active cell's number format.
+    DecreaseDecimals,
 }
 
 /// Dispatch a [`FormatAction`] against the model and UI state.
@@ -59,7 +74,7 @@ pub fn execute_format(
         }
         FormatAction::SetFontSize(size) => {
             let size = size.clamp(1.0, 409.0);
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
 
             /*
             FIXME:  how we handle cell area / columns / rows selection with different
@@ -90,7 +105,7 @@ pub fn execute_format(
         }
         FormatAction::SetFontFamily(family) => {
             let name = family.model_name();
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
 
             try_mutate(
                 model,
@@ -106,7 +121,7 @@ pub fn execute_format(
             // IronCalc "font.color": empty string clears (-> transparent), hex string sets.
             // Uses the same update_range_style path as bold/italic/size for proper
             // style-pool persistence and XLSX round-trip.
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             let value = hex.as_str();
             try_mutate(
                 model,
@@ -125,7 +140,7 @@ pub fn execute_format(
         FormatAction::SetBackgroundColor(hex) => {
             // IronCalc "fill.fg_color": empty string clears, hex string sets.
             // IronCalc automatically sets pattern_type = "solid" when a color is given.
-            let sa = model.with_value(SheetArea::from_view);
+            let sa = model.with_value(SheetRange::from_view);
             let value = hex.as_str();
 
             try_mutate(
@@ -166,6 +181,97 @@ pub fn execute_format(
                 area: sa.area.normalized().with_sheet(sa.sheet),
             }));
         }
+        FormatAction::SetNumFmt(code) => {
+            let sa = model.with_value(SheetRange::from_view);
+            let code = code.clone();
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.update_range_style(&area, "num_fmt", &code)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::SetHorizontalAlign(align) => {
+            // HorizontalAlignment::Display gives the exact lowercase string ironcalc expects.
+            let value = align.to_string();
+            let sa = model.with_value(SheetRange::from_view);
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.update_range_style(&area, StylePath::HORIZONTAL_ALIGN.as_str(), &value)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::SetVerticalAlign(align) => {
+            let value = align.to_string();
+            let sa = model.with_value(SheetRange::from_view);
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.update_range_style(&area, StylePath::VERTICAL_ALIGN.as_str(), &value)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::IncreaseDecimals | FormatAction::DecreaseDecimals => {
+            let delta = if matches!(action, FormatAction::IncreaseDecimals) {
+                1
+            } else {
+                -1
+            };
+            let sa = model.with_value(SheetRange::from_view);
+            let current = model.with_value(|m| m.active_num_fmt());
+            let new_fmt = adjust_decimals(&current, delta);
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.update_range_style(&area, StylePath::NUM_FMT.as_str(), &new_fmt)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::ClearFormatting => {
+            let sa = model.with_value(SheetRange::from_view);
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    m.range_clear_formatting(&area)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
     }
     Ok(())
 }
@@ -180,7 +286,7 @@ fn toggle_style(
     style_path: StylePath,
     current_val: fn(&ToolbarState) -> bool,
 ) -> Result<(), FormatError> {
-    let sa = model.with_value(SheetArea::from_view);
+    let sa = model.with_value(SheetRange::from_view);
 
     try_mutate(
         model,
@@ -200,6 +306,75 @@ fn toggle_style(
         area: sa.area.normalized().with_sheet(sa.sheet),
     }));
     Ok(())
+}
+
+/// Adjust the number of decimal places in a format string by `delta` (+1 or -1).
+///
+/// Called by `IncreaseDecimals` and `DecreaseDecimals` before applying `SetNumFmt`.
+/// Must handle the most common format shapes: plain numbers (`#,##0`), percentage
+/// (`0%`), currency with leading symbol (`£#,##0.00`), and the `"general"` sentinel.
+fn adjust_decimals(fmt: &str, delta: i32) -> String {
+    // NOTE: IronCalc PR 777 turns num_fmt from String into a NumFmt struct
+    // (num_fmt_id + format_code). When that lands, this function should
+    // operate on the format_code field.
+    if delta == 0 {
+        return fmt.to_owned();
+    }
+    if fmt.eq_ignore_ascii_case("general") {
+        return if delta > 0 {
+            "0.0".to_owned()
+        } else {
+            fmt.to_owned()
+        };
+    }
+
+    let dot = fmt.find('.');
+
+    if delta > 0 {
+        match dot {
+            Some(dot) => {
+                let zeros = fmt[dot + 1..].chars().take_while(|c| *c == '0').count();
+                let insert_at = dot + 1 + zeros;
+                let mut out = String::with_capacity(fmt.len() + 1);
+                out.push_str(&fmt[..insert_at]);
+                out.push('0');
+                out.push_str(&fmt[insert_at..]);
+                out
+            }
+            None => match fmt.rfind(|c: char| c == '0' || c == '#') {
+                Some(pos) => {
+                    let insert_at = pos + 1;
+                    let mut out = String::with_capacity(fmt.len() + 2);
+                    out.push_str(&fmt[..insert_at]);
+                    out.push_str(".0");
+                    out.push_str(&fmt[insert_at..]);
+                    out
+                }
+                None => fmt.to_owned(),
+            },
+        }
+    } else {
+        let Some(dot) = dot else {
+            return fmt.to_owned();
+        };
+        let zeros = fmt[dot + 1..].chars().take_while(|c| *c == '0').count();
+        match zeros {
+            0 => fmt.to_owned(),
+            1 => {
+                let mut out = String::with_capacity(fmt.len() - 2);
+                out.push_str(&fmt[..dot]);
+                out.push_str(&fmt[dot + 2..]);
+                out
+            }
+            _ => {
+                let last_zero = dot + zeros;
+                let mut out = String::with_capacity(fmt.len() - 1);
+                out.push_str(&fmt[..last_zero]);
+                out.push_str(&fmt[last_zero + 1..]);
+                out
+            }
+        }
+    }
 }
 
 /// Set `font.name` on every cell in the selection.

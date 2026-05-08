@@ -2,9 +2,10 @@ use leptos::prelude::*;
 
 use crate::components::{
     file_bar::FileBar, formula_bar::FormulaBar, header_context_menu::HeaderContextMenuOverlay,
-    sheet_tab_bar::SheetTabBar, status_bar::StatusBar, toolbar::Toolbar, worksheet::Worksheet,
+    named_ranges::NamedRangesDialog, sheet_tab_bar::SheetTabBar, status_bar::StatusBar,
+    toolbar::Toolbar, worksheet::Worksheet,
 };
-use crate::coord::SheetArea;
+use crate::coord::{CellAddress, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::{
@@ -44,69 +45,65 @@ pub fn Workbook() -> impl IntoView {
         let is_shift = ev.shift_key();
         let is_alt = ev.alt_key();
 
-        // Point-mode pre-check: arrow keys in Accept mode may enter/extend a cell-reference
-        // range inside a formula. Runs before classify_key (which is pure). The pure
-        // computation lives in formula_input::try_point_move; only the DOM cursor read and
-        // signal writes stay here.
         if let Some(ref edit) = state.editing_cell.get_untracked() {
-            // Exit pointing when user types a non-arrow key (e.g. operator, digit, backspace).
-            // This lets the next arrow press start a fresh cell reference.
-            // TODO(future): PointModeDecision — absorb this guard into try_point_move as a
-            // 3-way enum. Review DragState/EditMode signal lifecycle in state.rs first.
-            if should_exit_pointing(key.as_str())
-                && matches!(state.drag.get_untracked(), DragState::Pointing { .. })
-            {
-                state.drag.set(DragState::Idle);
-            }
+            let already_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
+            let may_point = edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
 
-            if !is_ctrl
-                && !is_alt
-                && matches!(
-                    key.as_str(),
-                    "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight"
-                )
-            {
-                let already_pointing =
-                    matches!(state.drag.get_untracked(), DragState::Pointing { .. });
-                // Accept mode always checks; Edit mode only when text was just
-                // modified (typed operator/paren) or already in pointing mode.
-                let may_point =
-                    edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
+            if may_point && !is_ctrl && !is_alt {
+                let caret_hit = if !already_pointing {
+                    edit.formula_analysis
+                        .refs_at_cursor(edit.cursor)
+                        .next()
+                        .cloned()
+                } else {
+                    None
+                };
 
-                if may_point {
-                    // Clear the dirty flag — this arrow key consumed it.
-                    state.editing_cell.update(|c| {
-                        if let Some(e) = c {
-                            e.text_dirty = false;
-                        }
-                    });
-                    let cursor = get_formula_cursor();
-                    let pr = state.effective_point_range(model);
-                    let prev_span =
-                        if let DragState::Pointing { ref_span, .. } = state.drag.get_untracked() {
-                            Some(ref_span)
+                let (current_ref, prev_span) = match caret_hit {
+                    Some(hit) => (hit.ref_node, Some(hit.span)),
+                    None => (
+                        state.effective_point_ref(model),
+                        if let DragState::Pointing { ref_text, .. } = state.drag.get_untracked() {
+                            Some(ref_text)
                         } else {
                             None
-                        };
-                    let sheet = model.with_value(|m| m.get_selected_sheet());
-                    if let Some(result) = try_point_move(
-                        &edit.text,
-                        &key,
-                        is_shift,
-                        cursor,
-                        already_pointing,
-                        pr,
-                        prev_span,
-                        sheet,
-                    ) {
+                        },
+                    ),
+                };
+
+                let editing = model.with_value(CellAddress::from_view);
+                let ctx = PointMoveCtx {
+                    text: &edit.text,
+                    cursor: edit.cursor,
+                    already_pointing,
+                    current_ref,
+                    prev_span,
+                    editing,
+                };
+                // web_sys::console::log_1(
+                //     &format!(
+                //         "key: {} ,already_pointing: {}, may_point: {}, edit.cursor: {}, edit.text: {}",
+                //         &key, already_pointing, may_point, edit.cursor, edit.text,
+                //     )
+                //     .into(),
+                // );
+                match try_point_move(&ctx, &key, is_shift) {
+                    PointMoveOutcome::NoAction => {}
+                    PointMoveOutcome::ExitPointing => {
+                        if already_pointing {
+                            state.drag.set(DragState::Idle);
+                        }
+                    }
+                    PointMoveOutcome::Move(result) => {
                         state.editing_cell.update(|c| {
                             if let Some(e) = c {
                                 e.text = result.text;
+                                e.text_dirty = false;
                             }
                         });
                         state.drag.set(DragState::Pointing {
-                            range: result.range,
-                            ref_span: result.span,
+                            ref_node: result.ref_node,
+                            ref_text: result.span,
                         });
                         ev.prevent_default();
                         return;
@@ -145,7 +142,7 @@ pub fn Workbook() -> impl IntoView {
                     model,
                     EvaluationMode::Immediate,
                     |m| -> Result<(), EditError> {
-                        let sheet_area = SheetArea::from_view(m);
+                        let sheet_area = SheetRange::from_view(m);
                         sheet_area.area.cells().try_for_each(|(row, col)| {
                             m.set_user_input(sheet_area.sheet, row, col, "")
                                 .map_err(EditError::Engine)
@@ -154,7 +151,7 @@ pub fn Workbook() -> impl IntoView {
                 ) {
                     state.status.set(Some(StatusMessage::Error(e.to_string())));
                 }
-                let sheet_area = model.with_value(SheetArea::from_view);
+                let sheet_area = model.with_value(SheetRange::from_view);
                 state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
                     sheet_area,
                 }));
@@ -199,6 +196,7 @@ pub fn Workbook() -> impl IntoView {
             <HeaderContextMenuOverlay />
             <SheetTabBar />
             <StatusBar />
+            <NamedRangesDialog />
         </div>
     }
 }
@@ -261,7 +259,7 @@ fn paste_from_clipboard(
                 return;
             }
             mutate(model, EvaluationMode::Immediate, |m| {
-                let area = SheetArea::from_view(m).to_ironcalc_area();
+                let area = SheetRange::from_view(m).to_ironcalc_area();
                 if let Err(e) = m.paste_csv_string(&area, &text) {
                     web_sys::console::warn_1(
                         &format!("[ironcalc] paste_csv_string failed: {e}").into(),

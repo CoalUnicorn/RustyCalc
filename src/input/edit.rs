@@ -5,6 +5,7 @@ use leptos::prelude::*;
 use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
+use crate::input::formula_analysis::FormulaAnalysis;
 use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
@@ -37,10 +38,12 @@ pub fn execute_edit(
                         let address = m.active_cell();
                         state.editing_cell.set(Some(EditingCell {
                             address,
+                            cursor: text.len(),
                             text: text.clone(),
                             mode: EditMode::Accept,
                             focus: EditFocus::Cell,
                             text_dirty: true,
+                            formula_analysis: FormulaAnalysis::default(),
                         }));
                         address
                     }),
@@ -56,12 +59,17 @@ pub fn execute_edit(
                             .get_cell_content(v.sheet, v.row, v.column)
                             .unwrap_or_default();
                         let address = m.active_cell();
+
+                        // Then set formula_analysis: analysis on the EditingCell being constructed/updated
+
                         state.editing_cell.set(Some(EditingCell {
                             address,
-                            text,
+                            cursor: text.len(),
+                            text: text.clone(),
                             mode: EditMode::Edit,
                             focus: EditFocus::Cell,
                             text_dirty: false,
+                            formula_analysis: model.with_value(|m| m.analyze_in_context(&text)),
                         }));
                         address
                     }),

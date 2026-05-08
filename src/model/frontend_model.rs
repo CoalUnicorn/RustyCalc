@@ -1,19 +1,17 @@
 use ironcalc_base::{
-    expressions::types::Area,
-    types::{CellType, HorizontalAlignment, VerticalAlignment},
-    worksheet::NavigationDirection,
-    UserModel,
+    expressions::types::Area, types::HorizontalAlignment, worksheet::NavigationDirection, UserModel,
 };
 
 use leptos::prelude::Set;
 
-use crate::coord::{CellAddress, CellArea};
+use crate::coord::SheetRange;
 use crate::model::frontend_types::*;
 use crate::state::ModelStore;
 use crate::{
-    canvas::geometry::{LAST_COLUMN, LAST_ROW},
-    coord::SheetArea,
+    coord::{CellAddress, CellArea, DefinedName},
+    input::formula_analysis::{analyze_formula, FormulaAnalysis},
 };
+use iron_canvas::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use leptos::prelude::UpdateValue;
 
@@ -23,18 +21,6 @@ pub(crate) const SHEET_STATE_VISIBLE: &str = "visible";
 
 pub trait FrontendModel {
     // Query
-
-    /// Fully resolved style for one cell.
-    ///
-    /// `default_text_color` is the theme's text color (differs in dark mode);
-    /// the renderer passes `self.theme.default_text_color`, the toolbar passes `"#000000"`.
-    fn cell_style(
-        &self,
-        sheet: u32,
-        row: i32,
-        col: i32,
-        default_text_color: &str,
-    ) -> ResolvedCellStyle;
 
     /// Formatting state for the toolbar, derived from the active cell.
     fn toolbar_state(&self) -> ToolbarState;
@@ -53,6 +39,8 @@ pub trait FrontendModel {
     /// Position of the active cell.
     fn active_cell(&self) -> CellAddress;
 
+    fn analyze_in_context(&self, text: &str) -> FormulaAnalysis;
+
     fn selection(&self) -> Area;
     /// Frozen pane state for the active sheet.
     fn frozen_panes(&self) -> FrozenPanes;
@@ -69,6 +57,42 @@ pub trait FrontendModel {
     fn get_sheet_visible_count(&self) -> usize;
 
     fn get_sheet_all(&self) -> Vec<(u32, String, String)>;
+
+    fn get_sheet_names(&self) -> Vec<(u32, String)>;
+
+    /// Workbook defined names, flattened from ironcalc's `DefinedNameS` tuples
+    /// into our named-field [`DefinedName`]. Fed to the parser so identifiers
+    /// like `=my_range` resolve instead of tripping `NamedVariableKind`.
+    fn get_defined_names(&self) -> Vec<DefinedName>;
+
+    // Defined-name mutations — every variant may change formula evaluation,
+    // so call sites must wrap these in `try_mutate(EvaluationMode::Immediate, …)`.
+    // Errors are surfaced verbatim from ironcalc as `Result<_, String>`.
+
+    /// Create a new defined name. `Err` if the name is invalid, duplicates an
+    /// existing name in the same scope, or the formula won't parse.
+    fn create_defined_name(
+        &mut self,
+        name: &str,
+        scope: Option<u32>,
+        formula: &str,
+    ) -> Result<(), String>;
+
+    /// Rename / re-scope / re-formula an existing defined name, identified by
+    /// `(old_name, old_scope)`.
+    fn rename_defined_name(
+        &mut self,
+        old_name: &str,
+        old_scope: Option<u32>,
+        new_name: &str,
+        new_scope: Option<u32>,
+        new_formula: &str,
+    ) -> Result<(), String>;
+
+    /// Delete a defined name. Cells that referenced it surface `#NAME?` after
+    /// the next evaluate.
+    fn remove_defined_name(&mut self, name: &str, scope: Option<u32>) -> Result<(), String>;
+
     // Navigation (infallible)
 
     /// Move the active cell one step. No-op at sheet edges.
@@ -128,70 +152,6 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
 }
 
 impl FrontendModel for UserModel<'_> {
-    fn cell_style(
-        &self,
-        sheet: u32,
-        row: i32,
-        col: i32,
-        default_text_color: &str,
-    ) -> ResolvedCellStyle {
-        let style = self.get_cell_style(sheet, row, col).unwrap_or_default();
-        let cell_type = self
-            .get_cell_type(sheet, row, col)
-            .unwrap_or(CellType::Text);
-
-        let text_color = match style.font.color.as_deref() {
-            None | Some("#000000") => CssColor::new(default_text_color),
-            Some(c) => CssColor::new(c),
-        };
-
-        // Font
-        let size_px = style.font.sz as f64;
-        let bold = style.font.b;
-        let italic = style.font.i;
-        let family = font_family_from_name(&style.font.name);
-        let css = ResolvedFont::build(size_px, bold, italic, &family);
-        let font = ResolvedFont {
-            size_px,
-            underline: style.font.u,
-            strikethrough: style.font.strike,
-            css,
-        };
-
-        // Alignment
-        let alignment = style.alignment.as_ref();
-        let h_align = match alignment.map(|a| &a.horizontal) {
-            Some(HorizontalAlignment::Right) => HorizontalAlignment::Right,
-            Some(HorizontalAlignment::Center) | Some(HorizontalAlignment::CenterContinuous) => {
-                HorizontalAlignment::Center
-            }
-            Some(HorizontalAlignment::Left) | Some(HorizontalAlignment::Fill) => {
-                HorizontalAlignment::Left
-            }
-            Some(HorizontalAlignment::Justify) | Some(HorizontalAlignment::Distributed) => {
-                // Canvas 2D has no justify/distributed - fall back to left.
-                HorizontalAlignment::Left
-            }
-            // General or unset: numbers right, everything else left.
-            None | Some(HorizontalAlignment::General) => match cell_type {
-                CellType::Number => HorizontalAlignment::Right,
-                _ => HorizontalAlignment::Left,
-            },
-        };
-        let v_align = alignment
-            .map(|a| a.vertical.clone())
-            .unwrap_or(VerticalAlignment::Bottom);
-        let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
-
-        ResolvedCellStyle {
-            text_color,
-            font,
-            h_align,
-            v_align,
-            wrap_text,
-        }
-    }
-
     fn toolbar_state(&self) -> ToolbarState {
         let view = self.get_selected_view();
         let style = self
@@ -209,11 +169,11 @@ impl FrontendModel for UserModel<'_> {
             .filter(|c| !c.is_empty())
             .map(CssColor::new);
 
-        let h_align = style
-            .alignment
-            .as_ref()
+        let alignment = style.alignment.as_ref();
+        let h_align = alignment
             .map(|a| a.horizontal.clone())
             .unwrap_or(HorizontalAlignment::General);
+        let v_align = alignment.map(|a| a.vertical.clone()).unwrap_or_default();
 
         ToolbarState {
             format: TextFormat {
@@ -227,6 +187,7 @@ impl FrontendModel for UserModel<'_> {
                 font_size: style.font.sz as f64,
                 font_family: font_family_from_name(&style.font.name),
                 h_align,
+                v_align,
                 text_color,
                 bg_color,
             },
@@ -261,11 +222,20 @@ impl FrontendModel for UserModel<'_> {
         }
     }
 
+    fn analyze_in_context(&self, text: &str) -> FormulaAnalysis {
+        analyze_formula(
+            text,
+            self.active_cell(),
+            &self.get_sheet_names(),
+            &self.get_defined_names(),
+        )
+    }
+
     // TODO: rename this, it returns ironcalc Area type
     // atm only added to input/format.rs:91
     // below is selection_area returns CellArea
     fn selection(&self) -> Area {
-        SheetArea::from_view(self).to_ironcalc_area()
+        SheetRange::from_view(self).to_ironcalc_area()
     }
 
     fn frozen_panes(&self) -> FrozenPanes {
@@ -332,6 +302,49 @@ impl FrontendModel for UserModel<'_> {
             .enumerate()
             .map(|(idx, s)| (idx as u32, s.name.clone(), s.state.clone()))
             .collect::<Vec<_>>()
+    }
+
+    // used by analyze_formula
+    fn get_sheet_names(&self) -> Vec<(u32, String)> {
+        self.get_sheet_all()
+            .into_iter()
+            .map(|(idx, name, _)| (idx, name))
+            .collect()
+    }
+
+    fn get_defined_names(&self) -> Vec<DefinedName> {
+        self.get_defined_name_list()
+            .into_iter()
+            .map(DefinedName::from)
+            .collect()
+    }
+
+    // Defined-name mutations — wrap each call site in
+    // `try_mutate(EvaluationMode::Immediate, …)`. ironcalc's `Result` errors
+    // (invalid name, duplicate, parse failure) bubble up unchanged.
+
+    fn create_defined_name(
+        &mut self,
+        name: &str,
+        scope: Option<u32>,
+        formula: &str,
+    ) -> Result<(), String> {
+        self.new_defined_name(name, scope, formula)
+    }
+
+    fn rename_defined_name(
+        &mut self,
+        old_name: &str,
+        old_scope: Option<u32>,
+        new_name: &str,
+        new_scope: Option<u32>,
+        new_formula: &str,
+    ) -> Result<(), String> {
+        self.update_defined_name(old_name, old_scope, new_name, new_scope, new_formula)
+    }
+
+    fn remove_defined_name(&mut self, name: &str, scope: Option<u32>) -> Result<(), String> {
+        self.delete_defined_name(name, scope)
     }
 
     // Navigation
@@ -533,27 +546,6 @@ mod tests {
     #[allow(clippy::expect_used)]
     fn make_model() -> UserModel<'static> {
         UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("failed to create test model")
-    }
-
-    #[test]
-    fn cell_style_defaults_for_empty_cell() {
-        let m = make_model();
-        // Empty cell should have sensible defaults
-        let style = m.cell_style(0, 1, 1, "#000000");
-        // assert!(style.bg_color.is_none());
-        assert_eq!(style.text_color.as_str(), "#000000");
-        // Empty/missing cells return CellType::Number from the base library,
-        // so General alignment resolves to Right (no visible effect since
-        // empty cells produce no rendered text).
-        assert_eq!(style.h_align, HorizontalAlignment::Right);
-    }
-
-    #[test]
-    fn cell_style_uses_theme_color_for_automatic() {
-        let m = make_model();
-        // Empty cell style - should fall back to theme color
-        let style = m.cell_style(0, 1, 1, "#FFFFFF");
-        assert_eq!(style.text_color.as_str(), "#ffffff");
     }
 
     #[test]

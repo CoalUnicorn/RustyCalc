@@ -1,14 +1,13 @@
 // See docs/leptos-patterns.md for component conventions.
 
 use leptos::prelude::*;
-use leptos_use::{use_debounce_fn, use_throttle_fn};
-use wasm_bindgen::JsCast;
 
-use crate::canvas::col_name;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
+use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
+use crate::input::formula_analysis::{analyze_formula, FormulaStatus};
 use crate::model::FrontendModel;
-use crate::state::{EditFocus, EditMode};
-use crate::state::{EditingCell, ModelStore, WorkbookState};
+use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
+use iron_canvas::col_name;
 
 /// The formula bar: cell address label + content/formula input.
 ///
@@ -27,7 +26,12 @@ pub fn FormulaBar() -> impl IntoView {
     let input_ref = state.formula_input_ref;
 
     let cell_address = move || {
-        // Subscribe to navigation events (selection changes affect cell address display)
+        // While editing, pin to the editing cell's address. The live cursor
+        // moves during point-mode reference selection, but the label must show
+        // where the edit will be committed.
+        if let Some(edit) = state.editing_cell.get() {
+            return format!("{}{}", col_name(edit.address.column), edit.address.row);
+        }
         let _ = state.events.navigation.get();
         model.with_value(|m| {
             let ac = m.active_cell();
@@ -49,52 +53,6 @@ pub fn FormulaBar() -> impl IntoView {
 
     let is_editing = move || state.editing_cell.get().is_some();
 
-    // ???: Debounced formula validation (300ms)
-    // Create a stored validation state that's updated via debouncing
-    let (validation_pending, set_validation_pending) = signal(false);
-    let (validation_error, set_validation_error) = signal(None::<String>);
-
-    // Manual debounce implementation using leptos-use use_timeout_fn
-    let debounced_validate = use_debounce_fn(
-        move || {
-            // Get current formula text for validation
-            if let Some(edit) = state.editing_cell.get_untracked() {
-                let text = edit.text;
-                if text.trim().is_empty() || !text.starts_with('=') {
-                    set_validation_error.set(None);
-                    return;
-                }
-
-                // Simple validation checks
-                if text.len() > 1000 {
-                    set_validation_error.set(Some("Formula too long (max 1000 chars)".to_string()));
-                } else if text.matches('(').count() != text.matches(')').count() {
-                    set_validation_error.set(Some("Mismatched parentheses".to_string()));
-                } else {
-                    set_validation_error.set(None);
-                }
-            }
-            set_validation_pending.set(false);
-        },
-        300.0,
-    );
-
-    // ???: Throttled highlighting state update (100ms = 10fps)
-    let throttled_highlight = use_throttle_fn(
-        move || {
-            // In a real implementation, this could update CSS classes for syntax highlighting
-            // For now, just mark that highlighting occurred
-            if let Some(edit) = state.editing_cell.get_untracked() {
-                let text = edit.text;
-                if text.starts_with('=') && text.len() > 1 {
-                    // This could trigger syntax highlighting updates
-                    // web_sys::console::debug_1(&"Highlighting formula".into());
-                }
-            }
-        },
-        100.0,
-    );
-
     // Start an edit session with FormulaBar focus (so CellEditor doesn't
     // steal focus back), or switch focus if already editing.
     let on_focus = move |_: web_sys::FocusEvent| {
@@ -109,6 +67,8 @@ pub fn FormulaBar() -> impl IntoView {
         model.with_value(|m| {
             let text = m.active_cell_content();
             let address = m.active_cell();
+            let sheet_names = model.with_value(|m| m.get_sheet_names());
+            let defined_names = model.with_value(|m| m.get_defined_names());
 
             // Fire editing started event
             state.emit_event(SpreadsheetEvent::Navigation(
@@ -117,61 +77,57 @@ pub fn FormulaBar() -> impl IntoView {
 
             state.editing_cell.set(Some(EditingCell {
                 address,
-                text,
+                text: text.clone(),
                 mode: EditMode::Edit,
                 focus: EditFocus::FormulaBar,
                 text_dirty: false,
+                formula_analysis: analyze_formula(&text, address, &sheet_names, &defined_names),
+                cursor: text.len(),
             }));
         });
     };
 
     // Update the shared edit buffer (syncs with CellEditor) + debounced validation.
     let on_input = move |ev: web_sys::Event| {
-        let value = ev
-            .target()
-            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-            .map(|el| el.value())
-            .unwrap_or_default();
-
-        // Immediate UI update (no lag in typing experience)
-        if state.editing_cell.get_untracked().is_some() {
-            state.editing_cell.update(|cell| {
-                if let Some(c) = cell {
-                    c.text = value.clone();
-                    c.text_dirty = true;
-                }
-            });
-        } else {
-            // First keystroke - Accept mode: arrows commit + navigate.
-            model.with_value(|m| {
-                let address = m.active_cell(); //CellAddress::from_view(m);
-                state.editing_cell.set(Some(EditingCell {
-                    address,
-                    text: value.clone(),
-                    mode: EditMode::Accept,
-                    focus: EditFocus::FormulaBar,
-                    text_dirty: true,
-                }));
-                state.emit_event(SpreadsheetEvent::Navigation(
-                    NavigationEvent::EditingStarted { address },
-                ));
-            });
-        }
-
-        // Trigger debounced validation (300ms after typing stops)
-        set_validation_pending.set(true);
-        debounced_validate();
-
-        // Trigger throttled highlighting (smooth 10fps updates)
-        throttled_highlight();
+        let Some(target) = ev.target() else { return };
+        let Some((value, cursor)) = read_value_and_cursor(&target) else {
+            return;
+        };
+        let sheet_names = model.with_value(|m| m.get_sheet_names());
+        let defined_names = model.with_value(|m| m.get_defined_names());
+        sync_edit(
+            state.editing_cell,
+            value,
+            cursor,
+            &sheet_names,
+            &defined_names,
+        );
     };
 
-    // Suppress browser defaults; let the event bubble to Workbook
-    // which commits or cancels via classify_key -> execute.
-    let on_keydown = move |ev: web_sys::KeyboardEvent| {
-        if matches!(ev.key().as_str(), "Enter" | "Tab" | "Escape") {
-            ev.prevent_default();
-        }
+    let on_keydown = move |ev: web_sys::KeyboardEvent| suppress_navigation_defaults(&ev);
+
+    // Ref-under-caret tooltip — first visible consumer of the ref_node
+    // identity preserved by analyze_formula. While editing, if the caret
+    // sits on (inclusive right edge) a resolved ref, render its localized
+    // form — `$A$1` stays `$A$1`, `Sheet2!B2` keeps its qualifier — proving
+    // absolute flags and sheet_name round-trip through the pipeline.
+    //
+    // The three primitives this closure composes are:
+    //   - FormulaAnalysis::refs_at_cursor(cursor) -> Iterator<&FormulaRef>
+    //   - RefNode::to_localized(&CellReferenceRC) -> String
+    //   - CellAddress::as_stringify_ctx() -> CellReferenceRC
+    let ref_under_caret = move || -> String {
+        state
+            .editing_cell
+            .get()
+            .and_then(|edit| {
+                let ctx = edit.address.as_stringify_ctx();
+                edit.formula_analysis
+                    .refs_at_cursor(edit.cursor)
+                    .next()
+                    .map(|r| r.ref_node.to_localized(&ctx))
+            })
+            .unwrap_or_default()
     };
 
     let input_class = move || {
@@ -180,12 +136,18 @@ pub fn FormulaBar() -> impl IntoView {
         } else {
             "fb-input"
         };
-        let validation = match validation_error.get() {
-            Some(_) => " error",
-            None if validation_pending.get() => " validating",
-            None => " valid",
-        };
-        format!("{}{}", base, validation)
+        let validation =
+            state
+                .editing_cell
+                .get()
+                .map_or("", |edit| match edit.formula_analysis.status {
+                    FormulaStatus::NotFormula => "",
+                    FormulaStatus::Valid { .. } => " valid",
+                    FormulaStatus::ParseError(_)
+                    | FormulaStatus::LexerError(_)
+                    | FormulaStatus::Unresolved { .. } => " error",
+                });
+        format!("{base}{validation}")
     };
 
     view! {
@@ -202,22 +164,12 @@ pub fn FormulaBar() -> impl IntoView {
                 on:focus=on_focus
                 on:input=on_input
                 on:keydown=on_keydown
-                placeholder="Enter value or formula"
             />
-            // Validation status indicator
-            <div class="fb-valid">
-                {move || {
-                    if validation_pending.get() {
-                        view! { <span class="fb-pending" title={"Checking formula syntax...".to_string()}>"Validating..."</span> }
-                    } else if let Some(error) = validation_error.get() {
-                        view! { <span class="fb-error" title={error.clone()}>"Error"</span> }
-                    } else if is_editing() && display_text().starts_with('=') {
-                        view! { <span class="fb-success" title={"Formula syntax is valid".to_string()}>"Valid"</span> }
-                    } else {
-                        view! { <span class="fb-neutral" title={"No validation needed".to_string()}>""</span> }
-                    }
-                }}
-            </div>
+
+            // Ref-under-caret indicator. Populated by `ref_under_caret` when
+            // editing and the cursor sits on a resolved ref.
+            <div class="fb-valid">{ref_under_caret}</div>
+
         </div>
     }
 }

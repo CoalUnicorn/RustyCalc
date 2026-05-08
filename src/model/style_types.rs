@@ -44,6 +44,21 @@ impl StylePath {
     /// - Used for relative size changes in formatting operations
     pub const FONT_SIZE_DELTA: Self = Self("font.size_delta");
 
+    /// Number format code: `"num_fmt"`
+    /// - `"general"` resets to automatic formatting
+    /// - Standard Excel format strings like `"#,##0.00"`, `"0%"`, `"dd/mm/yyyy"`
+    #[allow(dead_code)]
+    pub const NUM_FMT: Self = Self("num_fmt");
+
+    /// Horizontal cell alignment: `"alignment.horizontal"`
+    /// - `"general"` = auto (numbers right, text left)
+    /// - `"left"`, `"center"`, `"right"`, `"justify"`
+    pub const HORIZONTAL_ALIGN: Self = Self("alignment.horizontal");
+
+    /// Vertical cell alignment: `"alignment.vertical"`
+    /// - `"bottom"` (default), `"center"`, `"top"`
+    pub const VERTICAL_ALIGN: Self = Self("alignment.vertical");
+
     /// Returns the IronCalc-compatible string path.
     pub fn as_str(&self) -> &'static str {
         self.0

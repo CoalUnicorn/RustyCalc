@@ -18,7 +18,19 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout RustyCalc
+        uses: actions/checkout@v4
+        with:
+          path: RustyCalc
+
+      # Cargo.toml uses path = "../IronCalc/base" and "../IronCalc/xlsx".
+      # Pin deploys to the fork main; upstream-drift detection lives in rustycalc.yml's cron.
+      - name: Checkout IronCalc (sibling required by path deps)
+        uses: actions/checkout@v4
+        with:
+          repository: CoalUnicorn/IronCalc
+          ref: main
+          path: IronCalc
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -31,20 +43,21 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+            RustyCalc/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('RustyCalc/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Install Trunk
         run: cargo install trunk --locked
 
       - name: Build
+        working-directory: RustyCalc
         run: trunk build --release
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: RustyCalc/dist
 
   deploy:
     needs: build
