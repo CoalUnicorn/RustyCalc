@@ -314,37 +314,67 @@ fn toggle_style(
 /// Must handle the most common format shapes: plain numbers (`#,##0`), percentage
 /// (`0%`), currency with leading symbol (`£#,##0.00`), and the `"general"` sentinel.
 fn adjust_decimals(fmt: &str, delta: i32) -> String {
-    // TODO:
-    //
-    // NOTE: PR 777 number format would be a struct
-    // https://github.com/ironcalc/IronCalc/pull/777
-    // ```rust
-    // pub struct Style {
-    //    pub alignment: Option<Alignment>,
-    //    pub num_fmt: NumFmt // Old: String,
-    //
-    // pub struct NumFmt {
-    //    pub num_fmt_id: i32,
-    //    pub format_code: String,
-    //}
-    // ```
-    //
-    //
-    // Inputs: `fmt` is the current num_fmt string (e.g. "#,##0.00", "0%", "general").
-    //         `delta` is +1 (increase) or -1 (decrease).
-    // Return: modified format string.
-    //
-    //   "general" is "0" so increase gives "0.0".
-    // - decimal section '.' followed by '0' chars.
-    // - Increase: insert one '0' right after the existing decimal zeros (or add ".0").
-    // - Decrease: remove the last decimal '0'; if none remain, remove the dot.
-    // - When no dot exists and delta > 0, insert ".0" after the last '0' or '#'
-    //   in the string so currency/percentage qualifiers stay in the right place.
-    // - Decreasing with no decimals is a no-op.
-    //
-    //
-    let _ = delta;
-    fmt.to_owned() // placeholder — remove when implementing
+    // NOTE: IronCalc PR 777 turns num_fmt from String into a NumFmt struct
+    // (num_fmt_id + format_code). When that lands, this function should
+    // operate on the format_code field.
+    if delta == 0 {
+        return fmt.to_owned();
+    }
+    if fmt.eq_ignore_ascii_case("general") {
+        return if delta > 0 {
+            "0.0".to_owned()
+        } else {
+            fmt.to_owned()
+        };
+    }
+
+    let dot = fmt.find('.');
+
+    if delta > 0 {
+        match dot {
+            Some(dot) => {
+                let zeros = fmt[dot + 1..].chars().take_while(|c| *c == '0').count();
+                let insert_at = dot + 1 + zeros;
+                let mut out = String::with_capacity(fmt.len() + 1);
+                out.push_str(&fmt[..insert_at]);
+                out.push('0');
+                out.push_str(&fmt[insert_at..]);
+                out
+            }
+            None => match fmt.rfind(|c: char| c == '0' || c == '#') {
+                Some(pos) => {
+                    let insert_at = pos + 1;
+                    let mut out = String::with_capacity(fmt.len() + 2);
+                    out.push_str(&fmt[..insert_at]);
+                    out.push_str(".0");
+                    out.push_str(&fmt[insert_at..]);
+                    out
+                }
+                None => fmt.to_owned(),
+            },
+        }
+    } else {
+        let Some(dot) = dot else {
+            return fmt.to_owned();
+        };
+        let zeros = fmt[dot + 1..].chars().take_while(|c| *c == '0').count();
+        match zeros {
+            0 => fmt.to_owned(),
+            1 => {
+                let mut out = String::with_capacity(fmt.len() - 2);
+                out.push_str(&fmt[..dot]);
+                out.push_str(&fmt[dot + 2..]);
+                out
+            }
+            _ => {
+                let last_zero = dot + zeros;
+                let mut out = String::with_capacity(fmt.len() - 1);
+                out.push_str(&fmt[..last_zero]);
+                out.push_str(&fmt[last_zero + 1..]);
+                out
+            }
+        }
+    }
 }
 
 /// Set `font.name` on every cell in the selection.

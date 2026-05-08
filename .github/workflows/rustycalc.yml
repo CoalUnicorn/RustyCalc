@@ -1,0 +1,64 @@
+name: rustycalc
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  # Daily at 06:00 UTC: re-runs against ironcalc/IronCalc upstream main
+  # so a breaking upstream change shows up before the next manual rebase.
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: fmt + clippy + check (wasm32)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout RustyCalc
+        uses: actions/checkout@v4
+        with:
+          path: RustyCalc
+
+      # Cargo.toml uses path = "../IronCalc/base" and "../IronCalc/xlsx",
+      # so IronCalc must be checked out as a sibling directory.
+      - name: Checkout IronCalc (sibling required by path deps)
+        uses: actions/checkout@v4
+        with:
+          # schedule -> upstream main (drift detection)
+          # push/PR  -> fork main (matches local dev)
+          repository: ${{ github.event_name == 'schedule' && 'ironcalc/IronCalc' || 'CoalUnicorn/IronCalc' }}
+          ref: main
+          path: IronCalc
+
+      - name: Install Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: RustyCalc
+
+      - name: cargo fmt --check
+        working-directory: RustyCalc
+        run: cargo fmt --check
+
+      # No -D warnings yet; flip on once existing lints are triaged.
+      - name: cargo clippy (wasm32)
+        working-directory: RustyCalc
+        run: cargo clippy --target wasm32-unknown-unknown
+
+      - name: cargo check (wasm32)
+        working-directory: RustyCalc
+        run: cargo check --target wasm32-unknown-unknown
