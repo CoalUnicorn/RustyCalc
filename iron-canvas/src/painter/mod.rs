@@ -8,6 +8,8 @@
 //! `TextMetrics` is split out as a supertrait so future text-shaping work
 //! (kerning, web-font metrics, bidi) doesn't churn the drawing surface.
 
+use std::borrow::Cow;
+
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Line;
 use crate::Span;
@@ -30,11 +32,23 @@ pub(crate) enum PaintColor<'a> {
     Borrowed(&'a str),
 }
 
-impl PaintColor<'_> {
+impl<'a> PaintColor<'a> {
     pub(crate) fn as_str(&self) -> &str {
         match self {
             PaintColor::Static(s) => s,
             PaintColor::Borrowed(s) => s,
+        }
+    }
+
+    /// Lift a theme color (`Cow<'static, str>`) into a `PaintColor`. Built-in
+    /// themes carry `Cow::Borrowed(&'static str)` and route through `Static`,
+    /// preserving the painter's ptr-eq fast path. Host-page themes carry
+    /// `Cow::Owned(String)` and route through `Borrowed`, falling back to the
+    /// content-eq cache.
+    pub(crate) fn from_theme_str(s: &'a Cow<'static, str>) -> PaintColor<'a> {
+        match s {
+            Cow::Borrowed(s) => PaintColor::Static(s),
+            Cow::Owned(s) => PaintColor::Borrowed(s.as_str()),
         }
     }
 }

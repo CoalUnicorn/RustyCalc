@@ -1,6 +1,8 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
+use std::borrow::Cow;
+
 use crate::theme::CanvasTheme;
 /// Reference compositor for pixel-parity testing.
 ///
@@ -18,14 +20,14 @@ use crate::RenderOverlays;
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DrawOp {
     FillRect {
-        color: &'static str,
+        color: Cow<'static, str>,
         x: f64,
         y: f64,
         w: f64,
         h: f64,
     },
     StrokeRect {
-        color: &'static str,
+        color: Cow<'static, str>,
         line_width: f64,
         x: f64,
         y: f64,
@@ -43,7 +45,7 @@ pub(crate) enum DrawOp {
 /// Ops the grid layer emits for the stub paint.
 pub(crate) fn grid_ops(theme: &CanvasTheme, w: f64, h: f64) -> Vec<DrawOp> {
     vec![DrawOp::FillRect {
-        color: theme.cell_bg,
+        color: theme.cell_bg.clone(),
         x: 0.0,
         y: 0.0,
         w,
@@ -85,7 +87,7 @@ fn stub_range_stroke(theme: &CanvasTheme, range: RCRange) -> DrawOp {
     const COL_W: f64 = 80.0;
     const ROW_H: f64 = 20.0;
     DrawOp::StrokeRect {
-        color: theme.selection_color,
+        color: theme.selection_color.clone(),
         line_width: 2.0,
         x: range.c1 as f64 * COL_W,
         y: range.r1 as f64 * ROW_H,
@@ -120,7 +122,7 @@ pub(crate) fn reference_ops(
     h: f64,
 ) -> Vec<DrawOp> {
     let mut ops = vec![DrawOp::FillRect {
-        color: theme.cell_bg,
+        color: theme.cell_bg.clone(),
         x: 0.0,
         y: 0.0,
         w,
@@ -201,7 +203,7 @@ mod tests {
         // Here we model it as a FillRect(black) replacing ClearRect.
         let overlays = RenderOverlays::default();
         let bad_overlay: Vec<DrawOp> = vec![DrawOp::FillRect {
-            color: "#000000",
+            color: Cow::Borrowed("#000000"),
             x: 0.0,
             y: 0.0,
             w: W,

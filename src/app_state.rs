@@ -7,16 +7,22 @@
 //! during worksheet scroll.
 
 use leptos::prelude::*;
+use leptos_use::{ColorMode, UseColorModeReturn};
 
 use crate::events::*;
 use crate::perf::PerfTimings;
 use crate::state::Split;
-use crate::theme::Theme;
+use crate::theme::{use_rusty_calc_theme, Theme};
 
 #[derive(Clone, Copy)]
 pub struct AppState {
     events: EventBus,
-    pub(crate) theme: Split<Theme>,
+    /// Resolved theme from leptos-use: with `.emit_auto(false)`, this signal
+    /// only ever carries `Light` or `Dark`, never `Auto`.
+    theme_mode: Signal<ColorMode>,
+    /// Writes user preference (Auto/Light/Dark) into leptos-use, which
+    /// persists to localStorage and updates `<html data-theme>`.
+    set_theme_mode: WriteSignal<ColorMode>,
     pub(crate) sidebar_open: Split<bool>,
     pub(crate) collapsed_groups: Split<Vec<String>>,
     #[allow(dead_code)]
@@ -28,9 +34,13 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(events: EventBus) -> Self {
+        let UseColorModeReturn {
+            mode, set_mode, ..
+        } = use_rusty_calc_theme();
         Self {
             events,
-            theme: Split::new(Theme::from_storage()),
+            theme_mode: mode,
+            set_theme_mode: set_mode,
             sidebar_open: Split::new(false),
             collapsed_groups: Split::new(vec![]),
             show_perf_panel: Split::new(false),
@@ -44,16 +54,16 @@ impl AppState {
     }
 
     pub fn get_theme(&self) -> Theme {
-        self.theme.get().resolve_with_system()
+        self.theme_mode.get().into()
     }
 
     #[allow(dead_code)]
     pub fn get_theme_untracked(&self) -> Theme {
-        self.theme.get_untracked().resolve_with_system()
+        self.theme_mode.get_untracked().into()
     }
 
     pub fn set_theme(&self, theme: Theme) {
-        self.theme.set(theme);
+        self.set_theme_mode.set(theme.into());
         self.events
             .emit_event(SpreadsheetEvent::Theme(ThemeEvent::ThemeToggled {
                 new_theme: theme,

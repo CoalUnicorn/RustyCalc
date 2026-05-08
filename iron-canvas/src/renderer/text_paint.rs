@@ -5,6 +5,7 @@
 //! `RendererCore::paint_text`. Per the `*Paint` convention, every
 //! allocation that depends on cell content lives here, not at paint time.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
 use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignment};
@@ -44,13 +45,14 @@ pub(crate) struct TextPaint {
     pub needs_clip: bool,
 }
 
-/// Per-cell text color split between the zero-alloc theme-default fast path
-/// (`Static`) and the per-cell-override path (`Owned`). `Owned` carries an
-/// interned `Rc<str>` from `ColorIntern`, so steady-state text resolution is
-/// `Rc::clone` after the first sighting of each color. Mirrors `BorderColor`
-/// in `renderer/cells.rs`.
+/// Per-cell text color split between the theme-default path (`Static`) and
+/// the per-cell-override path (`Owned`). `Static` carries `Cow<'static, str>` —
+/// `Cow::Borrowed` for built-in themes ptr-eqs through the painter cache,
+/// `Cow::Owned` for host-page themes content-eqs. `Owned` carries an interned
+/// `Rc<str>` from `ColorIntern` so steady-state resolution is `Rc::clone`
+/// after the first sighting. Mirrors `BorderColor` in `renderer/cells.rs`.
 pub(crate) enum TextColor {
-    Static(&'static str),
+    Static(Cow<'static, str>),
     Owned(Rc<str>),
 }
 
@@ -212,10 +214,10 @@ impl CellTextStyle {
         // same theme red — per-error-kind styling would require a new model
         // accessor (see xlsm_err.md "Renderer-side categorisation").
         let text_color = if matches!(cell_type, CellType::ErrorValue) {
-            TextColor::Static(theme.error_text_color)
+            TextColor::Static(theme.error_text_color.clone())
         } else {
             match style.font.color.as_deref() {
-                None | Some("#000000") => TextColor::Static(theme.default_text_color),
+                None | Some("#000000") => TextColor::Static(theme.default_text_color.clone()),
                 Some(c) => TextColor::Owned(intern.get(c)),
             }
         };

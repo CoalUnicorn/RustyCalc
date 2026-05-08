@@ -82,6 +82,12 @@ pub fn Worksheet() -> impl IntoView {
     // and the container has nonzero CSS dimensions; then constructed exactly
     // once by the lazy-construct block in the rAF loop. Disposed in on_cleanup.
     let canvas_handle: StoredValue<Option<IronCanvas>, LocalStorage> = StoredValue::new_local(None);
+    // Theme-change fence. Set when `events.theme` fires; consumed in the rAF
+    // callback below. Defers `set_theme_from_element` to after leptos-use has
+    // written the new `data-theme` attribute on `<html>` — reading CSS vars
+    // synchronously inside the same effect batch as the toggle would race the
+    // attribute write and yield stale values.
+    let theme_dirty: StoredValue<bool> = StoredValue::new(false);
     // Expose the handle to descendant components (e.g. FormulaTextArea needs
     // `cell_rect` to position the in-cell editor against the painted frame).
     provide_context(canvas_handle);
@@ -128,9 +134,6 @@ pub fn Worksheet() -> impl IntoView {
 
     // Re-render canvas every time visual events occur (content, format, navigation, structure).
     let clipboard_draw = expect_context::<StoredValue<Option<AppClipboard>, LocalStorage>>();
-
-    // Memo for canvas theme - cached until theme changes.
-    let canvas_theme = Memo::new(move |_| app.get_theme().canvas_theme());
 
     // Memo for the reactive overlay components (autofill extend target and
     // point-mode range). These must live in a memo, not be read directly in
@@ -222,7 +225,6 @@ pub fn Worksheet() -> impl IntoView {
             // actually need it. request_repaint() at the end is the safety
             // net that ensures content/format/structure events still fan
             // out to both layers even when no value changed locally.
-            let theme = *canvas_theme.get();
             let (extend_to, point_range, formula_refs) = overlay.clone();
             let clipboard = clipboard_draw.with_value(|opt| {
                 opt.as_ref().map(|acb| SheetRange {
@@ -236,9 +238,11 @@ pub fn Worksheet() -> impl IntoView {
                 point_range: point_range.map(Into::into),
                 formula_refs: formula_refs.into_iter().map(Into::into).collect(),
             };
+            if has_theme {
+                theme_dirty.set_value(true);
+            }
             canvas_handle.update_value(|slot| {
                 if let Some(ic) = slot.as_mut() {
-                    ic.set_theme(theme);
                     ic.set_overlays(overlays);
                     // Grid repaint only when cell data, format, or structure changed.
                     // Nav and overlay-only changes are covered by set_overlays() above.
@@ -287,7 +291,10 @@ pub fn Worksheet() -> impl IntoView {
                     // drop-in swap inherits a correct first frame.
                     // Subsequent pushes are driven by the reactive Effects
                     // below.
-                    ic.set_theme(*canvas_theme.get_untracked());
+                    #[cfg(target_arch = "wasm32")]
+                    if let Some(el) = window().document().and_then(|d| d.document_element()) {
+                        ic.set_theme_from_element(&el);
+                    }
                     ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
                     let (extend_to, point_range, formula_refs) = reactive_overlay.get_untracked();
                     let clipboard = clipboard_draw.with_value(|opt| {
@@ -329,6 +336,13 @@ pub fn Worksheet() -> impl IntoView {
         web_sys::console::time_with_label("render");
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
+                if theme_dirty.get_value() {
+                    #[cfg(target_arch = "wasm32")]
+                    if let Some(el) = window().document().and_then(|d| d.document_element()) {
+                        ic.set_theme_from_element(&el);
+                    }
+                    theme_dirty.set_value(false);
+                }
                 ic.paint_if_dirty();
             }
         });

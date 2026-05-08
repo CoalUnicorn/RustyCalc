@@ -27,7 +27,7 @@ impl GridLayer {
     ) {
         let size = frame.canvas_size;
         let ctx = self.base.renderer.ctx_ref();
-        ctx.set_fill_style_str(frame.theme.cell_bg);
+        ctx.set_fill_style_str(frame.theme.cell_bg.as_ref());
         ctx.fill_rect(0.0, 0.0, size.w, size.h);
         self.base.renderer.invalidate_paint_cache();
         self.base.renderer.render_grid(model, frame);

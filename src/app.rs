@@ -8,7 +8,6 @@ use crate::app_state::AppState;
 use crate::events::EventBus;
 use crate::state::WorkbookState;
 use crate::storage;
-use crate::theme::use_rusty_calc_theme;
 
 #[component]
 pub fn App() -> impl IntoView {
@@ -17,16 +16,12 @@ pub fn App() -> impl IntoView {
     let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
 
     let events = EventBus::new();
+    // AppState owns the leptos-use color-mode handles internally; theme
+    // changes flow `app.set_theme -> set_mode -> <html data-theme>` with
+    // no app-level bridging Effect required.
     let app_state = AppState::new(events);
     let wb_state = WorkbookState::new(events);
     wb_state.current_uuid.set(Some(uuid));
-
-    // Wire leptos-use color mode: handles `data-theme` on <html> and localStorage.
-    // An Effect syncs app_state.theme -> set_mode so any toggle propagates automatically.
-    let leptos_use::UseColorModeReturn { set_mode, .. } = use_rusty_calc_theme();
-    Effect::new(move |_| {
-        set_mode.set(app_state.theme.get().into());
-    });
 
     let model = StoredValue::new_local(model);
 

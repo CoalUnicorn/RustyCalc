@@ -27,11 +27,12 @@ impl<P: Painter> RendererCore<P> {
     /// the path while preserving the old "set state then clip then stroke"
     /// ordering.
     pub(super) fn paint_text(&self, t: &TextPaint, lines: &[TextLine]) {
-        // TextColor::Static is the theme-default fast path (zero alloc).
-        // TextColor::Owned carries a per-cell custom color from the font's
-        // explicit color attribute.
+        // TextColor::Static carries the theme color; the helper routes
+        // Cow::Borrowed through the painter's ptr-eq fast path and Cow::Owned
+        // through content-eq. TextColor::Owned is a per-cell custom color
+        // from the font's explicit color attribute.
         let color = match &t.color {
-            TextColor::Static(s) => PaintColor::Static(s),
+            TextColor::Static(s) => PaintColor::from_theme_str(s),
             TextColor::Owned(s) => PaintColor::Borrowed(s),
         };
         // `font_css` is interned `Rc<str>` per (size, weight, slant, family);

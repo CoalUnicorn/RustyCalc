@@ -57,7 +57,7 @@ impl FrameContext {
     /// One model-walk per axis populates the four slot vecs (`frozen_rows`,
     /// `scroll_rows`, `frozen_cols`, `scroll_cols`); each scan breaks early at
     /// `canvas.{w,h}` or the sheet bound.
-    pub(crate) fn current(model: &dyn CanvasModel, canvas: CanvasSize, theme: CanvasTheme) -> Self {
+    pub(crate) fn current(model: &dyn CanvasModel, canvas: CanvasSize, theme: &CanvasTheme) -> Self {
         let view = model.get_selected_view();
         let frozen = FrozenRC::from_model(model);
 
@@ -124,7 +124,7 @@ impl FrameContext {
             scroll_cols,
             selection_range: view.selection,
             canvas_size: canvas,
-            theme,
+            theme: theme.clone(),
         }
     }
 

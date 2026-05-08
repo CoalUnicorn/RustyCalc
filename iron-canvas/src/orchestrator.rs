@@ -8,7 +8,7 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::geometry::CanvasSize;
 use crate::layer::{GridLayer, OverlayLayer, RenderOverlays};
-use crate::theme::{CanvasTheme, DARK, LIGHT};
+use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::ui::{HitTest, ResizeTarget};
 use crate::wasm::JsBackedModel;
 use crate::CanvasModel;
@@ -50,7 +50,7 @@ impl IronCanvas {
         Ok(IronCanvas {
             grid,
             overlay,
-            theme: LIGHT,
+            theme: CanvasTheme::light(),
             overlays: RenderOverlays::default(),
             model: None,
             last_frame: None,
@@ -76,7 +76,11 @@ impl IronCanvas {
 
     /// Push a new theme by name ("light" | "dark"). Fans out to grid + overlay; no-op if unchanged.
     pub fn set_theme_name(&mut self, name: &str) {
-        let theme = if name == "dark" { DARK } else { LIGHT };
+        let theme = if name == "dark" {
+            CanvasTheme::dark()
+        } else {
+            CanvasTheme::light()
+        };
         if theme != self.theme {
             self.theme = theme;
             self.grid.mark_dirty();
@@ -127,7 +131,7 @@ impl IronCanvas {
         }
 
         // Full rebuild: scroll/freeze/size/sheet changed, or grid is dirty.
-        let frame = FrameContext::current(model, self.size, self.theme);
+        let frame = FrameContext::current(model, self.size, &self.theme);
 
         if grid_dirty {
             self.grid.paint(model, &frame);
@@ -158,6 +162,22 @@ impl IronCanvas {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl IronCanvas {
+    /// JS-facing theme push from a host DOM node. Reads the upstream
+    /// `--palette-*` CSS custom properties off `el`'s computed style and
+    /// builds a `CanvasTheme`. Same dirty-bit semantics as `set_theme` —
+    /// pushing the same DOM state twice is a no-op.
+    ///
+    /// This is the canonical RustyCalc bridge: a leptos-use color-mode
+    /// effect toggles `data-theme` on `<html>`, then calls this with
+    /// `document.documentElement` (or any host element).
+    pub fn set_theme_from_element(&mut self, el: &web_sys::Element) {
+        self.set_theme(CanvasTheme::from_element(el));
+    }
+}
+
 impl IronCanvas {
     /// Push overlay state. Overlay-only; value-compares so a redundant push is a no-op.
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
@@ -177,6 +197,13 @@ impl IronCanvas {
             self.grid.mark_dirty();
             self.overlay.mark_dirty();
         }
+    }
+
+    /// Push a theme described by upstream CSS-variable inputs. Convenience
+    /// over `set_theme(vars.build())` — same dirty-bit semantics, idempotent
+    /// when the resolved palette equals the current one.
+    pub fn set_theme_variables(&mut self, vars: ThemeVariables) {
+        self.set_theme(vars.build());
     }
 
     /// Push a new data model. Grid-only; identity-compares via `Rc::ptr_eq`

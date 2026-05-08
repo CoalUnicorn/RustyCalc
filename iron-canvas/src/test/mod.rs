@@ -7,4 +7,5 @@ mod painter;
 mod reference;
 mod renderer;
 mod style;
+mod theme;
 mod types;

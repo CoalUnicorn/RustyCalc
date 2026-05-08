@@ -7,6 +7,8 @@
 //! drawable fold, so overlays never leak onto the canvas for off-screen
 //! refs like `=BB3`.
 
+use std::borrow::Cow;
+
 use crate::geometry::constants::{
     DASHED_BORDER_WIDTH, SELECTION_BORDER_WIDTH, STANDARD_BORDER_WIDTH,
 };
@@ -20,14 +22,15 @@ use super::super::types::coord::CellAddress;
 use super::{FrameContext, RendererCore};
 
 /// Controls whether `draw_dashed_range` fills the interior with a light tint.
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) enum DashFill {
     /// Outline only (used for clipboard marching ants).
     Outline,
     /// Outline + semi-transparent fill tint (used for point-mode range and
-    /// formula refs). Carries a precomputed `rgba(...)` tint so paint never
-    /// allocates per frame.
-    Tinted(&'static str),
+    /// formula refs). Carries a precomputed `rgba(...)` tint as
+    /// `Cow<'static, str>` — built-in themes use `Cow::Borrowed` for the
+    /// zero-alloc ptr-eq path; host-page themes carry the owned tint.
+    Tinted(Cow<'static, str>),
 }
 
 impl<P: Painter> RendererCore<P> {
@@ -47,7 +50,7 @@ impl<P: Painter> RendererCore<P> {
         };
 
         self.painter
-            .rect_fill(cell, PaintColor::Static(frame.theme.selection_fill));
+            .rect_fill(cell, PaintColor::from_theme_str(&frame.theme.selection_fill));
 
         // Restore the active cell's fill + borders on top of the selection
         // tint so its actual style shows through while selected. Phase 4
@@ -56,7 +59,7 @@ impl<P: Painter> RendererCore<P> {
 
         self.painter.rect_stroke(
             cell,
-            PaintColor::Static(frame.theme.selection_color),
+            PaintColor::from_theme_str(&frame.theme.selection_color),
             f64::from(SELECTION_BORDER_WIDTH),
         );
 
@@ -68,10 +71,10 @@ impl<P: Painter> RendererCore<P> {
         let handle = frame.autofill_handle_rect();
 
         self.painter
-            .rect_fill(handle, PaintColor::Static(frame.theme.selection_color));
+            .rect_fill(handle, PaintColor::from_theme_str(&frame.theme.selection_color));
         self.painter.rect_stroke(
             handle,
-            PaintColor::Static(frame.theme.cell_bg),
+            PaintColor::from_theme_str(&frame.theme.cell_bg),
             f64::from(AUTOFILL_HANDLE_BORDER_PX),
         );
     }
@@ -96,7 +99,7 @@ impl<P: Painter> RendererCore<P> {
 
         self.painter.rect_dashed(
             b,
-            PaintColor::Static(frame.theme.selection_color),
+            PaintColor::from_theme_str(&frame.theme.selection_color),
             f64::from(STANDARD_BORDER_WIDTH),
         );
     }
@@ -117,7 +120,7 @@ impl<P: Painter> RendererCore<P> {
         self.draw_dashed_range(
             frame,
             cb.range.normalized(),
-            PaintColor::Static(frame.theme.selection_color),
+            PaintColor::from_theme_str(&frame.theme.selection_color),
             DashFill::Outline,
         );
     }
@@ -128,8 +131,8 @@ impl<P: Painter> RendererCore<P> {
         self.draw_dashed_range(
             frame,
             pr.normalized(),
-            PaintColor::Static(frame.theme.pointing),
-            DashFill::Tinted(frame.theme.pointing_tint),
+            PaintColor::from_theme_str(&frame.theme.pointing),
+            DashFill::Tinted(frame.theme.pointing_tint.clone()),
         );
     }
 
@@ -151,7 +154,7 @@ impl<P: Painter> RendererCore<P> {
                 frame,
                 fr.sheet_area.range.normalized(),
                 PaintColor::Static(FORMULA_REF_COLORS[idx]),
-                DashFill::Tinted(FORMULA_REF_TINTS[idx]),
+                DashFill::Tinted(Cow::Borrowed(FORMULA_REF_TINTS[idx])),
             );
         }
     }
@@ -172,10 +175,10 @@ impl<P: Painter> RendererCore<P> {
 
         // Tint first so the dashed outline lands cleanly on top — the 8%
         // alpha would otherwise wash over the dashes and dim them.
-        // `DashFill::Tinted` carries `&'static str` so the tint stays on
-        // the zero-alloc Static path.
-        if let DashFill::Tinted(tint) = fill {
-            self.painter.rect_fill(b, PaintColor::Static(tint));
+        // `DashFill::Tinted` carries `Cow<'static, str>`; the helper
+        // preserves the ptr-eq fast path for built-in themes.
+        if let DashFill::Tinted(tint) = &fill {
+            self.painter.rect_fill(b, PaintColor::from_theme_str(tint));
         }
 
         self.painter

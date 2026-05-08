@@ -27,7 +27,7 @@ impl<P: Painter> RendererCore<P> {
         if frc.rows == 0 && frc.cols == 0 {
             return;
         }
-        let color = PaintColor::Static(frame.theme.grid_separator_color);
+        let color = PaintColor::from_theme_str(&frame.theme.grid_separator_color);
         let width = f64::from(FROZEN_SEP);
         let sep_y = frc.offset.y - FROZEN_SEP / 2 + HEADER_OFFSET;
         let sep_x = frc.offset.x - FROZEN_SEP / 2 + HEADER_OFFSET;
@@ -67,9 +67,9 @@ impl<P: Painter> RendererCore<P> {
             height: HEADER_ROW_HEIGHT,
         };
         self.painter
-            .rect_fill(corner, PaintColor::Static(frame.theme.header_bg));
+            .rect_fill(corner, PaintColor::from_theme_str(&frame.theme.header_bg));
 
-        let border_color = PaintColor::Static(frame.theme.header_border_color);
+        let border_color = PaintColor::from_theme_str(&frame.theme.header_border_color);
         self.painter.stroke_hline(
             Span {
                 from: 0,
@@ -157,15 +157,15 @@ impl<P: Painter> RendererCore<P> {
         thickness: i32,
         selected: bool,
     ) {
-        let body_bg = PaintColor::Static(if selected {
-            frame.theme.header_selected_bg
+        let body_bg = PaintColor::from_theme_str(if selected {
+            &frame.theme.header_selected_bg
         } else {
-            frame.theme.header_bg
+            &frame.theme.header_bg
         });
-        let text_color = PaintColor::Static(if selected {
-            frame.theme.header_selected_color
+        let text_color = PaintColor::from_theme_str(if selected {
+            &frame.theme.header_selected_color
         } else {
-            frame.theme.header_text_color
+            &frame.theme.header_text_color
         });
 
         let full = axis.header_rect(along, thickness);
@@ -177,7 +177,7 @@ impl<P: Painter> RendererCore<P> {
         };
 
         self.painter
-            .rect_fill(full, PaintColor::Static(frame.theme.header_border_color));
+            .rect_fill(full, PaintColor::from_theme_str(&frame.theme.header_border_color));
         self.painter.rect_fill(body, body_bg);
         let center = full.center();
         let snap_x = f64::from(center.x);

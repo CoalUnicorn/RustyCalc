@@ -7,6 +7,7 @@
 //! `TextPaint::resolve` run inside their respective sub-passes so border
 //! and text work happens only on cells that reach them.
 
+use std::borrow::Cow;
 use std::rc::Rc;
 
 use crate::geometry::frame::slot::{ColSlot, RowSlot};
@@ -96,7 +97,7 @@ impl<P: Painter> RendererCore<P> {
         // every theme-default cell through the painter's allocating cache miss.
         let color = match p.style.fill.fg_color.as_deref() {
             Some(c) => PaintColor::Borrowed(c),
-            None => PaintColor::Static(theme.cell_bg),
+            None => PaintColor::from_theme_str(&theme.cell_bg),
         };
         self.painter.rect_fill(p.rect, color);
     }
@@ -162,11 +163,12 @@ impl<P: Painter> RendererCore<P> {
     fn paint_border(&self, edge: BorderEdge, rect: PixelRect, b: &BorderPaint) {
         let line = edge.line(rect);
         let offsets: &[i32] = if b.stroke.double { &[-1, 1] } else { &[0] };
-        // BorderColor::Static threads `&'static str` straight through — the
-        // painter cache ptr-eqs it. BorderColor::Owned is the per-cell custom
-        // color; goes through the content-eq path.
+        // BorderColor::Static carries the theme grid color; the helper
+        // routes Cow::Borrowed through the painter's ptr-eq fast path and
+        // Cow::Owned through the content-eq cache. BorderColor::Owned is
+        // the per-cell custom color via the interner.
         let color = match &b.color {
-            BorderColor::Static(s) => PaintColor::Static(s),
+            BorderColor::Static(s) => PaintColor::from_theme_str(s),
             BorderColor::Owned(s) => PaintColor::Borrowed(s),
         };
         for &d in offsets {
@@ -296,12 +298,14 @@ pub(crate) struct BorderStroke {
     pub double: bool, // double-line styles render as two parallel strokes
 }
 
-/// Color for a resolved border edge. `Static` avoids any allocation for the
-/// common grid-line base coat (theme color is `&'static str`); `Owned` carries
-/// an interned `Rc<str>` from `ColorIntern` — `Rc::clone` after the first
-/// sighting of each unique color, so steady-state border resolution is alloc-free.
+/// Color for a resolved border edge. `Static` carries the theme grid color as
+/// `Cow<'static, str>` — built-in themes (`Cow::Borrowed`) ptr-eq through the
+/// painter cache; host-page themes (`Cow::Owned`) clone the `String` once per
+/// resolve and content-eq through the cache. `Owned` is the per-cell override
+/// path, an interned `Rc<str>` from `ColorIntern` (`Rc::clone` after the first
+/// sighting of each unique color).
 pub(crate) enum BorderColor {
-    Static(&'static str),
+    Static(Cow<'static, str>),
     Owned(Rc<str>),
 }
 
@@ -312,11 +316,13 @@ pub(crate) struct BorderPaint {
 
 impl BorderPaint {
     /// Thin grid-color stroke used as the right/bottom fallback when a cell
-    /// has no explicit border on that edge. Zero alloc — `theme.grid_color`
-    /// is `&'static str` so the `Static` arm avoids any per-cell `String`.
+    /// has no explicit border on that edge. `Cow::clone` is a pointer copy
+    /// for built-in themes (`Cow::Borrowed`) and a `String::clone` for
+    /// host-page themes — the latter is the only per-cell allocation, and
+    /// only on the new owned-theme path.
     fn grid_line(theme: &CanvasTheme) -> Self {
         Self {
-            color: BorderColor::Static(theme.grid_color),
+            color: BorderColor::Static(theme.grid_color.clone()),
             stroke: BorderStroke {
                 width_px: STANDARD_BORDER_WIDTH,
                 double: false,
@@ -325,13 +331,13 @@ impl BorderPaint {
     }
 
     /// Resolve a `BorderItem` from the cell style into a renderer-ready paint.
-    /// Color falls back to `theme.grid_color` when the item carries no explicit color —
-    /// that path stays zero-alloc by reusing the static theme string. The
+    /// Color falls back to `theme.grid_color` when the item carries no explicit
+    /// color — `Cow::clone` keeps the built-in path zero-alloc. The
     /// explicit-color branch goes through `ColorIntern` so the dynamic color
     /// is `Rc::clone`d on every frame after the first sighting.
     fn resolve(item: &BorderItem, theme: &CanvasTheme, intern: &ColorIntern) -> Self {
         let color = match item.color.as_deref() {
-            None => BorderColor::Static(theme.grid_color),
+            None => BorderColor::Static(theme.grid_color.clone()),
             Some(c) => BorderColor::Owned(intern.get(c)),
         };
         Self {
