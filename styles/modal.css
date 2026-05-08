@@ -24,8 +24,8 @@
 }
 
 .md-box {
-    background: var(--bg-color, #ffffff);
-    color: var(--text-color, #1f2328);
+    background: var(--bg-primary, #ffffff);
+    color: var(--text-primary, #1f2328);
     border-radius: 8px;
     box-shadow: transparent;
     display: flex;
@@ -63,7 +63,7 @@
     font-size: 16px;
     line-height: 1;
     cursor: pointer;
-    color: var(--text-color, #1f2328);
+    color: var(--text-primary, #1f2328);
     padding: 4px 8px;
     border-radius: 4px;
 }

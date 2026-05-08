@@ -41,7 +41,7 @@
 .nrm-list thead th {
   position: sticky;
   top: 0;
-  background: var(--bg-header, #f6f8fa);
+  background: var(--bg-secondary, #f6f8fa);
   text-align: left;
   padding: 8px 10px;
   font-weight: 600;
@@ -50,7 +50,7 @@
 
 .nrm-row td {
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border-color-soft, #eaecef);
+  border-bottom: 1px solid var(--border-inner, #eaecef);
 }
 .nrm-row:hover {
   background: var(--bg-hover, rgba(0, 0, 0, 0.04));
@@ -66,19 +66,19 @@
 }
 
 .nrm-scope {
-  color: var(--text-muted, #57606a);
+  color: var(--text-dim, #57606a);
 }
 
 .nrm-formula code {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
   font-size: 12px;
-  color: var(--text-color, #1f2328);
+  color: var(--text-primary, #1f2328);
 }
 
 .nrm-empty {
   text-align: center;
   padding: 32px 8px;
-  color: var(--text-muted, #57606a);
+  color: var(--text-dim, #57606a);
   font-style: italic;
 }
 
@@ -97,7 +97,7 @@
 }
 
 .nrm-hint {
-  color: var(--text-muted, #57606a);
+  color: var(--text-dim, #57606a);
   font-style: italic;
   margin: 0;
 }
@@ -111,7 +111,7 @@
 
 .nrm-form-row label {
   font-size: 13px;
-  color: var(--text-muted, #57606a);
+  color: var(--text-dim, #57606a);
 }
 
 .nrm-form-row input,
@@ -121,8 +121,8 @@
   padding: 6px 8px;
   border: 1px solid var(--border-color, #d0d7de);
   border-radius: 4px;
-  background: var(--bg-color, #ffffff);
-  color: var(--text-color, #1f2328);
+  background: var(--bg-primary, #ffffff);
+  color: var(--text-primary, #1f2328);
   font-family: inherit;
 }
 
@@ -154,7 +154,7 @@
   padding: 6px 14px;
   border-radius: 4px;
   border: 1px solid var(--border-color, #d0d7de);
-  background: var(--bg-color, #ffffff);
+  background: var(--bg-primary, #ffffff);
   cursor: pointer;
   font-size: 13px;
 }
