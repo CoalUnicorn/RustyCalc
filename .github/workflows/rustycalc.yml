@@ -3,17 +3,20 @@ name: rustycalc
 on:
   push:
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
+      - "**.md"
+      - "docs/**"
   pull_request:
     paths-ignore:
-      - '**.md'
-      - 'docs/**'
+      - "**.md"
+      - "docs/**"
   # Daily at 06:00 UTC: re-runs against ironcalc/IronCalc upstream main
   # so a breaking upstream change shows up before the next manual rebase.
   schedule:
-    - cron: '0 6 * * *'
+    - cron: "0 6 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
