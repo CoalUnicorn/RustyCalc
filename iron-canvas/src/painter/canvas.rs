@@ -74,8 +74,9 @@ impl CanvasPainter {
         }
     }
 
-    /// Direct ctx access for the renderer's text-slot snap helpers.
-    /// Going away once `fill_text` is the only text path (Task 3 ends ctx leakage).
+    /// Direct ctx access for the layer wrappers' own clear/fill paths
+    /// (`GridLayer::paint`, `OverlayLayer::paint`). Renderer code never
+    /// calls this; it routes through the `Painter` surface instead.
     pub(crate) fn ctx(&self) -> &CanvasRenderingContext2d {
         &self.ctx
     }
@@ -253,12 +254,12 @@ impl Painter for CanvasPainter {
     ) {
         self.set_font_cached(font_css);
         self.set_fill_cached(color);
-        let _ = self.ctx.set_text_align(match align {
+        self.ctx.set_text_align(match align {
             TextAlign::Start => "start",
             TextAlign::Center => "center",
             TextAlign::End => "end",
         });
-        let _ = self.ctx.set_text_baseline(match baseline {
+        self.ctx.set_text_baseline(match baseline {
             TextBaseline::Top => "top",
             TextBaseline::Middle => "middle",
             TextBaseline::Bottom => "bottom",
@@ -285,8 +286,8 @@ impl Painter for CanvasPainter {
     }
 
     fn reset_text_defaults(&self) {
-        let _ = self.ctx.set_text_align("center");
-        let _ = self.ctx.set_text_baseline("middle");
+        self.ctx.set_text_align("center");
+        self.ctx.set_text_baseline("middle");
     }
 
     fn begin_group(&self, _class: &'static str) {}

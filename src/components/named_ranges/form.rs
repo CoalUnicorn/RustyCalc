@@ -84,12 +84,8 @@ pub fn NamedRangeForm() -> impl IntoView {
             if let Some(c) = opt {
                 c.scope = scope;
                 c.context_cell.sheet = scope.unwrap_or(view_sheet);
-                c.formula_analysis = analyze_formula(
-                    &c.formula,
-                    c.context_cell,
-                    &sheet_names,
-                    &defined_names,
-                );
+                c.formula_analysis =
+                    analyze_formula(&c.formula, c.context_cell, &sheet_names, &defined_names);
             }
         });
     };
@@ -269,7 +265,10 @@ pub fn NamedRangeForm() -> impl IntoView {
 /// are mutated. Sheet name is quoted via ironcalc's own `quote_name` so the
 /// output round-trips through the same lexer that will validate it next.
 fn qualify_bare_refs(body: &str, sheet_name: &str, bare_spans: &[TextRef]) -> String {
-    let qualifier = format!("{}!", ironcalc_base::expressions::utils::quote_name(sheet_name));
+    let qualifier = format!(
+        "{}!",
+        ironcalc_base::expressions::utils::quote_name(sheet_name)
+    );
     let mut result = body.to_string();
     for span in bare_spans.iter().rev() {
         let pos = span.start.saturating_sub(1).min(result.len());

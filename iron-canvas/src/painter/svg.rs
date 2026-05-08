@@ -3,6 +3,7 @@
 //! Pure `std`. Emits a self-contained `<svg>` document for snapshot tests,
 //! exports, and headless rendering. Design notes: `docs/svg-painter.md`.
 
+#![allow(dead_code)]
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 

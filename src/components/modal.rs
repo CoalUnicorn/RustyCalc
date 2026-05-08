@@ -22,6 +22,7 @@ use leptos_use::{on_click_outside, use_document, use_event_listener};
 
 /// Sizing modifier applied to the inner `.modal-box`. Maps to a CSS class so
 /// width/height tuning lives in stylesheets, not Rust string formatting.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ModalSize {
     Small,

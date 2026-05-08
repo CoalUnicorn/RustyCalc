@@ -34,9 +34,7 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(events: EventBus) -> Self {
-        let UseColorModeReturn {
-            mode, set_mode, ..
-        } = use_rusty_calc_theme();
+        let UseColorModeReturn { mode, set_mode, .. } = use_rusty_calc_theme();
         Self {
             events,
             theme_mode: mode,

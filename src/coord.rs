@@ -89,7 +89,11 @@ impl RefNode {
     /// 2. Sheet qualification. The stringifier emits a `Sheet!` prefix iff
     ///    `sheet_name` is `Some`. Same-sheet points must therefore carry
     ///    `None` — otherwise every bare `A1` click renders as `Sheet1!A1`.
-    pub fn from_cell_area(area: SheetRange, editing: CellAddress, sheet_name_of_pointed: &str) -> Self {
+    pub fn from_cell_area(
+        area: SheetRange,
+        editing: CellAddress,
+        sheet_name_of_pointed: &str,
+    ) -> Self {
         let sheet_name = if area.sheet == editing.sheet {
             None
         } else {

@@ -74,4 +74,3 @@ pub fn use_rusty_calc_theme() -> leptos_use::UseColorModeReturn {
             .emit_auto(false), // Always resolve Auto to a concrete mode
     )
 }
-

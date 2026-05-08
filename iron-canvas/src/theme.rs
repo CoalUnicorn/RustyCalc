@@ -62,19 +62,18 @@ pub struct CanvasTheme {
 }
 
 impl CanvasTheme {
-    /// Built-in light palette. Equivalent to the `LIGHT` const — exposed as a
-    /// method so callers don't have to import the constant separately.
+    /// Built-in light palette.
     pub fn light() -> Self {
         LIGHT
     }
 
-    /// Built-in dark palette. See `light` for the rationale.
+    /// Built-in dark palette.
     pub fn dark() -> Self {
         DARK
     }
 }
 
-const LIGHT: CanvasTheme = CanvasTheme {
+pub(crate) const LIGHT: CanvasTheme = CanvasTheme {
     grid_color: Cow::Borrowed("#E0E0E0"),
     grid_separator_color: Cow::Borrowed("#E0E0E0"),
     header_bg: Cow::Borrowed("#FFF"),
@@ -91,7 +90,7 @@ const LIGHT: CanvasTheme = CanvasTheme {
     pointing_tint: Cow::Borrowed("rgba(30,111,217,0.08)"),
 };
 
-const DARK: CanvasTheme = CanvasTheme {
+pub(crate) const DARK: CanvasTheme = CanvasTheme {
     grid_color: Cow::Borrowed("#3A3A3A"),
     grid_separator_color: Cow::Borrowed("#3A3A3A"),
     header_bg: Cow::Borrowed("#1E1E1E"),
@@ -111,23 +110,22 @@ const DARK: CanvasTheme = CanvasTheme {
 /// Host-page input shape for a `CanvasTheme`. Each field is `Option<String>`;
 /// any field left `None` falls back to `CanvasTheme::light()` when converted.
 ///
-/// This is the bridge between IronCalc upstream's CSS-var contract
-/// (`--palette-sheet-*`, `--palette-primary-main`, etc.) and our renderer's
-/// resolved palette. Stage 3 reads these vars off a DOM element and builds a
-/// `ThemeVariables`; Stage 2 (this struct) just owns the conversion to
-/// `CanvasTheme` so the contract has one named seam.
+/// Bridges IronCalc upstream's CSS-var contract (`--palette-sheet-*`,
+/// `--palette-primary-main`, etc.) to the renderer's resolved palette.
+/// `from_css_reader` (and the wasm32 `CanvasTheme::from_element` that wraps
+/// it) populates these fields from a DOM element's computed style; the
+/// `From<ThemeVariables> for CanvasTheme` impl performs the per-field
+/// fallback to `LIGHT`.
 ///
 /// # Derived fields
 ///
-/// Some `CanvasTheme` fields don't have a direct upstream CSS-var equivalent.
-/// In v1 they fall back to `CanvasTheme::light()` when not supplied; the
-/// derivation rules below describe how `from_element` (Stage 3) will populate
-/// them from sparser inputs:
+/// Some `CanvasTheme` fields have no direct upstream CSS-var equivalent.
+/// `from_css_reader` derives them from sparser inputs:
 ///
-/// - `error_text_color` — derive from `--palette-error-main`.
-/// - `selection_color`, `pointing` — derive from `--palette-primary-main`.
-/// - `selection_fill` — derive from `--palette-primary-main` with ~12% alpha.
-/// - `pointing_tint` — derive from `--palette-primary-main` with ~8% alpha.
+/// - `error_text_color` from `--palette-error-main`.
+/// - `selection_color`, `pointing` from `--palette-primary-main`.
+/// - `selection_fill` from `--palette-primary-main` at ~12% alpha.
+/// - `pointing_tint` from `--palette-primary-main` at ~8% alpha.
 #[derive(Default, Clone, Debug)]
 pub struct ThemeVariables {
     pub grid_color: Option<String>,

@@ -67,7 +67,10 @@ fn empty_variables_via_builder_round_trip_to_light() {
 fn one_field_override_changes_only_that_field() {
     let theme = ThemeVariables::new().with_header_bg("#123456").build();
     let light = CanvasTheme::light();
-    assert_eq!(theme.header_bg, Cow::<'static, str>::Owned("#123456".into()));
+    assert_eq!(
+        theme.header_bg,
+        Cow::<'static, str>::Owned("#123456".into())
+    );
     // Every other field must be untouched.
     assert_eq!(theme.grid_color, light.grid_color);
     assert_eq!(theme.grid_separator_color, light.grid_separator_color);
@@ -243,11 +246,20 @@ fn full_upstream_var_set_round_trips_through_canvas_theme() {
     ]);
     let theme: CanvasTheme = ThemeVariables::from_css_reader(map_reader(map)).into();
     // Direct keys land verbatim.
-    assert_eq!(theme.grid_color, Cow::<'static, str>::Owned("#E0E0E0".into()));
+    assert_eq!(
+        theme.grid_color,
+        Cow::<'static, str>::Owned("#E0E0E0".into())
+    );
     assert_eq!(theme.cell_bg, Cow::<'static, str>::Owned("#FFFFFF".into()));
-    assert_eq!(theme.error_text_color, Cow::<'static, str>::Owned("#CC0000".into()));
+    assert_eq!(
+        theme.error_text_color,
+        Cow::<'static, str>::Owned("#CC0000".into())
+    );
     // primary-main propagates through derivation.
-    assert_eq!(theme.selection_color, Cow::<'static, str>::Owned("#1E6FD9".into()));
+    assert_eq!(
+        theme.selection_color,
+        Cow::<'static, str>::Owned("#1E6FD9".into())
+    );
     assert_eq!(theme.pointing, Cow::<'static, str>::Owned("#1E6FD9".into()));
     assert_eq!(
         theme.selection_fill,

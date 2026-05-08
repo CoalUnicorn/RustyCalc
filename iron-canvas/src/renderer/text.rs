@@ -59,8 +59,13 @@ impl<P: Painter> RendererCore<P> {
             let x1 = line.center_x - line.width / 2.0;
             let x2 = line.center_x + line.width / 2.0;
             if t.underline {
-                self.painter
-                    .stroke_text_hline(x1, x2, line.center_y + underline_offset, color, stroke_w);
+                self.painter.stroke_text_hline(
+                    x1,
+                    x2,
+                    line.center_y + underline_offset,
+                    color,
+                    stroke_w,
+                );
             }
             if t.strike {
                 self.painter

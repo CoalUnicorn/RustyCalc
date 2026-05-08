@@ -1,11 +1,11 @@
-//! Phase-3 overlays: selection rectangle, autofill drag preview, clipboard
-//! marching ants, point-mode range, formula-ref highlights.
+//! Overlay-layer paints: selection rectangle, autofill drag preview,
+//! clipboard marching ants, point-mode range, formula-ref highlights.
 //!
-//! Everything here is drawn *after* cell backgrounds + headers but *before*
-//! cell text (Phase 4). Each helper bails early via
-//! `range_pixel_bounds(...)?` when the range is entirely outside the
-//! drawable fold, so overlays never leak onto the canvas for off-screen
-//! refs like `=BB3`.
+//! These run on the transparent overlay canvas, which paints after the
+//! grid layer (cells + borders + text + headers + corner). Each helper
+//! bails early via `range_pixel_bounds(...)?` when the range is entirely
+//! outside the drawable fold, so overlays never leak onto the canvas for
+//! off-screen refs like `=BB3`.
 
 use std::borrow::Cow;
 
@@ -49,12 +49,13 @@ impl<P: Painter> RendererCore<P> {
             return;
         };
 
-        self.painter
-            .rect_fill(cell, PaintColor::from_theme_str(&frame.theme.selection_fill));
+        self.painter.rect_fill(
+            cell,
+            PaintColor::from_theme_str(&frame.theme.selection_fill),
+        );
 
-        // Restore the active cell's fill + borders on top of the selection
-        // tint so its actual style shows through while selected. Phase 4
-        // paints text over everything later.
+        // Restore the active cell's fill + borders + text on top of the
+        // selection tint so its actual style shows through while selected.
         self.repaint_active_cell(model, addr, frame);
 
         self.painter.rect_stroke(
@@ -70,8 +71,10 @@ impl<P: Painter> RendererCore<P> {
         // returns None there, matching `autofill_handle()` semantics.
         let handle = frame.autofill_handle_rect();
 
-        self.painter
-            .rect_fill(handle, PaintColor::from_theme_str(&frame.theme.selection_color));
+        self.painter.rect_fill(
+            handle,
+            PaintColor::from_theme_str(&frame.theme.selection_color),
+        );
         self.painter.rect_stroke(
             handle,
             PaintColor::from_theme_str(&frame.theme.cell_bg),

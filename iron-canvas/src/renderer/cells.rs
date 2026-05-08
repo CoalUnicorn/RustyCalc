@@ -220,7 +220,6 @@ impl<P: Painter> RendererCore<P> {
     }
 }
 
-//  Cell paint resolution
 pub(crate) struct CellPaint {
     pub addr: CellAddress,
     pub rect: PixelRect,
@@ -295,7 +294,7 @@ impl CellPaint {
 
 pub(crate) struct BorderStroke {
     pub width_px: i32,
-    pub double: bool, // double-line styles render as two parallel strokes
+    pub double: bool,
 }
 
 /// Color for a resolved border edge. `Static` carries the theme grid color as
@@ -376,9 +375,8 @@ impl BorderStroke {
     }
 }
 
-/// One cell yielded by a `PaneCells` walk: the address, its pixel rect at
-/// the current scroll, and any outer pane-boundary borders the renderer
-/// must force-draw on it.
+/// One cell yielded by a `PaneCells` walk: address + pixel rect at the
+/// current scroll.
 #[derive(Clone, Copy)]
 pub(crate) struct CellSlot {
     pub addr: CellAddress,
@@ -482,8 +480,7 @@ impl<'a> Iterator for CellPaintsIter<'a> {
                 self.model
                     .get_cell_style(slot.addr.sheet, slot.addr.row, slot.addr.column)
             else {
-                // Style fetch failed - skip this cell entirely (matches
-                // today's `render_cell_style` early-return at cells.rs).
+                // Style fetch failed — skip this cell entirely.
                 continue;
             };
 

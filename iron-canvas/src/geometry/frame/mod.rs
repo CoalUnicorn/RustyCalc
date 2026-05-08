@@ -1,19 +1,18 @@
+use crate::geometry::frame::slot::{ColSlot, RowSlot};
 use crate::{
     geometry::{
         constants::{
-            AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT,
-            LAST_COLUMN, LAST_ROW,
+            AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT,
+            HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
         },
         frame::frozen::FrozenRC,
         pixel_rect::PixelRect,
         prim::Point,
-        utils::{col_width, row_height},
     },
     theme::CanvasTheme,
     types::ui::{HitTest, ResizeTarget},
     CanvasModel, CanvasSize, RCRange,
 };
-use crate::geometry::frame::slot::{ColSlot, RowSlot};
 
 pub mod frozen;
 pub mod slot;
@@ -40,7 +39,7 @@ pub(crate) struct FrameContext {
     /// pure (no model read) and pins the handle position to the *painted*
     /// selection, even if the model's selection mutated between paint and
     /// the next hit-test.
-    pub selection_range: RCRange, //[i32; 4],
+    pub selection_range: RCRange,
     /// Canvas size at which this frame was built. Stored so `is_still_valid`
     /// can detect a resize without the orchestrator passing size separately.
     pub canvas_size: CanvasSize,
@@ -57,28 +56,42 @@ impl FrameContext {
     /// One model-walk per axis populates the four slot vecs (`frozen_rows`,
     /// `scroll_rows`, `frozen_cols`, `scroll_cols`); each scan breaks early at
     /// `canvas.{w,h}` or the sheet bound.
-    pub(crate) fn current(model: &dyn CanvasModel, canvas: CanvasSize, theme: &CanvasTheme) -> Self {
+    pub(crate) fn current(
+        model: &dyn CanvasModel,
+        canvas: CanvasSize,
+        theme: &CanvasTheme,
+    ) -> Self {
         let view = model.get_selected_view();
         let frozen = FrozenRC::from_model(model);
 
         let frozen_rows_count = frozen.frozen_rows_count();
         let frozen_cols_count = frozen.frozen_cols_count();
 
-        // Frozen rows: absolute Y starts at HEADER_ROW_HEIGHT and grows.
+        // Frozen rows: absolute Y starts at the body origin
+        // (HEADER_ROW_HEIGHT + HEADER_OFFSET) and grows. Matches
+        // `Axis::strip_start()` so headers and the body grid stay aligned.
         let mut frozen_rows = Vec::with_capacity(frozen_rows_count as usize);
-        let mut y_cursor = HEADER_ROW_HEIGHT;
+        let mut y_cursor = HEADER_ROW_HEIGHT + HEADER_OFFSET;
         for r in 1..=frozen_rows_count {
             let h = row_height(model, r);
-            frozen_rows.push(RowSlot { row: r, top: y_cursor, height: h });
+            frozen_rows.push(RowSlot {
+                row: r,
+                top: y_cursor,
+                height: h,
+            });
             y_cursor += h;
         }
 
         // Frozen cols
         let mut frozen_cols = Vec::with_capacity(frozen_cols_count as usize);
-        let mut x_cursor = HEADER_COL_WIDTH;
+        let mut x_cursor = HEADER_COL_WIDTH + HEADER_OFFSET;
         for c in 1..=frozen_cols_count {
             let w = col_width(model, c);
-            frozen_cols.push(ColSlot { col: c, left: x_cursor, width: w });
+            frozen_cols.push(ColSlot {
+                col: c,
+                left: x_cursor,
+                width: w,
+            });
             x_cursor += w;
         }
 
@@ -93,11 +106,19 @@ impl FrameContext {
         for row in row_first..=LAST_ROW {
             if f64::from(y_cursor) >= canvas.h || row == LAST_ROW {
                 let h = row_height(model, row);
-                scroll_rows.push(RowSlot { row, top: y_cursor, height: h });
+                scroll_rows.push(RowSlot {
+                    row,
+                    top: y_cursor,
+                    height: h,
+                });
                 break;
             }
             let h = row_height(model, row);
-            scroll_rows.push(RowSlot { row, top: y_cursor, height: h });
+            scroll_rows.push(RowSlot {
+                row,
+                top: y_cursor,
+                height: h,
+            });
             y_cursor += h;
         }
 
@@ -107,11 +128,19 @@ impl FrameContext {
         for col in col_first..=LAST_COLUMN {
             if f64::from(x_cursor) >= canvas.w || col == LAST_COLUMN {
                 let w = col_width(model, col);
-                scroll_cols.push(ColSlot { col, left: x_cursor, width: w });
+                scroll_cols.push(ColSlot {
+                    col,
+                    left: x_cursor,
+                    width: w,
+                });
                 break;
             }
             let w = col_width(model, col);
-            scroll_cols.push(ColSlot { col, left: x_cursor, width: w });
+            scroll_cols.push(ColSlot {
+                col,
+                left: x_cursor,
+                width: w,
+            });
             x_cursor += w;
         }
 
@@ -184,11 +213,8 @@ impl FrameContext {
         }
     }
 
-    /// The 1-based row index of the first scrollable row painted this frame.
-    /// Equals `(frozen_rows + 1).max(view.top_row)` at build time — the clamp
-    /// is preserved in `scroll_rows[0].row`. Falls back to `1` only if the
-    /// scrollable band is empty (canvas too small to fit any row, which the
-    /// builder treats as a degenerate frame).
+    /// First scrollable row painted this frame (1-based). Falls back to `1`
+    /// when the scrollable band is empty.
     #[inline]
     pub(crate) fn top_row(&self) -> i32 {
         self.scroll_rows.first().map(|s| s.row).unwrap_or(1)
@@ -201,12 +227,18 @@ impl FrameContext {
 
     #[inline]
     pub(crate) fn last_visible_row(&self) -> i32 {
-        self.scroll_rows.last().map(|s| s.row).unwrap_or(self.top_row())
+        self.scroll_rows
+            .last()
+            .map(|s| s.row)
+            .unwrap_or(self.top_row())
     }
 
     #[inline]
     pub(crate) fn last_visible_col(&self) -> i32 {
-        self.scroll_cols.last().map(|s| s.col).unwrap_or(self.left_column())
+        self.scroll_cols
+            .last()
+            .map(|s| s.col)
+            .unwrap_or(self.left_column())
     }
 
     // Pixel <-> cell mapping  (snapshot-only)
@@ -394,16 +426,16 @@ impl FrameContext {
         if x < 0 || y < 0 {
             return HitTest::Outside;
         }
-        if x < HEADER_COL_WIDTH && y < HEADER_ROW_HEIGHT {
+        if x < HEADER_COL_WIDTH + HEADER_OFFSET && y < HEADER_ROW_HEIGHT + HEADER_OFFSET {
             return HitTest::Corner;
         }
-        if y < HEADER_ROW_HEIGHT {
+        if y < HEADER_ROW_HEIGHT + HEADER_OFFSET {
             return match self.pixel_to_col(x) {
                 Some(c) => HitTest::ColHeader(c),
                 None => HitTest::Outside,
             };
         }
-        if x < HEADER_COL_WIDTH {
+        if x < HEADER_COL_WIDTH + HEADER_OFFSET {
             return match self.pixel_to_row(y) {
                 Some(r) => HitTest::RowHeader(r),
                 None => HitTest::Outside,
@@ -436,4 +468,20 @@ impl FrameContext {
         }
         None
     }
+}
+
+fn row_height(model: &dyn CanvasModel, row: i32) -> i32 {
+    let sheet = model.get_selected_sheet();
+    model
+        .get_row_height(sheet, row)
+        .unwrap_or(DEFAULT_ROW_HEIGHT)
+        .round() as i32
+}
+
+fn col_width(model: &dyn CanvasModel, col: i32) -> i32 {
+    let sheet = model.get_selected_sheet();
+    model
+        .get_column_width(sheet, col)
+        .unwrap_or(DEFAULT_COL_WIDTH)
+        .round() as i32
 }

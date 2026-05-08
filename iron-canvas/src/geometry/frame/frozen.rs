@@ -1,8 +1,8 @@
 use crate::{
     geometry::{
-        constants::{FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT},
+        constants::{FROZEN_SEP, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT},
+        frame::{col_width, row_height},
         prim::Point,
-        utils::{col_width, row_height},
     },
     CanvasModel,
 };
@@ -31,8 +31,8 @@ impl FrozenRC {
             rows,
             cols,
             offset: Point {
-                x: HEADER_COL_WIDTH + w + if cols > 0 { FROZEN_SEP } else { 0 },
-                y: HEADER_ROW_HEIGHT + h + if rows > 0 { FROZEN_SEP } else { 0 },
+                x: HEADER_COL_WIDTH + HEADER_OFFSET + w + if cols > 0 { FROZEN_SEP } else { 0 },
+                y: HEADER_ROW_HEIGHT + HEADER_OFFSET + h + if rows > 0 { FROZEN_SEP } else { 0 },
             },
         }
     }

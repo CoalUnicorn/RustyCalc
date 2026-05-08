@@ -30,11 +30,8 @@ pub struct IronCanvas {
     overlays: RenderOverlays,
     model: Option<Rc<dyn CanvasModel>>,
     last_frame: Option<FrameContext>,
-    /// Logical (CSS) canvas size — written by `resize`, read by `paint_if_dirty`
-    /// when building the shared `FrameContext`. Owning it here removes the
-    /// per-paint `grid.canvas_size()` peek and makes the "both layers are the
-    /// same size" invariant a property of the orchestrator, not a coincidence
-    /// of the atomic resize fan-out.
+    /// Logical (CSS) canvas size, written by `resize` and read by
+    /// `paint_if_dirty` when building the shared `FrameContext`.
     size: CanvasSize,
 }
 
@@ -74,23 +71,20 @@ impl IronCanvas {
         );
     }
 
-    /// Push a new theme by name ("light" | "dark"). Fans out to grid + overlay; no-op if unchanged.
+    /// Push a new theme by name ("light" | "dark"). Routes through `set_theme`,
+    /// so value-eq + dirty fan-out lives in one place.
     pub fn set_theme_name(&mut self, name: &str) {
         let theme = if name == "dark" {
             CanvasTheme::dark()
         } else {
             CanvasTheme::light()
         };
-        if theme != self.theme {
-            self.theme = theme;
-            self.grid.mark_dirty();
-            self.overlay.mark_dirty();
-        }
+        self.set_theme(theme);
     }
 
-    /// Mark both layers dirty. JS calls this after any state mutation
-    /// (scroll, selection change, resize) and then calls `paint_if_dirty`
-    /// on the next animation frame.
+    /// Mark both layers dirty. JS calls this after a state mutation that
+    /// invalidates the painted geometry (scroll, selection change) and then
+    /// calls `paint_if_dirty` on the next animation frame.
     pub fn request_repaint(&mut self) {
         self.grid.mark_dirty();
         self.overlay.mark_dirty();
@@ -109,9 +103,9 @@ impl IronCanvas {
             return;
         };
 
-        // Overlay-only fast path: reuse the last frame's prefix-sum tables
-        // when scroll / freeze / sheet / canvas size are unchanged. Triggered
-        // by autofill drag, clipboard state change, formula-ref highlight
+        // Overlay-only fast path: reuse the last frame's slot vecs when
+        // scroll / freeze / sheet / canvas size are unchanged. Triggered by
+        // autofill drag, clipboard state change, formula-ref highlight
         // updates, and active-cell moves.
         //
         // Falls through to a full rebuild when geometry diverged (IronCalc's
@@ -149,13 +143,11 @@ impl IronCanvas {
     pub fn dispose(self) {}
 
     /// JS-facing model push. Accepts the IronCalc `Model` JS handle as a raw
-    /// `JsValue` and `unchecked_into`-casts it. No runtime validation — a
+    /// `JsValue` and `unchecked_into`-casts it. No runtime validation: a
     /// wrong handle throws on first render-time method call, not here.
     ///
-    /// Currently always re-wraps in a fresh `Rc`, so identity-comparison in
-    /// `set_model` always sees a change and re-marks the grid dirty. Good
-    /// enough for now; tighten by tracking the previous `JsValue` once the
-    /// JS-side push frequency is known.
+    /// Always re-wraps in a fresh `Rc`, so identity-comparison in `set_model`
+    /// always sees a change and re-marks the grid dirty.
     pub fn set_model_js(&mut self, model: JsValue) {
         let backed: Rc<dyn CanvasModel> = Rc::new(JsBackedModel::from_js_value(model));
         self.set_model(backed);

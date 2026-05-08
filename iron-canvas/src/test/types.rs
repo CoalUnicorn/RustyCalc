@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 use crate::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
 use crate::geometry::frame::frozen::FrozenRC;
 use crate::geometry::prim::{Axis, Point};

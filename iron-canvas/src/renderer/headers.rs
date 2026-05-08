@@ -176,8 +176,10 @@ impl<P: Painter> RendererCore<P> {
             Axis::Column => full.inset(1, 0),
         };
 
-        self.painter
-            .rect_fill(full, PaintColor::from_theme_str(&frame.theme.header_border_color));
+        self.painter.rect_fill(
+            full,
+            PaintColor::from_theme_str(&frame.theme.header_border_color),
+        );
         self.painter.rect_fill(body, body_bg);
         let center = full.center();
         let snap_x = f64::from(center.x);

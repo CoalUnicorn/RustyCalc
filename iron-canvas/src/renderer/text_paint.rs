@@ -129,7 +129,7 @@ impl TextPaint {
         // Layout pass: split + wrap, measuring once. `lines` comes back with
         // text + width populated and `center_x/y` left at 0.0 for the position
         // pass below. Routed through `&dyn TextMetrics` so resolution stays
-        // backend-agnostic — see Task 3 in the painter-trait extraction plan.
+        // backend-agnostic.
         let mut wrap_buf = renderer.frame_cache.wrap_buf.borrow_mut();
         layout_into(
             renderer.painter(),
@@ -183,8 +183,8 @@ impl TextPaint {
 }
 
 /// Per-cell text styling resolved from the model's raw `Style`. Private step
-/// inside `TextPaint::resolve`; not exported. Font css is interned separately
-/// via `FontIntern` so this struct carries no per-cell `String`.
+/// inside `TextPaint::resolve_into`. Font css is interned separately via
+/// `FontIntern` so this struct carries no per-cell `String`.
 struct CellTextStyle {
     text_color: TextColor,
     underline: bool,
@@ -210,9 +210,9 @@ impl CellTextStyle {
 
         // IronCalc collapses every error variant (#VALUE!, #DIV/0!, #REF!, #NAME?,
         // #NUM!, #N/A, #NULL!, #SPILL!, #CIRC!, plus IronCalc-only #ERROR!/#N/IMPL!)
-        // into the single CellType::ErrorValue discriminator. Color them all the
-        // same theme red — per-error-kind styling would require a new model
-        // accessor (see xlsm_err.md "Renderer-side categorisation").
+        // into the single CellType::ErrorValue discriminator. All render in
+        // the theme's error color; per-error-kind styling would need a new
+        // model accessor.
         let text_color = if matches!(cell_type, CellType::ErrorValue) {
             TextColor::Static(theme.error_text_color.clone())
         } else {

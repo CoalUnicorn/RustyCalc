@@ -32,7 +32,6 @@ mod model_adapter;
 mod orchestrator;
 mod painter;
 pub mod renderer;
-pub mod style;
 pub mod theme;
 pub mod types;
 pub mod wasm;
@@ -47,7 +46,7 @@ pub use geometry::{
     },
     pixel_rect::PixelRect,
     prim::{Line, Point, Span},
-    utils::{col_name, col_width, row_height},
+    utils::col_name,
     CanvasSize,
 };
 

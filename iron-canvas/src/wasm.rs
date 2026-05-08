@@ -56,12 +56,7 @@ impl CanvasModel for JsBackedModel {
     fn get_cell_type(&self, _sheet: u32, _row: i32, _column: i32) -> Option<CellType> {
         todo!("bind IronCalcModelHandle.getCellType; needs enum-tag bridge")
     }
-    fn get_formatted_cell_value(
-        &self,
-        _sheet: u32,
-        _row: i32,
-        _column: i32,
-    ) -> Option<String> {
+    fn get_formatted_cell_value(&self, _sheet: u32, _row: i32, _column: i32) -> Option<String> {
         todo!("bind IronCalcModelHandle.getFormattedCellValue")
     }
 }

@@ -5,12 +5,12 @@
 //! Cell-level resolution (alignment, colour) lives in `crate::types`.
 
 /// Pre-built font parameters for canvas `ctx.font`.
-#[derive(Debug, Clone)]
-pub struct FontStyle {
-    pub css: String, // e.g. "bold italic 12px Arial"
-    pub size_px: f64,
-    pub underline: bool,
-    pub strikethrough: bool,
+#[allow(dead_code)]
+pub(crate) struct FontStyle {
+    css: String, // e.g. "bold italic 12px Arial"
+    size_px: f64,
+    underline: bool,
+    strikethrough: bool,
 }
 
 impl FontStyle {

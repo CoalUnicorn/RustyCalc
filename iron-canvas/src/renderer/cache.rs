@@ -2,8 +2,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::renderer::cells::CellPaint;
+use crate::renderer::style::FontStyle;
 use crate::renderer::text_paint::TextLine;
-use crate::style::FontStyle;
 use crate::types::coord::CssColor;
 
 pub(crate) struct FrameCache {

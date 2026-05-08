@@ -1,20 +1,14 @@
-//! Canvas 2D renderer for the spreadsheet grid.
-//!
-//! This module is the only piece of RustyCalc that talks to the browser's
-//! Canvas 2D API. Everything else - Leptos components, signals, event
-//! handlers - lives in `src/components/`. The split is deliberate: Leptos
-//! manages reactivity and DOM, but the actual cell grid is a `<canvas>`
-//! element drawn imperatively, because HTML tables/divs can't keep up with
-//! thousands of cells at 60fps.
+//! Renderer core for the spreadsheet grid.
 //!
 //! # Lifecycle
 //!
 //! Two stacked `<canvas>` elements are wrapped by [`crate::IronCanvas`];
-//! each canvas owns a `LayerBase` (canvas + `PaintGate` + `RendererCore`).
-//! `GridLayer` builds its 2D context with `alpha: false` (opaque, skips
-//! alpha compositing); `OverlayLayer` uses `alpha: true, desynchronized: true`.
-//! The renderer is **long-lived per layer** — it owns the 2D ctx, so the
-//! cached fill/stroke/font/line-width state persists across frames.
+//! each canvas owns a `LayerBase` (canvas + `PaintGate` + a layer renderer
+//! wrapping `RendererCore`). `GridLayer` builds its 2D context with
+//! `alpha: false` (opaque, skips alpha compositing); `OverlayLayer` uses
+//! `alpha: true, desynchronized: true`. The renderer is **long-lived per
+//! layer**, so the painter's cached fill/stroke/font/line-width state
+//! persists across frames.
 //!
 //! State pushes from JS mark layers dirty; `IronCanvas::paint_if_dirty`
 //! drives each dirty layer's `paint`, which calls into [`RendererCore::render_grid`]
@@ -38,29 +32,18 @@
 //!
 //! # Frozen panes
 //!
-//! The grid supports frozen rows and columns (Excel's "Freeze Panes").
-//! This splits the canvas into up to four quadrants:
-//!
-//! ```text
-//! ┌    ┬      ┐
-//! │ frozen/    │ frozen rows,     │
-//! │ frozen     │ scrollable cols  │
-//! ├    ┼      ┤
-//! │ scrollable │ main scrollable  │
-//! │ rows,      │ area             │
-//! │ frozen cols│                  │
-//! └    ┴      ┘
-//! ```
-//!
-//! Each quadrant is rendered by `render_pane()` with different row/col
-//! ranges and pixel offsets. A thick separator line marks the freeze
-//! boundary.
+//! The grid splits into up to four quadrants (top_left, top_right,
+//! bottom_left, bottom_right) based on frozen rows + columns. Each
+//! quadrant is rendered by `render_pane()` against a different
+//! `PaneRegion`; a thick separator line marks the freeze boundary. See
+//! the diagram in `ARCHITECTURE.md` for the layout.
 
 mod cache;
 mod cells;
 mod headers;
 mod overlays;
 mod pane;
+mod style;
 mod text;
 mod text_paint;
 mod viewport;
@@ -85,12 +68,13 @@ pub(crate) use text_paint::{layout_into, TextLine};
 
 use crate::painter::Painter;
 
-/// Shared renderer core. Holds the 2D painter, dpr, paint caches, and font intern,
-/// plus every drawing primitive. The two layer wrappers (`GridRenderer`,
-/// `OverlayRenderer`) each own a `RendererCore` and re-export only the entry
-/// point that belongs to their layer — `render_grid` for the grid, `render_overlays`
-/// for the overlay. This keeps each layer's public surface honest: a grid layer
-/// cannot accidentally call `render_overlays` and vice versa.
+/// Shared renderer core. Holds the painter `P`, dpr, the per-frame
+/// `FrameCache`, and the renderer-lifetime intern tables (font, column
+/// labels, per-cell color overrides). The two layer wrappers
+/// (`GridRenderer`, `OverlayRenderer`) each own a `RendererCore` and
+/// re-export only the entry point that belongs to their layer:
+/// `render_grid` for the grid, `render_overlays` for the overlay. A grid
+/// layer cannot call `render_overlays` and vice versa.
 pub(crate) struct RendererCore<P: Painter> {
     painter: P,
     dpr: i32,

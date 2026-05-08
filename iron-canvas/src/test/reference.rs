@@ -17,6 +17,7 @@ use crate::RCRange;
 use crate::RenderOverlays;
 
 /// A single canvas drawing command, captured for comparison.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum DrawOp {
     FillRect {

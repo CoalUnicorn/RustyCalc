@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
-#![allow(clippy::panic_in_result_fn)]
+#![allow(clippy::panic)]
 
 // Test fixture - a configurable in-memory CanvasModel.
 //
@@ -10,13 +10,13 @@
 
 use crate::geometry::constants::{
     AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
-    HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+    HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
 use crate::geometry::frame::frozen::FrozenRC;
 use crate::geometry::prim::Axis;
+use crate::theme::LIGHT;
 use crate::types::ui::HitTest;
 use crate::{geometry::frame::FrameContext, CanvasView};
-use crate::theme::LIGHT;
 use crate::{CanvasModel, CanvasSize, PixelRect, Point, RCRange};
 
 struct MockCanvasModel {
@@ -93,8 +93,8 @@ fn frozen_rc_no_freeze_has_no_bands_and_origin_skips_separator() {
     let frc = FrozenRC::from_model(&m);
     assert_eq!(frc.frozen_rows_count(), 0);
     assert_eq!(frc.frozen_cols_count(), 0);
-    assert_eq!(frc.offset.x, HEADER_COL_WIDTH);
-    assert_eq!(frc.offset.y, HEADER_ROW_HEIGHT);
+    assert_eq!(frc.offset.x, HEADER_COL_WIDTH + HEADER_OFFSET);
+    assert_eq!(frc.offset.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
 }
 
 #[test]
@@ -106,11 +106,13 @@ fn frozen_rc_rows_only_adds_separator_on_y_only() {
     let frc = FrozenRC::from_model(&m);
     assert_eq!(frc.frozen_rows_count(), 2);
     assert_eq!(frc.frozen_cols_count(), 0);
-    assert_eq!(frc.offset.x, HEADER_COL_WIDTH);
+    assert_eq!(frc.offset.x, HEADER_COL_WIDTH + HEADER_OFFSET);
     assert_eq!(
         frc.offset.y,
-        (f64::from(HEADER_ROW_HEIGHT) + 2.0 * DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP)).round()
-            as i32
+        (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET)
+            + 2.0 * DEFAULT_ROW_HEIGHT
+            + f64::from(FROZEN_SEP))
+        .round() as i32
     );
 }
 
@@ -126,12 +128,15 @@ fn frozen_rc_both_axes_add_separator_on_each() {
     assert_eq!(frc.frozen_cols_count(), 3);
     assert_eq!(
         frc.offset.x,
-        (f64::from(HEADER_COL_WIDTH) + 3.0 * DEFAULT_COL_WIDTH + f64::from(FROZEN_SEP)).round()
-            as i32
+        (f64::from(HEADER_COL_WIDTH + HEADER_OFFSET)
+            + 3.0 * DEFAULT_COL_WIDTH
+            + f64::from(FROZEN_SEP))
+        .round() as i32
     );
     assert_eq!(
         frc.offset.y,
-        (f64::from(HEADER_ROW_HEIGHT) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP)).round() as i32
+        (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP))
+            .round() as i32
     );
 }
 
@@ -165,8 +170,8 @@ fn cell_rect_at_origin_starts_at_top_left_header_corner() {
     let m = MockCanvasModel::default();
     let frame = FrameContext::current(&m, test_canvas(), &LIGHT);
     let r = frame.cell_rect(1, 1).expect("origin cell is on screen");
-    assert_eq!(r.top_left.x, HEADER_COL_WIDTH);
-    assert_eq!(r.top_left.y, HEADER_ROW_HEIGHT);
+    assert_eq!(r.top_left.x, HEADER_COL_WIDTH + HEADER_OFFSET);
+    assert_eq!(r.top_left.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
     assert_eq!(f64::from(r.width), DEFAULT_COL_WIDTH);
     assert_eq!(f64::from(r.height), DEFAULT_ROW_HEIGHT);
 }
@@ -178,10 +183,10 @@ fn col_to_x_inside_frozen_band_skips_frozen_offset() {
         ..Default::default()
     };
     let frame = FrameContext::current(&m, test_canvas(), &LIGHT);
-    assert_eq!(frame.col_to_x(1), HEADER_COL_WIDTH);
+    assert_eq!(frame.col_to_x(1), HEADER_COL_WIDTH + HEADER_OFFSET);
     assert_eq!(
         frame.col_to_x(2),
-        (f64::from(HEADER_COL_WIDTH) + DEFAULT_COL_WIDTH).round() as i32
+        (f64::from(HEADER_COL_WIDTH + HEADER_OFFSET) + DEFAULT_COL_WIDTH).round() as i32
     );
 }
 

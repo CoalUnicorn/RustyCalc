@@ -28,8 +28,14 @@ fn font_intern_distinguishes_size() {
     let intern = FontIntern::new();
     let a = intern.get_or_build(12.0, false, false, "Arial", "Calibri");
     let b = intern.get_or_build(14.0, false, false, "Arial", "Calibri");
-    assert!(!Rc::ptr_eq(&a, &b), "different sizes must allocate distinct entries");
-    assert_ne!(&*a, &*b, "different sizes must produce different css strings");
+    assert!(
+        !Rc::ptr_eq(&a, &b),
+        "different sizes must allocate distinct entries"
+    );
+    assert_ne!(
+        &*a, &*b,
+        "different sizes must produce different css strings"
+    );
 }
 
 #[test]
@@ -121,12 +127,26 @@ fn layout_into_truncates_stale_lines_from_previous_call() {
     let mut wrap_buf = String::new();
 
     layout_into(
-        &metrics, "12px", "a\nb\nc\nd", false, 1000.0, 8.0, &mut lines, &mut wrap_buf,
+        &metrics,
+        "12px",
+        "a\nb\nc\nd",
+        false,
+        1000.0,
+        8.0,
+        &mut lines,
+        &mut wrap_buf,
     );
     assert_eq!(lines.len(), 4);
 
     layout_into(
-        &metrics, "12px", "x", false, 1000.0, 8.0, &mut lines, &mut wrap_buf,
+        &metrics,
+        "12px",
+        "x",
+        false,
+        1000.0,
+        8.0,
+        &mut lines,
+        &mut wrap_buf,
     );
     assert_eq!(
         lines.len(),
@@ -157,7 +177,14 @@ fn layout_into_wrap_buf_buffer_persists() {
     assert!(cap_first > 0, "wrap path must populate wrap_buf");
 
     layout_into(
-        &metrics, "12px", "x", true, 80.0, 8.0, &mut lines, &mut wrap_buf,
+        &metrics,
+        "12px",
+        "x",
+        true,
+        80.0,
+        8.0,
+        &mut lines,
+        &mut wrap_buf,
     );
     assert!(
         wrap_buf.capacity() >= cap_first,
