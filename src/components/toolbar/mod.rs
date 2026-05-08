@@ -518,10 +518,10 @@ fn NumFmtQuickButtons() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
-    let on_gbp = move |_: web_sys::MouseEvent| {
-        execute(&SpreadsheetAction::set_num_fmt("£#,##0.00"), model, &state);
-        refocus_workbook();
-    };
+    // let on_gbp = move |_: web_sys::MouseEvent| {
+    //     execute(&SpreadsheetAction::set_num_fmt("£#,##0.00"), model, &state);
+    //     refocus_workbook();
+    // };
     let on_pct = move |_: web_sys::MouseEvent| {
         execute(&SpreadsheetAction::set_num_fmt("0%"), model, &state);
         refocus_workbook();
@@ -536,7 +536,7 @@ fn NumFmtQuickButtons() -> impl IntoView {
     };
 
     view! {
-        <button class="tb-btn" title="Currency (GBP)" on:click=on_gbp>"£"</button>
+        // <button class="tb-btn" title="Currency (GBP)" on:click=on_gbp>"£"</button>
         <button class="tb-btn" title="Percentage" on:click=on_pct>"%"</button>
         <button class="tb-btn" title="Decrease decimal places" on:click=on_dec_less>".0<-"</button>
         <button class="tb-btn" title="Increase decimal places" on:click=on_dec_more>".0->"</button>

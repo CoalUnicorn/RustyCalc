@@ -3,28 +3,6 @@
 //! All operations run in WASM - no server required. Import reads bytes from a
 //! browser File object; export writes bytes into a Vec and triggers a download.
 
-use std::io::Cursor;
-
-use ironcalc::export::save_xlsx_to_writer;
-use ironcalc::import::load_from_xlsx_bytes;
-use ironcalc_base::{Model, UserModel};
-
-/// Build a `UserModel` from raw .xlsx bytes.
-///
-/// Uses the same locale / timezone as the app's default model ("en" / "UTC").
-pub fn import_xlsx(bytes: &[u8], name: &str) -> Result<UserModel<'static>, String> {
-    let workbook = load_from_xlsx_bytes(bytes, name, "en", "UTC").map_err(|e| e.to_string())?;
-    let model = Model::from_workbook(workbook, "en").map_err(|e| e.to_string())?;
-    Ok(UserModel::from_model(model))
-}
-
-/// Serialize the current workbook to .xlsx bytes.
-pub fn export_xlsx(user_model: &UserModel<'static>) -> Result<Vec<u8>, String> {
-    let model = user_model.get_model();
-    let cursor = save_xlsx_to_writer(model, Cursor::new(Vec::new())).map_err(|e| e.to_string())?;
-    Ok(cursor.into_inner())
-}
-
 /// Read a browser `File` object into bytes.
 ///
 /// Must be called from an async context (e.g. inside `spawn_local`).

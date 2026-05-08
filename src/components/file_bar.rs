@@ -1,14 +1,15 @@
+use std::io::Cursor;
+
+use ironcalc::{export, import};
+use ironcalc_base::{Model, UserModel};
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
-#[allow(unused)]
 use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
-// use crate::components::perf_panel::PerfPanel;
-#[allow(unused)]
 use crate::events::*;
-// use crate::input::xlsx_io;
+use crate::input::xlsx_io;
 use crate::state::{ModelStore, WorkbookState};
 use crate::theme::Theme;
 
@@ -69,53 +70,65 @@ pub fn FileBar() -> impl IntoView {
         }
     };
 
-    // MAIN: disabled io
-    // RELEASE: Change dependency
-    // let on_file_change = move |ev: web_sys::Event| {
-    //     let (input, file) = match extract_file_input(&ev) {
-    //         Ok(result) => result,
-    //         Err(e) => {
-    //             web_sys::console::warn_1(&format!("[FileBar] {e}").into());
-    //             return;
-    //         }
-    //     };
-    //     let Some(file) = file else { return }; // no file selected
+    let on_file_change = move |ev: web_sys::Event| {
+        let (input, file) = match extract_file_input(&ev) {
+            Ok(result) => result,
+            Err(e) => {
+                web_sys::console::warn_1(&format!("[FileBar] {e}").into());
+                return;
+            }
+        };
+        let Some(file) = file else { return };
 
-    //     spawn_local(async move {
-    //         let bytes = xlsx_io::read_file_bytes(file).await;
-    //         match xlsx_io::import_xlsx(&bytes, "workbook") {
-    //             Ok(new_model) => {
-    //                 model.set_value(new_model);
-    //                 let sheet = model.with_value(|m| m.get_selected_view().sheet);
-    //                 state.emit_events([
-    //                     SpreadsheetEvent::Content(ContentEvent::GenericChange),
-    //                     SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
-    //                         sheet,
-    //                         col: None,
-    //                         row: None,
-    //                     }),
-    //                 ]);
-    //             }
-    //             Err(e) => {
-    //                 web_sys::console::warn_1(&format!("xlsx import failed: {e}").into());
-    //             }
-    //         }
-    //         // Allow the same file to be re-imported next time.
-    //         input.set_value("");
-    //     });
-    // };
+        spawn_local(async move {
+            let file_name = file.name();
+            let stem = std::path::Path::new(&file_name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("workbook")
+                .to_string();
+            let bytes = xlsx_io::read_file_bytes(file).await;
+            let result = import::load_from_xlsx_bytes(&bytes, &stem, "en", "UTC")
+                .map_err(|e| e.to_string())
+                .and_then(|wb| Model::from_workbook(wb, "en").map_err(|e| e.to_string()))
+                .map(UserModel::from_model);
 
-    // MAIN: disabled io
-    // RELEASE: Change dependency
-    // let on_export = move || {
-    //     model.with_value(|m| match xlsx_io::export_xlsx(m) {
-    //         Ok(bytes) => xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name())),
-    //         Err(e) => {
-    //             web_sys::console::warn_1(&format!("xlsx export failed: {e}").into());
-    //         }
-    //     });
-    //     crate::util::refocus_workbook();
-    // };
+            match result {
+                Ok(new_model) => {
+                    model.set_value(new_model);
+                    let sheet = model.with_value(|m| m.get_selected_view().sheet);
+                    state.emit_events([
+                        SpreadsheetEvent::Content(ContentEvent::GenericChange),
+                        SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
+                            sheet,
+                            col: None,
+                            row: None,
+                        }),
+                    ]);
+                }
+                Err(e) => {
+                    web_sys::console::warn_1(&format!("xlsx import failed: {e}").into());
+                }
+            }
+            // Allow the same file to be re-imported next time.
+            input.set_value("");
+        });
+    };
+
+    let on_export = move || {
+        model.with_value(|m| {
+            match export::save_xlsx_to_writer(m.get_model(), Cursor::new(Vec::new())) {
+                Ok(cursor) => {
+                    let bytes = cursor.into_inner();
+                    xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()));
+                }
+                Err(e) => {
+                    web_sys::console::warn_1(&format!("xlsx export failed: {e}").into());
+                }
+            }
+        });
+        crate::util::refocus_workbook();
+    };
 
     // let on_toggle_perf = move || {
     //     app.show_perf_panel.update(|v| *v = !*v);
@@ -156,14 +169,14 @@ pub fn FileBar() -> impl IntoView {
                 "≡"
             </button>
             // Hidden file picker - triggered programmatically by Import item.
-            // <input
-            //     type="file"
-            //     accept=".xlsx"
-            //     style="display:none"
-            //     node_ref=file_input_ref
-            //     on:change=on_file_change
-            // />
-            //
+            <input
+                type="file"
+                accept=".xlsx"
+                style="display:none"
+                node_ref=file_input_ref
+                on:change=on_file_change
+            />
+
             // Left: menu bar trigger - stop pointerdown so on_click_outside
             // in ContextMenu doesn't immediately re-close the menu.
             <button
@@ -176,9 +189,7 @@ pub fn FileBar() -> impl IntoView {
             </button>
             <ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos>
                 <ContextMenuItem on_click=on_import icon="⬆">"Import .xlsx"</ContextMenuItem>
-                // MAIN: disabled io
-                // RELEASE: Change dependency
-                //<ContextMenuItem on_click=on_export icon="⬇">"Download .xlsx"</ContextMenuItem>
+                <ContextMenuItem on_click=on_export icon="⬇">"Download .xlsx"</ContextMenuItem>
                 <ContextMenuSeparator />
                 /*
                 <ContextMenuItem on_click=on_toggle_perf icon="⏱">

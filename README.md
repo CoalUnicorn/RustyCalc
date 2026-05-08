@@ -25,7 +25,7 @@ Alpha-stage spreadsheet built in Rust, compiled to WebAssembly. The calculation 
   - Font
     - font family, font size (−/+), bold, italic, underline, strikethrough
   - Number format
-    - currency, percent / increase-decrease-decimals 
+    - percent / increase-decrease-decimals 
   - freeze panes
   - color pickers
     - text and background
