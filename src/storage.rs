@@ -291,7 +291,6 @@ pub fn create_new() -> (WorkbookId, UserModel<'static>) {
 ///
 /// Used when the user uploads a file - the model is already in memory; we just
 /// need to register and persist it.
-#[allow(dead_code)]
 pub fn create_new_from(model: UserModel<'static>) -> (WorkbookId, UserModel<'static>) {
     let uuid = WorkbookId::new();
     save(&uuid, &model);

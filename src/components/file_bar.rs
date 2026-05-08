@@ -8,7 +8,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
-use crate::events::*;
+use crate::input::workbook::{execute_workbook, WorkbookAction};
 use crate::input::xlsx_io;
 use crate::state::{ModelStore, WorkbookState};
 use crate::theme::Theme;
@@ -95,16 +95,7 @@ pub fn FileBar() -> impl IntoView {
 
             match result {
                 Ok(new_model) => {
-                    model.set_value(new_model);
-                    let sheet = model.with_value(|m| m.get_selected_view().sheet);
-                    state.emit_events([
-                        SpreadsheetEvent::Content(ContentEvent::GenericChange),
-                        SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
-                            sheet,
-                            col: None,
-                            row: None,
-                        }),
-                    ]);
+                    execute_workbook(WorkbookAction::Import(new_model), model, &state, app);
                 }
                 Err(e) => {
                     web_sys::console::warn_1(&format!("xlsx import failed: {e}").into());

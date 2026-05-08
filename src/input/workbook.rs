@@ -24,12 +24,14 @@ pub enum WorkbookAction {
     Create,
     /// Delete a workbook. If it's active, load or create a replacement.
     Delete(WorkbookId),
+    /// Save the current workbook and activate `model` under a fresh UUID.
+    Import(UserModel<'static>),
 }
 
 /// Execute a [`WorkbookAction`], replacing the loaded model and resetting
 /// transient UI state.
 pub fn execute_workbook(
-    action: &WorkbookAction,
+    action: WorkbookAction,
     model: ModelStore,
     state: &WorkbookState,
     app: AppState,
@@ -37,14 +39,14 @@ pub fn execute_workbook(
     match action {
         WorkbookAction::Switch(target_uuid) => {
             let cur = state.current_uuid.get_untracked();
-            if cur == Some(*target_uuid) {
+            if cur == Some(target_uuid) {
                 return;
             }
             if let Some(uuid) = &cur {
                 model.with_value(|m| storage::save(uuid, m));
             }
-            if let Some(new_model) = storage::load(target_uuid) {
-                activate(*target_uuid, new_model, model, state);
+            if let Some(new_model) = storage::load(&target_uuid) {
+                activate(target_uuid, new_model, model, state);
             }
         }
         WorkbookAction::Create => {
@@ -56,13 +58,21 @@ pub fn execute_workbook(
             app.bump_registry();
         }
         WorkbookAction::Delete(uuid) => {
-            let is_current = state.current_uuid.get_untracked() == Some(*uuid);
-            storage::delete(uuid);
+            let is_current = state.current_uuid.get_untracked() == Some(uuid);
+            storage::delete(&uuid);
             if is_current {
                 let (next_uuid, next_model) =
                     storage::load_selected().unwrap_or_else(storage::create_new);
                 activate(next_uuid, next_model, model, state);
             }
+            app.bump_registry();
+        }
+        WorkbookAction::Import(new_model) => {
+            if let Some(uuid) = state.current_uuid.get_untracked() {
+                model.with_value(|m| storage::save(&uuid, m));
+            }
+            let (new_uuid, new_model) = storage::create_new_from(new_model);
+            activate(new_uuid, new_model, model, state);
             app.bump_registry();
         }
     }

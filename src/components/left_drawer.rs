@@ -88,7 +88,7 @@ pub fn LeftDrawer() -> impl IntoView {
     };
 
     let switch_workbook = move |target_uuid: WorkbookId| {
-        execute_workbook(&WorkbookAction::Switch(target_uuid), model, &state, app);
+        execute_workbook(WorkbookAction::Switch(target_uuid), model, &state, app);
     };
 
     let delete_workbook = move |uuid: WorkbookId| {
@@ -100,12 +100,12 @@ pub fn LeftDrawer() -> impl IntoView {
             .confirm_with_message(&format!("Delete '{wb_name}'? This cannot be undone."))
             .unwrap_or(false);
         if confirmed {
-            execute_workbook(&WorkbookAction::Delete(uuid), model, &state, app);
+            execute_workbook(WorkbookAction::Delete(uuid), model, &state, app);
         }
     };
 
     let create_workbook = move |_| {
-        execute_workbook(&WorkbookAction::Create, model, &state, app);
+        execute_workbook(WorkbookAction::Create, model, &state, app);
     };
 
     // Toggle group collapse
