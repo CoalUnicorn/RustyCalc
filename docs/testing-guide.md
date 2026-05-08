@@ -49,70 +49,27 @@ fn test_my_feature() {
 
 ### Test Categories
 
-#### 1. **Unit Tests** (Pure Functions)
-Test individual functions without browser dependencies:
+| Kind | What it tests | Setup |
+|------|---------------|-------|
+| **Unit** | Pure functions (`CssColor::new`, `SafeFontFamily::from`) | None — assert directly |
+| **State** | `WorkbookState` signals, `DragState` transitions | `WorkbookState::new()` |
+| **Action** | `execute()` dispatch with model mutations | `Owner::new()` + `test_harness()` |
+| **Storage** | `localStorage` save/load roundtrip | Construct `UserModel`, call `save` / `load` |
+| **Component** | Leptos `view!` mounts without panicking | `provide_context(state)` + `provide_context(model)` inside `Owner::new().with(...)` |
 
-```rust
-#[wasm_bindgen_test]
-fn css_color_new_empty_substitutes_black() {
-    let c = CssColor::new("");
-    assert_eq!(c.as_str(), "#000000");
-}
-
-#[wasm_bindgen_test]
-fn safe_font_family_unknown_falls_back() {
-    assert_eq!(
-        SafeFontFamily::from(Some("Comic Sans")),
-        SafeFontFamily::SystemUi
-    );
-}
-```
-
-#### 2. **State Tests** (Leptos Signals)
-Test state management with Leptos reactive system:
-
-```rust
-#[wasm_bindgen_test]
-fn workbook_state_creation() {
-    let state = WorkbookState::new();
-    
-    // Test initial values
-    assert_eq!(state.drag.get(), DragState::Idle);
-    assert!(state.editing_cell.get().is_none());
-    
-    // Test state updates
-    state.editing_cell.set(Some(EditingCell {
-        address: CellAddress { sheet: 1, row: 1, column: 1 },
-        text: "test".to_owned(),
-        mode: EditMode::Edit,
-        focus: EditFocus::Cell,
-    }));
-    
-    assert!(state.editing_cell.get().is_some());
-}
-```
-
-#### 3. **Action Tests** (Action Dispatch System)
-Test the action system with model mutations:
+A representative Action test using the harness:
 
 ```rust
 #[wasm_bindgen_test]
 fn execute_navigate_down_advances_row() {
-    // Use the test harness for setup
     let owner = Owner::new();
     owner.with(|| {
         let (model, state) = test_harness();
-        
-        // Execute action
         execute(&SpreadsheetAction::Nav(NavAction::Arrow(ArrowKey::Down)), model, &state);
-        
-        // Verify result
-        let row = model.with_value(|m| m.get_selected_view().row);
-        assert_eq!(row, 2);
+        assert_eq!(model.with_value(|m| m.get_selected_view().row), 2);
     });
 }
 
-// Test helper function
 #[cfg(test)]
 fn test_harness() -> (ModelStore, WorkbookState) {
     (
@@ -121,51 +78,6 @@ fn test_harness() -> (ModelStore, WorkbookState) {
         ),
         crate::state::WorkbookState::new(),
     )
-}
-```
-
-#### 4. **Storage Tests** (LocalStorage Integration)
-Test persistence layer:
-
-```rust
-#[wasm_bindgen_test] 
-fn storage_save_load_roundtrip() {
-    use crate::storage::*;
-    
-    // Create test model
-    let model = ironcalc_base::UserModel::new_empty("test", "en", "UTC", "en").unwrap();
-    let uuid = "test-uuid";
-    
-    // Save to storage
-    save(uuid, &model);
-    
-    // Load from storage
-    let loaded = load(uuid).expect("Should load successfully");
-    
-    // Verify data integrity
-    assert_eq!(loaded.get_name(), "test");
-}
-```
-
-#### 5. **Component Tests** (UI Components)
-Test Leptos components:
-
-```rust
-use leptos::prelude::*;
-
-#[wasm_bindgen_test]
-fn toolbar_renders() {
-    let owner = Owner::new();
-    owner.with(|| {
-        let (model, state) = test_harness();
-        
-        // Provide context for component
-        provide_context(state);
-        provide_context(model);
-        
-        // Mounting the component should not panic
-        let _toolbar = view! { <Toolbar /> };
-    });
 }
 ```
 
@@ -204,75 +116,18 @@ mod tests {
 ```
 
 ### Test File Locations
-- **Unit tests**: In same file as implementation (`#[cfg(test)]` module)
-- **Integration tests**: In `src/input/action.rs` (action system tests)
-- **Component tests**: Adjacent to component files
-- **End-to-end tests**: Planned for `tests/` directory
+- **Unit tests**: in the same file as the implementation (`#[cfg(test)]` module)
+- **Action dispatch / `classify_key` tests**: `src/input/keyboard.rs`
+- **Pure-function tests** (no DOM): `src/input/formula_input.rs`
+- **State tests**: `src/state.rs`
+- **Component tests**: adjacent to component files
 
 ## Best Practices
 
-### 1. **Use Test Harness for Setup**
-Avoid repeating model/state creation:
-
-```rust
-// Better: Use shared test harness
-let (model, state) = test_harness();
-
-// Verbose: Repeating setup in every test
-let model = StoredValue::new_local(/* long setup */);
-let state = WorkbookState::new();
-```
-
-### 2. **Test Error Conditions**
-```rust
-#[wasm_bindgen_test]
-fn handles_invalid_input() {
-    let result = SafeFontFamily::from(Some(""));
-    assert_eq!(result, SafeFontFamily::SystemUi);
-}
-```
-
-### 3. **Test Performance Assumptions**
-Verify that `mutate()` optimizations work:
-
-```rust
-#[wasm_bindgen_test]
-fn mutate_uses_single_evaluation() {
-    let (model, state) = test_harness();
-    
-    // This should not cause double evaluation
-    mutate(model, EvaluationMode::Immediate, |m| {
-        warn_if_err(m.set_cell_value(1, 1, 1, "test"), "test");
-    });
-    
-    // Test passes if no panic from double evaluation
-}
-```
-
-### 4. **Clear Test Names**
-```rust
-// Better: Descriptive test names
-#[wasm_bindgen_test]
-fn css_color_empty_input_defaults_to_black() { /* ... */ }
-
-// Problematic: Unclear names
-#[wasm_bindgen_test]
-fn test1() { /* ... */ }
-```
-
-### 5. **Isolate Tests**
-Each test should be independent:
-
-```rust
-#[wasm_bindgen_test]
-fn independent_test() {
-    // Create fresh state for each test
-    let (model, state) = test_harness();
-    
-    // Don't rely on global state or previous tests
-    // ...
-}
-```
+- **Use `test_harness()`** for all action/state tests — keeps setup uniform.
+- **Each test creates fresh state.** No shared mutables, no test ordering assumptions.
+- **Name the assertion**, not the index. `css_color_empty_input_defaults_to_black` beats `test1`.
+- **Clear `localStorage` at the top of storage tests** (`gloo_storage::LocalStorage::clear().ok();`) so prior runs can't leak state.
 
 ## Debugging Tests
 
@@ -319,97 +174,32 @@ fn isolated_test() {
 
 ## Common Patterns
 
-### Testing Enums
+**Exhaustive enum coverage:** iterate every variant in an array and assert per variant — adding a variant breaks the build until you append it.
+
 ```rust
 #[wasm_bindgen_test]
 fn safe_font_family_css_names_non_empty() {
-    // Test each variant explicitly - exhaustive match keeps this in sync
-    let families = [
-        SafeFontFamily::Arial,
-        SafeFontFamily::CalibriLike,
-        SafeFontFamily::CourierNew,
-        SafeFontFamily::Georgia,
-        SafeFontFamily::TimesNewRoman,
-        SafeFontFamily::Verdana,
-        SafeFontFamily::SystemUi,
-    ];
-    for family in families {
+    for family in [SafeFontFamily::Arial, SafeFontFamily::CalibriLike, /* ... */ SafeFontFamily::SystemUi] {
         assert!(!family.css_name().is_empty());
         assert!(!family.model_name().is_empty());
-        assert!(!family.label().is_empty());
     }
 }
 ```
 
-### Testing Error Handling
-```rust
-#[wasm_bindgen_test]
-fn warn_if_err_logs_errors() {
-    // This should not panic, just log
-    warn_if_err(Err("test error"), "test context");
-    
-    // Test passes if no panic occurred
-}
-```
+**State transitions:** `match` on the new variant rather than equality so the destructured fields are checked too:
 
-### Testing State Transitions
 ```rust
-#[wasm_bindgen_test]
-fn drag_state_transitions() {
-    let state = WorkbookState::new();
-    
-    // Initial state
-    assert_eq!(state.drag.get(), DragState::Idle);
-    
-    // Transition to selecting
-    state.drag.set(DragState::Selecting);
-    assert_eq!(state.drag.get(), DragState::Selecting);
-    
-    // Transition to extending
-    state.drag.set(DragState::Extending { to_row: 5, to_col: 3 });
-    match state.drag.get() {
-        DragState::Extending { to_row, to_col } => {
-            assert_eq!(to_row, 5);
-            assert_eq!(to_col, 3);
-        }
-        _ => panic!("Expected Extending state"),
-    }
-}
-```
-
-## Performance Testing
-
-### Avoiding Double Evaluation
-```rust
-#[wasm_bindgen_test]
-fn mutate_prevents_double_evaluation() {
-    let (model, state) = test_harness();
-    
-    mutate(model, EvaluationMode::Immediate, |m| {
-        warn_if_err(m.set_cell_value(1, 1, 1, "=A1"), "set_formula");
-        warn_if_err(m.set_cell_value(1, 2, 1, "test"), "set_value");
-    });
-    
-    // Test should complete without performance issues
-}
+state.drag.set(DragState::Extending { to_row: 5, to_col: 3 });
+let DragState::Extending { to_row, to_col } = state.drag.get() else { panic!("expected Extending") };
+assert_eq!((to_row, to_col), (5, 3));
 ```
 
 ## Running Tests in CI/CD
 
-For continuous integration:
+The current `.github/workflows/rustycalc.yml` runs `cargo fmt`, `clippy`, and `check` on `wasm32-unknown-unknown`. Wasm-pack tests are not yet wired into CI. To add them:
 
-```bash
-# In GitHub Actions or similar
+```yaml
 - name: Run tests
   run: wasm-pack test --headless --firefox
 ```
-
-## Future Improvements
-
-Planned testing enhancements:
-- Visual regression tests for canvas rendering
-- Property-based testing with `proptest`
-- Performance benchmarks
-- End-to-end user interaction tests
-- Accessibility testing
 

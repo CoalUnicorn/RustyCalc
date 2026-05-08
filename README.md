@@ -3,32 +3,42 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+Alpha-stage spreadsheet built in Rust, compiled to WebAssembly. The calculation engine is [IronCalc](https://github.com/ironcalc/IronCalc) — an Excel-compatible Rust engine; the grid is drawn by the in-tree [`iron-canvas`](iron-canvas/README.md) crate (two-layer `<canvas>`: static grid + dynamic overlay). UI is [Leptos](https://leptos.dev/) in CSR mode.
 
-Alpha-stage spreadsheet built with Rust, compiled to WebAssembly. The calculation engine is [IronCalc](https://github.com/ironcalc/IronCalc), an open-source Excel-compatible engine written in Rust. RustyCalc wraps it with a Leptos CSR frontend and a Canvas 2D grid renderer.
+**Status:** prototype. Editing, formulas, formatting, multi-sheet, named ranges, and persistence work. No charts, no collaborative editing.
 
-**Status:** prototype. Core editing, formulas, formatting toolbar, multi-sheet, and persistence work. No charts, no collaborative editing yet.
+## Note
+  Frontend needs refactoring — I've been busy with canvas.
+  - [ ] Components
+  - [ ] Input
+  - [ ] Tests
+
 
 ## What works
 
-- Cell editing with formula support (IronCalc handles parsing and evaluation)
-- Canvas 2D rendered grid with frozen panes, selection, autofill drag
-- Toolbar: undo/redo, font family, font size (−/+), bold, italic, underline, strikethrough, 
-  freeze panes, color picker
-- Formula bar with live edit sync to the cell overlay
+- Cell editing with formula support (IronCalc parses and evaluates)
+- `iron-canvas` renderer: frozen panes, selection, autofill drag, marching ants, grid lines, error-cell formatting
+- Formula bar with point-mode editing and colored formula-reference overlays for cell and range tokens (named-range identifiers — WIP)
+- Named ranges — CRUD via toolbar button and modal dialog
+- Toolbar:
+  - undo/redo,
+  - Font
+    - font family, font size (−/+), bold, italic, underline, strikethrough
+  - Number format
+    - currency, percent / increase-decrease-decimals 
+  - freeze panes
+  - color pickers
+    - text and background
+
 - Sheet tab bar: add, rename, delete, hide/unhide, tab colors, context menus
-- Column/row resize by dragging header borders
-- Keyboard navigation matching Excel conventions (arrow keys, Ctrl+arrow, Shift+arrow, Page Up/Down, Home/End)
-- Keyboard shortcuts: Ctrl+B/I/U (bold/italic/underline), Ctrl+Z/Y (undo/redo)
-- Copy/paste (internal clipboard with structural paste, OS clipboard fallback for text)
-- Light/dark theme with localStorage persistence
-- Auto-save to localStorage (500 ms change-poll; immediate save on workbook switch)
-- Sidebar with Workbooks - each workbook can be assigned to a group. Rename workbook by double click.
-- Tauri desktop build
-- GitHub Pages deployment
-
-## Known limitations
-
-- `String.leak()` in `storage.rs` for the workbook name. IronCalc's `UserModel::new_empty` requires `&'static str`. Each new workbook leaks a small allocation. Negligible in practice but noted.
+- Right-click context menus on column and row headers (insert / delete / hide)
+- Column / row resize by dragging header borders
+- Excel-style keyboard navigation and shortcuts (arrows, Ctrl+arrow, Shift+arrow, Page Up/Down, Home/End, Ctrl+B/I/U, Ctrl+Z/Y)
+- Copy / paste (internal clipboard with structural paste, OS clipboard text fallback)
+- Light / dark theme with `localStorage` persistence; canvas reads `--palette-*` from CSS
+- Auto-save to `localStorage` (500 ms change-poll; immediate save on workbook switch)
+- Sidebar workbook list with groups; double-click to rename
+- Tauri desktop build, GitHub Pages deployment
 
 ## Build
 
@@ -38,97 +48,41 @@ Requires [Trunk](https://trunkrs.dev/) and the `wasm32-unknown-unknown` target.
 rustup target add wasm32-unknown-unknown
 cargo install trunk
 
-# Dev server at localhost:8080/RustyCalc/
-trunk serve
-
-# Production build to dist/
-trunk build --release
-
-# Tauri desktop
-cargo tauri dev
-
-# Tests
-wasm-pack test --headless --firefox
+trunk serve                            # dev server at localhost:8080/RustyCalc/
+trunk build --release                  # production build to dist/
+cargo tauri dev                        # optional desktop shell
+wasm-pack test --headless --firefox    # browser tests for the top-level crate
 ```
 
-## Project structure
-
-```
-src/
-├── main.rs            Entry point (mounts App)
-├── app.rs             Root component, context providers, auto-save
-├── coord.rs           CellAddress, CellArea, SheetArea - coordinate primitives
-├── events.rs          Typed event system (ContentEvent, FormatEvent, etc.)
-├── perf.rs            PerfTimings - commit -> render pipeline timestamps (perf panel + try_mutate_timed, not enabled atm)
-├── state.rs           WorkbookState - all UI signals
-├── app_state.rs       AppState - application-level signals (sidebar, theme, groups, perf)
-├── storage.rs         localStorage serialization, UUID, workbook group management
-├── theme.rs           Light/dark theme, CanvasTheme, COLOR_PALETTE
-├── util.rs            Focus management (Note: one last fn it will move elsewhere)
-├── canvas/
-│   ├── geometry.rs    Pixel<->cell coordinate math
-│   ├── renderer.rs    Canvas 2D drawing (grid, headers, selection, borders)
-│   └── types.rs       CanvasLayout, CellRenderData, resolved cell styles
-├── input/
-│   ├── error.rs       Per-module error types (FormatError, NavError, EditError, StructError)
-│   ├── edit.rs        EditAction - start, commit, cancel cell editing
-│   ├── format.rs      FormatAction - bold, italic, font size/family
-│   ├── formula_input.rs  Formula point-mode helpers (pure string ops)
-│   ├── keyboard.rs    SpreadsheetAction wrapper enum, classify_key(), execute()
-│   ├── sheet.rs       Sheet-level actions: select, add, delete, hide, unhide, rename, set color
-│   ├── structure.rs   StructAction - delete, undo/redo, insert/delete rows/cols
-│   ├── mouse.rs       Mouse event handlers for the worksheet canvas
-│   ├── nav.rs         NavAction - arrows, page, home/end, sheet switch
-│   ├── workbook.rs    Workbook-level lifecycle actions: switch, create, delete
-│   └── xlsx_io.rs     File import/export
-├── components/
-│   ├── cell_editor.rs    Textarea overlay during cell editing
-│   ├── color_picker.rs   Color palette + recent colors popup
-│   ├── context_menu.rs   Reusable right-click / button-triggered menu
-│   ├── file_bar.rs       Workbook management (new, open, save, import/export)
-│   ├── formula_bar.rs    Cell address + formula input
-│   ├── inline_rename.rs  Generic inline rename input component
-│   ├── left_drawer.rs    Collapsible sidebar: workbook list with group support
-│   ├── perf_panel.rs     Debug overlay for commit→render timing
-│   ├── sheet_tab_bar.rs  Sheet tabs with rename, color, hide/delete, context menus
-│   ├── status_bar.rs     Displays the most recent engine error below the sheet tab bar
-│   ├── toolbar.rs        Undo/redo, font family/size, B/I/U/S, freeze panes
-│   ├── workbook.rs       Top-level layout + keyboard dispatch
-│   └── worksheet.rs      Canvas element + mouse handlers
-└── model/
-│   ├── clipboard_bridge.rs  Serde bridge for IronCalc's pub(crate) Clipboard
-│   ├── frontend_model.rs    FrontendModel trait, mutate/try_mutate helpers
-│   ├── frontend_types.rs    Domain types (CssColor, SafeFontFamily, ToolbarState, etc.)
-│   └── style_types.rs       StylePath, HexColor, BooleanValue for update_range_style API
-│
-└── styles/   Each component has its own CSS file
-```
+CI (`.github/workflows/rustycalc.yml`) runs `cargo fmt`, `clippy`, and `check` on `wasm32-unknown-unknown`; tests are runnable locally but not yet wired into CI. The `iron-canvas` crate has its own native test suite (`cd iron-canvas && cargo test`).
 
 ## Docs
 
-- [docs/state-and-events.md](docs/state-and-events.md) - WorkbookState fields, EventBus categories, adding events
-- [docs/leptos-patterns.md](docs/leptos-patterns.md) - Leptos conventions (signals, event subscriptions, view bindings)
-- [docs/building-components.md](docs/building-components.md) - creating and debugging components
-- [docs/adding-actions.md](docs/adding-actions.md) - adding keyboard shortcuts and toolbar actions
-- [docs/rust-style-guide.md](docs/rust-style-guide.md) - type modeling patterns (newtypes, enums, error handling)
-- [docs/testing-guide.md](docs/testing-guide.md) - wasm-pack test setup, test categories, examples
-- [docs/performance-evaluation.md](docs/performance-evaluation.md) - avoiding double evaluation with mutate/try_mutate
+- [iron-canvas/README.md](iron-canvas/README.md), [iron-canvas/ARCHITECTURE.md](iron-canvas/ARCHITECTURE.md) — renderer design
+- [docs/state-and-events.md](docs/state-and-events.md) — `WorkbookState`, `EventBus`
+- [docs/leptos-patterns.md](docs/leptos-patterns.md) — Leptos conventions
+- [docs/building-components.md](docs/building-components.md) — components
+- [docs/adding-actions.md](docs/adding-actions.md) — keyboard shortcuts and toolbar actions
+- [docs/rust-style-guide.md](docs/rust-style-guide.md) — type modeling
+- [docs/testing-guide.md](docs/testing-guide.md) — test setup
+- [docs/performance-evaluation.md](docs/performance-evaluation.md) — `mutate` vs `try_mutate`
+- [docs/modal.md](docs/modal.md) — generic `Modal` dialog primitive
 
 ## Dependencies
 
-- [IronCalc](https://github.com/ironcalc/IronCalc) - spreadsheet engine (formula parsing, evaluation, OOXML support)
-- [Leptos](https://leptos.dev/) 0.8 - reactive UI framework (CSR mode)
-- [leptos-use](https://leptos-use.rs/) 0.18 - browser API hooks (ResizeObserver, setInterval)
-- [Trunk](https://trunkrs.dev/) - WASM build tool
-- [Tauri](https://tauri.app/) 2.x - optional desktop shell
-
+- [IronCalc](https://github.com/ironcalc/IronCalc) — engine (formula parsing, evaluation, OOXML)
+- `iron-canvas` (in-tree) — `<canvas>` grid renderer
+- [Leptos](https://leptos.dev/) 0.8, [leptos-use](https://leptos-use.rs/) 0.18 — reactive UI + browser hooks
+- [Trunk](https://trunkrs.dev/) — WASM build; [Tauri](https://tauri.app/) 2.x — optional desktop shell
 
 # License
 
-Licensed under either of
+Licensed under either [MIT](https://opensource.org/licenses/MIT) or [Apache-2.0](https://opensource.org/licenses/Apache-2.0) at your option.
 
-* [MIT license](https://opensource.org/licenses/MIT)
-* [Apache license, version 2.0](https://opensource.org/licenses/Apache-2.0)
+# Why
 
-
-at your option.
+  - Mental health
+  - I love and hate spreadsheets
+  - I was the spreadsheet / "IT guy" in the office
+  - I always dreamed of creating my own version
+  - All in Rust? I like the language and tooling - learning exercise

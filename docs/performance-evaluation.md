@@ -26,31 +26,14 @@ model.update_value(|m| {
 
 ## The mutate Helpers
 
-`src/model/frontend_model.rs` provides two helpers. Both wrap pause/resume — the only difference is whether the closure can fail.
-
-### `mutate` — infallible
+`src/model/frontend_model.rs` provides two helpers. Both pause evaluation before `f`, resume after, and optionally evaluate once — never more. Neither emits events; the caller calls `state.emit_event(...)` after the helper returns.
 
 ```rust
-pub fn mutate(
-    model: ModelStore,
-    evaluate: EvaluationMode,
-    f: impl FnOnce(&mut UserModel<'static>),
-)
+pub fn mutate(model, evaluate: EvaluationMode, f: impl FnOnce(&mut UserModel))
+pub fn try_mutate<E>(model, evaluate, f: impl FnOnce(&mut UserModel) -> Result<(), E>) -> Result<(), E>
 ```
 
-### `try_mutate` — fallible
-
-```rust
-pub fn try_mutate<E>(
-    model: ModelStore,
-    evaluate: EvaluationMode,
-    f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
-) -> Result<(), E>
-```
-
-Both pause evaluation before calling `f`, then resume and optionally evaluate once — never more.
-
-Neither emits events. The caller is responsible for `state.emit_event(...)` after the helper returns.
+Use `mutate` when the closure can't fail, `try_mutate` when it can.
 
 **Import:** `use crate::model::{mutate, try_mutate, EvaluationMode};`
 
@@ -74,64 +57,36 @@ Use for **pure UI state changes** that don't affect calculations:
 
 ## Usage Examples
 
-### Cell Edit (fallible, evaluation needed)
 ```rust
+// Cell edit — fallible, formulas must recalc
 try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), EditError> {
-    m.set_user_input(sheet, row, col, value)
-        .map_err(EditError::Engine)?;
-    Ok(())
+    m.set_user_input(sheet, row, col, value).map_err(EditError::Engine)
 })?;
 state.emit_event(SpreadsheetEvent::Content(ContentEvent::CellChanged { .. }));
-```
 
-### Navigation (infallible, no evaluation)
-```rust
-mutate(model, EvaluationMode::Deferred, |m| {
-    m.nav_arrow(dir);
-});
-state.emit_event(SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged { .. }));
-```
-
-### Formatting (fallible, no evaluation)
-```rust
+// Formatting — fallible, no recalc
 try_mutate(model, EvaluationMode::Deferred, |m| -> Result<(), FormatError> {
-    let area = selection_area(m);
-    m.update_range_style(&area, style_path.as_str(), value)
-        .map_err(FormatError::Engine)?;
-    Ok(())
+    m.update_range_style(&area, path, value).map_err(FormatError::Engine)
 })?;
-state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged { .. }));
-```
 
-### Structure Change (fallible, evaluation needed)
-```rust
-try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), StructError> {
-    m.insert_rows(sheet, row, 1)
-        .map_err(StructError::Engine)?;
-    Ok(())
-})?;
-state.emit_event(SpreadsheetEvent::Structure(StructureEvent::rows_inserted(loc)));
+// Navigation — infallible, no recalc
+mutate(model, EvaluationMode::Deferred, |m| { m.nav_arrow(dir); });
 ```
 
 ## Performance Impact
 
-In testing with formula-heavy spreadsheets:
-- **Without pause/resume**: 200ms per cell edit (double evaluation)
-- **With pause/resume**: 100ms per cell edit (single evaluation)  
+Pause/resume bracketing avoids the second `evaluate()` per mutation. The win scales with formula-graph fanout: cells with many dependents, deep chains, or rapid typing benefit most. Lightly-formula'd workbooks see negligible difference.
 
-The optimization becomes more important as:
-- Formula complexity increases
-- Number of dependent cells grows
-- Frequency of mutations increases (typing, rapid operations)
+To measure on a real workbook:
+
+- **Render time**: `src/components/worksheet.rs` brackets the canvas paint with `console::time_with_label("render")` / `console::time_end_with_label("render")`. Open DevTools → Performance and look for the `render` measure.
+- **Perf panel** (`src/components/perf_panel.rs`): toggleable in-app overlay backed by `AppState::perf` (`PerfTimings`); shows commit→render timestamps for the last action. Enable via `app.show_perf_panel.set(true)`.
+- **Event timing**: see "Debugging Evaluation Timing" below.
 
 ## Guidelines
 
-1. Use `try_mutate` when the closure can fail; use `mutate` for infallible arms.
-2. **Import:** `use crate::model::{mutate, try_mutate, EvaluationMode};`
-3. Pass `EvaluationMode::Immediate` when formulas might be affected (cell writes, row/col inserts).
-4. Pass `EvaluationMode::Deferred` for pure UI changes (navigation, formatting, selection).
-5. Never call `m.evaluate()` manually inside either helper's closure — the helper handles it.
-6. Always emit a typed event after the helper returns — neither helper triggers redraws or notifies subscribers.
+- Never call `m.evaluate()` inside the closure — the helper does it.
+- Always `state.emit_event(...)` after the helper returns — neither helper notifies subscribers.
 
 ## Debugging Evaluation Timing
 

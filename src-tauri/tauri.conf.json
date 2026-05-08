@@ -7,7 +7,10 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:8080",
     "beforeDevCommand": "trunk serve --public-url /",
-    "beforeBuildCommand": "trunk build --release --public-url /"
+    "beforeBuildCommand": {
+      "script": "env -u NO_COLOR trunk build --release --public-url /",
+      "cwd": ".."
+    }
   },
   "app": {
     "windows": [

@@ -24,12 +24,13 @@ jobs:
           path: RustyCalc
 
       # Cargo.toml uses path = "../IronCalc/base" and "../IronCalc/xlsx".
-      # Pin deploys to the fork main; upstream-drift detection lives in rustycalc.yml's cron.
+      # Track the fork branch carrying the wasm-zip fix until it lands upstream;
+      # upstream-drift detection lives in rustycalc.yml's cron.
       - name: Checkout IronCalc (sibling required by path deps)
         uses: actions/checkout@v4
         with:
           repository: CoalUnicorn/IronCalc
-          ref: main
+          ref: rustycalc-xlsx-wasm
           path: IronCalc
 
       - name: Install Rust

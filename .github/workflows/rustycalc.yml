@@ -34,9 +34,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           # schedule -> upstream main (drift detection)
-          # push/PR  -> fork main (matches local dev)
+          # push/PR  -> fork's rustycalc-xlsx-wasm branch (matches local dev;
+          # carries the wasm-zip fix until it lands upstream)
           repository: ${{ github.event_name == 'schedule' && 'ironcalc/IronCalc' || 'CoalUnicorn/IronCalc' }}
-          ref: main
+          ref: ${{ github.event_name == 'schedule' && 'main' || 'rustycalc-xlsx-wasm' }}
           path: IronCalc
 
       - name: Install Rust toolchain (wasm32)

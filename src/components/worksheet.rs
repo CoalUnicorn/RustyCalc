@@ -332,7 +332,7 @@ pub fn Worksheet() -> impl IntoView {
             m.set_window_width(canvas_w);
             m.set_window_height(canvas_h);
         });
-
+        // Renderer debug
         web_sys::console::time_with_label("render");
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
@@ -346,6 +346,7 @@ pub fn Worksheet() -> impl IntoView {
                 ic.paint_if_dirty();
             }
         });
+        // Renderer debug
         web_sys::console::time_end_with_label("render");
 
         // Record render-done timestamp for the perf panel.

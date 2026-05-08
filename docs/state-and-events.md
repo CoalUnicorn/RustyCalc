@@ -15,10 +15,11 @@ let app = expect_context::<AppState>();
 
 app.sidebar_open.set(true);
 app.bump_registry();          // increments registry_version; redraws left drawer
-app.toggle_theme();
+app.toggle_light_dark();      // flips between Light and Dark
+app.set_theme(Theme::Auto);   // explicit choice
 ```
 
-Theme resolution: `app.theme` holds the user's preference (`Auto/Light/Dark`). Call `app.get_theme()` to resolve `Auto` against the system setting. Don't read `app.theme.get()` directly in rendering code.
+Theme resolution: the underlying signal is `Signal<ColorMode>` from `leptos_use::use_color_mode` and is not exposed as a field. Read with `app.get_theme()` (reactive) or `app.get_theme_untracked()` (event handlers); both resolve `Auto` against the system media query and return a `Theme`. Mutate with `app.set_theme(theme)` or the `app.toggle_light_dark()` shortcut.
 
 ---
 
@@ -74,51 +75,7 @@ let on_click = move |_| {
 
 ### Bridging a Split signal to component props
 
-Some components (e.g. `ContextMenu`) require a `(ReadSignal<bool>, WriteSignal<bool>)` pair,
-but the source of truth is a `Split<Option<T>>` on `WorkbookState`. Use two `Effect`s to sync
-in both directions:
-
-```rust
-let (menu_open, set_menu_open) = signal(false);
-let (menu_pos,  set_menu_pos)  = signal((0i32, 0i32));
-
-// Effect 1 — state → local signals (runs when the external signal changes)
-Effect::new(move |_| {
-    match state.context_menu.get() {   // reactive read
-        Some(ctx) => {
-            set_menu_pos.set((ctx.x, ctx.y));
-            set_menu_open.set(true);
-        }
-        None => set_menu_open.set(false),
-    }
-});
-
-// Effect 2 — local close → clear state (runs when menu_open changes)
-Effect::new(move |prev: Option<bool>| {
-    let is_open = menu_open.get();          // reactive read
-    if prev == Some(true) && !is_open {
-        state.context_menu.set(None);       // non-reactive write
-    }
-    is_open  // returned value becomes `prev` on the next run
-});
-```
-
-**Why the cycle terminates:** each Effect has exactly one reactive read and writes
-only to things it doesn't read. When Effect 2 clears `state.context_menu`, Effect 1
-fires and calls `set_menu_open.set(false)` — a no-op since it's already false.
-Leptos skips notifying downstream subscribers on a no-op write, so nothing loops.
-
-**Why `prev: Option<bool>` instead of just comparing to false:** on the first run
-`prev` is `None` (the signal was just created). Without the `prev == Some(true)` guard,
-closing logic would fire spuriously at mount time before the menu ever opened.
-
-This pattern applies whenever a canvas mouse handler or other non-component code
-writes to a `Split` field, and a component needs to consume it via
-`(ReadSignal, WriteSignal)` props.
-
-### Theme methods
-
-Theme preference lives on `AppState`, not `WorkbookState`. `app.theme` stores the raw preference (`Auto/Light/Dark`); `app.get_theme()` resolves `Auto` against the system setting. Use `app.get_theme()` in rendering code, not `app.theme.get()` directly.
+Components like `ContextMenu` require a `(ReadSignal<bool>, WriteSignal<bool>)` pair, but the source of truth is a `Split<Option<T>>` on `WorkbookState`. Two `Effect`s sync in both directions: one writes the local pair when the state signal changes, the other clears state when the local signal closes. The cycle terminates because each Effect writes only to things it doesn't read, and Leptos skips no-op writes. See `building-components.md` (canvas-sourced context menus) for the full pattern.
 
 ---
 
@@ -232,13 +189,14 @@ Rare — most changes fit the existing five. If you need one:
 | `formula_input_ref` | `NodeRef<Input>` | DOM ref to the formula bar `<input>` - used to read cursor position for point-mode. |
 | `recent_colors` | `Split<Vec<CssColor>>` | Recently used colors (max 16), persisted to localStorage. |
 | `status` | `Split<Option<StatusMessage>>` | Current status bar message. `None` clears the bar; `Some(StatusMessage::Error(msg))` shows an error. Set by `execute()` on every action (clears on `Ok`, sets on `Err`) and by direct sheet/workbook mutations. |
+| `named_ranges_modal_open` | `Split<bool>` | Whether the Named Ranges manager dialog is mounted. Drives the `<Show>` wrapper around `<Modal>` in `components/named_ranges/mod.rs`. See [modal.md](modal.md). |
 | `events` | `EventBus` | Per-category event signals. |
 
 ### AppState fields
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `theme` | `Split<Theme>` | User's theme preference. Read via `app.get_theme()`, not `.theme.get()`. |
+| _(theme)_ | `Signal<ColorMode>` (private, from `leptos_use::use_color_mode`) | User's theme preference. Public surface: `get_theme()` / `get_theme_untracked()` / `set_theme(Theme)` / `toggle_light_dark()`. |
 | `sidebar_open` | `Split<bool>` | Left drawer visibility. |
 | `collapsed_groups` | `Split<Vec<String>>` | Group labels currently collapsed in the left drawer. |
 | `show_perf_panel` | `Split<bool>` | Whether the performance panel overlay is visible. |
@@ -260,17 +218,5 @@ Pointing { range: CellArea,
 ```
 
 At most one is active at a time. The enum makes illegal combinations unrepresentable.
-
----
-
-## Event category guide
-
-| Category | When to use |
-|----------|-------------|
-| `Content` | Cell values, formulas, calculation results changed |
-| `Format` | Visual styling changed: fonts, colors, column widths, row heights |
-| `Structure` | Sheet added/deleted/renamed/hidden, rows or columns inserted/deleted |
-| `Navigation` | Selection moved, sheet switched, viewport scrolled, edit started/ended |
-| `Theme` | Light/dark theme toggled, color palette updated |
 
 See `adding-actions.md` for the action pipeline that produces these events.

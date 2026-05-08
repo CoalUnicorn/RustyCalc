@@ -178,7 +178,7 @@ values from context inside the child component (all context types are `Copy`).
 
 ## leptos-use hooks
 
-We use `leptos-use` (v0.15, compatible with Leptos 0.7) to replace manual
+We use `leptos-use` 0.18 (with Leptos 0.8) to replace manual
 `web_sys` boilerplate. These hooks handle cleanup automatically on unmount.
 
 | Instead of | Use |
