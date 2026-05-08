@@ -27,12 +27,6 @@
 @import "context-menu.css";
 @import "perf-panel.css";
 @import "left-drawer.css";
-<<<<<<< HEAD
 @import "status-bar.css";
-||||||| 31aeb15
-@import "status_bar.css";
-=======
-@import "status_bar.css";
 @import "modal.css";
 @import "named-ranges.css";
->>>>>>> broken-text

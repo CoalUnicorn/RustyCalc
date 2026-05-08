@@ -3,6 +3,9 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+![Demo screenshot](assets/demo_mortgage.png)
+
+
 Alpha-stage spreadsheet built in Rust, compiled to WebAssembly. The calculation engine is [IronCalc](https://github.com/ironcalc/IronCalc) — an Excel-compatible Rust engine; the grid is drawn by the in-tree [`iron-canvas`](iron-canvas/README.md) crate (two-layer `<canvas>`: static grid + dynamic overlay). UI is [Leptos](https://leptos.dev/) in CSR mode.
 
 **Status:** prototype. Editing, formulas, formatting, multi-sheet, named ranges, and persistence work. No charts, no collaborative editing.
