@@ -67,13 +67,16 @@ pub struct TextLine {
 impl TextPaint {
     /// Build a `TextPaint` for `addr` at `rect` and fill `lines` with the
     /// resolved per-line text/width/position. Returns `None` (with `lines`
-    /// left empty) for empty/too-small cells. Reads the formatted value from
-    /// the model and resolves font / alignment / colour via `CellTextStyle`.
+    /// left empty) for empty/too-small cells. The formatted value is supplied
+    /// by the caller — `render_pane` pulls it out of the prefetched
+    /// `pane_values` buffer; `repaint_active_cell` reads the model directly.
+    /// Font / alignment / colour are resolved via `CellTextStyle`.
     ///
     /// The split between `TextPaint` (per-cell scalars) and the externally
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
     /// the caller takes the buffer once at the top of `render_pane`, hands it
     /// to every cell, and parks it back on `FrameCache::text_lines`.
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve_into<P: Painter>(
         renderer: &RendererCore<P>,
         model: &dyn CanvasModel,
@@ -81,9 +84,9 @@ impl TextPaint {
         rect: PixelRect,
         theme: &CanvasTheme,
         style: &Style,
+        text: String,
         lines: &mut Vec<TextLine>,
     ) -> Option<TextPaint> {
-        let text = model.get_formatted_cell_value(addr.sheet, addr.row, addr.column)?;
         if text.is_empty() {
             return None;
         }

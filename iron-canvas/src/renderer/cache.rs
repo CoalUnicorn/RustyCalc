@@ -39,6 +39,11 @@ pub(crate) struct FrameCache {
     /// frames; on the wasm path this is the single buffer the JS bridge
     /// drains a per-pane response into.
     pub(crate) pane_styles: Cell<Vec<Option<Style>>>,
+    /// Dense, row-major formatted-cell-values for the current pane's range.
+    /// Same shape and rhythm as `pane_styles`: filled once per pane via
+    /// `CanvasModel::get_formatted_cell_values_in`, moved out per-cell via
+    /// `Option::take` in the text pass.
+    pub(crate) pane_values: Cell<Vec<Option<String>>>,
 }
 
 /// Renderer-lifetime intern table for `ctx.font` strings.

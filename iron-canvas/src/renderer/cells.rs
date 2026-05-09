@@ -61,11 +61,14 @@ impl<P: Painter> RendererCore<P> {
         let theme = &frame.theme;
         let cols_w = range.c2 - range.c1 + 1;
 
-        // Bulk-fetch styles for the whole rectangular range. UserModel default
-        // impl loops `get_cell_style` (no perf change); JsBackedModel will
-        // override (W5) and collapse to one JS call per pane.
+        // Bulk-fetch styles + formatted values for the whole rectangular
+        // range. UserModel default impls loop the per-cell accessors (no perf
+        // change); JsBackedModel will override (W5) and collapse each to one
+        // JS call per pane.
         let mut pane_styles = self.frame_cache.pane_styles.take();
         model.get_cell_styles_in(frame.sheet, range, &mut pane_styles);
+        let mut pane_values = self.frame_cache.pane_values.take();
+        model.get_formatted_cell_values_in(frame.sheet, range, &mut pane_values);
 
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
@@ -94,6 +97,10 @@ impl<P: Painter> RendererCore<P> {
 
         let mut text_lines = self.frame_cache.text_lines.take();
         for p in &slots {
+            let idx = ((p.addr.row - range.r1) * cols_w + (p.addr.column - range.c1)) as usize;
+            let Some(text) = pane_values.get_mut(idx).and_then(Option::take) else {
+                continue;
+            };
             if let Some(tp) = TextPaint::resolve_into(
                 self,
                 model,
@@ -101,11 +108,13 @@ impl<P: Painter> RendererCore<P> {
                 p.rect,
                 theme,
                 &p.style,
+                text,
                 &mut text_lines,
             ) {
                 self.paint_text(&tp, &text_lines);
             }
         }
+        self.frame_cache.pane_values.set(pane_values);
         self.frame_cache.text_slots.set(slots);
         self.frame_cache.text_lines.set(text_lines);
     }
@@ -225,16 +234,19 @@ impl<P: Painter> RendererCore<P> {
         };
         self.paint_cell(&paint, theme);
         let mut text_lines = self.frame_cache.text_lines.take();
-        if let Some(t) = TextPaint::resolve_into(
-            self,
-            model,
-            addr,
-            rect,
-            theme,
-            &paint.style,
-            &mut text_lines,
-        ) {
-            self.paint_text(&t, &text_lines);
+        if let Some(text) = model.get_formatted_cell_value(addr.sheet, addr.row, addr.column) {
+            if let Some(t) = TextPaint::resolve_into(
+                self,
+                model,
+                addr,
+                rect,
+                theme,
+                &paint.style,
+                text,
+                &mut text_lines,
+            ) {
+                self.paint_text(&t, &text_lines);
+            }
         }
         self.frame_cache.text_lines.set(text_lines);
     }

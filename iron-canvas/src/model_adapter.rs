@@ -46,6 +46,24 @@ pub trait CanvasModel {
             }
         }
     }
+
+    /// Bulk-fetch formatted cell values for the contiguous rectangle `range`
+    /// on `sheet`. Same row-major dense layout and `None` semantics as
+    /// `get_cell_styles_in`. Default impl loops `get_formatted_cell_value`;
+    /// wasm bridge overrides with one JS call per range.
+    fn get_formatted_cell_values_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Option<String>>,
+    ) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_formatted_cell_value(sheet, r, c));
+            }
+        }
+    }
 }
 
 impl<'a> CanvasModel for UserModel<'a> {
