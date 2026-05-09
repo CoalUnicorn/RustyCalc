@@ -6,14 +6,21 @@
 //! trait, because Recorder/SVG backends do not need it.
 
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use web_sys::{js_sys, CanvasRenderingContext2d};
 
 use super::{PaintColor, Painter, Sealed, TextAlign, TextBaseline, TextMetrics};
+use crate::diag::console_warn;
 use crate::geometry::{
     pixel_rect::PixelRect,
     prim::{Line, Span},
 };
+
+/// One-shot guard for the `measure_text` fallback warning. Process-wide
+/// (not per-painter) so grid + overlay layers share a single signal —
+/// the failure mode is a ctx-level capability, not a layer-local one.
+static MEASURE_WARN_EMITTED: AtomicBool = AtomicBool::new(false);
 
 /// Standard border line width (1px in CSS pixels).
 pub(crate) const STANDARD_BORDER_WIDTH: f64 = 1.0;
@@ -155,10 +162,30 @@ impl TextMetrics for CanvasPainter {
         // against a previously cached Static via content-eq if it was the
         // same literal.
         self.set_font_cached(PaintColor::Borrowed(font_css));
-        self.ctx
-            .measure_text(text)
-            .map(|m| m.width())
-            .unwrap_or_else(|_| text.chars().count() as f64 * 6.0)
+        match self.ctx.measure_text(text) {
+            Ok(m) => m.width(),
+            Err(_) => {
+                // Debug builds: crash on first occurrence so a regressing
+                // ctx state (lost context, bad font_css) is caught loud
+                // in dev. Release: char-count fallback survives, and a
+                // single console.warn whispers once per session.
+                debug_assert!(
+                    false,
+                    "CanvasPainter::measure_text_width: ctx.measure_text errored; \
+                     falling back to char-count×6 for {text:?} font={font_css:?}"
+                );
+                if MEASURE_WARN_EMITTED
+                    .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    console_warn(
+                        "iron-canvas: ctx.measure_text errored; using char-count fallback \
+                         (subsequent measure errors silenced)",
+                    );
+                }
+                text.chars().count() as f64 * 6.0
+            }
+        }
     }
 }
 

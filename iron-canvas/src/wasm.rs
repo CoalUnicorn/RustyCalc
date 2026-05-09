@@ -17,6 +17,7 @@ use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::diag::console_warn;
 use crate::types::coord::RCRange;
 use crate::CanvasModel;
 use crate::CanvasView;
@@ -73,11 +74,6 @@ extern "C" {
         row: i32,
         column: i32,
     ) -> Result<String, JsValue>;
-
-    // Dep-free console.warn — one binding, used by both the diagnostic
-    // surface here and (later) by `painter::canvas` for measure_text errors.
-    #[wasm_bindgen(js_namespace = console, js_name = warn)]
-    fn console_warn(s: &str);
 }
 
 pub struct JsBackedModel {

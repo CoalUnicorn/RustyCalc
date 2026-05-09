@@ -27,6 +27,7 @@
 
 pub mod geometry;
 
+mod diag;
 mod layer;
 mod model_adapter;
 mod orchestrator;
