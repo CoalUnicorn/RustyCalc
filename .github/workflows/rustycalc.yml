@@ -9,10 +9,12 @@ on:
     paths-ignore:
       - "**.md"
       - "docs/**"
-  # Daily at 06:00 UTC: re-runs against ironcalc/IronCalc upstream main
-  # so a breaking upstream change shows up before the next manual rebase.
-  schedule:
-    - cron: "0 6 * * *"
+  # Cron paused: drift detection now lives in CoalUnicorn/IronCalc's
+  # .github/workflows/wasm-patch-rebase.yml, which rebases the
+  # rustycalc-xlsx-wasm branch onto upstream/main daily and verifies
+  # wasm32 compiles. Re-enable here once the wasm-zip patch is upstreamed.
+  # schedule:
+  #   - cron: "0 6 * * *"
   workflow_dispatch:
 
 permissions:

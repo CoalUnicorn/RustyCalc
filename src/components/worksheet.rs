@@ -31,7 +31,7 @@ impl CanvasModel for WorksheetModelAdapter {
     fn get_selected_sheet(&self) -> u32 {
         self.store.with_value(CanvasModel::get_selected_sheet)
     }
-    fn get_selected_view(&self) -> CanvasView {
+    fn get_selected_view(&self) -> Option<CanvasView> {
         self.store.with_value(CanvasModel::get_selected_view)
     }
     fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32> {

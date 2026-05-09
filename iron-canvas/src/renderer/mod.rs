@@ -43,7 +43,7 @@ mod cells;
 mod headers;
 mod overlays;
 mod pane;
-mod style;
+pub(crate) mod style;
 mod text;
 mod text_paint;
 mod viewport;

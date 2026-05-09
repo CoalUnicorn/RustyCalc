@@ -272,6 +272,7 @@ impl CellTextStyle {
 /// below the rounding the position pass already does — additive sum is within
 /// 1px of a fresh `measureText(full_line)` and avoids the O(words²) re-measure
 /// the previous algorithm did on long wrapping cells.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_into(
     metrics: &dyn TextMetrics,
     font_css: &str,

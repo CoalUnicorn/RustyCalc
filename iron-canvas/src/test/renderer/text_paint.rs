@@ -1,9 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
-use std::rc::Rc;
-
 use crate::painter::TextMetrics;
 use crate::renderer::{layout_into, FontIntern, TextLine};
+use std::rc::Rc;
 
 struct FixedWidth(f64);
 impl TextMetrics for FixedWidth {
@@ -59,7 +58,7 @@ fn font_intern_distinguishes_family() {
 
 #[test]
 fn font_intern_built_string_matches_font_style_build() {
-    use crate::style::FontStyle;
+    use crate::renderer::style::FontStyle;
     let intern = FontIntern::new();
     let interned = intern.get_or_build(12.0, true, false, "Arial", "Calibri");
     let direct = FontStyle::build(12.0, true, false, "Arial", "Calibri");

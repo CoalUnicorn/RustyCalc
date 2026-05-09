@@ -11,7 +11,7 @@ use crate::{
     },
     theme::CanvasTheme,
     types::ui::{HitTest, ResizeTarget},
-    CanvasModel, CanvasSize, RCRange,
+    CanvasModel, CanvasSize, CanvasView, RCRange,
 };
 
 pub mod frozen;
@@ -61,7 +61,22 @@ impl FrameContext {
         canvas: CanvasSize,
         theme: &CanvasTheme,
     ) -> Self {
-        let view = model.get_selected_view();
+        // None ⇒ JS bridge transient (threw or shape malformed). Fall through
+        // with the fresh-model default so the frame still builds; next animation
+        // frame re-queries.
+        let view = model.get_selected_view().unwrap_or(CanvasView {
+            sheet: 0,
+            row: 1,
+            column: 1,
+            selection: RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 1,
+                c2: 1,
+            },
+            top_row: 1,
+            left_column: 1,
+        });
         let frozen = FrozenRC::from_model(model);
 
         let frozen_rows_count = frozen.frozen_rows_count();
@@ -169,7 +184,9 @@ impl FrameContext {
         if size != self.canvas_size {
             return false;
         }
-        let view = model.get_selected_view();
+        // None ⇒ JS bridge transient; force a full rebuild (which itself
+        // tolerates None via the fresh-model fallback in `current`).
+        let Some(view) = model.get_selected_view() else { return false };
         let sheet = model.get_selected_sheet();
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
@@ -189,7 +206,11 @@ impl FrameContext {
     /// "snapshot of what's painted" invariant on `selection_range`: the
     /// orchestrator never reaches into the field directly.
     pub(crate) fn refresh_overlay_inputs(&mut self, model: &dyn CanvasModel) {
-        self.selection_range = model.get_selected_view().selection;
+        // None ⇒ JS bridge transient; keep the last-known-good selection
+        // rather than blanking it out for one frame.
+        if let Some(view) = model.get_selected_view() {
+            self.selection_range = view.selection;
+        }
     }
 
     #[inline]

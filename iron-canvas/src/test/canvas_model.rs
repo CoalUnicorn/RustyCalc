@@ -49,15 +49,15 @@ impl CanvasModel for MockCanvasModel {
     fn get_selected_sheet(&self) -> u32 {
         self.sheet
     }
-    fn get_selected_view(&self) -> CanvasView {
-        CanvasView {
+    fn get_selected_view(&self) -> Option<CanvasView> {
+        Some(CanvasView {
             sheet: self.sheet,
             row: self.range[0],
             column: self.range[1],
             selection: RCRange::from(self.range),
             top_row: self.top_row,
             left_column: self.left_column,
-        }
+        })
     }
     fn get_frozen_rows_count(&self, _sheet: u32) -> Option<i32> {
         Some(self.frozen_rows)

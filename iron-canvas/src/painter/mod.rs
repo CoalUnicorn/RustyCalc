@@ -45,6 +45,7 @@ impl<'a> PaintColor<'a> {
     /// preserving the painter's ptr-eq fast path. Host-page themes carry
     /// `Cow::Owned(String)` and route through `Borrowed`, falling back to the
     /// content-eq cache.
+    #[allow(clippy::ptr_arg)]
     pub(crate) fn from_theme_str(s: &'a Cow<'static, str>) -> PaintColor<'a> {
         match s {
             Cow::Borrowed(s) => PaintColor::Static(s),

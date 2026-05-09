@@ -143,14 +143,16 @@ impl IronCanvas {
     pub fn dispose(self) {}
 
     /// JS-facing model push. Accepts the IronCalc `Model` JS handle as a raw
-    /// `JsValue` and `unchecked_into`-casts it. No runtime validation: a
-    /// wrong handle throws on first render-time method call, not here.
+    /// `JsValue` and validates it via `dyn_into`. Throws synchronously to JS
+    /// when the value isn't an `IronCalcModelHandle` — surfaces the contract
+    /// drift at the boundary rather than on the first render-time method call.
     ///
     /// Always re-wraps in a fresh `Rc`, so identity-comparison in `set_model`
     /// always sees a change and re-marks the grid dirty.
-    pub fn set_model_js(&mut self, model: JsValue) {
-        let backed: Rc<dyn CanvasModel> = Rc::new(JsBackedModel::from_js_value(model));
+    pub fn set_model_js(&mut self, model: JsValue) -> Result<(), JsValue> {
+        let backed: Rc<dyn CanvasModel> = Rc::new(JsBackedModel::try_from_js_value(model)?);
         self.set_model(backed);
+        Ok(())
     }
 }
 

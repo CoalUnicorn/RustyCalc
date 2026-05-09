@@ -1,5 +1,3 @@
-use crate::CanvasModel;
-
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct RCRange {
     pub r1: i32,
@@ -66,12 +64,6 @@ impl From<[i32; 4]> for RCRange {
             r2: range[2],
             c2: range[3],
         }
-    }
-}
-
-impl RCRange {
-    pub fn from_view(model: &dyn CanvasModel) -> Self {
-        model.get_selected_view().selection
     }
 }
 

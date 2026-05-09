@@ -9,15 +9,15 @@ impl CanvasModel for StubModel {
     fn get_selected_sheet(&self) -> u32 {
         0
     }
-    fn get_selected_view(&self) -> crate::CanvasView {
-        crate::CanvasView {
+    fn get_selected_view(&self) -> Option<crate::CanvasView> {
+        Some(crate::CanvasView {
             sheet: 0,
             row: 1,
             column: 1,
             selection: RCRange::from([1, 1, 1, 1]),
             top_row: 1,
             left_column: 1,
-        }
+        })
     }
     fn get_frozen_rows_count(&self, _: u32) -> Option<i32> {
         Some(0)

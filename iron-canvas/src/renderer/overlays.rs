@@ -37,15 +37,14 @@ impl<P: Painter> RendererCore<P> {
     /// Draw the blue selection border, semi-transparent fill, and autofill
     /// handle for the current selection.
     pub(super) fn draw_selection(&self, model: &dyn CanvasModel, frame: &FrameContext) {
-        let view = model.get_selected_view();
+        let Some(view) = model.get_selected_view() else { return };
         let sheet = model.get_selected_sheet();
         let addr = CellAddress {
             sheet,
             row: view.row,
             column: view.column,
         };
-        let Some(cell) = self.range_pixel_bounds(frame, RCRange::from_view(model).normalized())
-        else {
+        let Some(cell) = self.range_pixel_bounds(frame, view.selection.normalized()) else {
             return;
         };
 
@@ -89,7 +88,8 @@ impl<P: Painter> RendererCore<P> {
         frame: &FrameContext,
         target: AutofillTarget,
     ) {
-        let sel = RCRange::from_view(model).normalized();
+        let Some(view) = model.get_selected_view() else { return };
+        let sel = view.selection.normalized();
         let range = RCRange {
             r1: sel.r1.min(target.row),
             c1: sel.c1.min(target.col),

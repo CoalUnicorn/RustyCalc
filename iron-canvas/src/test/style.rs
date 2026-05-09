@@ -1,4 +1,4 @@
-use crate::style::{escape_font_family, FontStyle};
+use crate::renderer::style::{escape_font_family, FontStyle};
 
 #[test]
 fn empty_family_returns_fallback() {
