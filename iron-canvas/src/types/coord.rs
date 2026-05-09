@@ -96,24 +96,3 @@ pub struct FormulaRef {
     pub color_idx: usize,      // index into FORMULA_REF_COLORS
     pub active: bool,          // emphasize the ref under cursor
 }
-
-pub struct CssColor(String);
-
-impl CssColor {
-    pub fn new(s: impl Into<String>) -> Self {
-        let s = s.into();
-        if s.is_empty() {
-            Self("#000000".to_owned())
-        } else {
-            Self(s.to_lowercase())
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn into_string(self) -> String {
-        self.0
-    }
-}

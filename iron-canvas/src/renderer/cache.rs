@@ -3,10 +3,9 @@ use std::rc::Rc;
 
 use ironcalc_base::types::{CellType, Style};
 
+use crate::painter::CssColor;
 use crate::renderer::cells::CellPaint;
-use crate::renderer::style::FontStyle;
 use crate::renderer::text_paint::TextLine;
-use crate::types::coord::CssColor;
 
 pub(crate) struct FrameCache {
     /// Scratch buffer parking each pane's resolved `CellPaint`s during the
@@ -100,7 +99,7 @@ impl FontIntern {
                 return Rc::clone(css);
             }
         }
-        let css: Rc<str> = FontStyle::build(size_px, bold, italic, family, fallback).into();
+        let css: Rc<str> = build(size_px, bold, italic, family, fallback).into();
         entries.push((
             FontKey {
                 size_bits,
@@ -174,5 +173,26 @@ impl ColorIntern {
         let css: Rc<str> = CssColor::new(raw).into_string().into();
         entries.push((raw.into(), Rc::clone(&css)));
         css
+    }
+}
+
+pub(crate) fn build(
+    size_px: f64,
+    bold: bool,
+    italic: bool,
+    family: &str,
+    fallback: &str,
+) -> String {
+    let b = if bold { "bold " } else { "" };
+    let i = if italic { "italic " } else { "" };
+    let safe_family = escape_font_family(family, fallback);
+    format!("{b}{i}{size_px}px {safe_family}")
+}
+
+pub(crate) fn escape_font_family(name: &str, fallback: &str) -> String {
+    match name.trim() {
+        "" => fallback.to_owned(),
+        n if n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => n.to_owned(),
+        n => format!("\"{}\"", n.replace('"', "")),
     }
 }

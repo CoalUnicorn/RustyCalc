@@ -116,6 +116,24 @@ pub(crate) trait Painter: TextMetrics + private::Sealed {
     fn begin_group(&self, class: &'static str);
     fn end_group(&self);
 }
+
+pub struct CssColor(String);
+
+impl CssColor {
+    pub fn new(s: impl Into<String>) -> Self {
+        let s = s.into();
+        if s.is_empty() {
+            Self("#000000".to_owned())
+        } else {
+            Self(s.to_lowercase())
+        }
+    }
+
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
 pub(crate) use canvas::CanvasPainter;
 #[allow(unused_imports)]
 pub(crate) use svg::SvgPainter;
