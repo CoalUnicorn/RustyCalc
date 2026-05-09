@@ -27,7 +27,7 @@ use super::super::types::coord::{CellAddress, RCRange};
 use super::RendererCore;
 use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 
-use ironcalc_base::types::{Border, BorderItem, BorderStyle, Style};
+use ironcalc_base::types::{Border, BorderItem, BorderStyle, CellType, Style};
 
 impl<P: Painter> RendererCore<P> {
     /// Walk one frozen-pane quadrant in four deferred passes:
@@ -69,6 +69,8 @@ impl<P: Painter> RendererCore<P> {
         model.get_cell_styles_in(frame.sheet, range, &mut pane_styles);
         let mut pane_values = self.frame_cache.pane_values.take();
         model.get_formatted_cell_values_in(frame.sheet, range, &mut pane_values);
+        let mut pane_cell_types = self.frame_cache.pane_cell_types.take();
+        model.get_cell_types_in(frame.sheet, range, &mut pane_cell_types);
 
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
@@ -101,20 +103,24 @@ impl<P: Painter> RendererCore<P> {
             let Some(text) = pane_values.get_mut(idx).and_then(Option::take) else {
                 continue;
             };
+            let cell_type = pane_cell_types
+                .get_mut(idx)
+                .and_then(Option::take)
+                .unwrap_or(CellType::Text);
             if let Some(tp) = TextPaint::resolve_into(
                 self,
-                model,
-                p.addr,
                 p.rect,
                 theme,
                 &p.style,
                 text,
+                cell_type,
                 &mut text_lines,
             ) {
                 self.paint_text(&tp, &text_lines);
             }
         }
         self.frame_cache.pane_values.set(pane_values);
+        self.frame_cache.pane_cell_types.set(pane_cell_types);
         self.frame_cache.text_slots.set(slots);
         self.frame_cache.text_lines.set(text_lines);
     }
@@ -235,14 +241,16 @@ impl<P: Painter> RendererCore<P> {
         self.paint_cell(&paint, theme);
         let mut text_lines = self.frame_cache.text_lines.take();
         if let Some(text) = model.get_formatted_cell_value(addr.sheet, addr.row, addr.column) {
+            let cell_type = model
+                .get_cell_type(addr.sheet, addr.row, addr.column)
+                .unwrap_or(CellType::Text);
             if let Some(t) = TextPaint::resolve_into(
                 self,
-                model,
-                addr,
                 rect,
                 theme,
                 &paint.style,
                 text,
+                cell_type,
                 &mut text_lines,
             ) {
                 self.paint_text(&t, &text_lines);

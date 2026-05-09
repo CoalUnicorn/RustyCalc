@@ -1,5 +1,7 @@
 # iron-canvas
 
+**WIP**
+
 A `<canvas>` renderer for [IronCalc](https://github.com/ironcalc/IronCalc) workbooks.
 
 Two stacked canvases — a static **grid** layer (cells, headers, borders, text) and a dynamic **overlay** layer (selection, autofill handle, marching ants, formula refs). Both are driven from the same `IronCalc` model; only the overlay repaints on cursor movement.
@@ -25,7 +27,8 @@ The consumer mounts two `<canvas>` elements (overlay on top, `pointer-events: no
 
 **Painter trait.** Sealed; renderer code never touches `CanvasRenderingContext2d`. Three impls: `CanvasPainter` (production, caches ctx state), `SvgPainter` (snapshot output), `RecorderPainter` (test-only `DrawOp` log). Colors cross as `PaintColor<'a>::{Static(&'static str), Borrowed(&'a str)}` so theme constants ptr-eq against the painter cache zero-alloc.
 
-**Model.** `CanvasModel` is the read-only adapter trait (`src/model_adapter.rs`); `UserModel<'a>` from `ironcalc_base` plugs in via blanket impl.
+**Model.** `CanvasModel` is the read-only adapter trait (`src/model_adapter.rs`) — singular accessors plus three batched range accessors (`get_cell_styles_in`, `get_formatted_cell_values_in`, `get_cell_types_in`) that collapse a JS-bridge pane fetch to one boundary
+crossing. `UserModel<'a>` from `ironcalc_base` plugs in via the trait's default loop impl. 
 
 **Per-frame snapshot.** `FrameContext::current(model, size, theme)` walks the model once per axis into four slot vecs (`frozen_rows` / `scroll_rows` / `frozen_cols` / `scroll_cols`). Renderer and query API (`hit_test`, `cell_rect`, `autofill_handle`) read the same snapshot, so painted pixels and hit-tests agree by construction.
 
@@ -35,7 +38,6 @@ The consumer mounts two `<canvas>` elements (overlay on top, `pointer-events: no
 
 **Theme.** `CanvasTheme` fields are `Cow<'static, str>`. `light()` / `dark()` are built-in palettes (`Cow::Borrowed`, ptr-eq cache hit); `ThemeVariables` produces host overrides (`Cow::Owned`, content-eq). On wasm32, `CanvasTheme::from_element(&Element)` reads `--palette-*` off `getComputedStyle`.
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design.
 
 ## Tests
 

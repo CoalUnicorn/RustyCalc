@@ -1,7 +1,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use ironcalc_base::types::Style;
+use ironcalc_base::types::{CellType, Style};
 
 use crate::renderer::cells::CellPaint;
 use crate::renderer::style::FontStyle;
@@ -44,6 +44,11 @@ pub(crate) struct FrameCache {
     /// `CanvasModel::get_formatted_cell_values_in`, moved out per-cell via
     /// `Option::take` in the text pass.
     pub(crate) pane_values: Cell<Vec<Option<String>>>,
+    /// Dense, row-major cell types for the current pane's range. Same shape
+    /// and rhythm as `pane_styles` / `pane_values`: filled once per pane via
+    /// `CanvasModel::get_cell_types_in`, copied per-cell into the text-pass
+    /// `CellTextStyle::resolve` for alignment / error-color decisions.
+    pub(crate) pane_cell_types: Cell<Vec<Option<CellType>>>,
 }
 
 /// Renderer-lifetime intern table for `ctx.font` strings.

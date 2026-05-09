@@ -15,8 +15,6 @@ use crate::painter::{Painter, TextMetrics};
 use crate::renderer::cache::ColorIntern;
 use crate::renderer::RendererCore;
 use crate::theme::CanvasTheme;
-use crate::types::coord::CellAddress;
-use crate::CanvasModel;
 
 /// Below this in either pixel dimension, no text is laid out at all.
 pub(crate) const MIN_TEXT_DIM_PX: f64 = 10.0;
@@ -67,24 +65,23 @@ pub struct TextLine {
 impl TextPaint {
     /// Build a `TextPaint` for `addr` at `rect` and fill `lines` with the
     /// resolved per-line text/width/position. Returns `None` (with `lines`
-    /// left empty) for empty/too-small cells. The formatted value is supplied
-    /// by the caller — `render_pane` pulls it out of the prefetched
-    /// `pane_values` buffer; `repaint_active_cell` reads the model directly.
+    /// left empty) for empty/too-small cells. Formatted value AND cell type
+    /// are supplied by the caller — `render_pane` drains both from the
+    /// prefetched `pane_values` / `pane_cell_types` buffers;
+    /// `repaint_active_cell` reads the model directly for the active cell.
     /// Font / alignment / colour are resolved via `CellTextStyle`.
     ///
     /// The split between `TextPaint` (per-cell scalars) and the externally
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
     /// the caller takes the buffer once at the top of `render_pane`, hands it
     /// to every cell, and parks it back on `FrameCache::text_lines`.
-    #[allow(clippy::too_many_arguments)]
     pub fn resolve_into<P: Painter>(
         renderer: &RendererCore<P>,
-        model: &dyn CanvasModel,
-        addr: CellAddress,
         rect: PixelRect,
         theme: &CanvasTheme,
         style: &Style,
         text: String,
+        cell_type: CellType,
         lines: &mut Vec<TextLine>,
     ) -> Option<TextPaint> {
         if text.is_empty() {
@@ -101,15 +98,7 @@ impl TextPaint {
             h_align,
             v_align,
             wrap_text,
-        } = CellTextStyle::resolve(
-            model,
-            addr.sheet,
-            addr.row,
-            addr.column,
-            theme,
-            style,
-            &renderer.color_intern,
-        );
+        } = CellTextStyle::resolve(cell_type, theme, style, &renderer.color_intern);
 
         // Font interning: skips `FontStyle::build` on cache hit. Same lookup
         // is shared across cells with identical (size, weight, slant, family).
@@ -199,18 +188,11 @@ struct CellTextStyle {
 
 impl CellTextStyle {
     fn resolve(
-        model: &dyn CanvasModel,
-        sheet: u32,
-        row: i32,
-        column: i32,
+        cell_type: CellType,
         theme: &CanvasTheme,
         style: &Style,
         intern: &ColorIntern,
     ) -> Self {
-        let cell_type = model
-            .get_cell_type(sheet, row, column)
-            .unwrap_or(CellType::Text);
-
         // IronCalc collapses every error variant (#VALUE!, #DIV/0!, #REF!, #NAME?,
         // #NUM!, #N/A, #NULL!, #SPILL!, #CIRC!, plus IronCalc-only #ERROR!/#N/IMPL!)
         // into the single CellType::ErrorValue discriminator. All render in

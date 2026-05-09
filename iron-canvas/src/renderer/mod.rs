@@ -132,6 +132,7 @@ impl<P: Painter> RendererCore<P> {
                 wrap_buf: RefCell::new(String::new()),
                 pane_styles: Cell::new(Vec::new()),
                 pane_values: Cell::new(Vec::new()),
+                pane_cell_types: Cell::new(Vec::new()),
             },
             font_intern: FontIntern::new(),
             col_intern: ColNameIntern::new(),

@@ -64,6 +64,20 @@ pub trait CanvasModel {
             }
         }
     }
+
+    /// Bulk-fetch cell types for the contiguous rectangle `range` on `sheet`.
+    /// Same row-major dense layout and `None`-as-fetch-failure semantics as
+    /// the other `*_in` accessors. Drives the text pass's alignment/colour
+    /// resolution (`CellTextStyle::resolve`); default impl loops
+    /// `get_cell_type` so `UserModel` is byte-for-byte unchanged.
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellType>>) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_cell_type(sheet, r, c));
+            }
+        }
+    }
 }
 
 impl<'a> CanvasModel for UserModel<'a> {
