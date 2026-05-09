@@ -3,7 +3,7 @@ use crate::{
         slot::{ColSlot, RowSlot},
         FrameContext,
     },
-    renderer::cells::PaneCells,
+    types::coord::RCRange,
 };
 
 /// Identifies one of the four frozen-pane quadrants.
@@ -63,7 +63,23 @@ impl PaneRegion {
         }
     }
 
-    pub(crate) fn cells<'a>(&'a self, frame: &'a FrameContext) -> PaneCells<'a> {
-        PaneCells::new(self, frame)
+    /// Address-space rectangle this pane covers. `None` when the pane has no
+    /// rows or no cols (a pane is empty whenever the frozen count along that
+    /// axis is 0 — e.g. all four panes of an unfrozen sheet are empty except
+    /// `bottom_right`).
+    ///
+    /// The returned range spans `[first_row..=last_row] × [first_col..=last_col]`
+    /// from the slot vecs. Hidden rows/cols are NOT removed from the rectangle —
+    /// the slot vecs skip hidden lines, but the range stays contiguous so a
+    /// dense per-cell buffer keyed by `(row - r1, col - c1)` indexes correctly.
+    pub(crate) fn range(&self, frame: &FrameContext) -> Option<RCRange> {
+        let rows = self.rows(frame);
+        let cols = self.cols(frame);
+        Some(RCRange {
+            r1: rows.first()?.row,
+            c1: cols.first()?.col,
+            r2: rows.last()?.row,
+            c2: cols.last()?.col,
+        })
     }
 }

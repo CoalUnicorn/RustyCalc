@@ -2,8 +2,10 @@
 //!
 //! `render_pane` walks one frozen-pane quadrant in four deferred sub-passes
 //! over the same `CellPaint` slots: bg -> grid borders -> explicit borders ->
-//! text. `CellPaint` carries the cell's address, pixel rect, and `Style`
-//! pre-fetched by `CellPaintsIter`; `BorderPaint::resolve` and
+//! text. Styles are bulk-fetched once per pane via
+//! `CanvasModel::get_cell_styles_in` into a dense row-major buffer; the bg
+//! pass moves each `Style` out via `Option::take` and `CellPaint::resolve`
+//! lifts it into renderer-ready paint. `BorderPaint::resolve` and
 //! `TextPaint::resolve` run inside their respective sub-passes so border
 //! and text work happens only on cells that reach them.
 
@@ -52,19 +54,37 @@ impl<P: Painter> RendererCore<P> {
         pane: PaneRegion,
         frame: &FrameContext,
     ) {
-        if pane.rows(frame).is_empty() || pane.cols(frame).is_empty() {
+        let Some(range) = pane.range(frame) else {
             return;
-        }
+        };
 
         let theme = &frame.theme;
+        let cols_w = range.c2 - range.c1 + 1;
+
+        // Bulk-fetch styles for the whole rectangular range. UserModel default
+        // impl loops `get_cell_style` (no perf change); JsBackedModel will
+        // override (W5) and collapse to one JS call per pane.
+        let mut pane_styles = self.frame_cache.pane_styles.take();
+        model.get_cell_styles_in(frame.sheet, range, &mut pane_styles);
 
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
 
-        for p in self.paints_in(model, &pane, frame) {
+        for slot in PaneCells::new(&pane, frame) {
+            let idx = ((slot.addr.row - range.r1) * cols_w
+                + (slot.addr.column - range.c1)) as usize;
+            let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
+                continue;
+            };
+            let Some(p) =
+                CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
+            else {
+                continue;
+            };
             self.paint_bg(&p, theme);
             slots.push(p);
         }
+        self.frame_cache.pane_styles.set(pane_styles);
         for p in &slots {
             self.paint_borders_grid(p, theme);
         }
@@ -446,54 +466,3 @@ impl<'a> Iterator for PaneCells<'a> {
     }
 }
 
-/// `PaneCells` slots resolved into `CellPaint` via per-cell `get_cell_style`;
-/// slots whose style fetch fails are skipped.
-pub(crate) struct CellPaintsIter<'a> {
-    slots: PaneCells<'a>,
-    model: &'a dyn CanvasModel,
-    color_intern: &'a ColorIntern,
-}
-
-impl<'a> CellPaintsIter<'a> {
-    pub(crate) fn new(
-        model: &'a dyn CanvasModel,
-        pane: &'a PaneRegion,
-        frame: &'a FrameContext,
-        color_intern: &'a ColorIntern,
-    ) -> Self {
-        Self {
-            slots: pane.cells(frame),
-            model,
-            color_intern,
-        }
-    }
-}
-
-impl<'a> Iterator for CellPaintsIter<'a> {
-    type Item = CellPaint;
-
-    fn next(&mut self) -> Option<CellPaint> {
-        loop {
-            let slot = self.slots.next()?;
-
-            let Some(own_style) =
-                self.model
-                    .get_cell_style(slot.addr.sheet, slot.addr.row, slot.addr.column)
-            else {
-                // Style fetch failed — skip this cell entirely.
-                continue;
-            };
-
-            let paint = CellPaint::resolve_cell_paint(
-                slot,
-                own_style,
-                &self.slots.frame.theme,
-                self.color_intern,
-            );
-
-            if let Some(p) = paint {
-                return Some(p);
-            }
-        }
-    }
-}

@@ -56,7 +56,6 @@ use crate::geometry::prim::Axis;
 use crate::layer::RenderOverlays;
 use crate::painter::CanvasPainter;
 use crate::renderer::cache::FrameCache;
-use crate::renderer::cells::CellPaintsIter;
 use crate::CanvasModel;
 pub(crate) use cache::ColNameIntern;
 pub(crate) use cache::ColorIntern;
@@ -118,19 +117,6 @@ impl<P: Painter> RendererCore<P> {
         self.invalidate_paint_cache();
     }
 
-    /// Stream of `CellPaint` for a pane. Each yielded paint carries the
-    /// cell's address, pixel rect, and `Style` (fetched from the model
-    /// during iteration). Border + text resolution happens later, inside
-    /// `render_pane`'s deferred sub-passes.
-    pub(super) fn paints_in<'a>(
-        &'a self,
-        model: &'a dyn CanvasModel,
-        pane: &'a PaneRegion,
-        frame: &'a FrameContext,
-    ) -> CellPaintsIter<'a> {
-        CellPaintsIter::new(model, pane, frame, &self.color_intern)
-    }
-
     /// Layer-friendly constructor: caller owns canvas sizing + DPR scaling.
     /// Canvas size and theme both live on the per-frame `FrameContext`,
     /// not on the renderer.
@@ -144,6 +130,7 @@ impl<P: Painter> RendererCore<P> {
                 label_buf: RefCell::new(String::new()),
                 text_lines: Cell::new(Vec::new()),
                 wrap_buf: RefCell::new(String::new()),
+                pane_styles: Cell::new(Vec::new()),
             },
             font_intern: FontIntern::new(),
             col_intern: ColNameIntern::new(),

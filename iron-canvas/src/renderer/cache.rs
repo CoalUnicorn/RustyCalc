@@ -1,6 +1,8 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use ironcalc_base::types::Style;
+
 use crate::renderer::cells::CellPaint;
 use crate::renderer::style::FontStyle;
 use crate::renderer::text_paint::TextLine;
@@ -31,6 +33,12 @@ pub(crate) struct FrameCache {
     /// `String` across every wrapped raw-line of every cell, so the wrap
     /// branch is alloc-free in steady state. Renderer-lifetime, not per-cell.
     pub(crate) wrap_buf: RefCell<String>,
+    /// Dense, row-major styles for the current pane's rectangular range.
+    /// Filled once per pane via `CanvasModel::get_cell_styles_in`, drained
+    /// per-cell via `Option::take` in the bg pass. Capacity persists across
+    /// frames; on the wasm path this is the single buffer the JS bridge
+    /// drains a per-pane response into.
+    pub(crate) pane_styles: Cell<Vec<Option<Style>>>,
 }
 
 /// Renderer-lifetime intern table for `ctx.font` strings.

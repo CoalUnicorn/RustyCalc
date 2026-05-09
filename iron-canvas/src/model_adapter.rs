@@ -29,6 +29,23 @@ pub trait CanvasModel {
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
+
+    /// Bulk-fetch cell styles for the contiguous rectangle `range` on `sheet`.
+    /// Output is dense, row-major: `out[(row - r1) * cols + (col - c1)]` for
+    /// every `(row, col)` in `[r1..=r2] × [c1..=c2]`. `None` entries mean the
+    /// per-cell fetch failed (same semantics as `get_cell_style` returning
+    /// `None`).
+    ///
+    /// Default impl loops `get_cell_style` so `UserModel` is byte-for-byte
+    /// unchanged. The wasm bridge will override with one JS call per range.
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<Style>>) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_cell_style(sheet, r, c));
+            }
+        }
+    }
 }
 
 impl<'a> CanvasModel for UserModel<'a> {
