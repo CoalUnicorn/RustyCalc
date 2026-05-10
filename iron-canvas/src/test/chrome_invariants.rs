@@ -14,7 +14,6 @@ use ironcalc_base::types::{CellType, Style};
 
 use crate::chrome::{measure_row_header_width, Chrome};
 use crate::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
-use crate::geometry::prim::Axis;
 use crate::renderer::RendererCore;
 use crate::test::painter::{DrawOp, RecorderPainter};
 use crate::theme::CanvasTheme;
@@ -225,10 +224,9 @@ fn cell_origin_matches_header_thicknesses() {
 
 /// R2 invariant — the bug fix. At a 7-digit scroll position the row-number
 /// strip widens past `HEADER_COL_WIDTH`. Column headers must shift right by
-/// the same amount, otherwise they desync from cell columns. After R2,
-/// `Axis::Column.strip_start(frame)` returns `frame.cell_origin.x`, which
-/// is `row_header_thickness + outer_offset` — so the strip's leading edge
-/// always coincides with the cell area's leading edge.
+/// the same amount, otherwise they desync from cell columns. The test pins
+/// the first painted slot in each axis to the cell-area origin: any drift
+/// here means headers and cells disagree on where column 1 / row 1 starts.
 #[test]
 fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
     drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame, _| {
@@ -239,16 +237,26 @@ fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
             frame.cell_origin.x,
             HEADER_COL_WIDTH + HEADER_OFFSET,
         );
+        let first_col = frame
+            .pane_set
+            .cols
+            .scroll
+            .first()
+            .expect("scrolled view must emit at least one column slot");
         assert_eq!(
-            Axis::Column.strip_start(frame),
-            frame.cell_origin.x,
-            "column header strip must start at cell_origin.x — anything else \
+            first_col.left, frame.cell_origin.x,
+            "first painted column slot must start at cell_origin.x — anything else \
              means headers misalign with cell columns"
         );
+        let first_row = frame
+            .pane_set
+            .rows
+            .scroll
+            .first()
+            .expect("scrolled view must emit at least one row slot");
         assert_eq!(
-            Axis::Row.strip_start(frame),
-            frame.cell_origin.y,
-            "row header strip must start at cell_origin.y"
+            first_row.top, frame.cell_origin.y,
+            "first painted row slot must start at cell_origin.y"
         );
     });
 }

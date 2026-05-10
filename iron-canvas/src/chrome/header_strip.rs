@@ -35,35 +35,28 @@ impl<P: Painter> RendererCore<P> {
         });
     }
 
-    /// Shared scaffold: walk the frozen band (if any) then the visible
-    /// band, reading extents from the frame's prefix-sum snapshot — zero
-    /// model access.
+    /// Walk the frozen band (if any) then the scrollable band, reading
+    /// `(index, start, extent)` straight from the frame's slot vecs —
+    /// the slots already carry absolute canvas coords, so no cursor
+    /// accumulation is needed.
     fn walk_header_strip(&self, axis: Axis, frame: &Chrome, mut visit: impl FnMut(i32, i32, i32)) {
-        let frozen_count = axis.frozen_count(frame);
-        let frozen_origin = axis.frozen_origin(frame);
-
-        let mut frozen_cursor = axis.strip_start(frame);
-        for i in 1..=frozen_count {
-            let t = axis.frame_extent(frame, i);
-            if t <= 0 {
-                continue;
+        match axis {
+            Axis::Row => {
+                for s in &frame.pane_set.rows.frozen {
+                    visit(s.row, s.top, s.height);
+                }
+                for s in &frame.pane_set.rows.scroll {
+                    visit(s.row, s.top, s.height);
+                }
             }
-            visit(i, frozen_cursor, t);
-            frozen_cursor += t;
-        }
-
-        let mut scroll_cursor = if frozen_count > 0 {
-            frozen_origin
-        } else {
-            axis.strip_start(frame)
-        };
-        for i in axis.visible_band(frame) {
-            let t = axis.frame_extent(frame, i);
-            if t <= 0 {
-                continue;
+            Axis::Column => {
+                for s in &frame.pane_set.cols.frozen {
+                    visit(s.col, s.left, s.width);
+                }
+                for s in &frame.pane_set.cols.scroll {
+                    visit(s.col, s.left, s.width);
+                }
             }
-            visit(i, scroll_cursor, t);
-            scroll_cursor += t;
         }
     }
 

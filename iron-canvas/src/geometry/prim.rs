@@ -1,10 +1,4 @@
-use std::ops::RangeInclusive;
-
-use crate::{
-    chrome::Chrome,
-    geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect},
-    RCRange,
-};
+use crate::{geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect}, RCRange};
 
 /// A point in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -87,49 +81,6 @@ impl Axis {
                 width: parallel_size,
                 height: header_thickness,
             },
-        }
-    }
-
-    /// Extent from the frame's prefix-sum snapshot — zero model access.
-    pub(crate) fn frame_extent(self, frame: &Chrome, index: i32) -> i32 {
-        match self {
-            Axis::Row => frame.row_extent_at(index),
-            Axis::Column => frame.col_extent_at(index),
-        }
-    }
-
-    /// Pixel position where the cell area begins along this axis — the
-    /// column-axis value tracks the dynamic `row_header_thickness` via
-    /// `chrome.cell_origin.x`, so deep scrolls (4+ digit row numbers) keep
-    /// header columns aligned with cell columns.
-    pub(crate) fn strip_start(self, chrome: &Chrome) -> i32 {
-        match self {
-            Axis::Row => chrome.cell_origin.y,
-            Axis::Column => chrome.cell_origin.x,
-        }
-    }
-
-    /// Visible scrollable band in this axis, derived from the frame's slot vecs.
-    pub(crate) fn visible_band(self, frame: &Chrome) -> RangeInclusive<i32> {
-        match self {
-            Axis::Row => frame.top_row()..=frame.last_visible_row(),
-            Axis::Column => frame.left_column()..=frame.last_visible_col(),
-        }
-    }
-
-    /// Count of frozen cells along this axis (0 when nothing is frozen).
-    pub(crate) fn frozen_count(self, frame: &Chrome) -> i32 {
-        match self {
-            Axis::Row => frame.frozen.rows,
-            Axis::Column => frame.frozen.cols,
-        }
-    }
-
-    /// Pixel origin where the scrollable strip for this axis begins.
-    pub(crate) fn frozen_origin(self, frame: &Chrome) -> i32 {
-        match self {
-            Axis::Row => frame.frozen.offset.y,
-            Axis::Column => frame.frozen.offset.x,
         }
     }
 

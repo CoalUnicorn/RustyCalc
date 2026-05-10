@@ -60,8 +60,8 @@ pub(crate) struct Chrome {
     /// `frame.col_header_thickness`.
     pub col_header_thickness: i32,
     /// Pixel origin where the cell area begins. Single source of truth used
-    /// by `Axis::strip_start`, `walk_header_strip`, hit-test, and viewport
-    /// math instead of recomputing `header + outer_offset` at every site.
+    /// by hit-test and viewport math instead of recomputing
+    /// `header + outer_offset` at every site.
     pub cell_origin: Point,
     /// Active selection at paint time, raw `[r1, c1, r2, c2]` from
     /// `SelectedView.range`. Snapshotting it here keeps `autofill_handle`

@@ -12,7 +12,6 @@ use crate::geometry::constants::{
     AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
     HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
-use crate::geometry::prim::Axis;
 use crate::theme::LIGHT;
 use crate::types::ui::HitTest;
 use crate::{chrome::Chrome, CanvasView};
@@ -338,30 +337,6 @@ fn autofill_handle_tracks_in_place_selection_range_update() {
         after.y,
         (f64::from(frame.row_to_y(5)) + DEFAULT_ROW_HEIGHT).round() as i32
     );
-}
-
-#[test]
-fn row_visible_band_uses_top_and_last_visible_row() {
-    let m = MockCanvasModel {
-        top_row: 3,
-        ..Default::default()
-    };
-    let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    let band = Axis::Row.visible_band(&frame);
-    assert_eq!(*band.start(), frame.top_row());
-    assert_eq!(*band.end(), frame.last_visible_row());
-}
-
-#[test]
-fn column_visible_band_uses_left_column_and_last_visible_col() {
-    let m = MockCanvasModel {
-        left_column: 5,
-        ..Default::default()
-    };
-    let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    let band = Axis::Column.visible_band(&frame);
-    assert_eq!(*band.start(), frame.left_column());
-    assert_eq!(*band.end(), frame.last_visible_col());
 }
 
 #[test]
