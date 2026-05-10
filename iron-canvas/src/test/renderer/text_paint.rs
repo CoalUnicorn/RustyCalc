@@ -56,15 +56,6 @@ fn font_intern_distinguishes_family() {
     assert!(!Rc::ptr_eq(&a, &b));
 }
 
-#[test]
-fn font_intern_built_string_matches_font_style_build() {
-    use crate::renderer::style::FontStyle;
-    let intern = FontIntern::new();
-    let interned = intern.get_or_build(12.0, true, false, "Arial", "Calibri");
-    let direct = FontStyle::build(12.0, true, false, "Arial", "Calibri");
-    assert_eq!(&*interned, direct.as_str());
-}
-
 // ---------------------------------------------------------------------------
 // layout_into: TextLine String capacity reuse
 //

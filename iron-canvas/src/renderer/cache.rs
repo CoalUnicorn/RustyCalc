@@ -4,7 +4,7 @@ use std::rc::Rc;
 use ironcalc_base::types::{CellType, Style};
 
 use crate::painter::CssColor;
-use crate::renderer::cells::CellPaint;
+use crate::cell::CellPaint;
 use crate::renderer::text_paint::TextLine;
 
 pub(crate) struct FrameCache {

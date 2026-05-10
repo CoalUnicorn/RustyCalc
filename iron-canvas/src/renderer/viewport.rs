@@ -3,7 +3,7 @@
 //! All pixel↔cell math reads the `FrameContext` row/column slots built once
 //! per tick in `geometry/frame`. No model access happens here.
 
-use crate::geometry::frame::FrameContext;
+use crate::chrome::Chrome;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::types::coord::RCRange;
@@ -18,11 +18,7 @@ impl<P: Painter> RendererCore<P> {
     /// Returns `None` when the range is entirely outside the drawable fold
     /// (scrollable viewport + frozen bands). All coordinate math reads from the
     /// `FrameContext` slot vecs — zero model queries.
-    pub(super) fn range_pixel_bounds(
-        &self,
-        frame: &FrameContext,
-        range: RCRange,
-    ) -> Option<PixelRect> {
+    pub(crate) fn range_pixel_bounds(&self, frame: &Chrome, range: RCRange) -> Option<PixelRect> {
         let frozen_rows = frame.frozen.frozen_rows_count();
         let frozen_cols = frame.frozen.frozen_cols_count();
 
@@ -54,7 +50,7 @@ impl<P: Painter> RendererCore<P> {
     /// `=BB3` when column BB is off screen.
     fn range_intersects_fold(
         &self,
-        frame: &FrameContext,
+        frame: &Chrome,
         range: RCRange,
         frozen_rows: i32,
         frozen_cols: i32,

@@ -1,9 +1,9 @@
 use std::ops::RangeInclusive;
 
 use crate::{
+    chrome::Chrome,
     geometry::{
         constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT},
-        frame::FrameContext,
         pixel_rect::PixelRect,
     },
     RCRange,
@@ -63,30 +63,38 @@ impl Axis {
     /// Rect that pins a header cell to the corresponding header strip.
     ///
     /// `along` is the position along the axis (top_y for rows, left_x for
-    /// cols). The cross-axis extent is always the header strip width/height.
-    pub(crate) fn header_rect(self, along: i32, height: i32) -> PixelRect {
+    /// cols). `parallel_size` is the cell's extent along the axis (row
+    /// height / col width). `header_thickness` is the perpendicular size
+    /// of the header strip — `chrome.row_header_width` for rows (dynamic),
+    /// `HEADER_ROW_HEIGHT` for cols (currently static).
+    pub(crate) fn header_rect(
+        self,
+        along: i32,
+        parallel_size: i32,
+        header_thickness: i32,
+    ) -> PixelRect {
         match self {
             Axis::Row => PixelRect {
                 top_left: Point {
                     x: HEADER_OFFSET,
                     y: along,
                 },
-                width: HEADER_COL_WIDTH,
-                height,
+                width: header_thickness,
+                height: parallel_size,
             },
             Axis::Column => PixelRect {
                 top_left: Point {
                     x: along,
                     y: HEADER_OFFSET,
                 },
-                width: height,
-                height: HEADER_ROW_HEIGHT,
+                width: parallel_size,
+                height: header_thickness,
             },
         }
     }
 
     /// Extent from the frame's prefix-sum snapshot — zero model access.
-    pub(crate) fn frame_extent(self, frame: &FrameContext, index: i32) -> i32 {
+    pub(crate) fn frame_extent(self, frame: &Chrome, index: i32) -> i32 {
         match self {
             Axis::Row => frame.row_extent_at(index),
             Axis::Column => frame.col_extent_at(index),
@@ -103,7 +111,7 @@ impl Axis {
     }
 
     /// Visible scrollable band in this axis, derived from the frame's slot vecs.
-    pub(crate) fn visible_band(self, frame: &FrameContext) -> RangeInclusive<i32> {
+    pub(crate) fn visible_band(self, frame: &Chrome) -> RangeInclusive<i32> {
         match self {
             Axis::Row => frame.top_row()..=frame.last_visible_row(),
             Axis::Column => frame.left_column()..=frame.last_visible_col(),
@@ -111,7 +119,7 @@ impl Axis {
     }
 
     /// Count of frozen cells along this axis (0 when nothing is frozen).
-    pub(crate) fn frozen_count(self, frame: &FrameContext) -> i32 {
+    pub(crate) fn frozen_count(self, frame: &Chrome) -> i32 {
         match self {
             Axis::Row => frame.frozen.rows,
             Axis::Column => frame.frozen.cols,
@@ -119,7 +127,7 @@ impl Axis {
     }
 
     /// Pixel origin where the scrollable strip for this axis begins.
-    pub(crate) fn frozen_origin(self, frame: &FrameContext) -> i32 {
+    pub(crate) fn frozen_origin(self, frame: &Chrome) -> i32 {
         match self {
             Axis::Row => frame.frozen.offset.y,
             Axis::Column => frame.frozen.offset.x,

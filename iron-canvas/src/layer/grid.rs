@@ -1,7 +1,7 @@
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
-use crate::geometry::frame::FrameContext;
+use crate::chrome::Chrome;
 use crate::layer::{create_2d_context, LayerBase};
 use crate::painter::CanvasPainter;
 use crate::renderer::GridRenderer;
@@ -23,7 +23,7 @@ impl GridLayer {
     pub(crate) fn paint(
         &mut self,
         model: &dyn CanvasModel,
-        frame: &FrameContext, // pre-built by orchestrator
+        frame: &Chrome, // pre-built by orchestrator
     ) {
         let size = frame.canvas_size;
         let ctx = self.base.renderer.ctx_ref();

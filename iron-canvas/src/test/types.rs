@@ -2,14 +2,14 @@
 #![allow(unused_imports)]
 
 use crate::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
-use crate::geometry::frame::frozen::FrozenRC;
+use crate::chrome::FrozenRC;
 use crate::geometry::prim::{Axis, Point};
 use crate::layer::RenderOverlays;
 use crate::renderer::PaneRegion;
 
 #[test]
 fn row_header_rect_pins_x_to_left_strip() {
-    let rect = Axis::Row.header_rect(100, 20);
+    let rect = Axis::Row.header_rect(100, 20, HEADER_COL_WIDTH);
     assert_eq!(rect.top_left.x, HEADER_OFFSET);
     assert_eq!(rect.top_left.y, 100);
     assert_eq!(rect.width, HEADER_COL_WIDTH);
@@ -18,7 +18,7 @@ fn row_header_rect_pins_x_to_left_strip() {
 
 #[test]
 fn column_header_rect_pins_y_to_top_strip() {
-    let rect = Axis::Column.header_rect(100, 20);
+    let rect = Axis::Column.header_rect(100, 20, HEADER_ROW_HEIGHT);
     assert_eq!(rect.top_left.x, 100);
     assert_eq!(rect.top_left.y, HEADER_OFFSET);
     assert_eq!(rect.width, 20);
@@ -27,13 +27,13 @@ fn column_header_rect_pins_y_to_top_strip() {
 
 #[test]
 fn row_header_rect_thickness_maps_to_height() {
-    let rect = Axis::Row.header_rect(100, 50);
+    let rect = Axis::Row.header_rect(100, 50, HEADER_COL_WIDTH);
     assert_eq!(rect.height, 50);
 }
 
 #[test]
 fn column_header_rect_thickness_maps_to_width() {
-    let rect = Axis::Column.header_rect(100, 50);
+    let rect = Axis::Column.header_rect(100, 50, HEADER_ROW_HEIGHT);
     assert_eq!(rect.width, 50);
 }
 

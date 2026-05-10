@@ -1,8 +1,6 @@
 use crate::{
-    geometry::frame::{
-        slot::{ColSlot, RowSlot},
-        FrameContext,
-    },
+    chrome::Chrome,
+    geometry::frame::slot::{ColSlot, RowSlot},
     types::coord::RCRange,
 };
 
@@ -49,30 +47,31 @@ impl PaneRegion {
         }
     }
 
-    pub(crate) fn rows<'a>(&self, frame: &'a FrameContext) -> &'a [RowSlot] {
+    pub(crate) fn rows<'a>(&self, frame: &'a Chrome) -> &'a [RowSlot] {
         match self.row_band {
-            Band::Frozen => &frame.frozen_rows,
-            Band::Scroll => &frame.scroll_rows,
+            Band::Frozen => &frame.pane_set.frozen_rows,
+            Band::Scroll => &frame.pane_set.scroll_rows,
         }
     }
 
-    pub(crate) fn cols<'a>(&self, frame: &'a FrameContext) -> &'a [ColSlot] {
+    pub(crate) fn cols<'a>(&self, frame: &'a Chrome) -> &'a [ColSlot] {
         match self.col_band {
-            Band::Frozen => &frame.frozen_cols,
-            Band::Scroll => &frame.scroll_cols,
+            Band::Frozen => &frame.pane_set.frozen_cols,
+            Band::Scroll => &frame.pane_set.scroll_cols,
         }
     }
 
-    /// Address-space rectangle this pane covers. `None` when the pane has no
-    /// rows or no cols (a pane is empty whenever the frozen count along that
-    /// axis is 0 — e.g. all four panes of an unfrozen sheet are empty except
-    /// `bottom_right`).
+    /// Address-space rectangle this pane covers. `None` when the pane has
+    /// no rows or no cols (a pane is empty whenever the frozen count along
+    /// that axis is 0 — e.g. all four panes of an unfrozen sheet are
+    /// empty except `bottom_right`).
     ///
     /// The returned range spans `[first_row..=last_row] × [first_col..=last_col]`
-    /// from the slot vecs. Hidden rows/cols are NOT removed from the rectangle —
-    /// the slot vecs skip hidden lines, but the range stays contiguous so a
-    /// dense per-cell buffer keyed by `(row - r1, col - c1)` indexes correctly.
-    pub(crate) fn range(&self, frame: &FrameContext) -> Option<RCRange> {
+    /// from the slot vecs. Hidden rows/cols are NOT removed from the
+    /// rectangle — the slot vecs skip hidden lines, but the range stays
+    /// contiguous so a dense per-cell buffer keyed by `(row - r1, col - c1)`
+    /// indexes correctly.
+    pub(crate) fn range(&self, frame: &Chrome) -> Option<RCRange> {
         let rows = self.rows(frame);
         let cols = self.cols(frame);
         Some(RCRange {

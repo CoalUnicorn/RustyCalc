@@ -1,4 +1,5 @@
 mod canvas_model;
+mod chrome_invariants;
 mod geometry;
 mod layer;
 mod model;
@@ -6,6 +7,5 @@ mod orchestrator;
 mod painter;
 mod reference;
 mod renderer;
-mod style;
 mod theme;
 mod types;

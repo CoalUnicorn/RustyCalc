@@ -26,7 +26,7 @@ impl<P: Painter> RendererCore<P> {
     /// just filled; passing it alongside `t` keeps the per-cell allocation off
     /// the path while preserving the old "set state then clip then stroke"
     /// ordering.
-    pub(super) fn paint_text(&self, t: &TextPaint, lines: &[TextLine]) {
+    pub(crate) fn paint_text(&self, t: &TextPaint, lines: &[TextLine]) {
         // TextColor::Static carries the theme color; the helper routes
         // Cow::Borrowed through the painter's ptr-eq fast path and Cow::Owned
         // through content-eq. TextColor::Owned is a per-cell custom color

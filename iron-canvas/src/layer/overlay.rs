@@ -7,7 +7,7 @@ use crate::renderer::OverlayRenderer;
 use crate::types::coord::{AutofillTarget, SheetArea};
 use crate::{CanvasModel, FormulaRef, RCRange};
 
-use crate::geometry::frame::FrameContext;
+use crate::chrome::Chrome;
 
 /// Overlay ranges passed to `render()`.
 ///
@@ -50,7 +50,7 @@ impl OverlayLayer {
         &mut self,
         overlays: &RenderOverlays,
         model: &dyn CanvasModel,
-        frame: &FrameContext,
+        frame: &Chrome,
     ) {
         let size = frame.canvas_size;
         self.base

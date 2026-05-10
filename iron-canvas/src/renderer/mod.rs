@@ -38,28 +38,25 @@
 //! `PaneRegion`; a thick separator line marks the freeze boundary. See
 //! the diagram in `ARCHITECTURE.md` for the layout.
 
-mod cache;
-mod cells;
-mod headers;
-mod overlays;
-mod pane;
+pub(crate) mod cache;
 mod text;
-mod text_paint;
+pub(crate) mod text_paint;
 mod viewport;
 
 use std::cell::{Cell, RefCell};
 use web_sys::CanvasRenderingContext2d;
 
-use crate::geometry::frame::FrameContext;
+use crate::chrome::Chrome;
 use crate::geometry::prim::Axis;
 use crate::layer::RenderOverlays;
 use crate::painter::CanvasPainter;
 use crate::renderer::cache::FrameCache;
 use crate::CanvasModel;
+pub(crate) use crate::cell::PaneCells;
+pub(crate) use crate::chrome::PaneRegion;
 pub(crate) use cache::ColNameIntern;
 pub(crate) use cache::ColorIntern;
 pub(crate) use cache::FontIntern;
-pub(crate) use pane::PaneRegion;
 
 #[cfg(test)]
 pub(crate) use text_paint::{layout_into, TextLine};
@@ -74,22 +71,22 @@ use crate::painter::Painter;
 /// `render_grid` for the grid, `render_overlays` for the overlay. A grid
 /// layer cannot call `render_overlays` and vice versa.
 pub(crate) struct RendererCore<P: Painter> {
-    painter: P,
+    pub(crate) painter: P,
     dpr: i32,
-    frame_cache: FrameCache,
+    pub(crate) frame_cache: FrameCache,
     /// Renderer-lifetime intern table for `ctx.font` strings. Lives outside
     /// `FrameCache` because identical fonts repeat across frames, not just
     /// within a single paint.
-    pub(in crate::renderer) font_intern: FontIntern,
+    pub(crate) font_intern: FontIntern,
     /// Renderer-lifetime intern of column-letter labels. Same rationale as
     /// `font_intern` — column names repeat every frame; cache once, clone the
     /// `Rc<str>` thereafter.
-    pub(in crate::renderer) col_intern: ColNameIntern,
+    pub(crate) col_intern: ColNameIntern,
     /// Renderer-lifetime intern of per-cell color overrides (border + text).
     /// Hot-path callers (`BorderPaint::resolve`, `CellTextStyle::resolve`)
     /// previously allocated a fresh `String` per cell per frame; the intern
     /// makes those calls `Rc::clone` after the first sighting of each color.
-    pub(in crate::renderer) color_intern: ColorIntern,
+    pub(crate) color_intern: ColorIntern,
 }
 
 impl<P: Painter> RendererCore<P> {
@@ -143,7 +140,7 @@ impl<P: Painter> RendererCore<P> {
     /// headers, corner box. Does **not** clear the canvas — caller owns
     /// the clear so layer-owned renderers can paint a background fill
     /// instead.
-    pub(crate) fn render_grid(&self, model: &dyn CanvasModel, frame: &FrameContext) {
+    pub(crate) fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) {
         self.painter.begin_group("grid");
         // Cache the per-sheet grid-line toggle once for this frame so the
         // hot per-cell `paint_borders_grid` walk doesn't re-enter the model.
@@ -177,7 +174,7 @@ impl<P: Painter> RendererCore<P> {
         &mut self,
         model: &dyn CanvasModel,
         overlays: &RenderOverlays,
-        frame: &FrameContext,
+        frame: &Chrome,
     ) {
         self.painter.begin_group("overlay");
         self.draw_selection(model, frame);
@@ -222,7 +219,7 @@ pub(crate) struct GridRenderer<P: Painter> {
 }
 
 impl<P: Painter> GridRenderer<P> {
-    pub(crate) fn render_grid(&self, model: &dyn CanvasModel, frame: &FrameContext) {
+    pub(crate) fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) {
         self.core.render_grid(model, frame);
     }
 }
@@ -270,7 +267,7 @@ impl<P: Painter> OverlayRenderer<P> {
         &mut self,
         model: &dyn CanvasModel,
         overlays: &RenderOverlays,
-        frame: &FrameContext,
+        frame: &Chrome,
     ) {
         self.core.render_overlays(model, overlays, frame);
     }

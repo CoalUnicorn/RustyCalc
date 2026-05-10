@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use crate::{types::coord::CssColor, RCRange};
+use crate::RCRange;
 
 #[test]
 fn normalized_swaps_corners_when_inverted() {
@@ -104,14 +104,4 @@ fn with_sheet_attaches_sheet_id() {
     let area = RCRange::from_cell(2, 3).with_sheet(7);
     assert_eq!(area.sheet, 7);
     assert_eq!(area.range, RCRange::from_cell(2, 3));
-}
-
-#[test]
-fn css_color_empty_string_falls_back_to_black() {
-    assert_eq!(CssColor::new("").as_str(), "#000000");
-}
-
-#[test]
-fn css_color_lowercases_hex_input() {
-    assert_eq!(CssColor::new("#FF00AA").as_str(), "#ff00aa");
 }

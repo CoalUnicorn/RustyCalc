@@ -27,10 +27,13 @@
 
 pub mod geometry;
 
+mod cell;
+mod chrome;
 mod diag;
 mod layer;
 mod model_adapter;
 mod orchestrator;
+mod overlay;
 mod painter;
 pub mod renderer;
 pub mod theme;

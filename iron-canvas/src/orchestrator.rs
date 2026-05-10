@@ -3,7 +3,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::geometry::frame::FrameContext;
+use crate::chrome::Chrome;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::geometry::CanvasSize;
@@ -29,7 +29,7 @@ pub struct IronCanvas {
     theme: CanvasTheme,
     overlays: RenderOverlays,
     model: Option<Rc<dyn CanvasModel>>,
-    last_frame: Option<FrameContext>,
+    last_frame: Option<Chrome>,
     /// Logical (CSS) canvas size, written by `resize` and read by
     /// `paint_if_dirty` when building the shared `FrameContext`.
     size: CanvasSize,
@@ -125,7 +125,7 @@ impl IronCanvas {
         }
 
         // Full rebuild: scroll/freeze/size/sheet changed, or grid is dirty.
-        let frame = FrameContext::current(model, self.size, &self.theme);
+        let frame = Chrome::current(model, self.size, &self.theme);
 
         if grid_dirty {
             self.grid.paint(model, &frame);
