@@ -54,6 +54,15 @@ pub(crate) struct Chrome {
     /// Width of the row-header strip — measured per frame from the widest
     /// visible row label so the digits never clip past row 999.
     pub row_header_width: i32,
+    /// Height of the column-header strip. Static today (= `HEADER_ROW_HEIGHT`)
+    /// but stored on Chrome so the day this becomes dynamic, only the
+    /// assignment in `Chrome::current` changes — paint code already reads
+    /// `frame.col_header_thickness`.
+    pub col_header_thickness: i32,
+    /// Pixel origin where the cell area begins. Single source of truth used
+    /// by `Axis::strip_start`, `walk_header_strip`, hit-test, and viewport
+    /// math instead of recomputing `header + outer_offset` at every site.
+    pub cell_origin: Point,
     /// Active selection at paint time, raw `[r1, c1, r2, c2]` from
     /// `SelectedView.range`. Snapshotting it here keeps `autofill_handle`
     /// pure (no model read) and pins the handle position to the *painted*
@@ -82,18 +91,18 @@ impl PaneSet {
     /// Walk the row axis: build the frozen row slots and the scrollable
     /// row slots, returning the pixel Y of the frozen-rows separator.
     /// Independent of `row_header_width` — runs in Chrome::current's
-    /// Phase B, before the row-label measurement.
+    /// Phase B, before the row-label measurement. Reads `FROZEN_SEP`
+    /// directly because the gap between frozen and scroll bands is
+    /// PaneSet's own structural concern, not chrome geometry.
     pub(crate) fn build_rows(
         model: &dyn CanvasModel,
         frozen_count: i32,
-        col_header_height: i32,
-        outer_offset: i32,
-        frozen_sep_width: i32,
+        origin_y: i32,
         view_top_row: i32,
         canvas_h: f64,
     ) -> (Vec<RowSlot>, Vec<RowSlot>, i32) {
         let mut frozen_rows = Vec::with_capacity(frozen_count as usize);
-        let mut y_cursor = col_header_height + outer_offset;
+        let mut y_cursor = origin_y;
         for r in 1..=frozen_count {
             let h = row_height(model, r);
             frozen_rows.push(RowSlot {
@@ -103,7 +112,7 @@ impl PaneSet {
             });
             y_cursor += h;
         }
-        let frozen_offset_y = y_cursor + if frozen_count > 0 { frozen_sep_width } else { 0 };
+        let frozen_offset_y = y_cursor + if frozen_count > 0 { FROZEN_SEP } else { 0 };
 
         let row_first = (frozen_count + 1).max(view_top_row);
         let mut scroll_rows: Vec<RowSlot> = Vec::new();
@@ -130,20 +139,19 @@ impl PaneSet {
         (frozen_rows, scroll_rows, frozen_offset_y)
     }
 
-    /// Walk the column axis using the freshly-measured `row_header_width`
-    /// as the body-area X origin. Mirrors `build_rows` shape; runs in
-    /// Chrome::current's Phase D after measurement.
+    /// Walk the column axis using the cell-area X origin (which already
+    /// folds in the freshly-measured `row_header_width`). Mirrors
+    /// `build_rows` shape; runs in Chrome::current's Phase D after
+    /// measurement.
     pub(crate) fn build_cols(
         model: &dyn CanvasModel,
         frozen_count: i32,
-        row_header_width: i32,
-        outer_offset: i32,
-        frozen_sep_width: i32,
+        origin_x: i32,
         view_left_column: i32,
         canvas_w: f64,
     ) -> (Vec<ColSlot>, Vec<ColSlot>, i32) {
         let mut frozen_cols = Vec::with_capacity(frozen_count as usize);
-        let mut x_cursor = row_header_width + outer_offset;
+        let mut x_cursor = origin_x;
         for c in 1..=frozen_count {
             let w = col_width(model, c);
             frozen_cols.push(ColSlot {
@@ -153,7 +161,7 @@ impl PaneSet {
             });
             x_cursor += w;
         }
-        let frozen_offset_x = x_cursor + if frozen_count > 0 { frozen_sep_width } else { 0 };
+        let frozen_offset_x = x_cursor + if frozen_count > 0 { FROZEN_SEP } else { 0 };
 
         let col_first = (frozen_count + 1).max(view_left_column);
         let mut scroll_cols: Vec<ColSlot> = Vec::new();
@@ -243,23 +251,18 @@ impl Chrome {
         });
         let sheet = model.get_selected_sheet();
 
-        // Phase A — chrome geometry.
-        let col_header_height = HEADER_ROW_HEIGHT;
-        let outer_offset = HEADER_OFFSET;
-        let frozen_sep_width = FROZEN_SEP;
+        // Phase A — frozen counts only. Chrome-geometry constants
+        // (HEADER_ROW_HEIGHT, HEADER_OFFSET, FROZEN_SEP) are read at the
+        // point of need below; PaneSet no longer takes them as params.
         let frozen_row_count = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_col_count = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
-        // Phase B — row walk (independent of row_header_width).
-        let (frozen_rows, scroll_rows, frozen_offset_y) = PaneSet::build_rows(
-            model,
-            frozen_row_count,
-            col_header_height,
-            outer_offset,
-            frozen_sep_width,
-            view.top_row,
-            canvas.h,
-        );
+        // Phase B — row walk. `origin_y` is the top edge of the cell area;
+        // static today (col header is fixed-height) but computed here so
+        // the day it goes dynamic, only this line changes.
+        let origin_y = HEADER_ROW_HEIGHT + HEADER_OFFSET;
+        let (frozen_rows, scroll_rows, frozen_offset_y) =
+            PaneSet::build_rows(model, frozen_row_count, origin_y, view.top_row, canvas.h);
 
         // Phase C — measure row_header_width from the last visible row label.
         let last_visible_row = scroll_rows
@@ -268,18 +271,18 @@ impl Chrome {
             .unwrap_or((frozen_row_count + 1).max(view.top_row));
         let row_header_width = measure_row_header_width(last_visible_row);
 
-        // Phase D — col walk uses the measured width.
+        // Phase D — col walk uses the measured width to anchor `origin_x`.
+        let origin_x = row_header_width + HEADER_OFFSET;
         let (frozen_cols, scroll_cols, frozen_offset_x) = PaneSet::build_cols(
             model,
             frozen_col_count,
-            row_header_width,
-            outer_offset,
-            frozen_sep_width,
+            origin_x,
             view.left_column,
             canvas.w,
         );
 
-        // Phase E — assemble.
+        // Phase E — assemble. `cell_origin` reuses the locals from B/D so
+        // there's a single source of truth for the cell-area top-left.
         let frozen = FrozenRC {
             rows: frozen_row_count,
             cols: frozen_col_count,
@@ -294,12 +297,19 @@ impl Chrome {
             frozen_cols,
             scroll_cols,
         };
+        let col_header_thickness = HEADER_ROW_HEIGHT;
+        let cell_origin = Point {
+            x: origin_x,
+            y: origin_y,
+        };
 
         Chrome {
             sheet,
             frozen,
             pane_set,
             row_header_width,
+            col_header_thickness,
+            cell_origin,
             selection_range: view.selection,
             canvas_size: canvas,
             theme: theme.clone(),
@@ -358,12 +368,20 @@ impl Chrome {
 
     #[inline]
     pub(crate) fn top_row(&self) -> i32 {
-        self.pane_set.scroll_rows.first().map(|s| s.row).unwrap_or(1)
+        self.pane_set
+            .scroll_rows
+            .first()
+            .map(|s| s.row)
+            .unwrap_or(1)
     }
 
     #[inline]
     pub(crate) fn left_column(&self) -> i32 {
-        self.pane_set.scroll_cols.first().map(|s| s.col).unwrap_or(1)
+        self.pane_set
+            .scroll_cols
+            .first()
+            .map(|s| s.col)
+            .unwrap_or(1)
     }
 
     #[inline]

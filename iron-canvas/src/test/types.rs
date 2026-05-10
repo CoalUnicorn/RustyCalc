@@ -37,15 +37,11 @@ fn column_header_rect_thickness_maps_to_width() {
     assert_eq!(rect.width, 50);
 }
 
-#[test]
-fn row_strip_start_is_below_top_header() {
-    assert_eq!(Axis::Row.strip_start(), HEADER_ROW_HEIGHT + HEADER_OFFSET);
-}
-
-#[test]
-fn column_strip_start_is_right_of_left_header() {
-    assert_eq!(Axis::Column.strip_start(), HEADER_COL_WIDTH + HEADER_OFFSET);
-}
+// `Axis::strip_start` lost its prim-level unit tests in R2 — once it took
+// `&Chrome` it became a thin delegate to `chrome.cell_origin.{x,y}`.
+// The semantic invariant (column headers stay aligned with cell columns
+// across scrolls) lives at the Chrome layer in
+// `chrome_invariants::column_headers_align_with_cell_columns_at_7_digit_scroll`.
 
 fn frozen(rows: i32, cols: i32, origin: Point) -> FrozenRC {
     FrozenRC {

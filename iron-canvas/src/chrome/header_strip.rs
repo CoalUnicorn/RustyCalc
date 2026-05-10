@@ -48,7 +48,7 @@ impl<P: Painter> RendererCore<P> {
         let frozen_count = axis.frozen_count(frame);
         let frozen_origin = axis.frozen_origin(frame);
 
-        let mut frozen_cursor = axis.strip_start();
+        let mut frozen_cursor = axis.strip_start(frame);
         for i in 1..=frozen_count {
             let t = axis.frame_extent(frame, i);
             if t <= 0 {
@@ -61,7 +61,7 @@ impl<P: Painter> RendererCore<P> {
         let mut scroll_cursor = if frozen_count > 0 {
             frozen_origin
         } else {
-            axis.strip_start()
+            axis.strip_start(frame)
         };
         for i in axis.visible_band(frame) {
             let t = axis.frame_extent(frame, i);

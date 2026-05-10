@@ -2,10 +2,7 @@ use std::ops::RangeInclusive;
 
 use crate::{
     chrome::Chrome,
-    geometry::{
-        constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT},
-        pixel_rect::PixelRect,
-    },
+    geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect},
     RCRange,
 };
 
@@ -101,12 +98,14 @@ impl Axis {
         }
     }
 
-    /// Pixel position where the header strip begins along this axis,
-    /// offset by HEADER_OFFSET `0.5` for crisp integer-coordinate strokes.
-    pub(crate) fn strip_start(self) -> i32 {
+    /// Pixel position where the cell area begins along this axis — the
+    /// column-axis value tracks the dynamic `row_header_width` via
+    /// `chrome.cell_origin.x`, so deep scrolls (4+ digit row numbers) keep
+    /// header columns aligned with cell columns.
+    pub(crate) fn strip_start(self, chrome: &Chrome) -> i32 {
         match self {
-            Axis::Row => HEADER_ROW_HEIGHT + HEADER_OFFSET,
-            Axis::Column => HEADER_COL_WIDTH + HEADER_OFFSET,
+            Axis::Row => chrome.cell_origin.y,
+            Axis::Column => chrome.cell_origin.x,
         }
     }
 

@@ -13,7 +13,8 @@
 use ironcalc_base::types::{CellType, Style};
 
 use crate::chrome::{measure_row_header_width, Chrome};
-use crate::geometry::constants::HEADER_COL_WIDTH;
+use crate::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
+use crate::geometry::prim::Axis;
 use crate::renderer::RendererCore;
 use crate::test::painter::{DrawOp, RecorderPainter};
 use crate::theme::CanvasTheme;
@@ -193,5 +194,66 @@ fn corner_box_rect_widens_when_scrolled_to_7_digit_rows() {
                 "scrolled corner-box width ({far_corner}) must exceed top corner ({top_corner})",
             );
         });
+    });
+}
+
+/// R1 invariant: `cell_origin` is the single source of truth for where the
+/// cell area begins. It must equal the two header thicknesses plus the
+/// outer offset on each axis. Holds at every scroll position — `cell_origin.x`
+/// tracks the dynamic `row_header_width`, `cell_origin.y` tracks the
+/// (currently static) `col_header_thickness`.
+#[test]
+fn cell_origin_matches_header_thicknesses() {
+    drive_render_grid(&StubModel::at_top(), |frame, _| {
+        assert_eq!(frame.col_header_thickness, HEADER_ROW_HEIGHT);
+        assert_eq!(
+            frame.cell_origin.x,
+            frame.row_header_width + HEADER_OFFSET,
+            "cell_origin.x must equal row_header_width + outer_offset"
+        );
+        assert_eq!(
+            frame.cell_origin.y,
+            frame.col_header_thickness + HEADER_OFFSET,
+            "cell_origin.y must equal col_header_thickness + outer_offset"
+        );
+    });
+
+    drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame_far, _| {
+        assert_eq!(
+            frame_far.cell_origin.x,
+            frame_far.row_header_width + HEADER_OFFSET,
+            "cell_origin.x must track row_header_width even at deep scrolls"
+        );
+        assert_eq!(frame_far.col_header_thickness, HEADER_ROW_HEIGHT);
+    });
+}
+
+/// R2 invariant — the bug fix. At a 7-digit scroll position the row-number
+/// strip widens past `HEADER_COL_WIDTH`. Column headers must shift right by
+/// the same amount, otherwise they desync from cell columns. After R2,
+/// `Axis::Column.strip_start(frame)` returns `frame.cell_origin.x`, which
+/// is `row_header_width + outer_offset` — so the strip's leading edge
+/// always coincides with the cell area's leading edge.
+#[test]
+fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
+    drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame, _| {
+        assert!(
+            frame.cell_origin.x > HEADER_COL_WIDTH + HEADER_OFFSET,
+            "test premise: 7-digit scroll must widen row header past default \
+             (cell_origin.x={}, default={})",
+            frame.cell_origin.x,
+            HEADER_COL_WIDTH + HEADER_OFFSET,
+        );
+        assert_eq!(
+            Axis::Column.strip_start(frame),
+            frame.cell_origin.x,
+            "column header strip must start at cell_origin.x — anything else \
+             means headers misalign with cell columns"
+        );
+        assert_eq!(
+            Axis::Row.strip_start(frame),
+            frame.cell_origin.y,
+            "row header strip must start at cell_origin.y"
+        );
     });
 }
