@@ -15,14 +15,15 @@
 
 pub(crate) mod borders;
 pub(crate) mod paint;
+pub(crate) mod text;
 
 pub(crate) use paint::{CellPaint, PaneCells};
 
 use ironcalc_base::types::CellType;
 
+use crate::cell::text::TextPaint;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::painter::Painter;
-use crate::renderer::text_paint::TextPaint;
 use crate::renderer::RendererCore;
 use crate::theme::CanvasTheme;
 use crate::CanvasModel;

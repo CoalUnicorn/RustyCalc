@@ -5,7 +5,7 @@ use ironcalc_base::types::{CellType, Style};
 
 use crate::painter::CssColor;
 use crate::cell::CellPaint;
-use crate::renderer::text_paint::TextLine;
+use crate::cell::text::TextLine;
 
 pub(crate) struct FrameCache {
     /// Scratch buffer parking each pane's resolved `CellPaint`s during the

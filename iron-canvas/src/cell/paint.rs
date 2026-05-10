@@ -10,13 +10,13 @@
 use ironcalc_base::types::{CellType, Style};
 
 use crate::cell::borders::ResolvedBorders;
+use crate::cell::text::TextPaint;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::geometry::frame::slot::{ColSlot, RowSlot};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::cache::ColorIntern;
-use crate::renderer::text_paint::TextPaint;
 use crate::renderer::RendererCore;
 use crate::theme::CanvasTheme;
 use crate::types::coord::{CellAddress, RCRange};

@@ -39,8 +39,6 @@
 //! the diagram in `ARCHITECTURE.md` for the layout.
 
 pub(crate) mod cache;
-mod text;
-pub(crate) mod text_paint;
 mod viewport;
 
 use std::cell::{Cell, RefCell};
@@ -59,7 +57,7 @@ pub(crate) use cache::ColorIntern;
 pub(crate) use cache::FontIntern;
 
 #[cfg(test)]
-pub(crate) use text_paint::{layout_into, TextLine};
+pub(crate) use crate::cell::text::{layout_into, TextLine};
 
 use crate::painter::Painter;
 
