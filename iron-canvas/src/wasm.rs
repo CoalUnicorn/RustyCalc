@@ -91,11 +91,24 @@ impl JsBackedModel {
         }
     }
 
-    /// Validated cast from a raw JS handle. Caller (orchestrator's
-    /// `set_model_js`) propagates the error to JS so a wrong handle
-    /// surfaces at the boundary, not on the next render-time method call.
-    pub fn try_from_js_value(value: JsValue) -> Result<Self, JsValue> {
-        value.dyn_into::<IronCalcModelHandle>().map(Self::new)
+    /// Adopt a raw JS handle as an opaque `IronCalcModelHandle`. Validates
+    /// structurally (one duck-tested method) rather than by `instanceof`,
+    /// because the handle is module-agnostic — a host may bundle the
+    /// IronCalc wasm under any path. Returns a `JsError` (not a bare
+    /// `JsValue`) so the JS-side catch sees a real `Error` with a useful
+    /// `.message` instead of an opaque `[object Object]`.
+    pub fn try_from_js_value(value: JsValue) -> Result<Self, JsError> {
+        let probe = JsValue::from_str("getSelectedView");
+        let has = js_sys::Reflect::has(&value, &probe).map_err(|_| {
+            JsError::new("set_model_js: argument is not an object (expected an IronCalc Model)")
+        })?;
+        if !has {
+            return Err(JsError::new(
+                "set_model_js: handle missing required method 'getSelectedView' \
+                 — expected an IronCalc Model",
+            ));
+        }
+        Ok(Self::new(value.unchecked_into()))
     }
 
     /// `(js_throw_count, serde_shape_errs)`. Diagnostic surface for tests

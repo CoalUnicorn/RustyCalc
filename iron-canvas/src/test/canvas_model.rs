@@ -83,33 +83,35 @@ impl CanvasModel for MockCanvasModel {
     }
 }
 
-// FrozenRC — exercised through the production path (Chrome::current →
-// PaneSet::build_rows/build_cols → frozen.offset). The standalone
-// `FrozenRC::from_model` constructor was removed in R6; these tests now
-// assert the same math against the only path that reaches it in prod.
+// Frozen-band geometry — exercised through the production path
+// (Chrome::current → PaneSet::build_rows/build_cols). After R7 the
+// counts and offsets live on PaneSet directly; these tests pin the
+// same math against the only path that reaches it in prod.
 
 #[test]
-fn frozen_rc_no_freeze_has_no_bands_and_origin_skips_separator() {
+fn no_freeze_has_no_bands_and_origin_skips_separator() {
     let m = MockCanvasModel::default();
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    assert_eq!(frame.frozen.frozen_rows_count(), 0);
-    assert_eq!(frame.frozen.frozen_cols_count(), 0);
-    assert_eq!(frame.frozen.offset.x, HEADER_COL_WIDTH + HEADER_OFFSET);
-    assert_eq!(frame.frozen.offset.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
+    let p = &frame.pane_set;
+    assert_eq!(p.frozen_rows_count(), 0);
+    assert_eq!(p.frozen_cols_count(), 0);
+    assert_eq!(p.frozen_offset_x(), HEADER_COL_WIDTH + HEADER_OFFSET);
+    assert_eq!(p.frozen_offset_y(), HEADER_ROW_HEIGHT + HEADER_OFFSET);
 }
 
 #[test]
-fn frozen_rc_rows_only_adds_separator_on_y_only() {
+fn frozen_rows_only_adds_separator_on_y_only() {
     let m = MockCanvasModel {
         frozen_rows: 2,
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    assert_eq!(frame.frozen.frozen_rows_count(), 2);
-    assert_eq!(frame.frozen.frozen_cols_count(), 0);
-    assert_eq!(frame.frozen.offset.x, HEADER_COL_WIDTH + HEADER_OFFSET);
+    let p = &frame.pane_set;
+    assert_eq!(p.frozen_rows_count(), 2);
+    assert_eq!(p.frozen_cols_count(), 0);
+    assert_eq!(p.frozen_offset_x(), HEADER_COL_WIDTH + HEADER_OFFSET);
     assert_eq!(
-        frame.frozen.offset.y,
+        p.frozen_offset_y(),
         (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET)
             + 2.0 * DEFAULT_ROW_HEIGHT
             + f64::from(FROZEN_SEP))
@@ -118,24 +120,25 @@ fn frozen_rc_rows_only_adds_separator_on_y_only() {
 }
 
 #[test]
-fn frozen_rc_both_axes_add_separator_on_each() {
+fn frozen_both_axes_add_separator_on_each() {
     let m = MockCanvasModel {
         frozen_rows: 1,
         frozen_cols: 3,
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    assert_eq!(frame.frozen.frozen_rows_count(), 1);
-    assert_eq!(frame.frozen.frozen_cols_count(), 3);
+    let p = &frame.pane_set;
+    assert_eq!(p.frozen_rows_count(), 1);
+    assert_eq!(p.frozen_cols_count(), 3);
     assert_eq!(
-        frame.frozen.offset.x,
+        p.frozen_offset_x(),
         (f64::from(HEADER_COL_WIDTH + HEADER_OFFSET)
             + 3.0 * DEFAULT_COL_WIDTH
             + f64::from(FROZEN_SEP))
         .round() as i32
     );
     assert_eq!(
-        frame.frozen.offset.y,
+        p.frozen_offset_y(),
         (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP))
             .round() as i32
     );
@@ -144,12 +147,13 @@ fn frozen_rc_both_axes_add_separator_on_each() {
 #[test]
 fn frame_geometry_returns_zero_for_out_of_range_indices() {
     let frame = Chrome::current(&MockCanvasModel::default(), test_canvas(), &LIGHT);
-    assert_ne!(frame.col_to_x(1), 0);
-    assert_ne!(frame.row_to_y(1), 0);
-    assert_eq!(frame.row_to_y(99999), 0);
-    assert_eq!(frame.col_to_x(99999), 0);
-    assert_eq!(frame.row_extent_at(99999), 0);
-    assert_eq!(frame.col_extent_at(99999), 0);
+    let p = &frame.pane_set;
+    assert_ne!(p.col_to_x(1), 0);
+    assert_ne!(p.row_to_y(1), 0);
+    assert_eq!(p.row_to_y(99999), 0);
+    assert_eq!(p.col_to_x(99999), 0);
+    assert_eq!(p.row_extent_at(99999), 0);
+    assert_eq!(p.col_extent_at(99999), 0);
 }
 
 // FrameContext: pixel ↔ cell math
@@ -184,9 +188,10 @@ fn col_to_x_inside_frozen_band_skips_frozen_offset() {
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    assert_eq!(frame.col_to_x(1), HEADER_COL_WIDTH + HEADER_OFFSET);
+    let p = &frame.pane_set;
+    assert_eq!(p.col_to_x(1), HEADER_COL_WIDTH + HEADER_OFFSET);
     assert_eq!(
-        frame.col_to_x(2),
+        p.col_to_x(2),
         (f64::from(HEADER_COL_WIDTH + HEADER_OFFSET) + DEFAULT_COL_WIDTH).round() as i32
     );
 }
@@ -199,11 +204,12 @@ fn col_to_x_past_frozen_seam_uses_frozen_offset_and_left_column() {
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    let origin_x = frame.frozen.offset.x;
+    let p = &frame.pane_set;
+    let origin_x = p.frozen_offset_x();
     // col 5 is the first scrollable on screen -> at the frozen offset
-    assert_eq!(frame.col_to_x(5), origin_x);
+    assert_eq!(p.col_to_x(5), origin_x);
     assert_eq!(
-        frame.col_to_x(6),
+        p.col_to_x(6),
         (f64::from(origin_x) + DEFAULT_COL_WIDTH).round() as i32
     );
 }
@@ -230,11 +236,11 @@ fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
         .expect("finite selection has handle");
     assert_eq!(
         p.x,
-        (f64::from(frame.col_to_x(5)) + DEFAULT_COL_WIDTH).round() as i32
+        (f64::from(frame.pane_set.col_to_x(5)) + DEFAULT_COL_WIDTH).round() as i32
     );
     assert_eq!(
         p.y,
-        (f64::from(frame.row_to_y(4)) + DEFAULT_ROW_HEIGHT).round() as i32
+        (f64::from(frame.pane_set.row_to_y(4)) + DEFAULT_ROW_HEIGHT).round() as i32
     );
 }
 
@@ -331,11 +337,11 @@ fn autofill_handle_tracks_in_place_selection_range_update() {
     assert_ne!(before, after, "handle must move with selection_range");
     assert_eq!(
         after.x,
-        (f64::from(frame.col_to_x(6)) + DEFAULT_COL_WIDTH).round() as i32
+        (f64::from(frame.pane_set.col_to_x(6)) + DEFAULT_COL_WIDTH).round() as i32
     );
     assert_eq!(
         after.y,
-        (f64::from(frame.row_to_y(5)) + DEFAULT_ROW_HEIGHT).round() as i32
+        (f64::from(frame.pane_set.row_to_y(5)) + DEFAULT_ROW_HEIGHT).round() as i32
     );
 }
 
@@ -407,9 +413,10 @@ fn pixel_to_col_round_trips_col_to_x() {
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
+    let p = &frame.pane_set;
     for &c in &[1_i32, 2, 5, 6, 8] {
-        let x = frame.col_to_x(c);
+        let x = p.col_to_x(c);
         // Nudge +0.5 to land safely inside the cell (avoid the edge).
-        assert_eq!(frame.pixel_to_col(x + 1), Some(c), "round-trip col {}", c);
+        assert_eq!(p.pixel_to_col(x + 1), Some(c), "round-trip col {}", c);
     }
 }

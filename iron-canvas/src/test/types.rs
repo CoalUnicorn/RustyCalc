@@ -2,10 +2,8 @@
 #![allow(unused_imports)]
 
 use crate::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
-use crate::chrome::FrozenRC;
-use crate::geometry::prim::{Axis, Point};
+use crate::geometry::prim::Axis;
 use crate::layer::RenderOverlays;
-use crate::renderer::PaneRegion;
 
 #[test]
 fn row_header_rect_pins_x_to_left_strip() {
@@ -36,48 +34,6 @@ fn column_header_rect_thickness_maps_to_width() {
     let rect = Axis::Column.header_rect(100, 50, HEADER_ROW_HEIGHT);
     assert_eq!(rect.width, 50);
 }
-
-// `Axis::strip_start` lost its prim-level unit tests in R2 — once it took
-// `&Chrome` it became a thin delegate to `chrome.cell_origin.{x,y}`.
-// The semantic invariant (column headers stay aligned with cell columns
-// across scrolls) lives at the Chrome layer in
-// `chrome_invariants::column_headers_align_with_cell_columns_at_7_digit_scroll`.
-
-fn frozen(rows: i32, cols: i32, origin: Point) -> FrozenRC {
-    FrozenRC {
-        rows,
-        cols,
-        offset: origin,
-    }
-}
-
-// #[test]
-// fn pane_top_left_tags_both_bands_frozen() {
-//     let p = PaneRegion::top_left();
-//     assert_eq!(p.row_band, Band::Frozen);
-//     assert_eq!(p.col_band, Band::Frozen);
-// }
-
-// #[test]
-// fn pane_top_right_tags_frozen_rows_scroll_cols() {
-//     let p = PaneRegion::top_right();
-//     assert_eq!(p.row_band, Band::Frozen);
-//     assert_eq!(p.col_band, Band::Scroll);
-// }
-
-// #[test]
-// fn pane_bottom_left_tags_scroll_rows_frozen_cols() {
-//     let p = PaneRegion::bottom_left();
-//     assert_eq!(p.row_band, Band::Scroll);
-//     assert_eq!(p.col_band, Band::Frozen);
-// }
-
-// #[test]
-// fn pane_bottom_right_tags_both_bands_scroll() {
-//     let p = PaneRegion::bottom_right();
-//     assert_eq!(p.row_band, Band::Scroll);
-//     assert_eq!(p.col_band, Band::Scroll);
-// }
 
 #[test]
 fn render_overlays_default_equals_itself() {

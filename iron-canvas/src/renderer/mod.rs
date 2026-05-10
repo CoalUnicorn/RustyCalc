@@ -51,7 +51,6 @@ use crate::painter::CanvasPainter;
 use crate::renderer::cache::FrameCache;
 use crate::types::coord::RCRange;
 use crate::CanvasModel;
-pub(crate) use crate::cell::PaneCells;
 pub(crate) use crate::chrome::PaneRegion;
 pub(crate) use cache::ColNameIntern;
 pub(crate) use cache::ColorIntern;
@@ -208,24 +207,25 @@ impl<P: Painter> RendererCore<P> {
     /// (scrollable viewport + frozen bands). All coordinate math reads from the
     /// `Chrome` slot vecs — zero model queries.
     pub(crate) fn range_pixel_bounds(&self, frame: &Chrome, range: RCRange) -> Option<PixelRect> {
-        let frozen_rows = frame.frozen.frozen_rows_count();
-        let frozen_cols = frame.frozen.frozen_cols_count();
+        let p = &frame.pane_set;
+        let frozen_rows = p.frozen_rows_count();
+        let frozen_cols = p.frozen_cols_count();
 
         if !self.range_intersects_fold(frame, range, frozen_rows, frozen_cols) {
             return None;
         }
 
-        let x = frame.col_to_x(range.c1);
-        let y = frame.row_to_y(range.r1);
-        let right = if range.c2 > frame.last_visible_col() && range.c2 > frozen_cols {
+        let x = p.col_to_x(range.c1);
+        let y = p.row_to_y(range.r1);
+        let right = if range.c2 > p.last_visible_col() && range.c2 > frozen_cols {
             frame.canvas_size.w as i32
         } else {
-            frame.col_to_x(range.c2) + frame.col_extent_at(range.c2)
+            p.col_to_x(range.c2) + p.col_extent_at(range.c2)
         };
-        let bottom = if range.r2 > frame.last_visible_row() && range.r2 > frozen_rows {
+        let bottom = if range.r2 > p.last_visible_row() && range.r2 > frozen_rows {
             frame.canvas_size.h as i32
         } else {
-            frame.row_to_y(range.r2) + frame.row_extent_at(range.r2)
+            p.row_to_y(range.r2) + p.row_extent_at(range.r2)
         };
         Some(PixelRect {
             top_left: Point { x, y },
@@ -244,16 +244,17 @@ impl<P: Painter> RendererCore<P> {
         frozen_rows: i32,
         frozen_cols: i32,
     ) -> bool {
-        if range.c1 > frame.last_visible_col() && range.c1 > frozen_cols {
+        let p = &frame.pane_set;
+        if range.c1 > p.last_visible_col() && range.c1 > frozen_cols {
             return false;
         }
-        if range.r1 > frame.last_visible_row() && range.r1 > frozen_rows {
+        if range.r1 > p.last_visible_row() && range.r1 > frozen_rows {
             return false;
         }
-        if range.c2 < frame.left_column() && range.c2 > frozen_cols {
+        if range.c2 < p.left_column() && range.c2 > frozen_cols {
             return false;
         }
-        if range.r2 < frame.top_row() && range.r2 > frozen_rows {
+        if range.r2 < p.top_row() && range.r2 > frozen_rows {
             return false;
         }
         true

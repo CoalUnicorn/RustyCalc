@@ -26,18 +26,15 @@ use crate::geometry::{
     pixel_rect::PixelRect,
     prim::Point,
 };
-use crate::renderer::PaneCells;
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
 use crate::{CanvasModel, CanvasSize, CanvasView, RCRange};
 
 pub(crate) mod corner_box;
-pub mod frozen;
 pub(crate) mod frozen_separator;
 pub(crate) mod header_strip;
 pub(crate) mod pane_region;
 
-pub use frozen::FrozenRC;
 pub(crate) use pane_region::PaneRegion;
 
 /// Approx pixel width per digit at the bold 12px Inter header font.
@@ -49,7 +46,6 @@ const HEADER_LABEL_PAD_PX: i32 = 4;
 #[derive(Debug)]
 pub(crate) struct Chrome {
     pub sheet: u32,
-    pub frozen: FrozenRC,
     pub pane_set: PaneSet,
     /// Width of the row-header strip — measured per frame from the widest
     /// visible row label so the digits never clip past row 999.
@@ -193,17 +189,153 @@ impl PaneSet {
         }
     }
 
-    /// Open a `PaneCells` iterator over one quadrant. The chrome reference
-    /// threads theme / sheet / canvas through to each emitted `CellSlot`'s
-    /// resolver without duplicating snapshot state.
-    ///
-    /// Currently dead — callers still go through `PaneCells::new` directly
-    /// via `PaneRegion::rows/cols`. Held as the layer's API surface for
-    /// the per-axis migration that lands when the next callsite touch
-    /// happens.
-    #[allow(dead_code)]
-    pub(crate) fn cells<'a>(&'a self, region: &'a PaneRegion, chrome: &'a Chrome) -> PaneCells<'a> {
-        PaneCells::new(region, chrome)
+    #[inline]
+    pub(crate) fn frozen_rows_count(&self) -> i32 {
+        self.rows.frozen.len() as i32
+    }
+
+    #[inline]
+    pub(crate) fn frozen_cols_count(&self) -> i32 {
+        self.cols.frozen.len() as i32
+    }
+
+    #[inline]
+    fn row_slot(&self, row: i32) -> Option<&RowSlot> {
+        if row <= self.frozen_rows_count() {
+            self.rows.frozen.get((row - 1) as usize)
+        } else {
+            let first = self.rows.scroll.first()?.row;
+            self.rows.scroll.get((row - first) as usize)
+        }
+    }
+
+    #[inline]
+    fn col_slot(&self, col: i32) -> Option<&ColSlot> {
+        if col <= self.frozen_cols_count() {
+            self.cols.frozen.get((col - 1) as usize)
+        } else {
+            let first = self.cols.scroll.first()?.col;
+            self.cols.scroll.get((col - first) as usize)
+        }
+    }
+
+    #[inline]
+    pub(crate) fn top_row(&self) -> i32 {
+        self.rows.scroll.first().map(|s| s.row).unwrap_or(1)
+    }
+
+    #[inline]
+    pub(crate) fn left_column(&self) -> i32 {
+        self.cols.scroll.first().map(|s| s.col).unwrap_or(1)
+    }
+
+    #[inline]
+    pub(crate) fn last_visible_row(&self) -> i32 {
+        self.rows
+            .scroll
+            .last()
+            .map(|s| s.row)
+            .unwrap_or_else(|| self.top_row())
+    }
+
+    #[inline]
+    pub(crate) fn last_visible_col(&self) -> i32 {
+        self.cols
+            .scroll
+            .last()
+            .map(|s| s.col)
+            .unwrap_or_else(|| self.left_column())
+    }
+
+    #[inline]
+    pub(crate) fn row_in_frame(&self, row: i32) -> bool {
+        row <= self.frozen_rows_count() || (row >= self.top_row() && row <= self.last_visible_row())
+    }
+
+    #[inline]
+    pub(crate) fn col_in_frame(&self, col: i32) -> bool {
+        col <= self.frozen_cols_count()
+            || (col >= self.left_column() && col <= self.last_visible_col())
+    }
+
+    #[inline]
+    pub(crate) fn row_extent_at(&self, row: i32) -> i32 {
+        self.row_slot(row).map(|s| s.height).unwrap_or(0)
+    }
+
+    #[inline]
+    pub(crate) fn col_extent_at(&self, col: i32) -> i32 {
+        self.col_slot(col).map(|s| s.width).unwrap_or(0)
+    }
+
+    pub(crate) fn row_to_y(&self, row: i32) -> i32 {
+        self.row_slot(row).map(|s| s.top).unwrap_or(0)
+    }
+
+    pub(crate) fn col_to_x(&self, col: i32) -> i32 {
+        self.col_slot(col).map(|s| s.left).unwrap_or(0)
+    }
+
+    pub(crate) fn pixel_to_row(&self, y: i32) -> Option<i32> {
+        for s in &self.rows.frozen {
+            if y >= s.top && y < s.bottom() {
+                return Some(s.row);
+            }
+        }
+        for s in &self.rows.scroll {
+            if y >= s.top && y < s.bottom() {
+                return Some(s.row);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn pixel_to_col(&self, x: i32) -> Option<i32> {
+        for s in &self.cols.frozen {
+            if x >= s.left && x < s.right() {
+                return Some(s.col);
+            }
+        }
+        for s in &self.cols.scroll {
+            if x >= s.left && x < s.right() {
+                return Some(s.col);
+            }
+        }
+        None
+    }
+
+    pub(crate) fn row_boundary_at(&self, y: i32, hit_zone: i32) -> Option<i32> {
+        for s in &self.rows.frozen {
+            if (s.bottom() - y).abs() <= hit_zone {
+                return Some(s.row);
+            }
+        }
+        for s in &self.rows.scroll {
+            if (s.bottom() - y).abs() <= hit_zone {
+                return Some(s.row);
+            }
+            if s.bottom() > y + hit_zone {
+                break;
+            }
+        }
+        None
+    }
+
+    pub(crate) fn col_boundary_at(&self, x: i32, hit_zone: i32) -> Option<i32> {
+        for s in &self.cols.frozen {
+            if (s.right() - x).abs() <= hit_zone {
+                return Some(s.col);
+            }
+        }
+        for s in &self.cols.scroll {
+            if (s.right() - x).abs() <= hit_zone {
+                return Some(s.col);
+            }
+            if s.right() > x + hit_zone {
+                break;
+            }
+        }
+        None
     }
 }
 
@@ -290,20 +422,9 @@ impl Chrome {
 
         // Phase E — assemble. `cell_origin` reuses the locals from B/D so
         // there's a single source of truth for the cell-area top-left.
-        let frozen = FrozenRC {
-            rows: frozen_row_count,
-            cols: frozen_col_count,
-            offset: Point {
-                x: columns.frozen_offset_x,
-                y: rows.frozen_offset_y,
-            },
-        };
         let pane_set = PaneSet {
             rows,
-            cols: columns, // frozen_rows,
-                           // scroll_rows,
-                           // frozen_cols,
-                           // scroll_cols,
+            cols: columns,
         };
         let col_header_thickness = HEADER_ROW_HEIGHT;
         let cell_origin = Point {
@@ -313,7 +434,6 @@ impl Chrome {
 
         Chrome {
             sheet,
-            frozen,
             pane_set,
             row_header_thickness,
             col_header_thickness,
@@ -337,11 +457,11 @@ impl Chrome {
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
         let want_top = (frozen_rows + 1).max(view.top_row);
         let want_left = (frozen_cols + 1).max(view.left_column);
-        if self.top_row() != want_top || self.left_column() != want_left {
+        if self.pane_set.top_row() != want_top || self.pane_set.left_column() != want_left {
             return false;
         }
-        frozen_rows == self.frozen.frozen_rows_count()
-            && frozen_cols == self.frozen.frozen_cols_count()
+        frozen_rows == self.pane_set.frozen_rows_count()
+            && frozen_cols == self.pane_set.frozen_cols_count()
             && sheet == self.sheet
     }
 
@@ -354,135 +474,18 @@ impl Chrome {
         }
     }
 
-    #[inline]
-    fn row_slot(&self, row: i32) -> Option<&RowSlot> {
-        if row <= self.frozen.frozen_rows_count() {
-            self.pane_set.rows.frozen.get((row - 1) as usize)
-        } else {
-            let first = self.pane_set.rows.scroll.first()?.row;
-            self.pane_set.rows.scroll.get((row - first) as usize)
-        }
-    }
-
-    #[inline]
-    fn col_slot(&self, col: i32) -> Option<&ColSlot> {
-        if col <= self.frozen.frozen_cols_count() {
-            self.pane_set.cols.frozen.get((col - 1) as usize)
-        } else {
-            let first = self.pane_set.cols.scroll.first()?.col;
-            self.pane_set.cols.scroll.get((col - first) as usize)
-        }
-    }
-
-    #[inline]
-    pub(crate) fn top_row(&self) -> i32 {
-        self.pane_set
-            .rows
-            .scroll
-            .first()
-            .map(|s| s.row)
-            .unwrap_or(1)
-    }
-
-    #[inline]
-    pub(crate) fn left_column(&self) -> i32 {
-        self.pane_set
-            .cols
-            .scroll
-            .first()
-            .map(|s| s.col)
-            .unwrap_or(1)
-    }
-
-    #[inline]
-    pub(crate) fn last_visible_row(&self) -> i32 {
-        self.pane_set
-            .rows
-            .scroll
-            .last()
-            .map(|s| s.row)
-            .unwrap_or(self.top_row())
-    }
-
-    #[inline]
-    pub(crate) fn last_visible_col(&self) -> i32 {
-        self.pane_set
-            .cols
-            .scroll
-            .last()
-            .map(|s| s.col)
-            .unwrap_or(self.left_column())
-    }
-
-    #[inline]
-    fn row_in_frame(&self, row: i32) -> bool {
-        row <= self.frozen.frozen_rows_count()
-            || (row >= self.top_row() && row <= self.last_visible_row())
-    }
-
-    #[inline]
-    fn col_in_frame(&self, col: i32) -> bool {
-        col <= self.frozen.frozen_cols_count()
-            || (col >= self.left_column() && col <= self.last_visible_col())
-    }
-
-    #[inline]
-    pub(crate) fn col_extent_at(&self, col: i32) -> i32 {
-        self.col_slot(col).map(|s| s.width).unwrap_or(0)
-    }
-
-    #[inline]
-    pub(crate) fn row_extent_at(&self, row: i32) -> i32 {
-        self.row_slot(row).map(|s| s.height).unwrap_or(0)
-    }
-
-    pub(crate) fn col_to_x(&self, col: i32) -> i32 {
-        self.col_slot(col).map(|s| s.left).unwrap_or(0)
-    }
-
-    pub(crate) fn row_to_y(&self, row: i32) -> i32 {
-        self.row_slot(row).map(|s| s.top).unwrap_or(0)
-    }
-
-    pub(crate) fn pixel_to_col(&self, x: i32) -> Option<i32> {
-        for s in &self.pane_set.cols.frozen {
-            if x >= s.left && x < s.right() {
-                return Some(s.col);
-            }
-        }
-        for s in &self.pane_set.cols.scroll {
-            if x >= s.left && x < s.right() {
-                return Some(s.col);
-            }
-        }
-        None
-    }
-
-    pub(crate) fn pixel_to_row(&self, y: i32) -> Option<i32> {
-        for s in &self.pane_set.rows.frozen {
-            if y >= s.top && y < s.bottom() {
-                return Some(s.row);
-            }
-        }
-        for s in &self.pane_set.rows.scroll {
-            if y >= s.top && y < s.bottom() {
-                return Some(s.row);
-            }
-        }
-        None
-    }
-
     pub(crate) fn cell_rect(&self, row: i32, col: i32) -> Option<PixelRect> {
-        if !self.row_in_frame(row) || !self.col_in_frame(col) {
+        let p = &self.pane_set;
+        if !p.row_in_frame(row) || !p.col_in_frame(col) {
             return None;
         }
         Some(PixelRect {
             top_left: Point {
-                x: self.col_to_x(col),
-                y: self.row_to_y(row),
+                x: p.col_to_x(col),
+                y: p.row_to_y(row),
             },
-            width: self.col_extent_at(col),
-            height: self.row_extent_at(row),
+            width: p.col_extent_at(col),
+            height: p.row_extent_at(row),
         })
     }
 
@@ -493,12 +496,13 @@ impl Chrome {
         if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
             return None;
         }
-        if !self.row_in_frame(r2) || !self.col_in_frame(c2) {
+        let p = &self.pane_set;
+        if !p.row_in_frame(r2) || !p.col_in_frame(c2) {
             return None;
         }
         Some(Point {
-            x: self.col_to_x(c2) + self.col_extent_at(c2),
-            y: self.row_to_y(r2) + self.row_extent_at(r2),
+            x: p.col_to_x(c2) + p.col_extent_at(c2),
+            y: p.row_to_y(r2) + p.row_extent_at(r2),
         })
     }
 
@@ -521,40 +525,6 @@ impl Chrome {
         }
     }
 
-    pub(crate) fn col_boundary_at(&self, x: i32, hit_zone: i32) -> Option<i32> {
-        for s in &self.pane_set.cols.frozen {
-            if (s.right() - x).abs() <= hit_zone {
-                return Some(s.col);
-            }
-        }
-        for s in &self.pane_set.cols.scroll {
-            if (s.right() - x).abs() <= hit_zone {
-                return Some(s.col);
-            }
-            if s.right() > x + hit_zone {
-                break;
-            }
-        }
-        None
-    }
-
-    pub(crate) fn row_boundary_at(&self, y: i32, hit_zone: i32) -> Option<i32> {
-        for s in &self.pane_set.rows.frozen {
-            if (s.bottom() - y).abs() <= hit_zone {
-                return Some(s.row);
-            }
-        }
-        for s in &self.pane_set.rows.scroll {
-            if (s.bottom() - y).abs() <= hit_zone {
-                return Some(s.row);
-            }
-            if s.bottom() > y + hit_zone {
-                break;
-            }
-        }
-        None
-    }
-
     pub(crate) fn hit_test(&self, x: i32, y: i32) -> HitTest {
         if x < 0 || y < 0 {
             return HitTest::Outside;
@@ -562,19 +532,20 @@ impl Chrome {
         if x < self.cell_origin.x && y < self.cell_origin.y {
             return HitTest::Corner;
         }
+        let p = &self.pane_set;
         if y < self.cell_origin.y {
-            return match self.pixel_to_col(x) {
+            return match p.pixel_to_col(x) {
                 Some(c) => HitTest::ColHeader(c),
                 None => HitTest::Outside,
             };
         }
         if x < self.cell_origin.x {
-            return match self.pixel_to_row(y) {
+            return match p.pixel_to_row(y) {
                 Some(r) => HitTest::RowHeader(r),
                 None => HitTest::Outside,
             };
         }
-        let (Some(row), Some(column)) = (self.pixel_to_row(y), self.pixel_to_col(x)) else {
+        let (Some(row), Some(column)) = (p.pixel_to_row(y), p.pixel_to_col(x)) else {
             return HitTest::Outside;
         };
         let h = self.autofill_handle_rect();
@@ -591,10 +562,16 @@ impl Chrome {
 
     pub(crate) fn resize_handle_at(&self, x: i32, y: i32, tolerance: i32) -> Option<ResizeTarget> {
         if y < self.col_header_thickness && x > self.row_header_thickness {
-            return self.col_boundary_at(x, tolerance).map(ResizeTarget::Column);
+            return self
+                .pane_set
+                .col_boundary_at(x, tolerance)
+                .map(ResizeTarget::Column);
         }
         if x < self.row_header_thickness && y > self.col_header_thickness {
-            return self.row_boundary_at(y, tolerance).map(ResizeTarget::Row);
+            return self
+                .pane_set
+                .row_boundary_at(y, tolerance)
+                .map(ResizeTarget::Row);
         }
         None
     }
