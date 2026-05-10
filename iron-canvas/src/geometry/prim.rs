@@ -62,7 +62,7 @@ impl Axis {
     /// `along` is the position along the axis (top_y for rows, left_x for
     /// cols). `parallel_size` is the cell's extent along the axis (row
     /// height / col width). `header_thickness` is the perpendicular size
-    /// of the header strip — `chrome.row_header_width` for rows (dynamic),
+    /// of the header strip — `chrome.row_header_thickness` for rows (dynamic),
     /// `HEADER_ROW_HEIGHT` for cols (currently static).
     pub(crate) fn header_rect(
         self,
@@ -99,7 +99,7 @@ impl Axis {
     }
 
     /// Pixel position where the cell area begins along this axis — the
-    /// column-axis value tracks the dynamic `row_header_width` via
+    /// column-axis value tracks the dynamic `row_header_thickness` via
     /// `chrome.cell_origin.x`, so deep scrolls (4+ digit row numbers) keep
     /// header columns aligned with cell columns.
     pub(crate) fn strip_start(self, chrome: &Chrome) -> i32 {

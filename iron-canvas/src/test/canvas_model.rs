@@ -12,7 +12,6 @@ use crate::geometry::constants::{
     AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
     HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
-use crate::chrome::FrozenRC;
 use crate::geometry::prim::Axis;
 use crate::theme::LIGHT;
 use crate::types::ui::HitTest;
@@ -85,16 +84,19 @@ impl CanvasModel for MockCanvasModel {
     }
 }
 
-// FrozenRC
+// FrozenRC — exercised through the production path (Chrome::current →
+// PaneSet::build_rows/build_cols → frozen.offset). The standalone
+// `FrozenRC::from_model` constructor was removed in R6; these tests now
+// assert the same math against the only path that reaches it in prod.
 
 #[test]
 fn frozen_rc_no_freeze_has_no_bands_and_origin_skips_separator() {
     let m = MockCanvasModel::default();
-    let frc = FrozenRC::from_model(&m);
-    assert_eq!(frc.frozen_rows_count(), 0);
-    assert_eq!(frc.frozen_cols_count(), 0);
-    assert_eq!(frc.offset.x, HEADER_COL_WIDTH + HEADER_OFFSET);
-    assert_eq!(frc.offset.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
+    let frame = Chrome::current(&m, test_canvas(), &LIGHT);
+    assert_eq!(frame.frozen.frozen_rows_count(), 0);
+    assert_eq!(frame.frozen.frozen_cols_count(), 0);
+    assert_eq!(frame.frozen.offset.x, HEADER_COL_WIDTH + HEADER_OFFSET);
+    assert_eq!(frame.frozen.offset.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
 }
 
 #[test]
@@ -103,12 +105,12 @@ fn frozen_rc_rows_only_adds_separator_on_y_only() {
         frozen_rows: 2,
         ..Default::default()
     };
-    let frc = FrozenRC::from_model(&m);
-    assert_eq!(frc.frozen_rows_count(), 2);
-    assert_eq!(frc.frozen_cols_count(), 0);
-    assert_eq!(frc.offset.x, HEADER_COL_WIDTH + HEADER_OFFSET);
+    let frame = Chrome::current(&m, test_canvas(), &LIGHT);
+    assert_eq!(frame.frozen.frozen_rows_count(), 2);
+    assert_eq!(frame.frozen.frozen_cols_count(), 0);
+    assert_eq!(frame.frozen.offset.x, HEADER_COL_WIDTH + HEADER_OFFSET);
     assert_eq!(
-        frc.offset.y,
+        frame.frozen.offset.y,
         (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET)
             + 2.0 * DEFAULT_ROW_HEIGHT
             + f64::from(FROZEN_SEP))
@@ -123,18 +125,18 @@ fn frozen_rc_both_axes_add_separator_on_each() {
         frozen_cols: 3,
         ..Default::default()
     };
-    let frc = FrozenRC::from_model(&m);
-    assert_eq!(frc.frozen_rows_count(), 1);
-    assert_eq!(frc.frozen_cols_count(), 3);
+    let frame = Chrome::current(&m, test_canvas(), &LIGHT);
+    assert_eq!(frame.frozen.frozen_rows_count(), 1);
+    assert_eq!(frame.frozen.frozen_cols_count(), 3);
     assert_eq!(
-        frc.offset.x,
+        frame.frozen.offset.x,
         (f64::from(HEADER_COL_WIDTH + HEADER_OFFSET)
             + 3.0 * DEFAULT_COL_WIDTH
             + f64::from(FROZEN_SEP))
         .round() as i32
     );
     assert_eq!(
-        frc.offset.y,
+        frame.frozen.offset.y,
         (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP))
             .round() as i32
     );

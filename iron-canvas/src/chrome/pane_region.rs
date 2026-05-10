@@ -49,15 +49,15 @@ impl PaneRegion {
 
     pub(crate) fn rows<'a>(&self, frame: &'a Chrome) -> &'a [RowSlot] {
         match self.row_band {
-            Band::Frozen => &frame.pane_set.frozen_rows,
-            Band::Scroll => &frame.pane_set.scroll_rows,
+            Band::Frozen => &frame.pane_set.rows.frozen,
+            Band::Scroll => &frame.pane_set.rows.scroll,
         }
     }
 
     pub(crate) fn cols<'a>(&self, frame: &'a Chrome) -> &'a [ColSlot] {
         match self.col_band {
-            Band::Frozen => &frame.pane_set.frozen_cols,
-            Band::Scroll => &frame.pane_set.scroll_cols,
+            Band::Frozen => &frame.pane_set.cols.frozen,
+            Band::Scroll => &frame.pane_set.cols.scroll,
         }
     }
 

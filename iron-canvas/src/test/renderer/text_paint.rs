@@ -56,14 +56,14 @@ fn font_intern_distinguishes_family() {
     assert!(!Rc::ptr_eq(&a, &b));
 }
 
-// ---------------------------------------------------------------------------
+// -----
 // layout_into: TextLine String capacity reuse
 //
 // The per-cell text path is hot. `lines` and `wrap_buf` are parked on
 // `FrameCache` so the second cell of a frame should not allocate. These tests
 // pin that contract: slot 0's `String` heap buffer survives across calls, and
 // stale lines from a longer prior cell are truncated rather than rendered.
-// ---------------------------------------------------------------------------
+// -----
 
 #[test]
 fn layout_into_reuses_text_line_string_buffer() {

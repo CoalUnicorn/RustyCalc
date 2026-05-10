@@ -21,6 +21,20 @@ pub struct ColSlot {
     pub width: i32,
 }
 
+#[derive(Clone, Debug)]
+pub struct PaneColumns {
+    pub frozen: Vec<ColSlot>,
+    pub scroll: Vec<ColSlot>,
+    pub frozen_offset_x: i32,
+}
+
+#[derive(Clone, Debug)]
+pub struct PaneRows {
+    pub frozen: Vec<RowSlot>,
+    pub scroll: Vec<RowSlot>,
+    pub frozen_offset_y: i32,
+}
+
 impl RowSlot {
     #[inline]
     pub fn bottom(&self) -> i32 {

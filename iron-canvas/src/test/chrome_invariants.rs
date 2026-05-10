@@ -76,10 +76,7 @@ impl CanvasModel for StubModel {
 
 fn drive_render_grid(model: &StubModel, check: impl FnOnce(&Chrome, &[DrawOp])) {
     let theme = CanvasTheme::light();
-    let canvas = CanvasSize {
-        w: 600.0,
-        h: 400.0,
-    };
+    let canvas = CanvasSize { w: 600.0, h: 400.0 };
     let frame = Chrome::current(model, canvas, &theme);
     let core = RendererCore::for_layer(RecorderPainter::new());
     core.render_grid(model, &frame);
@@ -112,7 +109,7 @@ fn render_grid_brackets_grid_group_balanced() {
     });
 }
 
-// ─── Stage 1e — row_header_width widening ─────────────────────────────────
+// ─── Stage 1e — row_header_thickness widening ─────────────────────────────────
 
 #[test]
 fn measure_row_header_width_honors_default_minimum() {
@@ -155,12 +152,12 @@ fn measure_row_header_width_at_7_digits_widens_further() {
 fn chrome_row_header_width_grows_when_scrolled_into_4_digits() {
     drive_render_grid(&StubModel::at_top(), |frame_top, _| {
         drive_render_grid(&StubModel::scrolled_to(10_000), |frame_scrolled, _| {
-            assert_eq!(frame_top.row_header_width, HEADER_COL_WIDTH);
+            assert_eq!(frame_top.row_header_thickness, HEADER_COL_WIDTH);
             assert!(
-                frame_scrolled.row_header_width > frame_top.row_header_width,
+                frame_scrolled.row_header_thickness > frame_top.row_header_thickness,
                 "scrolled chrome row_header_width ({}) must exceed top-of-sheet ({})",
-                frame_scrolled.row_header_width,
-                frame_top.row_header_width,
+                frame_scrolled.row_header_thickness,
+                frame_top.row_header_thickness,
             );
         });
     });
@@ -169,12 +166,10 @@ fn chrome_row_header_width_grows_when_scrolled_into_4_digits() {
 #[test]
 fn corner_box_rect_widens_when_scrolled_to_7_digit_rows() {
     // The corner box is the first RectFill emitted by render_grid that
-    // sits at the canvas origin. Its width must follow chrome.row_header_width.
+    // sits at the canvas origin. Its width must follow chrome.row_header_thickness.
     let find_corner_width = |ops: &[DrawOp]| -> Option<i32> {
         ops.iter().find_map(|op| match op {
-            DrawOp::RectFill { rect, .. }
-                if rect.top_left.x == 0 && rect.top_left.y == 0 =>
-            {
+            DrawOp::RectFill { rect, .. } if rect.top_left.x == 0 && rect.top_left.y == 0 => {
                 Some(rect.width)
             }
             _ => None,
@@ -183,12 +178,12 @@ fn corner_box_rect_widens_when_scrolled_to_7_digit_rows() {
 
     drive_render_grid(&StubModel::at_top(), |frame_top, ops_top| {
         let top_corner = find_corner_width(ops_top).expect("corner box at top must paint");
-        assert_eq!(top_corner, frame_top.row_header_width);
+        assert_eq!(top_corner, frame_top.row_header_thickness);
 
         drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame_far, ops_far| {
             let far_corner =
                 find_corner_width(ops_far).expect("corner box scrolled-far must paint");
-            assert_eq!(far_corner, frame_far.row_header_width);
+            assert_eq!(far_corner, frame_far.row_header_thickness);
             assert!(
                 far_corner > top_corner,
                 "scrolled corner-box width ({far_corner}) must exceed top corner ({top_corner})",
@@ -200,7 +195,7 @@ fn corner_box_rect_widens_when_scrolled_to_7_digit_rows() {
 /// R1 invariant: `cell_origin` is the single source of truth for where the
 /// cell area begins. It must equal the two header thicknesses plus the
 /// outer offset on each axis. Holds at every scroll position — `cell_origin.x`
-/// tracks the dynamic `row_header_width`, `cell_origin.y` tracks the
+/// tracks the dynamic `row_header_thickness`, `cell_origin.y` tracks the
 /// (currently static) `col_header_thickness`.
 #[test]
 fn cell_origin_matches_header_thicknesses() {
@@ -208,8 +203,8 @@ fn cell_origin_matches_header_thicknesses() {
         assert_eq!(frame.col_header_thickness, HEADER_ROW_HEIGHT);
         assert_eq!(
             frame.cell_origin.x,
-            frame.row_header_width + HEADER_OFFSET,
-            "cell_origin.x must equal row_header_width + outer_offset"
+            frame.row_header_thickness + HEADER_OFFSET,
+            "cell_origin.x must equal row_header_thickness + outer_offset"
         );
         assert_eq!(
             frame.cell_origin.y,
@@ -221,8 +216,8 @@ fn cell_origin_matches_header_thicknesses() {
     drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame_far, _| {
         assert_eq!(
             frame_far.cell_origin.x,
-            frame_far.row_header_width + HEADER_OFFSET,
-            "cell_origin.x must track row_header_width even at deep scrolls"
+            frame_far.row_header_thickness + HEADER_OFFSET,
+            "cell_origin.x must track row_header_thickness even at deep scrolls"
         );
         assert_eq!(frame_far.col_header_thickness, HEADER_ROW_HEIGHT);
     });
@@ -232,7 +227,7 @@ fn cell_origin_matches_header_thicknesses() {
 /// strip widens past `HEADER_COL_WIDTH`. Column headers must shift right by
 /// the same amount, otherwise they desync from cell columns. After R2,
 /// `Axis::Column.strip_start(frame)` returns `frame.cell_origin.x`, which
-/// is `row_header_width + outer_offset` — so the strip's leading edge
+/// is `row_header_thickness + outer_offset` — so the strip's leading edge
 /// always coincides with the cell area's leading edge.
 #[test]
 fn column_headers_align_with_cell_columns_at_7_digit_scroll() {

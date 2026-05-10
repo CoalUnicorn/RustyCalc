@@ -11,13 +11,13 @@
 //! `self.pane_set.<vec>` for now or migrate per-axis to `PaneSet` as we
 //! touch them (per the hybrid-axis-split rule).
 //!
-//! `row_header_width` is computed dynamically per frame: the row-header
+//! `row_header_thickness` is computed dynamically per frame: the row-header
 //! strip widens as scroll position pushes more digits into row labels
 //! (1 → 999 fits in the 30px default; 10 000 needs ≈40px; 1 048 576
 //! needs ≈60px). Using a char-count approximation rather than threading
 //! `TextMetrics` keeps the build path free of painter coupling.
 
-use crate::geometry::frame::slot::{ColSlot, RowSlot};
+use crate::geometry::frame::slot::{ColSlot, PaneColumns, PaneRows, RowSlot};
 use crate::geometry::{
     constants::{
         AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
@@ -53,7 +53,7 @@ pub(crate) struct Chrome {
     pub pane_set: PaneSet,
     /// Width of the row-header strip — measured per frame from the widest
     /// visible row label so the digits never clip past row 999.
-    pub row_header_width: i32,
+    pub row_header_thickness: i32,
     /// Height of the column-header strip. Static today (= `HEADER_ROW_HEIGHT`)
     /// but stored on Chrome so the day this becomes dynamic, only the
     /// assignment in `Chrome::current` changes — paint code already reads
@@ -81,16 +81,14 @@ pub(crate) struct Chrome {
 
 #[derive(Debug)]
 pub(crate) struct PaneSet {
-    pub(crate) frozen_rows: Vec<RowSlot>,
-    pub(crate) scroll_rows: Vec<RowSlot>,
-    pub(crate) frozen_cols: Vec<ColSlot>,
-    pub(crate) scroll_cols: Vec<ColSlot>,
+    pub(crate) rows: PaneRows,
+    pub(crate) cols: PaneColumns,
 }
 
 impl PaneSet {
     /// Walk the row axis: build the frozen row slots and the scrollable
     /// row slots, returning the pixel Y of the frozen-rows separator.
-    /// Independent of `row_header_width` — runs in Chrome::current's
+    /// Independent of `row_header_thickness` — runs in Chrome::current's
     /// Phase B, before the row-label measurement. Reads `FROZEN_SEP`
     /// directly because the gap between frozen and scroll bands is
     /// PaneSet's own structural concern, not chrome geometry.
@@ -100,7 +98,7 @@ impl PaneSet {
         origin_y: i32,
         view_top_row: i32,
         canvas_h: f64,
-    ) -> (Vec<RowSlot>, Vec<RowSlot>, i32) {
+    ) -> PaneRows {
         let mut frozen_rows = Vec::with_capacity(frozen_count as usize);
         let mut y_cursor = origin_y;
         for r in 1..=frozen_count {
@@ -135,12 +133,15 @@ impl PaneSet {
             });
             y_cursor += h;
         }
-
-        (frozen_rows, scroll_rows, frozen_offset_y)
+        PaneRows {
+            frozen: frozen_rows,
+            scroll: scroll_rows,
+            frozen_offset_y,
+        }
     }
 
     /// Walk the column axis using the cell-area X origin (which already
-    /// folds in the freshly-measured `row_header_width`). Mirrors
+    /// folds in the freshly-measured `row_header_thickness`). Mirrors
     /// `build_rows` shape; runs in Chrome::current's Phase D after
     /// measurement.
     pub(crate) fn build_cols(
@@ -149,7 +150,7 @@ impl PaneSet {
         origin_x: i32,
         view_left_column: i32,
         canvas_w: f64,
-    ) -> (Vec<ColSlot>, Vec<ColSlot>, i32) {
+    ) -> PaneColumns {
         let mut frozen_cols = Vec::with_capacity(frozen_count as usize);
         let mut x_cursor = origin_x;
         for c in 1..=frozen_count {
@@ -185,7 +186,11 @@ impl PaneSet {
             x_cursor += w;
         }
 
-        (frozen_cols, scroll_cols, frozen_offset_x)
+        PaneColumns {
+            frozen: frozen_cols,
+            scroll: scroll_cols,
+            frozen_offset_x,
+        }
     }
 
     /// Open a `PaneCells` iterator over one quadrant. The chrome reference
@@ -226,7 +231,7 @@ pub(crate) fn measure_row_header_width(max_visible_row: i32) -> i32 {
 
 impl Chrome {
     /// Build a per-frame snapshot via the phased A→E construction:
-    /// A chrome geometry → B walk rows → C measure row_header_width
+    /// A chrome geometry → B walk rows → C measure row_header_thickness
     /// → D walk cols (using measured width) → E assemble.
     pub(crate) fn current(
         model: &dyn CanvasModel,
@@ -261,19 +266,21 @@ impl Chrome {
         // static today (col header is fixed-height) but computed here so
         // the day it goes dynamic, only this line changes.
         let origin_y = HEADER_ROW_HEIGHT + HEADER_OFFSET;
-        let (frozen_rows, scroll_rows, frozen_offset_y) =
-            PaneSet::build_rows(model, frozen_row_count, origin_y, view.top_row, canvas.h);
+        //let (frozen_rows, scroll_rows, frozen_offset_y) =
+        let rows = PaneSet::build_rows(model, frozen_row_count, origin_y, view.top_row, canvas.h);
 
-        // Phase C — measure row_header_width from the last visible row label.
-        let last_visible_row = scroll_rows
+        // Phase C — measure row_header_thickness from the last visible row label.
+        let last_visible_row = rows
+            .scroll
             .last()
             .map(|s| s.row)
             .unwrap_or((frozen_row_count + 1).max(view.top_row));
-        let row_header_width = measure_row_header_width(last_visible_row);
+        let row_header_thickness = measure_row_header_width(last_visible_row);
 
         // Phase D — col walk uses the measured width to anchor `origin_x`.
-        let origin_x = row_header_width + HEADER_OFFSET;
-        let (frozen_cols, scroll_cols, frozen_offset_x) = PaneSet::build_cols(
+        let origin_x = row_header_thickness + HEADER_OFFSET;
+        //let (frozen_cols, scroll_cols, frozen_offset_x)
+        let columns = PaneSet::build_cols(
             model,
             frozen_col_count,
             origin_x,
@@ -287,15 +294,16 @@ impl Chrome {
             rows: frozen_row_count,
             cols: frozen_col_count,
             offset: Point {
-                x: frozen_offset_x,
-                y: frozen_offset_y,
+                x: columns.frozen_offset_x,
+                y: rows.frozen_offset_y,
             },
         };
         let pane_set = PaneSet {
-            frozen_rows,
-            scroll_rows,
-            frozen_cols,
-            scroll_cols,
+            rows,
+            cols: columns, // frozen_rows,
+                           // scroll_rows,
+                           // frozen_cols,
+                           // scroll_cols,
         };
         let col_header_thickness = HEADER_ROW_HEIGHT;
         let cell_origin = Point {
@@ -307,7 +315,7 @@ impl Chrome {
             sheet,
             frozen,
             pane_set,
-            row_header_width,
+            row_header_thickness,
             col_header_thickness,
             cell_origin,
             selection_range: view.selection,
@@ -349,27 +357,28 @@ impl Chrome {
     #[inline]
     fn row_slot(&self, row: i32) -> Option<&RowSlot> {
         if row <= self.frozen.frozen_rows_count() {
-            self.pane_set.frozen_rows.get((row - 1) as usize)
+            self.pane_set.rows.frozen.get((row - 1) as usize)
         } else {
-            let first = self.pane_set.scroll_rows.first()?.row;
-            self.pane_set.scroll_rows.get((row - first) as usize)
+            let first = self.pane_set.rows.scroll.first()?.row;
+            self.pane_set.rows.scroll.get((row - first) as usize)
         }
     }
 
     #[inline]
     fn col_slot(&self, col: i32) -> Option<&ColSlot> {
         if col <= self.frozen.frozen_cols_count() {
-            self.pane_set.frozen_cols.get((col - 1) as usize)
+            self.pane_set.cols.frozen.get((col - 1) as usize)
         } else {
-            let first = self.pane_set.scroll_cols.first()?.col;
-            self.pane_set.scroll_cols.get((col - first) as usize)
+            let first = self.pane_set.cols.scroll.first()?.col;
+            self.pane_set.cols.scroll.get((col - first) as usize)
         }
     }
 
     #[inline]
     pub(crate) fn top_row(&self) -> i32 {
         self.pane_set
-            .scroll_rows
+            .rows
+            .scroll
             .first()
             .map(|s| s.row)
             .unwrap_or(1)
@@ -378,7 +387,8 @@ impl Chrome {
     #[inline]
     pub(crate) fn left_column(&self) -> i32 {
         self.pane_set
-            .scroll_cols
+            .cols
+            .scroll
             .first()
             .map(|s| s.col)
             .unwrap_or(1)
@@ -387,7 +397,8 @@ impl Chrome {
     #[inline]
     pub(crate) fn last_visible_row(&self) -> i32 {
         self.pane_set
-            .scroll_rows
+            .rows
+            .scroll
             .last()
             .map(|s| s.row)
             .unwrap_or(self.top_row())
@@ -396,7 +407,8 @@ impl Chrome {
     #[inline]
     pub(crate) fn last_visible_col(&self) -> i32 {
         self.pane_set
-            .scroll_cols
+            .cols
+            .scroll
             .last()
             .map(|s| s.col)
             .unwrap_or(self.left_column())
@@ -433,12 +445,12 @@ impl Chrome {
     }
 
     pub(crate) fn pixel_to_col(&self, x: i32) -> Option<i32> {
-        for s in &self.pane_set.frozen_cols {
+        for s in &self.pane_set.cols.frozen {
             if x >= s.left && x < s.right() {
                 return Some(s.col);
             }
         }
-        for s in &self.pane_set.scroll_cols {
+        for s in &self.pane_set.cols.scroll {
             if x >= s.left && x < s.right() {
                 return Some(s.col);
             }
@@ -447,12 +459,12 @@ impl Chrome {
     }
 
     pub(crate) fn pixel_to_row(&self, y: i32) -> Option<i32> {
-        for s in &self.pane_set.frozen_rows {
+        for s in &self.pane_set.rows.frozen {
             if y >= s.top && y < s.bottom() {
                 return Some(s.row);
             }
         }
-        for s in &self.pane_set.scroll_rows {
+        for s in &self.pane_set.rows.scroll {
             if y >= s.top && y < s.bottom() {
                 return Some(s.row);
             }
@@ -510,12 +522,12 @@ impl Chrome {
     }
 
     pub(crate) fn col_boundary_at(&self, x: i32, hit_zone: i32) -> Option<i32> {
-        for s in &self.pane_set.frozen_cols {
+        for s in &self.pane_set.cols.frozen {
             if (s.right() - x).abs() <= hit_zone {
                 return Some(s.col);
             }
         }
-        for s in &self.pane_set.scroll_cols {
+        for s in &self.pane_set.cols.scroll {
             if (s.right() - x).abs() <= hit_zone {
                 return Some(s.col);
             }
@@ -527,12 +539,12 @@ impl Chrome {
     }
 
     pub(crate) fn row_boundary_at(&self, y: i32, hit_zone: i32) -> Option<i32> {
-        for s in &self.pane_set.frozen_rows {
+        for s in &self.pane_set.rows.frozen {
             if (s.bottom() - y).abs() <= hit_zone {
                 return Some(s.row);
             }
         }
-        for s in &self.pane_set.scroll_rows {
+        for s in &self.pane_set.rows.scroll {
             if (s.bottom() - y).abs() <= hit_zone {
                 return Some(s.row);
             }
@@ -547,16 +559,16 @@ impl Chrome {
         if x < 0 || y < 0 {
             return HitTest::Outside;
         }
-        if x < self.row_header_width + HEADER_OFFSET && y < HEADER_ROW_HEIGHT + HEADER_OFFSET {
+        if x < self.cell_origin.x && y < self.cell_origin.y {
             return HitTest::Corner;
         }
-        if y < HEADER_ROW_HEIGHT + HEADER_OFFSET {
+        if y < self.cell_origin.y {
             return match self.pixel_to_col(x) {
                 Some(c) => HitTest::ColHeader(c),
                 None => HitTest::Outside,
             };
         }
-        if x < self.row_header_width + HEADER_OFFSET {
+        if x < self.cell_origin.x {
             return match self.pixel_to_row(y) {
                 Some(r) => HitTest::RowHeader(r),
                 None => HitTest::Outside,
@@ -578,10 +590,10 @@ impl Chrome {
     }
 
     pub(crate) fn resize_handle_at(&self, x: i32, y: i32, tolerance: i32) -> Option<ResizeTarget> {
-        if y < HEADER_ROW_HEIGHT && x > self.row_header_width {
+        if y < self.col_header_thickness && x > self.row_header_thickness {
             return self.col_boundary_at(x, tolerance).map(ResizeTarget::Column);
         }
-        if x < self.row_header_width && y > HEADER_ROW_HEIGHT {
+        if x < self.row_header_thickness && y > self.col_header_thickness {
             return self.row_boundary_at(y, tolerance).map(ResizeTarget::Row);
         }
         None

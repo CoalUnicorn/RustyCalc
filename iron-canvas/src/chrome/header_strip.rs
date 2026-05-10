@@ -9,7 +9,6 @@
 use std::fmt::Write as _;
 
 use crate::chrome::Chrome;
-use crate::geometry::constants::HEADER_ROW_HEIGHT;
 use crate::geometry::prim::Axis;
 use crate::painter::{PaintColor, Painter, TextAlign, TextBaseline};
 use crate::renderer::RendererCore;
@@ -39,12 +38,7 @@ impl<P: Painter> RendererCore<P> {
     /// Shared scaffold: walk the frozen band (if any) then the visible
     /// band, reading extents from the frame's prefix-sum snapshot — zero
     /// model access.
-    fn walk_header_strip(
-        &self,
-        axis: Axis,
-        frame: &Chrome,
-        mut visit: impl FnMut(i32, i32, i32),
-    ) {
+    fn walk_header_strip(&self, axis: Axis, frame: &Chrome, mut visit: impl FnMut(i32, i32, i32)) {
         let frozen_count = axis.frozen_count(frame);
         let frozen_origin = axis.frozen_origin(frame);
 
@@ -98,8 +92,8 @@ impl<P: Painter> RendererCore<P> {
         });
 
         let header_thickness = match axis {
-            Axis::Row => frame.row_header_width,
-            Axis::Column => HEADER_ROW_HEIGHT,
+            Axis::Row => frame.row_header_thickness,
+            Axis::Column => frame.col_header_thickness,
         };
         let full = axis.header_rect(along, thickness, header_thickness);
         // 1px inset on the cross-axis leaves the border strip visible
