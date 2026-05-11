@@ -30,7 +30,6 @@
 pub mod geometry;
 
 mod chrome;
-mod diag;
 mod layer;
 mod model_adapter;
 mod orchestrator;

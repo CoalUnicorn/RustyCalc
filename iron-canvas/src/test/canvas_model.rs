@@ -317,7 +317,7 @@ fn hit_test_rejects_click_past_handle_pad() {
 #[test]
 fn autofill_handle_tracks_in_place_selection_range_update() {
     // Mirrors the orchestrator's overlay-only repaint path: when the active
-    // cell moves without scrolling, `paint_if_dirty` mutates the reused
+    // cell moves without scrolling, `paintIfDirty` mutates the reused
     // frame's `selection_range` in place. The handle must land on the new
     // bottom-right, not the position captured by the previous full paint.
     let m = MockCanvasModel {

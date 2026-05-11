@@ -1,21 +1,10 @@
-//! Top structural layer that owns chrome geometry plus the `FrozenRC` and
-//! `PaneSet` child layers.
+//! Per-frame snapshot of painted chrome geometry. The renderer and every
+//! `IronCanvas` query read the same `Chrome`, so painted pixels and hit
+//! zones cannot disagree.
 //!
-//! `Chrome` is the per-frame snapshot threaded into every render phase AND
-//! every hit-test query. Built once per tick by `Chrome::current(model,
-//! canvas, theme)`; both the renderer (`paint_if_dirty`) and the input
-//! layer (`IronCanvas::hit_test`, `cell_rect`, `resize_handle_at`) read
-//! the same snapshot, so what's painted and what gets hit always agree.
-//!
-//! Slot vecs live on `PaneSet` and every pure-axis walk is a method on
-//! `PaneSet`; `Chrome` composes them when a query spans both axes
-//! (`cell_rect`, `range_rect`, `hit_test`, `resize_handle_at`).
-//!
-//! `row_header_thickness` is computed dynamically per frame: the row-header
-//! strip widens as scroll position pushes more digits into row labels
-//! (1 → 999 fits in the 30px default; 10 000 needs ≈40px; 1 048 576
-//! needs ≈60px). Using a char-count approximation rather than threading
-//! `TextMetrics` keeps the build path free of painter coupling.
+//! Pure-axis walks live on `PaneSet`; `Chrome` composes them whenever a
+//! query spans both axes. See `ARCHITECTURE.md` for the build phases
+//! (A–E) and the `is_still_valid` cache rules.
 
 use crate::geometry::slot::{col_width, row_height, ColSlot, RowSlot};
 use crate::geometry::{
@@ -37,39 +26,33 @@ pub(crate) use pane_region::PaneRegion;
 /// Approx pixel width per digit at the bold 12px Inter header font.
 /// Pessimistic enough that no row label clips inside the strip.
 const APPROX_DIGIT_WIDTH_PX: i32 = 8;
-/// Padding on each side of the row-label text inside the header strip.
+/// Padding either side of the row-label inside the header strip.
 const HEADER_LABEL_PAD_PX: i32 = 4;
 
 #[derive(Debug)]
 pub(crate) struct Chrome {
     pub sheet: u32,
     pub pane_set: PaneSet,
-    /// Width of the row-header strip — measured per frame from the widest
-    /// visible row label so the digits never clip past row 999.
+    /// Measured per frame from the widest visible row label.
     pub row_header_thickness: i32,
-    /// Height of the column-header strip.
     pub col_header_thickness: i32,
-    /// Pixel origin where the cell area begins. Single source of truth used
-    /// by hit-test and viewport math instead of recomputing
-    /// `header + outer_offset` at every site.
+    /// Top-left of the cell area; single source of truth for hit-test
+    /// and viewport math.
     pub cell_origin: Point,
-    /// Active selection at paint time, raw `[r1, c1, r2, c2]` from
-    /// `SelectedView.range`. Snapshotting it here keeps `autofill_handle`
-    /// pure (no model read) and pins the handle position to the *painted*
-    /// selection, even if the model's selection mutated between paint and
-    /// the next hit-test.
+    /// Selection snapshot at paint time, raw `[r1, c1, r2, c2]` from
+    /// `SelectedView.range`. Pins `autofill_handle` to the painted
+    /// selection even if the model's selection has since moved.
     ///
     /// Invariant: no paint or hit-test code reads
-    /// `model.get_selected_view().selection` — every consumer funnels
-    /// through this field so painted geometry and queried geometry agree.
+    /// `model.get_selected_view().selection`; every consumer goes through
+    /// this field, so painted and queried geometry stay in lockstep.
     pub selection_range: RCRange,
-    /// Canvas size at which this frame was built. Stored so `is_still_valid`
-    /// can detect a resize without the orchestrator passing size separately.
+    /// Canvas size at build time. `is_still_valid` reads this to detect
+    /// a resize.
     pub canvas_size: CanvasSize,
-    /// Theme this frame was painted with. Snapshot mirrors `canvas_size`:
-    /// renderer methods read `frame.theme.*` instead of holding a renderer
-    /// field. `IronCanvas::set_theme` marks both layers dirty on change, so
-    /// the overlay-only fast path never paints against a stale theme.
+    /// Theme this frame was painted with. The renderer reads `frame.theme`
+    /// directly; `IronCanvas::set_theme` marks both layers dirty on change,
+    /// so the overlay-only fast path never paints against a stale theme.
     pub theme: CanvasTheme,
 }
 
@@ -83,12 +66,9 @@ pub(crate) struct PaneSet {
     pub frozen_offset_x: i32,
 }
 
-/// Drained slot Vecs carried from the previous `Chrome` into the next one.
-///
-/// `Chrome::rebuild` extracts them from the outgoing frame so their backing
-/// allocations cross the frame boundary; the new frame `push`es into the
-/// already-cleared Vecs and only allocates if the row/column count grew
-/// past the previous capacity.
+/// Cleared slot Vecs handed from the outgoing `Chrome` into the next one,
+/// so the backing allocations cross the frame boundary and steady-state
+/// rebuilds only allocate when row/column count outgrows capacity.
 #[derive(Default)]
 pub(crate) struct RecycledSlots {
     pub(crate) frozen_rows: Vec<RowSlot>,
@@ -120,9 +100,8 @@ impl RecycledSlots {
 }
 
 impl PaneSet {
-    /// Start a fresh `PaneSet` reusing the previous frame's drained slot
-    /// Vecs as backing buffers. `frozen_offset_*` get filled in by
-    /// `fill_rows` / `fill_cols`.
+    /// Fresh `PaneSet` reusing the previous frame's drained slot Vecs.
+    /// `frozen_offset_*` are filled in by `fill_rows` / `fill_cols`.
     pub(crate) fn with_recycled(recycled: RecycledSlots) -> Self {
         PaneSet {
             frozen_rows: recycled.frozen_rows,
@@ -134,12 +113,11 @@ impl PaneSet {
         }
     }
 
-    /// Walk the row axis: populate the frozen row slots and the scrollable
-    /// row slots, recording the pixel Y where the scroll band begins.
-    /// Independent of `row_header_thickness` — runs in `Chrome::build`'s
-    /// Phase B, before the row-label measurement. Reads `FROZEN_SEP`
-    /// directly because the gap between frozen and scroll bands is the
-    /// row axis's own structural concern.
+    /// Populate `frozen_rows`, `scroll_rows`, and `frozen_offset_y`
+    /// (Phase B of `Chrome::build`; see `ARCHITECTURE.md`). Runs before
+    /// the row-label measurement, so it does not depend on
+    /// `row_header_thickness`. Reads `FROZEN_SEP` directly because the
+    /// gap between frozen and scroll bands is the row axis's concern.
     pub(crate) fn fill_rows(
         &mut self,
         model: &dyn CanvasModel,
@@ -177,10 +155,9 @@ impl PaneSet {
         }
     }
 
-    /// Walk the column axis using the cell-area X origin (which already
-    /// folds in the freshly-measured `row_header_thickness`). Mirrors
-    /// `fill_rows` shape; runs in `Chrome::build`'s Phase D after
-    /// measurement.
+    /// Column-axis mirror of `fill_rows`. Runs as Phase D, using the
+    /// cell-area X origin that already folds in the measured
+    /// `row_header_thickness`.
     pub(crate) fn fill_cols(
         &mut self,
         model: &dyn CanvasModel,
@@ -355,7 +332,7 @@ impl PaneSet {
     }
 }
 
-/// Decimal digit count (≥ 1).
+/// Decimal digit count, clamped to `≥ 1` so a zero input still reserves a slot.
 fn digit_count(n: i32) -> i32 {
     let mut n = n.max(1);
     let mut d = 0;
@@ -366,11 +343,10 @@ fn digit_count(n: i32) -> i32 {
     d
 }
 
-/// Width (in CSS px) the row-header strip needs to fit the widest label
-/// in the visible row range. Pessimistic char-count approximation —
-/// trades real font-metric accuracy for zero `TextMetrics` plumbing.
-/// Always returns at least `HEADER_COL_WIDTH` so 3-digit labels never
-/// shrink the strip below the historical default.
+/// Pixel width the row-header strip needs to fit the widest visible row
+/// label. Uses a pessimistic char-count approximation to avoid threading
+/// `TextMetrics` (and thus a painter dependency) into `Chrome::build`.
+/// Floored at `HEADER_COL_WIDTH` so 3-digit labels never shrink the strip.
 pub(crate) fn measure_row_header_width(max_visible_row: i32) -> i32 {
     let digits = digit_count(max_visible_row);
     let approx = digits * APPROX_DIGIT_WIDTH_PX + 2 * HEADER_LABEL_PAD_PX;
@@ -378,9 +354,9 @@ pub(crate) fn measure_row_header_width(max_visible_row: i32) -> i32 {
 }
 
 impl Chrome {
-    /// Build a per-frame snapshot via the phased A→E construction:
-    /// A frozen counts → B walk rows → C measure row_header_thickness
-    /// → D walk cols (using measured width) → E assemble.
+    /// First-frame build (no previous frame to recycle from). Steady-state
+    /// repaints go through `rebuild`. See `ARCHITECTURE.md` for the A–E
+    /// build phases.
     pub(crate) fn current(
         model: &dyn CanvasModel,
         canvas: CanvasSize,
@@ -389,16 +365,21 @@ impl Chrome {
         Self::build(model, canvas, theme, RecycledSlots::default())
     }
 
-    /// Build the next frame, recycling the outgoing frame's slot Vec
-    /// allocations. Consumes `self` because the previous `PaneSet` is no
-    /// longer reachable once its Vecs move into the new frame.
+    /// Steady-state build: recycles the outgoing frame's slot Vec
+    /// allocations. Consumes `self` because the old `PaneSet`'s Vecs move
+    /// into the new frame.
     pub(crate) fn rebuild(
         self,
         model: &dyn CanvasModel,
         canvas: CanvasSize,
         theme: &CanvasTheme,
     ) -> Self {
-        Self::build(model, canvas, theme, RecycledSlots::from_pane_set(self.pane_set))
+        Self::build(
+            model,
+            canvas,
+            theme,
+            RecycledSlots::from_pane_set(self.pane_set),
+        )
     }
 
     fn build(
@@ -488,9 +469,8 @@ impl Chrome {
             && sheet == self.sheet
     }
 
-    /// Refresh frame fields that the overlay paints from but that are
-    /// independent of the slot vecs. Call on the overlay-only fast path
-    /// after `is_still_valid` returned true, before painting.
+    /// Refresh overlay-only fields (independent of the slot vecs). Call on
+    /// the overlay-only fast path after `is_still_valid` returns true.
     pub(crate) fn refresh_overlay_inputs(&mut self, model: &dyn CanvasModel) {
         if let Some(view) = model.get_selected_view() {
             self.selection_range = view.selection;
@@ -513,9 +493,9 @@ impl Chrome {
     }
 
     /// Map a sheet-coordinate range to canvas pixel bounds, clamping
-    /// oversized selections to the canvas edge. Returns `None` when the
-    /// range is entirely outside the drawable fold (scrollable viewport
-    /// + frozen bands). Pure `Chrome` math — no model access.
+    /// oversized selections to the canvas edge. `None` when the range
+    /// lies entirely outside the drawable fold. Pure `Chrome` math, no
+    /// model access.
     pub(crate) fn range_rect(&self, range: RCRange) -> Option<PixelRect> {
         let p = &self.pane_set;
         let frozen_rows = p.frozen_rows_count();
@@ -544,9 +524,9 @@ impl Chrome {
         })
     }
 
-    /// Does `range` intersect the drawable fold (scrollable viewport plus
-    /// the frozen bands)? Guards `range_rect`'s slot lookups against
-    /// out-of-range refs like `=BB3` when column BB is off screen.
+    /// True if `range` overlaps the drawable fold (scrollable viewport
+    /// plus the frozen bands). Guards `range_rect`'s slot lookups against
+    /// off-screen refs like `=BB3` when column BB is not visible.
     fn range_intersects_fold(&self, range: RCRange, frozen_rows: i32, frozen_cols: i32) -> bool {
         let p = &self.pane_set;
         if range.c1 > p.last_visible_col() && range.c1 > frozen_cols {
@@ -645,4 +625,3 @@ impl Chrome {
         None
     }
 }
-

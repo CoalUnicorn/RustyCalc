@@ -2,9 +2,7 @@
 //! the active selection.
 
 use crate::chrome::Chrome;
-use crate::geometry::constants::{
-    AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH,
-};
+use crate::geometry::constants::{AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH};
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::CanvasModel;

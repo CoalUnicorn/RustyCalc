@@ -67,10 +67,7 @@ impl From<[i32; 4]> for RCRange {
     }
 }
 
-/// The target cell during an autofill-handle drag.
-///
-/// Replaces the anonymous `Option<(i32, i32)>` in `RenderOverlays` with a
-/// named struct so the fields are self-documenting at every call site.
+/// Target cell of an in-progress autofill-handle drag.
 #[derive(Copy, Clone, PartialEq)]
 pub struct AutofillTarget {
     pub row: i32,

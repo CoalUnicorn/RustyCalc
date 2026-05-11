@@ -17,7 +17,7 @@ use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::diag::console_warn;
+use super::diag::console_warn;
 use crate::types::coord::RCRange;
 use crate::CanvasModel;
 use crate::CanvasView;
@@ -100,11 +100,11 @@ impl JsBackedModel {
     pub fn try_from_js_value(value: JsValue) -> Result<Self, JsError> {
         let probe = JsValue::from_str("getSelectedView");
         let has = js_sys::Reflect::has(&value, &probe).map_err(|_| {
-            JsError::new("set_model_js: argument is not an object (expected an IronCalc Model)")
+            JsError::new("setModel: argument is not an object (expected an IronCalc Model)")
         })?;
         if !has {
             return Err(JsError::new(
-                "set_model_js: handle missing required method 'getSelectedView' \
+                "setModel: handle missing required method 'getSelectedView' \
                  — expected an IronCalc Model",
             ));
         }
@@ -203,7 +203,9 @@ impl CanvasModel for JsBackedModel {
     }
 
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
-        self.handle.get_formatted_cell_value(sheet, row, column).ok()
+        self.handle
+            .get_formatted_cell_value(sheet, row, column)
+            .ok()
     }
 }
 
@@ -268,7 +270,10 @@ mod tests {
         assert_eq!(cell_type_from_discriminant(4), Some(CellType::LogicalValue));
         assert_eq!(cell_type_from_discriminant(16), Some(CellType::ErrorValue));
         assert_eq!(cell_type_from_discriminant(64), Some(CellType::Array));
-        assert_eq!(cell_type_from_discriminant(128), Some(CellType::CompoundData));
+        assert_eq!(
+            cell_type_from_discriminant(128),
+            Some(CellType::CompoundData)
+        );
     }
 
     #[test]

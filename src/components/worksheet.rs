@@ -83,7 +83,7 @@ pub fn Worksheet() -> impl IntoView {
     // once by the lazy-construct block in the rAF loop. Disposed in on_cleanup.
     let canvas_handle: StoredValue<Option<IronCanvas>, LocalStorage> = StoredValue::new_local(None);
     // Theme-change fence. Set when `events.theme` fires; consumed in the rAF
-    // callback below. Defers `set_theme_from_element` to after leptos-use has
+    // callback below. Defers `setThemeFromElement` to after leptos-use has
     // written the new `data-theme` attribute on `<html>` — reading CSS vars
     // synchronously inside the same effect batch as the toggle would race the
     // attribute write and yield stale values.
@@ -127,7 +127,7 @@ pub fn Worksheet() -> impl IntoView {
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
                 ic.resize(w, h, dpr);
-                ic.request_repaint();
+                ic.requestRepaint();
             }
         });
     });
@@ -222,7 +222,7 @@ pub fn Worksheet() -> impl IntoView {
             // Push the same state into the IronCanvas orchestrator. Each
             // setter value-compares, so redundant pushes (e.g. format-only
             // events not touching theme) flip dirty only on the layers that
-            // actually need it. request_repaint() at the end is the safety
+            // actually need it. requestRepaint() at the end is the safety
             // net that ensures content/format/structure events still fan
             // out to both layers even when no value changed locally.
             let (extend_to, point_range, formula_refs) = overlay.clone();
@@ -247,7 +247,7 @@ pub fn Worksheet() -> impl IntoView {
                     // Grid repaint only when cell data, format, or structure changed.
                     // Nav and overlay-only changes are covered by set_overlays() above.
                     if has_content || has_structure || has_format {
-                        ic.request_repaint();
+                        ic.requestRepaint();
                     } else if has_nav {
                         ic.request_overlay_repaint(); // overlay only
                     }
@@ -293,7 +293,7 @@ pub fn Worksheet() -> impl IntoView {
                     // below.
                     #[cfg(target_arch = "wasm32")]
                     if let Some(el) = window().document().and_then(|d| d.document_element()) {
-                        ic.set_theme_from_element(&el);
+                        ic.setThemeFromElement(&el);
                     }
                     ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
                     let (extend_to, point_range, formula_refs) = reactive_overlay.get_untracked();
@@ -339,11 +339,11 @@ pub fn Worksheet() -> impl IntoView {
                 if theme_dirty.get_value() {
                     #[cfg(target_arch = "wasm32")]
                     if let Some(el) = window().document().and_then(|d| d.document_element()) {
-                        ic.set_theme_from_element(&el);
+                        ic.setThemeFromElement(&el);
                     }
                     theme_dirty.set_value(false);
                 }
-                ic.paint_if_dirty();
+                ic.paintIfDirty();
             }
         });
         // Renderer debug

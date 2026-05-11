@@ -1,9 +1,9 @@
 //! Per-axis visible slots on the painted frame.
 //!
-//! A `RowSlot` / `ColSlot` is the axis-level peer of `CellSlot`: the index
-//! plus the absolute canvas coordinate of its leading edge plus its extent.
-//! `PaneSet` stores four vecs of these (frozen / scrollable × row /
-//! column) and every pixel↔cell query reads them — no prefix-sum decoding.
+//! A slot carries the index, the absolute canvas coordinate of its leading
+//! edge, and its extent. `PaneSet` holds four vecs (frozen/scrollable ×
+//! row/column); every pixel↔cell query reads them directly, no prefix-sum
+//! decoding.
 
 use crate::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
 use crate::CanvasModel;
@@ -11,7 +11,7 @@ use crate::CanvasModel;
 #[derive(Clone, Copy, Debug)]
 pub struct RowSlot {
     pub row: i32,
-    /// Absolute canvas Y of this row's top edge.
+    /// Absolute canvas Y, not relative to any pane.
     pub top: i32,
     pub height: i32,
 }
@@ -19,7 +19,7 @@ pub struct RowSlot {
 #[derive(Clone, Copy, Debug)]
 pub struct ColSlot {
     pub col: i32,
-    /// Absolute canvas X of this column's left edge.
+    /// Absolute canvas X, not relative to any pane.
     pub left: i32,
     pub width: i32,
 }

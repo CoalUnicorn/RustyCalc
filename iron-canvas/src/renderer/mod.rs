@@ -10,13 +10,13 @@
 //! layer**, so the painter's cached fill/stroke/font/line-width state
 //! persists across frames.
 //!
-//! State pushes from JS mark layers dirty; `IronCanvas::paint_if_dirty`
+//! State pushes from JS mark layers dirty; `IronCanvas::paintIfDirty`
 //! drives each dirty layer's `paint`, which calls into [`RendererCore::render_grid`]
 //! / [`RendererCore::render_overlays`].
 //!
 //! # Render pipeline
 //!
-//! Two paint entry points, each driven by `paint_if_dirty` per dirty layer:
+//! Two paint entry points, each driven by `paintIfDirty` per dirty layer:
 //!
 //! - [`RendererCore::render_grid`] — cells (4 frozen-pane quadrants, each
 //!   running 4 cell sub-passes: bg -> grid borders -> explicit borders -> text),
@@ -47,12 +47,12 @@ use std::cell::{Cell, RefCell};
 use web_sys::CanvasRenderingContext2d;
 
 use crate::chrome::Chrome;
+pub(crate) use crate::chrome::PaneRegion;
 use crate::geometry::prim::Axis;
 use crate::layer::RenderOverlays;
 use crate::painter::CanvasPainter;
 use crate::renderer::cache::FrameCache;
 use crate::CanvasModel;
-pub(crate) use crate::chrome::PaneRegion;
 pub(crate) use cache::ColNameIntern;
 pub(crate) use cache::ColorIntern;
 pub(crate) use cache::FontIntern;

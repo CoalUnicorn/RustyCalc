@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use ironcalc_base::types::{CellType, Style};
 
-use crate::painter::CssColor;
-use super::cell::CellPaint;
 use super::cell::text::TextLine;
+use super::cell::CellPaint;
+use crate::painter::CssColor;
 
 pub(crate) struct FrameCache {
     /// Scratch buffer parking each pane's resolved `CellPaint`s during the

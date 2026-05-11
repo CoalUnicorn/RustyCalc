@@ -17,9 +17,9 @@ pub struct CanvasView {
 
 pub trait CanvasModel {
     fn get_selected_sheet(&self) -> u32;
-    /// `None` is reserved for the JS bridge: it signals the bridge call threw
-    /// or the returned shape didn't deserialize. Treat as a transient absence,
-    /// not a steady state — the next animation frame will re-query.
+    /// `None` signals a transient JS-bridge failure: the bridge call threw
+    /// or the returned shape didn't deserialize. The next animation frame
+    /// will re-query.
     fn get_selected_view(&self) -> Option<CanvasView>;
     fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
     fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
@@ -30,14 +30,13 @@ pub trait CanvasModel {
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
 
-    /// Bulk-fetch cell styles for the contiguous rectangle `range` on `sheet`.
-    /// Output is dense, row-major: `out[(row - r1) * cols + (col - c1)]` for
-    /// every `(row, col)` in `[r1..=r2] × [c1..=c2]`. `None` entries mean the
-    /// per-cell fetch failed (same semantics as `get_cell_style` returning
-    /// `None`).
+    /// Bulk-fetch cell styles for `range` on `sheet`. Output is dense,
+    /// row-major: `out[(row - r1) * cols + (col - c1)]`. `None` entries
+    /// carry the same fetch-failed meaning as `get_cell_style`.
     ///
-    /// Default impl loops `get_cell_style` so `UserModel` is byte-for-byte
-    /// unchanged. The wasm bridge will override with one JS call per range.
+    /// Default impl loops the per-cell accessor so `UserModel` keeps its
+    /// existing behaviour; the wasm bridge overrides this with a single
+    /// JS round-trip per range.
     fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<Style>>) {
         out.clear();
         for r in range.r1..=range.r2 {
@@ -47,10 +46,9 @@ pub trait CanvasModel {
         }
     }
 
-    /// Bulk-fetch formatted cell values for the contiguous rectangle `range`
-    /// on `sheet`. Same row-major dense layout and `None` semantics as
-    /// `get_cell_styles_in`. Default impl loops `get_formatted_cell_value`;
-    /// wasm bridge overrides with one JS call per range.
+    /// Bulk-fetch formatted cell values for `range` on `sheet`. Same dense
+    /// row-major layout and `None`-as-failure semantics as
+    /// `get_cell_styles_in`; same default-impl / wasm-override pattern.
     fn get_formatted_cell_values_in(
         &self,
         sheet: u32,
@@ -65,11 +63,9 @@ pub trait CanvasModel {
         }
     }
 
-    /// Bulk-fetch cell types for the contiguous rectangle `range` on `sheet`.
-    /// Same row-major dense layout and `None`-as-fetch-failure semantics as
-    /// the other `*_in` accessors. Drives the text pass's alignment/colour
-    /// resolution (`CellTextStyle::resolve`); default impl loops
-    /// `get_cell_type` so `UserModel` is byte-for-byte unchanged.
+    /// Bulk-fetch cell types for `range` on `sheet`. Same layout and
+    /// semantics as the other `*_in` accessors. Feeds the text pass's
+    /// alignment/colour resolution in `CellTextStyle::resolve`.
     fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellType>>) {
         out.clear();
         for r in range.r1..=range.r2 {

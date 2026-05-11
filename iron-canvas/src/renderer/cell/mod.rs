@@ -125,4 +125,3 @@ impl<P: Painter> RendererCore<P> {
         self.paint_borders(p, theme);
     }
 }
-

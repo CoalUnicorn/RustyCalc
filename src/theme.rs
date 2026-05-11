@@ -7,7 +7,7 @@
 ///   the consumer-side UI bits that need a strongly-typed handle.
 /// - The canvas palette is no longer plumbed through this module: iron-canvas
 ///   reads its theme directly from CSS custom properties on `<html>` via
-///   `IronCanvas::set_theme_from_element`. `CanvasTheme` and
+///   `IronCanvas::setThemeFromElement`. `CanvasTheme` and
 ///   [`ThemeVariables`] are re-exported here only for callers that want to
 ///   build a theme programmatically (e.g. tests).
 use leptos_use::{use_color_mode_with_options, ColorMode, UseColorModeOptions};

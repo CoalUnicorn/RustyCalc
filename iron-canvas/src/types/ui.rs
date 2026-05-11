@@ -1,7 +1,6 @@
-/// What the user sees at a given canvas point, against the last painted frame.
-///
-/// The active sheet is whatever `IronCanvas` is reflecting at the time of the
-/// query, so it is implicit and not encoded into the variants.
+/// What the cursor is over at a canvas point, resolved against the last
+/// painted frame. Sheet is implicit (whichever sheet `IronCanvas` is
+/// currently reflecting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HitTest {
     Cell {
@@ -11,9 +10,9 @@ pub enum HitTest {
     RowHeader(i32),
     ColHeader(i32),
     Corner,
-    /// Cursor is on the autofill handle. Carries the cell under the cursor
-    /// because callers always need both — the variant says "begin autofill",
-    /// the fields say "drag-target starts here".
+    /// Cursor is on the autofill handle. The row/column point at the
+    /// drag-target cell (the cell the cursor sits over while the handle
+    /// itself protrudes from the selection's bottom-right corner).
     AutofillHandle {
         row: i32,
         column: i32,
@@ -21,11 +20,9 @@ pub enum HitTest {
     Outside,
 }
 
-/// A row or column boundary the cursor is currently within tolerance of.
-///
-/// Returned by `IronCanvas::resize_handle_at` for cursor-style and
-/// drag-start decisions. Holds the index of the row/column **whose trailing
-/// edge** the cursor is near (i.e. dragging right enlarges that row/column).
+/// A row or column boundary the cursor sits within tolerance of. The index
+/// is the row/column whose *trailing edge* the cursor is near — dragging
+/// outward enlarges that row/column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResizeTarget {
     Column(i32),

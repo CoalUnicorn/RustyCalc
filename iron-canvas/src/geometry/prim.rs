@@ -1,4 +1,7 @@
-use crate::{geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect}, RCRange};
+use crate::{
+    geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect},
+    RCRange,
+};
 
 /// A point in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

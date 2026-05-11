@@ -97,7 +97,7 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
             });
             // Resolve the new drag-target against the *previous* painted frame.
             // The scroll mutation above won't be reflected on canvas until the
-            // next paint_if_dirty — so hit_test against last_frame matches
+            // next paintIfDirty — so hit_test against last_frame matches
             // what the user still sees.
             if let Some(HitTest::Cell { row, column }) = with_canvas(icv, |ic| ic.hit_test(mx, my))
             {

@@ -49,7 +49,7 @@ impl CanvasModel for StubModel {
 //
 // These simulate the headline acceptance criterion without a browser: two
 // `PaintGate` instances stand in for the real layers. The logic mirrors
-// exactly what `IronCanvas::set_overlays` and `paint_if_dirty` do in
+// exactly what `IronCanvas::set_overlays` and `paintIfDirty` do in
 // production, so a pass here proves the fan-out policy is correct.
 
 // Per-frame overlay state used to drive the value-compare path. Autofill drag
@@ -104,7 +104,7 @@ fn sixty_drag_frames_increment_overlay_only() {
             overlay.mark_dirty();
         }
         current = next;
-        // mirror paint_if_dirty — consume both gates
+        // mirror paintIfDirty — consume both gates
         grid.should_paint();
         overlay.should_paint();
     }

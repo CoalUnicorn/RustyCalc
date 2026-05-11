@@ -11,11 +11,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use web_sys::{js_sys, CanvasRenderingContext2d};
 
 use super::{PaintColor, Painter, Sealed, TextAlign, TextBaseline, TextMetrics};
-use crate::diag::console_warn;
 use crate::geometry::{
     pixel_rect::PixelRect,
     prim::{Line, Span},
 };
+use crate::wasm::diag::console_warn;
 
 /// One-shot guard for the `measure_text` fallback warning. Process-wide
 /// (not per-painter) so grid + overlay layers share a single signal —

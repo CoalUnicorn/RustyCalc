@@ -1,8 +1,8 @@
 //! Clipboard marching-ants border around the last Ctrl+C copied range.
 //! No-op when the clipboard is empty or lives on another sheet.
 
-use crate::chrome::Chrome;
 use super::DashFill;
+use crate::chrome::Chrome;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::types::coord::SheetArea;

@@ -1,7 +1,7 @@
 pub mod constants;
-pub mod slot;
 pub mod pixel_rect;
 pub mod prim;
+pub mod slot;
 pub mod utils;
 
 /// Size of the drawable canvas in logical (CSS) pixels.

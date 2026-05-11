@@ -16,9 +16,8 @@ pub const AUTOFILL_HANDLE_PX: i32 = 6;
 /// Width of the contrasting outline ring stroked around the handle. Sourced
 /// from `theme.cell_bg` so the handle pops against any cell fill underneath.
 pub const AUTOFILL_HANDLE_BORDER_PX: i32 = 1;
-/// Extra forgiveness around the handle's visual rect on every side when
-/// hit-testing pointer events — keeps the click target a couple pixels
-/// larger than the painted square.
+/// Padding added on every side of the handle's visual rect when hit-testing
+/// pointer events, so the click target is larger than the painted square.
 pub const AUTOFILL_HIT_PAD_PX: i32 = 2;
 
 /// Fallback row height when the model returns `None` (row not explicitly sized).

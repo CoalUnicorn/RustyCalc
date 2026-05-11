@@ -16,10 +16,42 @@ use iron_canvas::IronCanvas;
 let canvas = IronCanvas::create(grid_canvas_el, overlay_canvas_el)?;
 canvas.resize(css_w, css_h, dpr);
 canvas.set_model(model);
-canvas.paint_if_dirty();
+canvas.paintIfDirty();
 ```
 
 The consumer mounts two `<canvas>` elements (overlay on top, `pointer-events: none`, matching size) and forwards resize / model / repaint calls. `GridLayer` and `OverlayLayer` are private — the wasm-bindgen surface is `IronCanvas` only.
+
+## Anatomy
+
+`Chrome` is the per-frame snapshot every painter and every hit-test query reads. It wraps the cell area with the row-header strip, the column-header strip, the corner box, and (when frozen panes are active) the frozen separators. Inside, the cell area splits into up to four pane quadrants holding the rows/columns.
+
+```text
+┌─ Sheet ────────────────────────────────────────────────────────────┐
+│ ┌─ Chrome ──────────┬─ Col header strip (chrome) ──────────────┐   │
+│ │ Corner box        │  A   B   C   D   E   F   G   H           │   │
+│ │ (chrome)          │                                          │   │
+│ ├───────────────────┼──────────────────────────────────────────┤   │
+│ │ Row header strip  │ ┌─ Pane (top_left, frozen × frozen) ───┐ │   │
+│ │ (chrome)          │ │ ┌─Cell─┬─Cell─┐                      │ │   │
+│ │  1                │ │ │  bg  │ text │  shared border edges │ │   │
+│ │  2                │ │ ├──────┼──────┤                      │ │   │
+│ │  3                │ │ │ text │  bg  │                      │ │   │
+│ │  4                │ │ └──────┴──────┘                      │ │   │
+│ │  5                │ ├──── frozen separator (chrome) ───────┤ │   │
+│ │  6                │ │ Pane (bottom_left, scroll × frozen)  │ │   │
+│ │  7                │ │ ┌─Cell─┬─Cell─┬─Cell─┐               │ │   │
+│ │ ...               │ │ │      │      │      │               │ │   │
+│ │                   │ │ └──────┴──────┴──────┘               │ │   │
+│ │                   │ └──────────────────────────────────────┘ │   │
+│ └───────────────────┴──────────────────────────────────────────┘   │
+│                                                                    │
+│ Overlay canvas (transient, painted on top of the grid):            │
+│   selection · autofill handle · marching ants ·                    │
+│   point-mode · formula refs · header highlights                    │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+A workbook with only frozen rows collapses to `top_left` + `bottom_left`; only frozen columns to `top_left` + `top_right`; nothing frozen to `bottom_right` alone. Overlays live on the second canvas and paint *after* the grid — they never alter the snapshot the next hit-test reads. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the build phases (A → E) and query pipeline.
 
 ## How it works
 
@@ -30,9 +62,9 @@ The consumer mounts two `<canvas>` elements (overlay on top, `pointer-events: no
 **Model.** `CanvasModel` is the read-only adapter trait (`src/model_adapter.rs`) — singular accessors plus three batched range accessors (`get_cell_styles_in`, `get_formatted_cell_values_in`, `get_cell_types_in`) that collapse a JS-bridge pane fetch to one boundary
 crossing. `UserModel<'a>` from `ironcalc_base` plugs in via the trait's default loop impl. 
 
-**Per-frame snapshot.** `FrameContext::current(model, size, theme)` walks the model once per axis into four slot vecs (`frozen_rows` / `scroll_rows` / `frozen_cols` / `scroll_cols`). Renderer and query API (`hit_test`, `cell_rect`, `autofill_handle`) read the same snapshot, so painted pixels and hit-tests agree by construction.
+**Per-frame snapshot.** `Chrome::current(model, size, theme)` walks the model once per axis into four slot vecs on `Chrome.pane_set` (`frozen_rows` / `scroll_rows` / `frozen_cols` / `scroll_cols`). Renderer and query API (`hit_test`, `cell_rect`, `autofill_handle`) read the same `Chrome`, so painted pixels and hit-tests agree by construction.
 
-**`paint_if_dirty`.** If only the overlay is dirty and `last_frame.is_still_valid(model, size)`, repaint the overlay against the cached frame with no model walk. Otherwise rebuild `FrameContext`, paint dirty layers, cache.
+**`paintIfDirty`.** If only the overlay is dirty and `last_frame.is_still_valid(model, size)`, `refresh_overlay_inputs` re-snapshots selection from the model and the overlay repaints against the cached frame with no model walk. Otherwise the outgoing frame is consumed by `Chrome::rebuild` (which recycles its slot Vec allocations) — or `Chrome::current` on the very first paint — dirty layers paint, and the result is cached as `last_frame`.
 
 **Pane pipeline.** `render_grid` paints four quadrants (`top_left` / `top_right` / `bottom_left` / `bottom_right`), then frozen separators, then headers, then corner box. Each pane runs four deferred sub-passes over one reused slot vec: bg → grid borders → explicit borders → text. Order is load-bearing.
 
