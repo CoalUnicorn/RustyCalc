@@ -51,7 +51,7 @@ The consumer mounts two `<canvas>` elements (overlay on top, `pointer-events: no
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-A workbook with only frozen rows collapses to `top_left` + `bottom_left`; only frozen columns to `top_left` + `top_right`; nothing frozen to `bottom_right` alone. Overlays live on the second canvas and paint *after* the grid — they never alter the snapshot the next hit-test reads. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the build phases (A → E) and query pipeline.
+A workbook with only frozen rows collapses to `top_left` + `bottom_left`; only frozen columns to `top_left` + `top_right`; nothing frozen to `bottom_right` alone. Overlays live on the second canvas and paint *after* the grid — they never alter the snapshot the next hit-test reads.
 
 ## How it works
 
