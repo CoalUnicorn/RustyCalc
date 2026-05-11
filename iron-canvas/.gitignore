@@ -1,3 +1,5 @@
 dist/*
 target/*
 notes/*
+web-test/vendor/iron-canvas/
+web-test/vendor/ironcalc/

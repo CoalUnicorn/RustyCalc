@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>iron-canvas web-test</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 16px;
+                font:
+                    14px system-ui,
+                    sans-serif;
+                background: #f7f7f8;
+                color: #222;
+            }
+            h1 {
+                font-size: 16px;
+                margin: 0 0 12px;
+            }
+            #status {
+                margin: 0 0 12px;
+                color: #555;
+            }
+            #status.err {
+                color: #b00020;
+                font-family: ui-monospace, SFMono-Regular, monospace;
+                white-space: pre-wrap;
+            }
+            .stack {
+                position: relative;
+                width: 800px;
+                height: 400px;
+                background: #fff;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+            }
+            .stack canvas {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+            .stack canvas.overlay {
+                pointer-events: none;
+            }
+            #tabs {
+                display: flex;
+                gap: 2px;
+                width: 800px;
+                margin-top: 0;
+                background: #ececef;
+                border-top: 1px solid #d8d8dc;
+                padding: 4px 6px;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+            }
+            #tabs button {
+                font: inherit;
+                padding: 4px 12px;
+                background: #f7f7f8;
+                border: 1px solid #d8d8dc;
+                border-bottom: none;
+                border-radius: 4px 4px 0 0;
+                cursor: pointer;
+                color: #555;
+            }
+            #tabs button.active {
+                background: #fff;
+                color: #111;
+                font-weight: 600;
+            }
+            .hint {
+                margin: 12px 0 0;
+                color: #888;
+                font-size: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>iron-canvas &mdash; JsBackedModel smoke harness</h1>
+        <div id="status">loading wasm…</div>
+        <div class="stack">
+            <canvas id="grid"></canvas>
+            <canvas id="overlay" class="overlay"></canvas>
+        </div>
+        <div id="tabs"></div>
+        <div class="hint">
+            Three sheets are populated at boot. Click a tab to switch the
+            selected sheet — the canvas reads the new view on the next paint.
+            Open DevTools for the bridge snapshot.
+        </div>
+
+        <script type="module">
+            import initIronCanvas, {
+                IronCanvas,
+            } from "./vendor/iron-canvas/iron_canvas.js";
+            import initIronCalc, { Model } from "./vendor/ironcalc/wasm.js";
+
+            const statusEl = document.getElementById("status");
+            const tabsEl = document.getElementById("tabs");
+            const gridEl = document.getElementById("grid");
+            const overlayEl = document.getElementById("overlay");
+
+            const setStatus = (msg) => {
+                statusEl.className = "";
+                statusEl.textContent = msg;
+            };
+            const setError = (msg) => {
+                statusEl.className = "err";
+                statusEl.textContent = msg;
+            };
+
+            let phase = "init wasm";
+            try {
+                await Promise.all([initIronCanvas(), initIronCalc()]);
+
+                phase = "new Model";
+                const model = new Model("Workbook", "en", "UTC", "en");
+
+                phase = "populate sheets";
+                // Sheet 0 already exists; rename it and add cells.
+                model.renameSheet(0, "Numbers");
+                model.setUserInput(0, 1, 1, "1");
+                model.setUserInput(0, 2, 1, "2");
+                model.setUserInput(0, 3, 1, "3");
+                model.setUserInput(0, 1, 2, "=A1+10");
+                model.setUserInput(0, 2, 2, "=A2+10");
+                model.setUserInput(0, 3, 2, "=A3+10");
+
+                model.newSheet();
+                model.renameSheet(1, "Text");
+                model.setUserInput(1, 1, 1, "hello");
+                model.setUserInput(1, 2, 1, "world");
+                model.setUserInput(1, 1, 2, "iron-canvas");
+
+                model.newSheet();
+                model.renameSheet(2, "Math");
+                model.setUserInput(2, 1, 1, "3.14159");
+                model.setUserInput(2, 2, 1, "2.71828");
+                model.setUserInput(2, 3, 1, "=A1*A2");
+
+                phase = "IronCanvas.create";
+                const canvas = IronCanvas.create(gridEl, overlayEl);
+                phase = "setModel";
+                canvas.setModel(model);
+                phase = "resize";
+                canvas.resize(800, 400, window.devicePixelRatio || 1);
+
+                phase = "bridge snapshot";
+                console.log("bridge snapshot", {
+                    selectedView: model.getSelectedView(),
+                    styleA1: model.getCellStyle(0, 1, 1),
+                    typeA1: model.getCellType(0, 1, 1),
+                    formattedB1Numbers: model.getFormattedCellValue(0, 1, 2),
+                    rowHeight1: model.getRowHeight(0, 1),
+                    colWidth1: model.getColumnWidth(0, 1),
+                    frozenRows: model.getFrozenRowsCount(0),
+                    frozenCols: model.getFrozenColumnsCount(0),
+                    gridLines: model.getShowGridLines(0),
+                    worksheets: model.getWorksheetsProperties(),
+                });
+
+                phase = "render tabs";
+                const sheets = model.getWorksheetsProperties();
+                const renderTabs = () => {
+                    const active = model.getSelectedSheet();
+                    tabsEl.innerHTML = "";
+                    sheets.forEach((props, idx) => {
+                        const btn = document.createElement("button");
+                        btn.textContent = props.name;
+                        if (idx === active) btn.classList.add("active");
+                        btn.addEventListener("click", () => {
+                            model.setSelectedSheet(idx);
+                            canvas.requestRepaint();
+                            renderTabs();
+                        });
+                        tabsEl.appendChild(btn);
+                    });
+                };
+                renderTabs();
+
+                phase = "paint loop";
+                canvas.requestRepaint();
+                const loop = () => {
+                    canvas.paintIfDirty();
+                    requestAnimationFrame(loop);
+                };
+                requestAnimationFrame(loop);
+
+                setStatus(
+                    "ready — three sheets populated. Click a tab to switch.",
+                );
+            } catch (e) {
+                const detail =
+                    e instanceof Error
+                        ? e.stack || e.message
+                        : typeof e === "object" && e !== null
+                          ? JSON.stringify(e, Object.getOwnPropertyNames(e), 2)
+                          : String(e);
+                console.error("[" + phase + "]", e);
+                setError("[" + phase + "] " + detail);
+            }
+        </script>
+    </body>
+</html>
