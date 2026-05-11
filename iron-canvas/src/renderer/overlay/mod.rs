@@ -3,7 +3,7 @@
 //!
 //! These run on the transparent overlay canvas, which paints after the
 //! grid layer (cells + borders + text + headers + corner). Each helper
-//! bails early via `range_pixel_bounds(...)?` when the range is entirely
+//! bails early via `Chrome::range_rect(...)?` when the range is entirely
 //! outside the drawable fold, so overlays never leak onto the canvas for
 //! off-screen refs like `=BB3`.
 
@@ -44,7 +44,7 @@ impl<P: Painter> RendererCore<P> {
         color: PaintColor,
         fill: DashFill,
     ) {
-        let Some(b) = self.range_pixel_bounds(frame, range) else {
+        let Some(b) = frame.range_rect(range) else {
             return;
         };
 

@@ -31,7 +31,7 @@ pub struct IronCanvas {
     model: Option<Rc<dyn CanvasModel>>,
     last_frame: Option<Chrome>,
     /// Logical (CSS) canvas size, written by `resize` and read by
-    /// `paint_if_dirty` when building the shared `FrameContext`.
+    /// `paint_if_dirty` when building the shared `Chrome`.
     size: CanvasSize,
 }
 
@@ -109,7 +109,7 @@ impl IronCanvas {
         // updates, and active-cell moves.
         //
         // Falls through to a full rebuild when geometry diverged (IronCalc's
-        // UserModel is imperative — a sheet swap can mutate `FrameContext`
+        // UserModel is imperative — a sheet swap can mutate `Chrome`
         // identity without going through any setter) OR when no prior frame
         // exists, so the grid layer never sits beneath an overlay it didn't
         // paint with.
@@ -125,7 +125,12 @@ impl IronCanvas {
         }
 
         // Full rebuild: scroll/freeze/size/sheet changed, or grid is dirty.
-        let frame = Chrome::current(model, self.size, &self.theme);
+        // Recycle the outgoing frame's slot Vec allocations so steady-state
+        // rebuilds don't re-allocate the four pane-set buffers.
+        let frame = match self.last_frame.take() {
+            Some(prev) => prev.rebuild(model, self.size, &self.theme),
+            None => Chrome::current(model, self.size, &self.theme),
+        };
 
         if grid_dirty {
             self.grid.paint(model, &frame);

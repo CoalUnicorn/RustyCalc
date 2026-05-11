@@ -42,18 +42,18 @@ impl<P: Painter> RendererCore<P> {
     fn walk_header_strip(&self, axis: Axis, frame: &Chrome, mut visit: impl FnMut(i32, i32, i32)) {
         match axis {
             Axis::Row => {
-                for s in &frame.pane_set.rows.frozen {
+                for s in &frame.pane_set.frozen_rows {
                     visit(s.row, s.top, s.height);
                 }
-                for s in &frame.pane_set.rows.scroll {
+                for s in &frame.pane_set.scroll_rows {
                     visit(s.row, s.top, s.height);
                 }
             }
             Axis::Column => {
-                for s in &frame.pane_set.cols.frozen {
+                for s in &frame.pane_set.frozen_cols {
                     visit(s.col, s.left, s.width);
                 }
-                for s in &frame.pane_set.cols.scroll {
+                for s in &frame.pane_set.scroll_cols {
                     visit(s.col, s.left, s.width);
                 }
             }

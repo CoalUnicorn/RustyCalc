@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use crate::chrome::Chrome;
-use crate::overlay::DashFill;
+use super::DashFill;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};

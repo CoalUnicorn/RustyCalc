@@ -7,9 +7,9 @@
 //! layer (`IronCanvas::hit_test`, `cell_rect`, `resize_handle_at`) read
 //! the same snapshot, so what's painted and what gets hit always agree.
 //!
-//! Slot vecs live on `PaneSet`; methods that walk them either read through
-//! `self.pane_set.<vec>` for now or migrate per-axis to `PaneSet` as we
-//! touch them (per the hybrid-axis-split rule).
+//! Slot vecs live on `PaneSet` and every pure-axis walk is a method on
+//! `PaneSet`; `Chrome` composes them when a query spans both axes
+//! (`cell_rect`, `range_rect`, `hit_test`, `resize_handle_at`).
 //!
 //! `row_header_thickness` is computed dynamically per frame: the row-header
 //! strip widens as scroll position pushes more digits into row labels
@@ -17,22 +17,19 @@
 //! needs ≈60px). Using a char-count approximation rather than threading
 //! `TextMetrics` keeps the build path free of painter coupling.
 
-use crate::geometry::frame::slot::{ColSlot, PaneColumns, PaneRows, RowSlot};
+use crate::geometry::slot::{col_width, row_height, ColSlot, RowSlot};
 use crate::geometry::{
     constants::{
-        AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
-        HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+        AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_OFFSET,
+        HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
     },
     pixel_rect::PixelRect,
     prim::Point,
 };
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
-use crate::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use crate::{CanvasModel, CanvasSize, RCRange};
 
-pub(crate) mod corner_box;
-pub(crate) mod frozen_separator;
-pub(crate) mod header_strip;
 pub(crate) mod pane_region;
 
 pub(crate) use pane_region::PaneRegion;
@@ -50,10 +47,7 @@ pub(crate) struct Chrome {
     /// Width of the row-header strip — measured per frame from the widest
     /// visible row label so the digits never clip past row 999.
     pub row_header_thickness: i32,
-    /// Height of the column-header strip. Static today (= `HEADER_ROW_HEIGHT`)
-    /// but stored on Chrome so the day this becomes dynamic, only the
-    /// assignment in `Chrome::current` changes — paint code already reads
-    /// `frame.col_header_thickness`.
+    /// Height of the column-header strip.
     pub col_header_thickness: i32,
     /// Pixel origin where the cell area begins. Single source of truth used
     /// by hit-test and viewport math instead of recomputing
@@ -64,6 +58,10 @@ pub(crate) struct Chrome {
     /// pure (no model read) and pins the handle position to the *painted*
     /// selection, even if the model's selection mutated between paint and
     /// the next hit-test.
+    ///
+    /// Invariant: no paint or hit-test code reads
+    /// `model.get_selected_view().selection` — every consumer funnels
+    /// through this field so painted geometry and queried geometry agree.
     pub selection_range: RCRange,
     /// Canvas size at which this frame was built. Stored so `is_still_valid`
     /// can detect a resize without the orchestrator passing size separately.
@@ -77,162 +75,192 @@ pub(crate) struct Chrome {
 
 #[derive(Debug)]
 pub(crate) struct PaneSet {
-    pub(crate) rows: PaneRows,
-    pub(crate) cols: PaneColumns,
+    pub frozen_rows: Vec<RowSlot>,
+    pub scroll_rows: Vec<RowSlot>,
+    pub frozen_offset_y: i32,
+    pub frozen_cols: Vec<ColSlot>,
+    pub scroll_cols: Vec<ColSlot>,
+    pub frozen_offset_x: i32,
+}
+
+/// Drained slot Vecs carried from the previous `Chrome` into the next one.
+///
+/// `Chrome::rebuild` extracts them from the outgoing frame so their backing
+/// allocations cross the frame boundary; the new frame `push`es into the
+/// already-cleared Vecs and only allocates if the row/column count grew
+/// past the previous capacity.
+#[derive(Default)]
+pub(crate) struct RecycledSlots {
+    pub(crate) frozen_rows: Vec<RowSlot>,
+    pub(crate) scroll_rows: Vec<RowSlot>,
+    pub(crate) frozen_cols: Vec<ColSlot>,
+    pub(crate) scroll_cols: Vec<ColSlot>,
+}
+
+impl RecycledSlots {
+    fn from_pane_set(pane_set: PaneSet) -> Self {
+        let PaneSet {
+            mut frozen_rows,
+            mut scroll_rows,
+            mut frozen_cols,
+            mut scroll_cols,
+            ..
+        } = pane_set;
+        frozen_rows.clear();
+        scroll_rows.clear();
+        frozen_cols.clear();
+        scroll_cols.clear();
+        Self {
+            frozen_rows,
+            scroll_rows,
+            frozen_cols,
+            scroll_cols,
+        }
+    }
 }
 
 impl PaneSet {
-    /// Walk the row axis: build the frozen row slots and the scrollable
-    /// row slots, returning the pixel Y of the frozen-rows separator.
-    /// Independent of `row_header_thickness` — runs in Chrome::current's
+    /// Start a fresh `PaneSet` reusing the previous frame's drained slot
+    /// Vecs as backing buffers. `frozen_offset_*` get filled in by
+    /// `fill_rows` / `fill_cols`.
+    pub(crate) fn with_recycled(recycled: RecycledSlots) -> Self {
+        PaneSet {
+            frozen_rows: recycled.frozen_rows,
+            scroll_rows: recycled.scroll_rows,
+            frozen_offset_y: 0,
+            frozen_cols: recycled.frozen_cols,
+            scroll_cols: recycled.scroll_cols,
+            frozen_offset_x: 0,
+        }
+    }
+
+    /// Walk the row axis: populate the frozen row slots and the scrollable
+    /// row slots, recording the pixel Y where the scroll band begins.
+    /// Independent of `row_header_thickness` — runs in `Chrome::build`'s
     /// Phase B, before the row-label measurement. Reads `FROZEN_SEP`
-    /// directly because the gap between frozen and scroll bands is
-    /// PaneSet's own structural concern, not chrome geometry.
-    pub(crate) fn build_rows(
+    /// directly because the gap between frozen and scroll bands is the
+    /// row axis's own structural concern.
+    pub(crate) fn fill_rows(
+        &mut self,
         model: &dyn CanvasModel,
         frozen_count: i32,
         origin_y: i32,
         view_top_row: i32,
         canvas_h: f64,
-    ) -> PaneRows {
-        let mut frozen_rows = Vec::with_capacity(frozen_count as usize);
+    ) {
+        self.frozen_rows.reserve(frozen_count as usize);
         let mut y_cursor = origin_y;
         for r in 1..=frozen_count {
             let h = row_height(model, r);
-            frozen_rows.push(RowSlot {
+            self.frozen_rows.push(RowSlot {
                 row: r,
                 top: y_cursor,
                 height: h,
             });
             y_cursor += h;
         }
-        let frozen_offset_y = y_cursor + if frozen_count > 0 { FROZEN_SEP } else { 0 };
+        self.frozen_offset_y = y_cursor + if frozen_count > 0 { FROZEN_SEP } else { 0 };
 
         let row_first = (frozen_count + 1).max(view_top_row);
-        let mut scroll_rows: Vec<RowSlot> = Vec::new();
-        let mut y_cursor = frozen_offset_y;
+        let mut y_cursor = self.frozen_offset_y;
         for row in row_first..=LAST_ROW {
-            if f64::from(y_cursor) >= canvas_h || row == LAST_ROW {
-                let h = row_height(model, row);
-                scroll_rows.push(RowSlot {
-                    row,
-                    top: y_cursor,
-                    height: h,
-                });
-                break;
-            }
             let h = row_height(model, row);
-            scroll_rows.push(RowSlot {
+            self.scroll_rows.push(RowSlot {
                 row,
                 top: y_cursor,
                 height: h,
             });
+            if f64::from(y_cursor) >= canvas_h || row == LAST_ROW {
+                break;
+            }
             y_cursor += h;
-        }
-        PaneRows {
-            frozen: frozen_rows,
-            scroll: scroll_rows,
-            frozen_offset_y,
         }
     }
 
     /// Walk the column axis using the cell-area X origin (which already
     /// folds in the freshly-measured `row_header_thickness`). Mirrors
-    /// `build_rows` shape; runs in Chrome::current's Phase D after
+    /// `fill_rows` shape; runs in `Chrome::build`'s Phase D after
     /// measurement.
-    pub(crate) fn build_cols(
+    pub(crate) fn fill_cols(
+        &mut self,
         model: &dyn CanvasModel,
         frozen_count: i32,
         origin_x: i32,
         view_left_column: i32,
         canvas_w: f64,
-    ) -> PaneColumns {
-        let mut frozen_cols = Vec::with_capacity(frozen_count as usize);
+    ) {
+        self.frozen_cols.reserve(frozen_count as usize);
         let mut x_cursor = origin_x;
         for c in 1..=frozen_count {
             let w = col_width(model, c);
-            frozen_cols.push(ColSlot {
+            self.frozen_cols.push(ColSlot {
                 col: c,
                 left: x_cursor,
                 width: w,
             });
             x_cursor += w;
         }
-        let frozen_offset_x = x_cursor + if frozen_count > 0 { FROZEN_SEP } else { 0 };
+        self.frozen_offset_x = x_cursor + if frozen_count > 0 { FROZEN_SEP } else { 0 };
 
         let col_first = (frozen_count + 1).max(view_left_column);
-        let mut scroll_cols: Vec<ColSlot> = Vec::new();
-        let mut x_cursor = frozen_offset_x;
+        let mut x_cursor = self.frozen_offset_x;
         for col in col_first..=LAST_COLUMN {
-            if f64::from(x_cursor) >= canvas_w || col == LAST_COLUMN {
-                let w = col_width(model, col);
-                scroll_cols.push(ColSlot {
-                    col,
-                    left: x_cursor,
-                    width: w,
-                });
-                break;
-            }
             let w = col_width(model, col);
-            scroll_cols.push(ColSlot {
+            self.scroll_cols.push(ColSlot {
                 col,
                 left: x_cursor,
                 width: w,
             });
+            if f64::from(x_cursor) >= canvas_w || col == LAST_COLUMN {
+                break;
+            }
             x_cursor += w;
-        }
-
-        PaneColumns {
-            frozen: frozen_cols,
-            scroll: scroll_cols,
-            frozen_offset_x,
         }
     }
 
     #[inline]
     pub(crate) fn frozen_rows_count(&self) -> i32 {
-        self.rows.frozen.len() as i32
+        self.frozen_rows.len() as i32
     }
 
     #[inline]
     pub(crate) fn frozen_cols_count(&self) -> i32 {
-        self.cols.frozen.len() as i32
+        self.frozen_cols.len() as i32
     }
 
     #[inline]
     fn row_slot(&self, row: i32) -> Option<&RowSlot> {
         if row <= self.frozen_rows_count() {
-            self.rows.frozen.get((row - 1) as usize)
+            self.frozen_rows.get((row - 1) as usize)
         } else {
-            let first = self.rows.scroll.first()?.row;
-            self.rows.scroll.get((row - first) as usize)
+            let first = self.scroll_rows.first()?.row;
+            self.scroll_rows.get((row - first) as usize)
         }
     }
 
     #[inline]
     fn col_slot(&self, col: i32) -> Option<&ColSlot> {
         if col <= self.frozen_cols_count() {
-            self.cols.frozen.get((col - 1) as usize)
+            self.frozen_cols.get((col - 1) as usize)
         } else {
-            let first = self.cols.scroll.first()?.col;
-            self.cols.scroll.get((col - first) as usize)
+            let first = self.scroll_cols.first()?.col;
+            self.scroll_cols.get((col - first) as usize)
         }
     }
 
     #[inline]
     pub(crate) fn top_row(&self) -> i32 {
-        self.rows.scroll.first().map(|s| s.row).unwrap_or(1)
+        self.scroll_rows.first().map(|s| s.row).unwrap_or(1)
     }
 
     #[inline]
     pub(crate) fn left_column(&self) -> i32 {
-        self.cols.scroll.first().map(|s| s.col).unwrap_or(1)
+        self.scroll_cols.first().map(|s| s.col).unwrap_or(1)
     }
 
     #[inline]
     pub(crate) fn last_visible_row(&self) -> i32 {
-        self.rows
-            .scroll
+        self.scroll_rows
             .last()
             .map(|s| s.row)
             .unwrap_or_else(|| self.top_row())
@@ -240,8 +268,7 @@ impl PaneSet {
 
     #[inline]
     pub(crate) fn last_visible_col(&self) -> i32 {
-        self.cols
-            .scroll
+        self.scroll_cols
             .last()
             .map(|s| s.col)
             .unwrap_or_else(|| self.left_column())
@@ -249,13 +276,12 @@ impl PaneSet {
 
     #[inline]
     pub(crate) fn row_in_frame(&self, row: i32) -> bool {
-        row <= self.frozen_rows_count() || (row >= self.top_row() && row <= self.last_visible_row())
+        self.row_slot(row).is_some()
     }
 
     #[inline]
     pub(crate) fn col_in_frame(&self, col: i32) -> bool {
-        col <= self.frozen_cols_count()
-            || (col >= self.left_column() && col <= self.last_visible_col())
+        self.col_slot(col).is_some()
     }
 
     #[inline]
@@ -277,12 +303,12 @@ impl PaneSet {
     }
 
     pub(crate) fn pixel_to_row(&self, y: i32) -> Option<i32> {
-        for s in &self.rows.frozen {
+        for s in &self.frozen_rows {
             if y >= s.top && y < s.bottom() {
                 return Some(s.row);
             }
         }
-        for s in &self.rows.scroll {
+        for s in &self.scroll_rows {
             if y >= s.top && y < s.bottom() {
                 return Some(s.row);
             }
@@ -291,12 +317,12 @@ impl PaneSet {
     }
 
     pub(crate) fn pixel_to_col(&self, x: i32) -> Option<i32> {
-        for s in &self.cols.frozen {
+        for s in &self.frozen_cols {
             if x >= s.left && x < s.right() {
                 return Some(s.col);
             }
         }
-        for s in &self.cols.scroll {
+        for s in &self.scroll_cols {
             if x >= s.left && x < s.right() {
                 return Some(s.col);
             }
@@ -305,12 +331,7 @@ impl PaneSet {
     }
 
     pub(crate) fn row_boundary_at(&self, y: i32, hit_zone: i32) -> Option<i32> {
-        for s in &self.rows.frozen {
-            if (s.bottom() - y).abs() <= hit_zone {
-                return Some(s.row);
-            }
-        }
-        for s in &self.rows.scroll {
+        for s in self.frozen_rows.iter().chain(self.scroll_rows.iter()) {
             if (s.bottom() - y).abs() <= hit_zone {
                 return Some(s.row);
             }
@@ -322,12 +343,7 @@ impl PaneSet {
     }
 
     pub(crate) fn col_boundary_at(&self, x: i32, hit_zone: i32) -> Option<i32> {
-        for s in &self.cols.frozen {
-            if (s.right() - x).abs() <= hit_zone {
-                return Some(s.col);
-            }
-        }
-        for s in &self.cols.scroll {
+        for s in self.frozen_cols.iter().chain(self.scroll_cols.iter()) {
             if (s.right() - x).abs() <= hit_zone {
                 return Some(s.col);
             }
@@ -363,69 +379,76 @@ pub(crate) fn measure_row_header_width(max_visible_row: i32) -> i32 {
 
 impl Chrome {
     /// Build a per-frame snapshot via the phased A→E construction:
-    /// A chrome geometry → B walk rows → C measure row_header_thickness
+    /// A frozen counts → B walk rows → C measure row_header_thickness
     /// → D walk cols (using measured width) → E assemble.
     pub(crate) fn current(
         model: &dyn CanvasModel,
         canvas: CanvasSize,
         theme: &CanvasTheme,
     ) -> Self {
+        Self::build(model, canvas, theme, RecycledSlots::default())
+    }
+
+    /// Build the next frame, recycling the outgoing frame's slot Vec
+    /// allocations. Consumes `self` because the previous `PaneSet` is no
+    /// longer reachable once its Vecs move into the new frame.
+    pub(crate) fn rebuild(
+        self,
+        model: &dyn CanvasModel,
+        canvas: CanvasSize,
+        theme: &CanvasTheme,
+    ) -> Self {
+        Self::build(model, canvas, theme, RecycledSlots::from_pane_set(self.pane_set))
+    }
+
+    fn build(
+        model: &dyn CanvasModel,
+        canvas: CanvasSize,
+        theme: &CanvasTheme,
+        recycled: RecycledSlots,
+    ) -> Self {
         // None ⇒ JS bridge transient (threw or shape malformed). Fall through
         // with the fresh-model default so the frame still builds; next animation
         // frame re-queries.
-        let view = model.get_selected_view().unwrap_or(CanvasView {
-            sheet: 0,
-            row: 1,
-            column: 1,
-            selection: RCRange {
-                r1: 1,
-                c1: 1,
-                r2: 1,
-                c2: 1,
-            },
-            top_row: 1,
-            left_column: 1,
-        });
+        let (top_row, left_column, selection) = match model.get_selected_view() {
+            Some(v) => (v.top_row, v.left_column, v.selection),
+            None => (
+                1,
+                1,
+                RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 1,
+                    c2: 1,
+                },
+            ),
+        };
         let sheet = model.get_selected_sheet();
 
-        // Phase A — frozen counts only. Chrome-geometry constants
-        // (HEADER_ROW_HEIGHT, HEADER_OFFSET, FROZEN_SEP) are read at the
-        // point of need below; PaneSet no longer takes them as params.
+        // Phase A — frozen counts only.
         let frozen_row_count = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_col_count = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
-        // Phase B — row walk. `origin_y` is the top edge of the cell area;
-        // static today (col header is fixed-height) but computed here so
-        // the day it goes dynamic, only this line changes.
+        let mut pane_set = PaneSet::with_recycled(recycled);
+
+        // Phase B — row walk.
         let origin_y = HEADER_ROW_HEIGHT + HEADER_OFFSET;
-        //let (frozen_rows, scroll_rows, frozen_offset_y) =
-        let rows = PaneSet::build_rows(model, frozen_row_count, origin_y, view.top_row, canvas.h);
+        pane_set.fill_rows(model, frozen_row_count, origin_y, top_row, canvas.h);
 
         // Phase C — measure row_header_thickness from the last visible row label.
-        let last_visible_row = rows
-            .scroll
+        let last_visible_row = pane_set
+            .scroll_rows
             .last()
             .map(|s| s.row)
-            .unwrap_or((frozen_row_count + 1).max(view.top_row));
+            .unwrap_or((frozen_row_count + 1).max(top_row));
         let row_header_thickness = measure_row_header_width(last_visible_row);
 
         // Phase D — col walk uses the measured width to anchor `origin_x`.
         let origin_x = row_header_thickness + HEADER_OFFSET;
-        //let (frozen_cols, scroll_cols, frozen_offset_x)
-        let columns = PaneSet::build_cols(
-            model,
-            frozen_col_count,
-            origin_x,
-            view.left_column,
-            canvas.w,
-        );
+        pane_set.fill_cols(model, frozen_col_count, origin_x, left_column, canvas.w);
 
         // Phase E — assemble. `cell_origin` reuses the locals from B/D so
         // there's a single source of truth for the cell-area top-left.
-        let pane_set = PaneSet {
-            rows,
-            cols: columns,
-        };
         let col_header_thickness = HEADER_ROW_HEIGHT;
         let cell_origin = Point {
             x: origin_x,
@@ -438,7 +461,7 @@ impl Chrome {
             row_header_thickness,
             col_header_thickness,
             cell_origin,
-            selection_range: view.selection,
+            selection_range: selection,
             canvas_size: canvas,
             theme: theme.clone(),
         }
@@ -489,6 +512,58 @@ impl Chrome {
         })
     }
 
+    /// Map a sheet-coordinate range to canvas pixel bounds, clamping
+    /// oversized selections to the canvas edge. Returns `None` when the
+    /// range is entirely outside the drawable fold (scrollable viewport
+    /// + frozen bands). Pure `Chrome` math — no model access.
+    pub(crate) fn range_rect(&self, range: RCRange) -> Option<PixelRect> {
+        let p = &self.pane_set;
+        let frozen_rows = p.frozen_rows_count();
+        let frozen_cols = p.frozen_cols_count();
+
+        if !self.range_intersects_fold(range, frozen_rows, frozen_cols) {
+            return None;
+        }
+
+        let x = p.col_to_x(range.c1);
+        let y = p.row_to_y(range.r1);
+        let right = if range.c2 > p.last_visible_col() && range.c2 > frozen_cols {
+            self.canvas_size.w as i32
+        } else {
+            p.col_to_x(range.c2) + p.col_extent_at(range.c2)
+        };
+        let bottom = if range.r2 > p.last_visible_row() && range.r2 > frozen_rows {
+            self.canvas_size.h as i32
+        } else {
+            p.row_to_y(range.r2) + p.row_extent_at(range.r2)
+        };
+        Some(PixelRect {
+            top_left: Point { x, y },
+            width: right - x,
+            height: bottom - y,
+        })
+    }
+
+    /// Does `range` intersect the drawable fold (scrollable viewport plus
+    /// the frozen bands)? Guards `range_rect`'s slot lookups against
+    /// out-of-range refs like `=BB3` when column BB is off screen.
+    fn range_intersects_fold(&self, range: RCRange, frozen_rows: i32, frozen_cols: i32) -> bool {
+        let p = &self.pane_set;
+        if range.c1 > p.last_visible_col() && range.c1 > frozen_cols {
+            return false;
+        }
+        if range.r1 > p.last_visible_row() && range.r1 > frozen_rows {
+            return false;
+        }
+        if range.c2 < p.left_column() && range.c2 > frozen_cols {
+            return false;
+        }
+        if range.r2 < p.top_row() && range.r2 > frozen_rows {
+            return false;
+        }
+        true
+    }
+
     pub(crate) fn autofill_handle(&self) -> Option<Point> {
         let norm = self.selection_range.normalized();
         let r2 = norm.r2;
@@ -506,23 +581,16 @@ impl Chrome {
         })
     }
 
-    pub(crate) fn autofill_handle_rect(&self) -> PixelRect {
-        if let Some(p) = self.autofill_handle() {
-            PixelRect {
-                top_left: Point {
-                    x: p.x - AUTOFILL_HANDLE_PX,
-                    y: p.y - AUTOFILL_HANDLE_PX,
-                },
-                width: AUTOFILL_HANDLE_PX,
-                height: AUTOFILL_HANDLE_PX,
-            }
-        } else {
-            PixelRect {
-                top_left: Point::default(),
-                width: AUTOFILL_HANDLE_PX,
-                height: AUTOFILL_HANDLE_PX,
-            }
-        }
+    pub(crate) fn autofill_handle_rect(&self) -> Option<PixelRect> {
+        let p = self.autofill_handle()?;
+        Some(PixelRect {
+            top_left: Point {
+                x: p.x - AUTOFILL_HANDLE_PX,
+                y: p.y - AUTOFILL_HANDLE_PX,
+            },
+            width: AUTOFILL_HANDLE_PX,
+            height: AUTOFILL_HANDLE_PX,
+        })
     }
 
     pub(crate) fn hit_test(&self, x: i32, y: i32) -> HitTest {
@@ -548,14 +616,15 @@ impl Chrome {
         let (Some(row), Some(column)) = (p.pixel_to_row(y), p.pixel_to_col(x)) else {
             return HitTest::Outside;
         };
-        let h = self.autofill_handle_rect();
-        let pad = AUTOFILL_HIT_PAD_PX;
-        if x >= h.top_left.x - pad
-            && x <= h.right() + pad
-            && y >= h.top_left.y - pad
-            && y <= h.bottom() + pad
-        {
-            return HitTest::AutofillHandle { row, column };
+        if let Some(h) = self.autofill_handle_rect() {
+            let pad = AUTOFILL_HIT_PAD_PX;
+            if x >= h.top_left.x - pad
+                && x <= h.right() + pad
+                && y >= h.top_left.y - pad
+                && y <= h.bottom() + pad
+            {
+                return HitTest::AutofillHandle { row, column };
+            }
         }
         HitTest::Cell { row, column }
     }
@@ -577,18 +646,3 @@ impl Chrome {
     }
 }
 
-pub(crate) fn row_height(model: &dyn CanvasModel, row: i32) -> i32 {
-    let sheet = model.get_selected_sheet();
-    model
-        .get_row_height(sheet, row)
-        .unwrap_or(DEFAULT_ROW_HEIGHT)
-        .round() as i32
-}
-
-pub(crate) fn col_width(model: &dyn CanvasModel, col: i32) -> i32 {
-    let sheet = model.get_selected_sheet();
-    model
-        .get_column_width(sheet, col)
-        .unwrap_or(DEFAULT_COL_WIDTH)
-        .round() as i32
-}

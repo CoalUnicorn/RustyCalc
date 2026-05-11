@@ -67,13 +67,6 @@ impl From<[i32; 4]> for RCRange {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
-pub struct CellAddress {
-    pub sheet: u32,
-    pub row: i32,
-    pub column: i32,
-}
-
 /// The target cell during an autofill-handle drag.
 ///
 /// Replaces the anonymous `Option<(i32, i32)>` in `RenderOverlays` with a

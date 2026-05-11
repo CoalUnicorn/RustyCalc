@@ -2,8 +2,11 @@
 //!
 //! A `RowSlot` / `ColSlot` is the axis-level peer of `CellSlot`: the index
 //! plus the absolute canvas coordinate of its leading edge plus its extent.
-//! `FrameContext` stores four vecs of these (frozen / scrollable × row /
+//! `PaneSet` stores four vecs of these (frozen / scrollable × row /
 //! column) and every pixel↔cell query reads them — no prefix-sum decoding.
+
+use crate::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
+use crate::CanvasModel;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RowSlot {
@@ -21,20 +24,6 @@ pub struct ColSlot {
     pub width: i32,
 }
 
-#[derive(Clone, Debug)]
-pub struct PaneColumns {
-    pub frozen: Vec<ColSlot>,
-    pub scroll: Vec<ColSlot>,
-    pub frozen_offset_x: i32,
-}
-
-#[derive(Clone, Debug)]
-pub struct PaneRows {
-    pub frozen: Vec<RowSlot>,
-    pub scroll: Vec<RowSlot>,
-    pub frozen_offset_y: i32,
-}
-
 impl RowSlot {
     #[inline]
     pub fn bottom(&self) -> i32 {
@@ -47,4 +36,20 @@ impl ColSlot {
     pub fn right(&self) -> i32 {
         self.left + self.width
     }
+}
+
+pub(crate) fn row_height(model: &dyn CanvasModel, row: i32) -> i32 {
+    let sheet = model.get_selected_sheet();
+    model
+        .get_row_height(sheet, row)
+        .unwrap_or(DEFAULT_ROW_HEIGHT)
+        .round() as i32
+}
+
+pub(crate) fn col_width(model: &dyn CanvasModel, col: i32) -> i32 {
+    let sheet = model.get_selected_sheet();
+    model
+        .get_column_width(sheet, col)
+        .unwrap_or(DEFAULT_COL_WIDTH)
+        .round() as i32
 }

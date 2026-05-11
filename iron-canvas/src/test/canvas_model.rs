@@ -15,7 +15,7 @@ use crate::geometry::constants::{
 use crate::theme::LIGHT;
 use crate::types::ui::HitTest;
 use crate::{chrome::Chrome, CanvasView};
-use crate::{CanvasModel, CanvasSize, PixelRect, Point, RCRange};
+use crate::{CanvasModel, CanvasSize, RCRange};
 
 struct MockCanvasModel {
     sheet: u32,
@@ -95,8 +95,8 @@ fn no_freeze_has_no_bands_and_origin_skips_separator() {
     let p = &frame.pane_set;
     assert_eq!(p.frozen_rows_count(), 0);
     assert_eq!(p.frozen_cols_count(), 0);
-    assert_eq!(p.frozen_offset_x(), HEADER_COL_WIDTH + HEADER_OFFSET);
-    assert_eq!(p.frozen_offset_y(), HEADER_ROW_HEIGHT + HEADER_OFFSET);
+    assert_eq!(p.frozen_offset_x, HEADER_COL_WIDTH + HEADER_OFFSET);
+    assert_eq!(p.frozen_offset_y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
 }
 
 #[test]
@@ -109,9 +109,9 @@ fn frozen_rows_only_adds_separator_on_y_only() {
     let p = &frame.pane_set;
     assert_eq!(p.frozen_rows_count(), 2);
     assert_eq!(p.frozen_cols_count(), 0);
-    assert_eq!(p.frozen_offset_x(), HEADER_COL_WIDTH + HEADER_OFFSET);
+    assert_eq!(p.frozen_offset_x, HEADER_COL_WIDTH + HEADER_OFFSET);
     assert_eq!(
-        p.frozen_offset_y(),
+        p.frozen_offset_y,
         (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET)
             + 2.0 * DEFAULT_ROW_HEIGHT
             + f64::from(FROZEN_SEP))
@@ -131,14 +131,14 @@ fn frozen_both_axes_add_separator_on_each() {
     assert_eq!(p.frozen_rows_count(), 1);
     assert_eq!(p.frozen_cols_count(), 3);
     assert_eq!(
-        p.frozen_offset_x(),
+        p.frozen_offset_x,
         (f64::from(HEADER_COL_WIDTH + HEADER_OFFSET)
             + 3.0 * DEFAULT_COL_WIDTH
             + f64::from(FROZEN_SEP))
         .round() as i32
     );
     assert_eq!(
-        p.frozen_offset_y(),
+        p.frozen_offset_y,
         (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP))
             .round() as i32
     );
@@ -156,7 +156,7 @@ fn frame_geometry_returns_zero_for_out_of_range_indices() {
     assert_eq!(p.col_extent_at(99999), 0);
 }
 
-// FrameContext: pixel ↔ cell math
+// Chrome: pixel ↔ cell math
 //
 // The frame is built fresh per test from the mock model and a canvas
 // size large enough to make the test cells fall inside the visible
@@ -205,7 +205,7 @@ fn col_to_x_past_frozen_seam_uses_frozen_offset_and_left_column() {
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
     let p = &frame.pane_set;
-    let origin_x = p.frozen_offset_x();
+    let origin_x = p.frozen_offset_x;
     // col 5 is the first scrollable on screen -> at the frozen offset
     assert_eq!(p.col_to_x(5), origin_x);
     assert_eq!(
@@ -253,10 +253,14 @@ fn autofill_handle_rect_anchors_at_bot_right_corner() {
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    let corner = frame.autofill_handle();
-    let rect = frame.autofill_handle_rect();
-    assert_eq!(rect.top_left.x, corner.unwrap().x - AUTOFILL_HANDLE_PX);
-    assert_eq!(rect.top_left.y, corner.unwrap().y - AUTOFILL_HANDLE_PX);
+    let Some(corner) = frame.autofill_handle() else {
+        panic!("expected autofill handle for partial-cell selection [2,3,4,5]");
+    };
+    let Some(rect) = frame.autofill_handle_rect() else {
+        panic!("expected autofill rect for partial-cell selection [2,3,4,5]");
+    };
+    assert_eq!(rect.top_left.x, corner.x - AUTOFILL_HANDLE_PX);
+    assert_eq!(rect.top_left.y, corner.y - AUTOFILL_HANDLE_PX);
     assert_eq!(rect.width, AUTOFILL_HANDLE_PX);
     assert_eq!(rect.height, AUTOFILL_HANDLE_PX);
 }
@@ -268,14 +272,7 @@ fn no_autofill_handle_rect_full_sheet_selection() {
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    assert_eq!(
-        frame.autofill_handle_rect(),
-        PixelRect {
-            top_left: Point { x: 0, y: 0 },
-            width: 6,
-            height: 6,
-        }
-    );
+    assert!(frame.autofill_handle_rect().is_none());
 }
 
 #[test]
@@ -287,7 +284,9 @@ fn hit_test_accepts_click_within_handle_pad() {
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    let rect = frame.autofill_handle_rect();
+    let Some(rect) = frame.autofill_handle_rect() else {
+        panic!("expected autofill rect for partial-cell selection [2,3,4,5]");
+    };
     let x = rect.right() + 1;
     let y = rect.bottom() + 1;
     match frame.hit_test(x, y) {
@@ -304,7 +303,9 @@ fn hit_test_rejects_click_past_handle_pad() {
         ..Default::default()
     };
     let frame = Chrome::current(&m, test_canvas(), &LIGHT);
-    let rect = frame.autofill_handle_rect();
+    let Some(rect) = frame.autofill_handle_rect() else {
+        panic!("expected autofill rect for partial-cell selection [2,3,4,5]");
+    };
     let x = rect.right() + AUTOFILL_HIT_PAD_PX + 1;
     let y = rect.bottom() + AUTOFILL_HIT_PAD_PX + 1;
     match frame.hit_test(x, y) {
@@ -419,4 +420,38 @@ fn pixel_to_col_round_trips_col_to_x() {
         // Nudge +0.5 to land safely inside the cell (avoid the edge).
         assert_eq!(p.pixel_to_col(x + 1), Some(c), "round-trip col {}", c);
     }
+}
+
+// Slot-vec recycling — `rebuild` carries the four PaneSet Vec allocations
+// from the outgoing frame into the new one, so steady-state rebuilds don't
+// re-allocate. The strongest signal is pointer identity of the underlying
+// buffers across the frame boundary.
+#[test]
+fn rebuild_recycles_pane_slot_buffers() {
+    let m = MockCanvasModel {
+        frozen_rows: 2,
+        frozen_cols: 2,
+        ..Default::default()
+    };
+    let f1 = Chrome::current(&m, test_canvas(), &LIGHT);
+
+    let frozen_rows_ptr = f1.pane_set.frozen_rows.as_ptr();
+    let scroll_rows_ptr = f1.pane_set.scroll_rows.as_ptr();
+    let frozen_cols_ptr = f1.pane_set.frozen_cols.as_ptr();
+    let scroll_cols_ptr = f1.pane_set.scroll_cols.as_ptr();
+    let frozen_rows_cap = f1.pane_set.frozen_rows.capacity();
+    let scroll_rows_cap = f1.pane_set.scroll_rows.capacity();
+    let frozen_cols_cap = f1.pane_set.frozen_cols.capacity();
+    let scroll_cols_cap = f1.pane_set.scroll_cols.capacity();
+
+    let f2 = f1.rebuild(&m, test_canvas(), &LIGHT);
+
+    assert_eq!(f2.pane_set.frozen_rows.as_ptr(), frozen_rows_ptr);
+    assert_eq!(f2.pane_set.scroll_rows.as_ptr(), scroll_rows_ptr);
+    assert_eq!(f2.pane_set.frozen_cols.as_ptr(), frozen_cols_ptr);
+    assert_eq!(f2.pane_set.scroll_cols.as_ptr(), scroll_cols_ptr);
+    assert!(f2.pane_set.frozen_rows.capacity() >= frozen_rows_cap);
+    assert!(f2.pane_set.scroll_rows.capacity() >= scroll_rows_cap);
+    assert!(f2.pane_set.frozen_cols.capacity() >= frozen_cols_cap);
+    assert!(f2.pane_set.scroll_cols.capacity() >= scroll_cols_cap);
 }

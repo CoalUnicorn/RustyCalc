@@ -24,7 +24,7 @@ impl<P: Painter> RendererCore<P> {
             r2: sel.r2.max(target.row),
             c2: sel.c2.max(target.col),
         };
-        let Some(b) = self.range_pixel_bounds(frame, range) else {
+        let Some(b) = frame.range_rect(range) else {
             return;
         };
 

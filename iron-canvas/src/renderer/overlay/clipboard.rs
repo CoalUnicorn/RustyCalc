@@ -2,7 +2,7 @@
 //! No-op when the clipboard is empty or lives on another sheet.
 
 use crate::chrome::Chrome;
-use crate::overlay::DashFill;
+use super::DashFill;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::types::coord::SheetArea;

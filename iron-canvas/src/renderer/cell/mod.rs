@@ -21,7 +21,7 @@ pub(crate) use paint::{CellPaint, PaneCells};
 
 use ironcalc_base::types::CellType;
 
-use crate::cell::text::TextPaint;
+use self::text::TextPaint;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
@@ -70,8 +70,7 @@ impl<P: Painter> RendererCore<P> {
         slots.clear();
 
         for slot in PaneCells::new(&pane, frame) {
-            let idx =
-                ((slot.addr.row - range.r1) * cols_w + (slot.addr.column - range.c1)) as usize;
+            let idx = ((slot.row - range.r1) * cols_w + (slot.col - range.c1)) as usize;
             let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
                 continue;
             };
@@ -92,7 +91,7 @@ impl<P: Painter> RendererCore<P> {
 
         let mut text_lines = self.frame_cache.text_lines.take();
         for p in &slots {
-            let idx = ((p.addr.row - range.r1) * cols_w + (p.addr.column - range.c1)) as usize;
+            let idx = ((p.row - range.r1) * cols_w + (p.col - range.c1)) as usize;
             let Some(text) = pane_values.get_mut(idx).and_then(Option::take) else {
                 continue;
             };

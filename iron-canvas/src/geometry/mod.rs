@@ -1,5 +1,5 @@
 pub mod constants;
-pub mod frame;
+pub mod slot;
 pub mod pixel_rect;
 pub mod prim;
 pub mod utils;

@@ -1,13 +1,14 @@
 use crate::{
     chrome::Chrome,
-    geometry::frame::slot::{ColSlot, RowSlot},
+    geometry::slot::{ColSlot, RowSlot},
     types::coord::RCRange,
 };
 
 /// Identifies one of the four frozen-pane quadrants.
 ///
-/// `PaneRegion::cells(frame)` selects which of the frame's row-slot and
-/// col-slot vecs to walk. There is no longer an `origin` field — slot
+/// `PaneRegion::rows(frame)` / `cols(frame)` select which of the frame's
+/// row-slot and col-slot vecs to walk; `range(frame)` returns the
+/// address-space `RCRange` they span. There is no `origin` field — slot
 /// `.left`/`.top` are absolute canvas coordinates.
 #[derive(Clone, Copy)]
 pub struct PaneRegion {
@@ -49,15 +50,15 @@ impl PaneRegion {
 
     pub(crate) fn rows<'a>(&self, frame: &'a Chrome) -> &'a [RowSlot] {
         match self.row_band {
-            Band::Frozen => &frame.pane_set.rows.frozen,
-            Band::Scroll => &frame.pane_set.rows.scroll,
+            Band::Frozen => &frame.pane_set.frozen_rows,
+            Band::Scroll => &frame.pane_set.scroll_rows,
         }
     }
 
     pub(crate) fn cols<'a>(&self, frame: &'a Chrome) -> &'a [ColSlot] {
         match self.col_band {
-            Band::Frozen => &frame.pane_set.cols.frozen,
-            Band::Scroll => &frame.pane_set.cols.scroll,
+            Band::Frozen => &frame.pane_set.frozen_cols,
+            Band::Scroll => &frame.pane_set.scroll_cols,
         }
     }
 

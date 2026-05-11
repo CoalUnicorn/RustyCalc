@@ -39,17 +39,18 @@
 //! the diagram in `ARCHITECTURE.md` for the layout.
 
 pub(crate) mod cache;
+pub(crate) mod cell;
+pub(crate) mod chrome;
+pub(crate) mod overlay;
 
 use std::cell::{Cell, RefCell};
 use web_sys::CanvasRenderingContext2d;
 
 use crate::chrome::Chrome;
-use crate::geometry::pixel_rect::PixelRect;
-use crate::geometry::prim::{Axis, Point};
+use crate::geometry::prim::Axis;
 use crate::layer::RenderOverlays;
 use crate::painter::CanvasPainter;
 use crate::renderer::cache::FrameCache;
-use crate::types::coord::RCRange;
 use crate::CanvasModel;
 pub(crate) use crate::chrome::PaneRegion;
 pub(crate) use cache::ColNameIntern;
@@ -57,7 +58,7 @@ pub(crate) use cache::ColorIntern;
 pub(crate) use cache::FontIntern;
 
 #[cfg(test)]
-pub(crate) use crate::cell::text::{layout_into, TextLine};
+pub(crate) use self::cell::text::{layout_into, TextLine};
 
 use crate::painter::Painter;
 
@@ -112,7 +113,7 @@ impl<P: Painter> RendererCore<P> {
     }
 
     /// Layer-friendly constructor: caller owns canvas sizing + DPR scaling.
-    /// Canvas size and theme both live on the per-frame `FrameContext`,
+    /// Canvas size and theme both live on the per-frame `Chrome`,
     /// not on the renderer.
     pub(crate) fn for_layer(painter: P) -> Self {
         Self {
@@ -193,71 +194,6 @@ impl<P: Painter> RendererCore<P> {
             self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
         };
         self.painter.end_group();
-    }
-}
-
-// Renderer-side viewport math: range -> canvas pixel bounds used by
-// overlays. All pixel↔cell math reads the `Chrome` row/column slots built
-// once per tick — no model access happens here.
-impl<P: Painter> RendererCore<P> {
-    /// Map a sheet-coordinate range to canvas pixel bounds, clamping oversized
-    /// selections to the canvas edge.
-    ///
-    /// Returns `None` when the range is entirely outside the drawable fold
-    /// (scrollable viewport + frozen bands). All coordinate math reads from the
-    /// `Chrome` slot vecs — zero model queries.
-    pub(crate) fn range_pixel_bounds(&self, frame: &Chrome, range: RCRange) -> Option<PixelRect> {
-        let p = &frame.pane_set;
-        let frozen_rows = p.frozen_rows_count();
-        let frozen_cols = p.frozen_cols_count();
-
-        if !self.range_intersects_fold(frame, range, frozen_rows, frozen_cols) {
-            return None;
-        }
-
-        let x = p.col_to_x(range.c1);
-        let y = p.row_to_y(range.r1);
-        let right = if range.c2 > p.last_visible_col() && range.c2 > frozen_cols {
-            frame.canvas_size.w as i32
-        } else {
-            p.col_to_x(range.c2) + p.col_extent_at(range.c2)
-        };
-        let bottom = if range.r2 > p.last_visible_row() && range.r2 > frozen_rows {
-            frame.canvas_size.h as i32
-        } else {
-            p.row_to_y(range.r2) + p.row_extent_at(range.r2)
-        };
-        Some(PixelRect {
-            top_left: Point { x, y },
-            width: right - x,
-            height: bottom - y,
-        })
-    }
-
-    /// Does `range` intersect the drawable fold (scrollable viewport plus the
-    /// frozen bands)? Guards the slot lookups against out-of-range refs like
-    /// `=BB3` when column BB is off screen.
-    fn range_intersects_fold(
-        &self,
-        frame: &Chrome,
-        range: RCRange,
-        frozen_rows: i32,
-        frozen_cols: i32,
-    ) -> bool {
-        let p = &frame.pane_set;
-        if range.c1 > p.last_visible_col() && range.c1 > frozen_cols {
-            return false;
-        }
-        if range.r1 > p.last_visible_row() && range.r1 > frozen_rows {
-            return false;
-        }
-        if range.c2 < p.left_column() && range.c2 > frozen_cols {
-            return false;
-        }
-        if range.r2 < p.top_row() && range.r2 > frozen_rows {
-            return false;
-        }
-        true
     }
 }
 

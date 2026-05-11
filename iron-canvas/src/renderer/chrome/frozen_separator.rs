@@ -25,8 +25,8 @@ impl<P: Painter> RendererCore<P> {
         // FROZEN_SEP this also lands on a `.5` boundary — the crisp pixel
         // position for odd-width Canvas2D strokes.
         let half_sep = f64::from(FROZEN_SEP) / 2.0;
-        let sep_y = f64::from(p.rows.frozen_offset_y) - half_sep;
-        let sep_x = f64::from(p.cols.frozen_offset_x) - half_sep;
+        let sep_y = f64::from(p.frozen_offset_y) - half_sep;
+        let sep_x = f64::from(p.frozen_offset_x) - half_sep;
         let canvas_w = frame.canvas_size.w as i32;
         let canvas_h = frame.canvas_size.h as i32;
 

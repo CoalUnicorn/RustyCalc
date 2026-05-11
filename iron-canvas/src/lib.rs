@@ -19,21 +19,21 @@
 //!
 //! # Submodules
 //!
-//! - [`geometry`] - rect/line types and pixel <-> cell coordinate math.
-//! - [`types`] - renderer-internal shapes (panes, text layout, visible
-//!   region) plus public overlay types.
-//! - [`renderer`] - the render pipeline. See its module doc for the
-//!   full walk-through.
+//! - [`geometry`] — rect/line primitives and pixel↔cell coordinate math.
+//! - [`renderer`] — `RendererCore` plus the `cell/`, `chrome/`, `overlay/`
+//!   paint subtrees. See its module doc for the pipeline walk-through.
+//! - [`theme`] — `CanvasTheme` palette + CSS-var bridge.
+//! - [`types`] — public address types (`RCRange`, `FormulaRef`) and UI
+//!   variants (`HitTest`, `ResizeTarget`) used at the JS surface.
+//! - [`wasm`] — `JsBackedModel` JS-side adapter.
 
 pub mod geometry;
 
-mod cell;
 mod chrome;
 mod diag;
 mod layer;
 mod model_adapter;
 mod orchestrator;
-mod overlay;
 mod painter;
 pub mod renderer;
 pub mod theme;

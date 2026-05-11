@@ -7,7 +7,6 @@ use crate::geometry::constants::{
 };
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
-use crate::types::coord::CellAddress;
 use crate::CanvasModel;
 
 impl<P: Painter> RendererCore<P> {
@@ -15,13 +14,7 @@ impl<P: Painter> RendererCore<P> {
         let Some(view) = model.get_selected_view() else {
             return;
         };
-        let sheet = model.get_selected_sheet();
-        let addr = CellAddress {
-            sheet,
-            row: view.row,
-            column: view.column,
-        };
-        let Some(cell) = self.range_pixel_bounds(frame, view.selection.normalized()) else {
+        let Some(cell) = frame.range_rect(view.selection.normalized()) else {
             return;
         };
 
@@ -32,7 +25,8 @@ impl<P: Painter> RendererCore<P> {
 
         // Restore the active cell's fill + borders + text on top of the
         // selection tint so its actual style shows through while selected.
-        self.repaint_active_cell(model, addr, frame);
+        // Sheet is implicit — taken from `frame.sheet`.
+        self.repaint_active_cell(model, view.row, view.column, frame);
 
         self.painter.rect_stroke(
             cell,
@@ -46,16 +40,16 @@ impl<P: Painter> RendererCore<P> {
         // against any cell fill underneath. Skips full-row/col selections
         // — handle_rect returns None there, matching `autofill_handle()`
         // semantics.
-        let handle = frame.autofill_handle_rect();
-
-        self.painter.rect_fill(
-            handle,
-            PaintColor::from_theme_str(&frame.theme.selection_color),
-        );
-        self.painter.rect_stroke(
-            handle,
-            PaintColor::from_theme_str(&frame.theme.cell_bg),
-            f64::from(AUTOFILL_HANDLE_BORDER_PX),
-        );
+        if let Some(handle) = frame.autofill_handle_rect() {
+            self.painter.rect_fill(
+                handle,
+                PaintColor::from_theme_str(&frame.theme.selection_color),
+            );
+            self.painter.rect_stroke(
+                handle,
+                PaintColor::from_theme_str(&frame.theme.cell_bg),
+                f64::from(AUTOFILL_HANDLE_BORDER_PX),
+            );
+        }
     }
 }

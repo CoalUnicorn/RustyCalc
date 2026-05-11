@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use ironcalc_base::types::{Border, BorderItem, BorderStyle};
 
-use crate::cell::paint::CellPaint;
+use super::paint::CellPaint;
 use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::BorderEdge;

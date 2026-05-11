@@ -2,28 +2,31 @@
 //!
 //! `CellPaint` carries everything the per-cell paint passes need without
 //! re-entering the model: pixel rect, owned `Style`, and per-edge
-//! `ResolvedBorders`. `paint_bg` is the bg-only painter used by the bulk
-//! pane walk; `repaint_active_cell` is the single-cell entry point used by
-//! the selection overlay to restore the active cell on top of the
+//! `ResolvedBorders`. The sheet is constant for one pane walk and lives on
+//! `Chrome.sheet`, so per-cell records only carry `(row, col)`.
+//! `paint_bg` is the bg-only painter used by the bulk pane walk;
+//! `repaint_active_cell` is the single-cell entry point used by the
+//! selection overlay to restore the active cell on top of the
 //! semi-transparent selection fill.
 
 use ironcalc_base::types::{CellType, Style};
 
-use crate::cell::borders::ResolvedBorders;
-use crate::cell::text::TextPaint;
+use super::borders::ResolvedBorders;
+use super::text::TextPaint;
 use crate::chrome::{Chrome, PaneRegion};
-use crate::geometry::frame::slot::{ColSlot, RowSlot};
+use crate::geometry::slot::{ColSlot, RowSlot};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::cache::ColorIntern;
 use crate::renderer::RendererCore;
 use crate::theme::CanvasTheme;
-use crate::types::coord::{CellAddress, RCRange};
+use crate::types::coord::RCRange;
 use crate::CanvasModel;
 
 pub(crate) struct CellPaint {
-    pub addr: CellAddress,
+    pub row: i32,
+    pub col: i32,
     pub rect: PixelRect,
     pub style: Style,
     /// Per-edge resolved border paints. Computed once at iteration time so
@@ -49,7 +52,8 @@ impl CellPaint {
         }
         let borders = ResolvedBorders::resolve(&own_style.border, theme, intern);
         Some(CellPaint {
-            addr: slot.addr,
+            row: slot.row,
+            col: slot.col,
             rect: slot.rect,
             style: own_style,
             borders,
@@ -57,21 +61,20 @@ impl CellPaint {
     }
 }
 
-/// One cell yielded by a `PaneCells` walk: address + pixel rect at the
-/// current scroll.
+/// One cell yielded by a `PaneCells` walk: `(row, col)` + pixel rect at the
+/// current scroll. Sheet is implicit — see `Chrome.sheet`.
 #[derive(Clone, Copy)]
 pub(crate) struct CellSlot {
-    pub addr: CellAddress,
+    pub row: i32,
+    pub col: i32,
     pub rect: PixelRect,
 }
 
-/// Stateful walk over the cells of a `PaneRegion`. Reads all per-cell
-/// geometry (size, position, sheet, canvas extents) from the `Chrome`
-/// snapshot built once per tick — same source of truth as `chrome.cell_rect()`
-/// and the input layer's hit-test, so what's painted can never disagree
-/// with what gets hit.
+/// Stateful walk over the cells of a `PaneRegion`. Reads per-cell geometry
+/// from the `Chrome` snapshot built once per tick — same source of truth as
+/// `chrome.cell_rect()` and the input layer's hit-test, so what's painted
+/// can never disagree with what gets hit.
 pub(crate) struct PaneCells<'a> {
-    pub frame: &'a Chrome,
     rows: std::slice::Iter<'a, RowSlot>,
     cols_template: &'a [ColSlot],
     cols: std::slice::Iter<'a, ColSlot>,
@@ -82,7 +85,6 @@ impl<'a> PaneCells<'a> {
     pub(crate) fn new(pane: &'a PaneRegion, frame: &'a Chrome) -> Self {
         let cols_template = pane.cols(frame);
         Self {
-            frame,
             rows: pane.rows(frame).iter(),
             cols_template,
             cols: cols_template.iter(),
@@ -110,11 +112,8 @@ impl<'a> Iterator for PaneCells<'a> {
                 continue;
             };
             return Some(CellSlot {
-                addr: CellAddress {
-                    sheet: self.frame.sheet,
-                    row: row.row,
-                    column: col.col,
-                },
+                row: row.row,
+                col: col.col,
                 rect: PixelRect {
                     top_left: Point {
                         x: col.left,
@@ -141,25 +140,32 @@ impl<P: Painter> RendererCore<P> {
         self.painter.rect_fill(p.rect, color);
     }
 
-    /// Repaint one cell's full paint (bg + borders + text). Used by the
-    /// selection overlay to restore the active cell on top of the
-    /// semi-transparent selection fill.
+    /// Repaint one cell's full paint (bg + borders + text) at `(row, column)`
+    /// on the active sheet. Used by the selection overlay to restore the
+    /// active cell on top of the semi-transparent selection fill. Sheet is
+    /// implicit — taken from `frame.sheet`.
     pub(crate) fn repaint_active_cell(
         &self,
         model: &dyn CanvasModel,
-        addr: CellAddress,
+        row: i32,
+        column: i32,
         frame: &Chrome,
     ) {
-        let range = RCRange::from_cell(addr.row, addr.column);
-        let Some(rect) = self.range_pixel_bounds(frame, range) else {
+        let sheet = frame.sheet;
+        let range = RCRange::from_cell(row, column);
+        let Some(rect) = frame.range_rect(range) else {
             return;
         };
-        let Some(own_style) = model.get_cell_style(addr.sheet, addr.row, addr.column) else {
+        let Some(own_style) = model.get_cell_style(sheet, row, column) else {
             return;
         };
         let theme = &frame.theme;
         let Some(paint) = CellPaint::resolve_cell_paint(
-            CellSlot { addr, rect },
+            CellSlot {
+                row,
+                col: column,
+                rect,
+            },
             own_style,
             theme,
             &self.color_intern,
@@ -168,9 +174,9 @@ impl<P: Painter> RendererCore<P> {
         };
         self.paint_cell(&paint, theme);
         let mut text_lines = self.frame_cache.text_lines.take();
-        if let Some(text) = model.get_formatted_cell_value(addr.sheet, addr.row, addr.column) {
+        if let Some(text) = model.get_formatted_cell_value(sheet, row, column) {
             let cell_type = model
-                .get_cell_type(addr.sheet, addr.row, addr.column)
+                .get_cell_type(sheet, row, column)
                 .unwrap_or(CellType::Text);
             if let Some(t) = TextPaint::resolve_into(
                 self,
