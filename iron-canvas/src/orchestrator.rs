@@ -10,7 +10,7 @@ use crate::geometry::CanvasSize;
 use crate::layer::{GridLayer, OverlayLayer, RenderOverlays};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::ui::{HitTest, ResizeTarget};
-use crate::wasm::wasm::JsBackedModel;
+use crate::wasm::JsBackedModel;
 use crate::CanvasModel;
 
 /// Public wasm-bindgen handle owning both canvas layers.

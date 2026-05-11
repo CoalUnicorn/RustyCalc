@@ -311,7 +311,7 @@ fn EntryRow(
             </ContextMenuButton>
 
             <Show
-                when=move || is_renaming == true
+                when=move || is_renaming
                 fallback={let n = name.clone(); move || view!{ <span class="ld-name">{n.clone()}</span> }}
             >
                 <InlineRenameInput

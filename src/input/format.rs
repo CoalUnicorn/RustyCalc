@@ -341,7 +341,7 @@ fn adjust_decimals(fmt: &str, delta: i32) -> String {
                 out.push_str(&fmt[insert_at..]);
                 out
             }
-            None => match fmt.rfind(|c: char| c == '0' || c == '#') {
+            None => match fmt.rfind(['0', '#']) {
                 Some(pos) => {
                     let insert_at = pos + 1;
                     let mut out = String::with_capacity(fmt.len() + 2);
