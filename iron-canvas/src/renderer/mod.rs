@@ -149,10 +149,10 @@ impl<P: Painter> RendererCore<P> {
             .show_grid
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
 
-        self.render_pane(model, PaneRegion::top_left(), frame);
-        self.render_pane(model, PaneRegion::top_right(), frame);
-        self.render_pane(model, PaneRegion::bottom_left(), frame);
-        self.render_pane(model, PaneRegion::bottom_right(), frame);
+        self.render_pane(model, PaneRegion::TopLeft, frame);
+        self.render_pane(model, PaneRegion::TopRight, frame);
+        self.render_pane(model, PaneRegion::BottomLeft, frame);
+        self.render_pane(model, PaneRegion::BottomRight, frame);
 
         // Frozen separators paint AFTER cells so the thick divider wins
         // its pixels over the rightmost/bottommost frozen cell's grid stroke.

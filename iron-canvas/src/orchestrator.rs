@@ -125,12 +125,9 @@ impl IronCanvas {
         }
 
         // Full rebuild: scroll/freeze/size/sheet changed, or grid is dirty.
-        // Recycle the outgoing frame's slot Vec allocations so steady-state
-        // rebuilds don't re-allocate the four pane-set buffers.
-        let frame = match self.last_frame.take() {
-            Some(prev) => prev.rebuild(model, self.size, &self.theme),
-            None => Chrome::current(model, self.size, &self.theme),
-        };
+        // Passing the outgoing frame recycles its slot Vec allocations so
+        // steady-state rebuilds don't re-allocate the four pane-set buffers.
+        let frame = Chrome::next_frame(self.last_frame.take(), model, self.size, &self.theme);
 
         if grid_dirty {
             self.grid.paint(model, &frame);

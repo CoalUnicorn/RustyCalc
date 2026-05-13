@@ -6,7 +6,10 @@
 //! query spans both axes. See `ARCHITECTURE.md` for the build phases
 //! (A–E) and the `is_still_valid` cache rules.
 
-use crate::geometry::slot::{col_width, row_height, ColSlot, RowSlot};
+use crate::geometry::slot::{
+    boundary_at, col_width, fill_axis, last_visible_id, pixel_to_id, row_height, scroll_first,
+    slot_at, top_id, AxisSlot, ColSlot, RowSlot,
+};
 use crate::geometry::{
     constants::{
         AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_OFFSET,
@@ -127,32 +130,22 @@ impl PaneSet {
         canvas_h: f64,
     ) {
         self.frozen_rows.reserve(frozen_count as usize);
-        let mut y_cursor = origin_y;
-        for r in 1..=frozen_count {
-            let h = row_height(model, r);
-            self.frozen_rows.push(RowSlot {
-                row: r,
-                top: y_cursor,
-                height: h,
-            });
-            y_cursor += h;
-        }
-        self.frozen_offset_y = y_cursor + if frozen_count > 0 { FROZEN_SEP } else { 0 };
+        let after_frozen = fill_axis(
+            &mut self.frozen_rows,
+            1..=frozen_count,
+            origin_y,
+            i32::MAX,
+            |r| row_height(model, r),
+        );
+        self.frozen_offset_y = after_frozen + if frozen_count > 0 { FROZEN_SEP } else { 0 };
 
-        let row_first = (frozen_count + 1).max(view_top_row);
-        let mut y_cursor = self.frozen_offset_y;
-        for row in row_first..=LAST_ROW {
-            let h = row_height(model, row);
-            self.scroll_rows.push(RowSlot {
-                row,
-                top: y_cursor,
-                height: h,
-            });
-            if f64::from(y_cursor) >= canvas_h || row == LAST_ROW {
-                break;
-            }
-            y_cursor += h;
-        }
+        let _ = fill_axis(
+            &mut self.scroll_rows,
+            scroll_first(frozen_count, view_top_row)..=LAST_ROW,
+            self.frozen_offset_y,
+            canvas_h.ceil() as i32,
+            |r| row_height(model, r),
+        );
     }
 
     /// Column-axis mirror of `fill_rows`. Runs as Phase D, using the
@@ -167,32 +160,22 @@ impl PaneSet {
         canvas_w: f64,
     ) {
         self.frozen_cols.reserve(frozen_count as usize);
-        let mut x_cursor = origin_x;
-        for c in 1..=frozen_count {
-            let w = col_width(model, c);
-            self.frozen_cols.push(ColSlot {
-                col: c,
-                left: x_cursor,
-                width: w,
-            });
-            x_cursor += w;
-        }
-        self.frozen_offset_x = x_cursor + if frozen_count > 0 { FROZEN_SEP } else { 0 };
+        let after_frozen = fill_axis(
+            &mut self.frozen_cols,
+            1..=frozen_count,
+            origin_x,
+            i32::MAX,
+            |c| col_width(model, c),
+        );
+        self.frozen_offset_x = after_frozen + if frozen_count > 0 { FROZEN_SEP } else { 0 };
 
-        let col_first = (frozen_count + 1).max(view_left_column);
-        let mut x_cursor = self.frozen_offset_x;
-        for col in col_first..=LAST_COLUMN {
-            let w = col_width(model, col);
-            self.scroll_cols.push(ColSlot {
-                col,
-                left: x_cursor,
-                width: w,
-            });
-            if f64::from(x_cursor) >= canvas_w || col == LAST_COLUMN {
-                break;
-            }
-            x_cursor += w;
-        }
+        let _ = fill_axis(
+            &mut self.scroll_cols,
+            scroll_first(frozen_count, view_left_column)..=LAST_COLUMN,
+            self.frozen_offset_x,
+            canvas_w.ceil() as i32,
+            |c| col_width(model, c),
+        );
     }
 
     #[inline]
@@ -207,48 +190,32 @@ impl PaneSet {
 
     #[inline]
     fn row_slot(&self, row: i32) -> Option<&RowSlot> {
-        if row <= self.frozen_rows_count() {
-            self.frozen_rows.get((row - 1) as usize)
-        } else {
-            let first = self.scroll_rows.first()?.row;
-            self.scroll_rows.get((row - first) as usize)
-        }
+        slot_at(&self.frozen_rows, &self.scroll_rows, row)
     }
 
     #[inline]
     fn col_slot(&self, col: i32) -> Option<&ColSlot> {
-        if col <= self.frozen_cols_count() {
-            self.frozen_cols.get((col - 1) as usize)
-        } else {
-            let first = self.scroll_cols.first()?.col;
-            self.scroll_cols.get((col - first) as usize)
-        }
+        slot_at(&self.frozen_cols, &self.scroll_cols, col)
     }
 
     #[inline]
     pub(crate) fn top_row(&self) -> i32 {
-        self.scroll_rows.first().map(|s| s.row).unwrap_or(1)
+        top_id(&self.scroll_rows)
     }
 
     #[inline]
     pub(crate) fn left_column(&self) -> i32 {
-        self.scroll_cols.first().map(|s| s.col).unwrap_or(1)
+        top_id(&self.scroll_cols)
     }
 
     #[inline]
     pub(crate) fn last_visible_row(&self) -> i32 {
-        self.scroll_rows
-            .last()
-            .map(|s| s.row)
-            .unwrap_or_else(|| self.top_row())
+        last_visible_id(&self.scroll_rows)
     }
 
     #[inline]
     pub(crate) fn last_visible_col(&self) -> i32 {
-        self.scroll_cols
-            .last()
-            .map(|s| s.col)
-            .unwrap_or_else(|| self.left_column())
+        last_visible_id(&self.scroll_cols)
     }
 
     #[inline]
@@ -263,72 +230,36 @@ impl PaneSet {
 
     #[inline]
     pub(crate) fn row_extent_at(&self, row: i32) -> i32 {
-        self.row_slot(row).map(|s| s.height).unwrap_or(0)
+        self.row_slot(row).map(|s| s.extent()).unwrap_or(0)
     }
 
     #[inline]
     pub(crate) fn col_extent_at(&self, col: i32) -> i32 {
-        self.col_slot(col).map(|s| s.width).unwrap_or(0)
+        self.col_slot(col).map(|s| s.extent()).unwrap_or(0)
     }
 
     pub(crate) fn row_to_y(&self, row: i32) -> i32 {
-        self.row_slot(row).map(|s| s.top).unwrap_or(0)
+        self.row_slot(row).map(|s| s.start()).unwrap_or(0)
     }
 
     pub(crate) fn col_to_x(&self, col: i32) -> i32 {
-        self.col_slot(col).map(|s| s.left).unwrap_or(0)
+        self.col_slot(col).map(|s| s.start()).unwrap_or(0)
     }
 
     pub(crate) fn pixel_to_row(&self, y: i32) -> Option<i32> {
-        for s in &self.frozen_rows {
-            if y >= s.top && y < s.bottom() {
-                return Some(s.row);
-            }
-        }
-        for s in &self.scroll_rows {
-            if y >= s.top && y < s.bottom() {
-                return Some(s.row);
-            }
-        }
-        None
+        pixel_to_id(&self.frozen_rows, &self.scroll_rows, y)
     }
 
     pub(crate) fn pixel_to_col(&self, x: i32) -> Option<i32> {
-        for s in &self.frozen_cols {
-            if x >= s.left && x < s.right() {
-                return Some(s.col);
-            }
-        }
-        for s in &self.scroll_cols {
-            if x >= s.left && x < s.right() {
-                return Some(s.col);
-            }
-        }
-        None
+        pixel_to_id(&self.frozen_cols, &self.scroll_cols, x)
     }
 
     pub(crate) fn row_boundary_at(&self, y: i32, hit_zone: i32) -> Option<i32> {
-        for s in self.frozen_rows.iter().chain(self.scroll_rows.iter()) {
-            if (s.bottom() - y).abs() <= hit_zone {
-                return Some(s.row);
-            }
-            if s.bottom() > y + hit_zone {
-                break;
-            }
-        }
-        None
+        boundary_at(&self.frozen_rows, &self.scroll_rows, y, hit_zone)
     }
 
     pub(crate) fn col_boundary_at(&self, x: i32, hit_zone: i32) -> Option<i32> {
-        for s in self.frozen_cols.iter().chain(self.scroll_cols.iter()) {
-            if (s.right() - x).abs() <= hit_zone {
-                return Some(s.col);
-            }
-            if s.right() > x + hit_zone {
-                break;
-            }
-        }
-        None
+        boundary_at(&self.frozen_cols, &self.scroll_cols, x, hit_zone)
     }
 }
 
@@ -354,32 +285,20 @@ pub(crate) fn measure_row_header_width(max_visible_row: i32) -> i32 {
 }
 
 impl Chrome {
-    /// First-frame build (no previous frame to recycle from). Steady-state
-    /// repaints go through `rebuild`. See `ARCHITECTURE.md` for the A–E
-    /// build phases.
-    pub(crate) fn current(
+    /// Build the next-frame `Chrome`. When `prev` is `Some`, the outgoing
+    /// frame's slot Vec allocations are recycled so steady-state repaints
+    /// don't reallocate the four pane-set buffers. `prev == None` is the
+    /// first-frame path. See `ARCHITECTURE.md` for the A–E build phases.
+    pub(crate) fn next_frame(
+        prev: Option<Chrome>,
         model: &dyn CanvasModel,
         canvas: CanvasSize,
         theme: &CanvasTheme,
     ) -> Self {
-        Self::build(model, canvas, theme, RecycledSlots::default())
-    }
-
-    /// Steady-state build: recycles the outgoing frame's slot Vec
-    /// allocations. Consumes `self` because the old `PaneSet`'s Vecs move
-    /// into the new frame.
-    pub(crate) fn rebuild(
-        self,
-        model: &dyn CanvasModel,
-        canvas: CanvasSize,
-        theme: &CanvasTheme,
-    ) -> Self {
-        Self::build(
-            model,
-            canvas,
-            theme,
-            RecycledSlots::from_pane_set(self.pane_set),
-        )
+        let recycled = prev
+            .map(|c| RecycledSlots::from_pane_set(c.pane_set))
+            .unwrap_or_default();
+        Self::build(model, canvas, theme, recycled)
     }
 
     fn build(
@@ -459,8 +378,8 @@ impl Chrome {
         let sheet = model.get_selected_sheet();
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        let want_top = (frozen_rows + 1).max(view.top_row);
-        let want_left = (frozen_cols + 1).max(view.left_column);
+        let want_top = scroll_first(frozen_rows, view.top_row);
+        let want_left = scroll_first(frozen_cols, view.left_column);
         if self.pane_set.top_row() != want_top || self.pane_set.left_column() != want_left {
             return false;
         }
