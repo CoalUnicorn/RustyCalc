@@ -100,11 +100,7 @@ impl<'a> PaneCells<'a> {
     ///
     /// Slot vecs are sorted by `row` / `col`, so `partition_point` returns
     /// the half-open range of indices that intersect `strip` in O(log N).
-    pub(crate) fn for_strip(
-        pane: &'a PaneRegion,
-        frame: &'a Chrome,
-        strip: RCRange,
-    ) -> Self {
+    pub(crate) fn for_strip(pane: &'a PaneRegion, frame: &'a Chrome, strip: RCRange) -> Self {
         let rows_full = pane.rows(frame);
         let cols_full = pane.cols(frame);
         let r_start = rows_full.partition_point(|s| s.row < strip.r1);

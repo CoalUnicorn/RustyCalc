@@ -77,7 +77,11 @@ impl CanvasModel for ScrollModel {
         Some(0)
     }
     fn get_row_height(&self, _: u32, row: i32) -> Option<f64> {
-        Some(if row == 5 { self.row5_height.get() } else { 20.0 })
+        Some(if row == 5 {
+            self.row5_height.get()
+        } else {
+            20.0
+        })
     }
     fn get_column_width(&self, _: u32, _: i32) -> Option<f64> {
         Some(80.0)
@@ -398,13 +402,18 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
         .cloned()
         .collect();
 
-    // R20 was prev's overflow row (top past canvas bottom) and becomes
-    // fully visible in new — its on-canvas pixels were never blitted, so
-    // strip-fetch must repaint it. Any *other* R-text is a kept-band smear.
+    // Non-aligned axis: (400 − 28) / 20 = 18.6, so prev had two transition
+    // rows. R20 was the overflow (top past canvas bottom) and becomes fully
+    // visible in new — never blitted, must repaint. R19 was prev's partial
+    // (12 px visible) and is partial again in new at a different fraction
+    // (8 px overlap the strip clip), so its bottom band needs new pixels
+    // too. Any *other* R-text is a kept-band smear.
     let smeared_text_ops: Vec<&DrawOp> = post_scroll_ops
         .iter()
         .filter(|op| match op {
-            DrawOp::FillText { text, .. } => text.starts_with('R') && text != "R20",
+            DrawOp::FillText { text, .. } => {
+                text.starts_with('R') && text != "R19" && text != "R20"
+            }
             _ => false,
         })
         .collect();

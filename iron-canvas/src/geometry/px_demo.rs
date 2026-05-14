@@ -41,7 +41,11 @@ impl core::ops::SubAssign for Px {
     }
 }
 
-// impl Px {
-//     pub const fn const_add(self, r: Px) -> Px { Px(self.0 + r.0) }
-//     pub const fn const_sub(self, r: Px) -> Px { Px(self.0 - r.0) }
-// }
+impl Px {
+    pub const fn const_add(self, r: Px) -> Px {
+        Px(self.0 + r.0)
+    }
+    pub const fn const_sub(self, r: Px) -> Px {
+        Px(self.0 - r.0)
+    }
+}

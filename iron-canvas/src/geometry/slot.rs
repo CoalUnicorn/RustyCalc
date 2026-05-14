@@ -125,11 +125,7 @@ pub(crate) fn scroll_first(frozen_count: i32, view_first: i32) -> i32 {
 /// Locate a slot by `id` across the frozen+scroll pair. Frozen ids index
 /// from 1; scroll ids index from the first slot's id (the scroll band starts
 /// past whatever has been scrolled off-screen).
-pub(crate) fn slot_at<'a, S: AxisSlot>(
-    frozen: &'a [S],
-    scroll: &'a [S],
-    id: i32,
-) -> Option<&'a S> {
+pub(crate) fn slot_at<'a, S: AxisSlot>(frozen: &'a [S], scroll: &'a [S], id: i32) -> Option<&'a S> {
     let frozen_n = frozen.len() as i32;
     if id <= frozen_n {
         frozen.get((id - 1) as usize)

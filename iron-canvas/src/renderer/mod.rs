@@ -46,8 +46,8 @@ pub(crate) mod overlay;
 use std::cell::{Cell, RefCell};
 use web_sys::CanvasRenderingContext2d;
 
-use crate::chrome::{BlitPlan, Chrome};
 pub(crate) use crate::chrome::PaneRegion;
+use crate::chrome::{BlitPlan, Chrome};
 use crate::geometry::prim::Axis;
 use crate::layer::RenderOverlays;
 use crate::painter::CanvasPainter;
@@ -156,7 +156,7 @@ impl<P: Painter> RendererCore<P> {
         // narrows it on the blit fast-path so only the genuinely-stale
         // quadrants run their 4-pass walk.
         for pane in frame.stale_panes.iter() {
-            self.render_pane(model, pane, frame);
+            self.render_pane(model, pane, frame, None);
         }
 
         // Frozen separators paint AFTER cells so the thick divider wins
@@ -228,10 +228,10 @@ impl<P: Painter> RendererCore<P> {
         for pane in frame.stale_panes.iter() {
             if matches!(pane, PaneRegion::BottomRight) {
                 self.painter.push_clip(plan.repaint_strip);
-                self.render_pane(model, pane, frame);
+                self.render_pane(model, pane, frame, Some(plan));
                 self.painter.pop_clip();
             } else {
-                self.render_pane(model, pane, frame);
+                self.render_pane(model, pane, frame, Some(plan));
             }
         }
 
@@ -322,7 +322,11 @@ impl<P: Painter> GridRenderer<P> {
         self.core.pane_cache.pane(region).range.get()
     }
 
-    pub(crate) fn painter_blit(&self, src: crate::geometry::pixel_rect::PixelRect, dst: crate::geometry::pixel_rect::PixelRect) {
+    pub(crate) fn painter_blit(
+        &self,
+        src: crate::geometry::pixel_rect::PixelRect,
+        dst: crate::geometry::pixel_rect::PixelRect,
+    ) {
         self.core.painter().blit(src, dst);
     }
 }

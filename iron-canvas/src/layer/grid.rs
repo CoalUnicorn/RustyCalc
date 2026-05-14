@@ -57,12 +57,7 @@ impl GridLayer {
             .pane_cache_range_debug(crate::chrome::PaneRegion::BottomRight)
     }
 
-    pub(crate) fn paint_blit(
-        &mut self,
-        model: &dyn CanvasModel,
-        frame: &Chrome,
-        plan: &BlitPlan,
-    ) {
+    pub(crate) fn paint_blit(&mut self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
         if !self.base.renderer.painter_supports_blit() {
             self.paint(model, frame);
             return;

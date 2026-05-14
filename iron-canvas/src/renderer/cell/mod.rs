@@ -24,7 +24,7 @@ use ironcalc_base::types::CellType;
 
 use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
-use crate::chrome::{Chrome, PaneRegion};
+use crate::chrome::{BlitPlan, Chrome, PaneRegion};
 use crate::geometry::prim::Axis;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
@@ -51,7 +51,13 @@ impl<P: Painter> RendererCore<P> {
     /// across all -> explicit across all -> A.right strokes last on the
     /// shared edge). Text remains the final pass so overflow is never
     /// clipped by a neighbour's bg.
-    pub(crate) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion, frame: &Chrome) {
+    pub(crate) fn render_pane(
+        &self,
+        model: &dyn CanvasModel,
+        pane: PaneRegion,
+        frame: &Chrome,
+        plan: Option<&BlitPlan>,
+    ) {
         let pane_idx = pane as usize;
         let pane_buf = self.pane_cache.pane(pane);
 
@@ -93,7 +99,9 @@ impl<P: Painter> RendererCore<P> {
         if frame.slots_reused {
             if let Some(prev_range) = pane_buf.range.get() {
                 if let Some(axis) = infer_shift_axis(prev_range, range) {
-                    self.render_pane_strip(model, pane, range, axis, prev_range, pane_idx, frame);
+                    self.render_pane_strip(
+                        model, pane, range, axis, prev_range, pane_idx, frame, plan,
+                    );
                     return;
                 }
             }
@@ -213,15 +221,55 @@ impl<P: Painter> RendererCore<P> {
         prev_range: RCRange,
         pane_idx: usize,
         frame: &Chrome,
+        plan: Option<&BlitPlan>,
     ) {
         let theme = &frame.theme;
         let cols_w = range.c2 - range.c1 + 1;
         let pane_buf = self.pane_cache.pane(pane);
 
-        let Some(strip) = compute_strip(prev_range, range, axis) else {
+        let Some(mut strip) = compute_strip(prev_range, range, axis) else {
             pane_buf.range.set(Some(range));
             return;
         };
+
+        // Pixel-rect alignment. `compute_strip` is an address-space proxy
+        // for `plan.repaint_strip`; the two agree only when slot edges
+        // land on the canvas edge. On a non-aligned axis the partial slot
+        // at the canvas boundary transitions to fully-visible inside the
+        // dirty pixel rect — extend the RCRange to cover every slot whose
+        // pixel extent overlaps the rect.
+        if let Some(plan) = plan {
+            match axis {
+                Axis::Column => {
+                    let xmin = plan.repaint_strip.top_left.x;
+                    let xmax = xmin + plan.repaint_strip.width;
+                    let mut new_c1 = strip.c1;
+                    let mut new_c2 = strip.c2;
+                    for c in pane.cols(frame) {
+                        if c.left + c.width > xmin && c.left < xmax {
+                            new_c1 = new_c1.min(c.col);
+                            new_c2 = new_c2.max(c.col);
+                        }
+                    }
+                    strip.c1 = new_c1;
+                    strip.c2 = new_c2;
+                }
+                Axis::Row => {
+                    let ymin = plan.repaint_strip.top_left.y;
+                    let ymax = ymin + plan.repaint_strip.height;
+                    let mut new_r1 = strip.r1;
+                    let mut new_r2 = strip.r2;
+                    for r in pane.rows(frame) {
+                        if r.top + r.height > ymin && r.top < ymax {
+                            new_r1 = new_r1.min(r.row);
+                            new_r2 = new_r2.max(r.row);
+                        }
+                    }
+                    strip.r1 = new_r1;
+                    strip.r2 = new_r2;
+                }
+            }
+        }
         #[cfg(target_arch = "wasm32")]
         {
             use crate::wasm::diag::console_log;
