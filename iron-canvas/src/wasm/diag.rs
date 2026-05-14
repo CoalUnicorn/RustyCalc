@@ -11,4 +11,7 @@ use wasm_bindgen::prelude::*;
 extern "C" {
     #[wasm_bindgen(js_namespace = console, js_name = warn)]
     pub(crate) fn console_warn(s: &str);
+
+    #[wasm_bindgen(js_namespace = console, js_name = log)]
+    pub(crate) fn console_log(s: &str);
 }

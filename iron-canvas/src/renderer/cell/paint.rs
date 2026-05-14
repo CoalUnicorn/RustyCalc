@@ -91,6 +91,34 @@ impl<'a> PaneCells<'a> {
             current_row: None,
         }
     }
+
+    /// Walk only the cells whose `(row, col)` lies inside `strip`. Used by
+    /// the scroll-blit strip-fetch path: the painter blit preserved the
+    /// kept-band pixels, so the four per-cell sub-passes must touch only
+    /// the freshly-revealed strip — iterating the full pane would re-paint
+    /// the kept band on top of the already-correct pixels.
+    ///
+    /// Slot vecs are sorted by `row` / `col`, so `partition_point` returns
+    /// the half-open range of indices that intersect `strip` in O(log N).
+    pub(crate) fn for_strip(
+        pane: &'a PaneRegion,
+        frame: &'a Chrome,
+        strip: RCRange,
+    ) -> Self {
+        let rows_full = pane.rows(frame);
+        let cols_full = pane.cols(frame);
+        let r_start = rows_full.partition_point(|s| s.row < strip.r1);
+        let r_end = rows_full.partition_point(|s| s.row <= strip.r2);
+        let c_start = cols_full.partition_point(|s| s.col < strip.c1);
+        let c_end = cols_full.partition_point(|s| s.col <= strip.c2);
+        let cols_template = &cols_full[c_start..c_end];
+        Self {
+            rows: rows_full[r_start..r_end].iter(),
+            cols_template,
+            cols: cols_template.iter(),
+            current_row: None,
+        }
+    }
 }
 
 impl<'a> Iterator for PaneCells<'a> {

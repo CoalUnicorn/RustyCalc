@@ -115,6 +115,25 @@ pub(crate) trait Painter: TextMetrics + private::Sealed {
     /// `render_grid` / `render_overlays` so SVG output is structured per layer.
     fn begin_group(&self, class: &'static str);
     fn end_group(&self);
+
+    /// True when this backend can faithfully copy a rectangle of already-
+    /// painted pixels to another location on the same surface. The
+    /// scroll-blit fast path in `paintIfDirty` gates on this — backends
+    /// that can't shift pixels (SVG) opt out and fall through to a full
+    /// repaint. Default is `false` so any new backend opts in explicitly.
+    fn supports_blit(&self) -> bool {
+        false
+    }
+
+    /// Self-blit: copy the pixels under `src` to `dst` on this same
+    /// surface. Both rects are CSS pixels; DPR multiplication for the
+    /// source coords (which read from the DPR-scaled backing store)
+    /// happens at the backend's call site. Callers must check
+    /// `supports_blit()` first — backends that haven't overridden this
+    /// will trip the default `unreachable!`.
+    fn blit(&self, _src: PixelRect, _dst: PixelRect) {
+        unreachable!("Painter::blit called on a backend whose supports_blit() is false")
+    }
 }
 
 pub struct CssColor(String);

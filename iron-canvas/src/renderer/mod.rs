@@ -46,12 +46,12 @@ pub(crate) mod overlay;
 use std::cell::{Cell, RefCell};
 use web_sys::CanvasRenderingContext2d;
 
-use crate::chrome::Chrome;
+use crate::chrome::{BlitPlan, Chrome};
 pub(crate) use crate::chrome::PaneRegion;
 use crate::geometry::prim::Axis;
 use crate::layer::RenderOverlays;
 use crate::painter::CanvasPainter;
-use crate::renderer::cache::FrameCache;
+use crate::renderer::cache::{FrameCache, PaneCache};
 use crate::CanvasModel;
 pub(crate) use cache::ColNameIntern;
 pub(crate) use cache::ColorIntern;
@@ -73,6 +73,11 @@ pub(crate) struct RendererCore<P: Painter> {
     pub(crate) painter: P,
     dpr: i32,
     pub(crate) frame_cache: FrameCache,
+    /// Renderer-lifetime per-pane bulk-fetch buffers + last-fetched range.
+    /// Sibling of the intern tables below; survives across frames so
+    /// `render_pane` can short-circuit when a pane's address didn't
+    /// change (Stage 3.2) or strip-fetch the new band (Stage 3.3).
+    pub(crate) pane_cache: PaneCache,
     /// Renderer-lifetime intern table for `ctx.font` strings. Lives outside
     /// `FrameCache` because identical fonts repeat across frames, not just
     /// within a single paint.
@@ -125,10 +130,8 @@ impl<P: Painter> RendererCore<P> {
                 label_buf: RefCell::new(String::new()),
                 text_lines: Cell::new(Vec::new()),
                 wrap_buf: RefCell::new(String::new()),
-                pane_styles: Cell::new(Vec::new()),
-                pane_values: Cell::new(Vec::new()),
-                pane_cell_types: Cell::new(Vec::new()),
             },
+            pane_cache: PaneCache::default(),
             font_intern: FontIntern::new(),
             col_intern: ColNameIntern::new(),
             color_intern: ColorIntern::new(),
@@ -149,10 +152,12 @@ impl<P: Painter> RendererCore<P> {
             .show_grid
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
 
-        self.render_pane(model, PaneRegion::TopLeft, frame);
-        self.render_pane(model, PaneRegion::TopRight, frame);
-        self.render_pane(model, PaneRegion::BottomLeft, frame);
-        self.render_pane(model, PaneRegion::BottomRight, frame);
+        // `frame.stale_panes` is `ALL` after `Chrome::next_frame`; Stage 3.3
+        // narrows it on the blit fast-path so only the genuinely-stale
+        // quadrants run their 4-pass walk.
+        for pane in frame.stale_panes.iter() {
+            self.render_pane(model, pane, frame);
+        }
 
         // Frozen separators paint AFTER cells so the thick divider wins
         // its pixels over the rightmost/bottommost frozen cell's grid stroke.
@@ -161,6 +166,80 @@ impl<P: Painter> RendererCore<P> {
         self.render_headers_base(Axis::Row, frame);
         self.render_headers_base(Axis::Column, frame);
 
+        self.draw_corner_box(frame);
+        self.painter.end_group();
+    }
+
+    /// Like `render_grid`, but assumes the BottomRight kept band was just
+    /// preserved by a `Painter::blit` shift and only the
+    /// `plan.repaint_strip` region needs new pixels in that pane. Caller
+    /// (orchestrator) must set `frame.slots_reused = true` so render_pane's
+    /// fingerprint-mismatch branch fills the pane bg — the clip then
+    /// restricts that fill to the strip alone, leaving the blitted kept
+    /// band intact.
+    ///
+    /// Cross-axis panes (frozen-rows or frozen-cols quadrants whose RCRange
+    /// didn't change) fingerprint-match and skip cleanly under the same
+    /// `slots_reused` path. The two cross-pane fills that don't skip
+    /// (BottomLeft on a Row scroll, TopRight on a Column scroll) repaint
+    /// fully — Stage 3's strip-fetch will narrow them.
+    /// Walk each pane whose cached buffer data shifts along `plan.axis`
+    /// and rotate the kept-band entries in place so only the freshly-
+    /// revealed strip slots remain `None`. `render_pane` then fetches
+    /// just the strip instead of the full pane.
+    ///
+    /// Defensive: if `pane_buf.range` is stale enough that the dimensions
+    /// no longer line up (orthogonal axis differs, or the extent on the
+    /// scroll axis changed), drop the cached range so render_pane falls
+    /// through to a full fetch. This can happen when the previous paint
+    /// of that pane was before a canvas resize.
+    ///
+    /// Always runs at the top of `render_grid_blit` — the caller's
+    /// painter `blit` must come *before* this so the kept pixels are in
+    /// their new position; this rotates the cached cell data to match.
+    fn prepare_blit_cache(&self, frame: &Chrome, plan: &BlitPlan) {
+        for pane in plan.shift_panes().iter() {
+            let pane_buf = self.pane_cache.pane(pane);
+            let Some(new_range) = pane.range(frame) else {
+                pane_buf.range.set(None);
+                continue;
+            };
+            let _ = pane_buf.try_shift(new_range, plan.axis);
+        }
+    }
+
+    pub(crate) fn render_grid_blit(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        plan: &BlitPlan,
+    ) {
+        self.prepare_blit_cache(frame, plan);
+        self.painter.begin_group("grid");
+        let sheet = model.get_selected_sheet();
+        self.frame_cache
+            .show_grid
+            .set(model.get_show_grid_lines(sheet).unwrap_or(true));
+
+        // Iterate `stale_panes` in render order. The strip clip wraps
+        // BottomRight when (and only when) it's in the mask — Stage 3.3
+        // may drop BottomRight from the mask if the blit + strip-fetch
+        // proves the kept band's painted pixels are already correct.
+        for pane in frame.stale_panes.iter() {
+            if matches!(pane, PaneRegion::BottomRight) {
+                self.painter.push_clip(plan.repaint_strip);
+                self.render_pane(model, pane, frame);
+                self.painter.pop_clip();
+            } else {
+                self.render_pane(model, pane, frame);
+            }
+        }
+
+        self.draw_frozen_separators(frame);
+        // Headers shift along the scroll axis only: row labels move with
+        // vertical scroll (Axis::Row), col letters with horizontal scroll
+        // (Axis::Column). The cross-axis strip's pixels are unchanged.
+        self.render_headers_base(plan.axis, frame);
         self.draw_corner_box(frame);
         self.painter.end_group();
     }
@@ -220,6 +299,31 @@ pub(crate) struct GridRenderer<P: Painter> {
 impl<P: Painter> GridRenderer<P> {
     pub(crate) fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) {
         self.core.render_grid(model, frame);
+    }
+
+    pub(crate) fn render_grid_blit(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        plan: &BlitPlan,
+    ) {
+        self.core.render_grid_blit(model, frame, plan);
+    }
+
+    pub(crate) fn painter_supports_blit(&self) -> bool {
+        self.core.painter().supports_blit()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn pane_cache_range_debug(
+        &self,
+        region: crate::chrome::PaneRegion,
+    ) -> Option<crate::types::coord::RCRange> {
+        self.core.pane_cache.pane(region).range.get()
+    }
+
+    pub(crate) fn painter_blit(&self, src: crate::geometry::pixel_rect::PixelRect, dst: crate::geometry::pixel_rect::PixelRect) {
+        self.core.painter().blit(src, dst);
     }
 }
 

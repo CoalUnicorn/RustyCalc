@@ -54,3 +54,42 @@ impl PaneRegion {
         })
     }
 }
+
+/// Bitset over `PaneRegion`. `Chrome.stale_panes` carries one of these
+/// to tell `render_grid` which quadrants still need painting. Default
+/// after `Chrome::next_frame` is `ALL` (full repaint); Stage 3's
+/// `next_frame_with_blit` narrows it when the blit proves cross-axis
+/// panes' content is unchanged.
+///
+/// Bits are ordered to match `PaneRegion as u8`: TopLeft=0, TopRight=1,
+/// BottomLeft=2, BottomRight=3.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PaneRegionMask(u8);
+
+impl PaneRegionMask {
+    pub(crate) const EMPTY: PaneRegionMask = PaneRegionMask(0);
+    pub(crate) const ALL: PaneRegionMask = PaneRegionMask(0b1111);
+
+    pub(crate) fn with(self, region: PaneRegion) -> Self {
+        Self(self.0 | (1 << region as u8))
+    }
+
+    pub(crate) fn contains(self, region: PaneRegion) -> bool {
+        self.0 & (1 << region as u8) != 0
+    }
+
+    /// Yields panes in render order (matches the old `render_grid` 4-call
+    /// sequence: TopLeft, TopRight, BottomLeft, BottomRight). The order
+    /// is load-bearing for `render_grid_blit`'s BottomRight strip-clip
+    /// wrapping.
+    pub(crate) fn iter(self) -> impl Iterator<Item = PaneRegion> {
+        [
+            PaneRegion::TopLeft,
+            PaneRegion::TopRight,
+            PaneRegion::BottomLeft,
+            PaneRegion::BottomRight,
+        ]
+        .into_iter()
+        .filter(move |&p| self.contains(p))
+    }
+}

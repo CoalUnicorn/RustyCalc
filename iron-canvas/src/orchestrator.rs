@@ -3,7 +3,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::chrome::Chrome;
+use crate::chrome::{Chrome, FrameValidity};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::geometry::CanvasSize;
@@ -12,6 +12,50 @@ use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::ui::{HitTest, ResizeTarget};
 use crate::wasm::JsBackedModel;
 use crate::CanvasModel;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn log(s: &str);
+}
+
+#[cfg(target_arch = "wasm32")]
+fn log_blit_plan(
+    plan: &crate::chrome::BlitPlan,
+    prev_top: i32,
+    prev_pane_range: Option<crate::RCRange>,
+    frame: &Chrome,
+) {
+    use crate::geometry::prim::Axis;
+    let axis = match plan.axis {
+        Axis::Row => "Row",
+        Axis::Column => "Col",
+    };
+    let new_top = frame.pane_set_top_row_debug();
+    let new_last = frame.pane_set_last_row_debug();
+    let scroll_rows_len = frame.scroll_rows_len_debug();
+    let cached = match prev_pane_range {
+        Some(r) => format!("rows {}..={}", r.r1, r.r2),
+        None => "<none>".to_string(),
+    };
+    let msg = format!(
+        "[blit] axis={} prev_top={} new_top={} new_last={} cache.range={} scroll_rows.len()={} src=(y={}, h={}) dst=(y={}, h={}) strip=(y={}, h={})",
+        axis,
+        prev_top,
+        new_top,
+        new_last,
+        cached,
+        scroll_rows_len,
+        plan.src.top_left.y,
+        plan.src.height,
+        plan.dst.top_left.y,
+        plan.dst.height,
+        plan.repaint_strip.top_left.y,
+        plan.repaint_strip.height,
+    );
+    log(&msg);
+}
 
 /// Public wasm-bindgen handle owning both canvas layers.
 ///
@@ -90,53 +134,39 @@ impl IronCanvas {
 
     /// Paint whichever layers are dirty. Clean layers are skipped; see
     /// `ARCHITECTURE.md` for the cache rules and the overlay-only path.
+    ///
+    /// Dispatches into one of three named paths, in priority order:
+    /// 1. `try_paint_overlay_only` — grid clean + slot vecs match.
+    /// 2. `try_paint_blit` — viewport scrolled and the backend can shift pixels.
+    /// 3. `paint_grid` — full grid repaint (slot-reuse or rebuild).
     #[allow(non_snake_case)]
     pub fn paintIfDirty(&mut self) {
-        let mut grid_dirty = self.grid.should_paint();
+        let grid_dirty = self.grid.should_paint();
         let overlay_dirty = self.overlay.should_paint();
 
         if !grid_dirty && !overlay_dirty {
             return;
         }
 
-        let Some(model) = self.model.as_deref() else {
+        let Some(model) = self.model.clone() else {
             return;
         };
+        let model: &dyn CanvasModel = model.as_ref();
 
-        // Overlay-only fast path: reuse the last frame's slot vecs when
-        // scroll / freeze / sheet / canvas size are unchanged. Triggered by
-        // autofill drag, clipboard state change, formula-ref highlight
-        // updates, and active-cell moves.
-        //
-        // Falls through to a full rebuild when geometry diverged (IronCalc's
-        // `UserModel` is imperative; a sheet swap can mutate `Chrome`
-        // identity without any setter call) or when no prior frame exists.
-        // That guarantees the grid layer never sits beneath an overlay it
-        // didn't paint with.
-        if !grid_dirty {
-            match self.last_frame.as_mut() {
-                Some(prev) if prev.is_still_valid(model, self.size) => {
-                    prev.refresh_overlay_inputs(model);
-                    self.overlay.paint(&self.overlays, model, prev);
-                    return;
-                }
-                _ => grid_dirty = true,
-            }
+        let validity = self
+            .last_frame
+            .as_ref()
+            .map_or(FrameValidity::Rebuild, |f| {
+                f.is_still_valid(model, self.size)
+            });
+
+        if !grid_dirty && self.try_paint_overlay_only(validity, model) {
+            return;
         }
-
-        // Full rebuild: scroll/freeze/size/sheet changed, or grid is dirty.
-        // Passing the outgoing frame recycles its slot Vec allocations so
-        // steady-state rebuilds don't re-allocate the four pane-set buffers.
-        let frame = Chrome::next_frame(self.last_frame.take(), model, self.size, &self.theme);
-
-        if grid_dirty {
-            self.grid.paint(model, &frame);
+        if self.try_paint_blit(model) {
+            return;
         }
-        if overlay_dirty {
-            self.overlay.paint(&self.overlays, model, &frame);
-        }
-
-        self.last_frame = Some(frame);
+        self.paint_grid(validity, model, overlay_dirty);
     }
 
     /// Explicit teardown for React strict-mode / Leptos `Effect` mount
@@ -279,5 +309,92 @@ impl IronCanvas {
     /// `is_still_valid`, not duplicated at the callsite.
     pub fn request_overlay_repaint(&mut self) {
         self.overlay.mark_dirty();
+    }
+
+    /// Overlay-only fast path. Returns true when the overlay was painted
+    /// against the cached `last_frame` and the caller should stop.
+    /// Triggered by autofill drag, clipboard state change, formula-ref
+    /// highlight updates, and active-cell moves — anything that leaves
+    /// grid pixels untouched.
+    fn try_paint_overlay_only(&mut self, validity: FrameValidity, model: &dyn CanvasModel) -> bool {
+        if !matches!(validity, FrameValidity::SlotsReuse) {
+            return false;
+        }
+        let Some(prev) = self.last_frame.as_mut() else {
+            return false;
+        };
+        prev.refresh_overlay_inputs(model);
+        self.overlay.paint(&self.overlays, model, prev);
+        true
+    }
+
+    /// Scroll-blit fast path. Runs whenever the viewport scrolled along a
+    /// single axis and the painter can shift kept-band pixels — even when
+    /// only the overlay was marked dirty (arrow-nav fires
+    /// `request_overlay_repaint`, but a viewport scroll still requires a
+    /// grid update). `try_blit` filters no-op scrolls and cases where the
+    /// kept band can't be reused (theme / sheet / frozen / canvas
+    /// changed, or scroll exceeded the viewport extent).
+    ///
+    /// Returns true on success. Backends without `supports_blit` (e.g.
+    /// SVG) opt out and fall through to a full repaint.
+    fn try_paint_blit(&mut self, model: &dyn CanvasModel) -> bool {
+        if !self.grid.painter_supports_blit() {
+            return false;
+        }
+        let Some(plan) = self
+            .last_frame
+            .as_ref()
+            .and_then(|f| f.try_blit(model, self.size, &self.theme))
+        else {
+            return false;
+        };
+        let Some(prev) = self.last_frame.take() else {
+            return false;
+        };
+        #[cfg(target_arch = "wasm32")]
+        let prev_top = prev.pane_set_top_row_debug();
+        #[cfg(target_arch = "wasm32")]
+        let prev_pane_range = self.grid.bottom_right_cache_range_debug();
+        let frame = Chrome::next_frame_with_blit(prev, model, self.size, &self.theme, &plan);
+        #[cfg(target_arch = "wasm32")]
+        log_blit_plan(&plan, prev_top, prev_pane_range, &frame);
+        self.grid.paint_blit(model, &frame, &plan);
+        self.overlay.paint(&self.overlays, model, &frame);
+        self.last_frame = Some(frame);
+        true
+    }
+
+    /// Full grid repaint. Two `Chrome` sources:
+    ///   • `SlotsReuse` — keep prev's slot vecs, promote its painted
+    ///     `pane_fingerprints` into `prev_pane_fingerprints`, refresh
+    ///     theme + overlay inputs. Cheap; `render_pane` still
+    ///     fingerprint-skips per pane.
+    ///   • Rebuild — full `next_frame` walk. The new slot vecs make any
+    ///     fingerprint compare across the boundary meaningless, so every
+    ///     pane repaints.
+    fn paint_grid(
+        &mut self,
+        validity: FrameValidity,
+        model: &dyn CanvasModel,
+        overlay_dirty: bool,
+    ) {
+        let frame = match (validity, self.last_frame.take()) {
+            (FrameValidity::SlotsReuse, Some(mut prev)) => {
+                prev.prev_pane_fingerprints = prev.pane_fingerprints.replace([0; 4]);
+                prev.theme = self.theme.clone();
+                prev.slots_reused = true;
+                prev.refresh_overlay_inputs(model);
+                prev
+            }
+            (_, prev) => Chrome::next_frame(prev, model, self.size, &self.theme),
+        };
+
+        self.grid.paint(model, &frame);
+        if overlay_dirty {
+            self.overlay.paint(&self.overlays, model, &frame);
+        }
+
+        self.last_frame = Some(frame);
     }
 }

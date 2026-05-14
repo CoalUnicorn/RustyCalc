@@ -69,6 +69,10 @@ pub(crate) enum DrawOp {
         class: &'static str,
     },
     EndGroup,
+    Blit {
+        src: PixelRect,
+        dst: PixelRect,
+    },
 }
 
 #[derive(Default)]
@@ -219,6 +223,14 @@ impl Painter for RecorderPainter {
         self.group_depth.set(self.group_depth.get() - 1);
         self.push(DrawOp::EndGroup);
     }
+
+    fn supports_blit(&self) -> bool {
+        true
+    }
+
+    fn blit(&self, src: PixelRect, dst: PixelRect) {
+        self.push(DrawOp::Blit { src, dst });
+    }
 }
 
 #[cfg(test)]
@@ -258,6 +270,21 @@ mod tests {
         assert_eq!(ops.len(), 2);
         assert!(matches!(ops[0], DrawOp::PushClip { .. }));
         assert!(matches!(ops[1], DrawOp::PopClip));
+    }
+
+    #[test]
+    fn blit_records_op_and_supports_blit_is_true() {
+        let p = RecorderPainter::new();
+        assert!(p.supports_blit(), "Recorder backend opts in to blit");
+        let src = rect(0.0, 20.0, 100.0, 200.0);
+        let dst = rect(0.0, 0.0, 100.0, 200.0);
+        p.blit(src, dst);
+        let ops = p.into_ops();
+        assert_eq!(ops.len(), 1);
+        assert!(matches!(
+            ops[0],
+            DrawOp::Blit { src: s, dst: d } if s == src && d == dst
+        ));
     }
 
     #[test]
