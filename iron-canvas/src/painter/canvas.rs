@@ -56,12 +56,38 @@ impl CachedColor {
     }
 }
 
+/// Sticky `ctx.set_*` state cache for `CanvasPainter`. Lifted out as its
+/// own type so the paint regime arms in `IronCanvas::paintIfDirty` own the
+/// invalidation contract explicitly: `paint_rebuild` / `paint_content`
+/// invalidate at the arm prologue (ctx state about to change);
+/// `paint_viewport` / `paint_overlay` preserve (blit + overlay-only don't
+/// touch grid ctx state). Other painter backends (SvgPainter,
+/// RecorderPainter) have no analog — the cache is a Canvas2D-specific
+/// optimization.
+#[derive(Default)]
+pub(crate) struct SetterCache {
+    pub(crate) last_fill: Cell<CachedColor>,
+    pub(crate) last_stroke: Cell<CachedColor>,
+    pub(crate) last_font: Cell<CachedColor>,
+    pub(crate) last_line_width: Cell<f64>,
+}
+
+impl SetterCache {
+    /// Clear all four sticky binds. Called from the trait-level
+    /// `invalidate_cache`, from `pop_clip` (ctx.restore wipes ctx state),
+    /// and — via `RendererCore::invalidate_paint_cache` — from the paint
+    /// regime arms that change ctx fillStyle/strokeStyle/font/lineWidth.
+    pub(crate) fn invalidate(&self) {
+        self.last_fill.set(CachedColor::Empty);
+        self.last_stroke.set(CachedColor::Empty);
+        self.last_font.set(CachedColor::Empty);
+        self.last_line_width.set(0.0);
+    }
+}
+
 pub(crate) struct CanvasPainter {
     pub ctx: CanvasRenderingContext2d,
-    pub last_fill: Cell<CachedColor>,
-    pub last_stroke: Cell<CachedColor>,
-    pub last_font: Cell<CachedColor>,
-    pub last_line_width: Cell<f64>,
+    pub(crate) setter_cache: SetterCache,
     pub dash_pattern: js_sys::Array,
     pub dash_empty: js_sys::Array,
     pub clip_depth: Cell<u32>,
@@ -76,10 +102,7 @@ impl CanvasPainter {
     pub(crate) fn new(ctx: CanvasRenderingContext2d) -> Self {
         Self {
             ctx,
-            last_fill: Cell::new(CachedColor::Empty),
-            last_stroke: Cell::new(CachedColor::Empty),
-            last_font: Cell::new(CachedColor::Empty),
-            last_line_width: Cell::new(0.0),
+            setter_cache: SetterCache::default(),
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
             clip_depth: Cell::new(0),
@@ -95,39 +118,39 @@ impl CanvasPainter {
     }
 
     pub(crate) fn set_fill_cached(&self, color: PaintColor) {
-        let prev = self.last_fill.take();
+        let prev = self.setter_cache.last_fill.take();
         if prev.matches(color) {
-            self.last_fill.set(prev);
+            self.setter_cache.last_fill.set(prev);
             return;
         }
         self.ctx.set_fill_style_str(color.as_str());
-        self.last_fill.set(into_cached(color));
+        self.setter_cache.last_fill.set(into_cached(color));
     }
 
     fn set_stroke_cached(&self, color: PaintColor) {
-        let prev = self.last_stroke.take();
+        let prev = self.setter_cache.last_stroke.take();
         if prev.matches(color) {
-            self.last_stroke.set(prev);
+            self.setter_cache.last_stroke.set(prev);
             return;
         }
         self.ctx.set_stroke_style_str(color.as_str());
-        self.last_stroke.set(into_cached(color));
+        self.setter_cache.last_stroke.set(into_cached(color));
     }
 
     pub(crate) fn set_font_cached(&self, font: PaintColor) {
-        let prev = self.last_font.take();
+        let prev = self.setter_cache.last_font.take();
         if prev.matches(font) {
-            self.last_font.set(prev);
+            self.setter_cache.last_font.set(prev);
             return;
         }
         self.ctx.set_font(font.as_str());
-        self.last_font.set(into_cached(font));
+        self.setter_cache.last_font.set(into_cached(font));
     }
 
     pub(crate) fn set_line_width_cached(&self, width: f64) {
-        if (self.last_line_width.get() - width).abs() > f64::EPSILON {
+        if (self.setter_cache.last_line_width.get() - width).abs() > f64::EPSILON {
             self.ctx.set_line_width(width);
-            self.last_line_width.set(width);
+            self.setter_cache.last_line_width.set(width);
         }
     }
 
@@ -269,10 +292,7 @@ impl Painter for CanvasPainter {
         self.ctx.restore();
         self.clip_depth.set(self.clip_depth.get() - 1);
         // restore() resets fill/stroke/font/lineWidth/dash — invalidate cache
-        self.last_fill.set(CachedColor::Empty);
-        self.last_stroke.set(CachedColor::Empty);
-        self.last_font.set(CachedColor::Empty);
-        self.last_line_width.set(0.0);
+        self.setter_cache.invalidate();
     }
 
     fn fill_text(
@@ -304,10 +324,7 @@ impl Painter for CanvasPainter {
     fn invalidate_cache(&self) {
         // Public escape hatch for the renderer between frames.
         // (Layers call this in their `paint()` method today.)
-        self.last_fill.set(CachedColor::Empty);
-        self.last_stroke.set(CachedColor::Empty);
-        self.last_font.set(CachedColor::Empty);
-        self.last_line_width.set(0.0);
+        self.setter_cache.invalidate();
     }
 
     fn apply_dpr_transform(&self, dpr: i32) {

@@ -1,7 +1,7 @@
 //! Stage 1 fingerprint paint-skip — `render_pane` must emit zero `DrawOp`s
 //! when the bulk-fetched buffers content-match the prior frame (under
-//! `frame.slots_reused = true`), and must repaint exactly the pane whose
-//! fingerprint changed.
+//! `frame.kind == FrameKindTag::SlotsReused`), and must repaint exactly
+//! the pane whose fingerprint changed.
 //!
 //! These tests target `render_pane` directly rather than `render_grid` so
 //! the assertion surface stays the 4-pass per-pane walk. Header strips,
@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use ironcalc_base::types::{CellType, Style};
 
-use crate::chrome::{Chrome, PaneRegion};
+use crate::chrome::{Chrome, FrameKindTag, PaneRegion};
 use crate::renderer::RendererCore;
 use crate::test::painter::RecorderPainter;
 use crate::theme::CanvasTheme;
@@ -96,11 +96,11 @@ fn paint_pane(model: &MutableModel, frame: &Chrome, pane: PaneRegion) -> usize {
 }
 
 /// Mirrors the orchestrator's `SlotsReuse` branch: rotate the painted
-/// fingerprints into `prev_pane_fingerprints` and flip `slots_reused` on,
-/// so the next `render_pane` call hits the skip-comparison branch.
+/// fingerprints into `prev_pane_fingerprints` and flip the kind tag, so
+/// the next `render_pane` call hits the skip-comparison branch.
 fn promote_to_slots_reuse(frame: &mut Chrome) {
     frame.prev_pane_fingerprints = frame.pane_fingerprints.replace([0; 4]);
-    frame.slots_reused = true;
+    frame.kind = FrameKindTag::SlotsReused;
 }
 
 #[test]
@@ -109,9 +109,9 @@ fn render_pane_skips_on_idempotent_repaint() {
     let theme = CanvasTheme::light();
     let mut frame = Chrome::next_frame(None, &m, canvas(), &theme);
 
-    // First paint runs through the full 4-pass walk; `slots_reused` is
-    // false, so the skip branch is gated off but `pane_fingerprints` is
-    // still populated for the next frame.
+    // First paint runs through the full 4-pass walk; the kind is Fresh,
+    // so the skip branch is gated off but `pane_fingerprints` is still
+    // populated for the next frame.
     let first = paint_pane(&m, &frame, PaneRegion::BottomRight);
     assert!(first > 0, "first paint of a non-empty pane must emit ops");
 
@@ -123,7 +123,7 @@ fn render_pane_skips_on_idempotent_repaint() {
     let second = paint_pane(&m, &frame, PaneRegion::BottomRight);
     assert_eq!(
         second, 0,
-        "idempotent repaint under slots_reused must skip render_pane entirely",
+        "idempotent repaint under SlotsReused must skip render_pane entirely",
     );
 }
 

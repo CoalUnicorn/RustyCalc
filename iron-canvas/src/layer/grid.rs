@@ -24,30 +24,51 @@ impl GridLayer {
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome, // pre-built by orchestrator
+        plan: Option<&BlitPlan>,
     ) {
-        // Full-canvas clear runs only on rebuild. On `slots_reused` the
-        // prior frame's pixels stay; `render_pane` clears its own pane
-        // bg before re-painting when its fingerprint changed, preserving
-        // the fingerprint-skip win for clean panes.
-        if !frame.slots_reused {
+        // Full-canvas clear runs only on Fresh frames. When the prior
+        // frame's slot vecs were reused (SlotsReused or Blitted), its
+        // pixels stay; `render_pane` clears its own pane bg before
+        // re-painting when its fingerprint changed, preserving the
+        // fingerprint-skip win for clean panes.
+        //
+        // Setter-cache invalidation is the orchestrator arm's
+        // responsibility: `paint_rebuild` / `paint_content` call
+        // `invalidate_paint_cache` at their prologue. The raw
+        // `ctx.set_fill_style_str` below bypasses the cache but doesn't
+        // read it, so an Empty cache here is safe — the first cached-set
+        // inside `render_grid` will re-bind from Empty.
+        if !frame.kind.reuses_slots() {
             let size = frame.canvas_size;
             let ctx = self.base.renderer.ctx_ref();
             ctx.set_fill_style_str(frame.theme.cell_bg.as_ref());
             ctx.fill_rect(0.0, 0.0, size.w, size.h);
         }
+        self.base.renderer.render_grid(model, frame, plan);
+    }
+
+    /// Wipe the painter's sticky `set_*_cached` state and reset text
+    /// defaults. Paint regime arms (`paint_rebuild`, `paint_content`) call
+    /// this at their prologue; arms that preserve ctx state
+    /// (`paint_overlay`, `paint_viewport`) skip it.
+    pub(crate) fn invalidate_paint_cache(&mut self) {
         self.base.renderer.invalidate_paint_cache();
-        self.base.renderer.render_grid(model, frame);
     }
 
     /// Scroll-blit fast path: shift the BottomRight kept band via
     /// `Painter::blit`, then re-run the grid pipeline with the BottomRight
     /// pane wrapped in a clip to `plan.repaint_strip`. The caller (the
-    /// orchestrator) must set `frame.slots_reused = true` so render_pane's
-    /// fingerprint-mismatch branch fills the pane bg — clipped to the
-    /// strip, this erases stale pixels there without touching the kept
-    /// band. Falls back to `paint` if the backend doesn't support `blit`.
+    /// orchestrator) hands in a frame whose `kind` is `Blitted` so
+    /// render_pane's fingerprint-mismatch branch fills the pane bg —
+    /// clipped to the strip, this erases stale pixels there without
+    /// touching the kept band. Falls back to `paint` if the backend
+    /// doesn't support `blit`.
     pub(crate) fn painter_supports_blit(&self) -> bool {
         self.base.renderer.painter_supports_blit()
+    }
+
+    pub(crate) fn invalidate_pane_cache(&self, mask: crate::chrome::PaneRegionMask) {
+        self.base.renderer.invalidate_pane_cache(mask);
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -59,28 +80,35 @@ impl GridLayer {
 
     pub(crate) fn paint_blit(&mut self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
         if !self.base.renderer.painter_supports_blit() {
-            self.paint(model, frame);
+            self.paint(model, frame, None);
             return;
         }
-        self.base.renderer.painter_blit(plan.src, plan.dst);
+        for s in &plan.shifts {
+            self.base.renderer.painter_blit(s.src, s.dst);
+        }
         // `drawImage` doesn't disturb ctx fillStyle / strokeStyle / font /
         // lineWidth, so the painter's state cache is still valid across the
         // blit. Letting it survive lets the subsequent strip paint reuse
         // the prior frame's setter binds instead of re-issuing them.
         //
-        // `render_grid_blit` rotates the cached pane buffers at its top
-        // (`prepare_blit_cache`) before any cell paint — the blit must
-        // come first so the kept pixels are in their new position when
-        // the strip-fetch paints over the revealed band.
-        self.base.renderer.render_grid_blit(model, frame, plan);
+        // The unified `paint(.., Some(plan))` rotates the cached pane
+        // buffers at its top — the blit must come first so the kept
+        // pixels are in their new position when the strip-fetch paints
+        // over the revealed band.
+        self.paint(model, frame, Some(plan));
     }
 
-    pub(crate) fn mark_dirty(&mut self) {
+    #[allow(dead_code)] // Back-compat shim; production callers use `raise`.
+    pub(crate) fn mark_dirty(&self) {
         self.base.mark_dirty();
     }
 
-    pub(crate) fn should_paint(&mut self) -> bool {
-        self.base.should_paint()
+    pub(crate) fn raise(&self, sig: crate::signal::GridSignals) {
+        self.base.raise(sig);
+    }
+
+    pub(crate) fn drain_signals(&self) -> crate::signal::GridSignals {
+        self.base.drain_signals()
     }
 
     /// Resize the backing store. Ports the guard from `CanvasRenderer::new`:

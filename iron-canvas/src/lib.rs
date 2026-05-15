@@ -35,6 +35,7 @@ mod model_adapter;
 mod orchestrator;
 mod painter;
 pub mod renderer;
+pub(crate) mod signal;
 pub mod theme;
 pub mod types;
 pub mod wasm;

@@ -38,12 +38,17 @@ impl OverlayLayer {
         })
     }
 
-    pub(crate) fn mark_dirty(&mut self) {
+    #[allow(dead_code)] // Back-compat shim; production callers use `raise`.
+    pub(crate) fn mark_dirty(&self) {
         self.base.mark_dirty();
     }
 
-    pub(crate) fn should_paint(&mut self) -> bool {
-        self.base.should_paint()
+    pub(crate) fn raise(&self, sig: crate::signal::GridSignals) {
+        self.base.raise(sig);
+    }
+
+    pub(crate) fn drain_signals(&self) -> crate::signal::GridSignals {
+        self.base.drain_signals()
     }
 
     pub(crate) fn paint(

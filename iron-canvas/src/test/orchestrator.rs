@@ -62,8 +62,8 @@ fn drag_target(col: i32) -> crate::types::coord::AutofillTarget {
 #[test]
 fn set_overlays_only_dirties_overlay() {
     use crate::layer::PaintGate;
-    let mut grid = PaintGate::new();
-    let mut overlay = PaintGate::new();
+    let grid = PaintGate::new();
+    let overlay = PaintGate::new();
     let mut current = RenderOverlays::default();
 
     let next = RenderOverlays {
@@ -90,8 +90,8 @@ fn set_overlays_only_dirties_overlay() {
 #[test]
 fn sixty_drag_frames_increment_overlay_only() {
     use crate::layer::PaintGate;
-    let mut grid = PaintGate::new();
-    let mut overlay = PaintGate::new();
+    let grid = PaintGate::new();
+    let overlay = PaintGate::new();
     let mut current = RenderOverlays::default();
 
     for i in 0..60_i32 {
@@ -109,9 +109,10 @@ fn sixty_drag_frames_increment_overlay_only() {
         overlay.should_paint();
     }
 
-    assert_eq!(grid.paint_count, 0, "grid must not paint during drag");
+    assert_eq!(grid.paint_count.get(), 0, "grid must not paint during drag");
     assert_eq!(
-        overlay.paint_count, 60,
+        overlay.paint_count.get(),
+        60,
         "overlay must paint once per drag frame"
     );
 }

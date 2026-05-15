@@ -1,5 +1,7 @@
+mod blit_chrome_edges;
 mod canvas_model;
 mod chrome_invariants;
+mod frame_kind;
 mod geometry;
 mod layer;
 mod model;
@@ -9,5 +11,6 @@ mod painter;
 mod reference;
 mod renderer;
 mod scroll_blit;
+mod signals;
 mod theme;
 mod types;

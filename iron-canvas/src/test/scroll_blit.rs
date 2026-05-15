@@ -114,6 +114,12 @@ fn count_blits(ops: &[DrawOp]) -> usize {
         .count()
 }
 
+fn issue_blits<P: Painter>(painter: &P, plan: &crate::chrome::BlitPlan) {
+    for s in &plan.shifts {
+        painter.blit(s.src, s.dst);
+    }
+}
+
 fn count_rect_fills(ops: &[DrawOp]) -> usize {
     ops.iter()
         .filter(|op| matches!(op, DrawOp::RectFill { .. }))
@@ -129,7 +135,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     // Frame 0 at top_row=1.
     let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, None);
 
     let baseline_ops = core.painter().ops().len();
 
@@ -143,8 +149,8 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     // Simulate the orchestrator's blit fast-path on the same core so
     // the pane cache state carries across frames.
     let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
-    core.painter().blit(plan.src, plan.dst);
-    core.render_grid_blit(&m, &frame1, &plan);
+    issue_blits(core.painter(), &plan);
+    core.render_grid(&m, &frame1, Some(&plan));
 
     let blit_phase_ops: Vec<DrawOp> = core
         .painter()
@@ -167,10 +173,14 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
         .iter()
         .find(|op| matches!(op, DrawOp::Blit { .. }))
         .expect("blit op present per earlier assertion");
+    let primary = match plan.shifts.first() {
+        Some(s) => s,
+        None => panic!("plan must carry at least one shift"),
+    };
     match blit_op {
         DrawOp::Blit { src, dst } => {
-            assert_eq!(*src, plan.src, "blit src must match plan");
-            assert_eq!(*dst, plan.dst, "blit dst must match plan");
+            assert_eq!(*src, primary.src, "blit src must match plan");
+            assert_eq!(*dst, primary.dst, "blit dst must match plan");
         }
         _ => unreachable!(),
     }
@@ -203,7 +213,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
 
     let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, None);
     let baseline_ops = core.painter().ops().len();
 
     // Pure horizontal scroll by 1 column.
@@ -214,8 +224,8 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
         .expect("single-column scroll must qualify for blit");
 
     let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
-    core.painter().blit(plan.src, plan.dst);
-    core.render_grid_blit(&m, &frame1, &plan);
+    issue_blits(core.painter(), &plan);
+    core.render_grid(&m, &frame1, Some(&plan));
 
     let blit_phase_ops: Vec<DrawOp> = core
         .painter()
@@ -249,7 +259,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
 
     let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, None);
 
     let baseline_ops: Vec<DrawOp> = core.painter().ops().iter().cloned().collect();
     let baseline_rect_fills = count_rect_fills(&baseline_ops);
@@ -259,8 +269,8 @@ fn scroll_by_one_row_paints_only_strip_cells() {
         .try_blit(&m, canvas, &theme)
         .expect("single-row scroll must qualify for blit");
     let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
-    core.painter().blit(plan.src, plan.dst);
-    core.render_grid_blit(&m, &frame1, &plan);
+    issue_blits(core.painter(), &plan);
+    core.render_grid(&m, &frame1, Some(&plan));
 
     let blit_phase_ops: Vec<DrawOp> = core
         .painter()
@@ -332,7 +342,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
 
     let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, None);
     let baseline_ops = core.painter().ops().len();
 
     m.set_top_row(2);
@@ -341,8 +351,8 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
         .expect("single-row scroll must qualify for blit");
 
     let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
-    core.painter().blit(plan.src, plan.dst);
-    core.render_grid_blit(&m, &frame1, &plan);
+    issue_blits(core.painter(), &plan);
+    core.render_grid(&m, &frame1, Some(&plan));
 
     let post_scroll_ops: Vec<DrawOp> = core
         .painter()
@@ -382,7 +392,7 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
 
     let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, None);
     let baseline_ops = core.painter().ops().len();
 
     m.set_top_row(6);
@@ -391,8 +401,8 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
         .expect("5-row scroll must qualify for blit");
 
     let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
-    core.painter().blit(plan.src, plan.dst);
-    core.render_grid_blit(&m, &frame1, &plan);
+    issue_blits(core.painter(), &plan);
+    core.render_grid(&m, &frame1, Some(&plan));
 
     let post_scroll_ops: Vec<DrawOp> = core
         .painter()

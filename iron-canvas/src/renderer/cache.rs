@@ -5,7 +5,7 @@ use ironcalc_base::types::{CellType, Style};
 
 use super::cell::text::TextLine;
 use super::cell::CellPaint;
-use crate::chrome::PaneRegion;
+use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
 use crate::painter::CssColor;
 use crate::types::coord::RCRange;
@@ -40,7 +40,7 @@ pub(crate) struct FrameCache {
 /// Per-pane buffers that survive across frames. Holds the most recent
 /// bulk-fetch output for one `PaneRegion`, plus the `RCRange` they were
 /// fetched for. `render_pane` reads `range` to decide whether the cached
-/// buffers are still valid for the live frame: if `frame.slots_reused`
+/// buffers are still valid for the live frame: if `frame.kind.reuses_slots()`
 /// and the live pane range equals the cached range, no fetch is needed.
 ///
 /// Each field stays `Cell`-wrapped so `render_pane` can `take` for
@@ -103,6 +103,17 @@ pub(crate) struct PaneCache {
 impl PaneCache {
     pub(crate) fn pane(&self, region: PaneRegion) -> &PaneBuffers {
         &self.panes[region as usize]
+    }
+
+    /// Drop the cached `range` for every pane named in `mask` so the next
+    /// `render_pane` call refetches values/styles from the model instead
+    /// of trusting the stale buffers. The buffer Vecs stay allocated —
+    /// the refetch path overwrites them in place. Unmasked panes are
+    /// untouched and keep fingerprint-skipping.
+    pub(crate) fn invalidate(&self, mask: PaneRegionMask) {
+        for region in mask.iter() {
+            self.panes[region as usize].range.set(None);
+        }
     }
 }
 

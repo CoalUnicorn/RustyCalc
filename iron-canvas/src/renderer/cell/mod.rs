@@ -71,24 +71,7 @@ impl<P: Painter> RendererCore<P> {
         let theme = &frame.theme;
         let cols_w = range.c2 - range.c1 + 1;
 
-        // Stage 3.2 — geometric early exit. When the orchestrator carried
-        // the prior frame over (`slots_reused`) and this pane's address
-        // hasn't moved, the cached buffers + the painted pixels are still
-        // valid by construction. Cross-frozen panes on a scroll-blit always
-        // hit this branch; same-axis panes fall through to fetch + paint.
-        //
-        // We propagate the previous fingerprint forward so the next frame's
-        // `prev_pane_fingerprints[idx]` still reflects what was painted at
-        // this pane — otherwise the Stage 1 secondary skip would false-miss
-        // on the next repaint.
-        if frame.slots_reused && pane_buf.range.get() == Some(range) {
-            let mut fps = frame.pane_fingerprints.get();
-            fps[pane_idx] = frame.prev_pane_fingerprints[pane_idx];
-            frame.pane_fingerprints.set(fps);
-            return;
-        }
-
-        // Stage 3.3 — strip-fetch branch. `prepare_blit_cache` rotated
+        // Strip-fetch branch. `prepare_blit_cache` rotated
         // kept-band entries into their new indices (still `Some`) and left
         // the strip slots `None`; `pane_buf.range` stays at the pre-blit
         // value as the signal. Infer the single-axis shift, fetch only the
@@ -96,7 +79,7 @@ impl<P: Painter> RendererCore<P> {
         // four paint passes to the strip rect via `PaneCells::for_strip`.
         // Kept-band pixels are already correct (painter blit) and must NOT
         // be repainted on top.
-        if frame.slots_reused {
+        if frame.kind.reuses_slots() {
             if let Some(prev_range) = pane_buf.range.get() {
                 if let Some(axis) = infer_shift_axis(prev_range, range) {
                     self.render_pane_strip(
@@ -118,18 +101,18 @@ impl<P: Painter> RendererCore<P> {
         let mut pane_cell_types = pane_buf.cell_types.take();
         model.get_cell_types_in(frame.sheet, range, &mut pane_cell_types);
 
-        // Stage 1 paint-skip: same content as the previous frame at the
-        // same pane address ⇒ canvas pixels are still correct. Skip the
-        // 4-pass walk entirely; the orchestrator's slot-reuse path also
-        // suppressed the full canvas clear so the prior pixels survived.
-        // This is the *secondary* skip; the primary range-equality skip
-        // above avoided the fetch entirely when the address matched.
+        // Fingerprint paint-skip: same content as the previous frame
+        // ⇒ canvas pixels are still correct, skip the 4-pass walk. Bulk
+        // fetch above is unconditional now — content changes that don't
+        // raise CONTENT (e.g. recalc triggered by an upstream edit a
+        // caller forgot to mark) are detected here via fingerprint
+        // mismatch, not assumed away by a geometric early-exit.
         let new_fp = compute_pane_fingerprint(&pane_styles, &pane_values, &pane_cell_types, range);
         let mut fps = frame.pane_fingerprints.get();
         fps[pane_idx] = new_fp;
         frame.pane_fingerprints.set(fps);
 
-        if frame.slots_reused {
+        if frame.kind.reuses_slots() {
             if new_fp == frame.prev_pane_fingerprints[pane_idx] {
                 pane_buf.styles.set(pane_styles);
                 pane_buf.values.set(pane_values);

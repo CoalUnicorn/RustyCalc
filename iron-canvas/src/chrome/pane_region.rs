@@ -19,14 +19,14 @@ pub enum PaneRegion {
 }
 
 impl PaneRegion {
-    pub(crate) fn rows<'a>(self, frame: &'a Chrome) -> &'a [RowSlot] {
+    pub(crate) fn rows(self, frame: &Chrome) -> &[RowSlot] {
         match self {
             PaneRegion::TopLeft | PaneRegion::TopRight => &frame.pane_set.frozen_rows,
             PaneRegion::BottomLeft | PaneRegion::BottomRight => &frame.pane_set.scroll_rows,
         }
     }
 
-    pub(crate) fn cols<'a>(self, frame: &'a Chrome) -> &'a [ColSlot] {
+    pub(crate) fn cols(self, frame: &Chrome) -> &[ColSlot] {
         match self {
             PaneRegion::TopLeft | PaneRegion::BottomLeft => &frame.pane_set.frozen_cols,
             PaneRegion::TopRight | PaneRegion::BottomRight => &frame.pane_set.scroll_cols,
@@ -76,6 +76,13 @@ impl PaneRegionMask {
 
     pub(crate) fn contains(self, region: PaneRegion) -> bool {
         self.0 & (1 << region as u8) != 0
+    }
+
+    /// Bitwise OR. `mark_content_dirty` calls this to fold a newly-named
+    /// pane set into an already-pending one without losing the prior
+    /// flags.
+    pub(crate) fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
     }
 
     /// Yields panes in render order (matches the old `render_grid` 4-call

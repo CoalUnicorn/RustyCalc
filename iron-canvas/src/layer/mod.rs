@@ -4,16 +4,18 @@ mod overlay;
 pub(crate) use grid::GridLayer;
 pub(crate) use overlay::OverlayLayer;
 pub use overlay::RenderOverlays;
+use std::cell::Cell;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{js_sys, CanvasRenderingContext2d, HtmlCanvasElement};
 
 use crate::renderer::LayerOps;
+use crate::signal::GridSignals;
 use crate::CanvasSize;
 
 pub(crate) struct PaintGate {
-    dirty: bool,
+    signals: Cell<GridSignals>,
     #[cfg(test)]
-    pub(crate) paint_count: u32,
+    pub(crate) paint_count: Cell<u32>,
 }
 
 pub(crate) struct LayerBase<R: LayerOps> {
@@ -55,13 +57,18 @@ impl<R: LayerOps> LayerBase<R> {
         }
     }
 
-    pub(crate) fn mark_dirty(&mut self) {
-        self.gate.mark_dirty();
+    /// Back-compat shim: callers that don't yet know which signal they
+    /// raise get the safest blanket. Stage 3 narrows this per setter.
+    pub(crate) fn mark_dirty(&self) {
+        self.gate.raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
     }
 
-    /// Consume the dirty flag. Returns `true` if a paint is needed.
-    pub(crate) fn should_paint(&mut self) -> bool {
-        self.gate.should_paint()
+    pub(crate) fn raise(&self, sig: GridSignals) {
+        self.gate.raise(sig);
+    }
+
+    pub(crate) fn drain_signals(&self) -> GridSignals {
+        self.gate.drain()
     }
 
     pub(crate) fn resize(&mut self, css_w: i32, css_h: i32, dpr: i32) {
@@ -85,22 +92,38 @@ impl<R: LayerOps> LayerBase<R> {
 impl PaintGate {
     pub(crate) fn new() -> Self {
         Self {
-            dirty: false,
+            signals: Cell::new(GridSignals::EMPTY),
             #[cfg(test)]
-            paint_count: 0,
+            paint_count: Cell::new(0),
         }
     }
 
-    pub(crate) fn mark_dirty(&mut self) {
-        self.dirty = true;
+    pub(crate) fn raise(&self, sig: GridSignals) {
+        self.signals.set(self.signals.get() | sig);
     }
 
-    pub(crate) fn should_paint(&mut self) -> bool {
-        let was_dirty = std::mem::replace(&mut self.dirty, false);
+    pub(crate) fn drain(&self) -> GridSignals {
+        let drained = self.signals.replace(GridSignals::EMPTY);
         #[cfg(test)]
-        if was_dirty {
-            self.paint_count += 1;
+        if !drained.is_empty() {
+            self.paint_count.set(self.paint_count.get() + 1);
         }
-        was_dirty
+        drained
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn peek(&self) -> GridSignals {
+        self.signals.get()
+    }
+
+    // Back-compat shims for tests. Production code goes through `LayerBase`.
+    #[cfg(test)]
+    pub(crate) fn mark_dirty(&self) {
+        self.raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn should_paint(&self) -> bool {
+        !self.drain().is_empty()
     }
 }
