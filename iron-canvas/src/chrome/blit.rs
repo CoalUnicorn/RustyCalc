@@ -35,6 +35,56 @@ pub(crate) struct PaneShift {
     pub dst: PixelRect,
 }
 
+impl PaneShift {
+    /// BottomLeft sibling of a row-axis BottomRight shift: same Y range,
+    /// but X spans the frozen-cols band instead of the scroll band.
+    fn bottom_left_sibling(&self, frozen_band_x: i32, frozen_band_w: i32) -> PaneShift {
+        PaneShift {
+            pane: PaneRegion::BottomLeft,
+            src: PixelRect {
+                top_left: Point {
+                    x: frozen_band_x,
+                    y: self.src.top_left.y,
+                },
+                width: frozen_band_w,
+                height: self.src.height,
+            },
+            dst: PixelRect {
+                top_left: Point {
+                    x: frozen_band_x,
+                    y: self.dst.top_left.y,
+                },
+                width: frozen_band_w,
+                height: self.dst.height,
+            },
+        }
+    }
+
+    /// TopRight sibling of a column-axis BottomRight shift: same X range,
+    /// but Y spans the frozen-rows band instead of the scroll band.
+    fn top_right_sibling(&self, frozen_band_y: i32, frozen_band_h: i32) -> PaneShift {
+        PaneShift {
+            pane: PaneRegion::TopRight,
+            src: PixelRect {
+                top_left: Point {
+                    x: self.src.top_left.x,
+                    y: frozen_band_y,
+                },
+                width: self.src.width,
+                height: frozen_band_h,
+            },
+            dst: PixelRect {
+                top_left: Point {
+                    x: self.dst.top_left.x,
+                    y: frozen_band_y,
+                },
+                width: self.dst.width,
+                height: frozen_band_h,
+            },
+        }
+    }
+}
+
 /// Pure-canvas-pixel description of a scroll-blit. `shifts` lists every
 /// pane the painter must copy (1 entry without frozen cross-axis lines,
 /// 2 when a frozen band crosses the scroll axis); `repaint_strip` is the
@@ -67,6 +117,143 @@ impl BlitPlan {
                 .with(PaneRegion::BottomRight),
         }
     }
+
+    /// Compose a row-axis `BlitPlan`. `pane_h` is the prev frame's painted
+    /// scrollable height; `shift_px` is the absolute pixel shift. `canvas_h`
+    /// caps the repaint strip so it covers the entire untouched zone below
+    /// the previous paint, in case `pane_h` was short of the canvas edge.
+    ///
+    /// `HEADER_OFFSET + 1` shifts src/dst/strip one pixel past the row-header
+    /// / grid border line so the 1-px chrome stroke at
+    /// `row_header_thickness + HEADER_OFFSET` is never folded into the kept
+    /// band by the blit (`render_headers_base` repaints it on top each frame,
+    /// which would otherwise double its density).
+    fn for_row_scroll(
+        pane_x: i32,
+        pane_w: i32,
+        pane_y: i32,
+        pane_h: i32,
+        shift_px: i32,
+        dir: ShiftDir,
+        canvas_h: i32,
+        pane: PaneRegion,
+    ) -> BlitPlan {
+        let chrome_inset_left = HEADER_OFFSET + 1;
+        let kept_h = pane_h - shift_px;
+        let inset_x = pane_x + chrome_inset_left;
+        let inset_w = pane_w - chrome_inset_left;
+        let (src_y, dst_y, strip_y, strip_h) = match dir {
+            ShiftDir::Up => {
+                // Source is below the leaving band, dest sits at pane top.
+                // Repaint strip covers everything below the shifted band,
+                // through the canvas edge.
+                let strip_y = pane_y + kept_h;
+                (
+                    pane_y + shift_px,
+                    pane_y,
+                    strip_y,
+                    (canvas_h - strip_y).max(shift_px),
+                )
+            }
+            ShiftDir::Down => {
+                // Source at pane top, dest shifted down. Strip fills the
+                // newly-revealed top band.
+                (pane_y, pane_y + shift_px, pane_y, shift_px)
+            }
+        };
+        BlitPlan {
+            axis: Axis::Row,
+            shifts: vec![PaneShift {
+                pane,
+                src: PixelRect {
+                    top_left: Point {
+                        x: inset_x,
+                        y: src_y,
+                    },
+                    width: inset_w,
+                    height: kept_h,
+                },
+                dst: PixelRect {
+                    top_left: Point {
+                        x: inset_x,
+                        y: dst_y,
+                    },
+                    width: inset_w,
+                    height: kept_h,
+                },
+            }],
+            repaint_strip: PixelRect {
+                top_left: Point {
+                    x: inset_x,
+                    y: strip_y,
+                },
+                width: inset_w,
+                height: strip_h,
+            },
+        }
+    }
+
+    /// Column-axis mirror of `for_row_scroll`. `canvas_w` caps the strip in
+    /// the scroll-RIGHT case where the previous paint didn't reach the right
+    /// edge of the canvas. `HEADER_OFFSET + 1` keeps the 1-px column-header
+    /// border out of the blit src.
+    fn for_col_scroll(
+        pane_y: i32,
+        pane_h: i32,
+        pane_x: i32,
+        pane_w: i32,
+        shift_px: i32,
+        dir: ShiftDir,
+        canvas_w: i32,
+        pane: PaneRegion,
+    ) -> BlitPlan {
+        let chrome_inset_top = HEADER_OFFSET + 1;
+        let kept_w = pane_w - shift_px;
+        let inset_y = pane_y + chrome_inset_top;
+        let inset_h = pane_h - chrome_inset_top;
+        let (src_x, dst_x, strip_x, strip_w) = match dir {
+            ShiftDir::Up => {
+                let strip_x = pane_x + kept_w;
+                (
+                    pane_x + shift_px,
+                    pane_x,
+                    strip_x,
+                    (canvas_w - strip_x).max(shift_px),
+                )
+            }
+            ShiftDir::Down => (pane_x, pane_x + shift_px, pane_x, shift_px),
+        };
+        BlitPlan {
+            axis: Axis::Column,
+            shifts: vec![PaneShift {
+                pane,
+                src: PixelRect {
+                    top_left: Point {
+                        x: src_x,
+                        y: inset_y,
+                    },
+                    width: kept_w,
+                    height: inset_h,
+                },
+                dst: PixelRect {
+                    top_left: Point {
+                        x: dst_x,
+                        y: inset_y,
+                    },
+                    width: kept_w,
+                    height: inset_h,
+                },
+            }],
+            repaint_strip: PixelRect {
+                top_left: Point {
+                    x: strip_x,
+                    y: inset_y,
+                },
+                width: strip_w,
+                height: inset_h,
+            },
+        }
+    }
 }
 
 /// Dispatch input for `Chrome::next` — which construction regime the
@@ -88,7 +275,124 @@ pub(crate) enum FramePath {
     Blit(BlitPlan),
 }
 
-// ─── Scroll-blit helpers ──────────────────────────────────────────────────
+impl Chrome {
+    /// Probe whether a pure row-axis scroll from this Chrome to `new_top`
+    /// qualifies for a blit: detect direction, measure the shift, and
+    /// verify that the kept band's row heights still match the model.
+    /// Returns `None` if the geometry would not survive a blit; the caller
+    /// then falls through to a full rebuild.
+    fn probe_row_shift(
+        &self,
+        model: &dyn CanvasModel,
+        sheet: u32,
+        new_top: i32,
+        pane_y: i32,
+        pane_h: i32,
+    ) -> Option<(i32, ShiftDir)> {
+        let prev_rows = &self.pane_set.scroll_rows;
+        let _last = prev_rows.last()?;
+        let old_top = self.pane_set.top_row();
+        if new_top > old_top {
+            let drows = (new_top - old_top) as usize;
+            if drows >= prev_rows.len() {
+                return None;
+            }
+            let leaving_h = prev_rows[drows].top - pane_y;
+            if leaving_h <= 0 || leaving_h >= pane_h {
+                return None;
+            }
+            if !overlap_row_heights_match(model, sheet, &prev_rows[drows..]) {
+                return None;
+            }
+            Some((leaving_h, ShiftDir::Up))
+        } else {
+            let drows = (old_top - new_top) as usize;
+            let mut strip_h: i32 = 0;
+            for i in 0..drows {
+                let h = model
+                    .get_row_height(sheet, new_top + i as i32)
+                    .unwrap_or(0.0)
+                    .round() as i32;
+                strip_h = strip_h.saturating_add(h);
+            }
+            if strip_h <= 0 || strip_h >= pane_h {
+                return None;
+            }
+            if !overlap_row_heights_match(model, sheet, prev_rows) {
+                return None;
+            }
+            Some((strip_h, ShiftDir::Down))
+        }
+    }
+
+    /// Column-axis mirror of `probe_row_shift`.
+    fn probe_col_shift(
+        &self,
+        model: &dyn CanvasModel,
+        sheet: u32,
+        new_left: i32,
+        pane_x: i32,
+        pane_w: i32,
+    ) -> Option<(i32, ShiftDir)> {
+        let prev_cols = &self.pane_set.scroll_cols;
+        let _last = prev_cols.last()?;
+        let old_left = self.pane_set.left_column();
+        if new_left > old_left {
+            let dcols = (new_left - old_left) as usize;
+            if dcols >= prev_cols.len() {
+                return None;
+            }
+            let leaving_w = prev_cols[dcols].left - pane_x;
+            if leaving_w <= 0 || leaving_w >= pane_w {
+                return None;
+            }
+            if !overlap_col_widths_match(model, sheet, &prev_cols[dcols..]) {
+                return None;
+            }
+            Some((leaving_w, ShiftDir::Up))
+        } else {
+            let dcols = (old_left - new_left) as usize;
+            let mut strip_w: i32 = 0;
+            for i in 0..dcols {
+                let w = model
+                    .get_column_width(sheet, new_left + i as i32)
+                    .unwrap_or(0.0)
+                    .round() as i32;
+                strip_w = strip_w.saturating_add(w);
+            }
+            if strip_w <= 0 || strip_w >= pane_w {
+                return None;
+            }
+            if !overlap_col_widths_match(model, sheet, prev_cols) {
+                return None;
+            }
+            Some((strip_w, ShiftDir::Down))
+        }
+    }
+
+    /// Seed the next frame's pane fingerprints: regions touched by the
+    /// blit (`stale`) start at zero and force a repaint; untouched regions
+    /// carry forward verbatim so the cache check in `is_still_valid`
+    /// short-circuits on them.
+    fn seed_next_pane_fingerprints(&self, stale: PaneRegionMask) -> [u64; 4] {
+        let prev_fps = self.pane_fingerprints.get();
+        let mut seeded = [0u64; 4];
+        for region in [
+            PaneRegion::TopLeft,
+            PaneRegion::TopRight,
+            PaneRegion::BottomLeft,
+            PaneRegion::BottomRight,
+        ] {
+            if !stale.contains_region(region) {
+                let idx = region as usize;
+                seeded[idx] = prev_fps[idx];
+            }
+        }
+        seeded
+    }
+}
+
+// Scroll-blit helpers
 //
 // `try_blit` already disqualified anything that isn't a pure single-axis
 // scroll. These helpers compute the canvas-pixel src/dst/strip rects and
@@ -148,20 +452,7 @@ pub(super) fn try_blit_reuse(
     };
 
     let stale = plan.shift_panes();
-    let prev_fps = prev.pane_fingerprints.get();
-    let mut seeded_fps = [0u64; 4];
-    for region in [
-        PaneRegion::TopLeft,
-        PaneRegion::TopRight,
-        PaneRegion::BottomLeft,
-        PaneRegion::BottomRight,
-    ] {
-        if !stale.contains_region(region) {
-            let idx = region as usize;
-            seeded_fps[idx] = prev_fps[idx];
-        }
-    }
-
+    let seeded_fps = prev.seed_next_pane_fingerprints(stale);
     let active_cell = ActiveCellSnapshot::capture(model, prev.sheet, view.row, view.column);
 
     Some(Chrome {
@@ -174,7 +465,7 @@ pub(super) fn try_blit_reuse(
         active_cell,
         canvas_size: canvas,
         theme: theme.clone(),
-        prev_pane_fingerprints: prev_fps,
+        prev_pane_fingerprints: prev.pane_fingerprints.get(),
         pane_fingerprints: Cell::new(seeded_fps),
         kind: FrameKindTag::Blitted,
         stale_panes: stale,
@@ -351,8 +642,6 @@ pub(super) fn try_blit_rows(
     sheet: u32,
     new_top: i32,
 ) -> Option<BlitPlan> {
-    let prev_rows = &prev.pane_set.scroll_rows;
-    let _last = prev_rows.last()?;
     let pane_x = prev.pane_set.frozen_offset_x;
     let pane_y = prev.pane_set.frozen_offset_y;
     // pane_h is bounded by the canvas backing store extent, not by
@@ -366,7 +655,6 @@ pub(super) fn try_blit_rows(
     if pane_w <= 0 || pane_h <= 0 {
         return None;
     }
-    let old_top = prev.pane_set.top_row();
     // Frozen-cols band only exists when frozen_cols > 0; otherwise the
     // gap between row_header_thickness and pane_x is the 1-px chrome
     // stroke alone, NOT a paintable pane.
@@ -377,40 +665,9 @@ pub(super) fn try_blit_rows(
         0
     };
 
-    let (shift_px, dir) = if new_top > old_top {
-        let drows = (new_top - old_top) as usize;
-        if drows >= prev_rows.len() {
-            return None;
-        }
-        let leaving_h = prev_rows[drows].top - pane_y;
-        if leaving_h <= 0 || leaving_h >= pane_h {
-            return None;
-        }
-        if !overlap_row_heights_match(model, sheet, &prev_rows[drows..]) {
-            return None;
-        }
-        (leaving_h, ShiftDir::Up)
-    } else {
-        let drows = (old_top - new_top) as usize;
-        let mut strip_h: i32 = 0;
-        for i in 0..drows {
-            let h = model
-                .get_row_height(sheet, new_top + i as i32)
-                .unwrap_or(0.0)
-                .round() as i32;
-            strip_h = strip_h.saturating_add(h);
-        }
-        if strip_h <= 0 || strip_h >= pane_h {
-            return None;
-        }
-        if !overlap_row_heights_match(model, sheet, prev_rows) {
-            return None;
-        }
-        (strip_h, ShiftDir::Down)
-    };
+    let (shift_px, dir) = prev.probe_row_shift(model, sheet, new_top, pane_y, pane_h)?;
 
-    let mut plan = plan_along_y(
-        Axis::Row,
+    let mut plan = BlitPlan::for_row_scroll(
         pane_x,
         pane_w,
         pane_y,
@@ -421,11 +678,8 @@ pub(super) fn try_blit_rows(
         PaneRegion::BottomRight,
     );
     if frozen_band_w > 0 {
-        plan.shifts.push(bottom_left_shift(
-            &plan.shifts[0],
-            frozen_band_x,
-            frozen_band_w,
-        ));
+        let sibling = plan.shifts[0].bottom_left_sibling(frozen_band_x, frozen_band_w);
+        plan.shifts.push(sibling);
     }
     Some(plan)
 }
@@ -436,20 +690,16 @@ pub(super) fn try_blit_cols(
     sheet: u32,
     new_left: i32,
 ) -> Option<BlitPlan> {
-    let prev_cols = &prev.pane_set.scroll_cols;
-    let _last = prev_cols.last()?;
     let pane_x = prev.pane_set.frozen_offset_x;
     let pane_y = prev.pane_set.frozen_offset_y;
     // pane_w is bounded by the canvas backing store extent, not by
-    // `scroll_cols.last().left + width` — `fill_axis` pushes one column
-    // past the canvas edge (the "overflow column") whose pixels were
-    // never on canvas. Mirror of try_blit_rows. See the comment there.
+    // `scroll_cols.last().left + width` — mirror of the comment in
+    // try_blit_rows.
     let pane_w = (prev.canvas_size.w.round() as i32) - pane_x;
     let pane_h = (prev.canvas_size.h.round() as i32) - pane_y;
     if pane_w <= 0 || pane_h <= 0 {
         return None;
     }
-    let old_left = prev.pane_set.left_column();
     let frozen_band_y = prev.col_header_thickness + HEADER_OFFSET;
     let frozen_band_h = if prev.pane_set.frozen_rows_count() > 0 {
         pane_y - frozen_band_y
@@ -457,40 +707,9 @@ pub(super) fn try_blit_cols(
         0
     };
 
-    let (shift_px, dir) = if new_left > old_left {
-        let dcols = (new_left - old_left) as usize;
-        if dcols >= prev_cols.len() {
-            return None;
-        }
-        let leaving_w = prev_cols[dcols].left - pane_x;
-        if leaving_w <= 0 || leaving_w >= pane_w {
-            return None;
-        }
-        if !overlap_col_widths_match(model, sheet, &prev_cols[dcols..]) {
-            return None;
-        }
-        (leaving_w, ShiftDir::Up)
-    } else {
-        let dcols = (old_left - new_left) as usize;
-        let mut strip_w: i32 = 0;
-        for i in 0..dcols {
-            let w = model
-                .get_column_width(sheet, new_left + i as i32)
-                .unwrap_or(0.0)
-                .round() as i32;
-            strip_w = strip_w.saturating_add(w);
-        }
-        if strip_w <= 0 || strip_w >= pane_w {
-            return None;
-        }
-        if !overlap_col_widths_match(model, sheet, prev_cols) {
-            return None;
-        }
-        (strip_w, ShiftDir::Down)
-    };
+    let (shift_px, dir) = prev.probe_col_shift(model, sheet, new_left, pane_x, pane_w)?;
 
-    let mut plan = plan_along_x(
-        Axis::Column,
+    let mut plan = BlitPlan::for_col_scroll(
         pane_y,
         pane_h,
         pane_x,
@@ -501,61 +720,10 @@ pub(super) fn try_blit_cols(
         PaneRegion::BottomRight,
     );
     if frozen_band_h > 0 {
-        plan.shifts.push(top_right_shift(
-            &plan.shifts[0],
-            frozen_band_y,
-            frozen_band_h,
-        ));
+        let sibling = plan.shifts[0].top_right_sibling(frozen_band_y, frozen_band_h);
+        plan.shifts.push(sibling);
     }
     Some(plan)
-}
-
-/// BottomLeft sibling of a row-axis BottomRight shift: same Y range, but
-/// X spans the frozen-cols band instead of the scroll band.
-fn bottom_left_shift(br: &PaneShift, frozen_band_x: i32, frozen_band_w: i32) -> PaneShift {
-    PaneShift {
-        pane: PaneRegion::BottomLeft,
-        src: PixelRect {
-            top_left: Point {
-                x: frozen_band_x,
-                y: br.src.top_left.y,
-            },
-            width: frozen_band_w,
-            height: br.src.height,
-        },
-        dst: PixelRect {
-            top_left: Point {
-                x: frozen_band_x,
-                y: br.dst.top_left.y,
-            },
-            width: frozen_band_w,
-            height: br.dst.height,
-        },
-    }
-}
-
-/// TopRight sibling of a column-axis BottomRight shift: same X range, but
-/// Y spans the frozen-rows band instead of the scroll band.
-fn top_right_shift(br: &PaneShift, frozen_band_y: i32, frozen_band_h: i32) -> PaneShift {
-    PaneShift {
-        pane: PaneRegion::TopRight,
-        src: PixelRect {
-            top_left: Point {
-                x: br.src.top_left.x,
-                y: frozen_band_y,
-            },
-            width: br.src.width,
-            height: frozen_band_h,
-        },
-        dst: PixelRect {
-            top_left: Point {
-                x: br.dst.top_left.x,
-                y: frozen_band_y,
-            },
-            width: br.dst.width,
-            height: frozen_band_h,
-        },
-    }
 }
 
 fn overlap_row_heights_match(model: &dyn CanvasModel, sheet: u32, overlap: &[RowSlot]) -> bool {
@@ -584,143 +752,4 @@ enum ShiftDir {
     /// Content moves toward larger coordinate; strip lands at the near edge
     /// (scroll UP on rows, scroll LEFT on cols).
     Down,
-}
-
-/// Compose a row-axis `BlitPlan`. `pane_h` is the prev frame's painted
-/// scrollable height; `shift_px` is the absolute pixel shift. `canvas_h`
-/// caps the repaint strip so it covers the entire untouched zone below
-/// the previous paint, in case `pane_h` was short of the canvas edge.
-///
-/// `HEADER_OFFSET + 1` shifts src/dst/strip one pixel past the row-header
-/// / grid border line so the 1-px chrome stroke at
-/// `row_header_thickness + HEADER_OFFSET` is never folded into the kept
-/// band by the blit (`render_headers_base` repaints it on top each frame,
-/// which would otherwise double its density).
-fn plan_along_y(
-    axis: Axis,
-    pane_x: i32,
-    pane_w: i32,
-    pane_y: i32,
-    pane_h: i32,
-    shift_px: i32,
-    dir: ShiftDir,
-    canvas_h: i32,
-    pane: PaneRegion,
-) -> BlitPlan {
-    let chrome_inset_left = HEADER_OFFSET + 1;
-    let kept_h = pane_h - shift_px;
-    let inset_x = pane_x + chrome_inset_left;
-    let inset_w = pane_w - chrome_inset_left;
-    let (src_y, dst_y, strip_y, strip_h) = match dir {
-        ShiftDir::Up => {
-            // Source is below the leaving band, dest sits at pane top.
-            // Repaint strip covers everything below the shifted band,
-            // through the canvas edge.
-            let strip_y = pane_y + kept_h;
-            (
-                pane_y + shift_px,
-                pane_y,
-                strip_y,
-                (canvas_h - strip_y).max(shift_px),
-            )
-        }
-        ShiftDir::Down => {
-            // Source at pane top, dest shifted down. Strip fills the
-            // newly-revealed top band.
-            (pane_y, pane_y + shift_px, pane_y, shift_px)
-        }
-    };
-    BlitPlan {
-        axis,
-        shifts: vec![PaneShift {
-            pane,
-            src: PixelRect {
-                top_left: Point {
-                    x: inset_x,
-                    y: src_y,
-                },
-                width: inset_w,
-                height: kept_h,
-            },
-            dst: PixelRect {
-                top_left: Point {
-                    x: inset_x,
-                    y: dst_y,
-                },
-                width: inset_w,
-                height: kept_h,
-            },
-        }],
-        repaint_strip: PixelRect {
-            top_left: Point {
-                x: inset_x,
-                y: strip_y,
-            },
-            width: inset_w,
-            height: strip_h,
-        },
-    }
-}
-
-/// Column-axis mirror of `plan_along_y`. `canvas_w` caps the strip in
-/// the scroll-RIGHT case where the previous paint didn't reach the right
-/// edge of the canvas. `HEADER_OFFSET + 1` keeps the 1-px column-header
-/// border out of the blit src.
-fn plan_along_x(
-    axis: Axis,
-    pane_y: i32,
-    pane_h: i32,
-    pane_x: i32,
-    pane_w: i32,
-    shift_px: i32,
-    dir: ShiftDir,
-    canvas_w: i32,
-    pane: PaneRegion,
-) -> BlitPlan {
-    let chrome_inset_top = HEADER_OFFSET + 1;
-    let kept_w = pane_w - shift_px;
-    let inset_y = pane_y + chrome_inset_top;
-    let inset_h = pane_h - chrome_inset_top;
-    let (src_x, dst_x, strip_x, strip_w) = match dir {
-        ShiftDir::Up => {
-            let strip_x = pane_x + kept_w;
-            (
-                pane_x + shift_px,
-                pane_x,
-                strip_x,
-                (canvas_w - strip_x).max(shift_px),
-            )
-        }
-        ShiftDir::Down => (pane_x, pane_x + shift_px, pane_x, shift_px),
-    };
-    BlitPlan {
-        axis,
-        shifts: vec![PaneShift {
-            pane,
-            src: PixelRect {
-                top_left: Point {
-                    x: src_x,
-                    y: inset_y,
-                },
-                width: kept_w,
-                height: inset_h,
-            },
-            dst: PixelRect {
-                top_left: Point {
-                    x: dst_x,
-                    y: inset_y,
-                },
-                width: kept_w,
-                height: inset_h,
-            },
-        }],
-        repaint_strip: PixelRect {
-            top_left: Point {
-                x: strip_x,
-                y: inset_y,
-            },
-            width: strip_w,
-            height: inset_h,
-        },
-    }
 }
