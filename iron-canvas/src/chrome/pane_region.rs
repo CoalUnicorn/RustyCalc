@@ -55,41 +55,41 @@ impl PaneRegion {
     }
 }
 
-/// Bitset over `PaneRegion`. `Chrome.stale_panes` carries one of these
-/// to tell `render_grid` which quadrants still need painting. Default
-/// after `Chrome::next_frame` is `ALL` (full repaint); Stage 3's
-/// `next_frame_with_blit` narrows it when the blit proves cross-axis
-/// panes' content is unchanged.
-///
-/// Bits are ordered to match `PaneRegion as u8`: TopLeft=0, TopRight=1,
-/// BottomLeft=2, BottomRight=3.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PaneRegionMask(u8);
+bitflags::bitflags! {
+    /// Bitset over `PaneRegion`. `Chrome.stale_panes` carries one of these
+    /// to tell `render_grid` which quadrants still need painting. Bit
+    /// positions are pinned to `PaneRegion as u8` so `with(region)` /
+    /// `iter()` can map between enum and bit by left-shift.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) struct PaneRegionMask: u8 {
+        const TOP_LEFT     = 1 << PaneRegion::TopLeft as u8;
+        const TOP_RIGHT    = 1 << PaneRegion::TopRight as u8;
+        const BOTTOM_LEFT  = 1 << PaneRegion::BottomLeft as u8;
+        const BOTTOM_RIGHT = 1 << PaneRegion::BottomRight as u8;
+    }
+}
 
 impl PaneRegionMask {
-    pub(crate) const EMPTY: PaneRegionMask = PaneRegionMask(0);
-    pub(crate) const ALL: PaneRegionMask = PaneRegionMask(0b1111);
+    /// Aliases for the bitflags-provided `empty()` / `all()` so call sites
+    /// (`PaneRegionMask::EMPTY`, `::ALL`) stay declarative.
+    pub(crate) const EMPTY: Self = Self::empty();
+    pub(crate) const ALL: Self = Self::all();
 
     pub(crate) fn with(self, region: PaneRegion) -> Self {
-        Self(self.0 | (1 << region as u8))
+        self | Self::from_bits_truncate(1 << region as u8)
     }
 
-    pub(crate) fn contains(self, region: PaneRegion) -> bool {
-        self.0 & (1 << region as u8) != 0
+    /// Region-typed membership test. Distinct name from `bitflags`'
+    /// `contains(other: Self)` so both surfaces stay usable.
+    pub(crate) fn contains_region(self, region: PaneRegion) -> bool {
+        self.bits() & (1 << region as u8) != 0
     }
 
-    /// Bitwise OR. `mark_content_dirty` calls this to fold a newly-named
-    /// pane set into an already-pending one without losing the prior
-    /// flags.
-    pub(crate) fn union(self, other: Self) -> Self {
-        Self(self.0 | other.0)
-    }
-
-    /// Yields panes in render order (matches the old `render_grid` 4-call
-    /// sequence: TopLeft, TopRight, BottomLeft, BottomRight). The order
-    /// is load-bearing for `render_grid_blit`'s BottomRight strip-clip
-    /// wrapping.
-    pub(crate) fn iter(self) -> impl Iterator<Item = PaneRegion> {
+    /// Yields panes in render order (TopLeft, TopRight, BottomLeft,
+    /// BottomRight). Order is load-bearing for `render_grid_blit`'s
+    /// BottomRight strip-clip wrapping. Distinct from `bitflags`'
+    /// inherent `iter()`, which yields single-bit `Self` values.
+    pub(crate) fn regions(self) -> impl Iterator<Item = PaneRegion> {
         [
             PaneRegion::TopLeft,
             PaneRegion::TopRight,
@@ -97,6 +97,6 @@ impl PaneRegionMask {
             PaneRegion::BottomRight,
         ]
         .into_iter()
-        .filter(move |&p| self.contains(p))
+        .filter(move |&p| self.contains_region(p))
     }
 }

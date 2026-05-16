@@ -111,7 +111,7 @@ impl PaneCache {
     /// the refetch path overwrites them in place. Unmasked panes are
     /// untouched and keep fingerprint-skipping.
     pub(crate) fn invalidate(&self, mask: PaneRegionMask) {
-        for region in mask.iter() {
+        for region in mask.regions() {
             self.panes[region as usize].range.set(None);
         }
     }

@@ -115,7 +115,6 @@ pub(crate) trait Painter: TextMetrics + private::Sealed {
     /// `render_grid` / `render_overlays` so SVG output is structured per layer.
     fn begin_group(&self, class: &'static str);
     fn end_group(&self);
-
 }
 
 /// Backends that can copy a rectangle of already-painted pixels in place.

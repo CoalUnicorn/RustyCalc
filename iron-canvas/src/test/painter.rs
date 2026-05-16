@@ -8,7 +8,9 @@ use std::cell::{Cell, RefCell};
 
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Line, Span};
-use crate::painter::{BlitPainter, PaintColor, Painter, Sealed, TextAlign, TextBaseline, TextMetrics};
+use crate::painter::{
+    BlitPainter, PaintColor, Painter, Sealed, TextAlign, TextBaseline, TextMetrics,
+};
 
 /// Per-char width factor as a fraction of font size. Matches the
 /// approx-char-width fallback in `text_paint.rs::layout_into` so wrap math

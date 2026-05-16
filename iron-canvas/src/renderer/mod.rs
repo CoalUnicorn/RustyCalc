@@ -162,7 +162,7 @@ impl<P: Painter> RendererCore<P> {
         // resize, axis change), drop it so render_pane falls through to a
         // full fetch.
         if let Some(plan) = plan {
-            for pane in plan.shift_panes().iter() {
+            for pane in plan.shift_panes().regions() {
                 let pane_buf = self.pane_cache.pane(pane);
                 let Some(new_range) = pane.range(frame) else {
                     pane_buf.range.set(None);
@@ -184,7 +184,7 @@ impl<P: Painter> RendererCore<P> {
         // `frame.stale_panes` is `ALL` after `Chrome::next_frame`; the
         // blit fast-path narrows it so only the genuinely-stale quadrants
         // run their 4-pass walk.
-        for pane in frame.stale_panes.iter() {
+        for pane in frame.stale_panes.regions() {
             match (plan, pane) {
                 (Some(plan), PaneRegion::BottomRight) => {
                     self.painter.push_clip(plan.repaint_strip);

@@ -517,7 +517,7 @@ impl Chrome {
                     PaneRegion::BottomLeft,
                     PaneRegion::BottomRight,
                 ] {
-                    if !stale.contains(region) {
+                    if !stale.contains_region(region) {
                         let idx = region as usize;
                         fps[idx] = frame.prev_pane_fingerprints[idx];
                     }
@@ -701,7 +701,8 @@ impl Chrome {
     pub(crate) fn refresh_overlay_inputs(&mut self, model: &dyn CanvasModel) {
         if let Some(view) = model.get_selected_view() {
             self.selection_range = view.selection;
-            self.active_cell = ActiveCellSnapshot::capture(model, self.sheet, view.row, view.column);
+            self.active_cell =
+                ActiveCellSnapshot::capture(model, self.sheet, view.row, view.column);
         }
     }
 
@@ -922,7 +923,7 @@ fn try_blit_reuse(
         PaneRegion::BottomLeft,
         PaneRegion::BottomRight,
     ] {
-        if !stale.contains(region) {
+        if !stale.contains_region(region) {
             let idx = region as usize;
             seeded_fps[idx] = prev_fps[idx];
         }

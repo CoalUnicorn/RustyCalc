@@ -60,7 +60,8 @@ impl<R: LayerOps> LayerBase<R> {
     /// Back-compat shim: callers that don't yet know which signal they
     /// raise get the safest blanket. Stage 3 narrows this per setter.
     pub(crate) fn mark_dirty(&self) {
-        self.gate.raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
+        self.gate
+            .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
     }
 
     pub(crate) fn raise(&self, sig: GridSignals) {
@@ -109,11 +110,6 @@ impl PaintGate {
             self.paint_count.set(self.paint_count.get() + 1);
         }
         drained
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn peek(&self) -> GridSignals {
-        self.signals.get()
     }
 
     // Back-compat shims for tests. Production code goes through `LayerBase`.
