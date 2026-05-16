@@ -60,7 +60,7 @@ pub(crate) use cache::FontIntern;
 #[cfg(test)]
 pub(crate) use self::cell::text::{layout_into, TextLine};
 
-use crate::painter::Painter;
+use crate::painter::{BlitPainter, Painter};
 
 /// Shared renderer core. Holds the painter `P`, dpr, the per-frame
 /// `FrameCache`, and the renderer-lifetime intern tables (font, column
@@ -280,10 +280,6 @@ impl<P: Painter> GridRenderer<P> {
         self.core.render_grid(model, frame, plan);
     }
 
-    pub(crate) fn painter_supports_blit(&self) -> bool {
-        self.core.painter().supports_blit()
-    }
-
     /// Drop cached pane-buffer ranges for the masked panes. Plumbed through
     /// from `IronCanvas::paint_content` so a cell-content-changed regime
     /// can force the named panes to refetch on their next `render_pane`
@@ -299,7 +295,9 @@ impl<P: Painter> GridRenderer<P> {
     ) -> Option<crate::types::coord::RCRange> {
         self.core.pane_cache.pane(region).range.get()
     }
+}
 
+impl<P: BlitPainter> GridRenderer<P> {
     pub(crate) fn painter_blit(
         &self,
         src: crate::geometry::pixel_rect::PixelRect,

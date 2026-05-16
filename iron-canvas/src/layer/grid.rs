@@ -55,18 +55,6 @@ impl GridLayer {
         self.base.renderer.invalidate_paint_cache();
     }
 
-    /// Scroll-blit fast path: shift the BottomRight kept band via
-    /// `Painter::blit`, then re-run the grid pipeline with the BottomRight
-    /// pane wrapped in a clip to `plan.repaint_strip`. The caller (the
-    /// orchestrator) hands in a frame whose `kind` is `Blitted` so
-    /// render_pane's fingerprint-mismatch branch fills the pane bg —
-    /// clipped to the strip, this erases stale pixels there without
-    /// touching the kept band. Falls back to `paint` if the backend
-    /// doesn't support `blit`.
-    pub(crate) fn painter_supports_blit(&self) -> bool {
-        self.base.renderer.painter_supports_blit()
-    }
-
     pub(crate) fn invalidate_pane_cache(&self, mask: crate::chrome::PaneRegionMask) {
         self.base.renderer.invalidate_pane_cache(mask);
     }
@@ -78,11 +66,14 @@ impl GridLayer {
             .pane_cache_range_debug(crate::chrome::PaneRegion::BottomRight)
     }
 
+    /// Scroll-blit fast path: shift the BottomRight kept band via
+    /// `BlitPainter::blit`, then re-run the grid pipeline with the
+    /// BottomRight pane wrapped in a clip to `plan.repaint_strip`. The
+    /// orchestrator hands in a frame whose `kind` is `Blitted` so
+    /// `render_pane`'s fingerprint-mismatch branch fills the pane bg —
+    /// clipped to the strip, this erases stale pixels there without
+    /// touching the kept band.
     pub(crate) fn paint_blit(&mut self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
-        if !self.base.renderer.painter_supports_blit() {
-            self.paint(model, frame, None);
-            return;
-        }
         for s in &plan.shifts {
             self.base.renderer.painter_blit(s.src, s.dst);
         }

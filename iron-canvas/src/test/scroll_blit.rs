@@ -11,7 +11,7 @@ use std::cell::Cell;
 use ironcalc_base::types::{CellType, Style};
 
 use crate::chrome::{Chrome, FramePath};
-use crate::painter::Painter;
+use crate::painter::BlitPainter;
 use crate::renderer::RendererCore;
 use crate::test::painter::{DrawOp, RecorderPainter};
 use crate::theme::CanvasTheme;
@@ -114,7 +114,7 @@ fn count_blits(ops: &[DrawOp]) -> usize {
         .count()
 }
 
-fn issue_blits<P: Painter>(painter: &P, plan: &crate::chrome::BlitPlan) {
+fn issue_blits<P: BlitPainter>(painter: &P, plan: &crate::chrome::BlitPlan) {
     for s in &plan.shifts {
         painter.blit(s.src, s.dst);
     }

@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Line, Span};
-use crate::painter::{PaintColor, Painter, Sealed, TextAlign, TextBaseline, TextMetrics};
+use crate::painter::{BlitPainter, PaintColor, Painter, Sealed, TextAlign, TextBaseline, TextMetrics};
 
 /// Per-char width factor as a fraction of font size. Matches the
 /// approx-char-width fallback in `text_paint.rs::layout_into` so wrap math
@@ -223,11 +223,9 @@ impl Painter for RecorderPainter {
         self.group_depth.set(self.group_depth.get() - 1);
         self.push(DrawOp::EndGroup);
     }
+}
 
-    fn supports_blit(&self) -> bool {
-        true
-    }
-
+impl BlitPainter for RecorderPainter {
     fn blit(&self, src: PixelRect, dst: PixelRect) {
         self.push(DrawOp::Blit { src, dst });
     }
@@ -273,9 +271,8 @@ mod tests {
     }
 
     #[test]
-    fn blit_records_op_and_supports_blit_is_true() {
+    fn blit_records_op() {
         let p = RecorderPainter::new();
-        assert!(p.supports_blit(), "Recorder backend opts in to blit");
         let src = rect(0.0, 20.0, 100.0, 200.0);
         let dst = rect(0.0, 0.0, 100.0, 200.0);
         p.blit(src, dst);

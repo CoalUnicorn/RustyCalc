@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use web_sys::{js_sys, CanvasRenderingContext2d};
 
-use super::{PaintColor, Painter, Sealed, TextAlign, TextBaseline, TextMetrics};
+use super::{BlitPainter, PaintColor, Painter, Sealed, TextAlign, TextBaseline, TextMetrics};
 use crate::geometry::{
     pixel_rect::PixelRect,
     prim::{Line, Span},
@@ -343,11 +343,9 @@ impl Painter for CanvasPainter {
 
     fn begin_group(&self, _class: &'static str) {}
     fn end_group(&self) {}
+}
 
-    fn supports_blit(&self) -> bool {
-        true
-    }
-
+impl BlitPainter for CanvasPainter {
     fn blit(&self, src: PixelRect, dst: PixelRect) {
         // `ctx.canvas()` is None only for a detached OffscreenCanvas ctx,
         // which iron-canvas never constructs — but the API returns Option,
