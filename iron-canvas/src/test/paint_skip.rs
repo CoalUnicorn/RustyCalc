@@ -107,7 +107,7 @@ fn promote_to_slots_reuse(frame: &mut Chrome) {
 fn render_pane_skips_on_idempotent_repaint() {
     let m = MutableModel::default();
     let theme = CanvasTheme::light();
-    let mut frame = Chrome::next_frame(None, &m, canvas(), &theme);
+    let mut frame = Chrome::next(None, &m, canvas(), &theme, crate::chrome::FramePath::Fresh);
 
     // First paint runs through the full 4-pass walk; the kind is Fresh,
     // so the skip branch is gated off but `pane_fingerprints` is still
@@ -137,7 +137,7 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
         ..Default::default()
     };
     let theme = CanvasTheme::light();
-    let mut frame = Chrome::next_frame(None, &m, canvas(), &theme);
+    let mut frame = Chrome::next(None, &m, canvas(), &theme, crate::chrome::FramePath::Fresh);
 
     // Prime the per-pane fingerprints for both data-bearing panes.
     let _ = paint_pane(&m, &frame, PaneRegion::BottomLeft);

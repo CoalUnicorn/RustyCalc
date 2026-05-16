@@ -3,7 +3,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::chrome::{BlitPlan, Chrome, FrameKindTag, FrameValidity, PaneRegionMask};
+use crate::chrome::{BlitPlan, Chrome, FramePath, FrameValidity, PaneRegionMask};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::geometry::CanvasSize;
@@ -17,14 +17,8 @@ use crate::CanvasModel;
 /// Named verdict of `paintIfDirty`'s dispatch. One arm per concrete paint
 /// path; the exhaustive `match` over `decide()` replaces the old
 /// `try_paint_overlay_only → try_paint_blit → paint_grid` fallthrough chain.
-///
-/// `Content` is reachable only when a typed content-dirty signal lands
-/// (PR 4 — `mark_content_dirty`); until then `decide()` returns
-/// `Structural(Unknown)` for any grid-content change, preserving today's
-/// full-rebuild behavior.
-#[allow(dead_code)] // Content + StructuralReason variants populate over PRs 2–4.
+#[allow(dead_code)] // Structural's inner StructuralReason isn't read yet; future PRs refine.
 pub(crate) enum PaintRegime {
-    Idle,
     Overlay,
     Viewport(BlitPlan),
     Content(PaneRegionMask),
@@ -199,12 +193,11 @@ impl IronCanvas {
     /// Paint whichever layers are dirty. Clean layers are skipped; see
     /// `ARCHITECTURE.md` for the cache rules and the overlay-only path.
     ///
-    /// Dispatches via `decide()` into one of five named regimes:
-    /// `Idle` (nothing to do), `Overlay` (cached frame, overlay-only),
-    /// `Viewport` (scroll-blit), `Content` (cell-change without viewport
-    /// shift — dormant until PR 4 wires `mark_content_dirty`), `Structural`
-    /// (full or slots-reuse rebuild). The `match` is exhaustive — adding
-    /// a regime breaks the build here, by design.
+    /// Dispatches via `decide()` into one of four named regimes:
+    /// `Overlay` (cached frame, overlay-only), `Viewport` (scroll-blit,
+    /// content-clean), `Content` (cell-change without viewport shift),
+    /// `Structural` (full or slots-reuse rebuild). The `match` is
+    /// exhaustive — adding a regime breaks the build here, by design.
     #[allow(non_snake_case)]
     pub fn paintIfDirty(&mut self) {
         let grid_signals = self.grid.drain_signals();
@@ -222,7 +215,6 @@ impl IronCanvas {
         let content_dirty = signals.contains(GridSignals::CONTENT);
 
         match self.decide(signals, model) {
-            PaintRegime::Idle => {}
             PaintRegime::Overlay => self.paint_overlay(model),
             PaintRegime::Viewport(plan) => self.paint_viewport(model, plan),
             PaintRegime::Content(mask) => self.paint_content(model, mask, overlay_dirty),
@@ -464,18 +456,17 @@ impl IronCanvas {
         let Some(prev) = self.last_frame.take() else {
             return;
         };
-        match prev.kind {
-            // All three kinds carry valid slot vecs along at least the
-            // scroll axis; `try_blit` guarded the dimensions, so any kind
-            // is admissible here. If a fourth FrameKindTag variant lands,
-            // this match breaks the build and forces a decision.
-            FrameKindTag::Fresh | FrameKindTag::SlotsReused | FrameKindTag::Blitted => {}
-        }
         #[cfg(target_arch = "wasm32")]
         let prev_top = prev.pane_set_top_row_debug();
         #[cfg(target_arch = "wasm32")]
         let prev_pane_range = self.grid.bottom_right_cache_range_debug();
-        let frame = Chrome::next_frame_with_blit(prev, model, self.size, &self.theme, &plan);
+        let frame = Chrome::next(
+            Some(prev),
+            model,
+            self.size,
+            &self.theme,
+            FramePath::Blit(plan.clone()),
+        );
         #[cfg(target_arch = "wasm32")]
         log_blit_plan(&plan, prev_top, prev_pane_range, &frame);
         self.grid.paint_blit(model, &frame, &plan);
@@ -483,17 +474,11 @@ impl IronCanvas {
         self.last_frame = Some(frame);
     }
 
-    /// Content-changed-but-viewport-unchanged regime — the case today's
-    /// dispatch cannot represent (a cell value change while `is_still_valid`
-    /// would otherwise say `SlotsReuse`, leaving stale `PaneCache` buffers
-    /// to short-circuit `render_pane`'s strip-fetch). Reuses the prev
-    /// `Chrome` like `paint_rebuild`'s SlotsReuse branch, but additionally
-    /// invalidates the `PaneCache` entries for the masked panes so their
-    /// next `render_pane` refetches from the model. Unmasked panes
-    /// fingerprint-skip cleanly.
-    ///
-    /// Dormant until PR 4: `decide()` never returns `Content(mask)` until
-    /// a `pending_content` signal is plumbed.
+    /// Content-changed-but-viewport-unchanged regime. Slot vecs still
+    /// match the live model (so we reuse them via `from_slots_reuse`)
+    /// but cell values may have shifted, so we drop the `PaneCache`
+    /// entries for the masked panes and let `render_pane` refetch.
+    /// Unmasked panes fingerprint-skip cleanly.
     fn paint_content(
         &mut self,
         model: &dyn CanvasModel,
@@ -507,10 +492,13 @@ impl IronCanvas {
             self.paint_rebuild(model, overlay_dirty, true);
             return;
         };
-        match prev.kind {
-            FrameKindTag::Fresh | FrameKindTag::SlotsReused | FrameKindTag::Blitted => {}
-        }
-        let mut prev = Chrome::from_slots_reuse(prev, self.theme.clone());
+        let mut prev = Chrome::next(
+            Some(prev),
+            model,
+            self.size,
+            &self.theme,
+            FramePath::SlotsReuse,
+        );
         prev.refresh_overlay_inputs(model);
 
         self.grid.invalidate_pane_cache(mask);
@@ -539,31 +527,27 @@ impl IronCanvas {
                 f.is_still_valid(model, self.size)
             });
 
-        if let Some(prev) = self.last_frame.as_ref() {
-            match prev.kind {
-                FrameKindTag::Fresh | FrameKindTag::SlotsReused | FrameKindTag::Blitted => {}
-            }
-        }
-
         let frame = match (validity, self.last_frame.take()) {
             (FrameValidity::SlotsReuse, Some(prev)) => {
-                let mut frame = Chrome::from_slots_reuse(prev, self.theme.clone());
+                let mut frame = Chrome::next(
+                    Some(prev),
+                    model,
+                    self.size,
+                    &self.theme,
+                    FramePath::SlotsReuse,
+                );
                 frame.refresh_overlay_inputs(model);
                 frame
             }
-            (_, prev) => Chrome::next_frame(prev, model, self.size, &self.theme),
+            (_, prev) => Chrome::next(prev, model, self.size, &self.theme, FramePath::Fresh),
         };
 
-        let invalidate_cache = content_dirty || matches!(validity, FrameValidity::SlotsReuse);
-        if invalidate_cache {
-            self.grid.invalidate_pane_cache(PaneRegionMask::ALL);
-        }
-
-        // When content has changed, cached pane buffers may be stale even
-        // though the pane address is unchanged. Drop them so render_pane's
-        // geometric early-exit (cell/mod.rs:~84) refetches values from the
-        // model instead of short-circuiting on stale buffers.
-        if content_dirty {
+        // SlotsReuse: theme-only changes leave fingerprints intact; drop
+        // the buffers so the next render_pane refetches. CONTENT here
+        // means a content-edit escalated to Rebuild (e.g. via scroll); we
+        // still drop buffers so render_pane refetches against the new
+        // slot vecs instead of trusting a range-matched-but-stale cache.
+        if content_dirty || matches!(validity, FrameValidity::SlotsReuse) {
             self.grid.invalidate_pane_cache(PaneRegionMask::ALL);
         }
 

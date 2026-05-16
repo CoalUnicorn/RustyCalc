@@ -12,7 +12,7 @@
 
 use ironcalc_base::types::{CellType, Style};
 
-use crate::chrome::{measure_row_header_width, Chrome};
+use crate::chrome::{measure_row_header_width, Chrome, FramePath};
 use crate::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
 use crate::renderer::RendererCore;
 use crate::test::painter::{DrawOp, RecorderPainter};
@@ -76,7 +76,7 @@ impl CanvasModel for StubModel {
 fn drive_render_grid(model: &StubModel, check: impl FnOnce(&Chrome, &[DrawOp])) {
     let theme = CanvasTheme::light();
     let canvas = CanvasSize { w: 600.0, h: 400.0 };
-    let frame = Chrome::next_frame(None, model, canvas, &theme);
+    let frame = Chrome::next(None, model, canvas, &theme, FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
     core.render_grid(model, &frame, None);
     let ops = core.painter().ops();

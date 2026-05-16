@@ -60,7 +60,13 @@ fn canvas() -> CanvasSize {
 fn next_frame_emits_fresh_when_no_prev() {
     let model = FixtureModel;
     let theme = CanvasTheme::light();
-    let frame = Chrome::next_frame(None, &model, canvas(), &theme);
+    let frame = Chrome::next(
+        None,
+        &model,
+        canvas(),
+        &theme,
+        crate::chrome::FramePath::Fresh,
+    );
     assert_eq!(frame.kind, FrameKindTag::Fresh);
     assert!(
         !frame.kind.reuses_slots(),
@@ -72,8 +78,20 @@ fn next_frame_emits_fresh_when_no_prev() {
 fn from_slots_reuse_emits_slots_reused() {
     let model = FixtureModel;
     let theme = CanvasTheme::light();
-    let fresh = Chrome::next_frame(None, &model, canvas(), &theme);
-    let reused = Chrome::from_slots_reuse(fresh, theme.clone());
+    let fresh = Chrome::next(
+        None,
+        &model,
+        canvas(),
+        &theme,
+        crate::chrome::FramePath::Fresh,
+    );
+    let reused = Chrome::next(
+        Some(fresh),
+        &model,
+        canvas(),
+        &theme,
+        crate::chrome::FramePath::SlotsReuse,
+    );
     assert_eq!(reused.kind, FrameKindTag::SlotsReused);
     assert!(
         reused.kind.reuses_slots(),

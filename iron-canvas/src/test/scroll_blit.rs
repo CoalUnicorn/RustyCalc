@@ -10,7 +10,7 @@ use std::cell::Cell;
 
 use ironcalc_base::types::{CellType, Style};
 
-use crate::chrome::Chrome;
+use crate::chrome::{Chrome, FramePath};
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
 use crate::test::painter::{DrawOp, RecorderPainter};
@@ -18,7 +18,7 @@ use crate::theme::CanvasTheme;
 use crate::{CanvasModel, CanvasSize, CanvasView, RCRange};
 
 /// Scrollable model. `top_row` / `left_column` live in `Cell`s so a
-/// single test can rebuild `Chrome::next_frame` after a scroll without
+/// single test can rebuild `Chrome::next` after a scroll without
 /// rebuilding the model. `row5_height` lets a test mutate row 5's
 /// height between frames to drive the overlap-row-height guard in
 /// `try_blit`. Cell content + styles stay default — the tests are
@@ -133,7 +133,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     let canvas = canvas();
 
     // Frame 0 at top_row=1.
-    let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, canvas, &theme, crate::chrome::FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
     core.render_grid(&m, &frame0, None);
 
@@ -148,7 +148,13 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
 
     // Simulate the orchestrator's blit fast-path on the same core so
     // the pane cache state carries across frames.
-    let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
+    let frame1 = Chrome::next(
+        Some(frame0),
+        &m,
+        canvas,
+        &theme,
+        crate::chrome::FramePath::Blit(plan.clone()),
+    );
     issue_blits(core.painter(), &plan);
     core.render_grid(&m, &frame1, Some(&plan));
 
@@ -192,7 +198,7 @@ fn scroll_past_viewport_disqualifies_blit() {
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
-    let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, canvas, &theme, crate::chrome::FramePath::Fresh);
 
     // Canvas is 400 px tall, rows are 20 px → ~20 visible rows. Scroll
     // by 100 rows → no overlap with prev viewport → try_blit must bail.
@@ -211,7 +217,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
-    let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, canvas, &theme, crate::chrome::FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
     core.render_grid(&m, &frame0, None);
     let baseline_ops = core.painter().ops().len();
@@ -223,7 +229,13 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
         .try_blit(&m, canvas, &theme)
         .expect("single-column scroll must qualify for blit");
 
-    let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
+    let frame1 = Chrome::next(
+        Some(frame0),
+        &m,
+        canvas,
+        &theme,
+        FramePath::Blit(plan.clone()),
+    );
     issue_blits(core.painter(), &plan);
     core.render_grid(&m, &frame1, Some(&plan));
 
@@ -257,7 +269,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
-    let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, canvas, &theme, crate::chrome::FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
     core.render_grid(&m, &frame0, None);
 
@@ -268,7 +280,13 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let plan = frame0
         .try_blit(&m, canvas, &theme)
         .expect("single-row scroll must qualify for blit");
-    let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
+    let frame1 = Chrome::next(
+        Some(frame0),
+        &m,
+        canvas,
+        &theme,
+        FramePath::Blit(plan.clone()),
+    );
     issue_blits(core.painter(), &plan);
     core.render_grid(&m, &frame1, Some(&plan));
 
@@ -299,6 +317,53 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     );
 }
 
+/// Regression for the edit-then-scroll bug: typing into a cell and
+/// pressing Enter scrolls by one row. If the consumer forgets to call
+/// `markContentDirty`, the CONTENT-veto in `decide()` doesn't fire, so
+/// the geometric `try_blit` would otherwise succeed and the blit's kept
+/// band would shift pre-edit pixels (the just-edited cell renders blank).
+/// The defensive content check inside `try_blit` must catch this by
+/// re-hashing the prev frame's active-cell value against the live model.
+#[test]
+fn active_cell_value_change_disqualifies_blit() {
+    let m = ScrollModel::new();
+    let theme = CanvasTheme::light();
+    let canvas = canvas();
+    // Frame 0 paints with row 1 ("R1" coords) returning "".
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+
+    // Simulate the bug: row 1's value flips "" → "R1" (proxy for an edit
+    // committed at the active cell) AND viewport scrolls by one row.
+    m.set_data_until(5);
+    m.set_top_row(2);
+
+    let plan = frame0.try_blit(&m, canvas, &theme);
+    assert!(
+        plan.is_none(),
+        "edit-then-scroll must disqualify the blit when the active cell value changed",
+    );
+}
+
+/// Contrapositive: a pure single-row scroll with the active-cell value
+/// unchanged still qualifies for the blit fast path. Pins the defensive
+/// check to mismatch-only behavior — it must not over-reject.
+#[test]
+fn active_cell_value_unchanged_allows_blit() {
+    let m = ScrollModel::new();
+    m.set_data_until(20); // row 1's value is "R1" in both frames.
+    let theme = CanvasTheme::light();
+    let canvas = canvas();
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+
+    m.set_top_row(2);
+
+    let plan = frame0.try_blit(&m, canvas, &theme);
+    assert!(
+        plan.is_some(),
+        "pure scroll with unchanged active-cell value must qualify for the blit",
+    );
+}
+
 #[test]
 fn overlap_row_height_change_disqualifies_blit() {
     let m = ScrollModel::new();
@@ -306,7 +371,7 @@ fn overlap_row_height_change_disqualifies_blit() {
     let canvas = canvas();
 
     // Frame 0 sees row 5 at the default 20 px height.
-    let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
 
     // Resize row 5 between frames AND scroll. Row 5 sits inside the
     // overlap band of a 1-row scroll, so `try_blit`'s row-height guard
@@ -340,7 +405,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
-    let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
     core.render_grid(&m, &frame0, None);
     let baseline_ops = core.painter().ops().len();
@@ -350,7 +415,13 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
         .try_blit(&m, canvas, &theme)
         .expect("single-row scroll must qualify for blit");
 
-    let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
+    let frame1 = Chrome::next(
+        Some(frame0),
+        &m,
+        canvas,
+        &theme,
+        FramePath::Blit(plan.clone()),
+    );
     issue_blits(core.painter(), &plan);
     core.render_grid(&m, &frame1, Some(&plan));
 
@@ -390,7 +461,7 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
-    let frame0 = Chrome::next_frame(None, &m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
     core.render_grid(&m, &frame0, None);
     let baseline_ops = core.painter().ops().len();
@@ -400,7 +471,13 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
         .try_blit(&m, canvas, &theme)
         .expect("5-row scroll must qualify for blit");
 
-    let frame1 = Chrome::next_frame_with_blit(frame0, &m, canvas, &theme, &plan);
+    let frame1 = Chrome::next(
+        Some(frame0),
+        &m,
+        canvas,
+        &theme,
+        FramePath::Blit(plan.clone()),
+    );
     issue_blits(core.painter(), &plan);
     core.render_grid(&m, &frame1, Some(&plan));
 

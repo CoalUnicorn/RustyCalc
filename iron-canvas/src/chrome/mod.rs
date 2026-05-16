@@ -7,6 +7,8 @@
 //! (A–E) and the `is_still_valid` cache rules.
 
 use std::cell::Cell;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::geometry::slot::{
     boundary_at, col_width, fill_axis, last_visible_id, pixel_to_id, row_height, scroll_first,
@@ -36,6 +38,42 @@ const APPROX_DIGIT_WIDTH_PX: i32 = 8;
 /// Padding either side of the row-label inside the header strip.
 const HEADER_LABEL_PAD_PX: i32 = 4;
 
+/// Snapshot of the active cell at paint time. `try_blit` re-hashes the
+/// live model's value at the stored coords; a mismatch means the cell
+/// was edited since this `Chrome` was painted, and the blit's kept band
+/// would carry stale pixels. Catches the canonical edit-then-scroll case
+/// without requiring the consumer to call `markContentDirty`.
+#[derive(Clone, Debug)]
+pub(crate) struct ActiveCellSnapshot {
+    pub row: i32,
+    pub col: i32,
+    pub value_hash: u64,
+}
+
+impl ActiveCellSnapshot {
+    pub(crate) fn capture(model: &dyn CanvasModel, sheet: u32, row: i32, col: i32) -> Self {
+        let value = model
+            .get_formatted_cell_value(sheet, row, col)
+            .unwrap_or_default();
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        Self {
+            row,
+            col,
+            value_hash: hasher.finish(),
+        }
+    }
+
+    pub(crate) fn matches(&self, model: &dyn CanvasModel, sheet: u32) -> bool {
+        let value = model
+            .get_formatted_cell_value(sheet, self.row, self.col)
+            .unwrap_or_default();
+        let mut hasher = DefaultHasher::new();
+        value.hash(&mut hasher);
+        hasher.finish() == self.value_hash
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Chrome {
     pub sheet: u32,
@@ -54,6 +92,12 @@ pub(crate) struct Chrome {
     /// `model.get_selected_view().selection`; every consumer goes through
     /// this field, so painted and queried geometry stay in lockstep.
     pub selection_range: RCRange,
+    /// Active-cell coords + value hash at paint time. `try_blit` rejects
+    /// when the live model's value at these coords no longer matches,
+    /// catching edit-then-scroll cases where the consumer missed
+    /// `markContentDirty`. Refreshed by `refresh_overlay_inputs` on
+    /// SlotsReuse paths so selection-only moves don't poison the check.
+    pub(crate) active_cell: ActiveCellSnapshot,
     /// Canvas size at build time. `is_still_valid` reads this to detect
     /// a resize.
     pub canvas_size: CanvasSize,
@@ -140,6 +184,25 @@ impl BlitPlan {
                 .with(PaneRegion::BottomRight),
         }
     }
+}
+
+/// Dispatch input for `Chrome::next` — which construction regime the
+/// orchestrator selected for this frame. Replaces the trio of
+/// `next_frame` / `from_slots_reuse` / `next_frame_with_blit` constructors
+/// and the manual `match prev.kind` exhaustiveness checks at dispatch
+/// sites. Adding a variant breaks every regime arm at compile time.
+#[derive(Clone)]
+pub(crate) enum FramePath {
+    /// Full rebuild walk. `prev = Some` recycles slot Vec allocations;
+    /// `prev = None` is the first-frame path.
+    Fresh,
+    /// Reuse prev's slot vecs verbatim; refresh per-frame state only
+    /// (theme + pane_fingerprints rotation). Requires `prev = Some`.
+    SlotsReuse,
+    /// Blit fast-path. Scroll-axis slot vec rebuilt around the plan;
+    /// cross-axis cloned from prev. Falls back to `Fresh` on the
+    /// row_header_thickness digit-boundary case. Requires `prev = Some`.
+    Blit(BlitPlan),
 }
 
 #[derive(Debug)]
@@ -387,86 +450,86 @@ impl Chrome {
         self.pane_set.scroll_rows.len()
     }
 
-    /// Build the next-frame `Chrome`. When `prev` is `Some`, the outgoing
-    /// frame's slot Vec allocations are recycled so steady-state repaints
-    /// don't reallocate the four pane-set buffers. `prev == None` is the
-    /// first-frame path. See `ARCHITECTURE.md` for the A–E build phases.
-    pub(crate) fn next_frame(
+    /// Build the next-frame `Chrome`. The `path` argument selects which
+    /// regime the orchestrator chose; the body branches once and inlines
+    /// the three former constructors.
+    ///
+    ///   * `Fresh` — full rebuild. `prev = Some` recycles slot Vec
+    ///     allocations; `None` is the first-frame path. See
+    ///     `ARCHITECTURE.md` for build phases A–E.
+    ///   * `SlotsReuse` — prev's slot vecs survive verbatim; only
+    ///     per-frame state (theme + `pane_fingerprints` rotation) is
+    ///     refreshed. Caller must invoke `refresh_overlay_inputs` after.
+    ///   * `Blit(plan)` — caller has already issued `Painter::blit` to
+    ///     shift the kept band; this frame rebuilds only the scroll-axis
+    ///     slot vec (kept band heights/widths carry over from prev; the
+    ///     strip is the only band that hits the model) and clones the
+    ///     cross-axis vec. Falls back to `Fresh` when `row_header_thickness`
+    ///     would change across a digit boundary (e.g. row 99 → 100).
+    ///     Non-stale panes get their `pane_fingerprints` seeded from prev
+    ///     so the *next* frame's fingerprint compare doesn't false-
+    ///     mismatch against a build-default 0.
+    ///
+    /// `SlotsReuse` and `Blit` require `prev = Some`; `None` falls
+    /// through to `Fresh` defensively. The orchestrator proves
+    /// `prev.is_some()` before selecting those paths, but the fallback
+    /// keeps `Chrome::next` total.
+    pub(crate) fn next(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
         canvas: CanvasSize,
         theme: &CanvasTheme,
+        path: FramePath,
     ) -> Self {
-        let (recycled, prev_fps) = match prev {
-            Some(c) => (
-                RecycledSlots::from_pane_set(c.pane_set),
-                c.pane_fingerprints.get(),
-            ),
-            None => (RecycledSlots::default(), [0u64; 4]),
-        };
-        Self::build(model, canvas, theme, recycled, prev_fps)
-    }
-
-    /// Blit fast-path frame: caller has already issued the `Painter::blit`
-    /// to shift the kept-band pixels into their new viewport position, so
-    /// this frame inherits `FrameKindTag::Blitted` and narrows `stale_panes`
-    /// to just the panes whose data shifts along the scroll axis.
-    ///
-    /// First tries `try_blit_reuse`: rebuilds only the scroll-axis slot
-    /// vec (kept band's heights/widths carry over from prev; the strip
-    /// is the only band that hits the model) and clones the cross-axis
-    /// slot vec verbatim — `try_blit` already verified frozen counts +
-    /// canvas size are unchanged, so the cross-axis can't have shifted.
-    /// Bails to the full `next_frame` walk when row_header_thickness
-    /// would change (e.g. row 99 → 100 crosses a digit boundary), which
-    /// is the one case where cross-axis col `.left` values shift.
-    ///
-    /// Non-stale panes are skipped entirely by `render_grid`, so we seed
-    /// their `pane_fingerprints` from prev here — otherwise the Stage 1
-    /// fingerprint compare on the *next* frame would read the build-
-    /// default 0 and false-mismatch into an unnecessary repaint.
-    pub(crate) fn next_frame_with_blit(
-        prev: Chrome,
-        model: &dyn CanvasModel,
-        canvas: CanvasSize,
-        theme: &CanvasTheme,
-        plan: &BlitPlan,
-    ) -> Self {
-        if let Some(frame) = try_blit_reuse(&prev, model, canvas, theme, plan) {
-            return frame;
-        }
-        let frame = Self::next_frame(Some(prev), model, canvas, theme);
-        let stale = plan.shift_panes();
-        let mut fps = frame.pane_fingerprints.get();
-        for region in [
-            PaneRegion::TopLeft,
-            PaneRegion::TopRight,
-            PaneRegion::BottomLeft,
-            PaneRegion::BottomRight,
-        ] {
-            if !stale.contains(region) {
-                let idx = region as usize;
-                fps[idx] = frame.prev_pane_fingerprints[idx];
+        match path {
+            FramePath::Fresh => {
+                let (recycled, prev_fps) = match prev {
+                    Some(c) => (
+                        RecycledSlots::from_pane_set(c.pane_set),
+                        c.pane_fingerprints.get(),
+                    ),
+                    None => (RecycledSlots::default(), [0u64; 4]),
+                };
+                Self::build(model, canvas, theme, recycled, prev_fps)
+            }
+            FramePath::SlotsReuse => {
+                let Some(mut prev) = prev else {
+                    return Self::next(None, model, canvas, theme, FramePath::Fresh);
+                };
+                prev.prev_pane_fingerprints = prev.pane_fingerprints.replace([0; 4]);
+                prev.theme = theme.clone();
+                prev.kind = FrameKindTag::SlotsReused;
+                prev
+            }
+            FramePath::Blit(plan) => {
+                let Some(prev) = prev else {
+                    return Self::next(None, model, canvas, theme, FramePath::Fresh);
+                };
+                if let Some(frame) = try_blit_reuse(&prev, model, canvas, theme, &plan) {
+                    return frame;
+                }
+                let frame = Self::next(Some(prev), model, canvas, theme, FramePath::Fresh);
+                let stale = plan.shift_panes();
+                let mut fps = frame.pane_fingerprints.get();
+                for region in [
+                    PaneRegion::TopLeft,
+                    PaneRegion::TopRight,
+                    PaneRegion::BottomLeft,
+                    PaneRegion::BottomRight,
+                ] {
+                    if !stale.contains(region) {
+                        let idx = region as usize;
+                        fps[idx] = frame.prev_pane_fingerprints[idx];
+                    }
+                }
+                frame.pane_fingerprints.set(fps);
+                Chrome {
+                    kind: FrameKindTag::Blitted,
+                    stale_panes: stale,
+                    ..frame
+                }
             }
         }
-        frame.pane_fingerprints.set(fps);
-        Chrome {
-            kind: FrameKindTag::Blitted,
-            stale_panes: stale,
-            ..frame
-        }
-    }
-
-    /// Build a SlotsReuse frame in place: prev's slot vecs and pane caches
-    /// survive; per-frame state (theme, pane_fingerprints rotation) is
-    /// refreshed. Replaces the inline mutation in
-    /// `orchestrator::paint_rebuild` / `paint_content`. Caller invokes
-    /// `refresh_overlay_inputs` explicitly afterwards.
-    pub(crate) fn from_slots_reuse(mut prev: Chrome, theme: CanvasTheme) -> Self {
-        prev.prev_pane_fingerprints = prev.pane_fingerprints.replace([0; 4]);
-        prev.theme = theme;
-        prev.kind = FrameKindTag::SlotsReused;
-        prev
     }
 
     fn build(
@@ -479,20 +542,24 @@ impl Chrome {
         // None ⇒ JS bridge transient (threw or shape malformed). Fall through
         // with the fresh-model default so the frame still builds; next animation
         // frame re-queries.
-        let (top_row, left_column, selection) = match model.get_selected_view() {
-            Some(v) => (v.top_row, v.left_column, v.selection),
-            None => (
-                1,
-                1,
-                RCRange {
-                    r1: 1,
-                    c1: 1,
-                    r2: 1,
-                    c2: 1,
-                },
-            ),
-        };
+        let (top_row, left_column, selection, active_row, active_col) =
+            match model.get_selected_view() {
+                Some(v) => (v.top_row, v.left_column, v.selection, v.row, v.column),
+                None => (
+                    1,
+                    1,
+                    RCRange {
+                        r1: 1,
+                        c1: 1,
+                        r2: 1,
+                        c2: 1,
+                    },
+                    1,
+                    1,
+                ),
+            };
         let sheet = model.get_selected_sheet();
+        let active_cell = ActiveCellSnapshot::capture(model, sheet, active_row, active_col);
 
         // Phase A — frozen counts only.
         let frozen_row_count = model.get_frozen_rows_count(sheet).unwrap_or(0);
@@ -531,6 +598,7 @@ impl Chrome {
             col_header_thickness,
             cell_origin,
             selection_range: selection,
+            active_cell,
             canvas_size: canvas,
             theme: theme.clone(),
             prev_pane_fingerprints,
@@ -610,6 +678,13 @@ impl Chrome {
         let new_left = scroll_first(frozen_cols, view.left_column);
         let old_top = self.pane_set.top_row();
         let old_left = self.pane_set.left_column();
+        // Defensive content check: if the cell we painted as active no
+        // longer matches the live model, the blit's kept band would
+        // shift pre-edit pixels (canonical edit-then-scroll bug when
+        // consumer missed `markContentDirty`).
+        if !self.active_cell.matches(model, sheet) {
+            return None;
+        }
         match (new_top != old_top, new_left != old_left) {
             (true, false) => try_blit_rows(self, model, sheet, new_top),
             (false, true) => try_blit_cols(self, model, sheet, new_left),
@@ -620,10 +695,13 @@ impl Chrome {
     }
 
     /// Refresh overlay-only fields (independent of the slot vecs). Call on
-    /// the overlay-only fast path after `is_still_valid` returns true.
+    /// the overlay-only fast path after `is_still_valid` returns true,
+    /// and on SlotsReuse rebuilds so the active-cell snapshot tracks
+    /// selection moves within an unchanged viewport.
     pub(crate) fn refresh_overlay_inputs(&mut self, model: &dyn CanvasModel) {
         if let Some(view) = model.get_selected_view() {
             self.selection_range = view.selection;
+            self.active_cell = ActiveCellSnapshot::capture(model, self.sheet, view.row, view.column);
         }
     }
 
@@ -850,6 +928,8 @@ fn try_blit_reuse(
         }
     }
 
+    let active_cell = ActiveCellSnapshot::capture(model, prev.sheet, view.row, view.column);
+
     Some(Chrome {
         sheet: prev.sheet,
         pane_set,
@@ -857,6 +937,7 @@ fn try_blit_reuse(
         col_header_thickness: prev.col_header_thickness,
         cell_origin: prev.cell_origin,
         selection_range: view.selection,
+        active_cell,
         canvas_size: canvas,
         theme: theme.clone(),
         prev_pane_fingerprints: prev_fps,
