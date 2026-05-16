@@ -138,84 +138,83 @@ impl<P: Painter> RendererCore<P> {
         }
     }
 
-    /// Paint the grid layer: cells (per quadrant), frozen separators,
-    /// headers, corner box. Does **not** clear the canvas — caller owns
-    /// the clear so layer-owned renderers can paint a background fill
-    /// instead.
-    ///
-    /// `plan.is_some()` is the scroll-blit fast path: caller's
-    /// `Painter::blit` already shifted the kept band, so we rotate the
-    /// cached pane buffers to match (`try_shift` per pane in
-    /// `shift_panes()`), wrap BottomRight in a clip to `plan.repaint_strip`
-    /// so the strip alone is repainted, and only refresh the header strip
-    /// on the scroll axis (the cross-axis header is unchanged).
-    /// `plan.is_none()` runs the full pane walk and both header strips.
-    pub(crate) fn render_grid(
-        &self,
-        model: &dyn CanvasModel,
-        frame: &Chrome,
-        plan: Option<&BlitPlan>,
-    ) {
-        // Rotate cached pane buffers to follow the blit's pixel shift so
-        // `render_pane`'s strip-fetch only refills the revealed band.
-        // Defensive: if a pane's prior range no longer aligns (canvas
-        // resize, axis change), drop it so render_pane falls through to a
-        // full fetch.
-        if let Some(plan) = plan {
-            for pane in plan.shift_panes().regions() {
-                let pane_buf = self.pane_cache.pane(pane);
-                let Some(new_range) = pane.range(frame) else {
-                    pane_buf.range.set(None);
-                    continue;
-                };
-                let _ = pane_buf.try_shift(new_range, plan.axis);
-            }
-        }
-
+    /// Paint the grid layer for a fresh / slots-reuse frame: cells (per
+    /// quadrant), frozen separators, both header strips, corner box. Does
+    /// **not** clear the canvas — caller owns the clear so layer-owned
+    /// renderers can paint a background fill instead.
+    pub(crate) fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) {
         self.painter.begin_group("grid");
-        // Cache the per-sheet grid-line toggle once for this frame so the
-        // hot per-cell `paint_borders_grid` walk doesn't re-enter the model.
-        // Falls back to "show" on model failure, matching Excel's default-on.
-        let sheet = model.get_selected_sheet();
-        self.frame_cache
-            .show_grid
-            .set(model.get_show_grid_lines(sheet).unwrap_or(true));
+        self.cache_show_grid(model);
 
-        // `frame.stale_panes` is `ALL` after `Chrome::next_frame`; the
-        // blit fast-path narrows it so only the genuinely-stale quadrants
-        // run their 4-pass walk.
+        // `frame.stale_panes` is `ALL` on Fresh; narrower on SlotsReuse —
+        // either way each region listed needs its 4-pass walk.
         for pane in frame.stale_panes.regions() {
-            match (plan, pane) {
-                (Some(plan), PaneRegion::BottomRight) => {
-                    self.painter.push_clip(plan.repaint_strip);
-                    self.render_pane(model, pane, frame, Some(plan));
-                    self.painter.pop_clip();
-                }
-                (Some(plan), _) => {
-                    self.render_pane(model, pane, frame, Some(plan));
-                }
-                (None, _) => {
-                    self.render_pane(model, pane, frame, None);
-                }
-            }
+            self.render_pane(model, pane, frame);
         }
 
         // Frozen separators paint AFTER cells so the thick divider wins
         // its pixels over the rightmost/bottommost frozen cell's grid stroke.
         self.draw_frozen_separators(frame);
+        self.render_headers_base(Axis::Row, frame);
+        self.render_headers_base(Axis::Column, frame);
+        self.draw_corner_box(frame);
+        self.painter.end_group();
+    }
 
-        // On the blit path, only the scroll-axis header strip shifted;
-        // the cross-axis strip's pixels are unchanged.
-        match plan {
-            Some(plan) => self.render_headers_base(plan.axis, frame),
-            None => {
-                self.render_headers_base(Axis::Row, frame);
-                self.render_headers_base(Axis::Column, frame);
+    /// Scroll-blit variant: caller's `Painter::blit` already shifted the
+    /// kept band, so we rotate the cached pane buffers to match
+    /// (`try_shift` per pane in `plan.shift_panes()`), wrap BottomRight in
+    /// a clip to `plan.repaint_strip` so the strip alone is repainted, and
+    /// only refresh the header strip on the scroll axis (the cross-axis
+    /// header is unchanged).
+    pub(crate) fn render_grid_blit(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        plan: &BlitPlan,
+    ) {
+        // Rotate cached pane buffers to follow the blit's pixel shift so
+        // `render_pane_blit`'s strip-fetch only refills the revealed band.
+        // Defensive: if a pane's prior range no longer aligns (canvas
+        // resize, axis change), drop it so the fallback fetches in bulk.
+        for pane in plan.shift_panes().regions() {
+            let pane_buf = self.pane_cache.pane(pane);
+            let Some(new_range) = pane.range(frame) else {
+                pane_buf.range.set(None);
+                continue;
+            };
+            let _ = pane_buf.try_shift(new_range, plan.axis);
+        }
+
+        self.painter.begin_group("grid");
+        self.cache_show_grid(model);
+
+        for pane in frame.stale_panes.regions() {
+            if matches!(pane, PaneRegion::BottomRight) {
+                self.painter.push_clip(plan.repaint_strip);
+                self.render_pane_blit(model, pane, frame, plan.repaint_strip);
+                self.painter.pop_clip();
+            } else {
+                self.render_pane_blit(model, pane, frame, plan.repaint_strip);
             }
         }
 
+        self.draw_frozen_separators(frame);
+        // Only the scroll-axis header strip shifted; the cross-axis
+        // strip's pixels are unchanged.
+        self.render_headers_base(plan.axis, frame);
         self.draw_corner_box(frame);
         self.painter.end_group();
+    }
+
+    /// Cache the per-sheet grid-line toggle once for this frame so the
+    /// hot per-cell `paint_borders_grid` walk doesn't re-enter the model.
+    /// Falls back to "show" on model failure, matching Excel's default-on.
+    fn cache_show_grid(&self, model: &dyn CanvasModel) {
+        let sheet = model.get_selected_sheet();
+        self.frame_cache
+            .show_grid
+            .set(model.get_show_grid_lines(sheet).unwrap_or(true));
     }
 
     /// Paint the overlay layer: selection outline + autofill handle, header
@@ -271,13 +270,17 @@ pub(crate) struct GridRenderer<P: Painter> {
 }
 
 impl<P: Painter> GridRenderer<P> {
-    pub(crate) fn render_grid(
+    pub(crate) fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) {
+        self.core.render_grid(model, frame);
+    }
+
+    pub(crate) fn render_grid_blit(
         &self,
         model: &dyn CanvasModel,
         frame: &Chrome,
-        plan: Option<&BlitPlan>,
+        plan: &BlitPlan,
     ) {
-        self.core.render_grid(model, frame, plan);
+        self.core.render_grid_blit(model, frame, plan);
     }
 
     /// Drop cached pane-buffer ranges for the masked panes. Plumbed through

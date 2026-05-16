@@ -184,7 +184,7 @@ impl Chrome {
         model: &dyn CanvasModel,
         canvas: CanvasSize,
         theme: &CanvasTheme,
-        path: FramePath,
+        path: FramePath<'_>,
     ) -> Self {
         match path {
             FramePath::Fresh => {
@@ -210,7 +210,7 @@ impl Chrome {
                 let Some(prev) = prev else {
                     return Self::next(None, model, canvas, theme, FramePath::Fresh);
                 };
-                if let Some(frame) = blit::try_blit_reuse(&prev, model, canvas, theme, &plan) {
+                if let Some(frame) = blit::try_blit_reuse(&prev, model, canvas, theme, plan) {
                     return frame;
                 }
                 let frame = Self::next(Some(prev), model, canvas, theme, FramePath::Fresh);

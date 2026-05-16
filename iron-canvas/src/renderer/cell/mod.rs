@@ -24,7 +24,8 @@ use ironcalc_base::types::CellType;
 
 use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
-use crate::chrome::{BlitPlan, Chrome, PaneRegion};
+use crate::chrome::{Chrome, PaneRegion};
+use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
@@ -51,13 +52,7 @@ impl<P: Painter> RendererCore<P> {
     /// across all -> explicit across all -> A.right strokes last on the
     /// shared edge). Text remains the final pass so overflow is never
     /// clipped by a neighbour's bg.
-    pub(crate) fn render_pane(
-        &self,
-        model: &dyn CanvasModel,
-        pane: PaneRegion,
-        frame: &Chrome,
-        plan: Option<&BlitPlan>,
-    ) {
+    pub(crate) fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion, frame: &Chrome) {
         let pane_idx = pane as usize;
         let pane_buf = self.pane_cache.pane(pane);
 
@@ -70,25 +65,6 @@ impl<P: Painter> RendererCore<P> {
 
         let theme = &frame.theme;
         let cols_w = range.c2 - range.c1 + 1;
-
-        // Strip-fetch branch. `prepare_blit_cache` rotated
-        // kept-band entries into their new indices (still `Some`) and left
-        // the strip slots `None`; `pane_buf.range` stays at the pre-blit
-        // value as the signal. Infer the single-axis shift, fetch only the
-        // strip from the model, and let `render_pane_strip` confine the
-        // four paint passes to the strip rect via `PaneCells::for_strip`.
-        // Kept-band pixels are already correct (painter blit) and must NOT
-        // be repainted on top.
-        if frame.kind.reuses_slots() {
-            if let Some(prev_range) = pane_buf.range.get() {
-                if let Some(axis) = infer_shift_axis(prev_range, range) {
-                    self.render_pane_strip(
-                        model, pane, range, axis, prev_range, pane_idx, frame, plan,
-                    );
-                    return;
-                }
-            }
-        }
 
         // Bulk-fetch styles + formatted values for the whole rectangular
         // range. UserModel default impls loop the per-cell accessors (no perf
@@ -188,6 +164,41 @@ impl<P: Painter> RendererCore<P> {
         self.paint_borders(p, theme);
     }
 
+    /// Blit-frame entry: try the strip-fetch fast path; fall back to the
+    /// full bulk walk if the pane cache can't support it (no prior range,
+    /// or the range delta isn't a clean single-axis shift). Cache rotation
+    /// has already happened in `render_grid_blit`.
+    pub(crate) fn render_pane_blit(
+        &self,
+        model: &dyn CanvasModel,
+        pane: PaneRegion,
+        frame: &Chrome,
+        repaint_strip: PixelRect,
+    ) {
+        let pane_idx = pane as usize;
+        let pane_buf = self.pane_cache.pane(pane);
+        let Some(range) = pane.range(frame) else {
+            pane_buf.range.set(None);
+            return;
+        };
+        if let Some(prev_range) = pane_buf.range.get() {
+            if let Some(axis) = infer_shift_axis(prev_range, range) {
+                self.render_pane_strip(
+                    model,
+                    pane,
+                    range,
+                    axis,
+                    prev_range,
+                    pane_idx,
+                    frame,
+                    repaint_strip,
+                );
+                return;
+            }
+        }
+        self.render_pane(model, pane, frame);
+    }
+
     /// Stage 3.3 strip path: kept-band pixels were preserved by the
     /// painter blit; the freshly-revealed strip subrange is fetched from
     /// the model and painted, kept-band cells are skipped via their
@@ -204,7 +215,7 @@ impl<P: Painter> RendererCore<P> {
         prev_range: RCRange,
         pane_idx: usize,
         frame: &Chrome,
-        plan: Option<&BlitPlan>,
+        repaint_strip: PixelRect,
     ) {
         let theme = &frame.theme;
         let cols_w = range.c2 - range.c1 + 1;
@@ -216,41 +227,39 @@ impl<P: Painter> RendererCore<P> {
         };
 
         // Pixel-rect alignment. `compute_strip` is an address-space proxy
-        // for `plan.repaint_strip`; the two agree only when slot edges
-        // land on the canvas edge. On a non-aligned axis the partial slot
-        // at the canvas boundary transitions to fully-visible inside the
-        // dirty pixel rect — extend the RCRange to cover every slot whose
-        // pixel extent overlaps the rect.
-        if let Some(plan) = plan {
-            match axis {
-                Axis::Column => {
-                    let xmin = plan.repaint_strip.top_left.x;
-                    let xmax = xmin + plan.repaint_strip.width;
-                    let mut new_c1 = strip.c1;
-                    let mut new_c2 = strip.c2;
-                    for c in pane.cols(frame) {
-                        if c.left + c.width > xmin && c.left < xmax {
-                            new_c1 = new_c1.min(c.col);
-                            new_c2 = new_c2.max(c.col);
-                        }
+        // for `repaint_strip`; the two agree only when slot edges land on
+        // the canvas edge. On a non-aligned axis the partial slot at the
+        // canvas boundary transitions to fully-visible inside the dirty
+        // pixel rect — extend the RCRange to cover every slot whose pixel
+        // extent overlaps the rect.
+        match axis {
+            Axis::Column => {
+                let xmin = repaint_strip.top_left.x;
+                let xmax = xmin + repaint_strip.width;
+                let mut new_c1 = strip.c1;
+                let mut new_c2 = strip.c2;
+                for c in pane.cols(frame) {
+                    if c.left + c.width > xmin && c.left < xmax {
+                        new_c1 = new_c1.min(c.col);
+                        new_c2 = new_c2.max(c.col);
                     }
-                    strip.c1 = new_c1;
-                    strip.c2 = new_c2;
                 }
-                Axis::Row => {
-                    let ymin = plan.repaint_strip.top_left.y;
-                    let ymax = ymin + plan.repaint_strip.height;
-                    let mut new_r1 = strip.r1;
-                    let mut new_r2 = strip.r2;
-                    for r in pane.rows(frame) {
-                        if r.top + r.height > ymin && r.top < ymax {
-                            new_r1 = new_r1.min(r.row);
-                            new_r2 = new_r2.max(r.row);
-                        }
+                strip.c1 = new_c1;
+                strip.c2 = new_c2;
+            }
+            Axis::Row => {
+                let ymin = repaint_strip.top_left.y;
+                let ymax = ymin + repaint_strip.height;
+                let mut new_r1 = strip.r1;
+                let mut new_r2 = strip.r2;
+                for r in pane.rows(frame) {
+                    if r.top + r.height > ymin && r.top < ymax {
+                        new_r1 = new_r1.min(r.row);
+                        new_r2 = new_r2.max(r.row);
                     }
-                    strip.r1 = new_r1;
-                    strip.r2 = new_r2;
                 }
+                strip.r1 = new_r1;
+                strip.r2 = new_r2;
             }
         }
         #[cfg(target_arch = "wasm32")]

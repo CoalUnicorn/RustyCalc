@@ -135,7 +135,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     // Frame 0 at top_row=1.
     let frame0 = Chrome::next(None, &m, canvas, &theme, crate::chrome::FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0, None);
+    core.render_grid(&m, &frame0);
 
     let baseline_ops = core.painter().ops().len();
 
@@ -153,10 +153,10 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
         &m,
         canvas,
         &theme,
-        crate::chrome::FramePath::Blit(plan.clone()),
+        crate::chrome::FramePath::Blit(&plan),
     );
     issue_blits(core.painter(), &plan);
-    core.render_grid(&m, &frame1, Some(&plan));
+    core.render_grid_blit(&m, &frame1, &plan);
 
     let blit_phase_ops: Vec<DrawOp> = core
         .painter()
@@ -219,7 +219,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, crate::chrome::FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0, None);
+    core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
 
     // Pure horizontal scroll by 1 column.
@@ -229,15 +229,9 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
         .try_blit(&m, canvas, &theme)
         .expect("single-column scroll must qualify for blit");
 
-    let frame1 = Chrome::next(
-        Some(frame0),
-        &m,
-        canvas,
-        &theme,
-        FramePath::Blit(plan.clone()),
-    );
+    let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
     issue_blits(core.painter(), &plan);
-    core.render_grid(&m, &frame1, Some(&plan));
+    core.render_grid_blit(&m, &frame1, &plan);
 
     let blit_phase_ops: Vec<DrawOp> = core
         .painter()
@@ -271,7 +265,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, crate::chrome::FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0, None);
+    core.render_grid(&m, &frame0);
 
     let baseline_ops: Vec<DrawOp> = core.painter().ops().iter().cloned().collect();
     let baseline_rect_fills = count_rect_fills(&baseline_ops);
@@ -280,15 +274,9 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let plan = frame0
         .try_blit(&m, canvas, &theme)
         .expect("single-row scroll must qualify for blit");
-    let frame1 = Chrome::next(
-        Some(frame0),
-        &m,
-        canvas,
-        &theme,
-        FramePath::Blit(plan.clone()),
-    );
+    let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
     issue_blits(core.painter(), &plan);
-    core.render_grid(&m, &frame1, Some(&plan));
+    core.render_grid_blit(&m, &frame1, &plan);
 
     let blit_phase_ops: Vec<DrawOp> = core
         .painter()
@@ -407,7 +395,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0, None);
+    core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
 
     m.set_top_row(2);
@@ -415,15 +403,9 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
         .try_blit(&m, canvas, &theme)
         .expect("single-row scroll must qualify for blit");
 
-    let frame1 = Chrome::next(
-        Some(frame0),
-        &m,
-        canvas,
-        &theme,
-        FramePath::Blit(plan.clone()),
-    );
+    let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
     issue_blits(core.painter(), &plan);
-    core.render_grid(&m, &frame1, Some(&plan));
+    core.render_grid_blit(&m, &frame1, &plan);
 
     let post_scroll_ops: Vec<DrawOp> = core
         .painter()
@@ -463,7 +445,7 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_grid(&m, &frame0, None);
+    core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
 
     m.set_top_row(6);
@@ -471,15 +453,9 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
         .try_blit(&m, canvas, &theme)
         .expect("5-row scroll must qualify for blit");
 
-    let frame1 = Chrome::next(
-        Some(frame0),
-        &m,
-        canvas,
-        &theme,
-        FramePath::Blit(plan.clone()),
-    );
+    let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
     issue_blits(core.painter(), &plan);
-    core.render_grid(&m, &frame1, Some(&plan));
+    core.render_grid_blit(&m, &frame1, &plan);
 
     let post_scroll_ops: Vec<DrawOp> = core
         .painter()

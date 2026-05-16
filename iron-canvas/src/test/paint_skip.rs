@@ -90,7 +90,7 @@ fn canvas() -> CanvasSize {
 /// fingerprint state lives on `Chrome` and survives across cores.
 fn paint_pane(model: &MutableModel, frame: &Chrome, pane: PaneRegion) -> usize {
     let core = RendererCore::for_layer(RecorderPainter::new());
-    core.render_pane(model, pane, frame, None);
+    core.render_pane(model, pane, frame);
     let count = core.painter().ops().len();
     count
 }

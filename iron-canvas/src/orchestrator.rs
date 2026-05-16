@@ -477,7 +477,7 @@ impl IronCanvas {
             model,
             self.size,
             &self.theme,
-            FramePath::Blit(plan.clone()),
+            FramePath::Blit(&plan),
         );
         #[cfg(target_arch = "wasm32")]
         log_blit_plan(&plan, prev_top, prev_pane_range, &frame);
@@ -514,7 +514,7 @@ impl IronCanvas {
         self.grid.invalidate_pane_cache(mask);
         self.grid.invalidate_paint_cache();
 
-        self.grid.paint(model, &frame, None);
+        self.grid.paint(model, &frame);
         if overlay_dirty {
             self.overlay.paint(&self.overlays, model, &frame);
         }
@@ -538,7 +538,7 @@ impl IronCanvas {
             self.grid.invalidate_pane_cache(PaneRegionMask::ALL);
         }
         self.grid.invalidate_paint_cache();
-        self.grid.paint(model, &frame, None);
+        self.grid.paint(model, &frame);
         if overlay_dirty {
             self.overlay.paint(&self.overlays, model, &frame);
         }

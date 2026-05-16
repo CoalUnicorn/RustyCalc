@@ -128,6 +128,7 @@ impl BlitPlan {
     /// `row_header_thickness + HEADER_OFFSET` is never folded into the kept
     /// band by the blit (`render_headers_base` repaints it on top each frame,
     /// which would otherwise double its density).
+    #[allow(clippy::too_many_arguments)]
     fn for_row_scroll(
         pane_x: i32,
         pane_w: i32,
@@ -197,6 +198,7 @@ impl BlitPlan {
     /// the scroll-RIGHT case where the previous paint didn't reach the right
     /// edge of the canvas. `HEADER_OFFSET + 1` keeps the 1-px column-header
     /// border out of the blit src.
+    #[allow(clippy::too_many_arguments)]
     fn for_col_scroll(
         pane_y: i32,
         pane_h: i32,
@@ -261,8 +263,8 @@ impl BlitPlan {
 /// `next_frame` / `from_slots_reuse` / `next_frame_with_blit` constructors
 /// and the manual `match prev.kind` exhaustiveness checks at dispatch
 /// sites. Adding a variant breaks every regime arm at compile time.
-#[derive(Clone)]
-pub(crate) enum FramePath {
+#[derive(Clone, Copy)]
+pub(crate) enum FramePath<'a> {
     /// Full rebuild walk. `prev = Some` recycles slot Vec allocations;
     /// `prev = None` is the first-frame path.
     Fresh,
@@ -272,7 +274,9 @@ pub(crate) enum FramePath {
     /// Blit fast-path. Scroll-axis slot vec rebuilt around the plan;
     /// cross-axis cloned from prev. Falls back to `Fresh` on the
     /// row_header_thickness digit-boundary case. Requires `prev = Some`.
-    Blit(BlitPlan),
+    /// Borrows the plan from the orchestrator's `paint_viewport` stack
+    /// frame so no per-frame clone is needed.
+    Blit(&'a BlitPlan),
 }
 
 impl Chrome {
