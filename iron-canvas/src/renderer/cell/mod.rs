@@ -390,7 +390,7 @@ fn infer_shift_axis(prev: RCRange, new: RCRange) -> Option<Axis> {
 
 /// Slice of `new` lying outside `prev` along the scroll axis. Returns
 /// `None` if the ranges are identical along `axis` (delta == 0). Under
-/// `try_blit` qualification, `|delta| < extent` is guaranteed so the
+/// `screen_for_blit` qualification, `|delta| < extent` is guaranteed so the
 /// no-overlap path is defensive only.
 fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
     match axis {

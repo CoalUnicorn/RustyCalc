@@ -1,7 +1,7 @@
 //! Single-axis scroll blit fast-path: detection, plan construction, and
 //! Chrome reuse around a `Painter::blit` shift.
 //!
-//! `Chrome::try_blit` (mod.rs) screens the disqualifiers (sheet / freeze /
+//! `Chrome::screen_for_blit` (mod.rs) screens the disqualifiers (sheet / freeze /
 //! canvas / theme / active-cell mismatch, two-axis scroll); on a viable
 //! scroll it delegates to `try_blit_rows` / `try_blit_cols` here, which
 //! return a `BlitPlan` if the geometry checks out. The orchestrator then
@@ -260,7 +260,7 @@ impl BlitPlan {
 
 /// Dispatch input for `Chrome::next` — which construction regime the
 /// orchestrator selected for this frame. Replaces the trio of
-/// `next_frame` / `from_slots_reuse` / `next_frame_with_blit` constructors
+/// `Chrome::next` dispatch over `FramePath::{Fresh, SlotsReuse, Blit}`
 /// and the manual `match prev.kind` exhaustiveness checks at dispatch
 /// sites. Adding a variant breaks every regime arm at compile time.
 #[derive(Clone, Copy)]
@@ -294,7 +294,9 @@ impl Chrome {
         pane_h: i32,
     ) -> Option<(i32, ShiftDir)> {
         let prev_rows = &self.pane_set.scroll_rows;
-        let _last = prev_rows.last()?;
+        if prev_rows.is_empty() {
+            return None;
+        }
         let old_top = self.pane_set.top_row();
         if new_top > old_top {
             let drows = (new_top - old_top) as usize;
@@ -339,7 +341,9 @@ impl Chrome {
         pane_w: i32,
     ) -> Option<(i32, ShiftDir)> {
         let prev_cols = &self.pane_set.scroll_cols;
-        let _last = prev_cols.last()?;
+        if prev_cols.is_empty() {
+            return None;
+        }
         let old_left = self.pane_set.left_column();
         if new_left > old_left {
             let dcols = (new_left - old_left) as usize;
@@ -398,7 +402,7 @@ impl Chrome {
 
 // Scroll-blit helpers
 //
-// `try_blit` already disqualified anything that isn't a pure single-axis
+// `screen_for_blit` already disqualified anything that isn't a pure single-axis
 // scroll. These helpers compute the canvas-pixel src/dst/strip rects and
 // verify the kept band's row heights (col widths) match what the model
 // still reports — that is the final qualification that the shifted pixels
@@ -409,7 +413,7 @@ impl Chrome {
 /// scroll-axis kept band carries forward heights/widths, only the strip
 /// touches the model. Returns `None` on the one cross-axis-affecting
 /// edge case (row_header_thickness changes across a digit boundary) or
-/// any model anomaly — the caller falls through to a full `next_frame`.
+/// any model anomaly — the caller falls through to a full `Chrome::next`.
 pub(super) fn try_blit_reuse(
     prev: &Chrome,
     model: &dyn CanvasModel,
@@ -479,7 +483,7 @@ pub(super) fn try_blit_reuse(
 /// Build new `scroll_rows` for a pure row scroll: keep the surviving
 /// slots with their `.row` and `.height` intact and only `.top` shifted,
 /// then `fill_axis` the strip from the model. Returns `None` if `prev`'s
-/// data isn't enough to cover the kept band — try_blit guards make this
+/// data isn't enough to cover the kept band — screen_for_blit guards make this
 /// path unreachable, but cheap defensiveness keeps the fallback open.
 fn rebuild_rows_for_row_scroll(
     prev: &Chrome,
@@ -756,4 +760,52 @@ enum ShiftDir {
     /// Content moves toward larger coordinate; strip lands at the near edge
     /// (scroll UP on rows, scroll LEFT on cols).
     Down,
+}
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::wasm_bindgen;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console)]
+    fn console_log(s: &str);
+}
+
+/// One-line debug summary emitted to the browser console after every
+/// scroll-blit dispatch. Wasm-only — native builds skip the call site
+/// behind `#[cfg(target_arch = "wasm32")]`.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn log(&self, prev_top: i32, prev_pane_range: Option<crate::RCRange>, frame: &Chrome) {
+    let axis = match self.axis {
+        Axis::Row => "Row",
+        Axis::Column => "Col",
+    };
+    let new_top = frame.pane_set_top_row_debug();
+    let new_last = frame.pane_set_last_row_debug();
+    let scroll_rows_len = frame.scroll_rows_len_debug();
+    let cached = match prev_pane_range {
+        Some(r) => format!("rows {}..={}", r.r1, r.r2),
+        None => "<none>".to_string(),
+    };
+    let Some(primary) = self.shifts.first() else {
+        return;
+    };
+    let msg = format!(
+        "[blit] axis={} prev_top={} new_top={} new_last={} cache.range={} scroll_rows.len()={} shifts={} src=(y={}, h={}) dst=(y={}, h={}) strip=(y={}, h={})",
+        axis,
+        prev_top,
+        new_top,
+        new_last,
+        cached,
+        scroll_rows_len,
+        self.shifts.len(),
+        primary.src.top_left.y,
+        primary.src.height,
+        primary.dst.top_left.y,
+        primary.dst.height,
+        self.repaint_strip.top_left.y,
+        self.repaint_strip.height,
+    );
+    console_log(&msg);
 }

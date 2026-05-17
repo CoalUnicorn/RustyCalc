@@ -21,7 +21,7 @@ use crate::{CanvasModel, CanvasSize, CanvasView, RCRange};
 /// single test can rebuild `Chrome::next` after a scroll without
 /// rebuilding the model. `row5_height` lets a test mutate row 5's
 /// height between frames to drive the overlap-row-height guard in
-/// `try_blit`. Cell content + styles stay default — the tests are
+/// `screen_for_blit`. Cell content + styles stay default — the tests are
 /// about paint-path activation, not visual fidelity.
 struct ScrollModel {
     top_row: Cell<i32>,
@@ -143,7 +143,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     m.set_top_row(2);
 
     let plan = frame0
-        .try_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme)
         .expect("single-row scroll must qualify for blit");
 
     // Simulate the orchestrator's blit fast-path on the same core so
@@ -201,10 +201,10 @@ fn scroll_past_viewport_disqualifies_blit() {
     let frame0 = Chrome::next(None, &m, canvas, &theme, crate::chrome::FramePath::Fresh);
 
     // Canvas is 400 px tall, rows are 20 px → ~20 visible rows. Scroll
-    // by 100 rows → no overlap with prev viewport → try_blit must bail.
+    // by 100 rows → no overlap with prev viewport → screen_for_blit must bail.
     m.set_top_row(101);
 
-    let plan = frame0.try_blit(&m, canvas, &theme);
+    let plan = frame0.screen_for_blit(&m, canvas, &theme);
     assert!(
         plan.is_none(),
         "scroll past viewport extent must not qualify for blit",
@@ -226,7 +226,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
     m.set_left_column(2);
 
     let plan = frame0
-        .try_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme)
         .expect("single-column scroll must qualify for blit");
 
     let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
@@ -272,7 +272,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
 
     m.set_top_row(2);
     let plan = frame0
-        .try_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme)
         .expect("single-row scroll must qualify for blit");
     let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
     issue_blits(core.painter(), &plan);
@@ -308,9 +308,9 @@ fn scroll_by_one_row_paints_only_strip_cells() {
 /// Regression for the edit-then-scroll bug: typing into a cell and
 /// pressing Enter scrolls by one row. If the consumer forgets to call
 /// `markContentDirty`, the CONTENT-veto in `decide()` doesn't fire, so
-/// the geometric `try_blit` would otherwise succeed and the blit's kept
+/// the geometric `screen_for_blit` would otherwise succeed and the blit's kept
 /// band would shift pre-edit pixels (the just-edited cell renders blank).
-/// The defensive content check inside `try_blit` must catch this by
+/// The defensive content check inside `screen_for_blit` must catch this by
 /// re-hashing the prev frame's active-cell value against the live model.
 #[test]
 fn active_cell_value_change_disqualifies_blit() {
@@ -325,7 +325,7 @@ fn active_cell_value_change_disqualifies_blit() {
     m.set_data_until(5);
     m.set_top_row(2);
 
-    let plan = frame0.try_blit(&m, canvas, &theme);
+    let plan = frame0.screen_for_blit(&m, canvas, &theme);
     assert!(
         plan.is_none(),
         "edit-then-scroll must disqualify the blit when the active cell value changed",
@@ -345,7 +345,7 @@ fn active_cell_value_unchanged_allows_blit() {
 
     m.set_top_row(2);
 
-    let plan = frame0.try_blit(&m, canvas, &theme);
+    let plan = frame0.screen_for_blit(&m, canvas, &theme);
     assert!(
         plan.is_some(),
         "pure scroll with unchanged active-cell value must qualify for the blit",
@@ -362,12 +362,12 @@ fn overlap_row_height_change_disqualifies_blit() {
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
 
     // Resize row 5 between frames AND scroll. Row 5 sits inside the
-    // overlap band of a 1-row scroll, so `try_blit`'s row-height guard
+    // overlap band of a 1-row scroll, so `screen_for_blit`'s row-height guard
     // must fire and the fast-path must bail to a full repaint.
     m.set_row5_height(40.0);
     m.set_top_row(2);
 
-    let plan = frame0.try_blit(&m, canvas, &theme);
+    let plan = frame0.screen_for_blit(&m, canvas, &theme);
     assert!(
         plan.is_none(),
         "row-height mutation inside the kept band must disqualify the blit",
@@ -400,7 +400,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
 
     m.set_top_row(2);
     let plan = frame0
-        .try_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme)
         .expect("single-row scroll must qualify for blit");
 
     let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
@@ -450,7 +450,7 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
 
     m.set_top_row(6);
     let plan = frame0
-        .try_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme)
         .expect("5-row scroll must qualify for blit");
 
     let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));

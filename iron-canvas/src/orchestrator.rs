@@ -32,55 +32,6 @@ pub(crate) enum PaintRegime {
     },
 }
 
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
-
-#[cfg(target_arch = "wasm32")]
-fn log_blit_plan(
-    plan: &crate::chrome::BlitPlan,
-    prev_top: i32,
-    prev_pane_range: Option<crate::RCRange>,
-    frame: &Chrome,
-) {
-    use crate::geometry::prim::Axis;
-    let axis = match plan.axis {
-        Axis::Row => "Row",
-        Axis::Column => "Col",
-    };
-    let new_top = frame.pane_set_top_row_debug();
-    let new_last = frame.pane_set_last_row_debug();
-    let scroll_rows_len = frame.scroll_rows_len_debug();
-    let cached = match prev_pane_range {
-        Some(r) => format!("rows {}..={}", r.r1, r.r2),
-        None => "<none>".to_string(),
-    };
-    let primary = match plan.shifts.first() {
-        Some(s) => s,
-        None => return,
-    };
-    let msg = format!(
-        "[blit] axis={} prev_top={} new_top={} new_last={} cache.range={} scroll_rows.len()={} shifts={} src=(y={}, h={}) dst=(y={}, h={}) strip=(y={}, h={})",
-        axis,
-        prev_top,
-        new_top,
-        new_last,
-        cached,
-        scroll_rows_len,
-        plan.shifts.len(),
-        primary.src.top_left.y,
-        primary.src.height,
-        primary.dst.top_left.y,
-        primary.dst.height,
-        plan.repaint_strip.top_left.y,
-        plan.repaint_strip.height,
-    );
-    log(&msg);
-}
-
 /// Public wasm-bindgen handle owning both canvas layers.
 ///
 /// Consumers mount two stacked `<canvas>` elements and pass them once at
@@ -99,11 +50,11 @@ pub struct IronCanvas {
     /// the next `Chrome`.
     size: CanvasSize,
     /// Typed cell-content-changed signal accumulated since the last paint.
-    /// `Some(mask)` means the named panes' cached buffers are stale and
-    /// must refetch from the model; `decide()` routes it to the `Content`
-    /// arm when the viewport is otherwise SlotsReuse-valid. Cleared at
-    /// the end of every `paintIfDirty`.
-    pending_content: Option<PaneRegionMask>,
+    /// Bits name the panes whose cached buffers are stale and must refetch.
+    /// `decide()` routes a non-empty mask through the SlotsReuse arm when
+    /// the viewport is otherwise reusable. Reset to `EMPTY` at the end of
+    /// every `paintIfDirty`.
+    pending_content: PaneRegionMask,
 }
 
 #[wasm_bindgen]
@@ -123,7 +74,7 @@ impl IronCanvas {
             model: None,
             last_frame: None,
             size: CanvasSize { w: 0.0, h: 0.0 },
-            pending_content: None,
+            pending_content: PaneRegionMask::EMPTY,
         })
     }
 
@@ -165,7 +116,7 @@ impl IronCanvas {
     /// veto the blit arm on every scroll (the blit arm's CONTENT-veto
     /// exists to prevent stale-pixel propagation, and a blanket
     /// `requestRepaint` cannot prove content is unchanged either way,
-    /// so we let geometric `try_blit` decide and fall back to a
+    /// so we let geometric `screen_for_blit` decide and fall back to a
     /// `Structural` rebuild when it can't).
     #[allow(non_snake_case)]
     pub fn requestRepaint(&mut self) {
@@ -217,7 +168,7 @@ impl IronCanvas {
                 content_dirty,
             } => self.paint_fresh(model, overlay_dirty, content_dirty),
         }
-        self.pending_content = None;
+        self.pending_content = PaneRegionMask::EMPTY;
     }
 
     /// Explicit teardown for React strict-mode / Leptos `Effect` mount
@@ -373,21 +324,14 @@ impl IronCanvas {
     /// Also marks the grid dirty so the next `paintIfDirty` runs even
     /// without a separate `requestRepaint`.
     pub(crate) fn mark_content_dirty(&mut self, mask: PaneRegionMask) {
-        self.pending_content = Some(match self.pending_content {
-            Some(prev) => prev.union(mask),
-            None => mask,
-        });
+        self.pending_content |= mask;
         self.grid.raise(GridSignals::CONTENT);
     }
 
     /// Classify which paint regime to run for the current state. Pure over
-    /// `&self`; arm methods own the mutation. `grid_dirty` is consumed by
-    /// the caller before we get here, so `decide` takes it as a parameter
-    /// rather than re-reading the gate (which is take-and-clear).
-    ///
-    /// PR 1+2 contract: `Content` is unreachable until `mark_content_dirty`
-    /// is wired in PR 4; `Structural` always reports `Unknown` until
-    /// `is_still_valid` is refined to distinguish causes.
+    /// `&self`; arm methods own the mutation. The signal bits are consumed
+    /// by the caller via `drain_signals`, so we take them as a parameter
+    /// rather than re-reading the take-and-clear gate.
     fn decide(&self, sig: GridSignals, model: &dyn CanvasModel) -> PaintRegime {
         let overlay_dirty = sig.overlay_dirty();
         let content_dirty = sig.contains(GridSignals::CONTENT);
@@ -406,7 +350,7 @@ impl IronCanvas {
             return PaintRegime::Overlay;
         }
 
-        // Blit detection is geometric: `try_blit` diffs `last_frame`'s
+        // Blit detection is geometric: `screen_for_blit` diffs `last_frame`'s
         // scroll/freeze/sheet/size against the model and returns a plan
         // only on a real viewport shift. Gated on CONTENT (a blit on
         // stale content propagates wrong pixels — the recalc bug) but
@@ -418,20 +362,18 @@ impl IronCanvas {
             if let Some(plan) = self
                 .last_frame
                 .as_ref()
-                .and_then(|f| f.try_blit(model, self.size, &self.theme))
+                .and_then(|f| f.screen_for_blit(model, self.size, &self.theme))
             {
                 return PaintRegime::Viewport(plan);
             }
         }
 
-        // SlotsReuse covers both old `Content` (content edit, viewport
-        // unchanged) and old `Structural`-with-reusable-slots (e.g. theme
-        // change). When content is dirty we honour the consumer-supplied
-        // pending mask; otherwise refresh all panes (theme touches every
-        // pane uniformly).
+        // When content is dirty we honour the consumer-supplied pending
+        // mask; otherwise refresh all panes (theme touches every pane
+        // uniformly).
         if matches!(validity, FrameValidity::SlotsReuse) && self.last_frame.is_some() {
-            let mask = if content_dirty {
-                self.pending_content.unwrap_or(PaneRegionMask::ALL)
+            let mask = if content_dirty && !self.pending_content.is_empty() {
+                self.pending_content
             } else {
                 PaneRegionMask::ALL
             };
@@ -480,7 +422,7 @@ impl IronCanvas {
             FramePath::Blit(&plan),
         );
         #[cfg(target_arch = "wasm32")]
-        log_blit_plan(&plan, prev_top, prev_pane_range, &frame);
+        plan.log(prev_top, prev_pane_range, &frame);
         self.grid.paint_blit(model, &frame, &plan);
         self.overlay.paint(&self.overlays, model, &frame);
         self.last_frame = Some(frame);

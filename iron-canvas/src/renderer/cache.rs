@@ -138,7 +138,7 @@ fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
 /// preserving entries whose `(row, col)` survived the scroll and leaving
 /// freshly-revealed slots as `None` for the caller's strip-fetch to fill.
 ///
-/// Invariants (caller-enforced; `try_blit` already guarantees these):
+/// Invariants (caller-enforced; `screen_for_blit` already guarantees these):
 /// - `prev_range` and `new_range` differ on exactly the `axis` given.
 /// - The orthogonal axis has identical first/last indices on both ranges.
 /// - `|delta|` along `axis` is strictly less than the visible extent on

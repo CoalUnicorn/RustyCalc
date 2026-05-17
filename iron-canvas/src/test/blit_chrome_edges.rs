@@ -125,7 +125,7 @@ fn blit_ops(
 //     let row_header_thickness = frame0.row_header_thickness;
 
 //     m.set_top_row(6);
-//     let plan = match frame0.try_blit(&m, canvas, &theme) {
+//     let plan = match frame0.screen_for_blit(&m, canvas, &theme) {
 //         Some(p) => p,
 //         None => panic!("5-row scroll must qualify for blit"),
 //     };
@@ -184,7 +184,7 @@ fn blit_ops(
 //     let frozen_cols_right_edge = frozen_offset_x;
 
 //     m.set_top_row(2);
-//     let plan = match frame0.try_blit(&m, canvas, &theme) {
+//     let plan = match frame0.screen_for_blit(&m, canvas, &theme) {
 //         Some(p) => p,
 //         None => panic!("1-row scroll must qualify for blit"),
 //     };

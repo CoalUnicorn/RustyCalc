@@ -1,18 +1,17 @@
-//! Runtime tag for `Chrome` — which constructor produced this frame.
-//! Regime arms in `orchestrator::paint_*` will match exhaustively on this
-//! tag (Stage 5); adding a variant breaks every dispatch site at compile
-//! time. Replaces a bool that could only distinguish two of the three
-//! constructor regimes.
+//! Runtime tag for `Chrome` — which `FramePath` arm of `Chrome::next`
+//! produced this frame. Diagnostics and per-pane fingerprint gating
+//! read it; orchestrator `paint_*` arms dispatch on `PaintRegime`
+//! upstream so they never need to match on this tag.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FrameKindTag {
-    /// `Chrome::next_frame` with `prev = None` (or a structural-cause prev).
-    /// Slot vecs are freshly walked from the model.
+    /// `FramePath::Fresh`: slot vecs freshly walked from the model
+    /// through `Chrome::build`. First paint, or structural divergence.
     Fresh,
-    /// `Chrome::from_slots_reuse`: prev's slot vecs reused as-is, only
+    /// `FramePath::SlotsReuse`: prev's slot vecs reused as-is; only
     /// per-frame state (theme, pane_fingerprints rotation) refreshed.
     SlotsReused,
-    /// `Chrome::next_frame_with_blit`: scroll-axis slot vec rebuilt around
+    /// `FramePath::Blit(&plan)`: scroll-axis slot vec rebuilt around
     /// a `BlitPlan`; cross-axis slot vec reused from prev.
     Blitted,
 }
