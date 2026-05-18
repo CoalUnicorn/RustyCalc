@@ -10,8 +10,8 @@
 
 use crate::chrome::FramePath;
 use crate::geometry::constants::{
-    AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP,
-    HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+    AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, CELL_AREA_INSET, DEFAULT_COL_WIDTH,
+    DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
 use crate::theme::LIGHT;
 use crate::types::ui::HitTest;
@@ -104,8 +104,8 @@ fn no_freeze_has_no_bands_and_origin_skips_separator() {
     let p = &frame.pane_set;
     assert_eq!(p.frozen_rows_count(), 0);
     assert_eq!(p.frozen_cols_count(), 0);
-    assert_eq!(p.frozen_offset_x, HEADER_COL_WIDTH + HEADER_OFFSET);
-    assert_eq!(p.frozen_offset_y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
+    assert_eq!(p.frozen_offset_x, HEADER_COL_WIDTH + CELL_AREA_INSET);
+    assert_eq!(p.frozen_offset_y, HEADER_ROW_HEIGHT + CELL_AREA_INSET);
 }
 
 #[test]
@@ -124,10 +124,10 @@ fn frozen_rows_only_adds_separator_on_y_only() {
     let p = &frame.pane_set;
     assert_eq!(p.frozen_rows_count(), 2);
     assert_eq!(p.frozen_cols_count(), 0);
-    assert_eq!(p.frozen_offset_x, HEADER_COL_WIDTH + HEADER_OFFSET);
+    assert_eq!(p.frozen_offset_x, HEADER_COL_WIDTH + CELL_AREA_INSET);
     assert_eq!(
         p.frozen_offset_y,
-        (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET)
+        (f64::from(HEADER_ROW_HEIGHT + CELL_AREA_INSET)
             + 2.0 * DEFAULT_ROW_HEIGHT
             + f64::from(FROZEN_SEP))
         .round() as i32
@@ -147,14 +147,14 @@ fn frozen_both_axes_add_separator_on_each() {
     assert_eq!(p.frozen_cols_count(), 3);
     assert_eq!(
         p.frozen_offset_x,
-        (f64::from(HEADER_COL_WIDTH + HEADER_OFFSET)
+        (f64::from(HEADER_COL_WIDTH + CELL_AREA_INSET)
             + 3.0 * DEFAULT_COL_WIDTH
             + f64::from(FROZEN_SEP))
         .round() as i32
     );
     assert_eq!(
         p.frozen_offset_y,
-        (f64::from(HEADER_ROW_HEIGHT + HEADER_OFFSET) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP))
+        (f64::from(HEADER_ROW_HEIGHT + CELL_AREA_INSET) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP))
             .round() as i32
     );
 }
@@ -196,8 +196,8 @@ fn cell_rect_at_origin_starts_at_top_left_header_corner() {
     let m = MockCanvasModel::default();
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
     let r = frame.cell_rect(1, 1).expect("origin cell is on screen");
-    assert_eq!(r.top_left.x, HEADER_COL_WIDTH + HEADER_OFFSET);
-    assert_eq!(r.top_left.y, HEADER_ROW_HEIGHT + HEADER_OFFSET);
+    assert_eq!(r.top_left.x, HEADER_COL_WIDTH + CELL_AREA_INSET);
+    assert_eq!(r.top_left.y, HEADER_ROW_HEIGHT + CELL_AREA_INSET);
     assert_eq!(f64::from(r.width), DEFAULT_COL_WIDTH);
     assert_eq!(f64::from(r.height), DEFAULT_ROW_HEIGHT);
 }
@@ -210,10 +210,10 @@ fn col_to_x_inside_frozen_band_skips_frozen_offset() {
     };
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
     let p = &frame.pane_set;
-    assert_eq!(p.col_to_x(1), HEADER_COL_WIDTH + HEADER_OFFSET);
+    assert_eq!(p.col_to_x(1), HEADER_COL_WIDTH + CELL_AREA_INSET);
     assert_eq!(
         p.col_to_x(2),
-        (f64::from(HEADER_COL_WIDTH + HEADER_OFFSET) + DEFAULT_COL_WIDTH).round() as i32
+        (f64::from(HEADER_COL_WIDTH + CELL_AREA_INSET) + DEFAULT_COL_WIDTH).round() as i32
     );
 }
 

@@ -13,7 +13,7 @@
 use ironcalc_base::types::{CellType, Style};
 
 use crate::chrome::{measure_row_header_width, Chrome, FramePath};
-use crate::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
+use crate::geometry::constants::{CELL_AREA_INSET, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use crate::renderer::RendererCore;
 use crate::test::painter::{DrawOp, RecorderPainter};
 use crate::theme::CanvasTheme;
@@ -202,12 +202,12 @@ fn cell_origin_matches_header_thicknesses() {
         assert_eq!(frame.col_header_thickness, HEADER_ROW_HEIGHT);
         assert_eq!(
             frame.cell_origin.x,
-            frame.row_header_thickness + HEADER_OFFSET,
+            frame.row_header_thickness + CELL_AREA_INSET,
             "cell_origin.x must equal row_header_thickness + outer_offset"
         );
         assert_eq!(
             frame.cell_origin.y,
-            frame.col_header_thickness + HEADER_OFFSET,
+            frame.col_header_thickness + CELL_AREA_INSET,
             "cell_origin.y must equal col_header_thickness + outer_offset"
         );
     });
@@ -215,7 +215,7 @@ fn cell_origin_matches_header_thicknesses() {
     drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame_far, _| {
         assert_eq!(
             frame_far.cell_origin.x,
-            frame_far.row_header_thickness + HEADER_OFFSET,
+            frame_far.row_header_thickness + CELL_AREA_INSET,
             "cell_origin.x must track row_header_thickness even at deep scrolls"
         );
         assert_eq!(frame_far.col_header_thickness, HEADER_ROW_HEIGHT);
@@ -231,11 +231,11 @@ fn cell_origin_matches_header_thicknesses() {
 fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
     drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame, _| {
         assert!(
-            frame.cell_origin.x > HEADER_COL_WIDTH + HEADER_OFFSET,
+            frame.cell_origin.x > HEADER_COL_WIDTH + CELL_AREA_INSET,
             "test premise: 7-digit scroll must widen row header past default \
              (cell_origin.x={}, default={})",
             frame.cell_origin.x,
-            HEADER_COL_WIDTH + HEADER_OFFSET,
+            HEADER_COL_WIDTH + CELL_AREA_INSET,
         );
         let first_col = frame
             .pane_set

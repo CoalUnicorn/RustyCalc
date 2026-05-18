@@ -59,13 +59,6 @@ impl GridLayer {
         self.base.renderer.invalidate_pane_cache(mask);
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn bottom_right_cache_range_debug(&self) -> Option<crate::RCRange> {
-        self.base
-            .renderer
-            .pane_cache_range_debug(crate::chrome::PaneRegion::BottomRight)
-    }
-
     /// Scroll-blit fast path: shift the BottomRight kept band via
     /// `BlitPainter::blit`, then run `render_grid_blit` with the
     /// BottomRight pane wrapped in a clip to `plan.repaint_strip`. The

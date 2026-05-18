@@ -9,6 +9,16 @@ pub const HEADER_OFFSET: i32 = 1;
 pub const HEADER_ROW_HEIGHT: i32 = 28;
 pub const HEADER_COL_WIDTH: i32 = 30;
 pub const FROZEN_SEP: i32 = 3;
+
+/// Pixel offset from a header strip's outer edge to the cell area origin.
+/// `HEADER_OFFSET` reserves the 1-px chrome border line (`draw_corner_box`
+/// strokes it sharply at `header_thickness + 0.5`); the extra
+/// `SELECTION_BORDER_WIDTH / 2` reserves a 1-px breathing buffer between
+/// the chrome border and the cell area so the selection — which
+/// `draw_selection` insets by `SELECTION_BORDER_WIDTH / 2` to keep the
+/// centered stroke inside the cell — paints with a visible gap from
+/// chrome at row 1 / col A.
+pub(crate) const CELL_AREA_INSET: i32 = HEADER_OFFSET;
 /// Side length of the autofill handle square. The handle's top-left sits at
 /// the selection's bottom-right corner (Excel anchor) so it visually pokes
 /// outside the selection rectangle.

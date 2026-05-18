@@ -13,7 +13,7 @@ use std::hash::{Hash, Hasher};
 use crate::geometry::slot::scroll_first;
 use crate::geometry::{
     constants::{
-        AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN,
+        AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN,
         LAST_ROW,
     },
     pixel_rect::PixelRect,
@@ -133,25 +133,6 @@ pub(crate) enum FrameValidity {
 }
 
 impl Chrome {
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn pane_set_top_row_debug(&self) -> i32 {
-        self.pane_set.top_row()
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn pane_set_last_row_debug(&self) -> i32 {
-        self.pane_set
-            .scroll_rows
-            .last()
-            .map(|s| s.row)
-            .unwrap_or(-1)
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn scroll_rows_len_debug(&self) -> usize {
-        self.pane_set.scroll_rows.len()
-    }
-
     /// Build the next-frame `Chrome`. The `path` argument selects which
     /// regime the orchestrator chose; the body branches once and inlines
     /// the three former constructors.
@@ -267,7 +248,7 @@ impl Chrome {
         let mut pane_set = PaneSet::with_recycled(recycled);
 
         // Phase B — row walk.
-        let origin_y = HEADER_ROW_HEIGHT + HEADER_OFFSET;
+        let origin_y = HEADER_ROW_HEIGHT + CELL_AREA_INSET;
         pane_set.fill_rows(model, frozen_row_count, origin_y, view.top_row, canvas.h);
 
         // Phase C — measure row_header_thickness from the last visible row label.
@@ -279,8 +260,14 @@ impl Chrome {
         let row_header_thickness = measure_row_header_width(last_visible_row);
 
         // Phase D — col walk uses the measured width to anchor `origin_x`.
-        let origin_x = row_header_thickness + HEADER_OFFSET;
-        pane_set.fill_cols(model, frozen_col_count, origin_x, view.left_column, canvas.w);
+        let origin_x = row_header_thickness + CELL_AREA_INSET;
+        pane_set.fill_cols(
+            model,
+            frozen_col_count,
+            origin_x,
+            view.left_column,
+            canvas.w,
+        );
 
         // Phase E — assemble. `cell_origin` reuses the locals from B/D so
         // there's a single source of truth for the cell-area top-left.
@@ -389,7 +376,7 @@ impl Chrome {
             (false, true) => blit::try_blit_cols(self, model, sheet, new_left),
             // (false, false): caller already filtered no-op scrolls.
             // (true, true): two-axis scroll has no single-shift plan.
-            _ => None,
+            (false, false) | (true, true) => None,
         }
     }
 

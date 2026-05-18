@@ -334,6 +334,15 @@ impl Painter for CanvasPainter {
             .set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             .expect("set_transform should not fail");
         self.ctx.scale(dpr_f, dpr_f).expect("scale should not fail");
+        // Canvas2D defaults `imageSmoothingEnabled = true`, which bilinear-
+        // interpolates `drawImage` source pixels. `Painter::blit` calls
+        // drawImage with src/dst on the same canvas — every interpolation
+        // pass smudges 1-pixel edges in the kept band. After a scroll
+        // round-trip those smudges visibly accumulate as horizontal /
+        // vertical lines across cells that should be empty. Disable here
+        // because the ctx state is wiped on every canvas resize and this
+        // method is the canonical re-init point.
+        self.ctx.set_image_smoothing_enabled(false);
     }
 
     fn reset_text_defaults(&self) {
@@ -366,22 +375,7 @@ impl BlitPainter for CanvasPainter {
         let dy = f64::from(dst.top_left.y);
         let dw = f64::from(dst.width);
         let dh = f64::from(dst.height);
-        #[cfg(target_arch = "wasm32")]
-        {
-            use crate::wasm::diag::console_log;
-            let cw = f64::from(canvas.width());
-            let ch = f64::from(canvas.height());
-            let oob_y = sy + sh > ch;
-            let oob_x = sx + sw > cw;
-            console_log(&format!(
-                "[blit] backing={}x{} dpr={} src_css=({},{},{}x{}) dst_css=({},{},{}x{}) src_backing=({},{},{}x{}) OOB_x={} OOB_y={}",
-                cw, ch, self.dpr.get(),
-                src.top_left.x, src.top_left.y, src.width, src.height,
-                dst.top_left.x, dst.top_left.y, dst.width, dst.height,
-                sx, sy, sw, sh,
-                oob_x, oob_y,
-            ));
-        }
+
         let _ = self
             .ctx
             .draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(

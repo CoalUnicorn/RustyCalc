@@ -24,12 +24,9 @@ pub(crate) enum PaintRegime {
     Viewport(BlitPlan),
     SlotsReuse {
         mask: PaneRegionMask,
-        overlay_dirty: bool,
+        signals: GridSignals,
     },
-    Fresh {
-        overlay_dirty: bool,
-        content_dirty: bool,
-    },
+    Fresh(GridSignals),
 }
 
 /// Public wasm-bindgen handle owning both canvas layers.
@@ -108,18 +105,26 @@ impl IronCanvas {
     /// Conservative repaint blanket. JS callers that don't know which
     /// signal class fits (scroll, selection, theme bridge) land here;
     /// callers that DO know should use the typed setters
-    /// (`markContentDirty`, `request_overlay_repaint`, `set_theme*`).
+    /// (`markContentDirty`, `request_overlay_repaint`, `set_theme*`,
+    /// `setModel`).
+    ///
+    /// Drops `last_frame` so the next `paintIfDirty` falls to `Fresh` —
+    /// the cheaper `SlotsReuse` / `Viewport` arms gate on
+    /// `last_frame.is_some()`. This covers workbook swaps that mutate
+    /// the model in place (row heights / column widths read at slot-vec
+    /// build time, not cached anywhere `STRUCTURAL` alone would
+    /// invalidate). JS callers that want the cheap structural rebuild
+    /// have typed setters; `requestRepaint` is the worst-case fallback.
     ///
     /// Raises `STRUCTURAL | OVERLAY` — explicitly *not* `CONTENT`. The
-    /// `Content` regime is reserved for real cell-value changes routed
-    /// through `markContentDirty`; raising it speculatively here would
-    /// veto the blit arm on every scroll (the blit arm's CONTENT-veto
-    /// exists to prevent stale-pixel propagation, and a blanket
-    /// `requestRepaint` cannot prove content is unchanged either way,
-    /// so we let geometric `screen_for_blit` decide and fall back to a
-    /// `Structural` rebuild when it can't).
+    /// `CONTENT` bit is reserved for real cell-value changes routed
+    /// through `markContentDirty`; raising it here would force
+    /// `PaneCache::ALL` invalidation in `paint_fresh` and a blanket
+    /// `requestRepaint` cannot prove the cache is stale either way.
     #[allow(non_snake_case)]
     pub fn requestRepaint(&mut self) {
+        self.last_frame = None;
+        self.pending_content = PaneRegionMask::EMPTY;
         self.grid
             .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
         self.overlay.raise(GridSignals::OVERLAY);
@@ -140,9 +145,10 @@ impl IronCanvas {
     ///
     /// Dispatches via `decide()` into one of four named regimes:
     /// `Overlay` (cached frame, overlay-only), `Viewport` (scroll-blit,
-    /// content-clean), `Content` (cell-change without viewport shift),
-    /// `Structural` (full or slots-reuse rebuild). The `match` is
-    /// exhaustive — adding a regime breaks the build here, by design.
+    /// content-clean), `SlotsReuse` (viewport stable; mask-scoped pane
+    /// refetch or full refresh on theme change), `Fresh` (full rebuild).
+    /// The `match` is exhaustive — adding a regime breaks the build
+    /// here, by design.
     #[allow(non_snake_case)]
     pub fn paintIfDirty(&mut self) {
         let grid_signals = self.grid.drain_signals();
@@ -159,14 +165,10 @@ impl IronCanvas {
         match self.decide(signals, model) {
             PaintRegime::Overlay => self.paint_overlay(model),
             PaintRegime::Viewport(plan) => self.paint_viewport(model, plan),
-            PaintRegime::SlotsReuse {
-                mask,
-                overlay_dirty,
-            } => self.paint_slots_reuse(model, mask, overlay_dirty),
-            PaintRegime::Fresh {
-                overlay_dirty,
-                content_dirty,
-            } => self.paint_fresh(model, overlay_dirty, content_dirty),
+            PaintRegime::SlotsReuse { mask, signals } => {
+                self.paint_slots_reuse(model, mask, signals)
+            }
+            PaintRegime::Fresh(signals) => self.paint_fresh(model, signals),
         }
         self.pending_content = PaneRegionMask::EMPTY;
     }
@@ -246,8 +248,14 @@ impl IronCanvas {
         };
         if changed {
             self.model = Some(model);
-            self.grid.raise(GridSignals::STRUCTURAL);
-            self.overlay.raise(GridSignals::STRUCTURAL);
+            // `is_still_valid` doesn't see model identity, so a workbook
+            // swap with the same scroll/sheet/freeze/size would otherwise
+            // reuse the prev pane_set (stale row heights / column widths).
+            self.last_frame = None;
+            self.pending_content = PaneRegionMask::EMPTY;
+            self.grid
+                .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
+            self.overlay.raise(GridSignals::OVERLAY);
         }
     }
 
@@ -316,9 +324,10 @@ impl IronCanvas {
 
     /// Typed cell-content-changed signal. Marks the named panes' cached
     /// buffers stale so the next `paintIfDirty` refetches their values
-    /// from the model via the `Content` regime arm — fixes the recalc
-    /// bug where a formula dependent on an edited cell silently kept
-    /// painting the stale cached value (commit `25d91d2`).
+    /// from the model via the `SlotsReuse` arm (mask = these panes) —
+    /// fixes the recalc bug where a formula dependent on an edited
+    /// cell silently kept painting the stale cached value (commit
+    /// `25d91d2`).
     ///
     /// Repeated calls accumulate (bitwise OR) until paint consumes them.
     /// Also marks the grid dirty so the next `paintIfDirty` runs even
@@ -333,7 +342,6 @@ impl IronCanvas {
     /// by the caller via `drain_signals`, so we take them as a parameter
     /// rather than re-reading the take-and-clear gate.
     fn decide(&self, sig: GridSignals, model: &dyn CanvasModel) -> PaintRegime {
-        let overlay_dirty = sig.overlay_dirty();
         let content_dirty = sig.contains(GridSignals::CONTENT);
         let validity = self
             .last_frame
@@ -343,7 +351,7 @@ impl IronCanvas {
             });
 
         if !sig.grid_dirty()
-            && overlay_dirty
+            && sig.overlay_dirty()
             && matches!(validity, FrameValidity::SlotsReuse)
             && self.last_frame.is_some()
         {
@@ -377,16 +385,10 @@ impl IronCanvas {
             } else {
                 PaneRegionMask::ALL
             };
-            return PaintRegime::SlotsReuse {
-                mask,
-                overlay_dirty,
-            };
+            return PaintRegime::SlotsReuse { mask, signals: sig };
         }
 
-        PaintRegime::Fresh {
-            overlay_dirty,
-            content_dirty,
-        }
+        PaintRegime::Fresh(sig)
     }
 
     /// Overlay-only fast path. Triggered by autofill drag, clipboard state
@@ -410,10 +412,6 @@ impl IronCanvas {
         let Some(prev) = self.last_frame.take() else {
             return;
         };
-        #[cfg(target_arch = "wasm32")]
-        let prev_top = prev.pane_set_top_row_debug();
-        #[cfg(target_arch = "wasm32")]
-        let prev_pane_range = self.grid.bottom_right_cache_range_debug();
         let frame = Chrome::next(
             Some(prev),
             model,
@@ -421,8 +419,6 @@ impl IronCanvas {
             &self.theme,
             FramePath::Blit(&plan),
         );
-        #[cfg(target_arch = "wasm32")]
-        plan.log(prev_top, prev_pane_range, &frame);
         self.grid.paint_blit(model, &frame, &plan);
         self.overlay.paint(&self.overlays, model, &frame);
         self.last_frame = Some(frame);
@@ -431,15 +427,13 @@ impl IronCanvas {
     /// SlotsReuse regime: prev's slot vecs survive (viewport unchanged),
     /// only `pane_cache` entries inside `mask` are invalidated so
     /// `render_pane` refetches there. Unmasked panes fingerprint-skip.
-    /// Absorbs both old `paint_content` (content edit, masked) and the
-    /// SlotsReuse arm of old `paint_rebuild` (structural change with
-    /// reusable slots, mask = ALL). `decide()` guarantees `last_frame`
-    /// is `Some` before selecting this regime.
+    /// `decide()` guarantees `last_frame` is `Some` before selecting
+    /// this regime.
     fn paint_slots_reuse(
         &mut self,
         model: &dyn CanvasModel,
         mask: PaneRegionMask,
-        overlay_dirty: bool,
+        signals: GridSignals,
     ) {
         let Some(prev) = self.last_frame.take() else {
             return;
@@ -457,7 +451,7 @@ impl IronCanvas {
         self.grid.invalidate_paint_cache();
 
         self.grid.paint(model, &frame);
-        if overlay_dirty {
+        if signals.overlay_dirty() {
             self.overlay.paint(&self.overlays, model, &frame);
         }
         self.last_frame = Some(frame);
@@ -469,19 +463,19 @@ impl IronCanvas {
     /// diverged (scroll/freeze/sheet/canvas size change) or no prior
     /// frame exists. The reusable-slot pathway lives in `paint_slots_reuse`.
     ///
-    /// `content_dirty` gates `PaneCache` invalidation: a content edit
+    /// The `CONTENT` bit gates `PaneCache` invalidation: a content edit
     /// escalated to Fresh (e.g. via concurrent scroll) means the cache's
     /// range-matched buffers may now be stale against the new slot vecs.
-    fn paint_fresh(&mut self, model: &dyn CanvasModel, overlay_dirty: bool, content_dirty: bool) {
+    fn paint_fresh(&mut self, model: &dyn CanvasModel, signals: GridSignals) {
         let prev = self.last_frame.take();
         let frame = Chrome::next(prev, model, self.size, &self.theme, FramePath::Fresh);
 
-        if content_dirty {
+        if signals.contains(GridSignals::CONTENT) {
             self.grid.invalidate_pane_cache(PaneRegionMask::ALL);
         }
         self.grid.invalidate_paint_cache();
         self.grid.paint(model, &frame);
-        if overlay_dirty {
+        if signals.overlay_dirty() {
             self.overlay.paint(&self.overlays, model, &frame);
         }
 

@@ -290,14 +290,6 @@ impl<P: Painter> GridRenderer<P> {
     pub(crate) fn invalidate_pane_cache(&self, mask: crate::chrome::PaneRegionMask) {
         self.core.pane_cache.invalidate(mask);
     }
-
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn pane_cache_range_debug(
-        &self,
-        region: crate::chrome::PaneRegion,
-    ) -> Option<crate::types::coord::RCRange> {
-        self.core.pane_cache.pane(region).range.get()
-    }
 }
 
 impl<P: BlitPainter> GridRenderer<P> {

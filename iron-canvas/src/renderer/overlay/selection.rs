@@ -26,8 +26,19 @@ impl<P: Painter> RendererCore<P> {
         // Sheet is implicit — taken from `frame.sheet`.
         self.repaint_active_cell(model, view.row, view.column, frame);
 
+        // Inset the stroke rect by `SELECTION_BORDER_WIDTH / 2` so the
+        // centered stroke fits entirely inside the cell area. Without
+        // this, the outer half of the stroke spills 1 px past `cell`'s
+        // top edge — invisible for B2/C3/etc (lands in the previous
+        // cell's bottom row) but visible at row 1 / col A where the
+        // spill lands on the chrome buffer pixel and the selection
+        // appears to sink into the header strip.
+        let stroke_rect = cell.inset(
+            SELECTION_BORDER_WIDTH / 2,
+            SELECTION_BORDER_WIDTH / 2,
+        );
         self.painter.rect_stroke(
-            cell,
+            stroke_rect,
             PaintColor::from_theme_str(&frame.theme.selection_color),
             f64::from(SELECTION_BORDER_WIDTH),
         );
