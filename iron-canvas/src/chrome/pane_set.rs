@@ -274,11 +274,9 @@ impl PaneSet {
             Some((leaving, ShiftDir::Forward))
         } else {
             let d = (old_first_idx - new_first_idx) as usize;
-            let mut strip: i32 = 0;
-            for i in 0..d {
-                let m = measure(new_first_idx + i as i32).unwrap_or(0);
-                strip = strip.saturating_add(m);
-            }
+            let strip: i32 = (0..d)
+                .map(|i| measure(new_first_idx + i as i32).unwrap_or(0))
+                .fold(0, i32::saturating_add);
             if strip <= 0 || strip >= pane_extent {
                 return None;
             }

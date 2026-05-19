@@ -161,6 +161,8 @@ impl TextPaint {
         for (i, line) in lines.iter_mut().enumerate() {
             let i_f = i as f64;
             let tw = line.width;
+            // foreign #[non_exhaustive]: HorizontalAlignment is upstream (ironcalc).
+            // Left / General / Justify / Distributed / Fill default to left-anchored.
             line.center_x = match h_align {
                 HorizontalAlignment::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
                 HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => {
@@ -168,6 +170,8 @@ impl TextPaint {
                 }
                 _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
             };
+            // foreign #[non_exhaustive]: VerticalAlignment is upstream (ironcalc).
+            // Top / Justify / Distributed default to top-anchored.
             line.center_y = match v_align {
                 VerticalAlignment::Bottom => {
                     f64::from(bottom) - size_px / 2.0 - TEXT_V_INSET_PX
@@ -243,6 +247,8 @@ impl CellTextStyle {
                 HorizontalAlignment::Left
             }
             // General or unset: numbers right, everything else left.
+            // foreign #[non_exhaustive]: CellType is upstream (ironcalc) —
+            // Text / LogicalValue / ErrorValue / Array / CompoundData default to left.
             None | Some(HorizontalAlignment::General) => match cell_type {
                 CellType::Number => HorizontalAlignment::Right,
                 _ => HorizontalAlignment::Left,

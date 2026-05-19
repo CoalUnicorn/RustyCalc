@@ -198,15 +198,13 @@ fn apply_blit_shift<T>(
             let delta = new_range.c1 - prev_range.c1;
             if delta > 0 {
                 let shift = delta as usize;
-                for r in 0..prev_rows {
-                    let row = &mut buf[r * cols..(r + 1) * cols];
+                for row in buf.chunks_exact_mut(cols) {
                     row.rotate_left(shift);
                     row[cols - shift..].fill_with(|| None);
                 }
             } else if delta < 0 {
                 let shift = (-delta) as usize;
-                for r in 0..prev_rows {
-                    let row = &mut buf[r * cols..(r + 1) * cols];
+                for row in buf.chunks_exact_mut(cols) {
                     row.rotate_right(shift);
                     row[..shift].fill_with(|| None);
                 }

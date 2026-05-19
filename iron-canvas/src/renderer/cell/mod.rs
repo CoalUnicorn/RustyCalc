@@ -463,11 +463,15 @@ fn splice_strip_into<T>(
     debug_assert_eq!(strip_buf.len(), strip_rows * strip_cols);
     let row_offset = (strip_range.r1 - pane_range.r1) as usize;
     let col_offset = (strip_range.c1 - pane_range.c1) as usize;
-    for r in 0..strip_rows {
-        for c in 0..strip_cols {
-            let strip_idx = r * strip_cols + c;
-            let pane_idx_inner = (row_offset + r) * pane_cols + (col_offset + c);
-            pane_buf[pane_idx_inner] = strip_buf[strip_idx].take();
+    let pane_rows = pane_buf
+        .chunks_exact_mut(pane_cols)
+        .skip(row_offset)
+        .take(strip_rows);
+    let strip_rows_iter = strip_buf.chunks_exact_mut(strip_cols);
+    for (pane_row, strip_row) in pane_rows.zip(strip_rows_iter) {
+        let dst = &mut pane_row[col_offset..col_offset + strip_cols];
+        for (d, s) in dst.iter_mut().zip(strip_row.iter_mut()) {
+            *d = s.take();
         }
     }
 }

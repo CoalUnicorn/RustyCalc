@@ -133,7 +133,8 @@ impl BorderStroke {
                 width_px: STANDARD_BORDER_WIDTH,
                 double: true,
             },
-            // Thin / Dotted / SlantDashDot / etc.
+            // foreign #[non_exhaustive]: BorderStyle is upstream (ironcalc).
+            // Thin / Dotted / SlantDashDot / etc. fall through to standard solid.
             _ => Self {
                 width_px: STANDARD_BORDER_WIDTH,
                 double: false,
