@@ -11,8 +11,10 @@
 //! persists across frames.
 //!
 //! State pushes from JS mark layers dirty; `IronCanvas::paintIfDirty`
-//! drives each dirty layer's `paint`, which calls into [`RendererCore::render_grid`]
-//! / [`RendererCore::render_overlays`].
+//! drives each dirty layer's `paint`. The grid layer calls into
+//! [`RendererCore::render_grid`]; the overlay layer iterates the
+//! `Layer` decorations in `src/layer/decoration/` and calls back into
+//! `RendererCore` for the active-cell repaint + header highlights.
 //!
 //! # Render pipeline
 //!
@@ -21,9 +23,9 @@
 //! - [`RendererCore::render_grid`] — cells (4 frozen-pane quadrants, each
 //!   running 4 cell sub-passes: bg -> grid borders -> explicit borders -> text),
 //!   frozen separators, headers, corner box.
-//! - [`RendererCore::render_overlays`] — selection rectangle + autofill handle,
-//!   header highlights, extend preview, clipboard marching ants, point-mode
-//!   range, formula-ref highlights.
+//! - `OverlayLayer::paint` (in `src/layer/overlay.rs`) — orchestrates the
+//!   decorations in `src/layer/decoration/` (selection, autofill, clipboard,
+//!   point-mode, formula-refs) plus header highlights.
 //!
 //! The cell sub-pass order matters: grid borders run across the whole pane
 //! before explicit borders so an explicit `right` on cell A wins over cell B's
@@ -41,7 +43,10 @@
 pub(crate) mod cache;
 pub(crate) mod cell;
 pub(crate) mod chrome;
-pub(crate) mod overlay;
+// `renderer/overlay/` has moved to `src/layer/decoration/`. Each
+// decoration is now a struct that impls `Layer`; the orchestration that
+// used to live in `RendererCore::render_overlays` is now in
+// `OverlayLayer::paint`.
 
 use std::cell::{Cell, RefCell};
 use web_sys::CanvasRenderingContext2d;
@@ -49,7 +54,6 @@ use web_sys::CanvasRenderingContext2d;
 pub(crate) use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome};
 use crate::geometry::prim::Axis;
-use crate::layer::RenderOverlays;
 use crate::painter::CanvasPainter;
 use crate::renderer::cache::{FrameCache, PaneCache};
 use crate::CanvasModel;
@@ -66,9 +70,10 @@ use crate::painter::{BlitPainter, Painter};
 /// `FrameCache`, and the renderer-lifetime intern tables (font, column
 /// labels, per-cell color overrides). The two layer wrappers
 /// (`GridRenderer`, `OverlayRenderer`) each own a `RendererCore` and
-/// re-export only the entry point that belongs to their layer:
-/// `render_grid` for the grid, `render_overlays` for the overlay. A grid
-/// layer cannot call `render_overlays` and vice versa.
+/// re-export only what their layer is allowed to perform: `GridRenderer`
+/// exposes `render_grid` + the four-phase pipeline; `OverlayRenderer`
+/// exposes `painter()` + `repaint_active_cell` + `render_header_highlights`
+/// for `OverlayLayer` to drive the decoration walk.
 pub(crate) struct RendererCore<P: Painter> {
     pub(crate) painter: P,
     dpr: i32,
@@ -217,36 +222,6 @@ impl<P: Painter> RendererCore<P> {
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
     }
 
-    /// Paint the overlay layer: selection outline + autofill handle, header
-    /// highlights, extend preview, clipboard marching ants, point-mode range,
-    /// formula-ref highlights. Does **not** clear the canvas — caller owns
-    /// the clear (overlay layer needs transparent bg).
-    pub(crate) fn render_overlays(
-        &mut self,
-        model: &dyn CanvasModel,
-        overlays: &RenderOverlays,
-        frame: &Chrome,
-    ) {
-        self.painter.begin_group("overlay");
-        self.draw_selection(model, frame);
-        // Header highlights live on the overlay so nav events skip the grid repaint.
-        self.render_header_highlights(Axis::Row, frame);
-        self.render_header_highlights(Axis::Column, frame);
-        if let Some(target) = overlays.extend_to {
-            self.draw_extend_preview(model, frame, target);
-        }
-
-        // Secondary overlays: clipboard marching ants, point-mode range,
-        // formula-ref highlights. Each no-ops if its data is absent or lives
-        // on another sheet.
-        self.draw_clipboard_overlay(model, frame, overlays.clipboard.as_ref());
-        self.draw_point_overlay(frame, overlays.point_range);
-
-        if !overlays.formula_refs.is_empty() {
-            self.draw_formula_ref_overlays(model, frame, &overlays.formula_refs);
-        };
-        self.painter.end_group();
-    }
 }
 
 // Layer-facing wrappers
@@ -341,13 +316,28 @@ impl OverlayRenderer<CanvasPainter> {
 }
 
 impl<P: Painter> OverlayRenderer<P> {
-    pub(crate) fn render_overlays(
-        &mut self,
+    pub(crate) fn painter(&self) -> &P {
+        self.core.painter()
+    }
+
+    pub(crate) fn render_header_highlights(
+        &self,
+        axis: crate::geometry::prim::Axis,
+        frame: &Chrome,
+        selection_range: crate::types::coord::RCRange,
+    ) {
+        self.core
+            .render_header_highlights(axis, frame, selection_range);
+    }
+
+    pub(crate) fn repaint_active_cell(
+        &self,
         model: &dyn CanvasModel,
-        overlays: &RenderOverlays,
+        row: i32,
+        column: i32,
         frame: &Chrome,
     ) {
-        self.core.render_overlays(model, overlays, frame);
+        self.core.repaint_active_cell(model, row, column, frame);
     }
 }
 

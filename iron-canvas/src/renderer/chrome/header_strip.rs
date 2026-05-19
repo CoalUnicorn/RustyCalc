@@ -26,8 +26,13 @@ impl<P: Painter> RendererCore<P> {
     /// Overlay pass repainting only selected header cells so the grid
     /// layer never redraws on navigation — the base pass beneath stays
     /// intact.
-    pub(crate) fn render_header_highlights(&self, axis: Axis, frame: &Chrome) {
-        let (sel_start, sel_end) = axis.selection_range(frame.selection_range);
+    pub(crate) fn render_header_highlights(
+        &self,
+        axis: Axis,
+        frame: &Chrome,
+        selection_range: crate::types::coord::RCRange,
+    ) {
+        let (sel_start, sel_end) = axis.selection_range(selection_range);
         self.walk_header_strip(axis, frame, |i, along, t| {
             if i >= sel_start && i <= sel_end {
                 self.draw_header_cell(axis, frame, i, along, t, true);

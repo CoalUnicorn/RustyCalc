@@ -1,6 +1,11 @@
+mod decoration;
 mod grid;
 mod overlay;
 
+pub(crate) use decoration::{
+    autofill::AutofillLayer, clipboard::ClipboardLayer, formula_refs::FormulaRefsLayer,
+    point_mode::PointModeLayer, selection::SelectionLayer, Layer,
+};
 pub(crate) use grid::GridLayer;
 pub(crate) use overlay::OverlayLayer;
 pub use overlay::RenderOverlays;

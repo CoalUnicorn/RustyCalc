@@ -13,8 +13,7 @@ use std::hash::{Hash, Hasher};
 use crate::geometry::slot::scroll_first;
 use crate::geometry::{
     constants::{
-        AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN,
-        LAST_ROW,
+        AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
     },
     pixel_rect::PixelRect,
     prim::Point,
@@ -38,7 +37,7 @@ pub(crate) use pane_set::{measure_row_header_width, PaneSet, RecycledSlots};
 /// was edited since this `Chrome` was painted, and the blit's kept band
 /// would carry stale pixels. Catches the canonical edit-then-scroll case
 /// without requiring the consumer to call `markContentDirty`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct ActiveCellSnapshot {
     pub row: i32,
     pub col: i32,
@@ -78,20 +77,6 @@ pub(crate) struct Chrome {
     /// Top-left of the cell area; single source of truth for hit-test
     /// and viewport math.
     pub cell_origin: Point,
-    /// Selection snapshot at paint time, raw `[r1, c1, r2, c2]` from
-    /// `SelectedView.range`. Pins `autofill_handle` to the painted
-    /// selection even if the model's selection has since moved.
-    ///
-    /// Invariant: no paint or hit-test code reads
-    /// `model.get_selected_view().selection`; every consumer goes through
-    /// this field, so painted and queried geometry stay in lockstep.
-    pub selection_range: RCRange,
-    /// Active-cell coords + value hash at paint time. `screen_for_blit` rejects
-    /// when the live model's value at these coords no longer matches,
-    /// catching edit-then-scroll cases where the consumer missed
-    /// `markContentDirty`. Refreshed by `refresh_overlay_inputs` on
-    /// SlotsReuse paths so selection-only moves don't poison the check.
-    pub(crate) active_cell: ActiveCellSnapshot,
     /// Canvas size at build time. `is_still_valid` reads this to detect
     /// a resize.
     pub canvas_size: CanvasSize,
@@ -142,7 +127,8 @@ impl Chrome {
     ///     `ARCHITECTURE.md` for build phases A–E.
     ///   * `SlotsReuse` — prev's slot vecs survive verbatim; only
     ///     per-frame state (theme + `pane_fingerprints` rotation) is
-    ///     refreshed. Caller must invoke `refresh_overlay_inputs` after.
+    ///     refreshed. Caller refreshes overlay state separately
+    ///     (`SelectionLayer::refresh` in the orchestrator).
     ///   * `Blit(plan)` — caller has already issued `Painter::blit` to
     ///     shift the kept band; this frame rebuilds only the scroll-axis
     ///     slot vec (kept band heights/widths carry over from prev; the
@@ -239,7 +225,6 @@ impl Chrome {
             left_column: 1,
         });
         let sheet = model.get_selected_sheet();
-        let active_cell = ActiveCellSnapshot::capture(model, sheet, view.row, view.column);
 
         // Phase A — frozen counts only.
         let frozen_row_count = model.get_frozen_rows_count(sheet).unwrap_or(0);
@@ -283,8 +268,6 @@ impl Chrome {
             row_header_thickness,
             col_header_thickness,
             cell_origin,
-            selection_range: view.selection,
-            active_cell,
             canvas_size: canvas,
             theme: theme.clone(),
             prev_pane_fingerprints,
@@ -344,6 +327,7 @@ impl Chrome {
         model: &dyn CanvasModel,
         canvas: CanvasSize,
         theme: &CanvasTheme,
+        active_cell: &ActiveCellSnapshot,
     ) -> Option<BlitPlan> {
         if canvas != self.canvas_size || theme != &self.theme {
             return None;
@@ -367,8 +351,9 @@ impl Chrome {
         // Defensive content check: if the cell we painted as active no
         // longer matches the live model, the blit's kept band would
         // shift pre-edit pixels (canonical edit-then-scroll bug when
-        // consumer missed `markContentDirty`).
-        if !self.active_cell.matches(model, sheet) {
+        // consumer missed `markContentDirty`). Snapshot is sourced from
+        // `SelectionLayer` by the orchestrator.
+        if !active_cell.matches(model, sheet) {
             return None;
         }
         match (new_top != old_top, new_left != old_left) {
@@ -377,18 +362,6 @@ impl Chrome {
             // (false, false): caller already filtered no-op scrolls.
             // (true, true): two-axis scroll has no single-shift plan.
             (false, false) | (true, true) => None,
-        }
-    }
-
-    /// Refresh overlay-only fields (independent of the slot vecs). Call on
-    /// the overlay-only fast path after `is_still_valid` returns true,
-    /// and on SlotsReuse rebuilds so the active-cell snapshot tracks
-    /// selection moves within an unchanged viewport.
-    pub(crate) fn refresh_overlay_inputs(&mut self, model: &dyn CanvasModel) {
-        if let Some(view) = model.get_selected_view() {
-            self.selection_range = view.selection;
-            self.active_cell =
-                ActiveCellSnapshot::capture(model, self.sheet, view.row, view.column);
         }
     }
 
@@ -459,8 +432,8 @@ impl Chrome {
         true
     }
 
-    pub(crate) fn autofill_handle(&self) -> Option<Point> {
-        let norm = self.selection_range.normalized();
+    pub(crate) fn autofill_handle(&self, selection_range: RCRange) -> Option<Point> {
+        let norm = selection_range.normalized();
         let r2 = norm.r2;
         let c2 = norm.c2;
         if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
@@ -476,8 +449,8 @@ impl Chrome {
         })
     }
 
-    pub(crate) fn autofill_handle_rect(&self) -> Option<PixelRect> {
-        let p = self.autofill_handle()?;
+    pub(crate) fn autofill_handle_rect(&self, selection_range: RCRange) -> Option<PixelRect> {
+        let p = self.autofill_handle(selection_range)?;
         Some(PixelRect {
             top_left: Point {
                 x: p.x - AUTOFILL_HANDLE_PX,
@@ -511,16 +484,9 @@ impl Chrome {
         let (Some(row), Some(column)) = (p.pixel_to_row(y), p.pixel_to_col(x)) else {
             return HitTest::Outside;
         };
-        if let Some(h) = self.autofill_handle_rect() {
-            let pad = AUTOFILL_HIT_PAD_PX;
-            if x >= h.top_left.x - pad
-                && x <= h.right() + pad
-                && y >= h.top_left.y - pad
-                && y <= h.bottom() + pad
-            {
-                return HitTest::AutofillHandle { row, column };
-            }
-        }
+        // `AutofillHandle` is resolved by `AutofillLayer::hit_test` in
+        // the orchestrator's reverse-z walk; the grid path returns plain
+        // cell / header / corner / outside.
         HitTest::Cell { row, column }
     }
 

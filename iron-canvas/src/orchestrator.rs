@@ -7,7 +7,11 @@ use crate::chrome::{BlitPlan, Chrome, FramePath, FrameValidity, PaneRegionMask};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::geometry::CanvasSize;
-use crate::layer::{GridLayer, OverlayLayer, RenderOverlays};
+use crate::layer::{
+    AutofillLayer, ClipboardLayer, FormulaRefsLayer, GridLayer, Layer, OverlayLayer,
+    PointModeLayer, RenderOverlays, SelectionLayer,
+};
+use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::signal::GridSignals;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -40,7 +44,11 @@ pub struct IronCanvas {
     grid: GridLayer,
     overlay: OverlayLayer,
     theme: CanvasTheme,
-    overlays: RenderOverlays,
+    selection: SelectionLayer,
+    autofill: AutofillLayer,
+    clipboard: ClipboardLayer,
+    point_mode: PointModeLayer,
+    formula_refs: FormulaRefsLayer,
     model: Option<Rc<dyn CanvasModel>>,
     last_frame: Option<Chrome>,
     /// Logical (CSS) canvas size; written by `resize`, read when building
@@ -67,7 +75,11 @@ impl IronCanvas {
             grid,
             overlay,
             theme: CanvasTheme::light(),
-            overlays: RenderOverlays::default(),
+            selection: SelectionLayer::default(),
+            autofill: AutofillLayer::default(),
+            clipboard: ClipboardLayer::default(),
+            point_mode: PointModeLayer::default(),
+            formula_refs: FormulaRefsLayer::default(),
             model: None,
             last_frame: None,
             size: CanvasSize { w: 0.0, h: 0.0 },
@@ -213,11 +225,39 @@ impl IronCanvas {
 }
 
 impl IronCanvas {
-    /// Push overlay state. Overlay-only; value-compared, so a redundant
-    /// push is a no-op.
+    /// Push overlay state. Fans out into per-layer setters; each value-
+    /// compares, so a redundant push is still a no-op.
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
-        if overlays != self.overlays {
-            self.overlays = overlays;
+        self.set_extend_to(overlays.extend_to);
+        self.set_clipboard(overlays.clipboard);
+        self.set_point_range(overlays.point_range);
+        self.set_formula_refs(overlays.formula_refs);
+    }
+
+    pub fn set_extend_to(&mut self, target: Option<AutofillTarget>) {
+        if self.autofill.extend_to != target {
+            self.autofill.extend_to = target;
+            self.overlay.raise(GridSignals::OVERLAY);
+        }
+    }
+
+    pub fn set_clipboard(&mut self, area: Option<SheetArea>) {
+        if self.clipboard.clipboard != area {
+            self.clipboard.clipboard = area;
+            self.overlay.raise(GridSignals::OVERLAY);
+        }
+    }
+
+    pub fn set_point_range(&mut self, range: Option<RCRange>) {
+        if self.point_mode.point_range != range {
+            self.point_mode.point_range = range;
+            self.overlay.raise(GridSignals::OVERLAY);
+        }
+    }
+
+    pub fn set_formula_refs(&mut self, refs: Vec<FormulaRef>) {
+        if self.formula_refs.refs != refs {
+            self.formula_refs.refs = refs;
             self.overlay.raise(GridSignals::OVERLAY);
         }
     }
@@ -276,11 +316,30 @@ impl IronCanvas {
 
     /// Resolve canvas-space `(x, y)` against the last painted frame.
     /// Returns `Outside` before the first paint or for negative coordinates.
+    ///
+    /// Decoration layers are tested in reverse-z order; the first `Some`
+    /// wins. Today only `AutofillLayer` claims a hit. Misses fall through
+    /// to `Chrome::hit_test` for the grid (cell / header / corner / outside).
     pub fn hit_test(&self, x: f64, y: f64) -> HitTest {
         let Some(frame) = self.last_frame.as_ref() else {
             return HitTest::Outside;
         };
-        frame.hit_test(x.round() as i32, y.round() as i32)
+        let xi = x.round() as i32;
+        let yi = y.round() as i32;
+        let layers: [&dyn Layer; 5] = [
+            &self.formula_refs,
+            &self.point_mode,
+            &self.clipboard,
+            &self.autofill,
+            &self.selection,
+        ];
+        let sel = self.selection.selection_range;
+        for layer in layers {
+            if let Some(hit) = layer.hit_test(frame, sel, xi, yi) {
+                return hit;
+            }
+        }
+        frame.hit_test(xi, yi)
     }
 
     /// Probe for a row/column resize handle near `(x, y)`. `tolerance` is
@@ -311,7 +370,9 @@ impl IronCanvas {
     /// `HitTest::AutofillHandle`; the two are not interchangeable because
     /// `hit_test` applies `AUTOFILL_HIT_PAD_PX` and this does not.
     pub fn autofill_handle(&self) -> Option<Point> {
-        self.last_frame.as_ref()?.autofill_handle()
+        self.last_frame
+            .as_ref()?
+            .autofill_handle(self.selection.selection_range)
     }
 
     /// Mark the overlay dirty. Selection, autofill, formula-ref, and
@@ -370,7 +431,9 @@ impl IronCanvas {
             if let Some(plan) = self
                 .last_frame
                 .as_ref()
-                .and_then(|f| f.screen_for_blit(model, self.size, &self.theme))
+                .and_then(|f| {
+                    f.screen_for_blit(model, self.size, &self.theme, &self.selection.active_cell)
+                })
             {
                 return PaintRegime::Viewport(plan);
             }
@@ -396,11 +459,21 @@ impl IronCanvas {
     /// anything that leaves grid pixels untouched. `decide()` proves the
     /// preconditions (slot vecs still match, `last_frame` is `Some`).
     fn paint_overlay(&mut self, model: &dyn CanvasModel) {
-        let Some(prev) = self.last_frame.as_mut() else {
+        self.selection.refresh(model);
+        let Some(prev) = self.last_frame.as_ref() else {
             return;
         };
-        prev.refresh_overlay_inputs(model);
-        self.overlay.paint(&self.overlays, model, prev);
+        self.overlay.paint(
+            model,
+            prev,
+            &self.selection,
+            &[
+                &self.autofill,
+                &self.clipboard,
+                &self.point_mode,
+                &self.formula_refs,
+            ],
+        );
     }
 
     /// Scroll-blit fast path. `decide()` already filtered no-op scrolls
@@ -420,7 +493,18 @@ impl IronCanvas {
             FramePath::Blit(&plan),
         );
         self.grid.paint_blit(model, &frame, &plan);
-        self.overlay.paint(&self.overlays, model, &frame);
+        self.selection.refresh(model);
+        self.overlay.paint(
+            model,
+            &frame,
+            &self.selection,
+            &[
+                &self.autofill,
+                &self.clipboard,
+                &self.point_mode,
+                &self.formula_refs,
+            ],
+        );
         self.last_frame = Some(frame);
     }
 
@@ -438,21 +522,37 @@ impl IronCanvas {
         let Some(prev) = self.last_frame.take() else {
             return;
         };
-        let mut frame = Chrome::next(
+        let frame = Chrome::next(
             Some(prev),
             model,
             self.size,
             &self.theme,
             FramePath::SlotsReuse,
         );
-        frame.refresh_overlay_inputs(model);
 
         self.grid.invalidate_pane_cache(mask);
         self.grid.invalidate_paint_cache();
 
         self.grid.paint(model, &frame);
+        // Refresh the selection snapshot unconditionally: even on a
+        // CONTENT-only signal the grid just repainted with new values,
+        // so the next paint's `screen_for_blit` must compare against
+        // the post-edit hash — otherwise a well-behaved consumer who
+        // called `markContentDirty` gets their next scroll falsely
+        // rejected by the defensive check and forced to Fresh.
+        self.selection.refresh(model);
         if signals.overlay_dirty() {
-            self.overlay.paint(&self.overlays, model, &frame);
+            self.overlay.paint(
+                model,
+                &frame,
+                &self.selection,
+                &[
+                    &self.autofill,
+                    &self.clipboard,
+                    &self.point_mode,
+                    &self.formula_refs,
+                ],
+            );
         }
         self.last_frame = Some(frame);
     }
@@ -475,8 +575,19 @@ impl IronCanvas {
         }
         self.grid.invalidate_paint_cache();
         self.grid.paint(model, &frame);
+        self.selection.refresh(model);
         if signals.overlay_dirty() {
-            self.overlay.paint(&self.overlays, model, &frame);
+            self.overlay.paint(
+                model,
+                &frame,
+                &self.selection,
+                &[
+                    &self.autofill,
+                    &self.clipboard,
+                    &self.point_mode,
+                    &self.formula_refs,
+                ],
+            );
         }
 
         self.last_frame = Some(frame);

@@ -18,6 +18,15 @@ use crate::types::ui::HitTest;
 use crate::{chrome::Chrome, CanvasView};
 use crate::{CanvasModel, CanvasSize, RCRange};
 
+fn range_of(m: &MockCanvasModel) -> RCRange {
+    RCRange {
+        r1: m.range[0],
+        c1: m.range[1],
+        r2: m.range[2],
+        c2: m.range[3],
+    }
+}
+
 struct MockCanvasModel {
     sheet: u32,
     frozen_rows: i32,
@@ -242,7 +251,7 @@ fn autofill_handle_is_none_for_full_sheet_selection() {
         ..Default::default()
     };
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
-    assert!(frame.autofill_handle().is_none());
+    assert!(frame.autofill_handle(range_of(&m)).is_none());
 }
 
 #[test]
@@ -253,7 +262,7 @@ fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
     };
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
     let p = frame
-        .autofill_handle()
+        .autofill_handle(range_of(&m))
         .expect("finite selection has handle");
     assert_eq!(
         p.x,
@@ -274,10 +283,10 @@ fn autofill_handle_rect_anchors_at_bot_right_corner() {
         ..Default::default()
     };
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
-    let Some(corner) = frame.autofill_handle() else {
+    let Some(corner) = frame.autofill_handle(range_of(&m)) else {
         panic!("expected autofill handle for partial-cell selection [2,3,4,5]");
     };
-    let Some(rect) = frame.autofill_handle_rect() else {
+    let Some(rect) = frame.autofill_handle_rect(range_of(&m)) else {
         panic!("expected autofill rect for partial-cell selection [2,3,4,5]");
     };
     assert_eq!(rect.top_left.x, corner.x - AUTOFILL_HANDLE_PX);
@@ -293,42 +302,57 @@ fn no_autofill_handle_rect_full_sheet_selection() {
         ..Default::default()
     };
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
-    assert!(frame.autofill_handle_rect().is_none());
+    assert!(frame.autofill_handle_rect(range_of(&m)).is_none());
 }
 
 #[test]
 fn hit_test_accepts_click_within_handle_pad() {
     // A click 1 px past the handle's bottom-right corner — inside the
-    // 2-px forgiveness pad — must classify as AutofillHandle.
+    // 2-px forgiveness pad — must classify as AutofillHandle. The
+    // dispatch lives on `AutofillLayer::hit_test` after A7; the
+    // orchestrator's reverse-z walk runs this layer first.
+    use crate::layer::{AutofillLayer, Layer};
     let m = MockCanvasModel {
         range: [2, 3, 4, 5],
         ..Default::default()
     };
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
-    let Some(rect) = frame.autofill_handle_rect() else {
+    let sel = range_of(&m);
+    let Some(rect) = frame.autofill_handle_rect(sel) else {
         panic!("expected autofill rect for partial-cell selection [2,3,4,5]");
     };
     let x = rect.right() + 1;
     let y = rect.bottom() + 1;
-    match frame.hit_test(x, y) {
-        HitTest::AutofillHandle { .. } => {}
+    let af = AutofillLayer::default();
+    match af.hit_test(&frame, sel, x, y) {
+        Some(HitTest::AutofillHandle { .. }) => {}
         other => panic!("expected AutofillHandle within pad, got {:?}", other),
     }
 }
 
 #[test]
 fn hit_test_rejects_click_past_handle_pad() {
-    // One pixel past the pad on each axis — must fall through to Cell.
+    // One pixel past the pad on each axis — `AutofillLayer::hit_test`
+    // returns None and the orchestrator's walk falls through to
+    // `Chrome::hit_test`, which now classifies cells directly without
+    // the handle check.
+    use crate::layer::{AutofillLayer, Layer};
     let m = MockCanvasModel {
         range: [2, 3, 4, 5],
         ..Default::default()
     };
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
-    let Some(rect) = frame.autofill_handle_rect() else {
+    let sel = range_of(&m);
+    let Some(rect) = frame.autofill_handle_rect(sel) else {
         panic!("expected autofill rect for partial-cell selection [2,3,4,5]");
     };
     let x = rect.right() + AUTOFILL_HIT_PAD_PX + 1;
     let y = rect.bottom() + AUTOFILL_HIT_PAD_PX + 1;
+    let af = AutofillLayer::default();
+    assert!(
+        af.hit_test(&frame, sel, x, y).is_none(),
+        "must miss past pad"
+    );
     match frame.hit_test(x, y) {
         HitTest::Cell { .. } => {}
         other => panic!("expected Cell past pad, got {:?}", other),
@@ -337,24 +361,26 @@ fn hit_test_rejects_click_past_handle_pad() {
 
 #[test]
 fn autofill_handle_tracks_in_place_selection_range_update() {
-    // Mirrors the orchestrator's overlay-only repaint path: when the active
-    // cell moves without scrolling, `paintIfDirty` mutates the reused
-    // frame's `selection_range` in place. The handle must land on the new
-    // bottom-right, not the position captured by the previous full paint.
+    // After B1 the selection range is a parameter; passing different
+    // ranges to the same frame must move the handle. (Pre-B1 this was a
+    // mutation test against `frame.selection_range`.)
     let m = MockCanvasModel {
         range: [2, 3, 2, 3],
         ..Default::default()
     };
-    let mut frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
-    let before = frame.autofill_handle().expect("initial handle");
+    let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
+    let before = frame
+        .autofill_handle(range_of(&m))
+        .expect("initial handle");
 
-    frame.selection_range = RCRange {
-        r1: 5,
-        c1: 6,
-        r2: 5,
-        c2: 6,
-    };
-    let after = frame.autofill_handle().expect("post-update handle");
+    let after = frame
+        .autofill_handle(RCRange {
+            r1: 5,
+            c1: 6,
+            r2: 5,
+            c2: 6,
+        })
+        .expect("post-update handle");
 
     assert_ne!(before, after, "handle must move with selection_range");
     assert_eq!(

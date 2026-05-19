@@ -10,12 +10,20 @@ use std::cell::Cell;
 
 use ironcalc_base::types::{CellType, Style};
 
-use crate::chrome::{Chrome, FramePath};
+use crate::chrome::{ActiveCellSnapshot, Chrome, FramePath};
 use crate::painter::BlitPainter;
 use crate::renderer::RendererCore;
 use crate::test::painter::{DrawOp, RecorderPainter};
 use crate::theme::CanvasTheme;
 use crate::{CanvasModel, CanvasSize, CanvasView, RCRange};
+
+/// Capture an `ActiveCellSnapshot` from the model's view. After B2
+/// `screen_for_blit` takes the snapshot as a parameter; tests source it
+/// here instead of reading it off `Chrome`.
+fn snap(m: &ScrollModel) -> ActiveCellSnapshot {
+    let view = m.get_selected_view().expect("scroll model has view");
+    ActiveCellSnapshot::capture(m, m.get_selected_sheet(), view.row, view.column)
+}
 
 /// Scrollable model. `top_row` / `left_column` live in `Cell`s so a
 /// single test can rebuild `Chrome::next` after a scroll without
@@ -143,7 +151,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     m.set_top_row(2);
 
     let plan = frame0
-        .screen_for_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-row scroll must qualify for blit");
 
     // Simulate the orchestrator's blit fast-path on the same core so
@@ -204,7 +212,7 @@ fn scroll_past_viewport_disqualifies_blit() {
     // by 100 rows → no overlap with prev viewport → screen_for_blit must bail.
     m.set_top_row(101);
 
-    let plan = frame0.screen_for_blit(&m, canvas, &theme);
+    let plan = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m));
     assert!(
         plan.is_none(),
         "scroll past viewport extent must not qualify for blit",
@@ -226,7 +234,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
     m.set_left_column(2);
 
     let plan = frame0
-        .screen_for_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-column scroll must qualify for blit");
 
     let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
@@ -272,7 +280,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
 
     m.set_top_row(2);
     let plan = frame0
-        .screen_for_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-row scroll must qualify for blit");
     let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
     issue_blits(core.painter(), &plan);
@@ -319,13 +327,17 @@ fn active_cell_value_change_disqualifies_blit() {
     let canvas = canvas();
     // Frame 0 paints with row 1 ("R1" coords) returning "".
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    // Snapshot captured at paint time, as SelectionLayer would. The
+    // defensive check in `screen_for_blit` compares this snapshot
+    // against the live model on the *next* blit attempt.
+    let active_at_paint = snap(&m);
 
     // Simulate the bug: row 1's value flips "" → "R1" (proxy for an edit
     // committed at the active cell) AND viewport scrolls by one row.
     m.set_data_until(5);
     m.set_top_row(2);
 
-    let plan = frame0.screen_for_blit(&m, canvas, &theme);
+    let plan = frame0.screen_for_blit(&m, canvas, &theme, &active_at_paint);
     assert!(
         plan.is_none(),
         "edit-then-scroll must disqualify the blit when the active cell value changed",
@@ -345,7 +357,7 @@ fn active_cell_value_unchanged_allows_blit() {
 
     m.set_top_row(2);
 
-    let plan = frame0.screen_for_blit(&m, canvas, &theme);
+    let plan = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m));
     assert!(
         plan.is_some(),
         "pure scroll with unchanged active-cell value must qualify for the blit",
@@ -367,7 +379,7 @@ fn overlap_row_height_change_disqualifies_blit() {
     m.set_row5_height(40.0);
     m.set_top_row(2);
 
-    let plan = frame0.screen_for_blit(&m, canvas, &theme);
+    let plan = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m));
     assert!(
         plan.is_none(),
         "row-height mutation inside the kept band must disqualify the blit",
@@ -400,7 +412,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
 
     m.set_top_row(2);
     let plan = frame0
-        .screen_for_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-row scroll must qualify for blit");
 
     let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
@@ -450,7 +462,7 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
 
     m.set_top_row(6);
     let plan = frame0
-        .screen_for_blit(&m, canvas, &theme)
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("5-row scroll must qualify for blit");
 
     let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));

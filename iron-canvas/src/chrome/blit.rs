@@ -20,8 +20,7 @@ use crate::{CanvasModel, CanvasSize};
 
 use super::pane_set::ShiftDir;
 use super::{
-    measure_row_header_width, ActiveCellSnapshot, Chrome, FrameKindTag, PaneRegion, PaneRegionMask,
-    PaneSet,
+    measure_row_header_width, Chrome, FrameKindTag, PaneRegion, PaneRegionMask, PaneSet,
 };
 
 /// One pane's contribution to a scroll-blit. A row-axis scroll emits a
@@ -305,7 +304,6 @@ pub(super) fn try_blit_reuse(
 
     let stale = plan.shift_panes();
     let seeded_fps = prev.seed_next_pane_fingerprints(stale);
-    let active_cell = ActiveCellSnapshot::capture(model, prev.sheet, view.row, view.column);
 
     Some(Chrome {
         sheet: prev.sheet,
@@ -313,8 +311,6 @@ pub(super) fn try_blit_reuse(
         row_header_thickness,
         col_header_thickness: prev.col_header_thickness,
         cell_origin: prev.cell_origin,
-        selection_range: view.selection,
-        active_cell,
         canvas_size: canvas,
         theme: theme.clone(),
         prev_pane_fingerprints: prev.pane_fingerprints.get(),
