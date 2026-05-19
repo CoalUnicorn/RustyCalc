@@ -98,8 +98,9 @@ pub(crate) struct Chrome {
     pub(crate) kind: FrameKindTag,
     /// Which panes `render_grid` must paint this frame. The `FramePath::Fresh`
     /// / `SlotsReuse` arms of `Chrome::next` set this to `ALL`; the
-    /// `FramePath::Blit` arm narrows it to the cross-axis panes the
-    /// `BlitPlan` proves were unchanged by the scroll.
+    /// `FramePath::Blit` arm narrows it to the panes the `BlitPlan` shifts
+    /// (i.e. those whose strip needs repaint after the kept band is blitted).
+    /// Cross-axis panes the blit leaves intact are excluded.
     pub(crate) stale_panes: PaneRegionMask,
 }
 

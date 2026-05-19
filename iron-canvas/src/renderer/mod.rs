@@ -12,7 +12,7 @@
 //!
 //! State pushes from JS mark layers dirty; `IronCanvas::paintIfDirty`
 //! drives each dirty layer's `paint`. The grid layer calls into
-//! [`RendererCore::render_grid`]; the overlay layer iterates the
+//! `RendererCore::render_grid`; the overlay layer iterates the
 //! `Layer` decorations in `src/layer/decoration/` and calls back into
 //! `RendererCore` for the active-cell repaint + header highlights.
 //!
@@ -20,7 +20,7 @@
 //!
 //! Two paint entry points, each driven by `paintIfDirty` per dirty layer:
 //!
-//! - [`RendererCore::render_grid`] — cells (4 frozen-pane quadrants, each
+//! - `RendererCore::render_grid` — cells (4 frozen-pane quadrants, each
 //!   running 4 cell sub-passes: bg -> grid borders -> explicit borders -> text),
 //!   frozen separators, headers, corner box.
 //! - `OverlayLayer::paint` (in `src/layer/overlay.rs`) — orchestrates the

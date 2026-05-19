@@ -5,9 +5,22 @@ pub(crate) const MEDIUM_BORDER_WIDTH: i32 = 2;
 pub(crate) const THICK_BORDER_WIDTH: i32 = 3;
 pub(crate) const DASHED_BORDER_WIDTH: i32 = 2;
 
+/// Pixel offset from the canvas edge to the chrome's outer 1-px border
+/// line, which `draw_corner_box` strokes sharply at `header_thickness + 0.5`.
 pub const HEADER_OFFSET: i32 = 1;
+
+/// Height of the column-header strip in pixels. Static — the strip never
+/// resizes to fit content.
 pub const HEADER_ROW_HEIGHT: i32 = 28;
+
+/// Minimum width of the row-header strip in pixels. `measure_row_header_width`
+/// floors `Chrome.row_header_thickness` at this value so labels under
+/// three digits never shrink the strip.
 pub const HEADER_COL_WIDTH: i32 = 30;
+
+/// Frozen-pane separator thickness in pixels. Used both as the stroke
+/// width drawn by `draw_frozen_separators` and as the gap that
+/// `pane_set` reserves between the frozen and scrolling pane bands.
 pub const FROZEN_SEP: i32 = 3;
 
 /// Pixel offset from a header strip's outer edge to the cell area origin.
@@ -34,6 +47,7 @@ pub const AUTOFILL_HIT_PAD_PX: i32 = 2;
 pub const DEFAULT_ROW_HEIGHT: f64 = 21.0;
 /// Fallback column width when the model returns `None` (column not explicitly sized).
 pub const DEFAULT_COL_WIDTH: f64 = 64.0;
-/// Min/Max index (Excel/OOXML limit).
+/// Maximum row index (Excel/OOXML limit).
 pub const LAST_ROW: i32 = 1_048_576;
+/// Maximum column index (Excel/OOXML limit).
 pub const LAST_COLUMN: i32 = 16_384;

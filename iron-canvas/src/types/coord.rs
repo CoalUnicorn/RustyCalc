@@ -1,3 +1,6 @@
+/// Inclusive rectangular range of cells. The two corners may be in either
+/// order — call [`RCRange::normalized`] if you need `r1 <= r2` and
+/// `c1 <= c2`.
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct RCRange {
     pub r1: i32,
@@ -21,6 +24,15 @@ impl RCRange {
         self.c2 - self.c1 + 1
     }
     /// Swap corners so `r1 <= r2` and `c1 <= c2`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use iron_canvas::RCRange;
+    /// let backwards = RCRange { r1: 5, c1: 3, r2: 2, c2: 1 };
+    /// let n = backwards.normalized();
+    /// assert_eq!((n.r1, n.c1, n.r2, n.c2), (2, 1, 5, 3));
+    /// ```
     pub fn normalized(self) -> Self {
         Self {
             r1: self.r1.min(self.r2),
@@ -34,6 +46,16 @@ impl RCRange {
         self.r1 == self.r2 && self.c1 == self.c2
     }
 
+    /// Iterate all `(row, col)` pairs in the range, row-major.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use iron_canvas::RCRange;
+    /// let r = RCRange { r1: 1, c1: 1, r2: 2, c2: 2 };
+    /// let v: Vec<_> = r.cells().collect();
+    /// assert_eq!(v, vec![(1, 1), (1, 2), (2, 1), (2, 2)]);
+    /// ```
     pub fn cells(self) -> impl Iterator<Item = (i32, i32)> {
         self.rows()
             .flat_map(move |row| self.columns().map(move |col| (row, col)))
@@ -74,15 +96,20 @@ pub struct AutofillTarget {
     pub col: i32,
 }
 
+/// An [`RCRange`] qualified with the sheet it lives on.
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct SheetArea {
     pub sheet: u32,
     pub range: RCRange,
 }
 
+/// One cell or range reference parsed out of an in-edit formula. The
+/// renderer outlines `sheet_area` with the color slot at
+/// `color_idx % FORMULA_REF_COLORS.len()` (see [`crate::theme`]), so any
+/// `usize` is accepted; `active` emphasises the ref the cursor sits on.
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct FormulaRef {
-    pub sheet_area: SheetArea, // what to outline
-    pub color_idx: usize,      // index into FORMULA_REF_COLORS
-    pub active: bool,          // emphasize the ref under cursor
+    pub sheet_area: SheetArea,
+    pub color_idx: usize,
+    pub active: bool,
 }

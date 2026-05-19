@@ -20,8 +20,11 @@
 //! # Submodules
 //!
 //! - [`geometry`] — rect/line primitives and pixel↔cell coordinate math.
-//! - [`renderer`] — `RendererCore` plus the `cell/`, `chrome/`, `overlay/`
-//!   paint subtrees. See its module doc for the pipeline walk-through.
+//! - [`renderer`] — `RendererCore` plus the `cell/` and `chrome/` paint
+//!   subtrees. Overlay decorations (selection, autofill, clipboard,
+//!   point-mode, formula refs) live in `src/layer/decoration/` as `Layer`
+//!   trait impls, orchestrated by `OverlayLayer::paint`. See the module
+//!   doc for the pipeline walk-through.
 //! - [`theme`] — `CanvasTheme` palette + CSS-var bridge.
 //! - [`types`] — public address types (`RCRange`, `FormulaRef`) and UI
 //!   variants (`HitTest`, `ResizeTarget`) used at the JS surface.
@@ -57,4 +60,6 @@ pub use geometry::{
 pub use layer::RenderOverlays;
 pub use model_adapter::{CanvasModel, CanvasView};
 pub use orchestrator::IronCanvas;
-pub use types::coord::{FormulaRef, RCRange};
+pub use theme::{CanvasTheme, ThemeVariables};
+pub use types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
+pub use types::ui::{HitTest, ResizeTarget};

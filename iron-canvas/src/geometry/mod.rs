@@ -1,3 +1,10 @@
+//! Pixel- and cell-space primitives.
+//!
+//! Every visible artifact composes from [`pixel_rect::PixelRect`] and
+//! [`prim::Line`]. The cell-address ↔ pixel-rect mapping lives in
+//! [`slot`]; layout values in [`constants`]; the Excel-style column
+//! label helper in [`utils`].
+
 pub mod constants;
 pub mod pixel_rect;
 pub mod prim;

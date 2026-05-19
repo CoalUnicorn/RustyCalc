@@ -69,14 +69,14 @@
                 font-weight: 600;
             }
             .hint {
-                margin: 12px 0 0;
+                margin: 8px 0 0;
                 color: #888;
                 font-size: 12px;
             }
         </style>
     </head>
     <body>
-        <h1>iron-canvas &mdash; JsBackedModel smoke harness</h1>
+        <h1>iron-canvas &mdash; smoke harness</h1>
         <div id="status">loading wasm…</div>
         <div class="stack">
             <canvas id="grid"></canvas>
@@ -96,8 +96,8 @@
             import initIronCalc, { Model } from "./vendor/ironcalc/wasm.js";
 
             const statusEl = document.getElementById("status");
-            const tabsEl = document.getElementById("tabs");
-            const gridEl = document.getElementById("grid");
+            const tabsEl   = document.getElementById("tabs");
+            const gridEl   = document.getElementById("grid");
             const overlayEl = document.getElementById("overlay");
 
             const setStatus = (msg) => {

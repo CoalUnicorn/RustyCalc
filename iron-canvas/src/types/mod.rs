@@ -1,11 +1,12 @@
-//! Canvas domain types - the authoritative type definitions for the canvas module.
+//! Public address and UI types for the canvas surface.
 //!
-//! Types are split by visibility:
-//! - `pub(crate)` - renderer-internal: text layout, pane geometry, drawing params
-//! - `pub` - worksheet-visible: overlay state passed in from the Leptos component
+//! - [`coord`] — cell-space addressing: `RCRange`, `SheetArea`,
+//!   `FormulaRef`, `AutofillTarget`.
+//! - [`ui`] — pointer-resolution outcomes: `HitTest`, `ResizeTarget`.
 //!
-//! `*Paint` submodules hold renderer-ready snapshots resolved from the model.
-//! Convention: resolve in `crate::types`, paint in `crate::renderer`.
+//! Renderer-ready `*Paint` snapshots (`CellPaint`, `BorderPaint`,
+//! `TextPaint`) live alongside the paint code in `crate::renderer::cell`,
+//! not here.
 
 pub mod coord;
 pub mod ui;

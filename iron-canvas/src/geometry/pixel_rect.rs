@@ -30,6 +30,21 @@ impl PixelRect {
         }
     }
     /// Shrink by `dx` / `dy` on each side (negative values grow the rect).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use iron_canvas::{PixelRect, Point};
+    /// let r = PixelRect { top_left: Point { x: 10, y: 20 }, width: 100, height: 50 };
+    ///
+    /// let shrunk = r.inset(2, 3);
+    /// assert_eq!(shrunk.top_left, Point { x: 12, y: 23 });
+    /// assert_eq!((shrunk.width, shrunk.height), (96, 44));
+    ///
+    /// let grown = r.inset(-1, -1);
+    /// assert_eq!(grown.top_left, Point { x: 9, y: 19 });
+    /// assert_eq!((grown.width, grown.height), (102, 52));
+    /// ```
     pub fn inset(&self, dx: i32, dy: i32) -> Self {
         Self {
             top_left: Point {
@@ -63,6 +78,16 @@ impl PixelRect {
     }
 }
 
+/// Inline-CSS layout string (`left:Xpx;top:Ypx;width:Wpx;height:Hpx;`),
+/// useful for setting a Leptos element's `style` attribute.
+///
+/// # Examples
+///
+/// ```
+/// use iron_canvas::{PixelRect, Point};
+/// let r = PixelRect { top_left: Point { x: 10, y: 20 }, width: 100, height: 50 };
+/// assert_eq!(r.to_string(), "left:10px;top:20px;width:100px;height:50px;");
+/// ```
 impl Display for PixelRect {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(

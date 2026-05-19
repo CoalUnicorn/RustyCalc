@@ -1,3 +1,10 @@
+//! Two-canvas layering glue.
+//!
+//! `LayerBase` wraps an `HtmlCanvasElement` with a `PaintGate` (typed
+//! `GridSignals` dirty bits) and a layer-specific renderer. `GridLayer`
+//! and `OverlayLayer` instantiate the pair; the overlay decoration impls
+//! live in the `decoration/` submodule.
+
 mod decoration;
 mod grid;
 mod overlay;

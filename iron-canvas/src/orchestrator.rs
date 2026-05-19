@@ -103,8 +103,10 @@ impl IronCanvas {
         );
     }
 
-    /// Push a theme by name (`"light"` | `"dark"`). Routes through
-    /// `set_theme` so value-eq and dirty fan-out stay in one place.
+    /// Push a theme by name. Only `"dark"` is recognized; every other
+    /// value (including `"light"` and anything misspelled) maps to the
+    /// light palette. Routes through `set_theme` so value-eq and dirty
+    /// fan-out stay in one place.
     pub fn set_theme_name(&mut self, name: &str) {
         let theme = if name == "dark" {
             CanvasTheme::dark()
@@ -195,7 +197,7 @@ impl IronCanvas {
     /// `JsBackedModel::try_from_js_value`. Returns `JsError` (not bare
     /// `JsValue`) so the JS catch sees a real `Error` with `.message` and
     /// `.stack`; per-call contract drift still surfaces through the
-    /// `(catch, method)` wrappers in `wasm.rs`.
+    /// `(catch, method)` wrappers in `wasm/mod.rs`.
     ///
     /// Every call re-wraps in a fresh `Rc`, so `set_model`'s identity
     /// check always sees a change and re-marks the grid dirty.

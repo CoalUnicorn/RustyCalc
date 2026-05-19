@@ -24,6 +24,18 @@ pub enum Line {
 
 impl Line {
     /// Move the line by `d` perpendicular to its direction.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use iron_canvas::{Line, Span};
+    /// let h = Line::H { span: Span { from: 0, to: 100 }, y: 10 };
+    /// // H runs horizontally, so cross-axis is y.
+    /// assert_eq!(
+    ///     h.offset_cross(5),
+    ///     Line::H { span: Span { from: 0, to: 100 }, y: 15 },
+    /// );
+    /// ```
     pub fn offset_cross(self, d: i32) -> Self {
         match self {
             Line::H { span, y } => Line::H { span, y: y + d },
@@ -32,7 +44,8 @@ impl Line {
     }
 }
 
-/// Line length
+/// Endpoints of an axis-aligned line. The line covers `from` through `to`;
+/// `to - from` is its pixel length.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Span {
     pub from: i32,

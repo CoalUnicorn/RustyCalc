@@ -198,10 +198,8 @@ impl BlitPlan {
 }
 
 /// Dispatch input for `Chrome::next` — which construction regime the
-/// orchestrator selected for this frame. Replaces the trio of
-/// `Chrome::next` dispatch over `FramePath::{Fresh, SlotsReuse, Blit}`
-/// and the manual `match prev.kind` exhaustiveness checks at dispatch
-/// sites. Adding a variant breaks every regime arm at compile time.
+/// orchestrator selected for this frame. Exhaustive: adding a variant
+/// breaks every regime arm at compile time.
 #[derive(Clone, Copy)]
 pub(crate) enum FramePath<'a> {
     /// Full rebuild walk. `prev = Some` recycles slot Vec allocations;
