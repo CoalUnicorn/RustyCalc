@@ -1019,7 +1019,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71dd52191aae121e8611f1e8dc3e324dd0dd1dee1e6dd91d10ee07a3cfb4d9d8"
 
 [[package]]
-name = "iron-canvas"
+name = "iron-canvas-core"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "bitflags",
+ "ironcalc_base",
+ "serde",
+]
+
+[[package]]
+name = "iron-canvas-web"
 version = "0.1.0-alpha.1"
 dependencies = [
  "bitflags",
@@ -1030,15 +1039,6 @@ dependencies = [
  "serde-wasm-bindgen",
  "wasm-bindgen",
  "web-sys",
-]
-
-[[package]]
-name = "iron-canvas-core"
-version = "0.1.0-alpha.1"
-dependencies = [
- "bitflags",
- "ironcalc_base",
- "serde",
 ]
 
 [[package]]
@@ -1789,7 +1789,8 @@ dependencies = [
  "console_error_panic_hook",
  "gloo-net",
  "gloo-storage",
- "iron-canvas",
+ "iron-canvas-core",
+ "iron-canvas-web",
  "ironcalc",
  "ironcalc_base",
  "js-sys",

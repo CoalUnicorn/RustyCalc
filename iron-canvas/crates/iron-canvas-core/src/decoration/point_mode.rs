@@ -1,8 +1,8 @@
 //! Point-mode range highlight — blue dashed outline with an 8% fill tint.
 
 use crate::chrome::Chrome;
-use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::decoration::Layer;
+use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::painter::{PaintColor, Painter};
 use crate::types::coord::RCRange;
 use crate::CanvasModel;

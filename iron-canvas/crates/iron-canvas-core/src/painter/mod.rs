@@ -13,7 +13,6 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Line;
 use crate::Span;
 
-
 /// Color/font argument for the `Painter` surface. The `Static` variant carries
 /// a `&'static str` whose address is stable for the program lifetime, so the
 /// Canvas-2D backend can ptr-eq it against its cache without ever allocating
@@ -140,4 +139,3 @@ impl CssColor {
         self.0
     }
 }
-

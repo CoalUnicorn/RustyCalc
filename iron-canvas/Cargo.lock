@@ -221,20 +221,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iron-canvas"
-version = "0.1.0-alpha.1"
-dependencies = [
- "bitflags",
- "iron-canvas-core",
- "ironcalc_base",
- "js-sys",
- "serde",
- "serde-wasm-bindgen",
- "wasm-bindgen",
- "web-sys",
-]
-
-[[package]]
 name = "iron-canvas-core"
 version = "0.1.0-alpha.1"
 dependencies = [
@@ -257,6 +243,20 @@ name = "iron-canvas-svg"
 version = "0.1.0-alpha.1"
 dependencies = [
  "iron-canvas-core",
+]
+
+[[package]]
+name = "iron-canvas-web"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "bitflags",
+ "iron-canvas-core",
+ "ironcalc_base",
+ "js-sys",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

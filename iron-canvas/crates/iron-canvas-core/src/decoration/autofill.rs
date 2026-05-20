@@ -2,8 +2,8 @@
 //! hit-test.
 
 use crate::chrome::Chrome;
-use crate::geometry::constants::{AUTOFILL_HIT_PAD_PX, STANDARD_BORDER_WIDTH};
 use crate::decoration::Layer;
+use crate::geometry::constants::{AUTOFILL_HIT_PAD_PX, STANDARD_BORDER_WIDTH};
 use crate::painter::{PaintColor, Painter};
 use crate::types::coord::{AutofillTarget, RCRange};
 use crate::types::ui::HitTest;

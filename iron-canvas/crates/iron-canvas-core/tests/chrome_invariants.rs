@@ -15,9 +15,9 @@ use ironcalc_base::types::{CellType, Style};
 use iron_canvas_core::chrome::{measure_row_header_width, Chrome, FramePath};
 use iron_canvas_core::geometry::constants::{CELL_AREA_INSET, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use iron_canvas_core::renderer::RendererCore;
-use iron_canvas_recorder::{DrawOp, RecorderPainter};
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 struct StubModel {
     top_row: i32,

@@ -13,7 +13,7 @@ use crate::model::{
     style_types::{BooleanValue, HexColor, StylePath},
     try_mutate, EvaluationMode, FrontendModel, SafeFontFamily, ToolbarState,
 };
-use iron_canvas::geometry::constants::{LAST_COLUMN, LAST_ROW};
+use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use crate::state::{ModelStore, WorkbookState};
 

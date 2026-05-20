@@ -19,7 +19,7 @@ use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_default
 use crate::input::mouse::CanvasHandle;
 use crate::model::FrontendModel;
 use crate::state::{EditFocus, ModelStore, WorkbookState};
-use iron_canvas::PixelRect;
+use iron_canvas_core::PixelRect;
 
 #[component]
 pub fn FormulaTextArea() -> impl IntoView {

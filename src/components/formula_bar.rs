@@ -7,7 +7,7 @@ use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_default
 use crate::input::formula_analysis::{analyze_formula, FormulaStatus};
 use crate::model::FrontendModel;
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
-use iron_canvas::col_name;
+use iron_canvas_core::col_name;
 
 /// The formula bar: cell address label + content/formula input.
 ///

@@ -15,9 +15,9 @@ use ironcalc_base::types::{CellType, Style};
 
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, PaneRegion};
 use iron_canvas_core::renderer::RendererCore;
-use iron_canvas_recorder::RecorderPainter;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_recorder::RecorderPainter;
 
 /// Stateful model: cell values live in a `RefCell<HashMap>` so a test can
 /// mutate one cell between paints without rebuilding the frame.
@@ -107,7 +107,13 @@ fn promote_to_slots_reuse(frame: &mut Chrome) {
 fn render_pane_skips_on_idempotent_repaint() {
     let m = MutableModel::default();
     let theme = CanvasTheme::light();
-    let mut frame = Chrome::next(None, &m, canvas(), &theme, iron_canvas_core::chrome::FramePath::Fresh);
+    let mut frame = Chrome::next(
+        None,
+        &m,
+        canvas(),
+        &theme,
+        iron_canvas_core::chrome::FramePath::Fresh,
+    );
 
     // First paint runs through the full 4-pass walk; the kind is Fresh,
     // so the skip branch is gated off but `pane_fingerprints` is still
@@ -137,7 +143,13 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
         ..Default::default()
     };
     let theme = CanvasTheme::light();
-    let mut frame = Chrome::next(None, &m, canvas(), &theme, iron_canvas_core::chrome::FramePath::Fresh);
+    let mut frame = Chrome::next(
+        None,
+        &m,
+        canvas(),
+        &theme,
+        iron_canvas_core::chrome::FramePath::Fresh,
+    );
 
     // Prime the per-pane fingerprints for both data-bearing panes.
     let _ = paint_pane(&m, &frame, PaneRegion::BottomLeft);

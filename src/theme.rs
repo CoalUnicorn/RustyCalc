@@ -13,7 +13,7 @@
 use leptos_use::{use_color_mode_with_options, ColorMode, UseColorModeOptions};
 
 #[allow(unused_imports)]
-pub use iron_canvas::theme::{CanvasTheme, ThemeVariables};
+pub use iron_canvas_core::theme::{CanvasTheme, ThemeVariables};
 
 // Shared color palette
 /// 40-color palette used by the tab color picker and future color pickers.

@@ -180,12 +180,7 @@ where
 
     /// Scroll-blit grid paint: shift the kept band per `BlitPlan::shifts`,
     /// then run `render_grid_blit` (which only repaints the revealed strip).
-    pub fn paint_grid_blit(
-        &mut self,
-        model: &dyn CanvasModel,
-        frame: &Chrome,
-        plan: &BlitPlan,
-    ) {
+    pub fn paint_grid_blit(&mut self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
         for s in &plan.shifts {
             self.renderer.painter_blit(s.src, s.dst);
         }

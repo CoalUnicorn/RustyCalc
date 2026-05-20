@@ -22,9 +22,9 @@ use iron_canvas_core::chrome::Chrome;
 use iron_canvas_core::geometry::constants::HEADER_OFFSET;
 use iron_canvas_core::painter::Painter;
 use iron_canvas_core::renderer::RendererCore;
-use iron_canvas_recorder::{DrawOp, RecorderPainter};
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 const ROW_HEIGHT: f64 = 20.0;
 const COL_WIDTH: f64 = 80.0;

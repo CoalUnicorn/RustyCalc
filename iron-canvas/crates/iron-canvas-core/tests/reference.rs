@@ -63,12 +63,7 @@ pub fn grid_ops(theme: &CanvasTheme, w: f64, h: f64) -> Vec<DrawOp> {
 /// reference module only asserts that two-canvas compositing equals the
 /// single-canvas reference for the same scene; it does not assert geometry
 /// correctness against the production renderer.
-pub fn overlay_ops(
-    theme: &CanvasTheme,
-    overlays: &RenderOverlays,
-    w: f64,
-    h: f64,
-) -> Vec<DrawOp> {
+pub fn overlay_ops(theme: &CanvasTheme, overlays: &RenderOverlays, w: f64, h: f64) -> Vec<DrawOp> {
     let mut ops = vec![DrawOp::ClearRect {
         x: 0.0,
         y: 0.0,

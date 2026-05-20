@@ -7,9 +7,9 @@
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 
-use iron_canvas_core::painter::{PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Span};
+use iron_canvas_core::painter::{PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
 
 // Matches RecorderPainter's fallback so wrap math is consistent across
 // non-browser backends. SVG has no host-side text measurement API.

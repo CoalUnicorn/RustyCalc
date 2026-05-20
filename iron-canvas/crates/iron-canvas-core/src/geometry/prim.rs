@@ -74,12 +74,7 @@ impl Axis {
     /// height / col width). `header_thickness` is the perpendicular size
     /// of the header strip — `chrome.row_header_thickness` for rows (dynamic),
     /// `HEADER_ROW_HEIGHT` for cols (currently static).
-    pub fn header_rect(
-        self,
-        along: i32,
-        parallel_size: i32,
-        header_thickness: i32,
-    ) -> PixelRect {
+    pub fn header_rect(self, along: i32, parallel_size: i32, header_thickness: i32) -> PixelRect {
         match self {
             Axis::Row => PixelRect {
                 top_left: Point {

@@ -282,11 +282,7 @@ impl Chrome {
     /// model. Per-pane content skipping happens later (inside
     /// `render_pane`) via the fingerprint compare; this method only
     /// decides whether the slot vecs themselves can be reused.
-    pub fn is_still_valid(
-        &self,
-        model: &dyn CanvasModel,
-        size: CanvasSize,
-    ) -> FrameValidity {
+    pub fn is_still_valid(&self, model: &dyn CanvasModel, size: CanvasSize) -> FrameValidity {
         if size != self.canvas_size {
             return FrameValidity::Rebuild;
         }

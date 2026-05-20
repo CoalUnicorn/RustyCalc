@@ -2,8 +2,8 @@
 //! the active selection.
 
 use crate::chrome::{ActiveCellSnapshot, Chrome};
-use crate::geometry::constants::{AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH};
 use crate::decoration::{Layer, RepaintActiveCell};
+use crate::geometry::constants::{AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH};
 use crate::painter::{PaintColor, Painter};
 use crate::types::coord::RCRange;
 use crate::CanvasModel;

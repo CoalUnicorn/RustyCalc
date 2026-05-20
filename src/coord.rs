@@ -13,7 +13,7 @@ use ironcalc_base::expressions::types::CellReferenceRC;
 use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
 
-use iron_canvas::types::coord::{FormulaRef, RCRange, SheetArea};
+use iron_canvas_core::types::coord::{FormulaRef, RCRange, SheetArea};
 
 use crate::model::ArrowKey;
 

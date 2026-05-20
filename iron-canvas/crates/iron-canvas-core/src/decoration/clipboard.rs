@@ -2,8 +2,8 @@
 //! No-op when the clipboard is empty or lives on another sheet.
 
 use crate::chrome::Chrome;
-use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::decoration::Layer;
+use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::painter::{PaintColor, Painter};
 use crate::types::coord::SheetArea;
 use crate::CanvasModel;

@@ -1,4 +1,4 @@
-use iron_canvas::types::coord::AutofillTarget;
+use iron_canvas_core::types::coord::AutofillTarget;
 use ironcalc_base::types::{CellType, Style};
 use leptos::html;
 use leptos::prelude::*;
@@ -14,7 +14,8 @@ use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::mouse::*;
 use crate::model::AppClipboard;
 use crate::state::{DragState, ModelStore, WorkbookState};
-use iron_canvas::*;
+use iron_canvas_core::*;
+use iron_canvas_web::IronCanvas;
 
 /// Bridges `ModelStore` (a Leptos `StoredValue` holding `UserModel<'static>`)
 /// to `iron_canvas::CanvasModel`. Each trait method `with_value`-borrows the

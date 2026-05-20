@@ -11,7 +11,9 @@ use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
-use iron_canvas_core::painter::{BlitPainter, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
+use iron_canvas_core::painter::{
+    BlitPainter, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+};
 
 /// Per-char width factor as a fraction of font size. Matches the
 /// approx-char-width fallback in `text_paint.rs::layout_into` so wrap math

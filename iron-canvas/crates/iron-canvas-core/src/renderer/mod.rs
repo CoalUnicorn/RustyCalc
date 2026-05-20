@@ -174,12 +174,7 @@ impl<P: Painter> RendererCore<P> {
     /// a clip to `plan.repaint_strip` so the strip alone is repainted, and
     /// only refresh the header strip on the scroll axis (the cross-axis
     /// header is unchanged).
-    pub fn render_grid_blit(
-        &self,
-        model: &dyn CanvasModel,
-        frame: &Chrome,
-        plan: &BlitPlan,
-    ) {
+    pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
         // Rotate cached pane buffers to follow the blit's pixel shift so
         // `render_pane_blit`'s strip-fetch only refills the revealed band.
         // Defensive: if a pane's prior range no longer aligns (canvas
@@ -252,12 +247,7 @@ impl<P: Painter> GridRenderer<P> {
         self.core.render_grid(model, frame);
     }
 
-    pub fn render_grid_blit(
-        &self,
-        model: &dyn CanvasModel,
-        frame: &Chrome,
-        plan: &BlitPlan,
-    ) {
+    pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
         self.core.render_grid_blit(model, frame, plan);
     }
 

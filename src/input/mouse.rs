@@ -19,11 +19,14 @@ use crate::state::{
     ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
     StatusMessage, WorkbookState,
 };
-use iron_canvas::geometry::constants::{
-    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+use iron_canvas_core::{
+    geometry::constants::{
+        DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN,
+        LAST_ROW,
+    },
+    types::ui::{HitTest, ResizeTarget},
 };
-use iron_canvas::types::ui::{HitTest, ResizeTarget};
-use iron_canvas::{CanvasSize, IronCanvas, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
+use iron_canvas_web::{CanvasSize, IronCanvas};
 use ironcalc_base::UserModel;
 
 /// Storage type for the IronCanvas orchestrator handle. `LocalStorage`

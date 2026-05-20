@@ -8,20 +8,21 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+use crate::layer::RenderOverlays;
+use crate::theme::{CanvasTheme, ThemeVariables};
+use crate::wasm::JsBackedModel;
+use crate::web_surface::WebSurface;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::orchestrator::Orchestrator;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
-use crate::layer::RenderOverlays;
-use crate::theme::{CanvasTheme, ThemeVariables};
-use crate::wasm::JsBackedModel;
-use crate::web_surface::WebSurface;
+use iron_canvas_core::CanvasModel;
 
 #[wasm_bindgen]
 pub struct IronCanvas {
-    orch: Orchestrator<WebSurface, Rc<JsBackedModel>>,
+    orch: Orchestrator<WebSurface, Rc<dyn CanvasModel>>,
 }
 
 #[wasm_bindgen]
@@ -36,16 +37,14 @@ impl IronCanvas {
         let grid = WebSurface::grid(grid_canvas)?;
         let overlay = WebSurface::overlay(overlay_canvas)?;
         Ok(IronCanvas {
-            orch: Orchestrator::<WebSurface, Rc<JsBackedModel>>::new(grid, overlay),
+            orch: Orchestrator::<WebSurface, Rc<dyn CanvasModel>>::new(grid, overlay),
         })
     }
 
     /// Resize both layers in one call.
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.orch.resize(
-            CanvasSize { w: css_w, h: css_h },
-            dpr.round() as i32,
-        );
+        self.orch
+            .resize(CanvasSize { w: css_w, h: css_h }, dpr.round() as i32);
     }
 
     /// Push a theme by name. Only `"dark"` is recognized; every other
@@ -110,8 +109,8 @@ impl IronCanvas {
     }
 }
 
-// Rust-only API. Mirrors today's surface so downstream `worksheet.rs`
-// imports stay valid until Stage 4.
+// Rust-only API. Counterpart to the `#[wasm_bindgen]` block above —
+// these methods take Rust types that don't cross the JS bridge.
 impl IronCanvas {
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
         self.orch.set_overlays(overlays);
@@ -141,9 +140,10 @@ impl IronCanvas {
         self.orch.set_theme_variables(vars);
     }
 
-    /// Rust-level model push. Stage-4 consumers building `JsBackedModel`
-    /// outside the JS bridge route through here.
-    pub fn set_model(&mut self, model: Rc<JsBackedModel>) {
+    /// Rust-level model push. Accepts any `CanvasModel` impl behind an
+    /// `Rc` — Leptos-side adapters that bridge a host store to the canvas
+    /// (e.g. `WorksheetModelAdapter`) route through here.
+    pub fn set_model(&mut self, model: Rc<dyn CanvasModel>) {
         self.orch.set_model(model);
     }
 

@@ -13,9 +13,9 @@ use ironcalc_base::types::{CellType, Style};
 use iron_canvas_core::chrome::{ActiveCellSnapshot, Chrome, FramePath};
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
-use iron_canvas_recorder::{DrawOp, RecorderPainter};
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 /// Capture an `ActiveCellSnapshot` from the model's view. After B2
 /// `screen_for_blit` takes the snapshot as a parameter; tests source it
@@ -141,7 +141,13 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     let canvas = canvas();
 
     // Frame 0 at top_row=1.
-    let frame0 = Chrome::next(None, &m, canvas, &theme, iron_canvas_core::chrome::FramePath::Fresh);
+    let frame0 = Chrome::next(
+        None,
+        &m,
+        canvas,
+        &theme,
+        iron_canvas_core::chrome::FramePath::Fresh,
+    );
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
 
@@ -206,7 +212,13 @@ fn scroll_past_viewport_disqualifies_blit() {
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, iron_canvas_core::chrome::FramePath::Fresh);
+    let frame0 = Chrome::next(
+        None,
+        &m,
+        canvas,
+        &theme,
+        iron_canvas_core::chrome::FramePath::Fresh,
+    );
 
     // Canvas is 400 px tall, rows are 20 px → ~20 visible rows. Scroll
     // by 100 rows → no overlap with prev viewport → screen_for_blit must bail.
@@ -225,7 +237,13 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, iron_canvas_core::chrome::FramePath::Fresh);
+    let frame0 = Chrome::next(
+        None,
+        &m,
+        canvas,
+        &theme,
+        iron_canvas_core::chrome::FramePath::Fresh,
+    );
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
@@ -271,7 +289,13 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, iron_canvas_core::chrome::FramePath::Fresh);
+    let frame0 = Chrome::next(
+        None,
+        &m,
+        canvas,
+        &theme,
+        iron_canvas_core::chrome::FramePath::Fresh,
+    );
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
 

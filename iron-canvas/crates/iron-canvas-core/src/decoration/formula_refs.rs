@@ -4,8 +4,8 @@
 use std::borrow::Cow;
 
 use crate::chrome::Chrome;
-use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::decoration::Layer;
+use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::painter::{PaintColor, Painter};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
 use crate::types::coord::FormulaRef;
