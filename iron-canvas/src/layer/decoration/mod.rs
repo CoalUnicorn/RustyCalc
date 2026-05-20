@@ -47,13 +47,7 @@ pub(crate) trait Layer {
     /// + handle paint over it. `paint` runs first, the renderer hook fires,
     /// then `paint_after_hook` finishes the layer. Default no-op covers
     /// every decoration except `SelectionLayer`.
-    fn paint_after_hook(
-        &self,
-        _model: &dyn CanvasModel,
-        _frame: &Chrome,
-        _painter: &dyn Painter,
-    ) {
-    }
+    fn paint_after_hook(&self, _model: &dyn CanvasModel, _frame: &Chrome, _painter: &dyn Painter) {}
 
     /// Ask `OverlayLayer::paint` to run `OverlayRenderer::repaint_active_cell`
     /// between this decoration's `paint` and `paint_after_hook`. Returning

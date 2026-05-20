@@ -221,7 +221,6 @@ impl<P: Painter> RendererCore<P> {
             .show_grid
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
     }
-
 }
 
 // Layer-facing wrappers

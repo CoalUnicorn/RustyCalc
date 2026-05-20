@@ -31,7 +31,6 @@ impl SelectionLayer {
             );
         }
     }
-
 }
 
 impl Layer for SelectionLayer {

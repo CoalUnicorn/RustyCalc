@@ -163,8 +163,10 @@ fn frozen_both_axes_add_separator_on_each() {
     );
     assert_eq!(
         p.frozen_offset_y,
-        (f64::from(HEADER_ROW_HEIGHT + CELL_AREA_INSET) + DEFAULT_ROW_HEIGHT + f64::from(FROZEN_SEP))
-            .round() as i32
+        (f64::from(HEADER_ROW_HEIGHT + CELL_AREA_INSET)
+            + DEFAULT_ROW_HEIGHT
+            + f64::from(FROZEN_SEP))
+        .round() as i32
     );
 }
 
@@ -369,9 +371,7 @@ fn autofill_handle_tracks_in_place_selection_range_update() {
         ..Default::default()
     };
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
-    let before = frame
-        .autofill_handle(range_of(&m))
-        .expect("initial handle");
+    let before = frame.autofill_handle(range_of(&m)).expect("initial handle");
 
     let after = frame
         .autofill_handle(RCRange {

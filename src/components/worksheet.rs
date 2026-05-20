@@ -244,12 +244,22 @@ pub fn Worksheet() -> impl IntoView {
             canvas_handle.update_value(|slot| {
                 if let Some(ic) = slot.as_mut() {
                     ic.set_overlays(overlays);
-                    // Grid repaint only when cell data, format, or structure changed.
-                    // Nav and overlay-only changes are covered by set_overlays() above.
-                    if has_content || has_structure || has_format {
+                    // Format events include row/col resize (LayoutChanged) —
+                    // those mutate slot pixel geometry and must drop
+                    // last_frame, so they route through requestRepaint with
+                    // structure. Content edits go through markContentDirty
+                    // for the SlotsReuse fast path; nav co-firing (commit-
+                    // Enter) needs an explicit overlay raise because
+                    // markContentDirty leaves the overlay bit untouched.
+                    if has_structure || has_format {
                         ic.requestRepaint();
+                    } else if has_content {
+                        ic.markContentDirty();
+                        if has_nav {
+                            ic.request_overlay_repaint();
+                        }
                     } else if has_nav {
-                        ic.request_overlay_repaint(); // overlay only
+                        ic.request_overlay_repaint();
                     }
                 }
             });

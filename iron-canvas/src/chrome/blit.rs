@@ -19,9 +19,7 @@ use crate::theme::CanvasTheme;
 use crate::{CanvasModel, CanvasSize};
 
 use super::pane_set::ShiftDir;
-use super::{
-    measure_row_header_width, Chrome, FrameKindTag, PaneRegion, PaneRegionMask, PaneSet,
-};
+use super::{measure_row_header_width, Chrome, FrameKindTag, PaneRegion, PaneRegionMask, PaneSet};
 
 /// One pane's contribution to a scroll-blit. A row-axis scroll emits a
 /// `PaneShift` for `BottomRight` and, when `frozen_cols > 0`, another
@@ -216,29 +214,6 @@ pub(crate) enum FramePath<'a> {
     Blit(&'a BlitPlan),
 }
 
-impl Chrome {
-    /// Seed the next frame's pane fingerprints: regions touched by the
-    /// blit (`stale`) start at zero and force a repaint; untouched regions
-    /// carry forward verbatim so the cache check in `is_still_valid`
-    /// short-circuits on them.
-    fn seed_next_pane_fingerprints(&self, stale: PaneRegionMask) -> [u64; 4] {
-        let prev_fps = self.pane_fingerprints.get();
-        let mut seeded = [0u64; 4];
-        for region in [
-            PaneRegion::TopLeft,
-            PaneRegion::TopRight,
-            PaneRegion::BottomLeft,
-            PaneRegion::BottomRight,
-        ] {
-            if !stale.contains_region(region) {
-                let idx = region as usize;
-                seeded[idx] = prev_fps[idx];
-            }
-        }
-        seeded
-    }
-}
-
 // Scroll-blit helpers
 //
 // `screen_for_blit` already disqualified anything that isn't a pure single-axis
@@ -301,7 +276,15 @@ pub(super) fn try_blit_reuse(
     };
 
     let stale = plan.shift_panes();
-    let seeded_fps = prev.seed_next_pane_fingerprints(stale);
+    // Seed next frame's per-pane fingerprints: carry prev's forward, then
+    // zero out the regions the blit touched so their next paint refetches
+    // and re-fingerprints. Untouched regions short-circuit on the next
+    // frame's cache check via fingerprint match.
+    let prev_fps = prev.pane_fingerprints.get();
+    let mut seeded_fps = prev_fps;
+    for region in stale.regions() {
+        seeded_fps[region as usize] = 0;
+    }
 
     Some(Chrome {
         sheet: prev.sheet,
@@ -311,7 +294,7 @@ pub(super) fn try_blit_reuse(
         cell_origin: prev.cell_origin,
         canvas_size: canvas,
         theme: theme.clone(),
-        prev_pane_fingerprints: prev.pane_fingerprints.get(),
+        prev_pane_fingerprints: prev_fps,
         pane_fingerprints: Cell::new(seeded_fps),
         kind: FrameKindTag::Blitted,
         stale_panes: stale,

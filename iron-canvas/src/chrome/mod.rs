@@ -12,9 +12,7 @@ use std::hash::{Hash, Hasher};
 
 use crate::geometry::slot::scroll_first;
 use crate::geometry::{
-    constants::{
-        AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
-    },
+    constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW},
     pixel_rect::PixelRect,
     prim::Point,
 };

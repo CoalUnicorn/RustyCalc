@@ -9,7 +9,6 @@ use crate::types::coord::{AutofillTarget, RCRange};
 use crate::types::ui::HitTest;
 use crate::CanvasModel;
 
-
 #[derive(Default)]
 pub(crate) struct AutofillLayer {
     pub(crate) extend_to: Option<AutofillTarget>,

@@ -11,9 +11,9 @@ use crate::layer::{
     AutofillLayer, ClipboardLayer, FormulaRefsLayer, GridLayer, Layer, OverlayLayer,
     PointModeLayer, RenderOverlays, SelectionLayer,
 };
-use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::signal::GridSignals;
 use crate::theme::{CanvasTheme, ThemeVariables};
+use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
 use crate::wasm::JsBackedModel;
 use crate::CanvasModel;
@@ -430,13 +430,9 @@ impl IronCanvas {
         // `GridLayer` is concretely `CanvasPainter` (a `BlitPainter`), so
         // the capability is a compile-time fact here, not a runtime check.
         if !content_dirty {
-            if let Some(plan) = self
-                .last_frame
-                .as_ref()
-                .and_then(|f| {
-                    f.screen_for_blit(model, self.size, &self.theme, &self.selection.active_cell)
-                })
-            {
+            if let Some(plan) = self.last_frame.as_ref().and_then(|f| {
+                f.screen_for_blit(model, self.size, &self.theme, &self.selection.active_cell)
+            }) {
                 return PaintRegime::Viewport(plan);
             }
         }

@@ -295,13 +295,9 @@ impl PaneSet {
         pane_y: i32,
         pane_h: i32,
     ) -> Option<(i32, ShiftDir)> {
-        Self::probe_axis_shift(
-            &self.scroll_rows,
-            new_top,
-            pane_y,
-            pane_h,
-            |r| model.get_row_height(sheet, r).map(|h| h.round() as i32),
-        )
+        Self::probe_axis_shift(&self.scroll_rows, new_top, pane_y, pane_h, |r| {
+            model.get_row_height(sheet, r).map(|h| h.round() as i32)
+        })
     }
 
     pub(crate) fn probe_col_shift(
@@ -312,13 +308,9 @@ impl PaneSet {
         pane_x: i32,
         pane_w: i32,
     ) -> Option<(i32, ShiftDir)> {
-        Self::probe_axis_shift(
-            &self.scroll_cols,
-            new_left,
-            pane_x,
-            pane_w,
-            |c| model.get_column_width(sheet, c).map(|w| w.round() as i32),
-        )
+        Self::probe_axis_shift(&self.scroll_cols, new_left, pane_x, pane_w, |c| {
+            model.get_column_width(sheet, c).map(|w| w.round() as i32)
+        })
     }
 
     /// Rebuild a scroll-axis slot vec for a single-axis blit. The kept
@@ -387,10 +379,7 @@ impl PaneSet {
         }
         // Top up if the kept-band shift left the last slot short of the edge.
         if new_slots.last().is_some_and(|s| s.start() < max_cursor) {
-            let cursor = new_slots
-                .last()
-                .map(|s| s.end())
-                .unwrap_or(frozen_offset);
+            let cursor = new_slots.last().map(|s| s.end()).unwrap_or(frozen_offset);
             let next_id = new_slots
                 .last()
                 .map(|s| s.id() + 1)
