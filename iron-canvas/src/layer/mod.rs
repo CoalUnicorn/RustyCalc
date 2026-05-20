@@ -5,15 +5,14 @@
 //! and `OverlayLayer` instantiate the pair; the overlay decoration impls
 //! live in the `decoration/` submodule.
 
-mod decoration;
 mod grid;
 mod overlay;
 
-pub(crate) use decoration::{
+pub(crate) use grid::GridLayer;
+pub(crate) use iron_canvas_core::decoration::{
     autofill::AutofillLayer, clipboard::ClipboardLayer, formula_refs::FormulaRefsLayer,
     point_mode::PointModeLayer, selection::SelectionLayer, Layer,
 };
-pub(crate) use grid::GridLayer;
 pub(crate) use overlay::OverlayLayer;
 pub use overlay::RenderOverlays;
 use std::cell::Cell;

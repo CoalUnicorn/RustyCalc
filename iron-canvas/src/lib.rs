@@ -1,65 +1,31 @@
-//! The spreadsheet's `<canvas>` surface.
+//! The spreadsheet's `<canvas>` surface — wasm-bound facade.
 //!
-//! # The Concept - everything is a rectangle or a line
+//! Pure-Rust application + domain layers live in `iron-canvas-core`. This
+//! crate hosts the Canvas2D `Painter` impl, the wasm-bindgen `IronCanvas`
+//! handle, the JS-bridged `JsBackedModel`, the two-canvas `LayerBase`
+//! wrappers, and the CSS-var theme bridge — everything that touches
+//! `web-sys` / `wasm-bindgen` / `js-sys`.
 //!
-//! Every visible artifact in the grid is one of two primitives:
-//!
-//! - [`PixelRect`] - cells, headers, corner box, selection fill, autofill
-//!   handle, point-mode tint, clipboard marching-ants region, text clip.
-//! - [`Line`] - border edges, frozen-pane separators, underline,
-//!   strikethrough.
-//!
-//! No curves, no arbitrary paths. Border resolution becomes "pick a `Line`
-//! and a color"; pane layout becomes "four `PixelRect`s side by side";
-//! overlays compose by stacking `PixelRect`s.
-//!
-//! That constraint keeps the paint layer small: `rect_fill`, `rect_stroke`,
-//! `rect_dashed`, `stroke_line`, `with_clip`. New visuals reduce to those
-//! helpers or they don't ship.
-//!
-//! # Submodules
-//!
-//! - [`geometry`] — rect/line primitives and pixel↔cell coordinate math.
-//! - [`renderer`] — `RendererCore` plus the `cell/` and `chrome/` paint
-//!   subtrees. Overlay decorations (selection, autofill, clipboard,
-//!   point-mode, formula refs) live in `src/layer/decoration/` as `Layer`
-//!   trait impls, orchestrated by `OverlayLayer::paint`. See the module
-//!   doc for the pipeline walk-through.
-//! - [`theme`] — `CanvasTheme` palette + CSS-var bridge.
-//! - [`types`] — public address types (`RCRange`, `FormulaRef`) and UI
-//!   variants (`HitTest`, `ResizeTarget`) used at the JS surface.
-//! - [`wasm`] — `JsBackedModel` JS-side adapter.
+//! Everything `iron-canvas-core` re-exports flows through here unchanged
+//! so existing downstream call sites stay valid until Stage 4 renames
+//! this crate to `iron-canvas-web`.
 
-pub mod geometry;
-
-mod chrome;
+mod canvas_painter;
 mod layer;
-mod model_adapter;
 mod orchestrator;
-mod painter;
-pub mod renderer;
-pub(crate) mod signal;
-pub mod theme;
-pub mod types;
+pub mod theme_from_element;
 pub mod wasm;
 
 #[cfg(test)]
 mod test;
 
-pub use geometry::{
-    constants::{
-        AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
-        HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
-    },
-    pixel_rect::PixelRect,
-    prim::{Line, Point, Span},
-    utils::col_name,
-    CanvasSize,
+pub use iron_canvas_core::{
+    chrome, decoration, geometry, model_adapter, painter, renderer, signal, theme, types,
+    AutofillTarget, CanvasModel, CanvasSize, CanvasTheme, CanvasView, FormulaRef, HitTest, Line,
+    PixelRect, Point, RCRange, ResizeTarget, SheetArea, Span, ThemeVariables, AUTOFILL_HANDLE_PX,
+    DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_OFFSET,
+    HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
-
+pub use iron_canvas_core::geometry::utils::col_name;
 pub use layer::RenderOverlays;
-pub use model_adapter::{CanvasModel, CanvasView};
 pub use orchestrator::IronCanvas;
-pub use theme::{CanvasTheme, ThemeVariables};
-pub use types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
-pub use types::ui::{HitTest, ResizeTarget};

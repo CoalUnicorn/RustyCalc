@@ -222,7 +222,7 @@ impl IronCanvas {
     /// `document.documentElement` (or any host element).
     #[allow(non_snake_case)]
     pub fn setThemeFromElement(&mut self, el: &web_sys::Element) {
-        self.set_theme(CanvasTheme::from_element(el));
+        self.set_theme(crate::theme_from_element::from_element(el));
     }
 }
 

@@ -1,0 +1,10 @@
+[package]
+name = "iron-canvas-recorder"
+version = "0.1.0-alpha.1"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+iron-canvas-core = { path = "../iron-canvas-core" }

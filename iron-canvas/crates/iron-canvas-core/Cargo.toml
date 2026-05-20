@@ -1,0 +1,16 @@
+[package]
+name = "iron-canvas-core"
+version = "0.1.0-alpha.1"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+ironcalc_base = { version = "0.7.1", path = "../../../../IronCalc/base" }
+serde = { version = "1.0.228", features = ["derive"] }
+bitflags = "2.11.1"
+
+[dev-dependencies]
+iron-canvas-recorder = { path = "../iron-canvas-recorder" }
+iron-canvas-svg = { path = "../iron-canvas-svg" }

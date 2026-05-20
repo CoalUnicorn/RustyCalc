@@ -1,9 +1,9 @@
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
+use crate::canvas_painter::CanvasPainter;
 use crate::chrome::{BlitPlan, Chrome};
 use crate::layer::{create_2d_context, LayerBase};
-use crate::painter::CanvasPainter;
 use crate::renderer::GridRenderer;
 use crate::CanvasModel;
 
@@ -14,7 +14,7 @@ pub(crate) struct GridLayer {
 impl GridLayer {
     pub(crate) fn create(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
         let ctx = create_2d_context(&canvas, false, false)?;
-        let renderer = GridRenderer::for_layer(ctx);
+        let renderer = GridRenderer::for_layer(CanvasPainter::new(ctx));
         Ok(Self {
             base: LayerBase::new(canvas, renderer),
         })
@@ -40,7 +40,7 @@ impl GridLayer {
         // inside `render_grid` will re-bind from Empty.
         if !frame.kind.reuses_slots() {
             let size = frame.canvas_size;
-            let ctx = self.base.renderer.ctx_ref();
+            let ctx = self.base.renderer.painter().ctx();
             ctx.set_fill_style_str(frame.theme.cell_bg.as_ref());
             ctx.fill_rect(0.0, 0.0, size.w, size.h);
         }

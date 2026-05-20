@@ -3,26 +3,11 @@ use web_sys::HtmlCanvasElement;
 
 use crate::chrome::Chrome;
 use crate::layer::{create_2d_context, Layer, LayerBase, SelectionLayer};
-use crate::painter::{CanvasPainter, Painter};
+use crate::painter::Painter;
+use crate::canvas_painter::CanvasPainter;
 use crate::renderer::OverlayRenderer;
-use crate::types::coord::{AutofillTarget, SheetArea};
-use crate::{CanvasModel, FormulaRef, RCRange};
-
-/// Overlay ranges passed to `render()`.
-///
-/// Selection is not stored here — it is paint-time-derived from
-/// `model.get_selected_view()`. The consumer signals selection changes via
-/// `IronCanvas::request_overlay_repaint()`.
-#[derive(Clone, PartialEq, Default)]
-pub struct RenderOverlays {
-    /// Target cell during autofill-handle drag.
-    pub extend_to: Option<AutofillTarget>,
-    pub clipboard: Option<SheetArea>,
-    /// Range being pointed at during formula entry.
-    pub point_range: Option<RCRange>,
-    /// All formula refs extracted from the current formula (multi-color overlays).
-    pub formula_refs: Vec<FormulaRef>,
-}
+use crate::CanvasModel;
+pub use iron_canvas_core::RenderOverlays;
 
 pub(crate) struct OverlayLayer {
     base: LayerBase<OverlayRenderer<CanvasPainter>>,
@@ -31,7 +16,7 @@ pub(crate) struct OverlayLayer {
 impl OverlayLayer {
     pub(crate) fn create(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
         let ctx = create_2d_context(&canvas, true, true)?;
-        let renderer = OverlayRenderer::for_layer(ctx);
+        let renderer = OverlayRenderer::for_layer(CanvasPainter::new(ctx));
         Ok(Self {
             base: LayerBase::new(canvas, renderer),
         })
@@ -60,7 +45,8 @@ impl OverlayLayer {
         let size = frame.canvas_size;
         self.base
             .renderer
-            .ctx_ref()
+            .painter()
+            .ctx()
             .clear_rect(0.0, 0.0, size.w, size.h);
 
         let painter = self.base.renderer.painter();
