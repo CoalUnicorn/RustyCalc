@@ -1,5 +1,7 @@
 // CanvasModel - read-only worksheet surface the renderer consumes
 
+use std::rc::Rc;
+
 use ironcalc_base::types::{CellType, Style};
 use ironcalc_base::UserModel;
 
@@ -73,6 +75,56 @@ pub trait CanvasModel {
                 out.push(self.get_cell_type(sheet, r, c));
             }
         }
+    }
+}
+
+/// Forwarding impl so `Orchestrator<S, Rc<JsBackedModel>>` (in the web
+/// crate) satisfies the `M: CanvasModel` bound. `?Sized` lets `Rc<dyn
+/// CanvasModel>` also satisfy it for callers that prefer dyn dispatch.
+impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
+    fn get_selected_sheet(&self) -> u32 {
+        (**self).get_selected_sheet()
+    }
+    fn get_selected_view(&self) -> Option<CanvasView> {
+        (**self).get_selected_view()
+    }
+    fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32> {
+        (**self).get_frozen_rows_count(sheet)
+    }
+    fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32> {
+        (**self).get_frozen_columns_count(sheet)
+    }
+    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
+        (**self).get_row_height(sheet, row)
+    }
+    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
+        (**self).get_column_width(sheet, column)
+    }
+    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
+        (**self).get_show_grid_lines(sheet)
+    }
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style> {
+        (**self).get_cell_style(sheet, row, column)
+    }
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType> {
+        (**self).get_cell_type(sheet, row, column)
+    }
+    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
+        (**self).get_formatted_cell_value(sheet, row, column)
+    }
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<Style>>) {
+        (**self).get_cell_styles_in(sheet, range, out)
+    }
+    fn get_formatted_cell_values_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Option<String>>,
+    ) {
+        (**self).get_formatted_cell_values_in(sheet, range, out)
+    }
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellType>>) {
+        (**self).get_cell_types_in(sheet, range, out)
     }
 }
 

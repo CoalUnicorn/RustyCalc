@@ -138,6 +138,11 @@ impl Painter for SvgPainter {
         body.push_str("\"/>");
     }
 
+    fn clear_rect(&self, _rect: PixelRect) {
+        // SVG has no concept of clearing alpha pixels; emitted elements
+        // simply compose on top. The overlay-clear contract is a no-op here.
+    }
+
     fn rect_stroke(&self, rect: PixelRect, color: PaintColor, width: f64) {
         let (x, y, w, h) = rect.as_f64_tuple();
         let mut body = self.body.borrow_mut();

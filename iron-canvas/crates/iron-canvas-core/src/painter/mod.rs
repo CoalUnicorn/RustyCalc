@@ -71,6 +71,10 @@ pub trait TextMetrics {
 
 pub trait Painter: TextMetrics {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor);
+    /// Clear the pixels under `rect` to fully transparent. Canvas-2D maps
+    /// to `ctx.clearRect`; backends that don't compose alpha (SVG, Recorder)
+    /// may no-op.
+    fn clear_rect(&self, rect: PixelRect);
     fn rect_stroke(&self, rect: PixelRect, color: PaintColor, width: f64);
     fn rect_dashed(&self, rect: PixelRect, color: PaintColor, width: f64);
     fn stroke_line(&self, line: Line, color: PaintColor, width: f64);

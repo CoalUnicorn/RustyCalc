@@ -9,12 +9,15 @@ pub mod decoration;
 pub mod geometry;
 pub mod layer;
 pub mod model_adapter;
+pub mod orchestrator;
 pub mod painter;
 pub mod render_overlays;
 pub mod renderer;
 pub mod signal;
 pub mod theme;
 pub mod types;
+
+pub use orchestrator::{Orchestrator, PaintRegime};
 
 pub use render_overlays::RenderOverlays;
 

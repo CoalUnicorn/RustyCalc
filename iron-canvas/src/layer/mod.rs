@@ -1,16 +1,7 @@
-//! Two-canvas layering glue (web crate).
-//!
-//! `LayerBase`, `PaintGate`, and `Surface` live in `iron-canvas-core`. This
-//! module hosts the wasm-bound `GridLayer` / `OverlayLayer` specializations
-//! that pair a `WebSurface` with the layer-specific renderer.
+//! Web-side layer re-exports. The Surface trait, `LayerBase`, `PaintGate`,
+//! and the layer-specialization paint methods all live in
+//! `iron_canvas_core::layer`. This shim keeps the historical
+//! `iron_canvas::layer::RenderOverlays` import path stable until Stage 4
+//! renames this crate to `iron-canvas-web`.
 
-mod grid;
-mod overlay;
-
-pub(crate) use grid::GridLayer;
-pub(crate) use iron_canvas_core::decoration::{
-    autofill::AutofillLayer, clipboard::ClipboardLayer, formula_refs::FormulaRefsLayer,
-    point_mode::PointModeLayer, selection::SelectionLayer, Layer,
-};
-pub(crate) use overlay::OverlayLayer;
-pub use overlay::RenderOverlays;
+pub use iron_canvas_core::RenderOverlays;

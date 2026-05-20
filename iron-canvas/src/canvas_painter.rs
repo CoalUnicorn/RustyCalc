@@ -112,13 +112,6 @@ impl CanvasPainter {
         }
     }
 
-    /// Direct ctx access for the layer wrappers' own clear/fill paths
-    /// (`GridLayer::paint`, `OverlayLayer::paint`). Renderer code never
-    /// calls this; it routes through the `Painter` surface instead.
-    pub(crate) fn ctx(&self) -> &CanvasRenderingContext2d {
-        &self.ctx
-    }
-
     pub(crate) fn set_fill_cached(&self, color: PaintColor) {
         let prev = self.setter_cache.last_fill.take();
         if prev.matches(color) {
@@ -223,6 +216,11 @@ impl Painter for CanvasPainter {
         self.set_fill_cached(color);
         let (x, y, w, h) = rect.as_f64_tuple();
         self.ctx.fill_rect(x, y, w, h);
+    }
+
+    fn clear_rect(&self, rect: PixelRect) {
+        let (x, y, w, h) = rect.as_f64_tuple();
+        self.ctx.clear_rect(x, y, w, h);
     }
 
     fn rect_stroke(&self, rect: PixelRect, color: PaintColor, width: f64) {

@@ -5,9 +5,12 @@
 //! browser metrics still need a wasm-bindgen-test harness.
 
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Span};
+use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{BlitPainter, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
 
 /// Per-char width factor as a fraction of font size. Matches the
@@ -20,6 +23,9 @@ pub enum DrawOp {
     RectFill {
         rect: PixelRect,
         color: String,
+    },
+    ClearRect {
+        rect: PixelRect,
     },
     RectStroke {
         rect: PixelRect,
@@ -129,6 +135,10 @@ impl Painter for RecorderPainter {
         });
     }
 
+    fn clear_rect(&self, rect: PixelRect) {
+        self.push(DrawOp::ClearRect { rect });
+    }
+
     fn rect_stroke(&self, rect: PixelRect, color: PaintColor, width: f64) {
         self.push(DrawOp::RectStroke {
             rect,
@@ -227,6 +237,47 @@ impl BlitPainter for RecorderPainter {
     fn blit(&self, src: PixelRect, dst: PixelRect) {
         self.push(DrawOp::Blit { src, dst });
     }
+}
+
+/// In-memory `Surface` adapter. Drives `Orchestrator` for tests: every
+/// drawn op is captured by the wrapped `RecorderPainter`. `resize` /
+/// `present` are no-ops — the recorder has no backing pixel buffer.
+pub struct MemSurface {
+    painter: Rc<RecorderPainter>,
+}
+
+impl MemSurface {
+    pub fn new() -> Self {
+        Self {
+            painter: Rc::new(RecorderPainter::new()),
+        }
+    }
+
+    /// Direct handle to the recorder for op-log assertions.
+    pub fn recorder(&self) -> &RecorderPainter {
+        &self.painter
+    }
+}
+
+impl Default for MemSurface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Surface for MemSurface {
+    type P = RecorderPainter;
+
+    fn painter(&self) -> &RecorderPainter {
+        self.painter.as_ref()
+    }
+
+    fn clone_painter(&self) -> Rc<RecorderPainter> {
+        Rc::clone(&self.painter)
+    }
+
+    fn resize(&mut self, _css: CanvasSize, _dpr: i32) {}
+    fn present(&self) {}
 }
 
 #[cfg(test)]
