@@ -61,7 +61,7 @@ fn drag_target(col: i32) -> crate::types::coord::AutofillTarget {
 
 #[test]
 fn set_overlays_only_dirties_overlay() {
-    use crate::layer::PaintGate;
+    use iron_canvas_core::layer::PaintGate;
     let grid = PaintGate::new();
     let overlay = PaintGate::new();
     let mut current = RenderOverlays::default();
@@ -89,7 +89,7 @@ fn set_overlays_only_dirties_overlay() {
 
 #[test]
 fn sixty_drag_frames_increment_overlay_only() {
-    use crate::layer::PaintGate;
+    use iron_canvas_core::layer::PaintGate;
     let grid = PaintGate::new();
     let overlay = PaintGate::new();
     let mut current = RenderOverlays::default();

@@ -142,7 +142,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
 
     // Frame 0 at top_row=1.
     let frame0 = Chrome::next(None, &m, canvas, &theme, iron_canvas_core::chrome::FramePath::Fresh);
-    let core = RendererCore::for_layer(RecorderPainter::new());
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
 
     let baseline_ops = core.painter().ops().len();
@@ -226,7 +226,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
     let canvas = canvas();
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, iron_canvas_core::chrome::FramePath::Fresh);
-    let core = RendererCore::for_layer(RecorderPainter::new());
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
 
@@ -272,7 +272,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let canvas = canvas();
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, iron_canvas_core::chrome::FramePath::Fresh);
-    let core = RendererCore::for_layer(RecorderPainter::new());
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
 
     let baseline_ops: Vec<DrawOp> = core.painter().ops().iter().cloned().collect();
@@ -406,7 +406,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
     let canvas = canvas();
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
-    let core = RendererCore::for_layer(RecorderPainter::new());
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
 
@@ -456,7 +456,7 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
     let canvas = canvas();
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
-    let core = RendererCore::for_layer(RecorderPainter::new());
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
 

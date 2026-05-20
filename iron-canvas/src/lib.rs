@@ -15,6 +15,7 @@ mod layer;
 mod orchestrator;
 pub mod theme_from_element;
 pub mod wasm;
+pub mod web_surface;
 
 #[cfg(test)]
 mod test;

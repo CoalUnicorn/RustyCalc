@@ -1,24 +1,28 @@
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
-use crate::chrome::Chrome;
-use crate::layer::{create_2d_context, Layer, LayerBase, SelectionLayer};
-use crate::painter::Painter;
+use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::layer::{LayerBase, Surface};
+
 use crate::canvas_painter::CanvasPainter;
+use crate::chrome::Chrome;
+use crate::layer::{Layer, SelectionLayer};
+use crate::painter::Painter;
 use crate::renderer::OverlayRenderer;
+use crate::web_surface::WebSurface;
 use crate::CanvasModel;
 pub use iron_canvas_core::RenderOverlays;
 
 pub(crate) struct OverlayLayer {
-    base: LayerBase<OverlayRenderer<CanvasPainter>>,
+    base: LayerBase<WebSurface, OverlayRenderer<CanvasPainter>>,
 }
 
 impl OverlayLayer {
     pub(crate) fn create(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
-        let ctx = create_2d_context(&canvas, true, true)?;
-        let renderer = OverlayRenderer::for_layer(CanvasPainter::new(ctx));
+        let surface = WebSurface::overlay(canvas)?;
+        let renderer = OverlayRenderer::for_layer(surface.clone_painter());
         Ok(Self {
-            base: LayerBase::new(canvas, renderer),
+            base: LayerBase::new(surface, renderer),
         })
     }
 
@@ -44,12 +48,12 @@ impl OverlayLayer {
     ) {
         let size = frame.canvas_size;
         self.base
-            .renderer
+            .surface
             .painter()
             .ctx()
             .clear_rect(0.0, 0.0, size.w, size.h);
 
-        let painter = self.base.renderer.painter();
+        let painter = self.base.surface.painter();
         painter.begin_group("overlay");
 
         // Selection paints fill (under) then stroke + handle (over) the
@@ -62,7 +66,7 @@ impl OverlayLayer {
                 .renderer
                 .repaint_active_cell(model, hook.row, hook.col, frame);
         }
-        selection.paint_after_hook(model, frame, self.base.renderer.painter());
+        selection.paint_after_hook(model, frame, self.base.surface.painter());
 
         self.base.renderer.render_header_highlights(
             crate::geometry::prim::Axis::Row,
@@ -75,7 +79,7 @@ impl OverlayLayer {
             selection.selection_range,
         );
 
-        let painter = self.base.renderer.painter();
+        let painter = self.base.surface.painter();
         for layer in others {
             layer.paint(model, frame, painter);
         }
@@ -83,6 +87,12 @@ impl OverlayLayer {
     }
 
     pub(crate) fn resize(&mut self, css_w: i32, css_h: i32, dpr: i32) {
-        self.base.resize(css_w, css_h, dpr);
+        self.base.resize(
+            CanvasSize {
+                w: f64::from(css_w),
+                h: f64::from(css_h),
+            },
+            dpr,
+        );
     }
 }

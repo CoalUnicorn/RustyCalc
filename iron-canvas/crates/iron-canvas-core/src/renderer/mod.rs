@@ -49,6 +49,7 @@ pub mod chrome;
 // `OverlayLayer::paint`.
 
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 pub use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome};
@@ -72,7 +73,10 @@ use crate::painter::{BlitPainter, Painter};
 /// exposes `painter()` + `repaint_active_cell` + `render_header_highlights`
 /// for `OverlayLayer` to drive the decoration walk.
 pub struct RendererCore<P: Painter> {
-    pub painter: P,
+    /// The surface owns the painter as the semantic source of truth; the
+    /// renderer holds a shared handle so paint methods reach the painter
+    /// without re-borrowing through the surface on every call.
+    pub painter: Rc<P>,
     dpr: i32,
     pub frame_cache: FrameCache,
     /// Renderer-lifetime per-pane bulk-fetch buffers + last-fetched range.
@@ -97,7 +101,7 @@ pub struct RendererCore<P: Painter> {
 
 impl<P: Painter> RendererCore<P> {
     pub fn painter(&self) -> &P {
-        &self.painter
+        self.painter.as_ref()
     }
 }
 
@@ -121,8 +125,9 @@ impl<P: Painter> RendererCore<P> {
 
     /// Layer-friendly constructor: caller owns canvas sizing + DPR scaling.
     /// Canvas size and theme both live on the per-frame `Chrome`,
-    /// not on the renderer.
-    pub fn for_layer(painter: P) -> Self {
+    /// not on the renderer. Takes the painter as an `Rc` so the surface that
+    /// owns the painter can hand the renderer its own owning handle.
+    pub fn for_layer(painter: Rc<P>) -> Self {
         Self {
             painter,
             dpr: 1,
@@ -231,8 +236,10 @@ impl<P: Painter> RendererCore<P> {
 
 /// Backend-agnostic resize hook. Called by `LayerBase::resize` whenever the
 /// backing store's DPR changes; everything else stays on the wrapper's
-/// inherent surface.
+/// inherent surface. `Painter` ties the renderer's painter type to the
+/// `LayerBase`'s `Surface::P` at the type level.
 pub trait LayerOps {
+    type Painter: Painter;
     fn resize_for_dpr(&mut self, dpr: i32);
 }
 
@@ -262,7 +269,7 @@ impl<P: Painter> GridRenderer<P> {
         self.core.pane_cache.invalidate(mask);
     }
 
-    pub fn for_layer(painter: P) -> Self {
+    pub fn for_layer(painter: Rc<P>) -> Self {
         Self {
             core: RendererCore::for_layer(painter),
         }
@@ -288,6 +295,7 @@ impl<P: BlitPainter> GridRenderer<P> {
 }
 
 impl<P: Painter> LayerOps for GridRenderer<P> {
+    type Painter = P;
     fn resize_for_dpr(&mut self, dpr: i32) {
         self.core.resize_for_dpr(dpr);
     }
@@ -298,7 +306,7 @@ pub struct OverlayRenderer<P: Painter> {
 }
 
 impl<P: Painter> OverlayRenderer<P> {
-    pub fn for_layer(painter: P) -> Self {
+    pub fn for_layer(painter: Rc<P>) -> Self {
         Self {
             core: RendererCore::for_layer(painter),
         }
@@ -330,6 +338,7 @@ impl<P: Painter> OverlayRenderer<P> {
 }
 
 impl<P: Painter> LayerOps for OverlayRenderer<P> {
+    type Painter = P;
     fn resize_for_dpr(&mut self, dpr: i32) {
         self.core.resize_for_dpr(dpr);
     }

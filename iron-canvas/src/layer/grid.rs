@@ -1,22 +1,25 @@
 use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
+use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::layer::{LayerBase, Surface};
+
 use crate::canvas_painter::CanvasPainter;
 use crate::chrome::{BlitPlan, Chrome};
-use crate::layer::{create_2d_context, LayerBase};
 use crate::renderer::GridRenderer;
+use crate::web_surface::WebSurface;
 use crate::CanvasModel;
 
 pub(crate) struct GridLayer {
-    base: LayerBase<GridRenderer<CanvasPainter>>,
+    base: LayerBase<WebSurface, GridRenderer<CanvasPainter>>,
 }
 
 impl GridLayer {
     pub(crate) fn create(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
-        let ctx = create_2d_context(&canvas, false, false)?;
-        let renderer = GridRenderer::for_layer(CanvasPainter::new(ctx));
+        let surface = WebSurface::grid(canvas)?;
+        let renderer = GridRenderer::for_layer(surface.clone_painter());
         Ok(Self {
-            base: LayerBase::new(canvas, renderer),
+            base: LayerBase::new(surface, renderer),
         })
     }
 
@@ -32,15 +35,12 @@ impl GridLayer {
         // for clean panes. Blitted frames take `paint_blit`, which
         // never reaches this clear.
         //
-        // Setter-cache invalidation is the orchestrator arm's
-        // responsibility: `paint_rebuild` / `paint_content` call
-        // `invalidate_paint_cache` at their prologue. The raw
-        // `ctx.set_fill_style_str` below bypasses the cache but doesn't
-        // read it, so an Empty cache here is safe — the first cached-set
-        // inside `render_grid` will re-bind from Empty.
+        // The raw `ctx.set_fill_style_str` below bypasses the painter
+        // cache but doesn't read it, so an Empty cache here is safe —
+        // the first cached-set inside `render_grid` re-binds from Empty.
         if !frame.kind.reuses_slots() {
             let size = frame.canvas_size;
-            let ctx = self.base.renderer.painter().ctx();
+            let ctx = self.base.surface.painter().ctx();
             ctx.set_fill_style_str(frame.theme.cell_bg.as_ref());
             ctx.fill_rect(0.0, 0.0, size.w, size.h);
         }
@@ -91,6 +91,12 @@ impl GridLayer {
     /// Resize the backing store. Ports the guard from `CanvasRenderer::new`:
     /// only reallocates the bitmap when dimensions actually change.
     pub(crate) fn resize(&mut self, css_w: i32, css_h: i32, dpr: i32) {
-        self.base.resize(css_w, css_h, dpr);
+        self.base.resize(
+            CanvasSize {
+                w: f64::from(css_w),
+                h: f64::from(css_h),
+            },
+            dpr,
+        );
     }
 }

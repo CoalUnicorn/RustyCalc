@@ -1,4 +1,4 @@
-use crate::layer::PaintGate;
+use iron_canvas_core::layer::PaintGate;
 
 #[test]
 fn fresh_gate_does_not_paint() {

@@ -87,7 +87,7 @@ impl SetterCache {
     }
 }
 
-pub(crate) struct CanvasPainter {
+pub struct CanvasPainter {
     pub ctx: CanvasRenderingContext2d,
     pub(crate) setter_cache: SetterCache,
     pub dash_pattern: js_sys::Array,

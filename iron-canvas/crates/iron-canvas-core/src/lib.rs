@@ -7,6 +7,7 @@
 pub mod chrome;
 pub mod decoration;
 pub mod geometry;
+pub mod layer;
 pub mod model_adapter;
 pub mod painter;
 pub mod render_overlays;

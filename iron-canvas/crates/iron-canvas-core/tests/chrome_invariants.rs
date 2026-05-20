@@ -77,7 +77,7 @@ fn drive_render_grid(model: &StubModel, check: impl FnOnce(&Chrome, &[DrawOp])) 
     let theme = CanvasTheme::light();
     let canvas = CanvasSize { w: 600.0, h: 400.0 };
     let frame = Chrome::next(None, model, canvas, &theme, FramePath::Fresh);
-    let core = RendererCore::for_layer(RecorderPainter::new());
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(model, &frame);
     let ops = core.painter().ops();
     check(&frame, &ops);
