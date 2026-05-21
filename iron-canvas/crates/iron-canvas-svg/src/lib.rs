@@ -3,13 +3,18 @@
 //! Pure `std`. Emits a self-contained `<svg>` document for snapshot tests,
 //! exports, and headless rendering. Design notes: `docs/svg-painter.md`.
 
-#![allow(dead_code)]
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
+use std::mem;
+use std::rc::Rc;
 
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Span};
-use iron_canvas_core::painter::{PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
+use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::layer::Surface;
+use iron_canvas_core::painter::{
+    BlitPainter, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+};
 
 // Matches RecorderPainter's fallback so wrap math is consistent across
 // non-browser backends. SVG has no host-side text measurement API.
@@ -40,9 +45,11 @@ impl SvgPainter {
         }
     }
 
-    /// Consume the painter and return the finished SVG document.
+    /// Drain the buffered body + defs and return the finished SVG
+    /// document. Takes `&self` so callers holding the painter behind
+    /// `Rc` (e.g. `SvgSurface`) can finish without unwrapping.
     /// Asserts clip and group balance.
-    pub fn finish(self) -> String {
+    pub fn finish(&self) -> String {
         debug_assert_eq!(
             self.clip_depth.get(),
             0,
@@ -61,8 +68,8 @@ impl SvgPainter {
             (self.width, self.height)
         };
 
-        let defs = self.defs.into_inner();
-        let body = self.body.into_inner();
+        let defs = mem::take(&mut *self.defs.borrow_mut());
+        let body = mem::take(&mut *self.body.borrow_mut());
         let mut out = String::with_capacity(defs.len() + body.len() + 256);
         let _ = write!(
             out,
@@ -299,6 +306,63 @@ impl Painter for SvgPainter {
         self.group_depth.set(self.group_depth.get() - 1);
         self.body.borrow_mut().push_str("</g>");
     }
+}
+
+impl BlitPainter for SvgPainter {
+    fn blit(&self, _src: PixelRect, _dst: PixelRect) {
+        unreachable!(
+            "SvgPainter::blit invoked — SVG export must always run via PaintRegime::Fresh"
+        );
+    }
+}
+
+/// `Surface` adapter wrapping `SvgPainter`. Drives `Orchestrator` for
+/// one-shot SVG export. `resize` and `present` are no-ops — the SVG
+/// document size is fixed at construction time and there's no backing
+/// pixel buffer to flush.
+pub struct SvgSurface {
+    painter: Rc<SvgPainter>,
+}
+
+impl SvgSurface {
+    pub fn new(width: i32, height: i32) -> Self {
+        Self {
+            painter: Rc::new(SvgPainter::new(width, height)),
+        }
+    }
+
+    /// Drain the painter and return the finished `<svg>` document.
+    /// Safe to call after the orchestrator (and its `Rc<SvgPainter>`
+    /// clones) have been dropped — but also safe before, because
+    /// `SvgPainter::finish` takes `&self`.
+    pub fn finish(&self) -> String {
+        self.painter.finish()
+    }
+}
+
+impl Surface for SvgSurface {
+    type P = SvgPainter;
+
+    fn painter(&self) -> &SvgPainter {
+        self.painter.as_ref()
+    }
+
+    fn clone_painter(&self) -> Rc<SvgPainter> {
+        Rc::clone(&self.painter)
+    }
+
+    /// SVG document dimensions are baked at `SvgSurface::new`; a later
+    /// `resize` that disagrees would silently produce a mismatched
+    /// `viewBox`. Callers must pair construction and `Orchestrator::resize`
+    /// with the same `(w, h)` — the assert hardens that contract.
+    fn resize(&mut self, css: CanvasSize, _dpr: i32) {
+        debug_assert_eq!(
+            (css.w.round() as i32, css.h.round() as i32),
+            (self.painter.width, self.painter.height),
+            "SvgSurface::resize disagrees with SvgPainter dimensions baked at construction",
+        );
+    }
+    fn present(&self) {}
 }
 
 #[cfg(test)]

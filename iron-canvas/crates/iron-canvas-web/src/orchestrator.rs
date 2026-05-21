@@ -15,14 +15,19 @@ use crate::web_surface::WebSurface;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
 use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::layer::Surface;
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 use iron_canvas_core::CanvasModel;
+use iron_canvas_svg::SvgSurface;
 
 #[wasm_bindgen]
 pub struct IronCanvas {
     orch: Orchestrator<WebSurface, Rc<dyn CanvasModel>>,
+    // Cached so SVG export can re-push the live model into a throwaway
+    // orchestrator. Updated alongside every `set_model` / `setModel`.
+    model: Option<Rc<dyn CanvasModel>>,
 }
 
 #[wasm_bindgen]
@@ -38,6 +43,7 @@ impl IronCanvas {
         let overlay = WebSurface::overlay(overlay_canvas)?;
         Ok(IronCanvas {
             orch: Orchestrator::<WebSurface, Rc<dyn CanvasModel>>::new(grid, overlay),
+            model: None,
         })
     }
 
@@ -90,9 +96,49 @@ impl IronCanvas {
     /// catch sees a real `Error` with `.message` and `.stack`.
     #[allow(non_snake_case)]
     pub fn setModel(&mut self, model: JsValue) -> Result<(), JsError> {
-        let backed = Rc::new(JsBackedModel::try_from_js_value(model)?);
+        let backed: Rc<dyn CanvasModel> = Rc::new(JsBackedModel::try_from_js_value(model)?);
+        self.model = Some(Rc::clone(&backed));
         self.orch.set_model(backed);
         Ok(())
+    }
+
+    /// Render the current sheet as a self-contained SVG string. Returns
+    /// an empty string if no model has been pushed yet. The export
+    /// reads the live theme but uses a one-shot orchestrator — never
+    /// touches the live grid / overlay surfaces and never fires blit
+    /// (always `PaintRegime::Fresh`). Overlays (selection, marching
+    /// ants, autofill handle, formula refs) are deliberately omitted
+    /// — the overlay surface's SVG output is built but discarded.
+    ///
+    /// Why the overlay-discard strategy yields a clean grid SVG even
+    /// though the throwaway orchestrator's `SelectionLayer` defaults to
+    /// an A1 active cell: `LayerBase::paint_overlay_layer` invokes the
+    /// `after_paint_renderer_hook` (active-cell repaint) through the
+    /// **overlay** renderer's painter, not the grid's. The hook's output
+    /// goes to the discarded overlay surface; the grid surface only
+    /// receives `render_grid`'s cell / borders / chrome draws.
+    #[allow(non_snake_case)]
+    pub fn exportSvg(&self, css_w: f64, css_h: f64) -> String {
+        let Some(model) = self.model.as_ref() else {
+            return String::new();
+        };
+        let width = css_w.round() as i32;
+        let height = css_h.round() as i32;
+
+        let grid = SvgSurface::new(width, height);
+        let overlay = SvgSurface::new(width, height);
+        let grid_painter = grid.clone_painter();
+
+        let mut export_orch =
+            Orchestrator::<SvgSurface, Rc<dyn CanvasModel>>::new(grid, overlay);
+        export_orch.set_theme(self.orch.theme().clone());
+        export_orch.set_model(Rc::clone(model));
+        export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
+        export_orch.request_repaint();
+        export_orch.paint_if_dirty();
+        drop(export_orch);
+
+        grid_painter.finish()
     }
 }
 
@@ -144,6 +190,7 @@ impl IronCanvas {
     /// `Rc` — Leptos-side adapters that bridge a host store to the canvas
     /// (e.g. `WorksheetModelAdapter`) route through here.
     pub fn set_model(&mut self, model: Rc<dyn CanvasModel>) {
+        self.model = Some(Rc::clone(&model));
         self.orch.set_model(model);
     }
 

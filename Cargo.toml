@@ -9,7 +9,6 @@ readme = "README.md"
 
 [dependencies]
 leptos = { version = "0.8", features = ["csr"] }
-#ironcalc_base = { git = "https://github.com/CoalUnicorn/IronCalc",branch = "fix-col-iterations", features = ["use_regex_lite"] }
 ironcalc_base = { version = "0.7.1", path = "../IronCalc/base"  }
 ironcalc = { version = "0.7.1", path = "../IronCalc/xlsx" }
 iron-canvas-web = { path = "iron-canvas/crates/iron-canvas-web" }

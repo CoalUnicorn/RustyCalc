@@ -88,6 +88,9 @@
             selected sheet — the canvas reads the new view on the next paint.
             Open DevTools for the bridge snapshot.
         </div>
+        <p style="margin-top: 12px">
+            <button id="save-svg" type="button">Save as SVG</button>
+        </p>
 
         <script type="module">
             import initIronCanvas, {
@@ -177,6 +180,25 @@
                     });
                 };
                 renderTabs();
+
+                phase = "wire save-svg";
+                document
+                    .getElementById("save-svg")
+                    .addEventListener("click", () => {
+                        const svg = canvas.exportSvg(800, 400);
+                        const blob = new Blob([svg], {
+                            type: "image/svg+xml",
+                        });
+                        const url = URL.createObjectURL(blob);
+                        const a = Object.assign(
+                            document.createElement("a"),
+                            { href: url, download: "sheet.svg" },
+                        );
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                    });
 
                 phase = "paint loop";
                 canvas.requestRepaint();

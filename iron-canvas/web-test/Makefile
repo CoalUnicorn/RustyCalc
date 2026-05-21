@@ -11,7 +11,7 @@ PROFILE_FLAG := $(if $(filter dev,$(PROFILE)),--dev,$(if $(filter profiling,$(PR
 .PHONY: build sync serve clean
 
 build:
-	cd $(IC_DIR) && wasm-pack build --target web $(PROFILE_FLAG)
+	cd $(IC_DIR) && wasm-pack build --target web $(PROFILE_FLAG) --no-opt
 
 sync:
 	@test -d $(IC_PKG)    || (echo "missing $(IC_PKG) — run 'make build' first" && exit 1)

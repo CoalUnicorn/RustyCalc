@@ -251,6 +251,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "bitflags",
  "iron-canvas-core",
+ "iron-canvas-svg",
  "ironcalc_base",
  "js-sys",
  "serde",
