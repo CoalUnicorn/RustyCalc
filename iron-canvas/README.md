@@ -4,14 +4,29 @@
 
 A `<canvas>` renderer for [IronCalc](https://github.com/ironcalc/IronCalc) workbooks.
 
-Two stacked canvases — a static **grid** layer (cells, headers, borders, text) and a dynamic **overlay** layer (selection, autofill handle, marching ants, formula refs). Both are driven from the same `IronCalc` model; only the overlay repaints on cursor movement.
+There are two stacked canvases. The grid layer paints cells, headers, borders, and text; the overlay layer paints selection, the autofill handle, marching ants, and formula refs. Both layers read the same IronCalc model. On cursor movement only the overlay repaints.
 
-Everything visible is a `PixelRect` or a `Line`. The painter surface is five primitives: `rect_fill`, `rect_stroke`, `rect_dashed`, `stroke_line`, `fill_text` (plus clip + text helpers). New visuals reduce to those or they don't ship.
+Every visible pixel composes from `PixelRect` and `Line`. The painter surface is five primitives (`rect_fill`, `rect_stroke`, `rect_dashed`, `stroke_line`, `fill_text`) plus clip and text helpers. New visuals reduce to those primitives.
+
+## Workspace layout
+
+`iron-canvas/` is a Cargo workspace:
+
+| Crate                  | Role                                                                                     |
+| ---------------------- | ---------------------------------------------------------------------------------------- |
+| `iron-canvas-core`     | Pure-Rust engine: geometry, `Chrome`, renderer, `Orchestrator<S: Surface, M: CanvasModel>`, `Painter` trait surface. No `web-sys` / `wasm-bindgen` deps |
+| `iron-canvas-web`      | `#[wasm_bindgen]` facade: `IronCanvas`, `WebSurface`, `CanvasPainter`, `JsBackedModel`   |
+| `iron-canvas-svg`      | `SvgPainter` — declarative SVG output                                                    |
+| `iron-canvas-recorder` | `RecorderPainter` + `MemSurface` — drives `Orchestrator<MemSurface, _>` in core's tests  |
+
+Consumers depending on the wasm bundle use `iron-canvas-web`. Native /
+non-browser backends impl `Surface` (associated `type P = YourPainter`)
+and wire `Orchestrator<YourSurface, _>` directly.
 
 ## Quick start
 
 ```js
-import initIronCanvas, { IronCanvas } from "./iron_canvas.js";
+import initIronCanvas, { IronCanvas } from "./iron_canvas_web.js";
 import initIronCalc, { Model } from "./wasm.js";
 
 await Promise.all([initIronCanvas(), initIronCalc()]);
@@ -26,8 +41,9 @@ requestAnimationFrame(loop);
 ```
 
 The consumer mounts two `<canvas>` elements (overlay on top, `pointer-events: none`,
-matching size) and forwards resize / model / repaint calls. `GridLayer` and
-`OverlayLayer` are private — the wasm-bindgen surface is `IronCanvas` only.
+matching size) and forwards resize / model / repaint calls. The wasm-bindgen
+surface is `IronCanvas` only; everything else (Orchestrator, LayerBase, Surface,
+WebSurface, the renderer types) is Rust-only.
 
 ## CSS stacking
 
@@ -180,59 +196,48 @@ pipeline.
 
 ## How it works
 
-**Two layers, one model.** Both layers read the same `Rc<dyn CanvasModel>`. The
-grid canvas is opaque (`alpha: false`); the overlay uses
-`alpha: true, desynchronized: true`. Each layer wraps a `LayerBase<R: LayerOps>`
-that holds a `PaintGate` (typed `GridSignals` dirty bits) and a long-lived
-`RendererCore<CanvasPainter>` whose caches survive across frames.
+### Layers, surfaces, painters
 
-**Overlay decorations.** Selection, autofill preview, clipboard ants, point-mode,
-and formula-ref outlines are each a struct implementing the `Layer` trait in
-`src/layer/decoration/`. `OverlayLayer::paint` walks them in fixed z-order; each
-reads its own state directly — there is no monolithic `render_overlays`.
+Both layers read the same `Option<M>` where `M: CanvasModel`; the web facade pins `M = Rc<dyn CanvasModel>`. The grid canvas is opaque (`alpha: false`) and the overlay uses `alpha: true, desynchronized: true`. Each layer is a `LayerBase<S, R>` where `S: Surface` owns the painter and `R: LayerOps<Painter = S::P>` is the renderer wrapper. The surface hands the renderer an `Rc<S::P>` clone at construction, so paint methods do not re-borrow through the surface on every call. `LayerBase` also carries a `PaintGate` (typed `GridSignals` dirty bits) and a long-lived `RendererCore<S::P>` whose caches survive across frames.
 
-**Painter trait.** Sealed; renderer code never touches `CanvasRenderingContext2d`.
-Three impls: `CanvasPainter` (production, caches ctx state), `SvgPainter`
-(snapshot output), `RecorderPainter` (test-only `DrawOp` log).
+`Surface` is the backend-agnostic drawing target. It owns an associated `type P: Painter + BlitPainter` plus `painter`, `clone_painter`, `resize`, and `present`. `WebSurface` wraps an `HtmlCanvasElement` and an `Rc<CanvasPainter>`. `MemSurface` (in `iron-canvas-recorder`) wraps an `Rc<RecorderPainter>` and drives `Orchestrator<MemSurface, _>` through every paint regime inside core's integration tests.
 
-**Model.** `CanvasModel` is the read-only adapter trait (`src/model_adapter.rs`) —
-singular accessors plus three batched range accessors (`get_cell_styles_in`,
-`get_formatted_cell_values_in`, `get_cell_types_in`) that collapse a JS-bridge
-pane fetch to one boundary crossing.
+The `Painter` trait is unsealed; adapter crates implement it. Renderer code does not touch `CanvasRenderingContext2d` directly. The layer-clear and full-canvas-fill paths route through `Painter::clear_rect` and `Painter::rect_fill` so SVG and Recorder backends see the same op stream. Three impls ship today: `CanvasPainter` (production, caches ctx state), `SvgPainter` (snapshot output), and `RecorderPainter` (test-only `DrawOp` log).
 
-**Per-frame snapshot.** `Chrome::next(prev, model, canvas, theme, path)` is the
-single constructor. `path: FramePath` selects one of three build regimes
-(`Fresh` / `SlotsReuse` / `Blit`). The `Fresh` arm walks the model once per axis
-into four slot vecs; `SlotsReuse` reuses the previous frame's vecs; `Blit` shifts
-one axis in-place for a pure scroll. The resulting `Chrome` is the single source
-of truth for hit-test geometry.
+### Model and overlay decorations
 
-**`paintIfDirty`.** Drains typed dirty signals from both layers and dispatches to
-one of four regimes in cheapness order: `Overlay` (overlay-only, no grid rebuild),
-`Viewport` (scroll blit), `SlotsReuse` (stable viewport, masked pane refetch),
-`Fresh` (full rebuild).
+`CanvasModel` is the read-only adapter trait at `crates/iron-canvas-core/src/model_adapter.rs`. It exposes singular accessors plus three batched range accessors (`get_cell_styles_in`, `get_formatted_cell_values_in`, `get_cell_types_in`) that collapse a JS-bridge pane fetch into one boundary crossing. A blanket `impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T>` lets any owning handle (including `Rc<dyn CanvasModel>`) pass where the trait is expected.
 
-**Pane pipeline.** `render_grid` paints four quadrants (`top_left` / `top_right` /
-`bottom_left` / `bottom_right`), then frozen separators, then headers, then corner
-box. Each pane runs four deferred sub-passes over one reused slot vec:
-bg → grid borders → explicit borders → text. Order is load-bearing.
+Selection, autofill preview, clipboard ants, point-mode, and formula-ref outlines each implement the `Layer` trait in `crates/iron-canvas-core/src/layer/decoration/`. `LayerBase::paint_overlay_layer` walks them in fixed z-order, and each reads its own state directly. There is no monolithic `render_overlays`.
 
-**Theme.** `CanvasTheme` fields are `Cow<'static, str>`. `light()` / `dark()` are
-built-in palettes (`Cow::Borrowed`, ptr-eq cache hit); host overrides via
-`ThemeVariables` are `Cow::Owned`. On wasm32, `setThemeFromElement` reads
-`--palette-*` off `getComputedStyle`.
+### Per-frame snapshot and dispatch
+
+`Chrome::next(prev, model, canvas, theme, path)` is the single constructor. `path: FramePath` selects one of three build regimes: `Fresh` walks the model once per axis into four slot vecs, `SlotsReuse` reuses the previous frame's vecs, and `Blit` shifts one axis in-place for a pure scroll. The resulting `Chrome` is the single source of truth for hit-test geometry.
+
+`paint_if_dirty` (on `Orchestrator`; `IronCanvas::paintIfDirty` delegates to it) drains typed dirty signals from both layers and dispatches to one of four regimes in cheapness order. `Overlay` repaints the overlay only and skips the grid rebuild. `Viewport` runs the scroll blit. `SlotsReuse` keeps the viewport stable and refetches only the masked panes. `Fresh` is the full rebuild.
+
+### Pane pipeline and theme
+
+`render_grid` paints the four pane quadrants (`top_left`, `top_right`, `bottom_left`, `bottom_right`), then frozen separators, then headers, then the corner box. Each pane runs four deferred sub-passes over one reused slot vec: bg, then grid borders, then explicit borders, then text. The sub-pass order is the contract — explicit borders must win over grid borders at shared edges, and text must run last so overflow is not clipped by a neighbour's bg.
+
+`CanvasTheme` fields are `Cow<'static, str>`. `light()` and `dark()` are built-in palettes (`Cow::Borrowed`, ptr-eq cache hit); host overrides via `ThemeVariables` are `Cow::Owned`. On wasm32, `setThemeFromElement` reads `--palette-*` off `getComputedStyle`.
 
 ## Tests
 
-`RecorderPainter` is the testing entry point — see [`src/test/painter.rs`](src/test/painter.rs)
-for the recorder and inline examples. Renderer tests construct a `RecorderPainter`,
-drive a render pass, and assert against the resulting `Vec<DrawOp>`.
+`RecorderPainter` (in `iron-canvas-recorder`) is the testing entry point.
+Renderer tests construct one, drive a render pass, and assert against the
+resulting `Vec<DrawOp>`. The four-regime integration test in
+`crates/iron-canvas-core/tests/orchestrator_regimes.rs` drives
+`Orchestrator<MemSurface, _>` through `Fresh` / `SlotsReuse` / `Viewport` /
+`Overlay` and asserts the expected op log for each.
 
 ```
-cargo test
+cargo test --workspace
 ```
 
 ## Status
 
-Pre-1.0. Public API is `IronCanvas` + the `geometry` re-exports from `lib.rs`.
-Everything else is internal and may move.
+Pre-1.0. Wasm consumers depend on `iron-canvas-web` and import through
+`iron_canvas_web::*` (which re-exports `IronCanvas` plus the
+`iron-canvas-core` public surface). Native / non-browser consumers pull
+`iron-canvas-core` directly and provide their own `Surface` impl.

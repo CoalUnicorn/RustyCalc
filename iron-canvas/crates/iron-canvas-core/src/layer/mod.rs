@@ -58,12 +58,7 @@ pub trait Surface {
 
 pub struct PaintGate {
     signals: Cell<GridSignals>,
-    /// Instrumentation-only tick — incremented per non-empty `drain`,
-    /// read by cross-crate tests in `iron-canvas` to assert paint cadence.
-    /// Production code must not branch on this value. The field is `pub`
-    /// (not `cfg(test)`-gated) because `cfg(test)` doesn't cross crate
-    /// boundaries; the `Cell<u32>` cost is one machine word.
-    pub paint_count: Cell<u32>,
+    paint_count: Cell<u32>,
 }
 
 impl PaintGate {
@@ -86,12 +81,16 @@ impl PaintGate {
         drained
     }
 
-    pub fn mark_dirty(&self) {
-        self.raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
-    }
-
     pub fn should_paint(&self) -> bool {
         !self.drain().is_empty()
+    }
+
+    /// Non-empty-drain tick. Cross-crate test surface; production must not
+    /// branch on it. `cfg(test)` doesn't cross crate boundaries, so the
+    /// accessor stays callable for tests in sibling crates.
+    #[doc(hidden)]
+    pub fn paint_count(&self) -> u32 {
+        self.paint_count.get()
     }
 }
 
@@ -106,9 +105,9 @@ where
     S: Surface,
     R: LayerOps<Painter = S::P>,
 {
-    pub surface: S,
+    pub(crate) surface: S,
     gate: PaintGate,
-    pub renderer: R,
+    pub(crate) renderer: R,
 }
 
 impl<S, R> LayerBase<S, R>
@@ -122,14 +121,6 @@ where
             gate: PaintGate::new(),
             renderer,
         }
-    }
-
-    /// Back-compat shim: callers that don't yet know which signal they
-    /// raise get the safest blanket. Per-setter routing lives in the
-    /// orchestrator.
-    pub fn mark_dirty(&self) {
-        self.gate
-            .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
     }
 
     pub fn raise(&self, sig: GridSignals) {

@@ -1,14 +1,14 @@
-//! Frame dispatch + state aggregator. Backend-agnostic; the wasm-bound
-//! `IronCanvas` facade in `iron-canvas` (Stage 4: `iron-canvas-web`) owns
-//! an `Orchestrator<WebSurface, Rc<JsBackedModel>>` and delegates every
-//! setter / query / paint call here.
+//! Frame dispatch and state aggregator. Backend-agnostic; the wasm-bound
+//! `IronCanvas` facade in `iron-canvas-web` owns an
+//! `Orchestrator<WebSurface, Rc<dyn CanvasModel>>` and delegates every
+//! setter, query, and paint call here.
 //!
-//! `paint_if_dirty` drains both layers' typed `GridSignals`, then picks one
+//! `paint_if_dirty` drains both layers' typed `GridSignals` and picks one
 //! of four `PaintRegime` arms via `decide` (cheapness-ordered). Each arm
 //! runs a `Chrome::next(.., FramePath::*)` walk through the matching
 //! `LayerBase` paint method. The query API (`hit_test`, `cell_rect`,
-//! `resize_handle_at`, `autofill_handle`) reads `last_frame` so hits agree
-//! with painted pixels by construction.
+//! `resize_handle_at`, `autofill_handle`) reads `last_frame`, so hits
+//! agree with painted pixels by construction.
 
 use crate::chrome::{BlitPlan, Chrome, FramePath, FrameValidity, PaneRegionMask};
 use crate::decoration::{
@@ -49,8 +49,8 @@ where
     S::P: BlitPainter,
     M: CanvasModel,
 {
-    pub grid: LayerBase<S, GridRenderer<S::P>>,
-    pub overlay: LayerBase<S, OverlayRenderer<S::P>>,
+    pub(crate) grid: LayerBase<S, GridRenderer<S::P>>,
+    pub(crate) overlay: LayerBase<S, OverlayRenderer<S::P>>,
     theme: CanvasTheme,
     selection: SelectionLayer,
     autofill: AutofillLayer,
@@ -209,6 +209,19 @@ where
 
     pub fn selection(&self) -> &SelectionLayer {
         &self.selection
+    }
+
+    /// Cross-crate test surface — the recorder backend reads the grid
+    /// surface to inspect emitted `DrawOp`s. Production must not branch
+    /// on this.
+    #[doc(hidden)]
+    pub fn grid_surface(&self) -> &S {
+        &self.grid.surface
+    }
+
+    #[doc(hidden)]
+    pub fn overlay_surface(&self) -> &S {
+        &self.overlay.surface
     }
 
     // Query API. All queries resolve against `last_frame`, the snapshot

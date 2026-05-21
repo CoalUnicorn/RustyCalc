@@ -79,6 +79,12 @@ impl FontIntern {
     }
 }
 
+impl Default for FontIntern {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Renderer-lifetime intern table for column-letter labels (`A`, `B`, ..., `XFD`).
 ///
 /// Mirrors `FontIntern`: each unique column index pays one `col_name` allocation
@@ -106,6 +112,12 @@ impl ColNameIntern {
             entries.push(crate::geometry::utils::col_name(next).into());
         }
         Rc::clone(&entries[idx])
+    }
+}
+
+impl Default for ColNameIntern {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -137,5 +149,11 @@ impl ColorIntern {
         let css: Rc<str> = CssColor::new(raw).into_string().into();
         entries.push((raw.into(), Rc::clone(&css)));
         css
+    }
+}
+
+impl Default for ColorIntern {
+    fn default() -> Self {
+        Self::new()
     }
 }

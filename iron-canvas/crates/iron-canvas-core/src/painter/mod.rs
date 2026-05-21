@@ -1,11 +1,13 @@
 //! Drawing backend abstraction.
 //!
-//! `Painter` is the surface every renderer paint method calls into.
-//! Two implementations live in this crate: `CanvasPainter` (production,
-//! Canvas 2D) and the test-only `RecorderPainter` (captures `DrawOp`s).
+//! `Painter` is the surface every renderer paint method calls into. The
+//! trait surface lives here; concrete impls live in sibling adapter
+//! crates: `CanvasPainter` in `iron-canvas-web`, `SvgPainter` in
+//! `iron-canvas-svg`, `RecorderPainter` in `iron-canvas-recorder`.
 //!
-//! `TextMetrics` is split out as a supertrait so future text-shaping work
-//! (kerning, web-font metrics, bidi) doesn't churn the drawing surface.
+//! `TextMetrics` is a separate supertrait because text measurement is
+//! consumed outside the paint loop (e.g. for column-fit calculations)
+//! and must stay callable without a paint-time context.
 
 use std::borrow::Cow;
 

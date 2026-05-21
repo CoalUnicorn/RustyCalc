@@ -1,5 +1,5 @@
 //! Per-frame snapshot of painted chrome geometry. The renderer and every
-//! `IronCanvas` query read the same `Chrome`, so painted pixels and hit
+//! `Orchestrator` query read the same `Chrome`, so painted pixels and hit
 //! zones cannot disagree.
 //!
 //! Pure-axis walks live on `PaneSet`; `Chrome` composes them whenever a
@@ -10,19 +10,19 @@ use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use crate::geometry::slot::scroll_first;
 use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW},
     pixel_rect::PixelRect,
     prim::Point,
+    slot::scroll_first,
 };
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
 use crate::{CanvasModel, CanvasSize, CanvasView, RCRange};
 
 mod blit;
-pub mod kind;
-pub mod pane_region;
+mod kind;
+mod pane_region;
 mod pane_set;
 
 pub use blit::{BlitPlan, FramePath};
@@ -42,6 +42,8 @@ pub struct ActiveCellSnapshot {
     pub value_hash: u64,
 }
 
+/// `DefaultHasher` is per-process — equality only holds within one run.
+/// Never persist or compare across processes.
 fn hash_cell_value(model: &dyn CanvasModel, sheet: u32, row: i32, col: i32) -> u64 {
     let value = model
         .get_formatted_cell_value(sheet, row, col)

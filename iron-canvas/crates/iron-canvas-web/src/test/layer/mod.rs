@@ -1,4 +1,7 @@
 use iron_canvas_core::layer::PaintGate;
+use iron_canvas_core::signal::GridSignals;
+
+const ANY: GridSignals = GridSignals::STRUCTURAL.union(GridSignals::OVERLAY);
 
 #[test]
 fn fresh_gate_does_not_paint() {
@@ -7,16 +10,16 @@ fn fresh_gate_does_not_paint() {
 }
 
 #[test]
-fn mark_dirty_enables_paint() {
+fn raise_enables_paint() {
     let gate = PaintGate::new();
-    gate.mark_dirty();
+    gate.raise(ANY);
     assert!(gate.should_paint());
 }
 
 #[test]
 fn should_paint_clears_flag() {
     let gate = PaintGate::new();
-    gate.mark_dirty();
+    gate.raise(ANY);
     gate.should_paint();
     assert!(
         !gate.should_paint(),
@@ -25,10 +28,10 @@ fn should_paint_clears_flag() {
 }
 
 #[test]
-fn double_mark_dirty_still_paints_once() {
+fn double_raise_still_paints_once() {
     let gate = PaintGate::new();
-    gate.mark_dirty();
-    gate.mark_dirty();
+    gate.raise(ANY);
+    gate.raise(ANY);
     assert!(gate.should_paint());
     assert!(!gate.should_paint());
 }

@@ -1,3 +1,20 @@
 [workspace]
 members = ["crates/*"]
-resolver = "2"
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0-alpha.1"
+authors = ["CoalUnicorn"]
+edition = "2021"
+
+[workspace.dependencies]
+ironcalc_base = { version = "0.7.1", path = "../../IronCalc/base" }
+serde = { version = "1", features = ["derive"] }
+bitflags = "2.11.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

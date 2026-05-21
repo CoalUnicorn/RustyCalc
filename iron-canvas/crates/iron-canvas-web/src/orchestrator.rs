@@ -8,14 +8,14 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::layer::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
+use crate::RenderOverlays;
 use crate::wasm::JsBackedModel;
 use crate::web_surface::WebSurface;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
 use iron_canvas_core::geometry::CanvasSize;
-use iron_canvas_core::orchestrator::Orchestrator;
+use iron_canvas_core::Orchestrator;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 use iron_canvas_core::CanvasModel;

@@ -1,7 +1,8 @@
 [package]
 name = "iron-canvas-svg"
-version = "0.1.0-alpha.1"
-edition = "2021"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
 
 [lib]
 crate-type = ["rlib"]

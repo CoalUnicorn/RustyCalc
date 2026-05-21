@@ -2,6 +2,7 @@
 #![allow(clippy::expect_used)]
 
 use crate::{CanvasModel, RCRange, RenderOverlays};
+use iron_canvas_core::signal::GridSignals;
 use std::rc::Rc;
 
 struct StubModel;
@@ -72,7 +73,7 @@ fn set_overlays_only_dirties_overlay() {
     };
     // mirror set_overlays fan-out policy
     if next != current {
-        overlay.mark_dirty();
+        overlay.raise(GridSignals::OVERLAY);
     }
     current = next;
     let _ = current;
@@ -101,7 +102,7 @@ fn sixty_drag_frames_increment_overlay_only() {
         };
         // mirror set_overlays
         if next != current {
-            overlay.mark_dirty();
+            overlay.raise(GridSignals::OVERLAY);
         }
         current = next;
         // mirror paintIfDirty — consume both gates
@@ -109,9 +110,9 @@ fn sixty_drag_frames_increment_overlay_only() {
         overlay.should_paint();
     }
 
-    assert_eq!(grid.paint_count.get(), 0, "grid must not paint during drag");
+    assert_eq!(grid.paint_count(), 0, "grid must not paint during drag");
     assert_eq!(
-        overlay.paint_count.get(),
+        overlay.paint_count(),
         60,
         "overlay must paint once per drag frame"
     );

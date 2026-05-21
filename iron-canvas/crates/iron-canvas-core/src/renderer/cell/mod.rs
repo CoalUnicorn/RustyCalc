@@ -357,7 +357,7 @@ fn infer_shift_axis(prev: RCRange, new: RCRange) -> Option<Axis> {
     match (rows_same, cols_same) {
         (true, false) => Some(Axis::Column),
         (false, true) => Some(Axis::Row),
-        _ => None,
+        (true, true) | (false, false) => None,
     }
 }
 

@@ -18,7 +18,7 @@ use ironcalc_base::types::{CellType, Style};
 
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
-use iron_canvas_core::orchestrator::Orchestrator;
+use iron_canvas_core::Orchestrator;
 use iron_canvas_core::types::coord::{AutofillTarget, RCRange};
 use iron_canvas_core::{CanvasModel, CanvasTheme, CanvasView};
 
@@ -106,22 +106,22 @@ fn build(model: Rc<ScrollableStub>) -> Orchestrator<MemSurface, Rc<ScrollableStu
 }
 
 fn grid_ops_len<M: CanvasModel>(orch: &Orchestrator<MemSurface, M>) -> usize {
-    orch.grid.surface.recorder().ops().len()
+    orch.grid_surface().recorder().ops().len()
 }
 fn overlay_ops_len<M: CanvasModel>(orch: &Orchestrator<MemSurface, M>) -> usize {
-    orch.overlay.surface.recorder().ops().len()
+    orch.overlay_surface().recorder().ops().len()
 }
 fn grid_ops_since<M: CanvasModel>(
     orch: &Orchestrator<MemSurface, M>,
     cursor: usize,
 ) -> Vec<DrawOp> {
-    orch.grid.surface.recorder().ops()[cursor..].to_vec()
+    orch.grid_surface().recorder().ops()[cursor..].to_vec()
 }
 fn overlay_ops_since<M: CanvasModel>(
     orch: &Orchestrator<MemSurface, M>,
     cursor: usize,
 ) -> Vec<DrawOp> {
-    orch.overlay.surface.recorder().ops()[cursor..].to_vec()
+    orch.overlay_surface().recorder().ops()[cursor..].to_vec()
 }
 
 #[test]
@@ -131,8 +131,8 @@ fn fresh_regime_emits_canvas_fill_and_overlay_clear() {
 
     orch.paint_if_dirty();
 
-    let grid_ops = orch.grid.surface.recorder().ops();
-    let overlay_ops = orch.overlay.surface.recorder().ops();
+    let grid_ops = orch.grid_surface().recorder().ops();
+    let overlay_ops = orch.overlay_surface().recorder().ops();
     assert!(!grid_ops.is_empty(), "Fresh must paint the grid");
     assert!(!overlay_ops.is_empty(), "Fresh must paint the overlay");
 

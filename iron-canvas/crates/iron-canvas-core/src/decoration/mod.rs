@@ -49,8 +49,9 @@ pub trait Layer {
         None
     }
 
-    /// Selection's fill paints under the active-cell repaint; its stroke
-    /// + handle paint over it. `paint` runs first, the renderer hook fires,
+    /// Selection's fill paints under the active-cell repaint;
+    ///
+    /// its stroke + handle paint over it. `paint` runs first, the renderer hook fires,
     /// then `paint_after_hook` finishes the layer. Default no-op covers
     /// every decoration except `SelectionLayer`.
     fn paint_after_hook(&self, _model: &dyn CanvasModel, _frame: &Chrome, _painter: &dyn Painter) {}

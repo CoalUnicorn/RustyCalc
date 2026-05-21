@@ -2,47 +2,54 @@
 //!
 //! # Lifecycle
 //!
-//! Two stacked `<canvas>` elements are wrapped by [`crate::IronCanvas`];
-//! each canvas owns a `LayerBase` (canvas + `PaintGate` + a layer renderer
-//! wrapping `RendererCore`). `GridLayer` builds its 2D context with
-//! `alpha: false` (opaque, skips alpha compositing); `OverlayLayer` uses
-//! `alpha: true, desynchronized: true`. The renderer is **long-lived per
-//! layer**, so the painter's cached fill/stroke/font/line-width state
-//! persists across frames.
+//! `Orchestrator<S, M>` (in [`crate::orchestrator`]) owns two
+//! [`LayerBase<S, R>`](crate::layer::LayerBase) values: one for the grid,
+//! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::layer::Surface),
+//! a [`PaintGate`](crate::layer::PaintGate), and a layer-specific renderer
+//! wrapping [`RendererCore`]. In the wasm build the surface is
+//! `iron_canvas_web::WebSurface`; the grid context uses `alpha: false`
+//! (opaque, skips alpha compositing) and the overlay uses
+//! `alpha: true, desynchronized: true`. The renderer is long-lived per
+//! layer, so the painter's cached fill/stroke/font/line-width state
+//! survives across frames.
 //!
-//! State pushes from JS mark layers dirty; `IronCanvas::paintIfDirty`
-//! drives each dirty layer's `paint`. The grid layer calls into
-//! `RendererCore::render_grid`; the overlay layer iterates the
-//! `Layer` decorations in `src/layer/decoration/` and calls back into
-//! `RendererCore` for the active-cell repaint + header highlights.
+//! State pushes from the host mark layers dirty. `Orchestrator::paint_if_dirty`
+//! drives each dirty layer through its `LayerBase` paint method:
+//! `paint_grid` / `paint_grid_blit` for the grid, `paint_overlay_layer`
+//! for the overlay. The grid path calls into [`RendererCore::render_grid`];
+//! the overlay path iterates the [`Layer`](crate::decoration::Layer)
+//! decorations in `crate::decoration` and calls back into `RendererCore`
+//! for the active-cell repaint and header highlights.
 //!
 //! # Render pipeline
 //!
-//! Two paint entry points, each driven by `paintIfDirty` per dirty layer:
+//! Two paint entry points, each driven by `paint_if_dirty` per dirty layer:
 //!
-//! - `RendererCore::render_grid` — cells (4 frozen-pane quadrants, each
-//!   running 4 cell sub-passes: bg -> grid borders -> explicit borders -> text),
-//!   frozen separators, headers, corner box.
-//! - `OverlayLayer::paint` (in `src/layer/overlay.rs`) — orchestrates the
-//!   decorations in `src/layer/decoration/` (selection, autofill, clipboard,
-//!   point-mode, formula-refs) plus header highlights.
+//! - [`RendererCore::render_grid`] paints cells (four frozen-pane
+//!   quadrants, each running four cell sub-passes: bg, then grid
+//!   borders, then explicit borders, then text), then frozen separators,
+//!   then headers, then the corner box.
+//! - `LayerBase::paint_overlay_layer` orchestrates the decorations in
+//!   `crate::decoration` (selection, autofill, clipboard, point-mode,
+//!   formula-refs) plus header highlights.
 //!
-//! The cell sub-pass order matters: grid borders run across the whole pane
-//! before explicit borders so an explicit `right` on cell A wins over cell B's
-//! grid `left` at the shared pixel column. Text runs last so overflow is never
-//! clipped by a neighbour's bg.
+//! The cell sub-pass order is the contract: grid borders run across the
+//! whole pane before explicit borders, so an explicit `right` on cell A
+//! wins over cell B's grid `left` at the shared pixel column. Text runs
+//! last so overflow is never clipped by a neighbour's bg.
 //!
 //! # Frozen panes
 //!
-//! The grid splits into up to four quadrants (top_left, top_right,
-//! bottom_left, bottom_right) based on frozen rows + columns. Each
+//! The grid splits into up to four quadrants (`TopLeft`, `TopRight`,
+//! `BottomLeft`, `BottomRight`) based on frozen rows and columns. Each
 //! quadrant is rendered by `render_pane()` against a different
-//! `PaneRegion`; a thick separator line marks the freeze boundary. See
-//! the diagram in `ARCHITECTURE.md` for the layout.
+//! [`PaneRegion`](crate::chrome::PaneRegion); a thick separator line
+//! marks the freeze boundary. See the diagram in `ARCHITECTURE.md` for
+//! the layout.
 
 pub mod cache;
 pub mod cell;
-pub mod chrome;
+pub mod frame;
 // `renderer/overlay/` has moved to `src/layer/decoration/`. Each
 // decoration is now a struct that impls `Layer`; the orchestration that
 // used to live in `RendererCore::render_overlays` is now in
