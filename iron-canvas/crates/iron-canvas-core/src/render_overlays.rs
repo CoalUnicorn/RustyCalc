@@ -15,4 +15,9 @@ pub struct RenderOverlays {
     pub point_range: Option<RCRange>,
     /// All formula refs extracted from the current formula (multi-color overlays).
     pub formula_refs: Vec<FormulaRef>,
+    /// Index into [`Self::formula_refs`] of the ref the cursor sits on, if any.
+    /// Caller invariant: when `Some(i)`, `i < formula_refs.len()`. Renderer
+    /// consumers should `formula_refs.get(i)`, not `[i]`, so a host bug can't
+    /// panic the paint loop.
+    pub active_ref: Option<usize>,
 }

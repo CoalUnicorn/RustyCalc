@@ -14,6 +14,7 @@ use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
 
 use iron_canvas_core::types::coord::{FormulaRef, RCRange, SheetArea};
+pub use iron_canvas_core::types::coord::FormulaRefKind;
 
 use crate::model::ArrowKey;
 
@@ -137,6 +138,90 @@ impl RefNode {
 
     pub fn to_rc(&self) -> String {
         to_rc_format(&self.inner)
+    }
+
+    /// Rewrite this ref's coordinates to `new` while preserving the
+    /// user-visible identity: sheet qualification (`Sheet!` prefix) and
+    /// per-axis absolute (`$`) flags. The dragged ref's text must keep
+    /// its `$A$1` / `Sheet2!` markup so the user's intent survives the
+    /// drag.
+    ///
+    /// Encoding rules mirror [`Self::from_cell_area`]:
+    /// - Relative axes store `coord - editing.*` so the stringifier emits
+    ///   the address against the editing cell's RC ctx.
+    /// - Absolute axes store the absolute 1-based coord unchanged.
+    /// - `sheet_name` is preserved from `self`; cross-sheet drag isn't
+    ///   supported, so `self.sheet_name.is_some()` implies the new ref
+    ///   is on the same other sheet.
+    ///
+    /// Cell↔range transitions: a single-cell self promotes to `RangeKind`
+    /// when `new` is multi-cell (duplicating both absolute flags onto the
+    /// new endpoint); a range self collapses to `ReferenceKind` when `new`
+    /// is a single cell (endpoint 1's flags win — TopLeft is the canonical
+    /// surviving corner).
+    pub fn with_area(&self, new: SheetRange, editing: CellAddress) -> Self {
+        let encode = |abs: bool, coord: i32, base: i32| -> i32 {
+            if abs {
+                coord
+            } else {
+                coord - base
+            }
+        };
+        let (sheet_name, abs_r1, abs_c1, abs_r2, abs_c2) = match &self.inner {
+            Node::ReferenceKind {
+                sheet_name,
+                absolute_row,
+                absolute_column,
+                ..
+            } => (
+                sheet_name.clone(),
+                *absolute_row,
+                *absolute_column,
+                *absolute_row,
+                *absolute_column,
+            ),
+            Node::RangeKind {
+                sheet_name,
+                absolute_row1,
+                absolute_column1,
+                absolute_row2,
+                absolute_column2,
+                ..
+            } => (
+                sheet_name.clone(),
+                *absolute_row1,
+                *absolute_column1,
+                *absolute_row2,
+                *absolute_column2,
+            ),
+            _ => (None, false, false, false, false),
+        };
+
+        let a = new.area;
+        let inner = if a.is_single_cell() {
+            Node::ReferenceKind {
+                sheet_name,
+                sheet_index: new.sheet,
+                absolute_row: abs_r1,
+                absolute_column: abs_c1,
+                row: encode(abs_r1, a.r1, editing.row),
+                column: encode(abs_c1, a.c1, editing.column),
+            }
+        } else {
+            Node::RangeKind {
+                sheet_name,
+                sheet_index: new.sheet,
+                absolute_row1: abs_r1,
+                absolute_column1: abs_c1,
+                row1: encode(abs_r1, a.r1, editing.row),
+                column1: encode(abs_c1, a.c1, editing.column),
+                absolute_row2: abs_r2,
+                absolute_column2: abs_c2,
+                row2: encode(abs_r2, a.r2, editing.row),
+                column2: encode(abs_c2, a.c2, editing.column),
+            }
+        };
+        Self { inner }
     }
 
     /// Resolve the pointed-at cell(s) as a canonical `SheetArea` for overlay
@@ -452,17 +537,18 @@ pub struct ActiveRef {
     /// Byte span of this token in the formula string — drives cursor-aware
     /// per-token highlighting via `FormulaAnalysis::refs_at_cursor`.
     pub span: TextRef,
+    /// Emission origin — `Direct` for `RefLeaf::Resolved`, `DefinedName`
+    /// when a name expands to a Reference/Range. Drag-edit gating reads
+    /// this via `matches!(kind, FormulaRefKind::Direct)`.
+    pub kind: FormulaRefKind,
 }
 
-// Drops `ref_node` and `span` (editing-side state the renderer doesn't need).
-// `active` defaults to false — wire `refs_at_cursor` here when the renderer
-// starts honouring it.
 impl From<ActiveRef> for FormulaRef {
     fn from(a: ActiveRef) -> Self {
         Self {
             sheet_area: a.sheet_area.into(),
             color_idx: a.color_idx,
-            active: false,
+            kind: a.kind,
         }
     }
 }
@@ -1007,5 +1093,65 @@ mod tests {
         let range = RefNode::range(0, None, 1, 1, true, true, 3, 2, true, true);
         let moved = range.relocate_to(5, 3, &editing);
         assert_eq!(moved.to_localized(&ctx_a1()), "$C$5");
+    }
+
+    // ---- RefNode::with_area ----
+
+    /// `$A$1` dragged to B3 must render as `$B$3` — both axes stay absolute.
+    #[test]
+    fn with_area_preserves_absolute_both_axes() {
+        let original = RefNode::cell(0, None, 1, 1, true, true);
+        let new = SheetRange::from_cell(0, 3, 2);
+        let moved = original.with_area(new, editing_a1());
+        assert_eq!(moved.to_localized(&ctx_a1()), "$B$3");
+    }
+
+    /// `$A1` (column absolute, row relative) dragged to B3 must render
+    /// as `$B3`; the `$`-flag is per-axis and travels independently.
+    #[test]
+    fn with_area_preserves_mixed_absolute_flags() {
+        let original = RefNode::cell(0, None, 0, 1, false, true);
+        let new = SheetRange::from_cell(0, 3, 2);
+        let moved = original.with_area(new, editing_a1());
+        assert_eq!(moved.to_localized(&ctx_a1()), "$B3");
+    }
+
+    /// Cross-sheet ref `Sheet2!A1` dragged to B3 stays cross-sheet.
+    #[test]
+    fn with_area_preserves_cross_sheet_prefix() {
+        let original = RefNode::cell(1, Some("Sheet2".into()), 0, 0, false, false);
+        let new = SheetRange::from_cell(1, 3, 2);
+        let moved = original.with_area(new, editing_a1());
+        assert_eq!(moved.to_localized(&ctx_a1()), "Sheet2!B3");
+    }
+
+    /// Same-sheet ref `A1` (no prefix) dragged to B3 stays bare — the
+    /// stringifier only emits `Sheet!` when `sheet_name.is_some()`.
+    #[test]
+    fn with_area_keeps_same_sheet_implicit() {
+        let original = RefNode::cell(0, None, 0, 0, false, false);
+        let new = SheetRange::from_cell(0, 3, 2);
+        let moved = original.with_area(new, editing_a1());
+        assert_eq!(moved.to_localized(&ctx_a1()), "B3");
+    }
+
+    /// Single-cell self + multi-cell new = promotion to RangeKind. The
+    /// new range's endpoints both inherit self's absolute flags.
+    #[test]
+    fn with_area_promotes_cell_to_range() {
+        let original = RefNode::cell(0, None, 0, 0, false, false);
+        let new = SheetRange::new(0, 1, 1, 3, 2);
+        let moved = original.with_area(new, editing_a1());
+        assert_eq!(moved.to_localized(&ctx_a1()), "A1:B3");
+    }
+
+    /// Multi-cell self + single-cell new = collapse to ReferenceKind.
+    /// Endpoint 1's flags win — top-left is the canonical surviving corner.
+    #[test]
+    fn with_area_collapses_range_to_cell() {
+        let original = RefNode::range(0, None, 0, 0, false, false, 2, 1, false, false);
+        let new = SheetRange::from_cell(0, 5, 3);
+        let moved = original.with_area(new, editing_a1());
+        assert_eq!(moved.to_localized(&ctx_a1()), "C5");
     }
 }

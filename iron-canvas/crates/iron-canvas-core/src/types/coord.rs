@@ -103,13 +103,29 @@ pub struct SheetArea {
     pub range: RCRange,
 }
 
+/// Origin of a [`FormulaRef`]. The renderer treats all kinds the same today;
+/// `Direct` is the only draggable kind.
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
+pub enum FormulaRefKind {
+    /// `A1`, `Sheet2!B3:C5` — a `Node::ReferenceKind` / `Node::RangeKind`
+    /// emission. Resolvable to coords; draggable in-place.
+    #[default]
+    Direct,
+    /// `my_range` ident bound to a defined name. Not draggable — moving it
+    /// would require rewriting the name binding, not the coord span.
+    DefinedName,
+    /// Parser bailed on the formula; the ref came from a fallback span.
+    /// Not draggable.
+    Unresolved,
+}
+
 /// One cell or range reference parsed out of an in-edit formula. The
 /// renderer outlines `sheet_area` with the color slot at
-/// `color_idx % FORMULA_REF_COLORS.len()` (see [`crate::theme`]), so any
-/// `usize` is accepted; `active` emphasises the ref the cursor sits on.
+/// `color_idx % FORMULA_REF_COLORS.len()` (see [`crate::theme`]); per-ref
+/// active-emphasis is driven separately by [`crate::RenderOverlays::active_ref`].
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct FormulaRef {
     pub sheet_area: SheetArea,
     pub color_idx: usize,
-    pub active: bool,
+    pub kind: FormulaRefKind,
 }

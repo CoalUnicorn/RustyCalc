@@ -250,6 +250,24 @@ where
         frame.hit_test(xi, yi)
     }
 
+    /// Resolve a pixel coordinate to a cell (row, column), bypassing every
+    /// decoration layer. The layer-aware `hit_test` is the right tool for
+    /// pointer events that start interactions (mousedown), but a drag
+    /// already in flight needs the underlying cell *regardless* of which
+    /// overlay rectangle the cursor happens to be over — otherwise an
+    /// overlay (e.g. `FormulaRefsLayer`) shadows its own cell and the host
+    /// can't read pointer motion that re-enters the overlay's bounds.
+    /// Returns `None` before the first paint or when the cursor falls in
+    /// chrome / off-grid.
+    pub fn pixel_to_cell(&self, x: f64, y: f64) -> Option<(i32, i32)> {
+        let frame = self.last_frame.as_ref()?;
+        let xi = x.round() as i32;
+        let yi = y.round() as i32;
+        let row = frame.pane_set.pixel_to_row(yi)?;
+        let col = frame.pane_set.pixel_to_col(xi)?;
+        Some((row, col))
+    }
+
     pub fn resize_handle_at(&self, x: f64, y: f64, tolerance: f64) -> Option<ResizeTarget> {
         self.last_frame.as_ref()?.resize_handle_at(
             x.round() as i32,

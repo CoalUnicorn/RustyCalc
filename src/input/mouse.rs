@@ -13,18 +13,18 @@ use crate::coord::{CellAddress, CellArea, RefNode, SheetRange, TextRef};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
 use crate::input::formula_analysis::is_in_reference_mode;
-use crate::input::formula_input::splice_ref;
+use crate::input::formula_input::{splice_dragged_ref, splice_ref};
 use crate::model::{try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
     ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
-    StatusMessage, WorkbookState,
+    RefOverride, StatusMessage, WorkbookState,
 };
 use iron_canvas_core::{
     geometry::constants::{
         DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN,
         LAST_ROW,
     },
-    types::ui::{HitTest, ResizeTarget},
+    types::ui::{Corner, HitTest, RefZone, ResizeTarget, Side},
 };
 use iron_canvas_web::{CanvasSize, IronCanvas};
 use ironcalc_base::UserModel;
@@ -397,8 +397,105 @@ pub fn handle_mousedown(
             handle_cell_click(&ev, row, column, true, model, state)
         }
         HitTest::Cell { row, column } => handle_cell_click(&ev, row, column, false, model, state),
+        HitTest::FormulaRef {
+            ref_idx,
+            zone,
+            grab_row,
+            grab_col,
+        } => {
+            handle_formula_ref_mousedown(&ev, ref_idx, zone, grab_row, grab_col, model, state);
+        }
         HitTest::Outside => {}
     }
+}
+
+/// Begin a formula-ref overlay drag.
+///
+/// Reads the ref's current `SheetRange` from the in-edit formula analysis
+/// and captures it as `anchor` so mousemove math is absolute (no
+/// frame-to-frame delta state). `grab_cell` is the cell under the cursor
+/// at mousedown — Body translation uses it to preserve relative position.
+/// Click-to-select is suppressed structurally: `handle_mousedown`
+/// dispatched here instead of into `HitTest::Cell`, so `handle_cell_click`
+/// never runs. `ev.prevent_default()` only suppresses the browser default.
+fn handle_formula_ref_mousedown(
+    ev: &web_sys::MouseEvent,
+    ref_idx: usize,
+    zone: RefZone,
+    grab_row: i32,
+    grab_col: i32,
+    _model: ModelStore,
+    state: WorkbookState,
+) {
+    let Some(editing) = state.editing_cell.get_untracked() else {
+        return;
+    };
+    let Some(active_ref) = editing.formula_analysis.refs().get(ref_idx) else {
+        return;
+    };
+    let anchor = active_ref.sheet_area;
+    // Pin grab_cell's sheet to the anchor's sheet — one source of truth for
+    // the drag's sheet. The selected sheet can't shift mid-drag while the
+    // editor is open, but the invariant lives in the type, not in another
+    // invariant.
+    let grab_cell = CellAddress {
+        sheet: anchor.sheet,
+        row: grab_row,
+        column: grab_col,
+    };
+    state.drag.set(DragState::DraggingFormulaRef {
+        ref_idx,
+        zone,
+        anchor,
+        grab_cell,
+    });
+    state
+        .dragged_ref_override
+        .set(Some(RefOverride { idx: ref_idx, range: anchor }));
+    ev.prevent_default();
+}
+
+/// Splice the dropped ref's new text into the formula at mouseup.
+///
+/// Builds a new `RefNode` via `RefNode::with_area` so `$`-flags and
+/// `Sheet!` prefix survive, stringifies it, and splices through the same
+/// `splice_ref` keystroke buffer the point-mode drag uses. The drop-on-
+/// origin no-op (drop coincides with the ref's current area — Excel
+/// ignores it) is decided inside `splice_dragged_ref`, which returns
+/// `None` and short-circuits the rewrite. Re-runs `analyze_formula` on
+/// the new text; the reactive subscription on `editing_cell` then
+/// republishes the overlay with refs at their new positions.
+fn commit_formula_ref_drag(
+    ref_idx: usize,
+    new_range: SheetRange,
+    model: ModelStore,
+    state: WorkbookState,
+) {
+    let Some(edit) = state.editing_cell.get_untracked() else {
+        return;
+    };
+    let Some(active_ref) = edit.formula_analysis.refs().get(ref_idx) else {
+        return;
+    };
+    let original_ref = active_ref.ref_node.clone();
+    let span = active_ref.span;
+    let Some((new_text, new_span)) = splice_dragged_ref(
+        &edit.text,
+        span,
+        &original_ref,
+        new_range,
+        edit.address,
+    ) else {
+        // Drop-on-origin no-op (drop coincides with the ref's current area).
+        return;
+    };
+    state.editing_cell.update(|c| {
+        if let Some(e) = c {
+            e.cursor = new_span.end;
+            e.formula_analysis = model.with_value(|m| m.analyze_in_context(&new_text));
+            e.text = new_text;
+        }
+    });
 }
 
 /// Expand selection, update resize drag, or update autofill/point-mode
@@ -415,6 +512,7 @@ pub fn handle_mousemove(
     if ev.buttons() == 0 {
         state.autoscroll.cancel();
         state.drag.set(DragState::Idle);
+        state.dragged_ref_override.set(None);
         return;
     }
     let x = ev.offset_x() as f64;
@@ -477,7 +575,37 @@ pub fn handle_mousemove(
         DragState::Idle
         | DragState::Selecting
         | DragState::Extending { .. }
-        | DragState::Pointing { .. } => {}
+        | DragState::Pointing { .. }
+        | DragState::DraggingFormulaRef { .. } => {}
+    }
+
+    // Formula-ref drag must resolve the pointer to a cell BEFORE the
+    // layer-aware `ic.hit_test` below — otherwise `FormulaRefsLayer`
+    // claims the hit whenever the cursor re-enters its own painted rect
+    // (i.e. shrink direction) and the let-else bails out, freezing the
+    // drag. `pixel_to_cell` walks only the chrome's pane_set, so any
+    // overlay above it is invisible to the resolution.
+    if let DragState::DraggingFormulaRef {
+        ref_idx,
+        zone,
+        anchor,
+        grab_cell,
+    } = state.drag.get_untracked()
+    {
+        let Some((row, col)) = with_canvas(icv, |ic| ic.pixel_to_cell(x, y)).flatten() else {
+            return;
+        };
+        let cursor = CellAddress {
+            sheet: anchor.sheet,
+            row,
+            column: col,
+        };
+        let new_range = dragged_ref_range(anchor, zone, grab_cell, cursor);
+        state
+            .dragged_ref_override
+            .set(Some(RefOverride { idx: ref_idx, range: new_range }));
+        ev.prevent_default();
+        return;
     }
 
     // Hit-test against the painted frame. Anything that isn't a Cell (header,
@@ -568,16 +696,92 @@ pub fn handle_mousemove(
                 NavigationEvent::SelectionRangeChanged { sheet_area },
             ));
         }
-        DragState::Idle | DragState::ResizingCol { .. } | DragState::ResizingRow { .. } => {}
+        // DraggingFormulaRef is handled by the early short-circuit above
+        // (before the layer-aware ic.hit_test that would otherwise let
+        // FormulaRefsLayer shadow the cell under the cursor).
+        DragState::DraggingFormulaRef { .. }
+        | DragState::Idle
+        | DragState::ResizingCol { .. }
+        | DragState::ResizingRow { .. } => {}
+    }
+}
+
+/// Compute the new `SheetRange` for a formula-ref drag, given the
+/// mousedown `anchor`, the `zone` classification, the `grab_cell` under
+/// the cursor at mousedown, and the cursor's current `cell`.
+///
+/// **Body** translates the entire anchor by `cursor - grab_cell` so the
+/// pointer keeps its relative offset inside the ref.
+///
+/// **Edge** moves one side to `cursor`'s row/column, pinning the opposite
+/// side at the anchor's value. Cursor crossing the pinned side flattens
+/// the range to a 1-cell line on that axis (Excel-like).
+///
+/// **Corner** is Edge in both axes simultaneously — the diagonally
+/// opposite corner pins.
+///
+/// All coordinates clamp to `>= 1` so dragging past row 1 / column A
+/// caps at the sheet origin rather than producing zero-based addresses.
+fn dragged_ref_range(
+    anchor: SheetRange,
+    zone: RefZone,
+    grab_cell: CellAddress,
+    cursor: CellAddress,
+) -> SheetRange {
+    let a = anchor.area;
+    let cell = |r: i32, c: i32, r2: i32, c2: i32| {
+        let r1 = r.max(1).min(r2);
+        let c1 = c.max(1).min(c2);
+        let r2 = r2.max(1);
+        let c2 = c2.max(1);
+        SheetRange::new(anchor.sheet, r1, c1, r2, c2)
+    };
+    match zone {
+        RefZone::Body => {
+            // Drag math operates on the visually painted rect — normalize so
+            // a user-typed `B6:B4` translates the same as `B4:B6`.
+            let n = a.normalized();
+            let dr = cursor.row - grab_cell.row;
+            let dc = cursor.column - grab_cell.column;
+            // Clamp the leading corner; apply the *clamped* delta to the
+            // trailing corner so width/height stay constant (Excel-like move).
+            let new_r1 = (n.r1 + dr).max(1);
+            let new_c1 = (n.c1 + dc).max(1);
+            let actual_dr = new_r1 - n.r1;
+            let actual_dc = new_c1 - n.c1;
+            let new_r2 = n.r2 + actual_dr;
+            let new_c2 = n.c2 + actual_dc;
+            SheetRange::new(anchor.sheet, new_r1, new_c1, new_r2, new_c2)
+        }
+        RefZone::Edge(Side::Top) => cell(cursor.row, a.c1, a.r2, a.c2),
+        RefZone::Edge(Side::Bottom) => cell(a.r1, a.c1, cursor.row, a.c2),
+        RefZone::Edge(Side::Left) => cell(a.r1, cursor.column, a.r2, a.c2),
+        RefZone::Edge(Side::Right) => cell(a.r1, a.c1, a.r2, cursor.column),
+        RefZone::Corner(Corner::TopLeft) => cell(cursor.row, cursor.column, a.r2, a.c2),
+        RefZone::Corner(Corner::TopRight) => cell(cursor.row, a.c1, a.r2, cursor.column),
+        RefZone::Corner(Corner::BottomLeft) => cell(a.r1, cursor.column, cursor.row, a.c2),
+        RefZone::Corner(Corner::BottomRight) => cell(a.r1, a.c1, cursor.row, cursor.column),
     }
 }
 
 /// Commit an autofill drag on button release, then reset drag state.
 ///
 /// If no autofill drag was active, this is a no-op beyond resetting to `Idle`.
+/// If a `DraggingFormulaRef` was in flight, splice the new ref text into the
+/// formula via `commit_formula_ref_drag` before clearing the override. The
+/// splice runs through the existing keystroke buffer so `analyze_formula`
+/// re-runs on release and the overlay refreshes naturally.
 pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: WorkbookState) {
     state.autoscroll.cancel();
     let was_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
+
+    if let DragState::DraggingFormulaRef { ref_idx, .. } = state.drag.get_untracked() {
+        if let Some(RefOverride { range: new_range, .. }) =
+            state.dragged_ref_override.get_untracked()
+        {
+            commit_formula_ref_drag(ref_idx, new_range, model, state);
+        }
+    }
 
     if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
         match try_mutate(
@@ -606,6 +810,7 @@ pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
         }
     }
     state.drag.set(DragState::Idle);
+    state.dragged_ref_override.set(None);
     // After a point-mode drag, return focus to the formula input so the user
     // can continue typing the formula without clicking again.
     if was_pointing {
@@ -742,4 +947,149 @@ pub fn handle_dblclick(
             formula_analysis,
         }));
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cell(row: i32, column: i32) -> CellAddress {
+        CellAddress {
+            sheet: 0,
+            row,
+            column,
+        }
+    }
+
+    fn anchor(r1: i32, c1: i32, r2: i32, c2: i32) -> SheetRange {
+        SheetRange::new(0, r1, c1, r2, c2)
+    }
+
+    // Body — the regression. B4:B6, grab inside at B5, drop two columns
+    // right at D5 must MOVE to D4:D6, not extend to B4:D6.
+    #[test]
+    fn body_translates_whole_rect() {
+        let out = dragged_ref_range(anchor(4, 2, 6, 2), RefZone::Body, cell(5, 2), cell(5, 4));
+        assert_eq!(out, anchor(4, 4, 6, 4));
+    }
+
+    // Body — clamping at the leading corner must shrink the trailing
+    // delta by the same amount so width/height stay constant.
+    #[test]
+    fn body_clamps_leading_corner_and_keeps_shape() {
+        // A2:C4 (3 wide × 3 tall). Grab at B3, drop at A3 (one col left).
+        // Then drop one MORE col left — c1 would go to 0, clamps to 1,
+        // and c2 must follow: 3 - 1 = 2 (since c1 moved from 2 to 1).
+        let out = dragged_ref_range(anchor(2, 2, 4, 4), RefZone::Body, cell(3, 3), cell(3, 1));
+        assert_eq!(out, anchor(2, 1, 4, 3));
+    }
+
+    // Body — anchor stored un-normalized (B6:B4 as the user typed it)
+    // must drag identically to the normalized form.
+    #[test]
+    fn body_normalizes_inverted_anchor() {
+        let out = dragged_ref_range(
+            anchor(6, 2, 4, 2),
+            RefZone::Body,
+            cell(5, 2),
+            cell(5, 4),
+        );
+        assert_eq!(out, anchor(4, 4, 6, 4));
+    }
+
+    // Body — zero delta is a no-op (Excel ignores drop-on-origin, but
+    // the range math itself should still be the identity).
+    #[test]
+    fn body_zero_delta_is_identity() {
+        let a = anchor(2, 2, 5, 5);
+        let out = dragged_ref_range(a, RefZone::Body, cell(3, 3), cell(3, 3));
+        assert_eq!(out, a);
+    }
+
+    #[test]
+    fn edge_right_extends_only_c2() {
+        let out = dragged_ref_range(
+            anchor(2, 2, 4, 4),
+            RefZone::Edge(Side::Right),
+            cell(3, 4),
+            cell(3, 6),
+        );
+        assert_eq!(out, anchor(2, 2, 4, 6));
+    }
+
+    #[test]
+    fn edge_bottom_extends_only_r2() {
+        let out = dragged_ref_range(
+            anchor(2, 2, 4, 4),
+            RefZone::Edge(Side::Bottom),
+            cell(4, 3),
+            cell(7, 3),
+        );
+        assert_eq!(out, anchor(2, 2, 7, 4));
+    }
+
+    #[test]
+    fn corner_bottom_right_resizes_both_axes() {
+        let out = dragged_ref_range(
+            anchor(2, 2, 4, 4),
+            RefZone::Corner(Corner::BottomRight),
+            cell(4, 4),
+            cell(6, 7),
+        );
+        assert_eq!(out, anchor(2, 2, 6, 7));
+    }
+
+    #[test]
+    fn corner_top_left_resizes_both_axes() {
+        let out = dragged_ref_range(
+            anchor(3, 3, 5, 5),
+            RefZone::Corner(Corner::TopLeft),
+            cell(3, 3),
+            cell(2, 1),
+        );
+        assert_eq!(out, anchor(2, 1, 5, 5));
+    }
+
+    // Shrink — BottomRight corner with cursor INSIDE the anchor must
+    // pull r2/c2 inward, keeping r1/c1 pinned at the opposite TopLeft.
+    // Anchor B2:E10, grab BR, drop at C3 → expect B2:C3.
+    #[test]
+    fn corner_bottom_right_shrinks_when_cursor_inside_anchor() {
+        let out = dragged_ref_range(
+            anchor(2, 2, 10, 5),
+            RefZone::Corner(Corner::BottomRight),
+            cell(10, 5),
+            cell(3, 3),
+        );
+        assert_eq!(out, anchor(2, 2, 3, 3));
+    }
+
+    // Shrink — Right edge with cursor left of c2 must pull c2 inward
+    // and keep r1/r2 pinned (single-axis resize).
+    // Anchor B2:E10, grab Right edge, cursor at col 3 → expect B2:C10.
+    #[test]
+    fn edge_right_shrinks_when_cursor_left_of_c2() {
+        let out = dragged_ref_range(
+            anchor(2, 2, 10, 5),
+            RefZone::Edge(Side::Right),
+            cell(5, 5),
+            cell(5, 3),
+        );
+        assert_eq!(out, anchor(2, 2, 10, 3));
+    }
+
+    // Cross-anchor — dragging TopLeft past the BottomRight degenerates
+    // to a single cell at the pinned (BR) anchor rather than flipping
+    // or producing an inverted range. Anchor B2:E10, grab TL, cursor
+    // at F12 (past BR) → expect E10:E10 (clamped collapse).
+    #[test]
+    fn corner_top_left_collapses_when_cursor_past_br() {
+        let out = dragged_ref_range(
+            anchor(2, 2, 10, 5),
+            RefZone::Corner(Corner::TopLeft),
+            cell(2, 2),
+            cell(12, 6),
+        );
+        assert_eq!(out, anchor(10, 5, 10, 5));
+    }
 }

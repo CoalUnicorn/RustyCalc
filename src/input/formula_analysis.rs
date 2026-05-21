@@ -22,7 +22,9 @@ use ironcalc_base::expressions::{
     types::CellReferenceRC,
 };
 
-use crate::coord::{ActiveRef, CellAddress, DefinedName, RefNode, SheetRange, TextRef};
+use crate::coord::{
+    ActiveRef, CellAddress, DefinedName, FormulaRefKind, RefNode, SheetRange, TextRef,
+};
 
 /// Empty slice used by [`FormulaAnalysis::refs`] for variants that carry no overlays.
 const NO_REFS: &[ActiveRef] = &[];
@@ -296,6 +298,7 @@ pub fn analyze_formula(
                     sheet_area,
                     color_idx: assign_slot(sheet_area),
                     span,
+                    kind: FormulaRefKind::Direct,
                 });
             }
             RefLeaf::Unresolved => invalid_refs.push(span),
@@ -356,6 +359,7 @@ pub fn analyze_formula(
                         sheet_area,
                         color_idx: assign_slot(sheet_area),
                         span,
+                        kind: FormulaRefKind::DefinedName,
                     });
                 }
             }
@@ -966,5 +970,48 @@ mod formula_analysis_tests {
         // "B" is lexed as Ident (a valid identifier), not Illegal.
         // Reference mode is false mid-identifier — user must clear it first (e.g. backspace).
         assert!(!is_in_reference_mode("=A1+B", 5));
+    }
+
+    // ---- FormulaRefKind tagging ----
+
+    #[test]
+    fn direct_ref_kind_is_direct() {
+        let analysis = analyze_formula("=A1+1", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs().len(), 1);
+        assert!(matches!(analysis.refs()[0].kind, FormulaRefKind::Direct));
+    }
+
+    #[test]
+    fn defined_name_ref_kind_is_defined_name() {
+        let defined = vec![DefinedName {
+            name: "my_range".into(),
+            scope: None,
+            formula: "A1:A10".into(),
+        }];
+        let analysis = analyze_formula("=my_range+1", editing_at(0), &[], &defined);
+        assert_eq!(analysis.refs().len(), 1);
+        assert!(matches!(
+            analysis.refs()[0].kind,
+            FormulaRefKind::DefinedName
+        ));
+    }
+
+    #[test]
+    fn mixed_emissions_carry_independent_kinds() {
+        // `=A1+my_range` emits one Direct (A1) and one DefinedName (my_range)
+        // in document order. The two kinds must route independently — order
+        // here mirrors token-stream order in `analyze_formula`.
+        let defined = vec![DefinedName {
+            name: "my_range".into(),
+            scope: None,
+            formula: "B1:B10".into(),
+        }];
+        let analysis = analyze_formula("=A1+my_range", editing_at(0), &[], &defined);
+        assert_eq!(analysis.refs().len(), 2);
+        assert!(matches!(analysis.refs()[0].kind, FormulaRefKind::Direct));
+        assert!(matches!(
+            analysis.refs()[1].kind,
+            FormulaRefKind::DefinedName
+        ));
     }
 }

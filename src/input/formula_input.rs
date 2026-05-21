@@ -2,7 +2,7 @@
 ///
 /// These operate on formula strings and cursor positions; they have no side
 /// effects and do not touch the model.
-use crate::coord::{CellAddress, PointingStep, RefNode, TextRef};
+use crate::coord::{CellAddress, PointingStep, RefNode, SheetRange, TextRef};
 use crate::input::formula_analysis::is_in_reference_mode;
 use crate::model::ArrowKey;
 
@@ -28,6 +28,26 @@ pub fn splice_ref(text: &str, span: TextRef, ref_str: &str) -> (String, TextRef)
             end: new_end,
         },
     )
+}
+
+/// Pure splice for a formula-ref drag drop. Builds the new ref text via
+/// `RefNode::with_area` (so `$`-flags and `Sheet!` prefix survive) and
+/// splices it into the formula at `span`. Returns `None` when the new
+/// range equals the original ref's resolved area — Excel's drop-on-
+/// origin silence — so callers can skip the no-op edit.
+pub fn splice_dragged_ref(
+    text: &str,
+    span: TextRef,
+    original_ref: &RefNode,
+    new_range: SheetRange,
+    editing: CellAddress,
+) -> Option<(String, TextRef)> {
+    if original_ref.area(&editing) == new_range {
+        return None;
+    }
+    let new_node = original_ref.with_area(new_range, editing);
+    let new_str = new_node.to_localized(&editing.as_stringify_ctx());
+    Some(splice_ref(text, span, &new_str))
 }
 
 /// All state needed to evaluate a point-mode keypress, drawn from `EditingCell` and `DragState`.
@@ -404,6 +424,87 @@ mod tests {
                 ref_node: RefNode::cell(1, None, 1, 0, false, false),
                 span: TextRef { start: 1, end: 3 },
             }),
+        );
+    }
+
+    // ---- splice_dragged_ref ----
+
+    fn span(start: usize, end: usize) -> TextRef {
+        TextRef { start, end }
+    }
+
+    #[test]
+    fn drag_body_rewrites_formula_text() {
+        // `=A1+1`, drag the A1 ref body to B2. Span 1..3 covers "A1".
+        let original = RefNode::cell(0, None, 0, 0, false, false);
+        let new = SheetRange::from_cell(0, 2, 2);
+        let result = splice_dragged_ref("=A1+1", span(1, 3), &original, new, editing_a1());
+        let (text, new_span) = result.expect("body drag should produce text");
+        assert_eq!(text, "=B2+1");
+        assert_eq!(new_span, span(1, 3));
+    }
+
+    #[test]
+    fn drag_corner_resizes_range_in_text() {
+        // `=SUM(A1:B2)`, drag the BottomRight corner to C3. Span 5..10 = "A1:B2".
+        let original = RefNode::range(0, None, 0, 0, false, false, 1, 1, false, false);
+        let new = SheetRange::new(0, 1, 1, 3, 3);
+        let result =
+            splice_dragged_ref("=SUM(A1:B2)", span(5, 10), &original, new, editing_a1());
+        let (text, _) = result.expect("corner resize should produce text");
+        assert_eq!(text, "=SUM(A1:C3)");
+    }
+
+    #[test]
+    fn drag_preserves_absolute_flags_both_axes() {
+        // `=$A$1` -> `=$B$3`. Source is absolute; drop must keep both `$`.
+        let original = RefNode::cell(0, None, 1, 1, true, true);
+        let new = SheetRange::from_cell(0, 3, 2);
+        let result = splice_dragged_ref("=$A$1", span(1, 5), &original, new, editing_a1());
+        let (text, _) = result.expect("absolute drag should produce text");
+        assert_eq!(text, "=$B$3");
+    }
+
+    #[test]
+    fn drag_preserves_mixed_absolute_flags() {
+        // `=$A1` (column absolute, row relative) -> `=$B3`.
+        let original = RefNode::cell(0, None, 0, 1, false, true);
+        let new = SheetRange::from_cell(0, 3, 2);
+        let result = splice_dragged_ref("=$A1", span(1, 4), &original, new, editing_a1());
+        let (text, _) = result.expect("mixed-flag drag should produce text");
+        assert_eq!(text, "=$B3");
+    }
+
+    #[test]
+    fn drag_preserves_cross_sheet_prefix() {
+        // `=Sheet2!A1` -> `=Sheet2!B3`. sheet_name must travel through.
+        let original = RefNode::cell(1, Some("Sheet2".into()), 0, 0, false, false);
+        let new = SheetRange::from_cell(1, 3, 2);
+        let result =
+            splice_dragged_ref("=Sheet2!A1", span(1, 10), &original, new, editing_a1());
+        let (text, _) = result.expect("cross-sheet drag should produce text");
+        assert_eq!(text, "=Sheet2!B3");
+    }
+
+    #[test]
+    fn drag_keeps_same_sheet_implicit() {
+        // `=A1` (no Sheet! prefix) -> `=B3`. The drag must not invent a prefix.
+        let original = RefNode::cell(0, None, 0, 0, false, false);
+        let new = SheetRange::from_cell(0, 3, 2);
+        let result = splice_dragged_ref("=A1", span(1, 3), &original, new, editing_a1());
+        let (text, _) = result.expect("same-sheet drag should produce text");
+        assert_eq!(text, "=B3");
+    }
+
+    #[test]
+    fn drop_on_origin_is_noop() {
+        // Drop on the ref's current area -> None. No text rewrite.
+        let original = RefNode::cell(0, None, 0, 0, false, false);
+        let new = original.area(&editing_a1()); // same area
+        let result = splice_dragged_ref("=A1", span(1, 3), &original, new, editing_a1());
+        assert!(
+            result.is_none(),
+            "drop-on-origin must not produce a rewrite"
         );
     }
 }

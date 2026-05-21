@@ -43,6 +43,11 @@ pub const AUTOFILL_HANDLE_BORDER_PX: i32 = 1;
 /// pointer events, so the click target is larger than the painted square.
 pub const AUTOFILL_HIT_PAD_PX: i32 = 2;
 
+/// Inward tolerance for classifying a formula-ref hit as an edge or corner.
+/// Wider than `AUTOFILL_HIT_PAD_PX` because the ref overlay has no visible
+/// handle to anchor the cursor — the grab zone *is* the tolerance band.
+pub const REF_HANDLE_HIT_PAD_PX: i32 = 8;
+
 /// Fallback row height when the model returns `None` (row not explicitly sized).
 pub const DEFAULT_ROW_HEIGHT: f64 = 21.0;
 /// Fallback column width when the model returns `None` (column not explicitly sized).

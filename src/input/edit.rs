@@ -120,6 +120,20 @@ pub fn execute_edit(
             }
         }
         EditAction::Cancel => {
+            // Escape during a formula-ref drag aborts the drag only —
+            // formula text is untouched (the splice hasn't run), editing
+            // stays alive, the user can keep typing. Without this branch,
+            // Escape would unconditionally close the edit and lose the
+            // in-progress formula.
+            if matches!(
+                state.drag.get_untracked(),
+                DragState::DraggingFormulaRef { .. }
+            ) {
+                state.drag.set(DragState::Idle);
+                state.dragged_ref_override.set(None);
+                return Ok(());
+            }
+
             let edit_address = state.editing_cell.get_untracked().map(|e| e.address);
             state.editing_cell.set(None);
             state.drag.set(DragState::Idle);

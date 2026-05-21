@@ -155,6 +155,13 @@ impl IronCanvas {
         self.orch.hit_test(x, y)
     }
 
+    /// Layer-bypassing cell resolver. Use during an active drag whose
+    /// overlay (e.g. `FormulaRefsLayer`) would otherwise claim the
+    /// pointer and starve the host of underlying cell coordinates.
+    pub fn pixel_to_cell(&self, x: f64, y: f64) -> Option<(i32, i32)> {
+        self.orch.pixel_to_cell(x, y)
+    }
+
     pub fn resize_handle_at(&self, x: f64, y: f64, tolerance: f64) -> Option<ResizeTarget> {
         self.orch.resize_handle_at(x, y, tolerance)
     }
