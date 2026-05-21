@@ -39,7 +39,7 @@ impl PaneShift {
     /// origin/size are replaced. Row scrolls produce a BottomLeft sibling
     /// (cross axis = X); column scrolls produce a TopRight sibling
     /// (cross axis = Y).
-    fn sibling(
+    fn for_frozen_band(
         &self,
         pane: PaneRegion,
         scroll_axis: Axis,
@@ -350,7 +350,7 @@ pub(super) fn try_blit_rows(
         PaneRegion::BottomRight,
     );
     if frozen_band_w > 0 {
-        let sibling = plan.shifts[0].sibling(
+        let sibling = plan.shifts[0].for_frozen_band(
             PaneRegion::BottomLeft,
             Axis::Row,
             frozen_band_x,
@@ -404,7 +404,7 @@ pub(super) fn try_blit_cols(
         PaneRegion::BottomRight,
     );
     if frozen_band_h > 0 {
-        let sibling = plan.shifts[0].sibling(
+        let sibling = plan.shifts[0].for_frozen_band(
             PaneRegion::TopRight,
             Axis::Column,
             frozen_band_y,
