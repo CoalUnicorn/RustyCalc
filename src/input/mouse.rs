@@ -16,8 +16,8 @@ use crate::input::formula_analysis::is_in_reference_mode;
 use crate::input::formula_input::{splice_dragged_ref, splice_ref};
 use crate::model::{try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
 use crate::state::{
-    ContextMenuState, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu, ModelStore,
-    RefOverride, StatusMessage, WorkbookState,
+    ContextMenuState, CursorHint, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu,
+    ModelStore, RefOverride, StatusMessage, WorkbookState,
 };
 use iron_canvas_core::{
     geometry::constants::{
@@ -42,6 +42,42 @@ pub type CanvasHandle = StoredValue<Option<IronCanvas>, LocalStorage>;
 /// rAF construction runs (see `worksheet.rs`).
 fn with_canvas<R>(handle: CanvasHandle, f: impl FnOnce(&IronCanvas) -> R) -> Option<R> {
     handle.with_value(|slot| slot.as_ref().map(f))
+}
+
+/// Maps the idle hover position to a [`CursorHint`]. Probes in the same
+/// priority order as `handle_mousedown` so the cursor previews exactly
+/// which mousedown branch would fire: resize handles first (they
+/// straddle the header/cell seam by `HIT_ZONE` px), then the layered
+/// `hit_test`.
+fn compute_cursor_hint(icv: CanvasHandle, x: f64, y: f64) -> CursorHint {
+    if let Some(target) = with_canvas(icv, |ic| ic.resize_handle_at(x, y, HIT_ZONE)).flatten() {
+        return match target {
+            ResizeTarget::Column(_) => CursorHint::ColResize,
+            ResizeTarget::Row(_) => CursorHint::RowResize,
+        };
+    }
+    match with_canvas(icv, |ic| ic.hit_test(x, y)).unwrap_or(HitTest::Outside) {
+        HitTest::AutofillHandle { .. } => CursorHint::Autofill,
+        HitTest::FormulaRef { zone, .. } => ref_zone_hint(zone),
+        HitTest::Cell { .. }
+        | HitTest::ColHeader(_)
+        | HitTest::RowHeader(_)
+        | HitTest::Corner
+        | HitTest::Outside => CursorHint::Cell,
+    }
+}
+
+/// `Body` → whole-range move; opposite-side `Edge`s share an axis
+/// (top/bottom = NS, left/right = EW); diagonal `Corner` pairs share
+/// a slope (TL↔BR = NWSE, TR↔BL = NESW).
+fn ref_zone_hint(zone: RefZone) -> CursorHint {
+    match zone {
+        RefZone::Body => CursorHint::RefMove,
+        RefZone::Edge(Side::Top | Side::Bottom) => CursorHint::RefExtendNS,
+        RefZone::Edge(Side::Left | Side::Right) => CursorHint::RefExtendEW,
+        RefZone::Corner(Corner::TopLeft | Corner::BottomRight) => CursorHint::RefCornerNwse,
+        RefZone::Corner(Corner::TopRight | Corner::BottomLeft) => CursorHint::RefCornerNesw,
+    }
 }
 
 /// Pixel tolerance for column/row resize hit-test in the header area.
@@ -509,14 +545,18 @@ pub fn handle_mousemove(
     state: WorkbookState,
     icv: CanvasHandle,
 ) {
+    let x = ev.offset_x() as f64;
+    let y = ev.offset_y() as f64;
     if ev.buttons() == 0 {
         state.autoscroll.cancel();
         state.drag.set(DragState::Idle);
         state.dragged_ref_override.set(None);
+        let hint = compute_cursor_hint(icv, x, y);
+        if state.hover_cursor.get_untracked() != hint {
+            state.hover_cursor.set(hint);
+        }
         return;
     }
-    let x = ev.offset_x() as f64;
-    let y = ev.offset_y() as f64;
     let sheet = model.with_value(UserModel::get_selected_sheet);
 
     match state.drag.get_untracked() {

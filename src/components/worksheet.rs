@@ -433,14 +433,22 @@ pub fn Worksheet() -> impl IntoView {
                 role="application"
                 aria-label="Spreadsheet grid"
                 class=move || {
-                    match state.drag.get() {
-                        DragState::ResizingCol { .. } => "ws-canvas ws-grid resize-col",
-                        DragState::ResizingRow { .. } => "ws-canvas ws-grid resize-row",
+                    // Drag wins over the idle hover hint: a started resize must
+                    // not flicker back to `cell` if the pointer drifts off the
+                    // 4-px hot-zone mid-drag.
+                    let extra = match state.drag.get() {
+                        DragState::ResizingCol { .. } => "resize-col",
+                        DragState::ResizingRow { .. } => "resize-row",
                         DragState::Idle
                         | DragState::Selecting
                         | DragState::Extending { .. }
                         | DragState::Pointing { .. }
-                        | DragState::DraggingFormulaRef { .. } => "ws-canvas ws-grid",
+                        | DragState::DraggingFormulaRef { .. } => state.hover_cursor.get().class(),
+                    };
+                    if extra.is_empty() {
+                        "ws-canvas ws-grid".to_string()
+                    } else {
+                        format!("ws-canvas ws-grid {extra}")
                     }
                 }
                 tabindex="-1"
