@@ -7,14 +7,14 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v2)
+//! # On-disk layout (v1)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":2,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":1,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
 //!    {"frame_idx":0,"t_ms":0,"regime":"Fresh",...},
 //!    {"frame_idx":1,"t_ms":17,"regime":"Overlay",...}

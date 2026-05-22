@@ -3,6 +3,7 @@ name = "iron-canvas-core"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+licence.workspace = true
 
 [lib]
 crate-type = ["rlib"]

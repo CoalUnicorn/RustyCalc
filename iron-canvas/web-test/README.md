@@ -46,16 +46,23 @@ make build                     # --release (default)
 
 ## Recording
 
-To produce a `.icr` to drag into `recording-viewer.html`, build
-`iron-canvas-web` with the dev-only `recorder` feature:
+To produce a `.icr` to drag into `recording-viewer.html`, build with the dev-only `dev-tools` feature. Two paths produce equivalent recorder-aware wasm:
+
+**Standalone harness** (this directory):
 
 ```sh
-cd ../crates/iron-canvas-web
-wasm-pack build --target web --features recorder
+make build FEATURES=dev-tools
+make serve
 ```
 
-The host JS then sees `startRecording()` / `stopRecording()` on
-`IronCanvas` (the always-on `recordingSupported() -> bool` probe lets
-the page detect which flavor of wasm is loaded). Without the feature,
-those symbols are not exported and the prod bundle pays zero recording
-cost.
+`make build` forwards `FEATURES` to `wasm-pack` as `--features "dev-tools"` and copies the resulting `pkg/` into `vendor/iron-canvas`. Run `make sync` only (without rebuilding) if you already have a fresh `pkg/`.
+
+**Full RustyCalc app** (from the workspace root):
+
+```sh
+trunk serve --features dev-tools
+```
+
+The root `dev-tools` feature propagates to `iron-canvas-web/dev-tools`. The full app also gets the status-bar perf panel under the same flag (see the root [`README.md`](../../README.md#dev-tools)).
+
+In either case the host JS then sees `startRecording()` / `stopRecording()` on `IronCanvas`. The always-on `recordingSupported() -> bool` probe lets a page detect which flavor of wasm is loaded. Without the feature flag those symbols are not exported and the prod bundle pays zero recording cost.

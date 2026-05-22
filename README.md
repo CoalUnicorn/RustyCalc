@@ -22,6 +22,7 @@ Alpha-stage spreadsheet built in Rust, compiled to WebAssembly. The calculation 
 - Cell editing with formula support (IronCalc parses and evaluates)
 - `iron-canvas` renderer: frozen panes, selection, autofill drag, marching ants, grid lines, error-cell formatting
 - Formula bar with point-mode editing and colored formula-reference overlays for cell and range tokens (named-range identifiers — WIP)
+- Draggable formula refs: each cell/range token in an edited formula paints an outlined handle in the canvas; drag the body to move, the edges to resize one axis, the corners to resize both. The formula text rewrites on mouseup.
 - Named ranges — CRUD via toolbar button and modal dialog
 - Toolbar:
   - undo/redo,
@@ -59,9 +60,26 @@ wasm-pack test --headless --firefox    # browser tests for the top-level crate
 
 CI (`.github/workflows/rustycalc.yml`) runs `cargo fmt`, `clippy`, and `check` on `wasm32-unknown-unknown`; tests are runnable locally but not yet wired into CI. The `iron-canvas` crate has its own native test suite (`cd iron-canvas && cargo test`).
 
+### Dev tools
+
+```
+trunk serve --features dev-tools
+```
+
+The `dev-tools` feature propagates to `iron-canvas-web/dev-tools`, which pulls in the `iron-canvas-recorder` crate and enables:
+
+- **Perf panel** always-on in the status bar (per-frame `commit_start → input_done → eval_done → render_done` timings).
+- **Canvas recording** controls: start/stop capture of every painter op into an `.icr` (JSON) file you can save and replay.
+
+Replay a saved `.icr` by opening [`iron-canvas/web-test/recording-viewer.html`](iron-canvas/web-test/recording-viewer.html) and drag-dropping the file. See [`iron-canvas/web-test/README.md`](iron-canvas/web-test/README.md) for the standalone harness and viewer build instructions.
+
+Without the feature flag, the recorder and `serde_json` deps are not compiled into the wasm bundle and the prod build pays zero recording cost.
+
 ## Docs
 
 - [iron-canvas/README.md](iron-canvas/README.md), [iron-canvas/ARCHITECTURE.md](iron-canvas/ARCHITECTURE.md) — renderer design
+- [iron-canvas/web-test/README.md](iron-canvas/web-test/README.md) — standalone smoke harness and `.icr` recording viewer
+- [ARCHITECTURE.md](ARCHITECTURE.md) — top-level Leptos ↔ IronCalc ↔ iron-canvas wiring
 - [docs/state-and-events.md](docs/state-and-events.md) — `WorkbookState`, `EventBus`
 - [docs/leptos-patterns.md](docs/leptos-patterns.md) — Leptos conventions
 - [docs/building-components.md](docs/building-components.md) — components

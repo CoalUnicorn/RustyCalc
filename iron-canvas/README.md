@@ -4,7 +4,7 @@
 
 A `<canvas>` renderer for [IronCalc](https://github.com/ironcalc/IronCalc) workbooks.
 
-There are two stacked canvases. The grid layer paints cells, headers, borders, and text; the overlay layer paints selection, the autofill handle, marching ants, and formula refs. Both layers read the same IronCalc model. On cursor movement only the overlay repaints.
+There are two stacked canvases. The grid layer paints cells, headers, borders, and text; the overlay layer paints selection, the autofill handle, marching ants, point-mode, and formula refs (multi-color outlines with hit-tested move/resize handles — `Body` translates the ref, `Edge(Side)` resizes one axis, `Corner(Corner)` resizes both). Both layers read the same IronCalc model. On cursor movement only the overlay repaints.
 
 Every visible pixel composes from `PixelRect` and `Line`. The painter surface is five primitives (`rect_fill`, `rect_stroke`, `rect_dashed`, `stroke_line`, `fill_text`) plus clip and text helpers. New visuals reduce to those primitives.
 
@@ -230,6 +230,22 @@ Selection, autofill preview, clipboard ants, point-mode, and formula-ref outline
 `render_grid` paints the four pane quadrants (`top_left`, `top_right`, `bottom_left`, `bottom_right`), then frozen separators, then headers, then the corner box. Each pane runs four deferred sub-passes over one reused slot vec: bg, then grid borders, then explicit borders, then text. The sub-pass order is the contract — explicit borders must win over grid borders at shared edges, and text must run last so overflow is not clipped by a neighbour's bg.
 
 `CanvasTheme` fields are `Cow<'static, str>`. `light()` and `dark()` are built-in palettes (`Cow::Borrowed`, ptr-eq cache hit); host overrides via `ThemeVariables` are `Cow::Owned`. On wasm32, `setThemeFromElement` reads `--palette-*` off `getComputedStyle`.
+
+### Recording
+
+`iron-canvas-recorder` does double duty: it is both the test backend (`RecorderPainter` + `MemSurface` driving `Orchestrator<MemSurface, _>` through every regime) and the dev-only producer of `.icr` recording files.
+
+Enable the producer by building `iron-canvas-web` with the `dev-tools` feature:
+
+```sh
+wasm-pack build --target web --features dev-tools     # standalone
+# or, from the RustyCalc workspace root:
+trunk serve --features dev-tools                      # full app
+```
+
+With the feature on, `IronCanvas` exports `startRecording()` / `stopRecording()` and `RecordingSurface<S>` forks every painter call into a per-frame buffer. The output is a single uncompressed JSON document conforming to the `.icr` schema in `crates/iron-canvas-recorder/src/recording.rs` (`IcrHeader { schema, version, canvas_size, theme, started_at_unix_ms, partial }` + `Frame[]` with `frame_idx`, `t_ms`, `regime: PaintRegimeTag`, `signals: u8`, `grid_ops`, `overlay_ops`).
+
+Replay an `.icr` by opening [`web-test/recording-viewer.html`](web-test/recording-viewer.html) and drag-dropping the file; the page mirrors `iron_canvas_recorder::replay` in JS and paints onto a single 2D canvas. The always-on `recordingSupported() -> bool` probe lets the page detect whether the loaded wasm has recording compiled in. Without the feature flag, recording symbols are not exported and the prod bundle pays zero overhead.
 
 ## Tests
 

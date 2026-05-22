@@ -222,7 +222,7 @@ dependencies = [
 
 [[package]]
 name = "iron-canvas-core"
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.1"
 dependencies = [
  "bitflags",
  "iron-canvas-recorder",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "iron-canvas-recorder"
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.1"
 dependencies = [
  "iron-canvas-core",
  "serde",
@@ -242,14 +242,14 @@ dependencies = [
 
 [[package]]
 name = "iron-canvas-svg"
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.1"
 dependencies = [
  "iron-canvas-core",
 ]
 
 [[package]]
 name = "iron-canvas-web"
-version = "0.1.0-alpha.1"
+version = "0.1.0-beta.1"
 dependencies = [
  "bitflags",
  "iron-canvas-core",

@@ -5,8 +5,9 @@ ICALC_PKG := ../../../IronCalc/bindings/wasm/pkg
 PORT      ?= 8000
 # dev | release | profiling
 PROFILE   ?= release
-# Space-separated cargo features; `recorder` enables the .icr viewer's
-# icrReplayGridOps / icrReplayOverlayOps exports.
+# Space-separated cargo features; `dev-tools` enables the .icr recorder
+# (startRecording / stopRecording on IronCanvas) plus the replay exports
+# (icrReplayGridOps / icrReplayOverlayOps) the viewer page consumes.
 FEATURES  ?=
 
 PROFILE_FLAG  := $(if $(filter dev,$(PROFILE)),--dev,$(if $(filter profiling,$(PROFILE)),--profiling,--release))
