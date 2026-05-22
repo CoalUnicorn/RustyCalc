@@ -10,6 +10,10 @@
 //! `resize_handle_at`, `autofill_handle`) reads `last_frame`, so hits
 //! agree with painted pixels by construction.
 
+use std::cell::Cell;
+
+use serde::{Deserialize, Serialize};
+
 use crate::chrome::{BlitPlan, Chrome, FramePath, FrameValidity, PaneRegionMask};
 use crate::decoration::{
     autofill::AutofillLayer, clipboard::ClipboardLayer, formula_refs::FormulaRefsLayer,
@@ -43,6 +47,32 @@ pub enum PaintRegime {
     Fresh(GridSignals),
 }
 
+/// Data-free public mirror of `PaintRegime`. Stamped by `paint_if_dirty`
+/// into `Orchestrator.last_regime` so out-of-engine consumers (the
+/// recording pipeline) can attribute each captured frame to a regime
+/// without seeing the regime's inner data (`BlitPlan`, `PaneRegionMask`,
+/// `GridSignals`). Serializes with snake_case variant names to match the
+/// `.icr` JSON-lines schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaintRegimeTag {
+    Overlay,
+    Viewport,
+    SlotsReuse,
+    Fresh,
+}
+
+impl From<&PaintRegime> for PaintRegimeTag {
+    fn from(r: &PaintRegime) -> Self {
+        match r {
+            PaintRegime::Overlay => PaintRegimeTag::Overlay,
+            PaintRegime::Viewport(_) => PaintRegimeTag::Viewport,
+            PaintRegime::SlotsReuse { .. } => PaintRegimeTag::SlotsReuse,
+            PaintRegime::Fresh(_) => PaintRegimeTag::Fresh,
+        }
+    }
+}
+
 pub struct Orchestrator<S, M>
 where
     S: Surface,
@@ -68,6 +98,13 @@ where
     /// the viewport is otherwise reusable. Reset to `EMPTY` at the end of
     /// every `paint_if_dirty`.
     pending_content: PaneRegionMask,
+    /// Last regime `paint_if_dirty` dispatched. Stamped after `decide`,
+    /// read by the recording pipeline via `last_regime()`. `None` before
+    /// the first paint. `Cell` so the accessor takes `&self`.
+    last_regime: Cell<Option<PaintRegimeTag>>,
+    /// `GridSignals` drained by the last `paint_if_dirty`. Empty before
+    /// the first paint. `Cell` so the accessor takes `&self`.
+    last_signals: Cell<GridSignals>,
 }
 
 impl<S, M> Orchestrator<S, M>
@@ -92,7 +129,21 @@ where
             last_frame: None,
             size: CanvasSize { w: 0.0, h: 0.0 },
             pending_content: PaneRegionMask::EMPTY,
+            last_regime: Cell::new(None),
+            last_signals: Cell::new(GridSignals::empty()),
         }
+    }
+
+    /// Regime stamped by the last `paint_if_dirty`. `None` before the
+    /// first paint. Read by the recording pipeline.
+    pub fn last_regime(&self) -> Option<PaintRegimeTag> {
+        self.last_regime.get()
+    }
+
+    /// `GridSignals` word the last `paint_if_dirty` acted upon. Empty
+    /// before the first paint.
+    pub fn last_signals(&self) -> GridSignals {
+        self.last_signals.get()
     }
 
     /// Resize both layers in one call. No public per-layer resize, so
@@ -303,7 +354,10 @@ where
 
         {
             let model_dyn: &dyn CanvasModel = &model;
-            match self.decide(signals, model_dyn) {
+            let regime = self.decide(signals, model_dyn);
+            self.last_regime.set(Some(PaintRegimeTag::from(&regime)));
+            self.last_signals.set(signals);
+            match regime {
                 PaintRegime::Overlay => self.paint_overlay_regime(model_dyn),
                 PaintRegime::Viewport(plan) => self.paint_viewport_regime(model_dyn, plan),
                 PaintRegime::SlotsReuse { mask, signals } => {

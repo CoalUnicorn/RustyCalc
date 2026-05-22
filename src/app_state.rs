@@ -14,6 +14,18 @@ use crate::perf::PerfTimings;
 use crate::state::Split;
 use crate::theme::{use_rusty_calc_theme, Theme};
 
+/// One-shot command from the PerfPanel record button to the Worksheet
+/// dispatch Effect. The Effect drains it (`set(None)`) after handing the
+/// call to the iron-canvas orchestrator. Exists in both build flavors —
+/// in prod (no `recorder` feature) it is written but never read, since the
+/// PerfPanel button is hidden by the runtime `recordingSupported()` guard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum RecordingCmd {
+    Start,
+    Stop,
+}
+
 #[derive(Clone, Copy)]
 pub struct AppState {
     events: EventBus,
@@ -27,6 +39,14 @@ pub struct AppState {
     pub(crate) collapsed_groups: Split<Vec<String>>,
     #[allow(dead_code)]
     pub(crate) show_perf_panel: Split<bool>,
+    /// `true` while iron-canvas is capturing frames. Updated by the
+    /// Worksheet dispatch Effect after a successful start/stop.
+    #[allow(dead_code)]
+    pub recording_active: Split<bool>,
+    /// Pending command from the PerfPanel button. Cleared by Worksheet
+    /// once dispatched. See [`RecordingCmd`].
+    #[allow(dead_code)]
+    pub recording_cmd: Split<Option<RecordingCmd>>,
     pub perf: PerfTimings,
     /// Bumped when the workbook registry changes (create/delete/rename/group).
     pub registry_version: RwSignal<u64>,
@@ -41,7 +61,9 @@ impl AppState {
             set_theme_mode: set_mode,
             sidebar_open: Split::new(false),
             collapsed_groups: Split::new(vec![]),
-            show_perf_panel: Split::new(false),
+            show_perf_panel: Split::new(cfg!(feature = "dev-tools")),
+            recording_active: Split::new(false),
+            recording_cmd: Split::new(None),
             perf: PerfTimings::new(),
             registry_version: RwSignal::new(0),
         }

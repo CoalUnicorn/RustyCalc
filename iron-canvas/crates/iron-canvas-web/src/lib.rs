@@ -11,6 +11,8 @@
 
 mod canvas_painter;
 mod orchestrator;
+#[cfg(feature = "dev-tools")]
+mod replay;
 pub mod theme_from_element;
 pub mod wasm;
 pub mod web_surface;
@@ -23,8 +25,8 @@ pub use iron_canvas_core::{
     chrome, decoration, geometry, model_adapter, painter, renderer, signal, theme, types,
     AutofillTarget, CanvasModel, CanvasSize, CanvasTheme, CanvasView, Corner, FormulaRef,
     FormulaRefKind, HitTest, Line, PixelRect, Point, RCRange, RefZone, RenderOverlays,
-    ResizeTarget, SheetArea, Side, Span, ThemeVariables,
-    AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
-    HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+    ResizeTarget, SheetArea, Side, Span, ThemeVariables, AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH,
+    DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT,
+    LAST_COLUMN, LAST_ROW,
 };
 pub use orchestrator::IronCanvas;

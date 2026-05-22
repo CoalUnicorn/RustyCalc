@@ -11,6 +11,8 @@
 
 use std::borrow::Cow;
 
+use serde::{Deserialize, Serialize};
+
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Line;
 use crate::Span;
@@ -50,7 +52,7 @@ impl<'a> PaintColor<'a> {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextAlign {
     Start,
     Center,
@@ -58,7 +60,7 @@ pub enum TextAlign {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextBaseline {
     Top,
     Middle,
@@ -112,7 +114,7 @@ pub trait Painter: TextMetrics {
     /// Open a named group around subsequent draws. SVG emits `<g class="..">`,
     /// Recorder logs an op, Canvas-2D no-ops. The renderer brackets
     /// `render_grid` / `render_overlays` so SVG output is structured per layer.
-    fn begin_group(&self, class: &'static str);
+    fn begin_group(&self, class: &str);
     fn end_group(&self);
 }
 

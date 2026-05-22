@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::app_state::AppState;
+use crate::app_state::{AppState, RecordingCmd};
 
 /// Displays the last commit->render timing breakdown.
 ///
@@ -11,23 +11,41 @@ use crate::app_state::AppState;
 /// - **Total**: commit start to render complete
 #[component]
 pub fn PerfPanel() -> impl IntoView {
-    let perf = expect_context::<AppState>().perf;
+    let app = expect_context::<AppState>();
+    let perf = app.perf;
 
     let timing = move || {
-        let render_done = perf.render_done.get()?;
+        // In / Eval are durations within the cell-commit pipeline.
+        // Draw is the most recent `paintIfDirty()` duration — independent of
+        // commit, so it stays meaningful even when the last action was a
+        // scroll, overlay change, or theme flip.
         let commit_start = perf.commit_start.get()?;
         let input_done = perf.input_done.get()?;
         let eval_done = perf.eval_done.get()?;
+        let render_ms = perf.render_ms.get()?;
 
         let input_ms = input_done - commit_start;
         let eval_ms = eval_done - input_done;
-        let render_ms = render_done - eval_done;
-        let total_ms = render_done - commit_start;
+        let total_ms = input_ms + eval_ms + render_ms;
 
         Some((input_ms, eval_ms, render_ms, total_ms))
     };
 
     let formula_text = move || perf.last_formula.get().unwrap_or_default();
+
+    // Runtime detect: only render the record button when the wasm was built
+    // with `--features recorder`. In prod-flavor builds `recordingSupported()`
+    // returns false and the button row never reaches the DOM.
+    let recording_supported = iron_canvas_web::IronCanvas::recordingSupported();
+
+    let on_record_click = move |_| {
+        let cmd = if app.recording_active.get() {
+            RecordingCmd::Stop
+        } else {
+            RecordingCmd::Start
+        };
+        app.recording_cmd.set(Some(cmd));
+    };
 
     view! {
         <div class="pp">
@@ -58,6 +76,20 @@ pub fn PerfPanel() -> impl IntoView {
                     }.into_any()
                 }
             }}
+            {recording_supported.then(|| view! {
+                <span class="pp-sep">"|"</span>
+                <button
+                    class="pp-record-btn"
+                    class:active=move || app.recording_active.get()
+                    title="Capture paint-level .icr recording"
+                    on:click=on_record_click
+                >
+                    {move || if app.recording_active.get() { "■ Stop" } else { "● Record" }}
+                </button>
+                {move || app.recording_active.get().then(|| view! {
+                    <span class="pp-recording-label">"Recording…"</span>
+                })}
+            })}
         </div>
     }
 }

@@ -73,6 +73,7 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 | Method | Description |
 | ------ | ----------- |
 | `canvas.setModel(model)` | Bind an IronCalc `Model` JS handle. Triggers a full repaint. |
+| `canvas.exportSvg(css_w, css_h)` | Render the current sheet as a self-contained SVG string. Drives a throwaway `Orchestrator<SvgSurface, _>` against the cached model — no painted-pixel state on the live canvas is touched. Returns `""` if no model is bound. |
 
 #### Repaint triggers
 
@@ -121,6 +122,9 @@ let hit: HitTest = canvas.hit_test(x, y);
 // HitTest::Cell { row, column }
 // HitTest::RowHeader(row) | ColHeader(col) | Corner
 // HitTest::AutofillHandle { row, column }
+// HitTest::FormulaRef { ref_idx, zone, grab_row, grab_col }
+//   // zone: RefZone::Body | Edge(Side) | Corner(Corner)
+//   // grab_row/grab_col preserve the relative pointer position inside the ref
 // HitTest::Outside
 
 // Pixel rect of a visible cell
@@ -146,7 +150,12 @@ let on_mousemove = move |ev: MouseEvent| {
     let y = ev.client_y() as f64 - rect.top();
     match canvas.hit_test(x, y) {
         HitTest::Cell { row, column } => { /* select cell */ }
-        HitTest::AutofillHandle { .. } => { /* start drag */ }
+        HitTest::AutofillHandle { .. } => { /* start autofill drag */ }
+        HitTest::FormulaRef { ref_idx, zone, grab_row, grab_col } => {
+            // Body → translate the ref; Edge(Side) → single-axis resize;
+            // Corner(Corner) → two-axis resize. ref_idx indexes the
+            // Vec<FormulaRef> last pushed via set_formula_refs.
+        }
         HitTest::Outside => {}
         _ => {}
     }

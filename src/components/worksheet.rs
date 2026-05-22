@@ -6,13 +6,16 @@ use leptos_use::{use_raf_fn, use_resize_observer};
 use std::rc::Rc;
 use web_sys::HtmlCanvasElement;
 
-use crate::app_state::AppState;
+#[cfg(feature = "dev-tools")]
+use crate::app_state::{AppState, RecordingCmd};
 use crate::components::cell_editor::CellEditor;
 use crate::coord::ActiveRef;
 use crate::coord::{CellArea, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::mouse::*;
 use crate::model::AppClipboard;
+#[cfg(feature = "dev-tools")]
+use crate::state::StatusMessage;
 use crate::state::{DragState, ModelStore, WorkbookState};
 use iron_canvas_core::*;
 use iron_canvas_web::IronCanvas;
@@ -100,6 +103,7 @@ pub fn Worksheet() -> impl IntoView {
         });
     });
     let state = expect_context::<WorkbookState>();
+    #[cfg(feature = "dev-tools")]
     let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
 
@@ -298,6 +302,64 @@ pub fn Worksheet() -> impl IntoView {
         },
     );
 
+    // Recording dispatch Effect — peer to the reactive Effect above. Drains
+    // `app.recording_cmd` (one-shot Start/Stop from PerfPanel) and forwards
+    // to the iron-canvas orchestrator. Gated by `recorder` feature because
+    // `IronCanvas::startRecording` / `stopRecording` only exist when the
+    // upstream `iron-canvas-web/recorder` feature is enabled.
+    //
+    // `set(None)` at the end re-fires this same Effect with `cmd == None`,
+    // which short-circuits via the `let-else`. No infinite loop.
+    #[cfg(feature = "dev-tools")]
+    Effect::new(move |_| {
+        let Some(cmd) = app.recording_cmd.get() else {
+            return;
+        };
+        canvas_handle.update_value(|slot| {
+            let Some(ic) = slot.as_mut() else {
+                state
+                    .status
+                    .set(Some(StatusMessage::Error("canvas not ready".into())));
+                return;
+            };
+            match cmd {
+                RecordingCmd::Start => match ic.startRecording() {
+                    Ok(()) => app.recording_active.set(true),
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "startRecording failed: {e:?}"
+                    )))),
+                },
+                RecordingCmd::Stop => {
+                    // Engine `stopRecording` clears its `recording` state before
+                    // it can fail at `serialize()`; reset the UI flag eagerly so
+                    // a serialize-Err doesn't wedge the button in "Stop".
+                    app.recording_active.set(false);
+                    match ic.stopRecording() {
+                        Ok(arr) => {
+                            let bytes = arr.to_vec();
+                            let ts = js_sys::Date::new_0()
+                                .to_iso_string()
+                                .as_string()
+                                .and_then(|s| s.split('.').next().map(str::to_owned))
+                                .map(|s| s.replace(':', "-"))
+                                .unwrap_or_else(|| "now".into());
+                            let filename = format!("recording-{ts}.icr");
+                            crate::input::xlsx_io::trigger_download(
+                                &bytes,
+                                &filename,
+                                Some("application/octet-stream"),
+                            );
+                        }
+                        Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                            "stopRecording failed: {e:?}"
+                        )))),
+                    }
+                }
+            }
+        });
+        app.recording_cmd.set(None);
+    });
+
     // rAF render loop - fires on every animation frame (~60 fps).
     // Renders only when render_needed is true; otherwise returns immediately
     // (single untracked signal read + branch).
@@ -376,6 +438,8 @@ pub fn Worksheet() -> impl IntoView {
         });
         // Renderer debug
         web_sys::console::time_with_label("render");
+        #[cfg(feature = "dev-tools")]
+        let paint_t0 = crate::perf::now();
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
                 if theme_dirty.get_value() {
@@ -391,9 +455,13 @@ pub fn Worksheet() -> impl IntoView {
         // Renderer debug
         web_sys::console::time_end_with_label("render");
 
-        // Record render-done timestamp for the perf panel.
+        // Record paint duration for the PerfPanel. Skipped until the first
+        // cell commit has happened so the panel stays on its placeholder
+        // ("commit a cell to measure") and we don't spam the signal on
+        // every scroll / resize / overlay tick.
+        #[cfg(feature = "dev-tools")]
         if app.perf.commit_start.get_untracked().is_some() {
-            app.perf.render_done.set(Some(crate::perf::now()));
+            app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
         }
     });
 

@@ -9,3 +9,5 @@ crate-type = ["rlib"]
 
 [dependencies]
 iron-canvas-core = { path = "../iron-canvas-core" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

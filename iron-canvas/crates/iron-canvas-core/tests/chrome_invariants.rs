@@ -97,7 +97,7 @@ fn render_grid_brackets_grid_group_balanced() {
     drive_render_grid(&StubModel::at_top(), |_, ops| {
         let begins = ops
             .iter()
-            .filter(|op| matches!(op, DrawOp::BeginGroup { class: "grid" }))
+            .filter(|op| matches!(op, DrawOp::BeginGroup { class } if class == "grid"))
             .count();
         let ends = ops
             .iter()

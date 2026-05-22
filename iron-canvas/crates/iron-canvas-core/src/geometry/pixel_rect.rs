@@ -1,9 +1,11 @@
 use std::fmt::{self, Display};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{geometry::prim::Point, CanvasSize};
 
 /// A rectangle in logical (CSS) pixels on the canvas.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct PixelRect {
     pub top_left: Point,
     pub width: i32,

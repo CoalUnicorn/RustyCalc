@@ -9,25 +9,90 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::theme::{CanvasTheme, ThemeVariables};
-use crate::RenderOverlays;
 use crate::wasm::JsBackedModel;
 use crate::web_surface::WebSurface;
+use crate::RenderOverlays;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
-use iron_canvas_core::Orchestrator;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 use iron_canvas_core::CanvasModel;
+use iron_canvas_core::Orchestrator;
 use iron_canvas_svg::SvgSurface;
+
+#[cfg(feature = "dev-tools")]
+use iron_canvas_core::PaintRegimeTag;
+#[cfg(feature = "dev-tools")]
+use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
+#[cfg(feature = "dev-tools")]
+use iron_canvas_recorder::DrawOp;
+#[cfg(feature = "dev-tools")]
+use iron_canvas_recorder::RecordingSurface;
+
+/// Facade Surface — wraps `WebSurface` in `RecordingSurface` when the
+/// `recorder` feature is on (dev builds), bare `WebSurface` otherwise
+/// (prod). `Orchestrator<FacadeSurface, _>` flows the choice through
+/// the rest of the engine via the `Surface` trait without any other
+/// site needing to know which is which.
+#[cfg(feature = "dev-tools")]
+type FacadeSurface = RecordingSurface<WebSurface>;
+#[cfg(not(feature = "dev-tools"))]
+type FacadeSurface = WebSurface;
+
+#[cfg(feature = "dev-tools")]
+fn wrap_surface(s: WebSurface) -> FacadeSurface {
+    RecordingSurface::new(s)
+}
+#[cfg(not(feature = "dev-tools"))]
+fn wrap_surface(s: WebSurface) -> FacadeSurface {
+    s
+}
+
+#[cfg(feature = "dev-tools")]
+const SOFT_WARN_MS: u64 = 30_000;
+#[cfg(feature = "dev-tools")]
+const HARD_CAP_BYTES: usize = 100 * 1024 * 1024;
+#[cfg(feature = "dev-tools")]
+const OP_BYTES_HEURISTIC: usize = 150;
+
+// Per-op byte estimate for the hard-cap heuristic. Fixed-shape variants
+// settle near `OP_BYTES_HEURISTIC` after JSON encoding; FillText and
+// BeginGroup carry owned strings whose length dominates real-world
+// recordings (cell text + font_css + color, decoration class names),
+// so charge them on top.
+#[cfg(feature = "dev-tools")]
+fn op_bytes(op: &DrawOp) -> usize {
+    match op {
+        DrawOp::FillText {
+            text,
+            font_css,
+            color,
+            ..
+        } => OP_BYTES_HEURISTIC + text.len() + font_css.len() + color.len(),
+        DrawOp::BeginGroup { class } => OP_BYTES_HEURISTIC + class.len(),
+        _ => OP_BYTES_HEURISTIC,
+    }
+}
+
+#[cfg(feature = "dev-tools")]
+struct RecordingState {
+    rec: Recording,
+    started_at_ms: f64,
+    bytes_estimate: usize,
+    soft_warn_fired: bool,
+    capped: bool,
+}
 
 #[wasm_bindgen]
 pub struct IronCanvas {
-    orch: Orchestrator<WebSurface, Rc<dyn CanvasModel>>,
+    orch: Orchestrator<FacadeSurface, Rc<dyn CanvasModel>>,
     // Cached so SVG export can re-push the live model into a throwaway
     // orchestrator. Updated alongside every `set_model` / `setModel`.
     model: Option<Rc<dyn CanvasModel>>,
+    #[cfg(feature = "dev-tools")]
+    recording: Option<RecordingState>,
 }
 
 #[wasm_bindgen]
@@ -39,12 +104,22 @@ impl IronCanvas {
         grid_canvas: HtmlCanvasElement,
         overlay_canvas: HtmlCanvasElement,
     ) -> Result<IronCanvas, JsValue> {
-        let grid = WebSurface::grid(grid_canvas)?;
-        let overlay = WebSurface::overlay(overlay_canvas)?;
+        let grid = wrap_surface(WebSurface::grid(grid_canvas)?);
+        let overlay = wrap_surface(WebSurface::overlay(overlay_canvas)?);
         Ok(IronCanvas {
-            orch: Orchestrator::<WebSurface, Rc<dyn CanvasModel>>::new(grid, overlay),
+            orch: Orchestrator::<FacadeSurface, Rc<dyn CanvasModel>>::new(grid, overlay),
             model: None,
+            #[cfg(feature = "dev-tools")]
+            recording: None,
         })
+    }
+
+    /// Whether this build supports `startRecording` / `stopRecording`.
+    /// Always callable from JS so the host can hide its Record button on
+    /// prod builds without `try`-sniffing the class shape.
+    #[allow(non_snake_case)]
+    pub fn recordingSupported() -> bool {
+        cfg!(feature = "dev-tools")
     }
 
     /// Resize both layers in one call.
@@ -79,10 +154,86 @@ impl IronCanvas {
             .mark_content_dirty(iron_canvas_core::chrome::PaneRegionMask::ALL);
     }
 
-    /// Paint whichever layers are dirty.
+    /// Paint whichever layers are dirty. When a recording is active
+    /// (`recorder` feature only), brackets the paint with `begin_frame` /
+    /// `end_frame` on both surfaces and pushes a `Frame` whenever at
+    /// least one layer emitted ops. Idle rAF ticks are dropped.
     #[allow(non_snake_case)]
     pub fn paintIfDirty(&mut self) {
+        #[cfg(feature = "dev-tools")]
+        let recording_active = self.recording.is_some();
+        #[cfg(feature = "dev-tools")]
+        if recording_active {
+            self.orch.grid_surface().begin_frame();
+            self.orch.overlay_surface().begin_frame();
+        }
+
         self.orch.paint_if_dirty();
+
+        #[cfg(feature = "dev-tools")]
+        if recording_active {
+            self.capture_frame();
+        }
+    }
+
+    /// Start a paint-level recording. Errors if a recording is already
+    /// active. Both surfaces' painter-level forks are enabled; subsequent
+    /// `paintIfDirty` calls capture frames until `stopRecording` (or the
+    /// hard-cap watchdog) fires.
+    #[cfg(feature = "dev-tools")]
+    #[allow(non_snake_case)]
+    pub fn startRecording(&mut self) -> Result<(), JsError> {
+        if self.recording.is_some() {
+            return Err(JsError::new("recording already active"));
+        }
+        let canvas = self.orch.canvas_size();
+        let theme_snap = ThemeSnapshot::from(self.orch.theme());
+        let now = js_sys::Date::now();
+        let header = IcrHeader::new(canvas.w, canvas.h, theme_snap, now as u64);
+        self.recording = Some(RecordingState {
+            rec: Recording::new(header),
+            started_at_ms: now,
+            bytes_estimate: 0,
+            soft_warn_fired: false,
+            capped: false,
+        });
+        self.orch.grid_surface().enable_recording();
+        self.orch.overlay_surface().enable_recording();
+        // Synchronously capture a full Fresh paint as frame 0 so the
+        // recording always opens with the whole canvas. Relying on the
+        // host's next rAF tick is unsafe — that tick might be a narrow
+        // SlotsReuse (active-cell move, single-pane content edit) and
+        // frame 0 would be a tiny slice. `request_repaint` drops
+        // `last_frame`, which forces the next `paint_if_dirty` to take
+        // the Fresh arm; we drive it inline and call `capture_frame`
+        // ourselves so the recording's first entry is the snapshot.
+        self.orch.request_repaint();
+        self.orch.grid_surface().begin_frame();
+        self.orch.overlay_surface().begin_frame();
+        self.orch.paint_if_dirty();
+        self.capture_frame();
+        Ok(())
+    }
+
+    /// Stop the active recording and return the serialized `.icr` bytes.
+    /// If the hard-cap watchdog already fired, `header.partial` is `true`
+    /// and the bytes are the truncated tail.
+    #[cfg(feature = "dev-tools")]
+    #[allow(non_snake_case)]
+    pub fn stopRecording(&mut self) -> Result<js_sys::Uint8Array, JsError> {
+        self.orch.grid_surface().disable_recording();
+        self.orch.overlay_surface().disable_recording();
+        let state = self
+            .recording
+            .take()
+            .ok_or_else(|| JsError::new("no active recording"))?;
+        let bytes = state
+            .rec
+            .serialize()
+            .map_err(|e| JsError::new(&format!("recording serialize failed: {e}")))?;
+        let arr = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+        arr.copy_from(&bytes);
+        Ok(arr)
     }
 
     /// Explicit teardown for React strict-mode / Leptos `Effect` mount
@@ -129,8 +280,7 @@ impl IronCanvas {
         let overlay = SvgSurface::new(width, height);
         let grid_painter = grid.clone_painter();
 
-        let mut export_orch =
-            Orchestrator::<SvgSurface, Rc<dyn CanvasModel>>::new(grid, overlay);
+        let mut export_orch = Orchestrator::<SvgSurface, Rc<dyn CanvasModel>>::new(grid, overlay);
         export_orch.set_theme(self.orch.theme().clone());
         export_orch.set_model(Rc::clone(model));
         export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
@@ -223,5 +373,57 @@ impl IronCanvas {
 
     pub fn request_overlay_repaint(&mut self) {
         self.orch.request_overlay_repaint();
+    }
+
+    /// Drain the per-frame op buffers, push a `Frame` (skipping empty
+    /// ones), update the running cap estimate, fire soft-warn / hard-cap
+    /// side effects.
+    ///
+    /// Hard cap: flips `partial`, disables both painter-level forks, but
+    /// keeps `self.recording` populated so `stopRecording` can still
+    /// drain the partial bytes.
+    #[cfg(feature = "dev-tools")]
+    fn capture_frame(&mut self) {
+        let grid_ops = self.orch.grid_surface().end_frame();
+        let overlay_ops = self.orch.overlay_surface().end_frame();
+        if grid_ops.is_empty() && overlay_ops.is_empty() {
+            return;
+        }
+        let regime = self.orch.last_regime().unwrap_or(PaintRegimeTag::Fresh);
+        let signals = self.orch.last_signals().bits();
+        let Some(state) = self.recording.as_mut() else {
+            return;
+        };
+        let now = js_sys::Date::now();
+        let t_ms = (now - state.started_at_ms).max(0.0) as u64;
+        let frame_idx = state.rec.frames.len() as u32;
+        let frame_bytes: usize = grid_ops.iter().map(op_bytes).sum::<usize>()
+            + overlay_ops.iter().map(op_bytes).sum::<usize>();
+        state.rec.push_frame(Frame {
+            frame_idx,
+            t_ms,
+            regime,
+            signals,
+            grid_ops,
+            overlay_ops,
+        });
+        state.bytes_estimate = state.bytes_estimate.saturating_add(frame_bytes);
+
+        if !state.soft_warn_fired && t_ms > SOFT_WARN_MS {
+            state.soft_warn_fired = true;
+            crate::wasm::diag::console_warn(
+                "iron-canvas: recording > 30s — call stopRecording() soon",
+            );
+        }
+
+        if !state.capped && state.bytes_estimate > HARD_CAP_BYTES {
+            state.capped = true;
+            state.rec.header.partial = true;
+            self.orch.grid_surface().disable_recording();
+            self.orch.overlay_surface().disable_recording();
+            crate::wasm::diag::console_warn(
+                "iron-canvas: recording exceeded 100MB cap; auto-stopped (partial)",
+            );
+        }
     }
 }

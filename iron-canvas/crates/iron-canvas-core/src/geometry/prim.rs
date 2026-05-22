@@ -1,10 +1,12 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect},
     RCRange,
 };
 
 /// A point in logical (CSS) pixels on the canvas.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Point {
     pub x: i32,
     pub y: i32,
@@ -16,7 +18,7 @@ pub struct Point {
 /// `offset_cross` shifts perpendicular to the line's direction - used by
 /// `BorderStyle::Double`, which draws two parallel lines at ±1 on the
 /// cross-axis.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum Line {
     H { span: Span, y: i32 },
     V { x: i32, span: Span },
@@ -46,7 +48,7 @@ impl Line {
 
 /// Endpoints of an axis-aligned line. The line covers `from` through `to`;
 /// `to - from` is its pixel length.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Span {
     pub from: i32,
     pub to: i32,

@@ -348,7 +348,7 @@ impl Painter for CanvasPainter {
         self.ctx.set_text_baseline("middle");
     }
 
-    fn begin_group(&self, _class: &'static str) {}
+    fn begin_group(&self, _class: &str) {}
     fn end_group(&self) {}
 }
 

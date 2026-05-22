@@ -16,8 +16,13 @@ pub async fn read_file_bytes(file: web_sys::File) -> Vec<u8> {
 }
 
 /// Trigger a browser download of `bytes` with the given `filename`.
+///
+/// `mime` overrides the Blob `type:` attribute; passing `None` keeps the legacy
+/// xlsx MIME (preserves drop-target hints for spreadsheet workflows). Pass
+/// `Some("application/octet-stream")` for opaque binary artifacts such as
+/// `.icr` paint-level recordings.
 #[allow(clippy::expect_used)]
-pub fn trigger_download(bytes: &[u8], filename: &str) {
+pub fn trigger_download(bytes: &[u8], filename: &str, mime: Option<&str>) {
     use wasm_bindgen::JsCast;
 
     let array = js_sys::Uint8Array::from(bytes);
@@ -25,7 +30,9 @@ pub fn trigger_download(bytes: &[u8], filename: &str) {
     parts.push(&array);
 
     let opts = web_sys::BlobPropertyBag::new();
-    opts.set_type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    opts.set_type(
+        mime.unwrap_or("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+    );
 
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts)
         .expect("Blob construction from a Uint8Array always succeeds");

@@ -31,6 +31,9 @@ pub fn App() -> impl IntoView {
         StoredValue::new_local(None);
 
     provide_context(app_state);
+    // Provide PerfTimings independently so `try_mutate` can write phase
+    // timestamps without coupling the model layer to AppState.
+    provide_context(app_state.perf);
     provide_context(wb_state);
     provide_context(model);
     provide_context(clipboard);

@@ -290,7 +290,7 @@ impl Painter for SvgPainter {
         self.dpr.set(dpr);
     }
 
-    fn begin_group(&self, class: &'static str) {
+    fn begin_group(&self, class: &str) {
         let mut body = self.body.borrow_mut();
         body.push_str("<g class=\"");
         xml_escape(class, &mut body);

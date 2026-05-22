@@ -1,5 +1,7 @@
 use leptos::prelude::*;
 
+use crate::app_state::AppState;
+use crate::components::perf_panel::PerfPanel;
 use crate::input::formula_analysis::FormulaStatus;
 use crate::state::{StatusMessage, WorkbookState};
 
@@ -10,6 +12,7 @@ use crate::state::{StatusMessage, WorkbookState};
 /// is `None`.
 #[component]
 pub fn StatusBar() -> impl IntoView {
+    let app = expect_context::<AppState>();
     let state = expect_context::<WorkbookState>();
 
     let formula_msg = Memo::new(move |_| -> Option<String> {
@@ -48,6 +51,9 @@ pub fn StatusBar() -> impl IntoView {
                     view! { <span class="status-bar-formula-error">{msg}</span> }.into_any()
                 }
             }}
+            <Show when=move || app.show_perf_panel.get()>
+                <PerfPanel />
+            </Show>
         </div>
     }
 }

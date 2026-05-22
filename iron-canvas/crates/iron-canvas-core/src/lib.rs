@@ -17,7 +17,7 @@ pub mod signal;
 pub mod theme;
 pub mod types;
 
-pub use orchestrator::{Orchestrator, PaintRegime};
+pub use orchestrator::{Orchestrator, PaintRegime, PaintRegimeTag};
 
 pub use render_overlays::RenderOverlays;
 

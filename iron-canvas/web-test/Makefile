@@ -5,13 +5,17 @@ ICALC_PKG := ../../../IronCalc/bindings/wasm/pkg
 PORT      ?= 8000
 # dev | release | profiling
 PROFILE   ?= release
+# Space-separated cargo features; `recorder` enables the .icr viewer's
+# icrReplayGridOps / icrReplayOverlayOps exports.
+FEATURES  ?=
 
-PROFILE_FLAG := $(if $(filter dev,$(PROFILE)),--dev,$(if $(filter profiling,$(PROFILE)),--profiling,--release))
+PROFILE_FLAG  := $(if $(filter dev,$(PROFILE)),--dev,$(if $(filter profiling,$(PROFILE)),--profiling,--release))
+FEATURES_FLAG := $(if $(strip $(FEATURES)),--features "$(FEATURES)",)
 
 .PHONY: build sync serve clean
 
 build:
-	cd $(IC_DIR) && wasm-pack build --target web $(PROFILE_FLAG) --no-opt
+	cd $(IC_DIR) && wasm-pack build --target web $(PROFILE_FLAG) --no-opt $(FEATURES_FLAG)
 
 sync:
 	@test -d $(IC_PKG)    || (echo "missing $(IC_PKG) — run 'make build' first" && exit 1)

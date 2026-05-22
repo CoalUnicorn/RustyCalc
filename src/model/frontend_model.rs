@@ -2,6 +2,7 @@ use ironcalc_base::{
     expressions::types::Area, types::HorizontalAlignment, worksheet::NavigationDirection, UserModel,
 };
 
+#[cfg(feature = "dev-tools")]
 use leptos::prelude::Set;
 
 use crate::coord::SheetRange;
@@ -498,40 +499,34 @@ pub fn try_mutate<E>(
     evaluate: EvaluationMode,
     f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
 ) -> Result<(), E> {
+    // Phase timestamps under the `recorder` feature only. PerfTimings is
+    // pulled from Leptos context (provided in app.rs); if it isn't there
+    // — e.g. unit tests outside a runtime — the writes are silently skipped.
+    #[cfg(feature = "dev-tools")]
+    let perf = leptos::prelude::use_context::<crate::perf::PerfTimings>();
     let mut outcome: Result<(), E> = Ok(());
     model.update_value(|m| {
-        m.pause_evaluation();
-        outcome = f(m);
-        m.resume_evaluation();
-        if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
-            m.evaluate();
+        #[cfg(feature = "dev-tools")]
+        if let Some(p) = perf {
+            p.commit_start.set(Some(crate::perf::now()));
+            // Arm the paint-duration capture: the rAF loop's
+            // `if render_ms.is_none()` guard writes the next paint's
+            // duration and then leaves it alone until the next commit.
+            p.render_ms.set(None);
         }
-    });
-    outcome
-}
-
-/// Timed variant of [`try_mutate`]: records phase timestamps into [`PerfTimings`].
-///
-/// Sets `commit_start` before the closure, `input_done` after it, and `eval_done`
-/// after `evaluate()`. The caller sets `last_formula` before calling (context-specific).
-/// `render_done` is set separately by the canvas render effect in `worksheet.rs`.
-#[allow(dead_code)]
-pub fn try_mutate_timed<E>(
-    model: ModelStore,
-    evaluate: EvaluationMode,
-    perf: crate::perf::PerfTimings,
-    f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
-) -> Result<(), E> {
-    let mut outcome: Result<(), E> = Ok(());
-    model.update_value(|m| {
-        perf.commit_start.set(Some(crate::perf::now()));
         m.pause_evaluation();
         outcome = f(m);
-        perf.input_done.set(Some(crate::perf::now()));
+        #[cfg(feature = "dev-tools")]
+        if let Some(p) = perf {
+            p.input_done.set(Some(crate::perf::now()));
+        }
         m.resume_evaluation();
         if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
             m.evaluate();
-            perf.eval_done.set(Some(crate::perf::now()));
+            #[cfg(feature = "dev-tools")]
+            if let Some(p) = perf {
+                p.eval_done.set(Some(crate::perf::now()));
+            }
         }
     });
     outcome

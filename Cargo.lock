@@ -1028,6 +1028,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "iron-canvas-recorder"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "iron-canvas-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "iron-canvas-svg"
 version = "0.1.0-alpha.1"
 dependencies = [
@@ -1040,11 +1049,13 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "bitflags",
  "iron-canvas-core",
+ "iron-canvas-recorder",
  "iron-canvas-svg",
  "ironcalc_base",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "wasm-bindgen",
  "web-sys",
 ]

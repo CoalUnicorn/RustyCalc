@@ -22,7 +22,9 @@ use iron_canvas_core::Orchestrator;
 use iron_canvas_core::types::coord::{AutofillTarget, RCRange};
 use iron_canvas_core::{CanvasModel, CanvasTheme, CanvasView};
 
-use iron_canvas_recorder::{DrawOp, MemSurface};
+use iron_canvas_core::PaintRegimeTag;
+use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
+use iron_canvas_recorder::{replay, DrawOp, MemSurface, RecorderPainter, RecordingSurface};
 
 /// In-memory model whose scroll position and active cell can be mutated
 /// from the test via `Cell` interior mutability while held as `Rc<Self>`
@@ -281,4 +283,188 @@ fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
         )),
         "Content-dirty SlotsReuse must NOT full-canvas-fill"
     );
+}
+
+// ─── Stage 5: Recording round-trip through RecordingSurface<MemSurface> ───
+//
+// Reuses ScrollableStub + the same regime scenarios as the MemSurface
+// suite above. Each test wraps both surfaces in RecordingSurface and
+// asserts:
+//   1. Orchestrator::last_regime() stamps the expected PaintRegimeTag.
+//      (Covers the deferred-from-Stage-2 `last_regime_set_after_each_arm`.)
+//   2. The captured per-frame op streams round-trip through serde +
+//      replay() byte-equal against the originals.
+
+fn build_rec(
+    model: Rc<ScrollableStub>,
+) -> Orchestrator<RecordingSurface<MemSurface>, Rc<ScrollableStub>> {
+    let grid = RecordingSurface::new(MemSurface::new());
+    let overlay = RecordingSurface::new(MemSurface::new());
+    grid.enable_recording();
+    overlay.enable_recording();
+    let mut orch = Orchestrator::<RecordingSurface<MemSurface>, Rc<ScrollableStub>>::new(
+        grid, overlay,
+    );
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
+    orch.set_model(model);
+    orch
+}
+
+/// Bracket a paint with begin_frame/end_frame on both surfaces and
+/// return (grid_ops, overlay_ops, regime, signals_bits).
+fn paint_and_capture(
+    orch: &mut Orchestrator<RecordingSurface<MemSurface>, Rc<ScrollableStub>>,
+) -> (Vec<DrawOp>, Vec<DrawOp>, Option<PaintRegimeTag>, u8) {
+    orch.grid_surface().begin_frame();
+    orch.overlay_surface().begin_frame();
+    orch.paint_if_dirty();
+    let grid_ops = orch.grid_surface().end_frame();
+    let overlay_ops = orch.overlay_surface().end_frame();
+    (grid_ops, overlay_ops, orch.last_regime(), orch.last_signals().bits())
+}
+
+/// `replay()` prepends one `DrawOp::InvalidateCache` to keep the sink's
+/// ctx-state cache from drifting. Trim it so the tail is comparable to
+/// the originally captured stream.
+fn replay_and_drain(ops: &[DrawOp]) -> Vec<DrawOp> {
+    let sink = RecorderPainter::new();
+    replay(&sink, ops);
+    let mut replayed = sink.into_ops();
+    // Drop the synthetic leading InvalidateCache prepended by replay().
+    assert!(matches!(replayed.first(), Some(DrawOp::InvalidateCache)));
+    replayed.remove(0);
+    replayed
+}
+
+#[test]
+fn last_regime_fresh_after_initial_paint() {
+    let stub = Rc::new(ScrollableStub::new());
+    let mut orch = build_rec(Rc::clone(&stub));
+    let (grid_ops, overlay_ops, regime, _) = paint_and_capture(&mut orch);
+
+    assert_eq!(regime, Some(PaintRegimeTag::Fresh));
+    assert!(!grid_ops.is_empty());
+    assert!(!overlay_ops.is_empty());
+    // Round-trip through replay — proves the captured stream is
+    // structurally valid even before serde gets involved.
+    assert_eq!(replay_and_drain(&grid_ops), grid_ops);
+    assert_eq!(replay_and_drain(&overlay_ops), overlay_ops);
+}
+
+#[test]
+fn last_regime_slots_reuse_after_theme_swap() {
+    let stub = Rc::new(ScrollableStub::new());
+    let mut orch = build_rec(Rc::clone(&stub));
+    paint_and_capture(&mut orch); // Fresh.
+
+    orch.set_theme(CanvasTheme::dark());
+    let (grid_ops, _, regime, _) = paint_and_capture(&mut orch);
+
+    assert_eq!(regime, Some(PaintRegimeTag::SlotsReuse));
+    assert!(!grid_ops.is_empty());
+}
+
+#[test]
+fn last_regime_viewport_after_row_scroll() {
+    let stub = Rc::new(ScrollableStub::new());
+    let mut orch = build_rec(Rc::clone(&stub));
+    paint_and_capture(&mut orch); // Fresh.
+
+    stub.set_top_row(2);
+    orch.request_overlay_repaint();
+    let (grid_ops, _, regime, _) = paint_and_capture(&mut orch);
+
+    assert_eq!(regime, Some(PaintRegimeTag::Viewport));
+    assert!(grid_ops.iter().any(|op| matches!(op, DrawOp::Blit { .. })));
+}
+
+#[test]
+fn last_regime_overlay_after_autofill_drag() {
+    let stub = Rc::new(ScrollableStub::new());
+    let mut orch = build_rec(Rc::clone(&stub));
+    paint_and_capture(&mut orch); // Fresh.
+
+    orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
+    let (grid_ops, overlay_ops, regime, _) = paint_and_capture(&mut orch);
+
+    assert_eq!(regime, Some(PaintRegimeTag::Overlay));
+    assert!(grid_ops.is_empty(), "Overlay must not touch the grid");
+    assert!(!overlay_ops.is_empty());
+}
+
+#[test]
+fn recording_serde_round_trip_across_all_four_regimes() {
+    // Drive Fresh → SlotsReuse → Viewport → Overlay through one
+    // Orchestrator, collecting one Frame per regime, then serialize the
+    // whole Recording and assert deserialize is bit-equal to the original.
+    let stub = Rc::new(ScrollableStub::new());
+    let mut orch = build_rec(Rc::clone(&stub));
+
+    let mut frames: Vec<Frame> = Vec::new();
+    let mut push = |orch: &mut Orchestrator<
+        RecordingSurface<MemSurface>,
+        Rc<ScrollableStub>,
+    >,
+                    t_ms: u64| {
+        let (grid_ops, overlay_ops, regime, signals) = paint_and_capture(orch);
+        // Skip idle frames so the recording matches the production
+        // paint_if_dirty drop-empty-frames behavior.
+        if grid_ops.is_empty() && overlay_ops.is_empty() {
+            return;
+        }
+        let idx = frames.len() as u32;
+        frames.push(Frame {
+            frame_idx: idx,
+            t_ms,
+            regime: regime.expect("regime must be stamped"),
+            signals,
+            grid_ops,
+            overlay_ops,
+        });
+    };
+
+    push(&mut orch, 0); // Fresh
+    orch.set_theme(CanvasTheme::dark());
+    push(&mut orch, 16); // SlotsReuse
+    stub.set_top_row(2);
+    orch.request_overlay_repaint();
+    push(&mut orch, 32); // Viewport
+    orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
+    push(&mut orch, 48); // Overlay
+
+    assert_eq!(frames.len(), 4, "all four regimes should produce frames");
+    let regimes: Vec<_> = frames.iter().map(|f| f.regime).collect();
+    assert_eq!(
+        regimes,
+        vec![
+            PaintRegimeTag::Fresh,
+            PaintRegimeTag::SlotsReuse,
+            PaintRegimeTag::Viewport,
+            PaintRegimeTag::Overlay,
+        ],
+    );
+
+    let header = IcrHeader::new(
+        800.0,
+        600.0,
+        ThemeSnapshot::from(orch.theme()),
+        0, // deterministic — tests don't read wall-clock for this field
+    );
+    let mut recording = Recording::new(header);
+    for f in &frames {
+        recording.push_frame(f.clone());
+    }
+
+    let bytes = recording.serialize().expect("serialize");
+    let back = Recording::deserialize(&bytes).expect("deserialize");
+    assert_eq!(recording, back, "Recording must survive a serde round-trip");
+
+    // Per-frame: replay each frame's op stream into a fresh sink and
+    // assert byte-equal against the deserialized stream.
+    for (orig, restored) in frames.iter().zip(&back.frames) {
+        assert_eq!(orig.grid_ops, restored.grid_ops);
+        assert_eq!(orig.overlay_ops, restored.overlay_ops);
+        assert_eq!(replay_and_drain(&restored.grid_ops), orig.grid_ops);
+        assert_eq!(replay_and_drain(&restored.overlay_ops), orig.overlay_ops);
+    }
 }

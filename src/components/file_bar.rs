@@ -111,7 +111,7 @@ pub fn FileBar() -> impl IntoView {
             match export::save_xlsx_to_writer(m.get_model(), Cursor::new(Vec::new())) {
                 Ok(cursor) => {
                     let bytes = cursor.into_inner();
-                    xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()));
+                    xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()), None);
                 }
                 Err(e) => {
                     web_sys::console::warn_1(&format!("xlsx export failed: {e}").into());

@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+    <!--
+      iron-canvas .icr recording viewer.
+
+      Loads the iron-canvas-web wasm bundle (built with --features
+      recorder) and replays ops through `icrReplayGridOps` /
+      `icrReplayOverlayOps`, which delegate to the same Rust
+      `iron_canvas_recorder::replay` driving `CanvasPainter`. The JS
+      side only owns cadence (cumulative grid from last Fresh anchor;
+      per-frame overlay); all op dispatch is Rust.
+
+      Build the vendor bundle with:
+        FEATURES=recorder make -C web-test build sync
+
+      Compression is intentionally not handled here. If a future viewer
+      reads zstd/gzip-wrapped recordings, wire the decompressor in
+      `loadIcr` before `JSON.parse`.
+
+      Manual test: open this page via `make serve`, drag-drop a fixture
+      .icr from `crates/iron-canvas-recorder/tests/fixtures/`.
+    -->
+    <head>
+        <meta charset="UTF-8" />
+        <title>iron-canvas .icr viewer</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 16px;
+                font:
+                    14px system-ui,
+                    sans-serif;
+                background: #f7f7f8;
+                color: #222;
+                display: grid;
+                grid-template-columns: auto 320px;
+                gap: 16px;
+                align-items: start;
+            }
+            h1 {
+                font-size: 16px;
+                margin: 0 0 12px;
+            }
+            #drop {
+                width: 1024px;
+                min-height: 40px;
+                padding: 8px 12px;
+                border: 1px dashed #888;
+                border-radius: 6px;
+                background: #fff;
+                color: #555;
+                margin: 0 0 12px;
+                cursor: pointer;
+            }
+            #drop.dragover {
+                border-color: #1e6fd9;
+                background: #eef5ff;
+                color: #1e6fd9;
+            }
+            #stage-wrap {
+                position: relative;
+                width: 1024px;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+                background: #fff;
+            }
+            #stage-grid,
+            #stage-overlay {
+                position: absolute;
+                top: 0;
+                left: 0;
+                display: block;
+            }
+            #stage-grid {
+                background: #fff;
+            }
+            #controls {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                margin: 8px 0;
+            }
+            #scrub {
+                flex: 1;
+            }
+            button {
+                font: inherit;
+                padding: 4px 10px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                background: #fff;
+                cursor: pointer;
+            }
+            button:hover {
+                background: #f0f0f0;
+            }
+            button:disabled {
+                opacity: 0.4;
+                cursor: default;
+            }
+            #panel {
+                font-family: ui-monospace, SFMono-Regular, monospace;
+                font-size: 12px;
+                background: #fff;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+                padding: 12px;
+                border-radius: 4px;
+                line-height: 1.5;
+            }
+            #panel h2 {
+                font-size: 12px;
+                font-weight: 600;
+                margin: 0 0 6px;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                color: #888;
+                font-family: system-ui, sans-serif;
+            }
+            #panel section + section {
+                margin-top: 14px;
+            }
+            #panel .kv {
+                display: grid;
+                grid-template-columns: 130px 1fr;
+                gap: 2px 8px;
+            }
+            #panel .kv span:nth-child(odd) {
+                color: #888;
+            }
+            #warn {
+                margin: 8px 0;
+                padding: 8px 12px;
+                background: #fff7e0;
+                border: 1px solid #f0c84b;
+                color: #6b4d00;
+                border-radius: 4px;
+                display: none;
+                font-size: 13px;
+                font-family: system-ui, sans-serif;
+            }
+            #warn.show {
+                display: block;
+            }
+        </style>
+    </head>
+    <body>
+        <div>
+            <h1>iron-canvas .icr viewer</h1>
+            <label id="drop" for="file">
+                Drag an .icr here, or click to choose a file
+                <input
+                    id="file"
+                    type="file"
+                    accept=".icr,application/json"
+                    hidden
+                />
+            </label>
+            <div id="warn"></div>
+            <div id="stage-wrap">
+                <canvas id="stage-grid" width="1024" height="768"></canvas>
+                <canvas
+                    id="stage-overlay"
+                    width="1024"
+                    height="768"
+                ></canvas>
+            </div>
+            <div id="controls">
+                <button id="prev" disabled>◀ Step</button>
+                <button id="play" disabled>▶ Play</button>
+                <button id="next" disabled>Step ▶</button>
+                <input
+                    id="scrub"
+                    type="range"
+                    min="0"
+                    max="0"
+                    value="0"
+                    disabled
+                />
+                <span id="frameLabel">–</span>
+            </div>
+        </div>
+
+        <aside id="panel">
+            <section>
+                <h2>Header</h2>
+                <div class="kv" id="headerKv">
+                    <span>schema</span><span>–</span> <span>iron-canvas</span
+                    ><span>–</span> <span>canvas</span><span>–</span>
+                    <span>started</span><span>–</span> <span>partial</span
+                    ><span>–</span>
+                </div>
+            </section>
+            <section>
+                <h2>Frame</h2>
+                <div class="kv" id="frameKv">
+                    <span>idx</span><span>–</span> <span>t_ms</span
+                    ><span>–</span> <span>regime</span><span>–</span>
+                    <span>signals</span><span>–</span> <span>grid_ops</span
+                    ><span>–</span> <span>overlay_ops</span><span>–</span>
+                </div>
+            </section>
+        </aside>
+
+        <script type="module">
+            import initIronCanvas, {
+                icrReplayGridOps,
+                icrReplayOverlayOps,
+            } from "./vendor/iron-canvas/iron_canvas_web.js";
+
+            // ──────────────────────────────────────────────────────────────
+            // Schema constants — pinned to the producer's
+            // ICR_SCHEMA_VERSION. Bump in lockstep with the recorder crate.
+            // ──────────────────────────────────────────────────────────────
+            const ICR_SCHEMA_VERSION = 2;
+            // The viewer build version is for the version-mismatch banner.
+            // Edit by hand when shipping a new recorder release.
+            const VIEWER_VERSION = "0.1.0-alpha.1";
+
+            // ──────────────────────────────────────────────────────────────
+            // DOM hooks
+            // ──────────────────────────────────────────────────────────────
+            const drop = document.getElementById("drop");
+            const fileInput = document.getElementById("file");
+            const stageWrap = document.getElementById("stage-wrap");
+            const gridCanvas = document.getElementById("stage-grid");
+            const overlayCanvas = document.getElementById("stage-overlay");
+            const gridCtx = gridCanvas.getContext("2d");
+            // alpha: true matches the real overlay surface so its leading
+            // ClearRect erases only overlay pixels, not the grid below.
+            const overlayCtx = overlayCanvas.getContext("2d", {
+                alpha: true,
+            });
+            const warn = document.getElementById("warn");
+            const prevBtn = document.getElementById("prev");
+            const nextBtn = document.getElementById("next");
+            const playBtn = document.getElementById("play");
+            const scrub = document.getElementById("scrub");
+            const frameLabel = document.getElementById("frameLabel");
+
+            // ──────────────────────────────────────────────────────────────
+            // wasm init — load iron-canvas-web (built with --features
+            // recorder). Without the feature, `icrReplayGridOps` /
+            // `icrReplayOverlayOps` aren't exported and the viewer is
+            // useless; bail loud rather than render a blank canvas.
+            // ──────────────────────────────────────────────────────────────
+            await initIronCanvas();
+            if (
+                typeof icrReplayGridOps !== "function" ||
+                typeof icrReplayOverlayOps !== "function"
+            ) {
+                showWarn(
+                    "wasm bundle lacks icr replay exports — rebuild with FEATURES=recorder make -C web-test build sync",
+                );
+            }
+
+            // ──────────────────────────────────────────────────────────────
+            // Player state
+            // ──────────────────────────────────────────────────────────────
+            let recording = null; // { header, frames }
+            let idx = 0;
+            let playing = false;
+            let rafToken = 0;
+            // Wall-clock anchor for time-accurate playback. Reset on
+            // play/seek so the next frame fires t_ms after `playAnchor`.
+            let playAnchor = 0;
+            let anchorFrameIdx = 0;
+
+            // ──────────────────────────────────────────────────────────────
+            // File I/O — drag-drop and picker share `loadIcr`.
+            // ──────────────────────────────────────────────────────────────
+            drop.addEventListener("dragover", (e) => {
+                e.preventDefault();
+                drop.classList.add("dragover");
+            });
+            drop.addEventListener("dragleave", () =>
+                drop.classList.remove("dragover"),
+            );
+            drop.addEventListener("drop", (e) => {
+                e.preventDefault();
+                drop.classList.remove("dragover");
+                const f = e.dataTransfer.files[0];
+                if (f) loadIcr(f);
+            });
+            fileInput.addEventListener("change", (e) => {
+                const f = e.target.files[0];
+                if (f) loadIcr(f);
+            });
+
+            async function loadIcr(file) {
+                const buf = await file.arrayBuffer();
+                const text = new TextDecoder("utf-8").decode(buf);
+                let parsed;
+                try {
+                    parsed = JSON.parse(text);
+                } catch (e) {
+                    showWarn("File is not valid JSON: " + e.message);
+                    return;
+                }
+                if (!parsed || !parsed.header || !Array.isArray(parsed.frames)) {
+                    showWarn("Not an .icr recording (missing header / frames).");
+                    return;
+                }
+                if (parsed.header.schema_version !== ICR_SCHEMA_VERSION) {
+                    showWarn(
+                        `Schema version mismatch: file=${parsed.header.schema_version}, viewer=${ICR_SCHEMA_VERSION}. Refusing to play.`,
+                    );
+                    return;
+                }
+                recording = { header: parsed.header, frames: parsed.frames };
+                onLoaded();
+            }
+
+            function onLoaded() {
+                // Banner: version mismatch warns but plays.
+                if (recording.header.iron_canvas_version !== VIEWER_VERSION) {
+                    showWarn(
+                        `Recording produced by iron-canvas ${recording.header.iron_canvas_version}; viewer built against ${VIEWER_VERSION}. Playback may diverge.`,
+                    );
+                } else if (recording.header.partial) {
+                    showWarn(
+                        "This recording is marked partial — the producer hit the hard-cap mid-capture.",
+                    );
+                } else {
+                    hideWarn();
+                }
+
+                // Match both canvases (and the wrapper) to the recording
+                // dimensions so the replay's coordinate system maps 1:1.
+                const cw = Math.round(recording.header.canvas_w);
+                const ch = Math.round(recording.header.canvas_h);
+                gridCanvas.width = cw;
+                gridCanvas.height = ch;
+                overlayCanvas.width = cw;
+                overlayCanvas.height = ch;
+                stageWrap.style.width = cw + "px";
+                stageWrap.style.height = ch + "px";
+
+                // Populate header panel.
+                const hk = document.getElementById("headerKv");
+                hk.children[1].textContent = recording.header.schema_version;
+                hk.children[3].textContent =
+                    recording.header.iron_canvas_version;
+                hk.children[5].textContent = `${gridCanvas.width}×${gridCanvas.height}`;
+                hk.children[7].textContent = new Date(
+                    recording.header.started_at_unix_ms,
+                ).toLocaleString();
+                hk.children[9].textContent = recording.header.partial
+                    ? "yes"
+                    : "no";
+
+                // Wire controls.
+                const n = recording.frames.length;
+                scrub.max = Math.max(0, n - 1);
+                scrub.value = 0;
+                scrub.disabled = n === 0;
+                prevBtn.disabled = n === 0;
+                nextBtn.disabled = n === 0;
+                playBtn.disabled = n === 0;
+                idx = 0;
+                seek(0);
+            }
+
+            function showWarn(msg) {
+                warn.textContent = msg;
+                warn.classList.add("show");
+            }
+            function hideWarn() {
+                warn.classList.remove("show");
+            }
+
+            // ──────────────────────────────────────────────────────────────
+            // Replay — delegates to wasm `icrReplayGridOps` /
+            // `icrReplayOverlayOps`, which run the same
+            // `iron_canvas_recorder::replay` dispatch the live renderer
+            // exercises against `CanvasPainter`.
+            //
+            // The real iron-canvas paints to two stacked canvases (opaque
+            // grid below, alpha overlay above). The viewer mirrors that
+            // because each Overlay-regime frame's `overlay_ops` starts
+            // with `ClearRect(0,0,w,h)` — on the real overlay surface that
+            // erases only overlay pixels, but on a single composited
+            // canvas it would wipe the grid pixels we just painted.
+            //
+            // Cadence:
+            // - Grid canvas is *cumulative*. Scrubbing to frame N finds
+            //   the most recent `fresh` regime at or before N and replays
+            //   grid_ops from that frame forward through N. SlotsReuse /
+            //   Viewport (blit) frames emit incremental ops that assume
+            //   the previous grid pixels are still on screen.
+            // - Overlay canvas is *per-frame*. Each frame's overlay_ops
+            //   is self-contained (leading ClearRect, then the new layer).
+            // ──────────────────────────────────────────────────────────────
+            function replayThrough(targetIdx) {
+                if (!recording || recording.frames.length === 0) return;
+                const frames = recording.frames;
+
+                // Find the last Fresh frame at or before targetIdx — that's
+                // the cumulative grid replay's start anchor.
+                let startIdx = 0;
+                for (let i = targetIdx; i >= 0; i--) {
+                    if (frames[i].regime === "fresh") {
+                        startIdx = i;
+                        break;
+                    }
+                }
+
+                // Reset to identity + clear; the replay's own
+                // ApplyDprTransform op will re-establish the DPR scale.
+                gridCtx.setTransform(1, 0, 0, 1, 0, 0);
+                gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+                for (let i = startIdx; i <= targetIdx; i++) {
+                    icrReplayGridOps(
+                        gridCtx,
+                        JSON.stringify(frames[i].grid_ops),
+                    );
+                }
+
+                overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
+                overlayCtx.clearRect(
+                    0,
+                    0,
+                    overlayCanvas.width,
+                    overlayCanvas.height,
+                );
+                icrReplayOverlayOps(
+                    overlayCtx,
+                    JSON.stringify(frames[targetIdx].overlay_ops),
+                );
+            }
+
+            // ──────────────────────────────────────────────────────────────
+            // Controls
+            // ──────────────────────────────────────────────────────────────
+            function seek(i) {
+                if (!recording || recording.frames.length === 0) return;
+                idx = Math.max(0, Math.min(recording.frames.length - 1, i));
+                scrub.value = idx;
+                replayThrough(idx);
+                updateFrameKv(recording.frames[idx]);
+                frameLabel.textContent = `${idx + 1} / ${recording.frames.length}`;
+            }
+
+            function updateFrameKv(f) {
+                const k = document.getElementById("frameKv");
+                k.children[1].textContent = f.frame_idx;
+                k.children[3].textContent = f.t_ms;
+                k.children[5].textContent = f.regime;
+                k.children[7].textContent = `0b${f.signals.toString(2).padStart(4, "0")}`;
+                k.children[9].textContent = f.grid_ops.length;
+                k.children[11].textContent = f.overlay_ops.length;
+            }
+
+            prevBtn.addEventListener("click", () => {
+                pause();
+                seek(idx - 1);
+            });
+            nextBtn.addEventListener("click", () => {
+                pause();
+                seek(idx + 1);
+            });
+            playBtn.addEventListener("click", () => {
+                if (playing) pause();
+                else play();
+            });
+            scrub.addEventListener("input", (e) => {
+                pause();
+                seek(parseInt(e.target.value, 10));
+            });
+
+            function play() {
+                if (!recording || recording.frames.length === 0) return;
+                playing = true;
+                playBtn.textContent = "❚❚ Pause";
+                playAnchor = performance.now();
+                anchorFrameIdx = idx;
+                rafToken = requestAnimationFrame(tick);
+            }
+
+            function pause() {
+                playing = false;
+                playBtn.textContent = "▶ Play";
+                if (rafToken) cancelAnimationFrame(rafToken);
+                rafToken = 0;
+            }
+
+            // Time-accurate playback: walk forward while the next frame's
+            // (t_ms − anchorFrame.t_ms) is in the past relative to the
+            // wall-clock anchor. Stops at the last frame.
+            function tick(now) {
+                if (!playing) return;
+                const frames = recording.frames;
+                if (idx >= frames.length - 1) {
+                    pause();
+                    return;
+                }
+                const elapsed = now - playAnchor;
+                const anchorT = frames[anchorFrameIdx].t_ms;
+                let next = idx;
+                while (
+                    next + 1 < frames.length &&
+                    frames[next + 1].t_ms - anchorT <= elapsed
+                ) {
+                    next++;
+                }
+                if (next !== idx) seek(next);
+                rafToken = requestAnimationFrame(tick);
+            }
+
+            // Keyboard: ← step back, → step forward, Space toggles play.
+            window.addEventListener("keydown", (e) => {
+                if (!recording) return;
+                if (e.key === "ArrowLeft") {
+                    pause();
+                    seek(idx - 1);
+                } else if (e.key === "ArrowRight") {
+                    pause();
+                    seek(idx + 1);
+                } else if (e.key === " ") {
+                    e.preventDefault();
+                    playing ? pause() : play();
+                }
+            });
+        </script>
+    </body>
+</html>
