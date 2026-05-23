@@ -74,7 +74,7 @@ jobs:
 
       - name: Build dev (/RustyCalc/dev/)
         working-directory: RustyCalc-dev
-        run: trunk build --release --public-url /RustyCalc/dev/
+        run: trunk build --release --public-url /RustyCalc/dev/ --features dev-tools
 
       - name: Assemble combined Pages tree
         run: |
