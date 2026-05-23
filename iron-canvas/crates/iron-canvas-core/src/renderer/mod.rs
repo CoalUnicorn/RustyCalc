@@ -69,7 +69,7 @@ pub use cache::FontIntern;
 
 pub use self::cell::text::{layout_into, TextLine};
 
-use crate::painter::{BlitPainter, Painter};
+use crate::painter::{BlitPainter, GroupClass, Painter};
 
 /// Shared renderer core. Holds the painter `P`, dpr, the per-frame
 /// `FrameCache`, and the renderer-lifetime intern tables (font, column
@@ -157,7 +157,7 @@ impl<P: Painter> RendererCore<P> {
     /// **not** clear the canvas — caller owns the clear so layer-owned
     /// renderers can paint a background fill instead.
     pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) {
-        self.painter.begin_group("grid");
+        self.painter.begin_group(GroupClass::Grid);
         self.cache_show_grid(model);
 
         // `frame.stale_panes` is `ALL` on Fresh; narrower on SlotsReuse —
@@ -195,7 +195,7 @@ impl<P: Painter> RendererCore<P> {
             let _ = pane_buf.try_shift(new_range, plan.axis);
         }
 
-        self.painter.begin_group("grid");
+        self.painter.begin_group(GroupClass::Grid);
         self.cache_show_grid(model);
 
         for pane in frame.stale_panes.regions() {

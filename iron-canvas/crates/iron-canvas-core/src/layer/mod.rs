@@ -17,7 +17,7 @@ use crate::decoration::{selection::SelectionLayer, Layer};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::geometry::CanvasSize;
-use crate::painter::{BlitPainter, PaintColor, Painter};
+use crate::painter::{BlitPainter, GroupClass, PaintColor, Painter};
 use crate::renderer::{GridRenderer, LayerOps, OverlayRenderer};
 use crate::signal::GridSignals;
 use crate::CanvasModel;
@@ -203,7 +203,7 @@ where
         let size = frame.canvas_size;
         let painter = self.surface.painter();
         painter.clear_rect(full_canvas_rect(size));
-        painter.begin_group("overlay");
+        painter.begin_group(GroupClass::Overlay);
 
         // Selection paints fill (under) then stroke + handle (over) the
         // active-cell repaint. Header highlights land between selection

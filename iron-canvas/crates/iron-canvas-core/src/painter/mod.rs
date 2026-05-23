@@ -59,6 +59,28 @@ pub enum TextAlign {
     End,
 }
 
+/// Typed group label for `Painter::begin_group`. Enumerates the layers and
+/// sub-sections the renderer brackets — SVG emits `<g class="…">` with the
+/// kebab-case form, the recorder serializes it through serde, the Canvas-2D
+/// backend no-ops on it. Closed set: a typed enum lets the recorder's
+/// `skip_groups` filter compare by variant rather than string content, and
+/// keeps the SVG class names disciplined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GroupClass {
+    Grid,
+    Overlay,
+}
+
+impl GroupClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GroupClass::Grid => "grid",
+            GroupClass::Overlay => "overlay",
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextBaseline {
@@ -114,7 +136,7 @@ pub trait Painter: TextMetrics {
     /// Open a named group around subsequent draws. SVG emits `<g class="..">`,
     /// Recorder logs an op, Canvas-2D no-ops. The renderer brackets
     /// `render_grid` / `render_overlays` so SVG output is structured per layer.
-    fn begin_group(&self, class: &str);
+    fn begin_group(&self, class: GroupClass);
     fn end_group(&self);
 }
 

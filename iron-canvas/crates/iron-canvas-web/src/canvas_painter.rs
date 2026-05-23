@@ -16,7 +16,7 @@ use iron_canvas_core::geometry::{
     prim::{Line, Span},
 };
 use iron_canvas_core::painter::{
-    BlitPainter, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
 
 /// One-shot guard for the `measure_text` fallback warning. Process-wide
@@ -348,7 +348,7 @@ impl Painter for CanvasPainter {
         self.ctx.set_text_baseline("middle");
     }
 
-    fn begin_group(&self, _class: &str) {}
+    fn begin_group(&self, _class: GroupClass) {}
     fn end_group(&self) {}
 }
 

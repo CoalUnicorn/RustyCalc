@@ -17,6 +17,7 @@ use iron_canvas_core::geometry::constants::{CELL_AREA_INSET, HEADER_COL_WIDTH, H
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_core::painter::GroupClass;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 struct StubModel {
@@ -97,7 +98,7 @@ fn render_grid_brackets_grid_group_balanced() {
     drive_render_grid(&StubModel::at_top(), |_, ops| {
         let begins = ops
             .iter()
-            .filter(|op| matches!(op, DrawOp::BeginGroup { class } if class == "grid"))
+            .filter(|op| matches!(op, DrawOp::BeginGroup { class: GroupClass::Grid }))
             .count();
         let ends = ops
             .iter()

@@ -71,7 +71,7 @@ fn op_bytes(op: &DrawOp) -> usize {
             color,
             ..
         } => OP_BYTES_HEURISTIC + text.len() + font_css.len() + color.len(),
-        DrawOp::BeginGroup { class } => OP_BYTES_HEURISTIC + class.len(),
+        DrawOp::BeginGroup { class } => OP_BYTES_HEURISTIC + class.as_str().len(),
         _ => OP_BYTES_HEURISTIC,
     }
 }

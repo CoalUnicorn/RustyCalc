@@ -12,7 +12,7 @@ use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
-    BlitPainter, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
 
 use serde::{Deserialize, Serialize};
@@ -86,7 +86,7 @@ pub enum DrawOp {
         dpr: i32,
     },
     BeginGroup {
-        class: String,
+        class: GroupClass,
     },
     EndGroup,
     Blit {
@@ -252,10 +252,8 @@ impl Painter for RecorderPainter {
         self.push(DrawOp::ApplyDprTransform { dpr });
     }
 
-    fn begin_group(&self, class: &str) {
-        self.push(DrawOp::BeginGroup {
-            class: class.to_string(),
-        });
+    fn begin_group(&self, class: GroupClass) {
+        self.push(DrawOp::BeginGroup { class });
         self.group_depth.set(self.group_depth.get() + 1);
     }
 
@@ -351,7 +349,7 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
             DrawOp::InvalidateCache => target.invalidate_cache(),
             DrawOp::ResetTextDefaults => target.reset_text_defaults(),
             DrawOp::ApplyDprTransform { dpr } => target.apply_dpr_transform(*dpr),
-            DrawOp::BeginGroup { class } => target.begin_group(class.as_str()),
+            DrawOp::BeginGroup { class } => target.begin_group(*class),
             DrawOp::EndGroup => target.end_group(),
             DrawOp::Blit { src, dst } => target.blit(*src, *dst),
         }
@@ -530,7 +528,7 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
         }
     }
 
-    fn begin_group(&self, class: &str) {
+    fn begin_group(&self, class: GroupClass) {
         self.inner.begin_group(class);
         if self.enabled.get() {
             self.recorder.begin_group(class);
@@ -736,7 +734,7 @@ mod tests {
         src.invalidate_cache();
         src.reset_text_defaults();
         src.apply_dpr_transform(2);
-        src.begin_group("test");
+        src.begin_group(GroupClass::Grid);
         src.end_group();
         src.blit(r, r);
 

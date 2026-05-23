@@ -24,7 +24,7 @@ use std::path::Path;
 
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
-use iron_canvas_core::painter::{TextAlign, TextBaseline};
+use iron_canvas_core::painter::{GroupClass, TextAlign, TextBaseline};
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::PaintRegimeTag;
 
@@ -49,7 +49,7 @@ fn build_fixture() -> Recording {
 
     let grid_ops = vec![
         DrawOp::BeginGroup {
-            class: "grid".to_string(),
+            class: GroupClass::Grid,
         },
         DrawOp::ApplyDprTransform { dpr: 1 },
         DrawOp::InvalidateCache,

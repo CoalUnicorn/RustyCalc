@@ -13,7 +13,7 @@ use iron_canvas_core::geometry::prim::{Line, Span};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
-    BlitPainter, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
 
 // Matches RecorderPainter's fallback so wrap math is consistent across
@@ -290,10 +290,10 @@ impl Painter for SvgPainter {
         self.dpr.set(dpr);
     }
 
-    fn begin_group(&self, class: &str) {
+    fn begin_group(&self, class: GroupClass) {
         let mut body = self.body.borrow_mut();
         body.push_str("<g class=\"");
-        xml_escape(class, &mut body);
+        body.push_str(class.as_str());
         body.push_str("\">");
         self.group_depth.set(self.group_depth.get() + 1);
     }
@@ -370,7 +370,9 @@ mod tests {
     use super::SvgPainter;
     use iron_canvas_core::geometry::pixel_rect::PixelRect;
     use iron_canvas_core::geometry::prim::{Line, Point, Span};
-    use iron_canvas_core::painter::{PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
+    use iron_canvas_core::painter::{
+        GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    };
 
     fn rect(x: i32, y: i32, w: i32, h: i32) -> PixelRect {
         PixelRect {
@@ -416,7 +418,7 @@ mod tests {
     #[test]
     fn group_wrappers_emit_classed_g() {
         let p = SvgPainter::new(10, 10);
-        p.begin_group("grid");
+        p.begin_group(GroupClass::Grid);
         p.rect_fill(rect(0, 0, 1, 1), PaintColor::Static("#000"));
         p.end_group();
         let svg = p.finish();
