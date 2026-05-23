@@ -90,6 +90,8 @@
         </div>
         <p style="margin-top: 12px">
             <button id="save-svg" type="button">Save as SVG</button>
+            <button id="highlight-a1c5" type="button">Highlight A1:C5</button>
+            <button id="clear-highlight" type="button">Clear highlight</button>
         </p>
 
         <script type="module">
@@ -199,6 +201,36 @@
                         a.remove();
                         URL.revokeObjectURL(url);
                     });
+
+                phase = "wire setPointRange demo";
+                document
+                    .getElementById("highlight-a1c5")
+                    .addEventListener("click", () => {
+                        canvas.setPointRange({ r1: 1, c1: 1, r2: 5, c2: 3 });
+                        canvas.requestOverlayRepaint();
+                    });
+                document
+                    .getElementById("clear-highlight")
+                    .addEventListener("click", () => {
+                        canvas.setPointRange(null);
+                        canvas.requestOverlayRepaint();
+                    });
+
+                phase = "wire hitTest demo";
+                // Phase 1 JS-API parity demo. Throttle to once per frame so
+                // the console doesn't drown; log only when the resolved
+                // variant changes (kind+row+column) — every cell drag would
+                // otherwise spam thousands of identical "cell" entries.
+                let lastHit = "";
+                gridEl.addEventListener("mousemove", (ev) => {
+                    const r = gridEl.getBoundingClientRect();
+                    const hit = canvas.hitTest(ev.clientX - r.left, ev.clientY - r.top);
+                    const key = JSON.stringify(hit);
+                    if (key !== lastHit) {
+                        lastHit = key;
+                        console.log("hitTest", hit);
+                    }
+                });
 
                 phase = "paint loop";
                 canvas.requestRepaint();

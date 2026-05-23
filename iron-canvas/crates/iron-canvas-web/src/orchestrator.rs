@@ -305,6 +305,166 @@ impl IronCanvas {
     }
 }
 
+// JS-facing query API. Mirrors the Rust-only query methods below, but
+// crosses the wasm-bindgen boundary by serializing via `serde-wasm-bindgen`
+// against the wire-shape mirrors in `crate::wire` (the engine enums use
+// tuple variants that internal tagging rejects).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+impl IronCanvas {
+    /// Resolve the cursor against the last painted frame. See
+    /// `crate::wire::HitTestWire` for the JS shape (tagged on `kind`).
+    #[allow(non_snake_case)]
+    pub fn hitTest(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
+        let wire: crate::wire::HitTestWire = self.orch.hit_test(x, y).into();
+        Ok(serde_wasm_bindgen::to_value(&wire)?)
+    }
+
+    /// Pixel rect of a 1-based cell, or `null` if the cell isn't laid out
+    /// (e.g. off-screen rows that the slot map hasn't materialized).
+    #[allow(non_snake_case)]
+    pub fn cellRect(&self, row: i32, column: i32) -> Result<JsValue, JsError> {
+        match self.orch.cell_rect(row, column) {
+            Some(rect) => Ok(serde_wasm_bindgen::to_value(&rect)?),
+            None => Ok(JsValue::NULL),
+        }
+    }
+
+    /// Resize-handle hit-test. `tolerance` is the slop band in CSS pixels.
+    /// Returns `null` if no row/column trailing edge is within tolerance.
+    #[allow(non_snake_case)]
+    pub fn resizeHandleAt(
+        &self,
+        x: f64,
+        y: f64,
+        tolerance: f64,
+    ) -> Result<JsValue, JsError> {
+        match self.orch.resize_handle_at(x, y, tolerance) {
+            Some(target) => {
+                let wire: crate::wire::ResizeTargetWire = target.into();
+                Ok(serde_wasm_bindgen::to_value(&wire)?)
+            }
+            None => Ok(JsValue::NULL),
+        }
+    }
+
+    /// Pixel position of the autofill handle, or `null` if no selection is
+    /// drawn (the handle is anchored to the active selection).
+    #[allow(non_snake_case)]
+    pub fn autofillHandlePos(&self) -> Result<JsValue, JsError> {
+        match self.orch.autofill_handle() {
+            Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
+            None => Ok(JsValue::NULL),
+        }
+    }
+
+    /// Layer-bypassing cell resolver. Returns `{row, column}` or `null`.
+    /// Bypasses overlay layers (formula-ref dragging, etc.) that would
+    /// otherwise claim the pointer.
+    #[allow(non_snake_case)]
+    pub fn pixelToCell(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
+        match self.orch.pixel_to_cell(x, y) {
+            Some((row, column)) => {
+                let wire = crate::wire::CellCoordWire { row, column };
+                Ok(serde_wasm_bindgen::to_value(&wire)?)
+            }
+            None => Ok(JsValue::NULL),
+        }
+    }
+
+    /// Current CSS-pixel size of the drawable area: `{ w, h }`.
+    #[allow(non_snake_case)]
+    pub fn canvasSize(&self) -> Result<JsValue, JsError> {
+        let wire: crate::wire::CanvasSizeWire = self.orch.canvas_size().into();
+        Ok(serde_wasm_bindgen::to_value(&wire)?)
+    }
+
+    // ============================================================
+    // Phase 2 — overlay setters.
+    // ============================================================
+
+    /// Mark the overlay layer dirty without changing state. Use after the
+    /// host mutates anything the overlay reads from the model (selection,
+    /// active cell, formula text) but not held in `RenderOverlays`.
+    #[allow(non_snake_case)]
+    pub fn requestOverlayRepaint(&mut self) {
+        self.orch.request_overlay_repaint();
+    }
+
+    /// Autofill drag target. Pass `null` to clear (drag ended / cancelled).
+    #[allow(non_snake_case)]
+    pub fn setExtendTo(&mut self, target: JsValue) -> Result<(), JsError> {
+        let wire: Option<crate::wire::AutofillTargetWire> =
+            serde_wasm_bindgen::from_value(target)?;
+        self.orch.set_extend_to(wire.map(Into::into));
+        Ok(())
+    }
+
+    /// Clipboard marching-ants rectangle. Pass `null` to clear.
+    #[allow(non_snake_case)]
+    pub fn setClipboard(&mut self, area: JsValue) -> Result<(), JsError> {
+        let wire: Option<crate::wire::SheetAreaWire> = serde_wasm_bindgen::from_value(area)?;
+        self.orch.set_clipboard(wire.map(Into::into));
+        Ok(())
+    }
+
+    /// Formula-entry point-mode range highlight. Pass `null` to clear.
+    #[allow(non_snake_case)]
+    pub fn setPointRange(&mut self, range: JsValue) -> Result<(), JsError> {
+        let wire: Option<crate::wire::RCRangeWire> = serde_wasm_bindgen::from_value(range)?;
+        self.orch.set_point_range(wire.map(Into::into));
+        Ok(())
+    }
+
+    /// Replace the per-formula draggable references. JS-side `active_ref`
+    /// indices stale after this call must be re-pushed via `setOverlays`;
+    /// the renderer is defensive (uses `.get()`), so a stale index is
+    /// silently ignored rather than panicking.
+    #[allow(non_snake_case)]
+    pub fn setFormulaRefs(&mut self, refs: JsValue) -> Result<(), JsError> {
+        let wire: Vec<crate::wire::FormulaRefWire> = serde_wasm_bindgen::from_value(refs)?;
+        let refs: Vec<iron_canvas_core::FormulaRef> = wire.into_iter().map(Into::into).collect();
+        self.orch.set_formula_refs(refs);
+        Ok(())
+    }
+
+    /// Full overlay-state push. Validates `active_ref < formula_refs.len()`
+    /// at the boundary — a violating payload throws a `JsError` rather
+    /// than silently dropping the highlight on the renderer side.
+    #[allow(non_snake_case)]
+    pub fn setOverlays(&mut self, overlays: JsValue) -> Result<(), JsError> {
+        let wire: crate::wire::RenderOverlaysWire = serde_wasm_bindgen::from_value(overlays)?;
+        let engine = wire.into_engine().map_err(|msg| JsError::new(&msg))?;
+        self.orch.set_overlays(engine);
+        Ok(())
+    }
+
+    // ============================================================
+    // Phase 3 — theme setters.
+    // ============================================================
+
+    /// Full theme push. Every palette field must be present — missing keys
+    /// throw a `JsError`. For partial overrides with a LIGHT fallback, use
+    /// `setThemeVariables`. For CSS-var driven themes, prefer the existing
+    /// `setThemeFromElement`.
+    #[allow(non_snake_case)]
+    pub fn setTheme(&mut self, theme: JsValue) -> Result<(), JsError> {
+        let wire: crate::wire::CanvasThemeWire = serde_wasm_bindgen::from_value(theme)?;
+        self.orch.set_theme(wire.into());
+        Ok(())
+    }
+
+    /// Partial theme override. Each key is optional; missing keys fall back
+    /// to `CanvasTheme::light()` via the engine's
+    /// `From<ThemeVariables> for CanvasTheme` impl.
+    #[allow(non_snake_case)]
+    pub fn setThemeVariables(&mut self, vars: JsValue) -> Result<(), JsError> {
+        let wire: crate::wire::ThemeVariablesWire = serde_wasm_bindgen::from_value(vars)?;
+        self.orch.set_theme_variables(wire.into());
+        Ok(())
+    }
+}
+
 // Rust-only API. Counterpart to the `#[wasm_bindgen]` block above —
 // these methods take Rust types that don't cross the JS bridge.
 impl IronCanvas {

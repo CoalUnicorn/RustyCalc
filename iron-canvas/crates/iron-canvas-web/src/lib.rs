@@ -16,6 +16,8 @@ mod replay;
 pub mod theme_from_element;
 pub mod wasm;
 pub mod web_surface;
+#[cfg(target_arch = "wasm32")]
+mod wire;
 
 #[cfg(test)]
 mod test;
