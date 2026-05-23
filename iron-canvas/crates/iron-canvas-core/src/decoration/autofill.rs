@@ -4,7 +4,7 @@
 use crate::chrome::Chrome;
 use crate::decoration::Layer;
 use crate::geometry::constants::{AUTOFILL_HIT_PAD_PX, STANDARD_BORDER_WIDTH};
-use crate::painter::{PaintColor, Painter};
+use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::types::coord::{AutofillTarget, RCRange};
 use crate::types::ui::HitTest;
 use crate::CanvasModel;
@@ -32,11 +32,13 @@ impl Layer for AutofillLayer {
         let Some(b) = frame.range_rect(range) else {
             return;
         };
+        painter.begin_group(GroupClass::Autofill);
         painter.rect_dashed(
             b,
             PaintColor::from_theme_str(&frame.theme.selection_color),
             f64::from(STANDARD_BORDER_WIDTH),
         );
+        painter.end_group();
     }
 
     fn hit_test(

@@ -96,16 +96,26 @@ fn render_grid_emits_draw_ops() {
 #[test]
 fn render_grid_brackets_grid_group_balanced() {
     drive_render_grid(&StubModel::at_top(), |_, ops| {
+        let count = |target: GroupClass| {
+            ops.iter()
+                .filter(|op| matches!(op, DrawOp::BeginGroup { class } if *class == target))
+                .count()
+        };
+        assert_eq!(count(GroupClass::Grid), 1, "one Grid bracket expected");
+        assert_eq!(count(GroupClass::Cells), 1, "one Cells bracket expected");
+        assert_eq!(count(GroupClass::FrozenSep), 1, "one FrozenSep bracket expected");
+        assert_eq!(count(GroupClass::Headers), 1, "one Headers bracket expected");
+        assert_eq!(count(GroupClass::Corner), 1, "one Corner bracket expected");
+
         let begins = ops
             .iter()
-            .filter(|op| matches!(op, DrawOp::BeginGroup { class: GroupClass::Grid }))
+            .filter(|op| matches!(op, DrawOp::BeginGroup { .. }))
             .count();
         let ends = ops
             .iter()
             .filter(|op| matches!(op, DrawOp::EndGroup))
             .count();
-        assert_eq!(begins, 1, "exactly one BeginGroup(\"grid\") expected");
-        assert_eq!(ends, 1, "exactly one EndGroup must pair the grid begin");
+        assert_eq!(begins, ends, "begin/end groups must balance");
     });
 }
 

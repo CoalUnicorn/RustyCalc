@@ -162,16 +162,27 @@ impl<P: Painter> RendererCore<P> {
 
         // `frame.stale_panes` is `ALL` on Fresh; narrower on SlotsReuse —
         // either way each region listed needs its 4-pass walk.
+        self.painter.begin_group(GroupClass::Cells);
         for pane in frame.stale_panes.regions() {
             self.render_pane(model, pane, frame);
         }
+        self.painter.end_group();
 
         // Frozen separators paint AFTER cells so the thick divider wins
         // its pixels over the rightmost/bottommost frozen cell's grid stroke.
+        self.painter.begin_group(GroupClass::FrozenSep);
         self.draw_frozen_separators(frame);
+        self.painter.end_group();
+
+        self.painter.begin_group(GroupClass::Headers);
         self.render_headers_base(Axis::Row, frame);
         self.render_headers_base(Axis::Column, frame);
+        self.painter.end_group();
+
+        self.painter.begin_group(GroupClass::Corner);
         self.draw_corner_box(frame);
+        self.painter.end_group();
+
         self.painter.end_group();
     }
 
@@ -198,6 +209,7 @@ impl<P: Painter> RendererCore<P> {
         self.painter.begin_group(GroupClass::Grid);
         self.cache_show_grid(model);
 
+        self.painter.begin_group(GroupClass::Cells);
         for pane in frame.stale_panes.regions() {
             if matches!(pane, PaneRegion::BottomRight) {
                 self.painter.push_clip(plan.repaint_strip);
@@ -207,12 +219,22 @@ impl<P: Painter> RendererCore<P> {
                 self.render_pane_blit(model, pane, frame, plan.repaint_strip);
             }
         }
+        self.painter.end_group();
 
+        self.painter.begin_group(GroupClass::FrozenSep);
         self.draw_frozen_separators(frame);
+        self.painter.end_group();
+
         // Only the scroll-axis header strip shifted; the cross-axis
         // strip's pixels are unchanged.
+        self.painter.begin_group(GroupClass::Headers);
         self.render_headers_base(plan.axis, frame);
+        self.painter.end_group();
+
+        self.painter.begin_group(GroupClass::Corner);
         self.draw_corner_box(frame);
+        self.painter.end_group();
+
         self.painter.end_group();
     }
 

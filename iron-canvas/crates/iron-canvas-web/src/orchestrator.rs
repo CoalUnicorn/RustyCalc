@@ -29,7 +29,7 @@ use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot
 #[cfg(feature = "dev-tools")]
 use iron_canvas_recorder::DrawOp;
 #[cfg(feature = "dev-tools")]
-use iron_canvas_recorder::RecordingSurface;
+use iron_canvas_recorder::{RecordingFilter, RecordingSurface};
 
 /// Facade Surface — wraps `WebSurface` in `RecordingSurface` when the
 /// `recorder` feature is on (dev builds), bare `WebSurface` otherwise
@@ -177,15 +177,26 @@ impl IronCanvas {
     }
 
     /// Start a paint-level recording. Errors if a recording is already
-    /// active. Both surfaces' painter-level forks are enabled; subsequent
-    /// `paintIfDirty` calls capture frames until `stopRecording` (or the
-    /// hard-cap watchdog) fires.
+    /// active. `opts` is an optional `RecordingFilter` JS object —
+    /// `{ layers?: "both"|"gridOnly"|"overlayOnly", skipGroups?: string[] }`.
+    /// Undefined/null means "record everything" (default filter).
+    /// Layer scope decides which surfaces fork ops; `skipGroups` drops
+    /// named `begin_group` brackets (and their contents) within recorded
+    /// surfaces. Subsequent `paintIfDirty` calls capture frames until
+    /// `stopRecording` (or the hard-cap watchdog) fires.
     #[cfg(feature = "dev-tools")]
     #[allow(non_snake_case)]
-    pub fn startRecording(&mut self) -> Result<(), JsError> {
+    pub fn startRecording(&mut self, opts: JsValue) -> Result<(), JsError> {
         if self.recording.is_some() {
             return Err(JsError::new("recording already active"));
         }
+        // `undefined` / `null` → default filter (record everything).
+        // Anything else is parsed as a `RecordingFilter` shape.
+        let filter: RecordingFilter = if opts.is_undefined() || opts.is_null() {
+            RecordingFilter::default()
+        } else {
+            serde_wasm_bindgen::from_value(opts)?
+        };
         let canvas = self.orch.canvas_size();
         let theme_snap = ThemeSnapshot::from(self.orch.theme());
         let now = js_sys::Date::now();
@@ -197,8 +208,14 @@ impl IronCanvas {
             soft_warn_fired: false,
             capped: false,
         });
-        self.orch.grid_surface().enable_recording();
-        self.orch.overlay_surface().enable_recording();
+        if filter.layers.includes_grid() {
+            self.orch.grid_surface().set_skip_groups(filter.skip_groups.clone());
+            self.orch.grid_surface().enable_recording();
+        }
+        if filter.layers.includes_overlay() {
+            self.orch.overlay_surface().set_skip_groups(filter.skip_groups);
+            self.orch.overlay_surface().enable_recording();
+        }
         // Synchronously capture a full Fresh paint as frame 0 so the
         // recording always opens with the whole canvas. Relying on the
         // host's next rAF tick is unsafe — that tick might be a narrow

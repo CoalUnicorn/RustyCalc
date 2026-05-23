@@ -5,6 +5,7 @@
 //! browser metrics still need a wasm-bindgen-test harness.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
@@ -18,6 +19,38 @@ use iron_canvas_core::painter::{
 use serde::{Deserialize, Serialize};
 
 pub mod recording;
+
+/// Which layer surfaces a recording captures. Single enum (rather than two
+/// bools) makes "record neither" unrepresentable — disabling both layers
+/// is the same as not recording at all, which `startRecording` rejects by
+/// not being called.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LayerScope {
+    #[default]
+    Both,
+    GridOnly,
+    OverlayOnly,
+}
+
+impl LayerScope {
+    pub fn includes_grid(self) -> bool {
+        matches!(self, Self::Both | Self::GridOnly)
+    }
+    pub fn includes_overlay(self) -> bool {
+        matches!(self, Self::Both | Self::OverlayOnly)
+    }
+}
+
+/// What a recording omits. `layers` skips entire surfaces (grid or
+/// overlay); `skip_groups` drops named `begin_group`/`end_group` brackets
+/// (and their contents, recursively) within recorded surfaces.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RecordingFilter {
+    pub layers: LayerScope,
+    pub skip_groups: HashSet<GroupClass>,
+}
 
 /// Per-char width factor as a fraction of font size. Matches the
 /// approx-char-width fallback in `text_paint.rs::layout_into` so wrap math
@@ -408,6 +441,18 @@ pub struct RecordingPainter<P: Painter + BlitPainter> {
     inner: Rc<P>,
     recorder: Rc<RecorderPainter>,
     enabled: Rc<Cell<bool>>,
+    skip_groups: Rc<RefCell<HashSet<GroupClass>>>,
+    /// Depth of currently-suppressed nested `begin_group`s. While > 0, no
+    /// op (including the matching `end_group`) is forked to `recorder`.
+    /// Reaches 0 again when the outermost suppressed `begin_group`'s
+    /// `end_group` fires.
+    skip_depth: Rc<Cell<u32>>,
+}
+
+impl<P: Painter + BlitPainter> RecordingPainter<P> {
+    fn should_record(&self) -> bool {
+        self.enabled.get() && self.skip_depth.get() == 0
+    }
 }
 
 impl<P: Painter + BlitPainter> TextMetrics for RecordingPainter<P> {
@@ -421,70 +466,70 @@ impl<P: Painter + BlitPainter> TextMetrics for RecordingPainter<P> {
 impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor) {
         self.inner.rect_fill(rect, color);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.rect_fill(rect, color);
         }
     }
 
     fn clear_rect(&self, rect: PixelRect) {
         self.inner.clear_rect(rect);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.clear_rect(rect);
         }
     }
 
     fn rect_stroke(&self, rect: PixelRect, color: PaintColor, width: f64) {
         self.inner.rect_stroke(rect, color, width);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.rect_stroke(rect, color, width);
         }
     }
 
     fn rect_dashed(&self, rect: PixelRect, color: PaintColor, width: f64) {
         self.inner.rect_dashed(rect, color, width);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.rect_dashed(rect, color, width);
         }
     }
 
     fn stroke_line(&self, line: Line, color: PaintColor, width: f64) {
         self.inner.stroke_line(line, color, width);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.stroke_line(line, color, width);
         }
     }
 
     fn stroke_hline(&self, span: Span, y: f64, color: PaintColor, width: f64) {
         self.inner.stroke_hline(span, y, color, width);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.stroke_hline(span, y, color, width);
         }
     }
 
     fn stroke_vline(&self, x: f64, span: Span, color: PaintColor, width: f64) {
         self.inner.stroke_vline(x, span, color, width);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.stroke_vline(x, span, color, width);
         }
     }
 
     fn stroke_text_hline(&self, x1: f64, x2: f64, y: f64, color: PaintColor, width: f64) {
         self.inner.stroke_text_hline(x1, x2, y, color, width);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.stroke_text_hline(x1, x2, y, color, width);
         }
     }
 
     fn push_clip(&self, rect: PixelRect) {
         self.inner.push_clip(rect);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.push_clip(rect);
         }
     }
 
     fn pop_clip(&self) {
         self.inner.pop_clip();
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.pop_clip();
         }
     }
@@ -501,7 +546,7 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
     ) {
         self.inner
             .fill_text(text, x, y, font_css, color, align, baseline);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder
                 .fill_text(text, x, y, font_css, color, align, baseline);
         }
@@ -509,44 +554,66 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
 
     fn invalidate_cache(&self) {
         self.inner.invalidate_cache();
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.invalidate_cache();
         }
     }
 
     fn reset_text_defaults(&self) {
         self.inner.reset_text_defaults();
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.reset_text_defaults();
         }
     }
 
     fn apply_dpr_transform(&self, dpr: i32) {
         self.inner.apply_dpr_transform(dpr);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.apply_dpr_transform(dpr);
         }
     }
 
     fn begin_group(&self, class: GroupClass) {
         self.inner.begin_group(class);
-        if self.enabled.get() {
-            self.recorder.begin_group(class);
+        if !self.enabled.get() {
+            return;
         }
+        let depth = self.skip_depth.get();
+        if depth > 0 {
+            // Already inside a suppressed group — bump depth and stay
+            // suppressed; the matching `end_group` will balance via the
+            // same counter.
+            self.skip_depth.set(depth + 1);
+            return;
+        }
+        if self.skip_groups.borrow().contains(&class) {
+            // Open a new suppression scope. depth==1 marks the outermost
+            // suppressed begin; the matching end_group drops it back to 0.
+            self.skip_depth.set(1);
+            return;
+        }
+        self.recorder.begin_group(class);
     }
 
     fn end_group(&self) {
         self.inner.end_group();
-        if self.enabled.get() {
-            self.recorder.end_group();
+        if !self.enabled.get() {
+            return;
         }
+        let depth = self.skip_depth.get();
+        if depth > 0 {
+            // Match the suppressed begin; do not emit the end either.
+            self.skip_depth.set(depth - 1);
+            return;
+        }
+        self.recorder.end_group();
     }
 }
 
 impl<P: Painter + BlitPainter> BlitPainter for RecordingPainter<P> {
     fn blit(&self, src: PixelRect, dst: PixelRect) {
         self.inner.blit(src, dst);
-        if self.enabled.get() {
+        if self.should_record() {
             self.recorder.blit(src, dst);
         }
     }
@@ -566,6 +633,8 @@ pub struct RecordingSurface<S: Surface> {
     painter: Rc<RecordingPainter<S::P>>,
     recorder: Rc<RecorderPainter>,
     enabled: Rc<Cell<bool>>,
+    skip_groups: Rc<RefCell<HashSet<GroupClass>>>,
+    skip_depth: Rc<Cell<u32>>,
 }
 
 impl<S: Surface> RecordingSurface<S> {
@@ -573,21 +642,36 @@ impl<S: Surface> RecordingSurface<S> {
         let inner_painter = inner.clone_painter();
         let recorder = Rc::new(RecorderPainter::new());
         let enabled = Rc::new(Cell::new(false));
+        let skip_groups = Rc::new(RefCell::new(HashSet::new()));
+        let skip_depth = Rc::new(Cell::new(0));
         let painter = Rc::new(RecordingPainter {
             inner: inner_painter,
             recorder: Rc::clone(&recorder),
             enabled: Rc::clone(&enabled),
+            skip_groups: Rc::clone(&skip_groups),
+            skip_depth: Rc::clone(&skip_depth),
         });
         Self {
             inner,
             painter,
             recorder,
             enabled,
+            skip_groups,
+            skip_depth,
         }
     }
 
     pub fn enable_recording(&self) {
         self.enabled.set(true);
+    }
+
+    /// Replace the per-surface group-suppression set. Safe to call only
+    /// outside a frame — the active `skip_depth` counter assumes the set
+    /// it consulted on `begin_group` is the same one the matching
+    /// `end_group` sees. Mid-frame mutation would corrupt the count.
+    pub fn set_skip_groups(&self, groups: HashSet<GroupClass>) {
+        *self.skip_groups.borrow_mut() = groups;
+        self.skip_depth.set(0);
     }
 
     pub fn disable_recording(&self) {

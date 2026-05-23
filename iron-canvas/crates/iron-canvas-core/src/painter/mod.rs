@@ -70,6 +70,18 @@ pub enum TextAlign {
 pub enum GroupClass {
     Grid,
     Overlay,
+    Cells,
+    FrozenSep,
+    Headers,
+    Corner,
+    SelectionFill,
+    SelectionStroke,
+    Autofill,
+    Clipboard,
+    PointMode,
+    FormulaRefs,
+    ActiveCellRepaint,
+    HeaderHighlights,
 }
 
 impl GroupClass {
@@ -77,6 +89,18 @@ impl GroupClass {
         match self {
             GroupClass::Grid => "grid",
             GroupClass::Overlay => "overlay",
+            GroupClass::Cells => "cells",
+            GroupClass::FrozenSep => "frozen-sep",
+            GroupClass::Headers => "headers",
+            GroupClass::Corner => "corner",
+            GroupClass::SelectionFill => "selection-fill",
+            GroupClass::SelectionStroke => "selection-stroke",
+            GroupClass::Autofill => "autofill",
+            GroupClass::Clipboard => "clipboard",
+            GroupClass::PointMode => "point-mode",
+            GroupClass::FormulaRefs => "formula-refs",
+            GroupClass::ActiveCellRepaint => "active-cell-repaint",
+            GroupClass::HeaderHighlights => "header-highlights",
         }
     }
 }

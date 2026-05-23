@@ -7,7 +7,7 @@ use crate::chrome::Chrome;
 use crate::decoration::Layer;
 use crate::geometry::constants::{DASHED_BORDER_WIDTH, REF_HANDLE_HIT_PAD_PX};
 use crate::geometry::pixel_rect::PixelRect;
-use crate::painter::{PaintColor, Painter};
+use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
 use crate::types::coord::{FormulaRef, FormulaRefKind, RCRange};
 use crate::types::ui::{Corner, HitTest, RefZone, Side};
@@ -24,6 +24,7 @@ impl Layer for FormulaRefsLayer {
             return;
         }
         let sheet = model.get_selected_sheet();
+        painter.begin_group(GroupClass::FormulaRefs);
         for fr in &self.refs {
             if fr.sheet_area.sheet != sheet {
                 continue;
@@ -42,6 +43,7 @@ impl Layer for FormulaRefsLayer {
                 f64::from(DASHED_BORDER_WIDTH),
             );
         }
+        painter.end_group();
     }
 
     fn hit_test(
