@@ -1,11 +1,16 @@
 [package]
-name = "iron-canvas-svg"
+name = "iron-canvas-export"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
 [lib]
 crate-type = ["rlib"]
+
+[features]
+default = ["svg", "pdf"]
+svg = []
+pdf = []
 
 [dependencies]
 iron-canvas-core = { path = "../iron-canvas-core" }

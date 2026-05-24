@@ -4,10 +4,12 @@
 //! `CanvasModel` here would be ~200 LOC for marginal extra coverage over
 //! the existing `MemSurface`-driven integration tests.
 
+#![cfg(feature = "svg")]
+
 use std::rc::Rc;
 
 use iron_canvas_core::{CanvasModel, Orchestrator};
-use iron_canvas_svg::SvgSurface;
+use iron_canvas_export::SvgSurface;
 
 #[test]
 fn orchestrator_accepts_svg_surface() {

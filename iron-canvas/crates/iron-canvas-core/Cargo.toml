@@ -14,4 +14,3 @@ bitflags = {workspace = true}
 
 [dev-dependencies]
 iron-canvas-recorder = { path = "../iron-canvas-recorder" }
-iron-canvas-svg = { path = "../iron-canvas-svg" }

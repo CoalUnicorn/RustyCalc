@@ -13,7 +13,7 @@ dev-tools = ["dep:iron-canvas-recorder", "dep:serde_json"]
 
 [dependencies]
 iron-canvas-core = { path = "../iron-canvas-core" }
-iron-canvas-svg = { path = "../iron-canvas-svg" }
+iron-canvas-export = { path = "../iron-canvas-export", default-features = false, features = ["svg"] }
 iron-canvas-recorder = { path = "../iron-canvas-recorder", optional = true }
 serde_json = { version = "1", optional = true }
 ironcalc_base = { workspace = true }

@@ -20,7 +20,7 @@ use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetA
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
-use iron_canvas_svg::SvgSurface;
+use iron_canvas_export::SvgSurface;
 
 #[cfg(feature = "dev-tools")]
 use iron_canvas_core::PaintRegimeTag;
