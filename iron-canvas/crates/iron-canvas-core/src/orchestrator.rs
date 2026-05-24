@@ -14,7 +14,7 @@ use std::cell::Cell;
 
 use serde::{Deserialize, Serialize};
 
-use crate::chrome::{BlitPlan, Chrome, FramePath, FrameValidity, PaneRegionMask};
+use crate::chrome::{BlitPlan, Chrome, FrameKindTag, FramePath, FrameValidity, PaneRegionMask};
 use crate::decoration::{
     autofill::AutofillLayer, clipboard::ClipboardLayer, formula_refs::FormulaRefsLayer,
     point_mode::PointModeLayer, selection::SelectionLayer, Layer,
@@ -167,11 +167,30 @@ where
         self.overlay.raise(GridSignals::OVERLAY);
     }
 
+    /// Bulk-push every overlay primitive in one comparison. The per-field
+    /// setters each raise OVERLAY independently; folding them into one
+    /// pass lets the Leptos host's per-frame reactive memo cost a single
+    /// raise instead of four.
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
-        self.set_extend_to(overlays.extend_to);
-        self.set_clipboard(overlays.clipboard);
-        self.set_point_range(overlays.point_range);
-        self.set_formula_refs(overlays.formula_refs);
+        let RenderOverlays {
+            extend_to,
+            clipboard,
+            point_range,
+            formula_refs,
+            active_ref: _,
+        } = overlays;
+        let changed = self.autofill.extend_to != extend_to
+            || self.clipboard.clipboard != clipboard
+            || self.point_mode.point_range != point_range
+            || self.formula_refs.refs != formula_refs;
+        if !changed {
+            return;
+        }
+        self.autofill.extend_to = extend_to;
+        self.clipboard.clipboard = clipboard;
+        self.point_mode.point_range = point_range;
+        self.formula_refs.refs = formula_refs;
+        self.overlay.raise(GridSignals::OVERLAY);
     }
 
     pub fn set_extend_to(&mut self, target: Option<AutofillTarget>) {
@@ -473,6 +492,12 @@ where
     /// viewport shifts where the kept band can't be reused; we trust the
     /// verdict and the supplied plan. Always repaints the overlay too —
     /// a viewport shift moves every overlay primitive's pixel position.
+    ///
+    /// `Chrome::next(Blit)` may demote to `Fresh` when in-place reuse
+    /// rejects (e.g. row-header digit boundary). We dispatch on
+    /// `frame.kind` so the demoted path takes the full repaint with cache
+    /// invalidation, instead of a `paint_grid_blit` that would carry
+    /// stale per-pane caches against the freshly rebuilt slot vecs.
     fn paint_viewport_regime(&mut self, model: &dyn CanvasModel, plan: BlitPlan) {
         let Some(prev) = self.last_frame.take() else {
             return;
@@ -484,7 +509,17 @@ where
             &self.theme,
             FramePath::Blit(&plan),
         );
-        self.grid.paint_grid_blit(model, &frame, &plan);
+        match frame.kind {
+            FrameKindTag::Blitted => self.grid.paint_grid_blit(model, &frame, &plan),
+            FrameKindTag::Fresh => {
+                self.grid.invalidate_pane_cache(PaneRegionMask::ALL);
+                self.grid.invalidate_paint_cache();
+                self.grid.paint_grid(model, &frame);
+            }
+            FrameKindTag::SlotsReused => unreachable!(
+                "Chrome::next(Blit) only returns Blitted (reuse) or Fresh (fallback)"
+            ),
+        }
         self.refresh_overlay_state(model);
         self.overlay.paint_overlay_layer(
             model,

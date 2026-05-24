@@ -943,6 +943,129 @@ mod tests {
     }
 
     #[test]
+    fn skip_groups_drops_targeted_section() {
+        // Filter contains `Cells`; emit Grid → Cells → Headers as siblings.
+        // The Cells bracket and its inner rect_fill must be suppressed;
+        // Grid and Headers (and the rect_fill inside Headers) must survive.
+        let surface = RecordingSurface::new(MemSurface::new());
+        surface.enable_recording();
+        let mut skip = HashSet::new();
+        skip.insert(GroupClass::Cells);
+        surface.set_skip_groups(skip);
+        surface.begin_frame();
+        let p = surface.painter();
+        p.begin_group(GroupClass::Grid);
+        p.begin_group(GroupClass::Cells);
+        p.rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
+        p.end_group();
+        p.begin_group(GroupClass::Headers);
+        p.rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#000"));
+        p.end_group();
+        p.end_group();
+        let ops = surface.end_frame();
+
+        let group_classes: Vec<GroupClass> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::BeginGroup { class } => Some(*class),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            group_classes,
+            vec![GroupClass::Grid, GroupClass::Headers],
+            "Cells begin must be dropped; Grid + Headers preserved",
+        );
+        let rect_fills = ops
+            .iter()
+            .filter(|op| matches!(op, DrawOp::RectFill { .. }))
+            .count();
+        assert_eq!(
+            rect_fills, 1,
+            "rect_fill inside Cells should be suppressed; one inside Headers should remain",
+        );
+    }
+
+    #[test]
+    fn skip_groups_handles_nested_groups() {
+        // Synthetic nested case — today's renderer is shallow, but the
+        // depth counter must still survive nested begin/end pairs inside
+        // a suppressed outer group, and re-enable capture exactly at the
+        // matching outer end_group.
+        let surface = RecordingSurface::new(MemSurface::new());
+        surface.enable_recording();
+        let mut skip = HashSet::new();
+        skip.insert(GroupClass::Cells);
+        surface.set_skip_groups(skip);
+        surface.begin_frame();
+        let p = surface.painter();
+        p.begin_group(GroupClass::Grid);
+        p.begin_group(GroupClass::Cells);
+        p.begin_group(GroupClass::FrozenSep); // nested inside skipped outer
+        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#aaa"));
+        p.end_group(); // ends FrozenSep — still suppressed (depth 2 → 1)
+        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#bbb"));
+        p.end_group(); // ends Cells — depth 1 → 0, capture resumes
+        p.begin_group(GroupClass::Headers);
+        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#ccc"));
+        p.end_group();
+        p.end_group();
+        let ops = surface.end_frame();
+
+        let group_classes: Vec<GroupClass> = ops
+            .iter()
+            .filter_map(|op| match op {
+                DrawOp::BeginGroup { class } => Some(*class),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            group_classes,
+            vec![GroupClass::Grid, GroupClass::Headers],
+            "Cells + its nested FrozenSep both suppressed; Headers preserved",
+        );
+        let rect_fills = ops
+            .iter()
+            .filter(|op| matches!(op, DrawOp::RectFill { .. }))
+            .count();
+        assert_eq!(
+            rect_fills, 1,
+            "only the rect_fill inside Headers should be captured",
+        );
+    }
+
+    #[test]
+    fn layer_scope_grid_only_disarms_overlay_surface() {
+        // Mirrors orchestrator wiring: scope decides which surfaces get
+        // `enable_recording()`. The disarmed surface stays cost-free —
+        // its painter never forks into the recorder.
+        let scope = LayerScope::GridOnly;
+        let grid = RecordingSurface::new(MemSurface::new());
+        let overlay = RecordingSurface::new(MemSurface::new());
+        if scope.includes_grid() {
+            grid.enable_recording();
+        }
+        if scope.includes_overlay() {
+            overlay.enable_recording();
+        }
+        grid.begin_frame();
+        overlay.begin_frame();
+        grid.painter()
+            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
+        overlay
+            .painter()
+            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#000"));
+        let grid_ops = grid.end_frame();
+        let overlay_ops = overlay.end_frame();
+
+        assert_eq!(grid_ops.len(), 1, "GridOnly armed the grid surface");
+        assert!(
+            overlay_ops.is_empty(),
+            "GridOnly leaves overlay disarmed; nothing captured",
+        );
+    }
+
+    #[test]
     fn measure_text_width_parses_font_size_from_css() {
         let p = RecorderPainter::new();
         // 5 chars × 16px × 1.0

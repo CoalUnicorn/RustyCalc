@@ -32,14 +32,18 @@ use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot
 use iron_canvas_recorder::DrawOp;
 
 const FIXTURE_PATH: &str = "tests/fixtures/fresh_paint.icr";
+const OVERLAY_FIXTURE_PATH: &str = "tests/fixtures/overlay_paint.icr";
 
 /// Builds a deterministic Recording covering one Fresh frame. The shape
 /// is hand-picked to exercise every `DrawOp` variant the viewer needs to
 /// dispatch on — RectFill / Stroke / Dashed, line variants, clip
 /// bracket, FillText, Blit, BeginGroup/EndGroup, and the unit variants
-/// (InvalidateCache / ResetTextDefaults). Coordinates fit inside the
-/// header's declared 200×100 canvas so the viewer renders the full
-/// scene without overflow.
+/// (InvalidateCache / ResetTextDefaults). The grid ops mirror the
+/// `render_grid` section order — setup, then nested `Cells` / `FrozenSep`
+/// / `Headers` / `Corner` brackets — so the fixture stands in for a
+/// real renderer output as well as the wire-format regression sentinel.
+/// Coordinates fit inside the header's declared 200×100 canvas so the
+/// viewer renders the full scene without overflow.
 fn build_fixture() -> Recording {
     let r = |x: i32, y: i32, w: i32, h: i32| PixelRect {
         top_left: Point { x, y },
@@ -54,6 +58,9 @@ fn build_fixture() -> Recording {
         DrawOp::ApplyDprTransform { dpr: 1 },
         DrawOp::InvalidateCache,
         DrawOp::ResetTextDefaults,
+        DrawOp::BeginGroup {
+            class: GroupClass::Cells,
+        },
         DrawOp::RectFill {
             rect: r(0, 0, 200, 100),
             color: "#FFFFFF".to_string(),
@@ -70,6 +77,10 @@ fn build_fixture() -> Recording {
             color: "#CCCCCC".to_string(),
             width: 1.0,
         },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::FrozenSep,
+        },
         DrawOp::StrokeLine {
             line: Line::H {
                 span: Span { from: 0, to: 200 },
@@ -77,6 +88,10 @@ fn build_fixture() -> Recording {
             },
             color: "#333333".to_string(),
             width: 1.0,
+        },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::Headers,
         },
         DrawOp::PushClip {
             rect: r(0, 0, 80, 20),
@@ -103,10 +118,15 @@ fn build_fixture() -> Recording {
             color: "#000000".to_string(),
             width: 1.0,
         },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::Corner,
+        },
         DrawOp::Blit {
             src: r(0, 20, 200, 80),
             dst: r(0, 0, 200, 80),
         },
+        DrawOp::EndGroup,
         DrawOp::EndGroup,
     ];
 
@@ -176,4 +196,200 @@ fn golden_fixture_round_trip_matches_disk() {
     // Sanity: the disk bytes also round-trip through deserialize.
     let restored = Recording::deserialize(&on_disk).expect("deserialize disk fixture");
     assert_eq!(restored, rec);
+}
+
+/// Builds a deterministic Recording focused on the overlay layer's
+/// decoration brackets. One frame whose `overlay_ops` walks all 8
+/// `GroupClass` variants the overlay layer emits, each with a single
+/// cheap op inside so the brackets aren't empty. The grid layer stays
+/// empty — this fixture stands in for an `OverlayOnly` recording.
+fn build_overlay_fixture() -> Recording {
+    let r = |x: i32, y: i32, w: i32, h: i32| PixelRect {
+        top_left: Point { x, y },
+        width: w,
+        height: h,
+    };
+
+    let overlay_ops = vec![
+        DrawOp::BeginGroup {
+            class: GroupClass::Overlay,
+        },
+        DrawOp::BeginGroup {
+            class: GroupClass::SelectionFill,
+        },
+        DrawOp::RectFill {
+            rect: r(0, 0, 80, 20),
+            color: "#1E6FD933".to_string(),
+        },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::ActiveCellRepaint,
+        },
+        DrawOp::ClearRect {
+            rect: r(0, 0, 80, 20),
+        },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::SelectionStroke,
+        },
+        DrawOp::RectStroke {
+            rect: r(0, 0, 80, 20),
+            color: "#1E6FD9".to_string(),
+            width: 2.0,
+        },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::HeaderHighlights,
+        },
+        DrawOp::RectFill {
+            rect: r(0, 0, 80, 4),
+            color: "#1E6FD955".to_string(),
+        },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::Autofill,
+        },
+        DrawOp::RectFill {
+            rect: r(76, 16, 4, 4),
+            color: "#1E6FD9".to_string(),
+        },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::Clipboard,
+        },
+        DrawOp::RectDashed {
+            rect: r(0, 20, 80, 20),
+            color: "#000000".to_string(),
+            width: 1.0,
+        },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::PointMode,
+        },
+        DrawOp::RectStroke {
+            rect: r(80, 0, 80, 20),
+            color: "#22BB22".to_string(),
+            width: 1.5,
+        },
+        DrawOp::EndGroup,
+        DrawOp::BeginGroup {
+            class: GroupClass::FormulaRefs,
+        },
+        DrawOp::RectStroke {
+            rect: r(80, 20, 80, 20),
+            color: "#BB2222".to_string(),
+            width: 1.5,
+        },
+        DrawOp::EndGroup,
+        DrawOp::EndGroup,
+    ];
+
+    let header = IcrHeader::new(
+        200.0,
+        100.0,
+        1,
+        ThemeSnapshot::from(&CanvasTheme::light()),
+        0,
+    );
+
+    let mut rec = Recording::new(header);
+    rec.push_frame(Frame {
+        frame_idx: 0,
+        t_ms: 0,
+        regime: PaintRegimeTag::Fresh,
+        signals: 0b1000, // OVERLAY bit
+        grid_ops: Vec::new(),
+        overlay_ops,
+    });
+    rec
+}
+
+#[test]
+fn overlay_paint_round_trip_matches_disk() {
+    let rec = build_overlay_fixture();
+    let bytes = rec.serialize().expect("serialize");
+    let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR")).join(OVERLAY_FIXTURE_PATH);
+
+    if std::env::var("ICR_REGEN").is_ok() {
+        std::fs::create_dir_all(fixture_path.parent().unwrap()).unwrap();
+        std::fs::write(&fixture_path, &bytes)
+            .unwrap_or_else(|e| panic!("write fixture {}: {}", fixture_path.display(), e));
+        println!("wrote {} ({} bytes)", fixture_path.display(), bytes.len());
+        return;
+    }
+
+    let on_disk = std::fs::read(&fixture_path).unwrap_or_else(|e| {
+        panic!(
+            "read fixture {}: {} \
+             (first run? regenerate with ICR_REGEN=1 cargo test ...)",
+            fixture_path.display(),
+            e
+        )
+    });
+    assert_eq!(
+        on_disk, bytes,
+        "overlay fixture drift at {}; regenerate with `ICR_REGEN=1 cargo test \
+         -p iron-canvas-recorder --test golden_fixture` if intentional.",
+        fixture_path.display()
+    );
+    let restored = Recording::deserialize(&on_disk).expect("deserialize disk fixture");
+    assert_eq!(restored, rec);
+}
+
+#[test]
+fn overlay_frame_has_decoration_subgroups() {
+    // All 8 overlay decoration variants must appear inside the Overlay
+    // group of a frame that exercises every decoration layer. Catches
+    // accidental drops of a `begin_group` call when overlay decorations
+    // are added or shuffled in `LayerBase::paint_overlay_layer`.
+    let rec = build_overlay_fixture();
+    let frame = rec.frames.first().expect("fixture has one frame");
+    let variants: std::collections::HashSet<&str> = frame
+        .overlay_ops
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::BeginGroup { class } => Some(class.as_str()),
+            _ => None,
+        })
+        .collect();
+    for required in [
+        "overlay",
+        "selection-fill",
+        "selection-stroke",
+        "autofill",
+        "clipboard",
+        "point-mode",
+        "formula-refs",
+        "active-cell-repaint",
+        "header-highlights",
+    ] {
+        assert!(
+            variants.contains(required),
+            "overlay_ops missing BeginGroup({required:?}); present: {variants:?}",
+        );
+    }
+}
+
+#[test]
+fn fresh_frame_has_grid_sections() {
+    // The fixture stands in for a real `render_grid` output; every
+    // section bracket the renderer opens must appear inside the Grid
+    // group of frame 0. This catches accidental drops of a `begin_group`
+    // call when sections are added or shuffled in the renderer.
+    let rec = build_fixture();
+    let frame = rec.frames.first().expect("fixture has one Fresh frame");
+    let variants: std::collections::HashSet<&str> = frame
+        .grid_ops
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::BeginGroup { class } => Some(class.as_str()),
+            _ => None,
+        })
+        .collect();
+    for required in ["grid", "cells", "frozen-sep", "headers", "corner"] {
+        assert!(
+            variants.contains(required),
+            "grid_ops missing BeginGroup({required:?}); present: {variants:?}",
+        );
+    }
 }

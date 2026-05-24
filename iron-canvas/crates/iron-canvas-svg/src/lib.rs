@@ -426,6 +426,82 @@ mod tests {
     }
 
     #[test]
+    fn grid_layer_has_section_groups() {
+        // Drive the painter through the same begin_group/end_group
+        // sequence `render_grid` produces: Grid wraps Cells / FrozenSep
+        // / Headers / Corner as siblings. The rendered SVG should
+        // surface that structure literally so a future SVG player can
+        // toggle sections independently.
+        let p = SvgPainter::new(10, 10);
+        p.begin_group(GroupClass::Grid);
+        p.begin_group(GroupClass::Cells);
+        p.rect_fill(rect(0, 0, 1, 1), PaintColor::Static("#fff"));
+        p.end_group();
+        p.begin_group(GroupClass::FrozenSep);
+        p.end_group();
+        p.begin_group(GroupClass::Headers);
+        p.end_group();
+        p.begin_group(GroupClass::Corner);
+        p.end_group();
+        p.end_group();
+        let svg = p.finish();
+
+        let body_start = svg
+            .find("<g class=\"grid\">")
+            .expect("grid bracket present");
+        let body_end = svg.rfind("</g>").expect("at least one closing g");
+        let body = &svg[body_start..=body_end];
+        assert!(body.contains("<g class=\"cells\">"));
+        assert!(body.contains("<g class=\"frozen-sep\">"));
+        assert!(body.contains("<g class=\"headers\">"));
+        assert!(body.contains("<g class=\"corner\">"));
+        // Sibling order: Cells first, Corner last — mirrors render_grid.
+        let cells_at = body.find("<g class=\"cells\">").unwrap();
+        let corner_at = body.find("<g class=\"corner\">").unwrap();
+        assert!(cells_at < corner_at, "Cells must precede Corner in the SVG");
+    }
+
+    #[test]
+    fn overlay_layer_has_structured_groups() {
+        // Mirror of grid_layer_has_section_groups for the overlay
+        // decoration brackets emitted by LayerBase::paint_overlay_layer.
+        let p = SvgPainter::new(10, 10);
+        p.begin_group(GroupClass::Overlay);
+        for class in [
+            GroupClass::SelectionFill,
+            GroupClass::ActiveCellRepaint,
+            GroupClass::SelectionStroke,
+            GroupClass::HeaderHighlights,
+            GroupClass::Autofill,
+            GroupClass::Clipboard,
+            GroupClass::PointMode,
+            GroupClass::FormulaRefs,
+        ] {
+            p.begin_group(class);
+            p.end_group();
+        }
+        p.end_group();
+        let svg = p.finish();
+
+        let body_start = svg
+            .find("<g class=\"overlay\">")
+            .expect("overlay bracket present");
+        let body = &svg[body_start..];
+        for required in [
+            "<g class=\"selection-fill\">",
+            "<g class=\"active-cell-repaint\">",
+            "<g class=\"selection-stroke\">",
+            "<g class=\"header-highlights\">",
+            "<g class=\"autofill\">",
+            "<g class=\"clipboard\">",
+            "<g class=\"point-mode\">",
+            "<g class=\"formula-refs\">",
+        ] {
+            assert!(body.contains(required), "overlay SVG missing {required}");
+        }
+    }
+
+    #[test]
     fn fill_text_xml_escapes_content() {
         let p = SvgPainter::new(10, 10);
         p.fill_text(

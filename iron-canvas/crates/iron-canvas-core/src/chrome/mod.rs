@@ -21,14 +21,24 @@ use crate::types::ui::{HitTest, ResizeTarget};
 use crate::{CanvasModel, CanvasSize, CanvasView, RCRange};
 
 mod blit;
+mod blit_rebuild;
 mod kind;
 mod pane_region;
 mod pane_set;
+mod recycled_slots;
 
 pub use blit::{BlitPlan, FramePath};
 pub use kind::FrameKindTag;
 pub use pane_region::{PaneRegion, PaneRegionMask};
-pub use pane_set::{measure_row_header_width, PaneSet, RecycledSlots};
+pub use pane_set::{measure_row_header_width, PaneSet};
+pub use recycled_slots::RecycledSlots;
+
+/// Per-process digest of a formatted cell value. `DefaultHasher` is
+/// randomly seeded per run, so equality only holds within one process.
+/// The newtype shape blocks accidental serialization / cross-process
+/// comparison at the type system level.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CellValueHash(u64);
 
 /// Snapshot of the active cell at paint time. `screen_for_blit` re-hashes the
 /// live model's value at the stored coords; a mismatch means the cell
@@ -39,18 +49,16 @@ pub use pane_set::{measure_row_header_width, PaneSet, RecycledSlots};
 pub struct ActiveCellSnapshot {
     pub row: i32,
     pub col: i32,
-    pub value_hash: u64,
+    pub value_hash: CellValueHash,
 }
 
-/// `DefaultHasher` is per-process — equality only holds within one run.
-/// Never persist or compare across processes.
-fn hash_cell_value(model: &dyn CanvasModel, sheet: u32, row: i32, col: i32) -> u64 {
+fn hash_cell_value(model: &dyn CanvasModel, sheet: u32, row: i32, col: i32) -> CellValueHash {
     let value = model
         .get_formatted_cell_value(sheet, row, col)
         .unwrap_or_default();
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
-    hasher.finish()
+    CellValueHash(hasher.finish())
 }
 
 impl ActiveCellSnapshot {
@@ -178,26 +186,14 @@ impl Chrome {
                 if let Some(frame) = blit::try_blit_reuse(&prev, model, canvas, theme, plan) {
                     return frame;
                 }
-                let frame = Self::next(Some(prev), model, canvas, theme, FramePath::Fresh);
-                let stale = plan.shift_panes();
-                let mut fps = frame.pane_fingerprints.get();
-                for region in [
-                    PaneRegion::TopLeft,
-                    PaneRegion::TopRight,
-                    PaneRegion::BottomLeft,
-                    PaneRegion::BottomRight,
-                ] {
-                    if !stale.contains_region(region) {
-                        let idx = region as usize;
-                        fps[idx] = frame.prev_pane_fingerprints[idx];
-                    }
-                }
-                frame.pane_fingerprints.set(fps);
-                Chrome {
-                    kind: FrameKindTag::Blitted,
-                    stale_panes: stale,
-                    ..frame
-                }
+                // Qualification passed (`screen_for_blit` returned a plan) but
+                // in-place reuse rejected — e.g. row-header digit boundary at
+                // 99 → 100, where `row_header_thickness` widens by one digit
+                // and the cross-axis cell-area origin shifts. The frame
+                // returns as `Fresh` (not the `Blitted` mislabel of yore);
+                // `paint_viewport_regime` dispatches on `frame.kind` and
+                // calls the full `paint_grid` path with cache invalidation.
+                Self::next(Some(prev), model, canvas, theme, FramePath::Fresh)
             }
         }
     }
