@@ -30,6 +30,8 @@ use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot
 use iron_canvas_recorder::DrawOp;
 #[cfg(feature = "dev-tools")]
 use iron_canvas_recorder::{RecordingFilter, RecordingSurface};
+#[cfg(feature = "dev-tools")]
+use crate::playback::{replay_through, PlaybackSession};
 
 /// Facade Surface — wraps `WebSurface` in `RecordingSurface` when the
 /// `recorder` feature is on (dev builds), bare `WebSurface` otherwise
@@ -91,8 +93,16 @@ pub struct IronCanvas {
     // Cached so SVG export can re-push the live model into a throwaway
     // orchestrator. Updated alongside every `set_model` / `setModel`.
     model: Option<Rc<dyn CanvasModel>>,
+    // Live DPR — the engine doesn't retain it across `resize` calls, and
+    // both the recording header and playback restore need it. Initialized
+    // to `1` so a pre-resize `startRecording` (test surface) gets a sane
+    // default rather than UB. Only read under `dev-tools`.
+    #[cfg_attr(not(feature = "dev-tools"), allow(dead_code))]
+    last_dpr: i32,
     #[cfg(feature = "dev-tools")]
     recording: Option<RecordingState>,
+    #[cfg(feature = "dev-tools")]
+    playback: Option<PlaybackSession>,
 }
 
 #[wasm_bindgen]
@@ -109,8 +119,11 @@ impl IronCanvas {
         Ok(IronCanvas {
             orch: Orchestrator::<FacadeSurface, Rc<dyn CanvasModel>>::new(grid, overlay),
             model: None,
+            last_dpr: 1,
             #[cfg(feature = "dev-tools")]
             recording: None,
+            #[cfg(feature = "dev-tools")]
+            playback: None,
         })
     }
 
@@ -124,8 +137,10 @@ impl IronCanvas {
 
     /// Resize both layers in one call.
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
+        let dpr_i = dpr.round() as i32;
+        self.last_dpr = dpr_i;
         self.orch
-            .resize(CanvasSize { w: css_w, h: css_h }, dpr.round() as i32);
+            .resize(CanvasSize { w: css_w, h: css_h }, dpr_i);
     }
 
     /// Push a theme by name. Only `"dark"` is recognized; every other
@@ -138,6 +153,7 @@ impl IronCanvas {
             CanvasTheme::light()
         };
         self.orch.set_theme(theme);
+        self.restamp_recording_theme();
     }
 
     /// Conservative repaint blanket — see `Orchestrator::request_repaint`.
@@ -160,6 +176,10 @@ impl IronCanvas {
     /// least one layer emitted ops. Idle rAF ticks are dropped.
     #[allow(non_snake_case)]
     pub fn paintIfDirty(&mut self) {
+        #[cfg(feature = "dev-tools")]
+        if self.playback.is_some() {
+            return;
+        }
         #[cfg(feature = "dev-tools")]
         let recording_active = self.recording.is_some();
         #[cfg(feature = "dev-tools")]
@@ -200,7 +220,7 @@ impl IronCanvas {
         let canvas = self.orch.canvas_size();
         let theme_snap = ThemeSnapshot::from(self.orch.theme());
         let now = js_sys::Date::now();
-        let header = IcrHeader::new(canvas.w, canvas.h, theme_snap, now as u64);
+        let header = IcrHeader::new(canvas.w, canvas.h, self.last_dpr, theme_snap, now as u64);
         self.recording = Some(RecordingState {
             rec: Recording::new(header),
             started_at_ms: now,
@@ -319,6 +339,7 @@ impl IronCanvas {
     pub fn setThemeFromElement(&mut self, el: &web_sys::Element) {
         self.orch
             .set_theme(crate::theme_from_element::from_element(el));
+        self.restamp_recording_theme();
     }
 }
 
@@ -468,6 +489,7 @@ impl IronCanvas {
     pub fn setTheme(&mut self, theme: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::CanvasThemeWire = serde_wasm_bindgen::from_value(theme)?;
         self.orch.set_theme(wire.into());
+        self.restamp_recording_theme();
         Ok(())
     }
 
@@ -478,6 +500,7 @@ impl IronCanvas {
     pub fn setThemeVariables(&mut self, vars: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::ThemeVariablesWire = serde_wasm_bindgen::from_value(vars)?;
         self.orch.set_theme_variables(wire.into());
+        self.restamp_recording_theme();
         Ok(())
     }
 }
@@ -507,10 +530,12 @@ impl IronCanvas {
 
     pub fn set_theme(&mut self, theme: CanvasTheme) {
         self.orch.set_theme(theme);
+        self.restamp_recording_theme();
     }
 
     pub fn set_theme_variables(&mut self, vars: ThemeVariables) {
         self.orch.set_theme_variables(vars);
+        self.restamp_recording_theme();
     }
 
     /// Rust-level model push. Accepts any `CanvasModel` impl behind an
@@ -602,5 +627,272 @@ impl IronCanvas {
                 "iron-canvas: recording exceeded 100MB cap; auto-stopped (partial)",
             );
         }
+    }
+
+    /// Re-stamp the active recording's header with the current theme so
+    /// playback metadata stays consistent with the resolved hex colors
+    /// embedded in subsequent ops. Called from every theme setter on
+    /// `IronCanvas` — without it, a `setTheme` mid-recording would leave
+    /// the header pinned to the initial palette while op colors carry
+    /// the new one. No-op when recording is inactive or the feature is
+    /// disabled at build time.
+    #[cfg(feature = "dev-tools")]
+    fn restamp_recording_theme(&mut self) {
+        if let Some(state) = self.recording.as_mut() {
+            state.rec.header.theme = ThemeSnapshot::from(self.orch.theme());
+        }
+    }
+
+    #[cfg(not(feature = "dev-tools"))]
+    #[inline]
+    fn restamp_recording_theme(&mut self) {
+        let _ = self;
+    }
+}
+
+// ============================================================================
+// Recording playback (dev-tools)
+//
+// Live-canvas playback: rents the worksheet's grid + overlay painters and
+// replays recorded `DrawOp`s through them. `paintIfDirty` short-circuits
+// while a session is loaded, so the orchestrator never observes playback.
+// `exitPlayback` calls `request_repaint` to force a `Fresh` next tick, which
+// restores the live worksheet from scratch.
+// ============================================================================
+
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen]
+impl IronCanvas {
+    /// Parse `.icr` bytes, enter playback, and paint frame 0.
+    /// While a session is live, `paintIfDirty` is a no-op.
+    ///
+    /// Refuses while a recording is being captured — the live grid /
+    /// overlay surfaces are wrapped in `RecordingPainter`, so the seek's
+    /// replay ops would otherwise fork into the active recording buffer
+    /// and corrupt the `.icr`.
+    ///
+    /// Resizes the orchestrator and the canvas backing stores to the
+    /// recording's dimensions and overrides their inline CSS width /
+    /// height so the displayed canvas matches. `exitPlayback` restores
+    /// both. The pre-playback CSS dimensions and DPR are stashed on the
+    /// session.
+    #[allow(non_snake_case)]
+    pub fn loadRecording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
+        if self.recording.is_some() {
+            return Err(JsError::new(
+                "cannot load a recording while a capture is active",
+            ));
+        }
+        let rec = Recording::deserialize(bytes)
+            .map_err(|e| JsError::new(&format!("recording deserialize failed: {e}")))?;
+        if rec.frames.is_empty() {
+            return Err(JsError::new("recording has no frames"));
+        }
+        let live_size = self.orch.canvas_size();
+        let live_dpr = self.last_dpr;
+        let rec_size = CanvasSize {
+            w: rec.header.canvas_w,
+            h: rec.header.canvas_h,
+        };
+        let rec_dpr = rec.header.dpr;
+
+        // Resize the orchestrator + canvas backing stores to recording
+        // dims. Inline CSS on the canvases is overridden separately —
+        // the `.ws-canvas` class pins display size to `100%`, which would
+        // otherwise scale the backing store back down to the container.
+        self.last_dpr = rec_dpr;
+        self.orch.resize(rec_size, rec_dpr);
+        set_canvas_css_size(
+            self.orch.grid_surface().inner().canvas(),
+            rec_size,
+        )?;
+        set_canvas_css_size(
+            self.orch.overlay_surface().inner().canvas(),
+            rec_size,
+        )?;
+
+        self.playback = Some(PlaybackSession::new(rec, live_size, live_dpr));
+        self.seek_recording_inner(0)
+    }
+
+    /// Seek to `frame_idx` (clamped to the recording length) and repaint.
+    /// Pauses an active play loop so the host's next `tickPlayback` doesn't
+    /// jump back to whatever the stale play-anchor projected.
+    ///
+    /// Refuses during an active capture — see `loadRecording` for the
+    /// same reason.
+    #[allow(non_snake_case)]
+    pub fn seekRecording(&mut self, frame_idx: u32) -> Result<(), JsError> {
+        if self.recording.is_some() {
+            return Err(JsError::new(
+                "cannot seek a recording while a capture is active",
+            ));
+        }
+        if let Some(s) = self.playback.as_mut() {
+            s.playing = false;
+        }
+        self.seek_recording_inner(frame_idx)
+    }
+
+    /// Begin time-accurate playback. `now_ms` is the host's
+    /// `performance.now()` reading captured at the same instant as the
+    /// call — used as the wall-clock anchor for subsequent ticks. Errs
+    /// when no recording is loaded.
+    ///
+    /// At end-of-recording, this is a no-op (the host decides whether to
+    /// rewind via `seekRecording(0)`). Two arms of `tickPlayback`'s
+    /// auto-pause contract would otherwise diverge: `Play` from the last
+    /// frame would restart the timeline, but `Play` arriving one frame
+    /// later (after the auto-pause) does not.
+    #[allow(non_snake_case)]
+    pub fn playRecording(&mut self, now_ms: f64) -> Result<(), JsError> {
+        let s = self
+            .playback
+            .as_mut()
+            .ok_or_else(|| JsError::new("no recording loaded"))?;
+        if s.frame_idx + 1 >= s.frame_count() {
+            return Ok(());
+        }
+        s.playing = true;
+        s.anchor(now_ms);
+        Ok(())
+    }
+
+    /// Halt the play loop. Idempotent.
+    #[allow(non_snake_case)]
+    pub fn pauseRecording(&mut self) {
+        if let Some(s) = self.playback.as_mut() {
+            s.playing = false;
+        }
+    }
+
+    /// `true` while play is active. `false` when paused, at end-of-recording,
+    /// or when no recording is loaded.
+    #[allow(non_snake_case)]
+    pub fn isPlaying(&self) -> bool {
+        self.playback.as_ref().is_some_and(|s| s.playing)
+    }
+
+    /// Drive playback forward to whichever frame matches `now_ms` against
+    /// the play-anchor. Returns `true` if the displayed frame changed.
+    /// Auto-pauses on reaching the last frame. No-op when no session is
+    /// loaded or `playing == false`.
+    ///
+    /// Host pattern: call from the same rAF loop that drives `paintIfDirty`.
+    /// `paintIfDirty` short-circuits while a session is loaded, so the two
+    /// never paint in the same tick.
+    #[allow(non_snake_case)]
+    pub fn tickPlayback(&mut self, now_ms: f64) -> bool {
+        let Some(s) = self.playback.as_mut() else {
+            return false;
+        };
+        if !s.playing {
+            return false;
+        }
+        let target = s.target_frame_for(now_ms);
+        let last = s.frame_count().saturating_sub(1);
+        let changed = target != s.frame_idx;
+        if target >= last {
+            s.playing = false;
+        }
+        if !changed {
+            return false;
+        }
+        // Ignore inner errors: target is computed from the session's own
+        // frame_count, so the only failure mode (no session) can't fire here.
+        let _ = self.seek_recording_inner(target);
+        true
+    }
+
+    /// Drop the active session and request a Fresh repaint so the live
+    /// worksheet returns on the next rAF tick. Restores the canvas CSS
+    /// dimensions and resizes the orchestrator back to the pre-playback
+    /// live size + DPR. No-op when no session is loaded.
+    #[allow(non_snake_case)]
+    pub fn exitPlayback(&mut self) {
+        let Some(session) = self.playback.take() else {
+            return;
+        };
+        // Clear the inline overrides so the `.ws-canvas { width: 100%;
+        // height: 100% }` rule controls display size again.
+        let _ = clear_canvas_css_size(self.orch.grid_surface().inner().canvas());
+        let _ = clear_canvas_css_size(self.orch.overlay_surface().inner().canvas());
+
+        self.last_dpr = session.live_dpr;
+        self.orch.resize(session.live_size, session.live_dpr);
+        self.orch.request_repaint();
+    }
+
+    /// `true` while a playback session is loaded.
+    #[allow(non_snake_case)]
+    pub fn playbackActive(&self) -> bool {
+        self.playback.is_some()
+    }
+
+    /// Total frames in the loaded recording, or 0 if none loaded.
+    #[allow(non_snake_case)]
+    pub fn recordingFrameCount(&self) -> u32 {
+        self.playback.as_ref().map_or(0, PlaybackSession::frame_count)
+    }
+
+    /// Current playback frame index, or 0 if none loaded.
+    #[allow(non_snake_case)]
+    pub fn recordingCurrentFrame(&self) -> u32 {
+        self.playback.as_ref().map_or(0, |s| s.frame_idx)
+    }
+}
+
+/// Override `<canvas>` inline width / height (CSS pixels) so the
+/// displayed canvas matches `size`. The `.ws-canvas` CSS class pins
+/// display size to `100%`; without an inline override the recording's
+/// backing-store resize would be scaled back down to the container.
+#[cfg(feature = "dev-tools")]
+fn set_canvas_css_size(
+    canvas: &HtmlCanvasElement,
+    size: CanvasSize,
+) -> Result<(), JsError> {
+    let style = canvas.style();
+    style
+        .set_property("width", &format!("{}px", size.w))
+        .map_err(|_| JsError::new("failed to set canvas inline width"))?;
+    style
+        .set_property("height", &format!("{}px", size.h))
+        .map_err(|_| JsError::new("failed to set canvas inline height"))?;
+    Ok(())
+}
+
+/// Clear the inline width / height overrides set by
+/// `set_canvas_css_size` so the `.ws-canvas` CSS rule controls display
+/// size again.
+#[cfg(feature = "dev-tools")]
+fn clear_canvas_css_size(canvas: &HtmlCanvasElement) -> Result<(), JsError> {
+    let style = canvas.style();
+    style
+        .remove_property("width")
+        .map_err(|_| JsError::new("failed to clear canvas inline width"))?;
+    style
+        .remove_property("height")
+        .map_err(|_| JsError::new("failed to clear canvas inline height"))?;
+    Ok(())
+}
+
+#[cfg(feature = "dev-tools")]
+impl IronCanvas {
+    fn seek_recording_inner(&mut self, frame_idx: u32) -> Result<(), JsError> {
+        let session = self
+            .playback
+            .as_mut()
+            .ok_or_else(|| JsError::new("no recording loaded"))?;
+        let count = session.frame_count();
+        if count == 0 {
+            return Err(JsError::new("recording has no frames"));
+        }
+        let clamped = frame_idx.min(count - 1);
+        session.frame_idx = clamped;
+
+        let grid = self.orch.grid_surface().painter();
+        let overlay = self.orch.overlay_surface().painter();
+        replay_through(grid, overlay, &session.recording, clamped);
+        Ok(())
     }
 }

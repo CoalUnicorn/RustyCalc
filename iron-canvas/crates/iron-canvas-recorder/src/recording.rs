@@ -76,7 +76,11 @@ use crate::DrawOp;
 
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
-pub const ICR_SCHEMA_VERSION: u32 = 1;
+///
+/// v2 (2026-05): added `IcrHeader::dpr` so playback can resize the live
+/// canvas to recording dimensions without scanning frame 0 for the first
+/// `ApplyDprTransform` op.
+pub const ICR_SCHEMA_VERSION: u32 = 2;
 
 /// Per-paint-tick capture. Built by the host (e.g. `IronCanvas::paintIfDirty`
 /// wrapper) by reading `Orchestrator::last_regime()` + `last_signals()`
@@ -148,6 +152,11 @@ pub struct IcrHeader {
     /// rather than `CanvasSize` to keep the engine `CanvasSize` serde-free.
     pub canvas_w: f64,
     pub canvas_h: f64,
+    /// Device pixel ratio at recording start. Playback uses this to size
+    /// the backing store and forward the right transform to the live
+    /// painter without scanning frame 0 for the first
+    /// `ApplyDprTransform`. Added in schema v2.
+    pub dpr: i32,
     pub theme: ThemeSnapshot,
     /// Unix epoch milliseconds when `startRecording` fired. Host-supplied.
     pub started_at_unix_ms: u64,
@@ -160,6 +169,7 @@ impl IcrHeader {
     pub fn new(
         canvas_w: f64,
         canvas_h: f64,
+        dpr: i32,
         theme: ThemeSnapshot,
         started_at_unix_ms: u64,
     ) -> Self {
@@ -168,6 +178,7 @@ impl IcrHeader {
             iron_canvas_version: env!("CARGO_PKG_VERSION").to_string(),
             canvas_w,
             canvas_h,
+            dpr,
             theme,
             started_at_unix_ms,
             partial: false,
@@ -247,7 +258,7 @@ mod tests {
     use iron_canvas_core::theme::CanvasTheme;
 
     fn header() -> IcrHeader {
-        IcrHeader::new(800.0, 400.0, ThemeSnapshot::from(&CanvasTheme::light()), 0)
+        IcrHeader::new(800.0, 400.0, 1, ThemeSnapshot::from(&CanvasTheme::light()), 0)
     }
 
     fn pix(x: i32, y: i32, w: i32, h: i32) -> PixelRect {

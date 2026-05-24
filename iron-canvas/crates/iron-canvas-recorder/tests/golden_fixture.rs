@@ -124,6 +124,7 @@ fn build_fixture() -> Recording {
     let header = IcrHeader::new(
         200.0,
         100.0,
+        1,
         ThemeSnapshot::from(&CanvasTheme::light()),
         0, // deterministic — never reads wall clock
     );

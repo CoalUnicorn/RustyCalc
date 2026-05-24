@@ -5,7 +5,6 @@ use crate::decoration::Layer;
 use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::types::coord::RCRange;
-use crate::CanvasModel;
 
 #[derive(Default)]
 pub struct PointModeLayer {
@@ -13,7 +12,11 @@ pub struct PointModeLayer {
 }
 
 impl Layer for PointModeLayer {
-    fn paint(&self, _model: &dyn CanvasModel, frame: &Chrome, painter: &dyn Painter) {
+    fn group(&self) -> GroupClass {
+        GroupClass::PointMode
+    }
+
+    fn paint(&self, frame: &Chrome, painter: &dyn Painter) {
         let Some(pr) = self.point_range else {
             return;
         };
@@ -22,13 +25,11 @@ impl Layer for PointModeLayer {
         };
         // Tint first so the dashed outline lands cleanly on top — the
         // 8% alpha would otherwise wash over and dim the dashes.
-        painter.begin_group(GroupClass::PointMode);
         painter.rect_fill(b, PaintColor::from_theme_str(&frame.theme.pointing_tint));
         painter.rect_dashed(
             b,
             PaintColor::from_theme_str(&frame.theme.pointing),
             f64::from(DASHED_BORDER_WIDTH),
         );
-        painter.end_group();
     }
 }

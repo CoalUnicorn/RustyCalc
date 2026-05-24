@@ -7,22 +7,27 @@ use crate::geometry::constants::{AUTOFILL_HIT_PAD_PX, STANDARD_BORDER_WIDTH};
 use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::types::coord::{AutofillTarget, RCRange};
 use crate::types::ui::HitTest;
-use crate::CanvasModel;
 
 #[derive(Default)]
 pub struct AutofillLayer {
     pub extend_to: Option<AutofillTarget>,
+    /// Snapshot of the selection rectangle the autofill drag extends from.
+    /// Mirrored from `SelectionLayer::selection_range` by the orchestrator
+    /// at refresh time so the preview is paint-coherent with the painted
+    /// selection rather than chasing the live model.
+    pub selection_range: RCRange,
 }
 
 impl Layer for AutofillLayer {
-    fn paint(&self, model: &dyn CanvasModel, frame: &Chrome, painter: &dyn Painter) {
+    fn group(&self) -> GroupClass {
+        GroupClass::Autofill
+    }
+
+    fn paint(&self, frame: &Chrome, painter: &dyn Painter) {
         let Some(target) = self.extend_to else {
             return;
         };
-        let Some(view) = model.get_selected_view() else {
-            return;
-        };
-        let sel = view.selection.normalized();
+        let sel = self.selection_range.normalized();
         let range = RCRange {
             r1: sel.r1.min(target.row),
             c1: sel.c1.min(target.col),
@@ -32,13 +37,11 @@ impl Layer for AutofillLayer {
         let Some(b) = frame.range_rect(range) else {
             return;
         };
-        painter.begin_group(GroupClass::Autofill);
         painter.rect_dashed(
             b,
             PaintColor::from_theme_str(&frame.theme.selection_color),
             f64::from(STANDARD_BORDER_WIDTH),
         );
-        painter.end_group();
     }
 
     fn hit_test(

@@ -37,6 +37,14 @@ impl WebSurface {
             painter: Rc::new(CanvasPainter::new(ctx)),
         })
     }
+
+    /// Underlying `<canvas>` element. Exposed so the orchestrator can
+    /// override inline CSS dimensions during playback (the CSS class
+    /// pins display size to `100%`; without an inline override the
+    /// backing-store resize would not move the display size).
+    pub fn canvas(&self) -> &HtmlCanvasElement {
+        &self.canvas
+    }
 }
 
 impl Surface for WebSurface {

@@ -26,6 +26,19 @@ pub enum RecordingCmd {
     Stop,
 }
 
+/// One-shot command from the PlaybackPanel to the Worksheet dispatch
+/// Effect. Same drain pattern as [`RecordingCmd`]. `Load` carries owned
+/// `.icr` bytes — read once by the Effect, then cleared.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub enum PlaybackCmd {
+    Load(Vec<u8>),
+    Seek(u32),
+    Play,
+    Pause,
+    Exit,
+}
+
 #[derive(Clone, Copy)]
 pub struct AppState {
     events: EventBus,
@@ -47,6 +60,22 @@ pub struct AppState {
     /// once dispatched. See [`RecordingCmd`].
     #[allow(dead_code)]
     pub recording_cmd: Split<Option<RecordingCmd>>,
+    /// Pending playback command. Cleared by Worksheet once dispatched.
+    #[allow(dead_code)]
+    pub playback_cmd: Split<Option<PlaybackCmd>>,
+    /// `true` once an `.icr` is loaded and playback has taken ownership of
+    /// the live canvases; `false` again on Exit.
+    #[allow(dead_code)]
+    pub playback_loaded: Split<bool>,
+    /// Mirrors `IronCanvas::isPlaying()` — synced from the rAF tick.
+    #[allow(dead_code)]
+    pub playback_playing: Split<bool>,
+    /// Current displayed frame, synced from the rAF tick.
+    #[allow(dead_code)]
+    pub playback_frame: Split<u32>,
+    /// Total frames in the loaded recording. Set on Load, zeroed on Exit.
+    #[allow(dead_code)]
+    pub playback_frame_count: Split<u32>,
     pub perf: PerfTimings,
     /// Bumped when the workbook registry changes (create/delete/rename/group).
     pub registry_version: RwSignal<u64>,
@@ -64,6 +93,11 @@ impl AppState {
             show_perf_panel: Split::new(cfg!(feature = "dev-tools")),
             recording_active: Split::new(false),
             recording_cmd: Split::new(None),
+            playback_cmd: Split::new(None),
+            playback_loaded: Split::new(false),
+            playback_playing: Split::new(false),
+            playback_frame: Split::new(0),
+            playback_frame_count: Split::new(0),
             perf: PerfTimings::new(),
             registry_version: RwSignal::new(0),
         }

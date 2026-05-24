@@ -7,7 +7,7 @@ use std::rc::Rc;
 use web_sys::HtmlCanvasElement;
 
 #[cfg(feature = "dev-tools")]
-use crate::app_state::{AppState, RecordingCmd};
+use crate::app_state::{AppState, PlaybackCmd, RecordingCmd};
 use crate::components::cell_editor::CellEditor;
 use crate::coord::ActiveRef;
 use crate::coord::{CellArea, SheetRange};
@@ -114,6 +114,15 @@ pub fn Worksheet() -> impl IntoView {
     // Cleanup is automatic when the component unmounts.
     let container_ref = NodeRef::<html::Div>::new();
     let _ = use_resize_observer(container_ref, move |_, _| {
+        // During playback the orchestrator + canvas backing stores are
+        // pinned to the recording's dimensions; a live container resize
+        // (window resize, devtools) would otherwise clobber them and
+        // skew the replay.
+        #[cfg(feature = "dev-tools")]
+        if app.playback_loaded.get_untracked() {
+            return;
+        }
+
         state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
 
         // Mirror the new dims into the orchestrator. Both canvases share
@@ -323,7 +332,7 @@ pub fn Worksheet() -> impl IntoView {
                 return;
             };
             match cmd {
-                RecordingCmd::Start => match ic.startRecording() {
+                RecordingCmd::Start => match ic.startRecording(wasm_bindgen::JsValue::UNDEFINED) {
                     Ok(()) => app.recording_active.set(true),
                     Err(e) => state.status.set(Some(StatusMessage::Error(format!(
                         "startRecording failed: {e:?}"
@@ -358,6 +367,74 @@ pub fn Worksheet() -> impl IntoView {
             }
         });
         app.recording_cmd.set(None);
+    });
+
+    // Playback command dispatch. Mirror of the recording Effect: drain a
+    // one-shot PlaybackCmd onto the live IronCanvas, mirror result state
+    // back into AppState signals so the PlaybackPanel re-renders.
+    #[cfg(feature = "dev-tools")]
+    Effect::new(move |_| {
+        let Some(cmd) = app.playback_cmd.get() else {
+            return;
+        };
+        canvas_handle.update_value(|slot| {
+            let Some(ic) = slot.as_mut() else {
+                state
+                    .status
+                    .set(Some(StatusMessage::Error("canvas not ready".into())));
+                return;
+            };
+            match cmd {
+                PlaybackCmd::Load(bytes) => match ic.loadRecording(&bytes) {
+                    Ok(()) => {
+                        app.playback_loaded.set(true);
+                        app.playback_frame_count.set(ic.recordingFrameCount());
+                        app.playback_frame.set(ic.recordingCurrentFrame());
+                        app.playback_playing.set(false);
+                    }
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "loadRecording failed: {e:?}"
+                    )))),
+                },
+                PlaybackCmd::Seek(idx) => match ic.seekRecording(idx) {
+                    Ok(()) => {
+                        app.playback_frame.set(ic.recordingCurrentFrame());
+                        // Stage 2 invariant: seek pauses any active play loop.
+                        app.playback_playing.set(false);
+                    }
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "seekRecording failed: {e:?}"
+                    )))),
+                },
+                PlaybackCmd::Play => match ic.playRecording(crate::perf::now()) {
+                    Ok(()) => {
+                        app.playback_playing.set(true);
+                        // Wake the rAF: tickPlayback runs on every frame
+                        // unconditionally, but a render_needed bump ensures
+                        // we don't stall on a sleeping rAF after a long pause.
+                        render_needed.set(true);
+                    }
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "playRecording failed: {e:?}"
+                    )))),
+                },
+                PlaybackCmd::Pause => {
+                    ic.pauseRecording();
+                    app.playback_playing.set(false);
+                }
+                PlaybackCmd::Exit => {
+                    ic.exitPlayback();
+                    app.playback_loaded.set(false);
+                    app.playback_playing.set(false);
+                    app.playback_frame.set(0);
+                    app.playback_frame_count.set(0);
+                    // exitPlayback called request_repaint on the engine; we
+                    // also need a rAF wake so paintIfDirty fires next tick.
+                    render_needed.set(true);
+                }
+            }
+        });
+        app.playback_cmd.set(None);
     });
 
     // rAF render loop - fires on every animation frame (~60 fps).
@@ -418,6 +495,24 @@ pub fn Worksheet() -> impl IntoView {
                 Err(e) => web_sys::console::error_1(&e),
             }
         });
+
+        // Playback tick. Runs unconditionally so play cadence is independent
+        // of `render_needed` (which is gated on workbook state changes).
+        // No-op when no recording is loaded or play is paused.
+        #[cfg(feature = "dev-tools")]
+        if app.playback_loaded.get_untracked() && app.playback_playing.get_untracked() {
+            canvas_handle.update_value(|slot| {
+                if let Some(ic) = slot.as_mut() {
+                    if ic.tickPlayback(crate::perf::now()) {
+                        app.playback_frame.set(ic.recordingCurrentFrame());
+                    }
+                    // Engine auto-pauses at end-of-recording — mirror it.
+                    if !ic.isPlaying() {
+                        app.playback_playing.set(false);
+                    }
+                }
+            });
+        }
 
         if !render_needed.get_untracked() {
             return;
@@ -494,8 +589,22 @@ pub fn Worksheet() -> impl IntoView {
         handle_wheel(ev, model, state);
     };
 
+    // Allow scrolling the container while a recording is loaded — the
+    // recording may be larger than the current viewport. Reverts to the
+    // CSS default (`hidden` for `.ws`) when playback exits.
+    #[cfg(feature = "dev-tools")]
+    let container_overflow = move || {
+        if app.playback_loaded.get() {
+            "auto"
+        } else {
+            ""
+        }
+    };
+    #[cfg(not(feature = "dev-tools"))]
+    let container_overflow = move || "";
+
     view! {
-        <div node_ref=container_ref class="ws">
+        <div node_ref=container_ref class="ws" style:overflow=container_overflow>
             <canvas
                 node_ref=grid_ref
                 role="application"

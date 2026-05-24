@@ -164,11 +164,12 @@ fn slots_reuse_regime_skips_full_canvas_fill() {
 
     let grid_before = grid_ops_len(&orch);
 
-    // A theme change keeps the viewport stable → validity = SlotsReuse.
-    // The decide cascade routes here because grid_dirty (STRUCTURAL is
-    // raised) blocks the Overlay arm and screen_for_blit returns None
-    // (no scroll).
-    orch.set_theme(CanvasTheme::dark());
+    // A content-dirty signal keeps the viewport stable → validity =
+    // SlotsReuse. The decide cascade routes here because CONTENT blocks
+    // the Viewport arm (blit on stale content is the recalc bug) and
+    // validity stays SlotsReuse. Theme swaps no longer reach this regime
+    // — they invalidate the paint cache and force Fresh.
+    orch.mark_content_dirty(PaneRegionMask::ALL);
     orch.paint_if_dirty();
 
     let new_grid_ops = grid_ops_since(&orch, grid_before);
@@ -352,7 +353,12 @@ fn last_regime_fresh_after_initial_paint() {
 }
 
 #[test]
-fn last_regime_slots_reuse_after_theme_swap() {
+fn last_regime_fresh_after_theme_swap() {
+    // Theme is frame-wide: the per-cell paint cache and last_frame's
+    // theme snapshot both go stale on a palette change, so set_theme
+    // drops last_frame and invalidates the paint cache. The next paint
+    // takes the Fresh arm; SlotsReuse would repaint stale-color cells
+    // under fresh chrome.
     let stub = Rc::new(ScrollableStub::new());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
@@ -360,7 +366,7 @@ fn last_regime_slots_reuse_after_theme_swap() {
     orch.set_theme(CanvasTheme::dark());
     let (grid_ops, _, regime, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(regime, Some(PaintRegimeTag::Fresh));
     assert!(!grid_ops.is_empty());
 }
 
@@ -424,7 +430,11 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     };
 
     push(&mut orch, 0); // Fresh
-    orch.set_theme(CanvasTheme::dark());
+    // mark_content_dirty raises CONTENT; viewport stays valid → SlotsReuse.
+    // (set_theme used to land here too, but a palette change now invalidates
+    // the paint cache and routes to Fresh, so it can't be used as a
+    // SlotsReuse trigger.)
+    orch.mark_content_dirty(PaneRegionMask::ALL);
     push(&mut orch, 16); // SlotsReuse
     stub.set_top_row(2);
     orch.request_overlay_repaint();
@@ -447,6 +457,7 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     let header = IcrHeader::new(
         800.0,
         600.0,
+        1,
         ThemeSnapshot::from(orch.theme()),
         0, // deterministic — tests don't read wall-clock for this field
     );

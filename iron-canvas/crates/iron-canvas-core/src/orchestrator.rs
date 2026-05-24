@@ -203,12 +203,20 @@ where
     }
 
     /// Push a theme. Value-compares against `self.theme` and, on change,
-    /// marks both layers dirty.
+    /// drops `last_frame`, invalidates the renderer paint cache, and
+    /// marks both layers dirty. Theme is frame-wide — the per-cell pixel
+    /// cache holds the old palette and `is_still_valid` does not check
+    /// theme, so without the cache invalidation `SlotsReuse` would
+    /// repaint stale-color cells under fresh chrome.
     pub fn set_theme(&mut self, theme: CanvasTheme) {
         if theme != self.theme {
             self.theme = theme;
-            self.grid.raise(GridSignals::STRUCTURAL);
-            self.overlay.raise(GridSignals::STRUCTURAL);
+            self.last_frame = None;
+            self.grid.invalidate_paint_cache();
+            self.grid
+                .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
+            self.overlay
+                .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
         }
     }
 
@@ -292,7 +300,10 @@ where
             &self.autofill,
             &self.selection,
         ];
-        let sel = self.selection.selection_range;
+        // No live selection → pass a zero range; the decoration layers that
+        // consult `sel` (autofill, formula-refs) treat it as "no anchor"
+        // and naturally fall through to the frame's pure cell hit-test.
+        let sel = self.selection.selection_range.unwrap_or_default();
         for layer in layers {
             if let Some(hit) = layer.hit_test(frame, sel, xi, yi) {
                 return hit;
@@ -334,7 +345,7 @@ where
     pub fn autofill_handle(&self) -> Option<Point> {
         self.last_frame
             .as_ref()?
-            .autofill_handle(self.selection.selection_range)
+            .autofill_handle(self.selection.selection_range?)
     }
 
     /// Paint whichever layers are dirty. Dispatches via `decide` into one
@@ -398,11 +409,19 @@ where
         // stale content propagates wrong pixels — the recalc bug) but
         // not on a typed VIEWPORT signal: no JS-facing setter raises
         // VIEWPORT today, so requiring it would dead-code this arm.
+        // Blit needs the previous frame's active-cell snapshot to re-hash
+        // against live state and reject the fast-path on a content change.
+        // Without a live selection there is nothing to re-hash, so the
+        // blit attempt is skipped entirely and dispatch falls through.
         if !content_dirty {
-            if let Some(plan) = self.last_frame.as_ref().and_then(|f| {
-                f.screen_for_blit(model, self.size, &self.theme, &self.selection.active_cell)
-            }) {
-                return PaintRegime::Viewport(plan);
+            if let Some(active) = self.selection.active_cell.as_ref() {
+                if let Some(plan) = self
+                    .last_frame
+                    .as_ref()
+                    .and_then(|f| f.screen_for_blit(model, self.size, &self.theme, active))
+                {
+                    return PaintRegime::Viewport(plan);
+                }
             }
         }
 
@@ -418,12 +437,22 @@ where
         PaintRegime::Fresh(sig)
     }
 
+    /// Refresh per-paint overlay state from the live model and mirror
+    /// the selection rectangle into `AutofillLayer` so the preview is
+    /// paint-coherent with the painted selection. Single source of
+    /// truth for the cross-decoration mirror — every regime calls this
+    /// instead of `self.selection.refresh(model)` directly.
+    fn refresh_overlay_state(&mut self, model: &dyn CanvasModel) {
+        self.selection.refresh(model);
+        self.autofill.selection_range = self.selection.selection_range.unwrap_or_default();
+    }
+
     /// Overlay-only fast path. Triggered by autofill drag, clipboard state
     /// change, formula-ref highlight updates, and active-cell moves —
     /// anything that leaves grid pixels untouched. `decide` proves the
     /// preconditions (slot vecs still match, `last_frame` is `Some`).
     fn paint_overlay_regime(&mut self, model: &dyn CanvasModel) {
-        self.selection.refresh(model);
+        self.refresh_overlay_state(model);
         let Some(prev) = self.last_frame.as_ref() else {
             return;
         };
@@ -456,7 +485,7 @@ where
             FramePath::Blit(&plan),
         );
         self.grid.paint_grid_blit(model, &frame, &plan);
-        self.selection.refresh(model);
+        self.refresh_overlay_state(model);
         self.overlay.paint_overlay_layer(
             model,
             &frame,
@@ -499,7 +528,7 @@ where
         // CONTENT-only signal the grid just repainted with new values,
         // so the next paint's `screen_for_blit` must compare against
         // the post-edit hash.
-        self.selection.refresh(model);
+        self.refresh_overlay_state(model);
         if signals.overlay_dirty() {
             self.overlay.paint_overlay_layer(
                 model,
@@ -531,7 +560,7 @@ where
         }
         self.grid.invalidate_paint_cache();
         self.grid.paint_grid(model, &frame);
-        self.selection.refresh(model);
+        self.refresh_overlay_state(model);
         if signals.overlay_dirty() {
             self.overlay.paint_overlay_layer(
                 model,

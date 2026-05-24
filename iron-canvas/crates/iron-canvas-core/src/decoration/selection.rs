@@ -1,62 +1,71 @@
 //! Blue selection border + semi-transparent fill + autofill handle for
-//! the active selection.
+//! the active selection. Three-phase paint: fill (under), renderer's
+//! active-cell repaint, stroke + handle (over). The orchestrator drives
+//! the phases by name.
 
 use crate::chrome::{ActiveCellSnapshot, Chrome};
-use crate::decoration::{Layer, RepaintActiveCell};
+use crate::decoration::Layer;
 use crate::geometry::constants::{AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH};
-use crate::painter::{PaintColor, Painter};
+use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::types::coord::RCRange;
 use crate::CanvasModel;
 
 #[derive(Default)]
 pub struct SelectionLayer {
-    pub selection_range: RCRange,
-    pub active_cell: ActiveCellSnapshot,
+    /// `None` when the model has no selected view — sheet swap mid-tick,
+    /// workbook reload, or pre-first-refresh. Every consumer that paints
+    /// or queries against the selection must gate on `Some` so stale
+    /// state from the previous sheet can't bleed through.
+    pub selection_range: Option<RCRange>,
+    pub active_cell: Option<ActiveCellSnapshot>,
+}
+
+/// Coordinates of the active cell the renderer must repaint between the
+/// selection fill and stroke phases.
+pub struct RepaintActiveCell {
+    pub row: i32,
+    pub col: i32,
 }
 
 impl SelectionLayer {
     /// Pull selection state from the model. Called by the orchestrator
     /// before any paint or hit-test, and before `screen_for_blit` so
     /// the active-cell snapshot reflects the model the blit would
-    /// reuse pixels against.
+    /// reuse pixels against. Clears to `None` when the model has no
+    /// selected view so stale state from the previous sheet cannot
+    /// paint a ghost selection.
     pub fn refresh(&mut self, model: &dyn CanvasModel) {
-        if let Some(view) = model.get_selected_view() {
-            self.selection_range = view.selection;
-            self.active_cell = ActiveCellSnapshot::capture(
-                model,
-                model.get_selected_sheet(),
-                view.row,
-                view.column,
-            );
-        }
-    }
-}
-
-impl Layer for SelectionLayer {
-    fn paint(&self, _model: &dyn CanvasModel, frame: &Chrome, painter: &dyn Painter) {
-        let Some(cell) = frame.range_rect(self.selection_range.normalized()) else {
+        let Some(view) = model.get_selected_view() else {
+            self.selection_range = None;
+            self.active_cell = None;
             return;
         };
-        painter.rect_fill(
-            cell,
-            PaintColor::from_theme_str(&frame.theme.selection_fill),
-        );
+        self.selection_range = Some(view.selection);
+        self.active_cell = Some(ActiveCellSnapshot::capture(
+            model,
+            model.get_selected_sheet(),
+            view.row,
+            view.column,
+        ));
     }
 
-    fn after_paint_renderer_hook(
-        &self,
-        model: &dyn CanvasModel,
-        _frame: &Chrome,
-    ) -> Option<RepaintActiveCell> {
-        let view = model.get_selected_view()?;
-        Some(RepaintActiveCell {
-            row: view.row,
-            col: view.column,
+    /// Active-cell coords for the renderer's repaint pass, fired between
+    /// the selection fill and stroke. `None` when no view is selected —
+    /// the renderer skips the repaint entirely rather than repainting A1.
+    pub fn active_cell_repaint(&self) -> Option<RepaintActiveCell> {
+        self.active_cell.as_ref().map(|a| RepaintActiveCell {
+            row: a.row,
+            col: a.col,
         })
     }
 
-    fn paint_after_hook(&self, _model: &dyn CanvasModel, frame: &Chrome, painter: &dyn Painter) {
-        let Some(cell) = frame.range_rect(self.selection_range.normalized()) else {
+    /// Stroke + autofill-handle. Painted *after* the renderer's active-cell
+    /// repaint so the stroke crisply overlays the cell border.
+    pub fn paint_stroke(&self, frame: &Chrome, painter: &dyn Painter) {
+        let Some(range) = self.selection_range else {
+            return;
+        };
+        let Some(cell) = frame.range_rect(range.normalized()) else {
             return;
         };
 
@@ -70,7 +79,7 @@ impl Layer for SelectionLayer {
             f64::from(SELECTION_BORDER_WIDTH),
         );
 
-        if let Some(handle) = frame.autofill_handle_rect(self.selection_range) {
+        if let Some(handle) = frame.autofill_handle_rect(range) {
             painter.rect_fill(
                 handle,
                 PaintColor::from_theme_str(&frame.theme.selection_color),
@@ -81,5 +90,24 @@ impl Layer for SelectionLayer {
                 f64::from(AUTOFILL_HANDLE_BORDER_PX),
             );
         }
+    }
+}
+
+impl Layer for SelectionLayer {
+    fn group(&self) -> GroupClass {
+        GroupClass::SelectionFill
+    }
+
+    fn paint(&self, frame: &Chrome, painter: &dyn Painter) {
+        let Some(range) = self.selection_range else {
+            return;
+        };
+        let Some(cell) = frame.range_rect(range.normalized()) else {
+            return;
+        };
+        painter.rect_fill(
+            cell,
+            PaintColor::from_theme_str(&frame.theme.selection_fill),
+        );
     }
 }

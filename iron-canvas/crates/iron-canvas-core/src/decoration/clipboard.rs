@@ -6,7 +6,6 @@ use crate::decoration::Layer;
 use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::types::coord::SheetArea;
-use crate::CanvasModel;
 
 #[derive(Default)]
 pub struct ClipboardLayer {
@@ -14,22 +13,24 @@ pub struct ClipboardLayer {
 }
 
 impl Layer for ClipboardLayer {
-    fn paint(&self, model: &dyn CanvasModel, frame: &Chrome, painter: &dyn Painter) {
+    fn group(&self) -> GroupClass {
+        GroupClass::Clipboard
+    }
+
+    fn paint(&self, frame: &Chrome, painter: &dyn Painter) {
         let Some(cb) = self.clipboard.as_ref() else {
             return;
         };
-        if cb.sheet != model.get_selected_sheet() {
+        if cb.sheet != frame.sheet {
             return;
         }
         let Some(b) = frame.range_rect(cb.range.normalized()) else {
             return;
         };
-        painter.begin_group(GroupClass::Clipboard);
         painter.rect_dashed(
             b,
             PaintColor::from_theme_str(&frame.theme.selection_color),
             f64::from(DASHED_BORDER_WIDTH),
         );
-        painter.end_group();
     }
 }

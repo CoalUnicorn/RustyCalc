@@ -12,6 +12,8 @@
 mod canvas_painter;
 mod orchestrator;
 #[cfg(feature = "dev-tools")]
+mod playback;
+#[cfg(feature = "dev-tools")]
 mod replay;
 pub mod theme_from_element;
 pub mod wasm;

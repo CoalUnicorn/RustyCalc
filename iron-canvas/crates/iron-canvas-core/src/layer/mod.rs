@@ -210,10 +210,13 @@ where
         // and the rest so the highlighted header strip is above the
         // selection tint.
         painter.begin_group(GroupClass::SelectionFill);
-        selection.paint(model, frame, painter);
+        selection.paint(frame, painter);
         painter.end_group();
 
-        if let Some(hook) = selection.after_paint_renderer_hook(model, frame) {
+        // Gate on `Some` so a tick where the model briefly has no selected
+        // view (sheet swap, workbook reload) does not repaint A1 with the
+        // default-zero snapshot or emit an empty bracket into recordings.
+        if let Some(hook) = selection.active_cell_repaint() {
             painter.begin_group(GroupClass::ActiveCellRepaint);
             self.renderer
                 .repaint_active_cell(model, hook.row, hook.col, frame);
@@ -221,18 +224,23 @@ where
         }
 
         painter.begin_group(GroupClass::SelectionStroke);
-        selection.paint_after_hook(model, frame, painter);
+        selection.paint_stroke(frame, painter);
         painter.end_group();
 
-        painter.begin_group(GroupClass::HeaderHighlights);
-        self.renderer
-            .render_header_highlights(Axis::Row, frame, selection.selection_range);
-        self.renderer
-            .render_header_highlights(Axis::Column, frame, selection.selection_range);
-        painter.end_group();
+        if let Some(sel) = selection.selection_range {
+            painter.begin_group(GroupClass::HeaderHighlights);
+            self.renderer
+                .render_header_highlights(Axis::Row, frame, sel);
+            self.renderer
+                .render_header_highlights(Axis::Column, frame, sel);
+            painter.end_group();
+        }
 
+        // Other decorations: one group each, named by the layer itself.
         for layer in others {
-            layer.paint(model, frame, painter);
+            painter.begin_group(layer.group());
+            layer.paint(frame, painter);
+            painter.end_group();
         }
         painter.end_group();
     }

@@ -2,6 +2,7 @@ use leptos::prelude::*;
 
 use crate::app_state::AppState;
 use crate::components::perf_panel::PerfPanel;
+use crate::components::playback_panel::PlaybackPanel;
 use crate::input::formula_analysis::FormulaStatus;
 use crate::state::{StatusMessage, WorkbookState};
 
@@ -54,6 +55,7 @@ pub fn StatusBar() -> impl IntoView {
             <Show when=move || app.show_perf_panel.get()>
                 <PerfPanel />
             </Show>
+            <PlaybackPanel />
         </div>
     }
 }

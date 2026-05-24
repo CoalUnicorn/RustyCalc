@@ -11,7 +11,6 @@ use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
 use crate::types::coord::{FormulaRef, FormulaRefKind, RCRange};
 use crate::types::ui::{Corner, HitTest, RefZone, Side};
-use crate::CanvasModel;
 
 #[derive(Default)]
 pub struct FormulaRefsLayer {
@@ -19,14 +18,16 @@ pub struct FormulaRefsLayer {
 }
 
 impl Layer for FormulaRefsLayer {
-    fn paint(&self, model: &dyn CanvasModel, frame: &Chrome, painter: &dyn Painter) {
+    fn group(&self) -> GroupClass {
+        GroupClass::FormulaRefs
+    }
+
+    fn paint(&self, frame: &Chrome, painter: &dyn Painter) {
         if self.refs.is_empty() {
             return;
         }
-        let sheet = model.get_selected_sheet();
-        painter.begin_group(GroupClass::FormulaRefs);
         for fr in &self.refs {
-            if fr.sheet_area.sheet != sheet {
+            if fr.sheet_area.sheet != frame.sheet {
                 continue;
             }
             let Some(b) = frame.range_rect(fr.sheet_area.range.normalized()) else {
@@ -43,7 +44,6 @@ impl Layer for FormulaRefsLayer {
                 f64::from(DASHED_BORDER_WIDTH),
             );
         }
-        painter.end_group();
     }
 
     fn hit_test(

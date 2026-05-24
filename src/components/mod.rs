@@ -10,6 +10,7 @@ pub mod left_drawer;
 pub mod modal;
 pub mod named_ranges;
 pub mod perf_panel;
+pub mod playback_panel;
 pub mod sheet_tab_bar;
 pub mod status_bar;
 pub mod toolbar;
