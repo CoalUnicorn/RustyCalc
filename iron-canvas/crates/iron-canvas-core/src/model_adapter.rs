@@ -78,53 +78,37 @@ pub trait CanvasModel {
     }
 }
 
+/// Emits forwarding bodies that defer to `(**self).<method>(args)` for each
+/// listed signature. Used once below to populate the `Rc<T>` blanket impl
+/// without 12 hand-written shims that move together.
+macro_rules! forward_canvas_model {
+    ($(fn $name:ident(&self $(, $arg:ident: $argty:ty)*) $(-> $ret:ty)?;)*) => {
+        $(
+            fn $name(&self, $($arg: $argty),*) $(-> $ret)? {
+                (**self).$name($($arg),*)
+            }
+        )*
+    };
+}
+
 /// Forwarding impl so `Orchestrator<S, Rc<JsBackedModel>>` (in the web
 /// crate) satisfies the `M: CanvasModel` bound. `?Sized` lets `Rc<dyn
 /// CanvasModel>` also satisfy it for callers that prefer dyn dispatch.
 impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
-    fn get_selected_sheet(&self) -> u32 {
-        (**self).get_selected_sheet()
-    }
-    fn get_selected_view(&self) -> Option<CanvasView> {
-        (**self).get_selected_view()
-    }
-    fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32> {
-        (**self).get_frozen_rows_count(sheet)
-    }
-    fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32> {
-        (**self).get_frozen_columns_count(sheet)
-    }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
-        (**self).get_row_height(sheet, row)
-    }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
-        (**self).get_column_width(sheet, column)
-    }
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
-        (**self).get_show_grid_lines(sheet)
-    }
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style> {
-        (**self).get_cell_style(sheet, row, column)
-    }
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType> {
-        (**self).get_cell_type(sheet, row, column)
-    }
-    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
-        (**self).get_formatted_cell_value(sheet, row, column)
-    }
-    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<Style>>) {
-        (**self).get_cell_styles_in(sheet, range, out)
-    }
-    fn get_formatted_cell_values_in(
-        &self,
-        sheet: u32,
-        range: RCRange,
-        out: &mut Vec<Option<String>>,
-    ) {
-        (**self).get_formatted_cell_values_in(sheet, range, out)
-    }
-    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellType>>) {
-        (**self).get_cell_types_in(sheet, range, out)
+    forward_canvas_model! {
+        fn get_selected_sheet(&self) -> u32;
+        fn get_selected_view(&self) -> Option<CanvasView>;
+        fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
+        fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
+        fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
+        fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
+        fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+        fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
+        fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
+        fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
+        fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<Style>>);
+        fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>);
+        fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellType>>);
     }
 }
 
