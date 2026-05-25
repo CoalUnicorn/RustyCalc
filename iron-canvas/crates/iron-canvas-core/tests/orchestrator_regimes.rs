@@ -11,97 +11,24 @@
 
 #![allow(clippy::unwrap_used)]
 
-use std::cell::Cell;
-use std::rc::Rc;
+mod common;
 
-use ironcalc_base::types::{CellType, Style};
+use std::rc::Rc;
 
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
-use iron_canvas_core::Orchestrator;
-use iron_canvas_core::types::coord::{AutofillTarget, RCRange};
-use iron_canvas_core::{CanvasModel, CanvasTheme, CanvasView};
+use iron_canvas_core::types::coord::AutofillTarget;
+use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
 
 use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
 use iron_canvas_recorder::{replay, DrawOp, MemSurface, RecorderPainter, RecordingSurface};
 
-/// In-memory model whose scroll position and active cell can be mutated
-/// from the test via `Cell` interior mutability while held as `Rc<Self>`
-/// by the Orchestrator. Otherwise returns enough flat data to render a
-/// uniform grid (20px rows × 80px cols, no frozen panes, default style).
-#[derive(Default)]
-struct ScrollableStub {
-    top_row: Cell<i32>,
-    left_column: Cell<i32>,
-    active_row: Cell<i32>,
-    active_col: Cell<i32>,
-}
+use common::TestModel;
 
-impl ScrollableStub {
-    fn new() -> Self {
-        Self {
-            top_row: Cell::new(1),
-            left_column: Cell::new(1),
-            active_row: Cell::new(1),
-            active_col: Cell::new(1),
-        }
-    }
-    fn set_top_row(&self, row: i32) {
-        self.top_row.set(row);
-    }
-}
-
-impl CanvasModel for ScrollableStub {
-    fn get_selected_sheet(&self) -> u32 {
-        0
-    }
-    fn get_selected_view(&self) -> Option<CanvasView> {
-        let r = self.active_row.get();
-        let c = self.active_col.get();
-        Some(CanvasView {
-            sheet: 0,
-            row: r,
-            column: c,
-            selection: RCRange {
-                r1: r,
-                c1: c,
-                r2: r,
-                c2: c,
-            },
-            top_row: self.top_row.get(),
-            left_column: self.left_column.get(),
-        })
-    }
-    fn get_frozen_rows_count(&self, _: u32) -> Option<i32> {
-        Some(0)
-    }
-    fn get_frozen_columns_count(&self, _: u32) -> Option<i32> {
-        Some(0)
-    }
-    fn get_row_height(&self, _: u32, _: i32) -> Option<f64> {
-        Some(20.0)
-    }
-    fn get_column_width(&self, _: u32, _: i32) -> Option<f64> {
-        Some(80.0)
-    }
-    fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
-        Some(true)
-    }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<Style> {
-        Some(Style::default())
-    }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellType> {
-        Some(CellType::Number)
-    }
-    fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Option<String> {
-        Some(String::new())
-    }
-}
-
-fn build(model: Rc<ScrollableStub>) -> Orchestrator<MemSurface, Rc<ScrollableStub>> {
+fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface, Rc<TestModel>> {
     let mut orch =
-        Orchestrator::<MemSurface, Rc<ScrollableStub>>::new(MemSurface::new(), MemSurface::new());
+        Orchestrator::<MemSurface, Rc<TestModel>>::new(MemSurface::new(), MemSurface::new());
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
     orch.set_model(model);
     orch
@@ -128,7 +55,7 @@ fn overlay_ops_since<M: CanvasModel>(
 
 #[test]
 fn fresh_regime_emits_canvas_fill_and_overlay_clear() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
 
     orch.paint_if_dirty();
@@ -158,7 +85,7 @@ fn fresh_regime_emits_canvas_fill_and_overlay_clear() {
 
 #[test]
 fn slots_reuse_regime_skips_full_canvas_fill() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty(); // Fresh — primes last_frame.
 
@@ -186,7 +113,7 @@ fn slots_reuse_regime_skips_full_canvas_fill() {
 
 #[test]
 fn viewport_regime_emits_blit_op() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty(); // Fresh.
 
@@ -212,7 +139,7 @@ fn viewport_regime_emits_blit_op() {
 
 #[test]
 fn overlay_regime_leaves_grid_untouched() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty(); // Fresh.
 
@@ -245,7 +172,7 @@ fn overlay_regime_leaves_grid_untouched() {
 
 #[test]
 fn empty_signals_short_circuit_paint_if_dirty() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty(); // Fresh.
 
@@ -261,7 +188,7 @@ fn empty_signals_short_circuit_paint_if_dirty() {
 
 #[test]
 fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty(); // Fresh.
 
@@ -288,7 +215,7 @@ fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
 
 // ─── Stage 5: Recording round-trip through RecordingSurface<MemSurface> ───
 //
-// Reuses ScrollableStub + the same regime scenarios as the MemSurface
+// Reuses TestModel + the same regime scenarios as the MemSurface
 // suite above. Each test wraps both surfaces in RecordingSurface and
 // asserts:
 //   1. Orchestrator::last_regime() stamps the expected PaintRegimeTag.
@@ -297,13 +224,13 @@ fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
 //      replay() byte-equal against the originals.
 
 fn build_rec(
-    model: Rc<ScrollableStub>,
-) -> Orchestrator<RecordingSurface<MemSurface>, Rc<ScrollableStub>> {
+    model: Rc<TestModel>,
+) -> Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>> {
     let grid = RecordingSurface::new(MemSurface::new());
     let overlay = RecordingSurface::new(MemSurface::new());
     grid.enable_recording();
     overlay.enable_recording();
-    let mut orch = Orchestrator::<RecordingSurface<MemSurface>, Rc<ScrollableStub>>::new(
+    let mut orch = Orchestrator::<RecordingSurface<MemSurface>, Rc<TestModel>>::new(
         grid, overlay,
     );
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
@@ -314,7 +241,7 @@ fn build_rec(
 /// Bracket a paint with begin_frame/end_frame on both surfaces and
 /// return (grid_ops, overlay_ops, regime, signals_bits).
 fn paint_and_capture(
-    orch: &mut Orchestrator<RecordingSurface<MemSurface>, Rc<ScrollableStub>>,
+    orch: &mut Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>>,
 ) -> (Vec<DrawOp>, Vec<DrawOp>, Option<PaintRegimeTag>, u8) {
     orch.grid_surface().begin_frame();
     orch.overlay_surface().begin_frame();
@@ -339,7 +266,7 @@ fn replay_and_drain(ops: &[DrawOp]) -> Vec<DrawOp> {
 
 #[test]
 fn last_regime_fresh_after_initial_paint() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     let (grid_ops, overlay_ops, regime, _) = paint_and_capture(&mut orch);
 
@@ -359,7 +286,7 @@ fn last_regime_fresh_after_theme_swap() {
     // drops last_frame and invalidates the paint cache. The next paint
     // takes the Fresh arm; SlotsReuse would repaint stale-color cells
     // under fresh chrome.
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
 
@@ -372,7 +299,7 @@ fn last_regime_fresh_after_theme_swap() {
 
 #[test]
 fn last_regime_viewport_after_row_scroll() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
 
@@ -386,7 +313,7 @@ fn last_regime_viewport_after_row_scroll() {
 
 #[test]
 fn last_regime_overlay_after_autofill_drag() {
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
 
@@ -403,13 +330,13 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     // Drive Fresh → SlotsReuse → Viewport → Overlay through one
     // Orchestrator, collecting one Frame per regime, then serialize the
     // whole Recording and assert deserialize is bit-equal to the original.
-    let stub = Rc::new(ScrollableStub::new());
+    let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
 
     let mut frames: Vec<Frame> = Vec::new();
     let mut push = |orch: &mut Orchestrator<
         RecordingSurface<MemSurface>,
-        Rc<ScrollableStub>,
+        Rc<TestModel>,
     >,
                     t_ms: u64| {
         let (grid_ops, overlay_ops, regime, signals) = paint_and_capture(orch);

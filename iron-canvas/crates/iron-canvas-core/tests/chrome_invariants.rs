@@ -10,74 +10,28 @@
 //! compiles and runs against the current renderer. Stage 1e adds the
 //! row-header widening assertions.
 
-use ironcalc_base::types::{CellType, Style};
+mod common;
 
 use iron_canvas_core::chrome::{measure_row_header_width, Chrome, FramePath};
 use iron_canvas_core::geometry::constants::{CELL_AREA_INSET, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
+use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
-use iron_canvas_core::painter::GroupClass;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-struct StubModel {
-    top_row: i32,
+use common::{canvas_default, TestModel};
+
+fn at_top() -> TestModel {
+    TestModel::synthetic_grid()
 }
 
-impl StubModel {
-    fn at_top() -> Self {
-        Self { top_row: 1 }
-    }
-
-    fn scrolled_to(top_row: i32) -> Self {
-        Self { top_row }
-    }
+fn scrolled_to(top_row: i32) -> TestModel {
+    TestModel::synthetic_grid().with_top_row(top_row).with_active(top_row, 1)
 }
 
-impl CanvasModel for StubModel {
-    fn get_selected_sheet(&self) -> u32 {
-        0
-    }
-    fn get_selected_view(&self) -> Option<CanvasView> {
-        Some(CanvasView {
-            sheet: 0,
-            row: self.top_row,
-            column: 1,
-            selection: RCRange::from([self.top_row, 1, self.top_row, 1]),
-            top_row: self.top_row,
-            left_column: 1,
-        })
-    }
-    fn get_frozen_rows_count(&self, _: u32) -> Option<i32> {
-        Some(0)
-    }
-    fn get_frozen_columns_count(&self, _: u32) -> Option<i32> {
-        Some(0)
-    }
-    fn get_row_height(&self, _: u32, _: i32) -> Option<f64> {
-        Some(20.0)
-    }
-    fn get_column_width(&self, _: u32, _: i32) -> Option<f64> {
-        Some(80.0)
-    }
-    fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
-        Some(true)
-    }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<Style> {
-        Some(Style::default())
-    }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellType> {
-        Some(CellType::Number)
-    }
-    fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Option<String> {
-        Some(String::new())
-    }
-}
-
-fn drive_render_grid(model: &StubModel, check: impl FnOnce(&Chrome, &[DrawOp])) {
+fn drive_render_grid(model: &TestModel, check: impl FnOnce(&Chrome, &[DrawOp])) {
     let theme = CanvasTheme::light();
-    let canvas = CanvasSize { w: 600.0, h: 400.0 };
-    let frame = Chrome::next(None, model, canvas, &theme, FramePath::Fresh);
+    let frame = Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(model, &frame);
     let ops = core.painter().ops();
@@ -88,14 +42,14 @@ fn drive_render_grid(model: &StubModel, check: impl FnOnce(&Chrome, &[DrawOp])) 
 
 #[test]
 fn render_grid_emits_draw_ops() {
-    drive_render_grid(&StubModel::at_top(), |_, ops| {
+    drive_render_grid(&at_top(), |_, ops| {
         assert!(!ops.is_empty(), "render_grid must emit at least one DrawOp");
     });
 }
 
 #[test]
 fn render_grid_brackets_grid_group_balanced() {
-    drive_render_grid(&StubModel::at_top(), |_, ops| {
+    drive_render_grid(&at_top(), |_, ops| {
         let count = |target: GroupClass| {
             ops.iter()
                 .filter(|op| matches!(op, DrawOp::BeginGroup { class } if *class == target))
@@ -160,8 +114,8 @@ fn measure_row_header_width_at_7_digits_widens_further() {
 
 #[test]
 fn chrome_row_header_width_grows_when_scrolled_into_4_digits() {
-    drive_render_grid(&StubModel::at_top(), |frame_top, _| {
-        drive_render_grid(&StubModel::scrolled_to(10_000), |frame_scrolled, _| {
+    drive_render_grid(&at_top(), |frame_top, _| {
+        drive_render_grid(&scrolled_to(10_000), |frame_scrolled, _| {
             assert_eq!(frame_top.row_header_thickness, HEADER_COL_WIDTH);
             assert!(
                 frame_scrolled.row_header_thickness > frame_top.row_header_thickness,
@@ -186,11 +140,11 @@ fn corner_box_rect_widens_when_scrolled_to_7_digit_rows() {
         })
     };
 
-    drive_render_grid(&StubModel::at_top(), |frame_top, ops_top| {
+    drive_render_grid(&at_top(), |frame_top, ops_top| {
         let top_corner = find_corner_width(ops_top).expect("corner box at top must paint");
         assert_eq!(top_corner, frame_top.row_header_thickness);
 
-        drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame_far, ops_far| {
+        drive_render_grid(&scrolled_to(1_000_000), |frame_far, ops_far| {
             let far_corner =
                 find_corner_width(ops_far).expect("corner box scrolled-far must paint");
             assert_eq!(far_corner, frame_far.row_header_thickness);
@@ -209,7 +163,7 @@ fn corner_box_rect_widens_when_scrolled_to_7_digit_rows() {
 /// (currently static) `col_header_thickness`.
 #[test]
 fn cell_origin_matches_header_thicknesses() {
-    drive_render_grid(&StubModel::at_top(), |frame, _| {
+    drive_render_grid(&at_top(), |frame, _| {
         assert_eq!(frame.col_header_thickness, HEADER_ROW_HEIGHT);
         assert_eq!(
             frame.cell_origin.x,
@@ -223,7 +177,7 @@ fn cell_origin_matches_header_thicknesses() {
         );
     });
 
-    drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame_far, _| {
+    drive_render_grid(&scrolled_to(1_000_000), |frame_far, _| {
         assert_eq!(
             frame_far.cell_origin.x,
             frame_far.row_header_thickness + CELL_AREA_INSET,
@@ -240,7 +194,7 @@ fn cell_origin_matches_header_thicknesses() {
 /// here means headers and cells disagree on where column 1 / row 1 starts.
 #[test]
 fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
-    drive_render_grid(&StubModel::scrolled_to(1_000_000), |frame, _| {
+    drive_render_grid(&scrolled_to(1_000_000), |frame, _| {
         assert!(
             frame.cell_origin.x > HEADER_COL_WIDTH + CELL_AREA_INSET,
             "test premise: 7-digit scroll must widen row header past default \

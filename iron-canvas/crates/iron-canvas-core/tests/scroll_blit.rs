@@ -6,114 +6,23 @@
 //! survives between paints — that's the state the Stage 3.3a strip-fetch
 //! path depends on.
 
-use std::cell::Cell;
-
-use ironcalc_base::types::{CellType, Style};
+mod common;
 
 use iron_canvas_core::chrome::{ActiveCellSnapshot, Chrome, FramePath};
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_core::CanvasModel;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
+
+use common::{canvas_default as canvas, TestModel};
 
 /// Capture an `ActiveCellSnapshot` from the model's view. After B2
 /// `screen_for_blit` takes the snapshot as a parameter; tests source it
 /// here instead of reading it off `Chrome`.
-fn snap(m: &ScrollModel) -> ActiveCellSnapshot {
+fn snap(m: &TestModel) -> ActiveCellSnapshot {
     let view = m.get_selected_view().expect("scroll model has view");
     ActiveCellSnapshot::capture(m, m.get_selected_sheet(), view.row, view.column)
-}
-
-/// Scrollable model. `top_row` / `left_column` live in `Cell`s so a
-/// single test can rebuild `Chrome::next` after a scroll without
-/// rebuilding the model. `row5_height` lets a test mutate row 5's
-/// height between frames to drive the overlap-row-height guard in
-/// `screen_for_blit`. Cell content + styles stay default — the tests are
-/// about paint-path activation, not visual fidelity.
-struct ScrollModel {
-    top_row: Cell<i32>,
-    left_column: Cell<i32>,
-    row5_height: Cell<f64>,
-    /// Rows `1..=data_until` return non-empty formatted values
-    /// (`"R{row}"`); rows past that return `""`. Default 0 = empty
-    /// sheet (existing tests).
-    data_until: Cell<i32>,
-}
-
-impl ScrollModel {
-    fn new() -> Self {
-        Self {
-            top_row: Cell::new(1),
-            left_column: Cell::new(1),
-            row5_height: Cell::new(20.0),
-            data_until: Cell::new(0),
-        }
-    }
-    fn set_top_row(&self, row: i32) {
-        self.top_row.set(row);
-    }
-    fn set_left_column(&self, col: i32) {
-        self.left_column.set(col);
-    }
-    fn set_row5_height(&self, h: f64) {
-        self.row5_height.set(h);
-    }
-    fn set_data_until(&self, row: i32) {
-        self.data_until.set(row);
-    }
-}
-
-impl CanvasModel for ScrollModel {
-    fn get_selected_sheet(&self) -> u32 {
-        0
-    }
-    fn get_selected_view(&self) -> Option<CanvasView> {
-        Some(CanvasView {
-            sheet: 0,
-            row: 1,
-            column: 1,
-            selection: RCRange::from([1, 1, 1, 1]),
-            top_row: self.top_row.get(),
-            left_column: self.left_column.get(),
-        })
-    }
-    fn get_frozen_rows_count(&self, _: u32) -> Option<i32> {
-        Some(0)
-    }
-    fn get_frozen_columns_count(&self, _: u32) -> Option<i32> {
-        Some(0)
-    }
-    fn get_row_height(&self, _: u32, row: i32) -> Option<f64> {
-        Some(if row == 5 {
-            self.row5_height.get()
-        } else {
-            20.0
-        })
-    }
-    fn get_column_width(&self, _: u32, _: i32) -> Option<f64> {
-        Some(80.0)
-    }
-    fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
-        Some(true)
-    }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<Style> {
-        Some(Style::default())
-    }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellType> {
-        Some(CellType::Text)
-    }
-    fn get_formatted_cell_value(&self, _: u32, row: i32, _col: i32) -> Option<String> {
-        if row >= 1 && row <= self.data_until.get() {
-            Some(format!("R{row}"))
-        } else {
-            Some(String::new())
-        }
-    }
-}
-
-fn canvas() -> CanvasSize {
-    CanvasSize { w: 600.0, h: 400.0 }
 }
 
 fn count_blits(ops: &[DrawOp]) -> usize {
@@ -136,7 +45,7 @@ fn count_rect_fills(ops: &[DrawOp]) -> usize {
 
 #[test]
 fn scroll_by_one_row_emits_exactly_one_blit_op() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
@@ -208,7 +117,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
 
 #[test]
 fn scroll_past_viewport_disqualifies_blit() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
@@ -233,7 +142,7 @@ fn scroll_past_viewport_disqualifies_blit() {
 
 #[test]
 fn scroll_by_one_column_emits_exactly_one_blit_op() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
@@ -285,7 +194,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
 /// against the full-pane baseline.
 #[test]
 fn scroll_by_one_row_paints_only_strip_cells() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
@@ -346,7 +255,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
 /// re-hashing the prev frame's active-cell value against the live model.
 #[test]
 fn active_cell_value_change_disqualifies_blit() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     let theme = CanvasTheme::light();
     let canvas = canvas();
     // Frame 0 paints with row 1 ("R1" coords) returning "".
@@ -373,7 +282,7 @@ fn active_cell_value_change_disqualifies_blit() {
 /// check to mismatch-only behavior — it must not over-reject.
 #[test]
 fn active_cell_value_unchanged_allows_blit() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     m.set_data_until(20); // row 1's value is "R1" in both frames.
     let theme = CanvasTheme::light();
     let canvas = canvas();
@@ -390,7 +299,7 @@ fn active_cell_value_unchanged_allows_blit() {
 
 #[test]
 fn overlap_row_height_change_disqualifies_blit() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     let theme = CanvasTheme::light();
     let canvas = canvas();
 
@@ -400,7 +309,7 @@ fn overlap_row_height_change_disqualifies_blit() {
     // Resize row 5 between frames AND scroll. Row 5 sits inside the
     // overlap band of a 1-row scroll, so `screen_for_blit`'s row-height guard
     // must fire and the fast-path must bail to a full repaint.
-    m.set_row5_height(40.0);
+    m.set_row_height(5, 40.0);
     m.set_top_row(2);
 
     let plan = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m));
@@ -424,7 +333,7 @@ fn overlap_row_height_change_disqualifies_blit() {
 /// FillText count for data-shaped strings must be zero.
 #[test]
 fn scroll_blit_does_not_smear_last_data_row_into_strip() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     m.set_data_until(15);
     let theme = CanvasTheme::light();
     let canvas = canvas();
@@ -474,7 +383,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
 /// last visible row had data pre-scroll, new strip below is empty.
 #[test]
 fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
-    let m = ScrollModel::new();
+    let m = TestModel::synthetic_grid();
     m.set_data_until(20);
     let theme = CanvasTheme::light();
     let canvas = canvas();

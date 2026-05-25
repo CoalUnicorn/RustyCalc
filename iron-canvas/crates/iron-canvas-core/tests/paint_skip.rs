@@ -8,87 +8,16 @@
 //! corner box, and frozen separators run above in `render_grid` and are
 //! not fingerprint-gated.
 
-use std::cell::RefCell;
-use std::collections::HashMap;
+mod common;
 
-use ironcalc_base::types::{CellType, Style};
-
-use iron_canvas_core::chrome::{Chrome, FrameKindTag, PaneRegion};
+use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegion};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
 use iron_canvas_recorder::RecorderPainter;
 
-/// Stateful model: cell values live in a `RefCell<HashMap>` so a test can
-/// mutate one cell between paints without rebuilding the frame.
-#[derive(Default)]
-struct MutableModel {
-    cells: RefCell<HashMap<(i32, i32), String>>,
-    frozen_cols: i32,
-}
+use common::{canvas_default, TestModel};
 
-impl MutableModel {
-    fn set_cell(&self, row: i32, col: i32, value: &str) {
-        self.cells
-            .borrow_mut()
-            .insert((row, col), value.to_string());
-    }
-}
-
-impl CanvasModel for MutableModel {
-    fn get_selected_sheet(&self) -> u32 {
-        0
-    }
-    fn get_selected_view(&self) -> Option<CanvasView> {
-        Some(CanvasView {
-            sheet: 0,
-            row: 1,
-            column: 1,
-            selection: RCRange::from([1, 1, 1, 1]),
-            top_row: 1,
-            left_column: 1,
-        })
-    }
-    fn get_frozen_rows_count(&self, _: u32) -> Option<i32> {
-        Some(0)
-    }
-    fn get_frozen_columns_count(&self, _: u32) -> Option<i32> {
-        Some(self.frozen_cols)
-    }
-    fn get_row_height(&self, _: u32, _: i32) -> Option<f64> {
-        Some(20.0)
-    }
-    fn get_column_width(&self, _: u32, _: i32) -> Option<f64> {
-        Some(80.0)
-    }
-    fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
-        Some(true)
-    }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<Style> {
-        Some(Style::default())
-    }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellType> {
-        Some(CellType::Text)
-    }
-    fn get_formatted_cell_value(&self, _: u32, row: i32, col: i32) -> Option<String> {
-        Some(
-            self.cells
-                .borrow()
-                .get(&(row, col))
-                .cloned()
-                .unwrap_or_default(),
-        )
-    }
-}
-
-fn canvas() -> CanvasSize {
-    CanvasSize { w: 600.0, h: 400.0 }
-}
-
-/// Paint one pane through a fresh `RecorderPainter` and return its op
-/// count. A new core per call keeps the recorder log isolated; the
-/// fingerprint state lives on `Chrome` and survives across cores.
-fn paint_pane(model: &MutableModel, frame: &Chrome, pane: PaneRegion) -> usize {
+fn paint_pane(model: &TestModel, frame: &Chrome, pane: PaneRegion) -> usize {
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_pane(model, pane, frame);
     let count = core.painter().ops().len();
@@ -105,15 +34,9 @@ fn promote_to_slots_reuse(frame: &mut Chrome) {
 
 #[test]
 fn render_pane_skips_on_idempotent_repaint() {
-    let m = MutableModel::default();
+    let m = TestModel::synthetic_grid();
     let theme = CanvasTheme::light();
-    let mut frame = Chrome::next(
-        None,
-        &m,
-        canvas(),
-        &theme,
-        iron_canvas_core::chrome::FramePath::Fresh,
-    );
+    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
 
     // First paint runs through the full 4-pass walk; the kind is Fresh,
     // so the skip branch is gated off but `pane_fingerprints` is still
@@ -138,20 +61,10 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
     // `frozen_cols = 2` splits the data-bearing region: BottomLeft owns
     // cols 1..=2, BottomRight owns cols 3..=. A mutation in one pane
     // must leave the other pane's fingerprint untouched.
-    let m = MutableModel {
-        frozen_cols: 2,
-        ..Default::default()
-    };
+    let m = TestModel::synthetic_grid().with_frozen_cols(2);
     let theme = CanvasTheme::light();
-    let mut frame = Chrome::next(
-        None,
-        &m,
-        canvas(),
-        &theme,
-        iron_canvas_core::chrome::FramePath::Fresh,
-    );
+    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
 
-    // Prime the per-pane fingerprints for both data-bearing panes.
     let _ = paint_pane(&m, &frame, PaneRegion::BottomLeft);
     let _ = paint_pane(&m, &frame, PaneRegion::BottomRight);
 
