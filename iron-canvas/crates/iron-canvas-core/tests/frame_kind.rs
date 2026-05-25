@@ -5,7 +5,7 @@
 
 mod common;
 
-use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
+use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegionMask};
 use iron_canvas_core::theme::CanvasTheme;
 
 use common::{canvas_default, TestModel};
@@ -32,13 +32,43 @@ fn from_slots_reuse_emits_slots_reused() {
         &model,
         canvas_default(),
         &theme,
-        FramePath::SlotsReuse,
+        FramePath::SlotsReuse {
+            stale_panes: PaneRegionMask::ALL,
+        },
     );
     assert_eq!(reused.kind, FrameKindTag::SlotsReused);
     assert!(
         reused.kind.reuses_slots(),
         "SlotsReused must report reuses_slots() so render_pane fingerprint-skips engage",
     );
+}
+
+/// Regression: a `SlotsReuse` frame must take `stale_panes` from the
+/// caller, not inherit it from `prev`. Before Option B made the field
+/// part of the `FramePath::SlotsReuse` variant, the arm silently kept
+/// `prev.stale_panes` — so a `SlotsReuse` chasing a `Blit` (whose
+/// `stale_panes` had been narrowed to the scrolled strip) would skip
+/// the unscrolled panes on the next content repaint. Reproduces the
+/// scroll-to-row-78 → DEL bug at the `Chrome::next` level without
+/// needing canvas or orchestrator scaffolding.
+#[test]
+fn slots_reuse_uses_caller_supplied_stale_panes() {
+    let model = TestModel::synthetic_grid();
+    let theme = CanvasTheme::light();
+    let mut prev = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
+    prev.stale_panes = PaneRegionMask::EMPTY;
+
+    let reused = Chrome::next(
+        Some(prev),
+        &model,
+        canvas_default(),
+        &theme,
+        FramePath::SlotsReuse {
+            stale_panes: PaneRegionMask::ALL,
+        },
+    );
+
+    assert_eq!(reused.stale_panes, PaneRegionMask::ALL);
 }
 
 /// Documents the Stage 5 invariant: adding a `FrameKindTag` variant must

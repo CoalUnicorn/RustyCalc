@@ -552,7 +552,7 @@ where
             model,
             self.size,
             &self.theme,
-            FramePath::SlotsReuse,
+            FramePath::SlotsReuse { stale_panes: mask },
         );
 
         self.grid.invalidate_pane_cache(mask);
@@ -564,7 +564,13 @@ where
         // so the next paint's `screen_for_blit` must compare against
         // the post-edit hash.
         self.refresh_overlay_state(model);
-        if signals.overlay_dirty() {
+        // Active-cell-repaint hook paints model-derived pixels on the
+        // overlay — so CONTENT implies OVERLAY when an active cell exists.
+        // Without this, DEL on the active cell clears the model but the
+        // overlay still shows the old value on top of the grid.
+        let must_paint_overlay = signals.overlay_dirty()
+            || (signals.contains(GridSignals::CONTENT) && self.selection.active_cell_repaint().is_some());
+        if must_paint_overlay {
             self.overlay.paint_overlay_layer(
                 model,
                 &frame,

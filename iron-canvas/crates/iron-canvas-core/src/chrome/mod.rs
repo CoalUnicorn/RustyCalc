@@ -104,11 +104,11 @@ pub struct Chrome {
     /// paint-skip gating read it; `FrameKindTag::reuses_slots()` is the
     /// "slot vecs inherited from prev" predicate.
     pub kind: FrameKindTag,
-    /// Which panes `render_grid` must paint this frame. The `FramePath::Fresh`
-    /// / `SlotsReuse` arms of `Chrome::next` set this to `ALL`; the
-    /// `FramePath::Blit` arm narrows it to the panes the `BlitPlan` shifts
-    /// (i.e. those whose strip needs repaint after the kept band is blitted).
-    /// Cross-axis panes the blit leaves intact are excluded.
+    /// Which panes `render_grid` must paint this frame. `FramePath::Fresh`
+    /// sets this to `ALL`; `FramePath::Blit` narrows it to the panes the
+    /// `BlitPlan` shifts (cross-axis panes left intact are excluded);
+    /// `FramePath::SlotsReuse { stale_panes }` takes it from the caller so
+    /// it never inherits a prior `Blit` frame's narrow mask.
     pub stale_panes: PaneRegionMask,
 }
 
@@ -170,13 +170,14 @@ impl Chrome {
                 };
                 Self::build(model, canvas, theme, recycled, prev_fps)
             }
-            FramePath::SlotsReuse => {
+            FramePath::SlotsReuse { stale_panes } => {
                 let Some(mut prev) = prev else {
                     return Self::next(None, model, canvas, theme, FramePath::Fresh);
                 };
                 prev.prev_pane_fingerprints = prev.pane_fingerprints.replace([0; 4]);
                 prev.theme = theme.clone();
                 prev.kind = FrameKindTag::SlotsReused;
+                prev.stale_panes = stale_panes;
                 prev
             }
             FramePath::Blit(plan) => {

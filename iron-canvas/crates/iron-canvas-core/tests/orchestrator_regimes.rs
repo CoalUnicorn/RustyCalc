@@ -213,6 +213,47 @@ fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
     );
 }
 
+/// Regression for the DEL-on-active-cell bug: a `CONTENT`-only signal must
+/// repaint the overlay whenever there's an active cell, because the overlay
+/// layer hosts the active-cell repaint hook that paints the model's current
+/// value on top of the grid. Without this implication, `paint_slots_reuse_regime`
+/// repaints the grid (correctly empty) but leaves the overlay's stale
+/// active-cell pixels (the old value) on screen.
+///
+/// The fix lives in the `must_paint_overlay` predicate at the tail of
+/// `paint_slots_reuse_regime`: `signals.overlay_dirty() || (CONTENT &&
+/// selection.active_cell_repaint().is_some())`.
+#[test]
+fn content_dirty_with_active_cell_repaints_overlay() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_active(1, 1));
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh — primes last_frame and overlay.
+
+    let overlay_before = overlay_ops_len(&orch);
+
+    // DEL on the active cell: model value gone, only CONTENT raised
+    // (no OVERLAY bit). Pre-fix, `if signals.overlay_dirty()` short-
+    // circuited and the overlay's stale active-cell pixels stayed put.
+    stub.set_cell(1, 1, "");
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.paint_if_dirty();
+
+    let new_overlay_ops = overlay_ops_since(&orch, overlay_before);
+    assert!(
+        !new_overlay_ops.is_empty(),
+        "CONTENT with an active cell must repaint the overlay; \
+         got an empty overlay op stream — the stale active-cell pixels \
+         would still be on screen"
+    );
+    assert!(
+        new_overlay_ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::ClearRect { .. })),
+        "Overlay repaint must clear before redrawing; got {:?}",
+        new_overlay_ops
+    );
+}
+
 // ─── Stage 5: Recording round-trip through RecordingSurface<MemSurface> ───
 //
 // Reuses TestModel + the same regime scenarios as the MemSurface

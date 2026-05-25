@@ -204,8 +204,11 @@ pub enum FramePath<'a> {
     /// `prev = None` is the first-frame path.
     Fresh,
     /// Reuse prev's slot vecs verbatim; refresh per-frame state only
-    /// (theme + pane_fingerprints rotation). Requires `prev = Some`.
-    SlotsReuse,
+    /// (theme + pane_fingerprints rotation). `stale_panes` is caller-
+    /// supplied so a `SlotsReuse` following a `Blit` doesn't inherit the
+    /// blit's narrow strip mask and silently skip a content repaint.
+    /// Requires `prev = Some`.
+    SlotsReuse { stale_panes: PaneRegionMask },
     /// Blit fast-path. Scroll-axis slot vec rebuilt around the plan;
     /// cross-axis cloned from prev. Falls back to `Fresh` on the
     /// row_header_thickness digit-boundary case. Requires `prev = Some`.
