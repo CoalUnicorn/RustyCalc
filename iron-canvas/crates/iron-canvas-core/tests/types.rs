@@ -56,7 +56,6 @@ fn render_overlays_changed_point_range_is_not_equal() {
         extend_to: None,
         clipboard: None,
         formula_refs: vec![],
-        active_ref: None,
     };
     b.point_range = Some(RCRange {
         r1: 1,

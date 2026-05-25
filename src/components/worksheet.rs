@@ -193,17 +193,6 @@ pub fn Worksheet() -> impl IntoView {
             }
         }
 
-        // Index of the ref whose token span contains the caret — drives the
-        // renderer's "active" emphasis. Same inclusive predicate as
-        // `refs_at_cursor`; first match wins (token-stream order).
-        let active_ref: Option<usize> = editing_cell.as_ref().and_then(|e| {
-            let cursor = e.cursor;
-            e.formula_analysis
-                .refs()
-                .iter()
-                .position(|r| cursor >= r.span.start && cursor <= r.span.end)
-        });
-
         // Point-mode range for overlay painting. RefNode stores relative deltas,
         // so resolution needs the editing cell's address as anchor.
         let point_range = match (state.drag.get(), editing_cell.as_ref()) {
@@ -211,7 +200,7 @@ pub fn Worksheet() -> impl IntoView {
             _ => None,
         };
 
-        (extend_to, point_range, formula_refs, active_ref)
+        (extend_to, point_range, formula_refs)
     });
 
     // Flag: set by the reactive subscription Effect below, cleared by the
@@ -236,12 +225,7 @@ pub fn Worksheet() -> impl IntoView {
     // detect overlay-only changes (autofill preview, point-mode range)
     // without needing a fake ContentEvent::GenericChange from request_redraw().
     Effect::new(
-        move |prev: Option<(
-            Option<AutofillTarget>,
-            Option<CellArea>,
-            Vec<ActiveRef>,
-            Option<usize>,
-        )>| {
+        move |prev: Option<(Option<AutofillTarget>, Option<CellArea>, Vec<ActiveRef>)>| {
             let has_content = !state.events.content.get().is_empty();
             let has_structure = !state.events.structure.get().is_empty();
             let has_format = !state.events.format.get().is_empty();
@@ -267,7 +251,7 @@ pub fn Worksheet() -> impl IntoView {
             // actually need it. requestRepaint() at the end is the safety
             // net that ensures content/format/structure events still fan
             // out to both layers even when no value changed locally.
-            let (extend_to, point_range, formula_refs, active_ref) = overlay.clone();
+            let (extend_to, point_range, formula_refs) = overlay.clone();
             let clipboard = clipboard_draw.with_value(|opt| {
                 opt.as_ref().map(|acb| SheetRange {
                     sheet: acb.sheet,
@@ -279,7 +263,6 @@ pub fn Worksheet() -> impl IntoView {
                 clipboard: clipboard.map(Into::into),
                 point_range: point_range.map(Into::into),
                 formula_refs: formula_refs.into_iter().map(Into::into).collect(),
-                active_ref,
             };
             if has_theme {
                 theme_dirty.set_value(true);
@@ -542,7 +525,7 @@ pub fn Worksheet() -> impl IntoView {
                         ic.setThemeFromElement(&el);
                     }
                     ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
-                    let (extend_to, point_range, formula_refs, active_ref) =
+                    let (extend_to, point_range, formula_refs) =
                         reactive_overlay.get_untracked();
                     let clipboard = clipboard_draw.with_value(|opt| {
                         opt.as_ref().map(|acb| SheetRange {
@@ -555,7 +538,6 @@ pub fn Worksheet() -> impl IntoView {
                         clipboard: clipboard.map(Into::into),
                         point_range: point_range.map(Into::into),
                         formula_refs: formula_refs.into_iter().map(Into::into).collect(),
-                        active_ref,
                     });
                     *slot = Some(ic);
                 }

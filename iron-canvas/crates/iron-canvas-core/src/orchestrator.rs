@@ -179,7 +179,6 @@ where
             clipboard,
             point_range,
             formula_refs,
-            active_ref: _,
         } = overlays;
         let changed = self.autofill.extend_to != extend_to
             || self.clipboard.clipboard != clipboard

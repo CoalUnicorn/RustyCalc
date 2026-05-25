@@ -121,8 +121,7 @@ pub enum FormulaRefKind {
 
 /// One cell or range reference parsed out of an in-edit formula. The
 /// renderer outlines `sheet_area` with the color slot at
-/// `color_idx % FORMULA_REF_COLORS.len()` (see [`crate::theme`]); per-ref
-/// active-emphasis is driven separately by [`crate::RenderOverlays::active_ref`].
+/// `color_idx % FORMULA_REF_COLORS.len()` (see [`crate::theme`]).
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct FormulaRef {
     pub sheet_area: SheetArea,

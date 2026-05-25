@@ -486,10 +486,7 @@ impl IronCanvas {
         Ok(())
     }
 
-    /// Replace the per-formula draggable references. JS-side `active_ref`
-    /// indices stale after this call must be re-pushed via `setOverlays`;
-    /// the renderer is defensive (uses `.get()`), so a stale index is
-    /// silently ignored rather than panicking.
+    /// Replace the per-formula draggable references.
     #[allow(non_snake_case)]
     pub fn setFormulaRefs(&mut self, refs: JsValue) -> Result<(), JsError> {
         let wire: Vec<crate::wire::FormulaRefWire> = serde_wasm_bindgen::from_value(refs)?;
@@ -498,9 +495,9 @@ impl IronCanvas {
         Ok(())
     }
 
-    /// Full overlay-state push. Validates `active_ref < formula_refs.len()`
-    /// at the boundary — a violating payload throws a `JsError` rather
-    /// than silently dropping the highlight on the renderer side.
+    /// Full overlay-state push. Currently infallible at the boundary; the
+    /// `Result` is preserved so future invariant checks can surface as a
+    /// `JsError` without touching the call site.
     #[allow(non_snake_case)]
     pub fn setOverlays(&mut self, overlays: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::RenderOverlaysWire = serde_wasm_bindgen::from_value(overlays)?;

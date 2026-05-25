@@ -230,7 +230,6 @@ pub(crate) struct RenderOverlaysWire {
     pub clipboard: Option<SheetAreaWire>,
     pub point_range: Option<RCRangeWire>,
     pub formula_refs: Vec<FormulaRefWire>,
-    pub active_ref: Option<usize>,
 }
 
 impl From<RCRangeWire> for RCRange {
@@ -372,28 +371,15 @@ impl From<ThemeVariablesWire> for ThemeVariables {
 }
 
 impl RenderOverlaysWire {
-    /// Convert to the engine `RenderOverlays`, enforcing the
-    /// `active_ref < formula_refs.len()` invariant at the JS boundary. The
-    /// renderer is also defensive (uses `.get()`), but a JS-side bug should
-    /// surface as a `JsError` rather than a silently-ignored highlight.
+    /// Convert to the engine `RenderOverlays`. Currently infallible; the
+    /// `Result` is preserved so future boundary invariants can surface as
+    /// a `JsError` without rippling through the call sites.
     pub(crate) fn into_engine(self) -> Result<RenderOverlays, String> {
-        let formula_refs: Vec<FormulaRef> =
-            self.formula_refs.into_iter().map(Into::into).collect();
-        if let Some(idx) = self.active_ref {
-            if idx >= formula_refs.len() {
-                return Err(format!(
-                    "active_ref index {} is out of range for {} formula refs",
-                    idx,
-                    formula_refs.len()
-                ));
-            }
-        }
         Ok(RenderOverlays {
             extend_to: self.extend_to.map(Into::into),
             clipboard: self.clipboard.map(Into::into),
             point_range: self.point_range.map(Into::into),
-            formula_refs,
-            active_ref: self.active_ref,
+            formula_refs: self.formula_refs.into_iter().map(Into::into).collect(),
         })
     }
 }
