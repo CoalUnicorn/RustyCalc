@@ -39,8 +39,8 @@ impl PdfDocument {
         }
     }
 
-    pub fn add_object(&mut self, num: u32, gen: u16, bytes: Vec<u8>) {
-        self.objects.push((num, gen, bytes));
+    pub fn add_object(&mut self, num: u32, r#gen: u16, bytes: Vec<u8>) {
+        self.objects.push((num, r#gen, bytes));
     }
 
     pub fn finish(self) -> Vec<u8> {
@@ -49,7 +49,7 @@ impl PdfDocument {
 
         let n = self.objects.len();
         let mut offsets: Vec<u64> = Vec::with_capacity(n);
-        for (num, gen, bytes) in &self.objects {
+        for (num, r#gen, bytes) in &self.objects {
             offsets.push(out.len() as u64);
             out.extend_from_slice(format!("{num} {gen} obj\n").as_bytes());
             out.extend_from_slice(bytes);

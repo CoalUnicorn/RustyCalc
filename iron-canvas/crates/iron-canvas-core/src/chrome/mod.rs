@@ -116,6 +116,7 @@ pub struct Chrome {
 /// Per-pane skipping happens later inside `render_pane` via the
 /// fingerprint compare; this verdict only gates slot-vec reuse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use = "FrameValidity gates slot-vec reuse; dropping the verdict will force a wrong dispatch later"]
 pub enum FrameValidity {
     /// Slot vecs match the live model. Caller may reuse `last_frame`
     /// directly; `render_pane` will fingerprint-skip per pane.

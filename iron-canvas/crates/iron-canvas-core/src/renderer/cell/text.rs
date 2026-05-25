@@ -257,7 +257,7 @@ impl CellTextStyle {
         let v_align = alignment
             .map(|a| a.vertical.clone())
             .unwrap_or(VerticalAlignment::Bottom);
-        let wrap_text = alignment.map(|a| a.wrap_text).unwrap_or(false);
+        let wrap_text = alignment.is_some_and(|a| a.wrap_text);
 
         Self {
             text_color,

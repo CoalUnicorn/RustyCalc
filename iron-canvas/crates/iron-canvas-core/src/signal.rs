@@ -5,6 +5,7 @@
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    #[must_use = "GridSignals encode dirty-bit decisions; dropping the value without acting on it is a paint-skip bug"]
     pub struct GridSignals: u8 {
         /// Reserved bit; no setter raises it today. `screen_for_blit` detects
         /// viewport shifts geometrically.

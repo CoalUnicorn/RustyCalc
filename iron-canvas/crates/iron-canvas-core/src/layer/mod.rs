@@ -29,6 +29,9 @@ use crate::CanvasModel;
 /// Surfaces own their painter outright; renderers receive a cloned handle
 /// via `clone_painter` at construction so paint methods don't need to
 /// re-borrow through the surface on every call.
+#[diagnostic::on_unimplemented(
+    note = "see the canvas-patterns skill for the `Surface` contract — reference impls live in WebSurface, SvgSurface, PdfSurface, MemSurface"
+)]
 pub trait Surface {
     type P: Painter + BlitPainter;
 

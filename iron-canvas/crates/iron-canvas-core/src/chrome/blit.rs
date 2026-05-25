@@ -92,6 +92,7 @@ struct AxisRange {
 /// All rects are in CSS pixels relative to the canvas origin — the
 /// `Painter::blit` backend handles DPR.
 #[derive(Clone)]
+#[must_use = "a BlitPlan represents a committed viewport-shift decision; dropping it means the blit never happens"]
 pub struct BlitPlan {
     pub axis: Axis,
     pub shifts: Vec<PaneShift>,
@@ -199,6 +200,7 @@ impl BlitPlan {
 /// orchestrator selected for this frame. Exhaustive: adding a variant
 /// breaks every regime arm at compile time.
 #[derive(Clone, Copy)]
+#[must_use = "FramePath dispatches Chrome::next; dropping it skips the chosen construction regime"]
 pub enum FramePath<'a> {
     /// Full rebuild walk. `prev = Some` recycles slot Vec allocations;
     /// `prev = None` is the first-frame path.

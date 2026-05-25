@@ -37,6 +37,7 @@ use crate::CanvasModel;
 /// needs (mask, dirty bits) so `paint_if_dirty` is pure pattern-destructure.
 /// Variants align with `FramePath`: `SlotsReuse` and `Fresh` here map to
 /// `FramePath::SlotsReuse` and `FramePath::Fresh` inside `Chrome::next`.
+#[must_use = "PaintRegime is the paint dispatch verdict; dropping it means the chosen paint_* method never runs"]
 pub enum PaintRegime {
     Overlay,
     Viewport(BlitPlan),
@@ -55,6 +56,7 @@ pub enum PaintRegime {
 /// `.icr` JSON-lines schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[must_use = "PaintRegimeTag is the recorded regime attribution; dropping it skips a recorder frame"]
 pub enum PaintRegimeTag {
     Overlay,
     Viewport,
@@ -432,16 +434,12 @@ where
         // against live state and reject the fast-path on a content change.
         // Without a live selection there is nothing to re-hash, so the
         // blit attempt is skipped entirely and dispatch falls through.
-        if !content_dirty {
-            if let Some(active) = self.selection.active_cell.as_ref() {
-                if let Some(plan) = self
-                    .last_frame
-                    .as_ref()
-                    .and_then(|f| f.screen_for_blit(model, self.size, &self.theme, active))
-                {
-                    return PaintRegime::Viewport(plan);
-                }
-            }
+        if !content_dirty
+            && let Some(active) = self.selection.active_cell.as_ref()
+            && let Some(frame) = self.last_frame.as_ref()
+            && let Some(plan) = frame.screen_for_blit(model, self.size, &self.theme, active)
+        {
+            return PaintRegime::Viewport(plan);
         }
 
         if matches!(validity, FrameValidity::SlotsReuse) && self.last_frame.is_some() {

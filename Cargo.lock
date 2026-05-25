@@ -1020,7 +1020,7 @@ checksum = "71dd52191aae121e8611f1e8dc3e324dd0dd1dee1e6dd91d10ee07a3cfb4d9d8"
 
 [[package]]
 name = "iron-canvas-core"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "bitflags",
  "ironcalc_base",
@@ -1029,14 +1029,14 @@ dependencies = [
 
 [[package]]
 name = "iron-canvas-export"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "iron-canvas-core",
 ]
 
 [[package]]
 name = "iron-canvas-recorder"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "iron-canvas-core",
  "serde",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "iron-canvas-web"
-version = "0.1.0-beta.1"
+version = "0.1.0-beta.2"
 dependencies = [
  "bitflags",
  "iron-canvas-core",

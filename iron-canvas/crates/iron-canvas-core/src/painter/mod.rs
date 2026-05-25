@@ -118,6 +118,9 @@ pub trait TextMetrics {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64;
 }
 
+#[diagnostic::on_unimplemented(
+    note = "see the canvas-patterns skill for the full `Painter` method surface (paint_*, blit, text) — reference impls live in CanvasPainter (web), SvgPainter, PdfPainter, RecorderPainter"
+)]
 pub trait Painter: TextMetrics {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor);
     /// Clear the pixels under `rect` to fully transparent. Canvas-2D maps
