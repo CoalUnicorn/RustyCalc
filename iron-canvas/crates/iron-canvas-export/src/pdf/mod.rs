@@ -1,9 +1,15 @@
-//! Hand-rolled PDF writer + (in Commit 3) `PdfPainter` + `PdfSurface`.
+//! Hand-rolled PDF backend: writer (`doc`) + `Painter`/`Surface`
+//! adapters (`painter`, `surface`).
 //!
-//! Commit 2 ships only the document writer (`doc::PdfDocument`) — enough
-//! to assemble a valid single-page PDF by hand. The painter that emits
-//! content-stream ops on top of it lives one commit further down.
+//! `PdfPainter` translates `Painter`/`BlitPainter`/`TextMetrics` calls
+//! into PDF content-stream ops and accumulates them in a shared
+//! `Rc<RefCell<ContentStream>>`. `PdfSurface` owns that stream and
+//! assembles a complete single-page document via `finish()`.
 
 pub mod doc;
+pub mod painter;
+pub mod surface;
 
 pub use doc::PdfDocument;
+pub use painter::PdfPainter;
+pub use surface::PdfSurface;

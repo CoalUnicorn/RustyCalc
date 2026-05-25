@@ -52,7 +52,7 @@ strip = true
 
 [features]
 tauri = []
-dev-tools = ["iron-canvas-web/dev-tools"]
+dev-tools = ["iron-canvas-web/dev-tools", "iron-canvas-web/pdf"]
 
 [package.metadata.leptos]
 lib-profile-release = "wasm-release"

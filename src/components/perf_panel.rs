@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 
-use crate::app_state::{AppState, RecordingCmd};
+use crate::app_state::{AppState, ExportCmd, RecordingCmd};
 
 /// Displays the last commit->render timing breakdown.
 ///
@@ -47,6 +47,9 @@ pub fn PerfPanel() -> impl IntoView {
         app.recording_cmd.set(Some(cmd));
     };
 
+    let on_export_svg = move |_| app.export_cmd.set(Some(ExportCmd::Svg));
+    let on_export_pdf = move |_| app.export_cmd.set(Some(ExportCmd::Pdf));
+
     view! {
         <div class="pp">
             <span class="pp-label">"⏱ Perf"</span>
@@ -90,6 +93,21 @@ pub fn PerfPanel() -> impl IntoView {
                     <span class="pp-recording-label">"Recording…"</span>
                 })}
             })}
+            <span class="pp-sep">"|"</span>
+            <button
+                class="pp-export-btn"
+                title="Download current sheet as SVG"
+                on:click=on_export_svg
+            >
+                "⇩ SVG"
+            </button>
+            <button
+                class="pp-export-btn"
+                title="PDF export"
+                on:click=on_export_pdf
+            >
+                "⇩ PDF"
+            </button>
         </div>
     }
 }

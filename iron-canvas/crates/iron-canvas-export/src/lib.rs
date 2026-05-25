@@ -11,3 +11,9 @@ pub mod svg;
 
 #[cfg(feature = "svg")]
 pub use svg::{SvgPainter, SvgSurface};
+
+#[cfg(feature = "pdf")]
+pub mod pdf;
+
+#[cfg(feature = "pdf")]
+pub use pdf::{PdfPainter, PdfSurface};

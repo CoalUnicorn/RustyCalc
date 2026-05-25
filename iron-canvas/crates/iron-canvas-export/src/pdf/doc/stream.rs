@@ -37,6 +37,12 @@ impl ContentStream {
         self.body.is_empty()
     }
 
+    /// Borrow the raw stream bytes — used by `PdfPainter` snapshots in
+    /// tests and by `PdfSurface::finish` when assembling the page.
+    pub fn bytes(&self) -> &[u8] {
+        &self.body
+    }
+
     /// Serialise as a stream object body: `<< /Length N >>\nstream\n…\nendstream`.
     /// Hand to `PdfDocument::add_object` as the `bytes` payload.
     pub fn into_object(self) -> Vec<u8> {

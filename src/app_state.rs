@@ -26,6 +26,18 @@ pub enum RecordingCmd {
     Stop,
 }
 
+/// One-shot command from the PerfPanel export buttons to the Worksheet
+/// dispatch Effect. Same drain pattern as [`RecordingCmd`]. `Svg` works
+/// today via `IronCanvas::exportSvg`; `Pdf` is reserved for the upcoming
+/// `iron-canvas-export` PDF backend and stays rendered as a disabled
+/// button until that lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ExportCmd {
+    Svg,
+    Pdf,
+}
+
 /// One-shot command from the PlaybackPanel to the Worksheet dispatch
 /// Effect. Same drain pattern as [`RecordingCmd`]. `Load` carries owned
 /// `.icr` bytes — read once by the Effect, then cleared.
@@ -60,6 +72,10 @@ pub struct AppState {
     /// once dispatched. See [`RecordingCmd`].
     #[allow(dead_code)]
     pub recording_cmd: Split<Option<RecordingCmd>>,
+    /// Pending export command from the PerfPanel SVG/PDF buttons.
+    /// Cleared by Worksheet once the file download has been triggered.
+    #[allow(dead_code)]
+    pub export_cmd: Split<Option<ExportCmd>>,
     /// Pending playback command. Cleared by Worksheet once dispatched.
     #[allow(dead_code)]
     pub playback_cmd: Split<Option<PlaybackCmd>>,
@@ -93,6 +109,7 @@ impl AppState {
             show_perf_panel: Split::new(cfg!(feature = "dev-tools")),
             recording_active: Split::new(false),
             recording_cmd: Split::new(None),
+            export_cmd: Split::new(None),
             playback_cmd: Split::new(None),
             playback_loaded: Split::new(false),
             playback_playing: Split::new(false),

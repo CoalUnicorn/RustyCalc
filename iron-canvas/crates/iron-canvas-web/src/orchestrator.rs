@@ -20,8 +20,12 @@ use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetA
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
+#[cfg(feature = "pdf")]
+use iron_canvas_export::pdf::PdfSurface;
 use iron_canvas_export::SvgSurface;
 
+#[cfg(feature = "dev-tools")]
+use crate::playback::{replay_through, PlaybackSession};
 #[cfg(feature = "dev-tools")]
 use iron_canvas_core::PaintRegimeTag;
 #[cfg(feature = "dev-tools")]
@@ -30,8 +34,6 @@ use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot
 use iron_canvas_recorder::DrawOp;
 #[cfg(feature = "dev-tools")]
 use iron_canvas_recorder::{RecordingFilter, RecordingSurface};
-#[cfg(feature = "dev-tools")]
-use crate::playback::{replay_through, PlaybackSession};
 
 /// Facade Surface — wraps `WebSurface` in `RecordingSurface` when the
 /// `recorder` feature is on (dev builds), bare `WebSurface` otherwise
@@ -139,8 +141,7 @@ impl IronCanvas {
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
         let dpr_i = dpr.round() as i32;
         self.last_dpr = dpr_i;
-        self.orch
-            .resize(CanvasSize { w: css_w, h: css_h }, dpr_i);
+        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr_i);
     }
 
     /// Push a theme by name. Only `"dark"` is recognized; every other
@@ -229,11 +230,15 @@ impl IronCanvas {
             capped: false,
         });
         if filter.layers.includes_grid() {
-            self.orch.grid_surface().set_skip_groups(filter.skip_groups.clone());
+            self.orch
+                .grid_surface()
+                .set_skip_groups(filter.skip_groups.clone());
             self.orch.grid_surface().enable_recording();
         }
         if filter.layers.includes_overlay() {
-            self.orch.overlay_surface().set_skip_groups(filter.skip_groups);
+            self.orch
+                .overlay_surface()
+                .set_skip_groups(filter.skip_groups);
             self.orch.overlay_surface().enable_recording();
         }
         // Synchronously capture a full Fresh paint as frame 0 so the
@@ -327,6 +332,39 @@ impl IronCanvas {
 
         grid_painter.finish()
     }
+
+    /// JS-facing PDF export. Mirrors `exportSvg` exactly: grid and
+    /// overlay surfaces each own their own `ContentStream`; the overlay
+    /// stream is silently dropped when the throwaway orchestrator
+    /// releases its surfaces. Only the grid stream feeds
+    /// `build_document`, so the resulting PDF carries no selection,
+    /// marching ants, autofill handle, or formula refs — same policy as
+    /// SVG export. `Vec<u8>` auto-converts to `Uint8Array` across the
+    /// wasm-bindgen boundary.
+    #[cfg(feature = "pdf")]
+    #[allow(non_snake_case)]
+    pub fn exportPdf(&self, css_w: f64, css_h: f64) -> Vec<u8> {
+        let Some(model) = self.model.as_ref() else {
+            return Vec::new();
+        };
+        let width = css_w.round() as u32;
+        let height = css_h.round() as u32;
+
+        let grid = PdfSurface::new(width, height);
+        let overlay = PdfSurface::new(width, height);
+        let grid_stream = grid.stream();
+
+        let mut export_orch = Orchestrator::<PdfSurface, Rc<dyn CanvasModel>>::new(grid, overlay);
+        export_orch.set_theme(self.orch.theme().clone());
+        export_orch.set_model(Rc::clone(model));
+        export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
+        export_orch.request_repaint();
+        export_orch.paint_if_dirty();
+        drop(export_orch);
+
+        let stream = grid_stream.borrow();
+        PdfSurface::build_document(&stream, width, height)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -371,12 +409,7 @@ impl IronCanvas {
     /// Resize-handle hit-test. `tolerance` is the slop band in CSS pixels.
     /// Returns `null` if no row/column trailing edge is within tolerance.
     #[allow(non_snake_case)]
-    pub fn resizeHandleAt(
-        &self,
-        x: f64,
-        y: f64,
-        tolerance: f64,
-    ) -> Result<JsValue, JsError> {
+    pub fn resizeHandleAt(&self, x: f64, y: f64, tolerance: f64) -> Result<JsValue, JsError> {
         match self.orch.resize_handle_at(x, y, tolerance) {
             Some(target) => {
                 let wire: crate::wire::ResizeTargetWire = target.into();
@@ -432,8 +465,7 @@ impl IronCanvas {
     /// Autofill drag target. Pass `null` to clear (drag ended / cancelled).
     #[allow(non_snake_case)]
     pub fn setExtendTo(&mut self, target: JsValue) -> Result<(), JsError> {
-        let wire: Option<crate::wire::AutofillTargetWire> =
-            serde_wasm_bindgen::from_value(target)?;
+        let wire: Option<crate::wire::AutofillTargetWire> = serde_wasm_bindgen::from_value(target)?;
         self.orch.set_extend_to(wire.map(Into::into));
         Ok(())
     }
@@ -702,14 +734,8 @@ impl IronCanvas {
         // otherwise scale the backing store back down to the container.
         self.last_dpr = rec_dpr;
         self.orch.resize(rec_size, rec_dpr);
-        set_canvas_css_size(
-            self.orch.grid_surface().inner().canvas(),
-            rec_size,
-        )?;
-        set_canvas_css_size(
-            self.orch.overlay_surface().inner().canvas(),
-            rec_size,
-        )?;
+        set_canvas_css_size(self.orch.grid_surface().inner().canvas(), rec_size)?;
+        set_canvas_css_size(self.orch.overlay_surface().inner().canvas(), rec_size)?;
 
         self.playback = Some(PlaybackSession::new(rec, live_size, live_dpr));
         self.seek_recording_inner(0)
@@ -832,7 +858,9 @@ impl IronCanvas {
     /// Total frames in the loaded recording, or 0 if none loaded.
     #[allow(non_snake_case)]
     pub fn recordingFrameCount(&self) -> u32 {
-        self.playback.as_ref().map_or(0, PlaybackSession::frame_count)
+        self.playback
+            .as_ref()
+            .map_or(0, PlaybackSession::frame_count)
     }
 
     /// Current playback frame index, or 0 if none loaded.
@@ -847,10 +875,7 @@ impl IronCanvas {
 /// display size to `100%`; without an inline override the recording's
 /// backing-store resize would be scaled back down to the container.
 #[cfg(feature = "dev-tools")]
-fn set_canvas_css_size(
-    canvas: &HtmlCanvasElement,
-    size: CanvasSize,
-) -> Result<(), JsError> {
+fn set_canvas_css_size(canvas: &HtmlCanvasElement, size: CanvasSize) -> Result<(), JsError> {
     let style = canvas.style();
     style
         .set_property("width", &format!("{}px", size.w))

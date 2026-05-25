@@ -7,7 +7,7 @@ use std::rc::Rc;
 use web_sys::HtmlCanvasElement;
 
 #[cfg(feature = "dev-tools")]
-use crate::app_state::{AppState, PlaybackCmd, RecordingCmd};
+use crate::app_state::{AppState, ExportCmd, PlaybackCmd, RecordingCmd};
 use crate::components::cell_editor::CellEditor;
 use crate::coord::ActiveRef;
 use crate::coord::{CellArea, SheetRange};
@@ -435,6 +435,52 @@ pub fn Worksheet() -> impl IntoView {
             }
         });
         app.playback_cmd.set(None);
+    });
+
+    // Export dispatch Effect. Drains `app.export_cmd` (one-shot Svg/Pdf
+    // from PerfPanel) and pipes the bytes through `trigger_download`.
+    // SVG runs today via `IronCanvas::exportSvg`; the PDF arm is wired
+    // but unreachable until the iron-canvas-export PDF backend lands —
+    // the PerfPanel button is rendered `disabled=true` in the meantime.
+    #[cfg(feature = "dev-tools")]
+    Effect::new(move |_| {
+        let Some(cmd) = app.export_cmd.get() else {
+            return;
+        };
+        canvas_handle.update_value(|slot| {
+            let Some(ic) = slot.as_mut() else {
+                state
+                    .status
+                    .set(Some(StatusMessage::Error("canvas not ready".into())));
+                return;
+            };
+            let size = ic.canvas_size();
+            let ts = js_sys::Date::new_0()
+                .to_iso_string()
+                .as_string()
+                .and_then(|s| s.split('.').next().map(str::to_owned))
+                .map(|s| s.replace(':', "-"))
+                .unwrap_or_else(|| "now".into());
+            match cmd {
+                ExportCmd::Svg => {
+                    let svg = ic.exportSvg(size.w, size.h);
+                    crate::input::xlsx_io::trigger_download(
+                        svg.as_bytes(),
+                        &format!("sheet-{ts}.svg"),
+                        Some("image/svg+xml"),
+                    );
+                }
+                ExportCmd::Pdf => {
+                    let pdf = ic.exportPdf(size.w, size.h);
+                    crate::input::xlsx_io::trigger_download(
+                        &pdf,
+                        &format!("sheet-{ts}.pdf"),
+                        Some("application/pdf"),
+                    );
+                }
+            }
+        });
+        app.export_cmd.set(None);
     });
 
     // rAF render loop - fires on every animation frame (~60 fps).
