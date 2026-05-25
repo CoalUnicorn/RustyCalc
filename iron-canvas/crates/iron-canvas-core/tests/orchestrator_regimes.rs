@@ -254,6 +254,57 @@ fn content_dirty_with_active_cell_repaints_overlay() {
     );
 }
 
+/// Regression for the workbook-switch stale-paint bug: `set_model` must
+/// drop `last_frame` and raise `STRUCTURAL | OVERLAY` so the next paint
+/// runs Fresh and clears both layers. Without this, swapping the
+/// orchestrator's model in place (RustyCalc workbook switch, driven by
+/// the `current_uuid` Effect in `worksheet.rs`) keeps the prior workbook's
+/// chrome / pane geometry / cached pane buffers — and `decide()` routes
+/// against the wrong `last_frame` to a stale SlotsReuse or Overlay paint
+/// that never repaints the grid.
+///
+/// Tests the contract via the public `last_regime` accessor instead of
+/// reaching into private fields: Fresh after `set_model` is exactly the
+/// behavior the dropped `last_frame` + raised signals are supposed to
+/// produce.
+#[test]
+fn set_model_drops_last_frame_and_forces_fresh() {
+    let stub_a = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub_a));
+    orch.paint_if_dirty(); // Fresh — primes last_frame.
+
+    // A second paint with no signals would short-circuit; a content-dirty
+    // paint here would land on SlotsReuse. We're proving set_model defeats
+    // that path even with a steady viewport / sheet / freeze / size.
+    let stub_b = Rc::new(TestModel::synthetic_grid());
+    orch.set_model(Rc::clone(&stub_b));
+
+    let grid_before = grid_ops_len(&orch);
+    let overlay_before = overlay_ops_len(&orch);
+    orch.paint_if_dirty();
+
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Fresh),
+        "set_model must drop last_frame so the next paint takes Fresh; \
+         got {:?} — the workbook-switch stale-paint bug is back",
+        orch.last_regime(),
+    );
+
+    let new_grid_ops = grid_ops_since(&orch, grid_before);
+    let new_overlay_ops = overlay_ops_since(&orch, overlay_before);
+    assert!(
+        !new_grid_ops.is_empty(),
+        "set_model must raise STRUCTURAL so Fresh repaints the grid"
+    );
+    assert!(
+        !new_overlay_ops.is_empty(),
+        "set_model must raise OVERLAY so Fresh repaints the overlay \
+         — else the prior workbook's selection / autofill / clipboard \
+         pixels persist on screen"
+    );
+}
+
 // ─── Stage 5: Recording round-trip through RecordingSurface<MemSurface> ───
 //
 // Reuses TestModel + the same regime scenarios as the MemSurface

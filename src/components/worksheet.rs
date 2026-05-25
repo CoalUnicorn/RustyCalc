@@ -311,6 +311,27 @@ pub fn Worksheet() -> impl IntoView {
         },
     );
 
+    // Workbook-switch Effect — the comment on line 517 promised "subsequent
+    // pushes are driven by the reactive Effects below" but no Effect actually
+    // watched the workbook identity. Without a set_model call, the orchestrator
+    // keeps last_frame from the old workbook (stale pane geometry, stale sheet
+    // ID), and paint_if_dirty never drops it for a Fresh rebuild.
+    //
+    // Watching `current_uuid` gives us a deterministic signal that fires once
+    // per workbook switch. set_model is idempotent-safe — re-pushing the same
+    // adapter triggers a full repaint.
+    {
+        let current_uuid = state.current_uuid.read();
+        Effect::new(move |_| {
+            let _uuid = current_uuid.get();
+            canvas_handle.update_value(|slot| {
+                if let Some(ic) = slot.as_mut() {
+                    ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
+                }
+            });
+        });
+    }
+
     // Recording dispatch Effect — peer to the reactive Effect above. Drains
     // `app.recording_cmd` (one-shot Start/Stop from PerfPanel) and forwards
     // to the iron-canvas orchestrator. Gated by `recorder` feature because
