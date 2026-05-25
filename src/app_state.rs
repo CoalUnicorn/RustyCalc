@@ -17,7 +17,7 @@ use crate::theme::{use_rusty_calc_theme, Theme};
 /// One-shot command from the PerfPanel record button to the Worksheet
 /// dispatch Effect. The Effect drains it (`set(None)`) after handing the
 /// call to the iron-canvas orchestrator. Exists in both build flavors —
-/// in prod (no `recorder` feature) it is written but never read, since the
+/// in prod (no `dev-tools` feature) it is written but never read, since the
 /// PerfPanel button is hidden by the runtime `recordingSupported()` guard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -27,10 +27,10 @@ pub enum RecordingCmd {
 }
 
 /// One-shot command from the PerfPanel export buttons to the Worksheet
-/// dispatch Effect. Same drain pattern as [`RecordingCmd`]. `Svg` works
-/// today via `IronCanvas::exportSvg`; `Pdf` is reserved for the upcoming
-/// `iron-canvas-export` PDF backend and stays rendered as a disabled
-/// button until that lands.
+/// dispatch Effect. Same drain pattern as [`RecordingCmd`]. `Svg` is served
+/// by `IronCanvas::exportSvg` (always on); `Pdf` is served by
+/// `IronCanvas::exportPdf` (gated behind the `dev-tools → iron-canvas-web/pdf`
+/// feature chain, on in dev builds).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum ExportCmd {

@@ -11,9 +11,22 @@ use crate::storage;
 
 #[component]
 pub fn App() -> impl IntoView {
-    // Load the previously selected workbook from localStorage, or create a
-    // fresh blank one if localStorage is empty (first launch).
-    let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
+    // A `#share=…` URL trumps localStorage so an incoming share link always
+    // wins on first paint. We persist the decoded model under a fresh UUID
+    // (via create_new_from) so the recipient's edits survive refresh — the
+    // copy is independent of the original sender's workbook.
+    //
+    // After a successful share load we clear the hash so subsequent
+    // refreshes fall through to load_selected instead of spawning a fresh
+    // copy (which would strand the user's edits).
+    let loaded_from_share = storage::load_shared_from_url();
+    if loaded_from_share.is_some() {
+        let _ = leptos::prelude::window().location().set_hash("");
+    }
+    let (uuid, model) = loaded_from_share
+        .map(storage::create_new_from)
+        .or_else(storage::load_selected)
+        .unwrap_or_else(storage::create_new);
 
     let events = EventBus::new();
     // AppState owns the leptos-use color-mode handles internally; theme

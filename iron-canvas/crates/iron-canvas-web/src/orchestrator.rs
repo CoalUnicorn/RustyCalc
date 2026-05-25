@@ -25,7 +25,7 @@ use iron_canvas_export::pdf::PdfSurface;
 use iron_canvas_export::SvgSurface;
 
 #[cfg(feature = "dev-tools")]
-use crate::playback::{replay_through, PlaybackSession};
+use crate::playback::{replay_through, PlayClock, PlaybackSession};
 #[cfg(feature = "dev-tools")]
 use iron_canvas_core::PaintRegimeTag;
 #[cfg(feature = "dev-tools")]
@@ -36,7 +36,7 @@ use iron_canvas_recorder::DrawOp;
 use iron_canvas_recorder::{RecordingFilter, RecordingSurface};
 
 /// Facade Surface — wraps `WebSurface` in `RecordingSurface` when the
-/// `recorder` feature is on (dev builds), bare `WebSurface` otherwise
+/// `dev-tools` feature is on (dev builds), bare `WebSurface` otherwise
 /// (prod). `Orchestrator<FacadeSurface, _>` flows the choice through
 /// the rest of the engine via the `Surface` trait without any other
 /// site needing to know which is which.
@@ -89,6 +89,17 @@ struct RecordingState {
     capped: bool,
 }
 
+/// The three mutually-exclusive lifecycle states of dev-tools capture /
+/// replay. `Live` is the only state in which `paintIfDirty` actually
+/// paints; `Recording(_)` adds frame capture; `Playback(_)` short-circuits
+/// the host's rAF loop and replays recorded ops through the live painters.
+#[cfg(feature = "dev-tools")]
+enum CanvasMode {
+    Live,
+    Recording(RecordingState),
+    Playback(PlaybackSession),
+}
+
 #[wasm_bindgen]
 pub struct IronCanvas {
     orch: Orchestrator<FacadeSurface, Rc<dyn CanvasModel>>,
@@ -97,14 +108,13 @@ pub struct IronCanvas {
     model: Option<Rc<dyn CanvasModel>>,
     // Live DPR — the engine doesn't retain it across `resize` calls, and
     // both the recording header and playback restore need it. Initialized
-    // to `1` so a pre-resize `startRecording` (test surface) gets a sane
-    // default rather than UB. Only read under `dev-tools`.
+    // to `1` because some entry paths (the test surface) call `startRecording`
+    // before any `resize`, and a DPR of `0` in the recording header would
+    // round-trip through playback nonsensically. Only read under `dev-tools`.
     #[cfg_attr(not(feature = "dev-tools"), allow(dead_code))]
     last_dpr: i32,
     #[cfg(feature = "dev-tools")]
-    recording: Option<RecordingState>,
-    #[cfg(feature = "dev-tools")]
-    playback: Option<PlaybackSession>,
+    mode: CanvasMode,
 }
 
 #[wasm_bindgen]
@@ -123,9 +133,7 @@ impl IronCanvas {
             model: None,
             last_dpr: 1,
             #[cfg(feature = "dev-tools")]
-            recording: None,
-            #[cfg(feature = "dev-tools")]
-            playback: None,
+            mode: CanvasMode::Live,
         })
     }
 
@@ -172,17 +180,17 @@ impl IronCanvas {
     }
 
     /// Paint whichever layers are dirty. When a recording is active
-    /// (`recorder` feature only), brackets the paint with `begin_frame` /
+    /// (`dev-tools` feature only), brackets the paint with `begin_frame` /
     /// `end_frame` on both surfaces and pushes a `Frame` whenever at
     /// least one layer emitted ops. Idle rAF ticks are dropped.
     #[allow(non_snake_case)]
     pub fn paintIfDirty(&mut self) {
         #[cfg(feature = "dev-tools")]
-        if self.playback.is_some() {
+        if matches!(self.mode, CanvasMode::Playback(_)) {
             return;
         }
         #[cfg(feature = "dev-tools")]
-        let recording_active = self.recording.is_some();
+        let recording_active = matches!(self.mode, CanvasMode::Recording(_));
         #[cfg(feature = "dev-tools")]
         if recording_active {
             self.orch.grid_surface().begin_frame();
@@ -208,8 +216,16 @@ impl IronCanvas {
     #[cfg(feature = "dev-tools")]
     #[allow(non_snake_case)]
     pub fn startRecording(&mut self, opts: JsValue) -> Result<(), JsError> {
-        if self.recording.is_some() {
-            return Err(JsError::new("recording already active"));
+        match &self.mode {
+            CanvasMode::Live => {}
+            CanvasMode::Recording(_) => {
+                return Err(JsError::new("recording already active"));
+            }
+            CanvasMode::Playback(_) => {
+                return Err(JsError::new(
+                    "cannot start a recording during playback",
+                ));
+            }
         }
         // `undefined` / `null` → default filter (record everything).
         // Anything else is parsed as a `RecordingFilter` shape.
@@ -222,7 +238,7 @@ impl IronCanvas {
         let theme_snap = ThemeSnapshot::from(self.orch.theme());
         let now = js_sys::Date::now();
         let header = IcrHeader::new(canvas.w, canvas.h, self.last_dpr, theme_snap, now as u64);
-        self.recording = Some(RecordingState {
+        self.mode = CanvasMode::Recording(RecordingState {
             rec: Recording::new(header),
             started_at_ms: now,
             bytes_estimate: 0,
@@ -263,12 +279,15 @@ impl IronCanvas {
     #[cfg(feature = "dev-tools")]
     #[allow(non_snake_case)]
     pub fn stopRecording(&mut self) -> Result<js_sys::Uint8Array, JsError> {
+        if !matches!(self.mode, CanvasMode::Recording(_)) {
+            return Err(JsError::new("no active recording"));
+        }
         self.orch.grid_surface().disable_recording();
         self.orch.overlay_surface().disable_recording();
-        let state = self
-            .recording
-            .take()
-            .ok_or_else(|| JsError::new("no active recording"))?;
+        let CanvasMode::Recording(state) = std::mem::replace(&mut self.mode, CanvasMode::Live)
+        else {
+            unreachable!("guarded above by matches!(Recording(_))")
+        };
         let bytes = state
             .rec
             .serialize()
@@ -611,7 +630,7 @@ impl IronCanvas {
     /// side effects.
     ///
     /// Hard cap: flips `partial`, disables both painter-level forks, but
-    /// keeps `self.recording` populated so `stopRecording` can still
+    /// keeps the `Recording` mode populated so `stopRecording` can still
     /// drain the partial bytes.
     #[cfg(feature = "dev-tools")]
     fn capture_frame(&mut self) {
@@ -622,7 +641,7 @@ impl IronCanvas {
         }
         let regime = self.orch.last_regime().unwrap_or(PaintRegimeTag::Fresh);
         let signals = self.orch.last_signals().bits();
-        let Some(state) = self.recording.as_mut() else {
+        let CanvasMode::Recording(state) = &mut self.mode else {
             return;
         };
         let now = js_sys::Date::now();
@@ -667,7 +686,7 @@ impl IronCanvas {
     /// disabled at build time.
     #[cfg(feature = "dev-tools")]
     fn restamp_recording_theme(&mut self) {
-        if let Some(state) = self.recording.as_mut() {
+        if let CanvasMode::Recording(state) = &mut self.mode {
             state.rec.header.theme = ThemeSnapshot::from(self.orch.theme());
         }
     }
@@ -707,7 +726,7 @@ impl IronCanvas {
     /// session.
     #[allow(non_snake_case)]
     pub fn loadRecording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
-        if self.recording.is_some() {
+        if matches!(self.mode, CanvasMode::Recording(_)) {
             return Err(JsError::new(
                 "cannot load a recording while a capture is active",
             ));
@@ -734,7 +753,7 @@ impl IronCanvas {
         set_canvas_css_size(self.orch.grid_surface().inner().canvas(), rec_size)?;
         set_canvas_css_size(self.orch.overlay_surface().inner().canvas(), rec_size)?;
 
-        self.playback = Some(PlaybackSession::new(rec, live_size, live_dpr));
+        self.mode = CanvasMode::Playback(PlaybackSession::new(rec, live_size, live_dpr));
         self.seek_recording_inner(0)
     }
 
@@ -746,13 +765,17 @@ impl IronCanvas {
     /// same reason.
     #[allow(non_snake_case)]
     pub fn seekRecording(&mut self, frame_idx: u32) -> Result<(), JsError> {
-        if self.recording.is_some() {
-            return Err(JsError::new(
-                "cannot seek a recording while a capture is active",
-            ));
-        }
-        if let Some(s) = self.playback.as_mut() {
-            s.playing = false;
+        match &mut self.mode {
+            CanvasMode::Recording(_) => {
+                return Err(JsError::new(
+                    "cannot seek a recording while a capture is active",
+                ));
+            }
+            // Fall through; `seek_recording_inner` produces "no recording loaded".
+            CanvasMode::Live => {}
+            CanvasMode::Playback(s) => {
+                s.clock = PlayClock::Paused;
+            }
         }
         self.seek_recording_inner(frame_idx)
     }
@@ -769,14 +792,12 @@ impl IronCanvas {
     /// later (after the auto-pause) does not.
     #[allow(non_snake_case)]
     pub fn playRecording(&mut self, now_ms: f64) -> Result<(), JsError> {
-        let s = self
-            .playback
-            .as_mut()
-            .ok_or_else(|| JsError::new("no recording loaded"))?;
+        let CanvasMode::Playback(s) = &mut self.mode else {
+            return Err(JsError::new("no recording loaded"));
+        };
         if s.frame_idx + 1 >= s.frame_count() {
             return Ok(());
         }
-        s.playing = true;
         s.anchor(now_ms);
         Ok(())
     }
@@ -784,8 +805,8 @@ impl IronCanvas {
     /// Halt the play loop. Idempotent.
     #[allow(non_snake_case)]
     pub fn pauseRecording(&mut self) {
-        if let Some(s) = self.playback.as_mut() {
-            s.playing = false;
+        if let CanvasMode::Playback(s) = &mut self.mode {
+            s.clock = PlayClock::Paused;
         }
     }
 
@@ -793,7 +814,10 @@ impl IronCanvas {
     /// or when no recording is loaded.
     #[allow(non_snake_case)]
     pub fn isPlaying(&self) -> bool {
-        self.playback.as_ref().is_some_and(|s| s.playing)
+        matches!(
+            &self.mode,
+            CanvasMode::Playback(s) if matches!(s.clock, PlayClock::Playing { .. })
+        )
     }
 
     /// Drive playback forward to whichever frame matches `now_ms` against
@@ -806,17 +830,21 @@ impl IronCanvas {
     /// never paint in the same tick.
     #[allow(non_snake_case)]
     pub fn tickPlayback(&mut self, now_ms: f64) -> bool {
-        let Some(s) = self.playback.as_mut() else {
+        let CanvasMode::Playback(s) = &mut self.mode else {
             return false;
         };
-        if !s.playing {
+        let PlayClock::Playing {
+            anchor_ms,
+            anchor_frame_idx,
+        } = s.clock
+        else {
             return false;
-        }
-        let target = s.target_frame_for(now_ms);
+        };
+        let target = s.target_frame_for(anchor_ms, anchor_frame_idx, now_ms);
         let last = s.frame_count().saturating_sub(1);
         let changed = target != s.frame_idx;
         if target >= last {
-            s.playing = false;
+            s.clock = PlayClock::Paused;
         }
         if !changed {
             return false;
@@ -833,7 +861,8 @@ impl IronCanvas {
     /// live size + DPR. No-op when no session is loaded.
     #[allow(non_snake_case)]
     pub fn exitPlayback(&mut self) {
-        let Some(session) = self.playback.take() else {
+        let CanvasMode::Playback(session) = std::mem::replace(&mut self.mode, CanvasMode::Live)
+        else {
             return;
         };
         // Clear the inline overrides so the `.ws-canvas { width: 100%;
@@ -849,21 +878,27 @@ impl IronCanvas {
     /// `true` while a playback session is loaded.
     #[allow(non_snake_case)]
     pub fn playbackActive(&self) -> bool {
-        self.playback.is_some()
+        matches!(self.mode, CanvasMode::Playback(_))
     }
 
     /// Total frames in the loaded recording, or 0 if none loaded.
     #[allow(non_snake_case)]
     pub fn recordingFrameCount(&self) -> u32 {
-        self.playback
-            .as_ref()
-            .map_or(0, PlaybackSession::frame_count)
+        if let CanvasMode::Playback(s) = &self.mode {
+            s.frame_count()
+        } else {
+            0
+        }
     }
 
     /// Current playback frame index, or 0 if none loaded.
     #[allow(non_snake_case)]
     pub fn recordingCurrentFrame(&self) -> u32 {
-        self.playback.as_ref().map_or(0, |s| s.frame_idx)
+        if let CanvasMode::Playback(s) = &self.mode {
+            s.frame_idx
+        } else {
+            0
+        }
     }
 }
 
@@ -901,10 +936,9 @@ fn clear_canvas_css_size(canvas: &HtmlCanvasElement) -> Result<(), JsError> {
 #[cfg(feature = "dev-tools")]
 impl IronCanvas {
     fn seek_recording_inner(&mut self, frame_idx: u32) -> Result<(), JsError> {
-        let session = self
-            .playback
-            .as_mut()
-            .ok_or_else(|| JsError::new("no recording loaded"))?;
+        let CanvasMode::Playback(session) = &mut self.mode else {
+            return Err(JsError::new("no recording loaded"));
+        };
         let count = session.frame_count();
         if count == 0 {
             return Err(JsError::new("recording has no frames"));

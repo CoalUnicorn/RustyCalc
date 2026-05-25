@@ -8,9 +8,11 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
+use crate::components::share_popover::SharePopover;
 use crate::input::workbook::{execute_workbook, WorkbookAction};
 use crate::input::xlsx_io;
 use crate::state::{ModelStore, WorkbookState};
+use crate::storage;
 use crate::theme::Theme;
 
 #[allow(dead_code)]
@@ -121,6 +123,47 @@ pub fn FileBar() -> impl IntoView {
         crate::util::refocus_workbook();
     };
 
+    // Share popover state. The URL is built eagerly on click (cheap) so the
+    // popover gets a static String prop — keeps SharePopover non-reactive
+    // and lets the host control refresh by re-mounting via <Show>.
+    let (share_open, set_share_open) = signal(false);
+    let share_url = RwSignal::new(String::new());
+    let share_error = RwSignal::new(String::new());
+
+    let on_share = move || {
+        let result = model.with_value(storage::encode_for_share_url);
+        match result {
+            Ok(encoded) => {
+                let loc = window().location();
+                let origin = loc.origin().unwrap_or_default();
+                // Include pathname so share links work on sub-path deploys
+                // (e.g. https://host/calc/#share=… not https://host/#share=…).
+                // For opaque origins (sandboxed iframes, file://), fall back
+                // to the full href minus any existing hash.
+                let base = if origin.is_empty() {
+                    loc.href()
+                        .unwrap_or_default()
+                        .split('#')
+                        .next()
+                        .unwrap_or("/")
+                        .to_string()
+                } else {
+                    let pathname = loc.pathname().unwrap_or_else(|_| "/".into());
+                    format!("{origin}{pathname}")
+                };
+                share_url.set(format!("{base}#share={encoded}"));
+                share_error.set(String::new());
+                set_share_open.set(true);
+            }
+            Err(storage::ShareError::TooLarge { size_kb }) => {
+                share_error.set(format!(
+                    "This workbook is too large to share via link ({size_kb} KB). \
+                     Use File → Download .xlsx instead."
+                ));
+            }
+        }
+    };
+
     // let on_toggle_perf = move || {
     //     app.show_perf_panel.update(|v| *v = !*v);
     // };
@@ -181,6 +224,7 @@ pub fn FileBar() -> impl IntoView {
             <ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos>
                 <ContextMenuItem on_click=on_import icon="⬆">"Import .xlsx"</ContextMenuItem>
                 <ContextMenuItem on_click=on_export icon="⬇">"Download .xlsx"</ContextMenuItem>
+                <ContextMenuItem on_click=on_share icon="🔗">"Share"</ContextMenuItem>
                 <ContextMenuSeparator />
                 /*
                 <ContextMenuItem on_click=on_toggle_perf icon="⏱">
@@ -188,6 +232,19 @@ pub fn FileBar() -> impl IntoView {
                 </ContextMenuItem>
                 */
             </ContextMenu>
+
+            <Show when=move || share_open.get()>
+                <SharePopover
+                    share_url=share_url.get()
+                    on_close=Callback::new(move |_| set_share_open.set(false))
+                />
+            </Show>
+
+            <Show when=move || !share_error.get().is_empty()>
+                <div class="sp-error-banner">
+                    {move || share_error.get()}
+                </div>
+            </Show>
 
             // Right: theme toggle
             <div class="fl-right">

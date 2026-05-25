@@ -11,16 +11,20 @@ use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_recorder::recording::{Frame, Recording};
 use iron_canvas_recorder::replay;
 
+/// Two-state playback clock. `Paused` carries no data; `Playing` carries the
+/// anchor pair (`anchor_ms` = wall-clock at last `play` / anchor reset,
+/// `anchor_frame_idx` = the frame `anchor_ms` is pinned to). The target frame
+/// at tick time is whichever frame's `t_ms` is closest to
+/// `frames[anchor_frame_idx].t_ms + (now - anchor_ms)`.
+pub enum PlayClock {
+    Paused,
+    Playing { anchor_ms: f64, anchor_frame_idx: u32 },
+}
+
 pub struct PlaybackSession {
     pub recording: Recording,
     pub frame_idx: u32,
-    pub playing: bool,
-    /// Wall-clock (`performance.now()`) at the last `play` or anchor reset.
-    pub play_anchor_ms: f64,
-    /// Frame index that `play_anchor_ms` is pinned to. The target frame at
-    /// tick time is whichever frame's `t_ms` is closest to
-    /// `frames[anchor_frame_idx].t_ms + (now - play_anchor_ms)`.
-    pub anchor_frame_idx: u32,
+    pub clock: PlayClock,
     /// Pre-playback live canvas size, captured at `loadRecording`. The
     /// orchestrator and canvas backing stores are resized to recording
     /// dimensions for the session's lifetime; on `exitPlayback` we
@@ -35,9 +39,7 @@ impl PlaybackSession {
         Self {
             recording,
             frame_idx: 0,
-            playing: false,
-            play_anchor_ms: 0.0,
-            anchor_frame_idx: 0,
+            clock: PlayClock::Paused,
             live_size,
             live_dpr,
         }
@@ -47,26 +49,30 @@ impl PlaybackSession {
         self.recording.frames.len() as u32
     }
 
-    /// Pin the playback clock: subsequent `target_frame_for` calls measure
-    /// elapsed time from `now_ms` against the timestamp of `frame_idx`.
+    /// Pin the playback clock and enter `Playing`: subsequent
+    /// `target_frame_for` calls measure elapsed time from `now_ms` against
+    /// the timestamp of the current `frame_idx`.
     pub fn anchor(&mut self, now_ms: f64) {
-        self.play_anchor_ms = now_ms;
-        self.anchor_frame_idx = self.frame_idx;
+        self.clock = PlayClock::Playing {
+            anchor_ms: now_ms,
+            anchor_frame_idx: self.frame_idx,
+        };
     }
 
-    /// Slice index of the frame that should be on screen at `now_ms`,
-    /// assuming `playing == true`. Walks forward only — playback is
-    /// strictly monotonic. Returns the anchor index when no frame has
-    /// elapsed yet.
-    pub fn target_frame_for(&self, now_ms: f64) -> u32 {
+    /// Slice index of the frame that should be on screen at `now_ms`.
+    /// Caller passes the anchor pair (destructured from `PlayClock::Playing`)
+    /// so this method is only reachable in the playing state. Walks forward
+    /// only — playback is strictly monotonic. Returns the anchor index when
+    /// no frame has elapsed yet.
+    pub fn target_frame_for(&self, anchor_ms: f64, anchor_frame_idx: u32, now_ms: f64) -> u32 {
         let frames = &self.recording.frames;
         if frames.is_empty() {
             return 0;
         }
         let count = frames.len() as u32;
-        let anchor_t = frames[self.anchor_frame_idx as usize].t_ms as f64;
-        let target_t = anchor_t + (now_ms - self.play_anchor_ms);
-        let mut i = self.frame_idx.max(self.anchor_frame_idx);
+        let anchor_t = frames[anchor_frame_idx as usize].t_ms as f64;
+        let target_t = anchor_t + (now_ms - anchor_ms);
+        let mut i = self.frame_idx.max(anchor_frame_idx);
         while i + 1 < count && (frames[(i + 1) as usize].t_ms as f64) <= target_t {
             i += 1;
         }

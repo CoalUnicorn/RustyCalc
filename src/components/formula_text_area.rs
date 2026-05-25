@@ -5,6 +5,8 @@
 //! - the `<Show>` mount gate,
 //! - the positioned `<textarea>` element (style computed from the selected
 //!   cell rect),
+//! - a sibling [`FormulaOverlay`] that renders colored ref tokens behind
+//!   the transparent textarea text,
 //! - the auto-focus effect that runs only on `EditFocus::Cell` transitions
 //!   (clicks or printable keys) — the formula bar owns its own focus.
 //!
@@ -14,7 +16,9 @@
 //! it atomically with `text` — which is exactly what `sync_edit` guarantees.
 
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 
+use crate::components::formula_overlay::FormulaOverlay;
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::input::mouse::CanvasHandle;
 use crate::model::FrontendModel;
@@ -26,6 +30,8 @@ pub fn FormulaTextArea() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
     let canvas_handle = expect_context::<CanvasHandle>();
+    // Cache the overlay element so on_scroll doesn't query_selector at 60 Hz.
+    let overlay_ref: NodeRef<leptos::html::Div> = NodeRef::new();
 
     // Track only the `EditFocus` variant — not the text buffer — so this
     // memo stays stable while the user types and the auto-focus Effect
@@ -50,15 +56,11 @@ pub fn FormulaTextArea() -> impl IntoView {
         ta.set_selection_range(len, len).ok();
     });
 
-    let cell_style = move || {
+    let host_style = move || {
         let _ = state.events.navigation.get();
         // Use the editing cell's address, not the live cursor. During point-mode
         // navigation the cursor moves to referenced cells, but the textarea must
         // stay anchored to the cell where the edit started.
-        //
-        // Pixel rect comes from `IronCanvas::cell_rect`, which reads the LAST
-        // PAINTED frame — keeps the editor positioned over the cell the user
-        // sees, even between a scroll mutation and the next animation frame.
         let (row, column) = state
             .editing_cell
             .get()
@@ -73,12 +75,26 @@ pub fn FormulaTextArea() -> impl IntoView {
         format!("{}", rect)
     };
 
-    let textarea_class = move || match state.editing_cell.get() {
-        Some(e) if e.formula_analysis.has_any_error() => "ce formula-error",
-        _ => "ce",
+    let is_error = move || {
+        state
+            .editing_cell
+            .get()
+            .map(|e| e.formula_analysis.has_any_error())
+            .unwrap_or(false)
     };
 
     let text_value = move || state.editing_cell.get().map(|e| e.text).unwrap_or_default();
+
+    let overlay_text = Signal::derive(move || {
+        state.editing_cell.get().map(|e| e.text).unwrap_or_default()
+    });
+    let overlay_refs = Signal::derive(move || {
+        state
+            .editing_cell
+            .get()
+            .map(|e| e.formula_analysis.refs().to_vec())
+            .unwrap_or_default()
+    });
 
     let on_input = move |ev: web_sys::Event| {
         let Some(target) = ev.target() else { return };
@@ -98,16 +114,36 @@ pub fn FormulaTextArea() -> impl IntoView {
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| suppress_navigation_defaults(&ev);
 
+    // Keep the overlay's scroll position glued to the textarea's. Scoped to
+    // the immediate previous sibling so multiple hosts never cross-fire.
+    let on_scroll = move |ev: web_sys::Event| {
+        let Some(target) = ev.target() else { return };
+        let Some(ta) = target.dyn_ref::<web_sys::HtmlTextAreaElement>() else {
+            return;
+        };
+        if let Some(overlay) = overlay_ref.get() {
+            let _ = overlay.set_scroll_top(ta.scroll_top());
+            let _ = overlay.set_scroll_left(ta.scroll_left());
+        }
+    };
+
     view! {
         <Show when=move || state.editing_cell.get().is_some()>
-            <textarea
-                node_ref=state.cell_editor_ref
-                class=textarea_class
-                style=cell_style
-                prop:value=text_value
-                on:input=on_input
-                on:keydown=on_keydown
-            />
+            <div
+                class="fe-host fe-host--cell"
+                class:formula-error=is_error
+                style=host_style
+            >
+                <FormulaOverlay node_ref=overlay_ref text=overlay_text refs=overlay_refs multiline=true />
+                <textarea
+                    node_ref=state.cell_editor_ref
+                    class="ce fe-text"
+                    prop:value=text_value
+                    on:input=on_input
+                    on:keydown=on_keydown
+                    on:scroll=on_scroll
+                />
+            </div>
         </Show>
     }
 }

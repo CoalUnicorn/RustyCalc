@@ -1,4 +1,7 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine,
+};
 use gloo_storage::{LocalStorage, Storage};
 use ironcalc_base::UserModel;
 use serde::{Deserialize, Serialize};
@@ -219,8 +222,8 @@ pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
             return None;
         }
     };
-    // "en" is 'static, so the returned UserModel<'static> lifetime is satisfied.
-    match UserModel::from_bytes(&bytes, "en") {
+    // LOCALE is 'static, so the returned UserModel<'static> lifetime is satisfied.
+    match UserModel::from_bytes(&bytes, LOCALE) {
         Ok(m) => Some(m),
         Err(e) => {
             web_sys::console::warn_1(
@@ -281,7 +284,7 @@ pub fn create_new() -> (WorkbookId, UserModel<'static>) {
     let name: &'static str = format!("Workbook {}", max_n + 1).leak();
     let uuid = WorkbookId::new();
     #[allow(clippy::expect_used)]
-    let model = UserModel::new_empty(name, "en", "UTC", "en").expect("Failed to create new model");
+    let model = UserModel::new_empty(name, LOCALE, "UTC", LOCALE).expect("Failed to create new model");
     save(&uuid, &model);
     set_selected_uuid(&uuid);
     (uuid, model)
@@ -306,5 +309,102 @@ pub fn delete(uuid: &WorkbookId) {
     save_registry(&registry);
     if get_selected_uuid() == Some(*uuid) {
         LocalStorage::delete(SELECTED_KEY);
+    }
+}
+
+// ============================================================================
+// URL Sharing
+// ============================================================================
+//
+// Encodes the entire workbook into a URL hash fragment so a recipient can open
+// a copy with no server round-trip. Raw model bytes → base64url (no padding)
+// keeps the result safe for `#share=…` without percent-encoding. The 30 KB
+// raw-byte ceiling keeps the resulting link well below practical browser URL
+// limits (~64 KB on Chrome / ~32 KB on most others when shared via chat apps).
+
+/// Maximum raw byte size for share-URL encoding.
+/// 30 KB raw → ~40 KB base64url, comfortably within practical hash-fragment
+/// limits across browsers and link-preview tools.
+pub const MAX_SHARE_BYTES: usize = 30_000;
+
+/// Maximum encoded (base64url) length for incoming share URLs.
+/// ceil(MAX_SHARE_BYTES × 4/3) — a guard before decode so attackers can't
+/// feed arbitrarily large payloads into the parser.
+const MAX_SHARE_ENCODED: usize = MAX_SHARE_BYTES * 4 / 3 + 4;
+
+/// Locale used for UserModel construction throughout storage.
+/// IronCalc's parser uses this for function-name resolution, number
+/// formatting, and date parsing. Keep it consistent across create/load/import.
+const LOCALE: &str = "en";
+
+#[derive(Debug, Clone)]
+pub enum ShareError {
+    TooLarge { size_kb: usize },
+}
+
+/// Encode a model to a URL-safe base64 string for sharing.
+/// Uses `URL_SAFE_NO_PAD` so the result drops into a hash fragment without
+/// percent-encoding or trailing `=` padding.
+pub fn encode_for_share_url(model: &UserModel) -> Result<String, ShareError> {
+    let bytes = model.to_bytes();
+    if bytes.len() > MAX_SHARE_BYTES {
+        return Err(ShareError::TooLarge {
+            size_kb: bytes.len() / 1024,
+        });
+    }
+    Ok(URL_SAFE_NO_PAD.encode(&bytes))
+}
+
+/// Try to load a shared model from the URL hash fragment.
+/// Returns `None` if no `#share=` parameter is present or decoding fails.
+/// Warnings are logged so silent data loss is visible in the console.
+pub fn load_shared_from_url() -> Option<UserModel<'static>> {
+    let hash = leptos::prelude::window().location().hash().ok()?;
+    let encoded = hash.strip_prefix("#share=")?;
+
+    // Reject oversized payloads before decoding — prevents attackers from
+    // feeding arbitrarily large base64 into the decoder/parser.
+    if encoded.len() > MAX_SHARE_ENCODED {
+        web_sys::console::warn_1(
+            &format!(
+                "[rustycalc sharing] encoded length {} exceeds limit {MAX_SHARE_ENCODED}",
+                encoded.len()
+            )
+            .into(),
+        );
+        return None;
+    }
+
+    let bytes = match URL_SAFE_NO_PAD.decode(encoded) {
+        Ok(b) => b,
+        Err(e) => {
+            web_sys::console::warn_1(
+                &format!("[rustycalc sharing] URL decode failed: {e}").into(),
+            );
+            return None;
+        }
+    };
+
+    // Double-check decoded size matches our limit — base64 can decode to
+    // a smaller payload than the encoded length suggested.
+    if bytes.len() > MAX_SHARE_BYTES {
+        web_sys::console::warn_1(
+            &format!(
+                "[rustycalc sharing] decoded {} bytes exceeds limit {MAX_SHARE_BYTES}",
+                bytes.len()
+            )
+            .into(),
+        );
+        return None;
+    }
+
+    match UserModel::from_bytes(&bytes, LOCALE) {
+        Ok(m) => Some(m),
+        Err(e) => {
+            web_sys::console::warn_1(
+                &format!("[rustycalc sharing] model parse failed: {e}").into(),
+            );
+            None
+        }
     }
 }
