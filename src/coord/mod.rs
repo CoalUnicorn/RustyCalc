@@ -5,13 +5,13 @@
 //! are converted at the edges via `to_ironcalc_area()`, `as_tuple()`, and
 //! `From<[i32; 4]>` — they never leak past the `FrontendModel` trait.
 
-mod types;
 mod convert;
 mod ref_edit;
+mod types;
 
-pub use types::*;
 pub use convert::*;
 pub use ref_edit::*;
+pub use types::*;
 
 // Re-export from iron-canvas-core so callers get it through `crate::coord`
 pub use types::FormulaRefKind;
@@ -19,6 +19,10 @@ pub use types::FormulaRefKind;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use ironcalc_base::expressions::types::CellReferenceRC;
+
+    use crate::model::ArrowKey;
+
     use super::*;
 
     #[test]
