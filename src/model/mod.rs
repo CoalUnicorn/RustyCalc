@@ -5,6 +5,6 @@ pub mod style_types;
 
 pub use clipboard_bridge::{AppClipboard, PasteMode};
 pub use frontend_model::{
-    mutate, try_mutate, EvaluationMode, FormulaAnalyzer, FrontendModel, Navigator, SheetQuery,
+    mutate, try_mutate, EvaluationMode, FormulaAnalyzer, Navigator, SheetQuery,
 };
 pub use frontend_types::*;

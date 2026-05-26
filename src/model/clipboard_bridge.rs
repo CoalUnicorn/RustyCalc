@@ -4,9 +4,11 @@
 use ironcalc_base::types::{BorderItem, BorderStyle};
 use ironcalc_base::{BorderArea, ClipboardData, UserModel};
 
+use crate::model::Navigator;
+
 use crate::coord::CellArea;
 
-    10|use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PasteMode {

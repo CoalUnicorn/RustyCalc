@@ -17,7 +17,7 @@ use crate::model::SheetQuery;
 use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{ModelStore, WorkbookState};
 
-use super::formula_input::FormulaInput;
+#[component]
 pub fn FormulaInput() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();

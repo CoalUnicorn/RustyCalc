@@ -23,9 +23,9 @@ use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_default
 use crate::input::mouse::CanvasHandle;
 use crate::model::SheetQuery;
 use crate::model::frontend_model::DefinedNameManager;
-use crate::state::{ModelStore, WorkbookState};
+use crate::state::{EditFocus, ModelStore, WorkbookState};
+use iron_canvas_core::PixelRect;
 
-use super::formula_input::FormulaInput;
 #[component]
 pub fn FormulaTextArea() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
