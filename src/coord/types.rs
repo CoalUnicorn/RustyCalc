@@ -1,19 +1,16 @@
-//! Shared coordinate primitives for cell ranges and addresses.
+//! Shared coordinate types — cell addresses, ranges, and formula references.
 //!
-//! All indices are 1-based, matching ironcalc conventions.
-//! ironcalc boundary types (`Area`, `ClipboardTuple`, `SelectedView.range`)
-//! are converted at the edges via `to_ironcalc_area()`, `as_tuple()`, and
-//! `From<[i32; 4]>` — they never leak past the `FrontendModel` trait.
+//! All indices are 1-based, matching ironcalc conventions.  Pure data structs
+//! and their inherent impls; `From` conversions live in `super::convert`.
 
-use ironcalc_base::{expressions::types::Area, UserModel};
-
+use ironcalc_base::expressions::parser::Node;
 use ironcalc_base::expressions::parser::stringify::{to_localized_string, to_rc_format};
-use ironcalc_base::expressions::parser::{DefinedNameS, Node};
 use ironcalc_base::expressions::types::CellReferenceRC;
 use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
+use ironcalc_base::UserModel;
 
-use iron_canvas_core::types::coord::{FormulaRef, RCRange, SheetArea};
+use iron_canvas_core::types::coord::SheetArea;
 pub use iron_canvas_core::types::coord::FormulaRefKind;
 
 use crate::model::ArrowKey;
@@ -26,7 +23,7 @@ use crate::model::ArrowKey;
 /// invariant by mutating in place.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RefNode {
-    inner: Node,
+    pub(crate) inner: Node,
 }
 
 impl RefNode {
@@ -129,10 +126,9 @@ impl RefNode {
     /// A1-style via ironcalc's canonical stringifier. `ctx` is the cell
     /// being edited — drives relative-offset math. Locale/language hard-
     /// coded to "en" until we surface them in AppState.
-    #[allow(clippy::expect_used)]
     pub fn to_localized(&self, ctx: &CellReferenceRC) -> String {
-        let locale = get_locale("en").expect("builtin 'en' locale ships with ironcalc");
-        let language = get_language("en").expect("builtin 'en' language ships with ironcalc");
+        let locale = get_locale("en").unwrap_or_else(|_| panic!("builtin 'en' locale missing"));
+        let language = get_language("en").unwrap_or_else(|_| panic!("builtin 'en' language missing"));
         to_localized_string(&self.inner, ctx, locale, language)
     }
 
@@ -407,9 +403,6 @@ impl RefNode {
     /// `$A$1` and the user clicks B5, the result is `$B$5`. Flag inheritance
     /// is what makes it Excel-parity instead of "drop to bare relative".
     pub fn relocate_to(&self, abs_row: i32, abs_col: i32, editing: &CellAddress) -> Self {
-        // Relative fields store `absolute - editing` offsets, so the rebuild
-        // rule is symmetric between the Reference and Range arms — only the
-        // field names differ. Trailing corner's flags win in the Range case.
         let (sheet_name, sheet_index, abs_r_flag, abs_c_flag) = match &self.inner {
             Node::ReferenceKind {
                 sheet_name,
@@ -470,15 +463,7 @@ impl DefinedName {
     }
 }
 
-impl From<DefinedNameS> for DefinedName {
-    fn from((name, scope, formula): DefinedNameS) -> Self {
-        Self {
-            name,
-            scope,
-            formula,
-        }
-    }
-}
+use ironcalc_base::expressions::parser::DefinedNameS;
 
 /// Byte-offset span within a formula string, marking where the last point-mode
 /// reference was spliced — so it can be replaced on the next arrow press or click.
@@ -543,16 +528,6 @@ pub struct ActiveRef {
     pub kind: FormulaRefKind,
 }
 
-impl From<ActiveRef> for FormulaRef {
-    fn from(a: ActiveRef) -> Self {
-        Self {
-            sheet_area: a.sheet_area.into(),
-            color_idx: a.color_idx,
-            kind: a.kind,
-        }
-    }
-}
-
 /// A cell range pinned to a specific sheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SheetRange {
@@ -582,13 +557,6 @@ impl SheetRange {
         }
     }
 
-    // pub fn contains_address(self, addr: CellAddress) -> bool {
-    //     if addr.sheet == self.sheet {
-    //         return self.area.contains(addr.row, addr.column)
-    //     }
-    //     false
-    // }
-
     pub fn on_same_sheet(self, other: SheetRange) -> bool {
         self.sheet == other.sheet
     }
@@ -598,14 +566,7 @@ impl SheetRange {
     }
 }
 
-impl From<SheetRange> for SheetArea {
-    fn from(s: SheetRange) -> Self {
-        Self {
-            sheet: s.sheet,
-            range: s.area.into(),
-        }
-    }
-}
+use ironcalc_base::expressions::types::Area;
 
 /// Axis-aligned cell range. 1-based sheet coordinates.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -712,40 +673,6 @@ impl CellArea {
     }
 }
 
-impl From<(i32, i32, i32, i32)> for CellArea {
-    fn from((r1, c1, r2, c2): (i32, i32, i32, i32)) -> Self {
-        Self { r1, c1, r2, c2 }
-    }
-}
-
-impl From<[i32; 4]> for CellArea {
-    fn from(range: [i32; 4]) -> Self {
-        Self {
-            r1: range[0],
-            c1: range[1],
-            r2: range[2],
-            c2: range[3],
-        }
-    }
-}
-
-impl From<CellArea> for [i32; 4] {
-    fn from(a: CellArea) -> Self {
-        [a.r1, a.c1, a.r2, a.c2]
-    }
-}
-
-impl From<CellArea> for RCRange {
-    fn from(c: CellArea) -> Self {
-        Self {
-            r1: c.r1,
-            c1: c.c1,
-            r2: c.r2,
-            c2: c.c2,
-        }
-    }
-}
-
 /// Single cell position on a sheet. 1-based indices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CellAddress {
@@ -786,372 +713,5 @@ impl CellAddress {
             row: self.row,
             column: self.column,
         }
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn contains_includes_corners() {
-        let a = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 3,
-            c2: 3,
-        };
-        assert!(a.contains(1, 1), "top-left");
-        assert!(a.contains(3, 3), "bottom-right");
-        assert!(!a.contains(4, 1), "outside");
-    }
-
-    #[test]
-    fn contains_single_cell_area() {
-        let a = CellArea::from_cell(5, 7);
-        assert!(a.contains(5, 7));
-        assert!(!a.contains(5, 8));
-    }
-
-    #[test]
-    fn normalized_swaps_inverted_coords() {
-        let a = CellArea {
-            r1: 4,
-            c1: 3,
-            r2: 1,
-            c2: 1,
-        };
-        assert_eq!(
-            a.normalized(),
-            CellArea {
-                r1: 1,
-                c1: 1,
-                r2: 4,
-                c2: 3
-            }
-        );
-    }
-
-    #[test]
-    fn to_sheet_area_produces_single_cell() {
-        let addr = CellAddress {
-            sheet: 2,
-            row: 4,
-            column: 6,
-        };
-        let sa = addr.to_sheet_area();
-        assert_eq!(sa.sheet, 2);
-        assert_eq!(sa.area, CellArea::from_cell(4, 6));
-        assert!(sa.area.is_single_cell());
-    }
-
-    fn ctx_a1() -> CellReferenceRC {
-        CellReferenceRC {
-            sheet: "Sheet1".into(),
-            row: 1,
-            column: 1,
-        }
-    }
-
-    fn editing_a1() -> CellAddress {
-        CellAddress {
-            sheet: 0,
-            row: 1,
-            column: 1,
-        }
-    }
-
-    // Relative Node fields store offsets from ctx: zero-offset from A1 -> "A1".
-    #[test]
-    fn refnode_a1_roundtrip() {
-        let n = RefNode::cell(0, None, 0, 0, false, false);
-        assert_eq!(n.to_localized(&ctx_a1()), "A1");
-    }
-
-    // Absolute Node fields store the final 1-based coordinate directly.
-    #[test]
-    fn refnode_absolute_a1_roundtrip() {
-        let n = RefNode::cell(0, None, 1, 1, true, true);
-        assert_eq!(n.to_localized(&ctx_a1()), "$A$1");
-    }
-
-    #[test]
-    fn refnode_cross_sheet_range() {
-        let n = RefNode::range(
-            1,
-            Some("Sheet2".into()),
-            0,
-            0,
-            false,
-            false,
-            2,
-            1,
-            false,
-            false,
-        );
-        assert_eq!(n.to_localized(&ctx_a1()), "Sheet2!A1:B3");
-    }
-
-    #[test]
-    fn refnode_quoted_sheet_name() {
-        let n = RefNode::cell(1, Some("Space Sheet".into()), 0, 0, false, false);
-        assert_eq!(n.to_localized(&ctx_a1()), "'Space Sheet'!A1");
-    }
-
-    #[test]
-    fn refnode_rc_format_absolute_is_r1c1() {
-        let n = RefNode::cell(0, None, 1, 1, true, true);
-        assert_eq!(n.to_rc(), "R1C1");
-    }
-
-    // Relative ref: stored fields are deltas; area() must add editing coords.
-    #[test]
-    fn refnode_area_relative_resolves_with_editing() {
-        let n = RefNode::cell(3, None, 4, 6, false, false);
-        let resolved = n.area(&editing_a1());
-        assert_eq!(resolved, SheetRange::from_cell(3, 5, 7));
-    }
-
-    // Absolute ref: stored fields are already absolute; editing is ignored.
-    #[test]
-    fn refnode_area_absolute_ignores_editing() {
-        let n = RefNode::cell(3, None, 5, 7, true, true);
-        let editing_far_away = CellAddress {
-            sheet: 0,
-            row: 100,
-            column: 100,
-        };
-        assert_eq!(n.area(&editing_far_away), SheetRange::from_cell(3, 5, 7));
-    }
-
-    // Range: each corner resolved independently via its own absolute flags.
-    #[test]
-    fn refnode_area_range_mixed_flags() {
-        // Anchor absolute at A1, trailing relative at delta (2,1) from editing.
-        let n = RefNode::range(2, None, 1, 1, true, true, 2, 1, false, false);
-        let editing = CellAddress {
-            sheet: 0,
-            row: 1,
-            column: 1,
-        };
-        assert_eq!(n.area(&editing), SheetRange::new(2, 1, 1, 3, 2));
-    }
-
-    #[test]
-    fn from_cell_area_same_sheet_omits_name() {
-        let area = SheetRange::from_cell(0, 1, 1);
-        let n = RefNode::from_cell_area(area, editing_a1(), "Sheet1");
-        assert_eq!(n.to_localized(&ctx_a1()), "A1");
-    }
-
-    #[test]
-    fn from_cell_area_cross_sheet_qualifies() {
-        let area = SheetRange::from_cell(1, 1, 1);
-        let n = RefNode::from_cell_area(area, editing_a1(), "Sheet2");
-        assert_eq!(n.to_localized(&ctx_a1()), "Sheet2!A1");
-    }
-
-    #[test]
-    fn from_cell_area_relative_offset() {
-        let area = SheetRange::from_cell(0, 5, 3);
-        let editing = CellAddress {
-            sheet: 0,
-            row: 2,
-            column: 2,
-        };
-        let ctx = CellReferenceRC {
-            sheet: "Sheet1".into(),
-            row: 2,
-            column: 2,
-        };
-        let n = RefNode::from_cell_area(area, editing, "Sheet1");
-        assert_eq!(n.to_localized(&ctx), "C5");
-    }
-
-    // Plain arrow: whole reference moves. Relative Node fields store deltas
-    // from ctx A1, so +1 to the row field shifts the resolved coord one row
-    // down — matching ironcalc's stringify semantics.
-    #[test]
-
-    fn extend_trailing_single_cell_arrow_down() {
-        let n = RefNode::cell(0, None, 0, 0, false, false);
-        let moved = n.extend_trailing(&ArrowKey::from_str("ArrowDown").unwrap());
-        assert_eq!(moved.to_localized(&ctx_a1()), "A2");
-    }
-
-    // Absolute flags survive the shift; stored coord increments directly.
-    #[test]
-    fn extend_trailing_preserves_absolute() {
-        let n = RefNode::cell(0, None, 1, 1, true, true);
-        let moved = n.extend_trailing(&ArrowKey::from_str("ArrowDown").unwrap());
-        assert_eq!(moved.to_localized(&ctx_a1()), "$A$2");
-    }
-
-    // Range variant: plain arrow drops the anchor, leaving a single cell at
-    // trailing + delta. Matches Excel's "plain arrow forgets the range".
-    #[test]
-    fn extend_trailing_range_collapses_to_trailing() {
-        let n = RefNode::range(0, None, 0, 0, false, false, 1, 1, false, false);
-        let moved = n.extend_trailing(&ArrowKey::from_str("ArrowRight").unwrap());
-        assert_eq!(moved.to_localized(&ctx_a1()), "C2");
-    }
-
-    // Sheet qualification is part of the preserved metadata.
-    #[test]
-    fn extend_trailing_preserves_sheet_name() {
-        let n = RefNode::cell(1, Some("Sheet2".into()), 0, 0, false, false);
-        let moved = n.extend_trailing(&ArrowKey::from_str("ArrowDown").unwrap());
-        assert_eq!(moved.to_localized(&ctx_a1()), "Sheet2!A2");
-    }
-
-    // Shift+arrow on a single cell: anchor pinned at A1, trailing grows to A2.
-    #[test]
-    fn extend_with_anchor_promotes_single_cell() {
-        let n = RefNode::cell(0, None, 0, 0, false, false);
-        let grown = n.extend_with_anchor(&ArrowKey::from_str("ArrowDown").unwrap());
-        assert_eq!(grown.to_localized(&ctx_a1()), "A1:A2");
-    }
-
-    // Absolute flags mirror from the source onto the promoted trailing corner.
-    #[test]
-    fn extend_with_anchor_mirrors_absolute_flags() {
-        let n = RefNode::cell(0, None, 1, 1, true, true);
-        let grown = n.extend_with_anchor(&ArrowKey::from_str("ArrowDown").unwrap());
-        assert_eq!(grown.to_localized(&ctx_a1()), "$A$1:$A$2");
-    }
-
-    // Existing range: anchor pinned at B3, trailing extends from C4 -> D4.
-    #[test]
-    fn extend_with_anchor_extends_range_trailing_corner() {
-        let n = RefNode::range(0, None, 2, 1, false, false, 3, 2, false, false);
-        let grown = n.extend_with_anchor(&ArrowKey::from_str("ArrowRight").unwrap());
-        assert_eq!(grown.to_localized(&ctx_a1()), "B3:D4");
-    }
-
-    // Sheet qualification carries through promotion.
-    #[test]
-    fn extend_with_anchor_preserves_sheet_on_promotion() {
-        let n = RefNode::cell(1, Some("Sheet2".into()), 0, 0, false, false);
-        let grown = n.extend_with_anchor(&ArrowKey::from_str("ArrowDown").unwrap());
-        assert_eq!(grown.to_localized(&ctx_a1()), "Sheet2!A1:A2");
-    }
-
-    // relocate_to — click-to-replace identity inheritance (Story 2.2).
-    //
-    // Caret on `$A$1`, user clicks B5. The whole point of this primitive:
-    // `$B$5`, not `B5`. Absolute flags are inherited from the receiver.
-    #[test]
-    fn relocate_preserves_absolute_flags() {
-        let editing = CellAddress {
-            sheet: 0,
-            row: 1,
-            column: 1,
-        };
-        let abs_a1 = RefNode::cell(0, None, 1, 1, true, true);
-        let moved = abs_a1.relocate_to(5, 2, &editing);
-        assert_eq!(moved.to_localized(&ctx_a1()), "$B$5");
-    }
-
-    // Caret on `Sheet2!B2`, user clicks C4. Sheet qualification follows the
-    // receiver — the click does not "steal" the ref back to the active sheet.
-    #[test]
-    fn relocate_preserves_sheet_name() {
-        let editing = CellAddress {
-            sheet: 0,
-            row: 1,
-            column: 1,
-        };
-        let cross = RefNode::cell(1, Some("Sheet2".into()), 1, 1, false, false);
-        let moved = cross.relocate_to(4, 3, &editing);
-        assert_eq!(moved.to_localized(&ctx_a1()), "Sheet2!C4");
-    }
-
-    // Control case: fully relative receiver -> no `$` invented.
-    #[test]
-    fn relocate_relative_stays_relative() {
-        let editing = CellAddress {
-            sheet: 0,
-            row: 1,
-            column: 1,
-        };
-        let rel = RefNode::cell(0, None, 0, 0, false, false);
-        let moved = rel.relocate_to(3, 3, &editing);
-        assert_eq!(moved.to_localized(&ctx_a1()), "C3");
-    }
-
-    // Caret on `$A$1:$B$3`, user clicks C5. Range collapses to a single
-    // cell whose flags come from the trailing corner (both absolute here) —
-    // same "click kills range selection" rule as `extend_trailing`.
-    #[test]
-    fn relocate_range_collapses_to_cell() {
-        let editing = CellAddress {
-            sheet: 0,
-            row: 1,
-            column: 1,
-        };
-        let range = RefNode::range(0, None, 1, 1, true, true, 3, 2, true, true);
-        let moved = range.relocate_to(5, 3, &editing);
-        assert_eq!(moved.to_localized(&ctx_a1()), "$C$5");
-    }
-
-    // ---- RefNode::with_area ----
-
-    /// `$A$1` dragged to B3 must render as `$B$3` — both axes stay absolute.
-    #[test]
-    fn with_area_preserves_absolute_both_axes() {
-        let original = RefNode::cell(0, None, 1, 1, true, true);
-        let new = SheetRange::from_cell(0, 3, 2);
-        let moved = original.with_area(new, editing_a1());
-        assert_eq!(moved.to_localized(&ctx_a1()), "$B$3");
-    }
-
-    /// `$A1` (column absolute, row relative) dragged to B3 must render
-    /// as `$B3`; the `$`-flag is per-axis and travels independently.
-    #[test]
-    fn with_area_preserves_mixed_absolute_flags() {
-        let original = RefNode::cell(0, None, 0, 1, false, true);
-        let new = SheetRange::from_cell(0, 3, 2);
-        let moved = original.with_area(new, editing_a1());
-        assert_eq!(moved.to_localized(&ctx_a1()), "$B3");
-    }
-
-    /// Cross-sheet ref `Sheet2!A1` dragged to B3 stays cross-sheet.
-    #[test]
-    fn with_area_preserves_cross_sheet_prefix() {
-        let original = RefNode::cell(1, Some("Sheet2".into()), 0, 0, false, false);
-        let new = SheetRange::from_cell(1, 3, 2);
-        let moved = original.with_area(new, editing_a1());
-        assert_eq!(moved.to_localized(&ctx_a1()), "Sheet2!B3");
-    }
-
-    /// Same-sheet ref `A1` (no prefix) dragged to B3 stays bare — the
-    /// stringifier only emits `Sheet!` when `sheet_name.is_some()`.
-    #[test]
-    fn with_area_keeps_same_sheet_implicit() {
-        let original = RefNode::cell(0, None, 0, 0, false, false);
-        let new = SheetRange::from_cell(0, 3, 2);
-        let moved = original.with_area(new, editing_a1());
-        assert_eq!(moved.to_localized(&ctx_a1()), "B3");
-    }
-
-    /// Single-cell self + multi-cell new = promotion to RangeKind. The
-    /// new range's endpoints both inherit self's absolute flags.
-    #[test]
-    fn with_area_promotes_cell_to_range() {
-        let original = RefNode::cell(0, None, 0, 0, false, false);
-        let new = SheetRange::new(0, 1, 1, 3, 2);
-        let moved = original.with_area(new, editing_a1());
-        assert_eq!(moved.to_localized(&ctx_a1()), "A1:B3");
-    }
-
-    /// Multi-cell self + single-cell new = collapse to ReferenceKind.
-    /// Endpoint 1's flags win — top-left is the canonical surviving corner.
-    #[test]
-    fn with_area_collapses_range_to_cell() {
-        let original = RefNode::range(0, None, 0, 0, false, false, 2, 1, false, false);
-        let new = SheetRange::from_cell(0, 5, 3);
-        let moved = original.with_area(new, editing_a1());
-        assert_eq!(moved.to_localized(&ctx_a1()), "C5");
     }
 }

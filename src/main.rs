@@ -8,6 +8,7 @@ mod events;
 mod input;
 mod model;
 pub mod perf;
+mod persistence;
 mod state;
 mod storage;
 mod theme;

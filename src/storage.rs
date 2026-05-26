@@ -429,8 +429,8 @@ pub fn create_new() -> (WorkbookId, UserModel<'static>) {
 
     let name: &'static str = format!("Workbook {}", max_n + 1).leak();
     let uuid = WorkbookId::new();
-    #[allow(clippy::expect_used)]
-    let model = UserModel::new_empty(name, LOCALE, "UTC", LOCALE).expect("Failed to create new model");
+    let model = UserModel::new_empty(name, LOCALE, "UTC", LOCALE)
+        .unwrap_or_else(|e| panic!("new_empty failed with builtin locale: {e:?}"));
     save(&uuid, &model);
     set_selected_uuid(&uuid);
     (uuid, model)

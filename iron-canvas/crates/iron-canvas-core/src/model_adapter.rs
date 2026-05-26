@@ -112,6 +112,12 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
     }
 }
 
+/// IronCalc-specific CanvasModel impl — **deprecated location**.
+///
+/// This impl now also lives in `iron-canvas-ironcalc` (separate bridge crate).
+/// When iron-canvas-core is next refactored (EXT-5), remove this copy and
+/// drop the `ironcalc_base` dependency from this crate so iron-canvas-core
+/// becomes truly engine-agnostic.
 impl<'a> CanvasModel for UserModel<'a> {
     fn get_selected_sheet(&self) -> u32 {
         UserModel::get_selected_sheet(self)
