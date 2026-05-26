@@ -37,6 +37,7 @@ thiserror = "1.0"  # For structured error types
 codee = { version = "0.3.5", features = ["json_serde"] }
 # leptos_i18n = "0.6.1"
 chrono = { version = "0.4", features =  ["serde", "wasmbind"] }
+sha2 = { version = "0.11.0", default-features = false }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -56,3 +57,9 @@ dev-tools = ["iron-canvas-web/dev-tools", "iron-canvas-web/pdf"]
 
 [package.metadata.leptos]
 lib-profile-release = "wasm-release"
+
+# Cap WASM linear memory at 256 MB so a crafted bitcode payload claiming
+# a multi-GB allocation traps quickly instead of degrading the tab into
+# multi-second GC death. See docs/reviews/2026-05-26-security-audit.md.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--max-memory=268435456"]

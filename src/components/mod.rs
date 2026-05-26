@@ -13,6 +13,7 @@ pub mod named_ranges;
 pub mod perf_panel;
 pub mod playback_panel;
 pub mod share_popover;
+pub mod share_verify;
 pub mod sheet_tab_bar;
 pub mod status_bar;
 pub mod toolbar;

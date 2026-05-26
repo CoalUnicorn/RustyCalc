@@ -10,13 +10,20 @@ use leptos::prelude::*;
 
 use crate::components::modal::Modal;
 
-/// Modal popover that exposes a copyable share URL.
+/// Modal popover that exposes a copyable share URL and optional verification word.
 ///
 /// `share_url` is taken by value — the host (FileBar) rebuilds it on demand
 /// when the user opens the popover, then unmounts the component on close,
 /// so a static String is the simplest contract.
+///
+/// `verify_word` is the word the sender chose (if any). Displayed so the sender
+/// knows what to share out-of-band with the receiver.
 #[component]
-pub fn SharePopover(share_url: String, on_close: Callback<()>) -> impl IntoView {
+pub fn SharePopover(
+    share_url: String,
+    #[prop(into, default = String::new())] verify_word: String,
+    on_close: Callback<()>,
+) -> impl IntoView {
     // "Copied!" flash. Two-second auto-revert so the user gets feedback
     // without a permanent state change.
     let copied = RwSignal::new(false);
@@ -37,9 +44,20 @@ pub fn SharePopover(share_url: String, on_close: Callback<()>) -> impl IntoView 
 
     let copy_label = move || if copied.get() { "Copied!" } else { "Copy URL" };
 
+    let has_word = !verify_word.is_empty();
+
     view! {
         <Modal title="Share this workbook" on_close=on_close>
             <div class="sp-popover">
+                <Show when=move || has_word>
+                    <div class="sp-verify-info">
+                        <span class="sp-verify-label">"Verification word: "</span>
+                        <code class="sp-verify-word">{verify_word.clone()}</code>
+                        <p class="sp-verify-hint">
+                            "Share this word with the receiver — they'll need to type it to open the workbook."
+                        </p>
+                    </div>
+                </Show>
                 <div class="sp-url-row">
                     <input
                         type="text"
@@ -52,8 +70,9 @@ pub fn SharePopover(share_url: String, on_close: Callback<()>) -> impl IntoView 
                     </button>
                 </div>
                 <div class="sp-footer">
-                    "Anyone with the link can access a copy of this workbook. \
-                     The link contains the entire workbook — treat it like the .xlsx file itself."
+                    "The link contains the entire workbook — anyone with it can \
+                     access a copy. The link may be saved in your browser history \
+                     and synced across devices."
                 </div>
             </div>
         </Modal>

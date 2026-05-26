@@ -129,9 +129,16 @@ pub fn FileBar() -> impl IntoView {
     let (share_open, set_share_open) = signal(false);
     let share_url = RwSignal::new(String::new());
     let share_error = RwSignal::new(String::new());
+    // Verification word for optional share-gating. Empty = no verification.
+    let verify_word = RwSignal::new(String::new());
 
     let on_share = move || {
-        let result = model.with_value(storage::encode_for_share_url);
+        let word: Option<String> = {
+            let w = verify_word.get();
+            let trimmed = w.trim();
+            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+        };
+        let result = model.with_value(|m| storage::encode_for_share_url(m, word.as_deref()));
         match result {
             Ok(encoded) => {
                 let loc = window().location();
@@ -236,6 +243,7 @@ pub fn FileBar() -> impl IntoView {
             <Show when=move || share_open.get()>
                 <SharePopover
                     share_url=share_url.get()
+                    verify_word=verify_word.get()
                     on_close=Callback::new(move |_| set_share_open.set(false))
                 />
             </Show>
@@ -243,6 +251,22 @@ pub fn FileBar() -> impl IntoView {
             <Show when=move || !share_error.get().is_empty()>
                 <div class="sp-error-banner">
                     {move || share_error.get()}
+                </div>
+            </Show>
+
+            // Verification word input — shown inline after Share is clicked.
+            // Clears when the popover closes.
+            <Show when=move || share_open.get()>
+                <div class="sp-word-row">
+                    <input
+                        type="text"
+                        class="sp-word-input"
+                        placeholder="Verification word (optional, 3+ letters)"
+                        prop:value=verify_word
+                        on:input=move |ev| {
+                            verify_word.set(event_target_value(&ev));
+                        }
+                    />
                 </div>
             </Show>
 

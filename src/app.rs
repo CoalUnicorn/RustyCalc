@@ -1,6 +1,9 @@
 use crate::components::left_drawer::LeftDrawer;
+use crate::components::share_verify::ShareVerify;
 use crate::components::workbook::Workbook;
 
+use base64::Engine;
+use gloo_storage::Storage;
 use leptos::prelude::*;
 use leptos_use::{use_debounce_fn_with_options, DebounceOptions};
 
@@ -16,17 +19,35 @@ pub fn App() -> impl IntoView {
     // (via create_new_from) so the recipient's edits survive refresh — the
     // copy is independent of the original sender's workbook.
     //
-    // After a successful share load we clear the hash so subsequent
-    // refreshes fall through to load_selected instead of spawning a fresh
-    // copy (which would strand the user's edits).
-    let loaded_from_share = storage::load_shared_from_url();
-    if loaded_from_share.is_some() {
-        let _ = leptos::prelude::window().location().set_hash("");
-    }
-    let (uuid, model) = loaded_from_share
-        .map(storage::create_new_from)
-        .or_else(storage::load_selected)
-        .unwrap_or_else(storage::create_new);
+    // v1 shares require verification — the receiver must type a word before
+    // the model is decoded. We stage the V1 payload in a signal for the
+    // ShareVerify modal to consume; the hash is cleared so refreshes don't
+    // re-prompt. After a successful V0 share load we clear the hash so
+    // subsequent refreshes fall through to load_selected.
+    let (pending_share, set_pending_share) = signal(
+        None::<(String, Vec<u8>, [u8; 32])>, /* (encoded_str, bytes, hash) */
+    );
+    let share_load = storage::load_shared_from_url();
+    let (uuid, model) = match share_load {
+        Some(storage::SharedLoad::Immediate(model)) => {
+            let _ = leptos::prelude::window().location().set_hash("");
+            storage::create_new_from(model)
+        }
+        Some(storage::SharedLoad::NeedsVerification { hash, bytes }) => {
+            // Hold the payload for the verification modal. The hash stays
+            // in the URL so a refresh re-enters this branch.
+            set_pending_share.set(Some((
+                leptos::prelude::window()
+                    .location()
+                    .hash()
+                    .unwrap_or_default(),
+                bytes,
+                hash,
+            )));
+            storage::load_selected().unwrap_or_else(storage::create_new)
+        }
+        None => storage::load_selected().unwrap_or_else(storage::create_new),
+    };
 
     let events = EventBus::new();
     // AppState owns the leptos-use color-mode handles internally; theme
@@ -43,6 +64,11 @@ pub fn App() -> impl IntoView {
     let clipboard: StoredValue<Option<crate::model::AppClipboard>, LocalStorage> =
         StoredValue::new_local(None);
 
+    // Pre-serialized model bytes refreshed by the debounced save. The
+    // beforeunload handler reads these directly, sidestepping a 10-50ms
+    // bitcode pass inside the browser's ~200ms unload budget.
+    let pre_serialized: StoredValue<Option<Vec<u8>>, LocalStorage> = StoredValue::new_local(None);
+
     provide_context(app_state);
     // Provide PerfTimings independently so `try_mutate` can write phase
     // timestamps without coupling the model layer to AppState.
@@ -50,6 +76,9 @@ pub fn App() -> impl IntoView {
     provide_context(wb_state);
     provide_context(model);
     provide_context(clipboard);
+    // Pending v1 share verification — consumed by ShareVerify modal.
+    provide_context(pending_share);
+    provide_context(set_pending_share);
 
     // Centralized auto-save via EventBus subscription.
     //
@@ -64,7 +93,12 @@ pub fn App() -> impl IntoView {
     let debounced_save = use_debounce_fn_with_options(
         move || {
             if let Some(uuid) = wb_state.current_uuid.get_untracked() {
-                model.with_value(|m| storage::save(&uuid, m));
+                model.with_value(|m| {
+                    storage::save(&uuid, m);
+                    pre_serialized.set_value(Some(m.to_bytes()));
+                });
+                // Clear the "Shared from link" quarantine badge on first edit.
+                storage::promote_from_shared(&uuid);
             }
         },
         1000.0,
@@ -85,7 +119,19 @@ pub fn App() -> impl IntoView {
         use wasm_bindgen::prelude::*;
         let cb = Closure::<dyn Fn(web_sys::Event)>::new(move |_: web_sys::Event| {
             if let Some(uuid) = wb_state.current_uuid.get_untracked() {
-                model.with_value(|m| storage::save(&uuid, m));
+                // Fast path: write the bytes the idle save already produced,
+                // bypassing a fresh bitcode pass. Registry was updated then too,
+                // so we only need to flush the model payload here.
+                if let Some(bytes) = pre_serialized.get_value() {
+                    let mut full = Vec::with_capacity(5 + bytes.len());
+                    full.extend_from_slice(b"RCAL");
+                    full.push(1u8);
+                    full.extend_from_slice(&bytes);
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(&full);
+                    let _ = gloo_storage::LocalStorage::set(uuid.to_string(), &encoded);
+                } else {
+                    model.with_value(|m| storage::save(&uuid, m));
+                }
             }
         });
         if let Ok(win) =
@@ -104,6 +150,7 @@ pub fn App() -> impl IntoView {
         <div id="app">
             <LeftDrawer />
             <Workbook />
+            <ShareVerify />
         </div>
     }
 }

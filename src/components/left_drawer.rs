@@ -166,6 +166,7 @@ pub fn LeftDrawer() -> impl IntoView {
                                                 name=entry.meta.name.clone()
                                                 active=entry.active
                                                 current_group=entry.meta.group.clone()
+                                                shared_from_link=entry.meta.shared_from_link
                                                 on_switch
                                                 on_delete
                                                 on_group
@@ -209,6 +210,7 @@ fn EntryRow(
     name: String,
     active: bool,
     current_group: WorkbookGroup,
+    shared_from_link: bool,
     on_switch: Callback<WorkbookId>,
     on_delete: Callback<WorkbookId>,
     on_group: Callback<(WorkbookId, WorkbookGroup)>,
@@ -312,7 +314,16 @@ fn EntryRow(
 
             <Show
                 when=move || is_renaming
-                fallback={let n = name.clone(); move || view!{ <span class="ld-name">{n.clone()}</span> }}
+                fallback={let n = name.clone(); move || view!{
+                    <span class="ld-name">
+                        {n.clone()}
+                        {if shared_from_link {
+                            Some(view! { <span class="ld-shared-badge" title="Shared from link — click to edit and clear this badge">"🔗"</span> })
+                        } else {
+                            None
+                        }}
+                    </span>
+                }}
             >
                 <InlineRenameInput
                     value=name.clone()
