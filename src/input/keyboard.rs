@@ -220,15 +220,21 @@ pub fn classify_key(
     }
 
     // Shift-only (no ctrl, no alt): extend selection.
+    // Only known navigation keys with Shift are consumed here.
+    // Shift+letter (e.g., Shift+A = "A") and other printable combos
+    // fall through to the is_printable check below so they start a
+    // cell edit with the capital letter.
     if shift && !ctrl && !alt {
-        return match key {
+        if let Some(action) = match key {
             "ArrowRight" => Some(Nav(NavAction::ExpandSelection(Right))),
             "ArrowLeft" => Some(Nav(NavAction::ExpandSelection(Left))),
             "ArrowUp" => Some(Nav(NavAction::ExpandSelection(Up))),
             "ArrowDown" => Some(Nav(NavAction::ExpandSelection(Down))),
             "Tab" => Some(Nav(NavAction::Arrow(Left))),
             _ => None,
-        };
+        } {
+            return Some(action);
+        }
     }
 
     // Any remaining modifier combination is not handled here.

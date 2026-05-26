@@ -9,7 +9,7 @@ use leptos::prelude::{UpdateValue, WithValue};
 
 use crate::app_state::AppState;
 use crate::events::{ContentEvent, SpreadsheetEvent};
-use crate::state::{DragState, ModelStore, WorkbookState};
+use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
 use crate::storage::{self, WorkbookId};
 
 /// Workbook-level lifecycle operations.
@@ -45,8 +45,14 @@ pub fn execute_workbook(
             if let Some(uuid) = &cur {
                 model.with_value(|m| storage::save(uuid, m));
             }
-            if let Some(new_model) = storage::load(&target_uuid) {
-                activate(target_uuid, new_model, model, state);
+            match storage::load(&target_uuid) {
+                Some(new_model) => activate(target_uuid, new_model, model, state),
+                None => {
+                    state.status.set(Some(StatusMessage::Error(format!(
+                        "Cannot open workbook — it was saved with an older version. \
+                         Your data is still in browser storage but needs migration."
+                    ))));
+                }
             }
         }
         WorkbookAction::Create => {
@@ -61,9 +67,20 @@ pub fn execute_workbook(
             let is_current = state.current_uuid.get_untracked() == Some(uuid);
             storage::delete(&uuid);
             if is_current {
-                let (next_uuid, next_model) =
-                    storage::load_selected().unwrap_or_else(storage::create_new);
-                activate(next_uuid, next_model, model, state);
+                match storage::load_selected() {
+                    Some((next_uuid, next_model)) => {
+                        activate(next_uuid, next_model, model, state);
+                    }
+                    None => {
+                        let (next_uuid, next_model) = storage::create_new();
+                        activate(next_uuid, next_model, model, state);
+                        state.status.set(Some(StatusMessage::Error(
+                            "Other workbooks could not be loaded after deletion. \
+                             Created a new blank workbook."
+                                .to_string(),
+                        )));
+                    }
+                }
             }
             app.bump_registry();
         }
