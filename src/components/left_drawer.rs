@@ -91,13 +91,10 @@ pub fn LeftDrawer() -> impl IntoView {
         execute_workbook(WorkbookAction::Switch(target_uuid), model, &state, app);
     };
 
-    let delete_workbook = move |uuid: WorkbookId| {
-        let wb_name = storage::load_registry()
-            .get(&uuid)
-            .map(|m| m.name.clone())
-            .unwrap_or_default();
+    let delete_workbook = move |(uuid, name): (WorkbookId, String)| {
+        let safe = storage::sanitize_name(&name);
         let confirmed = leptos::prelude::window()
-            .confirm_with_message(&format!("Delete '{wb_name}'? This cannot be undone."))
+            .confirm_with_message(&format!("Delete '{safe}'? This cannot be undone."))
             .unwrap_or(false);
         if confirmed {
             execute_workbook(WorkbookAction::Delete(uuid), model, &state, app);
@@ -212,7 +209,7 @@ fn EntryRow(
     current_group: WorkbookGroup,
     shared_from_link: bool,
     on_switch: Callback<WorkbookId>,
-    on_delete: Callback<WorkbookId>,
+    on_delete: Callback<(WorkbookId, String)>,
     on_group: Callback<(WorkbookId, WorkbookGroup)>,
     renaming: ReadSignal<Option<WorkbookId>>,
     set_renaming: WriteSignal<Option<WorkbookId>>,
@@ -224,6 +221,10 @@ fn EntryRow(
     let uuid_switch = uuid;
     let uuid_delete = uuid;
     let is_renaming = renaming.get_untracked() == Some(uuid);
+
+    // Pre-clone so the fallback closure can move `name` while the delete
+    // button also needs a copy for the confirmation dialog.
+    let delete_name = name.clone();
 
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
@@ -285,6 +286,10 @@ fn EntryRow(
             if state.current_uuid.get_untracked() == Some(uuid) {
                 model.update_value(|m| m.set_name(&new_name));
             }
+            // Renaming is an explicit user action — clear the \"shared from link\"
+            // quarantine badge. We don't auto-promote on autosave anymore so the
+            // user must rename to signal trust.
+            storage::promote_from_shared(&uuid);
             app.bump_registry();
         }
         set_renaming.set(None);
@@ -314,7 +319,7 @@ fn EntryRow(
 
             <Show
                 when=move || is_renaming
-                fallback={let n = name.clone(); move || view!{
+                fallback={let n = storage::sanitize_name(&delete_name); move || view!{
                     <span class="ld-name">
                         {n.clone()}
                         {if shared_from_link {
@@ -338,7 +343,7 @@ fn EntryRow(
                 title="Delete workbook"
                 on:click=move |ev: web_sys::MouseEvent| {
                     ev.stop_propagation();
-                    on_delete.run(uuid_delete);
+                    on_delete.run((uuid_delete, delete_name.clone()));
                 }
             >
                 "\u{00d7}"

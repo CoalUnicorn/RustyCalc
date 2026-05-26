@@ -42,8 +42,26 @@ pub fn execute_workbook(
             if cur == Some(target_uuid) {
                 return;
             }
+            // Save the current workbook before switching. If encoding fails
+            // (e.g. model exceeds MAX_STORAGE_BYTES), warn the user instead of
+            // silently losing changes.
             if let Some(uuid) = &cur {
-                model.with_value(|m| storage::save(uuid, m));
+                let saved = model.with_value(|m| {
+                    let bytes = m.to_bytes();
+                    if bytes.len() > storage::MAX_STORED_BYTES {
+                        state.status.set(Some(StatusMessage::Error(format!(
+                            "Cannot save workbook — it exceeds the {} MB limit. \
+                             Delete some sheets or data before switching.",
+                            storage::MAX_STORED_BYTES / 1_000_000
+                        ))));
+                        return false;
+                    }
+                    storage::save(uuid, m);
+                    true
+                });
+                if !saved {
+                    return;
+                }
             }
             match storage::load(&target_uuid) {
                 Some(new_model) => activate(target_uuid, new_model, model, state),

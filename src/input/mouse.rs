@@ -14,7 +14,7 @@ use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent
 use crate::input::error::StructError;
 use crate::input::formula_analysis::is_in_reference_mode;
 use crate::input::formula_input::{splice_dragged_ref, splice_ref};
-use crate::model::{try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
+use crate::model::{try_mutate, ArrowKey, EvaluationMode, FormulaAnalyzer, SheetQuery, Navigator, PageDir};
 use crate::state::{
     ContextMenuState, CursorHint, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu,
     ModelStore, RefOverride, StatusMessage, WorkbookState,

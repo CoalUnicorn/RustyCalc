@@ -11,7 +11,7 @@ use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
     style_types::{BooleanValue, HexColor, StylePath},
-    try_mutate, EvaluationMode, FrontendModel, SafeFontFamily, ToolbarState,
+    try_mutate, EvaluationMode, SheetQuery, SafeFontFamily, ToolbarState,
 };
 use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 

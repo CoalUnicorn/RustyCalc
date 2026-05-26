@@ -8,6 +8,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
+use crate::state::StatusMessage;
 use crate::components::share_popover::SharePopover;
 use crate::input::workbook::{execute_workbook, WorkbookAction};
 use crate::input::xlsx_io;
@@ -49,6 +50,25 @@ pub fn FileBar() -> impl IntoView {
 
     // Sidebar
     let on_sidebar = move |_| app.sidebar_open.set(!app.sidebar_open.get_untracked());
+
+    // Trust state for the active workbook. The badge appears whenever the
+    // current entry's `shared_from_link` flag is set; clicking promotes the
+    // workbook and bumps the registry so the sidebar 🔗 badge clears too.
+    // We re-read on registry_version so promotion / workbook switch refresh.
+    let is_shared_current = move || {
+        let _ = app.registry_version.get();
+        let uuid = state.current_uuid.get()?;
+        storage::load_registry()
+            .get(&uuid)
+            .map(|m| m.shared_from_link)
+    };
+    let on_trust = move |_: web_sys::MouseEvent| {
+        let Some(uuid) = state.current_uuid.get_untracked() else {
+            return;
+        };
+        storage::promote_from_shared(&uuid);
+        app.bump_registry();
+    };
     // File menu - owned signals + button anchor ref for positioning.
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
@@ -89,7 +109,13 @@ pub fn FileBar() -> impl IntoView {
                 .and_then(|s| s.to_str())
                 .unwrap_or("workbook")
                 .to_string();
-            let bytes = xlsx_io::read_file_bytes(file).await;
+            let bytes = match xlsx_io::read_file_bytes(file).await {
+                Ok(b) => b,
+                Err(e) => {
+                    state.status.set(Some(StatusMessage::Error(e)));
+                    return;
+                }
+            };
             let result = import::load_from_xlsx_bytes(&bytes, &stem, "en", "UTC")
                 .map_err(|e| e.to_string())
                 .and_then(|wb| Model::from_workbook(wb, "en").map_err(|e| e.to_string()))
@@ -113,7 +139,9 @@ pub fn FileBar() -> impl IntoView {
             match export::save_xlsx_to_writer(m.get_model(), Cursor::new(Vec::new())) {
                 Ok(cursor) => {
                     let bytes = cursor.into_inner();
-                    xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()), None);
+                    if let Err(e) = xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()), None) {
+                        state.status.set(Some(StatusMessage::Error(e)));
+                    }
                 }
                 Err(e) => {
                     web_sys::console::warn_1(&format!("xlsx export failed: {e}").into());
@@ -239,6 +267,16 @@ pub fn FileBar() -> impl IntoView {
                 </ContextMenuItem>
                 */
             </ContextMenu>
+
+            <Show when=move || is_shared_current().unwrap_or(false)>
+                <button
+                    class="fl-trust-btn"
+                    title="This workbook was loaded from a shared link. Click to trust it and clear the badge."
+                    on:click=on_trust
+                >
+                    "🛡 Trust this workbook"
+                </button>
+            </Show>
 
             <Show when=move || share_open.get()>
                 <SharePopover

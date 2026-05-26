@@ -7,6 +7,7 @@ use gloo_storage::Storage;
 use leptos::prelude::*;
 use leptos_use::{use_debounce_fn_with_options, DebounceOptions};
 
+
 use crate::app_state::AppState;
 use crate::events::EventBus;
 use crate::state::WorkbookState;
@@ -14,40 +15,19 @@ use crate::storage;
 
 #[component]
 pub fn App() -> impl IntoView {
-    // A `#share=…` URL trumps localStorage so an incoming share link always
-    // wins on first paint. We persist the decoded model under a fresh UUID
-    // (via create_new_from) so the recipient's edits survive refresh — the
-    // copy is independent of the original sender's workbook.
-    //
-    // v1 shares require verification — the receiver must type a word before
-    // the model is decoded. We stage the V1 payload in a signal for the
-    // ShareVerify modal to consume; the hash is cleared so refreshes don't
-    // re-prompt. After a successful V0 share load we clear the hash so
-    // subsequent refreshes fall through to load_selected.
-    let (pending_share, set_pending_share) = signal(
-        None::<(String, Vec<u8>, [u8; 32])>, /* (encoded_str, bytes, hash) */
-    );
+    // `#share=…` URLs are always staged in-memory pending user consent —
+    // never auto-persisted on first paint. Both V0 (no word) and V1 (word
+    // verification) defer bitcode deserialization until after the recipient
+    // clicks Accept in the ShareVerify modal, so a crafted payload can't
+    // run the parser on page load. The URL hash stays intact while the
+    // modal is open so a refresh re-enters this same branch; it's cleared
+    // on accept or dismiss.
+    let (pending_share, set_pending_share) = signal(None::<storage::SharedLoad>);
     let share_load = storage::load_shared_from_url();
-    let (uuid, model) = match share_load {
-        Some(storage::SharedLoad::Immediate(model)) => {
-            let _ = leptos::prelude::window().location().set_hash("");
-            storage::create_new_from(model)
-        }
-        Some(storage::SharedLoad::NeedsVerification { hash, bytes }) => {
-            // Hold the payload for the verification modal. The hash stays
-            // in the URL so a refresh re-enters this branch.
-            set_pending_share.set(Some((
-                leptos::prelude::window()
-                    .location()
-                    .hash()
-                    .unwrap_or_default(),
-                bytes,
-                hash,
-            )));
-            storage::load_selected().unwrap_or_else(storage::create_new)
-        }
-        None => storage::load_selected().unwrap_or_else(storage::create_new),
-    };
+    if let Some(load) = share_load {
+        set_pending_share.set(Some(load));
+    }
+    let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
 
     let events = EventBus::new();
     // AppState owns the leptos-use color-mode handles internally; theme
@@ -97,8 +77,6 @@ pub fn App() -> impl IntoView {
                     storage::save(&uuid, m);
                     pre_serialized.set_value(Some(m.to_bytes()));
                 });
-                // Clear the "Shared from link" quarantine badge on first edit.
-                storage::promote_from_shared(&uuid);
             }
         },
         1000.0,

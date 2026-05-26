@@ -2,17 +2,21 @@
 //!
 //! All operations run in WASM - no server required. Import reads bytes from a
 //! browser File object; export writes bytes into a Vec and triggers a download.
+//!
+//! Every browser API call is fallible — WASM panics (with `panic = "abort"` in
+//! release mode) kill the entire tab. All methods return `Result<_, String>` so
+//! callers can surface errors as status messages instead of crashing.
 
 /// Read a browser `File` object into bytes.
 ///
 /// Must be called from an async context (e.g. inside `spawn_local`).
-#[allow(clippy::expect_used)]
-pub async fn read_file_bytes(file: web_sys::File) -> Vec<u8> {
+/// Returns an error string suitable for display if the browser API fails.
+pub async fn read_file_bytes(file: web_sys::File) -> Result<Vec<u8>, String> {
     use wasm_bindgen_futures::JsFuture;
     let buffer = JsFuture::from(file.array_buffer())
         .await
-        .expect("File::array_buffer() is always resolvable in the browser");
-    js_sys::Uint8Array::new(&buffer).to_vec()
+        .map_err(|e| format!("Failed to read file: {e:?}"))?;
+    Ok(js_sys::Uint8Array::new(&buffer).to_vec())
 }
 
 /// Trigger a browser download of `bytes` with the given `filename`.
@@ -21,8 +25,9 @@ pub async fn read_file_bytes(file: web_sys::File) -> Vec<u8> {
 /// xlsx MIME (preserves drop-target hints for spreadsheet workflows). Pass
 /// `Some("application/octet-stream")` for opaque binary artifacts such as
 /// `.icr` paint-level recordings.
-#[allow(clippy::expect_used)]
-pub fn trigger_download(bytes: &[u8], filename: &str, mime: Option<&str>) {
+///
+/// Returns `Ok(())` on success or an error string suitable for display.
+pub fn trigger_download(bytes: &[u8], filename: &str, mime: Option<&str>) -> Result<(), String> {
     use wasm_bindgen::JsCast;
 
     let array = js_sys::Uint8Array::from(bytes);
@@ -35,26 +40,27 @@ pub fn trigger_download(bytes: &[u8], filename: &str, mime: Option<&str>) {
     );
 
     let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts)
-        .expect("Blob construction from a Uint8Array always succeeds");
+        .map_err(|e| format!("Failed to create download: {e:?}"))?;
 
     let url = web_sys::Url::create_object_url_with_blob(&blob)
-        .expect("createObjectURL is always available in a secure context");
+        .map_err(|e| format!("Failed to create download URL: {e:?}"))?;
 
     let document = leptos::prelude::document();
 
     let a: web_sys::HtmlAnchorElement = document
         .create_element("a")
-        .expect("createElement('a') always succeeds")
+        .map_err(|e| format!("Failed to create download element: {e:?}"))?
         .unchecked_into();
 
     a.set_href(&url);
     a.set_download(filename);
     document
         .body()
-        .expect("document has a body")
+        .ok_or_else(|| "No document body".to_string())?
         .append_child(&a)
-        .expect("append_child always succeeds");
+        .map_err(|e| format!("Failed to trigger download: {e:?}"))?;
     a.click();
     a.remove();
     web_sys::Url::revoke_object_url(&url).ok();
+    Ok(())
 }

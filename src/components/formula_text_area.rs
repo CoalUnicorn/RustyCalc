@@ -21,10 +21,11 @@ use wasm_bindgen::JsCast;
 use crate::components::formula_overlay::FormulaOverlay;
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::input::mouse::CanvasHandle;
-use crate::model::FrontendModel;
-use crate::state::{EditFocus, ModelStore, WorkbookState};
-use iron_canvas_core::PixelRect;
+use crate::model::SheetQuery;
+use crate::model::frontend_model::DefinedNameManager;
+use crate::state::{ModelStore, WorkbookState};
 
+use super::formula_input::FormulaInput;
 #[component]
 pub fn FormulaTextArea() -> impl IntoView {
     let state = expect_context::<WorkbookState>();

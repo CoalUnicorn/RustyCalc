@@ -25,7 +25,7 @@ const STORAGE_VERSION: u8 = 1;
 /// Maximum decoded byte size for localStorage entries.
 /// 5 MB is generous for a spreadsheet — a 30-sheet book with formulas
 /// typically fits in 50-200 KB.
-const MAX_STORED_BYTES: usize = 5_000_000;
+pub const MAX_STORED_BYTES: usize = 5_000_000;
 
 /// A 16-byte UUID v4 identifier for a workbook.
 ///
@@ -150,7 +150,11 @@ pub struct WorkbookMeta {
 /// characters (U+200E–U+200F, U+202A–U+202E, U+2066–U+2069) that could
 /// confuse UI layout. Truncates to 128 characters so an attacker can't
 /// inject a 1 MB name through a poisoned localStorage registry.
-fn sanitize_name(raw: &str) -> String {
+///
+/// Applied at every boundary where untrusted names cross into rendering:
+/// on save/rename input, on `load_registry()` deserialization, and again at
+/// render-time in the sidebar as a defense-in-depth backstop.
+pub fn sanitize_name(raw: &str) -> String {
     let cleaned: String = raw
         .chars()
         .filter(|c| {
@@ -224,8 +228,20 @@ pub fn update_name(uuid: &WorkbookId, name: &str) {
 // Registry helpers
 
 /// Load the UUID->metadata registry from localStorage.
+///
+/// Names are sanitized on the way out so any pre-sanitizer or share-imported
+/// entry can't leak control chars or bidi overrides into the sidebar.
 pub fn load_registry() -> HashMap<WorkbookId, WorkbookMeta> {
-    LocalStorage::get(MODELS_KEY).unwrap_or_default()
+    let raw: HashMap<WorkbookId, WorkbookMeta> = LocalStorage::get(MODELS_KEY).unwrap_or_default();
+    raw.into_iter()
+        .map(|(uuid, meta)| {
+            let cleaned = WorkbookMeta {
+                name: sanitize_name(&meta.name),
+                ..meta
+            };
+            (uuid, cleaned)
+        })
+        .collect()
 }
 
 fn save_registry(registry: &HashMap<WorkbookId, WorkbookMeta>) {
@@ -332,7 +348,14 @@ pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
     let model_bytes = &bytes[5..];
     // LOCALE is 'static, so the returned UserModel<'static> lifetime is satisfied.
     match UserModel::from_bytes(model_bytes, LOCALE) {
-        Ok(m) => Some(m),
+        Ok(mut m) => {
+            // Sanitize the model's internal name — workbooks imported via shared URL
+            // or saved before the sanitizer was added may carry C0 controls or bidi
+            // overrides in their name. We apply sanitization on load so every display
+            // path (sidebar, confirm dialogs, file bar) sees clean names.
+            m.set_name(&sanitize_name(&m.get_name()));
+            Some(m)
+        }
         Err(e) => {
             web_sys::console::warn_1(
                 &format!("[rustycalc storage] load {uuid}: model parse failed: {e}").into(),
@@ -484,16 +507,28 @@ pub enum ShareError {
     TooLarge { size_kb: usize },
 }
 
-/// Result of loading a shared workbook from the URL.
+/// A share payload that has been decoded but not yet consented to by the
+/// recipient. Bitcode parsing is deferred until the user accepts so a
+/// malicious crafted payload can't trigger expensive deserialization on
+/// first paint.
+#[derive(Clone)]
 pub enum SharedLoad {
-    /// v0 or no verification — load the model immediately.
-    Immediate(UserModel<'static>),
-    /// v1 verification required — caller must collect the word from the user,
-    /// then call verify_and_load_shared().
-    NeedsVerification {
-        hash: [u8; 32],
-        bytes: Vec<u8>,
-    },
+    /// v0 — no word verification. Recipient sees an accept/reject modal
+    /// with size + source; bitcode parse happens on accept.
+    PendingV0 { bytes: Vec<u8> },
+    /// v1 — word verification required. Recipient must type the sender's
+    /// word; on hash match the bytes are parsed.
+    PendingV1 { hash: [u8; 32], bytes: Vec<u8> },
+}
+
+impl SharedLoad {
+    /// Decoded payload size in bytes — used by the consent modal to show
+    /// "X KB" so the recipient can sanity-check before accepting.
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            Self::PendingV0 { bytes } | Self::PendingV1 { bytes, .. } => bytes.len(),
+        }
+    }
 }
 
 /// Encode a model to a URL-safe base64 string for sharing.
@@ -558,17 +593,9 @@ pub fn load_shared_from_url() -> Option<SharedLoad> {
     }
 
     match verify::decode_payload(&bytes) {
-        Some(verify::SharePayload::V0(payload)) => match UserModel::from_bytes(&payload, LOCALE) {
-            Ok(m) => Some(SharedLoad::Immediate(m)),
-            Err(e) => {
-                web_sys::console::warn_1(
-                    &format!("[rustycalc sharing] model parse failed: {e}").into(),
-                );
-                None
-            }
-        },
+        Some(verify::SharePayload::V0(payload)) => Some(SharedLoad::PendingV0 { bytes: payload }),
         Some(verify::SharePayload::V1 { hash, bytes }) => {
-            Some(SharedLoad::NeedsVerification { hash, bytes })
+            Some(SharedLoad::PendingV1 { hash, bytes })
         }
         None => {
             web_sys::console::warn_1(
@@ -577,6 +604,18 @@ pub fn load_shared_from_url() -> Option<SharedLoad> {
             None
         }
     }
+}
+
+/// Parse the staged V0 payload after the user accepts in the consent modal.
+/// Splitting parse from decode is the security win: a crafted payload can't
+/// run bitcode deserialization until the recipient has clicked Accept.
+pub fn accept_shared_v0(bytes: &[u8]) -> Result<UserModel<'static>, String> {
+    UserModel::from_bytes(bytes, LOCALE).map_err(|e| {
+        web_sys::console::warn_1(
+            &format!("[rustycalc sharing] model parse failed after consent: {e}").into(),
+        );
+        format!("Failed to load shared workbook: {e}")
+    })
 }
 
 /// Try to verify and load a v1 shared workbook.

@@ -357,11 +357,13 @@ pub fn Worksheet() -> impl IntoView {
                                 .map(|s| s.replace(':', "-"))
                                 .unwrap_or_else(|| "now".into());
                             let filename = format!("recording-{ts}.icr");
-                            crate::input::xlsx_io::trigger_download(
+                            if let Err(e) = crate::input::xlsx_io::trigger_download(
                                 &bytes,
                                 &filename,
                                 Some("application/octet-stream"),
-                            );
+                            ) {
+                                state.status.set(Some(StatusMessage::Error(e)));
+                            }
                         }
                         Err(e) => state.status.set(Some(StatusMessage::Error(format!(
                             "stopRecording failed: {e:?}"
@@ -468,19 +470,23 @@ pub fn Worksheet() -> impl IntoView {
             match cmd {
                 ExportCmd::Svg => {
                     let svg = ic.exportSvg(size.w, size.h);
-                    crate::input::xlsx_io::trigger_download(
+                    if let Err(e) = crate::input::xlsx_io::trigger_download(
                         svg.as_bytes(),
                         &format!("sheet-{ts}.svg"),
                         Some("image/svg+xml"),
-                    );
+                    ) {
+                        state.status.set(Some(StatusMessage::Error(e)));
+                    }
                 }
                 ExportCmd::Pdf => {
                     let pdf = ic.exportPdf(size.w, size.h);
-                    crate::input::xlsx_io::trigger_download(
+                    if let Err(e) = crate::input::xlsx_io::trigger_download(
                         &pdf,
                         &format!("sheet-{ts}.pdf"),
                         Some("application/pdf"),
-                    );
+                    ) {
+                        state.status.set(Some(StatusMessage::Error(e)));
+                    }
                 }
             }
         });

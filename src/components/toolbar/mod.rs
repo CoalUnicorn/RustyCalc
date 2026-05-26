@@ -10,7 +10,7 @@ use crate::events::*;
 use crate::input::error::FormatError;
 use crate::input::keyboard::{execute, SpreadsheetAction};
 use crate::model::{
-    frontend_types::ToolbarState, style_types::HexColor, try_mutate, EvaluationMode, FrontendModel,
+    frontend_types::ToolbarState, style_types::HexColor, try_mutate, EvaluationMode, SheetQuery,
     SafeFontFamily,
 };
 use crate::state::{ModelStore, StatusMessage, WorkbookState};

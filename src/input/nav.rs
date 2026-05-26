@@ -5,7 +5,7 @@ use leptos::prelude::WithValue;
 use crate::coord::{CellAddress, SheetRange};
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::error::NavError;
-use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel, PageDir};
+use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, Navigator, PageDir, SheetQuery};
 use crate::state::{ModelStore, WorkbookState};
 
 /// Helper to emit SelectionChanged event after navigation
