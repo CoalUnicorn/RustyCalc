@@ -61,6 +61,7 @@ pub fn LeftDrawer() -> impl IntoView {
 
     // Local UI state - split so read-only children don't re-run on writes from siblings.
     let (renaming, set_renaming) = signal(None::<WorkbookId>);
+    let (existing_groups, set_existing_groups) = signal(Vec::<String>::new());
 
     // Workbook list
     //
@@ -70,6 +71,26 @@ pub fn LeftDrawer() -> impl IntoView {
         let _ = app.registry_version.get();
         let current = state.current_uuid.get();
         let registry = storage::load_registry();
+
+        // Pre-compute existing group names once for all EntryRows,
+        // avoiding N localStorage deserializations for context menus.
+        let existing_groups: Vec<String> = {
+            let mut groups: Vec<String> = registry
+                .values()
+                .filter_map(|m| {
+                    if let WorkbookGroup::Named(n) = &m.group {
+                        Some(n.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+            groups.sort();
+            groups
+        };
+        set_existing_groups.set(existing_groups);
 
         let entries: Vec<DrawerEntry> = registry
             .into_iter()
@@ -164,6 +185,7 @@ pub fn LeftDrawer() -> impl IntoView {
                                                 active=entry.active
                                                 current_group=entry.meta.group.clone()
                                                 shared_from_link=entry.meta.shared_from_link
+                                                existing_groups=existing_groups
                                                 on_switch
                                                 on_delete
                                                 on_group
@@ -208,6 +230,7 @@ fn EntryRow(
     active: bool,
     current_group: WorkbookGroup,
     shared_from_link: bool,
+    existing_groups: ReadSignal<Vec<String>>,
     on_switch: Callback<WorkbookId>,
     on_delete: Callback<(WorkbookId, String)>,
     on_group: Callback<(WorkbookId, WorkbookGroup)>,
@@ -230,22 +253,7 @@ fn EntryRow(
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
     let (group_name, set_group_name) = signal(String::new());
 
-    let existing_groups: Vec<String> = {
-        let mut groups: Vec<String> = storage::load_registry()
-            .values()
-            .filter_map(|m| {
-                if let WorkbookGroup::Named(n) = &m.group {
-                    Some(n.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        groups.sort();
-        groups
-    };
+    let existing_groups = existing_groups.get_untracked();
 
     let has_group = matches!(current_group, WorkbookGroup::Named(_));
 

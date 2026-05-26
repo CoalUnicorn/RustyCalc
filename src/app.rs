@@ -75,7 +75,10 @@ pub fn App() -> impl IntoView {
             if let Some(uuid) = wb_state.current_uuid.get_untracked() {
                 model.with_value(|m| {
                     storage::save(&uuid, m);
-                    pre_serialized.set_value(Some(m.to_bytes()));
+                    web_sys::console::time_with_label("bitcode::to_bytes");
+                    let bytes = m.to_bytes();
+                    web_sys::console::time_end_with_label("bitcode::to_bytes");
+                    pre_serialized.set_value(Some(bytes));
                 });
             }
         },
