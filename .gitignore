@@ -2,4 +2,3 @@ dist/*
 target/*
 notes/*
 .worktrees/
-iron-canvas/bindings/python/target/
