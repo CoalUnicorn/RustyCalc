@@ -24,6 +24,23 @@ Consumers depending on the wasm bundle use `iron-canvas-web`. Native /
 non-browser backends impl `Surface` (associated `type P = YourPainter`)
 and wire `Orchestrator<YourSurface, _>` directly.
 
+## Development
+
+IronCalc is vendored as a git submodule in the parent RustyCalc repo.
+
+```bash
+# From the RustyCalc root:
+git submodule update --init   # if you cloned without --recurse-submodules
+
+# Build and test (from the RustyCalc root):
+cargo check --target wasm32-unknown-unknown
+cargo test --workspace
+
+# Or build/test iron-canvas in isolation:
+cd iron-canvas
+cargo test --workspace
+```
+
 ## Quick start
 
 ```js

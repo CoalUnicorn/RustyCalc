@@ -18,7 +18,7 @@ If you are comfortable working with GitHub and Git, the following steps should b
 2. **Clone the original repository**
    Clone the original repository to your local machine:
    ```bash
-   git clone https://github.com/CoalUnicorn/RustyCalc.git
+   git clone --recurse-submodules https://github.com/CoalUnicorn/RustyCalc.git
    cd RustyCalc
    ```
 
@@ -104,6 +104,12 @@ RustyCalc follows strong Rust design principles. Please review [docs/rust-style-
 ---
 
 ## 🧪 Development Setup
+
+IronCalc is vendored as a git submodule. If you cloned without `--recurse-submodules`, run:
+
+```bash
+git submodule update --init
+```
 
 1. **Install Rust and WebAssembly target:**
 ```bash

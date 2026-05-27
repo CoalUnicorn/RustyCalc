@@ -49,6 +49,14 @@ Alpha-stage spreadsheet built in Rust, compiled to WebAssembly. The calculation 
 
 ## Build
 
+IronCalc is vendored as a git submodule. Clone with `--recurse-submodules`:
+
+```
+git clone --recurse-submodules https://github.com/CoalUnicorn/RustyCalc.git
+```
+
+If you already cloned without it, run `git submodule update --init`.
+
 Requires [Trunk](https://trunkrs.dev/) and the `wasm32-unknown-unknown` target.
 
 ```

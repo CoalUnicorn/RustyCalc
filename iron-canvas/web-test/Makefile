@@ -1,7 +1,7 @@
 IC_CRATE  := iron-canvas-web
 IC_DIR    := ../crates/$(IC_CRATE)
 IC_PKG    := $(IC_DIR)/pkg
-ICALC_PKG := ../../../IronCalc/bindings/wasm/pkg
+ICALC_PKG := ../../IronCalc/bindings/wasm/pkg
 PORT      ?= 8000
 # dev | release | profiling
 PROFILE   ?= release

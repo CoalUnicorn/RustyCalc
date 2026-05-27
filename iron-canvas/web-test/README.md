@@ -19,6 +19,13 @@ or override on the command line):
 make serve ICALC_PKG=/path/to/IronCalc/bindings/wasm/pkg
 ```
 
+The IronCalc wasm bindings must be built before `make sync` can copy them:
+
+```sh
+cd ../../IronCalc/bindings/wasm && make
+cd - && make sync
+```
+
 ## Workflow
 
 ```sh

@@ -1,0 +1,4 @@
+[submodule "IronCalc"]
+	path = IronCalc
+	url = https://github.com/CoalUnicorn/IronCalc
+	branch = rustycalc-xlsx-wasm
