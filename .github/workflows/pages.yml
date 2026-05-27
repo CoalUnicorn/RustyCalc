@@ -90,10 +90,6 @@ jobs:
 
   deploy:
     needs: build
-    # Only `main` is whitelisted by the github-pages environment branch policy.
-    # `dev` pushes still rebuild the combined artifact (build job) as a signal,
-    # but skip the deploy gate so they don't surface a spurious red.
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
