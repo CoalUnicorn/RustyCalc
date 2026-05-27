@@ -692,7 +692,10 @@ mod formula_analysis_tests {
     #[test]
     fn test_invalid_function_captured() {
         let analysis = analyze_formula("=FOOBAR(1,2)", editing_at(0), &[], &[]);
-        let FormulaStatus::Unresolved { invalid_functions, .. } = &analysis.status else {
+        let FormulaStatus::Unresolved {
+            invalid_functions, ..
+        } = &analysis.status
+        else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
         assert_eq!(invalid_functions.len(), 1);
@@ -740,7 +743,9 @@ mod formula_analysis_tests {
         // must land in Unresolved.names (NOT Unresolved.functions).
         let analysis = analyze_formula("=my_undefined", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved {
-            invalid_names, invalid_functions, ..
+            invalid_names,
+            invalid_functions,
+            ..
         } = &analysis.status
         else {
             panic!("expected Unresolved, got {:?}", analysis.status);
@@ -760,7 +765,9 @@ mod formula_analysis_tests {
         // them differently (squiggle vs italic) without ambiguity.
         let analysis = analyze_formula("=my_undefined + FOOBAR(1)", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved {
-            invalid_names, invalid_functions, ..
+            invalid_names,
+            invalid_functions,
+            ..
         } = &analysis.status
         else {
             panic!("expected Unresolved, got {:?}", analysis.status);
