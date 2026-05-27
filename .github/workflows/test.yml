@@ -34,15 +34,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: RustyCalc
-
-      # Cargo.toml uses path = "../IronCalc/base" and "../IronCalc/xlsx",
-      # so IronCalc must be checked out as a sibling directory.
-      - name: Checkout IronCalc (sibling required by path deps)
-        uses: actions/checkout@v4
-        with:
-          repository: CoalUnicorn/IronCalc
-          ref: rustycalc-xlsx-wasm
-          path: IronCalc
+          submodules: recursive
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -78,13 +70,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: RustyCalc
-
-      - name: Checkout IronCalc (sibling required by path deps)
-        uses: actions/checkout@v4
-        with:
-          repository: CoalUnicorn/IronCalc
-          ref: rustycalc-xlsx-wasm
-          path: IronCalc
+          submodules: recursive
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
