@@ -82,12 +82,12 @@ pub fn split_formula_by_refs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coord::{RefNode, SheetRange, TextRef};
+    use crate::coord::{Absolute, RefNode, SheetRange, TextRef};
     use iron_canvas_core::types::coord::FormulaRefKind;
 
     fn make_ref(start: usize, end: usize, color_idx: usize) -> ActiveRef {
         ActiveRef {
-            ref_node: RefNode::cell(0, None, 0, 0, false, false),
+            ref_node: RefNode::cell(0, None, 0, 0, Absolute { row: false, column: false }),
             sheet_area: SheetRange::from_cell(0, 0, 0),
             color_idx,
             span: TextRef { start, end },

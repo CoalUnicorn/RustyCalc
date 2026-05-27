@@ -25,50 +25,54 @@ pub struct RefNode {
     pub(crate) inner: Node,
 }
 
+/// Named pair of absolute flags — prevents swapping row/column booleans
+/// at call sites (`cell(…, true, false)` was ambiguous).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Absolute {
+    pub row: bool,
+    pub column: bool,
+}
+
 impl RefNode {
     pub fn cell(
         sheet_index: u32,
         sheet_name: Option<String>,
         row: i32,
         column: i32,
-        absolute_row: bool,
-        absolute_column: bool,
+        absolute: Absolute,
     ) -> Self {
         Self {
             inner: Node::ReferenceKind {
                 sheet_name,
                 sheet_index,
-                absolute_row,
-                absolute_column,
+                absolute_row: absolute.row,
+                absolute_column: absolute.column,
                 row,
                 column,
             },
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn range(
         sheet_index: u32,
         sheet_name: Option<String>,
         row1: i32,
         column1: i32,
-        absolute_row1: bool,
-        absolute_column1: bool,
+        absolute1: Absolute,
         row2: i32,
         column2: i32,
-        absolute_row2: bool,
-        absolute_column2: bool,
+        absolute2: Absolute,
     ) -> Self {
         Self {
             inner: Node::RangeKind {
                 sheet_name,
                 sheet_index,
-                absolute_row1,
-                absolute_column1,
+                absolute_row1: absolute1.row,
+                absolute_column1: absolute1.column,
                 row1,
                 column1,
-                absolute_row2,
-                absolute_column2,
+                absolute_row2: absolute2.row,
+                absolute_column2: absolute2.column,
                 row2,
                 column2,
             },
@@ -436,7 +440,7 @@ impl RefNode {
         } else {
             abs_col - editing.column
         };
-        Self::cell(sheet_index, sheet_name, row, column, abs_r_flag, abs_c_flag)
+        Self::cell(sheet_index, sheet_name, row, column, Absolute { row: abs_r_flag, column: abs_c_flag })
     }
 }
 
