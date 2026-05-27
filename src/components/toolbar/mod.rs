@@ -229,11 +229,9 @@ fn FontSize() -> impl IntoView {
         if let Some(input) = ev
             .target()
             .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-        {
-            if let Ok(size) = input.value().parse::<f64>() {
+            && let Ok(size) = input.value().parse::<f64>() {
                 apply(size, model, &state);
             }
-        }
     };
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
@@ -243,11 +241,9 @@ fn FontSize() -> impl IntoView {
             if let Some(input) = ev
                 .target()
                 .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-            {
-                if let Ok(size) = input.value().parse::<f64>() {
+                && let Ok(size) = input.value().parse::<f64>() {
                     apply(size, model, &state);
                 }
-            }
         }
     };
 

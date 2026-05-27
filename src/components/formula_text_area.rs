@@ -122,8 +122,8 @@ pub fn FormulaTextArea() -> impl IntoView {
             return;
         };
         if let Some(overlay) = overlay_ref.get() {
-            let _ = overlay.set_scroll_top(ta.scroll_top());
-            let _ = overlay.set_scroll_left(ta.scroll_left());
+            overlay.set_scroll_top(ta.scroll_top());
+            overlay.set_scroll_left(ta.scroll_left());
         }
     };
 

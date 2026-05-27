@@ -225,7 +225,7 @@ pub fn analyze_formula(
     // otherwise every bare `A1` resolves to WrongReferenceKind.
 
     // NOTE: this can be better sheet_names: &[(u32, String)] as argument can be cleaner
-    // consider FrontendModel as the callers will be using it
+    // consider passing model traits directly as the callers will be using them
     let (sheet_name_list, active_sheet_name) = if sheet_names.is_empty() {
         (vec!["Sheet1".to_string()], "Sheet1".to_string())
     } else {

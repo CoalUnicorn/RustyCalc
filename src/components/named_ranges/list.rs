@@ -1,7 +1,7 @@
 //! Read-only table of every defined name in the workbook.
 //!
 //! Rows render `(name, scope, formula)` straight off
-//! `FrontendModel::get_defined_names()`. The list re-runs whenever
+//! `SheetQuery::get_defined_names()`. The list re-runs whenever
 //! `state.events.content` fires — that's the channel the CRUD wrappers
 //! emit on, so a Save / Delete / New refreshes the rows automatically.
 //!

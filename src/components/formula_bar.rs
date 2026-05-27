@@ -137,7 +137,7 @@ pub fn FormulaBar() -> impl IntoView {
             return;
         };
         if let Some(overlay) = overlay_ref.get() {
-            let _ = overlay.set_scroll_left(inp.scroll_left());
+            overlay.set_scroll_left(inp.scroll_left());
         }
     };
 

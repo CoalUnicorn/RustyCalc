@@ -193,11 +193,6 @@ pub trait Navigator {
     fn set_selected_area(&mut self, area: CellArea);
 }
 
-/// Backwards-compat umbrella for callers that need both query and navigation.
-/// New code should depend on the narrower trait it actually uses.
-pub trait FrontendModel: SheetQuery + Navigator {}
-impl<T: SheetQuery + Navigator> FrontendModel for T {}
-
 // Helper: map font name String -> SafeFontFamily
 
 fn font_family_from_name(name: &str) -> SafeFontFamily {

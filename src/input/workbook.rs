@@ -17,6 +17,7 @@ use crate::storage::{self, WorkbookId};
 /// Separate from `SpreadsheetAction` because these replace the loaded model
 /// rather than mutate cells within it. Callers are responsible for any
 /// confirmation dialog before calling `Delete`.
+#[allow(clippy::large_enum_variant)]
 pub enum WorkbookAction {
     /// Save the current workbook and load a different one.
     Switch(WorkbookId),
@@ -66,10 +67,8 @@ pub fn execute_workbook(
             match storage::load(&target_uuid) {
                 Some(new_model) => activate(target_uuid, new_model, model, state),
                 None => {
-                    state.status.set(Some(StatusMessage::Error(format!(
-                        "Cannot open workbook — it was saved with an older version. \
-                         Your data is still in browser storage but needs migration."
-                    ))));
+                    state.status.set(Some(StatusMessage::Error("Cannot open workbook — it was saved with an older version. \
+                         Your data is still in browser storage but needs migration.".to_string())));
                 }
             }
         }

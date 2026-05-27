@@ -4,7 +4,7 @@
 //! form is hidden behind a `<Show>` that flips when a row is selected (or
 //! `+ New` is clicked) — the empty state shows only the `+ New` button.
 //!
-//! Save / Delete dispatch through [`crate::model::FrontendModel`]'s
+//! Save / Delete dispatch through `create_defined_name` /
 //! `create_defined_name` / `rename_defined_name` / `remove_defined_name`,
 //! each wrapped in `try_mutate(EvaluationMode::Immediate, …)` so dependent
 //! cells recompute before the next paint. Errors from ironcalc surface

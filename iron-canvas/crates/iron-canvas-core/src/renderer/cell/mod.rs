@@ -181,8 +181,8 @@ impl<P: Painter> RendererCore<P> {
             pane_buf.range.set(None);
             return;
         };
-        if let Some(prev_range) = pane_buf.range.get() {
-            if let Some(axis) = infer_shift_axis(prev_range, range) {
+        if let Some(prev_range) = pane_buf.range.get()
+            && let Some(axis) = infer_shift_axis(prev_range, range) {
                 self.render_pane_strip(
                     model,
                     pane,
@@ -195,7 +195,6 @@ impl<P: Painter> RendererCore<P> {
                 );
                 return;
             }
-        }
         self.render_pane(model, pane, frame);
     }
 

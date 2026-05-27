@@ -224,8 +224,8 @@ pub fn classify_key(
     // Shift+letter (e.g., Shift+A = "A") and other printable combos
     // fall through to the is_printable check below so they start a
     // cell edit with the capital letter.
-    if shift && !ctrl && !alt {
-        if let Some(action) = match key {
+    if shift && !ctrl && !alt
+        && let Some(action) = match key {
             "ArrowRight" => Some(Nav(NavAction::ExpandSelection(Right))),
             "ArrowLeft" => Some(Nav(NavAction::ExpandSelection(Left))),
             "ArrowUp" => Some(Nav(NavAction::ExpandSelection(Up))),
@@ -235,7 +235,6 @@ pub fn classify_key(
         } {
             return Some(action);
         }
-    }
 
     // Any remaining modifier combination is not handled here.
     if ctrl || alt {
