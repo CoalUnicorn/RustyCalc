@@ -93,22 +93,22 @@ pub fn PerfPanel() -> impl IntoView {
                 {move || app.recording_active.get().then(|| view! {
                     <span class="pp-recording-label">"Recording…"</span>
                 })}
+                <span class="pp-sep">"|"</span>
+                <button
+                    class="pp-export-btn"
+                    title="Download current sheet as SVG"
+                    on:click=on_export_svg
+                >
+                    "⇩ SVG"
+                </button>
+                <button
+                    class="pp-export-btn"
+                    title="PDF export"
+                    on:click=on_export_pdf
+                >
+                    "⇩ PDF"
+                </button>
             })}
-            <span class="pp-sep">"|"</span>
-            <button
-                class="pp-export-btn"
-                title="Download current sheet as SVG"
-                on:click=on_export_svg
-            >
-                "⇩ SVG"
-            </button>
-            <button
-                class="pp-export-btn"
-                title="PDF export"
-                on:click=on_export_pdf
-            >
-                "⇩ PDF"
-            </button>
         </div>
     }
 }
