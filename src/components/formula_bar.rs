@@ -1,13 +1,16 @@
 // See docs/leptos-patterns.md for component conventions.
 
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 
+use crate::components::formula_overlay::FormulaOverlay;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
-use crate::input::formula_analysis::{analyze_formula, FormulaStatus};
-use crate::model::FrontendModel;
+use crate::input::formula_analysis::{FormulaStatus, analyze_formula};
+use crate::model::SheetQuery;
+use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
-use iron_canvas::col_name;
+use iron_canvas_core::col_name;
 
 /// The formula bar: cell address label + content/formula input.
 ///
@@ -24,6 +27,8 @@ pub fn FormulaBar() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
     let input_ref = state.formula_input_ref;
+    // Cache the overlay element so on_scroll doesn't query_selector at 60 Hz.
+    let overlay_ref: NodeRef<leptos::html::Div> = NodeRef::new();
 
     let cell_address = move || {
         // While editing, pin to the editing cell's address. The live cursor
@@ -106,6 +111,36 @@ pub fn FormulaBar() -> impl IntoView {
 
     let on_keydown = move |ev: web_sys::KeyboardEvent| suppress_navigation_defaults(&ev);
 
+    // Overlay text mirrors `display_text` exactly so colored spans align
+    // with the input characters regardless of edit state.
+    let overlay_text = Signal::derive(move || {
+        if let Some(edit) = state.editing_cell.get() {
+            return edit.text;
+        }
+        let _ = state.events.content.get();
+        let _ = state.events.navigation.get();
+        model.with_value(|m| m.active_cell_content())
+    });
+    // Colored spans only exist while editing — the non-editing display is
+    // the cell's raw content, which isn't run through the formula analyzer.
+    let overlay_refs = Signal::derive(move || {
+        state
+            .editing_cell
+            .get()
+            .map(|e| e.formula_analysis.refs().to_vec())
+            .unwrap_or_default()
+    });
+
+    let on_scroll = move |ev: web_sys::Event| {
+        let Some(target) = ev.target() else { return };
+        let Some(inp) = target.dyn_ref::<web_sys::HtmlInputElement>() else {
+            return;
+        };
+        if let Some(overlay) = overlay_ref.get() {
+            overlay.set_scroll_left(inp.scroll_left());
+        }
+    };
+
     // Ref-under-caret tooltip — first visible consumer of the ref_node
     // identity preserved by analyze_formula. While editing, if the caret
     // sits on (inclusive right edge) a resolved ref, render its localized
@@ -156,15 +191,19 @@ pub fn FormulaBar() -> impl IntoView {
                 {cell_address}
             </div>
             <div class="fb-fx">"fx"</div>
-            <input
-                node_ref=input_ref
-                type="text"
-                class=input_class
-                prop:value=display_text
-                on:focus=on_focus
-                on:input=on_input
-                on:keydown=on_keydown
-            />
+            <div class="fe-host fb-input-host">
+                <FormulaOverlay node_ref=overlay_ref text=overlay_text refs=overlay_refs />
+                <input
+                    node_ref=input_ref
+                    type="text"
+                    class=input_class
+                    prop:value=display_text
+                    on:focus=on_focus
+                    on:input=on_input
+                    on:keydown=on_keydown
+                    on:scroll=on_scroll
+                />
+            </div>
 
             // Ref-under-caret indicator. Populated by `ref_under_caret` when
             // editing and the cursor sits on a resolved ref.

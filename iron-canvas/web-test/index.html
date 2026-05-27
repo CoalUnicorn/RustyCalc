@@ -69,14 +69,14 @@
                 font-weight: 600;
             }
             .hint {
-                margin: 12px 0 0;
+                margin: 8px 0 0;
                 color: #888;
                 font-size: 12px;
             }
         </style>
     </head>
     <body>
-        <h1>iron-canvas &mdash; JsBackedModel smoke harness</h1>
+        <h1>iron-canvas &mdash; smoke harness</h1>
         <div id="status">loading wasm…</div>
         <div class="stack">
             <canvas id="grid"></canvas>
@@ -88,16 +88,21 @@
             selected sheet — the canvas reads the new view on the next paint.
             Open DevTools for the bridge snapshot.
         </div>
+        <p style="margin-top: 12px">
+            <button id="save-svg" type="button">Save as SVG</button>
+            <button id="highlight-a1c5" type="button">Highlight A1:C5</button>
+            <button id="clear-highlight" type="button">Clear highlight</button>
+        </p>
 
         <script type="module">
             import initIronCanvas, {
                 IronCanvas,
-            } from "./vendor/iron-canvas/iron_canvas.js";
+            } from "./vendor/iron-canvas/iron_canvas_web.js";
             import initIronCalc, { Model } from "./vendor/ironcalc/wasm.js";
 
             const statusEl = document.getElementById("status");
-            const tabsEl = document.getElementById("tabs");
-            const gridEl = document.getElementById("grid");
+            const tabsEl   = document.getElementById("tabs");
+            const gridEl   = document.getElementById("grid");
             const overlayEl = document.getElementById("overlay");
 
             const setStatus = (msg) => {
@@ -177,6 +182,55 @@
                     });
                 };
                 renderTabs();
+
+                phase = "wire save-svg";
+                document
+                    .getElementById("save-svg")
+                    .addEventListener("click", () => {
+                        const svg = canvas.exportSvg(800, 400);
+                        const blob = new Blob([svg], {
+                            type: "image/svg+xml",
+                        });
+                        const url = URL.createObjectURL(blob);
+                        const a = Object.assign(
+                            document.createElement("a"),
+                            { href: url, download: "sheet.svg" },
+                        );
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                    });
+
+                phase = "wire setPointRange demo";
+                document
+                    .getElementById("highlight-a1c5")
+                    .addEventListener("click", () => {
+                        canvas.setPointRange({ r1: 1, c1: 1, r2: 5, c2: 3 });
+                        canvas.requestOverlayRepaint();
+                    });
+                document
+                    .getElementById("clear-highlight")
+                    .addEventListener("click", () => {
+                        canvas.setPointRange(null);
+                        canvas.requestOverlayRepaint();
+                    });
+
+                phase = "wire hitTest demo";
+                // Phase 1 JS-API parity demo. Throttle to once per frame so
+                // the console doesn't drown; log only when the resolved
+                // variant changes (kind+row+column) — every cell drag would
+                // otherwise spam thousands of identical "cell" entries.
+                let lastHit = "";
+                gridEl.addEventListener("mousemove", (ev) => {
+                    const r = gridEl.getBoundingClientRect();
+                    const hit = canvas.hitTest(ev.clientX - r.left, ev.clientY - r.top);
+                    const key = JSON.stringify(hit);
+                    if (key !== lastHit) {
+                        lastHit = key;
+                        console.log("hitTest", hit);
+                    }
+                });
 
                 phase = "paint loop";
                 canvas.requestRepaint();

@@ -5,7 +5,7 @@ use leptos::prelude::WithValue;
 use crate::coord::{CellArea, SheetRange};
 use crate::events::{ContentEvent, Location, SpreadsheetEvent, StructureEvent};
 use crate::input::error::StructError;
-use crate::model::{try_mutate, EvaluationMode};
+use crate::model::{EvaluationMode, try_mutate};
 use crate::state::{ModelStore, WorkbookState};
 
 /// Structural mutations: delete/clear cell content, undo/redo, and row/column insert/delete.

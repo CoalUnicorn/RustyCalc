@@ -10,12 +10,12 @@
 // See docs/adding-actions.md for how to add or modify actions.
 
 use crate::input::{
-    edit::{execute_edit, EditAction},
-    format::{execute_format, FormatAction},
-    nav::{execute_nav, NavAction},
-    structure::{execute_struct, StructAction},
+    edit::{EditAction, execute_edit},
+    format::{FormatAction, execute_format},
+    nav::{NavAction, execute_nav},
+    structure::{StructAction, execute_struct},
 };
-use crate::model::{style_types::HexColor, ArrowKey, SafeFontFamily};
+use crate::model::{ArrowKey, SafeFontFamily, style_types::HexColor};
 use crate::state::{EditMode, EditingCell, ModelStore, StatusMessage, WorkbookState};
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 
@@ -220,15 +220,23 @@ pub fn classify_key(
     }
 
     // Shift-only (no ctrl, no alt): extend selection.
-    if shift && !ctrl && !alt {
-        return match key {
+    // Only known navigation keys with Shift are consumed here.
+    // Shift+letter (e.g., Shift+A = "A") and other printable combos
+    // fall through to the is_printable check below so they start a
+    // cell edit with the capital letter.
+    if shift
+        && !ctrl
+        && !alt
+        && let Some(action) = match key {
             "ArrowRight" => Some(Nav(NavAction::ExpandSelection(Right))),
             "ArrowLeft" => Some(Nav(NavAction::ExpandSelection(Left))),
             "ArrowUp" => Some(Nav(NavAction::ExpandSelection(Up))),
             "ArrowDown" => Some(Nav(NavAction::ExpandSelection(Down))),
             "Tab" => Some(Nav(NavAction::Arrow(Left))),
             _ => None,
-        };
+        }
+    {
+        return Some(action);
     }
 
     // Any remaining modifier combination is not handled here.
@@ -344,7 +352,7 @@ mod tests {
     use super::*;
     use crate::coord::CellAddress;
     use crate::input::formula_analysis::FormulaAnalysis;
-    use crate::model::{mutate, ArrowKey, EvaluationMode};
+    use crate::model::{ArrowKey, EvaluationMode, mutate};
     use crate::state::{DragState, EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;
     use wasm_bindgen_test::*;

@@ -20,19 +20,26 @@ pub struct PerfTimings {
     pub input_done: RwSignal<Option<f64>>,
     /// `performance.now()` just after `evaluate()`.
     pub eval_done: RwSignal<Option<f64>>,
-    /// `performance.now()` just after canvas `render()`.
-    pub render_done: RwSignal<Option<f64>>,
+    /// Duration of the last `paintIfDirty()` call in milliseconds — measured
+    /// inside the rAF loop only on frames that actually rendered (gated by
+    /// `render_needed`). Independent of the commit pipeline: scroll-only or
+    /// overlay-only repaints update this too.
+    pub render_ms: RwSignal<Option<f64>>,
     /// The formula/text that was committed (for display).
     pub last_formula: RwSignal<Option<String>>,
 }
 
 impl PerfTimings {
     pub fn new() -> Self {
+        // Phase timestamps and render_ms are seeded to `Some(0.0)` so the
+        // PerfPanel renders real-looking zeros from first paint instead of
+        // a "commit a cell to measure" placeholder. Real values overwrite
+        // these on the first commit / paint cycle.
         Self {
-            commit_start: RwSignal::new(None),
-            input_done: RwSignal::new(None),
-            eval_done: RwSignal::new(None),
-            render_done: RwSignal::new(None),
+            commit_start: RwSignal::new(Some(0.0)),
+            input_done: RwSignal::new(Some(0.0)),
+            eval_done: RwSignal::new(Some(0.0)),
+            render_ms: RwSignal::new(Some(0.0)),
             last_formula: RwSignal::new(None),
         }
     }

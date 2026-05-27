@@ -1,8 +1,8 @@
 //! Formatting actions: bold, italic, underline, strikethrough, font size/family.
 
 use ironcalc_base::{
-    types::{HorizontalAlignment, VerticalAlignment},
     UserModel,
+    types::{HorizontalAlignment, VerticalAlignment},
 };
 use leptos::prelude::WithValue;
 
@@ -10,10 +10,11 @@ use crate::coord::{CellArea, SheetRange};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
+    EvaluationMode, SafeFontFamily, SheetQuery, ToolbarState,
     style_types::{BooleanValue, HexColor, StylePath},
-    try_mutate, EvaluationMode, FrontendModel, SafeFontFamily, ToolbarState,
+    try_mutate,
 };
-use iron_canvas::geometry::constants::{LAST_COLUMN, LAST_ROW};
+use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use crate::state::{ModelStore, WorkbookState};
 

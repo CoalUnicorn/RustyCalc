@@ -4,7 +4,7 @@
 //! form is hidden behind a `<Show>` that flips when a row is selected (or
 //! `+ New` is clicked) — the empty state shows only the `+ New` button.
 //!
-//! Save / Delete dispatch through [`crate::model::FrontendModel`]'s
+//! Save / Delete dispatch through `create_defined_name` /
 //! `create_defined_name` / `rename_defined_name` / `remove_defined_name`,
 //! each wrapped in `try_mutate(EvaluationMode::Immediate, …)` so dependent
 //! cells recompute before the next paint. Errors from ironcalc surface
@@ -20,8 +20,9 @@ use leptos::prelude::*;
 
 use crate::coord::{CellAddress, TextRef};
 use crate::events::{ContentEvent, SpreadsheetEvent};
-use crate::input::formula_analysis::{analyze_formula, FormulaAnalysis};
-use crate::model::{try_mutate, EvaluationMode, FrontendModel};
+use crate::input::formula_analysis::{FormulaAnalysis, analyze_formula};
+use crate::model::frontend_model::DefinedNameManager;
+use crate::model::{EvaluationMode, SheetQuery, try_mutate};
 use crate::state::{EditingDefinedName, ModelStore, StatusMessage, WorkbookState};
 
 use super::formula_input::FormulaInput;

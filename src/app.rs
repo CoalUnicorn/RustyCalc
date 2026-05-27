@@ -1,8 +1,11 @@
 use crate::components::left_drawer::LeftDrawer;
+use crate::components::share_verify::ShareVerify;
 use crate::components::workbook::Workbook;
 
+use base64::Engine;
+use gloo_storage::Storage;
 use leptos::prelude::*;
-use leptos_use::{use_debounce_fn_with_options, DebounceOptions};
+use leptos_use::{DebounceOptions, use_debounce_fn_with_options};
 
 use crate::app_state::AppState;
 use crate::events::EventBus;
@@ -11,8 +14,18 @@ use crate::storage;
 
 #[component]
 pub fn App() -> impl IntoView {
-    // Load the previously selected workbook from localStorage, or create a
-    // fresh blank one if localStorage is empty (first launch).
+    // `#share=…` URLs are always staged in-memory pending user consent —
+    // never auto-persisted on first paint. Both V0 (no word) and V1 (word
+    // verification) defer bitcode deserialization until after the recipient
+    // clicks Accept in the ShareVerify modal, so a crafted payload can't
+    // run the parser on page load. The URL hash stays intact while the
+    // modal is open so a refresh re-enters this same branch; it's cleared
+    // on accept or dismiss.
+    let (pending_share, set_pending_share) = signal(None::<storage::SharedLoad>);
+    let share_load = storage::load_shared_from_url();
+    if let Some(load) = share_load {
+        set_pending_share.set(Some(load));
+    }
     let (uuid, model) = storage::load_selected().unwrap_or_else(storage::create_new);
 
     let events = EventBus::new();
@@ -30,10 +43,21 @@ pub fn App() -> impl IntoView {
     let clipboard: StoredValue<Option<crate::model::AppClipboard>, LocalStorage> =
         StoredValue::new_local(None);
 
+    // Pre-serialized model bytes refreshed by the debounced save. The
+    // beforeunload handler reads these directly, sidestepping a 10-50ms
+    // bitcode pass inside the browser's ~200ms unload budget.
+    let pre_serialized: StoredValue<Option<Vec<u8>>, LocalStorage> = StoredValue::new_local(None);
+
     provide_context(app_state);
+    // Provide PerfTimings independently so `try_mutate` can write phase
+    // timestamps without coupling the model layer to AppState.
+    provide_context(app_state.perf);
     provide_context(wb_state);
     provide_context(model);
     provide_context(clipboard);
+    // Pending v1 share verification — consumed by ShareVerify modal.
+    provide_context(pending_share);
+    provide_context(set_pending_share);
 
     // Centralized auto-save via EventBus subscription.
     //
@@ -48,7 +72,13 @@ pub fn App() -> impl IntoView {
     let debounced_save = use_debounce_fn_with_options(
         move || {
             if let Some(uuid) = wb_state.current_uuid.get_untracked() {
-                model.with_value(|m| storage::save(&uuid, m));
+                model.with_value(|m| {
+                    storage::save(&uuid, m);
+                    web_sys::console::time_with_label("bitcode::to_bytes");
+                    let bytes = m.to_bytes();
+                    web_sys::console::time_end_with_label("bitcode::to_bytes");
+                    pre_serialized.set_value(Some(bytes));
+                });
             }
         },
         1000.0,
@@ -69,7 +99,19 @@ pub fn App() -> impl IntoView {
         use wasm_bindgen::prelude::*;
         let cb = Closure::<dyn Fn(web_sys::Event)>::new(move |_: web_sys::Event| {
             if let Some(uuid) = wb_state.current_uuid.get_untracked() {
-                model.with_value(|m| storage::save(&uuid, m));
+                // Fast path: write the bytes the idle save already produced,
+                // bypassing a fresh bitcode pass. Registry was updated then too,
+                // so we only need to flush the model payload here.
+                if let Some(bytes) = pre_serialized.get_value() {
+                    let mut full = Vec::with_capacity(5 + bytes.len());
+                    full.extend_from_slice(b"RCAL");
+                    full.push(1u8);
+                    full.extend_from_slice(&bytes);
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(&full);
+                    let _ = gloo_storage::LocalStorage::set(uuid.to_string(), &encoded);
+                } else {
+                    model.with_value(|m| storage::save(&uuid, m));
+                }
             }
         });
         if let Ok(win) =
@@ -88,6 +130,7 @@ pub fn App() -> impl IntoView {
         <div id="app">
             <LeftDrawer />
             <Workbook />
+            <ShareVerify />
         </div>
     }
 }

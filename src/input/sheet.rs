@@ -10,7 +10,7 @@ use leptos::prelude::WithValue;
 
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
 use crate::input::error::SheetError;
-use crate::model::{try_mutate, EvaluationMode, FrontendModel};
+use crate::model::{EvaluationMode, SheetQuery, try_mutate};
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
 
 /// Sheet-level operations on the current workbook.

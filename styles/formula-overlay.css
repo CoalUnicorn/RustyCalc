@@ -1,0 +1,63 @@
+/* Formula overlay — prefix: fe-
+ *
+ * Renders colored ref tokens behind an editable text element.
+ * DOM shape: <div class="fe-host"><div class="fe-overlay">…</div><input|textarea/></div>
+ *
+ * Mechanism: the text element gets `color: transparent` so the overlay
+ * shows through. Native caret stays visible via `caret-color`. The overlay
+ * is `pointer-events: none` so clicks, selection, drag, and scroll pass
+ * straight through to the text element.
+ *
+ * Critical mirror: every CSS property that affects character positioning
+ * (font, padding, line-height, letter-spacing, white-space, tab-size) must
+ * match between overlay and text element — a 1px drift on any of them
+ * shifts every character of every colored token by one pixel.
+ */
+
+.fe-host {
+    position: relative;
+    /* New stacking context so the overlay/text z-indices stay self-contained
+     * (don't fight with the canvas's z-index: 10 ladder). */
+    isolation: isolate;
+}
+
+/* Shared text-layout properties applied to both overlay and text element. */
+.fe-text {
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    letter-spacing: normal;
+    box-sizing: border-box;
+    tab-size: 4;
+}
+
+.fe-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    /* Behind the text element so the native caret (drawn on the text
+     * element's layer) renders above the colored spans. */
+    z-index: 0;
+    color: var(--text-strong);
+    background: transparent;
+}
+
+/* Multiline variant — paired with a <textarea>. Wrap and break like the
+ * textarea so wrapped lines line up. */
+.fe-overlay--multiline {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+/* Single-line variant — paired with an <input>. The input scrolls
+ * horizontally when text overflows; overlay must do the same. */
+.fe-overlay--singleline {
+    white-space: pre;
+}
+
+.fe-overlay .fe-op {
+    color: var(--text-strong);
+}
+/* Ref token color is applied inline via `style:color=…` per span. */

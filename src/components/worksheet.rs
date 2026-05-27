@@ -1,4 +1,4 @@
-use iron_canvas::types::coord::AutofillTarget;
+use iron_canvas_core::types::coord::AutofillTarget;
 use ironcalc_base::types::{CellType, Style};
 use leptos::html;
 use leptos::prelude::*;
@@ -6,15 +6,19 @@ use leptos_use::{use_raf_fn, use_resize_observer};
 use std::rc::Rc;
 use web_sys::HtmlCanvasElement;
 
-use crate::app_state::AppState;
+#[cfg(feature = "dev-tools")]
+use crate::app_state::{AppState, ExportCmd, PlaybackCmd, RecordingCmd};
 use crate::components::cell_editor::CellEditor;
 use crate::coord::ActiveRef;
 use crate::coord::{CellArea, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::mouse::*;
 use crate::model::AppClipboard;
+#[cfg(feature = "dev-tools")]
+use crate::state::StatusMessage;
 use crate::state::{DragState, ModelStore, WorkbookState};
-use iron_canvas::*;
+use iron_canvas_core::*;
+use iron_canvas_web::IronCanvas;
 
 /// Bridges `ModelStore` (a Leptos `StoredValue` holding `UserModel<'static>`)
 /// to `iron_canvas::CanvasModel`. Each trait method `with_value`-borrows the
@@ -99,6 +103,7 @@ pub fn Worksheet() -> impl IntoView {
         });
     });
     let state = expect_context::<WorkbookState>();
+    #[cfg(feature = "dev-tools")]
     let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
 
@@ -109,6 +114,15 @@ pub fn Worksheet() -> impl IntoView {
     // Cleanup is automatic when the component unmounts.
     let container_ref = NodeRef::<html::Div>::new();
     let _ = use_resize_observer(container_ref, move |_, _| {
+        // During playback the orchestrator + canvas backing stores are
+        // pinned to the recording's dimensions; a live container resize
+        // (window resize, devtools) would otherwise clobber them and
+        // skew the replay.
+        #[cfg(feature = "dev-tools")]
+        if app.playback_loaded.get_untracked() {
+            return;
+        }
+
         state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
 
         // Mirror the new dims into the orchestrator. Both canvases share
@@ -162,10 +176,22 @@ pub fn Worksheet() -> impl IntoView {
         // derives PartialEq, the memo's PartialEq gate suppresses re-renders when
         // refs don't change (e.g. text changed but no new refs produced).
         let editing_cell = state.editing_cell.get();
-        let formula_refs: Vec<ActiveRef> = editing_cell
+        let mut formula_refs: Vec<ActiveRef> = editing_cell
             .as_ref()
             .map(|e| e.formula_analysis.refs().to_vec())
             .unwrap_or_default();
+
+        // Live drag ghost: while `DraggingFormulaRef` is active, mousemove
+        // publishes a `RefOverride`; we patch the matching ref's
+        // `sheet_area` so the painted outline follows the cursor without
+        // touching the formula text. Bounds-checked: if the formula was
+        // re-analyzed mid-drag and refs shrank, the patch is silently
+        // skipped.
+        if let Some(o) = state.dragged_ref_override.get()
+            && let Some(r) = formula_refs.get_mut(o.idx)
+        {
+            r.sheet_area = o.range;
+        }
 
         // Point-mode range for overlay painting. RefNode stores relative deltas,
         // so resolution needs the editing cell's address as anchor.
@@ -244,12 +270,22 @@ pub fn Worksheet() -> impl IntoView {
             canvas_handle.update_value(|slot| {
                 if let Some(ic) = slot.as_mut() {
                     ic.set_overlays(overlays);
-                    // Grid repaint only when cell data, format, or structure changed.
-                    // Nav and overlay-only changes are covered by set_overlays() above.
-                    if has_content || has_structure || has_format {
+                    // Format events include row/col resize (LayoutChanged) —
+                    // those mutate slot pixel geometry and must drop
+                    // last_frame, so they route through requestRepaint with
+                    // structure. Content edits go through markContentDirty
+                    // for the SlotsReuse fast path; nav co-firing (commit-
+                    // Enter) needs an explicit overlay raise because
+                    // markContentDirty leaves the overlay bit untouched.
+                    if has_structure || has_format {
                         ic.requestRepaint();
+                    } else if has_content {
+                        ic.markContentDirty();
+                        if has_nav {
+                            ic.request_overlay_repaint();
+                        }
                     } else if has_nav {
-                        ic.request_overlay_repaint(); // overlay only
+                        ic.request_overlay_repaint();
                     }
                 }
             });
@@ -257,6 +293,205 @@ pub fn Worksheet() -> impl IntoView {
             overlay
         },
     );
+
+    // Workbook-switch Effect — the comment on line 517 promised "subsequent
+    // pushes are driven by the reactive Effects below" but no Effect actually
+    // watched the workbook identity. Without a set_model call, the orchestrator
+    // keeps last_frame from the old workbook (stale pane geometry, stale sheet
+    // ID), and paint_if_dirty never drops it for a Fresh rebuild.
+    //
+    // Watching `current_uuid` gives us a deterministic signal that fires once
+    // per workbook switch. set_model is idempotent-safe — re-pushing the same
+    // adapter triggers a full repaint.
+    {
+        let current_uuid = state.current_uuid.read();
+        Effect::new(move |_| {
+            let _uuid = current_uuid.get();
+            canvas_handle.update_value(|slot| {
+                if let Some(ic) = slot.as_mut() {
+                    ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
+                }
+            });
+        });
+    }
+
+    // Recording dispatch Effect — peer to the reactive Effect above. Drains
+    // `app.recording_cmd` (one-shot Start/Stop from PerfPanel) and forwards
+    // to the iron-canvas orchestrator. Gated by `recorder` feature because
+    // `IronCanvas::startRecording` / `stopRecording` only exist when the
+    // upstream `iron-canvas-web/recorder` feature is enabled.
+    //
+    // `set(None)` at the end re-fires this same Effect with `cmd == None`,
+    // which short-circuits via the `let-else`. No infinite loop.
+    #[cfg(feature = "dev-tools")]
+    Effect::new(move |_| {
+        let Some(cmd) = app.recording_cmd.get() else {
+            return;
+        };
+        canvas_handle.update_value(|slot| {
+            let Some(ic) = slot.as_mut() else {
+                state
+                    .status
+                    .set(Some(StatusMessage::Error("canvas not ready".into())));
+                return;
+            };
+            match cmd {
+                RecordingCmd::Start => match ic.startRecording(wasm_bindgen::JsValue::UNDEFINED) {
+                    Ok(()) => app.recording_active.set(true),
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "startRecording failed: {e:?}"
+                    )))),
+                },
+                RecordingCmd::Stop => {
+                    // Engine `stopRecording` clears its `recording` state before
+                    // it can fail at `serialize()`; reset the UI flag eagerly so
+                    // a serialize-Err doesn't wedge the button in "Stop".
+                    app.recording_active.set(false);
+                    match ic.stopRecording() {
+                        Ok(arr) => {
+                            let bytes = arr.to_vec();
+                            let ts = js_sys::Date::new_0()
+                                .to_iso_string()
+                                .as_string()
+                                .and_then(|s| s.split('.').next().map(str::to_owned))
+                                .map(|s| s.replace(':', "-"))
+                                .unwrap_or_else(|| "now".into());
+                            let filename = format!("recording-{ts}.icr");
+                            if let Err(e) = crate::input::xlsx_io::trigger_download(
+                                &bytes,
+                                &filename,
+                                Some("application/octet-stream"),
+                            ) {
+                                state.status.set(Some(StatusMessage::Error(e)));
+                            }
+                        }
+                        Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                            "stopRecording failed: {e:?}"
+                        )))),
+                    }
+                }
+            }
+        });
+        app.recording_cmd.set(None);
+    });
+
+    // Playback command dispatch. Mirror of the recording Effect: drain a
+    // one-shot PlaybackCmd onto the live IronCanvas, mirror result state
+    // back into AppState signals so the PlaybackPanel re-renders.
+    #[cfg(feature = "dev-tools")]
+    Effect::new(move |_| {
+        let Some(cmd) = app.playback_cmd.get() else {
+            return;
+        };
+        canvas_handle.update_value(|slot| {
+            let Some(ic) = slot.as_mut() else {
+                state
+                    .status
+                    .set(Some(StatusMessage::Error("canvas not ready".into())));
+                return;
+            };
+            match cmd {
+                PlaybackCmd::Load(bytes) => match ic.loadRecording(&bytes) {
+                    Ok(()) => {
+                        app.playback_loaded.set(true);
+                        app.playback_frame_count.set(ic.recordingFrameCount());
+                        app.playback_frame.set(ic.recordingCurrentFrame());
+                        app.playback_playing.set(false);
+                    }
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "loadRecording failed: {e:?}"
+                    )))),
+                },
+                PlaybackCmd::Seek(idx) => match ic.seekRecording(idx) {
+                    Ok(()) => {
+                        app.playback_frame.set(ic.recordingCurrentFrame());
+                        // Stage 2 invariant: seek pauses any active play loop.
+                        app.playback_playing.set(false);
+                    }
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "seekRecording failed: {e:?}"
+                    )))),
+                },
+                PlaybackCmd::Play => match ic.playRecording(crate::perf::now()) {
+                    Ok(()) => {
+                        app.playback_playing.set(true);
+                        // Wake the rAF: tickPlayback runs on every frame
+                        // unconditionally, but a render_needed bump ensures
+                        // we don't stall on a sleeping rAF after a long pause.
+                        render_needed.set(true);
+                    }
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "playRecording failed: {e:?}"
+                    )))),
+                },
+                PlaybackCmd::Pause => {
+                    ic.pauseRecording();
+                    app.playback_playing.set(false);
+                }
+                PlaybackCmd::Exit => {
+                    ic.exitPlayback();
+                    app.playback_loaded.set(false);
+                    app.playback_playing.set(false);
+                    app.playback_frame.set(0);
+                    app.playback_frame_count.set(0);
+                    // exitPlayback called request_repaint on the engine; we
+                    // also need a rAF wake so paintIfDirty fires next tick.
+                    render_needed.set(true);
+                }
+            }
+        });
+        app.playback_cmd.set(None);
+    });
+
+    // Export dispatch Effect. Drains `app.export_cmd` (one-shot Svg/Pdf
+    // from PerfPanel) and pipes the bytes through `trigger_download`.
+    // SVG runs today via `IronCanvas::exportSvg`; the PDF arm is wired
+    // but unreachable until the iron-canvas-export PDF backend lands —
+    // the PerfPanel button is rendered `disabled=true` in the meantime.
+    #[cfg(feature = "dev-tools")]
+    Effect::new(move |_| {
+        let Some(cmd) = app.export_cmd.get() else {
+            return;
+        };
+        canvas_handle.update_value(|slot| {
+            let Some(ic) = slot.as_mut() else {
+                state
+                    .status
+                    .set(Some(StatusMessage::Error("canvas not ready".into())));
+                return;
+            };
+            let size = ic.canvas_size();
+            let ts = js_sys::Date::new_0()
+                .to_iso_string()
+                .as_string()
+                .and_then(|s| s.split('.').next().map(str::to_owned))
+                .map(|s| s.replace(':', "-"))
+                .unwrap_or_else(|| "now".into());
+            match cmd {
+                ExportCmd::Svg => {
+                    let svg = ic.exportSvg(size.w, size.h);
+                    if let Err(e) = crate::input::xlsx_io::trigger_download(
+                        svg.as_bytes(),
+                        &format!("sheet-{ts}.svg"),
+                        Some("image/svg+xml"),
+                    ) {
+                        state.status.set(Some(StatusMessage::Error(e)));
+                    }
+                }
+                ExportCmd::Pdf => {
+                    let pdf = ic.exportPdf(size.w, size.h);
+                    if let Err(e) = crate::input::xlsx_io::trigger_download(
+                        &pdf,
+                        &format!("sheet-{ts}.pdf"),
+                        Some("application/pdf"),
+                    ) {
+                        state.status.set(Some(StatusMessage::Error(e)));
+                    }
+                }
+            }
+        });
+        app.export_cmd.set(None);
+    });
 
     // rAF render loop - fires on every animation frame (~60 fps).
     // Renders only when render_needed is true; otherwise returns immediately
@@ -315,6 +550,24 @@ pub fn Worksheet() -> impl IntoView {
             }
         });
 
+        // Playback tick. Runs unconditionally so play cadence is independent
+        // of `render_needed` (which is gated on workbook state changes).
+        // No-op when no recording is loaded or play is paused.
+        #[cfg(feature = "dev-tools")]
+        if app.playback_loaded.get_untracked() && app.playback_playing.get_untracked() {
+            canvas_handle.update_value(|slot| {
+                if let Some(ic) = slot.as_mut() {
+                    if ic.tickPlayback(crate::perf::now()) {
+                        app.playback_frame.set(ic.recordingCurrentFrame());
+                    }
+                    // Engine auto-pauses at end-of-recording — mirror it.
+                    if !ic.isPlaying() {
+                        app.playback_playing.set(false);
+                    }
+                }
+            });
+        }
+
         if !render_needed.get_untracked() {
             return;
         }
@@ -334,6 +587,8 @@ pub fn Worksheet() -> impl IntoView {
         });
         // Renderer debug
         web_sys::console::time_with_label("render");
+        #[cfg(feature = "dev-tools")]
+        let paint_t0 = crate::perf::now();
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
                 if theme_dirty.get_value() {
@@ -349,9 +604,13 @@ pub fn Worksheet() -> impl IntoView {
         // Renderer debug
         web_sys::console::time_end_with_label("render");
 
-        // Record render-done timestamp for the perf panel.
+        // Record paint duration for the PerfPanel. Skipped until the first
+        // cell commit has happened so the panel stays on its placeholder
+        // ("commit a cell to measure") and we don't spam the signal on
+        // every scroll / resize / overlay tick.
+        #[cfg(feature = "dev-tools")]
         if app.perf.commit_start.get_untracked().is_some() {
-            app.perf.render_done.set(Some(crate::perf::now()));
+            app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
         }
     });
 
@@ -384,20 +643,43 @@ pub fn Worksheet() -> impl IntoView {
         handle_wheel(ev, model, state);
     };
 
+    // Allow scrolling the container while a recording is loaded — the
+    // recording may be larger than the current viewport. Reverts to the
+    // CSS default (`hidden` for `.ws`) when playback exits.
+    #[cfg(feature = "dev-tools")]
+    let container_overflow = move || {
+        if app.playback_loaded.get() {
+            "auto"
+        } else {
+            ""
+        }
+    };
+    #[cfg(not(feature = "dev-tools"))]
+    let container_overflow = move || "";
+
     view! {
-        <div node_ref=container_ref class="ws">
+        <div node_ref=container_ref class="ws" style:overflow=container_overflow>
             <canvas
                 node_ref=grid_ref
                 role="application"
                 aria-label="Spreadsheet grid"
                 class=move || {
-                    match state.drag.get() {
-                        DragState::ResizingCol { .. } => "ws-canvas ws-grid resize-col",
-                        DragState::ResizingRow { .. } => "ws-canvas ws-grid resize-row",
+                    // Drag wins over the idle hover hint: a started resize must
+                    // not flicker back to `cell` if the pointer drifts off the
+                    // 4-px hot-zone mid-drag.
+                    let extra = match state.drag.get() {
+                        DragState::ResizingCol { .. } => "resize-col",
+                        DragState::ResizingRow { .. } => "resize-row",
                         DragState::Idle
                         | DragState::Selecting
                         | DragState::Extending { .. }
-                        | DragState::Pointing { .. } => "ws-canvas ws-grid",
+                        | DragState::Pointing { .. }
+                        | DragState::DraggingFormulaRef { .. } => state.hover_cursor.get().class(),
+                    };
+                    if extra.is_empty() {
+                        "ws-canvas ws-grid".to_string()
+                    } else {
+                        format!("ws-canvas ws-grid {extra}")
                     }
                 }
                 tabindex="-1"

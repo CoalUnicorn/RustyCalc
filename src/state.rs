@@ -7,6 +7,8 @@ use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
 use leptos::prelude::*;
 
+use iron_canvas_web::RefZone;
+
 use crate::coord::{CellAddress, RefNode, SheetRange, TextRef};
 use crate::events::*;
 use crate::input::formula_analysis::FormulaAnalysis;
@@ -93,6 +95,62 @@ pub enum DragState {
         ref_node: RefNode,
         ref_text: TextRef,
     },
+    /// Formula-ref overlay drag. `anchor` is the ref's range at mousedown;
+    /// `grab_cell` is the cell under the cursor at mousedown. Mousemove
+    /// uses both to compute the new range per `zone` without frame-to-frame
+    /// state.
+    DraggingFormulaRef {
+        ref_idx: usize,
+        zone: RefZone,
+        anchor: SheetRange,
+        grab_cell: CellAddress,
+    },
+}
+
+/// Cursor style hint derived from the idle hover position. Drives the
+/// `class` on `.ws-grid` so the cursor previews the action a mousedown
+/// here would start (resize, autofill, ref-drag, …). Drag state wins
+/// over this — the view composes both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CursorHint {
+    #[default]
+    Cell,
+    ColResize,
+    RowResize,
+    Autofill,
+    RefMove,
+    RefExtendNS,
+    RefExtendEW,
+    RefCornerNwse,
+    RefCornerNesw,
+}
+
+impl CursorHint {
+    /// Extra class to append to `.ws-canvas.ws-grid`; empty string for
+    /// the default cursor which is already set by `.ws-canvas`.
+    pub fn class(self) -> &'static str {
+        match self {
+            CursorHint::Cell => "",
+            CursorHint::ColResize => "resize-col",
+            CursorHint::RowResize => "resize-row",
+            CursorHint::Autofill => "cur-autofill",
+            CursorHint::RefMove => "cur-ref-move",
+            CursorHint::RefExtendNS => "cur-ref-ns",
+            CursorHint::RefExtendEW => "cur-ref-ew",
+            CursorHint::RefCornerNwse => "cur-ref-nwse",
+            CursorHint::RefCornerNesw => "cur-ref-nesw",
+        }
+    }
+}
+
+/// Live preview of a formula-ref drag: the ref index and the range the
+/// cursor currently resolves to. Mousemove publishes this; the worksheet
+/// memo patches `formula_refs[idx].sheet_area` with `range` so the painted
+/// outline follows the cursor without rewriting the formula text.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RefOverride {
+    pub idx: usize,
+    pub range: SheetRange,
 }
 
 /// Arrow key behavior during a cell edit.
@@ -236,6 +294,13 @@ pub struct WorkbookState {
     pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
     pub(crate) cell_editor_ref: NodeRef<leptos::html::Textarea>,
     pub(crate) drag: Split<DragState>,
+    /// Idle-hover cursor style hint; written by `handle_mousemove`'s
+    /// `buttons() == 0` branch after a `resize_handle_at` + `hit_test`
+    /// probe. The worksheet `class=` memo composes this with `drag`.
+    pub(crate) hover_cursor: Split<CursorHint>,
+    /// Ghost-range published by `DragState::DraggingFormulaRef` mousemoves.
+    /// Cleared on mouseup, on Escape, and on the mouseup-missed bail-out.
+    pub(crate) dragged_ref_override: Split<Option<RefOverride>>,
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
     pub(crate) status: Split<Option<StatusMessage>>,
     pub(crate) autoscroll: AutoscrollState,
@@ -264,6 +329,8 @@ impl WorkbookState {
             formula_input_ref: NodeRef::new(),
             cell_editor_ref: NodeRef::new(),
             drag: Split::new(DragState::Idle),
+            hover_cursor: Split::new(CursorHint::default()),
+            dragged_ref_override: Split::new(None),
             context_menu: Split::new(None),
             status: Split::new(None),
             autoscroll: AutoscrollState::new(),

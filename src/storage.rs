@@ -1,4 +1,8 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
+use crate::verify;
+use base64::{
+    Engine,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+};
 use gloo_storage::{LocalStorage, Storage};
 use ironcalc_base::UserModel;
 use serde::{Deserialize, Serialize};
@@ -10,6 +14,19 @@ use std::str::FromStr;
 const SELECTED_KEY: &str = "selected";
 const MODELS_KEY: &str = "models";
 
+/// Magic bytes prepended to every localStorage entry so we can fast-reject
+/// non-RustyCalc blobs before the bitcode parser sees them.
+const STORAGE_MAGIC: &[u8; 4] = b"RCAL";
+
+/// Current storage format version. Bump when IronCalc schema changes in a
+/// way that breaks backward compatibility with existing stored data.
+const STORAGE_VERSION: u8 = 1;
+
+/// Maximum decoded byte size for localStorage entries.
+/// 5 MB is generous for a spreadsheet — a 30-sheet book with formulas
+/// typically fits in 50-200 KB.
+pub const MAX_STORED_BYTES: usize = 5_000_000;
+
 /// A 16-byte UUID v4 identifier for a workbook.
 ///
 /// `Copy` with zero heap allocation — unlike `String`, passing by value costs nothing.
@@ -20,17 +37,28 @@ pub struct WorkbookId([u8; 16]);
 
 impl WorkbookId {
     /// Generate a UUID v4 using `window.crypto.getRandomValues` (CSPRNG).
+    /// Falls back to `Math.random()` if crypto is unavailable (private-mode,
+    /// sandboxed iframe). The fallback has lower entropy but is sufficient
+    /// for localStorage key uniqueness within a single origin.
     #[allow(clippy::expect_used)]
     pub fn new() -> Self {
         let mut buf = [0u8; 16];
-        let crypto = leptos::prelude::window()
-            .crypto()
-            .expect("crypto must be available");
-        crypto
-            .get_random_values_with_u8_array(&mut buf)
-            .expect("getRandomValues must not fail for 16 bytes");
-        buf[6] = (buf[6] & 0x0f) | 0x40; // version 4
-        buf[8] = (buf[8] & 0x3f) | 0x80; // variant 10xx
+        // Try CSPRNG first. `window().crypto()` returns Result<Crypto, JsValue>;
+        // in private-mode/iframe contexts it may fail — fall back to Math.random().
+        let crypto_ok = web_sys::window().and_then(|w| w.crypto().ok());
+        if let Some(crypto) = crypto_ok
+            && crypto.get_random_values_with_u8_array(&mut buf).is_ok()
+        {
+            buf[6] = (buf[6] & 0x0f) | 0x40;
+            buf[8] = (buf[8] & 0x3f) | 0x80;
+            return Self(buf);
+        }
+        // Fallback: Math.random() — lower entropy but doesn't panic.
+        for byte in &mut buf {
+            *byte = (js_sys::Math::random() * 256.0) as u8;
+        }
+        buf[6] = (buf[6] & 0x0f) | 0x40;
+        buf[8] = (buf[8] & 0x3f) | 0x80;
         Self(buf)
     }
 }
@@ -41,11 +69,22 @@ impl fmt::Display for WorkbookId {
         write!(
             f,
             "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            b[0], b[1], b[2], b[3],
-            b[4], b[5],
-            b[6], b[7],
-            b[8], b[9],
-            b[10], b[11], b[12], b[13], b[14], b[15],
+            b[0],
+            b[1],
+            b[2],
+            b[3],
+            b[4],
+            b[5],
+            b[6],
+            b[7],
+            b[8],
+            b[9],
+            b[10],
+            b[11],
+            b[12],
+            b[13],
+            b[14],
+            b[15],
         )
     }
 }
@@ -108,6 +147,49 @@ pub struct WorkbookMeta {
     /// Last-modified timestamp (ms since epoch). Used for sort-by-recent.
     #[serde(default)]
     pub modified: f64,
+    /// True if this workbook was ingested from a shared link (#share=).
+    /// Displayed with a "Shared" badge in the sidebar until the user
+    /// explicitly promotes it by editing.
+    #[serde(default)]
+    pub shared_from_link: bool,
+}
+
+/// Clamp and sanitize a workbook name for safe display in the sidebar.
+///
+/// Strips C0 control characters (U+0000–U+001F, U+007F) and bidi override
+/// characters (U+200E–U+200F, U+202A–U+202E, U+2066–U+2069) that could
+/// confuse UI layout. Truncates to 128 characters so an attacker can't
+/// inject a 1 MB name through a poisoned localStorage registry.
+///
+/// Applied at every boundary where untrusted names cross into rendering:
+/// on save/rename input, on `load_registry()` deserialization, and again at
+/// render-time in the sidebar as a defense-in-depth backstop.
+pub fn sanitize_name(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| {
+            let cp = *c as u32;
+            // Reject C0 controls
+            if cp <= 0x1F || cp == 0x7F {
+                return false;
+            }
+            // Reject bidi overrides
+            if (0x200E..=0x200F).contains(&cp)
+                || (0x202A..=0x202E).contains(&cp)
+                || (0x2066..=0x2069).contains(&cp)
+            {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    if cleaned.len() <= 128 {
+        cleaned
+    } else {
+        // Truncate at a char boundary.
+        cleaned.chars().take(128).collect()
+    }
 }
 
 #[derive(Clone, Default, Debug, PartialOrd, Ord, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -148,7 +230,7 @@ pub fn update_group(uuid: &WorkbookId, group: WorkbookGroup) {
 pub fn update_name(uuid: &WorkbookId, name: &str) {
     let mut registry = load_registry();
     if let Some(meta) = registry.get_mut(uuid) {
-        meta.name = name.to_string();
+        meta.name = sanitize_name(name);
     }
     save_registry(&registry);
 }
@@ -156,8 +238,20 @@ pub fn update_name(uuid: &WorkbookId, name: &str) {
 // Registry helpers
 
 /// Load the UUID->metadata registry from localStorage.
+///
+/// Names are sanitized on the way out so any pre-sanitizer or share-imported
+/// entry can't leak control chars or bidi overrides into the sidebar.
 pub fn load_registry() -> HashMap<WorkbookId, WorkbookMeta> {
-    LocalStorage::get(MODELS_KEY).unwrap_or_default()
+    let raw: HashMap<WorkbookId, WorkbookMeta> = LocalStorage::get(MODELS_KEY).unwrap_or_default();
+    raw.into_iter()
+        .map(|(uuid, meta)| {
+            let cleaned = WorkbookMeta {
+                name: sanitize_name(&meta.name),
+                ..meta
+            };
+            (uuid, cleaned)
+        })
+        .collect()
 }
 
 fn save_registry(registry: &HashMap<WorkbookId, WorkbookMeta>) {
@@ -181,7 +275,11 @@ pub fn set_selected_uuid(uuid: &WorkbookId) {
 /// Serialize `model` to bytes, base64-encode, and write to localStorage.
 /// Also refreshes the workbook's entry in the metadata registry.
 pub fn save(uuid: &WorkbookId, model: &UserModel) {
-    let bytes = model.to_bytes();
+    let model_bytes = model.to_bytes();
+    let mut bytes = Vec::with_capacity(5 + model_bytes.len());
+    bytes.extend_from_slice(STORAGE_MAGIC);
+    bytes.push(STORAGE_VERSION);
+    bytes.extend_from_slice(&model_bytes);
     let encoded = STANDARD.encode(&bytes);
     log_err(
         LocalStorage::set(uuid.to_string(), encoded),
@@ -193,12 +291,18 @@ pub fn save(uuid: &WorkbookId, model: &UserModel) {
     registry.insert(
         *uuid,
         WorkbookMeta {
-            name: model.get_name(),
+            name: sanitize_name(&model.get_name()),
             group: registry
                 .get(uuid)
                 .map(|m| m.group.clone())
                 .unwrap_or_default(),
             modified: crate::perf::now(),
+            // Preserve the shared_from_link flag if it was set, don't clear
+            // it on save — it gets cleared explicitly by promote_from_shared.
+            shared_from_link: registry
+                .get(uuid)
+                .map(|m| m.shared_from_link)
+                .unwrap_or(false),
         },
     );
 
@@ -219,9 +323,50 @@ pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
             return None;
         }
     };
-    // "en" is 'static, so the returned UserModel<'static> lifetime is satisfied.
-    match UserModel::from_bytes(&bytes, "en") {
-        Ok(m) => Some(m),
+
+    // Size ceiling — reject obviously oversized entries before parsing.
+    if bytes.len() > MAX_STORED_BYTES {
+        web_sys::console::warn_1(
+            &format!(
+                "[rustycalc storage] load {uuid}: {} bytes exceeds limit {MAX_STORED_BYTES}",
+                bytes.len()
+            )
+            .into(),
+        );
+        return None;
+    }
+
+    // Check magic header.
+    if bytes.len() < 5 || &bytes[..4] != STORAGE_MAGIC {
+        web_sys::console::warn_1(
+            &format!("[rustycalc storage] load {uuid}: bad magic — not a RustyCalc workbook")
+                .into(),
+        );
+        return None;
+    }
+
+    let version = bytes[4];
+    if version != STORAGE_VERSION {
+        web_sys::console::warn_1(
+            &format!(
+                "[rustycalc storage] load {uuid}: version mismatch (got {version}, current {STORAGE_VERSION}) — schema may have changed"
+            )
+            .into(),
+        );
+        return None;
+    }
+
+    let model_bytes = &bytes[5..];
+    // LOCALE is 'static, so the returned UserModel<'static> lifetime is satisfied.
+    match UserModel::from_bytes(model_bytes, LOCALE) {
+        Ok(mut m) => {
+            // Sanitize the model's internal name — workbooks imported via shared URL
+            // or saved before the sanitizer was added may carry C0 controls or bidi
+            // overrides in their name. We apply sanitization on load so every display
+            // path (sidebar, confirm dialogs, file bar) sees clean names.
+            m.set_name(&sanitize_name(&m.get_name()));
+            Some(m)
+        }
         Err(e) => {
             web_sys::console::warn_1(
                 &format!("[rustycalc storage] load {uuid}: model parse failed: {e}").into(),
@@ -235,21 +380,36 @@ pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
 /// Returns `None` only when localStorage is completely empty.
 pub fn load_selected() -> Option<(WorkbookId, UserModel<'static>)> {
     // Try the explicitly selected UUID first.
-    if let Some(uuid) = get_selected_uuid() {
-        if let Some(model) = load(&uuid) {
-            return Some((uuid, model));
-        }
+    if let Some(uuid) = get_selected_uuid()
+        && let Some(model) = load(&uuid)
+    {
+        return Some((uuid, model));
     }
 
     // Fall back to the lexicographically first UUID that yields a valid model.
     // Sorting ensures a stable, repeatable result regardless of HashMap iteration order.
+    // Capped at MAX_STORAGE_FALLBACK attempts so a poisoned registry full of
+    // corrupted entries doesn't wedge startup (see security audit 2026-05-26).
+    const MAX_STORAGE_FALLBACK: usize = 10;
     let registry = load_registry();
     let mut uuids: Vec<WorkbookId> = registry.keys().cloned().collect();
     uuids.sort();
+    let mut tried = 0;
     for uuid in &uuids {
         if let Some(model) = load(uuid) {
             set_selected_uuid(uuid);
             return Some((*uuid, model));
+        }
+        tried += 1;
+        if tried >= MAX_STORAGE_FALLBACK {
+            web_sys::console::warn_1(
+                &format!(
+                    "[rustycalc storage] load_selected: {tried} fallback attempts exhausted, {remaining} entries skipped",
+                    remaining = uuids.len().saturating_sub(tried)
+                )
+                .into(),
+            );
+            break;
         }
     }
 
@@ -261,7 +421,7 @@ pub fn load_selected() -> Option<(WorkbookId, UserModel<'static>)> {
 pub fn create_new() -> (WorkbookId, UserModel<'static>) {
     let registry = load_registry();
     // `leak()` gives a `&'static str` so UserModel<'static> can borrow it.
-    // FIXME: each call leaks a small heap allocation that is never reclaimed.
+    // Note: each call leaks a small heap allocation that is never reclaimed.
     // In a typical session users create at most a handful of workbooks so the
     // total is negligible, but a long-lived WASM session with many creates/
     // deletes will accumulate.  Fixing requires UserModel to accept `String`
@@ -280,8 +440,8 @@ pub fn create_new() -> (WorkbookId, UserModel<'static>) {
 
     let name: &'static str = format!("Workbook {}", max_n + 1).leak();
     let uuid = WorkbookId::new();
-    #[allow(clippy::expect_used)]
-    let model = UserModel::new_empty(name, "en", "UTC", "en").expect("Failed to create new model");
+    let model = UserModel::new_empty(name, LOCALE, "UTC", LOCALE)
+        .unwrap_or_else(|e| panic!("new_empty failed with builtin locale: {e:?}"));
     save(&uuid, &model);
     set_selected_uuid(&uuid);
     (uuid, model)
@@ -294,8 +454,27 @@ pub fn create_new() -> (WorkbookId, UserModel<'static>) {
 pub fn create_new_from(model: UserModel<'static>) -> (WorkbookId, UserModel<'static>) {
     let uuid = WorkbookId::new();
     save(&uuid, &model);
+    // Mark as ingested from a shared link so the sidebar can show a
+    // quarantine badge. The flag is cleared on the first user edit.
+    let mut registry = load_registry();
+    if let Some(meta) = registry.get_mut(&uuid) {
+        meta.shared_from_link = true;
+    }
+    save_registry(&registry);
     set_selected_uuid(&uuid);
     (uuid, model)
+}
+
+/// Remove the quarantine badge from a shared-from-link workbook.
+/// Call after the first user edit to promote it to a regular workbook.
+pub fn promote_from_shared(uuid: &WorkbookId) {
+    let mut registry = load_registry();
+    if let Some(meta) = registry.get_mut(uuid)
+        && meta.shared_from_link
+    {
+        meta.shared_from_link = false;
+        save_registry(&registry);
+    }
 }
 
 /// Remove a workbook from localStorage and the registry.
@@ -307,4 +486,162 @@ pub fn delete(uuid: &WorkbookId) {
     if get_selected_uuid() == Some(*uuid) {
         LocalStorage::delete(SELECTED_KEY);
     }
+}
+
+// ============================================================================
+// URL Sharing
+// ============================================================================
+//
+// Encodes the entire workbook into a URL hash fragment so a recipient can open
+// a copy with no server round-trip. Raw model bytes → base64url (no padding)
+// keeps the result safe for `#share=…` without percent-encoding. The 30 KB
+// raw-byte ceiling keeps the resulting link well below practical browser URL
+// limits (~64 KB on Chrome / ~32 KB on most others when shared via chat apps).
+
+/// Maximum raw byte size for share-URL encoding.
+/// 30 KB raw → ~40 KB base64url, comfortably within practical hash-fragment
+/// limits across browsers and link-preview tools.
+pub const MAX_SHARE_BYTES: usize = 30_000;
+
+/// Maximum encoded (base64url) length for incoming share URLs.
+/// ceil(MAX_SHARE_BYTES × 4/3) — a guard before decode so attackers can't
+/// feed arbitrarily large payloads into the parser.
+const MAX_SHARE_ENCODED: usize = MAX_SHARE_BYTES * 4 / 3 + 4;
+
+/// Locale used for UserModel construction throughout storage.
+/// IronCalc's parser uses this for function-name resolution, number
+/// formatting, and date parsing. Keep it consistent across create/load/import.
+const LOCALE: &str = "en";
+
+#[derive(Debug, Clone)]
+pub enum ShareError {
+    TooLarge { size_kb: usize },
+}
+
+/// A share payload that has been decoded but not yet consented to by the
+/// recipient. Bitcode parsing is deferred until the user accepts so a
+/// malicious crafted payload can't trigger expensive deserialization on
+/// first paint.
+#[derive(Clone)]
+pub enum SharedLoad {
+    /// v0 — no word verification. Recipient sees an accept/reject modal
+    /// with size + source; bitcode parse happens on accept.
+    PendingV0 { bytes: Vec<u8> },
+    /// v1 — word verification required. Recipient must type the sender's
+    /// word; on hash match the bytes are parsed.
+    PendingV1 { hash: [u8; 32], bytes: Vec<u8> },
+}
+
+impl SharedLoad {
+    /// Decoded payload size in bytes — used by the consent modal to show
+    /// "X KB" so the recipient can sanity-check before accepting.
+    pub fn size_bytes(&self) -> usize {
+        match self {
+            Self::PendingV0 { bytes } | Self::PendingV1 { bytes, .. } => bytes.len(),
+        }
+    }
+}
+
+/// Encode a model to a URL-safe base64 string for sharing.
+/// Uses `URL_SAFE_NO_PAD` so the result drops into a hash fragment without
+/// percent-encoding or trailing `=` padding.
+///
+/// word: optional verification word. If Some, the payload is wrapped with a
+/// v1 version byte + SHA-256 hash prefix so the receiver must type the same
+/// word before the workbook loads.
+pub fn encode_for_share_url(model: &UserModel, word: Option<&str>) -> Result<String, ShareError> {
+    let bytes = model.to_bytes();
+    if bytes.len() > MAX_SHARE_BYTES {
+        return Err(ShareError::TooLarge {
+            size_kb: bytes.len() / 1024,
+        });
+    }
+    let wrapped = verify::encode_with_version(word, &bytes);
+    Ok(URL_SAFE_NO_PAD.encode(&wrapped))
+}
+
+/// Try to load a shared model from the URL hash fragment.
+/// Returns `None` if no `#share=` parameter is present or decoding fails.
+/// Warnings are logged so silent data loss is visible in the console.
+pub fn load_shared_from_url() -> Option<SharedLoad> {
+    let hash = leptos::prelude::window().location().hash().ok()?;
+    let encoded = hash.strip_prefix("#share=")?;
+
+    // Reject oversized payloads before decoding — prevents attackers from
+    // feeding arbitrarily large base64 into the decoder/parser.
+    if encoded.len() > MAX_SHARE_ENCODED {
+        web_sys::console::warn_1(
+            &format!(
+                "[rustycalc sharing] encoded length {} exceeds limit {MAX_SHARE_ENCODED}",
+                encoded.len()
+            )
+            .into(),
+        );
+        return None;
+    }
+
+    let bytes = match URL_SAFE_NO_PAD.decode(encoded) {
+        Ok(b) => b,
+        Err(e) => {
+            web_sys::console::warn_1(&format!("[rustycalc sharing] URL decode failed: {e}").into());
+            return None;
+        }
+    };
+
+    // Double-check decoded size matches our limit — base64 can decode to
+    // a smaller payload than the encoded length suggested.
+    if bytes.len() > MAX_SHARE_BYTES {
+        web_sys::console::warn_1(
+            &format!(
+                "[rustycalc sharing] decoded {} bytes exceeds limit {MAX_SHARE_BYTES}",
+                bytes.len()
+            )
+            .into(),
+        );
+        return None;
+    }
+
+    match verify::decode_payload(&bytes) {
+        Some(verify::SharePayload::V0(payload)) => Some(SharedLoad::PendingV0 { bytes: payload }),
+        Some(verify::SharePayload::V1 { hash, bytes }) => {
+            Some(SharedLoad::PendingV1 { hash, bytes })
+        }
+        None => {
+            web_sys::console::warn_1(&"[rustycalc sharing] unknown share payload version".into());
+            None
+        }
+    }
+}
+
+/// Parse the staged V0 payload after the user accepts in the consent modal.
+/// Splitting parse from decode is the security win: a crafted payload can't
+/// run bitcode deserialization until the recipient has clicked Accept.
+pub fn accept_shared_v0(bytes: &[u8]) -> Result<UserModel<'static>, String> {
+    UserModel::from_bytes(bytes, LOCALE).map_err(|e| {
+        web_sys::console::warn_1(
+            &format!("[rustycalc sharing] model parse failed after consent: {e}").into(),
+        );
+        format!("Failed to load shared workbook: {e}")
+    })
+}
+
+/// Try to verify and load a v1 shared workbook.
+/// Call this after the user types the verification word.
+///
+/// Returns user-facing error strings — the caller (verification modal) displays
+/// them directly. We use `String` rather than `VerifyError` so a post-verify
+/// bitcode parse failure can carry its own message without being shoe-horned
+/// into a verification-shaped error.
+pub fn verify_and_load_shared(
+    hash: &[u8; 32],
+    word: &str,
+    bytes: &[u8],
+) -> Result<UserModel<'static>, String> {
+    verify::verify_and_extract(hash, word).map_err(|e| e.to_string())?;
+    UserModel::from_bytes(bytes, LOCALE).map_err(|e| {
+        web_sys::console::warn_1(
+            &format!("[rustycalc sharing] model parse failed after verification: {e}").into(),
+        );
+        format!("Failed to load shared workbook: {e}")
+    })
 }

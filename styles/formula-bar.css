@@ -44,20 +44,59 @@
     flex-shrink: 0;
 }
 
-.fb .fb-input {
+/* Host wraps the input + overlay and takes the flex slot the input used
+ * to occupy. The input fills the host. */
+.fb .fb-input-host {
     flex: 1;
+    height: 100%;
+    /* The host also holds the background-while-editing — putting it here
+     * keeps the input fully transparent so the overlay shows through. */
+}
+
+.fb .fb-input-host:has(.fb-input.editing) {
+    background: var(--cell-editor-bg);
+}
+
+.fb .fb-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
     border: none;
     outline: none;
     padding: 0 8px;
+    /* font / line-height come from .fe-text on the overlay; mirror here. */
     font-family: Inter, Arial, sans-serif;
     font-size: 13px;
+    /* Match the overlay's line-height exactly — both pin to the row
+     * height so the single line of text centers identically. */
+    line-height: 38px;
     background: transparent;
-    color: var(--text-strong);
-    height: 100%;
+    color: transparent;
+    caret-color: var(--text-strong);
+    /* Above the overlay so the caret renders on top. */
+    z-index: 1;
 }
 
-.fb .fb-input.editing {
-    background: var(--cell-editor-bg);
+/* Selection on the transparent input: make the text visible so the
+ * user can read what they selected. Background stays transparent so the
+ * colored overlay underneath still shows through the selection. */
+.fb .fb-input::selection {
+    color: var(--text-strong);
+    background: transparent;
+}
+
+/* Overlay padding must match input padding so character positions align. */
+.fb .fb-input-host .fe-overlay {
+    padding: 0 8px;
+    /* Single-line input centers text vertically via line-height; match it. */
+    line-height: 38px;
+}
+
+.fb .fb-input-host .fe-overlay.fe-overlay--singleline {
+    /* Overlay default line-height (1.4) would shift baseline relative to
+     * the input's intrinsic centering — override to the row height. */
+    line-height: 38px;
 }
 
 /* Validation badges — stubs for the stylist */

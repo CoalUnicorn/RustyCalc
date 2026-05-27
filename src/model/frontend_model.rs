@@ -1,7 +1,8 @@
 use ironcalc_base::{
-    expressions::types::Area, types::HorizontalAlignment, worksheet::NavigationDirection, UserModel,
+    UserModel, expressions::types::Area, types::HorizontalAlignment, worksheet::NavigationDirection,
 };
 
+#[cfg(feature = "dev-tools")]
 use leptos::prelude::Set;
 
 use crate::coord::SheetRange;
@@ -9,9 +10,9 @@ use crate::model::frontend_types::*;
 use crate::state::ModelStore;
 use crate::{
     coord::{CellAddress, CellArea, DefinedName},
-    input::formula_analysis::{analyze_formula, FormulaAnalysis},
+    input::formula_analysis::{FormulaAnalysis, analyze_formula},
 };
-use iron_canvas::geometry::constants::{LAST_COLUMN, LAST_ROW};
+use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use leptos::prelude::UpdateValue;
 
@@ -19,58 +20,35 @@ use leptos::prelude::UpdateValue;
 /// Used to guard against silent typos in state comparisons.
 pub(crate) const SHEET_STATE_VISIBLE: &str = "visible";
 
-pub trait FrontendModel {
-    // Query
-
-    /// Formatting state for the toolbar, derived from the active cell.
-    fn toolbar_state(&self) -> ToolbarState;
-
-    /// Number-format code of the active cell (e.g. `"general"`, `"#,##0.00"`).
-    #[allow(dead_code)]
-    fn active_num_fmt(&self) -> String;
-
-    /// Formatted display string of the active cell (what the user sees in the grid).
-    #[allow(dead_code)]
-    fn active_cell_display(&self) -> String;
-
-    /// Raw content of the active cell (formula text or literal value).
-    fn active_cell_content(&self) -> String;
-
-    /// Position of the active cell.
-    fn active_cell(&self) -> CellAddress;
-
+/// Parse formula text in the active cell's context (sheet names, defined
+/// names, anchor). Pure read; safe under `with_value`.
+pub trait FormulaAnalyzer {
     fn analyze_in_context(&self, text: &str) -> FormulaAnalysis;
+}
 
-    fn selection(&self) -> Area;
-    /// Frozen pane state for the active sheet.
-    fn frozen_panes(&self) -> FrozenPanes;
+impl FormulaAnalyzer for UserModel<'_> {
+    fn analyze_in_context(&self, text: &str) -> FormulaAnalysis {
+        analyze_formula(
+            text,
+            SheetQuery::active_cell(self),
+            &SheetQuery::get_sheet_names(self),
+            &DefinedNameManager::get_defined_names(self),
+        )
+    }
+}
 
-    /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
-    fn sheet_dimension(&self) -> CellArea;
-
-    fn get_sheet_name(&self, sheet_idx: usize) -> String;
-
-    fn get_sheet_visible(&self) -> Vec<(u32, u32)>;
-
-    fn get_sheet_tab_color(&self, sheet_idx: usize) -> Option<String>;
-
-    fn get_sheet_visible_count(&self) -> usize;
-
-    fn get_sheet_all(&self) -> Vec<(u32, String, String)>;
-
-    fn get_sheet_names(&self) -> Vec<(u32, String)>;
-
-    /// Workbook defined names, flattened from ironcalc's `DefinedNameS` tuples
-    /// into our named-field [`DefinedName`]. Fed to the parser so identifiers
-    /// like `=my_range` resolve instead of tripping `NamedVariableKind`.
+/// Workbook defined names: read and CRUD. Every mutating call may change
+/// formula evaluation, so wrap call sites in
+/// `try_mutate(EvaluationMode::Immediate, …)`. Errors surface verbatim from
+/// ironcalc as `Result<_, String>`.
+pub trait DefinedNameManager {
+    /// Flattened from ironcalc's `DefinedNameS` tuples into our named-field
+    /// [`DefinedName`]. Fed to the parser so identifiers like `=my_range`
+    /// resolve instead of tripping `NamedVariableKind`.
     fn get_defined_names(&self) -> Vec<DefinedName>;
 
-    // Defined-name mutations — every variant may change formula evaluation,
-    // so call sites must wrap these in `try_mutate(EvaluationMode::Immediate, …)`.
-    // Errors are surfaced verbatim from ironcalc as `Result<_, String>`.
-
-    /// Create a new defined name. `Err` if the name is invalid, duplicates an
-    /// existing name in the same scope, or the formula won't parse.
+    /// `Err` if the name is invalid, duplicates an existing name in the same
+    /// scope, or the formula won't parse.
     fn create_defined_name(
         &mut self,
         name: &str,
@@ -92,9 +70,83 @@ pub trait FrontendModel {
     /// Delete a defined name. Cells that referenced it surface `#NAME?` after
     /// the next evaluate.
     fn remove_defined_name(&mut self, name: &str, scope: Option<u32>) -> Result<(), String>;
+}
 
-    // Navigation (infallible)
+impl DefinedNameManager for UserModel<'_> {
+    fn get_defined_names(&self) -> Vec<DefinedName> {
+        self.get_defined_name_list()
+            .into_iter()
+            .map(DefinedName::from)
+            .collect()
+    }
 
+    fn create_defined_name(
+        &mut self,
+        name: &str,
+        scope: Option<u32>,
+        formula: &str,
+    ) -> Result<(), String> {
+        self.new_defined_name(name, scope, formula)
+    }
+
+    fn rename_defined_name(
+        &mut self,
+        old_name: &str,
+        old_scope: Option<u32>,
+        new_name: &str,
+        new_scope: Option<u32>,
+        new_formula: &str,
+    ) -> Result<(), String> {
+        self.update_defined_name(old_name, old_scope, new_name, new_scope, new_formula)
+    }
+
+    fn remove_defined_name(&mut self, name: &str, scope: Option<u32>) -> Result<(), String> {
+        self.delete_defined_name(name, scope)
+    }
+}
+
+/// Read-only queries against the active workbook / sheet / cell.
+pub trait SheetQuery {
+    /// Formatting state for the toolbar, derived from the active cell.
+    fn toolbar_state(&self) -> ToolbarState;
+
+    /// Number-format code of the active cell (e.g. `"general"`, `"#,##0.00"`).
+    #[allow(dead_code)]
+    fn active_num_fmt(&self) -> String;
+
+    /// Formatted display string of the active cell (what the user sees in the grid).
+    #[allow(dead_code)]
+    fn active_cell_display(&self) -> String;
+
+    /// Raw content of the active cell (formula text or literal value).
+    fn active_cell_content(&self) -> String;
+
+    /// Position of the active cell.
+    fn active_cell(&self) -> CellAddress;
+
+    fn selection(&self) -> Area;
+
+    /// Frozen pane state for the active sheet.
+    fn frozen_panes(&self) -> FrozenPanes;
+
+    /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
+    fn sheet_dimension(&self) -> CellArea;
+
+    fn get_sheet_name(&self, sheet_idx: usize) -> String;
+
+    fn get_sheet_visible(&self) -> Vec<(u32, u32)>;
+
+    fn get_sheet_tab_color(&self, sheet_idx: usize) -> Option<String>;
+
+    fn get_sheet_visible_count(&self) -> usize;
+
+    fn get_sheet_all(&self) -> Vec<(u32, String, String)>;
+
+    fn get_sheet_names(&self) -> Vec<(u32, String)>;
+}
+
+/// Active-cell / selection mutation. Infallible: invalid coordinates are clamped.
+pub trait Navigator {
     /// Move the active cell one step. No-op at sheet edges.
     fn nav_arrow(&mut self, dir: ArrowKey);
 
@@ -151,7 +203,7 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
     }
 }
 
-impl FrontendModel for UserModel<'_> {
+impl SheetQuery for UserModel<'_> {
     fn toolbar_state(&self) -> ToolbarState {
         let view = self.get_selected_view();
         let style = self
@@ -220,15 +272,6 @@ impl FrontendModel for UserModel<'_> {
             row: view.row,
             column: view.column,
         }
-    }
-
-    fn analyze_in_context(&self, text: &str) -> FormulaAnalysis {
-        analyze_formula(
-            text,
-            self.active_cell(),
-            &self.get_sheet_names(),
-            &self.get_defined_names(),
-        )
     }
 
     // TODO: rename this, it returns ironcalc Area type
@@ -311,44 +354,9 @@ impl FrontendModel for UserModel<'_> {
             .map(|(idx, name, _)| (idx, name))
             .collect()
     }
+}
 
-    fn get_defined_names(&self) -> Vec<DefinedName> {
-        self.get_defined_name_list()
-            .into_iter()
-            .map(DefinedName::from)
-            .collect()
-    }
-
-    // Defined-name mutations — wrap each call site in
-    // `try_mutate(EvaluationMode::Immediate, …)`. ironcalc's `Result` errors
-    // (invalid name, duplicate, parse failure) bubble up unchanged.
-
-    fn create_defined_name(
-        &mut self,
-        name: &str,
-        scope: Option<u32>,
-        formula: &str,
-    ) -> Result<(), String> {
-        self.new_defined_name(name, scope, formula)
-    }
-
-    fn rename_defined_name(
-        &mut self,
-        old_name: &str,
-        old_scope: Option<u32>,
-        new_name: &str,
-        new_scope: Option<u32>,
-        new_formula: &str,
-    ) -> Result<(), String> {
-        self.update_defined_name(old_name, old_scope, new_name, new_scope, new_formula)
-    }
-
-    fn remove_defined_name(&mut self, name: &str, scope: Option<u32>) -> Result<(), String> {
-        self.delete_defined_name(name, scope)
-    }
-
-    // Navigation
-
+impl Navigator for UserModel<'_> {
     fn nav_arrow(&mut self, dir: ArrowKey) {
         let _ = match dir {
             ArrowKey::Up => self.on_arrow_up(),
@@ -498,40 +506,34 @@ pub fn try_mutate<E>(
     evaluate: EvaluationMode,
     f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
 ) -> Result<(), E> {
+    // Phase timestamps under the `recorder` feature only. PerfTimings is
+    // pulled from Leptos context (provided in app.rs); if it isn't there
+    // — e.g. unit tests outside a runtime — the writes are silently skipped.
+    #[cfg(feature = "dev-tools")]
+    let perf = leptos::prelude::use_context::<crate::perf::PerfTimings>();
     let mut outcome: Result<(), E> = Ok(());
     model.update_value(|m| {
-        m.pause_evaluation();
-        outcome = f(m);
-        m.resume_evaluation();
-        if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
-            m.evaluate();
+        #[cfg(feature = "dev-tools")]
+        if let Some(p) = perf {
+            p.commit_start.set(Some(crate::perf::now()));
+            // Arm the paint-duration capture: the rAF loop's
+            // `if render_ms.is_none()` guard writes the next paint's
+            // duration and then leaves it alone until the next commit.
+            p.render_ms.set(None);
         }
-    });
-    outcome
-}
-
-/// Timed variant of [`try_mutate`]: records phase timestamps into [`PerfTimings`].
-///
-/// Sets `commit_start` before the closure, `input_done` after it, and `eval_done`
-/// after `evaluate()`. The caller sets `last_formula` before calling (context-specific).
-/// `render_done` is set separately by the canvas render effect in `worksheet.rs`.
-#[allow(dead_code)]
-pub fn try_mutate_timed<E>(
-    model: ModelStore,
-    evaluate: EvaluationMode,
-    perf: crate::perf::PerfTimings,
-    f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
-) -> Result<(), E> {
-    let mut outcome: Result<(), E> = Ok(());
-    model.update_value(|m| {
-        perf.commit_start.set(Some(crate::perf::now()));
         m.pause_evaluation();
         outcome = f(m);
-        perf.input_done.set(Some(crate::perf::now()));
+        #[cfg(feature = "dev-tools")]
+        if let Some(p) = perf {
+            p.input_done.set(Some(crate::perf::now()));
+        }
         m.resume_evaluation();
         if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
             m.evaluate();
-            perf.eval_done.set(Some(crate::perf::now()));
+            #[cfg(feature = "dev-tools")]
+            if let Some(p) = perf {
+                p.eval_done.set(Some(crate::perf::now()));
+            }
         }
     });
     outcome

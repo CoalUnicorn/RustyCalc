@@ -14,6 +14,7 @@
  *   ld-     left drawer
  *   md-     modal dialog primitive
  *   nrm-    named-ranges modal
+ *   sp-     share popover
  */
 
 @import "layout.css";
@@ -23,6 +24,7 @@
 @import "color-picker.css";
 @import "worksheet.css";
 @import "cell-editor.css";
+@import "formula-overlay.css";
 @import "sheet-tabs.css";
 @import "context-menu.css";
 @import "perf-panel.css";
@@ -30,3 +32,4 @@
 @import "status-bar.css";
 @import "modal.css";
 @import "named-ranges.css";
+@import "share-popover.css";

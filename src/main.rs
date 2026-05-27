@@ -8,10 +8,12 @@ mod events;
 mod input;
 mod model;
 pub mod perf;
+
 mod state;
 mod storage;
 mod theme;
 mod util;
+mod verify;
 
 use app::App;
 

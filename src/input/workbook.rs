@@ -9,7 +9,7 @@ use leptos::prelude::{UpdateValue, WithValue};
 
 use crate::app_state::AppState;
 use crate::events::{ContentEvent, SpreadsheetEvent};
-use crate::state::{DragState, ModelStore, WorkbookState};
+use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
 use crate::storage::{self, WorkbookId};
 
 /// Workbook-level lifecycle operations.
@@ -17,6 +17,7 @@ use crate::storage::{self, WorkbookId};
 /// Separate from `SpreadsheetAction` because these replace the loaded model
 /// rather than mutate cells within it. Callers are responsible for any
 /// confirmation dialog before calling `Delete`.
+#[allow(clippy::large_enum_variant)]
 pub enum WorkbookAction {
     /// Save the current workbook and load a different one.
     Switch(WorkbookId),
@@ -42,11 +43,36 @@ pub fn execute_workbook(
             if cur == Some(target_uuid) {
                 return;
             }
+            // Save the current workbook before switching. If encoding fails
+            // (e.g. model exceeds MAX_STORAGE_BYTES), warn the user instead of
+            // silently losing changes.
             if let Some(uuid) = &cur {
-                model.with_value(|m| storage::save(uuid, m));
+                let saved = model.with_value(|m| {
+                    let bytes = m.to_bytes();
+                    if bytes.len() > storage::MAX_STORED_BYTES {
+                        state.status.set(Some(StatusMessage::Error(format!(
+                            "Cannot save workbook — it exceeds the {} MB limit. \
+                             Delete some sheets or data before switching.",
+                            storage::MAX_STORED_BYTES / 1_000_000
+                        ))));
+                        return false;
+                    }
+                    storage::save(uuid, m);
+                    true
+                });
+                if !saved {
+                    return;
+                }
             }
-            if let Some(new_model) = storage::load(&target_uuid) {
-                activate(target_uuid, new_model, model, state);
+            match storage::load(&target_uuid) {
+                Some(new_model) => activate(target_uuid, new_model, model, state),
+                None => {
+                    state.status.set(Some(StatusMessage::Error(
+                        "Cannot open workbook — it was saved with an older version. \
+                         Your data is still in browser storage but needs migration."
+                            .to_string(),
+                    )));
+                }
             }
         }
         WorkbookAction::Create => {
@@ -61,9 +87,20 @@ pub fn execute_workbook(
             let is_current = state.current_uuid.get_untracked() == Some(uuid);
             storage::delete(&uuid);
             if is_current {
-                let (next_uuid, next_model) =
-                    storage::load_selected().unwrap_or_else(storage::create_new);
-                activate(next_uuid, next_model, model, state);
+                match storage::load_selected() {
+                    Some((next_uuid, next_model)) => {
+                        activate(next_uuid, next_model, model, state);
+                    }
+                    None => {
+                        let (next_uuid, next_model) = storage::create_new();
+                        activate(next_uuid, next_model, model, state);
+                        state.status.set(Some(StatusMessage::Error(
+                            "Other workbooks could not be loaded after deletion. \
+                             Created a new blank workbook."
+                                .to_string(),
+                        )));
+                    }
+                }
             }
             app.bump_registry();
         }

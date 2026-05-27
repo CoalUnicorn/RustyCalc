@@ -1,7 +1,7 @@
 [package]
 name = "rusty-calc"
-version = "0.1.0-alpha.3"
-edition = "2021"
+version = "0.1.0-alpha.5"
+edition = "2024"
 repository = "https://github.com/CoalUnicorn/RustyCalc"
 homepage = "https://coalunicorn.github.io/RustyCalc/"
 license = "MIT OR Apache-2.0"
@@ -9,10 +9,12 @@ readme = "README.md"
 
 [dependencies]
 leptos = { version = "0.8", features = ["csr"] }
-#ironcalc_base = { git = "https://github.com/CoalUnicorn/IronCalc",branch = "fix-col-iterations", features = ["use_regex_lite"] }
-ironcalc_base = { version = "0.7.1", path = "../IronCalc/base"  }
-ironcalc = { version = "0.7.1", path = "../IronCalc/xlsx" }
-iron-canvas = { path = "iron-canvas" }
+ironcalc_base = { version = "0.7.1", path = "IronCalc/base"  }
+ironcalc = { version = "0.7.1", path = "IronCalc/xlsx" }
+iron-canvas-web = { path = "iron-canvas/crates/iron-canvas-web" }
+iron-canvas-core = { path = "iron-canvas/crates/iron-canvas-core" }
+
+
 web-sys = { version = "0.3", features = [
     "Window", "Document", "HtmlCanvasElement", "HtmlElement",
     "CanvasRenderingContext2d", "TextMetrics", "Element",
@@ -35,6 +37,7 @@ thiserror = "1.0"  # For structured error types
 codee = { version = "0.3.5", features = ["json_serde"] }
 # leptos_i18n = "0.6.1"
 chrono = { version = "0.4", features =  ["serde", "wasmbind"] }
+sha2 = { version = "0.11.0", default-features = false }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
@@ -50,6 +53,13 @@ strip = true
 
 [features]
 tauri = []
+dev-tools = ["iron-canvas-web/dev-tools", "iron-canvas-web/pdf"]
 
 [package.metadata.leptos]
 lib-profile-release = "wasm-release"
+
+# Cap WASM linear memory at 256 MB so a crafted bitcode payload claiming
+# a multi-GB allocation traps quickly instead of degrading the tab into
+# multi-second GC death. See docs/reviews/2026-05-26-security-audit.md.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--max-memory=268435456"]

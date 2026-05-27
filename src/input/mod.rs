@@ -4,6 +4,7 @@ pub mod error;
 pub mod format;
 pub mod formula_analysis;
 pub mod formula_input;
+pub mod formula_overlay;
 pub mod keyboard;
 pub mod mouse;
 pub mod nav;

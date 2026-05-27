@@ -1,20 +1,22 @@
-[package]
-name = "iron-canvas"
-version = "0.1.0-alpha.1"
-edition = "2021"
+[workspace]
+members = ["crates/*"]
+resolver = "3"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
+[workspace.package]
+version = "0.1.0-beta.2"
+authors = ["CoalUnicorn"]
+edition = "2024"
+license = "MIT OR Apache-2.0"
 
-[dependencies]
-ironcalc_base = { version = "0.7.1", path = "../../IronCalc/base"  }
-wasm-bindgen = "0.2"
-js-sys = "0.3"
-web-sys = { version = "0.3", features = [
-    "CanvasRenderingContext2d",
-    "HtmlCanvasElement","OffscreenCanvas",
-    "TextMetrics",
-    "Window","Element", "Document", "CssStyleDeclaration"
-] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde-wasm-bindgen = "0.6.5"
+[workspace.dependencies]
+ironcalc_base = { version = "0.7.1", path = "../IronCalc/base" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bitflags = "2.11.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

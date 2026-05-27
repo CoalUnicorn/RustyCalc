@@ -32,20 +32,21 @@ jobs:
           ref: main
           path: RustyCalc-main
 
-      - name: Checkout dev
-        uses: actions/checkout@v4
-        with:
-          ref: dev
-          path: RustyCalc-dev
-
-      # Cargo.toml uses path = "../IronCalc/base" and "../IronCalc/xlsx".
-      # Both RustyCalc checkouts resolve "../IronCalc" to the same sibling.
-      - name: Checkout IronCalc (sibling required by path deps)
+      # main still uses path = "../IronCalc/base" (no submodule yet).
+      # Remove after dev→main merge when main gets the submodule.
+      - name: Checkout IronCalc (sibling for main build)
         uses: actions/checkout@v4
         with:
           repository: CoalUnicorn/IronCalc
           ref: rustycalc-xlsx-wasm
           path: IronCalc
+
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: RustyCalc-dev
+          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable

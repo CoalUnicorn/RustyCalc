@@ -66,6 +66,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bitflags"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -79,9 +85,9 @@ checksum = "c8efb64bd706a16a1bdde310ae86b351e4d21550d98d056f22f8a7f7a2183fec"
 
 [[package]]
 name = "cc"
-version = "1.2.61"
+version = "1.2.62"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d16d90359e986641506914ba71350897565610e87ce0ad9e6f28569db3dd5c6d"
+checksum = "a1dce859f0832a7d088c4f1119888ab94ef4b5d6795d1ce05afb7fe159d79f98"
 dependencies = [
  "find-msvc-tools",
  "shlex",
@@ -215,13 +221,52 @@ dependencies = [
 ]
 
 [[package]]
-name = "iron-canvas"
-version = "0.1.0-alpha.1"
+name = "iron-canvas-core"
+version = "0.1.0-beta.2"
 dependencies = [
+ "bitflags",
+ "iron-canvas-recorder",
+ "ironcalc_base",
+ "serde",
+]
+
+[[package]]
+name = "iron-canvas-export"
+version = "0.1.0-beta.2"
+dependencies = [
+ "iron-canvas-core",
+]
+
+[[package]]
+name = "iron-canvas-ironcalc"
+version = "0.1.0-beta.2"
+dependencies = [
+ "iron-canvas-core",
+ "ironcalc_base",
+]
+
+[[package]]
+name = "iron-canvas-recorder"
+version = "0.1.0-beta.2"
+dependencies = [
+ "iron-canvas-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "iron-canvas-web"
+version = "0.1.0-beta.2"
+dependencies = [
+ "bitflags",
+ "iron-canvas-core",
+ "iron-canvas-export",
+ "iron-canvas-recorder",
  "ironcalc_base",
  "js-sys",
  "serde",
  "serde-wasm-bindgen",
+ "serde_json",
  "wasm-bindgen",
  "web-sys",
 ]
@@ -465,6 +510,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json"
+version = "1.0.149"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
+]
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -648,3 +706,9 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"

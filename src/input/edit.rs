@@ -6,7 +6,9 @@ use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::formula_analysis::FormulaAnalysis;
-use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FrontendModel};
+use crate::model::{
+    ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetQuery, mutate, try_mutate,
+};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
 
@@ -78,10 +80,13 @@ pub fn execute_edit(
         }
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
-                // Write the edit buffer to the model and recalculate (timed).
-                // let perf = expect_context::<AppState>().perf;
-                // perf.last_formula.set(Some(edit.text.clone()));
-                // Write the edit buffer to the model and recalculate.
+                // Stamp last-committed text for the PerfPanel readout. Phase
+                // timestamps (commit_start / input_done / eval_done) are
+                // written inside `try_mutate` itself.
+                #[cfg(feature = "dev-tools")]
+                if let Some(perf) = leptos::prelude::use_context::<crate::perf::PerfTimings>() {
+                    leptos::prelude::Set::set(&perf.last_formula, Some(edit.text.clone()));
+                }
                 try_mutate(model, EvaluationMode::Immediate, |m| {
                     m.set_user_input(
                         edit.address.sheet,
@@ -120,6 +125,20 @@ pub fn execute_edit(
             }
         }
         EditAction::Cancel => {
+            // Escape during a formula-ref drag aborts the drag only —
+            // formula text is untouched (the splice hasn't run), editing
+            // stays alive, the user can keep typing. Without this branch,
+            // Escape would unconditionally close the edit and lose the
+            // in-progress formula.
+            if matches!(
+                state.drag.get_untracked(),
+                DragState::DraggingFormulaRef { .. }
+            ) {
+                state.drag.set(DragState::Idle);
+                state.dragged_ref_override.set(None);
+                return Ok(());
+            }
+
             let edit_address = state.editing_cell.get_untracked().map(|e| e.address);
             state.editing_cell.set(None);
             state.drag.set(DragState::Idle);

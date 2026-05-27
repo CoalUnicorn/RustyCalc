@@ -58,3 +58,29 @@
 .ws .ws-canvas.resize-row {
     cursor: row-resize;
 }
+
+/* Idle hover hints — preview the action a mousedown at this position
+ * would trigger. Driven by CursorHint::class() in src/state.rs. */
+.ws .ws-canvas.cur-autofill {
+    cursor: crosshair;
+}
+
+.ws .ws-canvas.cur-ref-move {
+    cursor: move;
+}
+
+.ws .ws-canvas.cur-ref-ns {
+    cursor: ns-resize;
+}
+
+.ws .ws-canvas.cur-ref-ew {
+    cursor: ew-resize;
+}
+
+.ws .ws-canvas.cur-ref-nwse {
+    cursor: nwse-resize;
+}
+
+.ws .ws-canvas.cur-ref-nesw {
+    cursor: nesw-resize;
+}

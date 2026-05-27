@@ -8,10 +8,10 @@ use crate::components::color_picker::{BackgroundColorPicker, TextColorPicker};
 use crate::components::toolbar::number_format::NumberFormatPicker;
 use crate::events::*;
 use crate::input::error::FormatError;
-use crate::input::keyboard::{execute, SpreadsheetAction};
+use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::model::{
-    frontend_types::ToolbarState, style_types::HexColor, try_mutate, EvaluationMode, FrontendModel,
-    SafeFontFamily,
+    EvaluationMode, SafeFontFamily, SheetQuery, frontend_types::ToolbarState,
+    style_types::HexColor, try_mutate,
 };
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
 use crate::util::refocus_workbook;
@@ -229,10 +229,9 @@ fn FontSize() -> impl IntoView {
         if let Some(input) = ev
             .target()
             .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+            && let Ok(size) = input.value().parse::<f64>()
         {
-            if let Ok(size) = input.value().parse::<f64>() {
-                apply(size, model, &state);
-            }
+            apply(size, model, &state);
         }
     };
 
@@ -243,10 +242,9 @@ fn FontSize() -> impl IntoView {
             if let Some(input) = ev
                 .target()
                 .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+                && let Ok(size) = input.value().parse::<f64>()
             {
-                if let Ok(size) = input.value().parse::<f64>() {
-                    apply(size, model, &state);
-                }
+                apply(size, model, &state);
             }
         }
     };

@@ -1,7 +1,7 @@
 //! Read-only table of every defined name in the workbook.
 //!
 //! Rows render `(name, scope, formula)` straight off
-//! `FrontendModel::get_defined_names()`. The list re-runs whenever
+//! `SheetQuery::get_defined_names()`. The list re-runs whenever
 //! `state.events.content` fires — that's the channel the CRUD wrappers
 //! emit on, so a Save / Delete / New refreshes the rows automatically.
 //!
@@ -13,7 +13,8 @@ use leptos::prelude::*;
 
 use crate::coord::{CellAddress, DefinedName};
 use crate::input::formula_analysis::analyze_formula;
-use crate::model::FrontendModel;
+use crate::model::SheetQuery;
+use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{EditingDefinedName, ModelStore, WorkbookState};
 
 #[component]

@@ -1,0 +1,16 @@
+[package]
+name = "iron-canvas-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+ironcalc_base = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+bitflags = {workspace = true}
+
+[dev-dependencies]
+iron-canvas-recorder = { path = "../iron-canvas-recorder" }

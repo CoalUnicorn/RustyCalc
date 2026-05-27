@@ -12,7 +12,44 @@ use leptos_use::{ColorMode, UseColorModeReturn};
 use crate::events::*;
 use crate::perf::PerfTimings;
 use crate::state::Split;
-use crate::theme::{use_rusty_calc_theme, Theme};
+use crate::theme::{Theme, use_rusty_calc_theme};
+
+/// One-shot command from the PerfPanel record button to the Worksheet
+/// dispatch Effect. The Effect drains it (`set(None)`) after handing the
+/// call to the iron-canvas orchestrator. Exists in both build flavors —
+/// in prod (no `dev-tools` feature) it is written but never read, since the
+/// PerfPanel button is hidden by the runtime `recordingSupported()` guard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum RecordingCmd {
+    Start,
+    Stop,
+}
+
+/// One-shot command from the PerfPanel export buttons to the Worksheet
+/// dispatch Effect. Same drain pattern as [`RecordingCmd`]. `Svg` is served
+/// by `IronCanvas::exportSvg` (always on); `Pdf` is served by
+/// `IronCanvas::exportPdf` (gated behind the `dev-tools → iron-canvas-web/pdf`
+/// feature chain, on in dev builds).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum ExportCmd {
+    Svg,
+    Pdf,
+}
+
+/// One-shot command from the PlaybackPanel to the Worksheet dispatch
+/// Effect. Same drain pattern as [`RecordingCmd`]. `Load` carries owned
+/// `.icr` bytes — read once by the Effect, then cleared.
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub enum PlaybackCmd {
+    Load(Vec<u8>),
+    Seek(u32),
+    Play,
+    Pause,
+    Exit,
+}
 
 #[derive(Clone, Copy)]
 pub struct AppState {
@@ -27,6 +64,34 @@ pub struct AppState {
     pub(crate) collapsed_groups: Split<Vec<String>>,
     #[allow(dead_code)]
     pub(crate) show_perf_panel: Split<bool>,
+    /// `true` while iron-canvas is capturing frames. Updated by the
+    /// Worksheet dispatch Effect after a successful start/stop.
+    #[allow(dead_code)]
+    pub recording_active: Split<bool>,
+    /// Pending command from the PerfPanel button. Cleared by Worksheet
+    /// once dispatched. See [`RecordingCmd`].
+    #[allow(dead_code)]
+    pub recording_cmd: Split<Option<RecordingCmd>>,
+    /// Pending export command from the PerfPanel SVG/PDF buttons.
+    /// Cleared by Worksheet once the file download has been triggered.
+    #[allow(dead_code)]
+    pub export_cmd: Split<Option<ExportCmd>>,
+    /// Pending playback command. Cleared by Worksheet once dispatched.
+    #[allow(dead_code)]
+    pub playback_cmd: Split<Option<PlaybackCmd>>,
+    /// `true` once an `.icr` is loaded and playback has taken ownership of
+    /// the live canvases; `false` again on Exit.
+    #[allow(dead_code)]
+    pub playback_loaded: Split<bool>,
+    /// Mirrors `IronCanvas::isPlaying()` — synced from the rAF tick.
+    #[allow(dead_code)]
+    pub playback_playing: Split<bool>,
+    /// Current displayed frame, synced from the rAF tick.
+    #[allow(dead_code)]
+    pub playback_frame: Split<u32>,
+    /// Total frames in the loaded recording. Set on Load, zeroed on Exit.
+    #[allow(dead_code)]
+    pub playback_frame_count: Split<u32>,
     pub perf: PerfTimings,
     /// Bumped when the workbook registry changes (create/delete/rename/group).
     pub registry_version: RwSignal<u64>,
@@ -41,7 +106,15 @@ impl AppState {
             set_theme_mode: set_mode,
             sidebar_open: Split::new(false),
             collapsed_groups: Split::new(vec![]),
-            show_perf_panel: Split::new(false),
+            show_perf_panel: Split::new(cfg!(feature = "dev-tools")),
+            recording_active: Split::new(false),
+            recording_cmd: Split::new(None),
+            export_cmd: Split::new(None),
+            playback_cmd: Split::new(None),
+            playback_loaded: Split::new(false),
+            playback_playing: Split::new(false),
+            playback_frame: Split::new(0),
+            playback_frame_count: Split::new(0),
             perf: PerfTimings::new(),
             registry_version: RwSignal::new(0),
         }

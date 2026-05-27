@@ -8,9 +8,12 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
-use crate::input::workbook::{execute_workbook, WorkbookAction};
+use crate::components::share_popover::SharePopover;
+use crate::input::workbook::{WorkbookAction, execute_workbook};
 use crate::input::xlsx_io;
+use crate::state::StatusMessage;
 use crate::state::{ModelStore, WorkbookState};
+use crate::storage;
 use crate::theme::Theme;
 
 #[allow(dead_code)]
@@ -47,6 +50,25 @@ pub fn FileBar() -> impl IntoView {
 
     // Sidebar
     let on_sidebar = move |_| app.sidebar_open.set(!app.sidebar_open.get_untracked());
+
+    // Trust state for the active workbook. The badge appears whenever the
+    // current entry's `shared_from_link` flag is set; clicking promotes the
+    // workbook and bumps the registry so the sidebar 🔗 badge clears too.
+    // We re-read on registry_version so promotion / workbook switch refresh.
+    let is_shared_current = move || {
+        let _ = app.registry_version.get();
+        let uuid = state.current_uuid.get()?;
+        storage::load_registry()
+            .get(&uuid)
+            .map(|m| m.shared_from_link)
+    };
+    let on_trust = move |_: web_sys::MouseEvent| {
+        let Some(uuid) = state.current_uuid.get_untracked() else {
+            return;
+        };
+        storage::promote_from_shared(&uuid);
+        app.bump_registry();
+    };
     // File menu - owned signals + button anchor ref for positioning.
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
@@ -87,7 +109,13 @@ pub fn FileBar() -> impl IntoView {
                 .and_then(|s| s.to_str())
                 .unwrap_or("workbook")
                 .to_string();
-            let bytes = xlsx_io::read_file_bytes(file).await;
+            let bytes = match xlsx_io::read_file_bytes(file).await {
+                Ok(b) => b,
+                Err(e) => {
+                    state.status.set(Some(StatusMessage::Error(e)));
+                    return;
+                }
+            };
             let result = import::load_from_xlsx_bytes(&bytes, &stem, "en", "UTC")
                 .map_err(|e| e.to_string())
                 .and_then(|wb| Model::from_workbook(wb, "en").map_err(|e| e.to_string()))
@@ -111,7 +139,11 @@ pub fn FileBar() -> impl IntoView {
             match export::save_xlsx_to_writer(m.get_model(), Cursor::new(Vec::new())) {
                 Ok(cursor) => {
                     let bytes = cursor.into_inner();
-                    xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()));
+                    if let Err(e) =
+                        xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()), None)
+                    {
+                        state.status.set(Some(StatusMessage::Error(e)));
+                    }
                 }
                 Err(e) => {
                     web_sys::console::warn_1(&format!("xlsx export failed: {e}").into());
@@ -119,6 +151,58 @@ pub fn FileBar() -> impl IntoView {
             }
         });
         crate::util::refocus_workbook();
+    };
+
+    // Share popover state. The URL is built eagerly on click (cheap) so the
+    // popover gets a static String prop — keeps SharePopover non-reactive
+    // and lets the host control refresh by re-mounting via <Show>.
+    let (share_open, set_share_open) = signal(false);
+    let share_url = RwSignal::new(String::new());
+    let share_error = RwSignal::new(String::new());
+    // Verification word for optional share-gating. Empty = no verification.
+    let verify_word = RwSignal::new(String::new());
+
+    let on_share = move || {
+        let word: Option<String> = {
+            let w = verify_word.get();
+            let trimmed = w.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        };
+        let result = model.with_value(|m| storage::encode_for_share_url(m, word.as_deref()));
+        match result {
+            Ok(encoded) => {
+                let loc = window().location();
+                let origin = loc.origin().unwrap_or_default();
+                // Include pathname so share links work on sub-path deploys
+                // (e.g. https://host/calc/#share=… not https://host/#share=…).
+                // For opaque origins (sandboxed iframes, file://), fall back
+                // to the full href minus any existing hash.
+                let base = if origin.is_empty() {
+                    loc.href()
+                        .unwrap_or_default()
+                        .split('#')
+                        .next()
+                        .unwrap_or("/")
+                        .to_string()
+                } else {
+                    let pathname = loc.pathname().unwrap_or_else(|_| "/".into());
+                    format!("{origin}{pathname}")
+                };
+                share_url.set(format!("{base}#share={encoded}"));
+                share_error.set(String::new());
+                set_share_open.set(true);
+            }
+            Err(storage::ShareError::TooLarge { size_kb }) => {
+                share_error.set(format!(
+                    "This workbook is too large to share via link ({size_kb} KB). \
+                     Use File → Download .xlsx instead."
+                ));
+            }
+        }
     };
 
     // let on_toggle_perf = move || {
@@ -181,6 +265,7 @@ pub fn FileBar() -> impl IntoView {
             <ContextMenu open=menu_open set_open=set_menu_open pos=menu_pos>
                 <ContextMenuItem on_click=on_import icon="⬆">"Import .xlsx"</ContextMenuItem>
                 <ContextMenuItem on_click=on_export icon="⬇">"Download .xlsx"</ContextMenuItem>
+                <ContextMenuItem on_click=on_share icon="🔗">"Share"</ContextMenuItem>
                 <ContextMenuSeparator />
                 /*
                 <ContextMenuItem on_click=on_toggle_perf icon="⏱">
@@ -188,6 +273,46 @@ pub fn FileBar() -> impl IntoView {
                 </ContextMenuItem>
                 */
             </ContextMenu>
+
+            <Show when=move || is_shared_current().unwrap_or(false)>
+                <button
+                    class="fl-trust-btn"
+                    title="This workbook was loaded from a shared link. Click to trust it and clear the badge."
+                    on:click=on_trust
+                >
+                    "🛡 Trust this workbook"
+                </button>
+            </Show>
+
+            <Show when=move || share_open.get()>
+                <SharePopover
+                    share_url=share_url.get()
+                    verify_word=verify_word.get()
+                    on_close=Callback::new(move |_| set_share_open.set(false))
+                />
+            </Show>
+
+            <Show when=move || !share_error.get().is_empty()>
+                <div class="sp-error-banner">
+                    {move || share_error.get()}
+                </div>
+            </Show>
+
+            // Verification word input — shown inline after Share is clicked.
+            // Clears when the popover closes.
+            <Show when=move || share_open.get()>
+                <div class="sp-word-row">
+                    <input
+                        type="text"
+                        class="sp-word-input"
+                        placeholder="Verification word (optional, 3+ letters)"
+                        prop:value=verify_word
+                        on:input=move |ev| {
+                            verify_word.set(event_target_value(&ev));
+                        }
+                    />
+                </div>
+            </Show>
 
             // Right: theme toggle
             <div class="fl-right">

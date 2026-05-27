@@ -16,13 +16,15 @@
 use std::collections::HashMap;
 
 use ironcalc_base::expressions::{
-    lexer::{util::get_tokens, LexerError},
-    parser::{new_parser_english, Node},
+    lexer::{LexerError, util::get_tokens},
+    parser::{Node, new_parser_english},
     token::TokenType,
     types::CellReferenceRC,
 };
 
-use crate::coord::{ActiveRef, CellAddress, DefinedName, RefNode, SheetRange, TextRef};
+use crate::coord::{
+    Absolute, ActiveRef, CellAddress, DefinedName, FormulaRefKind, RefNode, SheetRange, TextRef,
+};
 
 /// Empty slice used by [`FormulaAnalysis::refs`] for variants that carry no overlays.
 const NO_REFS: &[ActiveRef] = &[];
@@ -111,15 +113,10 @@ pub enum FormulaStatus {
     LexerError(LexerError),
     /// Parsed cleanly but some references, functions, or names don't resolve.
     /// `valid_refs` is the subset that DID resolve and should still paint.
-    // TODO(human): rename `refs` -> `invalid_refs` (and `functions` -> `invalid_functions`,
-    // `names` -> `invalid_names`) so the three "bad" fields pair symmetrically with
-    // `valid_refs`. Update every destructure site: status_bar.rs, formula_bar.rs,
-    // and the tests in this file. The goal: `let Unresolved { invalid_refs, valid_refs, .. }`
-    // reads unambiguously without needing the docs.
     Unresolved {
-        refs: Vec<TextRef>,
-        functions: Vec<TextRef>,
-        names: Vec<TextRef>,
+        invalid_refs: Vec<TextRef>,
+        invalid_functions: Vec<TextRef>,
+        invalid_names: Vec<TextRef>,
         valid_refs: Vec<ActiveRef>,
     },
 }
@@ -223,7 +220,7 @@ pub fn analyze_formula(
     // otherwise every bare `A1` resolves to WrongReferenceKind.
 
     // NOTE: this can be better sheet_names: &[(u32, String)] as argument can be cleaner
-    // consider FrontendModel as the callers will be using it
+    // consider passing model traits directly as the callers will be using them
     let (sheet_name_list, active_sheet_name) = if sheet_names.is_empty() {
         (vec!["Sheet1".to_string()], "Sheet1".to_string())
     } else {
@@ -296,6 +293,7 @@ pub fn analyze_formula(
                     sheet_area,
                     color_idx: assign_slot(sheet_area),
                     span,
+                    kind: FormulaRefKind::Direct,
                 });
             }
             RefLeaf::Unresolved => invalid_refs.push(span),
@@ -321,8 +319,10 @@ pub fn analyze_formula(
                         sheet_name,
                         row,
                         column,
-                        absolute_row,
-                        absolute_column,
+                        Absolute {
+                            row: absolute_row,
+                            column: absolute_column,
+                        },
                     )),
                     Node::RangeKind {
                         sheet_name,
@@ -340,12 +340,16 @@ pub fn analyze_formula(
                         sheet_name,
                         row1,
                         column1,
-                        absolute_row1,
-                        absolute_column1,
+                        Absolute {
+                            row: absolute_row1,
+                            column: absolute_column1,
+                        },
                         row2,
                         column2,
-                        absolute_row2,
-                        absolute_column2,
+                        Absolute {
+                            row: absolute_row2,
+                            column: absolute_column2,
+                        },
                     )),
                     _ => None,
                 };
@@ -356,6 +360,7 @@ pub fn analyze_formula(
                         sheet_area,
                         color_idx: assign_slot(sheet_area),
                         span,
+                        kind: FormulaRefKind::DefinedName,
                     });
                 }
             }
@@ -386,9 +391,9 @@ pub fn analyze_formula(
     } else if !invalid_refs.is_empty() || !invalid_functions.is_empty() || !invalid_names.is_empty()
     {
         FormulaStatus::Unresolved {
-            refs: invalid_refs,
-            functions: invalid_functions,
-            names: invalid_names,
+            invalid_refs,
+            invalid_functions: invalid_functions,
+            invalid_names: invalid_names,
             valid_refs: refs,
         }
     } else {
@@ -432,8 +437,10 @@ fn ast_leaves(
             sheet_name.clone(),
             *row,
             *column,
-            *absolute_row,
-            *absolute_column,
+            Absolute {
+                row: *absolute_row,
+                column: *absolute_column,
+            },
         ))),
         Node::RangeKind {
             sheet_name,
@@ -451,12 +458,16 @@ fn ast_leaves(
             sheet_name.clone(),
             *row1,
             *column1,
-            *absolute_row1,
-            *absolute_column1,
+            Absolute {
+                row: *absolute_row1,
+                column: *absolute_column1,
+            },
             *row2,
             *column2,
-            *absolute_row2,
-            *absolute_column2,
+            Absolute {
+                row: *absolute_row2,
+                column: *absolute_column2,
+            },
         ))),
         Node::WrongReferenceKind { .. } | Node::WrongRangeKind { .. } => {
             ref_out.push(RefLeaf::Unresolved)
@@ -681,11 +692,14 @@ mod formula_analysis_tests {
     #[test]
     fn test_invalid_function_captured() {
         let analysis = analyze_formula("=FOOBAR(1,2)", editing_at(0), &[], &[]);
-        let FormulaStatus::Unresolved { functions, .. } = &analysis.status else {
+        let FormulaStatus::Unresolved {
+            invalid_functions, ..
+        } = &analysis.status
+        else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
-        assert_eq!(functions.len(), 1);
-        let span = functions[0];
+        assert_eq!(invalid_functions.len(), 1);
+        let span = invalid_functions[0];
         assert_eq!(&"=FOOBAR(1,2)"[span.start..span.end], "FOOBAR");
     }
 
@@ -699,10 +713,10 @@ mod formula_analysis_tests {
     fn test_wrong_sheet_ref_captured() {
         let sheets = vec![(0u32, "Sheet1".to_string())];
         let analysis = analyze_formula("=Ghost!A1", editing_at(0), &sheets, &[]);
-        let FormulaStatus::Unresolved { refs, .. } = &analysis.status else {
+        let FormulaStatus::Unresolved { invalid_refs, .. } = &analysis.status else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
-        assert_eq!(refs.len(), 1);
+        assert_eq!(invalid_refs.len(), 1);
         assert!(analysis.refs().is_empty());
     }
 
@@ -729,17 +743,19 @@ mod formula_analysis_tests {
         // must land in Unresolved.names (NOT Unresolved.functions).
         let analysis = analyze_formula("=my_undefined", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved {
-            names, functions, ..
+            invalid_names,
+            invalid_functions,
+            ..
         } = &analysis.status
         else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
-        assert_eq!(names.len(), 1, "unknown name should be captured");
+        assert_eq!(invalid_names.len(), 1, "unknown name should be captured");
         assert!(
-            functions.is_empty(),
+            invalid_functions.is_empty(),
             "unknown name must NOT leak into functions"
         );
-        let span = names[0];
+        let span = invalid_names[0];
         assert_eq!(&"=my_undefined"[span.start..span.end], "my_undefined");
     }
 
@@ -749,13 +765,15 @@ mod formula_analysis_tests {
         // them differently (squiggle vs italic) without ambiguity.
         let analysis = analyze_formula("=my_undefined + FOOBAR(1)", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved {
-            names, functions, ..
+            invalid_names,
+            invalid_functions,
+            ..
         } = &analysis.status
         else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
-        assert_eq!(names.len(), 1);
-        assert_eq!(functions.len(), 1);
+        assert_eq!(invalid_names.len(), 1);
+        assert_eq!(invalid_functions.len(), 1);
     }
 
     #[test]
@@ -774,7 +792,7 @@ mod formula_analysis_tests {
     // Identity preservation — ref_node must carry `absolute_row` /
     // `absolute_column` / `sheet_name` through analysis. These tests fail
     // until `ast_leaves` pushes the full Node via `RefNode::cell` /
-    // `RefNode::range` (the TODO(human) hand-off). Until then `refs()` is
+    // `RefNode::range` Until then `refs()` is
     // empty for resolved refs, so `.refs().len()` is 0 and the `refs()[0]`
     // indexing panics — by design, making the stub's presence impossible
     // to miss in test output.
@@ -966,5 +984,48 @@ mod formula_analysis_tests {
         // "B" is lexed as Ident (a valid identifier), not Illegal.
         // Reference mode is false mid-identifier — user must clear it first (e.g. backspace).
         assert!(!is_in_reference_mode("=A1+B", 5));
+    }
+
+    // ---- FormulaRefKind tagging ----
+
+    #[test]
+    fn direct_ref_kind_is_direct() {
+        let analysis = analyze_formula("=A1+1", editing_at(0), &[], &[]);
+        assert_eq!(analysis.refs().len(), 1);
+        assert!(matches!(analysis.refs()[0].kind, FormulaRefKind::Direct));
+    }
+
+    #[test]
+    fn defined_name_ref_kind_is_defined_name() {
+        let defined = vec![DefinedName {
+            name: "my_range".into(),
+            scope: None,
+            formula: "A1:A10".into(),
+        }];
+        let analysis = analyze_formula("=my_range+1", editing_at(0), &[], &defined);
+        assert_eq!(analysis.refs().len(), 1);
+        assert!(matches!(
+            analysis.refs()[0].kind,
+            FormulaRefKind::DefinedName
+        ));
+    }
+
+    #[test]
+    fn mixed_emissions_carry_independent_kinds() {
+        // `=A1+my_range` emits one Direct (A1) and one DefinedName (my_range)
+        // in document order. The two kinds must route independently — order
+        // here mirrors token-stream order in `analyze_formula`.
+        let defined = vec![DefinedName {
+            name: "my_range".into(),
+            scope: None,
+            formula: "B1:B10".into(),
+        }];
+        let analysis = analyze_formula("=A1+my_range", editing_at(0), &[], &defined);
+        assert_eq!(analysis.refs().len(), 2);
+        assert!(matches!(analysis.refs()[0].kind, FormulaRefKind::Direct));
+        assert!(matches!(
+            analysis.refs()[1].kind,
+            FormulaRefKind::DefinedName
+        ));
     }
 }

@@ -11,10 +11,10 @@ use crate::components::context_menu::{
     ContextMenu, ContextMenuButton, ContextMenuItem, ContextMenuSeparator,
 };
 use crate::components::inline_rename::InlineRenameInput;
-use crate::input::workbook::{execute_workbook, WorkbookAction};
+use crate::input::workbook::{WorkbookAction, execute_workbook};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage::{self, WorkbookGroup, WorkbookId, WorkbookMeta};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Entry ready for rendering: uuid, metadata, and whether it's the active workbook.
 struct DrawerEntry {
@@ -61,6 +61,7 @@ pub fn LeftDrawer() -> impl IntoView {
 
     // Local UI state - split so read-only children don't re-run on writes from siblings.
     let (renaming, set_renaming) = signal(None::<WorkbookId>);
+    let (existing_groups, set_existing_groups) = signal(Vec::<String>::new());
 
     // Workbook list
     //
@@ -70,6 +71,26 @@ pub fn LeftDrawer() -> impl IntoView {
         let _ = app.registry_version.get();
         let current = state.current_uuid.get();
         let registry = storage::load_registry();
+
+        // Pre-compute existing group names once for all EntryRows,
+        // avoiding N localStorage deserializations for context menus.
+        let existing_groups: Vec<String> = {
+            let mut groups: Vec<String> = registry
+                .values()
+                .filter_map(|m| {
+                    if let WorkbookGroup::Named(n) = &m.group {
+                        Some(n.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<std::collections::HashSet<_>>()
+                .into_iter()
+                .collect();
+            groups.sort();
+            groups
+        };
+        set_existing_groups.set(existing_groups);
 
         let entries: Vec<DrawerEntry> = registry
             .into_iter()
@@ -91,13 +112,10 @@ pub fn LeftDrawer() -> impl IntoView {
         execute_workbook(WorkbookAction::Switch(target_uuid), model, &state, app);
     };
 
-    let delete_workbook = move |uuid: WorkbookId| {
-        let wb_name = storage::load_registry()
-            .get(&uuid)
-            .map(|m| m.name.clone())
-            .unwrap_or_default();
+    let delete_workbook = move |(uuid, name): (WorkbookId, String)| {
+        let safe = storage::sanitize_name(&name);
         let confirmed = leptos::prelude::window()
-            .confirm_with_message(&format!("Delete '{wb_name}'? This cannot be undone."))
+            .confirm_with_message(&format!("Delete '{safe}'? This cannot be undone."))
             .unwrap_or(false);
         if confirmed {
             execute_workbook(WorkbookAction::Delete(uuid), model, &state, app);
@@ -166,6 +184,8 @@ pub fn LeftDrawer() -> impl IntoView {
                                                 name=entry.meta.name.clone()
                                                 active=entry.active
                                                 current_group=entry.meta.group.clone()
+                                                shared_from_link=entry.meta.shared_from_link
+                                                existing_groups=existing_groups
                                                 on_switch
                                                 on_delete
                                                 on_group
@@ -209,8 +229,10 @@ fn EntryRow(
     name: String,
     active: bool,
     current_group: WorkbookGroup,
+    shared_from_link: bool,
+    existing_groups: ReadSignal<Vec<String>>,
     on_switch: Callback<WorkbookId>,
-    on_delete: Callback<WorkbookId>,
+    on_delete: Callback<(WorkbookId, String)>,
     on_group: Callback<(WorkbookId, WorkbookGroup)>,
     renaming: ReadSignal<Option<WorkbookId>>,
     set_renaming: WriteSignal<Option<WorkbookId>>,
@@ -223,26 +245,15 @@ fn EntryRow(
     let uuid_delete = uuid;
     let is_renaming = renaming.get_untracked() == Some(uuid);
 
+    // Pre-clone so the fallback closure can move `name` while the delete
+    // button also needs a copy for the confirmation dialog.
+    let delete_name = name.clone();
+
     let (menu_open, set_menu_open) = signal(false);
     let (menu_pos, set_menu_pos) = signal((0i32, 0i32));
     let (group_name, set_group_name) = signal(String::new());
 
-    let existing_groups: Vec<String> = {
-        let mut groups: Vec<String> = storage::load_registry()
-            .values()
-            .filter_map(|m| {
-                if let WorkbookGroup::Named(n) = &m.group {
-                    Some(n.clone())
-                } else {
-                    None
-                }
-            })
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        groups.sort();
-        groups
-    };
+    let existing_groups = existing_groups.get_untracked();
 
     let has_group = matches!(current_group, WorkbookGroup::Named(_));
 
@@ -283,6 +294,10 @@ fn EntryRow(
             if state.current_uuid.get_untracked() == Some(uuid) {
                 model.update_value(|m| m.set_name(&new_name));
             }
+            // Renaming is an explicit user action — clear the \"shared from link\"
+            // quarantine badge. We don't auto-promote on autosave anymore so the
+            // user must rename to signal trust.
+            storage::promote_from_shared(&uuid);
             app.bump_registry();
         }
         set_renaming.set(None);
@@ -312,7 +327,16 @@ fn EntryRow(
 
             <Show
                 when=move || is_renaming
-                fallback={let n = name.clone(); move || view!{ <span class="ld-name">{n.clone()}</span> }}
+                fallback={let n = storage::sanitize_name(&delete_name); move || view!{
+                    <span class="ld-name">
+                        {n.clone()}
+                        {if shared_from_link {
+                            Some(view! { <span class="ld-shared-badge" title="Shared from link — click to edit and clear this badge">"🔗"</span> })
+                        } else {
+                            None
+                        }}
+                    </span>
+                }}
             >
                 <InlineRenameInput
                     value=name.clone()
@@ -327,7 +351,7 @@ fn EntryRow(
                 title="Delete workbook"
                 on:click=move |ev: web_sys::MouseEvent| {
                     ev.stop_propagation();
-                    on_delete.run(uuid_delete);
+                    on_delete.run((uuid_delete, delete_name.clone()));
                 }
             >
                 "\u{00d7}"
