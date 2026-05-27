@@ -1,0 +1,107 @@
+name: test
+
+on:
+  push:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Native cargo test for the iron-canvas workspace.
+  # The top-level rusty-calc package is Leptos client code and does not
+  # compile on the host target, so we scope tests to iron-canvas/ where
+  # the real unit/integration tests live (core, svg, recorder, web).
+  test-native:
+    name: cargo test (iron-canvas, native)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout RustyCalc
+        uses: actions/checkout@v4
+        with:
+          path: RustyCalc
+
+      # Cargo.toml uses path = "../IronCalc/base" and "../IronCalc/xlsx",
+      # so IronCalc must be checked out as a sibling directory.
+      - name: Checkout IronCalc (sibling required by path deps)
+        uses: actions/checkout@v4
+        with:
+          repository: CoalUnicorn/IronCalc
+          ref: rustycalc-xlsx-wasm
+          path: IronCalc
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: RustyCalc/iron-canvas
+
+      - name: cargo test --workspace
+        working-directory: RustyCalc/iron-canvas
+        run: cargo test --workspace --locked
+
+  # Feature-powerset check via cargo-hack.
+  # Catches feature-wiring bugs like `recorder` -> `dev-tools` renames
+  # where a forwarded feature stops resolving.
+  # - host run scopes to iron-canvas/ workspace (rusty-calc is wasm-only)
+  # - wasm run scopes to rusty-calc top-level (exercises the feature
+  #   forwards from rusty-calc into iron-canvas-web)
+  feature-hack:
+    name: cargo hack (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            cmd: cargo hack --feature-powerset --no-dev-deps check --workspace --manifest-path iron-canvas/Cargo.toml --target x86_64-unknown-linux-gnu
+          - target: wasm32-unknown-unknown
+            cmd: cargo hack --feature-powerset --no-dev-deps check --manifest-path Cargo.toml --target wasm32-unknown-unknown
+    steps:
+      - name: Checkout RustyCalc
+        uses: actions/checkout@v4
+        with:
+          path: RustyCalc
+
+      - name: Checkout IronCalc (sibling required by path deps)
+        uses: actions/checkout@v4
+        with:
+          repository: CoalUnicorn/IronCalc
+          ref: rustycalc-xlsx-wasm
+          path: IronCalc
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: RustyCalc
+          key: hack-${{ matrix.target }}
+
+      - name: ${{ matrix.cmd }}
+        working-directory: RustyCalc
+        run: ${{ matrix.cmd }}

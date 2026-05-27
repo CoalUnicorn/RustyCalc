@@ -1,8 +1,16 @@
 name: Deploy to GitHub Pages
 
+# Builds two trunk artifacts on every push to main or dev:
+#   main -> /RustyCalc/        (default public_url from Trunk.toml)
+#   dev  -> /RustyCalc/dev/    (--public-url override)
+# Both trees are combined into a single Pages artifact so one Pages
+# deployment hosts both sites. The non-triggering branch is always
+# rebuilt (not pulled from a previous artifact) so the deployment is
+# coherent regardless of which branch pushed.
+
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -18,10 +26,18 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout RustyCalc
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          path: RustyCalc
+          ref: main
+          path: RustyCalc-main
+          submodules: recursive
+
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: RustyCalc-dev
           submodules: recursive
 
       - name: Install Rust
@@ -35,21 +51,34 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            RustyCalc/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('RustyCalc/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+            RustyCalc-main/target
+            RustyCalc-dev/target
+          key: ${{ runner.os }}-pages-${{ hashFiles('RustyCalc-main/Cargo.lock', 'RustyCalc-dev/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-pages-
 
       - name: Install Trunk
-        run: cargo install trunk --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: trunk
 
-      - name: Build
-        working-directory: RustyCalc
+      - name: Build main (/RustyCalc/)
+        working-directory: RustyCalc-main
         run: trunk build --release
+
+      - name: Build dev (/RustyCalc/dev/)
+        working-directory: RustyCalc-dev
+        run: trunk build --release --public-url /RustyCalc/dev/ --features dev-tools
+
+      - name: Assemble combined Pages tree
+        run: |
+          mkdir -p pages-dist
+          cp -r RustyCalc-main/dist/. pages-dist/
+          cp -r RustyCalc-dev/dist     pages-dist/dev
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: RustyCalc/dist
+          path: pages-dist
 
   deploy:
     needs: build
