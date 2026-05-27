@@ -421,7 +421,7 @@ pub fn load_selected() -> Option<(WorkbookId, UserModel<'static>)> {
 pub fn create_new() -> (WorkbookId, UserModel<'static>) {
     let registry = load_registry();
     // `leak()` gives a `&'static str` so UserModel<'static> can borrow it.
-    // FIXME: each call leaks a small heap allocation that is never reclaimed.
+    // Note: each call leaks a small heap allocation that is never reclaimed.
     // In a typical session users create at most a handful of workbooks so the
     // total is negligible, but a long-lived WASM session with many creates/
     // deletes will accumulate.  Fixing requires UserModel to accept `String`

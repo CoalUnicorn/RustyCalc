@@ -113,15 +113,10 @@ pub enum FormulaStatus {
     LexerError(LexerError),
     /// Parsed cleanly but some references, functions, or names don't resolve.
     /// `valid_refs` is the subset that DID resolve and should still paint.
-    // TODO(human): rename `refs` -> `invalid_refs` (and `functions` -> `invalid_functions`,
-    // `names` -> `invalid_names`) so the three "bad" fields pair symmetrically with
-    // `valid_refs`. Update every destructure site: status_bar.rs, formula_bar.rs,
-    // and the tests in this file. The goal: `let Unresolved { invalid_refs, valid_refs, .. }`
-    // reads unambiguously without needing the docs.
     Unresolved {
-        refs: Vec<TextRef>,
-        functions: Vec<TextRef>,
-        names: Vec<TextRef>,
+        invalid_refs: Vec<TextRef>,
+        invalid_functions: Vec<TextRef>,
+        invalid_names: Vec<TextRef>,
         valid_refs: Vec<ActiveRef>,
     },
 }
@@ -396,9 +391,9 @@ pub fn analyze_formula(
     } else if !invalid_refs.is_empty() || !invalid_functions.is_empty() || !invalid_names.is_empty()
     {
         FormulaStatus::Unresolved {
-            refs: invalid_refs,
-            functions: invalid_functions,
-            names: invalid_names,
+            invalid_refs,
+            invalid_functions: invalid_functions,
+            invalid_names: invalid_names,
             valid_refs: refs,
         }
     } else {
@@ -697,11 +692,11 @@ mod formula_analysis_tests {
     #[test]
     fn test_invalid_function_captured() {
         let analysis = analyze_formula("=FOOBAR(1,2)", editing_at(0), &[], &[]);
-        let FormulaStatus::Unresolved { functions, .. } = &analysis.status else {
+        let FormulaStatus::Unresolved { invalid_functions, .. } = &analysis.status else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
-        assert_eq!(functions.len(), 1);
-        let span = functions[0];
+        assert_eq!(invalid_functions.len(), 1);
+        let span = invalid_functions[0];
         assert_eq!(&"=FOOBAR(1,2)"[span.start..span.end], "FOOBAR");
     }
 
@@ -715,10 +710,10 @@ mod formula_analysis_tests {
     fn test_wrong_sheet_ref_captured() {
         let sheets = vec![(0u32, "Sheet1".to_string())];
         let analysis = analyze_formula("=Ghost!A1", editing_at(0), &sheets, &[]);
-        let FormulaStatus::Unresolved { refs, .. } = &analysis.status else {
+        let FormulaStatus::Unresolved { invalid_refs, .. } = &analysis.status else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
-        assert_eq!(refs.len(), 1);
+        assert_eq!(invalid_refs.len(), 1);
         assert!(analysis.refs().is_empty());
     }
 
@@ -745,17 +740,17 @@ mod formula_analysis_tests {
         // must land in Unresolved.names (NOT Unresolved.functions).
         let analysis = analyze_formula("=my_undefined", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved {
-            names, functions, ..
+            invalid_names, invalid_functions, ..
         } = &analysis.status
         else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
-        assert_eq!(names.len(), 1, "unknown name should be captured");
+        assert_eq!(invalid_names.len(), 1, "unknown name should be captured");
         assert!(
-            functions.is_empty(),
+            invalid_functions.is_empty(),
             "unknown name must NOT leak into functions"
         );
-        let span = names[0];
+        let span = invalid_names[0];
         assert_eq!(&"=my_undefined"[span.start..span.end], "my_undefined");
     }
 
@@ -765,13 +760,13 @@ mod formula_analysis_tests {
         // them differently (squiggle vs italic) without ambiguity.
         let analysis = analyze_formula("=my_undefined + FOOBAR(1)", editing_at(0), &[], &[]);
         let FormulaStatus::Unresolved {
-            names, functions, ..
+            invalid_names, invalid_functions, ..
         } = &analysis.status
         else {
             panic!("expected Unresolved, got {:?}", analysis.status);
         };
-        assert_eq!(names.len(), 1);
-        assert_eq!(functions.len(), 1);
+        assert_eq!(invalid_names.len(), 1);
+        assert_eq!(invalid_functions.len(), 1);
     }
 
     #[test]
@@ -790,7 +785,7 @@ mod formula_analysis_tests {
     // Identity preservation — ref_node must carry `absolute_row` /
     // `absolute_column` / `sheet_name` through analysis. These tests fail
     // until `ast_leaves` pushes the full Node via `RefNode::cell` /
-    // `RefNode::range` (the TODO(human) hand-off). Until then `refs()` is
+    // `RefNode::range` Until then `refs()` is
     // empty for resolved refs, so `.refs().len()` is 0 and the `refs()[0]`
     // indexing panics — by design, making the stub's presence impossible
     // to miss in test output.
