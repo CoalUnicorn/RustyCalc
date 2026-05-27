@@ -16,8 +16,9 @@ Every visible pixel composes from `PixelRect` and `Line`. The painter surface is
 | ---------------------- | ---------------------------------------------------------------------------------------- |
 | `iron-canvas-core`     | Pure-Rust engine: geometry, `Chrome`, renderer, `Orchestrator<S: Surface, M: CanvasModel>`, `Painter` trait surface. No `web-sys` / `wasm-bindgen` deps |
 | `iron-canvas-web`      | `#[wasm_bindgen]` facade: `IronCanvas`, `WebSurface`, `CanvasPainter`, `JsBackedModel`   |
-| `iron-canvas-svg`      | `SvgPainter` — declarative SVG output                                                    |
+| `iron-canvas-export`   | Multi-format export: `SvgPainter` + `SvgSurface` (feature `svg`), `PdfPainter` + `PdfSurface` (feature `pdf`). Pure `std`. |
 | `iron-canvas-recorder` | `RecorderPainter` + `MemSurface` — drives `Orchestrator<MemSurface, _>` in core's tests  |
+| `iron-canvas-ironcalc` | Bridge crate: `IronCalcModel<'a>` newtype implementing `CanvasModel` for IronCalc `UserModel`. CF (conditional formatting) decoration bridge. |
 
 Consumers depending on the wasm bundle use `iron-canvas-web`. Native /
 non-browser backends impl `Surface` (associated `type P = YourPainter`)
@@ -74,6 +75,7 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 | ------ | ----------- |
 | `canvas.setModel(model)` | Bind an IronCalc `Model` JS handle. Triggers a full repaint. |
 | `canvas.exportSvg(css_w, css_h)` | Render the current sheet as a self-contained SVG string. Drives a throwaway `Orchestrator<SvgSurface, _>` against the cached model — no painted-pixel state on the live canvas is touched. Returns `""` if no model is bound. |
+| `canvas.exportPdf(css_w, css_h)` | Render the current sheet as a self-contained PDF (returned as `Uint8Array`). Gated behind `--features pdf`. |
 
 #### Repaint triggers
 
@@ -110,6 +112,7 @@ and raises `OVERLAY`; only the overlay layer repaints.
 | `canvas.set_clipboard(area)` | Clipboard marching-ants area (`Option<SheetArea>`). |
 | `canvas.set_point_range(range)` | Point-mode range highlight (`Option<RCRange>`). |
 | `canvas.set_formula_refs(refs)` | Formula-ref outlines (`Vec<FormulaRef>`). |
+| `canvas.set_overlays(overlays)` | Batch overlay setter — `RenderOverlays` struct carrying all decorations at once. |
 
 #### Queries
 
