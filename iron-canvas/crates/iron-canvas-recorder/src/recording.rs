@@ -69,8 +69,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::PaintRegimeTag;
+use iron_canvas_core::theme::CanvasTheme;
 
 use crate::DrawOp;
 
@@ -258,7 +258,13 @@ mod tests {
     use iron_canvas_core::theme::CanvasTheme;
 
     fn header() -> IcrHeader {
-        IcrHeader::new(800.0, 400.0, 1, ThemeSnapshot::from(&CanvasTheme::light()), 0)
+        IcrHeader::new(
+            800.0,
+            400.0,
+            1,
+            ThemeSnapshot::from(&CanvasTheme::light()),
+            0,
+        )
     }
 
     fn pix(x: i32, y: i32, w: i32, h: i32) -> PixelRect {

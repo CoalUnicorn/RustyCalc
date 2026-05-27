@@ -49,13 +49,15 @@ fn width_and_height_are_inclusive() {
 #[test]
 fn is_single_cell_only_when_corners_match() {
     assert!(RCRange::from_cell(7, 9).is_single_cell());
-    assert!(!RCRange {
-        r1: 1,
-        c1: 1,
-        r2: 1,
-        c2: 2
-    }
-    .is_single_cell());
+    assert!(
+        !RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 1,
+            c2: 2
+        }
+        .is_single_cell()
+    );
 }
 
 #[test]

@@ -8,8 +8,8 @@
 
 #![cfg(feature = "pdf")]
 
-use iron_canvas_export::pdf::doc::{font, object, page, ContentStream, PdfDocument};
 use iron_canvas_export::pdf::PdfDocument as ReexportedDoc;
+use iron_canvas_export::pdf::doc::{ContentStream, PdfDocument, font, object, page};
 
 const PAGE_W: u32 = 200;
 const PAGE_H: u32 = 100;
@@ -96,8 +96,7 @@ fn xref_offsets_land_on_obj_lines() {
     let Some(header_nl) = find_subslice(&bytes[header_start..], b"\n") else {
         panic!("xref subsection header missing newline");
     };
-    let Ok(header_str) = std::str::from_utf8(&bytes[header_start..header_start + header_nl])
-    else {
+    let Ok(header_str) = std::str::from_utf8(&bytes[header_start..header_start + header_nl]) else {
         panic!("xref header must be ASCII");
     };
     let Some((first_str, count_str)) = header_str.split_once(' ') else {

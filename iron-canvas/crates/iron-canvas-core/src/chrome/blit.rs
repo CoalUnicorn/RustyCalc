@@ -19,7 +19,7 @@ use crate::theme::CanvasTheme;
 use crate::{CanvasModel, CanvasSize};
 
 use super::blit_rebuild::ShiftDir;
-use super::{measure_row_header_width, Chrome, FrameKindTag, PaneRegion, PaneRegionMask, PaneSet};
+use super::{Chrome, FrameKindTag, PaneRegion, PaneRegionMask, PaneSet, measure_row_header_width};
 
 /// One pane's contribution to a scroll-blit. A row-axis scroll emits a
 /// `PaneShift` for `BottomRight` and, when `frozen_cols > 0`, another

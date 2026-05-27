@@ -47,11 +47,12 @@ impl WorkbookId {
         // in private-mode/iframe contexts it may fail — fall back to Math.random().
         let crypto_ok = web_sys::window().and_then(|w| w.crypto().ok());
         if let Some(crypto) = crypto_ok
-            && crypto.get_random_values_with_u8_array(&mut buf).is_ok() {
-                buf[6] = (buf[6] & 0x0f) | 0x40;
-                buf[8] = (buf[8] & 0x3f) | 0x80;
-                return Self(buf);
-            }
+            && crypto.get_random_values_with_u8_array(&mut buf).is_ok()
+        {
+            buf[6] = (buf[6] & 0x0f) | 0x40;
+            buf[8] = (buf[8] & 0x3f) | 0x80;
+            return Self(buf);
+        }
         // Fallback: Math.random() — lower entropy but doesn't panic.
         for byte in &mut buf {
             *byte = (js_sys::Math::random() * 256.0) as u8;
@@ -380,9 +381,10 @@ pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
 pub fn load_selected() -> Option<(WorkbookId, UserModel<'static>)> {
     // Try the explicitly selected UUID first.
     if let Some(uuid) = get_selected_uuid()
-        && let Some(model) = load(&uuid) {
-            return Some((uuid, model));
-        }
+        && let Some(model) = load(&uuid)
+    {
+        return Some((uuid, model));
+    }
 
     // Fall back to the lexicographically first UUID that yields a valid model.
     // Sorting ensures a stable, repeatable result regardless of HashMap iteration order.
@@ -468,10 +470,11 @@ pub fn create_new_from(model: UserModel<'static>) -> (WorkbookId, UserModel<'sta
 pub fn promote_from_shared(uuid: &WorkbookId) {
     let mut registry = load_registry();
     if let Some(meta) = registry.get_mut(uuid)
-        && meta.shared_from_link {
-            meta.shared_from_link = false;
-            save_registry(&registry);
-        }
+        && meta.shared_from_link
+    {
+        meta.shared_from_link = false;
+        save_registry(&registry);
+    }
 }
 
 /// Remove a workbook from localStorage and the registry.

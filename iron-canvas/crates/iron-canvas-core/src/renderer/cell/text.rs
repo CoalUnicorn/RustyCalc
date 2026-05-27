@@ -20,8 +20,8 @@ use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignme
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::painter::{PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
-use crate::renderer::cache::ColorIntern;
 use crate::renderer::RendererCore;
+use crate::renderer::cache::ColorIntern;
 use crate::theme::CanvasTheme;
 
 //  layout constants
@@ -419,7 +419,10 @@ impl<P: Painter> RendererCore<P> {
                     // on the cell's left edge. No width approximation needed; the
                     // SVG `text-anchor="start"` renders glyphs at their natural
                     // width and overflow into adjacent empty cells just works.
-                    (f64::from(t.clip.top_left.x) + CELL_PADDING, TextAlign::Start)
+                    (
+                        f64::from(t.clip.top_left.x) + CELL_PADDING,
+                        TextAlign::Start,
+                    )
                 }
             };
             self.painter.fill_text(

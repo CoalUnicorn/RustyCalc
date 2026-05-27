@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use iron_canvas_core::painter::TextMetrics;
-use iron_canvas_core::renderer::{layout_into, FontIntern, TextLine};
+use iron_canvas_core::renderer::{FontIntern, TextLine, layout_into};
 use std::rc::Rc;
 
 struct FixedWidth(f64);

@@ -13,9 +13,9 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
+use crate::Span;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Line;
-use crate::Span;
 
 /// Color/font argument for the `Painter` surface. The `Static` variant carries
 /// a `&'static str` whose address is stable for the program lifetime, so the

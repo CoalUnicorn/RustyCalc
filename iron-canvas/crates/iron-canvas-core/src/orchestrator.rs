@@ -14,14 +14,15 @@ use std::cell::Cell;
 
 use serde::{Deserialize, Serialize};
 
+use crate::CanvasModel;
 use crate::chrome::{BlitPlan, Chrome, FrameKindTag, FramePath, FrameValidity, PaneRegionMask};
 use crate::decoration::{
-    autofill::AutofillLayer, clipboard::ClipboardLayer, formula_refs::FormulaRefsLayer,
-    point_mode::PointModeLayer, selection::SelectionLayer, Layer,
+    Layer, autofill::AutofillLayer, clipboard::ClipboardLayer, formula_refs::FormulaRefsLayer,
+    point_mode::PointModeLayer, selection::SelectionLayer,
 };
+use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
-use crate::geometry::CanvasSize;
 use crate::layer::{LayerBase, Surface};
 use crate::painter::BlitPainter;
 use crate::render_overlays::RenderOverlays;
@@ -30,7 +31,6 @@ use crate::signal::GridSignals;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
-use crate::CanvasModel;
 
 /// Named verdict of `paint_if_dirty`'s dispatch. Each variant aligns 1:1
 /// with a `paint_*` method; the regime carries everything that method
@@ -513,9 +513,9 @@ where
                 self.grid.invalidate_paint_cache();
                 self.grid.paint_grid(model, &frame);
             }
-            FrameKindTag::SlotsReused => unreachable!(
-                "Chrome::next(Blit) only returns Blitted (reuse) or Fresh (fallback)"
-            ),
+            FrameKindTag::SlotsReused => {
+                unreachable!("Chrome::next(Blit) only returns Blitted (reuse) or Fresh (fallback)")
+            }
         }
         self.refresh_overlay_state(model);
         self.overlay.paint_overlay_layer(
@@ -566,7 +566,8 @@ where
         // Without this, DEL on the active cell clears the model but the
         // overlay still shows the old value on top of the grid.
         let must_paint_overlay = signals.overlay_dirty()
-            || (signals.contains(GridSignals::CONTENT) && self.selection.active_cell_repaint().is_some());
+            || (signals.contains(GridSignals::CONTENT)
+                && self.selection.active_cell_repaint().is_some());
         if must_paint_overlay {
             self.overlay.paint_overlay_layer(
                 model,

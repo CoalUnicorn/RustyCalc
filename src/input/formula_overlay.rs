@@ -87,7 +87,16 @@ mod tests {
 
     fn make_ref(start: usize, end: usize, color_idx: usize) -> ActiveRef {
         ActiveRef {
-            ref_node: RefNode::cell(0, None, 0, 0, Absolute { row: false, column: false }),
+            ref_node: RefNode::cell(
+                0,
+                None,
+                0,
+                0,
+                Absolute {
+                    row: false,
+                    column: false,
+                },
+            ),
             sheet_area: SheetRange::from_cell(0, 0, 0),
             color_idx,
             span: TextRef { start, end },

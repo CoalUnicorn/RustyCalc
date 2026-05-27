@@ -15,7 +15,7 @@ use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::RecorderPainter;
 
-use common::{canvas_default, TestModel};
+use common::{TestModel, canvas_default};
 
 fn paint_pane(model: &TestModel, frame: &Chrome, pane: PaneRegion) -> usize {
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));

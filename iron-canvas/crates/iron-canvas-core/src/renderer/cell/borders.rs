@@ -21,8 +21,8 @@ use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THI
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::BorderEdge;
 use crate::painter::{PaintColor, Painter};
-use crate::renderer::cache::ColorIntern;
 use crate::renderer::RendererCore;
+use crate::renderer::cache::ColorIntern;
 use crate::theme::CanvasTheme;
 
 /// Per-edge `BorderPaint` resolved from a cell's `Borders` style. `None` on

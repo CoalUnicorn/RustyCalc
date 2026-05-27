@@ -28,7 +28,9 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
     // check rejects and the dispatch falls through to a Fresh rebuild.
     let canvas = CanvasSize { w: 600.0, h: 400.0 };
     let theme = CanvasTheme::light();
-    let model = TestModel::synthetic_grid().with_top_row(980).with_active(980, 1);
+    let model = TestModel::synthetic_grid()
+        .with_top_row(980)
+        .with_active(980, 1);
 
     let prev = Chrome::next(None, &model, canvas, &theme, FramePath::Fresh);
     let prev_row_header = prev.row_header_thickness;
@@ -89,7 +91,9 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
 fn blit_inside_stable_digit_band_keeps_blitted_kind() {
     let canvas = CanvasSize { w: 600.0, h: 400.0 };
     let theme = CanvasTheme::light();
-    let model = TestModel::synthetic_grid().with_top_row(10).with_active(10, 1);
+    let model = TestModel::synthetic_grid()
+        .with_top_row(10)
+        .with_active(10, 1);
 
     let prev = Chrome::next(None, &model, canvas, &theme, FramePath::Fresh);
     let prev_row_header = prev.row_header_thickness;

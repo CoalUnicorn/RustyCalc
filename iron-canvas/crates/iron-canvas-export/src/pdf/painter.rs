@@ -20,7 +20,7 @@ use iron_canvas_core::painter::{
 
 use crate::common::color::parse_css_color;
 use crate::common::escape::pdf_string_escape;
-use crate::common::text::{parse_font_size_px, CHAR_WIDTH_FACTOR};
+use crate::common::text::{CHAR_WIDTH_FACTOR, parse_font_size_px};
 use crate::pdf::doc::stream::ContentStream;
 
 /// Visible dash pattern when `rect_dashed` is invoked. Matches the
@@ -40,11 +40,7 @@ impl PdfPainter {
     /// for single-surface scenarios (unit tests, future
     /// orchestrator-driven export).
     pub fn new(width: u32, height: u32) -> Self {
-        Self::with_stream(
-            Rc::new(RefCell::new(ContentStream::new())),
-            width,
-            height,
-        )
+        Self::with_stream(Rc::new(RefCell::new(ContentStream::new())), width, height)
     }
 
     /// Construct a painter sharing an externally-owned stream. The

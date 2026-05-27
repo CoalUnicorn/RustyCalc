@@ -13,16 +13,16 @@ use ironcalc_base::types::{CellType, Style};
 
 use super::borders::ResolvedBorders;
 use super::text::TextPaint;
+use crate::CanvasModel;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::geometry::slot::{ColSlot, RowSlot};
 use crate::painter::{PaintColor, Painter};
-use crate::renderer::cache::ColorIntern;
 use crate::renderer::RendererCore;
+use crate::renderer::cache::ColorIntern;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
-use crate::CanvasModel;
 
 pub struct CellPaint {
     pub row: i32,

@@ -5,8 +5,8 @@
 //! Chrome scaffolding.
 
 use iron_canvas_core::geometry::slot::{
-    boundary_at, fill_axis, last_visible_id, pixel_to_id, scroll_first, slot_at, top_id, ColSlot,
-    RowSlot,
+    ColSlot, RowSlot, boundary_at, fill_axis, last_visible_id, pixel_to_id, scroll_first, slot_at,
+    top_id,
 };
 
 #[test]
@@ -65,7 +65,11 @@ fn scroll_first_prefers_view_first_past_frozen_band() {
     assert_eq!(scroll_first(0, 1), 1);
     assert_eq!(scroll_first(0, 50), 50);
     // Frozen pushes the floor.
-    assert_eq!(scroll_first(3, 1), 4, "frozen_count + 1 wins when view <= frozen");
+    assert_eq!(
+        scroll_first(3, 1),
+        4,
+        "frozen_count + 1 wins when view <= frozen"
+    );
     assert_eq!(scroll_first(3, 4), 4, "tie goes to frozen+1 via max()");
     assert_eq!(scroll_first(3, 10), 10, "view past frozen wins");
 }
@@ -73,14 +77,34 @@ fn scroll_first_prefers_view_first_past_frozen_band() {
 #[test]
 fn slot_at_finds_frozen_then_scroll_then_misses() {
     let frozen = vec![
-        ColSlot { col: 1, left: 0, width: 50 },
-        ColSlot { col: 2, left: 50, width: 50 },
+        ColSlot {
+            col: 1,
+            left: 0,
+            width: 50,
+        },
+        ColSlot {
+            col: 2,
+            left: 50,
+            width: 50,
+        },
     ];
     // Scroll band starts at col 7 (cols 3..=6 scrolled off-screen).
     let scroll = vec![
-        ColSlot { col: 7, left: 100, width: 50 },
-        ColSlot { col: 8, left: 150, width: 50 },
-        ColSlot { col: 9, left: 200, width: 50 },
+        ColSlot {
+            col: 7,
+            left: 100,
+            width: 50,
+        },
+        ColSlot {
+            col: 8,
+            left: 150,
+            width: 50,
+        },
+        ColSlot {
+            col: 9,
+            left: 200,
+            width: 50,
+        },
     ];
 
     assert_eq!(slot_at(&frozen, &scroll, 1).map(|s| s.col), Some(1));
@@ -90,7 +114,10 @@ fn slot_at_finds_frozen_then_scroll_then_misses() {
 
     // Past the frozen band but before the scroll band's first id — falls
     // into the gap, returns None.
-    assert!(slot_at(&frozen, &scroll, 3).is_none(), "scrolled-off ids are not addressable");
+    assert!(
+        slot_at(&frozen, &scroll, 3).is_none(),
+        "scrolled-off ids are not addressable"
+    );
     // Past the scroll band's tail.
     assert!(slot_at(&frozen, &scroll, 99).is_none());
 }
@@ -98,13 +125,24 @@ fn slot_at_finds_frozen_then_scroll_then_misses() {
 #[test]
 fn slot_at_frozen_only_works_with_empty_scroll() {
     let frozen = vec![
-        RowSlot { row: 1, top: 0, height: 20 },
-        RowSlot { row: 2, top: 20, height: 20 },
+        RowSlot {
+            row: 1,
+            top: 0,
+            height: 20,
+        },
+        RowSlot {
+            row: 2,
+            top: 20,
+            height: 20,
+        },
     ];
     let scroll: Vec<RowSlot> = Vec::new();
     assert_eq!(slot_at(&frozen, &scroll, 1).map(|s| s.row), Some(1));
     assert_eq!(slot_at(&frozen, &scroll, 2).map(|s| s.row), Some(2));
-    assert!(slot_at(&frozen, &scroll, 3).is_none(), "no scroll band → past-frozen returns None");
+    assert!(
+        slot_at(&frozen, &scroll, 3).is_none(),
+        "no scroll band → past-frozen returns None"
+    );
 }
 
 #[test]
@@ -117,9 +155,21 @@ fn top_id_and_last_visible_id_fall_back_to_one_when_empty() {
 #[test]
 fn top_id_and_last_visible_id_read_scroll_band_when_populated() {
     let scroll = vec![
-        RowSlot { row: 10, top: 0, height: 20 },
-        RowSlot { row: 11, top: 20, height: 20 },
-        RowSlot { row: 12, top: 40, height: 20 },
+        RowSlot {
+            row: 10,
+            top: 0,
+            height: 20,
+        },
+        RowSlot {
+            row: 11,
+            top: 20,
+            height: 20,
+        },
+        RowSlot {
+            row: 12,
+            top: 40,
+            height: 20,
+        },
     ];
     assert_eq!(top_id(&scroll), 10);
     assert_eq!(last_visible_id(&scroll), 12);
@@ -129,19 +179,45 @@ fn top_id_and_last_visible_id_read_scroll_band_when_populated() {
 fn pixel_to_id_hits_inside_band_and_misses_at_end_edge() {
     // Slot bounds are [start, end) — half-open by the strict-less-than
     // check in pixel_to_id. The trailing pixel belongs to the NEXT slot.
-    let frozen = vec![ColSlot { col: 1, left: 0, width: 50 }];
+    let frozen = vec![ColSlot {
+        col: 1,
+        left: 0,
+        width: 50,
+    }];
     let scroll = vec![
-        ColSlot { col: 2, left: 50, width: 50 },
-        ColSlot { col: 3, left: 100, width: 50 },
+        ColSlot {
+            col: 2,
+            left: 50,
+            width: 50,
+        },
+        ColSlot {
+            col: 3,
+            left: 100,
+            width: 50,
+        },
     ];
 
-    assert_eq!(pixel_to_id(&frozen, &scroll, 0), Some(1), "leading edge inclusive");
+    assert_eq!(
+        pixel_to_id(&frozen, &scroll, 0),
+        Some(1),
+        "leading edge inclusive"
+    );
     assert_eq!(pixel_to_id(&frozen, &scroll, 49), Some(1));
-    assert_eq!(pixel_to_id(&frozen, &scroll, 50), Some(2), "boundary belongs to the next slot");
+    assert_eq!(
+        pixel_to_id(&frozen, &scroll, 50),
+        Some(2),
+        "boundary belongs to the next slot"
+    );
     assert_eq!(pixel_to_id(&frozen, &scroll, 100), Some(3));
     assert_eq!(pixel_to_id(&frozen, &scroll, 149), Some(3));
-    assert!(pixel_to_id(&frozen, &scroll, 150).is_none(), "past last slot's end");
-    assert!(pixel_to_id(&frozen, &scroll, -1).is_none(), "before first slot");
+    assert!(
+        pixel_to_id(&frozen, &scroll, 150).is_none(),
+        "past last slot's end"
+    );
+    assert!(
+        pixel_to_id(&frozen, &scroll, -1).is_none(),
+        "before first slot"
+    );
 }
 
 #[test]
@@ -156,9 +232,21 @@ fn pixel_to_id_empty_bands_returns_none() {
 fn boundary_at_snaps_within_hit_zone_to_trailing_edge() {
     let frozen: Vec<ColSlot> = Vec::new();
     let scroll = vec![
-        ColSlot { col: 1, left: 0, width: 50 },
-        ColSlot { col: 2, left: 50, width: 50 },
-        ColSlot { col: 3, left: 100, width: 50 },
+        ColSlot {
+            col: 1,
+            left: 0,
+            width: 50,
+        },
+        ColSlot {
+            col: 2,
+            left: 50,
+            width: 50,
+        },
+        ColSlot {
+            col: 3,
+            left: 100,
+            width: 50,
+        },
     ];
 
     // Slot 1 ends at x=50. Hit zone 3 → x ∈ [47, 53] snaps to col 1.
@@ -177,9 +265,21 @@ fn boundary_at_returns_none_in_slot_interior_and_breaks_early() {
     // break fired without relying on internal state.
     let frozen: Vec<ColSlot> = Vec::new();
     let scroll = vec![
-        ColSlot { col: 1, left: 0, width: 100 },
-        ColSlot { col: 2, left: 100, width: 100 },
-        ColSlot { col: 3, left: 200, width: 100 },
+        ColSlot {
+            col: 1,
+            left: 0,
+            width: 100,
+        },
+        ColSlot {
+            col: 2,
+            left: 100,
+            width: 100,
+        },
+        ColSlot {
+            col: 3,
+            left: 200,
+            width: 100,
+        },
     ];
 
     // Pixel mid-slot 1, hit_zone 5 → slot 1's end (100) > 50 + 5, so the
@@ -197,10 +297,22 @@ fn boundary_at_empty_bands_returns_none() {
 
 #[test]
 fn boundary_at_walks_frozen_before_scroll() {
-    let frozen = vec![RowSlot { row: 1, top: 0, height: 20 }];
+    let frozen = vec![RowSlot {
+        row: 1,
+        top: 0,
+        height: 20,
+    }];
     let scroll = vec![
-        RowSlot { row: 5, top: 20, height: 20 },
-        RowSlot { row: 6, top: 40, height: 20 },
+        RowSlot {
+            row: 5,
+            top: 20,
+            height: 20,
+        },
+        RowSlot {
+            row: 6,
+            top: 40,
+            height: 20,
+        },
     ];
     // Frozen slot 1 ends at y=20 → snaps to row 1.
     assert_eq!(boundary_at(&frozen, &scroll, 20, 2), Some(1));

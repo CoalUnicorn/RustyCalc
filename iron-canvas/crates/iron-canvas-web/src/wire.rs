@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use iron_canvas_core::{
-    geometry::CanvasSize, AutofillTarget, CanvasTheme, Corner, FormulaRef, FormulaRefKind, HitTest,
-    RCRange, RefZone, RenderOverlays, ResizeTarget, SheetArea, Side, ThemeVariables,
+    AutofillTarget, CanvasTheme, Corner, FormulaRef, FormulaRefKind, HitTest, RCRange, RefZone,
+    RenderOverlays, ResizeTarget, SheetArea, Side, ThemeVariables, geometry::CanvasSize,
 };
 
 #[derive(Serialize)]

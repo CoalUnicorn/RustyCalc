@@ -214,7 +214,11 @@ impl Painter for SvgPainter {
         let _ = write!(
             self.defs.borrow_mut(),
             "<clipPath id=\"c{}\"><rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\"/></clipPath>",
-            id, x, y, w, h
+            id,
+            x,
+            y,
+            w,
+            h
         );
         let _ = write!(self.body.borrow_mut(), "<g clip-path=\"url(#c{})\">", id);
         self.clip_depth.set(self.clip_depth.get() + 1);

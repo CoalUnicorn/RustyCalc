@@ -14,13 +14,13 @@ use std::cell::Cell;
 
 use ironcalc_base::types::{CellType, Style};
 use serde::Deserialize;
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
-use crate::types::coord::RCRange;
-use crate::wasm::diag::console_warn;
 use crate::CanvasModel;
 use crate::CanvasView;
+use crate::types::coord::RCRange;
+use crate::wasm::diag::console_warn;
 
 #[wasm_bindgen]
 extern "C" {

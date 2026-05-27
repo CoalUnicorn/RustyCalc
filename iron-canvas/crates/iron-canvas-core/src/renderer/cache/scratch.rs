@@ -9,8 +9,8 @@
 
 use std::cell::{Cell, RefCell};
 
-use super::super::cell::text::TextLine;
 use super::super::cell::CellPaint;
+use super::super::cell::text::TextLine;
 
 pub struct FrameCache {
     /// Scratch buffer parking each pane's resolved `CellPaint`s during the

@@ -345,9 +345,11 @@ fn resize_handle_at_off_strip_is_none() {
     let m = TestModel::new();
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
     // Inside cell grid -> no resize handle
-    assert!(frame
-        .resize_handle_at(HEADER_COL_WIDTH + 50, HEADER_ROW_HEIGHT + 50, 4)
-        .is_none());
+    assert!(
+        frame
+            .resize_handle_at(HEADER_COL_WIDTH + 50, HEADER_ROW_HEIGHT + 50, 4)
+            .is_none()
+    );
 }
 
 #[test]

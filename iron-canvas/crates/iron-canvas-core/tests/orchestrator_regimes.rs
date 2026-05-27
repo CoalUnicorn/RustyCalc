@@ -22,7 +22,7 @@ use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
 
 use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
-use iron_canvas_recorder::{replay, DrawOp, MemSurface, RecorderPainter, RecordingSurface};
+use iron_canvas_recorder::{DrawOp, MemSurface, RecorderPainter, RecordingSurface, replay};
 
 use common::TestModel;
 
@@ -315,16 +315,12 @@ fn set_model_drops_last_frame_and_forces_fresh() {
 //   2. The captured per-frame op streams round-trip through serde +
 //      replay() byte-equal against the originals.
 
-fn build_rec(
-    model: Rc<TestModel>,
-) -> Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>> {
+fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>> {
     let grid = RecordingSurface::new(MemSurface::new());
     let overlay = RecordingSurface::new(MemSurface::new());
     grid.enable_recording();
     overlay.enable_recording();
-    let mut orch = Orchestrator::<RecordingSurface<MemSurface>, Rc<TestModel>>::new(
-        grid, overlay,
-    );
+    let mut orch = Orchestrator::<RecordingSurface<MemSurface>, Rc<TestModel>>::new(grid, overlay);
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
     orch.set_model(model);
     orch
@@ -340,7 +336,12 @@ fn paint_and_capture(
     orch.paint_if_dirty();
     let grid_ops = orch.grid_surface().end_frame();
     let overlay_ops = orch.overlay_surface().end_frame();
-    (grid_ops, overlay_ops, orch.last_regime(), orch.last_signals().bits())
+    (
+        grid_ops,
+        overlay_ops,
+        orch.last_regime(),
+        orch.last_signals().bits(),
+    )
 }
 
 /// `replay()` prepends one `DrawOp::InvalidateCache` to keep the sink's
@@ -426,10 +427,7 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     let mut orch = build_rec(Rc::clone(&stub));
 
     let mut frames: Vec<Frame> = Vec::new();
-    let mut push = |orch: &mut Orchestrator<
-        RecordingSurface<MemSurface>,
-        Rc<TestModel>,
-    >,
+    let mut push = |orch: &mut Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>>,
                     t_ms: u64| {
         let (grid_ops, overlay_ops, regime, signals) = paint_and_capture(orch);
         // Skip idle frames so the recording matches the production

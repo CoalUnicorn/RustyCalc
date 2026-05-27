@@ -6,11 +6,11 @@
 
 mod common;
 
+use iron_canvas_core::RCRange;
 use iron_canvas_core::chrome::{Chrome, FramePath};
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::RCRange;
 
-use common::{canvas_default, TestModel};
+use common::{TestModel, canvas_default};
 
 fn fresh(model: &TestModel) -> Chrome {
     let theme = CanvasTheme::light();

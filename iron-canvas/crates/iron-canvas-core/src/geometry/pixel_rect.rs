@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{geometry::prim::Point, CanvasSize};
+use crate::{CanvasSize, geometry::prim::Point};
 
 /// A rectangle in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]

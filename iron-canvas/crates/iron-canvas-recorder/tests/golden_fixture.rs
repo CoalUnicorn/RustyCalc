@@ -22,14 +22,14 @@
 
 use std::path::Path;
 
+use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{GroupClass, TextAlign, TextBaseline};
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::PaintRegimeTag;
 
-use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
 use iron_canvas_recorder::DrawOp;
+use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
 
 const FIXTURE_PATH: &str = "tests/fixtures/fresh_paint.icr";
 const OVERLAY_FIXTURE_PATH: &str = "tests/fixtures/overlay_paint.icr";
@@ -186,7 +186,8 @@ fn golden_fixture_round_trip_matches_disk() {
         )
     });
     assert_eq!(
-        on_disk, bytes,
+        on_disk,
+        bytes,
         "fixture drift detected at {}; if the format change is intentional, \
          regenerate with `ICR_REGEN=1 cargo test -p iron-canvas-recorder \
          --test golden_fixture` and commit the new file.",
@@ -327,7 +328,8 @@ fn overlay_paint_round_trip_matches_disk() {
         )
     });
     assert_eq!(
-        on_disk, bytes,
+        on_disk,
+        bytes,
         "overlay fixture drift at {}; regenerate with `ICR_REGEN=1 cargo test \
          -p iron-canvas-recorder --test golden_fixture` if intentional.",
         fixture_path.display()

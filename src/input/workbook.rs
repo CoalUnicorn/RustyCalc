@@ -67,8 +67,11 @@ pub fn execute_workbook(
             match storage::load(&target_uuid) {
                 Some(new_model) => activate(target_uuid, new_model, model, state),
                 None => {
-                    state.status.set(Some(StatusMessage::Error("Cannot open workbook — it was saved with an older version. \
-                         Your data is still in browser storage but needs migration.".to_string())));
+                    state.status.set(Some(StatusMessage::Error(
+                        "Cannot open workbook — it was saved with an older version. \
+                         Your data is still in browser storage but needs migration."
+                            .to_string(),
+                    )));
                 }
             }
         }

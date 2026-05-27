@@ -440,7 +440,16 @@ impl RefNode {
         } else {
             abs_col - editing.column
         };
-        Self::cell(sheet_index, sheet_name, row, column, Absolute { row: abs_r_flag, column: abs_c_flag })
+        Self::cell(
+            sheet_index,
+            sheet_name,
+            row,
+            column,
+            Absolute {
+                row: abs_r_flag,
+                column: abs_c_flag,
+            },
+        )
     }
 }
 

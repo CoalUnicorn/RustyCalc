@@ -5,9 +5,9 @@
 //! frame at or before the target — cumulative on the grid surface, per-frame
 //! on the overlay surface. Owned by `IronCanvas`; the orchestrator is unaware.
 
+use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::{BlitPainter, Painter};
-use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_recorder::recording::{Frame, Recording};
 use iron_canvas_recorder::replay;
 
@@ -18,7 +18,10 @@ use iron_canvas_recorder::replay;
 /// `frames[anchor_frame_idx].t_ms + (now - anchor_ms)`.
 pub enum PlayClock {
     Paused,
-    Playing { anchor_ms: f64, anchor_frame_idx: u32 },
+    Playing {
+        anchor_ms: f64,
+        anchor_frame_idx: u32,
+    },
 }
 
 pub struct PlaybackSession {

@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use iron_canvas_core::RenderOverlays;
 use iron_canvas_core::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
 use iron_canvas_core::geometry::prim::Axis;
-use iron_canvas_core::RenderOverlays;
 
 #[test]
 fn row_header_rect_pins_x_to_left_strip() {

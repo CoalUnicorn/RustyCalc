@@ -8,7 +8,7 @@ mod common;
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegionMask};
 use iron_canvas_core::theme::CanvasTheme;
 
-use common::{canvas_default, TestModel};
+use common::{TestModel, canvas_default};
 
 #[test]
 fn next_frame_emits_fresh_when_no_prev() {

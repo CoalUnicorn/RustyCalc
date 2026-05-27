@@ -8,30 +8,30 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+use crate::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::wasm::JsBackedModel;
 use crate::web_surface::WebSurface;
-use crate::RenderOverlays;
+use iron_canvas_core::CanvasModel;
+use iron_canvas_core::Orchestrator;
+use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
-use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
-use iron_canvas_core::CanvasModel;
-use iron_canvas_core::Orchestrator;
+use iron_canvas_export::SvgSurface;
 #[cfg(feature = "pdf")]
 use iron_canvas_export::pdf::PdfSurface;
-use iron_canvas_export::SvgSurface;
 
 #[cfg(feature = "dev-tools")]
-use crate::playback::{replay_through, PlayClock, PlaybackSession};
+use crate::playback::{PlayClock, PlaybackSession, replay_through};
 #[cfg(feature = "dev-tools")]
 use iron_canvas_core::PaintRegimeTag;
 #[cfg(feature = "dev-tools")]
-use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
-#[cfg(feature = "dev-tools")]
 use iron_canvas_recorder::DrawOp;
+#[cfg(feature = "dev-tools")]
+use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
 #[cfg(feature = "dev-tools")]
 use iron_canvas_recorder::{RecordingFilter, RecordingSurface};
 
@@ -222,9 +222,7 @@ impl IronCanvas {
                 return Err(JsError::new("recording already active"));
             }
             CanvasMode::Playback(_) => {
-                return Err(JsError::new(
-                    "cannot start a recording during playback",
-                ));
+                return Err(JsError::new("cannot start a recording during playback"));
             }
         }
         // `undefined` / `null` → default filter (record everything).

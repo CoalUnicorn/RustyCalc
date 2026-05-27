@@ -5,8 +5,8 @@
 //! row/column); every pixel↔cell query reads them directly, no prefix-sum
 //! decoding.
 
-use crate::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
 use crate::CanvasModel;
+use crate::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RowSlot {

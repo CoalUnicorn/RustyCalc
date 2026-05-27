@@ -182,19 +182,20 @@ impl<P: Painter> RendererCore<P> {
             return;
         };
         if let Some(prev_range) = pane_buf.range.get()
-            && let Some(axis) = infer_shift_axis(prev_range, range) {
-                self.render_pane_strip(
-                    model,
-                    pane,
-                    range,
-                    axis,
-                    prev_range,
-                    pane_idx,
-                    frame,
-                    repaint_strip,
-                );
-                return;
-            }
+            && let Some(axis) = infer_shift_axis(prev_range, range)
+        {
+            self.render_pane_strip(
+                model,
+                pane,
+                range,
+                axis,
+                prev_range,
+                pane_idx,
+                frame,
+                repaint_strip,
+            );
+            return;
+        }
         self.render_pane(model, pane, frame);
     }
 

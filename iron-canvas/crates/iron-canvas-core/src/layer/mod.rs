@@ -12,15 +12,15 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::CanvasModel;
 use crate::chrome::{BlitPlan, Chrome, PaneRegionMask};
-use crate::decoration::{selection::SelectionLayer, Layer};
+use crate::decoration::{Layer, selection::SelectionLayer};
+use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
-use crate::geometry::CanvasSize;
 use crate::painter::{BlitPainter, GroupClass, PaintColor, Painter};
 use crate::renderer::{GridRenderer, LayerOps, OverlayRenderer};
 use crate::signal::GridSignals;
-use crate::CanvasModel;
 
 /// Drawing target abstraction. Production wasm holds one Surface per
 /// `<canvas>` (grid + overlay); a Cairo backend would hold one per

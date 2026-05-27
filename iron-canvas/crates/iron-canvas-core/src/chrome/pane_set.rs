@@ -7,12 +7,12 @@
 //! sibling files (`blit_rebuild.rs`, `recycled_slots.rs`) — this module
 //! holds only the pure-axis surface.
 
+use crate::CanvasModel;
 use crate::geometry::constants::{FROZEN_SEP, HEADER_COL_WIDTH, LAST_COLUMN, LAST_ROW};
 use crate::geometry::slot::{
-    boundary_at, col_width, fill_axis, last_visible_id, pixel_to_id, row_height, scroll_first,
-    slot_at, top_id, AxisSlot, ColSlot, RowSlot,
+    AxisSlot, ColSlot, RowSlot, boundary_at, col_width, fill_axis, last_visible_id, pixel_to_id,
+    row_height, scroll_first, slot_at, top_id,
 };
-use crate::CanvasModel;
 
 use super::recycled_slots::RecycledSlots;
 

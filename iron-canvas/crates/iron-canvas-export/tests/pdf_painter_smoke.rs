@@ -61,7 +61,10 @@ fn rect_fill_emits_rgb_then_re_then_f() {
     p.rect_fill(rect(10, 20, 30, 40), PaintColor::Static("#ff0000"));
     let s = snapshot(&p);
     assert!(s.contains("1.000 0.000 0.000 rg"), "missing red rg: {s:?}");
-    assert!(s.contains("10.000 20.000 30.000 40.000 re"), "missing re: {s:?}");
+    assert!(
+        s.contains("10.000 20.000 30.000 40.000 re"),
+        "missing re: {s:?}"
+    );
     assert!(s.contains("\nf\n"), "missing fill op: {s:?}");
 }
 
@@ -70,9 +73,15 @@ fn rect_stroke_emits_rgb_width_re_S() {
     let p = PdfPainter::new(W, H);
     p.rect_stroke(rect(5, 5, 10, 10), PaintColor::Static("#00ff00"), 2.5);
     let s = snapshot(&p);
-    assert!(s.contains("0.000 1.000 0.000 RG"), "missing green RG: {s:?}");
+    assert!(
+        s.contains("0.000 1.000 0.000 RG"),
+        "missing green RG: {s:?}"
+    );
     assert!(s.contains("2.500 w"), "missing line width: {s:?}");
-    assert!(s.contains("5.000 5.000 10.000 10.000 re"), "missing re: {s:?}");
+    assert!(
+        s.contains("5.000 5.000 10.000 10.000 re"),
+        "missing re: {s:?}"
+    );
     assert!(s.contains("\nS\n"), "missing stroke op: {s:?}");
 }
 
@@ -91,7 +100,10 @@ fn clear_rect_fills_white() {
     let p = PdfPainter::new(W, H);
     p.clear_rect(rect(0, 0, W as i32, H as i32));
     let s = snapshot(&p);
-    assert!(s.contains("1.000 1.000 1.000 rg"), "clear_rect must use white: {s:?}");
+    assert!(
+        s.contains("1.000 1.000 1.000 rg"),
+        "clear_rect must use white: {s:?}"
+    );
     assert!(s.contains("0.000 0.000 100.000 50.000 re"));
     assert!(s.contains("\nf\n"));
 }
@@ -189,7 +201,10 @@ fn fill_text_emits_BT_Tf_color_Tm_Tj_ET() {
     let s = snapshot(&p);
     assert!(s.contains("BT\n"), "missing text-object start: {s:?}");
     assert!(s.contains("/F1 14.000 Tf"), "missing font select: {s:?}");
-    assert!(s.contains("1 0 0 -1 20.000 15.000 Tm"), "missing text matrix: {s:?}");
+    assert!(
+        s.contains("1 0 0 -1 20.000 15.000 Tm"),
+        "missing text matrix: {s:?}"
+    );
     assert!(s.contains("(Hi) Tj"), "missing text payload: {s:?}");
     assert!(s.contains("ET\n"), "missing text-object end: {s:?}");
 }
@@ -208,7 +223,10 @@ fn fill_text_align_center_shifts_x_by_half_width() {
         TextBaseline::Alphabetic,
     );
     let s = snapshot(&p);
-    assert!(s.contains("1 0 0 -1 80.000 20.000 Tm"), "centre alignment off: {s:?}");
+    assert!(
+        s.contains("1 0 0 -1 80.000 20.000 Tm"),
+        "centre alignment off: {s:?}"
+    );
 }
 
 #[test]
@@ -224,7 +242,10 @@ fn fill_text_align_end_shifts_x_by_full_width() {
         TextBaseline::Alphabetic,
     );
     let s = snapshot(&p);
-    assert!(s.contains("1 0 0 -1 60.000 20.000 Tm"), "end alignment off: {s:?}");
+    assert!(
+        s.contains("1 0 0 -1 60.000 20.000 Tm"),
+        "end alignment off: {s:?}"
+    );
 }
 
 #[test]
@@ -317,10 +338,8 @@ fn finish_round_trips_through_pdf_header_and_eof() {
 #[test]
 fn finish_includes_painter_output_after_ctm() {
     let s = PdfSurface::new(W, H);
-    s.painter().rect_fill(
-        rect(5, 5, 10, 10),
-        PaintColor::Static("#abcdef"),
-    );
+    s.painter()
+        .rect_fill(rect(5, 5, 10, 10), PaintColor::Static("#abcdef"));
     let bytes = s.finish();
     // The fill op must appear AFTER the CTM in the stream.
     let cm_needle = format!("1 0 0 -1 0 {H} cm");

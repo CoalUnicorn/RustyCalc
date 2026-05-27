@@ -12,21 +12,23 @@
 
 mod common;
 
-use iron_canvas_core::chrome::{measure_row_header_width, Chrome, FramePath};
+use iron_canvas_core::chrome::{Chrome, FramePath, measure_row_header_width};
 use iron_canvas_core::geometry::constants::{CELL_AREA_INSET, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{canvas_default, TestModel};
+use common::{TestModel, canvas_default};
 
 fn at_top() -> TestModel {
     TestModel::synthetic_grid()
 }
 
 fn scrolled_to(top_row: i32) -> TestModel {
-    TestModel::synthetic_grid().with_top_row(top_row).with_active(top_row, 1)
+    TestModel::synthetic_grid()
+        .with_top_row(top_row)
+        .with_active(top_row, 1)
 }
 
 fn drive_render_grid(model: &TestModel, check: impl FnOnce(&Chrome, &[DrawOp])) {
@@ -57,8 +59,16 @@ fn render_grid_brackets_grid_group_balanced() {
         };
         assert_eq!(count(GroupClass::Grid), 1, "one Grid bracket expected");
         assert_eq!(count(GroupClass::Cells), 1, "one Cells bracket expected");
-        assert_eq!(count(GroupClass::FrozenSep), 1, "one FrozenSep bracket expected");
-        assert_eq!(count(GroupClass::Headers), 1, "one Headers bracket expected");
+        assert_eq!(
+            count(GroupClass::FrozenSep),
+            1,
+            "one FrozenSep bracket expected"
+        );
+        assert_eq!(
+            count(GroupClass::Headers),
+            1,
+            "one Headers bracket expected"
+        );
         assert_eq!(count(GroupClass::Corner), 1, "one Corner bracket expected");
 
         let begins = ops

@@ -188,9 +188,10 @@ pub fn Worksheet() -> impl IntoView {
         // re-analyzed mid-drag and refs shrank, the patch is silently
         // skipped.
         if let Some(o) = state.dragged_ref_override.get()
-            && let Some(r) = formula_refs.get_mut(o.idx) {
-                r.sheet_area = o.range;
-            }
+            && let Some(r) = formula_refs.get_mut(o.idx)
+        {
+            r.sheet_area = o.range;
+        }
 
         // Point-mode range for overlay painting. RefNode stores relative deltas,
         // so resolution needs the editing cell's address as anchor.

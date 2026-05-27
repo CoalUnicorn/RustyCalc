@@ -4,11 +4,11 @@
 
 mod common;
 
+use iron_canvas_core::CanvasSize;
 use iron_canvas_core::chrome::{Chrome, FramePath, FrameValidity};
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::CanvasSize;
 
-use common::{canvas_default, TestModel};
+use common::{TestModel, canvas_default};
 
 fn fresh(model: &TestModel) -> Chrome {
     let theme = CanvasTheme::light();

@@ -8,14 +8,14 @@
 
 mod common;
 
+use iron_canvas_core::CanvasModel;
 use iron_canvas_core::chrome::{ActiveCellSnapshot, Chrome, FramePath};
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::CanvasModel;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{canvas_default as canvas, TestModel};
+use common::{TestModel, canvas_default as canvas};
 
 /// Capture an `ActiveCellSnapshot` from the model's view. After B2
 /// `screen_for_blit` takes the snapshot as a parameter; tests source it

@@ -324,7 +324,10 @@ pub fn analyze_formula(
                         sheet_name,
                         row,
                         column,
-                        Absolute { row: absolute_row, column: absolute_column },
+                        Absolute {
+                            row: absolute_row,
+                            column: absolute_column,
+                        },
                     )),
                     Node::RangeKind {
                         sheet_name,
@@ -342,10 +345,16 @@ pub fn analyze_formula(
                         sheet_name,
                         row1,
                         column1,
-                        Absolute { row: absolute_row1, column: absolute_column1 },
+                        Absolute {
+                            row: absolute_row1,
+                            column: absolute_column1,
+                        },
                         row2,
                         column2,
-                        Absolute { row: absolute_row2, column: absolute_column2 },
+                        Absolute {
+                            row: absolute_row2,
+                            column: absolute_column2,
+                        },
                     )),
                     _ => None,
                 };
@@ -433,7 +442,10 @@ fn ast_leaves(
             sheet_name.clone(),
             *row,
             *column,
-            Absolute { row: *absolute_row, column: *absolute_column },
+            Absolute {
+                row: *absolute_row,
+                column: *absolute_column,
+            },
         ))),
         Node::RangeKind {
             sheet_name,
@@ -451,10 +463,16 @@ fn ast_leaves(
             sheet_name.clone(),
             *row1,
             *column1,
-            Absolute { row: *absolute_row1, column: *absolute_column1 },
+            Absolute {
+                row: *absolute_row1,
+                column: *absolute_column1,
+            },
             *row2,
             *column2,
-            Absolute { row: *absolute_row2, column: *absolute_column2 },
+            Absolute {
+                row: *absolute_row2,
+                column: *absolute_column2,
+            },
         ))),
         Node::WrongReferenceKind { .. } | Node::WrongRangeKind { .. } => {
             ref_out.push(RefLeaf::Unresolved)

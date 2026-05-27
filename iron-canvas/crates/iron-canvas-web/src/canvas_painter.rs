@@ -8,7 +8,7 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use web_sys::{js_sys, CanvasRenderingContext2d};
+use web_sys::{CanvasRenderingContext2d, js_sys};
 
 use crate::wasm::diag::console_warn;
 use iron_canvas_core::geometry::{

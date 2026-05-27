@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect},
     RCRange,
+    geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect},
 };
 
 /// A point in logical (CSS) pixels on the canvas.

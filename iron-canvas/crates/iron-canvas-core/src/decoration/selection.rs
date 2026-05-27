@@ -3,12 +3,12 @@
 //! active-cell repaint, stroke + handle (over). The orchestrator drives
 //! the phases by name.
 
+use crate::CanvasModel;
 use crate::chrome::{ActiveCellSnapshot, Chrome};
 use crate::decoration::Layer;
 use crate::geometry::constants::{AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH};
 use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::types::coord::RCRange;
-use crate::CanvasModel;
 
 #[derive(Default)]
 pub struct SelectionLayer {

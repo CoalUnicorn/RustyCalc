@@ -1,10 +1,10 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
+use iron_canvas_core::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::geometry::utils::col_name;
-use iron_canvas_core::CanvasSize;
 
 #[test]
 fn backing_size_scales_by_dpr() {

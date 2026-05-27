@@ -2,8 +2,8 @@
 
 use std::rc::Rc;
 
-use ironcalc_base::types::{CellType, Style};
 use ironcalc_base::UserModel;
+use ironcalc_base::types::{CellType, Style};
 
 use crate::types::coord::RCRange;
 

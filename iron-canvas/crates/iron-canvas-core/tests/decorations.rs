@@ -14,7 +14,7 @@ use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::types::coord::{RCRange, SheetArea};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{canvas_default, TestModel};
+use common::{TestModel, canvas_default};
 
 fn fresh_frame(model: &TestModel) -> Chrome {
     let theme = CanvasTheme::light();

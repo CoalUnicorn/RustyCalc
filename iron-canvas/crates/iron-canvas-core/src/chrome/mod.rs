@@ -30,7 +30,7 @@ mod recycled_slots;
 pub use blit::{BlitPlan, FramePath};
 pub use kind::FrameKindTag;
 pub use pane_region::{PaneRegion, PaneRegionMask};
-pub use pane_set::{measure_row_header_width, PaneSet};
+pub use pane_set::{PaneSet, measure_row_header_width};
 pub use recycled_slots::RecycledSlots;
 
 /// Per-process digest of a formatted cell value. `DefaultHasher` is

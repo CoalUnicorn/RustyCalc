@@ -58,16 +58,16 @@ pub mod frame;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use crate::CanvasModel;
 pub use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome};
 use crate::geometry::prim::Axis;
 use crate::renderer::cache::{FrameCache, PaneCache};
-use crate::CanvasModel;
 pub use cache::ColNameIntern;
 pub use cache::ColorIntern;
 pub use cache::FontIntern;
 
-pub use self::cell::text::{layout_into, TextLine};
+pub use self::cell::text::{TextLine, layout_into};
 
 use crate::painter::{BlitPainter, GroupClass, Painter};
 

@@ -48,7 +48,11 @@ fn parse_hex(rest: &str) -> Option<Rgb> {
             let r = u8::from_str_radix(rest.get(0..2)?, 16).ok()?;
             let g = u8::from_str_radix(rest.get(2..4)?, 16).ok()?;
             let b = u8::from_str_radix(rest.get(4..6)?, 16).ok()?;
-            Some((f64::from(r) / 255.0, f64::from(g) / 255.0, f64::from(b) / 255.0))
+            Some((
+                f64::from(r) / 255.0,
+                f64::from(g) / 255.0,
+                f64::from(b) / 255.0,
+            ))
         }
         _ => None,
     }

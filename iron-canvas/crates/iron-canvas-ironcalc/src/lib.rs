@@ -14,12 +14,9 @@
 //! 2. The `impl CanvasModel for UserModel` in `iron-canvas-core` is removed.
 //! 3. `iron-canvas-core` drops its `ironcalc_base` dependency.
 
-use iron_canvas_core::{
-    CanvasModel, CanvasView,
-    types::coord::RCRange,
-};
-use ironcalc_base::types::{CellType, Style};
+use iron_canvas_core::{CanvasModel, CanvasView, types::coord::RCRange};
 use ironcalc_base::UserModel;
+use ironcalc_base::types::{CellType, Style};
 
 /// Newtype wrapper that implements `CanvasModel` for `UserModel`.
 ///

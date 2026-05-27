@@ -7,7 +7,7 @@
 //! the latter only carries pure-axis geometry.
 
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
-use crate::geometry::slot::{col_width, fill_axis, row_height, AxisSlot, ColSlot, RowSlot};
+use crate::geometry::slot::{AxisSlot, ColSlot, RowSlot, col_width, fill_axis, row_height};
 use crate::{CanvasModel, CanvasSize};
 
 use super::pane_set::PaneSet;
