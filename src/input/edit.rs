@@ -6,7 +6,9 @@ use crate::coord::CellAddress;
 use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::formula_analysis::FormulaAnalysis;
-use crate::model::{mutate, try_mutate, ArrowKey, EvaluationMode, FormulaAnalyzer, SheetQuery, Navigator};
+use crate::model::{
+    ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetQuery, mutate, try_mutate,
+};
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
 

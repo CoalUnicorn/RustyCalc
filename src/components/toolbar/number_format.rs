@@ -7,7 +7,7 @@
 use leptos::prelude::*;
 use leptos_use::on_click_outside;
 
-use crate::input::keyboard::{execute, SpreadsheetAction};
+use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::model::SheetQuery;
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::refocus_workbook;

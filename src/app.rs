@@ -5,8 +5,7 @@ use crate::components::workbook::Workbook;
 use base64::Engine;
 use gloo_storage::Storage;
 use leptos::prelude::*;
-use leptos_use::{use_debounce_fn_with_options, DebounceOptions};
-
+use leptos_use::{DebounceOptions, use_debounce_fn_with_options};
 
 use crate::app_state::AppState;
 use crate::events::EventBus;

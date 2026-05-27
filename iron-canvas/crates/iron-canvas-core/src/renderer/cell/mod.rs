@@ -24,6 +24,7 @@ use ironcalc_base::types::CellType;
 
 use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
+use crate::CanvasModel;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
@@ -31,7 +32,6 @@ use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
-use crate::CanvasModel;
 
 impl<P: Painter> RendererCore<P> {
     /// Walk one frozen-pane quadrant in four deferred passes:

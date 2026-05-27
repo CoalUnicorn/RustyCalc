@@ -20,9 +20,9 @@ use leptos::prelude::*;
 
 use crate::coord::{CellAddress, TextRef};
 use crate::events::{ContentEvent, SpreadsheetEvent};
-use crate::input::formula_analysis::{analyze_formula, FormulaAnalysis};
-use crate::model::{try_mutate, EvaluationMode, SheetQuery};
+use crate::input::formula_analysis::{FormulaAnalysis, analyze_formula};
 use crate::model::frontend_model::DefinedNameManager;
+use crate::model::{EvaluationMode, SheetQuery, try_mutate};
 use crate::state::{EditingDefinedName, ModelStore, StatusMessage, WorkbookState};
 
 use super::formula_input::FormulaInput;

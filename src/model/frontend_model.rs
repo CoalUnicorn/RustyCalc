@@ -1,5 +1,5 @@
 use ironcalc_base::{
-    expressions::types::Area, types::HorizontalAlignment, worksheet::NavigationDirection, UserModel,
+    UserModel, expressions::types::Area, types::HorizontalAlignment, worksheet::NavigationDirection,
 };
 
 #[cfg(feature = "dev-tools")]
@@ -10,7 +10,7 @@ use crate::model::frontend_types::*;
 use crate::state::ModelStore;
 use crate::{
     coord::{CellAddress, CellArea, DefinedName},
-    input::formula_analysis::{analyze_formula, FormulaAnalysis},
+    input::formula_analysis::{FormulaAnalysis, analyze_formula},
 };
 use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 

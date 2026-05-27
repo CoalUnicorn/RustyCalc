@@ -12,7 +12,7 @@ use leptos_use::{ColorMode, UseColorModeReturn};
 use crate::events::*;
 use crate::perf::PerfTimings;
 use crate::state::Split;
-use crate::theme::{use_rusty_calc_theme, Theme};
+use crate::theme::{Theme, use_rusty_calc_theme};
 
 /// One-shot command from the PerfPanel record button to the Worksheet
 /// dispatch Effect. The Effect drains it (`set(None)`) after handing the

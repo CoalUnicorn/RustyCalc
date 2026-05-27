@@ -11,9 +11,9 @@ use crate::input::error::EditError;
 use crate::input::{
     edit::EditAction,
     formula_input::*,
-    keyboard::{classify_key, execute, KeyMod, SpreadsheetAction},
+    keyboard::{KeyMod, SpreadsheetAction, classify_key, execute},
 };
-use crate::model::{mutate, try_mutate, AppClipboard, EvaluationMode, PasteMode};
+use crate::model::{AppClipboard, EvaluationMode, PasteMode, mutate, try_mutate};
 use crate::state::{DragState, EditMode, ModelStore, StatusMessage, WorkbookState};
 
 /// Top-level keyboard router. Clipboard ops and point-mode arrow handling

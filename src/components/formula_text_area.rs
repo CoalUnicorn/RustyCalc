@@ -86,9 +86,8 @@ pub fn FormulaTextArea() -> impl IntoView {
 
     let text_value = move || state.editing_cell.get().map(|e| e.text).unwrap_or_default();
 
-    let overlay_text = Signal::derive(move || {
-        state.editing_cell.get().map(|e| e.text).unwrap_or_default()
-    });
+    let overlay_text =
+        Signal::derive(move || state.editing_cell.get().map(|e| e.text).unwrap_or_default());
     let overlay_refs = Signal::derive(move || {
         state
             .editing_cell

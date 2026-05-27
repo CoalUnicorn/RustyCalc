@@ -531,8 +531,7 @@ pub fn Worksheet() -> impl IntoView {
                         ic.setThemeFromElement(&el);
                     }
                     ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
-                    let (extend_to, point_range, formula_refs) =
-                        reactive_overlay.get_untracked();
+                    let (extend_to, point_range, formula_refs) = reactive_overlay.get_untracked();
                     let clipboard = clipboard_draw.with_value(|opt| {
                         opt.as_ref().map(|acb| SheetRange {
                             sheet: acb.sheet,

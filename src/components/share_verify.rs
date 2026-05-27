@@ -107,8 +107,9 @@ pub fn ShareVerify() -> impl IntoView {
 
     let is_v1 = move || matches!(pending.get(), Some(SharedLoad::PendingV1 { .. }));
 
-    let can_submit_v1 =
-        move || !loading.get() && word.get().trim().chars().count() >= 3 && attempts.get() < MAX_ATTEMPTS;
+    let can_submit_v1 = move || {
+        !loading.get() && word.get().trim().chars().count() >= 3 && attempts.get() < MAX_ATTEMPTS
+    };
     let locked = move || attempts.get() >= MAX_ATTEMPTS;
 
     view! {

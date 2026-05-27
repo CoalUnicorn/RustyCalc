@@ -1,7 +1,7 @@
 use crate::verify;
 use base64::{
-    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
     Engine,
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
 };
 use gloo_storage::{LocalStorage, Storage};
 use ironcalc_base::UserModel;
@@ -45,8 +45,7 @@ impl WorkbookId {
         let mut buf = [0u8; 16];
         // Try CSPRNG first. `window().crypto()` returns Result<Crypto, JsValue>;
         // in private-mode/iframe contexts it may fail — fall back to Math.random().
-        let crypto_ok = web_sys::window()
-            .and_then(|w| w.crypto().ok());
+        let crypto_ok = web_sys::window().and_then(|w| w.crypto().ok());
         if let Some(crypto) = crypto_ok {
             if crypto.get_random_values_with_u8_array(&mut buf).is_ok() {
                 buf[6] = (buf[6] & 0x0f) | 0x40;
@@ -70,11 +69,22 @@ impl fmt::Display for WorkbookId {
         write!(
             f,
             "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            b[0], b[1], b[2], b[3],
-            b[4], b[5],
-            b[6], b[7],
-            b[8], b[9],
-            b[10], b[11], b[12], b[13], b[14], b[15],
+            b[0],
+            b[1],
+            b[2],
+            b[3],
+            b[4],
+            b[5],
+            b[6],
+            b[7],
+            b[8],
+            b[9],
+            b[10],
+            b[11],
+            b[12],
+            b[13],
+            b[14],
+            b[15],
         )
     }
 }
@@ -329,7 +339,8 @@ pub fn load(uuid: &WorkbookId) -> Option<UserModel<'static>> {
     // Check magic header.
     if bytes.len() < 5 || &bytes[..4] != STORAGE_MAGIC {
         web_sys::console::warn_1(
-            &format!("[rustycalc storage] load {uuid}: bad magic — not a RustyCalc workbook").into(),
+            &format!("[rustycalc storage] load {uuid}: bad magic — not a RustyCalc workbook")
+                .into(),
         );
         return None;
     }
@@ -572,9 +583,7 @@ pub fn load_shared_from_url() -> Option<SharedLoad> {
     let bytes = match URL_SAFE_NO_PAD.decode(encoded) {
         Ok(b) => b,
         Err(e) => {
-            web_sys::console::warn_1(
-                &format!("[rustycalc sharing] URL decode failed: {e}").into(),
-            );
+            web_sys::console::warn_1(&format!("[rustycalc sharing] URL decode failed: {e}").into());
             return None;
         }
     };
@@ -598,9 +607,7 @@ pub fn load_shared_from_url() -> Option<SharedLoad> {
             Some(SharedLoad::PendingV1 { hash, bytes })
         }
         None => {
-            web_sys::console::warn_1(
-                &"[rustycalc sharing] unknown share payload version".into(),
-            );
+            web_sys::console::warn_1(&"[rustycalc sharing] unknown share payload version".into());
             None
         }
     }

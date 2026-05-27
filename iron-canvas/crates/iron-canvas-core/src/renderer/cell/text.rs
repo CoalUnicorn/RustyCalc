@@ -55,6 +55,11 @@ pub struct TextPaint {
     pub color: TextColor,
     pub underline: bool,
     pub strike: bool,
+    /// Resolved horizontal alignment — carried through to `paint_text` so
+    /// backends that can't measure glyphs accurately (SVG) can use
+    /// `text-anchor="start"` / `"end"` anchored on cell boundaries instead
+    /// of the `CHAR_WIDTH_FACTOR`-approximated `center_x`.
+    pub h_align: HorizontalAlignment,
     /// True when at least one line overflows horizontally or there are
     /// multiple lines (which can overflow vertically). Resolved here so
     /// `paint_text` can skip `push_clip`/`pop_clip` when the cell can't
@@ -195,6 +200,7 @@ impl TextPaint {
             color: text_color,
             underline,
             strike,
+            h_align,
             needs_clip,
         })
     }
@@ -401,13 +407,28 @@ impl<P: Painter> RendererCore<P> {
             self.painter.push_clip(t.clip);
         }
         for line in lines {
+            let (x, align) = match t.h_align {
+                HorizontalAlignment::Right => {
+                    (f64::from(t.clip.right()) - CELL_PADDING, TextAlign::End)
+                }
+                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => {
+                    (line.center_x, TextAlign::Center)
+                }
+                _ => {
+                    // Left / General / Justify / Distributed / Fill — start-anchored
+                    // on the cell's left edge. No width approximation needed; the
+                    // SVG `text-anchor="start"` renders glyphs at their natural
+                    // width and overflow into adjacent empty cells just works.
+                    (f64::from(t.clip.top_left.x) + CELL_PADDING, TextAlign::Start)
+                }
+            };
             self.painter.fill_text(
                 &line.text,
-                line.center_x,
+                x,
                 line.center_y,
                 font_css,
                 color,
-                TextAlign::Center,
+                align,
                 TextBaseline::Middle,
             );
             let x1 = line.center_x - line.width / 2.0;

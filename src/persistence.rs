@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use gloo_storage::{LocalStorage, Storage};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 /// Pluggable key-value persistence.
 pub trait Persistence {

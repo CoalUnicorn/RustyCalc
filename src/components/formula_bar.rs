@@ -6,7 +6,7 @@ use wasm_bindgen::JsCast;
 use crate::components::formula_overlay::FormulaOverlay;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
-use crate::input::formula_analysis::{analyze_formula, FormulaStatus};
+use crate::input::formula_analysis::{FormulaStatus, analyze_formula};
 use crate::model::SheetQuery;
 use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};

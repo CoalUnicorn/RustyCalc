@@ -84,6 +84,7 @@ pub fn PerfPanel() -> impl IntoView {
                 <button
                     class="pp-record-btn"
                     class:active=move || app.recording_active.get()
+                    disabled=move || app.playback_loaded.get()
                     title="Capture paint-level .icr recording"
                     on:click=on_record_click
                 >

@@ -18,7 +18,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{js_sys, Event, HtmlInputElement};
+use web_sys::{Event, HtmlInputElement, js_sys};
 
 use crate::app_state::{AppState, PlaybackCmd};
 

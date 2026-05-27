@@ -8,10 +8,10 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
 use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
-use crate::state::StatusMessage;
 use crate::components::share_popover::SharePopover;
-use crate::input::workbook::{execute_workbook, WorkbookAction};
+use crate::input::workbook::{WorkbookAction, execute_workbook};
 use crate::input::xlsx_io;
+use crate::state::StatusMessage;
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage;
 use crate::theme::Theme;
@@ -139,7 +139,9 @@ pub fn FileBar() -> impl IntoView {
             match export::save_xlsx_to_writer(m.get_model(), Cursor::new(Vec::new())) {
                 Ok(cursor) => {
                     let bytes = cursor.into_inner();
-                    if let Err(e) = xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()), None) {
+                    if let Err(e) =
+                        xlsx_io::trigger_download(&bytes, &format!("{}.xlsx", m.get_name()), None)
+                    {
                         state.status.set(Some(StatusMessage::Error(e)));
                     }
                 }
@@ -164,7 +166,11 @@ pub fn FileBar() -> impl IntoView {
         let word: Option<String> = {
             let w = verify_word.get();
             let trimmed = w.trim();
-            if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
         };
         let result = model.with_value(|m| storage::encode_for_share_url(m, word.as_deref()));
         match result {

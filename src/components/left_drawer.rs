@@ -11,10 +11,10 @@ use crate::components::context_menu::{
     ContextMenu, ContextMenuButton, ContextMenuItem, ContextMenuSeparator,
 };
 use crate::components::inline_rename::InlineRenameInput;
-use crate::input::workbook::{execute_workbook, WorkbookAction};
+use crate::input::workbook::{WorkbookAction, execute_workbook};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage::{self, WorkbookGroup, WorkbookId, WorkbookMeta};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Entry ready for rendering: uuid, metadata, and whether it's the active workbook.
 struct DrawerEntry {

@@ -7,14 +7,16 @@
 //! closures that delegate here.
 
 use leptos::prelude::*;
-use wasm_bindgen::{closure::Closure, JsCast};
+use wasm_bindgen::{JsCast, closure::Closure};
 
 use crate::coord::{CellAddress, CellArea, RefNode, SheetRange, TextRef};
 use crate::events::{ContentEvent, FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
 use crate::input::formula_analysis::is_in_reference_mode;
 use crate::input::formula_input::{splice_dragged_ref, splice_ref};
-use crate::model::{try_mutate, ArrowKey, EvaluationMode, FormulaAnalyzer, SheetQuery, Navigator, PageDir};
+use crate::model::{
+    ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, PageDir, SheetQuery, try_mutate,
+};
 use crate::state::{
     ContextMenuState, CursorHint, DragState, EditFocus, EditMode, EditingCell, HeaderContextMenu,
     ModelStore, RefOverride, StatusMessage, WorkbookState,
@@ -485,9 +487,10 @@ fn handle_formula_ref_mousedown(
         anchor,
         grab_cell,
     });
-    state
-        .dragged_ref_override
-        .set(Some(RefOverride { idx: ref_idx, range: anchor }));
+    state.dragged_ref_override.set(Some(RefOverride {
+        idx: ref_idx,
+        range: anchor,
+    }));
     ev.prevent_default();
 }
 
@@ -515,13 +518,9 @@ fn commit_formula_ref_drag(
     };
     let original_ref = active_ref.ref_node.clone();
     let span = active_ref.span;
-    let Some((new_text, new_span)) = splice_dragged_ref(
-        &edit.text,
-        span,
-        &original_ref,
-        new_range,
-        edit.address,
-    ) else {
+    let Some((new_text, new_span)) =
+        splice_dragged_ref(&edit.text, span, &original_ref, new_range, edit.address)
+    else {
         // Drop-on-origin no-op (drop coincides with the ref's current area).
         return;
     };
@@ -641,9 +640,10 @@ pub fn handle_mousemove(
             column: col,
         };
         let new_range = dragged_ref_range(anchor, zone, grab_cell, cursor);
-        state
-            .dragged_ref_override
-            .set(Some(RefOverride { idx: ref_idx, range: new_range }));
+        state.dragged_ref_override.set(Some(RefOverride {
+            idx: ref_idx,
+            range: new_range,
+        }));
         ev.prevent_default();
         return;
     }
@@ -816,8 +816,9 @@ pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
     let was_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
 
     if let DragState::DraggingFormulaRef { ref_idx, .. } = state.drag.get_untracked() {
-        if let Some(RefOverride { range: new_range, .. }) =
-            state.dragged_ref_override.get_untracked()
+        if let Some(RefOverride {
+            range: new_range, ..
+        }) = state.dragged_ref_override.get_untracked()
         {
             commit_formula_ref_drag(ref_idx, new_range, model, state);
         }
@@ -1028,12 +1029,7 @@ mod tests {
     // must drag identically to the normalized form.
     #[test]
     fn body_normalizes_inverted_anchor() {
-        let out = dragged_ref_range(
-            anchor(6, 2, 4, 2),
-            RefZone::Body,
-            cell(5, 2),
-            cell(5, 4),
-        );
+        let out = dragged_ref_range(anchor(6, 2, 4, 2), RefZone::Body, cell(5, 2), cell(5, 4));
         assert_eq!(out, anchor(4, 4, 6, 4));
     }
 

@@ -1,8 +1,8 @@
 //! Type conversions between RustyCalc coordinate types and ironcalc /
 //! iron-canvas types.
 
-use ironcalc_base::expressions::parser::DefinedNameS;
 use iron_canvas_core::types::coord::{FormulaRef, RCRange, SheetArea};
+use ironcalc_base::expressions::parser::DefinedNameS;
 
 use super::types::*;
 

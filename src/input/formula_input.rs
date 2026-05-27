@@ -449,8 +449,7 @@ mod tests {
         // `=SUM(A1:B2)`, drag the BottomRight corner to C3. Span 5..10 = "A1:B2".
         let original = RefNode::range(0, None, 0, 0, false, false, 1, 1, false, false);
         let new = SheetRange::new(0, 1, 1, 3, 3);
-        let result =
-            splice_dragged_ref("=SUM(A1:B2)", span(5, 10), &original, new, editing_a1());
+        let result = splice_dragged_ref("=SUM(A1:B2)", span(5, 10), &original, new, editing_a1());
         let (text, _) = result.expect("corner resize should produce text");
         assert_eq!(text, "=SUM(A1:C3)");
     }
@@ -480,8 +479,7 @@ mod tests {
         // `=Sheet2!A1` -> `=Sheet2!B3`. sheet_name must travel through.
         let original = RefNode::cell(1, Some("Sheet2".into()), 0, 0, false, false);
         let new = SheetRange::from_cell(1, 3, 2);
-        let result =
-            splice_dragged_ref("=Sheet2!A1", span(1, 10), &original, new, editing_a1());
+        let result = splice_dragged_ref("=Sheet2!A1", span(1, 10), &original, new, editing_a1());
         let (text, _) = result.expect("cross-sheet drag should produce text");
         assert_eq!(text, "=Sheet2!B3");
     }

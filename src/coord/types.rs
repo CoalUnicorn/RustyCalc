@@ -3,14 +3,13 @@
 //! All indices are 1-based, matching ironcalc conventions.  Pure data structs
 //! and their inherent impls; `From` conversions live in `super::convert`.
 
+use ironcalc_base::UserModel;
 use ironcalc_base::expressions::parser::Node;
 use ironcalc_base::expressions::parser::stringify::{to_localized_string, to_rc_format};
 use ironcalc_base::expressions::types::CellReferenceRC;
 use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
-use ironcalc_base::UserModel;
 
-use iron_canvas_core::types::coord::SheetArea;
 pub use iron_canvas_core::types::coord::FormulaRefKind;
 
 use crate::model::ArrowKey;
@@ -128,7 +127,8 @@ impl RefNode {
     /// coded to "en" until we surface them in AppState.
     pub fn to_localized(&self, ctx: &CellReferenceRC) -> String {
         let locale = get_locale("en").unwrap_or_else(|_| panic!("builtin 'en' locale missing"));
-        let language = get_language("en").unwrap_or_else(|_| panic!("builtin 'en' language missing"));
+        let language =
+            get_language("en").unwrap_or_else(|_| panic!("builtin 'en' language missing"));
         to_localized_string(&self.inner, ctx, locale, language)
     }
 
@@ -156,13 +156,8 @@ impl RefNode {
     /// is a single cell (endpoint 1's flags win — TopLeft is the canonical
     /// surviving corner).
     pub fn with_area(&self, new: SheetRange, editing: CellAddress) -> Self {
-        let encode = |abs: bool, coord: i32, base: i32| -> i32 {
-            if abs {
-                coord
-            } else {
-                coord - base
-            }
-        };
+        let encode =
+            |abs: bool, coord: i32, base: i32| -> i32 { if abs { coord } else { coord - base } };
         let (sheet_name, abs_r1, abs_c1, abs_r2, abs_c2) = match &self.inner {
             Node::ReferenceKind {
                 sheet_name,

@@ -10,12 +10,12 @@
 // See docs/adding-actions.md for how to add or modify actions.
 
 use crate::input::{
-    edit::{execute_edit, EditAction},
-    format::{execute_format, FormatAction},
-    nav::{execute_nav, NavAction},
-    structure::{execute_struct, StructAction},
+    edit::{EditAction, execute_edit},
+    format::{FormatAction, execute_format},
+    nav::{NavAction, execute_nav},
+    structure::{StructAction, execute_struct},
 };
-use crate::model::{style_types::HexColor, ArrowKey, SafeFontFamily};
+use crate::model::{ArrowKey, SafeFontFamily, style_types::HexColor};
 use crate::state::{EditMode, EditingCell, ModelStore, StatusMessage, WorkbookState};
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 
@@ -350,7 +350,7 @@ mod tests {
     use super::*;
     use crate::coord::CellAddress;
     use crate::input::formula_analysis::FormulaAnalysis;
-    use crate::model::{mutate, ArrowKey, EvaluationMode};
+    use crate::model::{ArrowKey, EvaluationMode, mutate};
     use crate::state::{DragState, EditFocus, EditMode, EditingCell};
     use leptos::prelude::*;
     use wasm_bindgen_test::*;

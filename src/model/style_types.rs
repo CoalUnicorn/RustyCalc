@@ -186,11 +186,7 @@ pub enum BooleanValue {
 
 impl BooleanValue {
     pub fn from_bool(value: bool) -> Self {
-        if value {
-            Self::True
-        } else {
-            Self::False
-        }
+        if value { Self::True } else { Self::False }
     }
 
     /// Returns the IronCalc-compatible string ("true" or "false").
