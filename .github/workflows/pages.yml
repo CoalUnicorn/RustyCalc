@@ -31,15 +31,7 @@ jobs:
         with:
           ref: main
           path: RustyCalc-main
-
-      # main still uses path = "../IronCalc/base" (no submodule yet).
-      # Remove after dev→main merge when main gets the submodule.
-      - name: Checkout IronCalc (sibling for main build)
-        uses: actions/checkout@v4
-        with:
-          repository: CoalUnicorn/IronCalc
-          ref: rustycalc-xlsx-wasm
-          path: IronCalc
+          submodules: recursive
 
       - name: Checkout dev
         uses: actions/checkout@v4
