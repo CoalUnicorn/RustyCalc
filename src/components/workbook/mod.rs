@@ -216,9 +216,18 @@ fn copy_to_app_clipboard(
         if let Ok(cb) = m.copy_to_clipboard() {
             let app_cb = AppClipboard::capture(&cb);
             let csv = app_cb.csv.clone();
+            let sheet_area = SheetRange {
+                sheet: app_cb.sheet,
+                area: app_cb.range,
+            };
             clipboard_store.update_value(|c| *c = Some(app_cb));
-            // Repaint so the marching-ants border appears immediately.
-            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+            // Wake the subscribe Effect so set_overlays repaints the
+            // marching-ants border. The copied range isn't mutated, so this
+            // reuses the content regime purely as a redraw trigger (overlay-only
+            // routing deferred — see SESSION.md).
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
+                sheet_area,
+            }));
             // Fire-and-forget: write tab-separated text to the OS clipboard.
             wasm_bindgen_futures::spawn_local(async move {
                 let clip = leptos::prelude::window().navigator().clipboard();
@@ -272,12 +281,18 @@ fn paste_from_clipboard(
                     );
                 }
             });
-            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+            let sheet_area = model.with_value(SheetRange::from_view);
+            state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
+                sheet_area,
+            }));
         });
     }
 
     if internal_pasted {
-        state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+        let sheet_area = model.with_value(SheetRange::from_view);
+        state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
+            sheet_area,
+        }));
     }
 
     internal_pasted

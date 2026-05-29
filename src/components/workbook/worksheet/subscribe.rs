@@ -15,8 +15,8 @@
 //! Each category signal is replaced (not appended) on every emit, so
 //! reading any non-empty signal means a new action just happened. The
 //! Effect returns the current overlay state so the next run can detect
-//! overlay-only changes (autofill preview, point-mode range) without
-//! needing a fake `ContentEvent::GenericChange` from `request_redraw()`.
+//! overlay-only changes (autofill preview, point-mode range) without a
+//! synthetic content event to force the redraw.
 
 use leptos::prelude::*;
 

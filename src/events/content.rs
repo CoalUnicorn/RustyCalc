@@ -21,7 +21,5 @@ pub enum ContentEvent {
     CalculationUpdated {
         affected_sheets: Vec<u32>,
     },
-    #[allow(dead_code)]
     NamedRangesChanged,
-    GenericChange,
 }

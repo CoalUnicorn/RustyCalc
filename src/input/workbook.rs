@@ -8,7 +8,7 @@ use ironcalc_base::UserModel;
 use leptos::prelude::{UpdateValue, WithValue};
 
 use crate::app_state::AppState;
-use crate::events::{ContentEvent, SpreadsheetEvent};
+use crate::events::{SpreadsheetEvent, StructureEvent};
 use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
 use crate::storage::{self, WorkbookId};
 
@@ -129,5 +129,5 @@ fn activate(
     state.current_uuid.set(Some(uuid));
     state.editing_cell.set(None);
     state.drag.set(DragState::Idle);
-    state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+    state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
 }

@@ -6,7 +6,7 @@ use std::rc::Rc;
 #[cfg(feature = "dev-tools")]
 use crate::app_state::AppState;
 use crate::components::workbook::editing::cell_editor::CellEditor;
-use crate::events::{ContentEvent, SpreadsheetEvent};
+use crate::events::{SpreadsheetEvent, StructureEvent};
 use crate::input::mouse::{
     CanvasHandle, handle_contextmenu, handle_dblclick, handle_mousedown, handle_mousemove,
     handle_mouseup, handle_wheel,
@@ -77,7 +77,7 @@ pub fn Worksheet() -> impl IntoView {
             return;
         }
 
-        state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+        state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
 
         // Mirror the new dims into the orchestrator. Both canvases share CSS
         // dims, so reading from grid_ref is sufficient. If the ref hasn't

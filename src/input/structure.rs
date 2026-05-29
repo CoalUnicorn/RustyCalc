@@ -107,7 +107,7 @@ pub fn execute_struct(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+            state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
         }
         StructAction::Redo => {
             try_mutate(
@@ -118,7 +118,7 @@ pub fn execute_struct(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+            state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
         }
         StructAction::InsertRows => {
             let loc = model.with_value(|m| {

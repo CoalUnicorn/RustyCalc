@@ -139,7 +139,7 @@ pub fn NamedRangeForm() -> impl IntoView {
         match result {
             Ok(()) => {
                 state.editing_named_range.set(None);
-                state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+                state.emit_event(SpreadsheetEvent::Content(ContentEvent::NamedRangesChanged));
             }
             Err(msg) => state.status.set(Some(StatusMessage::Error(msg))),
         }
@@ -158,7 +158,7 @@ pub fn NamedRangeForm() -> impl IntoView {
         match result {
             Ok(()) => {
                 state.editing_named_range.set(None);
-                state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+                state.emit_event(SpreadsheetEvent::Content(ContentEvent::NamedRangesChanged));
             }
             Err(msg) => state.status.set(Some(StatusMessage::Error(msg))),
         }

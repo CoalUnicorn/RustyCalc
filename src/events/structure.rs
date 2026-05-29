@@ -141,6 +141,10 @@ pub enum StructureEvent {
         from_row: i32,
         to_row: i32,
     },
+    /// Document or viewport geometry replaced wholesale — undo/redo, workbook
+    /// switch, shared-workbook load, viewport resize. Routes through the Fresh
+    /// repaint regime (drops `last_frame`), not the content blit cache.
+    DocumentReset,
     // FreezeChanged {
     //     sheet: u32,
     //     frozen_rows: i32,

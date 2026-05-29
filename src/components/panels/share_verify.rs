@@ -2,7 +2,7 @@ use leptos::prelude::*;
 
 use crate::app_state::AppState;
 use crate::components::ui::modal::Modal;
-use crate::events::{ContentEvent, SpreadsheetEvent};
+use crate::events::{SpreadsheetEvent, StructureEvent};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage::{self, SharedLoad};
 
@@ -49,7 +49,7 @@ pub fn ShareVerify() -> impl IntoView {
         model.update_value(|m| *m = new_model);
         state.current_uuid.set(Some(new_uuid));
         state.editing_cell.set(None);
-        state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+        state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
         app.bump_registry();
         let _ = window().location().set_hash("");
         set_pending.set(None);
