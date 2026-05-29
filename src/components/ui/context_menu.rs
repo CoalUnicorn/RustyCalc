@@ -18,21 +18,21 @@
 //! // on contextmenu event: set_pos((ev.client_x(), ev.client_y())); set_open(true); ev.prevent_default();
 //! ```
 
+use crate::components::ui::popover::Popover;
 use leptos::prelude::*;
-use leptos_use::on_click_outside;
 
 /// Dropdown container.  Caller owns `open`/`set_open` and `pos`/`set_pos`.
 ///
 /// Provides `set_open: WriteSignal<bool>` via context so [`ContextMenuItem`]
 /// children can close the menu automatically.
 ///
-/// `above_anchor`: when `true`, renders with `bottom: calc(100vh - y + 4px)`
-/// instead of `top: y` - use for menus anchored to a bottom bar.
+/// `above_anchor`: forwarded to [`Popover`] — when `true`, renders with
+/// `bottom: calc(100vh - y + 4px)` instead of `top: y`.
 ///
 /// # Trigger buttons
 /// The button that opens this menu must stop `pointerdown` propagation so
-/// `on_click_outside` does not immediately re-close the menu on the same
-/// event: `on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()`.
+/// the popover's `on_click_outside` does not immediately re-close on the
+/// same event: `on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()`.
 #[component]
 pub fn ContextMenu(
     open: ReadSignal<bool>,
@@ -43,36 +43,10 @@ pub fn ContextMenu(
 ) -> impl IntoView {
     provide_context(set_open);
 
-    let menu_ref = NodeRef::<leptos::html::Div>::new();
-
-    // Close when the user clicks/taps anywhere outside the menu panel.
-    // Guard against spurious fires when the menu is already closed.
-    let _ = on_click_outside(menu_ref, move |_| {
-        if open.get_untracked() {
-            set_open.set(false);
-        }
-    });
-
-    // `children()` is FnOnce - must be called exactly once at mount time.
-    // We use `display:none` on a wrapper div rather than `<Show>` to avoid
-    // the Leptos 0.7 constraint that Show's children closure must be `Fn`.
     view! {
-        <div style=move || if open.get() { "" } else { "display:none;" }>
-            <div
-                node_ref=menu_ref
-                class="ctx"
-                style=move || {
-                    let (x, y) = pos.get();
-                    if above_anchor {
-                        format!("left:{x}px;bottom:calc(100vh - {y}px + 4px);")
-                    } else {
-                        format!("left:{x}px;top:{y}px;")
-                    }
-                }
-            >
-                {children()}
-            </div>
-        </div>
+        <Popover open set_open pos above_anchor class="ctx">
+            {children()}
+        </Popover>
     }
 }
 
