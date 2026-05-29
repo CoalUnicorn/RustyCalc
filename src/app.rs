@@ -1,5 +1,5 @@
-use crate::components::left_drawer::LeftDrawer;
-use crate::components::share_verify::ShareVerify;
+use crate::components::chrome::left_drawer::LeftDrawer;
+use crate::components::panels::share_verify::ShareVerify;
 use crate::components::workbook::Workbook;
 
 use base64::Engine;

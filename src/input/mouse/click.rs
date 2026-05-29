@@ -11,9 +11,7 @@ use crate::coord::{CellAddress, RefNode, SheetRange, TextRef};
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::formula::{is_in_reference_mode, splice_ref};
 use crate::model::{FormulaAnalyzer, Navigator};
-use crate::state::{
-    DragState, EditMode, ModelStore, WorkbookState,
-};
+use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
 
 /// Click on the top-left corner cell: select the entire sheet.
 pub fn handle_corner_click(model: ModelStore, state: WorkbookState) {

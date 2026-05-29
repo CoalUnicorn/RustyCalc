@@ -120,7 +120,7 @@ pub fn PerfPanel() -> impl IntoView {
 // Component
 // ```rust
 //
-// use crate::components::perf_panel::PerfPanel
+// use crate::components::panels::perf_panel::PerfPanel
 // pub fn Bar() -> impl IntoView {
 //   let state = expect_context::<WorkbookState>();
 //   let app = expect_context::<AppState>();

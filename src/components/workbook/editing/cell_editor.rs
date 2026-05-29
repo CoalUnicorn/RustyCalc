@@ -7,7 +7,7 @@
 
 use leptos::prelude::*;
 
-use crate::components::formula_text_area::FormulaTextArea;
+use crate::components::workbook::editing::formula_text_area::FormulaTextArea;
 
 #[component]
 pub fn CellEditor() -> impl IntoView {

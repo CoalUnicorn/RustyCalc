@@ -1,6 +1,6 @@
 //! Formula `<textarea>` for the Manage Named Ranges dialog.
 //!
-//! Mirror of [`crate::components::formula_text_area::FormulaTextArea`] minus
+//! Mirror of [`crate::components::workbook::editing::formula_text_area::FormulaTextArea`] minus
 //! the cell-editor concerns (canvas positioning, focus arbitration with the
 //! grid, point-mode arming). Both editors share
 //! [`crate::input::formula::sync_edit`]: the trait bound

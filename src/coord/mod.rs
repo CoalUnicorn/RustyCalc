@@ -12,4 +12,3 @@ pub use types::*;
 
 // Re-export from iron-canvas-core so callers get it through `crate::coord`
 pub use types::FormulaRefKind;
-

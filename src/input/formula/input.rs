@@ -136,4 +136,3 @@ pub fn try_point_move(ctx: &PointMoveCtx, key: &str, is_shift: bool) -> PointMov
         PointMoveOutcome::ExitPointing
     }
 }
-

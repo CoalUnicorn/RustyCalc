@@ -193,4 +193,3 @@ impl FrozenPanes {
         self.rows > 0 || self.cols > 0
     }
 }
-

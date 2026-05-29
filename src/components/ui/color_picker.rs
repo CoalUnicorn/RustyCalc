@@ -469,4 +469,3 @@ pub fn TabColorPicker(
         </ColorPicker>
     }
 }
-

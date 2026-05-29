@@ -498,4 +498,3 @@ fn ast_leaves(
         | Node::EmptyArgKind => {}
     }
 }
-

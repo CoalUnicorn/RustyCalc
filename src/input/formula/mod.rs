@@ -17,8 +17,6 @@ mod status;
 
 pub use analysis::{FormulaAnalysis, analyze_formula};
 pub use edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
-pub use input::{
-    PointMoveCtx, PointMoveOutcome, splice_dragged_ref, splice_ref, try_point_move,
-};
+pub use input::{PointMoveCtx, PointMoveOutcome, splice_dragged_ref, splice_ref, try_point_move};
 pub use ref_mode::is_in_reference_mode;
 pub use status::FormulaStatus;

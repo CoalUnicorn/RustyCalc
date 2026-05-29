@@ -4,8 +4,8 @@ use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 use leptos::prelude::*;
 use wasm_bindgen::UnwrapThrowExt;
 
-use crate::components::color_picker::{BackgroundColorPicker, TextColorPicker};
-use crate::components::toolbar::number_format::NumberFormatPicker;
+use crate::components::chrome::toolbar::number_format::NumberFormatPicker;
+use crate::components::ui::color_picker::{BackgroundColorPicker, TextColorPicker};
 use crate::events::*;
 use crate::input::error::FormatError;
 use crate::input::keyboard::{SpreadsheetAction, execute};

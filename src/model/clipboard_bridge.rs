@@ -119,4 +119,3 @@ pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<Stri
 }
 
 // Tests
-

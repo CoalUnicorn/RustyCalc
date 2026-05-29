@@ -5,7 +5,9 @@
 //! free of dispatch glue and state — both belong in
 //! [`super::dispatch`].
 
-use crate::input::{edit::EditAction, format::FormatAction, nav::NavAction, structure::StructAction};
+use crate::input::{
+    edit::EditAction, format::FormatAction, nav::NavAction, structure::StructAction,
+};
 use crate::model::ArrowKey;
 use crate::state::{EditMode, EditingCell};
 

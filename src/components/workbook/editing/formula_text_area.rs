@@ -18,7 +18,7 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::components::formula_overlay::FormulaOverlay;
+use crate::components::workbook::editing::formula_overlay::FormulaOverlay;
 use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::input::mouse::CanvasHandle;
 use crate::model::SheetQuery;

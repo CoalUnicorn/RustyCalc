@@ -1,8 +1,8 @@
-use crate::input::keyboard::*;
 use crate::coord::CellAddress;
 use crate::input::edit::EditAction;
 use crate::input::format::FormatAction;
 use crate::input::formula::FormulaAnalysis;
+use crate::input::keyboard::*;
 use crate::input::nav::NavAction;
 use crate::input::structure::StructAction;
 use crate::model::{ArrowKey, EvaluationMode, mutate};

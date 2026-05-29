@@ -10,7 +10,7 @@
 
 use leptos::prelude::*;
 
-use crate::components::modal::{Modal, ModalSize};
+use crate::components::ui::modal::{Modal, ModalSize};
 use crate::state::WorkbookState;
 
 pub mod form;

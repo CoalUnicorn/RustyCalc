@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 #[cfg(feature = "dev-tools")]
 use crate::app_state::AppState;
-use crate::components::cell_editor::CellEditor;
+use crate::components::workbook::editing::cell_editor::CellEditor;
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::mouse::{
     CanvasHandle, handle_contextmenu, handle_dblclick, handle_mousedown, handle_mousemove,

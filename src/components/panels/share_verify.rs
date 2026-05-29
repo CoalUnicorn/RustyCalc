@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 
 use crate::app_state::AppState;
-use crate::components::modal::Modal;
+use crate::components::ui::modal::Modal;
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage::{self, SharedLoad};

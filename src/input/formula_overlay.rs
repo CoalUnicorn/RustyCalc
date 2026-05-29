@@ -78,4 +78,3 @@ pub fn split_formula_by_refs(
 
     segments
 }
-

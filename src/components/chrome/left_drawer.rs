@@ -7,10 +7,10 @@
 use leptos::prelude::*;
 
 use crate::app_state::AppState;
-use crate::components::context_menu::{
+use crate::components::ui::context_menu::{
     ContextMenu, ContextMenuButton, ContextMenuItem, ContextMenuSeparator,
 };
-use crate::components::inline_rename::InlineRenameInput;
+use crate::components::ui::inline_rename::InlineRenameInput;
 use crate::input::workbook::{WorkbookAction, execute_workbook};
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage::{self, WorkbookGroup, WorkbookId, WorkbookMeta};

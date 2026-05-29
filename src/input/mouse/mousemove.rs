@@ -14,9 +14,7 @@ use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
 use crate::input::formula::splice_ref;
 use crate::model::{ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, try_mutate};
-use crate::state::{
-    DragState, ModelStore, RefOverride, StatusMessage, WorkbookState,
-};
+use crate::state::{DragState, ModelStore, RefOverride, StatusMessage, WorkbookState};
 use iron_canvas_core::{
     geometry::constants::{
         DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN,
@@ -162,7 +160,6 @@ fn update_autoscroll(
     cb.forget();
     state.autoscroll.id.set_value(Some(id));
 }
-
 
 /// the canvas). Reset drag state so the next interaction starts clean.
 pub fn handle_mousemove(

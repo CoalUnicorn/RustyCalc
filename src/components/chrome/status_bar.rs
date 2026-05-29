@@ -1,8 +1,8 @@
 use leptos::prelude::*;
 
 use crate::app_state::AppState;
-use crate::components::perf_panel::PerfPanel;
-use crate::components::playback_panel::PlaybackPanel;
+use crate::components::panels::perf_panel::PerfPanel;
+use crate::components::panels::playback_panel::PlaybackPanel;
 use crate::input::formula::FormulaStatus;
 use crate::state::{StatusMessage, WorkbookState};
 

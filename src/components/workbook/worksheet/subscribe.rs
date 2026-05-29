@@ -45,12 +45,7 @@ pub(super) fn install_subscribe_effect(
         let overlay = reactive_overlay.get();
         let overlay_changed = prev.is_some_and(|p| p != overlay);
 
-        if !(has_content
-            || has_structure
-            || has_format
-            || has_nav
-            || has_theme
-            || overlay_changed)
+        if !(has_content || has_structure || has_format || has_nav || has_theme || overlay_changed)
         {
             return overlay;
         }

@@ -1,6 +1,6 @@
-use crate::components::color_picker::TabColorPicker;
-use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
-use crate::components::inline_rename::InlineRenameInput;
+use crate::components::ui::color_picker::TabColorPicker;
+use crate::components::ui::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
+use crate::components::ui::inline_rename::InlineRenameInput;
 use crate::input::sheet::{SheetAction, execute_sheet};
 use crate::model::style_types::HexColor;
 use crate::model::{SheetQuery, frontend_model::SHEET_STATE_VISIBLE};

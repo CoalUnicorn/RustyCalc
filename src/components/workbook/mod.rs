@@ -1,9 +1,15 @@
+pub mod editing;
+pub mod worksheet;
+
 use leptos::prelude::*;
 
+use crate::components::workbook::worksheet::Worksheet;
 use crate::components::{
-    file_bar::FileBar, formula_bar::FormulaBar, header_context_menu::HeaderContextMenuOverlay,
-    named_ranges::NamedRangesDialog, sheet_tab_bar::SheetTabBar, status_bar::StatusBar,
-    toolbar::Toolbar, worksheet::Worksheet,
+    chrome::{
+        file_bar::FileBar, formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar,
+        status_bar::StatusBar, toolbar::Toolbar,
+    },
+    panels::{header_context_menu::HeaderContextMenuOverlay, named_ranges::NamedRangesDialog},
 };
 use crate::coord::{CellAddress, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};

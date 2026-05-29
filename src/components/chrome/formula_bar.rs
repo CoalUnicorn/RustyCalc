@@ -3,10 +3,10 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::components::formula_overlay::FormulaOverlay;
+use crate::components::workbook::editing::formula_overlay::FormulaOverlay;
 use crate::events::{NavigationEvent, SpreadsheetEvent};
-use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::input::formula::{FormulaStatus, analyze_formula};
+use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::model::SheetQuery;
 use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};

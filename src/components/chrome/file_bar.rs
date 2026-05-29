@@ -7,8 +7,8 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::app_state::AppState;
-use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
-use crate::components::share_popover::SharePopover;
+use crate::components::panels::share_popover::SharePopover;
+use crate::components::ui::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
 use crate::input::workbook::{WorkbookAction, execute_workbook};
 use crate::input::xlsx_io;
 use crate::state::StatusMessage;

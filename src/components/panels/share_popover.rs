@@ -1,6 +1,6 @@
 //! Share popover — shows the URL for the current workbook and a Copy button.
 //!
-//! Hosted by [`crate::components::file_bar::FileBar`] inside a `<Show when=open>`
+//! Hosted by [`crate::components::chrome::file_bar::FileBar`] inside a `<Show when=open>`
 //! gate. Re-mounts each time it's opened, so `share_url` is captured fresh
 //! from the host on every open and we don't need a reactive prop.
 
@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use leptos::prelude::*;
 
-use crate::components::modal::Modal;
+use crate::components::ui::modal::Modal;
 
 /// Modal popover that exposes a copyable share URL and optional verification word.
 ///

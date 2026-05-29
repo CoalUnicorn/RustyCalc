@@ -6,7 +6,7 @@
 
 use leptos::prelude::*;
 
-use crate::components::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
+use crate::components::ui::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::input::structure::StructAction;
 use crate::state::{HeaderContextMenu, ModelStore, WorkbookState};

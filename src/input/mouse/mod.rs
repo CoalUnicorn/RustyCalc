@@ -43,10 +43,6 @@ pub type CanvasHandle = StoredValue<Option<IronCanvas>, LocalStorage>;
 
 /// Read a value from the canvas handle. Returns `None` until both
 /// `<canvas>` elements mount and the lazy rAF construction runs.
-pub(super) fn with_canvas<R>(
-    handle: CanvasHandle,
-    f: impl FnOnce(&IronCanvas) -> R,
-) -> Option<R> {
+pub(super) fn with_canvas<R>(handle: CanvasHandle, f: impl FnOnce(&IronCanvas) -> R) -> Option<R> {
     handle.with_value(|slot| slot.as_ref().map(f))
 }
-

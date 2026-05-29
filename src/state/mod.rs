@@ -21,4 +21,3 @@ pub use named_range::EditingDefinedName;
 pub use split::Split;
 pub use status::StatusMessage;
 pub use workbook_state::{ModelStore, WorkbookState};
-
