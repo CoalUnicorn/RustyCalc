@@ -104,3 +104,34 @@ pub fn NumberFormatPicker() -> impl IntoView {
         </div>
     }
 }
+
+/// Number format quick-access: percentage (%) and decimal ±.
+#[component]
+pub fn NumFmtQuickButtons() -> impl IntoView {
+    let state = expect_context::<WorkbookState>();
+    let model = expect_context::<ModelStore>();
+
+    // let on_gbp = move |_: web_sys::MouseEvent| {
+    //     execute(&SpreadsheetAction::set_num_fmt("£#,##0.00"), model, &state);
+    //     refocus_workbook();
+    // };
+    let on_pct = move |_: web_sys::MouseEvent| {
+        execute(&SpreadsheetAction::set_num_fmt("0%"), model, &state);
+        refocus_workbook();
+    };
+    let on_dec_less = move |_: web_sys::MouseEvent| {
+        execute(&SpreadsheetAction::decrease_decimals(), model, &state);
+        refocus_workbook();
+    };
+    let on_dec_more = move |_: web_sys::MouseEvent| {
+        execute(&SpreadsheetAction::increase_decimals(), model, &state);
+        refocus_workbook();
+    };
+
+    view! {
+        // <button class="tb-btn" title="Currency (GBP)" on:click=on_gbp>"£"</button>
+        <button class="tb-btn" title="Percentage" on:click=on_pct>"%"</button>
+        <button class="tb-btn" title="Decrease decimal places" on:click=on_dec_less>".0<-"</button>
+        <button class="tb-btn" title="Increase decimal places" on:click=on_dec_more>".0->"</button>
+    }
+}
