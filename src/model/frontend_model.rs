@@ -389,7 +389,10 @@ impl Navigator for UserModel<'_> {
 
     fn nav_select_column(&mut self, col: i32) {
         log_nav_err(self.set_selected_cell(1, col), "nav_select_column");
-        let _ = self.set_selected_range(1, col, LAST_ROW, col);
+        log_nav_err(
+            self.set_selected_range(1, col, LAST_ROW, col),
+            "nav_select_column_range",
+        );
     }
 
     fn nav_select_row(&mut self, row: i32) {
