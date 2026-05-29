@@ -125,6 +125,7 @@ pub(super) fn install_raf_loop(
             m.set_window_width(canvas_w);
             m.set_window_height(canvas_h);
         });
+        #[cfg(feature = "dev-tools")]
         web_sys::console::time_with_label("render");
         #[cfg(feature = "dev-tools")]
         let paint_t0 = crate::perf::now();
@@ -140,6 +141,7 @@ pub(super) fn install_raf_loop(
                 ic.paintIfDirty();
             }
         });
+        #[cfg(feature = "dev-tools")]
         web_sys::console::time_end_with_label("render");
 
         // Record paint duration for the PerfPanel. Skipped until the first

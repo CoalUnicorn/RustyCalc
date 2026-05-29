@@ -180,10 +180,14 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
         }
 
         SheetAction::Duplicate(_) => {
-            todo!("SheetAction::Duplicate not yet implemented")
+            state.status.set(Some(StatusMessage::Error(
+                "Duplicate sheet is not yet implemented".into(),
+            )));
         }
         SheetAction::Move { .. } => {
-            todo!("SheetAction::Move not yet implemented")
+            state.status.set(Some(StatusMessage::Error(
+                "Move sheet is not yet implemented".into(),
+            )));
         }
     }
 }

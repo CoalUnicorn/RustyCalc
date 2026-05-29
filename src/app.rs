@@ -108,7 +108,10 @@ pub fn App() -> impl IntoView {
                     full.push(1u8);
                     full.extend_from_slice(&bytes);
                     let encoded = base64::engine::general_purpose::STANDARD.encode(&full);
-                    let _ = gloo_storage::LocalStorage::set(uuid.to_string(), &encoded);
+                    storage::log_err(
+                        gloo_storage::LocalStorage::set(uuid.to_string(), &encoded),
+                        "beforeunload save",
+                    );
                 } else {
                     model.with_value(|m| storage::save(&uuid, m));
                 }

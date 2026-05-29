@@ -132,7 +132,7 @@ impl<'de> Deserialize<'de> for WorkbookId {
 
 /// Log a storage error to the browser console and discard the `Err`.
 /// Used in place of bare `.ok()` so silent failures become visible in DevTools.
-fn log_err<E: std::fmt::Display>(result: Result<(), E>, ctx: &str) {
+pub(crate) fn log_err<E: std::fmt::Display>(result: Result<(), E>, ctx: &str) {
     if let Err(e) = result {
         web_sys::console::warn_1(&format!("[rustycalc storage] {ctx}: {e}").into());
     }

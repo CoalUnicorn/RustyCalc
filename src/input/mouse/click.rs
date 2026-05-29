@@ -15,25 +15,33 @@ use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
 
 /// Click on the top-left corner cell: select the entire sheet.
 pub fn handle_corner_click(model: ModelStore, state: WorkbookState) {
+    #[cfg(feature = "dev-tools")]
     web_sys::console::time_with_label("corner:nav_select_all");
     model.update_value(|m| {
         m.nav_select_all();
     });
+    #[cfg(feature = "dev-tools")]
     web_sys::console::time_end_with_label("corner:nav_select_all");
 
+    #[cfg(feature = "dev-tools")]
     web_sys::console::time_with_label("corner:editing_cell");
 
     state.editing_cell.set(None);
+    #[cfg(feature = "dev-tools")]
     web_sys::console::time_end_with_label("corner:editing_cell");
 
+    #[cfg(feature = "dev-tools")]
     web_sys::console::time_with_label("corner:from_view");
     let sheet_area = model.with_value(SheetRange::from_view);
+    #[cfg(feature = "dev-tools")]
     web_sys::console::time_end_with_label("corner:from_view");
 
+    #[cfg(feature = "dev-tools")]
     web_sys::console::time_with_label("corner:emit_event");
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged { sheet_area },
     ));
+    #[cfg(feature = "dev-tools")]
     web_sys::console::time_end_with_label("corner:emit_event");
 }
 
