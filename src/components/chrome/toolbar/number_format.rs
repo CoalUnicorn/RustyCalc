@@ -1,12 +1,12 @@
 //! Number format picker for the toolbar.
 //!
-//! Renders a "123 ▾" button that opens a dropdown listing common number
+//! Renders a "123 ▾" button that opens a Popover listing common number
 //! formats. The active format is indicated with a checkmark. Selecting
 //! an entry applies `FormatAction::SetNumFmt` to the current selection.
 
 use leptos::prelude::*;
-use leptos_use::on_click_outside;
 
+use crate::components::ui::popover::Popover;
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::model::SheetQuery;
 use crate::state::{ModelStore, WorkbookState};
@@ -37,6 +37,7 @@ pub fn NumberFormatPicker() -> impl IntoView {
     let model = expect_context::<ModelStore>();
 
     let (open, set_open) = signal(false);
+    let (pos, set_pos) = signal((0i32, 0i32));
 
     // Reacts to both format events (after applying a format) and navigation
     // (selection change may show a different cell's format).
@@ -46,12 +47,11 @@ pub fn NumberFormatPicker() -> impl IntoView {
         model.with_value(|m| m.active_num_fmt())
     });
 
-    let container_ref = NodeRef::<leptos::html::Div>::new();
-    let _ = on_click_outside(container_ref, move |_| {
-        if open.get_untracked() {
-            set_open.set(false);
-        }
-    });
+    let trigger_click = move |ev: web_sys::MouseEvent| {
+        ev.stop_propagation();
+        set_pos.set((ev.client_x(), ev.client_y()));
+        set_open.update(|v| *v = !*v);
+    };
 
     // `*entry` copies the Option<(&str,&str,&str)> (all types are Copy), giving
     // code/label/preview as &'static str — sized and moveable into each item closure.
@@ -89,22 +89,18 @@ pub fn NumberFormatPicker() -> impl IntoView {
         .collect();
 
     view! {
-        <div node_ref=container_ref class="tb-num-fmt">
+        <div class="tb-num-fmt">
             <button
                 class="tb-btn"
                 title="Number format"
                 on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
-                on:click=move |_| set_open.update(|o| *o = !*o)
+                on:click=trigger_click
             >
                 "123 ▾"
             </button>
-            // display:none is a runtime value (driven by open signal) — inline style is correct here
-            <div
-                class="tb-num-fmt-dropdown"
-                style=move || if open.get() { "" } else { "display:none;" }
-            >
+            <Popover open set_open pos class="tb-num-fmt-dropdown">
                 {items}
-            </div>
+            </Popover>
         </div>
     }
 }

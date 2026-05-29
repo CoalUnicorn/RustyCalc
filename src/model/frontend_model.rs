@@ -16,6 +16,14 @@ use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use leptos::prelude::UpdateValue;
 
+/// Log a `Navigator` error to the browser console instead of silently
+/// discarding it. Mirror of `storage::log_err` for the nav domain.
+fn log_nav_err(result: Result<(), String>, ctx: &str) {
+    if let Err(e) = result {
+        web_sys::console::warn_1(&format!("[rustycalc nav] {ctx}: {e}").into());
+    }
+}
+
 /// IronCalc's canonical string value for a visible worksheet.
 /// Used to guard against silent typos in state comparisons.
 pub(crate) const SHEET_STATE_VISIBLE: &str = "visible";
@@ -376,22 +384,22 @@ impl Navigator for UserModel<'_> {
     fn nav_set_cell(&mut self, row: i32, col: i32) {
         let row = row.clamp(1, LAST_ROW);
         let col = col.clamp(1, LAST_COLUMN);
-        let _ = self.set_selected_cell(row, col);
+        log_nav_err(self.set_selected_cell(row, col), "nav_set_cell");
     }
 
     fn nav_select_column(&mut self, col: i32) {
-        let _ = self.set_selected_cell(1, col);
+        log_nav_err(self.set_selected_cell(1, col), "nav_select_column");
         let _ = self.set_selected_range(1, col, LAST_ROW, col);
     }
 
     fn nav_select_row(&mut self, row: i32) {
-        let _ = self.set_selected_cell(row, 1);
-        let _ = self.set_selected_range(row, 1, row, LAST_COLUMN);
+        log_nav_err(self.set_selected_cell(row, 1), "nav_select_row");
+        log_nav_err(self.set_selected_range(row, 1, row, LAST_COLUMN), "nav_select_row_range");
     }
 
     fn nav_select_all(&mut self) {
-        let _ = self.set_selected_cell(1, 1);
-        let _ = self.set_selected_range(1, 1, LAST_ROW, LAST_COLUMN);
+        log_nav_err(self.set_selected_cell(1, 1), "nav_select_all");
+        log_nav_err(self.set_selected_range(1, 1, LAST_ROW, LAST_COLUMN), "nav_select_all_range");
     }
 
     fn nav_extend_selection(&mut self, row: i32, col: i32) {
@@ -406,7 +414,7 @@ impl Navigator for UserModel<'_> {
         } else {
             (col, anchor)
         };
-        let _ = self.set_selected_range(1, c1, LAST_ROW, c2);
+        log_nav_err(self.set_selected_range(1, c1, LAST_ROW, c2), "nav_extend_col");
     }
 
     fn nav_extend_row_selection(&mut self, row: i32) {
@@ -417,7 +425,7 @@ impl Navigator for UserModel<'_> {
         } else {
             (row, anchor)
         };
-        let _ = self.set_selected_range(r1, 1, r2, LAST_COLUMN);
+        log_nav_err(self.set_selected_range(r1, 1, r2, LAST_COLUMN), "nav_extend_row");
     }
 
     fn nav_to_edge(&mut self, dir: ArrowKey) {
@@ -435,8 +443,8 @@ impl Navigator for UserModel<'_> {
         let col = area.c1.clamp(1, LAST_COLUMN);
         let row2 = area.r2.clamp(1, LAST_ROW);
         let col2 = area.c2.clamp(1, LAST_COLUMN);
-        let _ = self.set_selected_cell(row, col);
-        let _ = self.set_selected_range(row, col, row2, col2);
+        log_nav_err(self.set_selected_cell(row, col), "nav_select_range");
+        log_nav_err(self.set_selected_range(row, col, row2, col2), "nav_select_range_area");
     }
 
     fn nav_expand_selection(&mut self, dir: ArrowKey) {
@@ -451,12 +459,12 @@ impl Navigator for UserModel<'_> {
 
     fn nav_home_row(&mut self) {
         let row = self.get_selected_view().row;
-        let _ = self.set_selected_cell(row, 1);
+        log_nav_err(self.set_selected_cell(row, 1), "nav_home_row");
     }
 
     fn set_selected_area(&mut self, area: CellArea) {
-        let _ = self.set_selected_cell(area.r1, area.c1);
-        let _ = self.set_selected_range(area.r1, area.c1, area.r2, area.c2);
+        log_nav_err(self.set_selected_cell(area.r1, area.c1), "set_selected_area");
+        log_nav_err(self.set_selected_range(area.r1, area.c1, area.r2, area.c2), "set_selected_area_range");
     }
 }
 

@@ -109,15 +109,6 @@ impl EventBus {
         let mut theme = vec![];
 
         for event in new_events {
-            #[cfg(debug_assertions)]
-            {
-                use std::cell::Cell;
-                thread_local! { static LAST: Cell<f64> = const { Cell::new(0.0) }; }
-                let now = crate::perf::now();
-                LAST.with(|t| {
-                    t.set(now);
-                });
-            }
             match event {
                 SpreadsheetEvent::Content(e) => content.push(e),
                 SpreadsheetEvent::Format(e) => format.push(e),

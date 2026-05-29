@@ -55,9 +55,6 @@ strip = true
 tauri = []
 dev-tools = ["iron-canvas-web/dev-tools", "iron-canvas-web/pdf"]
 
-[package.metadata.leptos]
-lib-profile-release = "wasm-release"
-
 # Cap WASM linear memory at 256 MB so a crafted bitcode payload claiming
 # a multi-GB allocation traps quickly instead of degrading the tab into
 # multi-second GC death. See docs/reviews/2026-05-26-security-audit.md.

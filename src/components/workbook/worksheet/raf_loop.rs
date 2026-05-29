@@ -12,6 +12,7 @@
 use leptos::html;
 use leptos::prelude::*;
 use leptos_use::use_raf_fn;
+use std::cell::Cell;
 use std::rc::Rc;
 use web_sys::HtmlCanvasElement;
 
@@ -38,6 +39,8 @@ pub(super) fn install_raf_loop(
     render_needed: RwSignal<bool>,
     #[cfg(feature = "dev-tools")] app: AppState,
 ) {
+    let last_canvas_w = Cell::new(0.0f64);
+    let last_canvas_h = Cell::new(0.0f64);
     let _ = use_raf_fn(move |_| {
         canvas_handle.update_value(|slot| {
             if slot.is_some() {
@@ -121,10 +124,14 @@ pub(super) fn install_raf_loop(
         // visible viewport size.
         let canvas_w = canvas_el.client_width() as f64;
         let canvas_h = canvas_el.client_height() as f64;
-        model.update_value(|m| {
-            m.set_window_width(canvas_w);
-            m.set_window_height(canvas_h);
-        });
+        if canvas_w != last_canvas_w.get() || canvas_h != last_canvas_h.get() {
+            model.update_value(|m| {
+                m.set_window_width(canvas_w);
+                m.set_window_height(canvas_h);
+            });
+            last_canvas_w.set(canvas_w);
+            last_canvas_h.set(canvas_h);
+        }
         #[cfg(feature = "dev-tools")]
         web_sys::console::time_with_label("render");
         #[cfg(feature = "dev-tools")]
