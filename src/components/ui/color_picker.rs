@@ -5,9 +5,9 @@ A reusable color picker for toolbar, context menus, and sheet tabs.
 
 ```
 ColorPicker (base - no WorkbookState dep)
-├ ColorPickerTrigger  (button or ctx-item depending on placement)
-├ on_click_outside    (closes picker without swallowing the click)
-└ ColorPickerDropdown (z-index 1100)
+├ Dropdown placement → <button> trigger + <Popover> (click-outside + viewport clamp)
+├ Inline placement   → ctx-item trigger + inline expansion (position derived from parent menu)
+└ ColorPickerPanel   (placement-agnostic contents)
     ├ MainColorPalette
     ├ RecentColorsPalette
     ├ CustomColorInput
@@ -38,6 +38,7 @@ Custom / without WorkbookState:
 use leptos::prelude::*;
 use leptos_use::{on_click_outside, use_toggle};
 
+use crate::components::ui::popover::Popover;
 use crate::model::style_types::HexColor;
 use crate::state::WorkbookState;
 use crate::theme::COLOR_PALETTE;
@@ -95,85 +96,120 @@ pub fn ColorPicker(
     #[prop(default = true)] allow_clear: bool,
     #[prop(default = Signal::derive(|| Vec::new()))] recent_colors: Signal<Vec<HexColor>>,
 ) -> impl IntoView {
-    let leptos_use::UseToggleReturn {
-        toggle: toggle_picker,
-        value: picker_open,
-        set_value: set_picker_open,
-    } = use_toggle(false);
-
     let custom_input = RwSignal::new(String::new());
-
-    let select_color = move |color: Option<HexColor>| {
-        on_color_change.run(color);
-        set_picker_open.set(false);
-        custom_input.set(String::new());
-    };
-
-    // on_click_outside fires for any click whose target is outside this div,
-    // without consuming/stopping the event - so a mis-click on Bold closes the
-    // picker AND toggles bold in a single click.
-    let container_ref = NodeRef::<leptos::html::Div>::new();
-    let _ = on_click_outside(container_ref, move |_| set_picker_open.set(false));
-
     let container_class = format!("cp cp-{}", color_type.css_class());
 
-    view! {
-        <div class={container_class} node_ref=container_ref>
-            <ColorPickerTrigger
-                placement=placement
-                on_toggle=Callback::new(move |_| toggle_picker())
-            >
-                {children()}
-            </ColorPickerTrigger>
+    match placement {
+        // Toolbar: a button trigger + a floating panel delegated to `Popover`,
+        // which owns click-outside dismiss and viewport-edge clamping. The panel
+        // anchors to the trigger button's bottom-left rect so it opens directly
+        // beneath the button; Popover then clamps it on-screen.
+        ColorPickerPlacement::Dropdown => {
+            let (open, set_open) = signal(false);
+            let (pos, set_pos) = signal((0i32, 0i32));
 
-            <Show when=move || picker_open.get()>
-                <ColorPickerDropdown
-                    placement=placement
-                    current_color=current_color
-                    recent_colors=recent_colors
-                    custom_input=custom_input
-                    allow_custom=allow_custom
-                    allow_clear=allow_clear
-                    on_color_select=select_color
-                />
-            </Show>
-        </div>
+            let select_color = move |color: Option<HexColor>| {
+                on_color_change.run(color);
+                set_open.set(false);
+                custom_input.set(String::new());
+            };
+
+            let on_trigger = move |ev: web_sys::MouseEvent| {
+                use wasm_bindgen::JsCast;
+                // current_target = the button the listener is bound to, never an
+                // inner icon/bar — so the anchor rect is always the button's.
+                if let Some(el) = ev
+                    .current_target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                {
+                    let rect = el.get_bounding_client_rect();
+                    set_pos.set((rect.left() as i32, rect.bottom() as i32));
+                }
+                set_open.update(|v| *v = !*v);
+            };
+
+            view! {
+                <div class=container_class>
+                    <button
+                        class="tb-btn cp-trigger"
+                        on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
+                        on:click=on_trigger
+                    >
+                        {children()}
+                    </button>
+                    <Popover open set_open pos class="cp-drop">
+                        <ColorPickerPanel
+                            current_color=current_color
+                            recent_colors=recent_colors
+                            custom_input=custom_input
+                            allow_custom=allow_custom
+                            allow_clear=allow_clear
+                            on_color_select=select_color
+                        />
+                    </Popover>
+                </div>
+            }
+            .into_any()
+        }
+        // Context menu: the panel expands inline (normal document flow) inside
+        // the menu, so its position is derived entirely from the parent menu —
+        // no floating panel of its own. The parent `ContextMenu` (itself a
+        // `Popover`) re-clamps when this expansion grows it.
+        ColorPickerPlacement::Inline => {
+            let leptos_use::UseToggleReturn {
+                toggle: toggle_picker,
+                value: picker_open,
+                set_value: set_picker_open,
+            } = use_toggle(false);
+
+            let select_color = move |color: Option<HexColor>| {
+                on_color_change.run(color);
+                set_picker_open.set(false);
+                custom_input.set(String::new());
+            };
+
+            // Click-outside on the whole row (trigger + expansion), not stopping
+            // the event — a mis-click elsewhere closes the picker.
+            let container_ref = NodeRef::<leptos::html::Div>::new();
+            let _ = on_click_outside(container_ref, move |_| set_picker_open.set(false));
+
+            view! {
+                <div class=container_class node_ref=container_ref>
+                    <div
+                        class="ctx-item cp-trigger"
+                        on:click=move |ev: web_sys::MouseEvent| {
+                            ev.stop_propagation();
+                            toggle_picker();
+                        }
+                    >
+                        {children()}
+                    </div>
+                    <Show when=move || picker_open.get()>
+                        <div class="cp-inline">
+                            <ColorPickerPanel
+                                current_color=current_color
+                                recent_colors=recent_colors
+                                custom_input=custom_input
+                                allow_custom=allow_custom
+                                allow_clear=allow_clear
+                                on_color_select=select_color
+                            />
+                        </div>
+                    </Show>
+                </div>
+            }
+            .into_any()
+        }
     }
 }
 
 // Private sub-components
 
+/// Placement-agnostic panel contents: main palette, recent colors, optional
+/// custom-hex input, optional clear button. The wrapping surface (floating
+/// `Popover` vs inline `cp-inline` div) is the caller's responsibility.
 #[component]
-fn ColorPickerTrigger(
-    placement: ColorPickerPlacement,
-    on_toggle: Callback<()>,
-    children: Children,
-) -> impl IntoView {
-    let on_click = move |ev: web_sys::MouseEvent| {
-        ev.stop_propagation();
-        on_toggle.run(());
-    };
-
-    if placement == ColorPickerPlacement::Dropdown {
-        view! {
-            <button class="tb-btn cp-trigger" on:click=on_click>
-                {children()}
-            </button>
-        }
-        .into_any()
-    } else {
-        view! {
-            <div class="ctx-item cp-trigger" on:click=on_click>
-                {children()}
-            </div>
-        }
-        .into_any()
-    }
-}
-
-#[component]
-fn ColorPickerDropdown(
-    placement: ColorPickerPlacement,
+fn ColorPickerPanel(
     current_color: Signal<Option<HexColor>>,
     recent_colors: Signal<Vec<HexColor>>,
     custom_input: RwSignal<String>,
@@ -181,26 +217,19 @@ fn ColorPickerDropdown(
     allow_clear: bool,
     on_color_select: impl Fn(Option<HexColor>) + Copy + Send + Sync + 'static,
 ) -> impl IntoView {
-    let picker_class = match placement {
-        ColorPickerPlacement::Dropdown => "cp-drop",
-        ColorPickerPlacement::Inline => "cp-inline",
-    };
-
     view! {
-        <div class={picker_class}>
-            <MainColorPalette current_color=current_color on_color_select=on_color_select />
-            <RecentColorsPalette
-                recent_colors=recent_colors
-                current_color=current_color
-                on_color_select=on_color_select
-            />
-            <Show when=move || allow_custom>
-                <CustomColorInput custom_input=custom_input on_color_select=on_color_select />
-            </Show>
-            <Show when=move || allow_clear>
-                <ClearColorButton on_color_select=on_color_select />
-            </Show>
-        </div>
+        <MainColorPalette current_color=current_color on_color_select=on_color_select />
+        <RecentColorsPalette
+            recent_colors=recent_colors
+            current_color=current_color
+            on_color_select=on_color_select
+        />
+        <Show when=move || allow_custom>
+            <CustomColorInput custom_input=custom_input on_color_select=on_color_select />
+        </Show>
+        <Show when=move || allow_clear>
+            <ClearColorButton on_color_select=on_color_select />
+        </Show>
     }
 }
 

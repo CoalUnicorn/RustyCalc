@@ -59,11 +59,10 @@
     color: var(--text-dim);
 }
 
-/* Dropdown (toolbar mode) */
+/* Dropdown (toolbar mode) — positioned by <Popover> via inline left/top
+   (viewport coordinates), so it must be fixed, not container-relative. */
 .cp .cp-drop {
-    position: absolute;
-    top: 100%;
-    left: 0;
+    position: fixed;
     z-index: 1100;
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
