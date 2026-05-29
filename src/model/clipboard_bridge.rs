@@ -34,25 +34,23 @@ struct ClipboardMirror {
     range: (i32, i32, i32, i32),
 }
 
-#[allow(clippy::expect_used)]
 impl AppClipboard {
     /// Extract all fields from an opaque `ironcalc_base::Clipboard` via serde.
     ///
     /// Accepts any `Serialize` value whose JSON shape matches `Clipboard`
     /// (`{csv, data, sheet, range}`). This avoids naming the `Clipboard` type
     /// directly, since it's not re-exported from `ironcalc_base`.
-    ///
-    /// # Panics
-    pub fn capture(clipboard: &impl serde::Serialize) -> Self {
-        let json = serde_json::to_value(clipboard).expect("Clipboard must be serializable");
-        let m: ClipboardMirror =
-            serde_json::from_value(json).expect("ClipboardMirror must match Clipboard's shape");
-        Self {
+    pub fn capture(clipboard: &impl serde::Serialize) -> Result<Self, String> {
+        let json = serde_json::to_value(clipboard)
+            .map_err(|e| format!("Clipboard serialization failed: {e}"))?;
+        let m: ClipboardMirror = serde_json::from_value(json)
+            .map_err(|e| format!("Clipboard shape mismatch: {e}"))?;
+        Ok(Self {
             csv: m.csv,
             sheet: m.sheet,
             range: m.range.into(),
             data: m.data,
-        }
+        })
     }
 
     /// Tiles source to fill destination if dimensions are exact multiples,

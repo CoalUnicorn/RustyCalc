@@ -74,7 +74,7 @@ fn tile_reps_same_size_returns_none() {
 fn capture_roundtrip() {
     let model = UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("create test model");
     let cb = model.copy_to_clipboard().expect("copy empty range");
-    let app = AppClipboard::capture(&cb);
+    let app = AppClipboard::capture(&cb).expect("capture roundtrip");
     assert_eq!(app.sheet, 0);
 }
 

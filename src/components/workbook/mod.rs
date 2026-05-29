@@ -214,7 +214,13 @@ fn copy_to_app_clipboard(
 ) {
     model.with_value(|m| {
         if let Ok(cb) = m.copy_to_clipboard() {
-            let app_cb = AppClipboard::capture(&cb);
+            let app_cb = match AppClipboard::capture(&cb) {
+                Ok(cb) => cb,
+                Err(e) => {
+                    state.status.set(Some(StatusMessage::Error(e)));
+                    return;
+                }
+            };
             let csv = app_cb.csv.clone();
             let sheet_area = SheetRange {
                 sheet: app_cb.sheet,
@@ -264,6 +270,7 @@ fn paste_from_clipboard(
     // Only attempted when no internal clipboard data was available; otherwise
     // the async path would race and overwrite the already-completed paste.
     if !internal_pasted {
+        const MAX_CLIPBOARD_BYTES: usize = 500_000;
         wasm_bindgen_futures::spawn_local(async move {
             let clip = leptos::prelude::window().navigator().clipboard();
             let Ok(js_text) = wasm_bindgen_futures::JsFuture::from(clip.read_text()).await else {
@@ -271,6 +278,13 @@ fn paste_from_clipboard(
             };
             let text = js_text.as_string().unwrap_or_default();
             if text.is_empty() {
+                return;
+            }
+            if text.len() > MAX_CLIPBOARD_BYTES {
+                state.status.set(Some(StatusMessage::Error(format!(
+                    "Clipboard paste too large: {} bytes (limit {MAX_CLIPBOARD_BYTES})",
+                    text.len()
+                ))));
                 return;
             }
             mutate(model, EvaluationMode::Immediate, |m| {
