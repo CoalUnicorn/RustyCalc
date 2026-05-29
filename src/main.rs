@@ -15,6 +15,9 @@ mod theme;
 mod util;
 mod verify;
 
+#[cfg(test)]
+mod test;
+
 use app::App;
 
 fn main() {

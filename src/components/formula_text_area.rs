@@ -11,7 +11,7 @@
 //!   (clicks or printable keys) — the formula bar owns its own focus.
 //!
 //! State-sync (on_input, on_keydown) is delegated to
-//! [`crate::input::edit_sync`] so this component stays a thin DOM wrapper.
+//! [`crate::input::formula`] so this component stays a thin DOM wrapper.
 //! Point mode reads `edit.cursor` after every keystroke, so we must update
 //! it atomically with `text` — which is exactly what `sync_edit` guarantees.
 
@@ -19,7 +19,7 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::components::formula_overlay::FormulaOverlay;
-use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
+use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::input::mouse::CanvasHandle;
 use crate::model::SheetQuery;
 use crate::model::frontend_model::DefinedNameManager;

@@ -3,8 +3,8 @@
 //! Mirror of [`crate::components::formula_text_area::FormulaTextArea`] minus
 //! the cell-editor concerns (canvas positioning, focus arbitration with the
 //! grid, point-mode arming). Both editors share
-//! [`crate::input::edit_sync::sync_edit`]: the trait bound
-//! [`crate::input::edit_sync::FormulaEditState`] dispatches on the in-progress
+//! [`crate::input::formula::sync_edit`]: the trait bound
+//! [`crate::input::formula::FormulaEditState`] dispatches on the in-progress
 //! state type, so analyze-on-keystroke validation behaves identically here.
 //!
 //! The error class reads [`crate::state::EditingDefinedName::formula_invalid`]
@@ -12,7 +12,7 @@
 
 use leptos::prelude::*;
 
-use crate::input::edit_sync::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
+use crate::input::formula::{read_value_and_cursor, suppress_navigation_defaults, sync_edit};
 use crate::model::SheetQuery;
 use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{ModelStore, WorkbookState};

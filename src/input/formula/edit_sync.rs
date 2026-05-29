@@ -21,8 +21,9 @@
 use wasm_bindgen::JsCast;
 
 use crate::coord::CellAddress;
-use crate::input::formula_analysis::{FormulaAnalysis, analyze_formula};
 use crate::state::{EditingCell, EditingDefinedName, Split};
+
+use super::analysis::{FormulaAnalysis, analyze_formula};
 
 /// Extract `(value, cursor)` from an input or textarea event target.
 ///

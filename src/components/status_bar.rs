@@ -3,7 +3,7 @@ use leptos::prelude::*;
 use crate::app_state::AppState;
 use crate::components::perf_panel::PerfPanel;
 use crate::components::playback_panel::PlaybackPanel;
-use crate::input::formula_analysis::FormulaStatus;
+use crate::input::formula::FormulaStatus;
 use crate::state::{StatusMessage, WorkbookState};
 
 /// Displays the most recent engine error below the sheet tab bar.

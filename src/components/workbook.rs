@@ -10,7 +10,7 @@ use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::{
     edit::EditAction,
-    formula_input::*,
+    formula::*,
     keyboard::{KeyMod, SpreadsheetAction, classify_key, execute},
 };
 use crate::model::{AppClipboard, EvaluationMode, PasteMode, mutate, try_mutate};

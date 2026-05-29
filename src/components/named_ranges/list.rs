@@ -12,7 +12,7 @@
 use leptos::prelude::*;
 
 use crate::coord::{CellAddress, DefinedName};
-use crate::input::formula_analysis::analyze_formula;
+use crate::input::formula::analyze_formula;
 use crate::model::SheetQuery;
 use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{EditingDefinedName, ModelStore, WorkbookState};
