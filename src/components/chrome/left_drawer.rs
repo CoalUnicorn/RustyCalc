@@ -292,7 +292,14 @@ fn EntryRow(
             storage::update_name(&uuid, &new_name);
             // Keep the in-memory model in sync so the next save() won't revert the name.
             if state.current_uuid.get_untracked() == Some(uuid) {
-                model.update_value(|m| m.set_name(&new_name));
+                model.update_value(|m| {
+                    m.set_name(&new_name);
+                    // Trigger save immediately — renaming doesn't emit
+                    // content/format/structure events that wake the autosave
+                    // Effect, so without this the rename lives in memory until
+                    // the next edit or beforeunload.
+                    storage::save(&uuid, m);
+                });
             }
             // Renaming is an explicit user action — clear the \"shared from link\"
             // quarantine badge. We don't auto-promote on autosave anymore so the

@@ -16,7 +16,6 @@ use std::cell::Cell;
 use std::rc::Rc;
 use web_sys::HtmlCanvasElement;
 
-#[cfg(feature = "dev-tools")]
 use crate::app_state::AppState;
 use crate::coord::SheetRange;
 use crate::input::mouse::CanvasHandle;
@@ -37,7 +36,7 @@ pub(super) fn install_raf_loop(
     clipboard_draw: ClipboardDraw,
     theme_dirty: StoredValue<bool>,
     render_needed: RwSignal<bool>,
-    #[cfg(feature = "dev-tools")] app: AppState,
+    app: Option<AppState>,
 ) {
     let last_canvas_w = Cell::new(0.0f64);
     let last_canvas_h = Cell::new(0.0f64);
@@ -97,18 +96,20 @@ pub(super) fn install_raf_loop(
         // of `render_needed` (which is gated on workbook state changes).
         // No-op when no recording is loaded or play is paused.
         #[cfg(feature = "dev-tools")]
-        if app.playback_loaded.get_untracked() && app.playback_playing.get_untracked() {
-            canvas_handle.update_value(|slot| {
-                if let Some(ic) = slot.as_mut() {
-                    if ic.tick_playback(crate::perf::now()) {
-                        app.playback_frame.set(ic.recording_current_frame());
+        if let Some(app) = &app {
+            if app.playback_loaded.get_untracked() && app.playback_playing.get_untracked() {
+                canvas_handle.update_value(|slot| {
+                    if let Some(ic) = slot.as_mut() {
+                        if ic.tick_playback(crate::perf::now()) {
+                            app.playback_frame.set(ic.recording_current_frame());
+                        }
+                        // Engine auto-pauses at end-of-recording — mirror it.
+                        if !ic.is_playing() {
+                            app.playback_playing.set(false);
+                        }
                     }
-                    // Engine auto-pauses at end-of-recording — mirror it.
-                    if !ic.is_playing() {
-                        app.playback_playing.set(false);
-                    }
-                }
-            });
+                });
+            }
         }
 
         if !render_needed.get_untracked() {
@@ -134,7 +135,6 @@ pub(super) fn install_raf_loop(
         }
         #[cfg(feature = "dev-tools")]
         web_sys::console::time_with_label("render");
-        #[cfg(feature = "dev-tools")]
         let paint_t0 = crate::perf::now();
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
@@ -155,9 +155,10 @@ pub(super) fn install_raf_loop(
         // cell commit has happened so the panel stays on its placeholder
         // ("commit a cell to measure") and we don't spam the signal on
         // every scroll / resize / overlay tick.
-        #[cfg(feature = "dev-tools")]
-        if app.perf.commit_start.get_untracked().is_some() {
-            app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
+        if let Some(app) = &app {
+            if app.perf.commit_start.get_untracked().is_some() {
+                app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
+            }
         }
     });
 }

@@ -77,25 +77,24 @@ pub fn execute_format(
             let size = size.clamp(1.0, 409.0);
             let sa = model.with_value(SheetRange::from_view);
 
-            /*
-            FIXME:  how we handle cell area / columns / rows selection with different
-                    font sizing. How excel handle this?
-                1.  Currently if selection includes empty cell default size 13px and bigger we decrement,
-                    it will throw console err like:
-                    [ironcalc] set_font_size: Invalid value for font size: '-43'.
-                    [ironcalc] set_font_size: Invalid value for font size: '0'.
-            */
             try_mutate(
                 model,
                 EvaluationMode::Deferred,
                 |m| -> Result<(), FormatError> {
                     let area = m.selection();
-                    let val = format!(
-                        "{}",
-                        size as i32 - m.toolbar_state().style.font_size.round() as i32
-                    );
-                    m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
-                        .map_err(FormatError::Engine)?;
+                    let current = m.toolbar_state().style.font_size;
+                    // Skip when the active cell has no font size — applying a relative
+                    // delta to empty cells in the range can produce negative sizes
+                    // (IronCalc logs `set_font_size: Invalid value for font size: '-43'`).
+                    // Once IronCalc handles empty-cell delta clamping, remove this guard.
+                    if current > 0.0 {
+                        let val = format!(
+                            "{}",
+                            size as i32 - current.round() as i32
+                        );
+                        m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
+                            .map_err(FormatError::Engine)?;
+                    }
                     Ok(())
                 },
             )?;

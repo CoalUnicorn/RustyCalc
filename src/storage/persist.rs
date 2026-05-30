@@ -203,6 +203,9 @@ pub fn create_new() -> (WorkbookId, UserModel<'static>) {
 ///
 /// Used when the user uploads a file - the model is already in memory; we just
 /// need to register and persist it.
+/// Safety: caller must ensure model originated from a trusted source
+/// (validated by both callers upstream — `share_verify.rs` verifies the
+/// shared payload, `workbook.rs` uploads from a user-provided file).
 pub fn create_new_from(model: UserModel<'static>) -> (WorkbookId, UserModel<'static>) {
     let uuid = WorkbookId::new();
     save(&uuid, &model);

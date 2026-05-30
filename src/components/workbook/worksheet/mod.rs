@@ -3,7 +3,6 @@ use leptos::prelude::*;
 use leptos_use::use_resize_observer;
 use std::rc::Rc;
 
-#[cfg(feature = "dev-tools")]
 use crate::app_state::AppState;
 use crate::components::workbook::editing::cell_editor::CellEditor;
 use crate::events::{SpreadsheetEvent, StructureEvent};
@@ -57,8 +56,7 @@ pub fn Worksheet() -> impl IntoView {
         });
     });
     let state = expect_context::<WorkbookState>();
-    #[cfg(feature = "dev-tools")]
-    let app = expect_context::<AppState>();
+    let app = use_context::<AppState>();
     let model = expect_context::<ModelStore>();
 
     // ResizeObserver: re-render when the container changes size.
@@ -151,7 +149,6 @@ pub fn Worksheet() -> impl IntoView {
         clipboard_draw,
         theme_dirty,
         render_needed,
-        #[cfg(feature = "dev-tools")]
         app,
     );
 

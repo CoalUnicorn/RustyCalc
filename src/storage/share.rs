@@ -147,7 +147,7 @@ pub fn verify_and_load_shared(
     word: &str,
     bytes: &[u8],
 ) -> Result<UserModel<'static>, String> {
-    verify::verify_and_extract(hash, word).map_err(|e| e.to_string())?;
+    verify::decode_with_consent(hash, word).map_err(|e| e.to_string())?;
     UserModel::from_bytes(bytes, LOCALE).map_err(|e| {
         web_sys::console::warn_1(
             &format!("[rustycalc sharing] model parse failed after verification: {e}").into(),

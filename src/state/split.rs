@@ -30,6 +30,9 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
     }
 
     #[allow(dead_code)]
+    /// Reads the inner value via a closure. Stable primitive API;
+    /// kept for potential external consumers that prefer the `with`
+    /// pattern over `get()`.
     pub fn with<R>(&self, f: impl FnOnce(&T) -> R) -> R {
         self.0.with(f)
     }
@@ -47,11 +50,15 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
     }
 
     #[allow(dead_code)]
+    /// Returns the inner `ReadSignal`. Stable primitive API;
+    /// kept for potential external consumers that need raw signal handles.
     pub fn read(&self) -> ReadSignal<T> {
         self.0
     }
 
     #[allow(dead_code)]
+    /// Returns the inner `WriteSignal`. Stable primitive API;
+    /// kept for potential external consumers that need raw signal handles.
     pub fn write(&self) -> WriteSignal<T> {
         self.1
     }
