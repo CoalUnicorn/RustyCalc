@@ -136,9 +136,10 @@ pub fn FormulaBar() -> impl IntoView {
         let Some(inp) = target.dyn_ref::<web_sys::HtmlInputElement>() else {
             return;
         };
-        if let Some(overlay) = overlay_ref.get() {
-            overlay.set_scroll_left(inp.scroll_left());
-        }
+        let Some(overlay) = overlay_ref.get() else {
+            return;
+        };
+        overlay.set_scroll_left(inp.scroll_left());
     };
 
     // Ref-under-caret tooltip — first visible consumer of the ref_node

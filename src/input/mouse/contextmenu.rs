@@ -46,12 +46,13 @@ pub fn handle_contextmenu(
         _ => None,
     };
 
-    if let Some(target) = target {
-        ev.prevent_default();
-        state.context_menu.set(Some(ContextMenuState {
-            x: ev.client_x(),
-            y: ev.client_y(),
-            target,
-        }));
-    }
+    let Some(target) = target else {
+        return;
+    };
+    ev.prevent_default();
+    state.context_menu.set(Some(ContextMenuState {
+        x: ev.client_x(),
+        y: ev.client_y(),
+        target,
+    }));
 }
