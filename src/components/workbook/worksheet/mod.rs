@@ -56,7 +56,7 @@ pub fn Worksheet() -> impl IntoView {
         });
     });
     let state = expect_context::<WorkbookState>();
-    let app = use_context::<AppState>();
+    let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
 
     // ResizeObserver: re-render when the container changes size.
@@ -149,7 +149,7 @@ pub fn Worksheet() -> impl IntoView {
         clipboard_draw,
         theme_dirty,
         render_needed,
-        app,
+        Some(app),
     );
 
     // mousedown: dispatches via IronCanvas::hit_test (canvas_handle owns the

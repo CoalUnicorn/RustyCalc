@@ -53,7 +53,7 @@ strip = true
 
 [features]
 tauri = []
-dev-tools = ["iron-canvas-web/dev-tools"]
+dev-tools = ["iron-canvas-web/dev-tools", "export"]
 export = ["iron-canvas-web/pdf"]
 
 # Cap WASM linear memory at 256 MB so a crafted bitcode payload claiming
