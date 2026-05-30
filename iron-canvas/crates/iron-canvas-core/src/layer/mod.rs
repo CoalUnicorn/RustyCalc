@@ -232,10 +232,14 @@ where
 
         if let Some(sel) = selection.selection_range {
             painter.begin_group(GroupClass::HeaderHighlights);
-            self.renderer
-                .render_header_highlights(Axis::Row, frame, sel);
-            self.renderer
-                .render_header_highlights(Axis::Column, frame, sel);
+            if frame.row_header_thickness > 0 {
+                self.renderer
+                    .render_header_highlights(Axis::Row, frame, sel);
+            }
+            if frame.col_header_thickness > 0 {
+                self.renderer
+                    .render_header_highlights(Axis::Column, frame, sel);
+            }
             painter.end_group();
         }
 

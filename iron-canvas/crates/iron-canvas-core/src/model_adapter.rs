@@ -28,6 +28,21 @@ pub trait CanvasModel {
     fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
     fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+
+    /// Whether the row-header strip (1, 2, 3...) is visible on `sheet`.
+    /// `Some(true)` default; `None` carries the same fetch-failed meaning
+    /// as the other accessors. `false` collapses the strip to zero width.
+    fn get_show_row_headers(&self, _sheet: u32) -> Option<bool> {
+        Some(true)
+    }
+
+    /// Whether the column-header strip (A, B, C...) is visible on `sheet`.
+    /// `Some(true)` default; `None` carries the same fetch-failed meaning
+    /// as the other accessors. `false` collapses the strip to zero height.
+    fn get_show_col_headers(&self, _sheet: u32) -> Option<bool> {
+        Some(true)
+    }
+
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
@@ -103,6 +118,8 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
         fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
         fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+        fn get_show_row_headers(&self, sheet: u32) -> Option<bool>;
+        fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
         fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
         fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
         fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;

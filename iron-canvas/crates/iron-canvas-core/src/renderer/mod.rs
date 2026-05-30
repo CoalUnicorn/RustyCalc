@@ -175,13 +175,21 @@ impl<P: Painter> RendererCore<P> {
         self.painter.end_group();
 
         self.painter.begin_group(GroupClass::Headers);
-        self.render_headers_base(Axis::Row, frame);
-        self.render_headers_base(Axis::Column, frame);
+        if frame.row_header_thickness > 0 {
+            self.render_headers_base(Axis::Row, frame);
+        }
+        if frame.col_header_thickness > 0 {
+            self.render_headers_base(Axis::Column, frame);
+        }
         self.painter.end_group();
 
-        self.painter.begin_group(GroupClass::Corner);
-        self.draw_corner_box(frame);
-        self.painter.end_group();
+        // Corner box is gated for *correctness*: at thickness 0 it would
+        // still stroke 0.5px border lines spanning the full canvas.
+        if frame.row_header_thickness > 0 && frame.col_header_thickness > 0 {
+            self.painter.begin_group(GroupClass::Corner);
+            self.draw_corner_box(frame);
+            self.painter.end_group();
+        }
 
         self.painter.end_group();
     }
@@ -228,12 +236,22 @@ impl<P: Painter> RendererCore<P> {
         // Only the scroll-axis header strip shifted; the cross-axis
         // strip's pixels are unchanged.
         self.painter.begin_group(GroupClass::Headers);
-        self.render_headers_base(plan.axis, frame);
+        let axis_thickness = match plan.axis {
+            Axis::Row => frame.row_header_thickness,
+            Axis::Column => frame.col_header_thickness,
+        };
+        if axis_thickness > 0 {
+            self.render_headers_base(plan.axis, frame);
+        }
         self.painter.end_group();
 
-        self.painter.begin_group(GroupClass::Corner);
-        self.draw_corner_box(frame);
-        self.painter.end_group();
+        // Corner box is gated for *correctness*: at thickness 0 it would
+        // still stroke 0.5px border lines spanning the full canvas.
+        if frame.row_header_thickness > 0 && frame.col_header_thickness > 0 {
+            self.painter.begin_group(GroupClass::Corner);
+            self.draw_corner_box(frame);
+            self.painter.end_group();
+        }
 
         self.painter.end_group();
     }

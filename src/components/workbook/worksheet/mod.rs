@@ -127,7 +127,10 @@ pub fn Worksheet() -> impl IntoView {
             let _uuid = current_uuid.get();
             canvas_handle.update_value(|slot| {
                 if let Some(ic) = slot.as_mut() {
-                    ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
+                    ic.set_model(Rc::new(WorksheetModelAdapter {
+                        store: model,
+                        show_headers: state.show_headers,
+                    }));
                 }
             });
         });
@@ -150,6 +153,7 @@ pub fn Worksheet() -> impl IntoView {
         theme_dirty,
         render_needed,
         Some(app),
+        state.show_headers,
     );
 
     // mousedown: dispatches via IronCanvas::hit_test (canvas_handle owns the

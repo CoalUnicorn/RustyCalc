@@ -1,7 +1,7 @@
 use ironcalc_base::types::{CellType, Style};
 use leptos::prelude::*;
 
-use crate::state::ModelStore;
+use crate::state::{ModelStore, Split};
 use iron_canvas_core::{CanvasModel, CanvasView};
 
 /// Bridges `ModelStore` (a Leptos `StoredValue` holding `UserModel<'static>`)
@@ -13,6 +13,7 @@ use iron_canvas_core::{CanvasModel, CanvasView};
 /// `UserModel` are picked up automatically on the next render-time read.
 pub(super) struct WorksheetModelAdapter {
     pub store: ModelStore,
+    pub show_headers: Split<bool>,
 }
 
 impl CanvasModel for WorksheetModelAdapter {
@@ -41,6 +42,12 @@ impl CanvasModel for WorksheetModelAdapter {
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
         self.store
             .with_value(|m| CanvasModel::get_show_grid_lines(m, sheet))
+    }
+    fn get_show_row_headers(&self, _sheet: u32) -> Option<bool> {
+        Some(self.show_headers.get_untracked())
+    }
+    fn get_show_col_headers(&self, _sheet: u32) -> Option<bool> {
+        Some(self.show_headers.get_untracked())
     }
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style> {
         self.store

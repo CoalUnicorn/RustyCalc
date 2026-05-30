@@ -42,6 +42,8 @@ pub struct TestModel {
     active_col: Cell<i32>,
     selection: Cell<RCRange>,
     show_grid: Cell<bool>,
+    show_row_headers: Cell<bool>,
+    show_col_headers: Cell<bool>,
 }
 
 impl Default for TestModel {
@@ -67,6 +69,8 @@ impl Default for TestModel {
                 c2: 1,
             }),
             show_grid: Cell::new(true),
+            show_row_headers: Cell::new(true),
+            show_col_headers: Cell::new(true),
         }
     }
 }
@@ -144,6 +148,14 @@ impl TestModel {
     }
     pub fn with_show_grid(self, b: bool) -> Self {
         self.show_grid.set(b);
+        self
+    }
+    pub fn with_hidden_row_headers(self) -> Self {
+        self.show_row_headers.set(false);
+        self
+    }
+    pub fn with_hidden_col_headers(self) -> Self {
+        self.show_col_headers.set(false);
         self
     }
 
@@ -237,6 +249,12 @@ impl CanvasModel for TestModel {
     }
     fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
         Some(self.show_grid.get())
+    }
+    fn get_show_row_headers(&self, _: u32) -> Option<bool> {
+        Some(self.show_row_headers.get())
+    }
+    fn get_show_col_headers(&self, _: u32) -> Option<bool> {
+        Some(self.show_col_headers.get())
     }
     fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<Style> {
         Some(Style::default())

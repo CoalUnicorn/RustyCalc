@@ -9,12 +9,14 @@ use wasm_bindgen_futures::spawn_local;
 use crate::app_state::AppState;
 use crate::components::panels::share_popover::SharePopover;
 use crate::components::ui::context_menu::{ContextMenu, ContextMenuItem, ContextMenuSeparator};
+use crate::events::*;
 use crate::input::workbook::{WorkbookAction, execute_workbook};
 use crate::input::xlsx_io;
 use crate::state::StatusMessage;
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage;
 use crate::theme::Theme;
+use crate::util::refocus_workbook;
 
 #[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
@@ -81,6 +83,29 @@ pub fn FileBar() -> impl IntoView {
             set_menu_pos.set((rect.left() as i32, rect.bottom() as i32));
         }
         set_menu_open.update(|v| *v = !*v);
+    };
+
+    // View menu - owned signals + button anchor ref for positioning.
+    let (view_menu_open, set_view_menu_open) = signal(false);
+    let (view_menu_pos, set_view_menu_pos) = signal((0i32, 0i32));
+    let view_btn_ref = NodeRef::<leptos::html::Button>::new();
+
+    let on_view_click = move |_: web_sys::MouseEvent| {
+        if let Some(el) = view_btn_ref.get() {
+            let rect = el.get_bounding_client_rect();
+            set_view_menu_pos.set((rect.left() as i32, rect.bottom() as i32));
+        }
+        set_view_menu_open.update(|v| *v = !*v);
+    };
+
+    let on_toggle_headers = move || {
+        state.show_headers.set(!state.show_headers.get_untracked());
+        state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
+            sheet: model.with_value(|m| m.get_selected_view().sheet),
+            col: None,
+            row: None,
+        }));
+        refocus_workbook();
     };
 
     // Hidden file input - triggered by the Import menu item.
@@ -272,6 +297,22 @@ pub fn FileBar() -> impl IntoView {
                     {perf_label}
                 </ContextMenuItem>
                 */
+            </ContextMenu>
+
+            <button
+                node_ref=view_btn_ref
+                class="fl-menu-btn"
+                on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
+                on:click=on_view_click
+            >
+                "View"
+            </button>
+            <ContextMenu open=view_menu_open set_open=set_view_menu_open pos=view_menu_pos>
+                // Checked state rides in the label, not `icon`: that prop is
+                // `Option<&'static str>` and can't take a reactive closure.
+                <ContextMenuItem on_click=on_toggle_headers>
+                    {move || if state.show_headers.get() { "☑ Show Headers" } else { "☐ Show Headers" }}
+                </ContextMenuItem>
             </ContextMenu>
 
             <Show when=move || is_shared_current().unwrap_or(false)>

@@ -225,6 +225,13 @@ impl Chrome {
         });
         let sheet = model.get_selected_sheet();
 
+        // Visibility is modelled as thickness 0. CELL_AREA_INSET only reserves
+        // the 1-px chrome border that draw_corner_box strokes; a hidden strip
+        // paints no such border, so its thickness AND inset collapse to 0 and
+        // cells reclaim the full edge (cell_origin follows from origin_x/_y).
+        let show_row = model.get_show_row_headers(sheet).unwrap_or(true);
+        let show_col = model.get_show_col_headers(sheet).unwrap_or(true);
+
         // Phase A — frozen counts only.
         let frozen_row_count = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_col_count = model.get_frozen_columns_count(sheet).unwrap_or(0);
@@ -232,7 +239,11 @@ impl Chrome {
         let mut pane_set = PaneSet::with_recycled(recycled);
 
         // Phase B — row walk.
-        let origin_y = HEADER_ROW_HEIGHT + CELL_AREA_INSET;
+        let origin_y = if show_col {
+            HEADER_ROW_HEIGHT + CELL_AREA_INSET
+        } else {
+            0
+        };
         pane_set.fill_rows(model, frozen_row_count, origin_y, view.top_row, canvas.h);
 
         // Phase C — measure row_header_thickness from the last visible row label.
@@ -241,10 +252,18 @@ impl Chrome {
             .last()
             .map(|s| s.row)
             .unwrap_or((frozen_row_count + 1).max(view.top_row));
-        let row_header_thickness = measure_row_header_width(last_visible_row);
+        let row_header_thickness = if show_row {
+            measure_row_header_width(last_visible_row)
+        } else {
+            0
+        };
 
         // Phase D — col walk uses the measured width to anchor `origin_x`.
-        let origin_x = row_header_thickness + CELL_AREA_INSET;
+        let origin_x = if show_row {
+            row_header_thickness + CELL_AREA_INSET
+        } else {
+            0
+        };
         pane_set.fill_cols(
             model,
             frozen_col_count,
@@ -255,7 +274,7 @@ impl Chrome {
 
         // Phase E — assemble. `cell_origin` reuses the locals from B/D so
         // there's a single source of truth for the cell-area top-left.
-        let col_header_thickness = HEADER_ROW_HEIGHT;
+        let col_header_thickness = if show_col { HEADER_ROW_HEIGHT } else { 0 };
         let cell_origin = Point {
             x: origin_x,
             y: origin_y,

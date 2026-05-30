@@ -19,7 +19,7 @@ use web_sys::HtmlCanvasElement;
 use crate::app_state::AppState;
 use crate::coord::SheetRange;
 use crate::input::mouse::CanvasHandle;
-use crate::state::ModelStore;
+use crate::state::{ModelStore, Split};
 use iron_canvas_core::*;
 use iron_canvas_web::IronCanvas;
 
@@ -27,6 +27,7 @@ use super::ClipboardDraw;
 use super::adapter::WorksheetModelAdapter;
 use super::overlay_memo::OverlayTuple;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn install_raf_loop(
     grid_ref: NodeRef<html::Canvas>,
     overlay_ref: NodeRef<html::Canvas>,
@@ -37,6 +38,7 @@ pub(super) fn install_raf_loop(
     theme_dirty: StoredValue<bool>,
     render_needed: RwSignal<bool>,
     app: Option<AppState>,
+    show_headers: Split<bool>,
 ) {
     let last_canvas_w = Cell::new(0.0f64);
     let last_canvas_h = Cell::new(0.0f64);
@@ -68,7 +70,10 @@ pub(super) fn install_raf_loop(
                     if let Some(el) = window().document().and_then(|d| d.document_element()) {
                         ic.set_theme_from_element(&el);
                     }
-                    ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
+                    ic.set_model(Rc::new(WorksheetModelAdapter {
+                        store: model,
+                        show_headers,
+                    }));
                     let OverlayTuple {
                         extend_to,
                         point_range,

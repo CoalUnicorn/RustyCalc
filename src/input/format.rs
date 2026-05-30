@@ -88,10 +88,7 @@ pub fn execute_format(
                     // (IronCalc logs `set_font_size: Invalid value for font size: '-43'`).
                     // Once IronCalc handles empty-cell delta clamping, remove this guard.
                     if current > 0.0 {
-                        let val = format!(
-                            "{}",
-                            size as i32 - current.round() as i32
-                        );
+                        let val = format!("{}", size as i32 - current.round() as i32);
                         m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
                             .map_err(FormatError::Engine)?;
                     }

@@ -11,7 +11,6 @@
 
 use std::cell::Cell;
 
-use crate::geometry::constants::CELL_AREA_INSET;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::geometry::slot::scroll_first;
@@ -326,9 +325,9 @@ pub(super) fn try_blit_rows(
         return None;
     }
     // Frozen-cols band only exists when frozen_cols > 0; otherwise the
-    // gap between row_header_thickness and pane_x is the 1-px chrome
-    // stroke alone, NOT a paintable pane.
-    let frozen_band_x = prev.row_header_thickness + CELL_AREA_INSET;
+    // gap between cell_origin.x and pane_x is the 1-px chrome stroke
+    // alone, NOT a paintable pane.
+    let frozen_band_x = prev.cell_origin.x;
     let frozen_band_w = if prev.pane_set.frozen_cols_count() > 0 {
         pane_x - frozen_band_x
     } else {
@@ -382,7 +381,7 @@ pub(super) fn try_blit_cols(
     if pane_w <= 0 || pane_h <= 0 {
         return None;
     }
-    let frozen_band_y = prev.col_header_thickness + CELL_AREA_INSET;
+    let frozen_band_y = prev.cell_origin.y;
     let frozen_band_h = if prev.pane_set.frozen_rows_count() > 0 {
         pane_y - frozen_band_y
     } else {
