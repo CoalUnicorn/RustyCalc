@@ -99,11 +99,13 @@
     line-height: 38px;
 }
 
-/* Validation badges — stubs for the stylist */
-/*
-.fb .fb-valid   {  }
-.fb .fb-pending {  }
-.fb .fb-error   {  }
-.fb .fb-ok      {  }
-.fb .fb-neutral {  }
-*/
+/* Ref-under-caret indicator — shows which cell the cursor is on during
+ * formula editing. Mono to distinguish from the formula text above. */
+.fb .fb-valid {
+    padding: 0 8px;
+    font-size: 12px;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
+}

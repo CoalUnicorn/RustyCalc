@@ -80,7 +80,7 @@ pub fn PlaybackPanel() -> impl IntoView {
         {move || {
             if app.playback_loaded.get() {
                 view! {
-                    <span class="pb-label">"▶ Playback"</span>
+                    <span class="pb-label">"Playback"</span>
                     <button
                         class="pb-btn"
                         class:active=move || app.playback_playing.get()

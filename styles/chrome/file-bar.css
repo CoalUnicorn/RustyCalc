@@ -78,3 +78,21 @@
     background: var(--bg-hover-strong);
     border-color: var(--border-color);
 }
+
+/* Trust badge — shown for workbooks loaded from a shared link */
+.fl .fl-trust-btn {
+    padding: 2px 10px;
+    height: 28px;
+    font-size: 12px;
+    font-family: inherit;
+    border: 1px solid var(--warning, #c8a000);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--warning, #c8a000);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.fl .fl-trust-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--warning, #c8a000);
+}

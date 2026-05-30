@@ -1,35 +1,56 @@
 /* RustyCalc — Component CSS Index
  *
- * Prefixes:
- *   (none)  layout / app root
- *   fl-     file bar
- *   tb-     toolbar
- *   fb-     formula bar
- *   cp-     color picker
- *   ws-     worksheet
- *   ce-     cell editor
- *   tab-    sheet tab bar
- *   ctx-    context menu
- *   pp-     perf panel
- *   ld-     left drawer
- *   md-     modal dialog primitive
- *   nrm-    named-ranges modal
- *   sp-     share popover
+ * Files are grouped by role into subfolders; prefixes stay globally unique.
+ *
+ *   (none)  layout / app root          layout.css
+ *
+ *   chrome/ — persistent app frame
+ *   fl-     file bar                   chrome/file-bar.css
+ *   tb-     toolbar                    chrome/toolbar.css
+ *   fb-     formula bar                chrome/formula-bar.css
+ *   tab-    sheet tab bar              chrome/sheet-tabs.css
+ *   ld-     left drawer                chrome/left-drawer.css
+ *   (none)  status bar                 chrome/status-bar.css
+ *
+ *   worksheet/ — the grid surface
+ *   ws-     worksheet                  worksheet/worksheet.css
+ *   ce-     cell editor textarea       worksheet/cell-editor.css
+ *   fe-     formula editor overlay     worksheet/formula-overlay.css
+ *
+ *   ui/ — reusable primitives
+ *   cp-     color picker               ui/color-picker.css
+ *   ctx-    context menu               ui/context-menu.css
+ *   md-     modal dialog primitive     ui/modal.css
+ *
+ *   panels/ — feature surfaces
+ *   pp-     perf panel                 panels/perf-panel.css
+ *   pb-     playback panel             panels/playback-panel.css
+ *   nrm-    named-ranges modal         panels/named-ranges.css
+ *   sp-     share popover              panels/share-popover.css
  */
 
 @import "layout.css";
-@import "file-bar.css";
-@import "toolbar.css";
-@import "formula-bar.css";
-@import "color-picker.css";
-@import "worksheet.css";
-@import "cell-editor.css";
-@import "formula-overlay.css";
-@import "sheet-tabs.css";
-@import "context-menu.css";
-@import "perf-panel.css";
-@import "left-drawer.css";
-@import "status-bar.css";
-@import "modal.css";
-@import "named-ranges.css";
-@import "share-popover.css";
+
+/* chrome — persistent app frame */
+@import "chrome/file-bar.css";
+@import "chrome/toolbar.css";
+@import "chrome/formula-bar.css";
+@import "chrome/sheet-tabs.css";
+@import "chrome/left-drawer.css";
+@import "chrome/status-bar.css";
+
+/* worksheet — the grid surface */
+@import "worksheet/worksheet.css";
+@import "worksheet/cell-editor.css";
+@import "worksheet/formula-overlay.css";
+
+/* ui — reusable primitives */
+@import "ui/color-picker.css";
+@import "ui/context-menu.css";
+@import "ui/modal.css";
+
+/* panels — feature surfaces */
+@import "panels/perf-panel.css";
+@import "panels/playback-panel.css";
+@import "panels/named-ranges.css";
+@import "panels/share-popover.css";

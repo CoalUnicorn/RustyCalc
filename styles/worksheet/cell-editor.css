@@ -19,7 +19,7 @@
 }
 
 .fe-host--cell.formula-error {
-    border-color: var(--err);
+    border-color: var(--error);
 }
 
 /* The textarea fills the host. Text is transparent so the overlay shows

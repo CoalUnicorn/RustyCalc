@@ -54,6 +54,50 @@
     padding-top: 4px;
 }
 
+/* Verification word display (shown inside the Share popover) */
+.sp-verify-info {
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    font-size: 13px;
+}
+.sp-verify-label { color: var(--text-dim); }
+.sp-verify-word {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-weight: 600;
+    color: var(--accent);
+}
+.sp-verify-hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin: 4px 0 0;
+}
+
+/* Verification word input (shown inline in the file bar next to Share) */
+.sp-word-row {
+    display: flex;
+    align-items: center;
+    height: 28px;
+}
+.sp-word-input {
+    height: 24px;
+    padding: 0 8px;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 12px;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+.sp-word-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+.sp-word-input::placeholder {
+    color: var(--text-dim);
+}
+
 /* Error banner for size-limit rejections. Fixed-position toast — deferred
  * to a proper notification component, see docs/plans/2026-05-25-url-sharing.md
  * "Deferred to Follow-up". */
