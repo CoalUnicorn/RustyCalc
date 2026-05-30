@@ -43,8 +43,8 @@ impl AppClipboard {
     pub fn capture(clipboard: &impl serde::Serialize) -> Result<Self, String> {
         let json = serde_json::to_value(clipboard)
             .map_err(|e| format!("Clipboard serialization failed: {e}"))?;
-        let m: ClipboardMirror = serde_json::from_value(json)
-            .map_err(|e| format!("Clipboard shape mismatch: {e}"))?;
+        let m: ClipboardMirror =
+            serde_json::from_value(json).map_err(|e| format!("Clipboard shape mismatch: {e}"))?;
         Ok(Self {
             csv: m.csv,
             sheet: m.sheet,

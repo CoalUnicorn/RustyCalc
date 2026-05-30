@@ -358,8 +358,8 @@ pub fn analyze_formula(
     {
         FormulaStatus::Unresolved {
             invalid_refs,
-            invalid_functions: invalid_functions,
-            invalid_names: invalid_names,
+            invalid_functions,
+            invalid_names,
             valid_refs: refs,
         }
     } else {

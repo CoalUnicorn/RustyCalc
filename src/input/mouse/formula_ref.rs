@@ -96,7 +96,6 @@ pub(super) fn commit_formula_ref_drag(
 /// preview while a button is held.
 ///
 /// If no button is held when this fires, mouseup was missed (pointer left
-
 /// caps at the sheet origin rather than producing zero-based addresses.
 pub(crate) fn dragged_ref_range(
     anchor: SheetRange,

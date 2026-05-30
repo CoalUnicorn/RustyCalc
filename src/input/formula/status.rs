@@ -7,8 +7,8 @@ use crate::coord::{ActiveRef, TextRef};
 /// Diagnostic state of a formula — exactly one at a time.
 ///
 /// Precedence is baked in at construction by
-/// [`super::analyze_formula`]: `ParseError` > `LexerError` > `Unresolved`
-/// > `Valid`. The status bar only surfaces the highest-priority state, so
+/// [`super::analyze_formula`]: `ParseError` -> `LexerError` -> `Unresolved`
+/// -> `Valid`. The status bar only surfaces the highest-priority state, so
 /// collapsing here keeps the "show in the right order" invariant at the
 /// type level rather than on every consumer.
 #[derive(Clone, Debug, PartialEq, Default)]

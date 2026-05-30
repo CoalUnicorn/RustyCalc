@@ -80,9 +80,7 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
                 let new_top = (view.top_row + dy).clamp(1, LAST_ROW);
                 let new_left = (view.left_column + dx).clamp(1, LAST_COLUMN);
                 if let Err(e) = m.set_top_left_visible_cell(new_top, new_left) {
-                    web_sys::console::warn_1(
-                        &format!("[rustycalc nav] scroll: {e}").into(),
-                    );
+                    web_sys::console::warn_1(&format!("[rustycalc nav] scroll: {e}").into());
                 }
             });
             // Resolve the new drag-target against the *previous* painted frame.
