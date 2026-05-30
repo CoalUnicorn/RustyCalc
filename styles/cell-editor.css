@@ -43,6 +43,14 @@
     z-index: 1;
 }
 
+/* Overlay padding must match textarea padding (1px 3px) so character
+ * positions align. Without this, the overlay text starts 3px left of the
+ * textarea text, causing the cursor to appear offset and the offset to
+ * compound as text wraps. */
+.fe-host--cell .fe-overlay {
+    padding: 1px 3px;
+}
+
 /* Selection on the transparent textarea: make the text visible so the
  * user can read what they selected. Background stays transparent so the
  * colored overlay underneath still shows through the selection. */
