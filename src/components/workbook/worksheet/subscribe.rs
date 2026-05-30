@@ -87,9 +87,9 @@ pub(super) fn install_subscribe_effect(
                 // nav co-firing (commit-Enter) needs an explicit overlay raise
                 // because markContentDirty leaves the overlay bit untouched.
                 if has_structure || has_format {
-                    ic.requestRepaint();
+                    ic.request_repaint();
                 } else if has_content {
-                    ic.markContentDirty();
+                    ic.mark_content_dirty();
                     if has_nav {
                         ic.request_overlay_repaint();
                     }

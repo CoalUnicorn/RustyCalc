@@ -34,9 +34,9 @@ pub fn PerfPanel() -> impl IntoView {
     let formula_text = move || perf.last_formula.get().unwrap_or_default();
 
     // Runtime detect: only render the record button when the wasm was built
-    // with `--features dev-tools`. In prod-flavor builds `recordingSupported()`
+    // with `--features dev-tools`. In prod-flavor builds `recording_supported()`
     // returns false and the button row never reaches the DOM.
-    let recording_supported = iron_canvas_web::IronCanvas::recordingSupported();
+    let recording_supported = iron_canvas_web::IronCanvas::recording_supported();
 
     let on_record_click = move |_| {
         let cmd = if app.recording_active.get() {

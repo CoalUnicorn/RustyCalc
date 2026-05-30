@@ -141,7 +141,8 @@ impl IronCanvas {
     /// Always callable from JS so the host can hide its Record button on
     /// prod builds without `try`-sniffing the class shape.
     #[allow(non_snake_case)]
-    pub fn recordingSupported() -> bool {
+    #[wasm_bindgen(js_name = "recordingSupported")]
+    pub fn recording_supported() -> bool {
         cfg!(feature = "dev-tools")
     }
 
@@ -167,14 +168,16 @@ impl IronCanvas {
 
     /// Conservative repaint blanket — see `Orchestrator::request_repaint`.
     #[allow(non_snake_case)]
-    pub fn requestRepaint(&mut self) {
+    #[wasm_bindgen(js_name = "requestRepaint")]
+    pub fn request_repaint(&mut self) {
         self.orch.request_repaint();
     }
 
     /// JS-facing cell-content-changed signal — marks all four pane
     /// quadrants. Pane-granular masks stay Rust-internal.
     #[allow(non_snake_case)]
-    pub fn markContentDirty(&mut self) {
+    #[wasm_bindgen(js_name = "markContentDirty")]
+    pub fn mark_content_dirty(&mut self) {
         self.orch
             .mark_content_dirty(iron_canvas_core::chrome::PaneRegionMask::ALL);
     }
@@ -184,7 +187,8 @@ impl IronCanvas {
     /// `end_frame` on both surfaces and pushes a `Frame` whenever at
     /// least one layer emitted ops. Idle rAF ticks are dropped.
     #[allow(non_snake_case)]
-    pub fn paintIfDirty(&mut self) {
+    #[wasm_bindgen(js_name = "paintIfDirty")]
+    pub fn paint_if_dirty(&mut self) {
         #[cfg(feature = "dev-tools")]
         if matches!(self.mode, CanvasMode::Playback(_)) {
             return;
@@ -215,7 +219,8 @@ impl IronCanvas {
     /// `stopRecording` (or the hard-cap watchdog) fires.
     #[cfg(feature = "dev-tools")]
     #[allow(non_snake_case)]
-    pub fn startRecording(&mut self, opts: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "startRecording")]
+    pub fn start_recording(&mut self, opts: JsValue) -> Result<(), JsError> {
         match &self.mode {
             CanvasMode::Live => {}
             CanvasMode::Recording(_) => {
@@ -276,7 +281,8 @@ impl IronCanvas {
     /// and the bytes are the truncated tail.
     #[cfg(feature = "dev-tools")]
     #[allow(non_snake_case)]
-    pub fn stopRecording(&mut self) -> Result<js_sys::Uint8Array, JsError> {
+    #[wasm_bindgen(js_name = "stopRecording")]
+    pub fn stop_recording(&mut self) -> Result<js_sys::Uint8Array, JsError> {
         if !matches!(self.mode, CanvasMode::Recording(_)) {
             return Err(JsError::new("no active recording"));
         }
@@ -328,7 +334,8 @@ impl IronCanvas {
     /// goes to the discarded overlay surface; the grid surface only
     /// receives `render_grid`'s cell / borders / chrome draws.
     #[allow(non_snake_case)]
-    pub fn exportSvg(&self, css_w: f64, css_h: f64) -> String {
+    #[wasm_bindgen(js_name = "exportSvg")]
+    pub fn export_svg(&self, css_w: f64, css_h: f64) -> String {
         let Some(model) = self.model.as_ref() else {
             return String::new();
         };
@@ -360,7 +367,8 @@ impl IronCanvas {
     /// wasm-bindgen boundary.
     #[cfg(feature = "pdf")]
     #[allow(non_snake_case)]
-    pub fn exportPdf(&self, css_w: f64, css_h: f64) -> Vec<u8> {
+    #[wasm_bindgen(js_name = "exportPdf")]
+    pub fn export_pdf(&self, css_w: f64, css_h: f64) -> Vec<u8> {
         let Some(model) = self.model.as_ref() else {
             return Vec::new();
         };
@@ -391,7 +399,8 @@ impl IronCanvas {
     /// `--palette-*` custom properties off `el`'s computed style and
     /// builds a `CanvasTheme`.
     #[allow(non_snake_case)]
-    pub fn setThemeFromElement(&mut self, el: &web_sys::Element) {
+    #[wasm_bindgen(js_name = "setThemeFromElement")]
+    pub fn set_theme_from_element(&mut self, el: &web_sys::Element) {
         self.orch
             .set_theme(crate::theme_from_element::from_element(el));
         self.restamp_recording_theme();
@@ -723,7 +732,8 @@ impl IronCanvas {
     /// both. The pre-playback CSS dimensions and DPR are stashed on the
     /// session.
     #[allow(non_snake_case)]
-    pub fn loadRecording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "loadRecording")]
+    pub fn load_recording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
         if matches!(self.mode, CanvasMode::Recording(_)) {
             return Err(JsError::new(
                 "cannot load a recording while a capture is active",
@@ -762,7 +772,8 @@ impl IronCanvas {
     /// Refuses during an active capture — see `loadRecording` for the
     /// same reason.
     #[allow(non_snake_case)]
-    pub fn seekRecording(&mut self, frame_idx: u32) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "seekRecording")]
+    pub fn seek_recording(&mut self, frame_idx: u32) -> Result<(), JsError> {
         match &mut self.mode {
             CanvasMode::Recording(_) => {
                 return Err(JsError::new(
@@ -789,7 +800,8 @@ impl IronCanvas {
     /// frame would restart the timeline, but `Play` arriving one frame
     /// later (after the auto-pause) does not.
     #[allow(non_snake_case)]
-    pub fn playRecording(&mut self, now_ms: f64) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "playRecording")]
+    pub fn play_recording(&mut self, now_ms: f64) -> Result<(), JsError> {
         let CanvasMode::Playback(s) = &mut self.mode else {
             return Err(JsError::new("no recording loaded"));
         };
@@ -802,7 +814,8 @@ impl IronCanvas {
 
     /// Halt the play loop. Idempotent.
     #[allow(non_snake_case)]
-    pub fn pauseRecording(&mut self) {
+    #[wasm_bindgen(js_name = "pauseRecording")]
+    pub fn pause_recording(&mut self) {
         if let CanvasMode::Playback(s) = &mut self.mode {
             s.clock = PlayClock::Paused;
         }
@@ -811,7 +824,8 @@ impl IronCanvas {
     /// `true` while play is active. `false` when paused, at end-of-recording,
     /// or when no recording is loaded.
     #[allow(non_snake_case)]
-    pub fn isPlaying(&self) -> bool {
+    #[wasm_bindgen(js_name = "isPlaying")]
+    pub fn is_playing(&self) -> bool {
         matches!(
             &self.mode,
             CanvasMode::Playback(s) if matches!(s.clock, PlayClock::Playing { .. })
@@ -827,7 +841,8 @@ impl IronCanvas {
     /// `paintIfDirty` short-circuits while a session is loaded, so the two
     /// never paint in the same tick.
     #[allow(non_snake_case)]
-    pub fn tickPlayback(&mut self, now_ms: f64) -> bool {
+    #[wasm_bindgen(js_name = "tickPlayback")]
+    pub fn tick_playback(&mut self, now_ms: f64) -> bool {
         let CanvasMode::Playback(s) = &mut self.mode else {
             return false;
         };
@@ -858,7 +873,8 @@ impl IronCanvas {
     /// dimensions and resizes the orchestrator back to the pre-playback
     /// live size + DPR. No-op when no session is loaded.
     #[allow(non_snake_case)]
-    pub fn exitPlayback(&mut self) {
+    #[wasm_bindgen(js_name = "exitPlayback")]
+    pub fn exit_playback(&mut self) {
         let CanvasMode::Playback(session) = std::mem::replace(&mut self.mode, CanvasMode::Live)
         else {
             return;
@@ -875,13 +891,15 @@ impl IronCanvas {
 
     /// `true` while a playback session is loaded.
     #[allow(non_snake_case)]
-    pub fn playbackActive(&self) -> bool {
+    #[wasm_bindgen(js_name = "playbackActive")]
+    pub fn playback_active(&self) -> bool {
         matches!(self.mode, CanvasMode::Playback(_))
     }
 
     /// Total frames in the loaded recording, or 0 if none loaded.
     #[allow(non_snake_case)]
-    pub fn recordingFrameCount(&self) -> u32 {
+    #[wasm_bindgen(js_name = "recordingFrameCount")]
+    pub fn recording_frame_count(&self) -> u32 {
         if let CanvasMode::Playback(s) = &self.mode {
             s.frame_count()
         } else {
@@ -891,7 +909,8 @@ impl IronCanvas {
 
     /// Current playback frame index, or 0 if none loaded.
     #[allow(non_snake_case)]
-    pub fn recordingCurrentFrame(&self) -> u32 {
+    #[wasm_bindgen(js_name = "recordingCurrentFrame")]
+    pub fn recording_current_frame(&self) -> u32 {
         if let CanvasMode::Playback(s) = &self.mode {
             s.frame_idx
         } else {

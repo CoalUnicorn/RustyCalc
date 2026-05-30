@@ -67,7 +67,7 @@ pub(super) fn install_raf_loop(
                     // subscribe Effect and the workbook-switch Effect.
                     #[cfg(target_arch = "wasm32")]
                     if let Some(el) = window().document().and_then(|d| d.document_element()) {
-                        ic.setThemeFromElement(&el);
+                        ic.set_theme_from_element(&el);
                     }
                     ic.set_model(Rc::new(WorksheetModelAdapter { store: model }));
                     let OverlayTuple {
@@ -100,11 +100,11 @@ pub(super) fn install_raf_loop(
         if app.playback_loaded.get_untracked() && app.playback_playing.get_untracked() {
             canvas_handle.update_value(|slot| {
                 if let Some(ic) = slot.as_mut() {
-                    if ic.tickPlayback(crate::perf::now()) {
-                        app.playback_frame.set(ic.recordingCurrentFrame());
+                    if ic.tick_playback(crate::perf::now()) {
+                        app.playback_frame.set(ic.recording_current_frame());
                     }
                     // Engine auto-pauses at end-of-recording — mirror it.
-                    if !ic.isPlaying() {
+                    if !ic.is_playing() {
                         app.playback_playing.set(false);
                     }
                 }
@@ -141,11 +141,11 @@ pub(super) fn install_raf_loop(
                 if theme_dirty.get_value() {
                     #[cfg(target_arch = "wasm32")]
                     if let Some(el) = window().document().and_then(|d| d.document_element()) {
-                        ic.setThemeFromElement(&el);
+                        ic.set_theme_from_element(&el);
                     }
                     theme_dirty.set_value(false);
                 }
-                ic.paintIfDirty();
+                ic.paint_if_dirty();
             }
         });
         #[cfg(feature = "dev-tools")]

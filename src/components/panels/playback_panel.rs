@@ -2,7 +2,7 @@
 //!
 //! Status-bar sibling of [`PerfPanel`]. Renders only when the wasm was built
 //! with `--features dev-tools` (runtime-checked via
-//! `IronCanvas::recordingSupported()`). The panel itself is stateless — every
+//! `IronCanvas::recording_supported()`). The panel itself is stateless — every
 //! interaction emits a [`PlaybackCmd`] which the Worksheet dispatch Effect
 //! drains onto the live `IronCanvas`.
 //!
@@ -25,7 +25,7 @@ use crate::app_state::{AppState, PlaybackCmd};
 #[component]
 pub fn PlaybackPanel() -> impl IntoView {
     let app = expect_context::<AppState>();
-    let recording_supported = iron_canvas_web::IronCanvas::recordingSupported();
+    let recording_supported = iron_canvas_web::IronCanvas::recording_supported();
     if !recording_supported {
         return view! { <span /> }.into_any();
     }

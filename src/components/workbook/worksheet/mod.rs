@@ -95,7 +95,7 @@ pub fn Worksheet() -> impl IntoView {
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
                 ic.resize(w, h, dpr);
-                ic.requestRepaint();
+                ic.request_repaint();
             }
         });
     });

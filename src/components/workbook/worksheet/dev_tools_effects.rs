@@ -33,7 +33,7 @@ pub(super) fn install_recording_effect(
                 return;
             };
             match cmd {
-                RecordingCmd::Start => match ic.startRecording(wasm_bindgen::JsValue::UNDEFINED) {
+                RecordingCmd::Start => match ic.start_recording(wasm_bindgen::JsValue::UNDEFINED) {
                     Ok(()) => app.recording_active.set(true),
                     Err(e) => state.status.set(Some(StatusMessage::Error(format!(
                         "startRecording failed: {e:?}"
@@ -44,7 +44,7 @@ pub(super) fn install_recording_effect(
                     // it can fail at `serialize()`; reset the UI flag eagerly so
                     // a serialize-Err doesn't wedge the button in "Stop".
                     app.recording_active.set(false);
-                    match ic.stopRecording() {
+                    match ic.stop_recording() {
                         Ok(arr) => {
                             let bytes = arr.to_vec();
                             let ts = js_sys::Date::new_0()
@@ -94,20 +94,20 @@ pub(super) fn install_playback_effect(
                 return;
             };
             match cmd {
-                PlaybackCmd::Load(bytes) => match ic.loadRecording(&bytes) {
+                PlaybackCmd::Load(bytes) => match ic.load_recording(&bytes) {
                     Ok(()) => {
                         app.playback_loaded.set(true);
-                        app.playback_frame_count.set(ic.recordingFrameCount());
-                        app.playback_frame.set(ic.recordingCurrentFrame());
+                        app.playback_frame_count.set(ic.recording_frame_count());
+                        app.playback_frame.set(ic.recording_current_frame());
                         app.playback_playing.set(false);
                     }
                     Err(e) => state.status.set(Some(StatusMessage::Error(format!(
                         "loadRecording failed: {e:?}"
                     )))),
                 },
-                PlaybackCmd::Seek(idx) => match ic.seekRecording(idx) {
+                PlaybackCmd::Seek(idx) => match ic.seek_recording(idx) {
                     Ok(()) => {
-                        app.playback_frame.set(ic.recordingCurrentFrame());
+                        app.playback_frame.set(ic.recording_current_frame());
                         // Stage 2 invariant: seek pauses any active play loop.
                         app.playback_playing.set(false);
                     }
@@ -115,7 +115,7 @@ pub(super) fn install_playback_effect(
                         "seekRecording failed: {e:?}"
                     )))),
                 },
-                PlaybackCmd::Play => match ic.playRecording(crate::perf::now()) {
+                PlaybackCmd::Play => match ic.play_recording(crate::perf::now()) {
                     Ok(()) => {
                         app.playback_playing.set(true);
                         // Wake the rAF: tickPlayback runs on every frame
@@ -128,11 +128,11 @@ pub(super) fn install_playback_effect(
                     )))),
                 },
                 PlaybackCmd::Pause => {
-                    ic.pauseRecording();
+                    ic.pause_recording();
                     app.playback_playing.set(false);
                 }
                 PlaybackCmd::Exit => {
-                    ic.exitPlayback();
+                    ic.exit_playback();
                     app.playback_loaded.set(false);
                     app.playback_playing.set(false);
                     app.playback_frame.set(0);
@@ -177,7 +177,7 @@ pub(super) fn install_export_effect(
                 .unwrap_or_else(|| "now".into());
             match cmd {
                 ExportCmd::Svg => {
-                    let svg = ic.exportSvg(size.w, size.h);
+                    let svg = ic.export_svg(size.w, size.h);
                     if let Err(e) = crate::input::xlsx_io::trigger_download(
                         svg.as_bytes(),
                         &format!("sheet-{ts}.svg"),
@@ -187,7 +187,7 @@ pub(super) fn install_export_effect(
                     }
                 }
                 ExportCmd::Pdf => {
-                    let pdf = ic.exportPdf(size.w, size.h);
+                    let pdf = ic.export_pdf(size.w, size.h);
                     if let Err(e) = crate::input::xlsx_io::trigger_download(
                         &pdf,
                         &format!("sheet-{ts}.pdf"),
