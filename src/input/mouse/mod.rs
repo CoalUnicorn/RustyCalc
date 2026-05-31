@@ -21,6 +21,7 @@ use leptos::prelude::*;
 mod click;
 mod contextmenu;
 mod cursor_hint;
+pub(crate) mod header_span;
 mod dblclick;
 pub(crate) mod formula_ref;
 mod mousedown;

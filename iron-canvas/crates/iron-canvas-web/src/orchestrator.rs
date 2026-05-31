@@ -624,6 +624,14 @@ impl IronCanvas {
         self.orch.cell_rect(row, column)
     }
 
+    pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
+        self.orch.fit_column_width(col, first_row, last_row)
+    }
+
+    pub fn fit_row_height(&self, row: i32, first_col: i32, last_col: i32) -> Option<f64> {
+        self.orch.fit_row_height(row, first_col, last_col)
+    }
+
     pub fn autofill_handle(&self) -> Option<Point> {
         self.orch.autofill_handle()
     }

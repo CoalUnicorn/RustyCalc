@@ -362,6 +362,25 @@ where
         self.last_frame.as_ref()?.cell_rect(row, column)
     }
 
+    /// Auto-fit width for `col`: widest formatted value across the
+    /// `[first_row, last_row]` used-row span, plus padding. `None` when the
+    /// model is absent or no scanned cell in `col` has text. Pure
+    /// measurement — the consumer applies the returned extent.
+    pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
+        let model = self.model.as_ref()?;
+        let metrics = self.grid.surface.painter();
+        crate::autofit::fit_width(model, metrics, col, first_row, last_row)
+    }
+
+    /// Auto-fit height for `row`: tallest font across the `[first_col,
+    /// last_col]` used-column span, plus padding. Same absence semantics as
+    /// `fit_column_width`.
+    pub fn fit_row_height(&self, row: i32, first_col: i32, last_col: i32) -> Option<f64> {
+        let model = self.model.as_ref()?;
+        let metrics = self.grid.surface.painter();
+        crate::autofit::fit_height(model, metrics, row, first_col, last_col)
+    }
+
     pub fn autofill_handle(&self) -> Option<Point> {
         self.last_frame
             .as_ref()?

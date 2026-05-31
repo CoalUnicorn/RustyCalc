@@ -8,7 +8,7 @@
 /// Format `(size, weight, slant, family)` into the `ctx.font` CSS string
 /// the canvas backend expects. Family is run through [`escape_font_family`]
 /// so user-supplied themes can't corrupt the string with stray quotes.
-pub(super) fn build(
+pub(crate) fn build(
     size_px: f64,
     bold: bool,
     italic: bool,
@@ -25,7 +25,7 @@ pub(super) fn build(
 /// names fall back to `fallback`. Plain ASCII identifiers (alphanumeric
 /// plus `-`) pass through unquoted. Anything else is wrapped in double
 /// quotes with embedded `"` stripped.
-pub(super) fn escape_font_family(name: &str, fallback: &str) -> String {
+pub(crate) fn escape_font_family(name: &str, fallback: &str) -> String {
     match name.trim() {
         "" => fallback.to_owned(),
         n if n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') => n.to_owned(),

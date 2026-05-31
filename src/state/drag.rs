@@ -17,10 +17,12 @@ pub enum DragState {
     Selecting,
     /// Autofill handle drag: the cell the user is dragging toward.
     Extending { to_row: i32, to_col: i32 },
-    /// Column header resize: `(col_1based, current_mouse_x)`.
-    ResizingCol { col: i32, x: f64 },
-    /// Row header resize: `(row_1based, current_mouse_y)`.
-    ResizingRow { row: i32, y: f64 },
+    /// Column header resize. `col` is the dragged boundary's column; `span`
+    /// is the inclusive `(first, last)` of columns resized together; `x` is
+    /// the current mouse x.
+    ResizingCol { col: i32, span: (i32, i32), x: f64 },
+    /// Row header resize — mirror of `ResizingCol`.
+    ResizingRow { row: i32, span: (i32, i32), y: f64 },
     /// Formula point-mode: carries ironcalc's canonical reference Node plus the
     /// byte span of its rendered form in the edited formula text.
     Pointing {

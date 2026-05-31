@@ -4,6 +4,7 @@
 //! See `crate::painter::Painter` for the drawing surface, `crate::chrome::Chrome`
 //! for the per-frame snapshot, and `crate::renderer` for the paint passes.
 
+pub mod autofit;
 pub mod chrome;
 pub mod decoration;
 pub mod geometry;

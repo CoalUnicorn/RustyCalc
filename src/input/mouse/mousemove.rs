@@ -185,7 +185,7 @@ pub fn handle_mousemove(
     let sheet = model.with_value(UserModel::get_selected_sheet);
 
     match state.drag.get_untracked() {
-        DragState::ResizingCol { col, x: last_x } => {
+        DragState::ResizingCol { col, span, x: last_x } => {
             let delta = x - last_x;
             let result = try_mutate(
                 model,
@@ -193,11 +193,11 @@ pub fn handle_mousemove(
                 |m| -> Result<(), StructError> {
                     let current_w = m.get_column_width(sheet, col).unwrap_or(DEFAULT_COL_WIDTH);
                     let new_w = (current_w + delta).max(5.0);
-                    m.set_columns_width(sheet, col, col, new_w)
+                    m.set_columns_width(sheet, span.0, span.1, new_w)
                         .map_err(StructError::Engine)
                 },
             );
-            state.drag.set(DragState::ResizingCol { col, x });
+            state.drag.set(DragState::ResizingCol { col, span, x });
             if let Err(e) = result {
                 state.status.set(Some(StatusMessage::Error(e.to_string())));
                 ev.prevent_default();
@@ -211,7 +211,7 @@ pub fn handle_mousemove(
             ev.prevent_default();
             return;
         }
-        DragState::ResizingRow { row, y: last_y } => {
+        DragState::ResizingRow { row, span, y: last_y } => {
             let delta = y - last_y;
             let result = try_mutate(
                 model,
@@ -219,11 +219,11 @@ pub fn handle_mousemove(
                 |m| -> Result<(), StructError> {
                     let current_h = m.get_row_height(sheet, row).unwrap_or(DEFAULT_ROW_HEIGHT);
                     let new_h = (current_h + delta).max(3.0);
-                    m.set_rows_height(sheet, row, row, new_h)
+                    m.set_rows_height(sheet, span.0, span.1, new_h)
                         .map_err(StructError::Engine)
                 },
             );
-            state.drag.set(DragState::ResizingRow { row, y });
+            state.drag.set(DragState::ResizingRow { row, span, y });
             if let Err(e) = result {
                 state.status.set(Some(StatusMessage::Error(e.to_string())));
                 ev.prevent_default();

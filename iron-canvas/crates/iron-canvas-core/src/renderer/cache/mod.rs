@@ -8,11 +8,11 @@
 //! | Cross-frame model     | [`PaneCache`] / [`PaneBuffers`]   | `invalidate(mask)` / `try_shift(..)` (blit) |
 //! | Renderer-lifetime     | [`FontIntern`], [`ColNameIntern`], [`ColorIntern`] | insert-only                           |
 //!
-//! `font` is module-private — pure CSS-string construction consumed only
-//! by [`FontIntern`]. Splitting it keeps the formatting concern separable
-//! from the deduplication concern without exposing either upstream.
+//! `font` is `pub(crate)` — pure CSS-string construction consumed by
+//! [`FontIntern`] and by `autofit` (which must produce identical font
+//! strings to those the renderer paints).
 
-mod font;
+pub(crate) mod font;
 mod intern;
 mod pane_cache;
 mod scratch;
