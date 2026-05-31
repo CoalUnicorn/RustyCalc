@@ -17,3 +17,4 @@ mod model_frontend_types;
 mod model_style;
 mod mouse;
 mod state;
+mod toolbar_section;

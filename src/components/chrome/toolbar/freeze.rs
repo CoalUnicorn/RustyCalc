@@ -4,6 +4,7 @@
 
 use leptos::prelude::*;
 
+use super::icon::{Icon, IconName};
 use crate::events::*;
 use crate::input::error::FormatError;
 use crate::model::{EvaluationMode, SheetQuery, try_mutate};
@@ -59,8 +60,6 @@ pub fn FreezePane() -> impl IntoView {
         refocus_workbook();
     };
 
-    let freeze_label = move || if is_frozen.get() { "╔" } else { "╬" };
-
     view! {
         <button
             class=move || if is_frozen.get() { "tb-btn active" } else { "tb-btn" }
@@ -71,7 +70,7 @@ pub fn FreezePane() -> impl IntoView {
             }
             on:click=on_freeze
         >
-            {freeze_label}
+            <Icon name=IconName::Freeze />
         </button>
     }
 }

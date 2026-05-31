@@ -10,6 +10,8 @@
  *   font-size-btn      -> tb-size-btn
  */
 
+.tb-shell { display: flex; flex-direction: column; flex-shrink: 0; }
+
 .tb {
     display: flex;
     align-items: center;
@@ -19,6 +21,7 @@
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-inner);
     flex-shrink: 0;
+    overflow: hidden; /* clip the pre-measure first frame */
 }
 
 .tb .tb-btn {
@@ -166,4 +169,77 @@
 
 .tb-num-fmt-preview--empty {
     display: none;
+}
+
+.tb-ic { width: 18px; height: 18px; display: block; fill: currentColor; }
+
+.tb-tabstrip {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 30px;
+    padding: 0 8px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-inner);
+    flex-shrink: 0;
+}
+.tb-tab {
+    height: 30px;
+    padding: 0 12px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.tb-tab:hover { color: var(--text-primary); }
+.tb-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+}
+
+.tb-grp {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.tb-overflow {
+    position: relative;
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+.tb-overflow-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 200;
+    min-width: 200px;
+    margin-top: 2px;
+    padding: 5px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.tb-overflow-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.tb-overflow-item:hover {
+    background: var(--bg-hover);
+}
+
+.tb-overflow-label {
+    font-size: 12.5px;
+    color: var(--text-primary);
 }

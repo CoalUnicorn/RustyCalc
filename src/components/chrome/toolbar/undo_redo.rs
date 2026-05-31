@@ -3,6 +3,7 @@
 
 use leptos::prelude::*;
 
+use super::icon::{Icon, IconName};
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::refocus_workbook;
@@ -32,7 +33,7 @@ pub fn UndoRedo() -> impl IntoView {
             disabled=move || !can_undo()
             on:click=on_undo
         >
-            "↺"
+            <Icon name=IconName::Undo />
         </button>
         <button
             class="tb-btn"
@@ -40,7 +41,7 @@ pub fn UndoRedo() -> impl IntoView {
             disabled=move || !can_redo()
             on:click=on_redo
         >
-            "↻"
+            <Icon name=IconName::Redo />
         </button>
     }
 }

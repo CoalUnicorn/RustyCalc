@@ -2,6 +2,7 @@
 
 use leptos::prelude::*;
 
+use super::icon::{Icon, IconName};
 use crate::state::WorkbookState;
 
 #[component]
@@ -16,7 +17,7 @@ pub fn NamedRangesButton() -> impl IntoView {
             title="Manage named ranges"
             on:click=on_click
         >
-            "Names"
+            <Icon name=IconName::NamedRange /> "Names"
         </button>
     }
 }
