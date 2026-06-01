@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::coord::CellAddress;
+use crate::coord::{CellAddress, CellArea};
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::input::structure::StructAction;
 use crate::model::{FormulaAnalyzer, SheetQuery};
@@ -10,6 +10,7 @@ use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 
 use super::cursor_hint::HIT_ZONE;
+use super::header_span::{Axis, full_header_span};
 use super::{CanvasHandle, with_canvas};
 
 pub fn handle_dblclick(
@@ -22,28 +23,39 @@ pub fn handle_dblclick(
     let y = ev.offset_y() as f64;
 
     if let Some(target) = with_canvas(icv, |ic| ic.resize_handle_at(x, y, HIT_ZONE)).flatten() {
-        // Excel-style auto-fit scans the whole used range, not just the
-        // painted viewport, so a column stays fitted after the user scrolls.
-        let dim = model.with_value(|m| m.sheet_dimension());
+        // Excel-style auto-fit: scan the whole used range (not just the
+        // painted viewport), and when the boundary sits inside a full-header
+        // multi-selection, fit every selected column/row to its OWN content.
+        // `full_header_span` collapses to `(idx, idx)` for a lone header, so
+        // the single-target case falls out of the same loop. Each column is a
+        // separate `set_columns_width` call — hence a separate undo step —
+        // because ironcalc groups undo per call (`push_diff_list`).
+        let (dim, area) = model.with_value(|m| (m.sheet_dimension(), CellArea::from_view(m)));
         match target {
             ResizeTarget::Column(col) => {
-                if let Some(w) =
-                    with_canvas(icv, |ic| ic.fit_column_width(col, dim.r1, dim.r2)).flatten()
-                {
-                    execute(
-                        &SpreadsheetAction::Structure(StructAction::SetColumnWidth { col, count: 1, width: w }),
-                        model, &state,
-                    );
+                let (first, last) = full_header_span(area, col, Axis::Col);
+                for c in first..=last {
+                    if let Some(w) =
+                        with_canvas(icv, |ic| ic.fit_column_width(c, dim.r1, dim.r2)).flatten()
+                    {
+                        execute(
+                            &SpreadsheetAction::Structure(StructAction::SetColumnWidth { col: c, count: 1, width: w }),
+                            model, &state,
+                        );
+                    }
                 }
             }
             ResizeTarget::Row(row) => {
-                if let Some(h) =
-                    with_canvas(icv, |ic| ic.fit_row_height(row, dim.c1, dim.c2)).flatten()
-                {
-                    execute(
-                        &SpreadsheetAction::Structure(StructAction::SetRowHeight { row, count: 1, height: h }),
-                        model, &state,
-                    );
+                let (first, last) = full_header_span(area, row, Axis::Row);
+                for r in first..=last {
+                    if let Some(h) =
+                        with_canvas(icv, |ic| ic.fit_row_height(r, dim.c1, dim.c2)).flatten()
+                    {
+                        execute(
+                            &SpreadsheetAction::Structure(StructAction::SetRowHeight { row: r, count: 1, height: h }),
+                            model, &state,
+                        );
+                    }
                 }
             }
         }
