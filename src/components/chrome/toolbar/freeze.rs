@@ -4,7 +4,7 @@
 
 use leptos::prelude::*;
 
-use super::icon::{Icon, IconName};
+use super::icon::{Icon, SheetIcon};
 use crate::events::*;
 use crate::input::error::FormatError;
 use crate::model::{EvaluationMode, SheetQuery, try_mutate};
@@ -70,7 +70,7 @@ pub fn FreezePane() -> impl IntoView {
             }
             on:click=on_freeze
         >
-            <Icon name=IconName::Freeze />
+            <Icon icon=SheetIcon::Freeze />
         </button>
     }
 }

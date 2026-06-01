@@ -1,5 +1,7 @@
 mod alignment;
+pub(crate) mod chrome_controls;
 mod color_pickers;
+mod file_ops;
 mod font;
 mod format_toggles;
 mod freeze;
@@ -8,8 +10,10 @@ mod named_ranges;
 mod number_format;
 pub(crate) mod overflow;
 pub(crate) mod section;
+mod share_controls;
 pub(crate) mod tab_strip;
 mod undo_redo;
+mod view_options;
 
 use leptos::prelude::*;
 
@@ -26,9 +30,13 @@ use named_ranges::NamedRangesButton;
 use number_format::{NumFmtQuickButtons, NumberFormatPicker};
 use undo_redo::UndoRedo;
 
+use chrome_controls::{ChromeCluster, HamburgerButton};
+use file_ops::FileOps;
 use overflow::OverflowRow;
 use section::{ToolSlot, ToolbarSection};
+use share_controls::ShareControls;
 use tab_strip::TabStrip;
+use view_options::ShowHeadersToggle;
 
 /// Two-tier toolbar: a tab strip selecting a `ToolbarSection`, above a single
 /// overflow row whose slots are rebuilt for the active section.
@@ -99,14 +107,25 @@ pub fn Toolbar() -> impl IntoView {
                 view! { <NamedRangesButton /> }.into_any()
             }),
         ],
-        ToolbarSection::View => vec![ToolSlot::new("Freeze", || {
-            view! { <FreezePane /> }.into_any()
-        })],
+        ToolbarSection::View => vec![
+            ToolSlot::new("Freeze", || view! { <FreezePane /> }.into_any()),
+            ToolSlot::new("Headers", || view! { <ShowHeadersToggle /> }.into_any()),
+        ],
+        ToolbarSection::File => {
+            vec![ToolSlot::new("File", || view! { <FileOps /> }.into_any())]
+        }
     };
 
     view! {
         <div class="tb-shell">
-            <TabStrip />
+            <div class="tb-head">
+                <HamburgerButton />
+                <TabStrip />
+                <div class="tb-head-right">
+                    <ShareControls />
+                    <ChromeCluster />
+                </div>
+            </div>
             {move || view! { <OverflowRow slots=slots() /> }}
         </div>
     }

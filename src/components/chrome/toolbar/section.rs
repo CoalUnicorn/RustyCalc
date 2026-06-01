@@ -10,14 +10,16 @@ pub enum ToolbarSection {
     Home,
     Data,
     View,
+    File,
 }
 
 impl ToolbarSection {
-    pub fn all() -> [ToolbarSection; 3] {
+    pub fn all() -> [ToolbarSection; 4] {
         [
             ToolbarSection::Home,
             ToolbarSection::Data,
             ToolbarSection::View,
+            ToolbarSection::File,
         ]
     }
 
@@ -26,6 +28,7 @@ impl ToolbarSection {
             ToolbarSection::Home => "Home",
             ToolbarSection::Data => "Data",
             ToolbarSection::View => "View",
+            ToolbarSection::File => "File",
         }
     }
 }

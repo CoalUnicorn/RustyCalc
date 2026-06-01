@@ -71,7 +71,11 @@ pub fn HeaderContextMenuOverlay() -> impl IntoView {
     // Snapshot menu position + current extent, then open the resize popover.
     // Called from on_click handlers, so .get_untracked() avoids reactive warnings.
     let open_resize = move |axis: Axis, first: i32, count: i32| {
-        let pos = state.context_menu.get_untracked().map(|c| (c.x, c.y)).unwrap_or((0, 0));
+        let pos = state
+            .context_menu
+            .get_untracked()
+            .map(|c| (c.x, c.y))
+            .unwrap_or((0, 0));
         let extent = model.with_value(|m| {
             let sheet = m.get_selected_sheet();
             match axis {

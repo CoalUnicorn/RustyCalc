@@ -26,12 +26,18 @@ pub fn handle_contextmenu(
         Some(HitTest::ColHeader(col)) => Some(model.with_value(|m| {
             let area = CellArea::from_view(m);
             let (first, last) = full_header_span(area, col, Axis::Col);
-            HeaderContextMenu::Column { col: first, count: last - first + 1 }
+            HeaderContextMenu::Column {
+                col: first,
+                count: last - first + 1,
+            }
         })),
         Some(HitTest::RowHeader(row)) => Some(model.with_value(|m| {
             let area = CellArea::from_view(m);
             let (first, last) = full_header_span(area, row, Axis::Row);
-            HeaderContextMenu::Row { row: first, count: last - first + 1 }
+            HeaderContextMenu::Row {
+                row: first,
+                count: last - first + 1,
+            }
         })),
         _ => None,
     };

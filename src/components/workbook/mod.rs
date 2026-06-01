@@ -6,8 +6,8 @@ use leptos::prelude::*;
 use crate::components::workbook::worksheet::Worksheet;
 use crate::components::{
     chrome::{
-        file_bar::FileBar, formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar,
-        status_bar::StatusBar, toolbar::Toolbar,
+        formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar, status_bar::StatusBar,
+        toolbar::Toolbar,
     },
     panels::{header_context_menu::HeaderContextMenuOverlay, named_ranges::NamedRangesDialog},
 };
@@ -195,7 +195,6 @@ pub fn Workbook() -> impl IntoView {
             tabindex="0"
             on:keydown=on_keydown
         >
-            <FileBar />
             <Toolbar />
             <FormulaBar />
             <Worksheet />

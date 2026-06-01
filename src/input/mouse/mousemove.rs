@@ -185,7 +185,11 @@ pub fn handle_mousemove(
     let sheet = model.with_value(UserModel::get_selected_sheet);
 
     match state.drag.get_untracked() {
-        DragState::ResizingCol { col, span, x: last_x } => {
+        DragState::ResizingCol {
+            col,
+            span,
+            x: last_x,
+        } => {
             let delta = x - last_x;
             let result = try_mutate(
                 model,
@@ -211,7 +215,11 @@ pub fn handle_mousemove(
             ev.prevent_default();
             return;
         }
-        DragState::ResizingRow { row, span, y: last_y } => {
+        DragState::ResizingRow {
+            row,
+            span,
+            y: last_y,
+        } => {
             let delta = y - last_y;
             let result = try_mutate(
                 model,

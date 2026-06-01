@@ -60,9 +60,13 @@ pub enum StructAction {
         height: f64,
     },
     /// Freeze columns from the left up to and including `col`.
-    FreezeUpToColumn { col: i32 },
+    FreezeUpToColumn {
+        col: i32,
+    },
     /// Freeze rows from the top up to and including `row`.
-    FreezeUpToRow { row: i32 },
+    FreezeUpToRow {
+        row: i32,
+    },
     /// Remove all frozen panes.
     Unfreeze,
 }
@@ -368,10 +372,14 @@ pub fn execute_struct(
         }
         StructAction::FreezeUpToColumn { col } => {
             let sheet = model.with_value(|m| m.get_selected_sheet());
-            try_mutate(model, EvaluationMode::Deferred, |m| -> Result<(), StructError> {
-                m.set_frozen_columns_count(m.get_selected_sheet(), *col)
-                    .map_err(StructError::Engine)
-            })?;
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), StructError> {
+                    m.set_frozen_columns_count(m.get_selected_sheet(), *col)
+                        .map_err(StructError::Engine)
+                },
+            )?;
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                 sheet,
                 col: Some(*col),
@@ -380,10 +388,14 @@ pub fn execute_struct(
         }
         StructAction::FreezeUpToRow { row } => {
             let sheet = model.with_value(|m| m.get_selected_sheet());
-            try_mutate(model, EvaluationMode::Deferred, |m| -> Result<(), StructError> {
-                m.set_frozen_rows_count(m.get_selected_sheet(), *row)
-                    .map_err(StructError::Engine)
-            })?;
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), StructError> {
+                    m.set_frozen_rows_count(m.get_selected_sheet(), *row)
+                        .map_err(StructError::Engine)
+                },
+            )?;
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                 sheet,
                 col: None,
@@ -392,11 +404,16 @@ pub fn execute_struct(
         }
         StructAction::Unfreeze => {
             let sheet = model.with_value(|m| m.get_selected_sheet());
-            try_mutate(model, EvaluationMode::Deferred, |m| -> Result<(), StructError> {
-                let s = m.get_selected_sheet();
-                m.set_frozen_rows_count(s, 0).map_err(StructError::Engine)?;
-                m.set_frozen_columns_count(s, 0).map_err(StructError::Engine)
-            })?;
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                |m| -> Result<(), StructError> {
+                    let s = m.get_selected_sheet();
+                    m.set_frozen_rows_count(s, 0).map_err(StructError::Engine)?;
+                    m.set_frozen_columns_count(s, 0)
+                        .map_err(StructError::Engine)
+                },
+            )?;
             state.emit_event(SpreadsheetEvent::Format(FormatEvent::LayoutChanged {
                 sheet,
                 col: None,

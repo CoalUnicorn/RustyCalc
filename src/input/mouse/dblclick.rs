@@ -39,8 +39,13 @@ pub fn handle_dblclick(
                         with_canvas(icv, |ic| ic.fit_column_width(c, dim.r1, dim.r2)).flatten()
                     {
                         execute(
-                            &SpreadsheetAction::Structure(StructAction::SetColumnWidth { col: c, count: 1, width: w }),
-                            model, &state,
+                            &SpreadsheetAction::Structure(StructAction::SetColumnWidth {
+                                col: c,
+                                count: 1,
+                                width: w,
+                            }),
+                            model,
+                            &state,
                         );
                     }
                 }
@@ -52,8 +57,13 @@ pub fn handle_dblclick(
                         with_canvas(icv, |ic| ic.fit_row_height(r, dim.c1, dim.c2)).flatten()
                     {
                         execute(
-                            &SpreadsheetAction::Structure(StructAction::SetRowHeight { row: r, count: 1, height: h }),
-                            model, &state,
+                            &SpreadsheetAction::Structure(StructAction::SetRowHeight {
+                                row: r,
+                                count: 1,
+                                height: h,
+                            }),
+                            model,
+                            &state,
                         );
                     }
                 }

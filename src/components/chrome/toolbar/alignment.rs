@@ -6,7 +6,7 @@
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 use leptos::prelude::*;
 
-use super::icon::{Icon, IconName};
+use super::icon::{AlignIcon, Icon};
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::model::frontend_types::ToolbarState;
 use crate::state::{ModelStore, WorkbookState};
@@ -23,7 +23,7 @@ pub fn AlignButtons() -> impl IntoView {
     // Each button needs: the target alignment, the button glyph, and the tooltip.
     // `is_active` maps the ironcalc variant to the canonical L/C/R bucket,
     // because Fill is a visual variant of Left and CenterContinuous of Center.
-    let make_btn = move |target: HorizontalAlignment, icon: IconName, title: &'static str| {
+    let make_btn = move |target: HorizontalAlignment, icon: AlignIcon, title: &'static str| {
         // Signal<bool> is Copy — both the class and click closures can capture it independently.
         let t = target.clone();
         let is_active = Signal::derive(move || match t {
@@ -51,15 +51,15 @@ pub fn AlignButtons() -> impl IntoView {
                     refocus_workbook();
                 }
             >
-                <Icon name=icon />
+                <Icon icon=icon />
             </button>
         }
     };
 
     view! {
-        {make_btn(HorizontalAlignment::Left,   IconName::AlignLeft,   "Align left")}
-        {make_btn(HorizontalAlignment::Center, IconName::AlignCenter, "Align center")}
-        {make_btn(HorizontalAlignment::Right,  IconName::AlignRight,  "Align right")}
+        {make_btn(HorizontalAlignment::Left,   AlignIcon::Left,   "Align left")}
+        {make_btn(HorizontalAlignment::Center, AlignIcon::Center, "Align center")}
+        {make_btn(HorizontalAlignment::Right,  AlignIcon::Right,  "Align right")}
     }
 }
 

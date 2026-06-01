@@ -3,7 +3,7 @@
 
 use leptos::prelude::*;
 
-use super::icon::{Icon, IconName};
+use super::icon::{Icon, TextIcon};
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::model::frontend_types::ToolbarState;
 use crate::state::{ModelStore, WorkbookState};
@@ -35,28 +35,28 @@ pub fn FormatToggles() -> impl IntoView {
             title="Bold (Ctrl+B)"
             on:click=on_bold
         >
-            <Icon name=IconName::Bold />
+            <Icon icon=TextIcon::Bold />
         </button>
         <button
             class=move || if format().italic { "tb-btn active" } else { "tb-btn" }
             title="Italic (Ctrl+I)"
             on:click=on_italic
         >
-            <Icon name=IconName::Italic />
+            <Icon icon=TextIcon::Italic />
         </button>
         <button
             class=move || if format().underline { "tb-btn active" } else { "tb-btn" }
             title="Underline (Ctrl+U)"
             on:click=on_underline
         >
-            <Icon name=IconName::Underline />
+            <Icon icon=TextIcon::Underline />
         </button>
         <button
             class=move || if format().strikethrough { "tb-btn active" } else { "tb-btn" }
             title="Strikethrough"
             on:click=on_strike
         >
-            <Icon name=IconName::Strikethrough />
+            <Icon icon=TextIcon::Strikethrough />
         </button>
     }
 }

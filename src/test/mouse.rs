@@ -145,11 +145,21 @@ fn corner_top_left_collapses_when_cursor_past_br() {
 // --- header_span tests ---
 
 fn full_col_area(c1: i32, c2: i32) -> CellArea {
-    CellArea { r1: 1, c1, r2: LAST_ROW, c2 }
+    CellArea {
+        r1: 1,
+        c1,
+        r2: LAST_ROW,
+        c2,
+    }
 }
 
 fn full_row_area(r1: i32, r2: i32) -> CellArea {
-    CellArea { r1, c1: 1, r2, c2: LAST_COLUMN }
+    CellArea {
+        r1,
+        c1: 1,
+        r2,
+        c2: LAST_COLUMN,
+    }
 }
 
 #[test]
@@ -167,7 +177,12 @@ fn span_is_single_when_col_outside_selection() {
 #[test]
 fn span_is_single_when_selection_not_full_height() {
     // r2=10, not LAST_ROW — not a full-column strip
-    let area = CellArea { r1: 1, c1: 2, r2: 10, c2: 4 };
+    let area = CellArea {
+        r1: 1,
+        c1: 2,
+        r2: 10,
+        c2: 4,
+    };
     assert_eq!(full_header_span(area, 3, Axis::Col), (3, 3));
 }
 

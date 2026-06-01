@@ -5,7 +5,6 @@
  *   (none)  layout / app root          layout.css
  *
  *   chrome/ — persistent app frame
- *   fl-     file bar                   chrome/file-bar.css
  *   tb-     toolbar                    chrome/toolbar.css
  *   fb-     formula bar                chrome/formula-bar.css
  *   tab-    sheet tab bar              chrome/sheet-tabs.css
@@ -32,7 +31,6 @@
 @import "layout.css";
 
 /* chrome — persistent app frame */
-@import "chrome/file-bar.css";
 @import "chrome/toolbar.css";
 @import "chrome/formula-bar.css";
 @import "chrome/sheet-tabs.css";

@@ -173,15 +173,73 @@
 
 .tb-ic { width: 18px; height: 18px; display: block; fill: currentColor; }
 
-.tb-tabstrip {
+/* Chrome header row: hamburger | tabs | sharing + chrome cluster. */
+.tb-head {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 4px;
     height: 30px;
     padding: 0 8px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-inner);
     flex-shrink: 0;
+}
+.tb-head-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.tb-ham {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.tb-ham:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.tb-repo {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 12px;
+}
+.tb-repo:hover {
+    color: var(--text-primary);
+}
+.tb-ver {
+    font-variant-numeric: tabular-nums;
+}
+.tb-trust {
+    padding: 2px 10px;
+    height: 26px;
+    font-size: 12px;
+    font-family: inherit;
+    border: 1px solid var(--warning, #c8a000);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--warning, #c8a000);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tb-trust:hover {
+    background: var(--bg-hover);
+}
+
+.tb-tabstrip {
+    display: flex;
+    align-items: center;
+    gap: 2px;
 }
 .tb-tab {
     height: 30px;
