@@ -51,7 +51,7 @@ fn fit_count_empty_is_zero() {
 }
 
 use crate::components::chrome::toolbar::icon::{
-    AlignIcon, ChromeIcon, EditIcon, FileIcon, Glyph, SheetIcon, TextIcon,
+    AlignIcon, BorderIcon, ChromeIcon, EditIcon, FileIcon, Glyph, SheetIcon, TextIcon,
 };
 
 #[test]
@@ -67,6 +67,7 @@ fn every_icon_has_non_empty_path() {
     check(&SheetIcon::all());
     check(&FileIcon::all());
     check(&ChromeIcon::all());
+    check(&BorderIcon::all());
 }
 
 use crate::components::chrome::toolbar::chrome_controls::app_version;

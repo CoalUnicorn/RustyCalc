@@ -11,7 +11,7 @@ use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
     EvaluationMode, SafeFontFamily, SheetQuery, ToolbarState,
-    style_types::{BooleanValue, HexColor, StylePath},
+    style_types::{BooleanValue, BorderSide, BorderWeight, HexColor, StylePath},
     try_mutate,
 };
 use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
@@ -36,6 +36,16 @@ pub enum FormatAction {
     SetFontFamily(SafeFontFamily),
     SetTextColor(HexColor),
     SetBackgroundColor(HexColor),
+    /// Apply a border preset to the selected range.
+    ///
+    /// `side` controls which edges are affected; `weight` controls line
+    /// thickness; `color` is the line color (`#RRGGBB`). Use
+    /// [`BorderSide::None`] to clear all borders.
+    SetBorder {
+        side: BorderSide,
+        weight: BorderWeight,
+        color: HexColor,
+    },
     /// Apply a number format code to the selection. `"general"` resets to auto.
     SetNumFmt(String),
     /// Reset all formatting (font, color, borders, number format) on the selection.
@@ -171,6 +181,41 @@ pub fn execute_format(
                         m.update_range_style(&area, StylePath::BACKGROUND_COLOR.as_str(), value)
                             .map_err(FormatError::Engine)?;
                     }
+                    Ok(())
+                },
+            )?;
+            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
+                area: sa.area.normalized().with_sheet(sa.sheet),
+            }));
+        }
+        FormatAction::SetBorder {
+            side,
+            weight,
+            color,
+        } => {
+            // `BorderArea` has `pub(crate)` fields but derives `Deserialize`, so
+            // we construct it from JSON using the serde variant names rather than
+            // coupling to upstream internals. `set_area_with_border` then applies
+            // the preset across the selection (e.g. `Outer` draws only the
+            // perimeter, `Inner` only the interior grid).
+            let sa = model.with_value(SheetRange::from_view);
+            let type_str = side.as_json_str();
+            let style_str = weight.as_json_str();
+            let color_str = color.as_str().to_owned();
+
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                move |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    let json = serde_json::json!({
+                        "item": { "style": style_str, "color": color_str },
+                        "type": type_str,
+                    });
+                    let border_area: ironcalc_base::BorderArea = serde_json::from_value(json)
+                        .map_err(|e| FormatError::Engine(e.to_string()))?;
+                    m.set_area_with_border(&area, &border_area)
+                        .map_err(FormatError::Engine)?;
                     Ok(())
                 },
             )?;

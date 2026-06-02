@@ -7,6 +7,7 @@ use leptos::prelude::Set;
 
 use crate::coord::SheetRange;
 use crate::model::frontend_types::*;
+use crate::model::style_types::BorderWeight;
 use crate::state::ModelStore;
 use crate::{
     coord::{CellAddress, CellArea, DefinedName},
@@ -211,6 +212,22 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
     }
 }
 
+/// Map an IronCalc `BorderStyle` to our `BorderWeight` subset.
+///
+/// Medium variants (dashed, dash-dot, etc.) all map to `Medium`.
+/// Any exotic style not explicitly covered falls back to `Thin`.
+fn border_weight_from_style(s: &ironcalc_base::types::BorderStyle) -> BorderWeight {
+    use ironcalc_base::types::BorderStyle as BS;
+    match s {
+        BS::Medium | BS::MediumDashed | BS::MediumDashDot | BS::MediumDashDotDot => {
+            BorderWeight::Medium
+        }
+        BS::Thick => BorderWeight::Thick,
+        BS::Double => BorderWeight::Double,
+        _ => BorderWeight::Thin,
+    }
+}
+
 impl SheetQuery for UserModel<'_> {
     fn toolbar_state(&self) -> ToolbarState {
         let view = self.get_selected_view();
@@ -235,6 +252,30 @@ impl SheetQuery for UserModel<'_> {
             .unwrap_or(HorizontalAlignment::General);
         let v_align = alignment.map(|a| a.vertical.clone()).unwrap_or_default();
 
+        // A cell can carry four independently-styled edges, but the picker holds
+        // a single color+weight. Seed it from the cell's existing borders by
+        // choosing one "dominant" edge. `edges` is ordered for the human to lean
+        // on if they want a priority scheme; each entry is `&Option<BorderItem>`,
+        // where `BorderItem` has `.color: Option<String>` and `.style: BorderStyle`.
+        // Bottom-first priority: in a spreadsheet the bottom edge carries the
+        // most visual weight (row/total separators), so it best represents the
+        // cell's border when collapsing four edges into one picker value.
+        let dominant = [
+            &style.border.bottom,
+            &style.border.right,
+            &style.border.top,
+            &style.border.left,
+        ]
+        .into_iter()
+        .find_map(|edge| edge.as_ref());
+        let border = match dominant {
+            Some(item) => BorderState {
+                color: CssColor::new(item.color.as_deref().unwrap_or("")),
+                weight: border_weight_from_style(&item.style),
+            },
+            None => BorderState::default(),
+        };
+
         ToolbarState {
             format: TextFormat {
                 bold: style.font.b,
@@ -251,6 +292,8 @@ impl SheetQuery for UserModel<'_> {
                 text_color,
                 bg_color,
             },
+
+            border,
         }
     }
 

@@ -1,5 +1,7 @@
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 
+use crate::model::style_types::BorderWeight;
+
 /// CSS hex color string, e.g. `"#FF0000"`. Empty input becomes `"#000000"`.
 /// CssColor is a wire type — it carries model data zero-copy through the renderer
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -139,11 +141,32 @@ pub struct TextStyle {
     pub bg_color: Option<CssColor>,
 }
 
+/// Active cell border state reflected in the toolbar's border picker.
+///
+/// Holds the *picker's* current color/weight choices — what a click on a preset
+/// will apply — seeded from the active cell's dominant border when the dropdown
+/// opens (see `SheetQuery::toolbar_state`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BorderState {
+    pub color: CssColor,
+    pub weight: BorderWeight,
+}
+
+impl Default for BorderState {
+    fn default() -> Self {
+        Self {
+            color: CssColor::new("#000000"),
+            weight: BorderWeight::Thin,
+        }
+    }
+}
+
 /// Active cell style state reflected in the toolbar.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolbarState {
     pub format: TextFormat,
     pub style: TextStyle,
+    pub border: BorderState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -301,3 +301,155 @@
     font-size: 12.5px;
     color: var(--text-primary);
 }
+
+/* ==========================================================================
+   Border picker: trigger + Popover dropdown laid out as a 5-column preset grid
+   above two menu rows — "Border color" (the reusable base ColorPicker) and
+   "Border style" (expands to a Thin/Medium/Thick weight selector).
+   ========================================================================== */
+.tb-border {
+    position: relative;
+    display: inline-block;
+}
+
+.tb-border-dropdown {
+    /* Positioned by <Popover> via inline left/top (viewport coords), so this
+       must be `fixed` — `absolute` would resolve against `.tb-border` and fling
+       the panel off-screen. Matches the working `.cp-drop` convention. */
+    position: fixed;
+    z-index: 200;
+    min-width: 180px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    padding: 6px 0;
+}
+
+/* Preset grid: all ten glyphs, 5 per row. */
+.tb-border-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
+    padding: 6px;
+}
+
+.tb-border-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+
+.tb-border-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-inner);
+}
+
+.tb-border-sep {
+    height: 1px;
+    background: var(--border-inner);
+    margin: 2px 0;
+}
+
+/* "Border color" row (the base ColorPicker trigger) + the "Border style" label
+   share one look so the two read as a consistent list. */
+.tb-border-menu-label-row,
+.tb-border-dropdown .cp,
+.tb-border-dropdown .cp-trigger {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.tb-border-menu-label-row,
+.tb-border-dropdown .cp-trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 7px 10px;
+    font-size: 12px;
+    text-align: left;
+    color: var(--text-primary);
+    background: none;
+    border: none;
+    border-radius: 0;
+}
+
+/* Only the color row is interactive; the style label is static. */
+.tb-border-dropdown .cp-trigger {
+    cursor: pointer;
+}
+
+.tb-border-dropdown .cp-trigger:hover {
+    background: var(--bg-hover);
+}
+
+.tb-border-menu-ic {
+    display: flex;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+
+.tb-border-menu-ic svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+.tb-border-menu-label {
+    flex: 1;
+}
+
+.tb-border-swatch {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+/* Weight options: three equal buttons, each a name above a line-weight preview. */
+.tb-border-weight-row {
+    display: flex;
+    gap: 4px;
+    padding: 0 10px 8px;
+}
+
+.tb-border-weight-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 4px;
+    font-size: 11px;
+    line-height: 1.2;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-inner);
+    border-radius: 3px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.tb-border-weight-btn:hover {
+    background: var(--bg-hover);
+}
+
+.tb-border-weight-btn--active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+/* Line preview; thickness comes from an inline `border-top` per weight. */
+.tb-border-weight-preview {
+    width: 100%;
+    /* border-top set inline (1/2/3px); currentColor follows the button text,
+       so it turns white when the button is active. */
+}

@@ -11,6 +11,7 @@ mod number_format;
 pub(crate) mod overflow;
 pub(crate) mod section;
 mod share_controls;
+mod style;
 pub(crate) mod tab_strip;
 mod undo_redo;
 mod view_options;
@@ -35,6 +36,7 @@ use file_ops::FileOps;
 use overflow::OverflowRow;
 use section::{ToolSlot, ToolbarSection};
 use share_controls::ShareControls;
+use style::BorderPicker;
 use tab_strip::TabStrip;
 use view_options::ShowHeadersToggle;
 
@@ -87,6 +89,7 @@ pub fn Toolbar() -> impl IntoView {
                     <FormatToggles />
                     <TextColorPickerToolbar />
                     <BackgroundColorPickerToolbar />
+                    <BorderPicker />
                 }
                 .into_any()
             }),

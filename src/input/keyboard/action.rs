@@ -7,7 +7,10 @@ use crate::input::{
 };
 #[cfg(test)]
 use crate::model::ArrowKey;
-use crate::model::{SafeFontFamily, style_types::HexColor};
+use crate::model::{
+    SafeFontFamily,
+    style_types::{BorderSide, BorderWeight, HexColor},
+};
 
 /// Top-level action dispatched from a keyboard event.
 ///
@@ -68,6 +71,13 @@ impl SpreadsheetAction {
     }
     pub fn set_background_color(hex: HexColor) -> Self {
         Self::Format(FormatAction::SetBackgroundColor(hex))
+    }
+    pub fn set_border(side: BorderSide, weight: BorderWeight, color: HexColor) -> Self {
+        Self::Format(FormatAction::SetBorder {
+            side,
+            weight,
+            color,
+        })
     }
     pub fn set_num_fmt(code: &str) -> Self {
         Self::Format(FormatAction::SetNumFmt(code.to_owned()))

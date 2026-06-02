@@ -129,6 +129,18 @@ impl HexColor {
     pub fn is_transparent(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Converts an `Option<String>` to a `HexColor` at a system boundary.
+    ///
+    /// `None` and invalid hex strings both map to `transparent()`.
+    /// Use this in UI callbacks where the color picker may produce unvalidated input.
+    pub fn from_opt(opt: Option<String>) -> Self {
+        match opt {
+            None => Self::transparent(),
+            Some(s) if s.is_empty() => Self::transparent(),
+            Some(s) => Self::new(s).unwrap_or_else(|_| Self::transparent()),
+        }
+    }
 }
 
 impl AsRef<str> for HexColor {
@@ -225,5 +237,68 @@ impl From<BooleanValue> for bool {
 impl AsRef<str> for BooleanValue {
     fn as_ref(&self) -> &str {
         self.as_str()
+    }
+}
+
+/// Which sides or region of the selection a border applies to.
+///
+/// Mirrors `ironcalc_base`'s internal `BorderType`. Defined here so
+/// `FormatAction` stays `Clone + Copy + PartialEq` without depending on
+/// upstream derives. The serde variant names used to construct `BorderArea`
+/// via JSON are returned by `as_json_str`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderSide {
+    All,
+    Inner,
+    Outer,
+    Top,
+    Right,
+    Bottom,
+    Left,
+    CenterH,
+    CenterV,
+    None,
+}
+
+impl BorderSide {
+    /// Variant name used as the `"type"` key in IronCalc's `BorderArea` JSON.
+    pub(crate) fn as_json_str(self) -> &'static str {
+        match self {
+            BorderSide::All => "All",
+            BorderSide::Inner => "Inner",
+            BorderSide::Outer => "Outer",
+            BorderSide::Top => "Top",
+            BorderSide::Right => "Right",
+            BorderSide::Bottom => "Bottom",
+            BorderSide::Left => "Left",
+            BorderSide::CenterH => "CenterH",
+            BorderSide::CenterV => "CenterV",
+            BorderSide::None => "None",
+        }
+    }
+}
+
+/// Line weight for a border.
+///
+/// Covers the most commonly used `ironcalc_base::BorderStyle` variants.
+/// The lowercase serde strings are used to construct `BorderArea` via JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum BorderWeight {
+    Thin,
+    Medium,
+    Thick,
+    Double,
+}
+
+impl BorderWeight {
+    /// Lowercase serde string expected by IronCalc's `BorderStyle`.
+    pub(crate) fn as_json_str(self) -> &'static str {
+        match self {
+            BorderWeight::Thin => "thin",
+            BorderWeight::Medium => "medium",
+            BorderWeight::Thick => "thick",
+            BorderWeight::Double => "double",
+        }
     }
 }

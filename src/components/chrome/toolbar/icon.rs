@@ -62,6 +62,27 @@ pub enum ChromeIcon {
     Moon,
 }
 
+/// Border-preset glyphs, one per [`BorderSide`](crate::model::style_types::BorderSide).
+///
+/// Each glyph is a single-color SVG: a faint **dashed** cell-outline reference
+/// (drawn as a `fill="none"` stroke at group `opacity`, so overlaps never
+/// darken) plus the active edge(s) as solid filled bars. Encoding meaning in
+/// shape rather than color lets the whole set recolor for hover/active/disabled
+/// and dark mode for free. Design source: `docs/designs/2026-06-01-border-icons-preview.html`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BorderIcon {
+    All,
+    Inner,
+    Outer,
+    Top,
+    Right,
+    Bottom,
+    Left,
+    CenterH,
+    CenterV,
+    None,
+}
+
 // ==============================================================================
 // Glyph paths
 // ==============================================================================
@@ -154,6 +175,43 @@ impl Glyph for ChromeIcon {
     }
 }
 
+impl Glyph for BorderIcon {
+    fn path(&self) -> &'static str {
+        match self {
+            BorderIcon::All => {
+                r#"<rect x="3" y="3" width="18" height="2"/><rect x="3" y="19" width="18" height="2"/><rect x="3" y="3" width="2" height="18"/><rect x="19" y="3" width="2" height="18"/><rect x="11" y="5" width="2" height="14"/><rect x="5" y="11" width="14" height="2"/>"#
+            }
+            BorderIcon::Inner => {
+                r#"<g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><rect x="4" y="4" width="16" height="16"/></g><rect x="11" y="5" width="2" height="14"/><rect x="5" y="11" width="14" height="2"/>"#
+            }
+            BorderIcon::Outer => {
+                r#"<rect x="3" y="3" width="18" height="2"/><rect x="3" y="19" width="18" height="2"/><rect x="3" y="3" width="2" height="18"/><rect x="19" y="3" width="2" height="18"/><g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><line x1="12" y1="4" x2="12" y2="20"/><line x1="4" y1="12" x2="20" y2="12"/></g>"#
+            }
+            BorderIcon::Top => {
+                r#"<g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><rect x="4" y="4" width="16" height="16"/></g><rect x="3" y="3" width="18" height="2"/>"#
+            }
+            BorderIcon::Right => {
+                r#"<g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><rect x="4" y="4" width="16" height="16"/></g><rect x="19" y="3" width="2" height="18"/>"#
+            }
+            BorderIcon::Bottom => {
+                r#"<g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><rect x="4" y="4" width="16" height="16"/></g><rect x="3" y="19" width="18" height="2"/>"#
+            }
+            BorderIcon::Left => {
+                r#"<g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><rect x="4" y="4" width="16" height="16"/></g><rect x="3" y="3" width="2" height="18"/>"#
+            }
+            BorderIcon::CenterH => {
+                r#"<g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><rect x="4" y="4" width="16" height="16"/></g><rect x="5" y="11" width="14" height="2"/>"#
+            }
+            BorderIcon::CenterV => {
+                r#"<g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><rect x="4" y="4" width="16" height="16"/></g><rect x="11" y="5" width="2" height="14"/>"#
+            }
+            BorderIcon::None => {
+                r#"<g opacity="0.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 2"><rect x="4" y="4" width="16" height="16"/></g>"#
+            }
+        }
+    }
+}
+
 /// Renders a group glyph as an inline SVG. `width`/`height` come from `.tb-ic` CSS.
 #[component]
 pub fn Icon<G>(icon: G) -> impl IntoView
@@ -213,6 +271,24 @@ impl ChromeIcon {
             ChromeIcon::GitHub,
             ChromeIcon::Sun,
             ChromeIcon::Moon,
+        ]
+    }
+}
+
+#[cfg(test)]
+impl BorderIcon {
+    pub fn all() -> [BorderIcon; 10] {
+        [
+            BorderIcon::All,
+            BorderIcon::Inner,
+            BorderIcon::Outer,
+            BorderIcon::Top,
+            BorderIcon::Right,
+            BorderIcon::Bottom,
+            BorderIcon::Left,
+            BorderIcon::CenterH,
+            BorderIcon::CenterV,
+            BorderIcon::None,
         ]
     }
 }
