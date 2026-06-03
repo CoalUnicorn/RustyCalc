@@ -8,6 +8,8 @@
  *   toolbar-font-family -> tb-font
  *   toolbar-font-size  -> tb-size
  *   font-size-btn      -> tb-size-btn
+ *   theme-btn          -> tb-theme   (migrated from file bar)
+ *   share-btn          -> tb-share   (migrated from file bar)
  */
 
 .tb-shell { display: flex; flex-direction: column; flex-shrink: 0; }
@@ -234,6 +236,45 @@
 }
 .tb-trust:hover {
     background: var(--bg-hover);
+}
+
+/* Theme toggle — circular icon button. Migrated from the former file bar's
+ * `.fl-theme`; standalone (no `.tb-btn`) so the round geometry isn't fighting
+ * the rectangular base button. */
+.tb-theme {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border-inner);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    transition:
+        background 0.12s,
+        border-color 0.12s;
+}
+.tb-theme:hover {
+    background: var(--bg-hover-strong);
+    border-color: var(--border-color);
+}
+
+/* Share — primary action, so it overrides the transparent `.tb-btn` base with
+ * an accent fill. Uses `.tb` ancestor to match `.tb-btn`'s specificity and wins
+ * by appearing later in the file. */
+.tb .tb-share {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.tb .tb-share:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    opacity: 0.9;
 }
 
 .tb-tabstrip {

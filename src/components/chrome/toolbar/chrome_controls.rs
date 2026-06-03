@@ -57,7 +57,7 @@ pub fn ChromeCluster() -> impl IntoView {
             <Icon icon=ChromeIcon::GitHub />
             <span class="tb-ver">{app_version()}</span>
         </a>
-        <button class="tb-theme tb-btn" on:click=on_toggle_theme title=theme_title>
+        <button class="tb-theme" on:click=on_toggle_theme title=theme_title>
             {move || {
                 if theme_is_dark() {
                     view! { <Icon icon=ChromeIcon::Sun /> }.into_any()
