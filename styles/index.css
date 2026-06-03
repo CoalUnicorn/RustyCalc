@@ -26,6 +26,7 @@
  *   pb-     playback panel             panels/playback-panel.css
  *   nrm-    named-ranges modal         panels/named-ranges.css
  *   sp-     share popover              panels/share-popover.css
+ *   resize- header resize popover      panels/header-context-menu.css
  */
 
 @import "layout.css";
@@ -52,3 +53,4 @@
 @import "panels/playback-panel.css";
 @import "panels/named-ranges.css";
 @import "panels/share-popover.css";
+@import "panels/header-context-menu.css";
