@@ -54,41 +54,27 @@
     padding-top: 4px;
 }
 
-/* Verification word display (shown inside the Share popover) */
-.sp-verify-info {
-    padding: 8px 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-inner);
-    border-radius: 4px;
-    font-size: 13px;
-}
-.sp-verify-label { color: var(--text-dim); }
-.sp-verify-word {
-    font-family: var(--font-mono, ui-monospace, monospace);
-    font-weight: 600;
-    color: var(--accent);
-}
 .sp-verify-hint {
     font-size: 11px;
     color: var(--text-dim);
     margin: 4px 0 0;
 }
 
-/* Verification word input (shown inline in the file bar next to Share) */
+/* Verification word input — full-width row inside the Share modal, above the
+ * URL row. Mirrors `.sp-url-input` so the two fields read as a pair. */
 .sp-word-row {
     display: flex;
-    align-items: center;
-    height: 28px;
+    width: 100%;
 }
 .sp-word-input {
-    height: 24px;
-    padding: 0 8px;
+    flex: 1;
+    padding: 6px 10px;
     font-family: Inter, Arial, sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     border: 1px solid var(--border-inner);
     border-radius: 4px;
-    background: var(--bg-primary);
-    color: var(--text-primary);
+    background: var(--bg-secondary);
+    color: var(--text-strong);
 }
 .sp-word-input:focus {
     outline: none;

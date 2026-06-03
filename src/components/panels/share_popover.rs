@@ -1,9 +1,8 @@
-//! Share popover — shows the URL for the current workbook and a Copy button.
+//! Share popover — shows the URL for the current workbook, an editable
+//! verification word, and a Copy button.
 //!
 //! Hosted by [`crate::components::chrome::toolbar::share_controls::ShareControls`]
-//! inside a `<Show when=open>` gate. Re-mounts each time it's opened, so
-//! `share_url` is captured fresh from the host on every open and we don't need a
-//! reactive prop.
+//! inside a `<Show when=open>` gate.
 
 use std::time::Duration;
 
@@ -11,61 +10,59 @@ use leptos::prelude::*;
 
 use crate::components::ui::modal::Modal;
 
-/// Modal popover that exposes a copyable share URL and optional verification word.
+/// Modal popover exposing a copyable share URL and an optional verification word.
 ///
-/// `share_url` is taken by value — the host (ShareControls) rebuilds it on demand
-/// when the user opens the popover, then unmounts the component on close,
-/// so a static String is the simplest contract.
-///
-/// `verify_word` is the word the sender chose (if any). Displayed so the sender
-/// knows what to share out-of-band with the receiver.
+/// `share_url` and `verify_word` are reactive signals owned by the host
+/// (ShareControls). They're signals rather than plain Strings because the word
+/// is editable here: committing it (blur/Enter) runs `regenerate`, which
+/// re-encodes the workbook so `share_url` — and thus the copied link — reflects
+/// the word. Per-keystroke `on:input` only updates the cheap word signal; the
+/// expensive re-encode is deferred to `on:change`.
 #[component]
 pub fn SharePopover(
-    share_url: String,
-    #[prop(into, default = String::new())] verify_word: String,
+    share_url: RwSignal<String>,
+    verify_word: RwSignal<String>,
+    regenerate: Callback<()>,
     on_close: Callback<()>,
 ) -> impl IntoView {
     // "Copied!" flash. Two-second auto-revert so the user gets feedback
     // without a permanent state change.
     let copied = RwSignal::new(false);
 
-    // Clone once per consumer — closures need owned Strings to stay 'static,
-    // and `prop:value` needs its own copy that outlives the click handler.
-    let url_for_input = share_url.clone();
-    let url_for_copy = share_url;
-
     let handle_copy = move |_| {
         // Best-effort clipboard write. The returned Promise is intentionally
         // dropped: failure is silent (sandboxed iframes, denied permissions)
         // and the URL stays visible in the input as a manual fallback.
-        let _ = window().navigator().clipboard().write_text(&url_for_copy);
+        let _ = window()
+            .navigator()
+            .clipboard()
+            .write_text(&share_url.get_untracked());
         copied.set(true);
         set_timeout(move || copied.set(false), Duration::from_secs(2));
     };
 
     let copy_label = move || if copied.get() { "Copied!" } else { "Copy URL" };
 
-    let has_word = !verify_word.is_empty();
-
     view! {
         <Modal title="Share this workbook" on_close=on_close>
             <div class="sp-popover">
-                <Show when=move || has_word>
-                    <div class="sp-verify-info">
-                        <span class="sp-verify-label">"Verification word: "</span>
-                        <code class="sp-verify-word">{verify_word.clone()}</code>
-                        <p class="sp-verify-hint">
-                            "Share this word with the receiver — they'll need to type it to open the workbook."
-                        </p>
-                    </div>
-                </Show>
-                <div class="sp-url-row">
+                <div class="sp-word-row">
                     <input
                         type="text"
-                        class="sp-url-input"
-                        readonly
-                        prop:value=url_for_input
+                        class="sp-word-input"
+                        placeholder="Verification word (optional, 3+ letters)"
+                        prop:value=verify_word
+                        on:input=move |ev| verify_word.set(event_target_value(&ev))
+                        on:change=move |_| { regenerate.run(()); }
                     />
+                </div>
+                <p class="sp-verify-hint">
+                    "Set a word and share it with the receiver out-of-band — \
+                     they'll need to type it to open the workbook. The link below \
+                     updates when you commit the word."
+                </p>
+                <div class="sp-url-row">
+                    <input type="text" class="sp-url-input" readonly prop:value=share_url />
                     <button class="sp-copy-btn" on:click=handle_copy>
                         {copy_label}
                     </button>

@@ -40,9 +40,14 @@ pub fn ShareControls() -> impl IntoView {
     let share_error = RwSignal::new(String::new());
     let verify_word = RwSignal::new(String::new());
 
-    let on_share = move |_: web_sys::MouseEvent| {
+    // Encode the workbook (with the current verification word, if any) into the
+    // share URL. Returns whether encoding succeeded so the caller can decide
+    // whether to open the modal. Shared by the Share button and the in-modal
+    // word field, which re-runs it on commit (on:change) so the copied link
+    // always reflects the word. `Copy` because every capture is a `Copy` handle.
+    let regenerate = move || -> bool {
         let word: Option<String> = {
-            let w = verify_word.get();
+            let w = verify_word.get_untracked();
             let trimmed = w.trim();
             if trimmed.is_empty() {
                 None
@@ -50,8 +55,7 @@ pub fn ShareControls() -> impl IntoView {
                 Some(trimmed.to_string())
             }
         };
-        let result = model.with_value(|m| storage::encode_for_share_url(m, word.as_deref()));
-        match result {
+        match model.with_value(|m| storage::encode_for_share_url(m, word.as_deref())) {
             Ok(encoded) => {
                 let loc = window().location();
                 let origin = loc.origin().unwrap_or_default();
@@ -70,14 +74,21 @@ pub fn ShareControls() -> impl IntoView {
                 };
                 share_url.set(format!("{base}#share={encoded}"));
                 share_error.set(String::new());
-                set_share_open.set(true);
+                true
             }
             Err(storage::ShareError::TooLarge { size_kb }) => {
                 share_error.set(format!(
                     "This workbook is too large to share via link ({size_kb} KB). \
                      Use File → Download .xlsx instead."
                 ));
+                false
             }
+        }
+    };
+
+    let on_share = move |_: web_sys::MouseEvent| {
+        if regenerate() {
+            set_share_open.set(true);
         }
     };
 
@@ -98,26 +109,17 @@ pub fn ShareControls() -> impl IntoView {
 
         <Show when=move || share_open.get()>
             <SharePopover
-                share_url=share_url.get()
-                verify_word=verify_word.get()
+                share_url=share_url
+                verify_word=verify_word
+                regenerate=Callback::new(move |_| {
+                    regenerate();
+                })
                 on_close=Callback::new(move |_| set_share_open.set(false))
             />
         </Show>
 
         <Show when=move || !share_error.get().is_empty()>
             <div class="sp-error-banner">{move || share_error.get()}</div>
-        </Show>
-
-        <Show when=move || share_open.get()>
-            <div class="sp-word-row">
-                <input
-                    type="text"
-                    class="sp-word-input"
-                    placeholder="Verification word (optional, 3+ letters)"
-                    prop:value=verify_word
-                    on:input=move |ev| verify_word.set(event_target_value(&ev))
-                />
-            </div>
         </Show>
     }
 }
