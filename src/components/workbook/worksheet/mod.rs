@@ -14,6 +14,7 @@ use crate::model::AppClipboard;
 use crate::state::{DragState, ModelStore, WorkbookState};
 
 mod adapter;
+mod autofit;
 #[cfg(feature = "dev-tools")]
 mod dev_tools_effects;
 mod overlay_memo;
@@ -114,6 +115,11 @@ pub fn Worksheet() -> impl IntoView {
         clipboard_draw,
         render_needed,
     );
+
+    // Grow rows to fit multi-line / wrapped content on commit. Lives here
+    // because it needs the `CanvasHandle` to measure glyphs; watches content
+    // events only, so it can't loop on its own `SetRowHeight` (Format) emits.
+    autofit::install_autofit_effect(state, canvas_handle, model);
 
     // Workbook-switch Effect — watching `current_uuid` gives us a deterministic
     // signal that fires once per workbook switch. Without a set_model call,

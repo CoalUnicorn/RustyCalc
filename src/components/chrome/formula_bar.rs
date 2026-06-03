@@ -29,6 +29,9 @@ pub fn FormulaBar() -> impl IntoView {
     let input_ref = state.formula_input_ref;
     // Cache the overlay element so on_scroll doesn't query_selector at 60 Hz.
     let overlay_ref: NodeRef<leptos::html::Div> = NodeRef::new();
+    // Excel-style expand toggle: collapsed = one row, expanded = tall multi-line
+    // view. Local to the bar — no other component reads it.
+    let expanded = RwSignal::new(false);
 
     let cell_address = move || {
         // While editing, pin to the editing cell's address. The live cursor
@@ -133,13 +136,15 @@ pub fn FormulaBar() -> impl IntoView {
 
     let on_scroll = move |ev: web_sys::Event| {
         let Some(target) = ev.target() else { return };
-        let Some(inp) = target.dyn_ref::<web_sys::HtmlInputElement>() else {
+        let Some(ta) = target.dyn_ref::<web_sys::HtmlTextAreaElement>() else {
             return;
         };
         let Some(overlay) = overlay_ref.get() else {
             return;
         };
-        overlay.set_scroll_left(inp.scroll_left());
+        // Multi-line now: sync both axes so the overlay tracks the textarea.
+        overlay.set_scroll_top(ta.scroll_top());
+        overlay.set_scroll_left(ta.scroll_left());
     };
 
     // Ref-under-caret tooltip — first visible consumer of the ref_node
@@ -167,10 +172,12 @@ pub fn FormulaBar() -> impl IntoView {
     };
 
     let input_class = move || {
+        // `fe-text` shares font / line-height / box-sizing with the overlay so
+        // characters align pixel-for-pixel (see formula-overlay.css).
         let base = if is_editing() {
-            "fb-input editing"
+            "fb-input fe-text editing"
         } else {
-            "fb-input"
+            "fb-input fe-text"
         };
         let validation =
             state
@@ -187,16 +194,15 @@ pub fn FormulaBar() -> impl IntoView {
     };
 
     view! {
-        <div id="formula-bar" class="fb">
+        <div id="formula-bar" class="fb" class:fb--expanded=move || expanded.get()>
             <div class="fb-addr">
                 {cell_address}
             </div>
             <div class="fb-fx">"fx"</div>
             <div class="fe-host fb-input-host">
-                <FormulaOverlay node_ref=overlay_ref text=overlay_text refs=overlay_refs />
-                <input
+                <FormulaOverlay node_ref=overlay_ref text=overlay_text refs=overlay_refs multiline=true />
+                <textarea
                     node_ref=input_ref
-                    type="text"
                     class=input_class
                     prop:value=display_text
                     on:focus=on_focus
@@ -205,6 +211,19 @@ pub fn FormulaBar() -> impl IntoView {
                     on:scroll=on_scroll
                 />
             </div>
+
+            // Excel-style expand/collapse toggle. `mousedown` preventDefault
+            // keeps focus in the textarea so clicking it doesn't end the edit.
+            <button
+                class="fb-expand"
+                type="button"
+                tabindex="-1"
+                aria-label="Expand formula bar"
+                on:mousedown=move |ev: web_sys::MouseEvent| ev.prevent_default()
+                on:click=move |_| expanded.update(|e| *e = !*e)
+            >
+                {move || if expanded.get() { "⌃" } else { "⌄" }}
+            </button>
 
             // Ref-under-caret indicator. Populated by `ref_under_caret` when
             // editing and the cursor sits on a resolved ref.

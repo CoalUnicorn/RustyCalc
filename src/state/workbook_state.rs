@@ -26,7 +26,7 @@ pub struct WorkbookState {
     pub(crate) current_uuid: Split<Option<WorkbookId>>,
     pub(crate) recent_colors: Split<Vec<CssColor>>,
     pub(crate) editing_cell: Split<Option<EditingCell>>,
-    pub(crate) formula_input_ref: NodeRef<leptos::html::Input>,
+    pub(crate) formula_input_ref: NodeRef<leptos::html::Textarea>,
     pub(crate) cell_editor_ref: NodeRef<leptos::html::Textarea>,
     pub(crate) drag: Split<DragState>,
     /// Idle-hover cursor style hint; written by `handle_mousemove`'s

@@ -118,6 +118,22 @@ pub fn Workbook() -> impl IntoView {
             }
         }
 
+        // Alt+Enter inserts a literal newline at the caret. Browsers don't do
+        // this natively for Alt+Enter (only plain / Shift+Enter), so splice it
+        // in here, where we hold the event target + DOM caret. Must run before
+        // classify, which would otherwise route Enter to a commit.
+        if key == "Enter"
+            && is_alt
+            && !is_ctrl
+            && state.editing_cell.get_untracked().is_some()
+        {
+            if let Some(target) = ev.target() {
+                insert_newline_at_caret(state.editing_cell, model, &target);
+            }
+            ev.prevent_default();
+            return;
+        }
+
         // Classify key -> action
         let edit_ref = state.editing_cell.get_untracked();
         let Some(action) = classify_key(

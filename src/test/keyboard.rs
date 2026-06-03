@@ -340,6 +340,20 @@ fn accept_mode_enter_tab_commit() {
 }
 
 #[wasm_bindgen_test]
+fn ctrl_shift_enter_commits_array_formula() {
+    let e = accept_cell();
+    assert_eq!(
+        classify_key("Enter", KeyMod::ctrl_shift(), Some(&e)),
+        Some(edit(EditAction::CommitArrayAndNavigate(ArrowKey::Down)))
+    );
+    // Plain Enter still commits a normal value, unchanged.
+    assert_eq!(
+        classify_key("Enter", KeyMod::none(), Some(&e)),
+        Some(edit(EditAction::CommitAndNavigate(ArrowKey::Down)))
+    );
+}
+
+#[wasm_bindgen_test]
 fn accept_mode_escape_cancels() {
     let e = accept_cell();
     assert_eq!(

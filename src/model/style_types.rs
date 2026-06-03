@@ -59,6 +59,10 @@ impl StylePath {
     /// - `"bottom"` (default), `"center"`, `"top"`
     pub const VERTICAL_ALIGN: Self = Self("alignment.vertical");
 
+    /// Wrap text within the cell: `"alignment.wrap_text"`. Boolean `"true"`/`"false"`.
+    /// Forced on when an Alt+Enter value commits with an embedded newline.
+    pub const WRAP_TEXT: Self = Self("alignment.wrap_text");
+
     /// Returns the IronCalc-compatible string path.
     pub fn as_str(&self) -> &'static str {
         self.0

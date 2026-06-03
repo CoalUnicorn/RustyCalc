@@ -42,6 +42,10 @@ pub fn classify_key(
     // While editing
     if let Some(e) = edit {
         return match key {
+            "Enter" if ctrl && shift => Some(Edit(EditAction::CommitArrayAndNavigate(Down))),
+            // NOTE: Alt+Enter (newline insert) is handled in the workbook keydown
+            // handler *before* classify — it needs the DOM caret. It never
+            // reaches here.
             "Enter" => Some(Edit(EditAction::CommitAndNavigate(Down))),
             "Tab" if shift => Some(Edit(EditAction::CommitAndNavigate(Left))),
             "Tab" => Some(Edit(EditAction::CommitAndNavigate(Right))),
