@@ -51,10 +51,11 @@
     padding: 1px 3px;
 }
 
-/* Selection on the transparent textarea: make the text visible so the
- * user can read what they selected. Background stays transparent so the
- * colored overlay underneath still shows through the selection. */
+/* Selection on the transparent textarea: flip the text visible so the user
+ * can read what they selected, and paint a semi-transparent accent band
+ * behind it. The tint stays translucent so the colored overlay tokens
+ * underneath still show through. */
 .ce::selection {
     color: var(--text-strong);
-    background: transparent;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
 }

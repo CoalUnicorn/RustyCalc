@@ -23,6 +23,14 @@
     flex-shrink: 0;
 }
 
+/* Expanded (Excel-style): the bar grows to a tall multi-line view. The host
+ * is height:100%, so driving `.fb` height cascades to the textarea + overlay.
+ * Keep `align-items: center` (base) — the host fills via its explicit height,
+ * and the addr/fx/chevron stay vertically centered. */
+.fb.fb--expanded {
+    height: 140px;
+}
+
 .fb .fb-addr {
     min-width: 60px;
     padding: 0 8px;
@@ -64,13 +72,18 @@
     height: 100%;
     border: none;
     outline: none;
-    padding: 0 8px;
-    /* font / line-height come from .fe-text on the overlay; mirror here. */
-    font-family: Inter, Arial, sans-serif;
-    font-size: 13px;
-    /* Match the overlay's line-height exactly — both pin to the row
-     * height so the single line of text centers identically. */
-    line-height: 38px;
+    /* font / line-height / box-sizing come from the shared `.fe-text` class
+     * (also on the overlay) so characters align pixel-for-pixel. Do NOT set
+     * line-height here — it would override `.fe-text` (1.2) and break wrap
+     * alignment with the overlay. */
+    /* Top/bottom padding centers the single collapsed line: (38 - ~18) / 2. */
+    padding: 10px 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    resize: none;
+    /* Collapsed: clip to the one visible line. Expanded overrides to scroll. */
+    overflow: hidden;
     background: transparent;
     color: transparent;
     caret-color: var(--text-strong);
@@ -78,25 +91,25 @@
     z-index: 1;
 }
 
-/* Selection on the transparent input: make the text visible so the
- * user can read what they selected. Background stays transparent so the
- * colored overlay underneath still shows through the selection. */
+.fb.fb--expanded .fb-input {
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Selection on the transparent input: flip the text visible so the user can
+ * read what they selected, and paint a semi-transparent accent band behind
+ * it. The tint stays translucent so the colored overlay tokens underneath
+ * still show through. */
 .fb .fb-input::selection {
     color: var(--text-strong);
-    background: transparent;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
-/* Overlay padding must match input padding so character positions align. */
+/* Overlay padding must match the textarea padding (10px 8px) so character
+ * positions align. Line-height comes from `.fe-text` (1.2) on both — no
+ * override here, or the overlay would drift from the textarea per wrapped line. */
 .fb .fb-input-host .fe-overlay {
-    padding: 0 8px;
-    /* Single-line input centers text vertically via line-height; match it. */
-    line-height: 38px;
-}
-
-.fb .fb-input-host .fe-overlay.fe-overlay--singleline {
-    /* Overlay default line-height (1.4) would shift baseline relative to
-     * the input's intrinsic centering — override to the row height. */
-    line-height: 38px;
+    padding: 10px 8px;
 }
 
 /* Ref-under-caret indicator — shows which cell the cursor is on during
@@ -108,4 +121,27 @@
     color: var(--text-dim);
     white-space: nowrap;
     flex-shrink: 0;
+}
+
+/* Expand/collapse chevron — Excel-style toggle at the right of the bar. */
+.fb .fb-expand {
+    flex-shrink: 0;
+    width: 26px;
+    align-self: stretch;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-left: 1px solid var(--border-inner);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    user-select: none;
+}
+
+.fb .fb-expand:hover {
+    background: var(--bg-secondary, rgba(0, 0, 0, 0.05));
+    color: var(--text-strong);
 }

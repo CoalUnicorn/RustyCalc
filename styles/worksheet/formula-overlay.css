@@ -25,7 +25,9 @@
 .fe-text {
     font-family: Inter, Arial, sans-serif;
     font-size: 13px;
-    line-height: 1.4;
+    /* Excel single line spacing (font's natural height). Mirrors the canvas
+     * painter's LINE_HEIGHT_FACTOR (1.2) so edit mode and display align. */
+    line-height: 1.2;
     letter-spacing: normal;
     box-sizing: border-box;
     tab-size: 4;
