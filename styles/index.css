@@ -26,6 +26,7 @@
  *   pb-     playback panel             panels/playback-panel.css
  *   nrm-    named-ranges modal         panels/named-ranges.css
  *   sp-     share popover              panels/share-popover.css
+ *   sv-     share verify modal         panels/share-verify.css
  *   resize- header resize popover      panels/header-context-menu.css
  */
 
@@ -53,4 +54,5 @@
 @import "panels/playback-panel.css";
 @import "panels/named-ranges.css";
 @import "panels/share-popover.css";
+@import "panels/share-verify.css";
 @import "panels/header-context-menu.css";

@@ -23,7 +23,7 @@ pub const MAX_SHARE_BYTES: usize = 30_000;
 /// feed arbitrarily large payloads into the parser.
 const MAX_SHARE_ENCODED: usize = MAX_SHARE_BYTES * 4 / 3 + 4;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ShareError {
     TooLarge { size_kb: usize },
 }
@@ -98,9 +98,13 @@ pub fn load_shared_from_url() -> Option<SharedLoad> {
         }
     };
 
-    // Double-check decoded size matches our limit — base64 can decode to
-    // a smaller payload than the encoded length suggested.
-    if bytes.len() > MAX_SHARE_BYTES {
+    // Accept decoded payloads up to MAX_SHARE_BYTES + 33 bytes — the V1
+    // wrapper prepends 1 version byte + 32 hash bytes to the model payload.
+    // decode_payload below applies the strict per-version MAX_SHARE_BYTES
+    // ceiling on the model bytes themselves, so this guard only excludes
+    // obviously-wrong oversized decodes without false-rejecting valid V1
+    // shares at the model-size boundary.
+    if bytes.len() > MAX_SHARE_BYTES + 33 {
         web_sys::console::warn_1(
             &format!(
                 "[rustycalc sharing] decoded {} bytes exceeds limit {MAX_SHARE_BYTES}",

@@ -102,10 +102,10 @@ pub fn decode_payload(raw: &[u8]) -> Option<SharePayload> {
     }
 }
 
-pub fn decode_with_consent(hash: &[u8; 32], word: &str) -> Result<Vec<u8>, VerifyError> {
+pub fn decode_with_consent(hash: &[u8; 32], word: &str) -> Result<(), VerifyError> {
     let trimmed = validate_word(word)?;
     if &hash_word(trimmed) != hash {
         return Err(VerifyError::HashMismatch);
     }
-    Ok(Vec::new())
+    Ok(())
 }

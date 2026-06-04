@@ -56,10 +56,14 @@ pub fn ShareVerify() -> impl IntoView {
         reset_modal();
     };
 
-    let on_dismiss = move |_: leptos::ev::MouseEvent| {
+    let close_modal = move || {
         let _ = window().location().set_hash("");
         set_pending.set(None);
         reset_modal();
+    };
+
+    let on_dismiss = move |_: leptos::ev::MouseEvent| {
+        close_modal();
     };
 
     let on_accept_v0 = move |_: leptos::ev::MouseEvent| {
@@ -115,8 +119,7 @@ pub fn ShareVerify() -> impl IntoView {
     view! {
         <Show when=show>
             <Modal title="Open shared workbook?" on_close=Callback::new(move |_| {
-                let _ = window().location().set_hash("");
-                set_pending.set(None);
+                close_modal();
             })>
                 <div class="sv-container">
                     <p class="sv-description">

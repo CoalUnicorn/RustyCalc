@@ -8,6 +8,7 @@ use crate::app_state::AppState;
 use crate::components::panels::share_popover::SharePopover;
 use crate::state::{ModelStore, WorkbookState};
 use crate::storage;
+use crate::verify;
 
 use super::icon::{FileIcon, Icon};
 
@@ -52,7 +53,13 @@ pub fn ShareControls() -> impl IntoView {
             if trimmed.is_empty() {
                 None
             } else {
-                Some(trimmed.to_string())
+                match verify::validate_word(trimmed) {
+                    Ok(_) => Some(trimmed.to_string()),
+                    Err(e) => {
+                        share_error.set(e.to_string());
+                        return false;
+                    }
+                }
             }
         };
         match model.with_value(|m| storage::encode_for_share_url(m, word.as_deref())) {
