@@ -18,6 +18,7 @@ use crate::types::ui::HitTest;
 
 pub mod autofill;
 pub mod clipboard;
+pub(crate) mod decorations;
 pub mod formula_refs;
 pub mod point_mode;
 pub mod selection;
