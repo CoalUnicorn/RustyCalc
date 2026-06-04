@@ -36,12 +36,14 @@
     border-right: 1px solid var(--border-color);
 }
 
-/* Header bar — height matches .fl (file-bar) so both panels align */
+/* Header bar — height matches the toolbar's total so the workbook list lines up
+ * with the grid. The toolbar (`.tb-shell`) is two rows: `.tb-head` (30px) +
+ * `.tb` (36px) = 66px. Heights include borders (global `box-sizing: border-box`). */
 .ld .ld-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 44px;
+    height: 66px;
     padding: 0 12px;
     flex-shrink: 0;
     border-bottom: 1px solid var(--border-color);
