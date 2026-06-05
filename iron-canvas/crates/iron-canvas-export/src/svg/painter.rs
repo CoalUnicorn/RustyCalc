@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::mem;
 
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Span};
+use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
@@ -124,6 +124,22 @@ impl Painter for SvgPainter {
             "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"",
             x, y, w, h
         );
+        xml_escape(color.as_str(), &mut body);
+        body.push_str("\"/>");
+    }
+
+    fn fill_path(&self, points: &[Point], color: PaintColor) {
+        if points.len() < 2 {
+            return;
+        }
+        let mut body = self.body.borrow_mut();
+        body.push_str("<path d=\"");
+        let first = points[0];
+        let _ = write!(body, "M{:.3} {:.3}", f64::from(first.x), f64::from(first.y));
+        for p in &points[1..] {
+            let _ = write!(body, " L{:.3} {:.3}", f64::from(p.x), f64::from(p.y));
+        }
+        body.push_str("Z\" fill=\"");
         xml_escape(color.as_str(), &mut body);
         body.push_str("\"/>");
     }

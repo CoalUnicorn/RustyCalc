@@ -13,7 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Span};
+use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
@@ -128,6 +128,19 @@ impl Painter for PdfPainter {
         self.emit_fill_color(color);
         self.emit_rect(x, y, w, h);
         self.write_str("f\n");
+    }
+
+    fn fill_path(&self, points: &[Point], color: PaintColor) {
+        if points.len() < 2 {
+            return;
+        }
+        self.emit_fill_color(color);
+        let first = points[0];
+        self.write_str(&format!("{:.3} {:.3} m\n", f64::from(first.x), f64::from(first.y)));
+        for p in &points[1..] {
+            self.write_str(&format!("{:.3} {:.3} l\n", f64::from(p.x), f64::from(p.y)));
+        }
+        self.write_str("h\nf\n"); // h closes the subpath; f fills
     }
 
     fn clear_rect(&self, rect: PixelRect) {

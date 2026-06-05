@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Span};
+use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
@@ -61,6 +61,10 @@ const CHAR_WIDTH_FACTOR: f64 = 1.0;
 pub enum DrawOp {
     RectFill {
         rect: PixelRect,
+        color: String,
+    },
+    FillPath {
+        points: Vec<Point>,
         color: String,
     },
     ClearRect {
@@ -178,6 +182,13 @@ impl Painter for RecorderPainter {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor) {
         self.push(DrawOp::RectFill {
             rect,
+            color: color.as_str().to_string(),
+        });
+    }
+
+    fn fill_path(&self, points: &[Point], color: PaintColor) {
+        self.push(DrawOp::FillPath {
+            points: points.to_vec(),
             color: color.as_str().to_string(),
         });
     }
@@ -325,6 +336,9 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
             DrawOp::RectFill { rect, color } => {
                 target.rect_fill(*rect, PaintColor::Borrowed(color));
             }
+            DrawOp::FillPath { points, color } => {
+                target.fill_path(points, PaintColor::Borrowed(color));
+            }
             DrawOp::ClearRect { rect } => target.clear_rect(*rect),
             DrawOp::RectStroke { rect, color, width } => {
                 target.rect_stroke(*rect, PaintColor::Borrowed(color), *width);
@@ -468,6 +482,13 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
         self.inner.rect_fill(rect, color);
         if self.should_record() {
             self.recorder.rect_fill(rect, color);
+        }
+    }
+
+    fn fill_path(&self, points: &[Point], color: PaintColor) {
+        self.inner.fill_path(points, color);
+        if self.should_record() {
+            self.recorder.fill_path(points, color);
         }
     }
 
@@ -780,6 +801,14 @@ mod tests {
         let src = RecorderPainter::new();
         let r = rect(0.0, 0.0, 10.0, 10.0);
         src.rect_fill(r, PaintColor::Static("#ff0000"));
+        src.fill_path(
+            &[
+                Point { x: 0, y: 0 },
+                Point { x: 10, y: 0 },
+                Point { x: 5, y: 8 },
+            ],
+            PaintColor::Static("#abc"),
+        );
         src.clear_rect(r);
         src.rect_stroke(r, PaintColor::Static("#00ff00"), 1.0);
         src.rect_dashed(r, PaintColor::Static("#0000ff"), 2.0);

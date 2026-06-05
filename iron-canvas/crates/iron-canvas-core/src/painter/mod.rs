@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::Span;
 use crate::geometry::pixel_rect::PixelRect;
-use crate::geometry::prim::Line;
+use crate::geometry::prim::{Line, Point};
+
+pub mod shapes;
+pub use shapes::PainterShapes;
 
 /// Color/font argument for the `Painter` surface. The `Static` variant carries
 /// a `&'static str` whose address is stable for the program lifetime, so the
@@ -123,6 +126,10 @@ pub trait TextMetrics {
 )]
 pub trait Painter: TextMetrics {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor);
+    /// Fill the closed polygon defined by `points`, in pixel space. The path
+    /// implicitly closes from `points.last()` to `points.first()`. Empty or
+    /// single-point input is a no-op.
+    fn fill_path(&self, points: &[Point], color: PaintColor);
     /// Clear the pixels under `rect` to fully transparent. Canvas-2D maps
     /// to `ctx.clearRect`; backends that don't compose alpha (SVG, Recorder)
     /// may no-op.

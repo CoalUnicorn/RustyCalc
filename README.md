@@ -19,20 +19,16 @@ Alpha-stage spreadsheet built in Rust, compiled to WebAssembly. The calculation 
 
 ## What works
 
-- Cell editing with formula support (IronCalc parses and evaluates)
-- `iron-canvas` renderer: frozen panes, selection, autofill drag, marching ants, grid lines, error-cell formatting, conditional formatting (data bars, icon sets, color scales)
+- Cell editing with formula support (IronCalc parses and evaluates); multi-line cells (Alt+Enter) and CSE array formulas (Ctrl+Shift+Enter)
+- `iron-canvas` renderer: frozen panes, selection, autofill drag, marching ants, grid lines, auto-fit row heights, error-cell formatting, conditional formatting (data bars, icon sets, color scales)
 - Formula bar with point-mode editing and colored formula-reference overlays for cell and range tokens (named-range identifiers — WIP)
 - Draggable formula refs: each cell/range token in an edited formula paints an outlined handle in the canvas; drag the body to move, the edges to resize one axis, the corners to resize both. The formula text rewrites on mouseup.
 - Named ranges — CRUD via toolbar button and modal dialog
-- Toolbar:
-  - undo/redo,
-  - Font
-    - font family, font size (−/+), bold, italic, underline, strikethrough
-  - Number format
-    - percent / increase-decrease-decimals 
-  - freeze panes
-  - color pickers
-    - text and background
+- Toolbar — tabbed sections (Home / Data / View / File) with an overflow `⋯` menu when space is tight:
+  - **Home:** undo/redo; font family, size (−/+), bold, italic, underline, strikethrough; text & background color; cell borders; horizontal/vertical alignment, text wrap, merge
+  - **Data:** number format (percent, increase/decrease decimals); named ranges
+  - **View:** freeze panes; row/column header visibility
+  - **File:** `.xlsx` import / export
 
 - Sheet tab bar: add, rename, delete, hide/unhide, tab colors, context menus
 - Right-click context menus on column and row headers (insert / delete / hide)

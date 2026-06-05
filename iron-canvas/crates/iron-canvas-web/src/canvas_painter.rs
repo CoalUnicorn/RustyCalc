@@ -13,7 +13,7 @@ use web_sys::{CanvasRenderingContext2d, js_sys};
 use crate::wasm::diag::console_warn;
 use iron_canvas_core::geometry::{
     pixel_rect::PixelRect,
-    prim::{Line, Span},
+    prim::{Line, Point, Span},
 };
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
@@ -216,6 +216,21 @@ impl Painter for CanvasPainter {
         self.set_fill_cached(color);
         let (x, y, w, h) = rect.as_f64_tuple();
         self.ctx.fill_rect(x, y, w, h);
+    }
+
+    fn fill_path(&self, points: &[Point], color: PaintColor) {
+        if points.len() < 2 {
+            return; // empty or single-point is a no-op
+        }
+        self.set_fill_cached(color);
+        self.ctx.begin_path();
+        let first = points[0];
+        self.ctx.move_to(f64::from(first.x), f64::from(first.y));
+        for p in &points[1..] {
+            self.ctx.line_to(f64::from(p.x), f64::from(p.y));
+        }
+        self.ctx.close_path();
+        self.ctx.fill();
     }
 
     fn clear_rect(&self, rect: PixelRect) {

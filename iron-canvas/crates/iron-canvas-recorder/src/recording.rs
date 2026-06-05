@@ -80,7 +80,10 @@ use crate::DrawOp;
 /// v2 (2026-05): added `IcrHeader::dpr` so playback can resize the live
 /// canvas to recording dimensions without scanning frame 0 for the first
 /// `ApplyDprTransform` op.
-pub const ICR_SCHEMA_VERSION: u32 = 2;
+///
+/// v3 (2026-05): added `DrawOp::FillPath` — a new op variant is a breaking
+/// change (older readers don't recognize the tag), so the schema bumps.
+pub const ICR_SCHEMA_VERSION: u32 = 3;
 
 /// Per-paint-tick capture. Built by the host (e.g. `IronCanvas::paintIfDirty`
 /// wrapper) by reading `Orchestrator::last_regime()` + `last_signals()`

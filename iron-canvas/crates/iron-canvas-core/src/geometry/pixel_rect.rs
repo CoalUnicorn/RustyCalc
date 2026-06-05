@@ -70,6 +70,27 @@ impl PixelRect {
             && self.bottom() > 0
     }
 
+    /// The four corners in clockwise order from `top_left`: TL, TR, BR, BL.
+    /// Used by `PainterShapes::fill_rect` to express a rect as a closed polygon.
+    pub fn corners(&self) -> [Point; 4] {
+        let (x, y) = (self.top_left.x, self.top_left.y);
+        [
+            Point { x, y },
+            Point {
+                x: x + self.width,
+                y,
+            },
+            Point {
+                x: x + self.width,
+                y: y + self.height,
+            },
+            Point {
+                x,
+                y: y + self.height,
+            },
+        ]
+    }
+
     pub fn as_f64_tuple(self) -> (f64, f64, f64, f64) {
         (
             f64::from(self.top_left.x),
