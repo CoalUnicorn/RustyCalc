@@ -75,9 +75,7 @@ impl<'a> Hash for StyleDigest<'a> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let s = self.0;
 
-        s.fill.pattern_type.hash(state);
-        s.fill.fg_color.hash(state);
-        s.fill.bg_color.hash(state);
+        s.fill.color.hash(state);
 
         s.font.strike.hash(state);
         s.font.u.hash(state);

@@ -157,7 +157,7 @@ impl<P: Painter> RendererCore<P> {
         // Branch on the model's per-cell override: zero-alloc Static path for
         // the theme default, Borrowed for the colored case. Avoids feeding
         // every theme-default cell through the painter's allocating cache miss.
-        let color = match p.style.fill.fg_color.as_deref() {
+        let color = match p.style.fill.color.as_deref() {
             Some(c) => PaintColor::Borrowed(c),
             None => PaintColor::from_theme_str(&theme.cell_bg),
         };

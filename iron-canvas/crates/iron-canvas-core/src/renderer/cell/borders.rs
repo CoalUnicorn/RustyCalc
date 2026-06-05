@@ -152,7 +152,7 @@ impl<P: Painter> RendererCore<P> {
         if !self.frame_cache.show_grid.get() {
             return;
         }
-        if p.style.fill.fg_color.is_some() {
+        if p.style.fill.color.is_some() {
             return;
         }
         let grid = BorderPaint::grid_line(theme);

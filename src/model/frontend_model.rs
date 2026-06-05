@@ -241,7 +241,7 @@ impl SheetQuery for UserModel<'_> {
         };
         let bg_color = style
             .fill
-            .fg_color
+            .color
             .as_deref()
             .filter(|c| !c.is_empty())
             .map(CssColor::new);
