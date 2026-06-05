@@ -16,6 +16,7 @@
 
 use iron_canvas_core::{CanvasModel, CanvasView, types::coord::RCRange};
 use ironcalc_base::UserModel;
+use ironcalc_base::cf_types::ExtendedStyle;
 use ironcalc_base::types::{CellType, Style};
 
 /// Newtype wrapper that implements `CanvasModel` for `UserModel`.
@@ -74,5 +75,8 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
     }
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
         UserModel::get_formatted_cell_value(&self.0, sheet, row, column).ok()
+    }
+    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<ExtendedStyle> {
+        UserModel::get_extended_cell_style(&self.0, sheet, row, column).ok()
     }
 }

@@ -1,6 +1,7 @@
 mod alignment;
 pub(crate) mod chrome_controls;
 mod color_pickers;
+mod conditional_formatting;
 mod file_ops;
 mod font;
 mod format_toggles;
@@ -24,6 +25,7 @@ use crate::state::{ModelStore, WorkbookState};
 
 use alignment::{AlignButtons, VertAlignButtons};
 use color_pickers::{BackgroundColorPickerToolbar, TextColorPickerToolbar};
+use conditional_formatting::ConditionalFormattingButton;
 use font::{FontFamily, FontSize};
 use format_toggles::{ClearFormat, FormatToggles};
 use freeze::FreezePane;
@@ -108,6 +110,9 @@ pub fn Toolbar() -> impl IntoView {
             }),
             ToolSlot::new("Named ranges", || {
                 view! { <NamedRangesButton /> }.into_any()
+            }),
+            ToolSlot::new("Conditional formatting", || {
+                view! { <ConditionalFormattingButton /> }.into_any()
             }),
         ],
         ToolbarSection::View => vec![

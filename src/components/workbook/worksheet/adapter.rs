@@ -1,3 +1,4 @@
+use ironcalc_base::cf_types::ExtendedStyle;
 use ironcalc_base::types::{CellType, Style};
 use leptos::prelude::*;
 
@@ -60,5 +61,9 @@ impl CanvasModel for WorksheetModelAdapter {
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
         self.store
             .with_value(|m| CanvasModel::get_formatted_cell_value(m, sheet, row, column))
+    }
+    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<ExtendedStyle> {
+        self.store
+            .with_value(|m| CanvasModel::get_extended_cell_style(m, sheet, row, column))
     }
 }

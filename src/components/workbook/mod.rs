@@ -9,7 +9,10 @@ use crate::components::{
         formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar, status_bar::StatusBar,
         toolbar::Toolbar,
     },
-    panels::{header_context_menu::HeaderContextMenuOverlay, named_ranges::NamedRangesDialog},
+    panels::{
+        conditional_formatting::ConditionalFormattingDialog,
+        header_context_menu::HeaderContextMenuOverlay, named_ranges::NamedRangesDialog,
+    },
 };
 use crate::coord::{CellAddress, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};
@@ -122,11 +125,7 @@ pub fn Workbook() -> impl IntoView {
         // this natively for Alt+Enter (only plain / Shift+Enter), so splice it
         // in here, where we hold the event target + DOM caret. Must run before
         // classify, which would otherwise route Enter to a commit.
-        if key == "Enter"
-            && is_alt
-            && !is_ctrl
-            && state.editing_cell.get_untracked().is_some()
-        {
+        if key == "Enter" && is_alt && !is_ctrl && state.editing_cell.get_untracked().is_some() {
             if let Some(target) = ev.target() {
                 insert_newline_at_caret(state.editing_cell, model, &target);
             }
@@ -218,6 +217,7 @@ pub fn Workbook() -> impl IntoView {
             <SheetTabBar />
             <StatusBar />
             <NamedRangesDialog />
+            <ConditionalFormattingDialog />
         </div>
     }
 }

@@ -24,7 +24,6 @@ pub enum FormatEvent {
     DocumentColorsChanged {
         colors: Vec<CssColor>,
     },
-    #[allow(dead_code)]
     ConditionalFormattingChanged {
         sheet: u32,
     },

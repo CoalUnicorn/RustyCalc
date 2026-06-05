@@ -30,6 +30,7 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
+use crate::renderer::cf_types::CfDecorationPaint;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
@@ -112,14 +113,39 @@ impl<P: Painter> RendererCore<P> {
             let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
                 continue;
             };
-            let Some(p) = CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
+            // Conditional formatting: when a CF rule matches this cell,
+            // IronCalc's extended style is the base style with the CF dxf
+            // fill/font overlay already applied — use it as the paint source
+            // so fill, font, and borders all reflect CF — plus any
+            // data-bar / icon / rating decoration.
+            let (own_style, cf_decoration) =
+                match model.get_extended_cell_style(frame.sheet, slot.row, slot.col) {
+                    Some(extended) => {
+                        let deco = CfDecorationPaint::from_extended_style(&extended);
+                        (extended.style, deco)
+                    }
+                    None => (own_style, None),
+                };
+            let Some(mut p) =
+                CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
             else {
                 continue;
             };
+            p.cf_decoration = cf_decoration;
             self.paint_bg(&p, theme);
             slots.push(p);
         }
         pane_buf.styles.set(pane_styles);
+        // CF decoration pass: data bars / icons / ratings overlay the cell
+        // fill, below grid/explicit borders so the bar doesn't obscure border
+        // strokes. `paint_cf_decoration` is a no-op on the Canvas-2D and SVG
+        // backends today (decorations deferred); this keeps the recorder and
+        // any future backend wired without a second walk later.
+        for p in &slots {
+            if let Some(ref deco) = p.cf_decoration {
+                self.painter.paint_cf_decoration(p.rect, deco);
+            }
+        }
         for p in &slots {
             self.paint_borders_grid(p, theme);
         }
@@ -293,14 +319,31 @@ impl<P: Painter> RendererCore<P> {
             let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
                 continue;
             };
-            let Some(p) = CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
+            // Conditional formatting: same overlay-as-paint-source treatment as
+            // the full-pane walk in `render_pane` — see the comment there.
+            let (own_style, cf_decoration) =
+                match model.get_extended_cell_style(frame.sheet, slot.row, slot.col) {
+                    Some(extended) => {
+                        let deco = CfDecorationPaint::from_extended_style(&extended);
+                        (extended.style, deco)
+                    }
+                    None => (own_style, None),
+                };
+            let Some(mut p) =
+                CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
             else {
                 continue;
             };
+            p.cf_decoration = cf_decoration;
             self.paint_bg(&p, theme);
             slots.push(p);
         }
         pane_buf.styles.set(pane_styles);
+        for p in &slots {
+            if let Some(ref deco) = p.cf_decoration {
+                self.painter.paint_cf_decoration(p.rect, deco);
+            }
+        }
         for p in &slots {
             self.paint_borders_grid(p, theme);
         }

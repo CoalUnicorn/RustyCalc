@@ -15,6 +15,7 @@ use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
+use iron_canvas_core::renderer::cf_types::CfDecorationPaint;
 
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +127,10 @@ pub enum DrawOp {
         class: GroupClass,
     },
     EndGroup,
+    CfDecoration {
+        rect: PixelRect,
+        decoration: CfDecorationPaint,
+    },
     Blit {
         src: PixelRect,
         dst: PixelRect,
@@ -309,6 +314,13 @@ impl Painter for RecorderPainter {
         self.group_depth.set(self.group_depth.get() - 1);
         self.push(DrawOp::EndGroup);
     }
+
+    fn paint_cf_decoration(&self, rect: PixelRect, deco: &CfDecorationPaint) {
+        self.push(DrawOp::CfDecoration {
+            rect,
+            decoration: deco.clone(),
+        });
+    }
 }
 
 impl BlitPainter for RecorderPainter {
@@ -398,6 +410,9 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
             DrawOp::ApplyDprTransform { dpr } => target.apply_dpr_transform(*dpr),
             DrawOp::BeginGroup { class } => target.begin_group(*class),
             DrawOp::EndGroup => target.end_group(),
+            DrawOp::CfDecoration { rect, decoration } => {
+                target.paint_cf_decoration(*rect, decoration);
+            }
             DrawOp::Blit { src, dst } => target.blit(*src, *dst),
         }
     }
@@ -628,6 +643,13 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
             return;
         }
         self.recorder.end_group();
+    }
+
+    fn paint_cf_decoration(&self, rect: PixelRect, deco: &CfDecorationPaint) {
+        self.inner.paint_cf_decoration(rect, deco);
+        if self.should_record() {
+            self.recorder.paint_cf_decoration(rect, deco);
+        }
     }
 }
 

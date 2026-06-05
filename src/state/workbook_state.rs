@@ -2,6 +2,7 @@
 
 use gloo_storage::Storage as GlooStorage;
 use ironcalc_base::UserModel;
+use ironcalc_base::cf_types::CfRuleInput;
 use leptos::prelude::*;
 
 use crate::coord::{CellAddress, RefNode, SheetRange};
@@ -51,6 +52,25 @@ pub struct WorkbookState {
     /// view preference; not persisted in the workbook. Read untracked by the
     /// canvas adapter; the toggle emits FormatEvent::LayoutChanged to repaint.
     pub(crate) show_headers: Split<bool>,
+    /// Whether the "Conditional Formatting" modal is mounted. Toggled by the
+    /// toolbar CF button and the dialog's close handlers — mirrors
+    /// [`Self::named_ranges_modal_open`].
+    pub(crate) cf_dialog_open: Split<bool>,
+    /// In-progress rule edit for the CF dialog. `None` while no rule is being
+    /// edited (initial state, or after Save / Cancel).
+    pub(crate) editing_cf_rule: Split<Option<CfRuleEditState>>,
+}
+
+/// In-progress edit state for the conditional formatting rule editor.
+/// `None` when no rule is being edited (initial state, or after Save/Cancel).
+#[derive(Debug, Clone)]
+pub struct CfRuleEditState {
+    /// `None` for new rules; `Some(idx)` for editing an existing rule at that index.
+    pub index: Option<u32>,
+    /// The sqref range (e.g. "A1:C10") — user can type or use cell selection.
+    pub range: String,
+    /// The rule being constructed, using IronCalc's `CfRuleInput`.
+    pub rule: CfRuleInput,
 }
 
 impl WorkbookState {
@@ -76,6 +96,8 @@ impl WorkbookState {
             named_ranges_modal_open: Split::new(false),
             editing_named_range: Split::new(None),
             show_headers: Split::new(true),
+            cf_dialog_open: Split::new(false),
+            editing_cf_rule: Split::new(None),
         }
     }
 

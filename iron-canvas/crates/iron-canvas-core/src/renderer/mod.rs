@@ -49,6 +49,7 @@
 
 pub mod cache;
 pub mod cell;
+pub mod cf_types;
 pub mod frame;
 // `renderer/overlay/` has moved to `src/layer/decoration/`. Each
 // decoration is now a struct that impls `Layer`; the orchestration that

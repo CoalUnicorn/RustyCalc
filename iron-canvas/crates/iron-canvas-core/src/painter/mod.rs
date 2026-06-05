@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::Span;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Line, Point};
+use crate::renderer::cf_types::CfDecorationPaint;
 
 pub mod shapes;
 pub use shapes::PainterShapes;
@@ -172,6 +173,12 @@ pub trait Painter: TextMetrics {
     /// `render_grid` / `render_overlays` so SVG output is structured per layer.
     fn begin_group(&self, class: GroupClass);
     fn end_group(&self);
+
+    /// Paint a conditional formatting decoration (icon, data bar, or rating)
+    /// over an already-filled cell rect. Called after `rect_fill` so the
+    /// decoration layers over the cell fill. Backends that don't support CF
+    /// (e.g. plain SVG/PDF exports) may no-op.
+    fn paint_cf_decoration(&self, _rect: PixelRect, _deco: &CfDecorationPaint) {}
 }
 
 /// Backends that can copy a rectangle of already-painted pixels in place.

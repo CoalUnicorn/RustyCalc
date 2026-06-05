@@ -28,6 +28,7 @@
  *   sp-     share popover              panels/share-popover.css
  *   sv-     share verify modal         panels/share-verify.css
  *   resize- header resize popover      panels/header-context-menu.css
+ *   cfm-    conditional formatting     panels/conditional-formatting.css
  */
 
 @import "layout.css";
@@ -56,3 +57,4 @@
 @import "panels/share-popover.css";
 @import "panels/share-verify.css";
 @import "panels/header-context-menu.css";
+@import "panels/conditional-formatting.css";

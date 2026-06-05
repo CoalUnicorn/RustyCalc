@@ -21,6 +21,7 @@ use crate::geometry::slot::{ColSlot, RowSlot};
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
+use crate::renderer::cf_types::CfDecorationPaint;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
@@ -33,6 +34,13 @@ pub struct CellPaint {
     /// the explicit-border sub-pass in `render_pane` is pure pixel pushing —
     /// no `BorderPaint::resolve` calls inside the paint loop.
     pub borders: ResolvedBorders,
+    /// Conditional-formatting decoration (data bar / icon / rating), if any
+    /// CF rule with a decoration matches this cell. `None` for plain cells.
+    /// CF *fill/font* overrides are not carried here — they ride the `style`
+    /// field, which the render pass sources from `ExtendedStyle::style` (the
+    /// base style with the CF dxf overlay already applied). Resolved in the
+    /// render loop (where the model is in scope), not in `resolve_cell_paint`.
+    pub cf_decoration: Option<CfDecorationPaint>,
 }
 
 impl CellPaint {
@@ -57,6 +65,7 @@ impl CellPaint {
             rect: slot.rect,
             style: own_style,
             borders,
+            cf_decoration: None,
         })
     }
 }

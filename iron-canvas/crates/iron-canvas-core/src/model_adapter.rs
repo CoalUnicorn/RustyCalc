@@ -3,6 +3,7 @@
 use std::rc::Rc;
 
 use ironcalc_base::UserModel;
+use ironcalc_base::cf_types::ExtendedStyle;
 use ironcalc_base::types::{CellType, Style};
 
 use crate::types::coord::RCRange;
@@ -46,6 +47,22 @@ pub trait CanvasModel {
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
+
+    /// Base cell style plus any conditional-formatting overlay: the CF dxf
+    /// fill/font applied on top of the base `Style`, plus optional data-bar,
+    /// icon-set, and rating decorations (`ExtendedStyle::{data_bar, icon,
+    /// rating}`). `None` carries the same fetch-failed meaning as
+    /// `get_cell_style`. The default returns `None` so engines without CF
+    /// support (and test stubs) compile unchanged; IronCalc-backed impls
+    /// override it to call `UserModel::get_extended_cell_style`.
+    fn get_extended_cell_style(
+        &self,
+        _sheet: u32,
+        _row: i32,
+        _column: i32,
+    ) -> Option<ExtendedStyle> {
+        None
+    }
 
     /// Bulk-fetch cell styles for `range` on `sheet`. Output is dense,
     /// row-major: `out[(row - r1) * cols + (col - c1)]`. `None` entries
@@ -125,6 +142,7 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
         fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
         fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
+        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<ExtendedStyle>;
         fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<Style>>);
         fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>);
         fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellType>>);
@@ -180,5 +198,8 @@ impl<'a> CanvasModel for UserModel<'a> {
     }
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
         UserModel::get_formatted_cell_value(self, sheet, row, column).ok()
+    }
+    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<ExtendedStyle> {
+        UserModel::get_extended_cell_style(self, sheet, row, column).ok()
     }
 }
