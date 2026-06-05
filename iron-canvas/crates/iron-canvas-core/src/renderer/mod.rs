@@ -2,7 +2,7 @@
 //!
 //! # Lifecycle
 //!
-//! `Orchestrator<S, M>` (in [`crate::orchestrator`]) owns two
+//! `Orchestrator<S>` (in [`crate::orchestrator`]) owns two
 //! [`LayerBase<S, R>`](crate::layer::LayerBase) values: one for the grid,
 //! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::layer::Surface),
 //! a [`PaintGate`](crate::layer::PaintGate), and a layer-specific renderer

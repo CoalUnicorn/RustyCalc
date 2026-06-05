@@ -1,4 +1,4 @@
-//! `Orchestrator<MemSurface, _>` four-regime integration test.
+//! `Orchestrator<MemSurface>` four-regime integration test.
 //!
 //! Drives all four `PaintRegime` arms (`Fresh`, `SlotsReuse`, `Viewport`,
 //! `Overlay`) through the same dispatch entry point a browser would use,
@@ -18,7 +18,7 @@ use std::rc::Rc;
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::types::coord::AutofillTarget;
-use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
+use iron_canvas_core::{CanvasTheme, Orchestrator};
 
 use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
@@ -26,30 +26,23 @@ use iron_canvas_recorder::{DrawOp, MemSurface, RecorderPainter, RecordingSurface
 
 use common::TestModel;
 
-fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface, Rc<TestModel>> {
-    let mut orch =
-        Orchestrator::<MemSurface, Rc<TestModel>>::new(MemSurface::new(), MemSurface::new());
+fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface> {
+    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
     orch.set_model(model);
     orch
 }
 
-fn grid_ops_len<M: CanvasModel>(orch: &Orchestrator<MemSurface, M>) -> usize {
+fn grid_ops_len(orch: &Orchestrator<MemSurface>) -> usize {
     orch.grid_surface().recorder().ops().len()
 }
-fn overlay_ops_len<M: CanvasModel>(orch: &Orchestrator<MemSurface, M>) -> usize {
+fn overlay_ops_len(orch: &Orchestrator<MemSurface>) -> usize {
     orch.overlay_surface().recorder().ops().len()
 }
-fn grid_ops_since<M: CanvasModel>(
-    orch: &Orchestrator<MemSurface, M>,
-    cursor: usize,
-) -> Vec<DrawOp> {
+fn grid_ops_since(orch: &Orchestrator<MemSurface>, cursor: usize) -> Vec<DrawOp> {
     orch.grid_surface().recorder().ops()[cursor..].to_vec()
 }
-fn overlay_ops_since<M: CanvasModel>(
-    orch: &Orchestrator<MemSurface, M>,
-    cursor: usize,
-) -> Vec<DrawOp> {
+fn overlay_ops_since(orch: &Orchestrator<MemSurface>, cursor: usize) -> Vec<DrawOp> {
     orch.overlay_surface().recorder().ops()[cursor..].to_vec()
 }
 
@@ -277,7 +270,7 @@ fn set_model_drops_last_frame_and_forces_fresh() {
     // paint here would land on SlotsReuse. We're proving set_model defeats
     // that path even with a steady viewport / sheet / freeze / size.
     let stub_b = Rc::new(TestModel::synthetic_grid());
-    orch.set_model(Rc::clone(&stub_b));
+    orch.set_model(stub_b.clone());
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
@@ -315,12 +308,12 @@ fn set_model_drops_last_frame_and_forces_fresh() {
 //   2. The captured per-frame op streams round-trip through serde +
 //      replay() byte-equal against the originals.
 
-fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>> {
+fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>> {
     let grid = RecordingSurface::new(MemSurface::new());
     let overlay = RecordingSurface::new(MemSurface::new());
     grid.enable_recording();
     overlay.enable_recording();
-    let mut orch = Orchestrator::<RecordingSurface<MemSurface>, Rc<TestModel>>::new(grid, overlay);
+    let mut orch = Orchestrator::<RecordingSurface<MemSurface>>::new(grid, overlay);
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
     orch.set_model(model);
     orch
@@ -329,7 +322,7 @@ fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>,
 /// Bracket a paint with begin_frame/end_frame on both surfaces and
 /// return (grid_ops, overlay_ops, regime, signals_bits).
 fn paint_and_capture(
-    orch: &mut Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>>,
+    orch: &mut Orchestrator<RecordingSurface<MemSurface>>,
 ) -> (Vec<DrawOp>, Vec<DrawOp>, Option<PaintRegimeTag>, u8) {
     orch.grid_surface().begin_frame();
     orch.overlay_surface().begin_frame();
@@ -427,8 +420,7 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     let mut orch = build_rec(Rc::clone(&stub));
 
     let mut frames: Vec<Frame> = Vec::new();
-    let mut push = |orch: &mut Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>>,
-                    t_ms: u64| {
+    let mut push = |orch: &mut Orchestrator<RecordingSurface<MemSurface>>, t_ms: u64| {
         let (grid_ops, overlay_ops, regime, signals) = paint_and_capture(orch);
         // Skip idle frames so the recording matches the production
         // paint_if_dirty drop-empty-frames behavior.

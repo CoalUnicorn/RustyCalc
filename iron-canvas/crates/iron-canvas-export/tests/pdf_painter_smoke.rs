@@ -17,15 +17,13 @@
 // test pins. Suppress the snake_case lint for the whole file.
 #![allow(non_snake_case)]
 
-use std::rc::Rc;
-
+use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
-use iron_canvas_core::{CanvasModel, Orchestrator};
 use iron_canvas_export::pdf::{PdfPainter, PdfSurface};
 
 const W: u32 = 100;
@@ -299,7 +297,7 @@ fn orchestrator_accepts_pdf_surface() {
     // point is that the trait bounds resolve, not that anything paints.
     let grid = PdfSurface::new(W, H);
     let overlay = PdfSurface::new(W, H);
-    let _orch: Orchestrator<PdfSurface, Rc<dyn CanvasModel>> = Orchestrator::new(grid, overlay);
+    let _orch: Orchestrator<PdfSurface> = Orchestrator::new(grid, overlay);
 }
 
 #[test]

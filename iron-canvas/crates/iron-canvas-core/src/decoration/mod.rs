@@ -29,6 +29,8 @@ pub use formula_refs::FormulaRefsLayer;
 pub use point_mode::PointModeLayer;
 pub use selection::{RepaintActiveCell, SelectionLayer};
 
+pub(crate) use decorations::Decorations;
+
 pub trait Layer {
     /// Stable tag for the `begin_group`/`end_group` wrapper the orchestrator
     /// emits around this decoration's paint pass.

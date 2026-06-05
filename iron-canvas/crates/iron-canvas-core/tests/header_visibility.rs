@@ -239,8 +239,7 @@ use iron_canvas_recorder::{DrawOp, MemSurface};
 use std::rc::Rc;
 
 fn paint(model: Rc<TestModel>) -> Vec<DrawOp> {
-    let mut orch =
-        Orchestrator::<MemSurface, Rc<TestModel>>::new(MemSurface::new(), MemSurface::new());
+    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1);
     orch.set_model(model);
     orch.paint_if_dirty();
@@ -253,8 +252,7 @@ fn has_group(ops: &[DrawOp], class: GroupClass) -> bool {
 }
 
 fn overlay_paint(model: Rc<TestModel>) -> Vec<DrawOp> {
-    let mut orch =
-        Orchestrator::<MemSurface, Rc<TestModel>>::new(MemSurface::new(), MemSurface::new());
+    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1);
     orch.set_model(model);
     orch.paint_if_dirty();

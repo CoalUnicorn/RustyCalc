@@ -136,7 +136,11 @@ impl Painter for PdfPainter {
         }
         self.emit_fill_color(color);
         let first = points[0];
-        self.write_str(&format!("{:.3} {:.3} m\n", f64::from(first.x), f64::from(first.y)));
+        self.write_str(&format!(
+            "{:.3} {:.3} m\n",
+            f64::from(first.x),
+            f64::from(first.y)
+        ));
         for p in &points[1..] {
             self.write_str(&format!("{:.3} {:.3} l\n", f64::from(p.x), f64::from(p.y)));
         }

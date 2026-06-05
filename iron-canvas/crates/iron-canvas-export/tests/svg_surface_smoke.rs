@@ -1,14 +1,12 @@
 //! Stage-2 smoke test: `SvgSurface` satisfies the `Surface` trait bound
-//! so `Orchestrator<SvgSurface, _>` can be constructed. End-to-end paint
+//! so `Orchestrator<SvgSurface>` can be constructed. End-to-end paint
 //! verification lives in the browser test (Stage 5); building a stub
 //! `CanvasModel` here would be ~200 LOC for marginal extra coverage over
 //! the existing `MemSurface`-driven integration tests.
 
 #![cfg(feature = "svg")]
 
-use std::rc::Rc;
-
-use iron_canvas_core::{CanvasModel, Orchestrator};
+use iron_canvas_core::Orchestrator;
 use iron_canvas_export::SvgSurface;
 
 #[test]
@@ -16,7 +14,7 @@ fn orchestrator_accepts_svg_surface() {
     let grid = SvgSurface::new(100, 50);
     let overlay = SvgSurface::new(100, 50);
     // The whole point of Stage 2: this type resolves.
-    let _orch: Orchestrator<SvgSurface, Rc<dyn CanvasModel>> = Orchestrator::new(grid, overlay);
+    let _orch: Orchestrator<SvgSurface> = Orchestrator::new(grid, overlay);
 }
 
 #[test]

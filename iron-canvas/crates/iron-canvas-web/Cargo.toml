@@ -9,7 +9,11 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-dev-tools = ["dep:iron-canvas-recorder", "dep:serde_json"]
+dev-tools = [
+    "dep:iron-canvas-recorder",
+    "dep:serde_json",
+    "iron-canvas-core/surface-introspection",
+]
 pdf = ["iron-canvas-export/pdf"]
 
 [dependencies]

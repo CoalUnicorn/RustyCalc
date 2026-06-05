@@ -106,9 +106,11 @@ macro_rules! forward_canvas_model {
     };
 }
 
-/// Forwarding impl so `Orchestrator<S, Rc<JsBackedModel>>` (in the web
-/// crate) satisfies the `M: CanvasModel` bound. `?Sized` lets `Rc<dyn
-/// CanvasModel>` also satisfy it for callers that prefer dyn dispatch.
+/// Forwarding impl so an `Rc<M>` wrapping any `CanvasModel` is itself a
+/// `CanvasModel`. The orchestrator now stores `Rc<dyn CanvasModel>` and
+/// calls through `Rc::as_ref`, so this is deref-convenience for callers
+/// that hold a concrete `Rc<M>` — the `?Sized` arm also covers
+/// `Rc<dyn CanvasModel>` directly.
 impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
     forward_canvas_model! {
         fn get_selected_sheet(&self) -> u32;

@@ -102,7 +102,7 @@ enum CanvasMode {
 
 #[wasm_bindgen]
 pub struct IronCanvas {
-    orch: Orchestrator<FacadeSurface, Rc<dyn CanvasModel>>,
+    orch: Orchestrator<FacadeSurface>,
     // Cached so SVG export can re-push the live model into a throwaway
     // orchestrator. Updated alongside every `set_model` / `setModel`.
     model: Option<Rc<dyn CanvasModel>>,
@@ -129,7 +129,7 @@ impl IronCanvas {
         let grid = wrap_surface(WebSurface::grid(grid_canvas)?);
         let overlay = wrap_surface(WebSurface::overlay(overlay_canvas)?);
         Ok(IronCanvas {
-            orch: Orchestrator::<FacadeSurface, Rc<dyn CanvasModel>>::new(grid, overlay),
+            orch: Orchestrator::<FacadeSurface>::new(grid, overlay),
             model: None,
             last_dpr: 1,
             #[cfg(feature = "dev-tools")]
@@ -346,7 +346,7 @@ impl IronCanvas {
         let overlay = SvgSurface::new(width, height);
         let grid_painter = grid.clone_painter();
 
-        let mut export_orch = Orchestrator::<SvgSurface, Rc<dyn CanvasModel>>::new(grid, overlay);
+        let mut export_orch = Orchestrator::<SvgSurface>::new(grid, overlay);
         export_orch.set_theme(self.orch.theme().clone());
         export_orch.set_model(Rc::clone(model));
         export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
@@ -379,7 +379,7 @@ impl IronCanvas {
         let overlay = PdfSurface::new(width, height);
         let grid_stream = grid.stream();
 
-        let mut export_orch = Orchestrator::<PdfSurface, Rc<dyn CanvasModel>>::new(grid, overlay);
+        let mut export_orch = Orchestrator::<PdfSurface>::new(grid, overlay);
         export_orch.set_theme(self.orch.theme().clone());
         export_orch.set_model(Rc::clone(model));
         export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
