@@ -26,8 +26,10 @@ use crate::renderer::{TextLine, layout_into};
 use ironcalc_base::types::Style;
 
 /// Slack added to the measured content extent so glyphs don't touch the
-/// cell border. Mirrors the cell text pass's `CELL_PADDING` on both sides.
-pub const FIT_PADDING: f64 = 8.0;
+/// cell border. Derived from the cell text pass's `CELL_PADDING` on both
+/// sides so the two stay locked together — change `CELL_PADDING` and autofit
+/// follows automatically.
+pub const FIT_PADDING: f64 = 2.0 * CELL_PADDING;
 
 /// Floor so an auto-fit never collapses a column/row to an unusable sliver.
 const MIN_EXTENT: f64 = 5.0;
@@ -79,15 +81,22 @@ pub fn fit_width(
     let sheet = model.get_selected_sheet();
     let (first, last) = capped_range(first_row, last_row);
 
+    let span = RCRange {
+        r1: first,
+        c1: col,
+        r2: last,
+        c2: col,
+    };
+
     let mut max = 0.0_f64;
-    for row in first..=last {
-        let Some(text) = model.get_formatted_cell_value(sheet, row, col) else {
+    for (r, col) in span.cells() {
+        let Some(text) = model.get_formatted_cell_value(sheet, r, col) else {
             continue;
         };
         if text.is_empty() {
             continue;
         }
-        let css = match model.get_cell_style(sheet, row, col) {
+        let css = match model.get_cell_style(sheet, r, col) {
             Some(style) => font_css(&style),
             None => "12px sans-serif".to_owned(),
         };

@@ -164,12 +164,29 @@ pub fn pixel_to_id<S: AxisSlot>(frozen: &[S], scroll: &[S], pixel: i32) -> Optio
 /// Snap `pixel` to a slot's trailing edge when it falls within `hit_zone`.
 /// Breaks once a slot's end is past the hit zone — slot vecs are monotonic
 /// so no later slot can match.
+///
+/// Tie-break: when two adjacent edges both fall within `hit_zone` (thin slots
+/// at high zoom-out, or a generous `hit_zone`), the **first** in iteration
+/// order wins — not the nearest. Correct for normal zoom and tolerances; a
+/// nearest-edge scan would be needed if that stops holding.
+///
+/// The frozen-then-scroll chain is treated as one ascending pixel space, so
+/// the post-`hit_zone` break in the frozen leg must not cut off a still-
+/// reachable scroll slot. That holds only while the scroll band starts at or
+/// after the frozen band ends; the `debug_assert!` guards that seam invariant.
 pub fn boundary_at<S: AxisSlot>(
     frozen: &[S],
     scroll: &[S],
     pixel: i32,
     hit_zone: i32,
 ) -> Option<i32> {
+    debug_assert!(
+        match (frozen.last(), scroll.first()) {
+            (Some(f), Some(s)) => s.start() >= f.end(),
+            _ => true,
+        },
+        "boundary_at seam: scroll band must start at or after the frozen band ends"
+    );
     for s in frozen.iter().chain(scroll.iter()) {
         if (s.end() - pixel).abs() <= hit_zone {
             return Some(s.id());
