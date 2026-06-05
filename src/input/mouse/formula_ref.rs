@@ -12,7 +12,7 @@ use crate::coord::{CellAddress, SheetRange};
 use crate::input::formula::splice_dragged_ref;
 use crate::model::FormulaAnalyzer;
 use crate::state::{DragState, ModelStore, RefOverride, WorkbookState};
-use iron_canvas_core::types::ui::{Corner, RefZone, Side};
+use iron_canvas_core::types::ui::{RectCorner, RefZone, Side};
 
 /// never runs. `ev.prevent_default()` only suppresses the browser default.
 pub(super) fn handle_formula_ref_mousedown(
@@ -132,9 +132,9 @@ pub(crate) fn dragged_ref_range(
         RefZone::Edge(Side::Bottom) => cell(a.r1, a.c1, cursor.row, a.c2),
         RefZone::Edge(Side::Left) => cell(a.r1, cursor.column, a.r2, a.c2),
         RefZone::Edge(Side::Right) => cell(a.r1, a.c1, a.r2, cursor.column),
-        RefZone::Corner(Corner::TopLeft) => cell(cursor.row, cursor.column, a.r2, a.c2),
-        RefZone::Corner(Corner::TopRight) => cell(cursor.row, a.c1, a.r2, cursor.column),
-        RefZone::Corner(Corner::BottomLeft) => cell(a.r1, cursor.column, cursor.row, a.c2),
-        RefZone::Corner(Corner::BottomRight) => cell(a.r1, a.c1, cursor.row, cursor.column),
+        RefZone::Corner(RectCorner::TopLeft) => cell(cursor.row, cursor.column, a.r2, a.c2),
+        RefZone::Corner(RectCorner::TopRight) => cell(cursor.row, a.c1, a.r2, cursor.column),
+        RefZone::Corner(RectCorner::BottomLeft) => cell(a.r1, cursor.column, cursor.row, a.c2),
+        RefZone::Corner(RectCorner::BottomRight) => cell(a.r1, a.c1, cursor.row, cursor.column),
     }
 }

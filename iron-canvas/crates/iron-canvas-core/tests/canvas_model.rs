@@ -323,8 +323,8 @@ fn hit_test_col_header_when_y_in_strip() {
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
     // y inside header strip, x past row-header strip
     match frame.hit_test(HEADER_COL_WIDTH + 5, 5) {
-        HitTest::ColHeader(c) => assert!(c >= 1),
-        other => panic!("expected ColHeader, got {:?}", other),
+        HitTest::ColumnHeader(c) => assert!(c >= 1),
+        other => panic!("expected ColumnHeader, got {:?}", other),
     }
 }
 

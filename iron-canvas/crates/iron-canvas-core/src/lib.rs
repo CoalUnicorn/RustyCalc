@@ -35,4 +35,4 @@ pub use geometry::{
 pub use model_adapter::{CanvasModel, CanvasView};
 pub use theme::{CanvasTheme, ThemeVariables};
 pub use types::coord::{AutofillTarget, FormulaRef, FormulaRefKind, RCRange, SheetArea};
-pub use types::ui::{Corner, HitTest, RefZone, ResizeTarget, Side};
+pub use types::ui::{HitTest, RectCorner, RefZone, ResizeTarget, Side};

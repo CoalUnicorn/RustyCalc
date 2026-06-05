@@ -184,12 +184,12 @@ impl PaneSet {
         pixel_to_id(&self.frozen_cols, &self.scroll_cols, x)
     }
 
-    pub fn row_boundary_at(&self, y: i32, hit_zone: i32) -> Option<i32> {
-        boundary_at(&self.frozen_rows, &self.scroll_rows, y, hit_zone)
+    pub fn row_boundary_at(&self, y: i32, tolerance: i32) -> Option<i32> {
+        boundary_at(&self.frozen_rows, &self.scroll_rows, y, tolerance)
     }
 
-    pub fn col_boundary_at(&self, x: i32, hit_zone: i32) -> Option<i32> {
-        boundary_at(&self.frozen_cols, &self.scroll_cols, x, hit_zone)
+    pub fn col_boundary_at(&self, x: i32, tolerance: i32) -> Option<i32> {
+        boundary_at(&self.frozen_cols, &self.scroll_cols, x, tolerance)
     }
 }
 

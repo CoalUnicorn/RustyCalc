@@ -32,7 +32,7 @@ pub fn handle_dblclick(
         // because ironcalc groups undo per call (`push_diff_list`).
         let (dim, area) = model.with_value(|m| (m.sheet_dimension(), CellArea::from_view(m)));
         match target {
-            ResizeTarget::Column(col) => {
+            ResizeTarget::ColumnEdge(col) => {
                 let (first, last) = full_header_span(area, col, Axis::Col);
                 for c in first..=last {
                     if let Some(w) =
@@ -50,7 +50,7 @@ pub fn handle_dblclick(
                     }
                 }
             }
-            ResizeTarget::Row(row) => {
+            ResizeTarget::RowEdge(row) => {
                 let (first, last) = full_header_span(area, row, Axis::Row);
                 for r in first..=last {
                     if let Some(h) =

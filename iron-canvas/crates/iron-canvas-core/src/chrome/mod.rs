@@ -485,7 +485,7 @@ impl Chrome {
         let p = &self.pane_set;
         if y < self.cell_origin.y {
             return match p.pixel_to_col(x) {
-                Some(c) => HitTest::ColHeader(c),
+                Some(c) => HitTest::ColumnHeader(c),
                 None => HitTest::Outside,
             };
         }
@@ -509,13 +509,13 @@ impl Chrome {
             return self
                 .pane_set
                 .col_boundary_at(x, tolerance)
-                .map(ResizeTarget::Column);
+                .map(ResizeTarget::ColumnEdge);
         }
         if x < self.row_header_thickness && y > self.col_header_thickness {
             return self
                 .pane_set
                 .row_boundary_at(y, tolerance)
-                .map(ResizeTarget::Row);
+                .map(ResizeTarget::RowEdge);
         }
         None
     }

@@ -37,11 +37,11 @@ pub fn handle_mousedown(
     if let Some(target) = with_canvas(icv, |ic| ic.resize_handle_at(x, y, HIT_ZONE)).flatten() {
         let area = model.with_value(|m| CellArea::from_view(m));
         match target {
-            ResizeTarget::Column(col) => {
+            ResizeTarget::ColumnEdge(col) => {
                 let span = full_header_span(area, col, Axis::Col);
                 state.drag.set(DragState::ResizingCol { col, span, x });
             }
-            ResizeTarget::Row(row) => {
+            ResizeTarget::RowEdge(row) => {
                 let span = full_header_span(area, row, Axis::Row);
                 state.drag.set(DragState::ResizingRow { row, span, y });
             }
@@ -54,7 +54,7 @@ pub fn handle_mousedown(
     let hit = with_canvas(icv, |ic| ic.hit_test(x, y)).unwrap_or(HitTest::Outside);
     match hit {
         HitTest::Corner => handle_corner_click(model, state),
-        HitTest::ColHeader(col) => handle_col_header_click(&ev, col, model, state),
+        HitTest::ColumnHeader(col) => handle_col_header_click(&ev, col, model, state),
         HitTest::RowHeader(row) => handle_row_header_click(&ev, row, model, state),
         HitTest::AutofillHandle { row, column } => {
             handle_cell_click(&ev, row, column, true, model, state)
@@ -64,9 +64,9 @@ pub fn handle_mousedown(
             ref_idx,
             zone,
             grab_row,
-            grab_col,
+            grab_column,
         } => {
-            handle_formula_ref_mousedown(&ev, ref_idx, zone, grab_row, grab_col, model, state);
+            handle_formula_ref_mousedown(&ev, ref_idx, zone, grab_row, grab_column, model, state);
         }
         HitTest::Outside => {}
     }

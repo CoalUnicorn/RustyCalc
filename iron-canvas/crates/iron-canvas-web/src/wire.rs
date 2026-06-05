@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use iron_canvas_core::{
-    AutofillTarget, CanvasTheme, Corner, FormulaRef, FormulaRefKind, HitTest, RCRange, RefZone,
+    AutofillTarget, CanvasTheme, FormulaRef, FormulaRefKind, HitTest, RCRange, RectCorner, RefZone,
     RenderOverlays, ResizeTarget, SheetArea, Side, ThemeVariables, geometry::CanvasSize,
 };
 
@@ -27,7 +27,7 @@ pub(crate) enum HitTestWire {
     RowHeader {
         row: i32,
     },
-    ColHeader {
+    ColumnHeader {
         column: i32,
     },
     Corner,
@@ -39,7 +39,7 @@ pub(crate) enum HitTestWire {
         ref_idx: usize,
         zone: RefZoneWire,
         grab_row: i32,
-        grab_col: i32,
+        grab_column: i32,
     },
     Outside,
 }
@@ -106,13 +106,13 @@ impl From<Side> for SideWire {
     }
 }
 
-impl From<Corner> for CornerWire {
-    fn from(c: Corner) -> Self {
+impl From<RectCorner> for CornerWire {
+    fn from(c: RectCorner) -> Self {
         match c {
-            Corner::TopLeft => CornerWire::TopLeft,
-            Corner::TopRight => CornerWire::TopRight,
-            Corner::BottomLeft => CornerWire::BottomLeft,
-            Corner::BottomRight => CornerWire::BottomRight,
+            RectCorner::TopLeft => CornerWire::TopLeft,
+            RectCorner::TopRight => CornerWire::TopRight,
+            RectCorner::BottomLeft => CornerWire::BottomLeft,
+            RectCorner::BottomRight => CornerWire::BottomRight,
         }
     }
 }
@@ -134,19 +134,19 @@ impl From<HitTest> for HitTestWire {
         match h {
             HitTest::Cell { row, column } => HitTestWire::Cell { row, column },
             HitTest::RowHeader(row) => HitTestWire::RowHeader { row },
-            HitTest::ColHeader(column) => HitTestWire::ColHeader { column },
+            HitTest::ColumnHeader(column) => HitTestWire::ColumnHeader { column },
             HitTest::Corner => HitTestWire::Corner,
             HitTest::AutofillHandle { row, column } => HitTestWire::AutofillHandle { row, column },
             HitTest::FormulaRef {
                 ref_idx,
                 zone,
                 grab_row,
-                grab_col,
+                grab_column,
             } => HitTestWire::FormulaRef {
                 ref_idx,
                 zone: zone.into(),
                 grab_row,
-                grab_col,
+                grab_column,
             },
             HitTest::Outside => HitTestWire::Outside,
         }
@@ -156,8 +156,8 @@ impl From<HitTest> for HitTestWire {
 impl From<ResizeTarget> for ResizeTargetWire {
     fn from(r: ResizeTarget) -> Self {
         match r {
-            ResizeTarget::Row(row) => ResizeTargetWire::Row { row },
-            ResizeTarget::Column(column) => ResizeTargetWire::Column { column },
+            ResizeTarget::RowEdge(row) => ResizeTargetWire::Row { row },
+            ResizeTarget::ColumnEdge(column) => ResizeTargetWire::Column { column },
         }
     }
 }

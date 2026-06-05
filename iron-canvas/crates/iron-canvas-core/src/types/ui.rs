@@ -8,7 +8,7 @@ pub enum HitTest {
         column: i32,
     },
     RowHeader(i32),
-    ColHeader(i32),
+    ColumnHeader(i32),
     Corner,
     /// Cursor is on the autofill handle. The row/column point at the
     /// drag-target cell (the cell the cursor sits over while the handle
@@ -20,7 +20,7 @@ pub enum HitTest {
     /// Cursor is over a draggable formula-ref overlay. `ref_idx` indexes
     /// into the painted `Vec<FormulaRef>`; `zone` classifies which part of
     /// the rectangle was hit so the host can pick move vs resize behavior.
-    /// `grab_row` / `grab_col` are the 1-based cell coordinates under the
+    /// `grab_row` / `grab_column` are the 1-based cell coordinates under the
     /// pointer at the moment of the hit — Body translation needs them so
     /// the relative cursor position inside the ref is preserved through
     /// the drag.
@@ -28,7 +28,7 @@ pub enum HitTest {
         ref_idx: usize,
         zone: RefZone,
         grab_row: i32,
-        grab_col: i32,
+        grab_column: i32,
     },
     Outside,
 }
@@ -47,7 +47,7 @@ pub enum Side {
 /// One of the four corners of a formula-ref rectangle. Used by
 /// `RefZone::Corner` to drive two-axis resize.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Corner {
+pub enum RectCorner {
     TopLeft,
     TopRight,
     BottomLeft,
@@ -61,7 +61,7 @@ pub enum Corner {
 pub enum RefZone {
     Body,
     Edge(Side),
-    Corner(Corner),
+    Corner(RectCorner),
 }
 
 /// A row or column boundary the cursor sits within tolerance of. The index
@@ -69,6 +69,6 @@ pub enum RefZone {
 /// outward enlarges that row/column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResizeTarget {
-    Column(i32),
-    Row(i32),
+    RowEdge(i32),
+    ColumnEdge(i32),
 }

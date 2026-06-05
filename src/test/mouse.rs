@@ -2,7 +2,7 @@
 
 use crate::coord::{CellAddress, CellArea, SheetRange};
 use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
-use iron_canvas_core::types::ui::{Corner, RefZone, Side};
+use iron_canvas_core::types::ui::{RectCorner, RefZone, Side};
 
 use crate::input::mouse::formula_ref::dragged_ref_range;
 use crate::input::mouse::header_span::{Axis, full_header_span};
@@ -81,7 +81,7 @@ fn edge_bottom_extends_only_r2() {
 fn corner_bottom_right_resizes_both_axes() {
     let out = dragged_ref_range(
         anchor(2, 2, 4, 4),
-        RefZone::Corner(Corner::BottomRight),
+        RefZone::Corner(RectCorner::BottomRight),
         cell(4, 4),
         cell(6, 7),
     );
@@ -92,7 +92,7 @@ fn corner_bottom_right_resizes_both_axes() {
 fn corner_top_left_resizes_both_axes() {
     let out = dragged_ref_range(
         anchor(3, 3, 5, 5),
-        RefZone::Corner(Corner::TopLeft),
+        RefZone::Corner(RectCorner::TopLeft),
         cell(3, 3),
         cell(2, 1),
     );
@@ -106,7 +106,7 @@ fn corner_top_left_resizes_both_axes() {
 fn corner_bottom_right_shrinks_when_cursor_inside_anchor() {
     let out = dragged_ref_range(
         anchor(2, 2, 10, 5),
-        RefZone::Corner(Corner::BottomRight),
+        RefZone::Corner(RectCorner::BottomRight),
         cell(10, 5),
         cell(3, 3),
     );
@@ -135,7 +135,7 @@ fn edge_right_shrinks_when_cursor_left_of_c2() {
 fn corner_top_left_collapses_when_cursor_past_br() {
     let out = dragged_ref_range(
         anchor(2, 2, 10, 5),
-        RefZone::Corner(Corner::TopLeft),
+        RefZone::Corner(RectCorner::TopLeft),
         cell(2, 2),
         cell(12, 6),
     );

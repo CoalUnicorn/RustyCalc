@@ -23,7 +23,7 @@ pub fn handle_contextmenu(
     let y = ev.offset_y() as f64;
 
     let target = match with_canvas(icv, |ic| ic.hit_test(x, y)) {
-        Some(HitTest::ColHeader(col)) => Some(model.with_value(|m| {
+        Some(HitTest::ColumnHeader(col)) => Some(model.with_value(|m| {
             let area = CellArea::from_view(m);
             let (first, last) = full_header_span(area, col, Axis::Col);
             HeaderContextMenu::Column {
