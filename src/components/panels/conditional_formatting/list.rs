@@ -11,7 +11,7 @@ use leptos::prelude::*;
 
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::model::{EvaluationMode, try_mutate};
-use crate::state::{CfRuleEditState, ModelStore, WorkbookState};
+use crate::state::{ActiveDrawer, CfRuleEditState, ModelStore, WorkbookState};
 
 /// Human-readable label for a CfRule variant.
 fn rule_label(rule: &CfRule) -> &'static str {
@@ -111,7 +111,7 @@ pub fn CfRuleList() -> impl IntoView {
     // and re-runs the derive. Empty while the dialog is closed (not mounted).
     let rules: Signal<Vec<ConditionalFormatting>> = Signal::derive(move || {
         let _ = state.events.format.get();
-        if !state.cf_dialog_open.get() {
+        if state.active_drawer.get() != Some(ActiveDrawer::ConditionalFormatting) {
             return Vec::new();
         }
         model.with_value(|m| {

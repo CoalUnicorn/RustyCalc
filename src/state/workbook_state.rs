@@ -40,9 +40,8 @@ pub struct WorkbookState {
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
     pub(crate) status: Split<Option<StatusMessage>>,
     pub(crate) autoscroll: AutoscrollState,
-    /// Whether the "Manage Named Ranges" modal is mounted.
-    /// Toggled by the toolbar `Names` button and the dialog's close handlers.
-    pub(crate) named_ranges_modal_open: Split<bool>,
+    /// Which drawer panel (if any) is open — see [`ActiveDrawer`].
+    pub(crate) active_drawer: Split<Option<ActiveDrawer>>,
     /// Selected / in-progress row in the Manage Named Ranges dialog.
     /// `None` while no row is being edited (initial state, or after Save /
     /// Cancel). The dialog's `<FormulaInput>` reads/writes through this signal
@@ -52,10 +51,6 @@ pub struct WorkbookState {
     /// view preference; not persisted in the workbook. Read untracked by the
     /// canvas adapter; the toggle emits FormatEvent::LayoutChanged to repaint.
     pub(crate) show_headers: Split<bool>,
-    /// Whether the "Conditional Formatting" modal is mounted. Toggled by the
-    /// toolbar CF button and the dialog's close handlers — mirrors
-    /// [`Self::named_ranges_modal_open`].
-    pub(crate) cf_dialog_open: Split<bool>,
     /// In-progress rule edit for the CF dialog. `None` while no rule is being
     /// edited (initial state, or after Save / Cancel).
     pub(crate) editing_cf_rule: Split<Option<CfRuleEditState>>,
@@ -75,6 +70,16 @@ pub enum RangeCaptureTarget {
     CfRange,
     /// The Named Range "Refers to" formula (qualified absolute `Sheet1!$B$2:$D$8`).
     NamedRange,
+}
+
+/// Which drawer panel (if any) is currently open on the right side.
+/// Replaces the independent `cf_dialog_open` / `named_ranges_modal_open`
+/// bools — the `Option` guarantees mutual exclusion: only one drawer at a
+/// time, one document-level Esc listener, one z-index slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActiveDrawer {
+    ConditionalFormatting,
+    NamedRanges,
 }
 
 /// In-progress edit state for the conditional formatting rule editor.
@@ -109,10 +114,9 @@ impl WorkbookState {
             context_menu: Split::new(None),
             status: Split::new(None),
             autoscroll: AutoscrollState::new(),
-            named_ranges_modal_open: Split::new(false),
+            active_drawer: Split::new(None),
             editing_named_range: Split::new(None),
             show_headers: Split::new(true),
-            cf_dialog_open: Split::new(false),
             editing_cf_rule: Split::new(None),
             range_capture: Split::new(None),
         }

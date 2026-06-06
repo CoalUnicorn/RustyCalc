@@ -33,7 +33,11 @@ const PRESETS: &[Preset] = &[
     ("All Borders", BorderIcon::All, BorderSide::All),
     ("Outside Borders", BorderIcon::Outer, BorderSide::Outer),
     ("Inside Borders", BorderIcon::Inner, BorderSide::Inner),
-    ("Inside Horizontal", BorderIcon::CenterH, BorderSide::CenterH),
+    (
+        "Inside Horizontal",
+        BorderIcon::CenterH,
+        BorderSide::CenterH,
+    ),
     ("Inside Vertical", BorderIcon::CenterV, BorderSide::CenterV),
     ("Top Border", BorderIcon::Top, BorderSide::Top),
     ("Bottom Border", BorderIcon::Bottom, BorderSide::Bottom),

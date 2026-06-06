@@ -26,10 +26,8 @@ use leptos_use::{use_document, use_event_listener};
 
 /// Width modifier applied to the `.drawer` panel. Maps to a CSS class so the
 /// actual sizing lives in the stylesheet, mirroring [`super::modal::ModalSize`].
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DrawerWidth {
-    Small,
     Medium,
     Large,
 }
@@ -37,7 +35,6 @@ pub enum DrawerWidth {
 impl DrawerWidth {
     fn css_class(self) -> &'static str {
         match self {
-            DrawerWidth::Small => "drawer-sm",
             DrawerWidth::Medium => "drawer-md",
             DrawerWidth::Large => "drawer-lg",
         }

@@ -8,8 +8,9 @@ use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::formula::FormulaAnalysis;
 use crate::model::{
-    ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetQuery, mutate, try_mutate,
+    ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetQuery, mutate,
     style_types::{BooleanValue, StylePath},
+    try_mutate,
 };
 use crate::state::{DragState, EditingCell, ModelStore, WorkbookState};
 use crate::state::{EditFocus, EditMode};
@@ -86,28 +87,32 @@ pub fn execute_edit(
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
                 stamp_last_formula(&edit.text);
-                try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), EditError> {
-                    m.set_user_input(
-                        edit.address.sheet,
-                        edit.address.row,
-                        edit.address.column,
-                        &edit.text,
-                    )
-                    .map_err(EditError::Engine)?;
-                    // Excel parity: an Alt+Enter value carries an embedded
-                    // newline, so force wrap-text on the cell — otherwise the
-                    // extra lines render but stay clipped to the row height.
-                    if edit.text.contains('\n') {
-                        let area = edit.address.to_sheet_area().to_ironcalc_area();
-                        m.update_range_style(
-                            &area,
-                            StylePath::WRAP_TEXT.as_str(),
-                            BooleanValue::True.as_str(),
+                try_mutate(
+                    model,
+                    EvaluationMode::Immediate,
+                    |m| -> Result<(), EditError> {
+                        m.set_user_input(
+                            edit.address.sheet,
+                            edit.address.row,
+                            edit.address.column,
+                            &edit.text,
                         )
                         .map_err(EditError::Engine)?;
-                    }
-                    Ok(())
-                })?;
+                        // Excel parity: an Alt+Enter value carries an embedded
+                        // newline, so force wrap-text on the cell — otherwise the
+                        // extra lines render but stay clipped to the row height.
+                        if edit.text.contains('\n') {
+                            let area = edit.address.to_sheet_area().to_ironcalc_area();
+                            m.update_range_style(
+                                &area,
+                                StylePath::WRAP_TEXT.as_str(),
+                                BooleanValue::True.as_str(),
+                            )
+                            .map_err(EditError::Engine)?;
+                        }
+                        Ok(())
+                    },
+                )?;
                 finish_commit(model, state, &edit, *dir);
             }
         }
