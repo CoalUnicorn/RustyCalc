@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    RCRange,
-    geometry::{constants::HEADER_OFFSET, pixel_rect::PixelRect},
-};
+use crate::{RCRange, geometry::pixel_rect::PixelRect};
 
 /// A point in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -44,6 +41,40 @@ impl Line {
             Line::V { span, x } => Line::V { span, x: x + d },
         }
     }
+
+    /// Grow the segment by `d` pixels at each end, along its own direction.
+    ///
+    /// Borders are butt-capped, so a stroke ends exactly at its endpoint. Where
+    /// two perpendicular edges meet at a cell corner the thicker one leaves an
+    /// uncovered notch; extending each edge by half its width fills it (a manual
+    /// miter).
+    ///
+    /// ```
+    /// use iron_canvas_core::{Line, Span};
+    /// let h = Line::H { span: Span { from: 10, to: 100 }, y: 5 };
+    /// assert_eq!(
+    ///     h.extend(2),
+    ///     Line::H { span: Span { from: 8, to: 102 }, y: 5 },
+    /// );
+    /// ```
+    pub fn extend(self, d: i32) -> Self {
+        match self {
+            Line::H { span, y } => Line::H {
+                span: Span {
+                    from: span.from - d,
+                    to: span.to + d,
+                },
+                y,
+            },
+            Line::V { span, x } => Line::V {
+                x,
+                span: Span {
+                    from: span.from - d,
+                    to: span.to + d,
+                },
+            },
+        }
+    }
 }
 
 /// Endpoints of an axis-aligned line. The line covers `from` through `to`;
@@ -79,18 +110,12 @@ impl Axis {
     pub fn header_rect(self, along: i32, parallel_size: i32, header_thickness: i32) -> PixelRect {
         match self {
             Axis::Row => PixelRect {
-                top_left: Point {
-                    x: HEADER_OFFSET,
-                    y: along,
-                },
+                top_left: Point { x: 0, y: along },
                 width: header_thickness,
                 height: parallel_size,
             },
             Axis::Column => PixelRect {
-                top_left: Point {
-                    x: along,
-                    y: HEADER_OFFSET,
-                },
+                top_left: Point { x: along, y: 0 },
                 width: parallel_size,
                 height: header_thickness,
             },

@@ -2,13 +2,13 @@
 #![allow(unused_imports)]
 
 use iron_canvas_core::RenderOverlays;
-use iron_canvas_core::geometry::constants::{HEADER_COL_WIDTH, HEADER_OFFSET, HEADER_ROW_HEIGHT};
+use iron_canvas_core::geometry::constants::{HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use iron_canvas_core::geometry::prim::Axis;
 
 #[test]
 fn row_header_rect_pins_x_to_left_strip() {
     let rect = Axis::Row.header_rect(100, 20, HEADER_COL_WIDTH);
-    assert_eq!(rect.top_left.x, HEADER_OFFSET);
+    assert_eq!(rect.top_left.x, 0);
     assert_eq!(rect.top_left.y, 100);
     assert_eq!(rect.width, HEADER_COL_WIDTH);
     assert_eq!(rect.height, 20);
@@ -18,7 +18,7 @@ fn row_header_rect_pins_x_to_left_strip() {
 fn column_header_rect_pins_y_to_top_strip() {
     let rect = Axis::Column.header_rect(100, 20, HEADER_ROW_HEIGHT);
     assert_eq!(rect.top_left.x, 100);
-    assert_eq!(rect.top_left.y, HEADER_OFFSET);
+    assert_eq!(rect.top_left.y, 0);
     assert_eq!(rect.width, 20);
     assert_eq!(rect.height, HEADER_ROW_HEIGHT);
 }

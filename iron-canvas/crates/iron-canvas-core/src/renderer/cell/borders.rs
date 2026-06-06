@@ -195,7 +195,12 @@ impl<P: Painter> RendererCore<P> {
     /// Stroke one resolved border. `Double`-style borders render as two
     /// parallel strokes offset ±1 px on the cross-axis.
     fn paint_border(&self, edge: BorderEdge, rect: PixelRect, b: &BorderPaint) {
-        let line = edge.line(rect);
+        // Extend each edge by half its width so perpendicular borders overlap
+        // at the corner instead of leaving a butt-cap notch. With the painter's
+        // parity-aware pixel snap, `width_px / 2` is the exact reach of the
+        // crossing edge's band from its centerline (0 for 1-px borders, which
+        // already meet cleanly).
+        let line = edge.line(rect).extend(b.stroke.width_px / 2);
         let offsets: &[i32] = if b.stroke.double { &[-1, 1] } else { &[0] };
         let color = match &b.color {
             BorderColor::Static(s) => PaintColor::from_theme_str(s),

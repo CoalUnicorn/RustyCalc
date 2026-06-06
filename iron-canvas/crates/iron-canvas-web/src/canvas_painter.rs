@@ -27,6 +27,22 @@ static MEASURE_WARN_EMITTED: AtomicBool = AtomicBool::new(false);
 /// Standard border line width (1px in CSS pixels).
 pub(crate) const STANDARD_BORDER_WIDTH: f64 = 1.0;
 
+/// Snap an axis-aligned stroke's cross-axis coordinate onto the pixel grid.
+///
+/// Canvas centers a stroke on its path, so a width-1 line at integer `coord`
+/// covers `coord-0.5 .. coord+0.5` and antialiases into two half-opacity
+/// columns — fuzzy borders whose corners read as a faint/missing pixel where
+/// two perpendicular edges meet. Odd-width strokes are crisp when centered on
+/// a half-pixel; even-width strokes when centered on the integer. Mirrors the
+/// `+ 0.5` trick `draw_corner_box` already uses for frozen separators.
+fn snap_stroke_cross(coord: f64, width: f64) -> f64 {
+    if (width.round() as i32) % 2 == 0 {
+        coord.round()
+    } else {
+        coord.floor() + 0.5
+    }
+}
+
 /// Cached color/font value. `Static` is the zero-alloc fast path: when the
 /// renderer pushed a `&'static str` (theme color, `HEADER_FONT`), we keep the
 /// reference and ptr-eq it on the next call. `Owned` carries a per-frame
@@ -262,6 +278,7 @@ impl Painter for CanvasPainter {
     }
 
     fn stroke_hline(&self, span: Span, y: f64, color: PaintColor, width: f64) {
+        let y = snap_stroke_cross(y, width);
         self.set_stroke_cached(color);
         self.set_line_width_cached(width);
         self.ctx.begin_path();
@@ -271,6 +288,7 @@ impl Painter for CanvasPainter {
     }
 
     fn stroke_vline(&self, x: f64, span: Span, color: PaintColor, width: f64) {
+        let x = snap_stroke_cross(x, width);
         self.set_stroke_cached(color);
         self.set_line_width_cached(width);
         self.ctx.begin_path();

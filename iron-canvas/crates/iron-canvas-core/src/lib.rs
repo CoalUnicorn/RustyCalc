@@ -26,7 +26,7 @@ pub use geometry::{
     CanvasSize,
     constants::{
         AUTOFILL_HANDLE_PX, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
-        HEADER_OFFSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
+        HEADER_ROW_HEIGHT, HEADER_SEPARATOR_WIDTH, LAST_COLUMN, LAST_ROW,
     },
     pixel_rect::PixelRect,
     prim::{Line, Point, Span},
