@@ -6,7 +6,7 @@
 //! | --------------------- | --------------------------------- | ------------------------------------------- |
 //! | Per-call scratch      | [`FrameCache`]                    | `Cell::take` / `Cell::set` rhythm per pass  |
 //! | Cross-frame model     | [`PaneCache`] / [`PaneBuffers`]   | `invalidate(mask)` / `try_shift(..)` (blit) |
-//! | Renderer-lifetime     | [`FontIntern`], [`ColNameIntern`], [`ColorIntern`] | insert-only                           |
+//! | Renderer-lifetime     | [`FontIntern`], [`ColorIntern`]   | insert-only                                 |
 //!
 //! `font` is `pub(crate)` — pure CSS-string construction consumed by
 //! [`FontIntern`] and by `autofit` (which must produce identical font
@@ -17,6 +17,6 @@ mod intern;
 mod pane_cache;
 mod scratch;
 
-pub use intern::{ColNameIntern, ColorIntern, FontIntern};
+pub use intern::{ColorIntern, FontIntern};
 pub use pane_cache::PaneCache;
 pub use scratch::FrameCache;

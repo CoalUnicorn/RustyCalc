@@ -272,6 +272,13 @@ impl Chrome {
             canvas.w,
         );
 
+        // Data-driven header labels in walk_header_strip (frozen ++ scroll)
+        // order so header_strip can zip slots <-> labels positionally.
+        pane_set.row_header_labels =
+            PaneSet::resolve_row_labels(model, sheet, &pane_set.frozen_rows, &pane_set.scroll_rows);
+        pane_set.col_header_labels =
+            PaneSet::resolve_col_labels(model, sheet, &pane_set.frozen_cols, &pane_set.scroll_cols);
+
         // Phase E — assemble. `cell_origin` reuses the locals from B/D so
         // there's a single source of truth for the cell-area top-left.
         let col_header_thickness = if show_col { HEADER_ROW_HEIGHT } else { 0 };

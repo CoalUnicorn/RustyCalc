@@ -31,6 +31,7 @@ pub struct TestModel {
     row_height_overrides: RefCell<BTreeMap<i32, f64>>,
     col_width_overrides: RefCell<BTreeMap<i32, f64>>,
     cell_values: RefCell<HashMap<(i32, i32), String>>,
+    column_headers: RefCell<HashMap<i32, String>>,
     /// When > 0, rows `1..=data_until` return `"R{row}"` for any column
     /// not explicitly set via `set_cell`. Lets a test populate a synthetic
     /// data band without enumerating cells.
@@ -56,6 +57,7 @@ impl Default for TestModel {
             row_height_overrides: RefCell::default(),
             col_width_overrides: RefCell::default(),
             cell_values: RefCell::default(),
+            column_headers: RefCell::default(),
             data_until: Cell::new(0),
             top_row: Cell::new(1),
             left_column: Cell::new(1),
@@ -135,6 +137,12 @@ impl TestModel {
     }
     pub fn with_data_until(self, row: i32) -> Self {
         self.data_until.set(row);
+        self
+    }
+    pub fn with_column_header(self, col: i32, text: &str) -> Self {
+        self.column_headers
+            .borrow_mut()
+            .insert(col, text.to_string());
         self
     }
     pub fn with_default_row_height(self, h: f64) -> Self {
@@ -260,6 +268,9 @@ impl CanvasModel for TestModel {
     }
     fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellKind> {
         Some(CellKind::Text)
+    }
+    fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
+        self.column_headers.borrow().get(&column).cloned()
     }
     fn get_formatted_cell_value(&self, _: u32, row: i32, col: i32) -> Option<String> {
         if let Some(v) = self.cell_values.borrow().get(&(row, col)) {

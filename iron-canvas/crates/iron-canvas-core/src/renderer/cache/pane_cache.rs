@@ -70,7 +70,7 @@ impl PaneBuffers {
 }
 
 /// Four pane buffers, indexed by `PaneRegion as usize`. Renderer-lifetime
-/// (sits alongside `FontIntern` / `ColNameIntern` / `ColorIntern`) — the
+/// (sits alongside `FontIntern` / `ColorIntern`) — the
 /// Stage 1 fingerprint-skip already proved we want cross-frame content
 /// caching; Stage 3.1 graduates it from FrameCache scratch into a
 /// first-class durable cache.

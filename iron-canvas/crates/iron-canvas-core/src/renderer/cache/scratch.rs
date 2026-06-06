@@ -23,10 +23,6 @@ pub struct FrameCache {
     /// to gate the right/bottom grid-line fallback. Avoids a model call per
     /// cell on the hot pane walk.
     pub show_grid: Cell<bool>,
-    /// Scratch String formatted into for row-header labels (`write!` instead
-    /// of `i32::to_string()`). Cleared per-call; capacity persists across
-    /// frames so steady-state row-label paints don't re-allocate.
-    pub label_buf: RefCell<String>,
     /// Scratch line buffer parked here so `TextPaint::resolve_into` doesn't
     /// allocate a fresh `Vec<TextLine>` per cell with text. `layout_into`
     /// overwrites slots in place via a counter and `truncate`s the tail, so

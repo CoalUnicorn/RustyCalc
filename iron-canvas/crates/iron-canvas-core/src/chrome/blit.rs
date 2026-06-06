@@ -270,6 +270,15 @@ pub(super) fn try_blit_reuse(
         return None;
     }
 
+    // The scroll-axis vec changed under the blit, so its labels must be
+    // re-resolved; rebuilding both keeps the parallel-vec invariant trivially
+    // correct. Shares resolution with Chrome::build via PaneSet::resolve_*.
+    let sheet = prev.sheet;
+    let row_header_labels =
+        PaneSet::resolve_row_labels(model, sheet, &prev.pane_set.frozen_rows, &scroll_rows);
+    let col_header_labels =
+        PaneSet::resolve_col_labels(model, sheet, &prev.pane_set.frozen_cols, &scroll_cols);
+
     let pane_set = PaneSet {
         frozen_rows: prev.pane_set.frozen_rows.clone(),
         scroll_rows,
@@ -277,6 +286,8 @@ pub(super) fn try_blit_reuse(
         frozen_cols: prev.pane_set.frozen_cols.clone(),
         scroll_cols,
         frozen_offset_x: prev.pane_set.frozen_offset_x,
+        row_header_labels,
+        col_header_labels,
     };
 
     let stale = plan.shift_panes();

@@ -2,11 +2,9 @@
 //! the per-cell hot path is `Rc::clone` instead of `String::clone` (or
 //! `format!`) for repeated colors / fonts / column labels.
 //!
-//! Three tables, three keying strategies:
+//! Two tables, two keying strategies:
 //! - [`FontIntern`] — composite key `(size, bold, italic, family)`, linear
 //!   scan; bounded by ~10 unique tuples per realistic sheet.
-//! - [`ColNameIntern`] — direct index by 1-based column number, on-demand
-//!   `Vec` extension; `A`..`XFD` capped at 16384 entries.
 //! - [`ColorIntern`] — raw `&str` key into normalized `Rc<str>` value;
 //!   linear scan, bounded by the small set of distinct colors a sheet uses.
 
@@ -80,42 +78,6 @@ impl FontIntern {
 }
 
 impl Default for FontIntern {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Renderer-lifetime intern table for column-letter labels (`A`, `B`, ..., `XFD`).
-///
-/// Mirrors `FontIntern`: each unique column index pays one `col_name` allocation
-/// the first time it scrolls into view, then header repaints `Rc::clone` instead.
-/// Indexed by 1-based column number; entry 0 is the empty string returned by
-/// `col_name(0)` so out-of-range queries don't blow up the lookup.
-pub struct ColNameIntern {
-    entries: RefCell<Vec<Rc<str>>>,
-}
-
-impl ColNameIntern {
-    pub fn new() -> Self {
-        Self {
-            entries: RefCell::new(Vec::new()),
-        }
-    }
-
-    /// Interned label for column `col` (1-based). Grows the entry vec on demand
-    /// up to `col`; subsequent calls are zero-alloc.
-    pub fn get(&self, col: i32) -> Rc<str> {
-        let idx = col.max(0) as usize;
-        let mut entries = self.entries.borrow_mut();
-        while entries.len() <= idx {
-            let next = entries.len() as i32;
-            entries.push(crate::geometry::utils::col_name(next).into());
-        }
-        Rc::clone(&entries[idx])
-    }
-}
-
-impl Default for ColNameIntern {
     fn default() -> Self {
         Self::new()
     }

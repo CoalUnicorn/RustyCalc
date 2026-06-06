@@ -64,7 +64,6 @@ pub use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome};
 use crate::geometry::prim::Axis;
 use crate::renderer::cache::{FrameCache, PaneCache};
-pub use cache::ColNameIntern;
 pub use cache::ColorIntern;
 pub use cache::FontIntern;
 
@@ -96,10 +95,6 @@ pub struct RendererCore<P: Painter> {
     /// `FrameCache` because identical fonts repeat across frames, not just
     /// within a single paint.
     pub font_intern: FontIntern,
-    /// Renderer-lifetime intern of column-letter labels. Same rationale as
-    /// `font_intern` — column names repeat every frame; cache once, clone the
-    /// `Rc<str>` thereafter.
-    pub col_intern: ColNameIntern,
     /// Renderer-lifetime intern of per-cell color overrides (border + text).
     /// Hot-path callers (`BorderPaint::resolve`, `CellTextStyle::resolve`)
     /// previously allocated a fresh `String` per cell per frame; the intern
@@ -142,13 +137,11 @@ impl<P: Painter> RendererCore<P> {
             frame_cache: FrameCache {
                 text_slots: Cell::new(Vec::new()),
                 show_grid: Cell::new(true),
-                label_buf: RefCell::new(String::new()),
                 text_lines: Cell::new(Vec::new()),
                 wrap_buf: RefCell::new(String::new()),
             },
             pane_cache: PaneCache::default(),
             font_intern: FontIntern::new(),
-            col_intern: ColNameIntern::new(),
             color_intern: ColorIntern::new(),
         }
     }

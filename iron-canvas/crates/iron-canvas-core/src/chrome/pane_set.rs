@@ -30,6 +30,11 @@ pub struct PaneSet {
     pub frozen_cols: Vec<ColSlot>,
     pub scroll_cols: Vec<ColSlot>,
     pub frozen_offset_x: i32,
+    /// Resolved row-header labels, in the same order walk_header_strip visits:
+    /// frozen_rows ++ scroll_rows. Built in Chrome::build with the model in scope.
+    pub row_header_labels: Vec<String>,
+    /// Resolved column-header labels, parallel to frozen_cols ++ scroll_cols.
+    pub col_header_labels: Vec<String>,
 }
 
 impl PaneSet {
@@ -43,7 +48,49 @@ impl PaneSet {
             frozen_cols: recycled.frozen_cols,
             scroll_cols: recycled.scroll_cols,
             frozen_offset_x: 0,
+            row_header_labels: Vec::new(),
+            col_header_labels: Vec::new(),
         }
+    }
+
+    /// Resolve `frozen ++ scroll` header labels in walk_header_strip order:
+    /// a model override, else the 1-based row number. The Fresh build and the
+    /// blit rebuild both call this, so the two paths can never drift out of the
+    /// slot order their painters zip against.
+    pub(crate) fn resolve_row_labels(
+        model: &dyn CanvasModel,
+        sheet: u32,
+        frozen: &[RowSlot],
+        scroll: &[RowSlot],
+    ) -> Vec<String> {
+        frozen
+            .iter()
+            .chain(scroll.iter())
+            .map(|s| {
+                model
+                    .get_row_header_text(sheet, s.row)
+                    .unwrap_or_else(|| s.row.to_string())
+            })
+            .collect()
+    }
+
+    /// Column mirror of [`resolve_row_labels`], falling back to the A/B/C…
+    /// spreadsheet name.
+    pub(crate) fn resolve_col_labels(
+        model: &dyn CanvasModel,
+        sheet: u32,
+        frozen: &[ColSlot],
+        scroll: &[ColSlot],
+    ) -> Vec<String> {
+        frozen
+            .iter()
+            .chain(scroll.iter())
+            .map(|s| {
+                model
+                    .get_column_header_text(sheet, s.col)
+                    .unwrap_or_else(|| crate::geometry::utils::col_name(s.col))
+            })
+            .collect()
     }
 
     /// Populate `frozen_rows`, `scroll_rows`, and `frozen_offset_y`
