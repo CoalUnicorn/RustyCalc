@@ -20,7 +20,7 @@ pub mod text;
 
 pub use paint::{CellPaint, PaneCells};
 
-use ironcalc_base::types::CellType;
+use crate::style::CellKind;
 
 use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
@@ -113,19 +113,12 @@ impl<P: Painter> RendererCore<P> {
             let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
                 continue;
             };
-            // Conditional formatting: when a CF rule matches this cell,
-            // IronCalc's extended style is the base style with the CF dxf
-            // fill/font overlay already applied — use it as the paint source
-            // so fill, font, and borders all reflect CF — plus any
-            // data-bar / icon / rating decoration.
-            let (own_style, cf_decoration) =
-                match model.get_extended_cell_style(frame.sheet, slot.row, slot.col) {
-                    Some(extended) => {
-                        let deco = CfDecorationPaint::from_extended_style(&extended);
-                        (extended.style, deco)
-                    }
-                    None => (own_style, None),
-                };
+            // `own_style` already holds the dxf-merged CellStyle (the bridge folds
+            // the CF overlay in get_cell_styles_in). Only the decoration is fetched
+            // per cell.
+            let cf_decoration = model
+                .get_extended_cell_style(frame.sheet, slot.row, slot.col)
+                .map(|deco| CfDecorationPaint::from_cell_decoration(&deco));
             let Some(mut p) =
                 CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
             else {
@@ -162,7 +155,7 @@ impl<P: Painter> RendererCore<P> {
             let cell_type = pane_cell_types
                 .get_mut(idx)
                 .and_then(Option::take)
-                .unwrap_or(CellType::Text);
+                .unwrap_or(CellKind::Text);
             if let Some(tp) = TextPaint::resolve_into(
                 self,
                 p.rect,
@@ -319,16 +312,11 @@ impl<P: Painter> RendererCore<P> {
             let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
                 continue;
             };
-            // Conditional formatting: same overlay-as-paint-source treatment as
-            // the full-pane walk in `render_pane` — see the comment there.
-            let (own_style, cf_decoration) =
-                match model.get_extended_cell_style(frame.sheet, slot.row, slot.col) {
-                    Some(extended) => {
-                        let deco = CfDecorationPaint::from_extended_style(&extended);
-                        (extended.style, deco)
-                    }
-                    None => (own_style, None),
-                };
+            // `own_style` already holds the dxf-merged CellStyle. Only the
+            // decoration is fetched per cell — mirrors render_pane.
+            let cf_decoration = model
+                .get_extended_cell_style(frame.sheet, slot.row, slot.col)
+                .map(|deco| CfDecorationPaint::from_cell_decoration(&deco));
             let Some(mut p) =
                 CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
             else {
@@ -360,7 +348,7 @@ impl<P: Painter> RendererCore<P> {
             let cell_type = pane_cell_types
                 .get_mut(idx)
                 .and_then(Option::take)
-                .unwrap_or(CellType::Text);
+                .unwrap_or(CellKind::Text);
             if let Some(tp) = TextPaint::resolve_into(
                 self,
                 p.rect,

@@ -1069,7 +1069,6 @@ name = "iron-canvas-core"
 version = "0.1.0-beta.2"
 dependencies = [
  "bitflags",
- "ironcalc_base",
  "serde",
 ]
 
@@ -1078,6 +1077,14 @@ name = "iron-canvas-export"
 version = "0.1.0-beta.2"
 dependencies = [
  "iron-canvas-core",
+]
+
+[[package]]
+name = "iron-canvas-ironcalc"
+version = "0.1.0-beta.2"
+dependencies = [
+ "iron-canvas-core",
+ "ironcalc_base",
 ]
 
 [[package]]
@@ -1855,6 +1862,7 @@ dependencies = [
  "gloo-net",
  "gloo-storage",
  "iron-canvas-core",
+ "iron-canvas-ironcalc",
  "iron-canvas-web",
  "ironcalc",
  "ironcalc_base",

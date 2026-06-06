@@ -9,8 +9,6 @@
 //! selection overlay to restore the active cell on top of the
 //! semi-transparent selection fill.
 
-use ironcalc_base::types::{CellType, Style};
-
 use super::borders::ResolvedBorders;
 use super::text::TextPaint;
 use crate::CanvasModel;
@@ -22,6 +20,7 @@ use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
 use crate::renderer::cf_types::CfDecorationPaint;
+use crate::style::{CellKind, CellStyle};
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
@@ -29,7 +28,7 @@ pub struct CellPaint {
     pub row: i32,
     pub col: i32,
     pub rect: PixelRect,
-    pub style: Style,
+    pub style: CellStyle,
     /// Per-edge resolved border paints. Computed once at iteration time so
     /// the explicit-border sub-pass in `render_pane` is pure pixel pushing —
     /// no `BorderPaint::resolve` calls inside the paint loop.
@@ -51,7 +50,7 @@ impl CellPaint {
     /// pure pixel pushers.
     pub fn resolve_cell_paint(
         slot: CellSlot,
-        own_style: Style,
+        own_style: CellStyle,
         theme: &CanvasTheme,
         intern: &ColorIntern,
     ) -> Option<CellPaint> {
@@ -166,7 +165,7 @@ impl<P: Painter> RendererCore<P> {
         // Branch on the model's per-cell override: zero-alloc Static path for
         // the theme default, Borrowed for the colored case. Avoids feeding
         // every theme-default cell through the painter's allocating cache miss.
-        let color = match p.style.fill.color.as_deref() {
+        let color = match p.style.fill_color.as_deref() {
             Some(c) => PaintColor::Borrowed(c),
             None => PaintColor::from_theme_str(&theme.cell_bg),
         };
@@ -210,7 +209,7 @@ impl<P: Painter> RendererCore<P> {
         if let Some(text) = model.get_formatted_cell_value(sheet, row, column) {
             let cell_type = model
                 .get_cell_type(sheet, row, column)
-                .unwrap_or(CellType::Text);
+                .unwrap_or(CellKind::Text);
             if let Some(t) = TextPaint::resolve_into(
                 self,
                 rect,

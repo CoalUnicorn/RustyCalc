@@ -135,8 +135,9 @@ pub fn CfRuleEditor() -> impl IntoView {
     });
     let formula_analysis = Memo::new(move |_| {
         let text = formula_text.get();
-        analyzer_ctx
-            .with(|(sheet_names, defined_names, ctx)| analyze_formula(&text, *ctx, sheet_names, defined_names))
+        analyzer_ctx.with(|(sheet_names, defined_names, ctx)| {
+            analyze_formula(&text, *ctx, sheet_names, defined_names)
+        })
     });
     let formula_refs = Signal::derive(move || formula_analysis.with(|a| a.refs().to_vec()));
     let formula_is_error = Signal::derive(move || formula_analysis.with(|a| a.has_any_error()));
@@ -159,8 +160,7 @@ pub fn CfRuleEditor() -> impl IntoView {
         cf_formula_prev_span.set(None);
     });
 
-    let cf_formula_armed =
-        move || state.range_capture.get() == Some(RangeCaptureTarget::CfFormula);
+    let cf_formula_armed = move || state.range_capture.get() == Some(RangeCaptureTarget::CfFormula);
     let toggle_formula_arm = move |_: web_sys::MouseEvent| {
         if state.range_capture.get_untracked() == Some(RangeCaptureTarget::CfFormula) {
             state.range_capture.set(None);

@@ -9,9 +9,7 @@ use crate::components::{
         formula_bar::FormulaBar, sheet_tab_bar::SheetTabBar, status_bar::StatusBar,
         toolbar::Toolbar,
     },
-    panels::{
-        header_context_menu::HeaderContextMenuOverlay,
-    },
+    panels::header_context_menu::HeaderContextMenuOverlay,
 };
 use crate::coord::{CellAddress, SheetRange};
 use crate::events::{ContentEvent, SpreadsheetEvent};

@@ -65,13 +65,13 @@ fn fit_height_returns_none_for_empty_row() {
 
 #[test]
 fn fit_height_returns_some_when_row_has_content() {
-    // Default Style has sz = 13; expected result is 13.0 + FIT_PADDING.
+    // CellStyle::default() has size=11.0; expected result is 11.0 + FIT_PADDING.
     let model = TestModel::synthetic_grid();
     model.set_cell(2, 1, "x");
     let metrics = CharWidth;
     assert_eq!(
         fit_height(&model, &metrics, 2, 1, 3),
-        Some(13.0 + FIT_PADDING)
+        Some(11.0 + FIT_PADDING)
     );
 }
 
@@ -80,16 +80,16 @@ fn font_css_quotes_multi_word_family() {
     // "Times New Roman" contains spaces, so escape_font_family must wrap it
     // in double quotes. This asserts font_css produces the same quoted form
     // that the renderer's FontIntern / cache::font::build would produce.
-    use ironcalc_base::types::Style;
-    let mut style = Style::default();
+    use iron_canvas_core::CellStyle;
+    let mut style = CellStyle::default();
     style.font.name = "Times New Roman".to_owned();
-    assert_eq!(font_css(&style), "13px \"Times New Roman\"");
+    assert_eq!(font_css(&style), "11px \"Times New Roman\"");
 }
 
 #[test]
 fn font_css_empty_family_falls_back_to_calibri() {
-    use ironcalc_base::types::Style;
-    let style = Style::default(); // font.name is "" by default
-    // sz=13, not bold, not italic → "13px Calibri"
-    assert_eq!(font_css(&style), "13px Calibri");
+    use iron_canvas_core::CellStyle;
+    let style = CellStyle::default(); // font.name is "" by default
+    // size=11.0, not bold, not italic → "11px Calibri"
+    assert_eq!(font_css(&style), "11px Calibri");
 }

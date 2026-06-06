@@ -3,21 +3,18 @@
 //! `IronCalcModel` is a newtype wrapper that implements `CanvasModel` for
 //! `ironcalc_base::UserModel`.  Rust's orphan rule prevents implementing a
 //! foreign trait (`CanvasModel`) for a foreign type (`UserModel`) outside of
-//! the crate that defines the trait, so the direct impl lives in
-//! `iron-canvas-core`.  This newtype is the engine-agnostic path — it lets
-//! any downstream crate use `IronCalcModel` without importing `ironcalc_base`
-//! directly.
-//!
-//! ## Migration path (EXT-5)
-//!
-//! 1. Callers switch from `UserModel<'a>` to `IronCalcModel<'a>`.
-//! 2. The `impl CanvasModel for UserModel` in `iron-canvas-core` is removed.
-//! 3. `iron-canvas-core` drops its `ironcalc_base` dependency.
+//! the crate that defines the trait, so the direct impl lives here.  This
+//! newtype is the engine-agnostic path — it lets any downstream crate use
+//! `IronCalcModel` without importing `ironcalc_base` directly.
 
-use iron_canvas_core::{CanvasModel, CanvasView, types::coord::RCRange};
+pub mod convert;
+
+use iron_canvas_core::{
+    CanvasModel, CanvasView, CellDecoration, CellKind, CellStyle, types::coord::RCRange,
+};
 use ironcalc_base::UserModel;
-use ironcalc_base::cf_types::ExtendedStyle;
-use ironcalc_base::types::{CellType, Style};
+
+use crate::convert::{cell_decoration_from_extended, cell_type_to_kind, style_to_core};
 
 /// Newtype wrapper that implements `CanvasModel` for `UserModel`.
 ///
@@ -67,16 +64,47 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
         UserModel::get_show_grid_lines(&self.0, sheet).ok()
     }
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style> {
-        UserModel::get_cell_style(&self.0, sheet, row, column).ok()
+
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle> {
+        // Use the dxf-MERGED style so the fingerprint hashes what is painted.
+        UserModel::get_extended_cell_style(&self.0, sheet, row, column)
+            .ok()
+            .map(|ext| style_to_core(ext.style))
     }
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType> {
-        UserModel::get_cell_type(&self.0, sheet, row, column).ok()
+
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind> {
+        UserModel::get_cell_type(&self.0, sheet, row, column)
+            .ok()
+            .map(cell_type_to_kind)
     }
+
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
         UserModel::get_formatted_cell_value(&self.0, sheet, row, column).ok()
     }
-    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<ExtendedStyle> {
-        UserModel::get_extended_cell_style(&self.0, sheet, row, column).ok()
+
+    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellDecoration> {
+        let ext = UserModel::get_extended_cell_style(&self.0, sheet, row, column).ok()?;
+        // Map IronCalc's icon/data_bar/rating to the core decoration. Returns
+        // None when no decoration applies.
+        cell_decoration_from_extended(&ext)
+    }
+
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                // Loop via get_cell_style so we get the merged (dxf-applied) style.
+                out.push(self.get_cell_style(sheet, r, c));
+            }
+        }
+    }
+
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_cell_type(sheet, r, c));
+            }
+        }
     }
 }

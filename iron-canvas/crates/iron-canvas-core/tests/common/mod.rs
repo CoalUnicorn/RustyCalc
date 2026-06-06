@@ -18,10 +18,9 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 
-use ironcalc_base::types::{CellType, Style};
-
 use iron_canvas_core::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_core::{CellKind, CellStyle};
 
 pub struct TestModel {
     sheet: Cell<u32>,
@@ -256,11 +255,11 @@ impl CanvasModel for TestModel {
     fn get_show_col_headers(&self, _: u32) -> Option<bool> {
         Some(self.show_col_headers.get())
     }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<Style> {
-        Some(Style::default())
+    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<CellStyle> {
+        Some(CellStyle::default())
     }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellType> {
-        Some(CellType::Text)
+    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellKind> {
+        Some(CellKind::Text)
     }
     fn get_formatted_cell_value(&self, _: u32, row: i32, col: i32) -> Option<String> {
         if let Some(v) = self.cell_values.borrow().get(&(row, col)) {

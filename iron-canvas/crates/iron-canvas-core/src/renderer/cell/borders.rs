@@ -14,7 +14,7 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
-use ironcalc_base::types::{Border, BorderItem, BorderStyle};
+use crate::style::{Border, BorderItem, BorderStyle};
 
 use super::paint::CellPaint;
 use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
@@ -152,7 +152,7 @@ impl<P: Painter> RendererCore<P> {
         if !self.frame_cache.show_grid.get() {
             return;
         }
-        if p.style.fill.color.is_some() {
+        if p.style.fill_color.is_some() {
             return;
         }
         let grid = BorderPaint::grid_line(theme);

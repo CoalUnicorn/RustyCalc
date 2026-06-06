@@ -11,10 +11,9 @@
 
 use std::cell::Cell;
 
-use ironcalc_base::types::{CellType, Style};
-
 use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
+use crate::style::{CellKind, CellStyle};
 use crate::types::coord::RCRange;
 
 /// Per-pane buffers that survive across frames. Holds the most recent
@@ -28,9 +27,9 @@ use crate::types::coord::RCRange;
 /// FrameCache scratch buffers used pre-Stage-3).
 #[derive(Default)]
 pub struct PaneBuffers {
-    pub styles: Cell<Vec<Option<Style>>>,
+    pub styles: Cell<Vec<Option<CellStyle>>>,
     pub values: Cell<Vec<Option<String>>>,
-    pub cell_types: Cell<Vec<Option<CellType>>>,
+    pub cell_types: Cell<Vec<Option<CellKind>>>,
     /// The address-space range the buffers above were fetched for. `None`
     /// when this pane has never been painted, or was last seen empty
     /// (e.g. unfrozen-axis pane on a sheet without freezes).

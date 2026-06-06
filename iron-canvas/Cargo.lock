@@ -227,7 +227,6 @@ dependencies = [
  "bitflags",
  "iron-canvas-core",
  "iron-canvas-recorder",
- "ironcalc_base",
  "serde",
 ]
 

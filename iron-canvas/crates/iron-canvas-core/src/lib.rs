@@ -15,6 +15,7 @@ pub mod painter;
 mod render_overlays;
 pub mod renderer;
 pub mod signal;
+mod style;
 pub mod theme;
 pub mod types;
 
@@ -33,6 +34,10 @@ pub use geometry::{
     utils::col_name,
 };
 pub use model_adapter::{CanvasModel, CanvasView};
+pub use style::{
+    Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
+    FontStyle, HAlign, IconSpec, RatingSpec, VAlign,
+};
 pub use theme::{CanvasTheme, ThemeVariables};
 pub use types::coord::{AutofillTarget, FormulaRef, FormulaRefKind, RCRange, SheetArea};
 pub use types::ui::{HitTest, RectCorner, RefZone, ResizeTarget, Side};

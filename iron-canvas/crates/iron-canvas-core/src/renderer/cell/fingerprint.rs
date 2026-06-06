@@ -14,7 +14,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use ironcalc_base::types::{BorderItem, CellType, Style};
+use crate::style::{BorderItem, CellKind, CellStyle};
 
 use crate::types::coord::RCRange;
 
@@ -24,9 +24,9 @@ use crate::types::coord::RCRange;
 /// Range is folded in so two panes with structurally-identical data at
 /// different addresses don't collide.
 pub fn compute_pane_fingerprint(
-    styles: &[Option<Style>],
+    styles: &[Option<CellStyle>],
     values: &[Option<String>],
-    cell_types: &[Option<CellType>],
+    cell_types: &[Option<CellKind>],
     range: RCRange,
 ) -> u64 {
     let mut h = DefaultHasher::new();
@@ -69,22 +69,23 @@ pub fn compute_pane_fingerprint(
 /// pixels. The field selection is load-bearing: a paint-read field the
 /// digest misses ⇒ stale pixels on skip; a paint-irrelevant field the
 /// digest includes ⇒ unnecessary repaint when only that field changed.
-pub struct StyleDigest<'a>(pub &'a Style);
+pub struct StyleDigest<'a>(pub &'a CellStyle);
 
 impl<'a> Hash for StyleDigest<'a> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let s = self.0;
 
-        s.fill.color.hash(state);
+        s.fill_color.hash(state);
 
         s.font.strike.hash(state);
-        s.font.u.hash(state);
-        s.font.b.hash(state);
-        s.font.i.hash(state);
-        s.font.sz.hash(state);
+        s.font.underline.hash(state);
+        s.font.bold.hash(state);
+        s.font.italic.hash(state);
+        // f64 is not Hash — hash the bit pattern instead. Font size is always
+        // a finite positive number here, so to_bits() produces a stable value.
+        s.font.size.to_bits().hash(state);
         s.font.color.hash(state);
         s.font.name.hash(state);
-        s.font.family.hash(state);
 
         match &s.alignment {
             None => state.write_u8(0),

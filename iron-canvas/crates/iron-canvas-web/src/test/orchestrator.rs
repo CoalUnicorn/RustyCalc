@@ -35,11 +35,11 @@ impl CanvasModel for StubModel {
     fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
         Some(true)
     }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<ironcalc_base::types::Style> {
-        Some(ironcalc_base::types::Style::default())
+    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<iron_canvas_core::CellStyle> {
+        Some(iron_canvas_core::CellStyle::default())
     }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<ironcalc_base::types::CellType> {
-        Some(ironcalc_base::types::CellType::Number)
+    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<iron_canvas_core::CellKind> {
+        Some(iron_canvas_core::CellKind::Number)
     }
     fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Option<String> {
         Some(String::new())

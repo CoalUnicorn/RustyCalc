@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
-use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignment};
+use crate::style::{CellKind, CellStyle, HAlign, VAlign};
 
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
@@ -64,7 +64,7 @@ pub struct TextPaint {
     /// backends that can't measure glyphs accurately (SVG) can use
     /// `text-anchor="start"` / `"end"` anchored on cell boundaries instead
     /// of the `CHAR_WIDTH_FACTOR`-approximated `center_x`.
-    pub h_align: HorizontalAlignment,
+    pub h_align: HAlign,
     /// True when at least one line overflows horizontally or there are
     /// multiple lines (which can overflow vertically). Resolved here so
     /// `paint_text` can skip `push_clip`/`pop_clip` when the cell can't
@@ -111,9 +111,9 @@ impl TextPaint {
         renderer: &RendererCore<P>,
         rect: PixelRect,
         theme: &CanvasTheme,
-        style: &Style,
+        style: &CellStyle,
         text: String,
-        cell_type: CellType,
+        cell_type: CellKind,
         lines: &mut Vec<TextLine>,
     ) -> Option<TextPaint> {
         if text.is_empty() {
@@ -134,11 +134,11 @@ impl TextPaint {
 
         // Font interning: skips `FontStyle::build` on cache hit. Same lookup
         // is shared across cells with identical (size, weight, slant, family).
-        let size_px = f64::from(style.font.sz);
+        let size_px = style.font.size;
         let font_css = renderer.font_intern.get_or_build(
             size_px,
-            style.font.b,
-            style.font.i,
+            style.font.bold,
+            style.font.italic,
             &style.font.name,
             "Calibri",
         );
@@ -171,23 +171,19 @@ impl TextPaint {
         for (i, line) in lines.iter_mut().enumerate() {
             let i_f = i as f64;
             let tw = line.width;
-            // foreign #[non_exhaustive]: HorizontalAlignment is upstream (ironcalc).
             // Left / General / Justify / Distributed / Fill default to left-anchored.
             line.center_x = match h_align {
-                HorizontalAlignment::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
-                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => {
-                    f64::from(center.x)
-                }
+                HAlign::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
+                HAlign::Center | HAlign::CenterContinuous => f64::from(center.x),
                 _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
             };
-            // foreign #[non_exhaustive]: VerticalAlignment is upstream (ironcalc).
             // Top / Justify / Distributed default to top-anchored.
             line.center_y = match v_align {
-                VerticalAlignment::Bottom => {
+                VAlign::Bottom => {
                     f64::from(bottom) - size_px / 2.0 - TEXT_V_INSET_PX
                         + (i_f - line_count + 1.0) * line_height
                 }
-                VerticalAlignment::Center => {
+                VAlign::Center => {
                     f64::from(center.y) + (i_f + (1.0 - line_count) / 2.0) * line_height
                 }
                 _ => {
@@ -218,24 +214,21 @@ struct CellTextStyle {
     text_color: TextColor,
     underline: bool,
     strike: bool,
-    h_align: HorizontalAlignment,
-    v_align: VerticalAlignment,
+    h_align: HAlign,
+    v_align: VAlign,
     wrap_text: bool,
 }
 
 impl CellTextStyle {
     fn resolve(
-        cell_type: CellType,
+        cell_type: CellKind,
         theme: &CanvasTheme,
-        style: &Style,
+        style: &CellStyle,
         intern: &ColorIntern,
     ) -> Self {
-        // IronCalc collapses every error variant (#VALUE!, #DIV/0!, #REF!, #NAME?,
-        // #NUM!, #N/A, #NULL!, #SPILL!, #CIRC!, plus IronCalc-only #ERROR!/#N/IMPL!)
-        // into the single CellType::ErrorValue discriminator. All render in
-        // the theme's error color; per-error-kind styling would need a new
-        // model accessor.
-        let text_color = if matches!(cell_type, CellType::ErrorValue) {
+        // Error cells render in the theme's error color regardless of per-cell
+        // font color. CellKind::Error covers all IronCalc error variants.
+        let text_color = if matches!(cell_type, CellKind::Error) {
             TextColor::Static(theme.error_text_color.clone())
         } else {
             match style.font.color.as_deref() {
@@ -245,34 +238,24 @@ impl CellTextStyle {
         };
 
         let alignment = style.alignment.as_ref();
-        let h_align = match alignment.map(|a| &a.horizontal) {
-            Some(HorizontalAlignment::Right) => HorizontalAlignment::Right,
-            Some(HorizontalAlignment::Center) | Some(HorizontalAlignment::CenterContinuous) => {
-                HorizontalAlignment::Center
-            }
-            Some(HorizontalAlignment::Left) | Some(HorizontalAlignment::Fill) => {
-                HorizontalAlignment::Left
-            }
-            // Canvas 2D has no justify/distributed - fall back to left.
-            Some(HorizontalAlignment::Justify) | Some(HorizontalAlignment::Distributed) => {
-                HorizontalAlignment::Left
-            }
+        let h_align = match alignment.map(|a| a.horizontal) {
+            Some(HAlign::Right) => HAlign::Right,
+            Some(HAlign::Center) | Some(HAlign::CenterContinuous) => HAlign::Center,
+            Some(HAlign::Left) | Some(HAlign::Fill) => HAlign::Left,
+            // Canvas 2D has no justify/distributed — fall back to left.
+            Some(HAlign::Justify) | Some(HAlign::Distributed) => HAlign::Left,
             // General or unset: numbers right, everything else left.
-            // foreign #[non_exhaustive]: CellType is upstream (ironcalc) —
-            // Text / LogicalValue / ErrorValue / Array / CompoundData default to left.
-            None | Some(HorizontalAlignment::General) => match cell_type {
-                CellType::Number => HorizontalAlignment::Right,
-                _ => HorizontalAlignment::Left,
+            None | Some(HAlign::General) => match cell_type {
+                CellKind::Number => HAlign::Right,
+                _ => HAlign::Left,
             },
         };
-        let v_align = alignment
-            .map(|a| a.vertical.clone())
-            .unwrap_or(VerticalAlignment::Bottom);
+        let v_align = alignment.map(|a| a.vertical).unwrap_or(VAlign::Bottom);
         let wrap_text = alignment.is_some_and(|a| a.wrap_text);
 
         Self {
             text_color,
-            underline: style.font.u,
+            underline: style.font.underline,
             strike: style.font.strike,
             h_align,
             v_align,
@@ -413,12 +396,8 @@ impl<P: Painter> RendererCore<P> {
         }
         for line in lines {
             let (x, align) = match t.h_align {
-                HorizontalAlignment::Right => {
-                    (f64::from(t.clip.right()) - CELL_PADDING, TextAlign::End)
-                }
-                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => {
-                    (line.center_x, TextAlign::Center)
-                }
+                HAlign::Right => (f64::from(t.clip.right()) - CELL_PADDING, TextAlign::End),
+                HAlign::Center | HAlign::CenterContinuous => (line.center_x, TextAlign::Center),
                 _ => {
                     // Left / General / Justify / Distributed / Fill — start-anchored
                     // on the cell's left edge. No width approximation needed; the

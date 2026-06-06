@@ -15,7 +15,6 @@ crate-type = ["rlib"]
 surface-introspection = []
 
 [dependencies]
-ironcalc_base = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 bitflags = {workspace = true}
 

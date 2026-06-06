@@ -4,9 +4,9 @@ use leptos_use::use_resize_observer;
 use std::rc::Rc;
 
 use crate::app_state::AppState;
-use crate::components::workbook::editing::cell_editor::CellEditor;
 use crate::components::panels::conditional_formatting::ConditionalFormattingDialog;
 use crate::components::panels::named_ranges::NamedRangesDialog;
+use crate::components::workbook::editing::cell_editor::CellEditor;
 use crate::events::{SpreadsheetEvent, StructureEvent};
 use crate::input::mouse::{
     CanvasHandle, handle_contextmenu, handle_dblclick, handle_mousedown, handle_mousemove,

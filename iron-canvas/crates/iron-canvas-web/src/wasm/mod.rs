@@ -12,15 +12,18 @@
 
 use std::cell::Cell;
 
-use ironcalc_base::types::{CellType, Style};
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
-use crate::CanvasModel;
-use crate::CanvasView;
-use crate::types::coord::RCRange;
+use ironcalc_base::types as ic;
+
 use crate::wasm::diag::console_warn;
+use iron_canvas_core::types::coord::RCRange;
+use iron_canvas_core::{
+    Alignment, Border, BorderItem, BorderStyle, CellKind, CellStyle, FontStyle, HAlign, VAlign,
+};
+use iron_canvas_core::{CanvasModel, CanvasView};
 
 #[wasm_bindgen]
 extern "C" {
@@ -184,10 +187,10 @@ impl CanvasModel for JsBackedModel {
         self.handle.get_show_grid_lines(sheet).ok()
     }
 
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style> {
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle> {
         let jsv = self.handle.get_cell_style(sheet, row, column).ok()?;
-        match serde_wasm_bindgen::from_value::<Style>(jsv) {
-            Ok(s) => Some(s),
+        match serde_wasm_bindgen::from_value::<ic::Style>(jsv) {
+            Ok(s) => Some(ic_style_to_core(s)),
             Err(e) => {
                 self.note_serde_err("getCellStyle", &e);
                 None
@@ -195,11 +198,11 @@ impl CanvasModel for JsBackedModel {
         }
     }
 
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType> {
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind> {
         self.handle
             .get_cell_type(sheet, row, column)
             .ok()
-            .and_then(cell_type_from_discriminant)
+            .and_then(cell_kind_from_discriminant)
     }
 
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
@@ -240,22 +243,95 @@ impl JsSelectedView {
 // Discriminants pinned to `ironcalc_base::types::CellType`. `as i32` keeps
 // the mapping bound to the upstream enum — a renumbering breaks the build
 // instead of silently mismapping.
-const CELL_TYPE_NUMBER: i32 = CellType::Number as i32;
-const CELL_TYPE_TEXT: i32 = CellType::Text as i32;
-const CELL_TYPE_LOGICAL: i32 = CellType::LogicalValue as i32;
-const CELL_TYPE_ERROR: i32 = CellType::ErrorValue as i32;
-const CELL_TYPE_ARRAY: i32 = CellType::Array as i32;
-const CELL_TYPE_COMPOUND: i32 = CellType::CompoundData as i32;
+const CELL_TYPE_NUMBER: i32 = ic::CellType::Number as i32;
+const CELL_TYPE_TEXT: i32 = ic::CellType::Text as i32;
+const CELL_TYPE_LOGICAL: i32 = ic::CellType::LogicalValue as i32;
+const CELL_TYPE_ERROR: i32 = ic::CellType::ErrorValue as i32;
+const CELL_TYPE_ARRAY: i32 = ic::CellType::Array as i32;
+const CELL_TYPE_COMPOUND: i32 = ic::CellType::CompoundData as i32;
 
-fn cell_type_from_discriminant(v: i32) -> Option<CellType> {
+fn cell_kind_from_discriminant(v: i32) -> Option<CellKind> {
     match v {
-        CELL_TYPE_NUMBER => Some(CellType::Number),
-        CELL_TYPE_TEXT => Some(CellType::Text),
-        CELL_TYPE_LOGICAL => Some(CellType::LogicalValue),
-        CELL_TYPE_ERROR => Some(CellType::ErrorValue),
-        CELL_TYPE_ARRAY => Some(CellType::Array),
-        CELL_TYPE_COMPOUND => Some(CellType::CompoundData),
+        CELL_TYPE_NUMBER => Some(CellKind::Number),
+        CELL_TYPE_TEXT | CELL_TYPE_ARRAY | CELL_TYPE_COMPOUND => Some(CellKind::Text),
+        CELL_TYPE_LOGICAL => Some(CellKind::Logical),
+        CELL_TYPE_ERROR => Some(CellKind::Error),
         _ => None,
+    }
+}
+
+/// Convert an IronCalc `Style` (deserialized from JS) to the core `CellStyle`.
+/// Mirrors `iron-canvas-ironcalc::convert::style_to_core` — kept local to
+/// avoid pulling `iron-canvas-ironcalc` into the web crate's dep tree.
+fn ic_style_to_core(s: ic::Style) -> CellStyle {
+    CellStyle {
+        fill_color: s.fill.color,
+        font: FontStyle {
+            name: s.font.name,
+            size: f64::from(s.font.sz),
+            color: s.font.color,
+            bold: s.font.b,
+            italic: s.font.i,
+            underline: s.font.u,
+            strike: s.font.strike,
+        },
+        alignment: s.alignment.map(|a| Alignment {
+            horizontal: ic_halign_to_core(a.horizontal),
+            vertical: ic_valign_to_core(a.vertical),
+            wrap_text: a.wrap_text,
+        }),
+        border: Border {
+            left: s.border.left.map(ic_border_item_to_core),
+            right: s.border.right.map(ic_border_item_to_core),
+            top: s.border.top.map(ic_border_item_to_core),
+            bottom: s.border.bottom.map(ic_border_item_to_core),
+            diagonal_up: s.border.diagonal_up,
+            diagonal_down: s.border.diagonal_down,
+        },
+    }
+}
+
+fn ic_halign_to_core(h: ic::HorizontalAlignment) -> HAlign {
+    match h {
+        ic::HorizontalAlignment::Center => HAlign::Center,
+        ic::HorizontalAlignment::CenterContinuous => HAlign::CenterContinuous,
+        ic::HorizontalAlignment::Distributed => HAlign::Distributed,
+        ic::HorizontalAlignment::Fill => HAlign::Fill,
+        ic::HorizontalAlignment::General => HAlign::General,
+        ic::HorizontalAlignment::Justify => HAlign::Justify,
+        ic::HorizontalAlignment::Left => HAlign::Left,
+        ic::HorizontalAlignment::Right => HAlign::Right,
+    }
+}
+
+fn ic_valign_to_core(v: ic::VerticalAlignment) -> VAlign {
+    match v {
+        ic::VerticalAlignment::Bottom => VAlign::Bottom,
+        ic::VerticalAlignment::Center => VAlign::Center,
+        ic::VerticalAlignment::Distributed => VAlign::Distributed,
+        ic::VerticalAlignment::Justify => VAlign::Justify,
+        ic::VerticalAlignment::Top => VAlign::Top,
+    }
+}
+
+fn ic_border_item_to_core(b: ic::BorderItem) -> BorderItem {
+    BorderItem {
+        style: ic_border_style_to_core(b.style),
+        color: b.color,
+    }
+}
+
+fn ic_border_style_to_core(s: ic::BorderStyle) -> BorderStyle {
+    match s {
+        ic::BorderStyle::Thin => BorderStyle::Thin,
+        ic::BorderStyle::Medium => BorderStyle::Medium,
+        ic::BorderStyle::Thick => BorderStyle::Thick,
+        ic::BorderStyle::Double => BorderStyle::Double,
+        ic::BorderStyle::Dotted => BorderStyle::Dotted,
+        ic::BorderStyle::SlantDashDot => BorderStyle::SlantDashDot,
+        ic::BorderStyle::MediumDashed => BorderStyle::MediumDashed,
+        ic::BorderStyle::MediumDashDotDot => BorderStyle::MediumDashDotDot,
+        ic::BorderStyle::MediumDashDot => BorderStyle::MediumDashDot,
     }
 }
 
@@ -264,24 +340,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cell_type_from_discriminant_maps_known() {
-        assert_eq!(cell_type_from_discriminant(1), Some(CellType::Number));
-        assert_eq!(cell_type_from_discriminant(2), Some(CellType::Text));
-        assert_eq!(cell_type_from_discriminant(4), Some(CellType::LogicalValue));
-        assert_eq!(cell_type_from_discriminant(16), Some(CellType::ErrorValue));
-        assert_eq!(cell_type_from_discriminant(64), Some(CellType::Array));
-        assert_eq!(
-            cell_type_from_discriminant(128),
-            Some(CellType::CompoundData)
-        );
+    fn cell_kind_from_discriminant_maps_known() {
+        assert_eq!(cell_kind_from_discriminant(1), Some(CellKind::Number));
+        assert_eq!(cell_kind_from_discriminant(2), Some(CellKind::Text));
+        assert_eq!(cell_kind_from_discriminant(4), Some(CellKind::Logical));
+        assert_eq!(cell_kind_from_discriminant(16), Some(CellKind::Error));
+        // Array and CompoundData collapse to Text
+        assert_eq!(cell_kind_from_discriminant(64), Some(CellKind::Text));
+        assert_eq!(cell_kind_from_discriminant(128), Some(CellKind::Text));
     }
 
     #[test]
-    fn cell_type_from_discriminant_rejects_unknown() {
-        assert_eq!(cell_type_from_discriminant(0), None);
-        assert_eq!(cell_type_from_discriminant(3), None);
-        assert_eq!(cell_type_from_discriminant(-1), None);
-        assert_eq!(cell_type_from_discriminant(256), None);
+    fn cell_kind_from_discriminant_rejects_unknown() {
+        assert_eq!(cell_kind_from_discriminant(0), None);
+        assert_eq!(cell_kind_from_discriminant(3), None);
+        assert_eq!(cell_kind_from_discriminant(-1), None);
+        assert_eq!(cell_kind_from_discriminant(256), None);
     }
 
     #[test]

@@ -23,7 +23,7 @@ use crate::renderer::cache::font::escape_font_family;
 use crate::renderer::cell::text::{CELL_PADDING, CHAR_WIDTH_FACTOR, LINE_HEIGHT_FACTOR};
 use crate::renderer::{TextLine, layout_into};
 
-use ironcalc_base::types::Style;
+use crate::style::CellStyle;
 
 /// Slack added to the measured content extent so glyphs don't touch the
 /// cell border. Derived from the cell text pass's `CELL_PADDING` on both
@@ -60,10 +60,10 @@ fn capped_range(first: i32, last: i32) -> (i32, i32) {
 /// — the same function the text pass calls through `FontIntern` — so the
 /// string produced here is identical to the one the renderer paints with.
 /// The fallback `"Calibri"` matches the literal passed at `text.rs:138`.
-pub fn font_css(style: &Style) -> String {
-    let size_px = f64::from(style.font.sz);
-    let weight = if style.font.b { "bold " } else { "" };
-    let slant = if style.font.i { "italic " } else { "" };
+pub fn font_css(style: &CellStyle) -> String {
+    let size_px = style.font.size;
+    let weight = if style.font.bold { "bold " } else { "" };
+    let slant = if style.font.italic { "italic " } else { "" };
     let family = escape_font_family(&style.font.name, "Calibri");
     format!("{weight}{slant}{size_px}px {family}")
 }
@@ -147,7 +147,7 @@ pub fn fit_height(
             continue;
         }
         let style = model.get_cell_style(sheet, r, col);
-        let size_px = style.as_ref().map_or(12.0, |s| f64::from(s.font.sz));
+        let size_px = style.as_ref().map_or(12.0, |s| s.font.size);
         let css = style
             .as_ref()
             .map_or_else(|| "12px sans-serif".to_owned(), font_css);

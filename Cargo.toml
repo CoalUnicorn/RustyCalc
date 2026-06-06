@@ -13,6 +13,7 @@ ironcalc_base = { version = "0.7.1", path = "IronCalc/base"  }
 ironcalc = { version = "0.7.1", path = "IronCalc/xlsx" }
 iron-canvas-web = { path = "iron-canvas/crates/iron-canvas-web" }
 iron-canvas-core = { path = "iron-canvas/crates/iron-canvas-core" }
+iron-canvas-ironcalc = { path = "iron-canvas/crates/iron-canvas-ironcalc" }
 
 
 web-sys = { version = "0.3", features = [

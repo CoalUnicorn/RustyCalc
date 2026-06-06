@@ -2,10 +2,7 @@
 
 use std::rc::Rc;
 
-use ironcalc_base::UserModel;
-use ironcalc_base::cf_types::ExtendedStyle;
-use ironcalc_base::types::{CellType, Style};
-
+use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,23 +41,34 @@ pub trait CanvasModel {
         Some(true)
     }
 
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle>;
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind>;
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
 
     /// Base cell style plus any conditional-formatting overlay: the CF dxf
-    /// fill/font applied on top of the base `Style`, plus optional data-bar,
-    /// icon-set, and rating decorations (`ExtendedStyle::{data_bar, icon,
-    /// rating}`). `None` carries the same fetch-failed meaning as
-    /// `get_cell_style`. The default returns `None` so engines without CF
-    /// support (and test stubs) compile unchanged; IronCalc-backed impls
-    /// override it to call `UserModel::get_extended_cell_style`.
+    /// fill/font applied on top of the base style, plus optional data-bar,
+    /// icon-set, and rating decorations. `None` when no CF decoration applies
+    /// or when the model doesn't support CF. The default returns `None` so
+    /// engines without CF support (and test stubs) compile unchanged.
     fn get_extended_cell_style(
         &self,
         _sheet: u32,
         _row: i32,
         _column: i32,
-    ) -> Option<ExtendedStyle> {
+    ) -> Option<CellDecoration> {
+        None
+    }
+
+    /// Override text for a row header slot. `None` means use the default
+    /// numeric label (1, 2, 3...). Implementations that don't support custom
+    /// header text omit the override.
+    fn get_row_header_text(&self, _sheet: u32, _row: i32) -> Option<String> {
+        None
+    }
+
+    /// Override text for a column header slot. `None` means use the default
+    /// alphabetic label (A, B, C...).
+    fn get_column_header_text(&self, _sheet: u32, _col: i32) -> Option<String> {
         None
     }
 
@@ -68,10 +76,10 @@ pub trait CanvasModel {
     /// row-major: `out[(row - r1) * cols + (col - c1)]`. `None` entries
     /// carry the same fetch-failed meaning as `get_cell_style`.
     ///
-    /// Default impl loops the per-cell accessor so `UserModel` keeps its
-    /// existing behaviour; the wasm bridge overrides this with a single
-    /// JS round-trip per range.
-    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<Style>>) {
+    /// Default impl loops the per-cell accessor so impls that don't override
+    /// keep their existing behaviour; the wasm bridge overrides this with a
+    /// single JS round-trip per range.
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
@@ -100,7 +108,7 @@ pub trait CanvasModel {
     /// Bulk-fetch cell types for `range` on `sheet`. Same layout and
     /// semantics as the other `*_in` accessors. Feeds the text pass's
     /// alignment/colour resolution in `CellTextStyle::resolve`.
-    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellType>>) {
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
@@ -112,7 +120,7 @@ pub trait CanvasModel {
 
 /// Emits forwarding bodies that defer to `(**self).<method>(args)` for each
 /// listed signature. Used once below to populate the `Rc<T>` blanket impl
-/// without 12 hand-written shims that move together.
+/// without hand-written shims that move together.
 macro_rules! forward_canvas_model {
     ($(fn $name:ident(&self $(, $arg:ident: $argty:ty)*) $(-> $ret:ty)?;)*) => {
         $(
@@ -124,7 +132,7 @@ macro_rules! forward_canvas_model {
 }
 
 /// Forwarding impl so an `Rc<M>` wrapping any `CanvasModel` is itself a
-/// `CanvasModel`. The orchestrator now stores `Rc<dyn CanvasModel>` and
+/// `CanvasModel`. The orchestrator stores `Rc<dyn CanvasModel>` and
 /// calls through `Rc::as_ref`, so this is deref-convenience for callers
 /// that hold a concrete `Rc<M>` — the `?Sized` arm also covers
 /// `Rc<dyn CanvasModel>` directly.
@@ -139,67 +147,14 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
         fn get_show_row_headers(&self, sheet: u32) -> Option<bool>;
         fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
-        fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style>;
-        fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType>;
+        fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle>;
+        fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind>;
         fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
-        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<ExtendedStyle>;
-        fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<Style>>);
+        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellDecoration>;
+        fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;
+        fn get_column_header_text(&self, sheet: u32, col: i32) -> Option<String>;
+        fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>);
         fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>);
-        fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellType>>);
-    }
-}
-
-/// IronCalc-specific CanvasModel impl — **deprecated location**.
-///
-/// This impl now also lives in `iron-canvas-ironcalc` (separate bridge crate).
-/// When iron-canvas-core is next refactored (EXT-5), remove this copy and
-/// drop the `ironcalc_base` dependency from this crate so iron-canvas-core
-/// becomes truly engine-agnostic.
-impl<'a> CanvasModel for UserModel<'a> {
-    fn get_selected_sheet(&self) -> u32 {
-        UserModel::get_selected_sheet(self)
-    }
-    fn get_selected_view(&self) -> Option<CanvasView> {
-        let v = UserModel::get_selected_view(self);
-        Some(CanvasView {
-            sheet: v.sheet,
-            row: v.row,
-            column: v.column,
-            selection: RCRange {
-                r1: v.range[0],
-                c1: v.range[1],
-                r2: v.range[2],
-                c2: v.range[3],
-            },
-            top_row: v.top_row,
-            left_column: v.left_column,
-        })
-    }
-    fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32> {
-        UserModel::get_frozen_rows_count(self, sheet).ok()
-    }
-    fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32> {
-        UserModel::get_frozen_columns_count(self, sheet).ok()
-    }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
-        UserModel::get_row_height(self, sheet, row).ok()
-    }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
-        UserModel::get_column_width(self, sheet, column).ok()
-    }
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
-        UserModel::get_show_grid_lines(self, sheet).ok()
-    }
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<Style> {
-        UserModel::get_cell_style(self, sheet, row, column).ok()
-    }
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellType> {
-        UserModel::get_cell_type(self, sheet, row, column).ok()
-    }
-    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
-        UserModel::get_formatted_cell_value(self, sheet, row, column).ok()
-    }
-    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<ExtendedStyle> {
-        UserModel::get_extended_cell_style(self, sheet, row, column).ok()
+        fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>);
     }
 }

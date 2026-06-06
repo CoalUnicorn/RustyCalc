@@ -1,18 +1,17 @@
 //! Paint-ready conditional formatting decoration types.
 //!
-//! These mirror IronCalc's `CfIcon`, `CfDataBar`, `CfRating` but are
-//! pre-processed for the paint loop: hex strings parsed to `[u8; 3]`,
+//! These are pre-processed for the paint loop: hex strings parsed to `[u8; 3]`
 //! and fraction values clamped to renderable ranges.
 
-use ironcalc_base::cf_types::{CfDataBar, CfIcon, CfRating, ExtendedStyle, Icon};
+use crate::style::CellDecoration;
 use serde::{Deserialize, Serialize};
 
-/// Paint-ready icon decoration for a cell. The `icon` field uses IronCalc's
-/// `Icon` enum — the painter maps its variant to a glyph/emoji/SVG path at
-/// draw time so we don't carry font-dependent codepoints in paint data.
+/// Paint-ready icon decoration for a cell. The `icon` field is a String
+/// placeholder (IconSpec) — `paint_cf_decoration` is a no-op on all
+/// backends today, so no painted pixel depends on a richer icon enum yet.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CfIconPaint {
-    pub icon: Icon,
+    pub icon: String, // IconSpec placeholder — paint_cf_decoration is a no-op
     pub color_rgb: [u8; 3],
 }
 
@@ -35,47 +34,22 @@ pub enum CfDecorationPaint {
 }
 
 impl CfDecorationPaint {
-    /// Resolve the CF decoration from an IronCalc `ExtendedStyle`. Returns
-    /// `None` when no CF decoration applies (plain cell).
-    pub fn from_extended_style(extended: &ExtendedStyle) -> Option<Self> {
-        if let Some(icon) = &extended.icon {
-            return Some(CfDecorationPaint::Icon(CfIconPaint::from_cf_icon(icon)));
-        }
-        if let Some(bar) = &extended.data_bar {
-            return Some(CfDecorationPaint::DataBar(CfDataBarPaint::from_cf_data_bar(
-                bar,
-            )));
-        }
-        if let Some(rating) = &extended.rating {
-            return Some(CfDecorationPaint::from_cf_rating(rating));
-        }
-        None
-    }
-}
-
-impl CfIconPaint {
-    pub fn from_cf_icon(cf: &CfIcon) -> Self {
-        Self {
-            icon: cf.icon.clone(),
-            color_rgb: parse_hex_color(&cf.color).unwrap_or([0, 0, 0]),
-        }
-    }
-}
-
-impl CfDataBarPaint {
-    pub fn from_cf_data_bar(cf: &CfDataBar) -> Self {
-        Self {
-            fill_color_rgb: parse_hex_color(&cf.positive_color).unwrap_or([0, 0, 0]),
-            fill_fraction: cf.value.clamp(0.0, 1.0),
-        }
-    }
-}
-
-impl CfDecorationPaint {
-    pub fn from_cf_rating(cf: &CfRating) -> Self {
-        CfDecorationPaint::Rating {
-            stars: cf.max as u8,
-            filled: cf.count as u8,
+    /// Convert a core `CellDecoration` into a renderer-ready `CfDecorationPaint`.
+    pub fn from_cell_decoration(deco: &CellDecoration) -> Self {
+        match deco {
+            CellDecoration::Icon(name) => CfDecorationPaint::Icon(CfIconPaint {
+                icon: name.clone(),
+                color_rgb: [0, 0, 0], // unused: paint_cf_decoration is a no-op
+            }),
+            CellDecoration::DataBar(spec) => CfDecorationPaint::DataBar(CfDataBarPaint {
+                fill_color_rgb: parse_hex_color(&spec.color).unwrap_or([0, 0, 0]),
+                fill_fraction: spec.fraction.clamp(0.0, 1.0),
+            }),
+            // RatingSpec fields are u32; CfDecorationPaint::Rating is u8.
+            CellDecoration::Rating(spec) => CfDecorationPaint::Rating {
+                stars: spec.stars as u8,
+                filled: spec.filled as u8,
+            },
         }
     }
 }
@@ -96,6 +70,7 @@ fn parse_hex_color(hex: &str) -> Option<[u8; 3]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::style::{DataBarSpec, RatingSpec};
 
     #[test]
     fn parses_hex_with_and_without_hash() {
@@ -112,34 +87,46 @@ mod tests {
 
     #[test]
     fn data_bar_clamps_fraction_and_uses_positive_color() {
-        let cf = CfDataBar {
-            positive_color: "#3366CC".to_string(),
-            negative_color: "#CC0000".to_string(),
-            is_gradient: false,
-            value: 1.5, // out of range — must clamp to 1.0
-            axis_position: 0.0,
-            show_value: true,
+        let spec = DataBarSpec {
+            color: "#3366CC".to_string(),
+            fraction: 1.5, // out of range — must clamp to 1.0
         };
-        let paint = CfDataBarPaint::from_cf_data_bar(&cf);
-        assert_eq!(paint.fill_color_rgb, [0x33, 0x66, 0xCC]);
-        assert_eq!(paint.fill_fraction, 1.0);
+        let paint = CfDecorationPaint::from_cell_decoration(&CellDecoration::DataBar(spec));
+        match paint {
+            CfDecorationPaint::DataBar(p) => {
+                assert_eq!(p.fill_color_rgb, [0x33, 0x66, 0xCC]);
+                assert_eq!(p.fill_fraction, 1.0);
+            }
+            other => panic!("expected DataBar, got {other:?}"),
+        }
     }
 
     #[test]
-    fn rating_maps_max_to_stars_and_count_to_filled() {
-        let cf = CfRating {
-            icon: Icon::Circle,
-            count: 3,
-            max: 5,
-            color: "#000000".to_string(),
-            show_value: false,
+    fn rating_maps_stars_and_filled() {
+        let spec = RatingSpec {
+            stars: 5,
+            filled: 3,
         };
-        match CfDecorationPaint::from_cf_rating(&cf) {
+        let paint = CfDecorationPaint::from_cell_decoration(&CellDecoration::Rating(spec));
+        match paint {
             CfDecorationPaint::Rating { stars, filled } => {
                 assert_eq!(stars, 5);
                 assert_eq!(filled, 3);
             }
             other => panic!("expected Rating, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn icon_carries_name_and_zeroed_color() {
+        let paint =
+            CfDecorationPaint::from_cell_decoration(&CellDecoration::Icon("ArrowUp".to_string()));
+        match paint {
+            CfDecorationPaint::Icon(p) => {
+                assert_eq!(p.icon, "ArrowUp");
+                assert_eq!(p.color_rgb, [0, 0, 0]);
+            }
+            other => panic!("expected Icon, got {other:?}"),
         }
     }
 }

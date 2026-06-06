@@ -29,9 +29,8 @@ pub use iron_canvas_core::{
     AUTOFILL_HANDLE_PX, AutofillTarget, CanvasModel, CanvasSize, CanvasTheme, CanvasView,
     DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, FormulaRef, FormulaRefKind,
     HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, HEADER_SEPARATOR_WIDTH, HitTest, LAST_COLUMN, LAST_ROW,
-    Line,
-    PixelRect, Point, RCRange, RectCorner, RefZone, RenderOverlays, ResizeTarget, SheetArea, Side,
-    Span, ThemeVariables, chrome, decoration, geometry, model_adapter, painter, renderer, signal,
-    theme, types,
+    Line, PixelRect, Point, RCRange, RectCorner, RefZone, RenderOverlays, ResizeTarget, SheetArea,
+    Side, Span, ThemeVariables, chrome, decoration, geometry, model_adapter, painter, renderer,
+    signal, theme, types,
 };
 pub use orchestrator::IronCanvas;
