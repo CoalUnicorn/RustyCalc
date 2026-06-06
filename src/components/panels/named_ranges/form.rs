@@ -18,12 +18,14 @@
 
 use leptos::prelude::*;
 
-use crate::coord::{CellAddress, TextRef};
+use crate::coord::{CellAddress, TextRef, selection_a1_qualified_absolute};
 use crate::events::{ContentEvent, SpreadsheetEvent};
-use crate::input::formula::{FormulaAnalysis, analyze_formula};
+use crate::input::formula::{FormulaAnalysis, analyze_formula, sync_edit};
 use crate::model::frontend_model::DefinedNameManager;
 use crate::model::{EvaluationMode, SheetQuery, try_mutate};
-use crate::state::{EditingDefinedName, ModelStore, StatusMessage, WorkbookState};
+use crate::state::{
+    EditingDefinedName, ModelStore, RangeCaptureTarget, StatusMessage, WorkbookState,
+};
 
 use super::formula_input::FormulaInput;
 
@@ -53,6 +55,47 @@ pub fn NamedRangeForm() -> impl IntoView {
     };
 
     let on_cancel = move |_| state.editing_named_range.set(None);
+
+    // ── Grid range-picking for "Refers to" ──────────────────────────────────
+    // The ⊞ button arms `range_capture`; while armed, a grid selection replaces
+    // the ENTIRE formula with `=<Sheet!$A$1>` and re-runs analysis (a named
+    // range conventionally refers to exactly one range, so whole-formula
+    // replacement is the right semantics — mid-formula insertion is a future
+    // follow-up). Manual typing in the textarea still disarms via FormulaInput.
+    let nr_armed = move || state.range_capture.get() == Some(RangeCaptureTarget::NamedRange);
+
+    let toggle_nr_arm = move |_: web_sys::MouseEvent| {
+        if state.range_capture.get_untracked() == Some(RangeCaptureTarget::NamedRange) {
+            state.range_capture.set(None);
+        } else {
+            state
+                .range_capture
+                .set(Some(RangeCaptureTarget::NamedRange));
+        }
+    };
+
+    Effect::new(move |_| {
+        // Subscribe to the navigation bus — selection changes are the trigger.
+        let _ = state.events.navigation.get();
+        if state.range_capture.get_untracked() != Some(RangeCaptureTarget::NamedRange) {
+            return;
+        }
+        // Only meaningful while a row is being edited.
+        if state.editing_named_range.get_untracked().is_none() {
+            return;
+        }
+        let formula = model.with_value(|m| format!("={}", selection_a1_qualified_absolute(m)));
+        let cursor = formula.encode_utf16().count();
+        let (sheet_names, defined_names) =
+            model.with_value(|m| (m.get_sheet_names(), m.get_defined_names()));
+        sync_edit(
+            state.editing_named_range,
+            formula,
+            cursor,
+            &sheet_names,
+            &defined_names,
+        );
+    });
 
     let on_name_change = move |ev: web_sys::Event| {
         let v = event_target_value(&ev);
@@ -231,8 +274,21 @@ pub fn NamedRangeForm() -> impl IntoView {
                 </div>
                 <div class="nrm-form-row">
                     <label>"Refers to"</label>
-                    <FormulaInput />
+                    <div class="nrm-refersto">
+                        <FormulaInput />
+                        <button
+                            class=move || if nr_armed() { "rp-arm rp-arm-active" } else { "rp-arm" }
+                            on:click=toggle_nr_arm
+                            type="button"
+                            title="Pick range from grid"
+                        >
+                            "⊞"
+                        </button>
+                    </div>
                 </div>
+                <Show when=nr_armed>
+                    <p class="rp-hint">"Selecting on grid… click ⊞ or press Esc when done."</p>
+                </Show>
                 <div class="nrm-btns">
                     <button
                         class="nrm-btn-danger"

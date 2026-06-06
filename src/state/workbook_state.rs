@@ -59,6 +59,22 @@ pub struct WorkbookState {
     /// In-progress rule edit for the CF dialog. `None` while no rule is being
     /// edited (initial state, or after Save / Cancel).
     pub(crate) editing_cf_rule: Split<Option<CfRuleEditState>>,
+    /// Which drawer range field (if any) is currently "armed" to capture the
+    /// grid selection. `None` means no field is listening. While `Some`, an
+    /// `Effect` in the `RangePickerInput` mirrors every selection change into
+    /// that field's text. See [`RangeCaptureTarget`].
+    pub(crate) range_capture: Split<Option<RangeCaptureTarget>>,
+}
+
+/// Identifies the drawer field that is armed to receive grid selections.
+/// Stored in [`WorkbookState::range_capture`]; only one field is ever armed,
+/// so picking a range for one target implicitly cancels any other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RangeCaptureTarget {
+    /// The Conditional Formatting "Apply to" range (sheet-relative `B2:D8`).
+    CfRange,
+    /// The Named Range "Refers to" formula (qualified absolute `Sheet1!$B$2:$D$8`).
+    NamedRange,
 }
 
 /// In-progress edit state for the conditional formatting rule editor.
@@ -98,6 +114,7 @@ impl WorkbookState {
             show_headers: Split::new(true),
             cf_dialog_open: Split::new(false),
             editing_cf_rule: Split::new(None),
+            range_capture: Split::new(None),
         }
     }
 

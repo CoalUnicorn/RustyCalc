@@ -20,4 +20,4 @@ pub use editing_cell::{EditFocus, EditMode, EditingCell};
 pub use named_range::EditingDefinedName;
 pub use split::Split;
 pub use status::StatusMessage;
-pub use workbook_state::{CfRuleEditState, ModelStore, WorkbookState};
+pub use workbook_state::{CfRuleEditState, ModelStore, RangeCaptureTarget, WorkbookState};

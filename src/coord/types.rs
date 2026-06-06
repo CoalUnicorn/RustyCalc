@@ -724,3 +724,61 @@ impl CellAddress {
         }
     }
 }
+
+// ==============================================================================
+// Selection → A1 text (for grid range-picking in drawers)
+// ==============================================================================
+//
+// The CF and Named-Range drawers fill a range field from the live grid
+// selection. Each consumer wants a different A1 shape, so we expose two
+// formatters built on the same `RefNode` stringifier the formula bar uses —
+// guaranteeing the output is exactly what the engine round-trips.
+
+/// The current selection as a **sheet-relative** A1 string (`B2:D8`) — no
+/// sheet prefix, no `$`. This is the shape a CF sqref wants.
+///
+/// We reuse point-mode's relative encoding: `from_cell_area` stores each
+/// coordinate as an offset from the active cell, and `to_localized` against
+/// that same anchor reconstructs the real address. Because the selection is
+/// always on the active sheet, the node carries `sheet_name: None`, so no
+/// `Sheet!` prefix is emitted.
+pub fn selection_a1_relative(model: &UserModel<'static>) -> String {
+    let selection = SheetRange::from_view(model);
+    let active = CellAddress::from_view(model);
+    RefNode::from_cell_area(selection, active, "").to_localized(&active.as_stringify_ctx())
+}
+
+/// The current selection as a **sheet-qualified absolute** A1 string
+/// (`Sheet1!$B$2:$D$8`) — the shape a Named Range "refers to".
+///
+/// Absolute refs store the 1-based coordinate verbatim (no offset), so the
+/// stringify anchor is irrelevant; `Some(sheet_name)` forces the `Sheet!`
+/// qualifier.
+pub fn selection_a1_qualified_absolute(model: &UserModel<'static>) -> String {
+    let selection = SheetRange::from_view(model);
+    let sheet_name = model
+        .get_worksheets_properties()
+        .get(selection.sheet as usize)
+        .map(|s| s.name.clone())
+        .unwrap_or_default();
+    let abs = Absolute {
+        row: true,
+        column: true,
+    };
+    let area = selection.area;
+    let node = if area.is_single_cell() {
+        RefNode::cell(selection.sheet, Some(sheet_name), area.r1, area.c1, abs)
+    } else {
+        RefNode::range(
+            selection.sheet,
+            Some(sheet_name),
+            area.r1,
+            area.c1,
+            abs,
+            area.r2,
+            area.c2,
+            abs,
+        )
+    };
+    node.to_localized(&CellAddress::from_view(model).as_stringify_ctx())
+}

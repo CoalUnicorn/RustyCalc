@@ -1,24 +1,25 @@
-/* Conditional Formatting modal — split-pane (rule list + rule editor).
+/* Conditional Formatting drawer — stacked panes (rule list above editor).
  *
  * Prefix: cfm-
  *
- * Layout: .cfm is the modal body; .cfm-list (35%, scrollable list of rules)
- * sits next to .cfm-editor (form for the currently selected rule).
+ * Layout: .cfm is the drawer body; .cfm-list (scrollable list of rules) sits
+ * above .cfm-editor (form for the currently selected rule). Stacked vertically
+ * to fit the narrower right-side drawer.
  */
 
 .cfm {
     display: flex;
+    flex-direction: column;
     gap: 0;
-    height: 400px;
-    max-height: 60vh;
 }
 
 .cfm-list {
-    width: 35%;
-    border-right: 1px solid var(--border, #ddd);
+    width: 100%;
+    border-bottom: 1px solid var(--border, #ddd);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    max-height: 220px;
 }
 .cfm-list-header {
     display: flex;

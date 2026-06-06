@@ -20,6 +20,7 @@
  *   cp-     color picker               ui/color-picker.css
  *   ctx-    context menu               ui/context-menu.css
  *   md-     modal dialog primitive     ui/modal.css
+ *   drawer- right-side drawer primitive ui/drawer.css
  *
  *   panels/ — feature surfaces
  *   pp-     perf panel                 panels/perf-panel.css
@@ -49,6 +50,7 @@
 @import "ui/color-picker.css";
 @import "ui/context-menu.css";
 @import "ui/modal.css";
+@import "ui/drawer.css";
 
 /* panels — feature surfaces */
 @import "panels/perf-panel.css";

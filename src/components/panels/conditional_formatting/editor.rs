@@ -13,10 +13,11 @@ use ironcalc_base::types::{Dxf, DxfFont, Fill};
 use leptos::prelude::*;
 
 use crate::components::ui::color_picker::{ColorPicker, ColorType};
+use crate::components::ui::range_picker::{RangeFormat, RangePickerInput};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::model::style_types::HexColor;
 use crate::model::{EvaluationMode, try_mutate};
-use crate::state::{ModelStore, WorkbookState};
+use crate::state::{ModelStore, RangeCaptureTarget, WorkbookState};
 
 const RULE_TYPES: &[(&str, &str)] = &[
     ("cell_is", "Cell Value"),
@@ -405,16 +406,20 @@ pub fn CfRuleEditor() -> impl IntoView {
                         </select>
                     </div>
 
-                    {/* Range input */}
+                    {/* Range input — ⊞ arms grid capture (sheet-relative B2:D8). */}
                     <div class="cfm-field">
                         <label class="cfm-label">"Range"</label>
-                        <input
-                            class="cfm-input"
-                            type="text"
-                            prop:value=range_text
-                            on:input=move |ev| range_text.set(event_target_value(&ev))
+                        <RangePickerInput
+                            value=range_text
+                            target=RangeCaptureTarget::CfRange
+                            format=RangeFormat::SheetRelative
                             placeholder="e.g. A1:C10"
                         />
+                        <Show when=move || {
+                            state.range_capture.get() == Some(RangeCaptureTarget::CfRange)
+                        }>
+                            <p class="rp-hint">"Selecting on grid… click ⊞ or press Esc when done."</p>
+                        </Show>
                     </div>
 
                     {/* Operator selector (CellIs only) */}

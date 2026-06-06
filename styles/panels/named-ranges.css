@@ -143,6 +143,18 @@
   border-color: var(--danger, #cf222e);
 }
 
+/* "Refers to" row: formula textarea + ⊞ grid-pick button side by side. The
+ * arm button (.rp-arm) is shared with RangePickerInput (see ui/drawer.css). */
+.nrm-refersto {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.nrm-refersto .nrm-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .nrm-btns {
   display: flex;
   justify-content: flex-end;
