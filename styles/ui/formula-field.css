@@ -1,0 +1,67 @@
+/* Formula Field — prefix: ff-
+ *
+ * Reusable formula <textarea> with a colored ref-token overlay, used by drawer
+ * forms (Conditional Formatting "Value / Formula", Named Ranges "Refers to").
+ *
+ * DOM shape: <div class="fe-host ff-host"><div class="fe-overlay">…</div><textarea class="ff-input fe-text"/></div>
+ *
+ * Alignment contract (see formula-overlay.css): the overlay is absolute
+ * `inset:0`; the textarea stays in normal flow (so it sets the host's height)
+ * but is lifted above the overlay via `position: relative; z-index: 1`. Their
+ * paddings MUST match or every colored token drifts.
+ */
+
+.ff-host {
+    /* `.fe-host` already provides position:relative + isolation. Add the
+     * drawer input chrome here so the overlay shows through a framed box. */
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+}
+
+.ff-host.error {
+    border-color: var(--error-color, #d1242f);
+}
+
+.ff-host:focus-within {
+    border-color: var(--accent);
+}
+
+.ff-input {
+    /* In normal flow so the textarea's intrinsic height (rows) sizes the host;
+     * lifted above the overlay so the native caret renders on top. */
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    border: none;
+    outline: none;
+    /* Must match `.ff-host .fe-overlay` padding below. */
+    padding: 4px 8px;
+    background: transparent;
+    /* Transparent text lets the colored overlay show through; the caret stays
+     * visible via caret-color. */
+    color: transparent;
+    caret-color: var(--text-strong);
+    resize: none;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+/* Selection on the transparent textarea: flip text visible + translucent band
+ * so the overlay tokens still show through (mirrors .fb-input::selection). */
+.ff-input::selection {
+    color: var(--text-strong);
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.ff-input::placeholder {
+    color: var(--text-dim);
+}
+
+/* Overlay padding mirrors the textarea padding so characters align. */
+.ff-host .fe-overlay {
+    padding: 4px 8px;
+}

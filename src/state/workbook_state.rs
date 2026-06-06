@@ -68,6 +68,10 @@ pub struct WorkbookState {
 pub enum RangeCaptureTarget {
     /// The Conditional Formatting "Apply to" range (sheet-relative `B2:D8`).
     CfRange,
+    /// The Conditional Formatting "Value / Formula" field — a grid selection
+    /// splices a reference into the formula at the caret (point-mode insert),
+    /// rather than replacing the whole field like [`Self::CfRange`].
+    CfFormula,
     /// The Named Range "Refers to" formula (qualified absolute `Sheet1!$B$2:$D$8`).
     NamedRange,
 }

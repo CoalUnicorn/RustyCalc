@@ -18,6 +18,7 @@
  *
  *   ui/ — reusable primitives
  *   cp-     color picker               ui/color-picker.css
+ *   ff-     formula field (drawer)     ui/formula-field.css
  *   ctx-    context menu               ui/context-menu.css
  *   md-     modal dialog primitive     ui/modal.css
  *   drawer- right-side drawer primitive ui/drawer.css
@@ -48,6 +49,7 @@
 
 /* ui — reusable primitives */
 @import "ui/color-picker.css";
+@import "ui/formula-field.css";
 @import "ui/context-menu.css";
 @import "ui/modal.css";
 @import "ui/drawer.css";

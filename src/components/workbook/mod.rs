@@ -10,8 +10,7 @@ use crate::components::{
         toolbar::Toolbar,
     },
     panels::{
-        conditional_formatting::ConditionalFormattingDialog,
-        header_context_menu::HeaderContextMenuOverlay, named_ranges::NamedRangesDialog,
+        header_context_menu::HeaderContextMenuOverlay,
     },
 };
 use crate::coord::{CellAddress, SheetRange};
@@ -216,8 +215,6 @@ pub fn Workbook() -> impl IntoView {
             <HeaderContextMenuOverlay />
             <SheetTabBar />
             <StatusBar />
-            <NamedRangesDialog />
-            <ConditionalFormattingDialog />
         </div>
     }
 }

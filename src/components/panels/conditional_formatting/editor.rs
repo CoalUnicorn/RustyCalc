@@ -13,10 +13,14 @@ use ironcalc_base::types::{Dxf, DxfFont, Fill};
 use leptos::prelude::*;
 
 use crate::components::ui::color_picker::{ColorPicker, ColorType};
+use crate::components::ui::formula_field::FormulaField;
 use crate::components::ui::range_picker::{RangeFormat, RangePickerInput};
+use crate::coord::{CellAddress, TextRef, selection_a1_relative};
 use crate::events::{FormatEvent, SpreadsheetEvent};
+use crate::input::formula::{analyze_formula, splice_ref};
+use crate::model::frontend_model::DefinedNameManager;
 use crate::model::style_types::HexColor;
-use crate::model::{EvaluationMode, try_mutate};
+use crate::model::{EvaluationMode, SheetQuery, try_mutate};
 use crate::state::{ModelStore, RangeCaptureTarget, WorkbookState};
 
 const RULE_TYPES: &[(&str, &str)] = &[
@@ -111,6 +115,87 @@ pub fn CfRuleEditor() -> impl IntoView {
     });
     let on_font_change = Callback::new(move |c: Option<HexColor>| {
         font_color.set(c.map(|h| h.as_str().to_owned()).unwrap_or_default());
+    });
+
+    // ── Value / Formula field: colored ref overlay + validation ──────────────
+    // The field reuses the shared, storage-agnostic `FormulaField`, so we run
+    // the analyzer here against the workbook's sheet + name tables, anchored at
+    // the current view cell. `events.content` keeps those tables fresh; a
+    // keystroke re-derives refs + validity cheaply. A plain literal like "100"
+    // analyzes as NotFormula → no refs, no error class.
+    let analyzer_ctx = Memo::new(move |_| {
+        let _ = state.events.content.get();
+        model.with_value(|m| {
+            (
+                m.get_sheet_names(),
+                m.get_defined_names(),
+                CellAddress::from_view(m),
+            )
+        })
+    });
+    let formula_analysis = Memo::new(move |_| {
+        let text = formula_text.get();
+        analyzer_ctx
+            .with(|(sheet_names, defined_names, ctx)| analyze_formula(&text, *ctx, sheet_names, defined_names))
+    });
+    let formula_refs = Signal::derive(move || formula_analysis.with(|a| a.refs().to_vec()));
+    let formula_is_error = Signal::derive(move || formula_analysis.with(|a| a.has_any_error()));
+
+    // Grid point-picking state. `formula_cursor` tracks the caret so a grid
+    // selection can splice a reference at the right spot; `cf_formula_prev_span`
+    // remembers the just-inserted ref so a continued drag grows/replaces it
+    // instead of appending a new ref on every selection tick.
+    let formula_cursor = RwSignal::new(0usize);
+    let cf_formula_prev_span = RwSignal::new(None::<TextRef>);
+
+    let on_formula_input = Callback::new(move |(v, cursor): (String, usize)| {
+        formula_text.set(v);
+        formula_cursor.set(cursor);
+        // Manual typing disarms grid-capture (so a stray selection can't clobber
+        // hand-edited text) and invalidates the remembered insert span.
+        if state.range_capture.get_untracked() == Some(RangeCaptureTarget::CfFormula) {
+            state.range_capture.set(None);
+        }
+        cf_formula_prev_span.set(None);
+    });
+
+    let cf_formula_armed =
+        move || state.range_capture.get() == Some(RangeCaptureTarget::CfFormula);
+    let toggle_formula_arm = move |_: web_sys::MouseEvent| {
+        if state.range_capture.get_untracked() == Some(RangeCaptureTarget::CfFormula) {
+            state.range_capture.set(None);
+        } else {
+            cf_formula_prev_span.set(None);
+            state.range_capture.set(Some(RangeCaptureTarget::CfFormula));
+        }
+    };
+
+    // While armed, mirror each grid selection into the formula as a spliced ref.
+    Effect::new(move |_| {
+        // Subscribe to the navigation bus — selection changes are the trigger.
+        let _ = state.events.navigation.get();
+        if state.range_capture.get_untracked() != Some(RangeCaptureTarget::CfFormula) {
+            return;
+        }
+        if state.editing_cf_rule.get_untracked().is_none() {
+            return;
+        }
+        // The grid selection as a relative A1 reference (e.g. "A1" / "A1:C10").
+        let ref_str = model.with_value(selection_a1_relative);
+
+        // First selection of a drag inserts at the caret; every later tick
+        // replaces the ref we inserted last time, so a drag grows ONE reference
+        // (`A1` → `A1:B3`) instead of appending a new one each tick. `get_untracked`
+        // throughout: this Effect is driven by the navigation bus, and must not
+        // re-subscribe to the formula text (it writes it) or re-fire itself.
+        let target_span = cf_formula_prev_span
+            .get_untracked()
+            .unwrap_or_else(|| TextRef::at(formula_cursor.get_untracked()));
+        let (new_text, new_span) = splice_ref(&formula_text.get_untracked(), target_span, &ref_str);
+
+        formula_cursor.set(new_span.end);
+        cf_formula_prev_span.set(Some(new_span));
+        formula_text.set(new_text);
     });
 
     // When editing_cf_rule changes, populate the local signals.
@@ -450,13 +535,30 @@ pub fn CfRuleEditor() -> impl IntoView {
                     <Show when=move || formula_visible.get()>
                         <div class="cfm-field">
                             <label class="cfm-label">"Value / Formula"</label>
-                            <input
-                                class="cfm-input"
-                                type="text"
-                                prop:value=formula_text
-                                on:input=move |ev| formula_text.set(event_target_value(&ev))
-                                placeholder="e.g. 100 or =$B$1"
-                            />
+                            <div class="rp-wrap">
+                                <FormulaField
+                                    value=formula_text
+                                    refs=formula_refs
+                                    is_error=formula_is_error
+                                    on_input=on_formula_input
+                                    placeholder="e.g. 100 or =$B$1"
+                                />
+                                <button
+                                    class=move || if cf_formula_armed() {
+                                        "rp-arm rp-arm-active"
+                                    } else {
+                                        "rp-arm"
+                                    }
+                                    type="button"
+                                    title="Insert range reference from grid"
+                                    on:click=toggle_formula_arm
+                                >
+                                    "⊞"
+                                </button>
+                            </div>
+                            <Show when=move || cf_formula_armed()>
+                                <p class="rp-hint">"Selecting on grid… click ⊞ or press Esc when done."</p>
+                            </Show>
                         </div>
                     </Show>
 
