@@ -14,7 +14,7 @@ use iron_canvas_recorder::{DrawOp, replay};
 use wasm_bindgen::prelude::*;
 use web_sys::CanvasRenderingContext2d;
 
-use crate::canvas_painter::CanvasPainter;
+use crate::CanvasPainter;
 
 #[wasm_bindgen(js_name = icrReplayGridOps)]
 pub fn icr_replay_grid_ops(ctx: CanvasRenderingContext2d, ops_json: &str) -> Result<(), JsValue> {

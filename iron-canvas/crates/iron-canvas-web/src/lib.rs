@@ -9,21 +9,19 @@
 //! Everything `iron-canvas-core` re-exports flows through here unchanged,
 //! so downstream call sites can name a single facade crate.
 
-mod canvas_painter;
 mod orchestrator;
 #[cfg(feature = "dev-tools")]
 mod playback;
 #[cfg(feature = "dev-tools")]
 mod replay;
-pub mod theme_from_element;
 pub mod wasm;
-pub mod web_surface;
 #[cfg(target_arch = "wasm32")]
 mod wire;
 
 #[cfg(test)]
 mod test;
 
+pub use iron_canvas_canvas2d::{CanvasPainter, WebSurface, theme_from_element};
 pub use iron_canvas_core::geometry::utils::col_name;
 pub use iron_canvas_core::{
     AUTOFILL_HANDLE_PX, AutofillTarget, CanvasModel, CanvasSize, CanvasTheme, CanvasView,

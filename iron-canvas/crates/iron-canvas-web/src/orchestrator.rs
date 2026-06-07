@@ -11,7 +11,7 @@ use web_sys::HtmlCanvasElement;
 use crate::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::wasm::JsBackedModel;
-use crate::web_surface::WebSurface;
+use iron_canvas_canvas2d::WebSurface;
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::CanvasSize;

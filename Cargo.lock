@@ -1065,6 +1065,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71dd52191aae121e8611f1e8dc3e324dd0dd1dee1e6dd91d10ee07a3cfb4d9d8"
 
 [[package]]
+name = "iron-canvas-canvas2d"
+version = "0.1.0-beta.2"
+dependencies = [
+ "iron-canvas-core",
+ "js-sys",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "iron-canvas-core"
 version = "0.1.0-beta.2"
 dependencies = [
@@ -1101,6 +1111,7 @@ name = "iron-canvas-web"
 version = "0.1.0-beta.2"
 dependencies = [
  "bitflags",
+ "iron-canvas-canvas2d",
  "iron-canvas-core",
  "iron-canvas-export",
  "iron-canvas-recorder",

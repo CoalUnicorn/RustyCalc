@@ -8,9 +8,9 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, js_sys};
 
-use crate::wasm::diag::console_warn;
 use iron_canvas_core::geometry::{
     pixel_rect::PixelRect,
     prim::{Line, Point, Span},
@@ -18,6 +18,14 @@ use iron_canvas_core::geometry::{
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
+
+// Private `console.warn` binding — zero IronCalc, kept local so this crate
+// does not depend on `iron-canvas-web`'s `wasm` diagnostics module.
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = warn)]
+    fn console_warn(s: &str);
+}
 
 /// One-shot guard for the `measure_text` fallback warning. Process-wide
 /// (not per-painter) so grid + overlay layers share a single signal —
@@ -117,7 +125,7 @@ pub struct CanvasPainter {
 }
 
 impl CanvasPainter {
-    pub(crate) fn new(ctx: CanvasRenderingContext2d) -> Self {
+    pub fn new(ctx: CanvasRenderingContext2d) -> Self {
         Self {
             ctx,
             setter_cache: SetterCache::default(),

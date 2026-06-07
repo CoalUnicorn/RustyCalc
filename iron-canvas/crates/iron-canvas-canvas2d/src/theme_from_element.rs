@@ -2,7 +2,7 @@
 //! in `iron-canvas-core`, but the `web_sys::Element` + `getComputedStyle`
 //! plumbing stays here.
 
-use crate::theme::{CanvasTheme, ThemeVariables};
+use iron_canvas_core::theme::{CanvasTheme, ThemeVariables};
 
 /// Build a theme from CSS custom properties on `el`'s computed style.
 /// Reads the upstream `--palette-*` keys via `getComputedStyle` and
