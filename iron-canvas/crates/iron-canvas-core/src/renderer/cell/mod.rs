@@ -20,7 +20,7 @@ pub mod text;
 
 pub use paint::{CellPaint, PaneCells};
 
-use crate::style::CellKind;
+use crate::style::{CellDecoration, CellKind, CellStyle};
 
 use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
@@ -65,7 +65,6 @@ impl<P: Painter> RendererCore<P> {
         };
 
         let theme = &frame.theme;
-        let cols_w = range.c2 - range.c1 + 1;
 
         // Bulk-fetch styles + formatted values for the whole rectangular
         // range. UserModel default impls loop the per-cell accessors (no perf
@@ -111,10 +110,44 @@ impl<P: Painter> RendererCore<P> {
             }
         }
 
+        self.paint_pane_cells(
+            PaneCells::new(&pane, frame),
+            pane,
+            range,
+            theme,
+            pane_styles,
+            pane_values,
+            pane_cell_types,
+            pane_decorations,
+        );
+    }
+
+    /// Shared paint tail for both `render_pane` and `render_pane_strip`:
+    /// the five deferred passes (bg -> CF decoration -> grid borders ->
+    /// explicit borders -> text) over `cells`, reading from the four bulk
+    /// buffers and parking them back onto `pane`'s cache. The two callers
+    /// differ only in which `PaneCells` they hand in — the full quadrant
+    /// (`new`) or the revealed strip (`for_strip`); the pass machinery is
+    /// identical, so it lives here once. Pass order is load-bearing — see
+    /// the doc on `render_pane` for why bg precedes borders precedes text.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_pane_cells(
+        &self,
+        cells: PaneCells,
+        pane: PaneRegion,
+        range: RCRange,
+        theme: &CanvasTheme,
+        mut pane_styles: Vec<Option<CellStyle>>,
+        mut pane_values: Vec<Option<String>>,
+        mut pane_cell_types: Vec<Option<CellKind>>,
+        mut pane_decorations: Vec<Option<CellDecoration>>,
+    ) {
+        let pane_buf = self.pane_cache.pane(pane);
+        let cols_w = range.c2 - range.c1 + 1;
+
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
-
-        for slot in PaneCells::new(&pane, frame) {
+        for slot in cells {
             let idx = ((slot.row - range.r1) * cols_w + (slot.col - range.c1)) as usize;
             let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
                 continue;
@@ -245,7 +278,6 @@ impl<P: Painter> RendererCore<P> {
         repaint_strip: PixelRect,
     ) {
         let theme = &frame.theme;
-        let cols_w = range.c2 - range.c1 + 1;
         let pane_buf = self.pane_cache.pane(pane);
 
         let Some(mut strip) = compute_strip(prev_range, range, axis) else {
@@ -289,10 +321,15 @@ impl<P: Painter> RendererCore<P> {
                 strip.r2 = new_r2;
             }
         }
-        let mut strip_styles = Vec::new();
-        let mut strip_values = Vec::new();
-        let mut strip_cell_types = Vec::new();
-        let mut strip_decorations = Vec::new();
+        // Strip-fetch scratch reused from `FrameCache` (take/set rhythm),
+        // not `Vec::new()` per frame — `splice_strip_into` drains these into
+        // the pane buffers, leaving warm capacity to park back below. The
+        // `*_in` defaults `clear()` before filling, so prior contents are
+        // harmless.
+        let mut strip_styles = self.frame_cache.strip_styles.take();
+        let mut strip_values = self.frame_cache.strip_values.take();
+        let mut strip_cell_types = self.frame_cache.strip_cell_types.take();
+        let mut strip_decorations = self.frame_cache.strip_decorations.take();
         model.get_cell_styles_in(frame.sheet, strip, &mut strip_styles);
         model.get_formatted_cell_values_in(frame.sheet, strip, &mut strip_values);
         model.get_cell_types_in(frame.sheet, strip, &mut strip_cell_types);
@@ -306,80 +343,31 @@ impl<P: Painter> RendererCore<P> {
         splice_strip_into(&mut pane_values, &mut strip_values, range, strip);
         splice_strip_into(&mut pane_cell_types, &mut strip_cell_types, range, strip);
         splice_strip_into(&mut pane_decorations, &mut strip_decorations, range, strip);
+        self.frame_cache.strip_styles.set(strip_styles);
+        self.frame_cache.strip_values.set(strip_values);
+        self.frame_cache.strip_cell_types.set(strip_cell_types);
+        self.frame_cache.strip_decorations.set(strip_decorations);
 
         if let Some(strip_rect) = frame.range_rect(strip) {
             self.painter
                 .rect_fill(strip_rect, PaintColor::from_theme_str(&theme.cell_bg));
         }
 
-        let mut slots = self.frame_cache.text_slots.take();
-        slots.clear();
         // Walk strip cells only. `apply_blit_shift` rotated the kept-band
         // entries (still `Some(...)`) into their new pane indices, so a
         // full-pane walk would re-`take` and re-paint the kept band on top
         // of pixels the painter blit already placed — wasting the entire
         // win. `PaneCells::for_strip` narrows the slot slices up front.
-        for slot in PaneCells::for_strip(&pane, frame, strip) {
-            let idx = ((slot.row - range.r1) * cols_w + (slot.col - range.c1)) as usize;
-            let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
-                continue;
-            };
-            // `own_style` already holds the dxf-merged CellStyle. The decoration
-            // rides the same spliced bulk buffer — mirrors render_pane.
-            let cf_decoration = pane_decorations
-                .get_mut(idx)
-                .and_then(Option::take)
-                .map(|deco| CfDecorationPaint::from_cell_decoration(&deco));
-            let Some(mut p) =
-                CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
-            else {
-                continue;
-            };
-            p.cf_decoration = cf_decoration;
-            self.paint_bg(&p, theme);
-            slots.push(p);
-        }
-        pane_buf.styles.set(pane_styles);
-        pane_buf.decorations.set(pane_decorations);
-        for p in &slots {
-            if let Some(ref deco) = p.cf_decoration {
-                self.painter.paint_cf_decoration(p.rect, deco);
-            }
-        }
-        for p in &slots {
-            self.paint_borders_grid(p, theme);
-        }
-        for p in &slots {
-            self.paint_borders_explicit(p);
-        }
-
-        let mut text_lines = self.frame_cache.text_lines.take();
-        for p in &slots {
-            let idx = ((p.row - range.r1) * cols_w + (p.col - range.c1)) as usize;
-            let Some(text) = pane_values.get_mut(idx).and_then(Option::take) else {
-                continue;
-            };
-            let cell_type = pane_cell_types
-                .get_mut(idx)
-                .and_then(Option::take)
-                .unwrap_or(CellKind::Text);
-            if let Some(tp) = TextPaint::resolve_into(
-                self,
-                p.rect,
-                theme,
-                &p.style,
-                text,
-                cell_type,
-                &mut text_lines,
-            ) {
-                self.paint_text(&tp, &text_lines);
-            }
-        }
-        pane_buf.values.set(pane_values);
-        pane_buf.cell_types.set(pane_cell_types);
-        pane_buf.range.set(Some(range));
-        self.frame_cache.text_slots.set(slots);
-        self.frame_cache.text_lines.set(text_lines);
+        self.paint_pane_cells(
+            PaneCells::for_strip(&pane, frame, strip),
+            pane,
+            range,
+            theme,
+            pane_styles,
+            pane_values,
+            pane_cell_types,
+            pane_decorations,
+        );
 
         let mut fps = frame.pane_fingerprints.get();
         fps[pane_idx] = 0;

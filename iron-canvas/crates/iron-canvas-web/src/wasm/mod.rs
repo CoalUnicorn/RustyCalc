@@ -121,6 +121,17 @@ impl JsBackedModel {
         (self.js_throw_count.get(), self.serde_shape_errs.get())
     }
 
+    /// Funnel a bridge call's `Result` into the `Option` the `CanvasModel`
+    /// trait wants, counting any throw on the way through. Every JS-handle
+    /// method routes its result here so a thrown error is recorded by
+    /// `note_js_throw` (counter + warn-once) instead of being silently
+    /// dropped by a bare `.ok()`.
+    fn note_throw<T>(&self, ctx: &str, result: Result<T, JsValue>) -> Option<T> {
+        result
+            .inspect_err(|_| self.note_js_throw(ctx))
+            .ok()
+    }
+
     fn note_js_throw(&self, ctx: &str) {
         let prev = self.js_throw_count.get();
         self.js_throw_count.set(prev + 1);
@@ -145,20 +156,12 @@ impl JsBackedModel {
 
 impl CanvasModel for JsBackedModel {
     fn get_selected_sheet(&self) -> u32 {
-        self.handle.get_selected_sheet().unwrap_or_else(|_| {
-            self.note_js_throw("getSelectedSheet");
-            0
-        })
+        self.note_throw("getSelectedSheet", self.handle.get_selected_sheet())
+            .unwrap_or(0)
     }
 
     fn get_selected_view(&self) -> Option<CanvasView> {
-        let jsv = match self.handle.get_selected_view() {
-            Ok(v) => v,
-            Err(_) => {
-                self.note_js_throw("getSelectedView");
-                return None;
-            }
-        };
+        let jsv = self.note_throw("getSelectedView", self.handle.get_selected_view())?;
         match serde_wasm_bindgen::from_value::<JsSelectedView>(jsv) {
             Ok(j) => Some(j.into_canvas_view()),
             Err(e) => {
@@ -169,27 +172,30 @@ impl CanvasModel for JsBackedModel {
     }
 
     fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32> {
-        self.handle.get_frozen_rows_count(sheet).ok()
+        self.note_throw("getFrozenRowsCount", self.handle.get_frozen_rows_count(sheet))
     }
 
     fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32> {
-        self.handle.get_frozen_columns_count(sheet).ok()
+        self.note_throw(
+            "getFrozenColumnsCount",
+            self.handle.get_frozen_columns_count(sheet),
+        )
     }
 
     fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
-        self.handle.get_row_height(sheet, row).ok()
+        self.note_throw("getRowHeight", self.handle.get_row_height(sheet, row))
     }
 
     fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
-        self.handle.get_column_width(sheet, column).ok()
+        self.note_throw("getColumnWidth", self.handle.get_column_width(sheet, column))
     }
 
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
-        self.handle.get_show_grid_lines(sheet).ok()
+        self.note_throw("getShowGridLines", self.handle.get_show_grid_lines(sheet))
     }
 
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle> {
-        let jsv = self.handle.get_cell_style(sheet, row, column).ok()?;
+        let jsv = self.note_throw("getCellStyle", self.handle.get_cell_style(sheet, row, column))?;
         match serde_wasm_bindgen::from_value::<ic::Style>(jsv) {
             Ok(s) => Some(ic_style_to_core(s)),
             Err(e) => {
@@ -200,16 +206,15 @@ impl CanvasModel for JsBackedModel {
     }
 
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind> {
-        self.handle
-            .get_cell_type(sheet, row, column)
-            .ok()
+        self.note_throw("getCellType", self.handle.get_cell_type(sheet, row, column))
             .and_then(cell_kind_from_discriminant)
     }
 
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
-        self.handle
-            .get_formatted_cell_value(sheet, row, column)
-            .ok()
+        self.note_throw(
+            "getFormattedCellValue",
+            self.handle.get_formatted_cell_value(sheet, row, column),
+        )
     }
 
     // TODO(W5): collapse bulk accessors to single JS round-trips once the JS

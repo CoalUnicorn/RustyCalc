@@ -11,6 +11,7 @@ use std::cell::{Cell, RefCell};
 
 use super::super::cell::CellPaint;
 use super::super::cell::text::TextLine;
+use crate::style::{CellDecoration, CellKind, CellStyle};
 
 pub struct FrameCache {
     /// Scratch buffer parking each pane's resolved `CellPaint`s during the
@@ -33,4 +34,13 @@ pub struct FrameCache {
     /// `String` across every wrapped raw-line of every cell, so the wrap
     /// branch is alloc-free in steady state. Renderer-lifetime, not per-cell.
     pub wrap_buf: RefCell<String>,
+    /// Strip-fetch scratch for `render_pane_strip`: the freshly-revealed
+    /// subrange's bulk-fetch output, drained into the pane buffers by
+    /// `splice_strip_into` each blit frame. Parked here (not on `PaneBuffers`,
+    /// whose contents must survive frames) so the strip path reuses one warm
+    /// allocation per buffer instead of `Vec::new()`-ing four per scroll.
+    pub strip_styles: Cell<Vec<Option<CellStyle>>>,
+    pub strip_values: Cell<Vec<Option<String>>>,
+    pub strip_cell_types: Cell<Vec<Option<CellKind>>>,
+    pub strip_decorations: Cell<Vec<Option<CellDecoration>>>,
 }
