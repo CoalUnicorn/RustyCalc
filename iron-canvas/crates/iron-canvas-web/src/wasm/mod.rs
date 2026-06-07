@@ -21,7 +21,7 @@ use ironcalc_base::types as ic;
 use crate::wasm::diag::console_warn;
 use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{
-    Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, FontStyle,
+    Alignment, Border, BorderItem, BorderStyle, CellKind, CellStyle, FontStyle,
     HAlign, VAlign,
 };
 use iron_canvas_core::{CanvasModel, CanvasView};
@@ -212,22 +212,9 @@ impl CanvasModel for JsBackedModel {
             .ok()
     }
 
-    // TODO(W5): collapse to a single JS round-trip once the JS Model handle
-    // exposes a bulk decoration API; for now this mirrors the per-cell default,
-    // matching the still-deferred styles/values/types bulk overrides.
-    fn get_cell_decorations_in(
-        &self,
-        sheet: u32,
-        range: RCRange,
-        out: &mut Vec<Option<CellDecoration>>,
-    ) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_extended_cell_style(sheet, r, c));
-            }
-        }
-    }
+    // TODO(W5): collapse bulk accessors to single JS round-trips once the JS
+    // Model handle exposes bulk decoration/style/value APIs. Until then the
+    // trait defaults (per-cell loops) run — correct, just chatty.
 }
 
 #[derive(Deserialize)]

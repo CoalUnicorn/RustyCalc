@@ -77,8 +77,9 @@ pub trait CanvasModel {
     /// carry the same fetch-failed meaning as `get_cell_style`.
     ///
     /// Default impl loops the per-cell accessor so impls that don't override
-    /// keep their existing behaviour; the wasm bridge overrides this with a
-    /// single JS round-trip per range.
+    /// keep their existing behaviour.
+    /// TODO(W5): wasm bridge should override this with a single JS round-trip
+    /// per range (matching `get_cell_decorations_in`).
     fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
         out.clear();
         for r in range.r1..=range.r2 {
@@ -90,7 +91,8 @@ pub trait CanvasModel {
 
     /// Bulk-fetch formatted cell values for `range` on `sheet`. Same dense
     /// row-major layout and `None`-as-failure semantics as
-    /// `get_cell_styles_in`; same default-impl / wasm-override pattern.
+    /// `get_cell_styles_in`.
+    /// TODO(W5): wasm bridge should override with a single JS round-trip.
     fn get_formatted_cell_values_in(
         &self,
         sheet: u32,

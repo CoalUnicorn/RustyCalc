@@ -28,7 +28,7 @@ impl CanvasModel for DataGrid {
     }
     fn get_column_width(&self, _s: u32, column: i32) -> Option<f64> {
         if column < 1 {
-            return None;
+            return Some(96.0); // row-header gutter — standard column width
         }
         Some(self.column_width_px((column - 1) as usize))
     }
@@ -59,5 +59,11 @@ impl CanvasModel for DataGrid {
             return None;
         }
         self.column_header((col - 1) as usize).map(str::to_owned)
+    }
+    fn get_row_header_text(&self, _s: u32, _row: i32) -> Option<String> {
+        // DataGrid has no row-header customization — always use numeric labels.
+        // Override is explicit (instead of relying on the trait default) so the
+        // symmetry with `get_column_header_text` is visible at the impl site.
+        None
     }
 }
