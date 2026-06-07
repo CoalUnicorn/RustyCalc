@@ -1,7 +1,7 @@
 //! Cross-frame per-pane model data, plus the blit-aware shift that lets
 //! the cache survive a single-axis scroll.
 //!
-//! Each [`PaneBuffers`] holds the styles/values/cell_types last fetched
+//! Each [`PaneBuffers`] holds the styles/values/cell_types/decorations last fetched
 //! for its [`crate::chrome::PaneRegion`], together with the `RCRange` the
 //! fetch covered. `render_pane` skips the model refetch when the cached
 //! `range` still matches the live pane range. Under a blit fast-path the
@@ -13,7 +13,7 @@ use std::cell::Cell;
 
 use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
-use crate::style::{CellKind, CellStyle};
+use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 
 /// Per-pane buffers that survive across frames. Holds the most recent
@@ -30,6 +30,7 @@ pub struct PaneBuffers {
     pub styles: Cell<Vec<Option<CellStyle>>>,
     pub values: Cell<Vec<Option<String>>>,
     pub cell_types: Cell<Vec<Option<CellKind>>>,
+    pub decorations: Cell<Vec<Option<CellDecoration>>>,
     /// The address-space range the buffers above were fetched for. `None`
     /// when this pane has never been painted, or was last seen empty
     /// (e.g. unfrozen-axis pane on a sheet without freezes).
@@ -59,12 +60,15 @@ impl PaneBuffers {
         let mut styles = self.styles.take();
         let mut values = self.values.take();
         let mut cell_types = self.cell_types.take();
+        let mut decorations = self.decorations.take();
         apply_blit_shift(&mut styles, prev_range, new_range, axis);
         apply_blit_shift(&mut values, prev_range, new_range, axis);
         apply_blit_shift(&mut cell_types, prev_range, new_range, axis);
+        apply_blit_shift(&mut decorations, prev_range, new_range, axis);
         self.styles.set(styles);
         self.values.set(values);
         self.cell_types.set(cell_types);
+        self.decorations.set(decorations);
         true
     }
 }

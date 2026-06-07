@@ -107,4 +107,18 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
             }
         }
     }
+
+    fn get_cell_decorations_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Option<CellDecoration>>,
+    ) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_extended_cell_style(sheet, r, c));
+            }
+        }
+    }
 }

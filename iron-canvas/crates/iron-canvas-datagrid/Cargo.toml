@@ -1,0 +1,18 @@
+[package]
+name = "iron-canvas-datagrid"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+iron-canvas-core = { path = "../iron-canvas-core" }
+
+[dev-dependencies]
+iron-canvas-recorder = { path = "../iron-canvas-recorder" }
+# Smoke test inspects emitted DrawOps via grid_surface(), gated behind
+# surface-introspection on the core crate. Dev-only: prod dep stays feature-bare.
+iron-canvas-core = { path = "../iron-canvas-core", features = ["surface-introspection"] }

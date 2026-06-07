@@ -231,6 +231,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "iron-canvas-datagrid"
+version = "0.1.0-beta.2"
+dependencies = [
+ "iron-canvas-core",
+ "iron-canvas-recorder",
+]
+
+[[package]]
 name = "iron-canvas-export"
 version = "0.1.0-beta.2"
 dependencies = [

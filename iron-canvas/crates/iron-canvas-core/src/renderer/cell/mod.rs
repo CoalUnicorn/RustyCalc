@@ -77,6 +77,8 @@ impl<P: Painter> RendererCore<P> {
         model.get_formatted_cell_values_in(frame.sheet, range, &mut pane_values);
         let mut pane_cell_types = pane_buf.cell_types.take();
         model.get_cell_types_in(frame.sheet, range, &mut pane_cell_types);
+        let mut pane_decorations = pane_buf.decorations.take();
+        model.get_cell_decorations_in(frame.sheet, range, &mut pane_decorations);
 
         // Fingerprint paint-skip: same content as the previous frame
         // ⇒ canvas pixels are still correct, skip the 4-pass walk. Bulk
@@ -94,6 +96,10 @@ impl<P: Painter> RendererCore<P> {
                 pane_buf.styles.set(pane_styles);
                 pane_buf.values.set(pane_values);
                 pane_buf.cell_types.set(pane_cell_types);
+                // Set decorations back too: a later blit `try_shift` rotates
+                // this buffer against the cached `Some(range)`; an empty vec
+                // would misalign indices and yield wrong decorations.
+                pane_buf.decorations.set(pane_decorations);
                 pane_buf.range.set(Some(range));
                 return;
             }
@@ -114,10 +120,11 @@ impl<P: Painter> RendererCore<P> {
                 continue;
             };
             // `own_style` already holds the dxf-merged CellStyle (the bridge folds
-            // the CF overlay in get_cell_styles_in). Only the decoration is fetched
-            // per cell.
-            let cf_decoration = model
-                .get_extended_cell_style(frame.sheet, slot.row, slot.col)
+            // the CF overlay in get_cell_styles_in). The decoration rides the
+            // same bulk buffer, indexed alongside styles/values/types.
+            let cf_decoration = pane_decorations
+                .get_mut(idx)
+                .and_then(Option::take)
                 .map(|deco| CfDecorationPaint::from_cell_decoration(&deco));
             let Some(mut p) =
                 CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
@@ -129,6 +136,7 @@ impl<P: Painter> RendererCore<P> {
             slots.push(p);
         }
         pane_buf.styles.set(pane_styles);
+        pane_buf.decorations.set(pane_decorations);
         // CF decoration pass: data bars / icons / ratings overlay the cell
         // fill, below grid/explicit borders so the bar doesn't obscure border
         // strokes. `paint_cf_decoration` is a no-op on the Canvas-2D and SVG
@@ -284,16 +292,20 @@ impl<P: Painter> RendererCore<P> {
         let mut strip_styles = Vec::new();
         let mut strip_values = Vec::new();
         let mut strip_cell_types = Vec::new();
+        let mut strip_decorations = Vec::new();
         model.get_cell_styles_in(frame.sheet, strip, &mut strip_styles);
         model.get_formatted_cell_values_in(frame.sheet, strip, &mut strip_values);
         model.get_cell_types_in(frame.sheet, strip, &mut strip_cell_types);
+        model.get_cell_decorations_in(frame.sheet, strip, &mut strip_decorations);
 
         let mut pane_styles = pane_buf.styles.take();
         let mut pane_values = pane_buf.values.take();
         let mut pane_cell_types = pane_buf.cell_types.take();
+        let mut pane_decorations = pane_buf.decorations.take();
         splice_strip_into(&mut pane_styles, &mut strip_styles, range, strip);
         splice_strip_into(&mut pane_values, &mut strip_values, range, strip);
         splice_strip_into(&mut pane_cell_types, &mut strip_cell_types, range, strip);
+        splice_strip_into(&mut pane_decorations, &mut strip_decorations, range, strip);
 
         if let Some(strip_rect) = frame.range_rect(strip) {
             self.painter
@@ -312,10 +324,11 @@ impl<P: Painter> RendererCore<P> {
             let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
                 continue;
             };
-            // `own_style` already holds the dxf-merged CellStyle. Only the
-            // decoration is fetched per cell — mirrors render_pane.
-            let cf_decoration = model
-                .get_extended_cell_style(frame.sheet, slot.row, slot.col)
+            // `own_style` already holds the dxf-merged CellStyle. The decoration
+            // rides the same spliced bulk buffer — mirrors render_pane.
+            let cf_decoration = pane_decorations
+                .get_mut(idx)
+                .and_then(Option::take)
                 .map(|deco| CfDecorationPaint::from_cell_decoration(&deco));
             let Some(mut p) =
                 CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
@@ -327,6 +340,7 @@ impl<P: Painter> RendererCore<P> {
             slots.push(p);
         }
         pane_buf.styles.set(pane_styles);
+        pane_buf.decorations.set(pane_decorations);
         for p in &slots {
             if let Some(ref deco) = p.cf_decoration {
                 self.painter.paint_cf_decoration(p.rect, deco);

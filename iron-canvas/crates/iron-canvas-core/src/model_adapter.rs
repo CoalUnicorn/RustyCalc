@@ -116,6 +116,24 @@ pub trait CanvasModel {
             }
         }
     }
+
+    /// Bulk-fetch CF decorations for `range` on `sheet`. Same dense
+    /// row-major layout and `None`-as-absent semantics as the other
+    /// `*_in` accessors; rides the same pane-cache / blit machinery so
+    /// decorations stay aligned with styles/values/types across scrolls.
+    fn get_cell_decorations_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Option<CellDecoration>>,
+    ) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_extended_cell_style(sheet, r, c));
+            }
+        }
+    }
 }
 
 /// Emits forwarding bodies that defer to `(**self).<method>(args)` for each
@@ -156,5 +174,6 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>);
         fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>);
         fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>);
+        fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellDecoration>>);
     }
 }

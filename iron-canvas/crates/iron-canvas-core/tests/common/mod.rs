@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use iron_canvas_core::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
-use iron_canvas_core::{CellKind, CellStyle};
+use iron_canvas_core::{CellDecoration, CellKind, CellStyle};
 
 pub struct TestModel {
     sheet: Cell<u32>,
@@ -31,6 +31,7 @@ pub struct TestModel {
     row_height_overrides: RefCell<BTreeMap<i32, f64>>,
     col_width_overrides: RefCell<BTreeMap<i32, f64>>,
     cell_values: RefCell<HashMap<(i32, i32), String>>,
+    decorations: RefCell<HashMap<(i32, i32), CellDecoration>>,
     column_headers: RefCell<HashMap<i32, String>>,
     /// When > 0, rows `1..=data_until` return `"R{row}"` for any column
     /// not explicitly set via `set_cell`. Lets a test populate a synthetic
@@ -57,6 +58,7 @@ impl Default for TestModel {
             row_height_overrides: RefCell::default(),
             col_width_overrides: RefCell::default(),
             cell_values: RefCell::default(),
+            decorations: RefCell::default(),
             column_headers: RefCell::default(),
             data_until: Cell::new(0),
             top_row: Cell::new(1),
@@ -204,6 +206,9 @@ impl TestModel {
             .borrow_mut()
             .insert((row, col), value.to_string());
     }
+    pub fn set_decoration(&self, row: i32, col: i32, deco: CellDecoration) {
+        self.decorations.borrow_mut().insert((row, col), deco);
+    }
     pub fn set_data_until(&self, row: i32) {
         self.data_until.set(row);
     }
@@ -268,6 +273,9 @@ impl CanvasModel for TestModel {
     }
     fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellKind> {
         Some(CellKind::Text)
+    }
+    fn get_extended_cell_style(&self, _: u32, row: i32, col: i32) -> Option<CellDecoration> {
+        self.decorations.borrow().get(&(row, col)).cloned()
     }
     fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
         self.column_headers.borrow().get(&column).cloned()
