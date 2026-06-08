@@ -11,10 +11,10 @@ use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    approx_text_width,
 };
 
 use crate::common::escape::xml_escape;
-use crate::common::text::CHAR_WIDTH_FACTOR;
 
 pub struct SvgPainter {
     body: RefCell<String>,
@@ -111,7 +111,7 @@ fn parse_font(font_css: &str) -> (f64, String) {
 impl TextMetrics for SvgPainter {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
         let (size, _) = parse_font(font_css);
-        text.chars().count() as f64 * size * CHAR_WIDTH_FACTOR
+        approx_text_width(size, text)
     }
 }
 

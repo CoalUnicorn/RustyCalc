@@ -16,11 +16,12 @@ use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    approx_text_width,
 };
 
 use crate::common::color::parse_css_color;
 use crate::common::escape::pdf_string_escape;
-use crate::common::text::{CHAR_WIDTH_FACTOR, parse_font_size_px};
+use crate::common::text::parse_font_size_px;
 use crate::pdf::doc::stream::ContentStream;
 
 /// Visible dash pattern when `rect_dashed` is invoked. Matches the
@@ -118,7 +119,7 @@ impl PdfPainter {
 impl TextMetrics for PdfPainter {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
         let size = parse_font_size_px(font_css);
-        text.chars().count() as f64 * size * CHAR_WIDTH_FACTOR
+        approx_text_width(size, text)
     }
 }
 
@@ -238,9 +239,9 @@ impl Painter for PdfPainter {
         let font_str = font_css.as_str();
         let size = parse_font_size_px(font_str);
 
-        // Approximate width without real font metrics — same formula as
-        // measure_text_width, kept inline to avoid a borrow round-trip.
-        let text_width = text.chars().count() as f64 * size * CHAR_WIDTH_FACTOR;
+        // Approximate width without real font metrics — same estimate as
+        // measure_text_width, recomputed here to avoid a borrow round-trip.
+        let text_width = approx_text_width(size, text);
 
         // Painter coords are Y-down. After the outer Y-flip CTM,
         // a counter-flipping text matrix (`1 0 0 -1 tx ty Tm`) restores

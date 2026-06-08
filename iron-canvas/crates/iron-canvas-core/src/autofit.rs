@@ -18,9 +18,9 @@
 
 use crate::CanvasModel;
 use crate::RCRange;
-use crate::painter::TextMetrics;
+use crate::painter::{CHAR_WIDTH_FACTOR, TextMetrics};
 use crate::renderer::cache::font::escape_font_family;
-use crate::renderer::cell::text::{CELL_PADDING, CHAR_WIDTH_FACTOR, LINE_HEIGHT_FACTOR};
+use crate::renderer::cell::text::{CELL_PADDING, LINE_HEIGHT_FACTOR};
 use crate::renderer::{TextLine, layout_into};
 
 use crate::style::CellStyle;

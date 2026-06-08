@@ -118,6 +118,19 @@ pub enum TextBaseline {
     Alphabetic,
 }
 
+/// Per-char width as a fraction of font size — the deterministic glyph-width
+/// estimate shared by every backend without a host text metric (SVG, PDF,
+/// Recorder) and by `layout_into`'s measure-fallback. One value keeps wrap
+/// math identical across all non-browser surfaces (measured == painted).
+pub const CHAR_WIDTH_FACTOR: f64 = 1.0;
+
+/// Deterministic text-width estimate: `chars × font_size_px × CHAR_WIDTH_FACTOR`.
+/// The single fallback every measureless `TextMetrics` backend serializes; each
+/// backend parses `font_size_px` from its own CSS shorthand before calling.
+pub fn approx_text_width(font_size_px: f64, text: &str) -> f64 {
+    text.chars().count() as f64 * font_size_px * CHAR_WIDTH_FACTOR
+}
+
 pub trait TextMetrics {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64;
 }

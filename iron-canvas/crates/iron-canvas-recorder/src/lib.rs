@@ -14,6 +14,7 @@ use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    approx_text_width,
 };
 use iron_canvas_core::renderer::cf_types::CfDecorationPaint;
 
@@ -52,11 +53,6 @@ pub struct RecordingFilter {
     pub layers: LayerScope,
     pub skip_groups: HashSet<GroupClass>,
 }
-
-/// Per-char width factor as a fraction of font size. Matches the
-/// approx-char-width fallback in `text_paint.rs::layout_into` so wrap math
-/// in tests stays internally consistent with the layout's own fallback.
-const CHAR_WIDTH_FACTOR: f64 = 1.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DrawOp {
@@ -179,7 +175,7 @@ impl TextMetrics for RecorderPainter {
             .split_whitespace()
             .find_map(|tok| tok.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()))
             .unwrap_or(12.0);
-        text.chars().count() as f64 * font_size_px * CHAR_WIDTH_FACTOR
+        approx_text_width(font_size_px, text)
     }
 }
 

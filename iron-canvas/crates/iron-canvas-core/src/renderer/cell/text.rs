@@ -19,7 +19,7 @@ use crate::style::{CellKind, CellStyle, HAlign, VAlign};
 
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
-use crate::painter::{PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
+use crate::painter::{CHAR_WIDTH_FACTOR, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
 use crate::theme::CanvasTheme;
@@ -28,9 +28,6 @@ use crate::theme::CanvasTheme;
 
 /// Below this in either pixel dimension, no text is laid out at all.
 const MIN_TEXT_DIM_PX: f64 = 10.0;
-// Shared with `crate::autofit`: line-aware row fit reuses `layout_into` and
-// must stack lines on the same metrics the painter does (measured == painted).
-pub(crate) const CHAR_WIDTH_FACTOR: f64 = 1.0;
 // Excel uses single line spacing inside a cell — the font's natural line
 // height, ~1.2x the em for Calibri. Matches `.fe-text` (formula-overlay.css)
 // so canvas display and the DOM editor stack lines identically.

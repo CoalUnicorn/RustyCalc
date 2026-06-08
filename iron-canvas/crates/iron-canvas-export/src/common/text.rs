@@ -1,7 +1,3 @@
-// Matches RecorderPainter's fallback so wrap math is consistent across
-// non-browser backends with no host-side text measurement API.
-pub const CHAR_WIDTH_FACTOR: f64 = 1.0;
-
 /// Default size when the CSS font shorthand carries no `<n>px` token.
 /// Matches `SvgPainter::parse_font`.
 pub const DEFAULT_FONT_SIZE_PX: f64 = 12.0;
