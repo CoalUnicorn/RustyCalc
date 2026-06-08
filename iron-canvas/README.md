@@ -14,15 +14,18 @@ Every visible pixel composes from `PixelRect` and `Line`. The painter surface is
 
 | Crate                  | Role                                                                                     |
 | ---------------------- | ---------------------------------------------------------------------------------------- |
-| `iron-canvas-core`     | Pure-Rust engine: geometry, `Chrome`, renderer, `Orchestrator<S: Surface, M: CanvasModel>`, `Painter` trait surface. No `web-sys` / `wasm-bindgen` deps |
-| `iron-canvas-web`      | `#[wasm_bindgen]` facade: `IronCanvas`, `WebSurface`, `CanvasPainter`, `JsBackedModel`   |
+| `iron-canvas-core`     | Pure-Rust engine: geometry, `Chrome`, renderer, `Orchestrator<S: Surface>` (model is an `Option<Rc<dyn CanvasModel>>` field), `Painter` trait surface. No `web-sys` / `wasm-bindgen` deps |
+| `iron-canvas-canvas2d` | IronCalc-free Canvas-2D backend: `CanvasPainter` (`Painter` impl, caches ctx state), `WebSurface`, `theme_from_element` CSS-var bridge. No `ironcalc_base` — reusable by `iron-canvas-datagrid-web` |
+| `iron-canvas-recorder` | `RecorderPainter` + `MemSurface` — drives `Orchestrator<MemSurface>` in core's tests; also the opt-in `RecordingSurface<S>` dev tool (`.icr`) |
 | `iron-canvas-export`   | Multi-format export: `SvgPainter` + `SvgSurface` (feature `svg`), `PdfPainter` + `PdfSurface` (feature `pdf`). Pure `std`. |
-| `iron-canvas-recorder` | `RecorderPainter` + `MemSurface` — drives `Orchestrator<MemSurface, _>` in core's tests  |
 | `iron-canvas-ironcalc` | Bridge crate: `IronCalcModel<'a>` newtype implementing `CanvasModel` for IronCalc `UserModel`. CF (conditional formatting) decoration bridge. |
+| `iron-canvas-datagrid` | Engine-agnostic in-memory table implementing `CanvasModel`: `DataGrid`, `DataGridBuilder`, `Column`, `Cell`, `SortDirection`. No IronCalc |
+| `iron-canvas-web`      | `#[wasm_bindgen]` facade: `IronCanvas`, `JsBackedModel`. Re-exports `WebSurface` / `CanvasPainter` / `theme_from_element` from `iron-canvas-canvas2d` |
+| `iron-canvas-datagrid-web` | `#[wasm_bindgen]` facade for a standalone canvas grid: `DataGridCanvas`. Composes datagrid + canvas2d + export — zero IronCalc |
 
 Consumers depending on the wasm bundle use `iron-canvas-web`. Native /
 non-browser backends impl `Surface` (associated `type P = YourPainter`)
-and wire `Orchestrator<YourSurface, _>` directly.
+and wire `Orchestrator<YourSurface>` directly.
 
 ## Development
 
@@ -91,7 +94,7 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 | Method | Description |
 | ------ | ----------- |
 | `canvas.setModel(model)` | Bind an IronCalc `Model` JS handle. Triggers a full repaint. |
-| `canvas.exportSvg(css_w, css_h)` | Render the current sheet as a self-contained SVG string. Drives a throwaway `Orchestrator<SvgSurface, _>` against the cached model — no painted-pixel state on the live canvas is touched. Returns `""` if no model is bound. |
+| `canvas.exportSvg(css_w, css_h)` | Render the current sheet as a self-contained SVG string. Drives a throwaway `Orchestrator<SvgSurface>` against the cached model — no painted-pixel state on the live canvas is touched. Returns `""` if no model is bound. |
 | `canvas.exportPdf(css_w, css_h)` | Render the current sheet as a self-contained PDF (returned as `Uint8Array`). Gated behind `--features pdf`. |
 
 #### Repaint triggers
@@ -224,9 +227,9 @@ A workbook with only frozen rows collapses to `top_left` + `bottom_left`; only f
 
 ### Layers, surfaces, painters
 
-Both layers read the same `Option<M>` where `M: CanvasModel`; the web facade pins `M = Rc<dyn CanvasModel>`. The grid canvas is opaque (`alpha: false`) and the overlay uses `alpha: true, desynchronized: true`. Each layer is a `LayerBase<S, R>` where `S: Surface` owns the painter and `R: LayerOps<Painter = S::P>` is the renderer wrapper. The surface hands the renderer an `Rc<S::P>` clone at construction, so paint methods do not re-borrow through the surface on every call. `LayerBase` also carries a `PaintGate` (typed `GridSignals` dirty bits) and a long-lived `RendererCore<S::P>` whose caches survive across frames.
+Both layers read the same `Option<Rc<dyn CanvasModel>>` held by the `Orchestrator<S>` — a single type param, with the model carried as a field rather than a second generic. The grid canvas is opaque (`alpha: false`) and the overlay uses `alpha: true, desynchronized: true`. Each layer is a `LayerBase<S, R>` where `S: Surface` owns the painter and `R: LayerOps<Painter = S::P>` is the renderer wrapper. The surface hands the renderer an `Rc<S::P>` clone at construction, so paint methods do not re-borrow through the surface on every call. `LayerBase` also carries a `PaintGate` (typed `GridSignals` dirty bits) and a long-lived `RendererCore<S::P>` whose caches survive across frames.
 
-`Surface` is the backend-agnostic drawing target. It owns an associated `type P: Painter + BlitPainter` plus `painter`, `clone_painter`, `resize`, and `present`. `WebSurface` wraps an `HtmlCanvasElement` and an `Rc<CanvasPainter>`. `MemSurface` (in `iron-canvas-recorder`) wraps an `Rc<RecorderPainter>` and drives `Orchestrator<MemSurface, _>` through every paint regime inside core's integration tests.
+`Surface` is the backend-agnostic drawing target. It owns an associated `type P: Painter + BlitPainter` plus `painter`, `clone_painter`, `resize`, and `present`. `WebSurface` wraps an `HtmlCanvasElement` and an `Rc<CanvasPainter>`. `MemSurface` (in `iron-canvas-recorder`) wraps an `Rc<RecorderPainter>` and drives `Orchestrator<MemSurface>` through every paint regime inside core's integration tests.
 
 The `Painter` trait is unsealed; adapter crates implement it. Renderer code does not touch `CanvasRenderingContext2d` directly. The layer-clear and full-canvas-fill paths route through `Painter::clear_rect` and `Painter::rect_fill` so SVG and Recorder backends see the same op stream. Three impls ship today: `CanvasPainter` (production, caches ctx state), `SvgPainter` (snapshot output), and `RecorderPainter` (test-only `DrawOp` log).
 
@@ -250,7 +253,7 @@ Selection, autofill preview, clipboard ants, point-mode, and formula-ref outline
 
 ### Recording
 
-`iron-canvas-recorder` does double duty: it is both the test backend (`RecorderPainter` + `MemSurface` driving `Orchestrator<MemSurface, _>` through every regime) and the dev-only producer of `.icr` recording files.
+`iron-canvas-recorder` does double duty: it is both the test backend (`RecorderPainter` + `MemSurface` driving `Orchestrator<MemSurface>` through every regime) and the dev-only producer of `.icr` recording files.
 
 Enable the producer by building `iron-canvas-web` with the `dev-tools` feature:
 
@@ -270,7 +273,7 @@ Replay an `.icr` by opening [`web-test/recording-viewer.html`](web-test/recordin
 Renderer tests construct one, drive a render pass, and assert against the
 resulting `Vec<DrawOp>`. The four-regime integration test in
 `crates/iron-canvas-core/tests/orchestrator_regimes.rs` drives
-`Orchestrator<MemSurface, _>` through `Fresh` / `SlotsReuse` / `Viewport` /
+`Orchestrator<MemSurface>` through `Fresh` / `SlotsReuse` / `Viewport` /
 `Overlay` and asserts the expected op log for each.
 
 ```
