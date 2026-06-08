@@ -195,6 +195,10 @@ impl CanvasModel for JsBackedModel {
     }
 
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle> {
+        // Mirror IronCalcModel's dxf-MERGED style: the JS `getCellStyle` extern
+        // must return the conditional-format-merged style so the fingerprint
+        // hashes what is painted. If JS returns the base style, CF cells paint
+        // unmerged here — a known parity gap with the native adapter.
         let jsv = self.note_throw("getCellStyle", self.handle.get_cell_style(sheet, row, column))?;
         match serde_wasm_bindgen::from_value::<ic::Style>(jsv) {
             Ok(s) => Some(ic_style_to_core(s)),

@@ -3,9 +3,9 @@
 //! `IronCalcModel` is a newtype wrapper that implements `CanvasModel` for
 //! `ironcalc_base::UserModel`.  Rust's orphan rule prevents implementing a
 //! foreign trait (`CanvasModel`) for a foreign type (`UserModel`) outside of
-//! the crate that defines the trait, so the direct impl lives here.  This
-//! newtype is the engine-agnostic path — it lets any downstream crate use
-//! `IronCalcModel` without importing `ironcalc_base` directly.
+//! the crate that defines the trait, so the direct impl lives here.  This is
+//! the IronCalc-specific adapter: constructing an `IronCalcModel` requires
+//! naming `ironcalc_base::UserModel`.  The engine-agnostic path is `DataGrid`.
 
 pub mod convert;
 

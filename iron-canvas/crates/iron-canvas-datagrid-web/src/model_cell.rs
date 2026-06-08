@@ -66,4 +66,7 @@ impl CanvasModel for DataGridModel {
     fn get_column_header_text(&self, s: u32, col: i32) -> Option<String> {
         self.0.borrow().get_column_header_text(s, col)
     }
+    fn get_row_header_text(&self, s: u32, row: i32) -> Option<String> {
+        self.0.borrow().get_row_header_text(s, row)
+    }
 }

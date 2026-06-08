@@ -15,6 +15,14 @@ pub struct CanvasView {
     pub left_column: i32,
 }
 
+/// Read-only worksheet surface the renderer consumes; every method is a pure
+/// query against the host model.
+///
+/// `None` from the fetch accessors is a transient bridge failure — the JS call
+/// threw or its payload didn't deserialize — not "empty"; the next animation
+/// frame re-queries. The override accessors (`get_*_header_text`,
+/// `get_extended_cell_style`) instead use `None` to mean "no override, fall
+/// back to the default."
 pub trait CanvasModel {
     fn get_selected_sheet(&self) -> u32;
     /// `None` signals a transient JS-bridge failure: the bridge call threw

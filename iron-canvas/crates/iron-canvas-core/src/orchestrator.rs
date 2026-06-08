@@ -5,9 +5,11 @@
 //! struct carries one type parameter (the `Surface`), not two.
 //!
 //! `paint_if_dirty` drains both layers' typed `GridSignals` and picks one
-//! of four `PaintRegime` arms via `decide` (cheapness-ordered). Each arm
-//! runs a `Chrome::next(.., FramePath::*)` walk through the matching
-//! `LayerBase` paint method. The query API (`hit_test`, `cell_rect`,
+//! of four `PaintRegime` arms via `decide` (cheapness-ordered). The Fresh,
+//! SlotsReuse, and Viewport arms rebuild via a `Chrome::next(.., FramePath::*)`
+//! walk through the matching `LayerBase` paint method; the Overlay arm reuses
+//! `last_frame` directly and repaints only the overlay. The query API
+//! (`hit_test`, `cell_rect`,
 //! `resize_handle_at`, `autofill_handle`) reads `last_frame`, so hits
 //! agree with painted pixels by construction.
 

@@ -25,8 +25,9 @@ pub struct ColSlot {
 }
 
 /// Axis-symmetric slot view. Lets every walk over `PaneSet`'s slot vecs share
-/// one implementation regardless of axis. `end` defaults to `start + extent`
-/// to subsume `RowSlot::bottom` / `ColSlot::right` for generic callers.
+/// one implementation regardless of axis. `end` defaults to `start + extent`,
+/// giving generic callers the far edge (row bottom / col right) without an
+/// axis-specific accessor.
 pub trait AxisSlot: Sized {
     fn new(id: i32, start: i32, extent: i32) -> Self;
     fn id(&self) -> i32;

@@ -7,11 +7,12 @@
 //!   points (`paint_bg`, `repaint_active_cell`).
 //! - [`borders`] — `ResolvedBorders`, `BorderPaint`, and the grid /
 //!   explicit / single-cell border passes.
-//! - This module — `render_pane` (the four-pass walk over one quadrant)
+//! - This module — `render_pane` (the five-pass walk over one quadrant)
 //!   and `paint_cell` (single-cell composer).
 //!
-//! Pass order in `render_pane` is load-bearing: bg -> grid borders ->
-//! explicit borders -> text. See the doc on `render_pane` for why.
+//! Pass order in `render_pane` is load-bearing: bg -> CF decoration ->
+//! grid borders -> explicit borders -> text. See the doc on `render_pane`
+//! for why.
 
 pub mod borders;
 pub mod fingerprint;
@@ -35,8 +36,8 @@ use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {
-    /// Walk one frozen-pane quadrant in four deferred passes:
-    /// bg -> grid borders -> explicit borders -> text.
+    /// Walk one frozen-pane quadrant in five deferred passes:
+    /// bg -> CF decoration -> grid borders -> explicit borders -> text.
     ///
     /// `BorderEdge::Right`/`Bottom` strokes at `x+width` snap (via
     /// `snap_stroke`) into the NEXT cell's pixel column, where they'd land
@@ -80,7 +81,7 @@ impl<P: Painter> RendererCore<P> {
         model.get_cell_decorations_in(frame.sheet, range, &mut pane_decorations);
 
         // Fingerprint paint-skip: same content as the previous frame
-        // ⇒ canvas pixels are still correct, skip the 4-pass walk. Bulk
+        // ⇒ canvas pixels are still correct, skip the five-pass walk. Bulk
         // fetch above is unconditional now — content changes that don't
         // raise CONTENT (e.g. recalc triggered by an upstream edit a
         // caller forgot to mark) are detected here via fingerprint
@@ -377,8 +378,8 @@ impl<P: Painter> RendererCore<P> {
 
 /// Identify a single-axis scroll between two pane RCRanges. Returns the
 /// scroll axis when one axis's endpoints differ and the other axis is
-/// identical, with both extents preserved. Used by `render_pane`'s Stage
-/// 3.3 detect to switch into the strip-fetch branch.
+/// identical, with both extents preserved. Used by `render_pane_blit`'s
+/// Stage 3.3 detect to switch into the strip-fetch branch.
 fn infer_shift_axis(prev: RCRange, new: RCRange) -> Option<Axis> {
     let rows_same = prev.r1 == new.r1 && prev.r2 == new.r2;
     let cols_same = prev.c1 == new.c1 && prev.c2 == new.c2;

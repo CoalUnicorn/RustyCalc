@@ -112,17 +112,17 @@ pub const DARK: CanvasTheme = CanvasTheme {
 ///
 /// Bridges IronCalc upstream's CSS-var contract (`--palette-sheet-*`,
 /// `--palette-primary-main`, etc.) to the renderer's resolved palette.
-/// `from_css_reader` (and the wasm32 `CanvasTheme::from_element` that wraps
-/// it) populates these fields from a DOM element's computed style; the
-/// `From<ThemeVariables> for CanvasTheme` impl performs the per-field
-/// fallback to `LIGHT`.
+/// `from_css_reader` (and the wasm32 `iron_canvas_canvas2d::theme_from_element`
+/// helpers that wrap it) populate these fields from a DOM element's computed
+/// style; the `From<ThemeVariables> for CanvasTheme` impl performs the
+/// per-field fallback to `LIGHT`.
 ///
 /// # Derived fields
 ///
-/// Some `CanvasTheme` fields have no direct upstream CSS-var equivalent.
-/// `from_css_reader` derives them from sparser inputs:
+/// Most fields read a single matching CSS var, but the "selection blue" group
+/// has no dedicated keys — one `--palette-primary-main` lookup fans out to all
+/// four:
 ///
-/// - `error_text_color` from `--palette-error-main`.
 /// - `selection_color`, `pointing` from `--palette-primary-main`.
 /// - `selection_fill` from `--palette-primary-main` at ~12% alpha.
 /// - `pointing_tint` from `--palette-primary-main` at ~8% alpha.
@@ -248,8 +248,8 @@ impl ThemeVariables {
     /// `None` (or an empty string after trim, which the helper treats as
     /// `None`) leaves the corresponding field unset; the `From` impl then
     /// falls back to `CanvasTheme::light()`. The DOM-bridge wrappers
-    /// (`CanvasTheme::from_element`, `from_root`) close over a
-    /// `CssStyleDeclaration::get_property_value` call; tests pass an
+    /// (`iron_canvas_canvas2d::theme_from_element::{from_element, from_root}`)
+    /// close over a `CssStyleDeclaration::get_property_value` call; tests pass an
     /// in-memory `HashMap` lookup so the derivation logic stays
     /// host-testable.
     ///

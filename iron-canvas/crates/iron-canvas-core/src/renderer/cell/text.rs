@@ -84,7 +84,8 @@ pub enum TextColor {
     Owned(Rc<str>),
 }
 
-/// One visual line of text inside a cell, positioned for center-aligned rendering.
+/// One visual line of text inside a cell, positioned for paint
+/// (`center_x`/`center_y` carry the resolved anchor point).
 pub struct TextLine {
     pub text: String,
     pub center_x: f64,
@@ -95,7 +96,7 @@ pub struct TextLine {
 //  resolve
 
 impl TextPaint {
-    /// Build a `TextPaint` for `addr` at `rect` and fill `lines` with the
+    /// Build a `TextPaint` at `rect` and fill `lines` with the
     /// resolved per-line text/width/position. Returns `None` (with `lines`
     /// left empty) for empty/too-small cells. Formatted value AND cell type
     /// are supplied by the caller — `render_pane` drains both from the

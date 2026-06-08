@@ -1,12 +1,16 @@
-//! JS-facing wire shapes for the `IronCanvas` query API.
+//! JS-facing wire shapes for the `IronCanvas` API — both directions.
 //!
 //! The engine enums in `iron-canvas-core` use tuple variants for their
 //! ergonomic in-Rust shape (`RowHeader(i32)`, `Edge(Side)`,
 //! `ResizeTarget::Column(i32)`). Serde's internal tagging (`tag = "kind"`)
 //! rejects tuple variants, and the engine crates are deliberately kept
-//! free of `wasm-bindgen` / `serde-wasm-bindgen` concerns. So the JS shape
-//! is materialized here: small, struct-formed mirrors that derive
-//! `Serialize`, plus `From` impls from the engine types.
+//! free of `wasm-bindgen` / `serde-wasm-bindgen` concerns. So the JS shapes
+//! are materialized here:
+//!
+//! - Outbound (query API): struct-formed mirrors that derive `Serialize`,
+//!   plus `From<Engine>` impls (`HitTestWire`, `ResizeTargetWire`, …).
+//! - Inbound (setter API): `Deserialize`-only shapes with `From<Wire> for
+//!   Engine` impls — Phase 2 overlay inputs and Phase 3 theme inputs.
 
 use serde::{Deserialize, Serialize};
 
