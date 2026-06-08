@@ -12,12 +12,15 @@ use crate::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::wasm::JsBackedModel;
 use iron_canvas_canvas2d::WebSurface;
+// `Surface` is only needed by the dev-tools recording path
+// (`grid_surface().painter()`); the export helpers no longer use it.
+#[cfg(feature = "dev-tools")]
+use iron_canvas_core::layer::Surface;
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
-use iron_canvas_core::layer::Surface;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 use iron_canvas_export::SvgSurface;
@@ -319,52 +322,27 @@ impl IronCanvas {
     }
 
     /// Render the current sheet as a self-contained SVG string. Returns
-    /// an empty string if no model has been pushed yet. The export
-    /// reads the live theme but uses a one-shot orchestrator — never
-    /// touches the live grid / overlay surfaces and never fires blit
-    /// (always `PaintRegime::Fresh`). Overlays (selection, marching
-    /// ants, autofill handle, formula refs) are deliberately omitted
-    /// — the overlay surface's SVG output is built but discarded.
-    ///
-    /// Why the overlay-discard strategy yields a clean grid SVG even
-    /// though the throwaway orchestrator's `SelectionLayer` defaults to
-    /// an A1 active cell: `LayerBase::paint_overlay_layer` invokes the
-    /// `after_paint_renderer_hook` (active-cell repaint) through the
-    /// **overlay** renderer's painter, not the grid's. The hook's output
-    /// goes to the discarded overlay surface; the grid surface only
-    /// receives `render_grid`'s cell / borders / chrome draws.
+    /// an empty string if no model has been pushed yet. Reads the live
+    /// theme but delegates to `SvgSurface::render`, which drives a
+    /// one-shot orchestrator — never touching the live surfaces and
+    /// never firing blit. See `SvgSurface::render` for the
+    /// overlay-discard policy.
     #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "exportSvg")]
     pub fn export_svg(&self, css_w: f64, css_h: f64) -> String {
         let Some(model) = self.model.as_ref() else {
             return String::new();
         };
-        let width = css_w.round() as i32;
-        let height = css_h.round() as i32;
-
-        let grid = SvgSurface::new(width, height);
-        let overlay = SvgSurface::new(width, height);
-        let grid_painter = grid.clone_painter();
-
-        let mut export_orch = Orchestrator::<SvgSurface>::new(grid, overlay);
-        export_orch.set_theme(self.orch.theme().clone());
-        export_orch.set_model(Rc::clone(model));
-        export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
-        export_orch.request_repaint();
-        export_orch.paint_if_dirty();
-        drop(export_orch);
-
-        grid_painter.finish()
+        SvgSurface::render(
+            Rc::clone(model),
+            self.orch.theme(),
+            CanvasSize { w: css_w, h: css_h },
+        )
     }
 
-    /// JS-facing PDF export. Mirrors `exportSvg` exactly: grid and
-    /// overlay surfaces each own their own `ContentStream`; the overlay
-    /// stream is silently dropped when the throwaway orchestrator
-    /// releases its surfaces. Only the grid stream feeds
-    /// `build_document`, so the resulting PDF carries no selection,
-    /// marching ants, autofill handle, or formula refs — same policy as
-    /// SVG export. `Vec<u8>` auto-converts to `Uint8Array` across the
-    /// wasm-bindgen boundary.
+    /// JS-facing PDF export. Mirrors `exportSvg`'s overlay-discard
+    /// policy via `PdfSurface::render`. `Vec<u8>` auto-converts to
+    /// `Uint8Array` across the wasm-bindgen boundary.
     #[cfg(feature = "pdf")]
     #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "exportPdf")]
@@ -372,23 +350,11 @@ impl IronCanvas {
         let Some(model) = self.model.as_ref() else {
             return Vec::new();
         };
-        let width = css_w.round() as u32;
-        let height = css_h.round() as u32;
-
-        let grid = PdfSurface::new(width, height);
-        let overlay = PdfSurface::new(width, height);
-        let grid_stream = grid.stream();
-
-        let mut export_orch = Orchestrator::<PdfSurface>::new(grid, overlay);
-        export_orch.set_theme(self.orch.theme().clone());
-        export_orch.set_model(Rc::clone(model));
-        export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
-        export_orch.request_repaint();
-        export_orch.paint_if_dirty();
-        drop(export_orch);
-
-        let stream = grid_stream.borrow();
-        PdfSurface::build_document(&stream, width, height)
+        PdfSurface::render(
+            Rc::clone(model),
+            self.orch.theme(),
+            CanvasSize { w: css_w, h: css_h },
+        )
     }
 }
 

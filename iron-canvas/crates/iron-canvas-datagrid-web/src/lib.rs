@@ -22,7 +22,6 @@ use std::rc::Rc;
 use iron_canvas_canvas2d::WebSurface;
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
-use iron_canvas_core::layer::Surface;
 use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
 use iron_canvas_datagrid::SortDirection;
 use iron_canvas_export::SvgSurface;
@@ -225,20 +224,12 @@ impl DataGridCanvas {
 
     #[wasm_bindgen(js_name = "exportSvg")]
     pub fn export_svg(&self, css_w: f64, css_h: f64) -> String {
-        // Throwaway orchestrator renders the same model into an SVG surface.
-        // `&self` is fine: we clone the model `Rc` and never mutate `self`.
-        let width = css_w.round() as i32;
-        let height = css_h.round() as i32;
-        let grid = SvgSurface::new(width, height);
-        let overlay = SvgSurface::new(width, height);
-        let grid_painter = grid.clone_painter();
-        let mut export_orch = Orchestrator::<SvgSurface>::new(grid, overlay);
-        export_orch.set_theme(self.orch.theme().clone());
-        export_orch.set_model(Rc::clone(&self.model) as Rc<dyn CanvasModel>);
-        export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
-        export_orch.request_repaint();
-        export_orch.paint_if_dirty();
-        drop(export_orch);
-        grid_painter.finish()
+        // `&self` is fine: `SvgSurface::render` clones the model `Rc` and
+        // drives its own throwaway orchestrator — `self` is never mutated.
+        SvgSurface::render(
+            Rc::clone(&self.model) as Rc<dyn CanvasModel>,
+            self.orch.theme(),
+            CanvasSize { w: css_w, h: css_h },
+        )
     }
 }

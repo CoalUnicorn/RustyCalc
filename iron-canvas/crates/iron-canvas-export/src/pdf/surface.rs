@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
+use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
 
 use crate::pdf::doc::{ContentStream, PdfDocument};
 use crate::pdf::painter::PdfPainter;
@@ -80,6 +81,33 @@ impl PdfSurface {
         doc.add_object(4, 0, page_stream.into_object());
         doc.add_object(5, 0, font::resources_object_with_helvetica());
         doc.finish()
+    }
+
+    /// One-shot render of `model` into a single-page PDF document.
+    ///
+    /// Mirrors [`crate::svg::SvgSurface::render`]'s overlay-discard
+    /// policy: both grid and overlay surfaces are driven by a throwaway
+    /// `Orchestrator`, but only the grid stream feeds `build_document`,
+    /// so the PDF carries no selection, marching ants, autofill handle,
+    /// or formula refs.
+    pub fn render(model: Rc<dyn CanvasModel>, theme: &CanvasTheme, size: CanvasSize) -> Vec<u8> {
+        let width = size.w.round() as u32;
+        let height = size.h.round() as u32;
+
+        let grid = PdfSurface::new(width, height);
+        let overlay = PdfSurface::new(width, height);
+        let grid_stream = grid.stream();
+
+        let mut orch = Orchestrator::<PdfSurface>::new(grid, overlay);
+        orch.set_theme(theme.clone());
+        orch.set_model(model);
+        orch.resize(size, 1);
+        orch.request_repaint();
+        orch.paint_if_dirty();
+        drop(orch);
+
+        let stream = grid_stream.borrow();
+        Self::build_document(&stream, width, height)
     }
 }
 

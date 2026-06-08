@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
+use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
 
 use super::SvgPainter;
 
@@ -26,6 +27,34 @@ impl SvgSurface {
     /// `SvgPainter::finish` takes `&self`.
     pub fn finish(&self) -> String {
         self.painter.finish()
+    }
+
+    /// One-shot render of `model` into a self-contained `<svg>` document.
+    ///
+    /// Spins a throwaway `Orchestrator` over a grid + overlay
+    /// `SvgSurface`, pushes `theme` and `model`, and paints a single
+    /// `PaintRegime::Fresh` frame. Overlays (selection, marching ants,
+    /// autofill handle, formula refs) are intentionally discarded: the
+    /// active-cell repaint hook draws through the *overlay* surface,
+    /// which is dropped here — only the grid surface's cell / border /
+    /// chrome draws survive into the returned string.
+    pub fn render(model: Rc<dyn CanvasModel>, theme: &CanvasTheme, size: CanvasSize) -> String {
+        let width = size.w.round() as i32;
+        let height = size.h.round() as i32;
+
+        let grid = SvgSurface::new(width, height);
+        let overlay = SvgSurface::new(width, height);
+        let grid_painter = grid.clone_painter();
+
+        let mut orch = Orchestrator::<SvgSurface>::new(grid, overlay);
+        orch.set_theme(theme.clone());
+        orch.set_model(model);
+        orch.resize(size, 1);
+        orch.request_repaint();
+        orch.paint_if_dirty();
+        drop(orch);
+
+        grid_painter.finish()
     }
 }
 
