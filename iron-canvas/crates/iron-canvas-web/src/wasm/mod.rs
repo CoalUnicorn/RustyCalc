@@ -78,21 +78,72 @@ extern "C" {
         row: i32,
         column: i32,
     ) -> Result<String, JsValue>;
+
+    // Batched range accessors (optional on the host). A dense, row-major array
+    // of length `(r2-r1+1)*(c2-c1+1)` collapses a pane fetch to one boundary
+    // crossing. Presence is probed once in `new`; absence falls back per-cell.
+    #[wasm_bindgen(catch, method, js_name = "getCellStylesIn")]
+    fn get_cell_styles_in(
+        this: &IronCalcModelHandle,
+        sheet: u32,
+        r1: i32,
+        c1: i32,
+        r2: i32,
+        c2: i32,
+    ) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(catch, method, js_name = "getFormattedCellValuesIn")]
+    fn get_formatted_cell_values_in(
+        this: &IronCalcModelHandle,
+        sheet: u32,
+        r1: i32,
+        c1: i32,
+        r2: i32,
+        c2: i32,
+    ) -> Result<JsValue, JsValue>;
+
+    #[wasm_bindgen(catch, method, js_name = "getCellTypesIn")]
+    fn get_cell_types_in(
+        this: &IronCalcModelHandle,
+        sheet: u32,
+        r1: i32,
+        c1: i32,
+        r2: i32,
+        c2: i32,
+    ) -> Result<JsValue, JsValue>;
 }
 
 pub struct JsBackedModel {
     handle: IronCalcModelHandle,
     js_throw_count: Cell<u64>,
     serde_shape_errs: Cell<u64>,
+    // Batched-accessor capability, probed once at construction (D-1). A static
+    // structural fact, so it lives in a flag — never re-probed and never
+    // conflated with a runtime throw.
+    has_styles_in: bool,
+    has_values_in: bool,
+    has_types_in: bool,
 }
 
 impl JsBackedModel {
     pub fn new(handle: IronCalcModelHandle) -> Self {
+        let has_styles_in = Self::has_method(&handle, "getCellStylesIn");
+        let has_values_in = Self::has_method(&handle, "getFormattedCellValuesIn");
+        let has_types_in = Self::has_method(&handle, "getCellTypesIn");
         Self {
             handle,
             js_throw_count: Cell::new(0),
             serde_shape_errs: Cell::new(0),
+            has_styles_in,
+            has_values_in,
+            has_types_in,
         }
+    }
+
+    /// Duck-test a method's presence on the handle. Structural probe via
+    /// `Reflect::has` — a missing method is a static absence, not a throw.
+    fn has_method(handle: &IronCalcModelHandle, name: &str) -> bool {
+        js_sys::Reflect::has(handle.as_ref(), &JsValue::from_str(name)).unwrap_or(false)
     }
 
     /// Adopt a raw JS handle as an opaque `IronCalcModelHandle`. Validates
@@ -150,6 +201,36 @@ impl JsBackedModel {
                 "iron-canvas: JS handle returned non-conforming shape ({ctx}: {err}); \
                  subsequent shape errors silenced"
             ));
+        }
+    }
+
+    /// Per-cell style fill — the trait default's body, reachable as a real
+    /// method so a flag-miss or batched-failure can degrade to today's exact
+    /// behaviour. (`super` can't reach a trait default.)
+    fn styles_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_cell_style(sheet, r, c));
+            }
+        }
+    }
+
+    fn values_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_formatted_cell_value(sheet, r, c));
+            }
+        }
+    }
+
+    fn types_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_cell_type(sheet, r, c));
+            }
         }
     }
 }
@@ -221,9 +302,111 @@ impl CanvasModel for JsBackedModel {
         )
     }
 
-    // TODO(W5): collapse bulk accessors to single JS round-trips once the JS
-    // Model handle exposes bulk decoration/style/value APIs. Until then the
-    // trait defaults (per-cell loops) run — correct, just chatty.
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
+        // D-1: structural absence routes to the per-cell path, untouched.
+        if !self.has_styles_in {
+            return self.styles_in_per_cell(sheet, range, out);
+        }
+        // A transient throw is a fall-back, not a corruption.
+        let jsv = match self.note_throw(
+            "getCellStylesIn",
+            self.handle
+                .get_cell_styles_in(sheet, range.r1, range.c1, range.r2, range.c2),
+        ) {
+            Some(v) => v,
+            None => return self.styles_in_per_cell(sheet, range, out),
+        };
+        // The array element shape is the per-cell shape — no new wire struct.
+        let decoded: Vec<Option<ic::Style>> = match serde_wasm_bindgen::from_value(jsv) {
+            Ok(v) => v,
+            Err(e) => {
+                self.note_serde_err("getCellStylesIn", &e);
+                return self.styles_in_per_cell(sheet, range, out);
+            }
+        };
+
+        // D-2: distrust any array that isn't dense + fully populated.
+        if !batch_is_dense(&decoded, range) {
+            return self.styles_in_per_cell(sheet, range, out);
+        }
+        out.clear();
+        out.extend(decoded.into_iter().map(|s| s.map(ic_style_to_core)));
+    }
+
+    fn get_formatted_cell_values_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Option<String>>,
+    ) {
+        if !self.has_values_in {
+            return self.values_in_per_cell(sheet, range, out);
+        }
+        let jsv = match self.note_throw(
+            "getFormattedCellValuesIn",
+            self.handle
+                .get_formatted_cell_values_in(sheet, range.r1, range.c1, range.r2, range.c2),
+        ) {
+            Some(v) => v,
+            None => return self.values_in_per_cell(sheet, range, out),
+        };
+        let decoded: Vec<Option<String>> = match serde_wasm_bindgen::from_value(jsv) {
+            Ok(v) => v,
+            Err(e) => {
+                self.note_serde_err("getFormattedCellValuesIn", &e);
+                return self.values_in_per_cell(sheet, range, out);
+            }
+        };
+        if !batch_is_dense(&decoded, range) {
+            return self.values_in_per_cell(sheet, range, out);
+        }
+        out.clear();
+        out.extend(decoded);
+    }
+
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
+        if !self.has_types_in {
+            return self.types_in_per_cell(sheet, range, out);
+        }
+        let jsv = match self.note_throw(
+            "getCellTypesIn",
+            self.handle
+                .get_cell_types_in(sheet, range.r1, range.c1, range.r2, range.c2),
+        ) {
+            Some(v) => v,
+            None => return self.types_in_per_cell(sheet, range, out),
+        };
+        let decoded: Vec<Option<i32>> = match serde_wasm_bindgen::from_value(jsv) {
+            Ok(v) => v,
+            Err(e) => {
+                self.note_serde_err("getCellTypesIn", &e);
+                return self.types_in_per_cell(sheet, range, out);
+            }
+        };
+        if !batch_is_dense(&decoded, range) {
+            return self.types_in_per_cell(sheet, range, out);
+        }
+        // A valid discriminant maps to a `CellKind`; an out-of-range one yields
+        // `None` here — the same legitimate per-cell outcome, not a corruption.
+        out.clear();
+        out.extend(decoded.into_iter().map(|d| d.and_then(cell_kind_from_discriminant)));
+    }
+}
+
+/// Whether a batched `*_in` array can be trusted enough to skip the per-cell
+/// path: it must be **dense** (exactly the range's cell count, so every
+/// row-major index `out[(r-r1)*cols + (c-c1)]` lands on a real element) and
+/// **fully populated** (no `None`, which the renderer reads as a hole).
+///
+/// All-or-nothing by design: one bad element forfeits the whole batch and
+/// forces a per-cell re-fetch, because the per-cell path can't repair a single
+/// slot inside an already-decoded array. A single transient `None` in a large
+/// pane therefore costs O(cells) that frame — acceptable, since `None` here is
+/// a bridge failure (rare), not a blank cell (which arrives as a real default).
+fn batch_is_dense<T>(decoded: &[Option<T>], range: RCRange) -> bool {
+    let rows = (range.r2 - range.r1 + 1) as usize;
+    let cols = (range.c2 - range.c1 + 1) as usize;
+    decoded.len() == rows * cols && decoded.iter().all(Option::is_some)
 }
 
 #[derive(Deserialize)]

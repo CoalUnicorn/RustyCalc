@@ -89,36 +89,7 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
         cell_decoration_from_extended(&ext)
     }
 
-    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                // Loop via get_cell_style so we get the merged (dxf-applied) style.
-                out.push(self.get_cell_style(sheet, r, c));
-            }
-        }
-    }
-
-    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_cell_type(sheet, r, c));
-            }
-        }
-    }
-
-    fn get_cell_decorations_in(
-        &self,
-        sheet: u32,
-        range: RCRange,
-        out: &mut Vec<Option<CellDecoration>>,
-    ) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_extended_cell_style(sheet, r, c));
-            }
-        }
-    }
+    // The bulk `*_in` accessors (styles, types, decorations) inherit the trait
+    // default — a per-cell loop over the merged accessors above. There is no JS
+    // boundary to amortise here, so an override would only re-spell the default.
 }
