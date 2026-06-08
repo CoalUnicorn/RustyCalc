@@ -40,10 +40,10 @@ fn no_freeze_has_no_bands_and_origin_skips_separator() {
         iron_canvas_core::chrome::FramePath::Fresh,
     );
     let p = &frame.pane_set;
-    assert_eq!(p.frozen_rows_count(), 0);
-    assert_eq!(p.frozen_cols_count(), 0);
-    assert_eq!(p.frozen_offset_x, HEADER_COL_WIDTH + CELL_AREA_INSET);
-    assert_eq!(p.frozen_offset_y, HEADER_ROW_HEIGHT + CELL_AREA_INSET);
+    assert_eq!(p.rows.frozen_count(), 0);
+    assert_eq!(p.cols.frozen_count(), 0);
+    assert_eq!(p.cols.frozen_offset, HEADER_COL_WIDTH + CELL_AREA_INSET);
+    assert_eq!(p.rows.frozen_offset, HEADER_ROW_HEIGHT + CELL_AREA_INSET);
 }
 
 #[test]
@@ -57,11 +57,11 @@ fn frozen_rows_only_adds_separator_on_y_only() {
         iron_canvas_core::chrome::FramePath::Fresh,
     );
     let p = &frame.pane_set;
-    assert_eq!(p.frozen_rows_count(), 2);
-    assert_eq!(p.frozen_cols_count(), 0);
-    assert_eq!(p.frozen_offset_x, HEADER_COL_WIDTH + CELL_AREA_INSET);
+    assert_eq!(p.rows.frozen_count(), 2);
+    assert_eq!(p.cols.frozen_count(), 0);
+    assert_eq!(p.cols.frozen_offset, HEADER_COL_WIDTH + CELL_AREA_INSET);
     assert_eq!(
-        p.frozen_offset_y,
+        p.rows.frozen_offset,
         (f64::from(HEADER_ROW_HEIGHT + CELL_AREA_INSET)
             + 2.0 * DEFAULT_ROW_HEIGHT
             + f64::from(FROZEN_SEP))
@@ -74,17 +74,17 @@ fn frozen_both_axes_add_separator_on_each() {
     let m = TestModel::new().with_frozen(1, 3);
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
     let p = &frame.pane_set;
-    assert_eq!(p.frozen_rows_count(), 1);
-    assert_eq!(p.frozen_cols_count(), 3);
+    assert_eq!(p.rows.frozen_count(), 1);
+    assert_eq!(p.cols.frozen_count(), 3);
     assert_eq!(
-        p.frozen_offset_x,
+        p.cols.frozen_offset,
         (f64::from(HEADER_COL_WIDTH + CELL_AREA_INSET)
             + 3.0 * DEFAULT_COL_WIDTH
             + f64::from(FROZEN_SEP))
         .round() as i32
     );
     assert_eq!(
-        p.frozen_offset_y,
+        p.rows.frozen_offset,
         (f64::from(HEADER_ROW_HEIGHT + CELL_AREA_INSET)
             + DEFAULT_ROW_HEIGHT
             + f64::from(FROZEN_SEP))
@@ -152,7 +152,7 @@ fn col_to_x_past_frozen_seam_uses_frozen_offset_and_left_column() {
     let m = TestModel::new().with_frozen_cols(2).with_left_column(5);
     let frame = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
     let p = &frame.pane_set;
-    let origin_x = p.frozen_offset_x;
+    let origin_x = p.cols.frozen_offset;
     // col 5 is the first scrollable on screen -> at the frozen offset
     assert_eq!(p.col_to_x(5), origin_x);
     assert_eq!(
@@ -363,7 +363,7 @@ fn pixel_to_col_round_trips_col_to_x() {
     for &c in &[1_i32, 2, 5, 6, 8] {
         let x = p.col_to_x(c);
         // Nudge +0.5 to land safely inside the cell (avoid the edge).
-        assert_eq!(p.pixel_to_col(x + 1), Some(c), "round-trip col {}", c);
+        assert_eq!(p.cols.pixel_to_id(x + 1), Some(c), "round-trip col {}", c);
     }
 }
 
@@ -376,23 +376,23 @@ fn rebuild_recycles_pane_slot_buffers() {
     let m = TestModel::new().with_frozen(2, 2);
     let f1 = Chrome::next(None, &m, test_canvas(), &LIGHT, FramePath::Fresh);
 
-    let frozen_rows_ptr = f1.pane_set.frozen_rows.as_ptr();
-    let scroll_rows_ptr = f1.pane_set.scroll_rows.as_ptr();
-    let frozen_cols_ptr = f1.pane_set.frozen_cols.as_ptr();
-    let scroll_cols_ptr = f1.pane_set.scroll_cols.as_ptr();
-    let frozen_rows_cap = f1.pane_set.frozen_rows.capacity();
-    let scroll_rows_cap = f1.pane_set.scroll_rows.capacity();
-    let frozen_cols_cap = f1.pane_set.frozen_cols.capacity();
-    let scroll_cols_cap = f1.pane_set.scroll_cols.capacity();
+    let frozen_rows_ptr = f1.pane_set.rows.frozen.as_ptr();
+    let scroll_rows_ptr = f1.pane_set.rows.scroll.as_ptr();
+    let frozen_cols_ptr = f1.pane_set.cols.frozen.as_ptr();
+    let scroll_cols_ptr = f1.pane_set.cols.scroll.as_ptr();
+    let frozen_rows_cap = f1.pane_set.rows.frozen.capacity();
+    let scroll_rows_cap = f1.pane_set.rows.scroll.capacity();
+    let frozen_cols_cap = f1.pane_set.cols.frozen.capacity();
+    let scroll_cols_cap = f1.pane_set.cols.scroll.capacity();
 
     let f2 = Chrome::next(Some(f1), &m, test_canvas(), &LIGHT, FramePath::Fresh);
 
-    assert_eq!(f2.pane_set.frozen_rows.as_ptr(), frozen_rows_ptr);
-    assert_eq!(f2.pane_set.scroll_rows.as_ptr(), scroll_rows_ptr);
-    assert_eq!(f2.pane_set.frozen_cols.as_ptr(), frozen_cols_ptr);
-    assert_eq!(f2.pane_set.scroll_cols.as_ptr(), scroll_cols_ptr);
-    assert!(f2.pane_set.frozen_rows.capacity() >= frozen_rows_cap);
-    assert!(f2.pane_set.scroll_rows.capacity() >= scroll_rows_cap);
-    assert!(f2.pane_set.frozen_cols.capacity() >= frozen_cols_cap);
-    assert!(f2.pane_set.scroll_cols.capacity() >= scroll_cols_cap);
+    assert_eq!(f2.pane_set.rows.frozen.as_ptr(), frozen_rows_ptr);
+    assert_eq!(f2.pane_set.rows.scroll.as_ptr(), scroll_rows_ptr);
+    assert_eq!(f2.pane_set.cols.frozen.as_ptr(), frozen_cols_ptr);
+    assert_eq!(f2.pane_set.cols.scroll.as_ptr(), scroll_cols_ptr);
+    assert!(f2.pane_set.rows.frozen.capacity() >= frozen_rows_cap);
+    assert!(f2.pane_set.rows.scroll.capacity() >= scroll_rows_cap);
+    assert!(f2.pane_set.cols.frozen.capacity() >= frozen_cols_cap);
+    assert!(f2.pane_set.cols.scroll.capacity() >= scroll_cols_cap);
 }

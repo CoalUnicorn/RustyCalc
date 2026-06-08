@@ -19,7 +19,9 @@ use crate::style::{CellKind, CellStyle, HAlign, VAlign};
 
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
-use crate::painter::{CHAR_WIDTH_FACTOR, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
+use crate::painter::{
+    CHAR_WIDTH_FACTOR, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
 use crate::theme::CanvasTheme;

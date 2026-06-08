@@ -53,9 +53,10 @@ impl<P: Painter> RendererCore<P> {
                 let labels = &frame.pane_set.row_header_labels;
                 for (s, label) in frame
                     .pane_set
-                    .frozen_rows
+                    .rows
+                    .frozen
                     .iter()
-                    .chain(frame.pane_set.scroll_rows.iter())
+                    .chain(frame.pane_set.rows.scroll.iter())
                     .zip(labels.iter())
                 {
                     visit(s.row, s.top, s.height, label);
@@ -65,9 +66,10 @@ impl<P: Painter> RendererCore<P> {
                 let labels = &frame.pane_set.col_header_labels;
                 for (s, label) in frame
                     .pane_set
-                    .frozen_cols
+                    .cols
+                    .frozen
                     .iter()
-                    .chain(frame.pane_set.scroll_cols.iter())
+                    .chain(frame.pane_set.cols.scroll.iter())
                     .zip(labels.iter())
                 {
                     visit(s.col, s.left, s.width, label);

@@ -315,8 +315,8 @@ where
         let frame = self.last_frame.as_ref()?;
         let xi = x.round() as i32;
         let yi = y.round() as i32;
-        let row = frame.pane_set.pixel_to_row(yi)?;
-        let col = frame.pane_set.pixel_to_col(xi)?;
+        let row = frame.pane_set.rows.pixel_to_id(yi)?;
+        let col = frame.pane_set.cols.pixel_to_id(xi)?;
         Some((row, col))
     }
 

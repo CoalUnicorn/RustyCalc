@@ -70,10 +70,10 @@ impl Layer for FormulaRefsLayer {
                 // grab_row/grab_column are the cell the pointer is over right
                 // now. `None` means the pointer sits over chrome or off-
                 // grid; treat that as no hit even if the zone classified.
-                let Some(grab_row) = frame.pane_set.pixel_to_row(y) else {
+                let Some(grab_row) = frame.pane_set.rows.pixel_to_id(y) else {
                     continue;
                 };
-                let Some(grab_column) = frame.pane_set.pixel_to_col(x) else {
+                let Some(grab_column) = frame.pane_set.cols.pixel_to_id(x) else {
                     continue;
                 };
                 return Some(HitTest::FormulaRef {

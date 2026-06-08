@@ -36,7 +36,8 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
     let prev_row_header = prev.row_header_thickness;
     let last_at_prev = prev
         .pane_set
-        .scroll_rows
+        .rows
+        .scroll
         .last()
         .expect("scroll band non-empty")
         .row;

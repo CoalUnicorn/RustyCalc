@@ -214,7 +214,8 @@ fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
         );
         let first_col = frame
             .pane_set
-            .scroll_cols
+            .cols
+            .scroll
             .first()
             .expect("scrolled view must emit at least one column slot");
         assert_eq!(
@@ -224,7 +225,8 @@ fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
         );
         let first_row = frame
             .pane_set
-            .scroll_rows
+            .rows
+            .scroll
             .first()
             .expect("scrolled view must emit at least one row slot");
         assert_eq!(

@@ -6,7 +6,7 @@
 //! decoding.
 
 use crate::CanvasModel;
-use crate::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
+use crate::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RowSlot {
@@ -199,6 +199,104 @@ pub fn boundary_at<S: AxisSlot>(
     None
 }
 
+/// Frozen + scroll slot pair for one axis, plus the canvas coordinate where
+/// the scroll band begins (past the frozen band and its separator — `y` for
+/// rows, `x` for cols). Owns the axis-generic queries `PaneSet` previously
+/// delegated through the free fns above *twice*, once per axis. `PaneSet`
+/// composes one `AxisSlots` per axis instead of four flat vecs.
+#[derive(Clone, Debug)]
+pub struct AxisSlots<S: AxisSlot> {
+    pub frozen: Vec<S>,
+    pub scroll: Vec<S>,
+    pub frozen_offset: i32,
+}
+
+impl<S: AxisSlot> AxisSlots<S> {
+    #[inline]
+    pub fn frozen_count(&self) -> i32 {
+        self.frozen.len() as i32
+    }
+
+    #[inline]
+    pub fn slot(&self, id: i32) -> Option<&S> {
+        slot_at(&self.frozen, &self.scroll, id)
+    }
+
+    /// First scroll-band id (top row / left column), or 1 on an empty band.
+    #[inline]
+    pub fn top(&self) -> i32 {
+        top_id(&self.scroll)
+    }
+
+    #[inline]
+    pub fn last_visible(&self) -> i32 {
+        last_visible_id(&self.scroll)
+    }
+
+    #[inline]
+    pub fn pixel_to_id(&self, pixel: i32) -> Option<i32> {
+        pixel_to_id(&self.frozen, &self.scroll, pixel)
+    }
+
+    #[inline]
+    pub fn boundary_at(&self, pixel: i32, tolerance: i32) -> Option<i32> {
+        boundary_at(&self.frozen, &self.scroll, pixel, tolerance)
+    }
+
+    /// Leading-edge coordinate of `id`'s slot (row top / col left); 0 off-frame.
+    #[inline]
+    pub fn to_pixel(&self, id: i32) -> i32 {
+        self.slot(id).map(|s| s.start()).unwrap_or(0)
+    }
+
+    /// Extent of `id`'s slot (row height / col width); 0 off-frame.
+    #[inline]
+    pub fn extent_at(&self, id: i32) -> i32 {
+        self.slot(id).map(|s| s.extent()).unwrap_or(0)
+    }
+
+    #[inline]
+    pub fn contains(&self, id: i32) -> bool {
+        self.slot(id).is_some()
+    }
+
+    /// Populate `frozen` + `scroll` and record `frozen_offset`. Walks the
+    /// frozen band first (always painted — `i32::MAX` disables the viewport
+    /// break), notes where the scroll band starts, then walks the scroll band
+    /// from `view_first` to `last`, breaking at the canvas edge.
+    ///
+    /// `frozen_offset` is the seam invariant `boundary_at` relies on: the
+    /// scroll band must begin at or after the frozen band ends.
+    // Mirrors `fill_axis`'s walker shape — each arg is an independent axis
+    // input (counts, origin, viewport bound, measure); bundling them would
+    // only add an indirection struct.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fill(
+        &mut self,
+        model: &dyn CanvasModel,
+        frozen_count: i32,
+        origin: i32,
+        view_first: i32,
+        last: i32,
+        canvas_extent: i32,
+        mut measure: impl FnMut(&dyn CanvasModel, i32) -> i32,
+    ) {
+        self.frozen.reserve(frozen_count as usize);
+        let after_frozen = fill_axis(&mut self.frozen, 1..=frozen_count, origin, i32::MAX, |id| {
+            measure(model, id)
+        });
+        self.frozen_offset = after_frozen + if frozen_count > 0 { FROZEN_SEP } else { 0 };
+
+        let _ = fill_axis(
+            &mut self.scroll,
+            scroll_first(frozen_count, view_first)..=last,
+            self.frozen_offset,
+            canvas_extent,
+            |id| measure(model, id),
+        );
+    }
+}
+
 pub fn row_height(model: &dyn CanvasModel, row: i32) -> i32 {
     let sheet = model.get_selected_sheet();
     model
@@ -213,4 +311,48 @@ pub fn col_width(model: &dyn CanvasModel, col: i32) -> i32 {
         .get_column_width(sheet, col)
         .unwrap_or(DEFAULT_COL_WIDTH)
         .round() as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two frozen rows (ids 1,2) at y=0,20 then a scroll band starting at the
+    /// recorded `frozen_offset`, ids 5.. (the user scrolled past 3,4).
+    fn rows() -> AxisSlots<RowSlot> {
+        AxisSlots {
+            frozen: vec![RowSlot::new(1, 0, 20), RowSlot::new(2, 20, 20)],
+            scroll: vec![RowSlot::new(5, 48, 20), RowSlot::new(6, 68, 20)],
+            frozen_offset: 48,
+        }
+    }
+
+    #[test]
+    fn slot_lookup_spans_frozen_then_scroll() {
+        let r = rows();
+        assert_eq!(r.frozen_count(), 2);
+        assert_eq!(r.slot(2).map(|s| s.start()), Some(20)); // frozen
+        assert_eq!(r.slot(5).map(|s| s.start()), Some(48)); // scroll, id-indexed
+        assert!(r.slot(3).is_none()); // scrolled off, between the bands
+    }
+
+    #[test]
+    fn pixel_and_boundary_walk_one_ascending_space() {
+        let r = rows();
+        assert_eq!(r.pixel_to_id(25), Some(2)); // inside frozen row 2
+        assert_eq!(r.pixel_to_id(50), Some(5)); // inside first scroll row
+        assert_eq!(r.boundary_at(40, 3), Some(2)); // frozen row 2's trailing edge
+        assert_eq!(r.boundary_at(88, 3), Some(6)); // last scroll row's edge
+    }
+
+    #[test]
+    fn pixel_accessors_resolve_edges_and_extents() {
+        let r = rows();
+        assert_eq!(r.top(), 5);
+        assert_eq!(r.last_visible(), 6);
+        assert_eq!(r.to_pixel(6), 68);
+        assert_eq!(r.extent_at(6), 20);
+        assert_eq!(r.to_pixel(99), 0); // off-frame falls back to 0
+        assert!(r.contains(1) && !r.contains(99));
+    }
 }

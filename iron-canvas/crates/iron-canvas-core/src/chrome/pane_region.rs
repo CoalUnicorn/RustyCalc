@@ -21,15 +21,15 @@ pub enum PaneRegion {
 impl PaneRegion {
     pub fn rows(self, frame: &Chrome) -> &[RowSlot] {
         match self {
-            PaneRegion::TopLeft | PaneRegion::TopRight => &frame.pane_set.frozen_rows,
-            PaneRegion::BottomLeft | PaneRegion::BottomRight => &frame.pane_set.scroll_rows,
+            PaneRegion::TopLeft | PaneRegion::TopRight => &frame.pane_set.rows.frozen,
+            PaneRegion::BottomLeft | PaneRegion::BottomRight => &frame.pane_set.rows.scroll,
         }
     }
 
     pub fn cols(self, frame: &Chrome) -> &[ColSlot] {
         match self {
-            PaneRegion::TopLeft | PaneRegion::BottomLeft => &frame.pane_set.frozen_cols,
-            PaneRegion::TopRight | PaneRegion::BottomRight => &frame.pane_set.scroll_cols,
+            PaneRegion::TopLeft | PaneRegion::BottomLeft => &frame.pane_set.cols.frozen,
+            PaneRegion::TopRight | PaneRegion::BottomRight => &frame.pane_set.cols.scroll,
         }
     }
 

@@ -185,17 +185,18 @@ impl Chrome {
                 let Some(prev) = prev else {
                     return Self::next(None, model, canvas, theme, FramePath::Fresh);
                 };
-                if let Some(frame) = blit::try_blit_reuse(&prev, model, canvas, theme, plan) {
-                    return frame;
-                }
                 // Qualification passed (`screen_for_blit` returned a plan) but
-                // in-place reuse rejected — e.g. row-header digit boundary at
-                // 99 → 100, where `row_header_thickness` widens by one digit
-                // and the cross-axis cell-area origin shifts. The frame
-                // returns as `Fresh` (not the `Blitted` mislabel of yore);
-                // `paint_viewport_regime` dispatches on `frame.kind` and
-                // calls the full `paint_grid` path with cache invalidation.
-                Self::next(Some(prev), model, canvas, theme, FramePath::Fresh)
+                // in-place reuse may still reject — e.g. row-header digit
+                // boundary at 99 → 100, where `row_header_thickness` widens by
+                // one digit and the cross-axis cell-area origin shifts. On
+                // reject `try_blit_reuse` hands `prev` back (`Err`) so the
+                // frame returns as `Fresh` (not the `Blitted` mislabel of
+                // yore); `paint_viewport_regime` dispatches on `frame.kind`
+                // and calls the full `paint_grid` path with cache invalidation.
+                match blit::try_blit_reuse(prev, model, canvas, theme, plan) {
+                    Ok(frame) => frame,
+                    Err(prev) => Self::next(Some(prev), model, canvas, theme, FramePath::Fresh),
+                }
             }
         }
     }
@@ -248,7 +249,8 @@ impl Chrome {
 
         // Phase C — measure row_header_thickness from the last visible row label.
         let last_visible_row = pane_set
-            .scroll_rows
+            .rows
+            .scroll
             .last()
             .map(|s| s.row)
             .unwrap_or((frozen_row_count + 1).max(view.top_row));
@@ -275,9 +277,9 @@ impl Chrome {
         // Data-driven header labels in walk_header_strip (frozen ++ scroll)
         // order so header_strip can zip slots <-> labels positionally.
         pane_set.row_header_labels =
-            PaneSet::resolve_row_labels(model, sheet, &pane_set.frozen_rows, &pane_set.scroll_rows);
+            PaneSet::resolve_row_labels(model, sheet, &pane_set.rows.frozen, &pane_set.rows.scroll);
         pane_set.col_header_labels =
-            PaneSet::resolve_col_labels(model, sheet, &pane_set.frozen_cols, &pane_set.scroll_cols);
+            PaneSet::resolve_col_labels(model, sheet, &pane_set.cols.frozen, &pane_set.cols.scroll);
 
         // Phase E — assemble. `cell_origin` reuses the locals from B/D so
         // there's a single source of truth for the cell-area top-left.
@@ -323,8 +325,8 @@ impl Chrome {
         if self.pane_set.top_row() != want_top || self.pane_set.left_column() != want_left {
             return FrameValidity::Rebuild;
         }
-        if frozen_rows == self.pane_set.frozen_rows_count()
-            && frozen_cols == self.pane_set.frozen_cols_count()
+        if frozen_rows == self.pane_set.rows.frozen_count()
+            && frozen_cols == self.pane_set.cols.frozen_count()
             && sheet == self.sheet
         {
             FrameValidity::SlotsReuse
@@ -359,8 +361,8 @@ impl Chrome {
         }
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        if frozen_rows != self.pane_set.frozen_rows_count()
-            || frozen_cols != self.pane_set.frozen_cols_count()
+        if frozen_rows != self.pane_set.rows.frozen_count()
+            || frozen_cols != self.pane_set.cols.frozen_count()
         {
             return None;
         }
@@ -407,8 +409,8 @@ impl Chrome {
     /// model access.
     pub fn range_rect(&self, range: RCRange) -> Option<PixelRect> {
         let p = &self.pane_set;
-        let frozen_rows = p.frozen_rows_count();
-        let frozen_cols = p.frozen_cols_count();
+        let frozen_rows = p.rows.frozen_count();
+        let frozen_cols = p.cols.frozen_count();
 
         if !self.range_intersects_fold(range, frozen_rows, frozen_cols) {
             return None;
@@ -491,18 +493,18 @@ impl Chrome {
         }
         let p = &self.pane_set;
         if y < self.cell_origin.y {
-            return match p.pixel_to_col(x) {
+            return match p.cols.pixel_to_id(x) {
                 Some(c) => HitTest::ColumnHeader(c),
                 None => HitTest::Outside,
             };
         }
         if x < self.cell_origin.x {
-            return match p.pixel_to_row(y) {
+            return match p.rows.pixel_to_id(y) {
                 Some(r) => HitTest::RowHeader(r),
                 None => HitTest::Outside,
             };
         }
-        let (Some(row), Some(column)) = (p.pixel_to_row(y), p.pixel_to_col(x)) else {
+        let (Some(row), Some(column)) = (p.rows.pixel_to_id(y), p.cols.pixel_to_id(x)) else {
             return HitTest::Outside;
         };
         // `AutofillHandle` is resolved by `AutofillLayer::hit_test` in
@@ -515,13 +517,15 @@ impl Chrome {
         if y < self.col_header_thickness && x > self.row_header_thickness {
             return self
                 .pane_set
-                .col_boundary_at(x, tolerance)
+                .cols
+                .boundary_at(x, tolerance)
                 .map(ResizeTarget::ColumnEdge);
         }
         if x < self.row_header_thickness && y > self.col_header_thickness {
             return self
                 .pane_set
-                .row_boundary_at(y, tolerance)
+                .rows
+                .boundary_at(y, tolerance)
                 .map(ResizeTarget::RowEdge);
         }
         None
