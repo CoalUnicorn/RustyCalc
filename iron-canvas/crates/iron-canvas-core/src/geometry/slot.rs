@@ -90,22 +90,22 @@ impl AxisSlot for ColSlot {
 /// `max_cursor`. Returns the cursor past the last accepted slot (where the
 /// next slot would sit) — used by the frozen pass to compute the band offset.
 ///
-/// `max_cursor = i32::MAX` disables the break, used for the frozen band which
+/// `max_cursor = None` disables the break, used for the frozen band which
 /// always paints regardless of viewport size. For the scroll band callers
-/// pass `canvas_extent.ceil() as i32` — exactly equivalent to the original
-/// `f64::from(cursor) >= canvas_extent` test, for any positive extent.
+/// pass `Some(canvas_extent.ceil() as i32)` — exactly equivalent to the
+/// original `f64::from(cursor) >= canvas_extent` test, for any positive extent.
 pub fn fill_axis<S: AxisSlot>(
     slots: &mut Vec<S>,
     range: std::ops::RangeInclusive<i32>,
     start: i32,
-    max_cursor: i32,
+    max_cursor: Option<i32>,
     mut measure: impl FnMut(i32) -> i32,
 ) -> i32 {
     let mut cursor = start;
     for id in range {
         let extent = measure(id);
         slots.push(S::new(id, cursor, extent));
-        if cursor >= max_cursor {
+        if max_cursor.is_some_and(|max| cursor >= max) {
             break;
         }
         cursor += extent;
@@ -261,7 +261,7 @@ impl<S: AxisSlot> AxisSlots<S> {
     }
 
     /// Populate `frozen` + `scroll` and record `frozen_offset`. Walks the
-    /// frozen band first (always painted — `i32::MAX` disables the viewport
+    /// frozen band first (always painted — `None` disables the viewport
     /// break), notes where the scroll band starts, then walks the scroll band
     /// from `view_first` to `last`, breaking at the canvas edge.
     ///
@@ -282,7 +282,7 @@ impl<S: AxisSlot> AxisSlots<S> {
         mut measure: impl FnMut(&dyn CanvasModel, i32) -> i32,
     ) {
         self.frozen.reserve(frozen_count as usize);
-        let after_frozen = fill_axis(&mut self.frozen, 1..=frozen_count, origin, i32::MAX, |id| {
+        let after_frozen = fill_axis(&mut self.frozen, 1..=frozen_count, origin, None, |id| {
             measure(model, id)
         });
         self.frozen_offset = after_frozen + if frozen_count > 0 { FROZEN_SEP } else { 0 };
@@ -291,7 +291,7 @@ impl<S: AxisSlot> AxisSlots<S> {
             &mut self.scroll,
             scroll_first(frozen_count, view_first)..=last,
             self.frozen_offset,
-            canvas_extent,
+            Some(canvas_extent),
             |id| measure(model, id),
         );
     }

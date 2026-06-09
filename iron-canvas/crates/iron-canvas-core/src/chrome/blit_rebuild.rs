@@ -124,7 +124,7 @@ fn rebuild_axis_slots<S: AxisSlot>(
             &mut new_slots,
             new_first_idx..=strip_last,
             frozen_offset,
-            i32::MAX,
+            None,
             &measure,
         );
         let strip_size = strip_cursor_end - frozen_offset;
@@ -151,7 +151,7 @@ fn rebuild_axis_slots<S: AxisSlot>(
             &mut new_slots,
             next_id..=last_idx_limit,
             cursor,
-            max_cursor,
+            Some(max_cursor),
             &measure,
         );
     }
