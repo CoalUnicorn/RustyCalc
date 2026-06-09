@@ -23,6 +23,7 @@ pub use paint::{CellPaint, PaneCells};
 
 use crate::style::{CellDecoration, CellKind, CellStyle};
 
+use self::borders::BorderPaint;
 use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
 use crate::CanvasModel;
@@ -181,8 +182,13 @@ impl<P: Painter> RendererCore<P> {
                 self.painter.paint_cf_decoration(p.rect, deco);
             }
         }
+        // Grid-line BorderPaint is theme-only, identical for every cell in the
+        // pass. Build once here instead of per slot inside `paint_borders_grid`
+        // (B-3) — on host-page themes that was one `theme.grid_color` String
+        // clone per cell.
+        let grid = BorderPaint::grid_line(theme);
         for p in &slots {
-            self.paint_borders_grid(p, theme);
+            self.paint_borders_grid(p, &grid);
         }
         for p in &slots {
             self.paint_borders_explicit(p);

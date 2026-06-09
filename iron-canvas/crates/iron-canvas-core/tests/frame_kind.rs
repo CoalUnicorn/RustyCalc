@@ -13,7 +13,7 @@ use common::{TestModel, canvas_default};
 #[test]
 fn next_frame_emits_fresh_when_no_prev() {
     let model = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let frame = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
     assert_eq!(frame.kind, FrameKindTag::Fresh);
     assert!(
@@ -25,7 +25,7 @@ fn next_frame_emits_fresh_when_no_prev() {
 #[test]
 fn from_slots_reuse_emits_slots_reused() {
     let model = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let fresh = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
     let reused = Chrome::next(
         Some(fresh),
@@ -54,7 +54,7 @@ fn from_slots_reuse_emits_slots_reused() {
 #[test]
 fn slots_reuse_uses_caller_supplied_stale_panes() {
     let model = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let mut prev = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
     prev.stale_panes = PaneRegionMask::EMPTY;
 

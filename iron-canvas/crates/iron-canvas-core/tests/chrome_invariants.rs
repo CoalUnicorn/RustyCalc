@@ -32,7 +32,7 @@ fn scrolled_to(top_row: i32) -> TestModel {
 }
 
 fn drive_render_grid(model: &TestModel, check: impl FnOnce(&Chrome, &[DrawOp])) {
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let frame = Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(model, &frame);

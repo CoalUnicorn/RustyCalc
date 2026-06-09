@@ -17,7 +17,7 @@ use iron_canvas_recorder::{DrawOp, RecorderPainter};
 use common::{TestModel, canvas_default};
 
 fn fresh_frame(model: &TestModel) -> Chrome {
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh)
 }
 

@@ -35,7 +35,7 @@ fn promote_to_slots_reuse(frame: &mut Chrome) {
 #[test]
 fn render_pane_skips_on_idempotent_repaint() {
     let m = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
 
     // First paint runs through the full 4-pass walk; the kind is Fresh,
@@ -62,7 +62,7 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
     // cols 1..=2, BottomRight owns cols 3..=. A mutation in one pane
     // must leave the other pane's fingerprint untouched.
     let m = TestModel::synthetic_grid().with_frozen_cols(2);
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
 
     let _ = paint_pane(&m, &frame, PaneRegion::BottomLeft);

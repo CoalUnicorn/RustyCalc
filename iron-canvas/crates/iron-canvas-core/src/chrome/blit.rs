@@ -10,6 +10,7 @@
 //! carries forward, only the strip hits the model.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
@@ -256,7 +257,7 @@ pub(super) fn try_blit_reuse(
     mut prev: Chrome,
     model: &dyn CanvasModel,
     canvas: CanvasSize,
-    theme: &CanvasTheme,
+    theme: &Rc<CanvasTheme>,
     plan: &BlitPlan,
 ) -> Result<Chrome, Chrome> {
     let Some(view) = model.get_selected_view() else {
@@ -357,7 +358,7 @@ pub(super) fn try_blit_reuse(
         col_header_thickness: prev.col_header_thickness,
         cell_origin: prev.cell_origin,
         canvas_size: canvas,
-        theme: theme.clone(),
+        theme: Rc::clone(theme),
         prev_pane_fingerprints: prev_fps,
         pane_fingerprints: Cell::new(seeded_fps),
         kind: FrameKindTag::Blitted,

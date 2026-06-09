@@ -9,6 +9,7 @@
 use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
 use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW},
@@ -92,7 +93,11 @@ pub struct Chrome {
     /// Theme this frame was painted with. The renderer reads `frame.theme`
     /// directly; `IronCanvas::set_theme` marks both layers dirty on change,
     /// so the overlay-only fast path never paints against a stale theme.
-    pub theme: CanvasTheme,
+    ///
+    /// `Rc` so the per-frame snapshot is a refcount bump, not a deep clone of
+    /// every color `String` — `Chrome` is rebuilt on every Fresh/SlotsReuse/
+    /// Blit frame (B-1).
+    pub theme: Rc<CanvasTheme>,
     /// Pane content fingerprints from the *previous* frame, snapshotted
     /// in `Chrome::next`. Indexed by `PaneRegion as usize`. Zero on first
     /// paint and after a `Rebuild` so the natural compare always misses.
@@ -158,7 +163,7 @@ impl Chrome {
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
         canvas: CanvasSize,
-        theme: &CanvasTheme,
+        theme: &Rc<CanvasTheme>,
         path: FramePath<'_>,
     ) -> Self {
         match path {
@@ -177,7 +182,7 @@ impl Chrome {
                     return Self::next(None, model, canvas, theme, FramePath::Fresh);
                 };
                 prev.prev_pane_fingerprints = prev.pane_fingerprints.replace([0; 4]);
-                prev.theme = theme.clone();
+                prev.theme = Rc::clone(theme);
                 prev.kind = FrameKindTag::SlotsReused;
                 prev.stale_panes = stale_panes;
                 prev
@@ -205,7 +210,7 @@ impl Chrome {
     fn build(
         model: &dyn CanvasModel,
         canvas: CanvasSize,
-        theme: &CanvasTheme,
+        theme: &Rc<CanvasTheme>,
         recycled: RecycledSlots,
         prev_pane_fingerprints: [u64; 4],
     ) -> Self {
@@ -297,7 +302,7 @@ impl Chrome {
             col_header_thickness,
             cell_origin,
             canvas_size: canvas,
-            theme: theme.clone(),
+            theme: Rc::clone(theme),
             prev_pane_fingerprints,
             pane_fingerprints: Cell::new([0; 4]),
             kind: FrameKindTag::Fresh,
@@ -350,7 +355,7 @@ impl Chrome {
         &self,
         model: &dyn CanvasModel,
         canvas: CanvasSize,
-        theme: &CanvasTheme,
+        theme: &Rc<CanvasTheme>,
         active_cell: &ActiveCellSnapshot,
     ) -> Option<BlitPlan> {
         if canvas != self.canvas_size || theme != &self.theme {

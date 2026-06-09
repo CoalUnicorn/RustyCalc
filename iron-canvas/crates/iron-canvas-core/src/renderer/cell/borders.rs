@@ -87,7 +87,7 @@ impl BorderPaint {
     /// Thin grid-color stroke used as the left/top fallback when a cell has
     /// no explicit border on that edge. `Cow::clone` is a pointer copy for
     /// built-in themes and a `String::clone` for host-page themes.
-    fn grid_line(theme: &CanvasTheme) -> Self {
+    pub(super) fn grid_line(theme: &CanvasTheme) -> Self {
         Self {
             color: BorderColor::Static(theme.grid_color.clone()),
             stroke: BorderStroke {
@@ -148,19 +148,21 @@ impl<P: Painter> RendererCore<P> {
     /// Reads `p.borders` (pre-resolved at iteration time) so an explicit
     /// border on left/top still suppresses the grid stroke without re-walking
     /// `style.border`.
-    pub(super) fn paint_borders_grid(&self, p: &CellPaint, theme: &CanvasTheme) {
+    /// `grid` is the theme's grid-line `BorderPaint`, resolved once per pass by
+    /// the caller and shared across every cell — it's frame-invariant, so
+    /// rebuilding it per slot only re-cloned `theme.grid_color` for nothing (B-3).
+    pub(super) fn paint_borders_grid(&self, p: &CellPaint, grid: &BorderPaint) {
         if !self.frame_cache.show_grid.get() {
             return;
         }
         if p.style.fill_color.is_some() {
             return;
         }
-        let grid = BorderPaint::grid_line(theme);
         if p.borders.left.is_none() {
-            self.paint_border(BorderEdge::Left, p.rect, &grid);
+            self.paint_border(BorderEdge::Left, p.rect, grid);
         }
         if p.borders.top.is_none() {
-            self.paint_border(BorderEdge::Top, p.rect, &grid);
+            self.paint_border(BorderEdge::Top, p.rect, grid);
         }
     }
 
@@ -188,7 +190,7 @@ impl<P: Painter> RendererCore<P> {
     /// sub-passes in their canonical order: grid fallback first, explicit
     /// over the top.
     pub(super) fn paint_borders(&self, p: &CellPaint, theme: &CanvasTheme) {
-        self.paint_borders_grid(p, theme);
+        self.paint_borders_grid(p, &BorderPaint::grid_line(theme));
         self.paint_borders_explicit(p);
     }
 

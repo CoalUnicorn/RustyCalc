@@ -46,7 +46,7 @@ fn count_rect_fills(ops: &[DrawOp]) -> usize {
 #[test]
 fn scroll_by_one_row_emits_exactly_one_blit_op() {
     let m = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
     // Frame 0 at top_row=1.
@@ -118,7 +118,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
 #[test]
 fn scroll_past_viewport_disqualifies_blit() {
     let m = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
     let frame0 = Chrome::next(
@@ -143,7 +143,7 @@ fn scroll_past_viewport_disqualifies_blit() {
 #[test]
 fn scroll_by_one_column_emits_exactly_one_blit_op() {
     let m = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
     let frame0 = Chrome::next(
@@ -195,7 +195,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
 #[test]
 fn scroll_by_one_row_paints_only_strip_cells() {
     let m = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
     let frame0 = Chrome::next(
@@ -256,7 +256,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
 #[test]
 fn active_cell_value_change_disqualifies_blit() {
     let m = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
     // Frame 0 paints with row 1 ("R1" coords) returning "".
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
@@ -284,7 +284,7 @@ fn active_cell_value_change_disqualifies_blit() {
 fn active_cell_value_unchanged_allows_blit() {
     let m = TestModel::synthetic_grid();
     m.set_data_until(20); // row 1's value is "R1" in both frames.
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
 
@@ -300,7 +300,7 @@ fn active_cell_value_unchanged_allows_blit() {
 #[test]
 fn overlap_row_height_change_disqualifies_blit() {
     let m = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
     // Frame 0 sees row 5 at the default 20 px height.
@@ -335,7 +335,7 @@ fn overlap_row_height_change_disqualifies_blit() {
 fn scroll_blit_does_not_smear_last_data_row_into_strip() {
     let m = TestModel::synthetic_grid();
     m.set_data_until(15);
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
@@ -385,7 +385,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
 fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
     let m = TestModel::synthetic_grid();
     m.set_data_until(20);
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
     let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);

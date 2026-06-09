@@ -82,7 +82,7 @@ where
 {
     pub(crate) grid: LayerBase<S, GridRenderer<S::P>>,
     pub(crate) overlay: LayerBase<S, OverlayRenderer<S::P>>,
-    theme: CanvasTheme,
+    theme: Rc<CanvasTheme>,
     decos: Decorations,
     model: Option<Rc<dyn CanvasModel>>,
     last_frame: Option<Chrome>,
@@ -116,7 +116,7 @@ where
         Self {
             grid: LayerBase::new(grid_surface, grid_renderer),
             overlay: LayerBase::new(overlay_surface, overlay_renderer),
-            theme: CanvasTheme::light(),
+            theme: Rc::new(CanvasTheme::light()),
             decos: Decorations::default(),
             model: None,
             last_frame: None,
@@ -201,8 +201,8 @@ where
     /// theme, so without the cache invalidation `SlotsReuse` would
     /// repaint stale-color cells under fresh chrome.
     pub fn set_theme(&mut self, theme: CanvasTheme) {
-        if theme != self.theme {
-            self.theme = theme;
+        if theme != *self.theme {
+            self.theme = Rc::new(theme);
             self.last_frame = None;
             self.grid.invalidate_paint_cache();
             self.grid

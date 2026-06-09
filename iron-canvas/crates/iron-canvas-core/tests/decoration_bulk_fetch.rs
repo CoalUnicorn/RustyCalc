@@ -83,7 +83,7 @@ fn decoration_reaches_painter_and_skip_is_stable() {
         }),
     );
 
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let mut frame = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
 
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));

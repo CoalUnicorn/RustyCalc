@@ -11,7 +11,13 @@ use common::TestModel;
 const CANVAS: CanvasSize = CanvasSize { w: 600.0, h: 400.0 };
 
 fn frame(model: &TestModel) -> Chrome {
-    Chrome::next(None, model, CANVAS, &CanvasTheme::light(), FramePath::Fresh)
+    Chrome::next(
+        None,
+        model,
+        CANVAS,
+        &std::rc::Rc::new(CanvasTheme::light()),
+        FramePath::Fresh,
+    )
 }
 
 #[test]
@@ -74,7 +80,7 @@ fn bottom_left_band_x(plan: &BlitPlan) -> Option<i32> {
 #[test]
 fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_hidden() {
     let canvas = canvas_default();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
 
     // Build a model with 2 frozen columns and hidden row headers, with enough
     // data rows that a single-row scroll has an overlap window to qualify.
@@ -113,7 +119,7 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_hidden() {
 #[test]
 fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_shown() {
     let canvas = canvas_default();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
 
     let m = TestModel::synthetic_grid().with_frozen_cols(2);
     m.set_data_until(30);
@@ -164,7 +170,7 @@ fn top_right_band_y(plan: &BlitPlan) -> Option<i32> {
 #[test]
 fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_hidden() {
     let canvas = canvas_default();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
 
     // Build a model with 2 frozen rows and hidden col headers, with enough
     // data that a single-column scroll has an overlap window to qualify.
@@ -203,7 +209,7 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_hidden() {
 #[test]
 fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_shown() {
     let canvas = canvas_default();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
 
     let m = TestModel::synthetic_grid().with_frozen_rows(2);
     m.set_data_until(30);

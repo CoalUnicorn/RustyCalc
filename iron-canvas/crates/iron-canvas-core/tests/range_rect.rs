@@ -13,7 +13,7 @@ use iron_canvas_core::theme::CanvasTheme;
 use common::{TestModel, canvas_default};
 
 fn fresh(model: &TestModel) -> Chrome {
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh)
 }
 
