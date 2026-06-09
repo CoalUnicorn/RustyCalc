@@ -1,6 +1,6 @@
 use crate::DataGrid;
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CanvasModel, CanvasView, CellKind, CellStyle, Fetched};
+use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched};
 
 impl CanvasModel for DataGrid {
     fn get_selected_sheet(&self) -> u32 {
@@ -35,6 +35,21 @@ impl CanvasModel for DataGrid {
     fn get_show_grid_lines(&self, _s: u32) -> Option<bool> {
         Some(true)
     }
+    fn get_column_header_text(&self, _s: u32, col: i32) -> Option<String> {
+        if col < 1 {
+            return None;
+        }
+        self.column_header((col - 1) as usize).map(str::to_owned)
+    }
+    fn get_row_header_text(&self, _s: u32, _row: i32) -> Option<String> {
+        // DataGrid has no row-header customization — always use numeric labels.
+        // Override is explicit (instead of relying on the trait default) so the
+        // symmetry with `get_column_header_text` is visible at the impl site.
+        None
+    }
+}
+
+impl CellContentQuery for DataGrid {
     fn get_cell_style(&self, _s: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         if row < 1 || column < 1 {
             return Fetched::Value(CellStyle::default());
@@ -55,17 +70,5 @@ impl CanvasModel for DataGrid {
             Some(v) => Fetched::Value(v.to_owned()),
             None => Fetched::Absent,
         }
-    }
-    fn get_column_header_text(&self, _s: u32, col: i32) -> Option<String> {
-        if col < 1 {
-            return None;
-        }
-        self.column_header((col - 1) as usize).map(str::to_owned)
-    }
-    fn get_row_header_text(&self, _s: u32, _row: i32) -> Option<String> {
-        // DataGrid has no row-header customization — always use numeric labels.
-        // Override is explicit (instead of relying on the trait default) so the
-        // symmetry with `get_column_header_text` is visible at the impl site.
-        None
     }
 }

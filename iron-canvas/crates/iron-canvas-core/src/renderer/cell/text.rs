@@ -146,9 +146,6 @@ impl TextPaint {
         let approx_char_w = size_px * CHAR_WIDTH_FACTOR;
         let line_height = size_px * LINE_HEIGHT_FACTOR;
         let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
-        let right = rect.right();
-        let bottom = rect.bottom();
-        let center = rect.center();
 
         // Layout pass: split + wrap, measuring once. `lines` comes back with
         // text + width populated and `center_x/y` left at 0.0 for the position
@@ -167,30 +164,7 @@ impl TextPaint {
         );
         drop(wrap_buf);
 
-        let line_count = lines.len() as f64;
-        for (i, line) in lines.iter_mut().enumerate() {
-            let i_f = i as f64;
-            let tw = line.width;
-            // Left / General / Justify / Distributed / Fill default to left-anchored.
-            line.center_x = match h_align {
-                HAlign::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
-                HAlign::Center | HAlign::CenterContinuous => f64::from(center.x),
-                _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
-            };
-            // Top / Justify / Distributed default to top-anchored.
-            line.center_y = match v_align {
-                VAlign::Bottom => {
-                    f64::from(bottom) - size_px / 2.0 - TEXT_V_INSET_PX
-                        + (i_f - line_count + 1.0) * line_height
-                }
-                VAlign::Center => {
-                    f64::from(center.y) + (i_f + (1.0 - line_count) / 2.0) * line_height
-                }
-                _ => {
-                    f64::from(rect.top_left.y) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height
-                }
-            };
-        }
+        position_lines(lines, h_align, v_align, rect, size_px, line_height);
 
         let needs_clip = lines.len() > 1 || lines.iter().any(|l| l.width > usable_w);
 
@@ -204,6 +178,43 @@ impl TextPaint {
             h_align,
             needs_clip,
         })
+    }
+}
+
+/// Assign each already-measured line its `center_x`/`center_y` anchor. Split out
+/// of `resolve_into` so the pipeline reads resolve → layout → position → assemble
+/// without a 20-line alignment digression inline (B-4). Mutates `lines` in place;
+/// `width` must already be populated by `layout_into`.
+fn position_lines(
+    lines: &mut [TextLine],
+    h_align: HAlign,
+    v_align: VAlign,
+    rect: PixelRect,
+    size_px: f64,
+    line_height: f64,
+) {
+    let right = rect.right();
+    let bottom = rect.bottom();
+    let center = rect.center();
+    let line_count = lines.len() as f64;
+    for (i, line) in lines.iter_mut().enumerate() {
+        let i_f = i as f64;
+        let tw = line.width;
+        // Left / General / Justify / Distributed / Fill default to left-anchored.
+        line.center_x = match h_align {
+            HAlign::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
+            HAlign::Center | HAlign::CenterContinuous => f64::from(center.x),
+            _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
+        };
+        // Top / Justify / Distributed default to top-anchored.
+        line.center_y = match v_align {
+            VAlign::Bottom => {
+                f64::from(bottom) - size_px / 2.0 - TEXT_V_INSET_PX
+                    + (i_f - line_count + 1.0) * line_height
+            }
+            VAlign::Center => f64::from(center.y) + (i_f + (1.0 - line_count) / 2.0) * line_height,
+            _ => f64::from(rect.top_left.y) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
+        };
     }
 }
 

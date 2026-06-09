@@ -16,42 +16,20 @@ pub struct CanvasView {
     pub left_column: i32,
 }
 
-/// Read-only worksheet surface the renderer consumes; every method is a pure
-/// query against the host model.
+/// The cell-content slice of the model: per-cell style, type, value, and CF
+/// decoration, plus their bulk (`*_in`) counterparts. Carved out as a
+/// supertrait of [`CanvasModel`] so the hottest loop — the cell painter — can
+/// state at the type level that it reads *cell content only*: its entry points
+/// take `&dyn CellContentQuery`, a `&dyn CanvasModel` upcasting to it at the
+/// call site (trait upcasting, stable since Rust 1.86).
 ///
-/// The content accessors (`get_cell_style`, `get_cell_type`,
+/// The single accessors (`get_cell_style`, `get_cell_type`,
 /// `get_formatted_cell_value`, `get_extended_cell_style`) return [`Fetched<T>`]
-/// so a transient bridge failure (`BridgeFailed`) is distinct from a legitimately
-/// empty cell (`Absent`). The `Option`-returning config/selection accessors carry
-/// the one meaning still left to them — `None` is a transient bridge failure —
-/// while the `get_*_header_text` overrides use `None` for "no override, fall back
-/// to the default."
-pub trait CanvasModel {
-    fn get_selected_sheet(&self) -> u32;
-    /// `None` signals a transient JS-bridge failure: the bridge call threw
-    /// or the returned shape didn't deserialize. The next animation frame
-    /// will re-query.
-    fn get_selected_view(&self) -> Option<CanvasView>;
-    fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
-    fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
-
-    /// Whether the row-header strip (1, 2, 3...) is visible on `sheet`.
-    /// `Some(true)` default; `None` carries the same fetch-failed meaning
-    /// as the other accessors. `false` collapses the strip to zero width.
-    fn get_show_row_headers(&self, _sheet: u32) -> Option<bool> {
-        Some(true)
-    }
-
-    /// Whether the column-header strip (A, B, C...) is visible on `sheet`.
-    /// `Some(true)` default; `None` carries the same fetch-failed meaning
-    /// as the other accessors. `false` collapses the strip to zero height.
-    fn get_show_col_headers(&self, _sheet: u32) -> Option<bool> {
-        Some(true)
-    }
-
+/// so a transient bridge failure (`BridgeFailed`) is distinct from a
+/// legitimately empty cell (`Absent`). The bulk `*_in` accessors are mutually
+/// closed — their defaults loop the single accessors — so the eight methods
+/// move as one self-contained unit.
+pub trait CellContentQuery {
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle>;
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
@@ -69,19 +47,6 @@ pub trait CanvasModel {
         _column: i32,
     ) -> Fetched<CellDecoration> {
         Fetched::Absent
-    }
-
-    /// Override text for a row header slot. `None` means use the default
-    /// numeric label (1, 2, 3...). Implementations that don't support custom
-    /// header text omit the override.
-    fn get_row_header_text(&self, _sheet: u32, _row: i32) -> Option<String> {
-        None
-    }
-
-    /// Override text for a column header slot. `None` means use the default
-    /// alphabetic label (A, B, C...).
-    fn get_column_header_text(&self, _sheet: u32, _col: i32) -> Option<String> {
-        None
     }
 
     /// Bulk-fetch cell styles for `range` on `sheet`. Output is dense,
@@ -154,10 +119,58 @@ pub trait CanvasModel {
     }
 }
 
+/// Read-only worksheet surface the renderer consumes; every method is a pure
+/// query against the host model. Extends [`CellContentQuery`] (the per-cell
+/// content slice) with the sheet-level config and selection accessors.
+///
+/// The `Option`-returning config/selection accessors use `None` for a transient
+/// JS-bridge failure (the next animation frame re-queries), while the
+/// `get_*_header_text` overrides use `None` for "no override, fall back to the
+/// default."
+pub trait CanvasModel: CellContentQuery {
+    fn get_selected_sheet(&self) -> u32;
+    /// `None` signals a transient JS-bridge failure: the bridge call threw
+    /// or the returned shape didn't deserialize. The next animation frame
+    /// will re-query.
+    fn get_selected_view(&self) -> Option<CanvasView>;
+    fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
+    fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
+    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
+    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
+    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+
+    /// Whether the row-header strip (1, 2, 3...) is visible on `sheet`.
+    /// `Some(true)` default; `None` carries the same fetch-failed meaning
+    /// as the other accessors. `false` collapses the strip to zero width.
+    fn get_show_row_headers(&self, _sheet: u32) -> Option<bool> {
+        Some(true)
+    }
+
+    /// Whether the column-header strip (A, B, C...) is visible on `sheet`.
+    /// `Some(true)` default; `None` carries the same fetch-failed meaning
+    /// as the other accessors. `false` collapses the strip to zero height.
+    fn get_show_col_headers(&self, _sheet: u32) -> Option<bool> {
+        Some(true)
+    }
+
+    /// Override text for a row header slot. `None` means use the default
+    /// numeric label (1, 2, 3...). Implementations that don't support custom
+    /// header text omit the override.
+    fn get_row_header_text(&self, _sheet: u32, _row: i32) -> Option<String> {
+        None
+    }
+
+    /// Override text for a column header slot. `None` means use the default
+    /// alphabetic label (A, B, C...).
+    fn get_column_header_text(&self, _sheet: u32, _col: i32) -> Option<String> {
+        None
+    }
+}
+
 /// Emits forwarding bodies that defer to `(**self).<method>(args)` for each
-/// listed signature. Used once below to populate the `Rc<T>` blanket impl
+/// listed signature. Used by the `Rc<T>` blanket impls below — once per trait —
 /// without hand-written shims that move together.
-macro_rules! forward_canvas_model {
+macro_rules! forward_methods {
     ($(fn $name:ident(&self $(, $arg:ident: $argty:ty)*) $(-> $ret:ty)?;)*) => {
         $(
             fn $name(&self, $($arg: $argty),*) $(-> $ret)? {
@@ -167,13 +180,29 @@ macro_rules! forward_canvas_model {
     };
 }
 
-/// Forwarding impl so an `Rc<M>` wrapping any `CanvasModel` is itself a
-/// `CanvasModel`. The orchestrator stores `Rc<dyn CanvasModel>` and
-/// calls through `Rc::as_ref`, so this is deref-convenience for callers
-/// that hold a concrete `Rc<M>` — the `?Sized` arm also covers
-/// `Rc<dyn CanvasModel>` directly.
+/// Forwarding impls so an `Rc<M>` wrapping any `CanvasModel` is itself a
+/// `CanvasModel`. The orchestrator stores `Rc<dyn CanvasModel>` and calls
+/// through `Rc::as_ref`, so these are deref-convenience for callers that hold a
+/// concrete `Rc<M>` — the `?Sized` arms also cover the `dyn` forms directly.
+///
+/// Two blocks because supertraits are not auto-derived: `Rc<T>: CanvasModel`
+/// requires a real `Rc<T>: CellContentQuery` impl. The `CanvasModel` bound on
+/// the second block implies `T: CellContentQuery`, satisfying the first.
+impl<T: CellContentQuery + ?Sized> CellContentQuery for Rc<T> {
+    forward_methods! {
+        fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle>;
+        fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
+        fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
+        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellDecoration>;
+        fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>);
+        fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>);
+        fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>);
+        fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellDecoration>>);
+    }
+}
+
 impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
-    forward_canvas_model! {
+    forward_methods! {
         fn get_selected_sheet(&self) -> u32;
         fn get_selected_view(&self) -> Option<CanvasView>;
         fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
@@ -183,15 +212,7 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
         fn get_show_row_headers(&self, sheet: u32) -> Option<bool>;
         fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
-        fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle>;
-        fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
-        fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
-        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellDecoration>;
         fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;
         fn get_column_header_text(&self, sheet: u32, col: i32) -> Option<String>;
-        fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>);
-        fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>);
-        fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>);
-        fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellDecoration>>);
     }
 }

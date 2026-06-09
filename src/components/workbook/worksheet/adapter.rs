@@ -2,7 +2,9 @@ use leptos::prelude::*;
 
 use crate::state::{ModelStore, Split};
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CanvasModel, CanvasView, CellDecoration, CellKind, CellStyle, Fetched};
+use iron_canvas_core::{
+    CanvasModel, CanvasView, CellContentQuery, CellDecoration, CellKind, CellStyle, Fetched,
+};
 use iron_canvas_ironcalc::convert::{
     cell_decoration_from_extended, cell_type_to_kind, style_to_core,
 };
@@ -67,6 +69,9 @@ impl CanvasModel for WorksheetModelAdapter {
     fn get_show_col_headers(&self, _sheet: u32) -> Option<bool> {
         Some(self.show_headers.get_untracked())
     }
+}
+
+impl CellContentQuery for WorksheetModelAdapter {
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         // Merged (dxf-applied) style via the bridge, mirroring IronCalcModel.
         // The inner `with_value` borrows the native `UserModel`, so a `None`

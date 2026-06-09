@@ -26,7 +26,7 @@ use crate::style::{CellDecoration, CellKind, CellStyle};
 use self::borders::BorderPaint;
 use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
-use crate::CanvasModel;
+use crate::CellContentQuery;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
@@ -55,7 +55,7 @@ impl<P: Painter> RendererCore<P> {
     /// across all -> explicit across all -> A.right strokes last on the
     /// shared edge). Text remains the final pass so overflow is never
     /// clipped by a neighbour's bg.
-    pub fn render_pane(&self, model: &dyn CanvasModel, pane: PaneRegion, frame: &Chrome) {
+    pub fn render_pane(&self, model: &dyn CellContentQuery, pane: PaneRegion, frame: &Chrome) {
         let pane_idx = pane as usize;
         let pane_buf = self.pane_cache.pane(pane);
 
@@ -237,7 +237,7 @@ impl<P: Painter> RendererCore<P> {
     /// has already happened in `render_grid_blit`.
     pub fn render_pane_blit(
         &self,
-        model: &dyn CanvasModel,
+        model: &dyn CellContentQuery,
         pane: PaneRegion,
         frame: &Chrome,
         repaint_strip: PixelRect,
@@ -275,7 +275,7 @@ impl<P: Painter> RendererCore<P> {
     #[allow(clippy::too_many_arguments)]
     fn render_pane_strip(
         &self,
-        model: &dyn CanvasModel,
+        model: &dyn CellContentQuery,
         pane: PaneRegion,
         range: RCRange,
         axis: Axis,

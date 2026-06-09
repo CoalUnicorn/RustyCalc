@@ -23,7 +23,7 @@ use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{
     Alignment, Border, BorderItem, BorderStyle, CellKind, CellStyle, FontStyle, HAlign, VAlign,
 };
-use iron_canvas_core::{CanvasModel, CanvasView, Fetched};
+use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
 
 #[wasm_bindgen]
 extern "C" {
@@ -277,7 +277,9 @@ impl CanvasModel for JsBackedModel {
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
         self.note_throw("getShowGridLines", self.handle.get_show_grid_lines(sheet))
     }
+}
 
+impl CellContentQuery for JsBackedModel {
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         // Mirror IronCalcModel's dxf-MERGED style: the JS `getCellStyle` extern
         // must return the conditional-format-merged style so the fingerprint
@@ -312,10 +314,9 @@ impl CanvasModel for JsBackedModel {
         // suppress the active-cell overlay every frame. It maps to `Absent`,
         // letting the renderer's `unwrap_or(CellKind::Text)` own the fallback —
         // matching the native adapter, where a model error is also `Absent`.
-        let Some(disc) = self.note_throw(
-            "getCellType",
-            self.handle.get_cell_type(sheet, row, column),
-        ) else {
+        let Some(disc) =
+            self.note_throw("getCellType", self.handle.get_cell_type(sheet, row, column))
+        else {
             return Fetched::BridgeFailed;
         };
         match cell_kind_from_discriminant(disc) {

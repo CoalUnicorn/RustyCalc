@@ -11,7 +11,7 @@
 
 use super::borders::ResolvedBorders;
 use super::text::TextPaint;
-use crate::CanvasModel;
+use crate::CellContentQuery;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
@@ -178,7 +178,7 @@ impl<P: Painter> RendererCore<P> {
     /// implicit — taken from `frame.sheet`.
     pub fn repaint_active_cell(
         &self,
-        model: &dyn CanvasModel,
+        model: &dyn CellContentQuery,
         row: i32,
         column: i32,
         frame: &Chrome,

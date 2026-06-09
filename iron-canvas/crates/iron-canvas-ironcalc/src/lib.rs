@@ -10,7 +10,8 @@
 pub mod convert;
 
 use iron_canvas_core::{
-    CanvasModel, CanvasView, CellDecoration, CellKind, CellStyle, Fetched, types::coord::RCRange,
+    CanvasModel, CanvasView, CellContentQuery, CellDecoration, CellKind, CellStyle, Fetched,
+    types::coord::RCRange,
 };
 use ironcalc_base::UserModel;
 
@@ -64,7 +65,9 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
         UserModel::get_show_grid_lines(&self.0, sheet).ok()
     }
+}
 
+impl<'a> CellContentQuery for IronCalcModel<'a> {
     fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         // Use the dxf-MERGED style so the fingerprint hashes what is painted.
         // A native UserModel error is the only `None` source here, and it maps

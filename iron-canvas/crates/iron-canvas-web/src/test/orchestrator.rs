@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
-use crate::{CanvasModel, RCRange, RenderOverlays};
+use crate::{CanvasModel, CellContentQuery, RCRange, RenderOverlays};
 use iron_canvas_core::signal::GridSignals;
 use std::rc::Rc;
 
@@ -35,6 +35,8 @@ impl CanvasModel for StubModel {
     fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
         Some(true)
     }
+}
+impl CellContentQuery for StubModel {
     fn get_cell_style(
         &self,
         _: u32,

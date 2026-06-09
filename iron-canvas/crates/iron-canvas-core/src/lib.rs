@@ -33,7 +33,7 @@ pub use geometry::{
     prim::{Line, Point, Span},
     utils::col_name,
 };
-pub use model_adapter::{CanvasModel, CanvasView};
+pub use model_adapter::{CanvasModel, CanvasView, CellContentQuery};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
     FontStyle, HAlign, IconSpec, RatingSpec, VAlign,

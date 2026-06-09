@@ -19,7 +19,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 
 use iron_canvas_core::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
-use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, CellContentQuery, RCRange};
 use iron_canvas_core::{CellDecoration, CellKind, CellStyle, Fetched};
 
 pub struct TestModel {
@@ -276,6 +276,12 @@ impl CanvasModel for TestModel {
     fn get_show_col_headers(&self, _: u32) -> Option<bool> {
         Some(self.show_col_headers.get())
     }
+    fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
+        self.column_headers.borrow().get(&column).cloned()
+    }
+}
+
+impl CellContentQuery for TestModel {
     fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Fetched<CellStyle> {
         Fetched::Value(CellStyle::default())
     }
@@ -287,9 +293,6 @@ impl CanvasModel for TestModel {
             Some(d) => Fetched::Value(d),
             None => Fetched::Absent,
         }
-    }
-    fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
-        self.column_headers.borrow().get(&column).cloned()
     }
     fn get_formatted_cell_value(&self, _: u32, row: i32, col: i32) -> Fetched<String> {
         if self.value_bridge_fail.get() {
