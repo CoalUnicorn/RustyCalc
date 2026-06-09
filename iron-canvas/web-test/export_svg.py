@@ -17,12 +17,10 @@ import time
 from pathlib import Path
 
 
-def serve_dist(port):
+def serve_dist(port, dist):
     """Start the RustyCalc dist server with path rewrite."""
     import http.server
     import threading
-
-    dist = Path("/home/mmm/01_Dev/RustyCalc/dist")
 
     class Handler(http.server.SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -54,6 +52,12 @@ def main():
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("--sheet", type=int, default=None)
     parser.add_argument("--app-url", default=None)
+    parser.add_argument(
+        "--dist",
+        type=Path,
+        default=Path(__file__).resolve().parents[2] / "dist",
+        help="RustyCalc dist/ dir to serve (default: <repo-root>/dist)",
+    )
     args = parser.parse_args()
 
     if not args.input.exists():
@@ -70,7 +74,7 @@ def main():
         app_url = args.app_url
     else:
         port = 8090
-        server = serve_dist(port)
+        server = serve_dist(port, args.dist)
         app_url = f"http://localhost:{port}/RustyCalc/"
         time.sleep(0.5)
 
@@ -128,12 +132,27 @@ const fs = require('fs');
     pw_path = Path("/tmp/export_svg_pw.js")
     pw_path.write_text(pw_script)
 
-    node_path = "/home/mmm/.nvm/versions/node/v24.9.0/lib/node_modules"
+    # Resolve where `playwright` lives: honor an existing NODE_PATH, else ask
+    # npm for the global module root. Keeps the script portable across machines
+    # and node versions instead of pinning one nvm install.
+    node_path = os.environ.get("NODE_PATH")
+    if not node_path:
+        try:
+            node_path = subprocess.run(
+                ["npm", "root", "-g"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            node_path = ""
+
+    env = {**os.environ}
+    if node_path:
+        env["NODE_PATH"] = node_path
     result = subprocess.run(
         ["node", str(pw_path)],
         capture_output=True, text=True,
         timeout=60,
-        env={**os.environ, "NODE_PATH": node_path},
+        env=env,
     )
 
     if server:
