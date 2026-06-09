@@ -7,7 +7,7 @@
 //! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::layer::Surface),
 //! a [`PaintGate`](crate::layer::PaintGate), and a layer-specific renderer
 //! wrapping [`RendererCore`]. In the wasm build the surface is
-//! `iron_canvas_web::WebSurface`; the grid context uses `alpha: false`
+//! `iron_canvas_canvas2d::WebSurface`; the grid context uses `alpha: false`
 //! (opaque, skips alpha compositing) and the overlay uses
 //! `alpha: true, desynchronized: true`. The renderer is long-lived per
 //! layer, so the painter's cached fill/stroke/font/line-width state
@@ -51,10 +51,10 @@ pub mod cache;
 pub mod cell;
 pub mod cf_types;
 pub mod frame;
-// `renderer/overlay/` has moved to `src/layer/decoration/`. Each
-// decoration is now a struct that impls `Layer`; the orchestration that
-// used to live in `RendererCore::render_overlays` is now in
-// `OverlayLayer::paint`.
+// `renderer/overlay/` has moved to `src/decoration/`. Each decoration is
+// a struct that impls `Layer`; the orchestration that used to live in
+// `RendererCore::render_overlays` is now in
+// `LayerBase::paint_overlay_layer` (src/layer/mod.rs).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -78,7 +78,7 @@ use crate::painter::{BlitPainter, GroupClass, Painter};
 /// re-export only what their layer is allowed to perform: `GridRenderer`
 /// exposes `render_grid` + the four-phase pipeline; `OverlayRenderer`
 /// exposes `painter()` + `repaint_active_cell` + `render_header_highlights`
-/// for `OverlayLayer` to drive the decoration walk.
+/// for `LayerBase::paint_overlay_layer` to drive the decoration walk.
 pub struct RendererCore<P: Painter> {
     /// The surface owns the painter as the semantic source of truth; the
     /// renderer holds a shared handle so paint methods reach the painter
@@ -297,9 +297,10 @@ impl<P: Painter> GridRenderer<P> {
     }
 
     /// Drop cached pane-buffer ranges for the masked panes. Plumbed through
-    /// from `IronCanvas::paint_content` so a cell-content-changed regime
-    /// can force the named panes to refetch on their next `render_pane`
-    /// while unmasked panes keep their fingerprint-skip win.
+    /// from the orchestrator's content-dirty regime arms so a
+    /// cell-content-changed paint can force the named panes to refetch on
+    /// their next `render_pane` while unmasked panes keep their
+    /// fingerprint-skip win.
     pub fn invalidate_pane_cache(&self, mask: crate::chrome::PaneRegionMask) {
         self.core.pane_cache.invalidate(mask);
     }

@@ -72,14 +72,14 @@ fn slots_reuse_uses_caller_supplied_stale_panes() {
 }
 
 /// Documents the Stage 5 invariant: adding a `FrameKindTag` variant must
-/// break every regime arm in `orchestrator::paint_*`. The non-exhaustive
-/// `match` blocks in `paint_viewport` / `paint_content` / `paint_rebuild`
-/// (no `_ =>` arm) enforce this at compile time.
+/// break the dispatch in `Orchestrator::paint_viewport_regime`. Its
+/// non-exhaustive `match frame.kind` (no `_ =>` arm) enforces this at
+/// compile time.
 ///
 /// To verify locally:
 /// 1. Add a fourth variant `Speculative` to `FrameKindTag` in `chrome/kind.rs`.
-/// 2. `cargo check -p iron-canvas` — expect `error[E0004]` at three call
-///    sites in `orchestrator.rs`.
+/// 2. `cargo check -p iron-canvas-core` — expect `error[E0004]` in
+///    `orchestrator.rs`.
 /// 3. Revert.
 ///
 /// This test does NOT do the experiment automatically; it pins the variant

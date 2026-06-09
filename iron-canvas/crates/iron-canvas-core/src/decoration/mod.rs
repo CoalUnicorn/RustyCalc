@@ -2,13 +2,13 @@
 //! marching ants, point-mode range, formula-ref highlights.
 //!
 //! Each decoration owns its own snapshot state and implements `Layer`.
-//! `OverlayLayer::paint` wraps every decoration's `paint` call in a
-//! `begin_group(layer.group()) … end_group()` pair, so decoration bodies
-//! stay free of group bookkeeping.
+//! `LayerBase::paint_overlay_layer` wraps every decoration's `paint` call
+//! in a `begin_group(layer.group()) … end_group()` pair, so decoration
+//! bodies stay free of group bookkeeping.
 //!
 //! `SelectionLayer` is special — it has a three-phase paint shape
 //! (fill → renderer's active-cell repaint → stroke) orchestrated by name
-//! in `OverlayRenderer::paint_overlay_layer`. The extra phases live as
+//! in `LayerBase::paint_overlay_layer`. The extra phases live as
 //! inherent methods on `SelectionLayer`, not on this trait.
 
 use crate::chrome::Chrome;

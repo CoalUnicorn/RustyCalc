@@ -48,7 +48,7 @@ impl Decorations {
         self.selection.active_cell_repaint()
     }
 
-    /// Back-to-front paint order for `OverlayRenderer::paint_overlay_layer`.
+    /// Back-to-front paint order for `LayerBase::paint_overlay_layer`.
     /// Selection is *not* in this slice — it drives the three-phase
     /// fill → active-cell repaint → stroke sequence and is passed
     /// separately to the renderer.
@@ -76,8 +76,9 @@ impl Decorations {
 
     /// Refresh selection from the live model, then mirror its rectangle
     /// into the autofill preview so the drag band stays paint-coherent
-    /// with the painted selection instead of chasing the model. Called at
-    /// the top of every paint regime arm.
+    /// with the painted selection instead of chasing the model. The Overlay
+    /// arm calls this first; the grid-painting arms call it after the grid
+    /// paint, before the overlay paint.
     pub(crate) fn refresh_overlay_state(&mut self, model: &dyn CanvasModel) {
         self.selection.refresh(model);
         self.autofill.selection_range = self.selection.selection_range.unwrap_or_default();

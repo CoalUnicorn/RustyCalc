@@ -1,8 +1,9 @@
 //! Stage 5 bulk decoration fetch — CF decorations must flow through the
-//! per-pane bulk buffer (`get_cell_decorations_in`) and reach the painter
-//! as a `DrawOp::CfDecoration`, exactly as the old per-cell fetch did. The
-//! bulk path also has to survive the fingerprint-skip set-back: a second
-//! idempotent paint must not corrupt the cached decorations buffer.
+//! per-pane bulk buffer (`get_cell_decorations_in`) and reach the painter.
+//! Decorations now resolve into `Painter` primitives at the renderer, so a
+//! data bar paints as a `RectFill` (no CF-specific op). The bulk path also
+//! has to survive the fingerprint-skip set-back: a second idempotent paint
+//! must not corrupt the cached decorations buffer.
 
 mod common;
 
@@ -15,11 +16,14 @@ use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default};
 
-fn decoration_count(painter: &RecorderPainter) -> usize {
+// A data bar paints as a `RectFill` in its own distinctive color; cell
+// backgrounds always use the theme color, so matching on the bar color
+// isolates the decoration from the per-cell bg fills.
+fn data_bar_fill_count(painter: &RecorderPainter, bar_color: &str) -> usize {
     painter
         .ops()
         .iter()
-        .filter(|op| matches!(op, DrawOp::CfDecoration { .. }))
+        .filter(|op| matches!(op, DrawOp::RectFill { color, .. } if color == bar_color))
         .count()
 }
 
@@ -79,7 +83,7 @@ fn decoration_reaches_painter_and_skip_is_stable() {
         2,
         CellDecoration::DataBar(DataBarSpec {
             fraction: 0.75,
-            color: "#06c".to_string(),
+            color: "#3366cc".to_string(),
         }),
     );
 
@@ -89,9 +93,9 @@ fn decoration_reaches_painter_and_skip_is_stable() {
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_pane(&model, PaneRegion::BottomRight, &frame);
     assert_eq!(
-        decoration_count(core.painter()),
+        data_bar_fill_count(core.painter(), "#3366cc"),
         1,
-        "bulk fetch must deliver exactly one CfDecoration op",
+        "bulk fetch must deliver exactly one data-bar RectFill",
     );
 
     frame.prev_pane_fingerprints = frame.pane_fingerprints.replace([0; 4]);

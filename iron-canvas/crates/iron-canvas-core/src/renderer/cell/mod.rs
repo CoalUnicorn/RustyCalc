@@ -174,12 +174,12 @@ impl<P: Painter> RendererCore<P> {
         pane_buf.decorations.set(pane_decorations);
         // CF decoration pass: data bars / icons / ratings overlay the cell
         // fill, below grid/explicit borders so the bar doesn't obscure border
-        // strokes. `paint_cf_decoration` is a no-op on the Canvas-2D and SVG
-        // backends today (decorations deferred); this keeps the recorder and
-        // any future backend wired without a second walk later.
+        // strokes. Each decoration resolves into `Painter` primitives at the
+        // renderer (`CfDecorationPaint::paint`), so no backend carries a
+        // CF-specific method — every surface replays the same rect/path ops.
         for p in &slots {
             if let Some(ref deco) = p.cf_decoration {
-                self.painter.paint_cf_decoration(p.rect, deco);
+                deco.paint(&*self.painter, p.rect);
             }
         }
         // Grid-line BorderPaint is theme-only, identical for every cell in the

@@ -34,10 +34,11 @@ pub use pane_region::{PaneRegion, PaneRegionMask};
 pub use pane_set::{PaneSet, measure_row_header_width};
 pub use recycled_slots::RecycledSlots;
 
-/// Per-process digest of a formatted cell value. `DefaultHasher` is
-/// randomly seeded per run, so equality only holds within one process.
-/// The newtype shape blocks accidental serialization / cross-process
-/// comparison at the type system level.
+/// In-process digest of a formatted cell value. `DefaultHasher` output is
+/// only stable within one std version, so the digest must never be
+/// persisted or compared across builds. The newtype shape blocks
+/// accidental serialization / cross-process comparison at the type
+/// system level.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CellValueHash(u64);
 
@@ -100,7 +101,8 @@ pub struct Chrome {
     pub theme: Rc<CanvasTheme>,
     /// Pane content fingerprints from the *previous* frame, snapshotted
     /// in `Chrome::next`. Indexed by `PaneRegion as usize`. Zero on first
-    /// paint and after a `Rebuild` so the natural compare always misses.
+    /// paint; a Fresh rebuild carries prev's values, but the per-pane
+    /// compare is gated on `kind.reuses_slots()`, so Fresh never skips.
     pub prev_pane_fingerprints: [u64; 4],
     /// Pane content fingerprints written by `render_pane` after each
     /// bulk-fetch. `Cell` so paint code stays on `&Chrome` (matches the

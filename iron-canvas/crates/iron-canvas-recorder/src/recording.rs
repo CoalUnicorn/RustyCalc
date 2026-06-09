@@ -83,7 +83,11 @@ use crate::DrawOp;
 ///
 /// v3 (2026-05): added `DrawOp::FillPath` — a new op variant is a breaking
 /// change (older readers don't recognize the tag), so the schema bumps.
-pub const ICR_SCHEMA_VERSION: u32 = 3;
+///
+/// v4 (2026-06): removed `DrawOp::CfDecoration` — CF decorations now resolve
+/// into `FillPath` / `RectFill` primitives at the renderer, so the dedicated
+/// op no longer exists. Dropping a variant is also breaking, so the schema bumps.
+pub const ICR_SCHEMA_VERSION: u32 = 4;
 
 /// Per-paint-tick capture. Built by the host (e.g. `IronCanvas::paintIfDirty`
 /// wrapper) by reading `Orchestrator::last_regime()` + `last_signals()`
