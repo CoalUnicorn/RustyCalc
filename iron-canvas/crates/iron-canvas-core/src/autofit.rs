@@ -90,13 +90,13 @@ pub fn fit_width(
 
     let mut max = 0.0_f64;
     for (r, col) in span.cells() {
-        let Some(text) = model.get_formatted_cell_value(sheet, r, col) else {
+        let Some(text) = model.get_formatted_cell_value(sheet, r, col).value() else {
             continue;
         };
         if text.is_empty() {
             continue;
         }
-        let css = match model.get_cell_style(sheet, r, col) {
+        let css = match model.get_cell_style(sheet, r, col).value() {
             Some(style) => font_css(&style),
             None => "12px sans-serif".to_owned(),
         };
@@ -140,13 +140,13 @@ pub fn fit_height(
 
     let mut max_height = 0.0_f64;
     for (r, col) in span.cells() {
-        let Some(text) = model.get_formatted_cell_value(sheet, r, col) else {
+        let Some(text) = model.get_formatted_cell_value(sheet, r, col).value() else {
             continue;
         };
         if text.is_empty() {
             continue;
         }
-        let style = model.get_cell_style(sheet, r, col);
+        let style = model.get_cell_style(sheet, r, col).value();
         let size_px = style.as_ref().map_or(12.0, |s| s.font.size);
         let css = style
             .as_ref()

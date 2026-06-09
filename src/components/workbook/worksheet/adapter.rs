@@ -2,7 +2,7 @@ use leptos::prelude::*;
 
 use crate::state::{ModelStore, Split};
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CanvasModel, CanvasView, CellDecoration, CellKind, CellStyle};
+use iron_canvas_core::{CanvasModel, CanvasView, CellDecoration, CellKind, CellStyle, Fetched};
 use iron_canvas_ironcalc::convert::{
     cell_decoration_from_extended, cell_type_to_kind, style_to_core,
 };
@@ -67,29 +67,45 @@ impl CanvasModel for WorksheetModelAdapter {
     fn get_show_col_headers(&self, _sheet: u32) -> Option<bool> {
         Some(self.show_headers.get_untracked())
     }
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle> {
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         // Merged (dxf-applied) style via the bridge, mirroring IronCalcModel.
-        self.store.with_value(|m| {
+        // The inner `with_value` borrows the native `UserModel`, so a `None`
+        // here is a model error, not a JS bridge failure — it maps to `Absent`.
+        match self.store.with_value(|m| {
             m.get_extended_cell_style(sheet, row, column)
                 .ok()
                 .map(|ext| style_to_core(ext.style))
-        })
+        }) {
+            Some(s) => Fetched::Value(s),
+            None => Fetched::Absent,
+        }
     }
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind> {
-        self.store.with_value(|m| {
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind> {
+        match self.store.with_value(|m| {
             m.get_cell_type(sheet, row, column)
                 .ok()
                 .map(cell_type_to_kind)
-        })
+        }) {
+            Some(k) => Fetched::Value(k),
+            None => Fetched::Absent,
+        }
     }
-    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
-        self.store
+    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String> {
+        match self
+            .store
             .with_value(|m| m.get_formatted_cell_value(sheet, row, column).ok())
+        {
+            Some(v) => Fetched::Value(v),
+            None => Fetched::Absent,
+        }
     }
-    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellDecoration> {
-        self.store.with_value(|m| {
+    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellDecoration> {
+        match self.store.with_value(|m| {
             let ext = m.get_extended_cell_style(sheet, row, column).ok()?;
             cell_decoration_from_extended(&ext)
-        })
+        }) {
+            Some(d) => Fetched::Value(d),
+            None => Fetched::Absent,
+        }
     }
 }

@@ -10,7 +10,7 @@
 pub mod convert;
 
 use iron_canvas_core::{
-    CanvasModel, CanvasView, CellDecoration, CellKind, CellStyle, types::coord::RCRange,
+    CanvasModel, CanvasView, CellDecoration, CellKind, CellStyle, Fetched, types::coord::RCRange,
 };
 use ironcalc_base::UserModel;
 
@@ -65,28 +65,52 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
         UserModel::get_show_grid_lines(&self.0, sheet).ok()
     }
 
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle> {
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         // Use the dxf-MERGED style so the fingerprint hashes what is painted.
-        UserModel::get_extended_cell_style(&self.0, sheet, row, column)
+        // A native UserModel error is the only `None` source here, and it maps
+        // to `Absent` — there is no JS bridge to fail.
+        match UserModel::get_extended_cell_style(&self.0, sheet, row, column)
             .ok()
             .map(|ext| style_to_core(ext.style))
+        {
+            Some(s) => Fetched::Value(s),
+            None => Fetched::Absent,
+        }
     }
 
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind> {
-        UserModel::get_cell_type(&self.0, sheet, row, column)
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind> {
+        match UserModel::get_cell_type(&self.0, sheet, row, column)
             .ok()
             .map(cell_type_to_kind)
+        {
+            Some(k) => Fetched::Value(k),
+            None => Fetched::Absent,
+        }
     }
 
-    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
-        UserModel::get_formatted_cell_value(&self.0, sheet, row, column).ok()
+    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String> {
+        match UserModel::get_formatted_cell_value(&self.0, sheet, row, column).ok() {
+            Some(v) => Fetched::Value(v),
+            None => Fetched::Absent,
+        }
     }
 
-    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellDecoration> {
-        let ext = UserModel::get_extended_cell_style(&self.0, sheet, row, column).ok()?;
-        // Map IronCalc's icon/data_bar/rating to the core decoration. Returns
-        // None when no decoration applies.
-        cell_decoration_from_extended(&ext)
+    fn get_extended_cell_style(
+        &self,
+        sheet: u32,
+        row: i32,
+        column: i32,
+    ) -> Fetched<CellDecoration> {
+        // Map IronCalc's icon/data_bar/rating to the core decoration. `Absent`
+        // when the model errors or no decoration applies — the renderer draws
+        // both the same.
+        match UserModel::get_extended_cell_style(&self.0, sheet, row, column)
+            .ok()
+            .and_then(|ext| cell_decoration_from_extended(&ext))
+        {
+            Some(d) => Fetched::Value(d),
+            None => Fetched::Absent,
+        }
     }
 
     // The bulk `*_in` accessors (styles, types, decorations) inherit the trait

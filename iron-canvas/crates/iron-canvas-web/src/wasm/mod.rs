@@ -21,10 +21,9 @@ use ironcalc_base::types as ic;
 use crate::wasm::diag::console_warn;
 use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{
-    Alignment, Border, BorderItem, BorderStyle, CellKind, CellStyle, FontStyle,
-    HAlign, VAlign,
+    Alignment, Border, BorderItem, BorderStyle, CellKind, CellStyle, FontStyle, HAlign, VAlign,
 };
-use iron_canvas_core::{CanvasModel, CanvasView};
+use iron_canvas_core::{CanvasModel, CanvasView, Fetched};
 
 #[wasm_bindgen]
 extern "C" {
@@ -178,9 +177,7 @@ impl JsBackedModel {
     /// `note_js_throw` (counter + warn-once) instead of being silently
     /// dropped by a bare `.ok()`.
     fn note_throw<T>(&self, ctx: &str, result: Result<T, JsValue>) -> Option<T> {
-        result
-            .inspect_err(|_| self.note_js_throw(ctx))
-            .ok()
+        result.inspect_err(|_| self.note_js_throw(ctx)).ok()
     }
 
     fn note_js_throw(&self, ctx: &str) {
@@ -211,7 +208,7 @@ impl JsBackedModel {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_cell_style(sheet, r, c));
+                out.push(self.get_cell_style(sheet, r, c).value());
             }
         }
     }
@@ -220,7 +217,7 @@ impl JsBackedModel {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_formatted_cell_value(sheet, r, c));
+                out.push(self.get_formatted_cell_value(sheet, r, c).value());
             }
         }
     }
@@ -229,7 +226,7 @@ impl JsBackedModel {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_cell_type(sheet, r, c));
+                out.push(self.get_cell_type(sheet, r, c).value());
             }
         }
     }
@@ -253,7 +250,10 @@ impl CanvasModel for JsBackedModel {
     }
 
     fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32> {
-        self.note_throw("getFrozenRowsCount", self.handle.get_frozen_rows_count(sheet))
+        self.note_throw(
+            "getFrozenRowsCount",
+            self.handle.get_frozen_rows_count(sheet),
+        )
     }
 
     fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32> {
@@ -268,38 +268,70 @@ impl CanvasModel for JsBackedModel {
     }
 
     fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
-        self.note_throw("getColumnWidth", self.handle.get_column_width(sheet, column))
+        self.note_throw(
+            "getColumnWidth",
+            self.handle.get_column_width(sheet, column),
+        )
     }
 
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
         self.note_throw("getShowGridLines", self.handle.get_show_grid_lines(sheet))
     }
 
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle> {
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         // Mirror IronCalcModel's dxf-MERGED style: the JS `getCellStyle` extern
         // must return the conditional-format-merged style so the fingerprint
         // hashes what is painted. If JS returns the base style, CF cells paint
         // unmerged here — a known parity gap with the native adapter.
-        let jsv = self.note_throw("getCellStyle", self.handle.get_cell_style(sheet, row, column))?;
+        //
+        // A JS throw or a non-conforming payload is a transient bridge failure,
+        // not an empty cell — the next frame re-queries. `getCellStyle` never
+        // legitimately answers "absent" (a blank cell still has a base style),
+        // so there is no `Absent` arm here.
+        let Some(jsv) = self.note_throw(
+            "getCellStyle",
+            self.handle.get_cell_style(sheet, row, column),
+        ) else {
+            return Fetched::BridgeFailed;
+        };
         match serde_wasm_bindgen::from_value::<ic::Style>(jsv) {
-            Ok(s) => Some(ic_style_to_core(s)),
+            Ok(s) => Fetched::Value(ic_style_to_core(s)),
             Err(e) => {
                 self.note_serde_err("getCellStyle", &e);
-                None
+                Fetched::BridgeFailed
             }
         }
     }
 
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind> {
-        self.note_throw("getCellType", self.handle.get_cell_type(sheet, row, column))
-            .and_then(cell_kind_from_discriminant)
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind> {
+        // Two failures with opposite lifetimes must not share a variant. A
+        // *throw* is transient — `BridgeFailed`, so the caller holds prior
+        // pixels and re-queries next frame. A successful call carrying a
+        // discriminant the core enum doesn't model is *persistent* (re-querying
+        // returns the same value); routing it through `BridgeFailed` would
+        // suppress the active-cell overlay every frame. It maps to `Absent`,
+        // letting the renderer's `unwrap_or(CellKind::Text)` own the fallback —
+        // matching the native adapter, where a model error is also `Absent`.
+        let Some(disc) = self.note_throw(
+            "getCellType",
+            self.handle.get_cell_type(sheet, row, column),
+        ) else {
+            return Fetched::BridgeFailed;
+        };
+        match cell_kind_from_discriminant(disc) {
+            Some(k) => Fetched::Value(k),
+            None => Fetched::Absent,
+        }
     }
 
-    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String> {
-        self.note_throw(
+    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String> {
+        match self.note_throw(
             "getFormattedCellValue",
             self.handle.get_formatted_cell_value(sheet, row, column),
-        )
+        ) {
+            Some(v) => Fetched::Value(v),
+            None => Fetched::BridgeFailed,
+        }
     }
 
     fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
@@ -325,7 +357,8 @@ impl CanvasModel for JsBackedModel {
             }
         };
 
-        // D-2: distrust any array that isn't dense + fully populated.
+        // D-2: only a wrong-length array is untrustworthy now; a null element
+        // is a blank cell, kept as `None` for the renderer to paint over bg.
         if !batch_is_dense(&decoded, range) {
             return self.styles_in_per_cell(sheet, range, out);
         }
@@ -389,24 +422,29 @@ impl CanvasModel for JsBackedModel {
         // A valid discriminant maps to a `CellKind`; an out-of-range one yields
         // `None` here — the same legitimate per-cell outcome, not a corruption.
         out.clear();
-        out.extend(decoded.into_iter().map(|d| d.and_then(cell_kind_from_discriminant)));
+        out.extend(
+            decoded
+                .into_iter()
+                .map(|d| d.and_then(cell_kind_from_discriminant)),
+        );
     }
 }
 
 /// Whether a batched `*_in` array can be trusted enough to skip the per-cell
-/// path: it must be **dense** (exactly the range's cell count, so every
-/// row-major index `out[(r-r1)*cols + (c-c1)]` lands on a real element) and
-/// **fully populated** (no `None`, which the renderer reads as a hole).
+/// path: it must be **dense** — exactly the range's cell count, so every
+/// row-major index `out[(r-r1)*cols + (c-c1)]` lands on a real slot.
 ///
-/// All-or-nothing by design: one bad element forfeits the whole batch and
-/// forces a per-cell re-fetch, because the per-cell path can't repair a single
-/// slot inside an already-decoded array. A single transient `None` in a large
-/// pane therefore costs O(cells) that frame — acceptable, since `None` here is
-/// a bridge failure (rare), not a blank cell (which arrives as a real default).
+/// A `None` *element* is no longer a reason to forfeit the batch. The bulk
+/// contract treats a null slot as a blank cell (`Absent`), not a failure: the
+/// renderer paints it over the pre-filled `cell_bg`, so a pane full of blanks
+/// renders correctly without the O(cells) per-cell refetch the old all-`Some`
+/// gate forced. The genuine failure modes — a throw, a non-array payload, or a
+/// wrong-length array — are caught upstream (the `note_throw` / `note_serde_err`
+/// fallback arms) or by this length check, and route to the per-cell path.
 fn batch_is_dense<T>(decoded: &[Option<T>], range: RCRange) -> bool {
     let rows = (range.r2 - range.r1 + 1) as usize;
     let cols = (range.c2 - range.c1 + 1) as usize;
-    decoded.len() == rows * cols && decoded.iter().all(Option::is_some)
+    decoded.len() == rows * cols
 }
 
 #[derive(Deserialize)]
@@ -553,6 +591,37 @@ mod tests {
         assert_eq!(cell_kind_from_discriminant(3), None);
         assert_eq!(cell_kind_from_discriminant(-1), None);
         assert_eq!(cell_kind_from_discriminant(256), None);
+    }
+
+    #[test]
+    fn batch_is_dense_accepts_null_blank_cells() {
+        // The Phase-3 contract change: a null element is a blank cell, not a
+        // failure, so an otherwise correctly-sized array is still trusted —
+        // a blank-cell pane no longer forces an O(cells) per-cell refetch.
+        let range = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        };
+        let decoded: Vec<Option<i32>> = vec![Some(1), None, None, Some(4)];
+        assert!(batch_is_dense(&decoded, range));
+    }
+
+    #[test]
+    fn batch_is_dense_rejects_wrong_length() {
+        // 2×2 range ⇒ 4 cells. Anything else can't be indexed row-major, so it
+        // forfeits the batch and falls back to the per-cell path.
+        let range = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        };
+        let short: Vec<Option<i32>> = vec![Some(1), Some(2), Some(3)];
+        let long: Vec<Option<i32>> = vec![None; 5];
+        assert!(!batch_is_dense(&short, range));
+        assert!(!batch_is_dense(&long, range));
     }
 
     #[test]

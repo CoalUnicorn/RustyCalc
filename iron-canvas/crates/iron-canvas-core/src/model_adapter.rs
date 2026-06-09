@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
+use crate::types::fetched::Fetched;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanvasView {
@@ -18,11 +19,13 @@ pub struct CanvasView {
 /// Read-only worksheet surface the renderer consumes; every method is a pure
 /// query against the host model.
 ///
-/// `None` from the fetch accessors is a transient bridge failure — the JS call
-/// threw or its payload didn't deserialize — not "empty"; the next animation
-/// frame re-queries. The override accessors (`get_*_header_text`,
-/// `get_extended_cell_style`) instead use `None` to mean "no override, fall
-/// back to the default."
+/// The content accessors (`get_cell_style`, `get_cell_type`,
+/// `get_formatted_cell_value`, `get_extended_cell_style`) return [`Fetched<T>`]
+/// so a transient bridge failure (`BridgeFailed`) is distinct from a legitimately
+/// empty cell (`Absent`). The `Option`-returning config/selection accessors carry
+/// the one meaning still left to them — `None` is a transient bridge failure —
+/// while the `get_*_header_text` overrides use `None` for "no override, fall back
+/// to the default."
 pub trait CanvasModel {
     fn get_selected_sheet(&self) -> u32;
     /// `None` signals a transient JS-bridge failure: the bridge call threw
@@ -49,22 +52,23 @@ pub trait CanvasModel {
         Some(true)
     }
 
-    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle>;
-    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind>;
-    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle>;
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
+    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
 
     /// Base cell style plus any conditional-formatting overlay: the CF dxf
     /// fill/font applied on top of the base style, plus optional data-bar,
-    /// icon-set, and rating decorations. `None` when no CF decoration applies
-    /// or when the model doesn't support CF. The default returns `None` so
-    /// engines without CF support (and test stubs) compile unchanged.
+    /// icon-set, and rating decorations. `Absent` when no CF decoration applies
+    /// or when the model doesn't support CF (the renderer draws both the same).
+    /// The default returns `Absent` so engines without CF support (and test
+    /// stubs) compile unchanged.
     fn get_extended_cell_style(
         &self,
         _sheet: u32,
         _row: i32,
         _column: i32,
-    ) -> Option<CellDecoration> {
-        None
+    ) -> Fetched<CellDecoration> {
+        Fetched::Absent
     }
 
     /// Override text for a row header slot. `None` means use the default
@@ -81,26 +85,30 @@ pub trait CanvasModel {
     }
 
     /// Bulk-fetch cell styles for `range` on `sheet`. Output is dense,
-    /// row-major: `out[(row - r1) * cols + (col - c1)]`. `None` entries
-    /// carry the same fetch-failed meaning as `get_cell_style`.
+    /// row-major: `out[(row - r1) * cols + (col - c1)]`.
     ///
-    /// Default impl loops the per-cell accessor so impls that don't override
-    /// keep their existing behaviour.
-    /// TODO(W5): wasm bridge should override this with a single JS round-trip
-    /// per range (matching `get_cell_decorations_in`).
+    /// Returns `Vec<Option<T>>`, **not** `Vec<Fetched<T>>` like the single
+    /// accessors. The pane cache consumes this as take-able scratch
+    /// (`Option::take` per slot) and treats every `None` identically — a blank
+    /// cell painted over the pre-filled `cell_bg`. No renderer site
+    /// distinguishes `Absent` from `BridgeFailed` in bulk, so a `Fetched` here
+    /// would ride the buffer unread; the actionable split lives at the fetch
+    /// boundary instead (the single-cell active-cell repaint, and the wasm
+    /// batch-trust gate).
+    ///
+    /// Default impl loops the per-cell accessor, collapsing each `Fetched` via
+    /// `.value()`; `JsBackedModel` overrides with one batched JS call per range.
     fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_cell_style(sheet, r, c));
+                out.push(self.get_cell_style(sheet, r, c).value());
             }
         }
     }
 
     /// Bulk-fetch formatted cell values for `range` on `sheet`. Same dense
-    /// row-major layout and `None`-as-failure semantics as
-    /// `get_cell_styles_in`.
-    /// TODO(W5): wasm bridge should override with a single JS round-trip.
+    /// row-major layout and `Vec<Option<T>>` rationale as `get_cell_styles_in`.
     fn get_formatted_cell_values_in(
         &self,
         sheet: u32,
@@ -110,19 +118,19 @@ pub trait CanvasModel {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_formatted_cell_value(sheet, r, c));
+                out.push(self.get_formatted_cell_value(sheet, r, c).value());
             }
         }
     }
 
-    /// Bulk-fetch cell types for `range` on `sheet`. Same layout and
-    /// semantics as the other `*_in` accessors. Feeds the text pass's
-    /// alignment/colour resolution in `CellTextStyle::resolve`.
+    /// Bulk-fetch cell types for `range` on `sheet`. Same dense layout and
+    /// `Vec<Option<T>>` rationale as `get_cell_styles_in`. Feeds the text
+    /// pass's alignment/colour resolution in `CellTextStyle::resolve`.
     fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_cell_type(sheet, r, c));
+                out.push(self.get_cell_type(sheet, r, c).value());
             }
         }
     }
@@ -140,7 +148,7 @@ pub trait CanvasModel {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_extended_cell_style(sheet, r, c));
+                out.push(self.get_extended_cell_style(sheet, r, c).value());
             }
         }
     }
@@ -175,10 +183,10 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
         fn get_show_row_headers(&self, sheet: u32) -> Option<bool>;
         fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
-        fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellStyle>;
-        fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Option<CellKind>;
-        fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Option<String>;
-        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Option<CellDecoration>;
+        fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle>;
+        fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
+        fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
+        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellDecoration>;
         fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;
         fn get_column_header_text(&self, sheet: u32, col: i32) -> Option<String>;
         fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>);

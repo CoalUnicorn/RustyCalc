@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use iron_canvas_core::{CanvasModel, CanvasView, CellKind, CellStyle};
+use iron_canvas_core::{CanvasModel, CanvasView, CellKind, CellStyle, Fetched};
 use iron_canvas_datagrid::DataGrid;
 
 /// Interior-mutable `DataGrid` so the wasm handle can mutate the model
@@ -54,13 +54,13 @@ impl CanvasModel for DataGridModel {
     fn get_show_grid_lines(&self, s: u32) -> Option<bool> {
         self.0.borrow().get_show_grid_lines(s)
     }
-    fn get_cell_style(&self, s: u32, row: i32, col: i32) -> Option<CellStyle> {
+    fn get_cell_style(&self, s: u32, row: i32, col: i32) -> Fetched<CellStyle> {
         self.0.borrow().get_cell_style(s, row, col)
     }
-    fn get_cell_type(&self, s: u32, row: i32, col: i32) -> Option<CellKind> {
+    fn get_cell_type(&self, s: u32, row: i32, col: i32) -> Fetched<CellKind> {
         self.0.borrow().get_cell_type(s, row, col)
     }
-    fn get_formatted_cell_value(&self, s: u32, row: i32, col: i32) -> Option<String> {
+    fn get_formatted_cell_value(&self, s: u32, row: i32, col: i32) -> Fetched<String> {
         self.0.borrow().get_formatted_cell_value(s, row, col)
     }
     fn get_column_header_text(&self, s: u32, col: i32) -> Option<String> {

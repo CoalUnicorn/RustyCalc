@@ -14,13 +14,13 @@ use crate::wasm::JsBackedModel;
 use iron_canvas_canvas2d::WebSurface;
 // `Surface` is only needed by the dev-tools recording path
 // (`grid_surface().painter()`); the export helpers no longer use it.
-#[cfg(feature = "dev-tools")]
-use iron_canvas_core::layer::Surface;
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
+#[cfg(feature = "dev-tools")]
+use iron_canvas_core::layer::Surface;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 use iron_canvas_export::SvgSurface;

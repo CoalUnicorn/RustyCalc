@@ -35,14 +35,29 @@ impl CanvasModel for StubModel {
     fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
         Some(true)
     }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<iron_canvas_core::CellStyle> {
-        Some(iron_canvas_core::CellStyle::default())
+    fn get_cell_style(
+        &self,
+        _: u32,
+        _: i32,
+        _: i32,
+    ) -> iron_canvas_core::Fetched<iron_canvas_core::CellStyle> {
+        iron_canvas_core::Fetched::Value(iron_canvas_core::CellStyle::default())
     }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<iron_canvas_core::CellKind> {
-        Some(iron_canvas_core::CellKind::Number)
+    fn get_cell_type(
+        &self,
+        _: u32,
+        _: i32,
+        _: i32,
+    ) -> iron_canvas_core::Fetched<iron_canvas_core::CellKind> {
+        iron_canvas_core::Fetched::Value(iron_canvas_core::CellKind::Number)
     }
-    fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Option<String> {
-        Some(String::new())
+    fn get_formatted_cell_value(
+        &self,
+        _: u32,
+        _: i32,
+        _: i32,
+    ) -> iron_canvas_core::Fetched<String> {
+        iron_canvas_core::Fetched::Value(String::new())
     }
 }
 

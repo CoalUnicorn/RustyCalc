@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use iron_canvas_core::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
-use iron_canvas_core::{CellDecoration, CellKind, CellStyle};
+use iron_canvas_core::{CellDecoration, CellKind, CellStyle, Fetched};
 
 pub struct TestModel {
     sheet: Cell<u32>,
@@ -45,6 +45,10 @@ pub struct TestModel {
     show_grid: Cell<bool>,
     show_row_headers: Cell<bool>,
     show_col_headers: Cell<bool>,
+    /// When set, `get_formatted_cell_value` reports a transient
+    /// `Fetched::BridgeFailed` — simulating a JS-bridge throw so tests can
+    /// exercise the active-cell repaint's atomic-skip path.
+    value_bridge_fail: Cell<bool>,
 }
 
 impl Default for TestModel {
@@ -74,6 +78,7 @@ impl Default for TestModel {
             show_grid: Cell::new(true),
             show_row_headers: Cell::new(true),
             show_col_headers: Cell::new(true),
+            value_bridge_fail: Cell::new(false),
         }
     }
 }
@@ -212,6 +217,9 @@ impl TestModel {
     pub fn set_data_until(&self, row: i32) {
         self.data_until.set(row);
     }
+    pub fn set_value_bridge_fail(&self, fail: bool) {
+        self.value_bridge_fail.set(fail);
+    }
     pub fn set_sheet(&self, sheet: u32) {
         self.sheet.set(sheet);
     }
@@ -268,27 +276,33 @@ impl CanvasModel for TestModel {
     fn get_show_col_headers(&self, _: u32) -> Option<bool> {
         Some(self.show_col_headers.get())
     }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<CellStyle> {
-        Some(CellStyle::default())
+    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Fetched<CellStyle> {
+        Fetched::Value(CellStyle::default())
     }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellKind> {
-        Some(CellKind::Text)
+    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Fetched<CellKind> {
+        Fetched::Value(CellKind::Text)
     }
-    fn get_extended_cell_style(&self, _: u32, row: i32, col: i32) -> Option<CellDecoration> {
-        self.decorations.borrow().get(&(row, col)).cloned()
+    fn get_extended_cell_style(&self, _: u32, row: i32, col: i32) -> Fetched<CellDecoration> {
+        match self.decorations.borrow().get(&(row, col)).cloned() {
+            Some(d) => Fetched::Value(d),
+            None => Fetched::Absent,
+        }
     }
     fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
         self.column_headers.borrow().get(&column).cloned()
     }
-    fn get_formatted_cell_value(&self, _: u32, row: i32, col: i32) -> Option<String> {
+    fn get_formatted_cell_value(&self, _: u32, row: i32, col: i32) -> Fetched<String> {
+        if self.value_bridge_fail.get() {
+            return Fetched::BridgeFailed;
+        }
         if let Some(v) = self.cell_values.borrow().get(&(row, col)) {
-            return Some(v.clone());
+            return Fetched::Value(v.clone());
         }
         let data_until = self.data_until.get();
         if data_until > 0 && (1..=data_until).contains(&row) {
-            return Some(format!("R{row}"));
+            return Fetched::Value(format!("R{row}"));
         }
-        Some(String::new())
+        Fetched::Value(String::new())
     }
 }
 

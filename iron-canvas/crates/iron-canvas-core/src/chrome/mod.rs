@@ -55,6 +55,7 @@ pub struct ActiveCellSnapshot {
 fn hash_cell_value(model: &dyn CanvasModel, sheet: u32, row: i32, col: i32) -> CellValueHash {
     let value = model
         .get_formatted_cell_value(sheet, row, col)
+        .value()
         .unwrap_or_default();
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);

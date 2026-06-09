@@ -188,7 +188,24 @@ impl<P: Painter> RendererCore<P> {
         let Some(rect) = frame.range_rect(range) else {
             return;
         };
-        let Some(own_style) = model.get_cell_style(sheet, row, column) else {
+
+        // Fetch every input *before* touching the painter. The overlay was
+        // cleared at the top of the frame, so this method either fully repaints
+        // the active cell or leaves the grid layer's prior pixels showing
+        // through. A transient `BridgeFailed` on any field must take the second
+        // path: painting an opaque background and then *skipping* the failed
+        // text would hide the grid's correct content behind a blank box — the
+        // A-3 flash. `Absent` is not a failure (a blank cell legitimately has
+        // no text), so it does not abort. Native models never report
+        // `BridgeFailed`, making this a no-op for every non-JS host.
+        let style = model.get_cell_style(sheet, row, column);
+        let value = model.get_formatted_cell_value(sheet, row, column);
+        let cell_type = model.get_cell_type(sheet, row, column);
+        if style.is_bridge_failed() || value.is_bridge_failed() || cell_type.is_bridge_failed() {
+            return;
+        }
+
+        let Some(own_style) = style.value() else {
             return;
         };
         let theme = &frame.theme;
@@ -206,10 +223,8 @@ impl<P: Painter> RendererCore<P> {
         };
         self.paint_cell(&paint, theme);
         let mut text_lines = self.frame_cache.text_lines.take();
-        if let Some(text) = model.get_formatted_cell_value(sheet, row, column) {
-            let cell_type = model
-                .get_cell_type(sheet, row, column)
-                .unwrap_or(CellKind::Text);
+        if let Some(text) = value.value() {
+            let cell_type = cell_type.unwrap_or(CellKind::Text);
             if let Some(t) = TextPaint::resolve_into(
                 self,
                 rect,

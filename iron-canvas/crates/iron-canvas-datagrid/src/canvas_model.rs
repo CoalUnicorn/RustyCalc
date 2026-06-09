@@ -1,6 +1,6 @@
 use crate::DataGrid;
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CanvasModel, CanvasView, CellKind, CellStyle};
+use iron_canvas_core::{CanvasModel, CanvasView, CellKind, CellStyle, Fetched};
 
 impl CanvasModel for DataGrid {
     fn get_selected_sheet(&self) -> u32 {
@@ -35,24 +35,26 @@ impl CanvasModel for DataGrid {
     fn get_show_grid_lines(&self, _s: u32) -> Option<bool> {
         Some(true)
     }
-    fn get_cell_style(&self, _s: u32, row: i32, column: i32) -> Option<CellStyle> {
+    fn get_cell_style(&self, _s: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         if row < 1 || column < 1 {
-            return Some(CellStyle::default());
+            return Fetched::Value(CellStyle::default());
         }
         match self.cell_style((row - 1) as usize, (column - 1) as usize) {
-            Some(st) => Some(st.clone()),
-            None => Some(self.column_default_style((column - 1) as usize)),
+            Some(st) => Fetched::Value(st.clone()),
+            None => Fetched::Value(self.column_default_style((column - 1) as usize)),
         }
     }
-    fn get_cell_type(&self, _s: u32, _row: i32, _col: i32) -> Option<CellKind> {
-        Some(CellKind::Text)
+    fn get_cell_type(&self, _s: u32, _row: i32, _col: i32) -> Fetched<CellKind> {
+        Fetched::Value(CellKind::Text)
     }
-    fn get_formatted_cell_value(&self, _s: u32, row: i32, column: i32) -> Option<String> {
+    fn get_formatted_cell_value(&self, _s: u32, row: i32, column: i32) -> Fetched<String> {
         if row < 1 || column < 1 {
-            return None;
+            return Fetched::Absent;
         }
-        self.cell_value((row - 1) as usize, (column - 1) as usize)
-            .map(str::to_owned)
+        match self.cell_value((row - 1) as usize, (column - 1) as usize) {
+            Some(v) => Fetched::Value(v.to_owned()),
+            None => Fetched::Absent,
+        }
     }
     fn get_column_header_text(&self, _s: u32, col: i32) -> Option<String> {
         if col < 1 {
