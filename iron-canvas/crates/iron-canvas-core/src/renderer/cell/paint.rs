@@ -228,13 +228,12 @@ impl<P: Painter> RendererCore<P> {
             if let Some(t) = TextPaint::resolve_into(
                 self,
                 rect,
-                theme,
                 &paint.style,
                 text,
                 cell_type,
                 &mut text_lines,
             ) {
-                self.paint_text(&t, &text_lines);
+                self.paint_text(&t, theme, &text_lines);
             }
         }
         self.frame_cache.text_lines.set(text_lines);

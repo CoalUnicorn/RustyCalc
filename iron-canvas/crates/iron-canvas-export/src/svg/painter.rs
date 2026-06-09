@@ -115,15 +115,22 @@ impl TextMetrics for SvgPainter {
     }
 }
 
+/// Write the shared `<rect x y width height` opening (no closing `>`) so the
+/// four rect emitters (fill / stroke / dashed / clip) append only their own
+/// attribute tail instead of repeating the geometry format (C-5).
+fn open_rect(rect: PixelRect, out: &mut String) {
+    let (x, y, w, h) = rect.as_f64_tuple();
+    let _ = write!(
+        out,
+        "<rect x=\"{x:.3}\" y=\"{y:.3}\" width=\"{w:.3}\" height=\"{h:.3}\""
+    );
+}
+
 impl Painter for SvgPainter {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor) {
-        let (x, y, w, h) = rect.as_f64_tuple();
         let mut body = self.body.borrow_mut();
-        let _ = write!(
-            body,
-            "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"",
-            x, y, w, h
-        );
+        open_rect(rect, &mut body);
+        body.push_str(" fill=\"");
         xml_escape(color.as_str(), &mut body);
         body.push_str("\"/>");
     }
@@ -150,31 +157,19 @@ impl Painter for SvgPainter {
     }
 
     fn rect_stroke(&self, rect: PixelRect, color: PaintColor, width: f64) {
-        let (x, y, w, h) = rect.as_f64_tuple();
         let mut body = self.body.borrow_mut();
-        let _ = write!(
-            body,
-            "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"",
-            x, y, w, h
-        );
+        open_rect(rect, &mut body);
+        body.push_str(" fill=\"none\" stroke=\"");
         xml_escape(color.as_str(), &mut body);
-        let _ = write!(body, "\" stroke-width=\"{:.3}\"/>", width);
+        let _ = write!(body, "\" stroke-width=\"{width:.3}\"/>");
     }
 
     fn rect_dashed(&self, rect: PixelRect, color: PaintColor, width: f64) {
-        let (x, y, w, h) = rect.as_f64_tuple();
         let mut body = self.body.borrow_mut();
-        let _ = write!(
-            body,
-            "<rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\" fill=\"none\" stroke=\"",
-            x, y, w, h
-        );
+        open_rect(rect, &mut body);
+        body.push_str(" fill=\"none\" stroke=\"");
         xml_escape(color.as_str(), &mut body);
-        let _ = write!(
-            body,
-            "\" stroke-width=\"{:.3}\" stroke-dasharray=\"4 3\"/>",
-            width
-        );
+        let _ = write!(body, "\" stroke-width=\"{width:.3}\" stroke-dasharray=\"4 3\"/>");
     }
 
     fn stroke_line(&self, line: Line, color: PaintColor, width: f64) {
@@ -226,16 +221,12 @@ impl Painter for SvgPainter {
     fn push_clip(&self, rect: PixelRect) {
         let id = self.next_clip_id.get();
         self.next_clip_id.set(id + 1);
-        let (x, y, w, h) = rect.as_f64_tuple();
-        let _ = write!(
-            self.defs.borrow_mut(),
-            "<clipPath id=\"c{}\"><rect x=\"{:.3}\" y=\"{:.3}\" width=\"{:.3}\" height=\"{:.3}\"/></clipPath>",
-            id,
-            x,
-            y,
-            w,
-            h
-        );
+        {
+            let mut defs = self.defs.borrow_mut();
+            let _ = write!(defs, "<clipPath id=\"c{id}\">");
+            open_rect(rect, &mut defs);
+            defs.push_str("/></clipPath>");
+        }
         let _ = write!(self.body.borrow_mut(), "<g clip-path=\"url(#c{})\">", id);
         self.clip_depth.set(self.clip_depth.get() + 1);
     }

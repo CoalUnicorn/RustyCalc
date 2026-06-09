@@ -10,7 +10,7 @@
 //! - Outbound (query API): struct-formed mirrors that derive `Serialize`,
 //!   plus `From<Engine>` impls (`HitTestWire`, `ResizeTargetWire`, …).
 //! - Inbound (setter API): `Deserialize`-only shapes with `From<Wire> for
-//!   Engine` impls — Phase 2 overlay inputs and Phase 3 theme inputs.
+//!   Engine` impls — overlay setter inputs and theme setter inputs.
 
 use serde::{Deserialize, Serialize};
 
@@ -177,7 +177,7 @@ impl From<CanvasSize> for CanvasSizeWire {
 // them — call sites serialize them directly.
 
 // =============================================================================
-// Phase 2 — overlay setter inputs (Deserialize only).
+// Inbound setters (JS→Rust, Deserialize): overlay inputs.
 // =============================================================================
 //
 // JS pushes these as plain objects via `serde_wasm_bindgen::from_value`. We
@@ -286,7 +286,7 @@ impl From<FormulaRefWire> for FormulaRef {
 }
 
 // =============================================================================
-// Phase 3 — theme setter inputs (Deserialize only).
+// Inbound setters (JS→Rust, Deserialize): theme inputs.
 // =============================================================================
 //
 // `CanvasThemeWire` requires every field — semantically a full push, no light

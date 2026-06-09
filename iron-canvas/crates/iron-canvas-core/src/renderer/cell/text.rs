@@ -12,7 +12,6 @@
 //! wipes the painter's font/fill state cache and forces the next cell's
 //! binds to miss).
 
-use std::borrow::Cow;
 use std::rc::Rc;
 
 use crate::style::{CellKind, CellStyle, HAlign, VAlign};
@@ -72,14 +71,15 @@ pub struct TextPaint {
     pub needs_clip: bool,
 }
 
-/// Per-cell text color split between the theme-default path (`Static`) and
-/// the per-cell-override path (`Owned`). `Static` carries `Cow<'static, str>` —
-/// `Cow::Borrowed` for built-in themes ptr-eqs through the painter cache,
-/// `Cow::Owned` for host-page themes content-eqs. `Owned` carries an interned
-/// `Rc<str>` from `ColorIntern` so steady-state resolution is `Rc::clone`
-/// after the first sighting. Mirrors `BorderColor` in `cell/borders.rs`.
+/// Per-cell text color. The theme paths (`ThemeDefault`, `ThemeError`) carry no
+/// payload — they name a theme slot resolved at paint time against the live
+/// `CanvasTheme`, so a text cell never clones the theme's color `String` (B-5:
+/// on host-page `Cow::Owned` themes that was one alloc per text cell per frame).
+/// `Owned` carries an interned `Rc<str>` from `ColorIntern` for the per-cell
+/// font-color override — `Rc::clone` after the first sighting.
 pub enum TextColor {
-    Static(Cow<'static, str>),
+    ThemeDefault,
+    ThemeError,
     Owned(Rc<str>),
 }
 
@@ -110,7 +110,6 @@ impl TextPaint {
     pub fn resolve_into<P: Painter>(
         renderer: &RendererCore<P>,
         rect: PixelRect,
-        theme: &CanvasTheme,
         style: &CellStyle,
         text: String,
         cell_type: CellKind,
@@ -130,7 +129,7 @@ impl TextPaint {
             h_align,
             v_align,
             wrap_text,
-        } = CellTextStyle::resolve(cell_type, theme, style, &renderer.color_intern);
+        } = CellTextStyle::resolve(cell_type, style, &renderer.color_intern);
 
         // Font interning: skips `FontStyle::build` on cache hit. Same lookup
         // is shared across cells with identical (size, weight, slant, family).
@@ -231,19 +230,15 @@ struct CellTextStyle {
 }
 
 impl CellTextStyle {
-    fn resolve(
-        cell_type: CellKind,
-        theme: &CanvasTheme,
-        style: &CellStyle,
-        intern: &ColorIntern,
-    ) -> Self {
+    fn resolve(cell_type: CellKind, style: &CellStyle, intern: &ColorIntern) -> Self {
         // Error cells render in the theme's error color regardless of per-cell
-        // font color. CellKind::Error covers all IronCalc error variants.
+        // font color. CellKind::Error covers all IronCalc error variants. Both
+        // theme slots resolve at paint time (B-5), so this is payload-free.
         let text_color = if matches!(cell_type, CellKind::Error) {
-            TextColor::Static(theme.error_text_color.clone())
+            TextColor::ThemeError
         } else {
             match style.font.color.as_deref() {
-                None | Some("#000000") => TextColor::Static(theme.default_text_color.clone()),
+                None | Some("#000000") => TextColor::ThemeDefault,
                 Some(c) => TextColor::Owned(intern.get(c)),
             }
         };
@@ -385,13 +380,14 @@ impl<P: Painter> RendererCore<P> {
     /// just filled; passing it alongside `t` keeps the per-cell allocation off
     /// the path while preserving the old "set state then clip then stroke"
     /// ordering.
-    pub fn paint_text(&self, t: &TextPaint, lines: &[TextLine]) {
-        // TextColor::Static carries the theme color; the helper routes
-        // Cow::Borrowed through the painter's ptr-eq fast path and Cow::Owned
-        // through content-eq. TextColor::Owned is a per-cell custom color
-        // from the font's explicit color attribute.
+    pub fn paint_text(&self, t: &TextPaint, theme: &CanvasTheme, lines: &[TextLine]) {
+        // The theme text colors resolve here, at paint time, rather than being
+        // cloned into every cell at resolve time (B-5). `from_theme_str` still
+        // routes the built-in `Cow::Borrowed` slot through the painter's ptr-eq
+        // fast path. `TextColor::Owned` is the per-cell font-color override.
         let color = match &t.color {
-            TextColor::Static(s) => PaintColor::from_theme_str(s),
+            TextColor::ThemeDefault => PaintColor::from_theme_str(&theme.default_text_color),
+            TextColor::ThemeError => PaintColor::from_theme_str(&theme.error_text_color),
             TextColor::Owned(s) => PaintColor::Borrowed(s),
         };
         // `font_css` is interned `Rc<str>` per (size, weight, slant, family);

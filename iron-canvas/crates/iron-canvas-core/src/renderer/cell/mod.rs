@@ -207,13 +207,12 @@ impl<P: Painter> RendererCore<P> {
             if let Some(tp) = TextPaint::resolve_into(
                 self,
                 p.rect,
-                theme,
                 &p.style,
                 text,
                 cell_type,
                 &mut text_lines,
             ) {
-                self.paint_text(&tp, &text_lines);
+                self.paint_text(&tp, theme, &text_lines);
             }
         }
         pane_buf.values.set(pane_values);
