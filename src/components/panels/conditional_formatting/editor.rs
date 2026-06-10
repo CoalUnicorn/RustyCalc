@@ -21,7 +21,7 @@ use crate::input::formula::{analyze_formula, splice_ref};
 use crate::model::frontend_model::DefinedNameManager;
 use crate::model::style_types::HexColor;
 use crate::model::{EvaluationMode, SheetRoster, try_mutate};
-use crate::state::{ModelStore, RangeCaptureTarget, WorkbookState};
+use crate::state::{ModelStore, RangeCaptureTarget, StatusMessage, WorkbookState};
 
 /// Seed a UI color picker from a CF rule color, resolved against the
 /// workbook theme (`""` for `Color::None`). Saving writes back `Color::Rgb`,
@@ -206,6 +206,24 @@ pub fn CfRuleEditor() -> impl IntoView {
         formula_text.set(new_text);
     });
 
+    let restore_format = move |format: &Dxf| {
+        fill_color.set(
+            format
+                .fill
+                .as_ref()
+                .map(|f| color_to_str(model, &f.color))
+                .unwrap_or_default(),
+        );
+        font_color.set(
+            format
+                .font
+                .as_ref()
+                .map(|f| color_to_str(model, &f.color))
+                .unwrap_or_default(),
+        );
+        bold.set(format.font.as_ref().and_then(|f| f.b).unwrap_or(false));
+    };
+
     // When editing_cf_rule changes, populate the local signals.
     Effect::new(move |_| {
         if let Some(edit) = &state.editing_cf_rule.get() {
@@ -231,21 +249,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                     formula_visible.set(true);
                     text_visible.set(false);
                     format_visible.set(true);
-                    fill_color.set(
-                        format
-                            .fill
-                            .as_ref()
-                            .map(|f| color_to_str(model, &f.color))
-                            .unwrap_or_default(),
-                    );
-                    font_color.set(
-                        format
-                            .font
-                            .as_ref()
-                            .map(|f| color_to_str(model, &f.color))
-                            .unwrap_or_default(),
-                    );
-                    bold.set(format.font.as_ref().and_then(|f| f.b).unwrap_or(false));
+                    restore_format(format);
                     stop_if_true.set(*s);
                 }
                 CfRuleInput::Formula {
@@ -261,21 +265,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                     formula_visible.set(true);
                     text_visible.set(false);
                     format_visible.set(true);
-                    fill_color.set(
-                        format
-                            .fill
-                            .as_ref()
-                            .map(|f| color_to_str(model, &f.color))
-                            .unwrap_or_default(),
-                    );
-                    font_color.set(
-                        format
-                            .font
-                            .as_ref()
-                            .map(|f| color_to_str(model, &f.color))
-                            .unwrap_or_default(),
-                    );
-                    bold.set(format.font.as_ref().and_then(|f| f.b).unwrap_or(false));
+                    restore_format(format);
                     stop_if_true.set(*s);
                 }
                 CfRuleInput::Text {
@@ -291,21 +281,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                     formula_visible.set(false);
                     text_visible.set(true);
                     format_visible.set(true);
-                    fill_color.set(
-                        format
-                            .fill
-                            .as_ref()
-                            .map(|f| color_to_str(model, &f.color))
-                            .unwrap_or_default(),
-                    );
-                    font_color.set(
-                        format
-                            .font
-                            .as_ref()
-                            .map(|f| color_to_str(model, &f.color))
-                            .unwrap_or_default(),
-                    );
-                    bold.set(format.font.as_ref().and_then(|f| f.b).unwrap_or(false));
+                    restore_format(format);
                     stop_if_true.set(*s);
                 }
                 CfRuleInput::ColorScale { .. } => {
@@ -317,7 +293,9 @@ pub fn CfRuleEditor() -> impl IntoView {
                     format_visible.set(false);
                 }
                 CfRuleInput::DuplicateValues {
-                    stop_if_true: s, ..
+                    format,
+                    stop_if_true: s,
+                    ..
                 } => {
                     selected_rule_type.set("duplicate".into());
                     operator_visible.set(false);
@@ -325,10 +303,13 @@ pub fn CfRuleEditor() -> impl IntoView {
                     formula_visible.set(false);
                     text_visible.set(false);
                     format_visible.set(true);
+                    restore_format(format);
                     stop_if_true.set(*s);
                 }
                 CfRuleInput::Blanks {
-                    stop_if_true: s, ..
+                    format,
+                    stop_if_true: s,
+                    ..
                 } => {
                     selected_rule_type.set("blanks".into());
                     operator_visible.set(false);
@@ -336,6 +317,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                     formula_visible.set(false);
                     text_visible.set(false);
                     format_visible.set(true);
+                    restore_format(format);
                     stop_if_true.set(*s);
                 }
                 _ => {}
@@ -442,12 +424,17 @@ pub fn CfRuleEditor() -> impl IntoView {
             })
         };
 
-        if result.is_ok() {
-            state.editing_cf_rule.set(None);
-            let sheet = model.with_value(|m| m.get_selected_sheet());
-            state.emit_event(SpreadsheetEvent::Format(
-                FormatEvent::ConditionalFormattingChanged { sheet },
-            ));
+        match result {
+            Ok(()) => {
+                state.editing_cf_rule.set(None);
+                let sheet = model.with_value(|m| m.get_selected_sheet());
+                state.emit_event(SpreadsheetEvent::Format(
+                    FormatEvent::ConditionalFormattingChanged { sheet },
+                ));
+            }
+            // Editor stays open with its data intact so the user can correct
+            // the rule instead of losing it.
+            Err(e) => state.status.set(Some(StatusMessage::Error(e))),
         }
     };
 

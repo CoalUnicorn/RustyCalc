@@ -11,7 +11,7 @@ use leptos::prelude::*;
 
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::model::{EvaluationMode, try_mutate};
-use crate::state::{ActiveDrawer, CfRuleEditState, ModelStore, WorkbookState};
+use crate::state::{ActiveDrawer, CfRuleEditState, ModelStore, StatusMessage, WorkbookState};
 
 /// Human-readable label for a CfRule variant.
 fn rule_label(rule: &CfRule) -> &'static str {
@@ -37,15 +37,17 @@ fn rule_label(rule: &CfRule) -> &'static str {
     }
 }
 
-/// Convert a stored `CfRule` back to a `CfRuleInput` for editing.
+/// Convert a stored `CfRule` back to a `CfRuleInput` for editing, or `None`
+/// for rule types the editor can't represent yet (Top10, AboveAverage, …) —
+/// editing those would silently rewrite them as something else.
 ///
 /// IronCalc stores a `dxf_id` in place of the inline `Dxf`, so the rule itself
 /// can't reconstruct its own format. The caller resolves the real format via
 /// `get_dxf_for_conditional_formatting` and passes it in here — preserving the
 /// user's fill/font when re-opening a rule (the old branch dropped it with
 /// `Dxf::default()`).
-fn cf_rule_to_input(rule: &CfRule, format: Dxf) -> CfRuleInput {
-    match rule {
+fn cf_rule_to_input(rule: &CfRule, format: Dxf) -> Option<CfRuleInput> {
+    Some(match rule {
         CfRule::ColorScale { thresholds } => CfRuleInput::ColorScale {
             thresholds: thresholds.clone(),
         },
@@ -90,15 +92,8 @@ fn cf_rule_to_input(rule: &CfRule, format: Dxf) -> CfRuleInput {
             format,
             stop_if_true: *stop_if_true,
         },
-        // Fall back to a default rule for unsupported types.
-        _ => CfRuleInput::CellIs {
-            operator: ValueOperator::GreaterThan,
-            formula: String::new(),
-            formula2: None,
-            format,
-            stop_if_true: false,
-        },
-    }
+        _ => return None,
+    })
 }
 
 #[component]
@@ -121,15 +116,20 @@ pub fn CfRuleList() -> impl IntoView {
     });
 
     let delete_rule = move |index: u32| {
-        let _ = try_mutate(model, EvaluationMode::Immediate, |m| {
+        let result = try_mutate(model, EvaluationMode::Immediate, |m| {
             let sheet = m.get_selected_sheet();
             m.delete_conditional_formatting(sheet, index)
         });
-        state.editing_cf_rule.set(None);
-        let sheet = model.with_value(|m| m.get_selected_sheet());
-        state.emit_event(SpreadsheetEvent::Format(
-            FormatEvent::ConditionalFormattingChanged { sheet },
-        ));
+        match result {
+            Ok(()) => {
+                state.editing_cf_rule.set(None);
+                let sheet = model.with_value(|m| m.get_selected_sheet());
+                state.emit_event(SpreadsheetEvent::Format(
+                    FormatEvent::ConditionalFormattingChanged { sheet },
+                ));
+            }
+            Err(e) => state.status.set(Some(StatusMessage::Error(e))),
+        }
     };
 
     let edit_rule = move |idx: usize, cf: &ConditionalFormatting| {
@@ -142,10 +142,17 @@ pub fn CfRuleList() -> impl IntoView {
                 .flatten()
                 .unwrap_or_default()
         });
+        let Some(rule) = cf_rule_to_input(&cf.cf_rule, format) else {
+            state.status.set(Some(StatusMessage::Error(format!(
+                "\"{}\" rules are not yet editable",
+                rule_label(&cf.cf_rule)
+            ))));
+            return;
+        };
         let edit = CfRuleEditState {
             index: Some(idx as u32),
             range: cf.range.clone(),
-            rule: cf_rule_to_input(&cf.cf_rule, format),
+            rule,
         };
         state.editing_cf_rule.set(Some(edit));
     };
@@ -181,21 +188,35 @@ pub fn CfRuleList() -> impl IntoView {
                         let priority = cf.priority;
                         let e = edit_rule;
                         let d = delete_rule;
-                        let rules_snapshot = rules.get();
-                        let idx = rules_snapshot
-                            .iter()
-                            .position(|r| r.priority == priority)
-                            .unwrap_or(0);
-                        let idx_u32 = idx as u32;
+                        // The index is resolved at click time, not render time:
+                        // the keyed <For> reuses DOM nodes after deletions, so a
+                        // captured index (and `cf` snapshot) would go stale and
+                        // target the wrong rule.
+                        let find_rule = move || {
+                            rules
+                                .get_untracked()
+                                .into_iter()
+                                .enumerate()
+                                .find(|(_, r)| r.priority == priority)
+                        };
                         view! {
-                            <div class="cfm-list-item" on:click=move |_| e(idx, &cf)>
+                            <div
+                                class="cfm-list-item"
+                                on:click=move |_| {
+                                    if let Some((idx, rule)) = find_rule() {
+                                        e(idx, &rule);
+                                    }
+                                }
+                            >
                                 <span class="cfm-item-label">{label}</span>
                                 <span class="cfm-item-range">{range}</span>
                                 <button
                                     class="cfm-item-delete"
                                     on:click=move |ev| {
                                         ev.stop_propagation();
-                                        d(idx_u32);
+                                        if let Some((idx, _)) = find_rule() {
+                                            d(idx as u32);
+                                        }
                                     }
                                     title="Delete rule"
                                 >
