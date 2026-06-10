@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use crate::coord::{CellAddress, CellArea};
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::input::structure::StructAction;
-use crate::model::{FormulaAnalyzer, SheetQuery};
+use crate::model::{FormulaAnalyzer, ActiveCellQuery};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 

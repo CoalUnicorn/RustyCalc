@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use super::icon::{Icon, SheetIcon};
 use crate::events::*;
 use crate::input::error::FormatError;
-use crate::model::{EvaluationMode, SheetQuery, try_mutate};
+use crate::model::{EvaluationMode, ActiveCellQuery, try_mutate};
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
 use crate::util::refocus_workbook;
 

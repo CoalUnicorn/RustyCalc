@@ -11,7 +11,7 @@ use crate::components::ui::popover::Popover;
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::input::mouse::header_span::Axis;
 use crate::input::structure::StructAction;
-use crate::model::frontend_model::SheetQuery;
+use crate::model::frontend_model::ActiveCellQuery;
 use crate::state::{HeaderContextMenu, ModelStore, WorkbookState};
 
 /// Viewport-level overlay for column and row header right-click menus.

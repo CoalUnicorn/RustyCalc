@@ -8,7 +8,7 @@ use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::formula::FormulaAnalysis;
 use crate::model::{
-    ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetQuery, mutate,
+    ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, ActiveCellQuery, mutate,
     style_types::{BooleanValue, StylePath},
     try_mutate,
 };

@@ -20,7 +20,7 @@ mod view_options;
 use leptos::prelude::*;
 
 use crate::events::StructureEvent;
-use crate::model::{SheetQuery, frontend_types::ToolbarState};
+use crate::model::{ActiveCellQuery, frontend_types::ToolbarState};
 use crate::state::{ModelStore, WorkbookState};
 
 use alignment::{AlignButtons, VertAlignButtons};

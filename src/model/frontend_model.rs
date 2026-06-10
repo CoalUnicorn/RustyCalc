@@ -39,8 +39,8 @@ impl FormulaAnalyzer for UserModel<'_> {
     fn analyze_in_context(&self, text: &str) -> FormulaAnalysis {
         analyze_formula(
             text,
-            SheetQuery::active_cell(self),
-            &SheetQuery::get_sheet_names(self),
+            ActiveCellQuery::active_cell(self),
+            &SheetRoster::get_sheet_names(self),
             &DefinedNameManager::get_defined_names(self),
         )
     }
@@ -114,8 +114,9 @@ impl DefinedNameManager for UserModel<'_> {
     }
 }
 
-/// Read-only queries against the active workbook / sheet / cell.
-pub trait SheetQuery {
+/// Active-cell / selection / active-sheet reads, all derived from the current
+/// view. The toolbar, formula bar, and navigation read through this slice.
+pub trait ActiveCellQuery {
     /// Formatting state for the toolbar, derived from the active cell.
     fn toolbar_state(&self) -> ToolbarState;
 
@@ -140,7 +141,11 @@ pub trait SheetQuery {
 
     /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
     fn sheet_dimension(&self) -> CellArea;
+}
 
+/// Workbook sheet-roster queries: names, visibility, tab colors. Independent
+/// of the active cell — the sheet-tab bar and name resolution read these.
+pub trait SheetRoster {
     fn get_sheet_name(&self, sheet_idx: usize) -> String;
 
     fn get_sheet_visible(&self) -> Vec<(u32, u32)>;
@@ -228,7 +233,7 @@ fn border_weight_from_style(s: &ironcalc_base::types::BorderStyle) -> BorderWeig
     }
 }
 
-impl SheetQuery for UserModel<'_> {
+impl ActiveCellQuery for UserModel<'_> {
     fn toolbar_state(&self) -> ToolbarState {
         let view = self.get_selected_view();
         let style = self
@@ -360,7 +365,9 @@ impl SheetQuery for UserModel<'_> {
             },
         }
     }
+}
 
+impl SheetRoster for UserModel<'_> {
     fn get_sheet_name(&self, sheet_idx: usize) -> String {
         self.get_worksheets_properties()
             .get(sheet_idx)

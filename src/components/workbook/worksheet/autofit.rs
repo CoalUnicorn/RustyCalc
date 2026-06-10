@@ -19,7 +19,7 @@ use crate::events::ContentEvent;
 use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::input::mouse::CanvasHandle;
 use crate::input::structure::StructAction;
-use crate::model::SheetQuery;
+use crate::model::ActiveCellQuery;
 use crate::state::{ModelStore, WorkbookState};
 use iron_canvas_core::geometry::constants::DEFAULT_ROW_HEIGHT;
 

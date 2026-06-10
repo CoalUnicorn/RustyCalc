@@ -24,7 +24,7 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::coord::CellAddress;
-use crate::model::SheetQuery;
+use crate::model::SheetRoster;
 use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{EditingCell, EditingDefinedName, ModelStore, Split};
 

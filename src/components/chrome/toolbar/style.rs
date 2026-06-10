@@ -9,7 +9,7 @@
 //!
 //! Color and weight persist across preset clicks within one open session, and
 //! seed from the active cell when the dropdown opens (see
-//! `SheetQuery::toolbar_state`).
+//! `ActiveCellQuery::toolbar_state`).
 
 use leptos::prelude::*;
 

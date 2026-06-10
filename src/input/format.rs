@@ -10,7 +10,7 @@ use crate::coord::{CellArea, SheetRange};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
-    EvaluationMode, SafeFontFamily, SheetQuery, ToolbarState,
+    EvaluationMode, SafeFontFamily, ActiveCellQuery, ToolbarState,
     style_types::{BooleanValue, BorderSide, BorderWeight, HexColor, StylePath},
     try_mutate,
 };

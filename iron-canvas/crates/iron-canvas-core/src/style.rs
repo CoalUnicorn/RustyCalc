@@ -108,10 +108,15 @@ pub enum CellKind {
 }
 
 /// Conditional-formatting decoration overlay. `IconSpec = String` is a v1
-/// placeholder (the icon name) — `paint_cf_decoration` is a no-op on all
-/// backends today, so no painted pixel depends on a richer icon enum yet.
+/// placeholder (the icon name) — the renderer resolves an icon to no pixels
+/// yet (no glyph system), so no painted pixel depends on a richer icon enum.
 pub type IconSpec = String;
 
+/// CF decorations today, but `#[non_exhaustive]` so non-CF per-cell visuals
+/// (sparklines, comment markers) can be added without breaking downstream
+/// matches. Variants resolve into `Painter` primitives at the renderer, so a
+/// new variant needs no new `Painter` method.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub enum CellDecoration {
     DataBar(DataBarSpec),

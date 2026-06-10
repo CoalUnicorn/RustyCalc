@@ -20,7 +20,7 @@ use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::formula::{analyze_formula, splice_ref};
 use crate::model::frontend_model::DefinedNameManager;
 use crate::model::style_types::HexColor;
-use crate::model::{EvaluationMode, SheetQuery, try_mutate};
+use crate::model::{EvaluationMode, SheetRoster, try_mutate};
 use crate::state::{ModelStore, RangeCaptureTarget, WorkbookState};
 
 const RULE_TYPES: &[(&str, &str)] = &[

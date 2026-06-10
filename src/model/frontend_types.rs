@@ -145,7 +145,7 @@ pub struct TextStyle {
 ///
 /// Holds the *picker's* current color/weight choices — what a click on a preset
 /// will apply — seeded from the active cell's dominant border when the dropdown
-/// opens (see `SheetQuery::toolbar_state`).
+/// opens (see `ActiveCellQuery::toolbar_state`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BorderState {
     pub color: CssColor,

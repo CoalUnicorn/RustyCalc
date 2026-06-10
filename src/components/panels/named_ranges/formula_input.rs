@@ -14,7 +14,7 @@ use leptos::prelude::*;
 
 use crate::components::ui::formula_field::FormulaField;
 use crate::input::formula::sync_edit;
-use crate::model::SheetQuery;
+use crate::model::SheetRoster;
 use crate::model::frontend_model::DefinedNameManager;
 use crate::state::{ModelStore, WorkbookState};
 

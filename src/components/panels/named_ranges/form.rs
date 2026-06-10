@@ -22,7 +22,7 @@ use crate::coord::{CellAddress, TextRef, selection_a1_qualified_absolute};
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::formula::{FormulaAnalysis, analyze_formula, sync_edit};
 use crate::model::frontend_model::DefinedNameManager;
-use crate::model::{EvaluationMode, SheetQuery, try_mutate};
+use crate::model::{EvaluationMode, SheetRoster, try_mutate};
 use crate::state::{
     EditingDefinedName, ModelStore, RangeCaptureTarget, StatusMessage, WorkbookState,
 };

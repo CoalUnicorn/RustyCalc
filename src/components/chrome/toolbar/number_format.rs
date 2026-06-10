@@ -8,7 +8,7 @@ use leptos::prelude::*;
 
 use crate::components::ui::popover::Popover;
 use crate::input::keyboard::{SpreadsheetAction, execute};
-use crate::model::SheetQuery;
+use crate::model::ActiveCellQuery;
 use crate::state::{ModelStore, WorkbookState};
 use crate::util::refocus_workbook;
 

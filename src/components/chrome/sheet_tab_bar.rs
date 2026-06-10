@@ -3,7 +3,7 @@ use crate::components::ui::context_menu::{ContextMenu, ContextMenuItem, ContextM
 use crate::components::ui::inline_rename::InlineRenameInput;
 use crate::input::sheet::{SheetAction, execute_sheet};
 use crate::model::style_types::HexColor;
-use crate::model::{SheetQuery, frontend_model::SHEET_STATE_VISIBLE};
+use crate::model::{SheetRoster, frontend_model::SHEET_STATE_VISIBLE};
 use crate::state::{ModelStore, WorkbookState};
 use leptos::prelude::*;
 
