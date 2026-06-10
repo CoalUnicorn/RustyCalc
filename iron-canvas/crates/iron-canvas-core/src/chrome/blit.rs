@@ -330,11 +330,13 @@ pub(super) fn try_blit_reuse(
             frozen: std::mem::take(&mut prev.pane_set.rows.frozen),
             scroll: scroll_rows,
             frozen_offset: prev.pane_set.rows.frozen_offset,
+            last_id: prev.pane_set.rows.last_id,
         },
         cols: AxisSlots {
             frozen: std::mem::take(&mut prev.pane_set.cols.frozen),
             scroll: scroll_cols,
             frozen_offset: prev.pane_set.cols.frozen_offset,
+            last_id: prev.pane_set.cols.last_id,
         },
         row_header_labels,
         col_header_labels,

@@ -23,6 +23,7 @@ pub use orchestrator::{Orchestrator, PaintRegime, PaintRegimeTag};
 
 pub use render_overlays::RenderOverlays;
 
+pub use decoration::{DecorationId, Layer};
 pub use geometry::{
     CanvasSize,
     constants::{

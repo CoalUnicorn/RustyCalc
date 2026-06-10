@@ -6,7 +6,6 @@
 //! Lives next to `chrome/blit.rs`. Splits off `chrome/pane_set.rs` so
 //! the latter only carries pure-axis geometry.
 
-use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
 use crate::geometry::slot::{AxisSlot, ColSlot, RowSlot, col_width, fill_axis, row_height};
 use crate::{CanvasModel, CanvasSize};
 
@@ -197,7 +196,10 @@ impl PaneSet {
             self.rows.frozen_offset,
             canvas.h.ceil() as i32,
             new_top,
-            LAST_ROW,
+            // prev's fill-time snapshot: the blit path is gated on
+            // !content_dirty, so the model's bound cannot have moved
+            // since prev was built — both rebuild paths agree.
+            self.rows.last_id,
             |r| row_height(model, r),
         )
     }
@@ -213,7 +215,7 @@ impl PaneSet {
             self.cols.frozen_offset,
             canvas.w.ceil() as i32,
             new_left,
-            LAST_COLUMN,
+            self.cols.last_id,
             |c| col_width(model, c),
         )
     }

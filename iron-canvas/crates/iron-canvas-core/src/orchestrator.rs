@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::CanvasModel;
 use crate::chrome::{BlitPlan, Chrome, FrameKindTag, FramePath, FrameValidity, PaneRegionMask};
-use crate::decoration::{Decorations, selection::SelectionLayer};
+use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
@@ -196,6 +196,33 @@ where
         }
     }
 
+    /// Install a consumer-owned overlay decoration above every built-in.
+    /// The layer paints from the next frame onward — never retroactively
+    /// onto a frame already emitted — and its `hit_test` runs before every
+    /// built-in zone, so returning `Some` at the autofill-handle pixel
+    /// steals the handle drag: stay paint-only (the trait default) unless
+    /// that shadowing is intended. The registry holds a strong `Rc`; keep
+    /// a typed clone, mutate through interior mutability, and call
+    /// [`Self::request_overlay_repaint`] after each change — unlike the
+    /// built-in setters, nothing here compares state for you.
+    pub fn add_decoration(&mut self, layer: Rc<dyn Layer>) -> DecorationId {
+        let id = self.decos.add_custom(layer);
+        self.overlay.raise(GridSignals::OVERLAY);
+        id
+    }
+
+    /// Remove a custom decoration. Removal is explicit — a layer whose
+    /// consumer handle was dropped still participates in the paint and hit
+    /// loops (as a no-op) until removed here. Raises `OVERLAY` only when
+    /// the id was found, so a stale-id call cannot trigger a repaint.
+    pub fn remove_decoration(&mut self, id: DecorationId) -> bool {
+        let removed = self.decos.remove_custom(id);
+        if removed {
+            self.overlay.raise(GridSignals::OVERLAY);
+        }
+        removed
+    }
+
     /// Push a theme. Value-compares against `self.theme` and, on change,
     /// drops `last_frame`, invalidates the renderer paint cache, and
     /// marks both layers dirty. Theme is frame-wide — the per-cell pixel
@@ -296,6 +323,13 @@ where
         // consult `sel` (autofill, formula-refs) treat it as "no anchor"
         // and naturally fall through to the frame's pure cell hit-test.
         let sel = self.decos.selection().selection_range.unwrap_or_default();
+        // Custom band first — front-to-back is reverse insertion order,
+        // mirroring its paint position above every built-in.
+        for (_, layer) in self.decos.custom_layers().iter().rev() {
+            if let Some(hit) = layer.hit_test(frame, sel, xi, yi) {
+                return hit;
+            }
+        }
         for layer in self.decos.hit_order() {
             if let Some(hit) = layer.hit_test(frame, sel, xi, yi) {
                 return hit;
@@ -466,6 +500,7 @@ where
             prev,
             self.decos.selection(),
             &self.decos.overlay_slice(),
+            self.decos.custom_layers(),
         );
     }
 
@@ -507,6 +542,7 @@ where
             &frame,
             self.decos.selection(),
             &self.decos.overlay_slice(),
+            self.decos.custom_layers(),
         );
         self.last_frame = Some(frame);
     }
@@ -553,6 +589,7 @@ where
                 &frame,
                 self.decos.selection(),
                 &self.decos.overlay_slice(),
+                self.decos.custom_layers(),
             );
         }
         self.last_frame = Some(frame);
@@ -580,6 +617,7 @@ where
                 &frame,
                 self.decos.selection(),
                 &self.decos.overlay_slice(),
+                self.decos.custom_layers(),
             );
         }
         self.last_frame = Some(frame);

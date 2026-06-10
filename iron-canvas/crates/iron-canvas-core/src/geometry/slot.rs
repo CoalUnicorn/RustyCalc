@@ -209,6 +209,11 @@ pub struct AxisSlots<S: AxisSlot> {
     pub frozen: Vec<S>,
     pub scroll: Vec<S>,
     pub frozen_offset: i32,
+    /// Last addressable slot id this axis walks to (`CanvasModel::last_row`
+    /// / `last_column`), snapshotted by `fill`. The blit-path rebuilds and
+    /// the autofill-handle guard read this instead of re-querying the model,
+    /// so a frame's queries stay coherent with its painted extent.
+    pub last_id: i32,
 }
 
 impl<S: AxisSlot> AxisSlots<S> {
@@ -281,6 +286,7 @@ impl<S: AxisSlot> AxisSlots<S> {
         canvas_extent: i32,
         mut measure: impl FnMut(&dyn CanvasModel, i32) -> i32,
     ) {
+        self.last_id = last;
         self.frozen.reserve(frozen_count as usize);
         let after_frozen = fill_axis(&mut self.frozen, 1..=frozen_count, origin, None, |id| {
             measure(model, id)
@@ -324,6 +330,7 @@ mod tests {
             frozen: vec![RowSlot::new(1, 0, 20), RowSlot::new(2, 20, 20)],
             scroll: vec![RowSlot::new(5, 48, 20), RowSlot::new(6, 68, 20)],
             frozen_offset: 48,
+            last_id: 6,
         }
     }
 

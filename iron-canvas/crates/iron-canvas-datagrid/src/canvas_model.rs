@@ -35,6 +35,15 @@ impl CanvasModel for DataGrid {
     fn get_show_grid_lines(&self, _s: u32) -> Option<bool> {
         Some(true)
     }
+    /// Finite grid: scroll extents, blit rebuilds, and the autofill guard
+    /// end at the data. Floored at 1 so an empty grid keeps one addressable
+    /// row — the walk never sees a zero-row axis.
+    fn last_row(&self, _s: u32) -> i32 {
+        (self.row_count() as i32).max(1)
+    }
+    fn last_column(&self, _s: u32) -> i32 {
+        (self.column_count() as i32).max(1)
+    }
     fn get_column_header_text(&self, _s: u32, col: i32) -> Option<String> {
         if col < 1 {
             return None;

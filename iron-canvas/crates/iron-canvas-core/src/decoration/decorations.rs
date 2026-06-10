@@ -1,4 +1,5 @@
-//! The five overlay decoration layers as one owned group.
+//! The built-in overlay decoration layers, plus the consumer custom band,
+//! as one owned group.
 //!
 //! Before this struct existed the orchestrator held `selection`,
 //! `autofill`, `clipboard`, `point_mode`, and `formula_refs` as five loose
@@ -17,6 +18,8 @@
 //!   paint-coherent is owned by `refresh_overlay_state`, the single source
 //!   of that invariant.
 
+use std::rc::Rc;
+
 use crate::CanvasModel;
 use crate::render_overlays::RenderOverlays;
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
@@ -26,6 +29,12 @@ use super::{
     SelectionLayer,
 };
 
+/// Handle for a consumer-installed overlay decoration. Returned by
+/// `Orchestrator::add_decoration`, consumed by `remove_decoration`. Ids
+/// are never reused within an orchestrator's lifetime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DecorationId(u32);
+
 #[derive(Default)]
 pub(crate) struct Decorations {
     selection: SelectionLayer,
@@ -33,6 +42,10 @@ pub(crate) struct Decorations {
     clipboard: ClipboardLayer,
     point_mode: PointModeLayer,
     formula_refs: FormulaRefsLayer,
+    /// Consumer band — insertion order is back-to-front. Painted above
+    /// `overlay_slice`, hit-tested (reversed) before `hit_order`.
+    custom: Vec<(DecorationId, Rc<dyn Layer>)>,
+    next_custom_id: u32,
 }
 
 impl Decorations {
@@ -72,6 +85,25 @@ impl Decorations {
             &self.autofill,
             &self.selection,
         ]
+    }
+
+    pub(crate) fn add_custom(&mut self, layer: Rc<dyn Layer>) -> DecorationId {
+        let id = DecorationId(self.next_custom_id);
+        self.next_custom_id += 1;
+        self.custom.push((id, layer));
+        id
+    }
+
+    /// Returns whether the id was present (the caller raises `OVERLAY`
+    /// only then — a stale-id removal must not trigger a repaint).
+    pub(crate) fn remove_custom(&mut self, id: DecorationId) -> bool {
+        let before = self.custom.len();
+        self.custom.retain(|(i, _)| *i != id);
+        self.custom.len() != before
+    }
+
+    pub(crate) fn custom_layers(&self) -> &[(DecorationId, Rc<dyn Layer>)] {
+        &self.custom
     }
 
     /// Refresh selection from the live model, then mirror its rectangle

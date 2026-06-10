@@ -8,7 +8,7 @@
 //! holds only the pure-axis surface.
 
 use crate::CanvasModel;
-use crate::geometry::constants::{HEADER_COL_WIDTH, LAST_COLUMN, LAST_ROW};
+use crate::geometry::constants::HEADER_COL_WIDTH;
 use crate::geometry::slot::{AxisSlots, ColSlot, RowSlot, col_width, row_height};
 
 use super::recycled_slots::RecycledSlots;
@@ -39,11 +39,13 @@ impl PaneSet {
                 frozen: recycled.frozen_rows,
                 scroll: recycled.scroll_rows,
                 frozen_offset: 0,
+                last_id: 0,
             },
             cols: AxisSlots {
                 frozen: recycled.frozen_cols,
                 scroll: recycled.scroll_cols,
                 frozen_offset: 0,
+                last_id: 0,
             },
             row_header_labels: Vec::new(),
             col_header_labels: Vec::new(),
@@ -100,6 +102,7 @@ impl PaneSet {
         frozen_count: i32,
         origin_y: i32,
         view_top_row: i32,
+        last_row: i32,
         canvas_h: f64,
     ) {
         self.rows.fill(
@@ -107,7 +110,7 @@ impl PaneSet {
             frozen_count,
             origin_y,
             view_top_row,
-            LAST_ROW,
+            last_row,
             canvas_h.ceil() as i32,
             row_height,
         );
@@ -122,6 +125,7 @@ impl PaneSet {
         frozen_count: i32,
         origin_x: i32,
         view_left_column: i32,
+        last_column: i32,
         canvas_w: f64,
     ) {
         self.cols.fill(
@@ -129,7 +133,7 @@ impl PaneSet {
             frozen_count,
             origin_x,
             view_left_column,
-            LAST_COLUMN,
+            last_column,
             canvas_w.ceil() as i32,
             col_width,
         );

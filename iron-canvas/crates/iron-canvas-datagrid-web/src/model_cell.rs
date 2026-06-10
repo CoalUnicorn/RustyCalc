@@ -31,7 +31,9 @@ impl DataGridModel {
 // Forward the non-defaulted `CanvasModel` methods. The defaulted bulk
 // readers (`get_*_in`) and the `get_extended_cell_style` / header-toggle
 // defaults call these per-cell forwarders, so they stay correct without
-// explicit forwarding.
+// explicit forwarding. `last_row` / `last_column` are defaulted but
+// forwarded anyway: their defaults return Excel bounds, not delegations,
+// so skipping the forward would lose the grid's finite extent.
 impl CanvasModel for DataGridModel {
     fn get_selected_sheet(&self) -> u32 {
         self.0.borrow().get_selected_sheet()
@@ -53,6 +55,12 @@ impl CanvasModel for DataGridModel {
     }
     fn get_show_grid_lines(&self, s: u32) -> Option<bool> {
         self.0.borrow().get_show_grid_lines(s)
+    }
+    fn last_row(&self, s: u32) -> i32 {
+        self.0.borrow().last_row(s)
+    }
+    fn last_column(&self, s: u32) -> i32 {
+        self.0.borrow().last_column(s)
     }
     fn get_column_header_text(&self, s: u32, col: i32) -> Option<String> {
         self.0.borrow().get_column_header_text(s, col)

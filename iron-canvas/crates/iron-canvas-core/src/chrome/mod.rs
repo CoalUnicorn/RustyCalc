@@ -12,7 +12,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use crate::geometry::{
-    constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW},
+    constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
     pixel_rect::PixelRect,
     prim::Point,
     slot::scroll_first,
@@ -247,13 +247,23 @@ impl Chrome {
 
         let mut pane_set = PaneSet::with_recycled(recycled);
 
-        // Phase B — row walk.
+        // Phase B — row walk, bounded by the model's grid (Excel's
+        // LAST_ROW/LAST_COLUMN by default; finite models override).
+        let last_row = model.last_row(sheet);
+        let last_column = model.last_column(sheet);
         let origin_y = if show_col {
             HEADER_ROW_HEIGHT + CELL_AREA_INSET
         } else {
             0
         };
-        pane_set.fill_rows(model, frozen_row_count, origin_y, view.top_row, canvas.h);
+        pane_set.fill_rows(
+            model,
+            frozen_row_count,
+            origin_y,
+            view.top_row,
+            last_row,
+            canvas.h,
+        );
 
         // Phase C — measure row_header_thickness from the last visible row label.
         let last_visible_row = pane_set
@@ -279,6 +289,7 @@ impl Chrome {
             frozen_col_count,
             origin_x,
             view.left_column,
+            last_column,
             canvas.w,
         );
 
@@ -467,10 +478,13 @@ impl Chrome {
         let norm = selection_range.normalized();
         let r2 = norm.r2;
         let c2 = norm.c2;
-        if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
+        let p = &self.pane_set;
+        // Selections reaching the grid's last row/column (full-row,
+        // full-column, or up against a finite model's data boundary) get
+        // no handle — there is nothing beyond to fill into.
+        if r2 >= p.rows.last_id || c2 >= p.cols.last_id {
             return None;
         }
-        let p = &self.pane_set;
         if !p.row_in_frame(r2) || !p.col_in_frame(c2) {
             return None;
         }

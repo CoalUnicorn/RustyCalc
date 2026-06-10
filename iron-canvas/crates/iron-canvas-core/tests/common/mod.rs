@@ -37,6 +37,10 @@ pub struct TestModel {
     /// not explicitly set via `set_cell`. Lets a test populate a synthetic
     /// data band without enumerating cells.
     data_until: Cell<i32>,
+    /// Grid bounds reported via `last_row` / `last_column`. Default to the
+    /// Excel constants; `with_last_row` shrinks them to model a finite grid.
+    last_row: Cell<i32>,
+    last_column: Cell<i32>,
     top_row: Cell<i32>,
     left_column: Cell<i32>,
     active_row: Cell<i32>,
@@ -65,6 +69,8 @@ impl Default for TestModel {
             decorations: RefCell::default(),
             column_headers: RefCell::default(),
             data_until: Cell::new(0),
+            last_row: Cell::new(iron_canvas_core::LAST_ROW),
+            last_column: Cell::new(iron_canvas_core::LAST_COLUMN),
             top_row: Cell::new(1),
             left_column: Cell::new(1),
             active_row: Cell::new(1),
@@ -144,6 +150,14 @@ impl TestModel {
     }
     pub fn with_data_until(self, row: i32) -> Self {
         self.data_until.set(row);
+        self
+    }
+    pub fn with_last_row(self, row: i32) -> Self {
+        self.last_row.set(row);
+        self
+    }
+    pub fn with_last_column(self, col: i32) -> Self {
+        self.last_column.set(col);
         self
     }
     pub fn with_column_header(self, col: i32, text: &str) -> Self {
@@ -269,6 +283,12 @@ impl CanvasModel for TestModel {
     }
     fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
         Some(self.show_grid.get())
+    }
+    fn last_row(&self, _: u32) -> i32 {
+        self.last_row.get()
+    }
+    fn last_column(&self, _: u32) -> i32 {
+        self.last_column.get()
     }
     fn get_show_row_headers(&self, _: u32) -> Option<bool> {
         Some(self.show_row_headers.get())

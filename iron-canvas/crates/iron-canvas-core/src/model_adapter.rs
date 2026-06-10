@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
@@ -123,6 +124,13 @@ pub trait CellContentQuery {
 /// query against the host model. Extends [`CellContentQuery`] (the per-cell
 /// content slice) with the sheet-level config and selection accessors.
 ///
+/// `sheet` is an opaque view-scope discriminator, not a spreadsheet concept:
+/// the engine echoes `get_selected_sheet()` back into the per-sheet accessors
+/// so a multi-surface model can route the query, and equality-compares it
+/// across frames (a changed value invalidates the cached frame). It is never
+/// interpreted beyond that. Single-surface models (the datagrid impl, for
+/// one) return a constant and ignore the parameter.
+///
 /// The `Option`-returning config/selection accessors use `None` for a transient
 /// JS-bridge failure (the next animation frame re-queries), while the
 /// `get_*_header_text` overrides use `None` for "no override, fall back to the
@@ -138,6 +146,19 @@ pub trait CanvasModel: CellContentQuery {
     fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
     fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+
+    /// Last addressable row of `sheet`, 1-based inclusive. The slot walks,
+    /// the blit-path rebuilds, and the autofill-handle guard clamp here.
+    /// The default is Excel's bound; finite models override it so scroll
+    /// extents end at their data.
+    fn last_row(&self, _sheet: u32) -> i32 {
+        LAST_ROW
+    }
+
+    /// Column mirror of [`Self::last_row`].
+    fn last_column(&self, _sheet: u32) -> i32 {
+        LAST_COLUMN
+    }
 
     /// Whether the row-header strip (1, 2, 3...) is visible on `sheet`.
     /// `Some(true)` default; `None` carries the same fetch-failed meaning
@@ -210,6 +231,8 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
         fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
         fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+        fn last_row(&self, sheet: u32) -> i32;
+        fn last_column(&self, sheet: u32) -> i32;
         fn get_show_row_headers(&self, sheet: u32) -> Option<bool>;
         fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
         fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;

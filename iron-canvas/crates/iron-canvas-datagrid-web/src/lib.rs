@@ -22,20 +22,23 @@ use std::rc::Rc;
 use iron_canvas_canvas2d::WebSurface;
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
-use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
+use iron_canvas_core::{CanvasModel, CanvasTheme, Layer, Orchestrator};
 use iron_canvas_datagrid::SortDirection;
 use iron_canvas_export::SvgSurface;
 use wasm_bindgen::prelude::*;
 
+pub mod hover;
 pub mod model_cell;
 pub mod wire;
 
+use hover::HoverLayer;
 use model_cell::DataGridModel;
 
 #[wasm_bindgen]
 pub struct DataGridCanvas {
     orch: Orchestrator<WebSurface>,
     model: Rc<DataGridModel>,
+    hover: Rc<HoverLayer>,
 }
 
 #[wasm_bindgen]
@@ -51,7 +54,9 @@ impl DataGridCanvas {
             WebSurface::overlay(overlay_canvas)?,
         );
         orch.set_model(Rc::clone(&model) as Rc<dyn CanvasModel>);
-        Ok(Self { orch, model })
+        let hover = Rc::new(HoverLayer::default());
+        orch.add_decoration(Rc::clone(&hover) as Rc<dyn Layer>);
+        Ok(Self { orch, model, hover })
     }
 
     // --- E.1 Theming ---
@@ -137,6 +142,16 @@ impl DataGridCanvas {
         self.model
             .borrow_mut_with(|g| g.set_selection(r1 + 1, c1 + 1, r2 + 1, c2 + 1));
         self.orch.request_overlay_repaint();
+    }
+
+    /// Hover-highlight a cell (0-based); any negative coordinate clears.
+    /// Drives the custom `HoverLayer` decoration — compare-then-raise, so
+    /// pointer-move spam on one cell costs no repaint.
+    #[wasm_bindgen(js_name = "setHover")]
+    pub fn set_hover(&mut self, row: i32, col: i32) {
+        if self.hover.set_cell(HoverLayer::cell_from_js(row, col)) {
+            self.orch.request_overlay_repaint();
+        }
     }
 
     // --- D.3 Column resize ---

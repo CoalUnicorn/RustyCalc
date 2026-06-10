@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 use crate::chrome::{BlitPlan, Chrome, PaneRegionMask};
-use crate::decoration::{Layer, selection::SelectionLayer};
+use crate::decoration::{DecorationId, Layer, selection::SelectionLayer};
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
@@ -202,6 +202,7 @@ where
         frame: &Chrome,
         selection: &SelectionLayer,
         others: &[&dyn Layer],
+        customs: &[(DecorationId, Rc<dyn Layer>)],
     ) {
         let size = frame.canvas_size;
         let painter = self.surface.painter();
@@ -245,6 +246,13 @@ where
 
         // Other decorations: one group each, named by the layer itself.
         for layer in others {
+            painter.begin_group(layer.group());
+            layer.paint(frame, painter);
+            painter.end_group();
+        }
+        // Consumer band — topmost, insertion order back-to-front. Same
+        // bracket-per-layer contract as the built-ins above.
+        for (_, layer) in customs {
             painter.begin_group(layer.group());
             layer.paint(frame, painter);
             painter.end_group();

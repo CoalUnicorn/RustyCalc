@@ -85,6 +85,9 @@ pub enum GroupClass {
     FormulaRefs,
     ActiveCellRepaint,
     HeaderHighlights,
+    /// Consumer band (`Orchestrator::add_decoration`) — every custom
+    /// decoration shares this bracket.
+    Custom,
 }
 
 impl GroupClass {
@@ -104,6 +107,7 @@ impl GroupClass {
             GroupClass::FormulaRefs => "formula-refs",
             GroupClass::ActiveCellRepaint => "active-cell-repaint",
             GroupClass::HeaderHighlights => "header-highlights",
+            GroupClass::Custom => "custom",
         }
     }
 }

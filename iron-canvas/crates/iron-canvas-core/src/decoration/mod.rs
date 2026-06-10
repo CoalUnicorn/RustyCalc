@@ -29,6 +29,7 @@ pub use formula_refs::FormulaRefsLayer;
 pub use point_mode::PointModeLayer;
 pub use selection::{RepaintActiveCell, SelectionLayer};
 
+pub use decorations::DecorationId;
 pub(crate) use decorations::Decorations;
 
 pub trait Layer {
