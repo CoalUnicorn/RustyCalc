@@ -1,4 +1,4 @@
-//! Typed dirty signals for `PaintGate`. Replaces the prior `Cell<bool>`
+//! Typed dirty signals for `PaintGate`.
 //! payload so `Orchestrator::decide` can dispatch on *what* changed rather
 //! than re-deriving intent from `is_still_valid` + `screen_for_blit`. Bit layout
 //! mirrors `chrome::pane_region::PaneRegionMask`.
