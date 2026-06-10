@@ -109,6 +109,11 @@ pub struct IronCanvas {
     // Cached so SVG export can re-push the live model into a throwaway
     // orchestrator. Updated alongside every `set_model` / `setModel`.
     model: Option<Rc<dyn CanvasModel>>,
+    // Typed twin of `model`, kept only when the model came through `setModel`
+    // (the JS path) — `themeChanged` needs `JsBackedModel::theme_changed`,
+    // which the type-erased `Rc<dyn CanvasModel>` can't reach. `None` for
+    // Rust-level models, whose theme handling lives host-side.
+    js_model: Option<Rc<JsBackedModel>>,
     // Live DPR — the engine doesn't retain it across `resize` calls, and
     // both the recording header and playback restore need it. Initialized
     // to `1` because some entry paths (the test surface) call `startRecording`
@@ -134,6 +139,7 @@ impl IronCanvas {
         Ok(IronCanvas {
             orch: Orchestrator::<FacadeSurface>::new(grid, overlay),
             model: None,
+            js_model: None,
             last_dpr: 1,
             #[cfg(feature = "dev-tools")]
             mode: CanvasMode::Live,
@@ -315,10 +321,27 @@ impl IronCanvas {
     /// catch sees a real `Error` with `.message` and `.stack`.
     #[allow(non_snake_case)]
     pub fn setModel(&mut self, model: JsValue) -> Result<(), JsError> {
-        let backed: Rc<dyn CanvasModel> = Rc::new(JsBackedModel::try_from_js_value(model)?);
-        self.model = Some(Rc::clone(&backed));
-        self.orch.set_model(backed);
+        let backed = Rc::new(JsBackedModel::try_from_js_value(model)?);
+        self.js_model = Some(Rc::clone(&backed));
+        let erased: Rc<dyn CanvasModel> = backed;
+        self.model = Some(Rc::clone(&erased));
+        self.orch.set_model(erased);
         Ok(())
+    }
+
+    /// Host contract for workbook-theme changes: call after
+    /// `model.setTheme(...)`. Drops the bridge's cached theme and marks
+    /// content dirty — a theme swap changes every style fingerprint, so the
+    /// next `paintIfDirty` repaints from fresh fetches. Without this call the
+    /// stale cache silently misrenders theme colors (no error, host bug).
+    /// No-op beyond the dirty mark for Rust-level models.
+    #[allow(non_snake_case)]
+    #[wasm_bindgen(js_name = "themeChanged")]
+    pub fn theme_changed(&mut self) {
+        if let Some(m) = &self.js_model {
+            m.theme_changed();
+        }
+        self.mark_content_dirty();
     }
 
     /// Render the current sheet as a self-contained SVG string. Returns
@@ -564,6 +587,8 @@ impl IronCanvas {
     /// (e.g. `WorksheetModelAdapter`) route through here.
     pub fn set_model(&mut self, model: Rc<dyn CanvasModel>) {
         self.model = Some(Rc::clone(&model));
+        // A Rust-level model replaces any JS one; its theme is host-resolved.
+        self.js_model = None;
         self.orch.set_model(model);
     }
 

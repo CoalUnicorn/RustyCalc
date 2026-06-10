@@ -93,6 +93,7 @@
             <button id="highlight-a1c5" type="button">Highlight A1:C5</button>
             <button id="clear-highlight" type="button">Clear highlight</button>
             <button id="dump-bridge-calls" type="button">Log + reset bridge calls</button>
+            <button id="swap-theme" type="button">Swap workbook theme</button>
         </p>
 
         <script type="module">
@@ -143,6 +144,16 @@
                 model.setUserInput(2, 1, 1, "3.14159");
                 model.setUserInput(2, 2, 1, "2.71828");
                 model.setUserInput(2, 3, 1, "=A1*A2");
+
+                // Theme-colored fills on Numbers!C1:D3 — exercises the
+                // Color::Theme path end-to-end. "[4, 0]" = slot 4 (accent1);
+                // the second column gets a 0.4 tint of the same slot.
+                model.updateRangeStyle(
+                    { sheet: 0, row: 1, column: 3, width: 1, height: 3 },
+                    "fill.color", "[4, 0]");
+                model.updateRangeStyle(
+                    { sheet: 0, row: 1, column: 4, width: 1, height: 3 },
+                    "fill.color", "[4, 0.4]");
 
                 // ----------------------------------------------------------------
                 // Phase 4: batched `*In` host methods + bridge-call instrumentation
@@ -300,6 +311,24 @@
                     .addEventListener("click", () => {
                         console.table({ ...bridgeCalls });
                         for (const k of Object.keys(bridgeCalls)) bridgeCalls[k] = 0;
+                    });
+
+                phase = "wire theme swap";
+                // Workbook-theme refresh contract: mutate the theme on the
+                // model, then tell the canvas — themeChanged() drops the
+                // bridge's cached theme and marks content dirty, so the next
+                // paintIfDirty repaints from fresh fetches. The accent1 fills
+                // in Numbers!C1:D3 must flip color on every click; if they
+                // don't, the cache invalidation path is broken.
+                let accentSwapped = false;
+                document
+                    .getElementById("swap-theme")
+                    .addEventListener("click", () => {
+                        const theme = model.getTheme();
+                        theme.accent1 = accentSwapped ? "#4472C4" : "#E91E63";
+                        accentSwapped = !accentSwapped;
+                        model.setTheme(theme);
+                        canvas.themeChanged();
                     });
 
                 phase = "wire hitTest demo";

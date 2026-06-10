@@ -1,7 +1,7 @@
 //! Serde-roundtrip bridge to access `ironcalc_base`'s `pub(crate)`
 //! clipboard and border fields without modifying the base crate.
 
-use ironcalc_base::types::{BorderItem, BorderStyle};
+use ironcalc_base::types::{BorderItem, BorderStyle, Color};
 use ironcalc_base::{BorderArea, ClipboardData, UserModel};
 
 use crate::model::Navigator;
@@ -108,8 +108,15 @@ pub enum BorderKind {
 #[allow(clippy::expect_used)]
 #[allow(dead_code)]
 pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<String>) -> BorderArea {
+    let border_color = match color {
+        Some(ref c) if !c.is_empty() => Color::from_rgb(c).unwrap_or(Color::None),
+        _ => Color::None,
+    };
     let mirror = BorderAreaMirror {
-        item: BorderItem { style, color },
+        item: BorderItem {
+            style,
+            color: border_color,
+        },
         r#type: kind,
     };
     let json = serde_json::to_value(&mirror).expect("BorderAreaMirror must be serializable");

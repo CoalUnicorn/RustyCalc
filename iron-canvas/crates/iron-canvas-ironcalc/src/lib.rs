@@ -17,6 +17,18 @@ use ironcalc_base::UserModel;
 
 use crate::convert::{cell_decoration_from_extended, cell_type_to_kind, style_to_core};
 
+/// Color resolver over a live `UserModel`: `resolve_color` borrows the
+/// workbook theme, so resolving costs no theme clone per cell. Pass as
+/// `&color_resolver(&model)` to the `convert` functions.
+pub fn color_resolver<'a>(
+    m: &'a UserModel<'_>,
+) -> impl Fn(&ironcalc_base::types::Color) -> Option<String> + 'a {
+    move |c| {
+        let rgb = m.resolve_color(c);
+        (!rgb.is_empty()).then_some(rgb)
+    }
+}
+
 /// Newtype wrapper that implements `CanvasModel` for `UserModel`.
 ///
 /// Derefs to `UserModel` so callers can still access IronCalc-specific
@@ -74,7 +86,7 @@ impl<'a> CellContentQuery for IronCalcModel<'a> {
         // to `Absent` — there is no JS bridge to fail.
         match UserModel::get_extended_cell_style(&self.0, sheet, row, column)
             .ok()
-            .map(|ext| style_to_core(ext.style))
+            .map(|ext| style_to_core(ext.style, &color_resolver(&self.0)))
         {
             Some(s) => Fetched::Value(s),
             None => Fetched::Absent,
@@ -109,7 +121,7 @@ impl<'a> CellContentQuery for IronCalcModel<'a> {
         // both the same.
         match UserModel::get_extended_cell_style(&self.0, sheet, row, column)
             .ok()
-            .and_then(|ext| cell_decoration_from_extended(&ext))
+            .and_then(|ext| cell_decoration_from_extended(&ext, &color_resolver(&self.0)))
         {
             Some(d) => Fetched::Value(d),
             None => Fetched::Absent,

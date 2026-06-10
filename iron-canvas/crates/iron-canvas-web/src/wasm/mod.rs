@@ -10,7 +10,7 @@
 //! `console.warn` exactly once per class per session — enough signal to
 //! diagnose a contract drift, not enough to flood the console.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use serde::Deserialize;
 use wasm_bindgen::JsCast;
@@ -24,6 +24,14 @@ use iron_canvas_core::{
     Alignment, Border, BorderItem, BorderStyle, CellKind, CellStyle, FontStyle, HAlign, VAlign,
 };
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
+
+/// Local mirror of `iron-canvas-ironcalc::convert::color_to_css` — kept here,
+/// like the rest of `ic_style_to_core`, to avoid pulling that crate into the
+/// web crate's dep tree. Resolves theme slots; `None` for `Color::None`.
+fn ic_color_to_css(c: &ic::Color, theme: &ic::Theme) -> Option<String> {
+    let rgb = c.to_rgb(theme);
+    (!rgb.is_empty()).then_some(rgb)
+}
 
 #[wasm_bindgen]
 extern "C" {
@@ -110,6 +118,11 @@ extern "C" {
         r2: i32,
         c2: i32,
     ) -> Result<JsValue, JsValue>;
+
+    // Workbook theme, needed to resolve `Color::Theme(idx, tint)` to CSS.
+    // Optional on the host; absence falls back to the Office default theme.
+    #[wasm_bindgen(catch, method, js_name = "getTheme")]
+    fn get_theme(this: &IronCalcModelHandle) -> Result<JsValue, JsValue>;
 }
 
 pub struct JsBackedModel {
@@ -122,6 +135,13 @@ pub struct JsBackedModel {
     has_styles_in: bool,
     has_values_in: bool,
     has_types_in: bool,
+    has_get_theme: bool,
+    // Workbook theme, fetched lazily and cached for the model's lifetime
+    // (user decision: cache once, explicit refresh). The host must call
+    // `IronCanvas.themeChanged()` after `model.setTheme(...)` — a stale
+    // cache silently misrenders theme colors, and that is a host bug, not
+    // a recoverable bridge failure.
+    theme: RefCell<Option<ic::Theme>>,
 }
 
 impl JsBackedModel {
@@ -129,6 +149,7 @@ impl JsBackedModel {
         let has_styles_in = Self::has_method(&handle, "getCellStylesIn");
         let has_values_in = Self::has_method(&handle, "getFormattedCellValuesIn");
         let has_types_in = Self::has_method(&handle, "getCellTypesIn");
+        let has_get_theme = Self::has_method(&handle, "getTheme");
         Self {
             handle,
             js_throw_count: Cell::new(0),
@@ -136,6 +157,44 @@ impl JsBackedModel {
             has_styles_in,
             has_values_in,
             has_types_in,
+            has_get_theme,
+            theme: RefCell::new(None),
+        }
+    }
+
+    /// Drop the cached workbook theme; the next style conversion refetches.
+    /// The host's repaint contract: call this (via `IronCanvas.themeChanged`)
+    /// after `model.setTheme(...)`, then mark content dirty — every style
+    /// fingerprint changes with the theme.
+    pub fn theme_changed(&self) {
+        self.theme.replace(None);
+    }
+
+    /// Run `f` against the cached workbook theme, filling the cache on first
+    /// use. A throw, a bad shape, or a host without `getTheme` all cache the
+    /// Office default — strictly better than dropping theme colors, and
+    /// recoverable via `theme_changed()` once the host fixes itself.
+    /// Holds the `RefCell` borrow across `f`; `f` must not re-enter the theme
+    /// cache (style conversion never does).
+    fn with_theme<T>(&self, f: impl FnOnce(&ic::Theme) -> T) -> T {
+        let mut slot = self.theme.borrow_mut();
+        let theme = slot.get_or_insert_with(|| self.fetch_theme());
+        f(theme)
+    }
+
+    fn fetch_theme(&self) -> ic::Theme {
+        if !self.has_get_theme {
+            return ic::Theme::default();
+        }
+        let Some(jsv) = self.note_throw("getTheme", self.handle.get_theme()) else {
+            return ic::Theme::default();
+        };
+        match serde_wasm_bindgen::from_value(jsv) {
+            Ok(t) => t,
+            Err(e) => {
+                self.note_serde_err("getTheme", &e);
+                ic::Theme::default()
+            }
         }
     }
 
@@ -297,7 +356,7 @@ impl CellContentQuery for JsBackedModel {
             return Fetched::BridgeFailed;
         };
         match serde_wasm_bindgen::from_value::<ic::Style>(jsv) {
-            Ok(s) => Fetched::Value(ic_style_to_core(s)),
+            Ok(s) => Fetched::Value(self.with_theme(|t| ic_style_to_core(s, t))),
             Err(e) => {
                 self.note_serde_err("getCellStyle", &e);
                 Fetched::BridgeFailed
@@ -364,7 +423,14 @@ impl CellContentQuery for JsBackedModel {
             return self.styles_in_per_cell(sheet, range, out);
         }
         out.clear();
-        out.extend(decoded.into_iter().map(|s| s.map(ic_style_to_core)));
+        // One theme borrow for the whole batch — not one cache hit per cell.
+        self.with_theme(|t| {
+            out.extend(
+                decoded
+                    .into_iter()
+                    .map(|s| s.map(|s| ic_style_to_core(s, t))),
+            );
+        });
     }
 
     fn get_formatted_cell_values_in(
@@ -496,16 +562,17 @@ fn cell_kind_from_discriminant(v: i32) -> Option<CellKind> {
     }
 }
 
-/// Convert an IronCalc `Style` (deserialized from JS) to the core `CellStyle`.
+/// Convert an IronCalc `Style` (deserialized from JS) to the core `CellStyle`,
+/// resolving theme colors against the workbook theme.
 /// Mirrors `iron-canvas-ironcalc::convert::style_to_core` — kept local to
 /// avoid pulling `iron-canvas-ironcalc` into the web crate's dep tree.
-fn ic_style_to_core(s: ic::Style) -> CellStyle {
+fn ic_style_to_core(s: ic::Style, theme: &ic::Theme) -> CellStyle {
     CellStyle {
-        fill_color: s.fill.color,
+        fill_color: ic_color_to_css(&s.fill.color, theme),
         font: FontStyle {
             name: s.font.name,
             size: f64::from(s.font.sz),
-            color: s.font.color,
+            color: ic_color_to_css(&s.font.color, theme),
             bold: s.font.b,
             italic: s.font.i,
             underline: s.font.u,
@@ -517,10 +584,10 @@ fn ic_style_to_core(s: ic::Style) -> CellStyle {
             wrap_text: a.wrap_text,
         }),
         border: Border {
-            left: s.border.left.map(ic_border_item_to_core),
-            right: s.border.right.map(ic_border_item_to_core),
-            top: s.border.top.map(ic_border_item_to_core),
-            bottom: s.border.bottom.map(ic_border_item_to_core),
+            left: s.border.left.map(|i| ic_border_item_to_core(i, theme)),
+            right: s.border.right.map(|i| ic_border_item_to_core(i, theme)),
+            top: s.border.top.map(|i| ic_border_item_to_core(i, theme)),
+            bottom: s.border.bottom.map(|i| ic_border_item_to_core(i, theme)),
             diagonal_up: s.border.diagonal_up,
             diagonal_down: s.border.diagonal_down,
         },
@@ -550,10 +617,10 @@ fn ic_valign_to_core(v: ic::VerticalAlignment) -> VAlign {
     }
 }
 
-fn ic_border_item_to_core(b: ic::BorderItem) -> BorderItem {
+fn ic_border_item_to_core(b: ic::BorderItem, theme: &ic::Theme) -> BorderItem {
     BorderItem {
         style: ic_border_style_to_core(b.style),
-        color: b.color,
+        color: ic_color_to_css(&b.color, theme),
     }
 }
 
@@ -645,6 +712,24 @@ mod tests {
         assert_eq!(cv.selection.c2, 4);
         assert_eq!(cv.top_row, 6);
         assert_eq!(cv.left_column, 2);
+    }
+
+    #[test]
+    fn mirror_resolves_theme_colors() {
+        let theme = ic::Theme::default();
+        let s = ic::Style {
+            fill: ic::Fill {
+                color: ic::Color::Theme(4, 0.0), // accent1
+            },
+            ..ic::Style::default()
+        };
+        let core = ic_style_to_core(s, &theme);
+        assert_eq!(core.fill_color.as_deref(), Some("#4472C4"));
+        assert_eq!(
+            ic_color_to_css(&ic::Color::None, &theme),
+            None,
+            "Color::None must stay None, not become an empty CSS string"
+        );
     }
 }
 

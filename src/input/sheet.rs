@@ -6,6 +6,7 @@
 //!
 //! Follows the `WorkbookAction` pattern in `workbook.rs`.
 
+use ironcalc_base::types::Color;
 use leptos::prelude::WithValue;
 
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
@@ -162,8 +163,14 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
 
         SheetAction::SetColor { sheet, color } => {
             let hex = color.as_deref().unwrap_or("");
+            let sheet_color = if hex.is_empty() {
+                Color::None
+            } else {
+                Color::from_rgb(hex).unwrap_or(Color::None)
+            };
             if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
-                m.set_sheet_color(*sheet, hex).map_err(SheetError::Engine)
+                m.set_sheet_color(*sheet, &sheet_color)
+                    .map_err(SheetError::Engine)
             }) {
                 state.status.set(Some(StatusMessage::Error(e.to_string())));
                 return;

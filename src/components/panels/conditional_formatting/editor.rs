@@ -9,7 +9,7 @@
 use ironcalc_base::cf_types::{
     CfRuleInput, Cfvo, ColorScaleThreshold, TextOperator, ValueOperator,
 };
-use ironcalc_base::types::{Dxf, DxfFont, Fill};
+use ironcalc_base::types::{Color, Dxf, DxfFont, Fill};
 use leptos::prelude::*;
 
 use crate::components::ui::color_picker::{ColorPicker, ColorType};
@@ -22,6 +22,14 @@ use crate::model::frontend_model::DefinedNameManager;
 use crate::model::style_types::HexColor;
 use crate::model::{EvaluationMode, SheetRoster, try_mutate};
 use crate::state::{ModelStore, RangeCaptureTarget, WorkbookState};
+
+/// Seed a UI color picker from a CF rule color, resolved against the
+/// workbook theme (`""` for `Color::None`). Saving writes back `Color::Rgb`,
+/// so editing a theme-colored rule pins it to its current hex — same
+/// behavior as Excel's picker.
+fn color_to_str(model: ModelStore, c: &Color) -> String {
+    model.with_value(|m| m.resolve_color(c))
+}
 
 const RULE_TYPES: &[(&str, &str)] = &[
     ("cell_is", "Cell Value"),
@@ -227,14 +235,14 @@ pub fn CfRuleEditor() -> impl IntoView {
                         format
                             .fill
                             .as_ref()
-                            .and_then(|f| f.color.clone())
+                            .map(|f| color_to_str(model, &f.color))
                             .unwrap_or_default(),
                     );
                     font_color.set(
                         format
                             .font
                             .as_ref()
-                            .and_then(|f| f.color.clone())
+                            .map(|f| color_to_str(model, &f.color))
                             .unwrap_or_default(),
                     );
                     bold.set(format.font.as_ref().and_then(|f| f.b).unwrap_or(false));
@@ -257,14 +265,14 @@ pub fn CfRuleEditor() -> impl IntoView {
                         format
                             .fill
                             .as_ref()
-                            .and_then(|f| f.color.clone())
+                            .map(|f| color_to_str(model, &f.color))
                             .unwrap_or_default(),
                     );
                     font_color.set(
                         format
                             .font
                             .as_ref()
-                            .and_then(|f| f.color.clone())
+                            .map(|f| color_to_str(model, &f.color))
                             .unwrap_or_default(),
                     );
                     bold.set(format.font.as_ref().and_then(|f| f.b).unwrap_or(false));
@@ -287,14 +295,14 @@ pub fn CfRuleEditor() -> impl IntoView {
                         format
                             .fill
                             .as_ref()
-                            .and_then(|f| f.color.clone())
+                            .map(|f| color_to_str(model, &f.color))
                             .unwrap_or_default(),
                     );
                     font_color.set(
                         format
                             .font
                             .as_ref()
-                            .and_then(|f| f.color.clone())
+                            .map(|f| color_to_str(model, &f.color))
                             .unwrap_or_default(),
                     );
                     bold.set(format.font.as_ref().and_then(|f| f.b).unwrap_or(false));
@@ -343,7 +351,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                     f.b = Some(true);
                 }
                 if !font_color.get().is_empty() {
-                    f.color = Some(font_color.get());
+                    f.color = Color::from_rgb(&font_color.get()).unwrap_or(Color::None);
                 }
                 Some(f)
             } else {
@@ -353,7 +361,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                 None
             } else {
                 Some(Fill {
-                    color: Some(fill_color.get()),
+                    color: Color::from_rgb(&fill_color.get()).unwrap_or(Color::None),
                 })
             },
             ..Default::default()
@@ -386,11 +394,11 @@ pub fn CfRuleEditor() -> impl IntoView {
                 thresholds: vec![
                     ColorScaleThreshold {
                         cfvo: Cfvo::Min,
-                        color: "#63be7b".into(),
+                        color: Color::Rgb("#63be7b".into()),
                     },
                     ColorScaleThreshold {
                         cfvo: Cfvo::Max,
-                        color: "#f8696b".into(),
+                        color: Color::Rgb("#f8696b".into()),
                     },
                 ],
             },

@@ -240,16 +240,16 @@ impl ActiveCellQuery for UserModel<'_> {
             .get_cell_style(view.sheet, view.row, view.column)
             .unwrap_or_default();
 
-        let text_color = match style.font.color.as_deref() {
-            None | Some("#000000") => CssColor::new("#000000"),
-            Some(c) => CssColor::new(c),
+        // resolve_color is theme-aware (Rgb passthrough, Theme(idx, tint)
+        // against the workbook theme) and returns "" for Color::None.
+        let text = self.resolve_color(&style.font.color);
+        let text_color = if text.is_empty() {
+            CssColor::new("#000000")
+        } else {
+            CssColor::new(&text)
         };
-        let bg_color = style
-            .fill
-            .color
-            .as_deref()
-            .filter(|c| !c.is_empty())
-            .map(CssColor::new);
+        let bg = self.resolve_color(&style.fill.color);
+        let bg_color = (!bg.is_empty()).then(|| CssColor::new(&bg));
 
         let alignment = style.alignment.as_ref();
         let h_align = alignment
@@ -261,7 +261,7 @@ impl ActiveCellQuery for UserModel<'_> {
         // a single color+weight. Seed it from the cell's existing borders by
         // choosing one "dominant" edge. `edges` is ordered for the human to lean
         // on if they want a priority scheme; each entry is `&Option<BorderItem>`,
-        // where `BorderItem` has `.color: Option<String>` and `.style: BorderStyle`.
+        // where `BorderItem` has `.color: Color` and `.style: BorderStyle`.
         // Bottom-first priority: in a spreadsheet the bottom edge carries the
         // most visual weight (row/total separators), so it best represents the
         // cell's border when collapsing four edges into one picker value.
@@ -275,7 +275,8 @@ impl ActiveCellQuery for UserModel<'_> {
         .find_map(|edge| edge.as_ref());
         let border = match dominant {
             Some(item) => BorderState {
-                color: CssColor::new(item.color.as_deref().unwrap_or("")),
+                // "" for Color::None — same empty seed as before.
+                color: CssColor::new(self.resolve_color(&item.color)),
                 weight: border_weight_from_style(&item.style),
             },
             None => BorderState::default(),
@@ -394,7 +395,10 @@ impl SheetRoster for UserModel<'_> {
     fn get_sheet_tab_color(&self, sheet_idx: usize) -> Option<String> {
         self.get_worksheets_properties()
             .get(sheet_idx)
-            .and_then(|s| s.color.clone())
+            .and_then(|s| {
+                let c = self.resolve_color(&s.color);
+                (!c.is_empty()).then_some(c)
+            })
     }
 
     fn get_sheet_all(&self) -> Vec<(u32, String, String)> {

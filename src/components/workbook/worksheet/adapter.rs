@@ -5,6 +5,7 @@ use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{
     CanvasModel, CanvasView, CellContentQuery, CellDecoration, CellKind, CellStyle, Fetched,
 };
+use iron_canvas_ironcalc::color_resolver;
 use iron_canvas_ironcalc::convert::{
     cell_decoration_from_extended, cell_type_to_kind, style_to_core,
 };
@@ -79,7 +80,7 @@ impl CellContentQuery for WorksheetModelAdapter {
         match self.store.with_value(|m| {
             m.get_extended_cell_style(sheet, row, column)
                 .ok()
-                .map(|ext| style_to_core(ext.style))
+                .map(|ext| style_to_core(ext.style, &color_resolver(m)))
         }) {
             Some(s) => Fetched::Value(s),
             None => Fetched::Absent,
@@ -104,10 +105,15 @@ impl CellContentQuery for WorksheetModelAdapter {
             None => Fetched::Absent,
         }
     }
-    fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellDecoration> {
+    fn get_extended_cell_style(
+        &self,
+        sheet: u32,
+        row: i32,
+        column: i32,
+    ) -> Fetched<CellDecoration> {
         match self.store.with_value(|m| {
             let ext = m.get_extended_cell_style(sheet, row, column).ok()?;
-            cell_decoration_from_extended(&ext)
+            cell_decoration_from_extended(&ext, &color_resolver(m))
         }) {
             Some(d) => Fetched::Value(d),
             None => Fetched::Absent,
