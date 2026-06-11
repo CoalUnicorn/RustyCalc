@@ -5,7 +5,9 @@
 //! recomputes whenever a `FormatEvent` fires (CF add/update/delete emit one),
 //! which is also what drives the canvas repaint — one signal, both effects.
 
-use ironcalc_base::cf_types::{CfRule, CfRuleInput, ConditionalFormatting, ValueOperator};
+use ironcalc_base::cf_types::{
+    CfRule, CfRuleInput, ConditionalFormatting, PeriodType, ValueOperator,
+};
 use ironcalc_base::types::Dxf;
 use leptos::prelude::*;
 
@@ -38,8 +40,8 @@ fn rule_label(rule: &CfRule) -> &'static str {
 }
 
 /// Convert a stored `CfRule` back to a `CfRuleInput` for editing, or `None`
-/// for rule types the editor can't represent yet (Top10, AboveAverage, …) —
-/// editing those would silently rewrite them as something else.
+/// for the one shape the editor can't represent (Between/NotBetween date
+/// rules) — editing those would silently drop their dates.
 ///
 /// IronCalc stores a `dxf_id` in place of the inline `Dxf`, so the rule itself
 /// can't reconstruct its own format. The caller resolves the real format via
@@ -92,7 +94,105 @@ fn cf_rule_to_input(rule: &CfRule, format: Dxf) -> Option<CfRuleInput> {
             format,
             stop_if_true: *stop_if_true,
         },
-        _ => return None,
+        CfRule::UniqueValues { stop_if_true, .. } => CfRuleInput::UniqueValues {
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        CfRule::NotBlanks { stop_if_true, .. } => CfRuleInput::NotBlanks {
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        CfRule::Errors { stop_if_true, .. } => CfRuleInput::Errors {
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        CfRule::NoErrors { stop_if_true, .. } => CfRuleInput::NoErrors {
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        CfRule::AboveAverage { stop_if_true, .. } => CfRuleInput::AboveAverage {
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        CfRule::BelowAverage { stop_if_true, .. } => CfRuleInput::BelowAverage {
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        CfRule::Top10 {
+            rank,
+            percent,
+            stop_if_true,
+            ..
+        } => CfRuleInput::Top10 {
+            rank: *rank,
+            percent: *percent,
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        CfRule::Bottom10 {
+            rank,
+            percent,
+            stop_if_true,
+            ..
+        } => CfRuleInput::Bottom10 {
+            rank: *rank,
+            percent: *percent,
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        // Between/NotBetween date rules carry date1/date2 the editor has no
+        // fields for (and the engine does not evaluate them yet) — guard them
+        // like the other not-yet-editable types instead of dropping the dates.
+        CfRule::TimePeriod {
+            time_period: PeriodType::Between | PeriodType::NotBetween,
+            ..
+        } => return None,
+        CfRule::TimePeriod {
+            time_period,
+            date1,
+            date2,
+            stop_if_true,
+            ..
+        } => CfRuleInput::TimePeriod {
+            time_period: time_period.clone(),
+            date1: date1.clone(),
+            date2: date2.clone(),
+            format,
+            stop_if_true: *stop_if_true,
+        },
+        CfRule::DataBar {
+            min,
+            max,
+            positive_color,
+            negative_color,
+            is_gradient,
+            show_value,
+        } => CfRuleInput::DataBar {
+            min: min.clone(),
+            max: max.clone(),
+            positive_color: positive_color.clone(),
+            negative_color: negative_color.clone(),
+            is_gradient: *is_gradient,
+            show_value: *show_value,
+        },
+        CfRule::IconSet {
+            thresholds,
+            show_value,
+        } => CfRuleInput::IconSet {
+            thresholds: thresholds.clone(),
+            show_value: *show_value,
+        },
+        CfRule::IconRating {
+            icon,
+            color,
+            thresholds,
+            show_value,
+        } => CfRuleInput::IconRating {
+            icon: icon.clone(),
+            color: color.clone(),
+            thresholds: thresholds.clone(),
+            show_value: *show_value,
+        },
     })
 }
 
