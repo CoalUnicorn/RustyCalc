@@ -84,6 +84,19 @@ fn test_cross_sheet_ref_resolved() {
     assert_eq!(analysis.refs()[0].sheet_area.sheet, 1);
 }
 
+// A bare ref resolves to the ANCHOR's sheet, not sheet 0. During point-mode
+// the anchor is the pinned edit origin; if a re-analysis passed the live view
+// cell (on another sheet) instead, the origin's `A1` would re-anchor to the
+// visible sheet and paint there. This pins the anchor→ref-sheet contract that
+// `FormulaAnalyzer::analyze_at` upholds at the call sites.
+#[test]
+fn test_bare_ref_anchors_to_editing_sheet_not_zero() {
+    let sheets = vec![(0u32, "Sheet1".to_string()), (1u32, "Sheet2".to_string())];
+    let analysis = analyze_formula("=A1+1", editing_at(1), &sheets, &[]);
+    assert_eq!(analysis.refs().len(), 1);
+    assert_eq!(analysis.refs()[0].sheet_area.sheet, 1);
+}
+
 #[test]
 fn test_unknown_sheet_ref_is_skipped() {
     // A reference to a sheet that doesn't exist in sheet_names should produce

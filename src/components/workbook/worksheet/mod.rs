@@ -102,7 +102,7 @@ pub fn Worksheet() -> impl IntoView {
     });
 
     let clipboard_draw = expect_context::<ClipboardDraw>();
-    let reactive_overlay = reactive_overlay(state);
+    let reactive_overlay = reactive_overlay(state, model);
 
     // Flag: set by the reactive subscription Effect, cleared by the rAF
     // render loop. Starts true so the first animation frame draws the

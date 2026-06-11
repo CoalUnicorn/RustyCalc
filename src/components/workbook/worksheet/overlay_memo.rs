@@ -17,7 +17,7 @@ use iron_canvas_core::types::coord::AutofillTarget;
 use leptos::prelude::*;
 
 use crate::coord::{ActiveRef, CellArea};
-use crate::state::{DragState, WorkbookState};
+use crate::state::{DragState, ModelStore, WorkbookState};
 
 /// Named so the subscribe-Effect's `prev: Option<OverlayTuple>` reads
 /// cleanly and the `PartialEq` gate is explicit instead of relying on
@@ -29,7 +29,7 @@ pub(super) struct OverlayTuple {
     pub formula_refs: Vec<ActiveRef>,
 }
 
-pub(super) fn reactive_overlay(state: WorkbookState) -> Memo<OverlayTuple> {
+pub(super) fn reactive_overlay(state: WorkbookState, model: ModelStore) -> Memo<OverlayTuple> {
     Memo::new(move |_| {
         let extend_to = if let DragState::Extending { to_row, to_col } = state.drag.get() {
             Some(AutofillTarget {
@@ -62,8 +62,19 @@ pub(super) fn reactive_overlay(state: WorkbookState) -> Memo<OverlayTuple> {
 
         // Point-mode range for overlay painting. RefNode stores relative
         // deltas, so resolution needs the editing cell's address as anchor.
+        // Cross-sheet pointing: the canvas only shows the selected sheet, so
+        // the rectangle is suppressed when the pointed sheet isn't visible
+        // (formula_refs and clipboard carry their sheet and are filtered by
+        // the painter; point_range is a bare RCRange, so the gate lives here).
+        // The visible sheet isn't a reactive value — subscribe to the
+        // navigation bus so ActiveSheetChanged re-evaluates the gate.
         let point_range = match (state.drag.get(), editing_cell.as_ref()) {
-            (DragState::Pointing { ref_node, .. }, Some(e)) => Some(ref_node.area(&e.address).area),
+            (DragState::Pointing { ref_node, .. }, Some(e)) => {
+                let _ = state.events.navigation.get();
+                let range = ref_node.area(&e.address);
+                let visible = model.with_value(|m| m.get_selected_view().sheet);
+                (range.sheet == visible).then_some(range.area)
+            }
             _ => None,
         };
 

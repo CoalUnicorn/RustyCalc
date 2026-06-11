@@ -10,7 +10,7 @@ use leptos::prelude::*;
 use crate::coord::{CellAddress, RefNode, SheetRange, TextRef};
 use crate::events::{NavigationEvent, SpreadsheetEvent};
 use crate::input::formula::{is_in_reference_mode, splice_ref};
-use crate::model::{FormulaAnalyzer, Navigator};
+use crate::model::{FormulaAnalyzer, Navigator, SheetRoster};
 use crate::state::{DragState, EditMode, ModelStore, WorkbookState};
 
 /// Click on the top-left corner cell: select the entire sheet.
@@ -122,24 +122,38 @@ pub fn handle_cell_click(
                 None
             };
             if already_pointing || caret_hit.is_some() || is_in_reference_mode(&edit.text, cursor) {
-                let editing = model.with_value(CellAddress::from_view);
+                // Three roles, three sources: the pinned edit origin anchors
+                // relative offsets and the stringify ctx (the formula commits
+                // there); the clicked cell lives on the *visible* sheet, which
+                // qualifies the ref (`Sheet2!B2`) when it differs.
+                let editing = edit.address;
+                let view_sheet = model.with_value(|m| m.get_selected_view().sheet);
+                let sheet_name = if view_sheet == editing.sheet {
+                    String::new()
+                } else {
+                    model.with_value(|m| m.get_sheet_name(view_sheet as usize))
+                };
                 let (ref_node, prev_span) = if let Some(hit) = caret_hit {
-                    (hit.ref_node.relocate_to(row, col, &editing), Some(hit.span))
+                    (
+                        hit.ref_node
+                            .relocate_to(row, col, &editing, view_sheet, &sheet_name),
+                        Some(hit.span),
+                    )
                 } else if let DragState::Pointing { ref_text, .. } = state.drag.get_untracked() {
                     (
                         RefNode::from_cell_area(
-                            SheetRange::from_cell(editing.sheet, row, col),
+                            SheetRange::from_cell(view_sheet, row, col),
                             editing,
-                            "",
+                            &sheet_name,
                         ),
                         Some(ref_text),
                     )
                 } else {
                     (
                         RefNode::from_cell_area(
-                            SheetRange::from_cell(editing.sheet, row, col),
+                            SheetRange::from_cell(view_sheet, row, col),
                             editing,
-                            "",
+                            &sheet_name,
                         ),
                         None,
                     )
@@ -152,7 +166,10 @@ pub fn handle_cell_click(
                     if let Some(e) = c {
                         e.cursor = ref_text.end;
                         e.text = new_text.clone();
-                        e.formula_analysis = model.with_value(|m| m.analyze_in_context(&new_text));
+                        // Anchor on the pinned origin, not the live view: the
+                        // user may be pointing from another sheet.
+                        e.formula_analysis =
+                            model.with_value(|m| m.analyze_at(&new_text, e.address));
                     }
                 });
                 state.drag.set(DragState::Pointing { ref_node, ref_text });

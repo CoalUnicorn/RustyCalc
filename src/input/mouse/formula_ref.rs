@@ -86,7 +86,7 @@ pub(super) fn commit_formula_ref_drag(
     state.editing_cell.update(|c| {
         if let Some(e) = c {
             e.cursor = new_span.end;
-            e.formula_analysis = model.with_value(|m| m.analyze_in_context(&new_text));
+            e.formula_analysis = model.with_value(|m| m.analyze_at(&new_text, e.address));
             e.text = new_text;
         }
     });

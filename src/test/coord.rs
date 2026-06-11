@@ -464,3 +464,81 @@ fn absolute_flags_not_swapped() {
     );
     assert_eq!(n.to_localized(&ctx_a1()), "$A$1");
 }
+
+// Click-to-replace on the same sheet: coordinates move, `$` flags survive,
+// no sheet prefix appears.
+#[test]
+fn relocate_to_same_sheet_preserves_flags() {
+    let n = RefNode::cell(
+        0,
+        None,
+        1,
+        1,
+        Absolute {
+            row: true,
+            column: true,
+        },
+    );
+    let moved = n.relocate_to(5, 2, &editing_a1(), 0, "Sheet1");
+    assert_eq!(moved.to_localized(&ctx_a1()), "$B$5");
+}
+
+// Cross-sheet click-to-replace: the ref adopts the clicked sheet and gains
+// qualification because it differs from the edit origin (sheet 0).
+#[test]
+fn relocate_to_cross_sheet_adopts_clicked_sheet() {
+    let n = RefNode::cell(
+        0,
+        None,
+        0,
+        0,
+        Absolute {
+            row: false,
+            column: false,
+        },
+    );
+    let moved = n.relocate_to(5, 2, &editing_a1(), 1, "Sheet2");
+    assert_eq!(moved.to_localized(&ctx_a1()), "Sheet2!B5");
+}
+
+// Clicking back on the origin sheet drops a stale qualification: replace
+// means replace, the old ref's `Sheet2!` does not survive.
+#[test]
+fn relocate_to_origin_sheet_drops_qualification() {
+    let n = RefNode::cell(
+        1,
+        Some("Sheet2".into()),
+        0,
+        0,
+        Absolute {
+            row: false,
+            column: false,
+        },
+    );
+    let moved = n.relocate_to(5, 2, &editing_a1(), 0, "Sheet1");
+    assert_eq!(moved.to_localized(&ctx_a1()), "B5");
+}
+
+// A range collapses to a cell inheriting the trailing corner's flags,
+// combined with cross-sheet adoption.
+#[test]
+fn relocate_to_cross_sheet_range_collapses_with_trailing_flags() {
+    let n = RefNode::range(
+        0,
+        None,
+        0,
+        0,
+        Absolute {
+            row: false,
+            column: false,
+        },
+        2,
+        1,
+        Absolute {
+            row: true,
+            column: true,
+        },
+    );
+    let moved = n.relocate_to(5, 2, &editing_a1(), 1, "Sheet2");
+    assert_eq!(moved.to_localized(&ctx_a1()), "Sheet2!$B$5");
+}

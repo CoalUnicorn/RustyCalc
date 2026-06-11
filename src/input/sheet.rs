@@ -12,7 +12,7 @@ use leptos::prelude::WithValue;
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
 use crate::input::error::SheetError;
 use crate::model::{EvaluationMode, SheetRoster, try_mutate};
-use crate::state::{ModelStore, StatusMessage, WorkbookState};
+use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
 
 /// Sheet-level operations on the current workbook.
 ///
@@ -49,6 +49,22 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
             let previous = model.with_value(|m| m.get_selected_view().sheet);
             if previous == *sheet_idx {
                 return;
+            }
+
+            // Tabs stay live during formula edit: point-mode survives the
+            // switch (the next click on the new sheet supplies a
+            // sheet-qualified ref). Every other drag is position-dependent
+            // on the outgoing sheet and is cancelled.
+            match state.drag.get_untracked() {
+                DragState::Idle | DragState::Pointing { .. } => {}
+                DragState::DraggingFormulaRef { .. } => {
+                    state.dragged_ref_override.set(None);
+                    state.drag.set(DragState::Idle);
+                }
+                DragState::Selecting
+                | DragState::Extending { .. }
+                | DragState::ResizingCol { .. }
+                | DragState::ResizingRow { .. } => state.drag.set(DragState::Idle),
             }
 
             if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {

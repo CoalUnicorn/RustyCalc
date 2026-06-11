@@ -13,7 +13,7 @@ use crate::coord::{CellAddress, CellArea, RefNode, SheetRange};
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::StructError;
 use crate::input::formula::splice_ref;
-use crate::model::{ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, try_mutate};
+use crate::model::{ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetRoster, try_mutate};
 use crate::state::{DragState, ModelStore, RefOverride, StatusMessage, WorkbookState};
 use iron_canvas_core::{
     geometry::constants::{
@@ -313,7 +313,20 @@ pub fn handle_mousemove(
             ref_node: pr,
             ref_text: ref_span,
         } => {
-            let editing = model.with_value(CellAddress::from_view);
+            // Pinned edit origin: `pr`'s relative offsets were stored against
+            // it, and the stringify ctx must match the offset base. The
+            // dragged area itself lives on the visible sheet (`sheet`), which
+            // qualifies the ref when it differs from the origin.
+            let editing = state
+                .editing_cell
+                .get_untracked()
+                .map(|e| e.address)
+                .unwrap_or_else(|| model.with_value(CellAddress::from_view));
+            let sheet_name = if sheet == editing.sheet {
+                String::new()
+            } else {
+                model.with_value(|m| m.get_sheet_name(sheet as usize))
+            };
             // Anchor corner is (r1, c1) of the currently-pointed range; mouse
             // position supplies the new trailing corner. Normalize so the
             // endpoints stay ordered after drag inversions (e.g. mouse crosses
@@ -327,7 +340,7 @@ pub fn handle_mousemove(
             }
             .normalized()
             .with_sheet(sheet);
-            let ref_node = RefNode::from_cell_area(dragged, editing, "");
+            let ref_node = RefNode::from_cell_area(dragged, editing, &sheet_name);
             let ref_str = ref_node.to_localized(&editing.as_stringify_ctx());
 
             if let Some(edit) = state.editing_cell.get_untracked() {
@@ -335,7 +348,10 @@ pub fn handle_mousemove(
                 state.editing_cell.update(|c| {
                     if let Some(e) = c {
                         e.cursor = ref_span.end;
-                        e.formula_analysis = model.with_value(|m| m.analyze_in_context(&new_text));
+                        // Pinned origin anchor — drag may extend from a
+                        // switched-to sheet.
+                        e.formula_analysis =
+                            model.with_value(|m| m.analyze_at(&new_text, e.address));
                         e.text = new_text;
                     }
                 });

@@ -393,42 +393,45 @@ impl RefNode {
         Self { inner }
     }
 
-    /// Produce a single-cell `RefNode` at absolute `(abs_row, abs_col)`,
-    /// preserving this RefNode's `absolute_row` / `absolute_column` /
-    /// `sheet_name` / `sheet_index`. A `RangeKind` collapses to a cell
-    /// inheriting the trailing corner's flags — matches `extend_trailing`'s
-    /// "click kills the range selection" semantics.
+    /// Produce a single-cell `RefNode` at absolute `(abs_row, abs_col)` on
+    /// `view_sheet`, preserving this RefNode's `absolute_row` /
+    /// `absolute_column` flags. A `RangeKind` collapses to a cell inheriting
+    /// the trailing corner's flags — matches `extend_trailing`'s "click kills
+    /// the range selection" semantics.
     ///
     /// This is the click-to-replace primitive: when the caret sits on
     /// `$A$1` and the user clicks B5, the result is `$B$5`. Flag inheritance
     /// is what makes it Excel-parity instead of "drop to bare relative".
-    pub fn relocate_to(&self, abs_row: i32, abs_col: i32, editing: &CellAddress) -> Self {
-        let (sheet_name, sheet_index, abs_r_flag, abs_c_flag) = match &self.inner {
+    ///
+    /// The clicked cell's sheet wins (Excel parity: replace means replace) —
+    /// the old ref's qualification is NOT preserved. Qualification is
+    /// re-derived against the edit origin, mirroring [`Self::from_cell_area`]:
+    /// `Some(view_sheet_name)` iff `view_sheet != editing.sheet`.
+    pub fn relocate_to(
+        &self,
+        abs_row: i32,
+        abs_col: i32,
+        editing: &CellAddress,
+        view_sheet: u32,
+        view_sheet_name: &str,
+    ) -> Self {
+        let (abs_r_flag, abs_c_flag) = match &self.inner {
             Node::ReferenceKind {
-                sheet_name,
-                sheet_index,
                 absolute_row,
                 absolute_column,
                 ..
-            } => (
-                sheet_name.clone(),
-                *sheet_index,
-                *absolute_row,
-                *absolute_column,
-            ),
+            } => (*absolute_row, *absolute_column),
             Node::RangeKind {
-                sheet_name,
-                sheet_index,
                 absolute_row2,
                 absolute_column2,
                 ..
-            } => (
-                sheet_name.clone(),
-                *sheet_index,
-                *absolute_row2,
-                *absolute_column2,
-            ),
+            } => (*absolute_row2, *absolute_column2),
             _ => unreachable!("RefNode invariant: inner is ReferenceKind or RangeKind"),
+        };
+        let sheet_name = if view_sheet == editing.sheet {
+            None
+        } else {
+            Some(view_sheet_name.to_owned())
         };
         let row = if abs_r_flag {
             abs_row
@@ -441,7 +444,7 @@ impl RefNode {
             abs_col - editing.column
         };
         Self::cell(
-            sheet_index,
+            view_sheet,
             sheet_name,
             row,
             column,

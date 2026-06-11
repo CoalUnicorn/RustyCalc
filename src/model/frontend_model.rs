@@ -29,17 +29,30 @@ fn log_nav_err(result: Result<(), String>, ctx: &str) {
 /// Used to guard against silent typos in state comparisons.
 pub(crate) const SHEET_STATE_VISIBLE: &str = "visible";
 
-/// Parse formula text in the active cell's context (sheet names, defined
-/// names, anchor). Pure read; safe under `with_value`.
+/// Parse formula text in a cell's context (sheet names, defined names,
+/// anchor). Pure read; safe under `with_value`.
 pub trait FormulaAnalyzer {
+    /// Analyze anchored at the active cell — correct at edit-start, where the
+    /// active cell IS the cell being edited.
     fn analyze_in_context(&self, text: &str) -> FormulaAnalysis;
+
+    /// Analyze anchored at an explicit cell. Required during point-mode: the
+    /// view may have switched to another sheet to pick a reference, but the
+    /// formula's anchor stays pinned to its origin cell. Re-analyzing against
+    /// the live `active_cell()` would re-resolve the origin's bare refs onto
+    /// the visible sheet (wrong sheet, wrong relative offsets).
+    fn analyze_at(&self, text: &str, anchor: CellAddress) -> FormulaAnalysis;
 }
 
 impl FormulaAnalyzer for UserModel<'_> {
     fn analyze_in_context(&self, text: &str) -> FormulaAnalysis {
+        self.analyze_at(text, ActiveCellQuery::active_cell(self))
+    }
+
+    fn analyze_at(&self, text: &str, anchor: CellAddress) -> FormulaAnalysis {
         analyze_formula(
             text,
-            ActiveCellQuery::active_cell(self),
+            anchor,
             &SheetRoster::get_sheet_names(self),
             &DefinedNameManager::get_defined_names(self),
         )
