@@ -1,4 +1,4 @@
-//! Top-level keyboard-dispatched action enum and convenience constructors.
+//! Top-level action enum and convenience constructors.
 
 use ironcalc_base::types::{HorizontalAlignment, VerticalAlignment};
 

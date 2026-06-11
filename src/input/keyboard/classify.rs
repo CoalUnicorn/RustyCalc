@@ -11,7 +11,7 @@ use crate::input::{
 use crate::model::ArrowKey;
 use crate::state::{EditMode, EditingCell};
 
-use super::action::SpreadsheetAction;
+use crate::input::action::SpreadsheetAction;
 
 /// Keyboard modifier state at the time of a key event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,11 +33,12 @@ pub fn classify_key(
     mods: KeyMod,
     edit: Option<&EditingCell>,
 ) -> Option<SpreadsheetAction> {
+    use crate::input::action::SpreadsheetAction::*;
+    use ArrowKey::*;
+
     let ctrl = mods.ctrl;
     let shift = mods.shift;
     let alt = mods.alt;
-    use ArrowKey::*;
-    use SpreadsheetAction::*;
 
     // While editing
     if let Some(e) = edit {

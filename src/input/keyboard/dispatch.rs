@@ -9,7 +9,7 @@ use crate::input::{
 };
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
 
-use super::action::SpreadsheetAction;
+use crate::input::action::SpreadsheetAction;
 
 /// Apply a `SpreadsheetAction` to the model and reactive state.
 ///
