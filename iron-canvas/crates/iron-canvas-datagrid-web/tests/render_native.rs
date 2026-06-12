@@ -6,7 +6,7 @@ use std::rc::Rc;
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_datagrid::{Column, DataGrid};
-use iron_canvas_datagrid_web::model_cell::DataGridModel;
+use iron_canvas_datagrid_web::DataGridModel;
 use iron_canvas_recorder::{DrawOp, MemSurface};
 
 #[test]

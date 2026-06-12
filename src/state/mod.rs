@@ -4,6 +4,7 @@
 //! The model itself lives in a [`ModelStore`] context value, not here.
 
 mod autoscroll;
+mod camera;
 mod context_menu;
 mod cursor_hint;
 mod drag;
@@ -13,6 +14,7 @@ mod split;
 mod status;
 mod workbook_state;
 
+pub use camera::{CameraSpec, PersistedCamera};
 pub use context_menu::{ContextMenuState, HeaderContextMenu};
 pub use cursor_hint::CursorHint;
 pub use drag::{DragState, RefOverride};

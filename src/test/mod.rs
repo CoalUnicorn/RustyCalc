@@ -5,6 +5,7 @@
 //! their production code; the corresponding test file in this directory
 //! re-imports the items under test via `crate::…` paths.
 
+mod camera;
 mod clipboard_bridge;
 mod color_picker;
 mod coord;

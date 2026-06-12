@@ -1,8 +1,10 @@
+pub mod camera;
 pub mod editing;
 pub mod worksheet;
 
 use leptos::prelude::*;
 
+use crate::components::workbook::camera::CameraLayer;
 use crate::components::workbook::worksheet::Worksheet;
 use crate::components::{
     chrome::{
@@ -20,7 +22,10 @@ use crate::input::{
     keyboard::{KeyMod, SpreadsheetAction, classify_key, execute},
 };
 use crate::model::{AppClipboard, EvaluationMode, PasteMode, mutate, try_mutate};
-use crate::state::{DragState, EditMode, ModelStore, StatusMessage, WorkbookState};
+use crate::state::{
+    CameraSpec, DragState, EditMode, ModelStore, PersistedCamera, StatusMessage, WorkbookState,
+};
+use gloo_storage::Storage as GlooStorage;
 
 /// Top-level keyboard router. Clipboard ops and point-mode arrow handling
 /// live here (need async OS APIs / DOM cursor position); everything else
@@ -200,16 +205,44 @@ pub fn Workbook() -> impl IntoView {
         }
     };
 
+    // Load cameras when the active workbook changes; save on any cameras mutation.
+    // The load fires cameras.set, which re-triggers save with identical data — harmless.
+    Effect::new(move |_| {
+        let Some(uuid) = state.current_uuid.get() else {
+            return;
+        };
+        let key = PersistedCamera::storage_key(&uuid.to_string());
+        let stored: Vec<PersistedCamera> =
+            <gloo_storage::LocalStorage as GlooStorage>::get(&key).unwrap_or_default();
+        state
+            .cameras
+            .set(stored.iter().map(CameraSpec::from).collect());
+    });
+
+    Effect::new(move |_| {
+        let cams = state.cameras.get();
+        let Some(uuid) = state.current_uuid.get_untracked() else {
+            return;
+        };
+        let key = PersistedCamera::storage_key(&uuid.to_string());
+        let stored: Vec<PersistedCamera> = cams.iter().map(PersistedCamera::from).collect();
+        if let Err(e) = <gloo_storage::LocalStorage as GlooStorage>::set(&key, &stored) {
+            leptos::logging::error!("camera persistence failed: {e:?}");
+        }
+    });
+
     view! {
         <div
             id="workbook"
             class="workbook"
+            style="position:relative;"
             tabindex="0"
             on:keydown=on_keydown
         >
             <Toolbar />
             <FormulaBar />
             <Worksheet />
+            <CameraLayer />
             <HeaderContextMenuOverlay />
             <SheetTabBar />
             <StatusBar />

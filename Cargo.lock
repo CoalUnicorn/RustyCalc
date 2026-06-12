@@ -1083,6 +1083,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "iron-canvas-datagrid"
+version = "0.1.0-beta.2"
+dependencies = [
+ "iron-canvas-core",
+]
+
+[[package]]
 name = "iron-canvas-export"
 version = "0.1.0-beta.2"
 dependencies = [
@@ -1872,7 +1879,9 @@ dependencies = [
  "console_error_panic_hook",
  "gloo-net",
  "gloo-storage",
+ "iron-canvas-canvas2d",
  "iron-canvas-core",
+ "iron-canvas-datagrid",
  "iron-canvas-ironcalc",
  "iron-canvas-web",
  "ironcalc",

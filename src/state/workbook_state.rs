@@ -11,6 +11,7 @@ use crate::model::CssColor;
 use crate::storage::WorkbookId;
 
 use super::autoscroll::AutoscrollState;
+use super::camera::CameraSpec;
 use super::context_menu::ContextMenuState;
 use super::cursor_hint::CursorHint;
 use super::drag::{DragState, RefOverride};
@@ -59,6 +60,8 @@ pub struct WorkbookState {
     /// `Effect` in the `RangePickerInput` mirrors every selection change into
     /// that field's text. See [`RangeCaptureTarget`].
     pub(crate) range_capture: Split<Option<RangeCaptureTarget>>,
+    /// Active floating Camera widgets. See [`CameraSpec`].
+    pub(crate) cameras: Split<Vec<CameraSpec>>,
 }
 
 /// Identifies the drawer field that is armed to receive grid selections.
@@ -74,6 +77,9 @@ pub enum RangeCaptureTarget {
     CfFormula,
     /// The Named Range "Refers to" formula (qualified absolute `Sheet1!$B$2:$D$8`).
     NamedRange,
+    /// A camera widget's source range; keyed by the widget's `id` so multiple
+    /// cameras can each have their own settings popover without aliasing.
+    Camera(u32),
 }
 
 /// Which drawer panel (if any) is currently open on the right side.
@@ -123,6 +129,7 @@ impl WorkbookState {
             show_headers: Split::new(true),
             editing_cf_rule: Split::new(None),
             range_capture: Split::new(None),
+            cameras: Split::new(Vec::new()),
         }
     }
 

@@ -45,6 +45,7 @@ pub enum AlignIcon {
 pub enum SheetIcon {
     Freeze,
     NamedRange,
+    Camera,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +138,10 @@ impl Glyph for SheetIcon {
             }
             SheetIcon::NamedRange => {
                 r#"<path d="M21.4 11.6 12.4 2.6c-.36-.37-.86-.59-1.41-.59H4c-1.1 0-2 .9-2 2v7c0 .55.22 1.05.59 1.42l9 9c.36.36.86.58 1.41.58s1.05-.22 1.41-.59l7-7c.37-.36.59-.86.59-1.41s-.23-1.06-.59-1.42zM5.5 7C4.67 7 4 6.33 4 5.5S4.67 4 5.5 4 7 4.67 7 5.5 6.33 7 5.5 7z"/>"#
+            }
+            // Camera: body rectangle with lens circle and shutter notch.
+            SheetIcon::Camera => {
+                r#"<path d="M9 3 7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2h-3.17L15 3H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>"#
             }
         }
     }
@@ -251,8 +256,8 @@ impl AlignIcon {
 
 #[cfg(test)]
 impl SheetIcon {
-    pub fn all() -> [SheetIcon; 2] {
-        [SheetIcon::Freeze, SheetIcon::NamedRange]
+    pub fn all() -> [SheetIcon; 3] {
+        [SheetIcon::Freeze, SheetIcon::NamedRange, SheetIcon::Camera]
     }
 }
 

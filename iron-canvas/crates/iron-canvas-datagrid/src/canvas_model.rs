@@ -56,6 +56,32 @@ impl CanvasModel for DataGrid {
         // symmetry with `get_column_header_text` is visible at the impl site.
         None
     }
+    fn get_show_row_headers(&self, _s: u32) -> Option<bool> {
+        Some(self.show_headers_enabled())
+    }
+    fn get_show_col_headers(&self, _s: u32) -> Option<bool> {
+        Some(self.show_headers_enabled())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iron_canvas_core::CanvasModel;
+
+    #[test]
+    fn headerless_grid_hides_both_header_strips() {
+        let grid = DataGrid::builder().show_headers(false).build();
+        assert_eq!(grid.get_show_row_headers(0), Some(false));
+        assert_eq!(grid.get_show_col_headers(0), Some(false));
+    }
+
+    #[test]
+    fn headers_default_on() {
+        let grid = DataGrid::builder().build();
+        assert_eq!(grid.get_show_row_headers(0), Some(true));
+        assert_eq!(grid.get_show_col_headers(0), Some(true));
+    }
 }
 
 impl CellContentQuery for DataGrid {

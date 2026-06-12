@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 
+use crate::DataGrid;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched};
-use iron_canvas_datagrid::DataGrid;
 
-/// Interior-mutable `DataGrid` so the wasm handle can mutate the model
+/// Interior-mutable `DataGrid` wrapper: the owner can mutate the grid
 /// in place while the orchestrator holds an `Rc` to the same object.
 pub struct DataGridModel(RefCell<DataGrid>);
 
@@ -16,7 +16,12 @@ impl DataGridModel {
         self.0.replace(grid);
     }
 
-    /// Run a mutation against the inner grid (used by Stage D mutators).
+    /// Run a read against the inner grid without exposing the borrow.
+    pub fn borrow_with<R>(&self, f: impl FnOnce(&DataGrid) -> R) -> R {
+        f(&self.0.borrow())
+    }
+
+    /// Run a mutation against the inner grid without exposing the borrow.
     pub fn borrow_mut_with<R>(&self, f: impl FnOnce(&mut DataGrid) -> R) -> R {
         f(&mut self.0.borrow_mut())
     }
@@ -67,6 +72,12 @@ impl CanvasModel for DataGridModel {
     }
     fn get_row_header_text(&self, s: u32, row: i32) -> Option<String> {
         self.0.borrow().get_row_header_text(s, row)
+    }
+    fn get_show_row_headers(&self, s: u32) -> Option<bool> {
+        self.0.borrow().get_show_row_headers(s)
+    }
+    fn get_show_col_headers(&self, s: u32) -> Option<bool> {
+        self.0.borrow().get_show_col_headers(s)
     }
 }
 

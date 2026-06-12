@@ -67,6 +67,7 @@ pub struct DataGrid {
     active_col: i32,
     sel: [i32; 4], // r1,c1,r2,c2 (1-based, display coords)
     frozen_header: bool,
+    show_headers: bool,
 }
 
 #[derive(Default)]
@@ -75,6 +76,8 @@ pub struct DataGridBuilder {
     rows: Vec<Vec<Cell>>,
     default_row_h: Option<f64>,
     frozen_header: bool,
+    // bool defaults to false; use hide_headers so the default (false) maps to headers ON
+    hide_headers: bool,
 }
 
 impl DataGrid {
@@ -93,6 +96,16 @@ impl DataGrid {
     pub fn column_width_px(&self, col: usize) -> f64 {
         self.columns.get(col).map(|c| c.width).unwrap_or(96.0)
     }
+
+    /// Natural pixel size of the full grid body (every column × every row,
+    /// headers excluded) — what a shrink-wrapped viewport would show.
+    pub fn content_extent(&self) -> (f64, f64) {
+        let w: f64 = (0..self.column_count())
+            .map(|c| self.column_width_px(c))
+            .sum();
+        let h = self.row_count() as f64 * self.default_row_height();
+        (w, h)
+    }
     pub fn column_header(&self, col: usize) -> Option<&str> {
         self.columns.get(col).map(|c| c.header.as_str())
     }
@@ -102,6 +115,13 @@ impl DataGrid {
     }
     pub(crate) fn frozen_header_enabled(&self) -> bool {
         self.frozen_header
+    }
+
+    pub fn set_show_headers(&mut self, on: bool) {
+        self.show_headers = on;
+    }
+    pub(crate) fn show_headers_enabled(&self) -> bool {
+        self.show_headers
     }
 
     pub fn set_column_width(&mut self, col: usize, width: f64) {
@@ -251,6 +271,10 @@ impl DataGrid {
         self.clamp_view();
     }
 
+    pub fn scroll_anchors(&self) -> (i32, i32) {
+        (self.top_row, self.left_col)
+    }
+
     // Keep viewport + selection inside the populated region. On an empty grid
     // (0 rows / 0 cols) clamping leaves the 1-based anchors at 1 without ever
     // computing a negative bound (max with 1 guards the usize->i32 cast).
@@ -293,6 +317,10 @@ impl DataGridBuilder {
         self.frozen_header = on;
         self
     }
+    pub fn show_headers(mut self, on: bool) -> Self {
+        self.hide_headers = !on;
+        self
+    }
     pub fn build(self) -> DataGrid {
         let order = (0..self.rows.len()).collect();
         let mut grid = DataGrid {
@@ -307,6 +335,7 @@ impl DataGridBuilder {
             active_col: 1,
             sel: [1, 1, 1, 1],
             frozen_header: self.frozen_header,
+            show_headers: !self.hide_headers,
         };
         grid.clamp_view(); // keep viewport + selection valid for an empty grid
         grid

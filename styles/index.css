@@ -15,6 +15,7 @@
  *   ws-     worksheet                  worksheet/worksheet.css
  *   ce-     cell editor textarea       worksheet/cell-editor.css
  *   fe-     formula editor overlay     worksheet/formula-overlay.css
+ *   cam-    camera widget              worksheet/camera.css
  *
  *   ui/ — reusable primitives
  *   cp-     color picker               ui/color-picker.css
@@ -46,6 +47,7 @@
 @import "worksheet/worksheet.css";
 @import "worksheet/cell-editor.css";
 @import "worksheet/formula-overlay.css";
+@import "worksheet/camera.css";
 
 /* ui — reusable primitives */
 @import "ui/color-picker.css";

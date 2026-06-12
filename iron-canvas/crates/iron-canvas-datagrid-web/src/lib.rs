@@ -28,11 +28,11 @@ use iron_canvas_export::SvgSurface;
 use wasm_bindgen::prelude::*;
 
 pub mod hover;
-pub mod model_cell;
 pub mod wire;
 
+pub use iron_canvas_datagrid::DataGridModel;
+
 use hover::HoverLayer;
-use model_cell::DataGridModel;
 
 #[wasm_bindgen]
 pub struct DataGridCanvas {

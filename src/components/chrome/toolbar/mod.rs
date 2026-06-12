@@ -1,4 +1,5 @@
 mod alignment;
+mod camera;
 pub(crate) mod chrome_controls;
 mod color_pickers;
 mod conditional_formatting;
@@ -24,6 +25,7 @@ use crate::model::{ActiveCellQuery, frontend_types::ToolbarState};
 use crate::state::{ModelStore, WorkbookState};
 
 use alignment::{AlignButtons, VertAlignButtons};
+use camera::InsertCamera;
 use color_pickers::{BackgroundColorPickerToolbar, TextColorPickerToolbar};
 use conditional_formatting::ConditionalFormattingButton;
 use font::{FontFamily, FontSize};
@@ -118,6 +120,7 @@ pub fn Toolbar() -> impl IntoView {
         ToolbarSection::View => vec![
             ToolSlot::new("Freeze", || view! { <FreezePane /> }.into_any()),
             ToolSlot::new("Headers", || view! { <ShowHeadersToggle /> }.into_any()),
+            ToolSlot::new("Camera", || view! { <InsertCamera /> }.into_any()),
         ],
         ToolbarSection::File => {
             vec![ToolSlot::new("File", || view! { <FileOps /> }.into_any())]

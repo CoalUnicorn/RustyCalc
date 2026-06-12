@@ -10,8 +10,8 @@ use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::{CanvasModel, Layer, Orchestrator};
 use iron_canvas_datagrid::{Column, DataGrid};
+use iron_canvas_datagrid_web::DataGridModel;
 use iron_canvas_datagrid_web::hover::HoverLayer;
-use iron_canvas_datagrid_web::model_cell::DataGridModel;
 use iron_canvas_recorder::{DrawOp, MemSurface};
 
 fn build() -> (Orchestrator<MemSurface>, Rc<HoverLayer>) {
