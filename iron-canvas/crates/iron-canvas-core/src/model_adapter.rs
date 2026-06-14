@@ -53,50 +53,48 @@ pub trait CellContentQuery {
     /// Bulk-fetch cell styles for `range` on `sheet`. Output is dense,
     /// row-major: `out[(row - r1) * cols + (col - c1)]`.
     ///
-    /// Returns `Vec<Option<T>>`, **not** `Vec<Fetched<T>>` like the single
-    /// accessors. The pane cache consumes this as take-able scratch
-    /// (`Option::take` per slot) and treats every `None` identically — a blank
-    /// cell painted over the pre-filled `cell_bg`. No renderer site
-    /// distinguishes `Absent` from `BridgeFailed` in bulk, so a `Fetched` here
-    /// would ride the buffer unread; the actionable split lives at the fetch
-    /// boundary instead (the single-cell active-cell repaint, and the wasm
-    /// batch-trust gate).
+    /// Returns `Vec<Fetched<T>>`, preserving the `Value`/`Absent`/`BridgeFailed`
+    /// split that the single accessors carry. The pane preflight reads the split:
+    /// a `BridgeFailed` slot means an in-flight bridge failure, so the frame
+    /// holds prior pixels rather than painting the cell blank (symmetric with the
+    /// single-cell active-cell repaint). `Absent` and `Value(empty)` still paint
+    /// over `cell_bg` identically.
     ///
-    /// Default impl loops the per-cell accessor, collapsing each `Fetched` via
-    /// `.value()`; `JsBackedModel` overrides with one batched JS call per range.
-    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
+    /// Default impl loops the per-cell accessor, forwarding each `Fetched`
+    /// verbatim; `JsBackedModel` overrides with one batched JS call per range.
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_cell_style(sheet, r, c).value());
+                out.push(self.get_cell_style(sheet, r, c));
             }
         }
     }
 
     /// Bulk-fetch formatted cell values for `range` on `sheet`. Same dense
-    /// row-major layout and `Vec<Option<T>>` rationale as `get_cell_styles_in`.
+    /// row-major layout and `Vec<Fetched<T>>` rationale as `get_cell_styles_in`.
     fn get_formatted_cell_values_in(
         &self,
         sheet: u32,
         range: RCRange,
-        out: &mut Vec<Option<String>>,
+        out: &mut Vec<Fetched<String>>,
     ) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_formatted_cell_value(sheet, r, c).value());
+                out.push(self.get_formatted_cell_value(sheet, r, c));
             }
         }
     }
 
     /// Bulk-fetch cell types for `range` on `sheet`. Same dense layout and
-    /// `Vec<Option<T>>` rationale as `get_cell_styles_in`. Feeds the text
+    /// `Vec<Fetched<T>>` rationale as `get_cell_styles_in`. Feeds the text
     /// pass's alignment/colour resolution in `CellTextStyle::resolve`.
-    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_cell_type(sheet, r, c).value());
+                out.push(self.get_cell_type(sheet, r, c));
             }
         }
     }
@@ -215,9 +213,9 @@ impl<T: CellContentQuery + ?Sized> CellContentQuery for Rc<T> {
         fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
         fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
         fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellDecoration>;
-        fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>);
-        fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>);
-        fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>);
+        fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>);
+        fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<String>>);
+        fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>);
         fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellDecoration>>);
     }
 }
@@ -237,5 +235,53 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
         fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;
         fn get_column_header_text(&self, sheet: u32, col: i32) -> Option<String>;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A model whose single accessor returns a different `Fetched` variant per
+    /// cell, so the default bulk loop's per-slot forwarding is observable.
+    struct PerCellOutcomeModel;
+
+    impl CellContentQuery for PerCellOutcomeModel {
+        fn get_cell_style(&self, _s: u32, row: i32, col: i32) -> Fetched<CellStyle> {
+            match (row, col) {
+                (1, 1) => Fetched::BridgeFailed,
+                (1, 2) => Fetched::Value(CellStyle::default()),
+                _ => Fetched::Absent,
+            }
+        }
+        fn get_cell_type(&self, _s: u32, _row: i32, _col: i32) -> Fetched<CellKind> {
+            Fetched::Absent
+        }
+        fn get_formatted_cell_value(&self, _s: u32, _row: i32, _col: i32) -> Fetched<String> {
+            Fetched::Absent
+        }
+    }
+
+    // Stage 1 (Fetched bulk channel): the default `get_cell_styles_in` loop must
+    // forward each `Fetched` verbatim — a per-cell `BridgeFailed` reaches the
+    // pane buffer as `BridgeFailed`, no longer `.value()`-collapsed to the same
+    // `None` as a blank cell. This is what lets the Stage 2 preflight tell a
+    // transient failure apart from an empty cell.
+    #[test]
+    fn default_bulk_styles_preserve_bridge_failed_per_slot() {
+        let range = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        };
+        let mut out = Vec::new();
+        PerCellOutcomeModel.get_cell_styles_in(0, range, &mut out);
+
+        // Row-major: (1,1), (1,2), (2,1), (2,2).
+        assert!(matches!(out[0], Fetched::BridgeFailed));
+        assert!(matches!(out[1], Fetched::Value(_)));
+        assert!(matches!(out[2], Fetched::Absent));
+        assert!(matches!(out[3], Fetched::Absent));
     }
 }

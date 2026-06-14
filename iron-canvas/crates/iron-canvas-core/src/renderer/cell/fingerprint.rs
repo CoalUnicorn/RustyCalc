@@ -17,6 +17,7 @@ use std::hash::{Hash, Hasher};
 use crate::style::{BorderItem, CellKind, CellStyle};
 
 use crate::types::coord::RCRange;
+use crate::types::fetched::Fetched;
 
 /// Fingerprint the bulk-fetched buffers for one pane. Same range +
 /// same buffers ⇒ same `u64` (modulo `DefaultHasher` collision, 2⁻⁶⁴).
@@ -24,9 +25,9 @@ use crate::types::coord::RCRange;
 /// Range is folded in so two panes with structurally-identical data at
 /// different addresses don't collide.
 pub fn compute_pane_fingerprint(
-    styles: &[Option<CellStyle>],
-    values: &[Option<String>],
-    cell_types: &[Option<CellKind>],
+    styles: &[Fetched<CellStyle>],
+    values: &[Fetched<String>],
+    cell_types: &[Fetched<CellKind>],
     range: RCRange,
 ) -> u64 {
     let mut h = DefaultHasher::new();
@@ -34,10 +35,15 @@ pub fn compute_pane_fingerprint(
     h.write_i32(range.c1);
     h.write_i32(range.r2);
     h.write_i32(range.c2);
+    // `Absent` and `BridgeFailed` both hash as the empty tag `0` — they paint
+    // identically *within a single frame's walk* (nothing drawn), so the
+    // fingerprint cannot tell them apart and Stage 1 stays behavior-preserving.
+    // The hold-on-`BridgeFailed` decision is made by the preflight *before* the
+    // fingerprint is committed (Stage 2), never here.
     for s in styles {
         match s {
-            None => h.write_u8(0),
-            Some(style) => {
+            Fetched::Absent | Fetched::BridgeFailed => h.write_u8(0),
+            Fetched::Value(style) => {
                 h.write_u8(1);
                 StyleDigest(style).hash(&mut h);
             }
@@ -45,8 +51,8 @@ pub fn compute_pane_fingerprint(
     }
     for v in values {
         match v {
-            None => h.write_u8(0),
-            Some(text) => {
+            Fetched::Absent | Fetched::BridgeFailed => h.write_u8(0),
+            Fetched::Value(text) => {
                 h.write_u8(1);
                 h.write_usize(text.len());
                 h.write(text.as_bytes());
@@ -55,8 +61,8 @@ pub fn compute_pane_fingerprint(
     }
     for t in cell_types {
         match t {
-            None => h.write_u8(0),
-            Some(ct) => {
+            Fetched::Absent | Fetched::BridgeFailed => h.write_u8(0),
+            Fetched::Value(ct) => {
                 h.write_u8(1);
                 std::mem::discriminant(ct).hash(&mut h);
             }

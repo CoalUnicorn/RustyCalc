@@ -367,11 +367,11 @@ fn last_regime_fresh_after_initial_paint() {
 
 #[test]
 fn last_regime_fresh_after_theme_swap() {
-    // Theme is frame-wide: the per-cell paint cache and last_frame's
-    // theme snapshot both go stale on a palette change, so set_theme
-    // drops last_frame and invalidates the paint cache. The next paint
-    // takes the Fresh arm; SlotsReuse would repaint stale-color cells
-    // under fresh chrome.
+    // Theme is frame-wide: a palette change makes the cached frame's
+    // pixels stale. `is_still_valid` rejects the theme-mismatched frame
+    // (and `set_theme` invalidates the content-keyed paint cache), so the
+    // next paint takes the Fresh arm; SlotsReuse would repaint stale-color
+    // cells under fresh chrome.
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.

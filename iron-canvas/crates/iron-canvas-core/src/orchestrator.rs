@@ -20,7 +20,7 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 
 use crate::CanvasModel;
-use crate::chrome::{BlitPlan, Chrome, FrameKindTag, FramePath, FrameValidity, PaneRegionMask};
+use crate::chrome::{BlitOutcome, BlitPlan, Chrome, FramePath, FrameValidity, PaneRegionMask};
 use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
@@ -224,15 +224,15 @@ where
     }
 
     /// Push a theme. Value-compares against `self.theme` and, on change,
-    /// drops `last_frame`, invalidates the renderer paint cache, and
-    /// marks both layers dirty. Theme is frame-wide — the per-cell pixel
-    /// cache holds the old palette and `is_still_valid` does not check
-    /// theme, so without the cache invalidation `SlotsReuse` would
-    /// repaint stale-color cells under fresh chrome.
+    /// invalidates the renderer paint cache and marks both layers dirty.
+    /// `is_still_valid` now rejects a theme-mismatched frame itself, so the
+    /// next paint reaches `Fresh` through the validity verdict — no out-of-band
+    /// `last_frame` drop needed here. The paint-cache invalidation stays: the
+    /// per-cell fingerprint cache is keyed on content, not palette, so even a
+    /// Fresh rebuild would fingerprint-skip stale-color cells without it.
     pub fn set_theme(&mut self, theme: CanvasTheme) {
         if theme != *self.theme {
             self.theme = Rc::new(theme);
-            self.last_frame = None;
             self.grid.invalidate_paint_cache();
             self.grid
                 .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
@@ -445,7 +445,7 @@ where
             .last_frame
             .as_ref()
             .map_or(FrameValidity::Rebuild, |f| {
-                f.is_still_valid(model, self.size)
+                f.is_still_valid(model, self.size, &self.theme)
             });
 
         if !sig.grid_dirty()
@@ -509,33 +509,27 @@ where
     /// verdict and the supplied plan. Always repaints the overlay too —
     /// a viewport shift moves every overlay primitive's pixel position.
     ///
-    /// `Chrome::next(Blit)` may demote to `Fresh` when in-place reuse
-    /// rejects (e.g. row-header digit boundary). We dispatch on
-    /// `frame.kind` so the demoted path takes the full repaint with cache
-    /// invalidation, instead of a `paint_grid_blit` that would carry
+    /// `Chrome::next_blit` may demote to `Fresh` when in-place reuse rejects
+    /// (e.g. row-header digit boundary). The `BlitOutcome` variant we get back
+    /// *is* the dispatch — the `FreshFallback` arm takes the full repaint with
+    /// cache invalidation, instead of a `paint_grid_blit` that would carry
     /// stale per-pane caches against the freshly rebuilt slot vecs.
     fn paint_viewport_regime(&mut self, model: &dyn CanvasModel, plan: BlitPlan) {
         let Some(prev) = self.last_frame.take() else {
             return;
         };
-        let frame = Chrome::next(
-            Some(prev),
-            model,
-            self.size,
-            &self.theme,
-            FramePath::Blit(&plan),
-        );
-        match frame.kind {
-            FrameKindTag::Blitted => self.grid.paint_grid_blit(model, &frame, &plan),
-            FrameKindTag::Fresh => {
+        let frame = match Chrome::next_blit(Some(prev), model, self.size, &self.theme, &plan) {
+            BlitOutcome::Blitted(frame) => {
+                self.grid.paint_grid_blit(model, &frame, &plan);
+                frame
+            }
+            BlitOutcome::FreshFallback(frame) => {
                 self.grid.invalidate_pane_cache(PaneRegionMask::ALL);
                 self.grid.invalidate_paint_cache();
                 self.grid.paint_grid(model, &frame);
+                frame
             }
-            FrameKindTag::SlotsReused => {
-                unreachable!("Chrome::next(Blit) only returns Blitted (reuse) or Fresh (fallback)")
-            }
-        }
+        };
         self.decos.refresh_overlay_state(model);
         self.overlay.paint_overlay_layer(
             model,

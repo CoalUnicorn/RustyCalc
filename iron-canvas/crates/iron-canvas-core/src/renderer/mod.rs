@@ -181,13 +181,7 @@ impl<P: Painter> RendererCore<P> {
         }
         self.painter.end_group();
 
-        // Corner box is gated for *correctness*: at thickness 0 it would
-        // still stroke 0.5px border lines spanning the full canvas.
-        if frame.row_header_thickness > 0 && frame.col_header_thickness > 0 {
-            self.painter.begin_group(GroupClass::Corner);
-            self.draw_corner_box(frame);
-            self.painter.end_group();
-        }
+        self.draw_corner_box_if_needed(frame);
 
         self.painter.end_group();
     }
@@ -243,15 +237,21 @@ impl<P: Painter> RendererCore<P> {
         }
         self.painter.end_group();
 
-        // Corner box is gated for *correctness*: at thickness 0 it would
-        // still stroke 0.5px border lines spanning the full canvas.
+        self.draw_corner_box_if_needed(frame);
+
+        self.painter.end_group();
+    }
+
+    /// Paint the header corner box, gated for *correctness*: at thickness 0 it
+    /// would still stroke 0.5px border lines spanning the full canvas. Shared
+    /// by `render_grid` and `render_grid_blit` (the one block identical between
+    /// them — the header strips differ, full vs scroll-axis only).
+    fn draw_corner_box_if_needed(&self, frame: &Chrome) {
         if frame.row_header_thickness > 0 && frame.col_header_thickness > 0 {
             self.painter.begin_group(GroupClass::Corner);
             self.draw_corner_box(frame);
             self.painter.end_group();
         }
-
-        self.painter.end_group();
     }
 
     /// Cache the per-sheet grid-line toggle once for this frame so the

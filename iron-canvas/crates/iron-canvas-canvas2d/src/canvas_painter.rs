@@ -5,7 +5,8 @@
 //! The cache is a Canvas2D-only optimization — it lives here, not in the
 //! trait, because Recorder/SVG backends do not need it.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use wasm_bindgen::prelude::*;
@@ -17,6 +18,7 @@ use iron_canvas_core::geometry::{
 };
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    approx_text_width, parse_font_size_px,
 };
 
 // Private `console.warn` binding — zero IronCalc, kept local so this crate
@@ -53,16 +55,17 @@ fn snap_stroke_cross(coord: f64, width: f64) -> f64 {
 
 /// Cached color/font value. `Static` is the zero-alloc fast path: when the
 /// renderer pushed a `&'static str` (theme color, `HEADER_FONT`), we keep the
-/// reference and ptr-eq it on the next call. `Owned` carries a per-frame
-/// custom color that originated as a non-static `&str`. `Empty` is the
-/// initial / post-clip state — always misses so the next paint re-binds the
-/// ctx.
+/// reference and ptr-eq it on the next call. `Owned` carries a custom color
+/// that originated as a non-static `&str`, deduped to a painter-lifetime
+/// `Rc<str>` (see `intern_borrowed`) so a recurring color is `Rc::clone`, not
+/// a fresh allocation. `Empty` is the initial / post-clip state — always
+/// misses so the next paint re-binds the ctx.
 #[derive(Default, Clone)]
 pub(crate) enum CachedColor {
     #[default]
     Empty,
     Static(&'static str),
-    Owned(String),
+    Owned(Rc<str>),
 }
 
 impl CachedColor {
@@ -77,7 +80,7 @@ impl CachedColor {
             (CachedColor::Empty, _) => false,
             (CachedColor::Static(a), PaintColor::Static(b)) => std::ptr::eq(a.as_ptr(), b.as_ptr()),
             (CachedColor::Static(a), PaintColor::Borrowed(b)) => *a == b,
-            (CachedColor::Owned(a), other) => a == other.as_str(),
+            (CachedColor::Owned(a), other) => &**a == other.as_str(),
         }
     }
 }
@@ -122,6 +125,12 @@ pub struct CanvasPainter {
     /// reads from the DPR-scaled backing store) is sized in backing-store
     /// pixels — dest coords go through the active transform unchanged.
     pub dpr: Cell<i32>,
+    /// Painter-lifetime dedup of custom (`Borrowed`) color strings to
+    /// `Rc<str>`. Distinct from `SetterCache`: `invalidate` resets the sticky
+    /// binds, but the palette outlives invalidation — an interned color is
+    /// still a valid key. Not cleared, so cardinality tracks the sheet's
+    /// distinct-color set (bounded, like `ColorIntern`).
+    palette: RefCell<Vec<Rc<str>>>,
 }
 
 impl CanvasPainter {
@@ -133,6 +142,7 @@ impl CanvasPainter {
             dash_empty: js_sys::Array::new(),
             clip_depth: Cell::new(0),
             dpr: Cell::new(1),
+            palette: RefCell::new(Vec::new()),
         }
     }
 
@@ -143,7 +153,7 @@ impl CanvasPainter {
             return;
         }
         self.ctx.set_fill_style_str(color.as_str());
-        self.setter_cache.last_fill.set(into_cached(color));
+        self.setter_cache.last_fill.set(self.cache_color(color));
     }
 
     fn set_stroke_cached(&self, color: PaintColor) {
@@ -153,7 +163,7 @@ impl CanvasPainter {
             return;
         }
         self.ctx.set_stroke_style_str(color.as_str());
-        self.setter_cache.last_stroke.set(into_cached(color));
+        self.setter_cache.last_stroke.set(self.cache_color(color));
     }
 
     pub(crate) fn set_font_cached(&self, font: PaintColor) {
@@ -163,7 +173,7 @@ impl CanvasPainter {
             return;
         }
         self.ctx.set_font(font.as_str());
-        self.setter_cache.last_font.set(into_cached(font));
+        self.setter_cache.last_font.set(self.cache_color(font));
     }
 
     pub(crate) fn set_line_width_cached(&self, width: f64) {
@@ -178,16 +188,29 @@ impl CanvasPainter {
         f(self);
         self.set_line_width_cached(STANDARD_BORDER_WIDTH);
     }
-}
 
-/// Branchless mapping from the call-site's `PaintColor` to the right
-/// `CachedColor` variant. Static stays zero-alloc; Borrowed pays one
-/// `to_string()` to own the comparison key for next-call content-eq.
-#[inline]
-fn into_cached(color: PaintColor<'_>) -> CachedColor {
-    match color {
-        PaintColor::Static(s) => CachedColor::Static(s),
-        PaintColor::Borrowed(s) => CachedColor::Owned(s.to_string()),
+    /// Map a call-site `PaintColor` to its `CachedColor`. `Static` stays
+    /// zero-alloc; `Borrowed` is deduped through the painter palette so a
+    /// recurring color reuses its `Rc<str>` instead of reallocating.
+    fn cache_color(&self, color: PaintColor<'_>) -> CachedColor {
+        match color {
+            PaintColor::Static(s) => CachedColor::Static(s),
+            PaintColor::Borrowed(s) => CachedColor::Owned(self.intern_borrowed(s)),
+        }
+    }
+
+    /// Dedup a custom (`Borrowed`) color string to a painter-lifetime
+    /// `Rc<str>`, so a color seen before is an `Rc::clone` rather than a fresh
+    /// allocation. Cardinality is bounded by the sheet's palette (same
+    /// assumption as `ColorIntern`).
+    fn intern_borrowed(&self, s: &str) -> Rc<str> {
+        let mut palette = self.palette.borrow_mut();
+        if let Some(rc) = palette.iter().find(|rc| &***rc == s) {
+            return Rc::clone(rc);
+        }
+        let rc: Rc<str> = Rc::from(s);
+        palette.push(Rc::clone(&rc));
+        rc
     }
 }
 
@@ -213,23 +236,25 @@ impl TextMetrics for CanvasPainter {
             Err(_) => {
                 // Debug builds: crash on first occurrence so a regressing
                 // ctx state (lost context, bad font_css) is caught loud
-                // in dev. Release: char-count fallback survives, and a
-                // single console.warn whispers once per session.
+                // in dev. Release: fall back to the shared `approx_text_width`
+                // estimate so a measure error agrees with the SVG/PDF/recorder
+                // backends instead of diverging; a single console.warn whispers
+                // once per session.
                 debug_assert!(
                     false,
                     "CanvasPainter::measure_text_width: ctx.measure_text errored; \
-                     falling back to char-count×6 for {text:?} font={font_css:?}"
+                     falling back to approx_text_width for {text:?} font={font_css:?}"
                 );
                 if MEASURE_WARN_EMITTED
                     .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
                     .is_ok()
                 {
                     console_warn(
-                        "iron-canvas: ctx.measure_text errored; using char-count fallback \
+                        "iron-canvas: ctx.measure_text errored; using approx_text_width fallback \
                          (subsequent measure errors silenced)",
                     );
                 }
-                text.chars().count() as f64 * 6.0
+                approx_text_width(parse_font_size_px(font_css), text)
             }
         }
     }

@@ -129,9 +129,22 @@ pub const CHAR_WIDTH_FACTOR: f64 = 1.0;
 
 /// Deterministic text-width estimate: `chars × font_size_px × CHAR_WIDTH_FACTOR`.
 /// The single fallback every measureless `TextMetrics` backend serializes; each
-/// backend parses `font_size_px` from its own CSS shorthand before calling.
+/// backend parses `font_size_px` via [`parse_font_size_px`] before calling.
 pub fn approx_text_width(font_size_px: f64, text: &str) -> f64 {
     text.chars().count() as f64 * font_size_px * CHAR_WIDTH_FACTOR
+}
+
+/// Default size when a CSS `font` shorthand carries no `<n>px` token.
+pub const DEFAULT_FONT_SIZE_PX: f64 = 12.0;
+
+/// Extract the first `<n>px` token from a CSS `font` shorthand, falling back to
+/// [`DEFAULT_FONT_SIZE_PX`] when none is present. The single size parser every
+/// measureless backend (SVG, PDF, Recorder) shares so they agree on wrap math.
+pub fn parse_font_size_px(font_css: &str) -> f64 {
+    font_css
+        .split_whitespace()
+        .find_map(|tok| tok.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()))
+        .unwrap_or(DEFAULT_FONT_SIZE_PX)
 }
 
 pub trait TextMetrics {

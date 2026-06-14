@@ -22,6 +22,7 @@ pub mod text;
 pub use paint::{CellPaint, PaneCells};
 
 use crate::style::{CellDecoration, CellKind, CellStyle};
+use crate::types::fetched::Fetched;
 
 use self::borders::BorderPaint;
 use self::fingerprint::compute_pane_fingerprint;
@@ -139,9 +140,9 @@ impl<P: Painter> RendererCore<P> {
         pane: PaneRegion,
         range: RCRange,
         theme: &CanvasTheme,
-        mut pane_styles: Vec<Option<CellStyle>>,
-        mut pane_values: Vec<Option<String>>,
-        mut pane_cell_types: Vec<Option<CellKind>>,
+        mut pane_styles: Vec<Fetched<CellStyle>>,
+        mut pane_values: Vec<Fetched<String>>,
+        mut pane_cell_types: Vec<Fetched<CellKind>>,
         mut pane_decorations: Vec<Option<CellDecoration>>,
     ) {
         let pane_buf = self.pane_cache.pane(pane);
@@ -151,7 +152,7 @@ impl<P: Painter> RendererCore<P> {
         slots.clear();
         for slot in cells {
             let idx = ((slot.row - range.r1) * cols_w + (slot.col - range.c1)) as usize;
-            let Some(own_style) = pane_styles.get_mut(idx).and_then(Option::take) else {
+            let Some(own_style) = pane_styles.get_mut(idx).and_then(Fetched::take_value) else {
                 continue;
             };
             // `own_style` already holds the dxf-merged CellStyle (the bridge folds
@@ -197,12 +198,12 @@ impl<P: Painter> RendererCore<P> {
         let mut text_lines = self.frame_cache.text_lines.take();
         for p in &slots {
             let idx = ((p.row - range.r1) * cols_w + (p.col - range.c1)) as usize;
-            let Some(text) = pane_values.get_mut(idx).and_then(Option::take) else {
+            let Some(text) = pane_values.get_mut(idx).and_then(Fetched::take_value) else {
                 continue;
             };
             let cell_type = pane_cell_types
                 .get_mut(idx)
-                .and_then(Option::take)
+                .and_then(Fetched::take_value)
                 .unwrap_or(CellKind::Text);
             if let Some(tp) = TextPaint::resolve_into(
                 self,
@@ -461,11 +462,12 @@ fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
 
 /// Move the freshly-fetched strip cells into `pane_buf` at the indices
 /// corresponding to their `(row, col)` within the new pane range. Drains
-/// `strip_buf` via `Option::take` so callers can drop the scratch Vec
-/// after the splice without leaking the inner values.
-fn splice_strip_into<T>(
-    pane_buf: &mut [Option<T>],
-    strip_buf: &mut [Option<T>],
+/// `strip_buf` via `mem::swap` (no `Default`/`Clone` bound, so it serves both
+/// `Fetched<T>` and `Option<T>` buffers): the pane slot's stale value lands
+/// in the strip scratch, which the caller's next `*_in` fetch `clear()`s.
+fn splice_strip_into<E>(
+    pane_buf: &mut [E],
+    strip_buf: &mut [E],
     pane_range: RCRange,
     strip_range: RCRange,
 ) {
@@ -483,7 +485,7 @@ fn splice_strip_into<T>(
     for (pane_row, strip_row) in pane_rows.zip(strip_rows_iter) {
         let dst = &mut pane_row[col_offset..col_offset + strip_cols];
         for (d, s) in dst.iter_mut().zip(strip_row.iter_mut()) {
-            *d = s.take();
+            std::mem::swap(d, s);
         }
     }
 }

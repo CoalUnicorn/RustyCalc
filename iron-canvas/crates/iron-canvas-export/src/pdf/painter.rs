@@ -16,12 +16,11 @@ use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    approx_text_width,
+    approx_text_width, parse_font_size_px,
 };
 
 use crate::common::color::parse_css_color;
 use crate::common::escape::pdf_string_escape;
-use crate::common::text::parse_font_size_px;
 use crate::pdf::doc::stream::ContentStream;
 
 /// Visible dash pattern when `rect_dashed` is invoked. Matches the

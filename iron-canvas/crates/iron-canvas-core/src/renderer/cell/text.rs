@@ -165,7 +165,7 @@ impl TextPaint {
 
         position_lines(lines, h_align, v_align, rect, size_px, line_height);
 
-        let needs_clip = lines.len() > 1 || lines.iter().any(|l| l.width > usable_w);
+        let needs_clip = lines_escape_cell(lines, usable_w, rect, line_height);
 
         Some(TextPaint {
             clip: rect,
@@ -215,6 +215,25 @@ fn position_lines(
             _ => f64::from(rect.top_left.y) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
         };
     }
+}
+
+/// Clip iff any *positioned* line escapes the cell box on either axis. Vertical
+/// reads the resolved `center_y` (post-`position_lines`), not a raw block-height
+/// compare: bottom/top alignment plus `TEXT_V_INSET_PX` can push a block that
+/// "fits" by total height past the top or bottom edge, and only the anchored
+/// centers reveal that. Glyphs are baseline-middle, so each spans
+/// `center_y ± line_height/2` (1.2·em over-estimates real glyph height, so the
+/// strict `<`/`>` err toward clipping a hair early — the safe direction).
+/// Supersedes the old `lines.len() > 1` proxy: catches a single tall line and a
+/// bottom-anchored block crossing the top edge, while still skipping the
+/// save/restore for multi-line cells that genuinely fit.
+fn lines_escape_cell(lines: &[TextLine], usable_w: f64, rect: PixelRect, line_height: f64) -> bool {
+    let half_line = line_height / 2.0;
+    let top = f64::from(rect.top_left.y);
+    let bottom = f64::from(rect.bottom());
+    lines.iter().any(|l| {
+        l.width > usable_w || l.center_y - half_line < top || l.center_y + half_line > bottom
+    })
 }
 
 /// Per-cell text styling resolved from the model's raw `Style`. Private step
@@ -444,5 +463,83 @@ impl<P: Painter> RendererCore<P> {
         if t.needs_clip {
             self.painter.pop_clip();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::prim::Point;
+
+    fn line(width: f64) -> TextLine {
+        TextLine {
+            text: "x".to_string(),
+            center_x: 0.0,
+            center_y: 0.0,
+            width,
+        }
+    }
+
+    fn rect(height: i32) -> PixelRect {
+        PixelRect {
+            top_left: Point { x: 0, y: 0 },
+            width: 100,
+            height,
+        }
+    }
+
+    // Regression (review 2026-06-13 finding #1): a bottom-aligned two-line cell
+    // whose block height *fits* the row can still cross the top edge once
+    // `position_lines` anchors it at the bottom with `TEXT_V_INSET_PX`. The
+    // raw block-height predicate missed this; the positioned-bounds check
+    // must clip it.
+    #[test]
+    fn bottom_aligned_block_fits_height_but_escapes_top_edge() {
+        let size_px = 12.0;
+        let line_height = size_px * LINE_HEIGHT_FACTOR; // 14.4
+        let rect = rect(30); // block = 2 * 14.4 = 28.8 < 30, so "fits" by height
+        let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
+        let mut lines = vec![line(10.0), line(10.0)];
+
+        position_lines(&mut lines, HAlign::Left, VAlign::Bottom, rect, size_px, line_height);
+
+        // Line 0 center lands at 5.6 → top of glyph ≈ 5.6 - 7.2 < 0.
+        assert!(lines[0].center_y - line_height / 2.0 < 0.0, "test premise: top line crosses the top edge");
+        assert!(
+            lines_escape_cell(&lines, usable_w, rect, line_height),
+            "bottom-anchored block crossing the top edge must clip"
+        );
+    }
+
+    #[test]
+    fn single_line_that_fits_does_not_clip() {
+        let size_px = 11.0;
+        let line_height = size_px * LINE_HEIGHT_FACTOR;
+        let rect = rect(20);
+        let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
+        let mut lines = vec![line(10.0)];
+
+        position_lines(&mut lines, HAlign::Left, VAlign::Bottom, rect, size_px, line_height);
+
+        assert!(
+            !lines_escape_cell(&lines, usable_w, rect, line_height),
+            "a single short line in a normal row must not pay the clip round-trip"
+        );
+    }
+
+    #[test]
+    fn line_wider_than_usable_width_clips() {
+        let size_px = 11.0;
+        let line_height = size_px * LINE_HEIGHT_FACTOR;
+        let rect = rect(20);
+        let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
+        let mut lines = vec![line(usable_w + 1.0)];
+
+        position_lines(&mut lines, HAlign::Left, VAlign::Bottom, rect, size_px, line_height);
+
+        assert!(
+            lines_escape_cell(&lines, usable_w, rect, line_height),
+            "horizontal overflow must clip"
+        );
     }
 }

@@ -301,6 +301,9 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
                 if let Some(c) = slot.as_mut() {
                     c.set_grid(model.with_value(|m| extract_grid(m, source)));
                     c.set_scroll(1, 1);
+                    // Re-point shrink-wraps to the new range; without this the
+                    // widget keeps the previous range's (often wider) size.
+                    apply_autosize(c);
                 }
             });
         }

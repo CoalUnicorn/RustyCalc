@@ -14,7 +14,7 @@ use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    approx_text_width,
+    approx_text_width, parse_font_size_px,
 };
 
 use serde::{Deserialize, Serialize};
@@ -166,11 +166,7 @@ impl RecorderPainter {
 
 impl TextMetrics for RecorderPainter {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
-        let font_size_px = font_css
-            .split_whitespace()
-            .find_map(|tok| tok.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()))
-            .unwrap_or(12.0);
-        approx_text_width(font_size_px, text)
+        approx_text_width(parse_font_size_px(font_css), text)
     }
 }
 

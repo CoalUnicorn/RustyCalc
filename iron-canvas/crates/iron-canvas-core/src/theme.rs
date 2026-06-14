@@ -289,7 +289,10 @@ impl ThemeVariables {
 /// or a malformed string), so the caller falls back to the LIGHT default
 /// instead of synthesising a broken fill string.
 fn derive_rgba(hex: &str, alpha: f64) -> Option<String> {
-    let hex = hex.trim().strip_prefix('#')?;
+    // `is_ascii` guard: `hex.len()` is a byte count, but the arms below slice
+    // by byte index — a multibyte value of byte-length 3 or 6 would slice
+    // through a UTF-8 char boundary and panic. ASCII hex is the only valid form.
+    let hex = hex.trim().strip_prefix('#').filter(|h| h.is_ascii())?;
     let (r, g, b) = match hex.len() {
         3 => (
             u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?,

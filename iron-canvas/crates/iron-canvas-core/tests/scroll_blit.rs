@@ -9,7 +9,7 @@
 mod common;
 
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::chrome::{ActiveCellSnapshot, Chrome, FramePath};
+use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
@@ -71,13 +71,11 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
 
     // Simulate the orchestrator's blit fast-path on the same core so
     // the pane cache state carries across frames.
-    let frame1 = Chrome::next(
-        Some(frame0),
-        &m,
-        canvas,
-        &theme,
-        iron_canvas_core::chrome::FramePath::Blit(&plan),
-    );
+    let BlitOutcome::Blitted(frame1) =
+        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("single-row scroll must blit in place");
+    };
     issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
@@ -164,7 +162,11 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-column scroll must qualify for blit");
 
-    let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
+    let BlitOutcome::Blitted(frame1) =
+        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("single-row scroll must blit in place");
+    };
     issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
@@ -215,7 +217,11 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let plan = frame0
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-row scroll must qualify for blit");
-    let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
+    let BlitOutcome::Blitted(frame1) =
+        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("single-row scroll must blit in place");
+    };
     issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
@@ -348,7 +354,11 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-row scroll must qualify for blit");
 
-    let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
+    let BlitOutcome::Blitted(frame1) =
+        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("single-row scroll must blit in place");
+    };
     issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
@@ -398,7 +408,11 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("5-row scroll must qualify for blit");
 
-    let frame1 = Chrome::next(Some(frame0), &m, canvas, &theme, FramePath::Blit(&plan));
+    let BlitOutcome::Blitted(frame1) =
+        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("single-row scroll must blit in place");
+    };
     issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 

@@ -1,4 +1,4 @@
-//! `Chrome::next(FramePath::Blit)` fallback: `screen_for_blit` qualifies
+//! `Chrome::next_blit` fallback: `screen_for_blit` qualifies
 //! but `try_blit_reuse` rejects in-place reuse — today this fires only at
 //! a row-header digit boundary, when the new last-visible row gains a
 //! digit and `row_header_thickness` widens. The dispatch must hand back
@@ -7,7 +7,7 @@
 
 mod common;
 
-use iron_canvas_core::chrome::{ActiveCellSnapshot, Chrome, FrameKindTag, FramePath};
+use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CanvasModel, CanvasSize};
 
@@ -59,28 +59,22 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
         .screen_for_blit(&model, canvas, &theme, &active)
         .expect("single-row scroll must qualify geometrically");
 
-    let next = Chrome::next(Some(prev), &model, canvas, &theme, FramePath::Blit(&plan));
+    let outcome = Chrome::next_blit(Some(prev), &model, canvas, &theme, &plan);
 
-    // The whole point of the fallback: if try_blit_reuse rejected, the
-    // returned frame must be Fresh-built (clean stale_panes = ALL, kind =
-    // Fresh) so paint_viewport_regime invalidates the cache.
-    if next.row_header_thickness != prev_row_header {
-        assert_eq!(
-            next.kind,
-            FrameKindTag::Fresh,
-            "row_header widened ({}→{}), so try_blit_reuse must have fallen back to Fresh",
-            prev_row_header,
-            next.row_header_thickness
-        );
-    } else {
-        // If the digit boundary didn't trip the measurement (numbers
-        // close enough), the blit reused as Blitted — that's still
-        // correct behavior, just a different code path. Pin the
-        // contract: kind ∈ {Fresh, Blitted}.
+    // The whole point of the fallback: if try_blit_reuse rejected, the outcome
+    // must be `FreshFallback` (Fresh-built frame, clean stale_panes = ALL) so
+    // paint_viewport_regime invalidates the cache. The `BlitOutcome` type now
+    // makes "Fresh or Blitted, never anything else" structural — the else
+    // branch needs no assertion.
+    let is_fallback = matches!(outcome, BlitOutcome::FreshFallback(_));
+    let next_row_header = match &outcome {
+        BlitOutcome::Blitted(f) | BlitOutcome::FreshFallback(f) => f.row_header_thickness,
+    };
+    if next_row_header != prev_row_header {
         assert!(
-            matches!(next.kind, FrameKindTag::Fresh | FrameKindTag::Blitted),
-            "blit-path frame must be Fresh or Blitted, got {:?}",
-            next.kind
+            is_fallback,
+            "row_header widened ({}→{}), so try_blit_reuse must have fallen back to Fresh",
+            prev_row_header, next_row_header
         );
     }
 }
@@ -105,15 +99,58 @@ fn blit_inside_stable_digit_band_keeps_blitted_kind() {
     let plan = prev
         .screen_for_blit(&model, canvas, &theme, &active)
         .expect("single-row scroll must qualify");
-    let next = Chrome::next(Some(prev), &model, canvas, &theme, FramePath::Blit(&plan));
+    let BlitOutcome::Blitted(next) =
+        Chrome::next_blit(Some(prev), &model, canvas, &theme, &plan)
+    else {
+        panic!("in-band scroll must reuse in place (Blitted)");
+    };
 
     assert_eq!(
         next.row_header_thickness, prev_row_header,
         "test premise: scrolls inside the 2-digit band must keep header width"
     );
-    assert_eq!(
-        next.kind,
-        FrameKindTag::Blitted,
-        "in-band scroll must reuse in place"
+}
+
+/// Review finding #3: a `BridgeFailed` fetch of the active cell is an *unknown*
+/// value — it can't prove the cell is unchanged, so the blit must be rejected
+/// regardless of which side (capture or compare) saw the failure. The control
+/// case (known value, unchanged) must still qualify, so the rejection is
+/// attributable to the failure and not the geometry.
+#[test]
+fn bridge_failed_active_cell_rejects_blit() {
+    let canvas = CanvasSize { w: 600.0, h: 400.0 };
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let model = TestModel::synthetic_grid()
+        .with_top_row(10)
+        .with_active(10, 1);
+    model.set_cell(10, 1, "hello");
+
+    let prev = Chrome::next(None, &model, canvas, &theme, FramePath::Fresh);
+    model.set_top_row(11);
+
+    // Control: known, unchanged value ⇒ single-row scroll qualifies.
+    assert!(
+        prev.screen_for_blit(&model, canvas, &theme, &snap(&model))
+            .is_some(),
+        "known unchanged active cell must qualify for blit"
+    );
+
+    // Compare-time failure: snapshot captured a known value, but the live
+    // re-hash now throws (`BridgeFailed`) ⇒ unknown ⇒ reject.
+    let known = snap(&model);
+    model.set_value_bridge_fail(true);
+    assert!(
+        prev.screen_for_blit(&model, canvas, &theme, &known).is_none(),
+        "BridgeFailed at compare time must reject the blit"
+    );
+
+    // Capture-time failure: snapshot taken while the bridge is down (poisoned
+    // `None`); even once the bridge recovers, it can't prove unchanged ⇒ reject.
+    let poisoned = snap(&model);
+    model.set_value_bridge_fail(false);
+    assert!(
+        prev.screen_for_blit(&model, canvas, &theme, &poisoned)
+            .is_none(),
+        "BridgeFailed at capture time must reject the blit"
     );
 }

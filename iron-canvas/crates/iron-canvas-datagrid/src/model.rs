@@ -70,14 +70,26 @@ pub struct DataGrid {
     show_headers: bool,
 }
 
-#[derive(Default)]
 pub struct DataGridBuilder {
     columns: Vec<Column>,
     rows: Vec<Vec<Cell>>,
     default_row_h: Option<f64>,
     frozen_header: bool,
-    // bool defaults to false; use hide_headers so the default (false) maps to headers ON
-    hide_headers: bool,
+    show_headers: bool,
+}
+
+// Manual `Default` (not derived) so `show_headers` starts ON; every other
+// field takes its own zero/empty default.
+impl Default for DataGridBuilder {
+    fn default() -> Self {
+        Self {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            default_row_h: None,
+            frozen_header: false,
+            show_headers: true,
+        }
+    }
 }
 
 impl DataGrid {
@@ -318,7 +330,7 @@ impl DataGridBuilder {
         self
     }
     pub fn show_headers(mut self, on: bool) -> Self {
-        self.hide_headers = !on;
+        self.show_headers = on;
         self
     }
     pub fn build(self) -> DataGrid {
@@ -335,7 +347,7 @@ impl DataGridBuilder {
             active_col: 1,
             sel: [1, 1, 1, 1],
             frozen_header: self.frozen_header,
-            show_headers: !self.hide_headers,
+            show_headers: self.show_headers,
         };
         grid.clamp_view(); // keep viewport + selection valid for an empty grid
         grid

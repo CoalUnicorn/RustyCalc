@@ -15,6 +15,7 @@ use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
+use crate::types::fetched::Fetched;
 
 /// Per-pane buffers that survive across frames. Holds the most recent
 /// bulk-fetch output for one `PaneRegion`, plus the `RCRange` they were
@@ -27,9 +28,9 @@ use crate::types::coord::RCRange;
 /// FrameCache scratch buffers used pre-Stage-3).
 #[derive(Default)]
 pub struct PaneBuffers {
-    pub styles: Cell<Vec<Option<CellStyle>>>,
-    pub values: Cell<Vec<Option<String>>>,
-    pub cell_types: Cell<Vec<Option<CellKind>>>,
+    pub styles: Cell<Vec<Fetched<CellStyle>>>,
+    pub values: Cell<Vec<Fetched<String>>>,
+    pub cell_types: Cell<Vec<Fetched<CellKind>>>,
     pub decorations: Cell<Vec<Option<CellDecoration>>>,
     /// The address-space range the buffers above were fetched for. `None`
     /// when this pane has never been painted, or was last seen empty
@@ -61,10 +62,13 @@ impl PaneBuffers {
         let mut values = self.values.take();
         let mut cell_types = self.cell_types.take();
         let mut decorations = self.decorations.take();
-        apply_blit_shift(&mut styles, prev_range, new_range, axis);
-        apply_blit_shift(&mut values, prev_range, new_range, axis);
-        apply_blit_shift(&mut cell_types, prev_range, new_range, axis);
-        apply_blit_shift(&mut decorations, prev_range, new_range, axis);
+        // Revealed strip slots are placeholders the strip-fetch overwrites this
+        // same frame. `Fetched::Absent` for the content buffers (nothing fetched
+        // yet); `None` for the still-`Option` decoration buffer.
+        apply_blit_shift(&mut styles, prev_range, new_range, axis, Fetched::Absent);
+        apply_blit_shift(&mut values, prev_range, new_range, axis, Fetched::Absent);
+        apply_blit_shift(&mut cell_types, prev_range, new_range, axis, Fetched::Absent);
+        apply_blit_shift(&mut decorations, prev_range, new_range, axis, None);
         self.styles.set(styles);
         self.values.set(values);
         self.cell_types.set(cell_types);
@@ -130,17 +134,20 @@ fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
 /// - At entry, `buf.len() == prev_rows * prev_cols`.
 ///
 /// On exit, `buf.len() == new_rows * new_cols`. Strip slots (the newly-
-/// revealed band along `axis`) are `None`; kept-band slots carry the
-/// values that were at those `(row, col)` pairs in `prev_range`.
+/// revealed band along `axis`) carry `fill` (the caller's placeholder for an
+/// un-fetched slot — `Fetched::Absent` for content, `None` for decorations);
+/// kept-band slots carry the values that were at those `(row, col)` pairs in
+/// `prev_range`.
 ///
-/// Note: this operates on `Vec<Option<T>>` for arbitrary `T` — no `Copy`
+/// Note: this operates on `Vec<E>` for arbitrary `E: Clone` — no `Copy`
 /// bound. Use `slice::rotate_left` / `rotate_right` (which work for any
-/// `T`), not `copy_within` (which is `T: Copy` only).
-fn apply_blit_shift<T>(
-    buf: &mut Vec<Option<T>>,
+/// `E`), not `copy_within` (which is `E: Copy` only).
+fn apply_blit_shift<E: Clone>(
+    buf: &mut Vec<E>,
     prev_range: RCRange,
     new_range: RCRange,
     axis: Axis,
+    fill: E,
 ) {
     let prev_rows = (prev_range.r2 - prev_range.r1 + 1) as usize;
     let prev_cols = (prev_range.c2 - prev_range.c1 + 1) as usize;
@@ -154,7 +161,7 @@ fn apply_blit_shift<T>(
             // Vertical scroll: row-major layout means the kept-band moves in
             // whole-row blocks of `cols` slots. Rotate the entire buffer by
             // `|delta_rows| * cols`; the displaced rows land in the strip,
-            // which we then overwrite with None for strip-fetch to fill.
+            // which we then overwrite with `fill` for strip-fetch to replace.
             debug_assert_eq!(prev_cols, new_cols);
             debug_assert_eq!(prev_rows, new_rows);
             let cols = prev_cols;
@@ -163,11 +170,11 @@ fn apply_blit_shift<T>(
                 let shift = delta as usize * cols;
                 buf.rotate_left(shift);
                 let strip_start = buf.len() - shift;
-                buf[strip_start..].fill_with(|| None);
+                buf[strip_start..].fill(fill.clone());
             } else if delta < 0 {
                 let shift = (-delta) as usize * cols;
                 buf.rotate_right(shift);
-                buf[..shift].fill_with(|| None);
+                buf[..shift].fill(fill.clone());
             }
         }
         Axis::Column => {
@@ -183,17 +190,17 @@ fn apply_blit_shift<T>(
                 let shift = delta as usize;
                 for row in buf.chunks_exact_mut(cols) {
                     row.rotate_left(shift);
-                    row[cols - shift..].fill_with(|| None);
+                    row[cols - shift..].fill(fill.clone());
                 }
             } else if delta < 0 {
                 let shift = (-delta) as usize;
                 for row in buf.chunks_exact_mut(cols) {
                     row.rotate_right(shift);
-                    row[..shift].fill_with(|| None);
+                    row[..shift].fill(fill.clone());
                 }
             }
         }
     }
 
-    buf.resize_with(new_rows * new_cols, || None);
+    buf.resize(new_rows * new_cols, fill);
 }

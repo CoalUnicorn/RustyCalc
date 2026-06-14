@@ -106,4 +106,60 @@ impl CellContentQuery for DataGrid {
             None => Fetched::Absent,
         }
     }
+
+    // Batched overrides. The default `*_in` loop dispatches the single-cell
+    // accessor through the trait per cell — a vtable hop on `&dyn CanvasModel`
+    // for every visible cell each frame, plus a fresh column-default build per
+    // blank cell. These drain grid storage directly and hoist each column's
+    // default style out of the row loop. Row-major order (row outer, column
+    // inner) mirrors the default impl the renderer indexes against.
+    fn get_cell_styles_in(&self, _s: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
+        out.clear();
+        let col_defaults: Vec<CellStyle> = (range.c1..=range.c2)
+            .map(|c| {
+                if c < 1 {
+                    CellStyle::default()
+                } else {
+                    self.column_default_style((c - 1) as usize)
+                }
+            })
+            .collect();
+        for r in range.r1..=range.r2 {
+            for (i, c) in (range.c1..=range.c2).enumerate() {
+                let style = if r < 1 || c < 1 {
+                    CellStyle::default()
+                } else {
+                    self.cell_style((r - 1) as usize, (c - 1) as usize)
+                        .cloned()
+                        .unwrap_or_else(|| col_defaults[i].clone())
+                };
+                // Local storage never bridges: a present cell is `Value`, an
+                // out-of-data slot is `Absent` (its column default still rode in
+                // above), never `BridgeFailed`.
+                out.push(Fetched::Value(style));
+            }
+        }
+    }
+
+    fn get_formatted_cell_values_in(&self, _s: u32, range: RCRange, out: &mut Vec<Fetched<String>>) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                let value = if r < 1 || c < 1 {
+                    Fetched::Absent
+                } else {
+                    self.cell_value((r - 1) as usize, (c - 1) as usize)
+                        .map_or(Fetched::Absent, |v| Fetched::Value(v.to_owned()))
+                };
+                out.push(value);
+            }
+        }
+    }
+
+    fn get_cell_types_in(&self, _s: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
+        // DataGrid is text-only, so every in-range cell is the same kind.
+        out.clear();
+        let cells = (range.r2 - range.r1 + 1).max(0) * (range.c2 - range.c1 + 1).max(0);
+        out.resize(cells as usize, Fetched::Value(CellKind::Text));
+    }
 }

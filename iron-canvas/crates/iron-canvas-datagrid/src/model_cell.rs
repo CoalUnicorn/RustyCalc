@@ -1,7 +1,9 @@
 use std::cell::RefCell;
 
 use crate::DataGrid;
-use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched};
+use iron_canvas_core::{
+    CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched, RCRange,
+};
 
 /// Interior-mutable `DataGrid` wrapper: the owner can mutate the grid
 /// in place while the orchestrator holds an `Rc` to the same object.
@@ -90,5 +92,71 @@ impl CellContentQuery for DataGridModel {
     }
     fn get_formatted_cell_value(&self, s: u32, row: i32, col: i32) -> Fetched<String> {
         self.0.borrow().get_formatted_cell_value(s, row, col)
+    }
+
+    // Forward the bulk readers so the per-frame pane fetch reaches `DataGrid`'s
+    // direct-storage `*_in` overrides. Without these, the defaulted trait loops
+    // would call the single-cell forwarders above — one `RefCell::borrow()` per
+    // cell — instead of one borrow per range. Decorations are intentionally not
+    // forwarded: `DataGrid` has no `get_cell_decorations_in` override, so the
+    // default loop is already its best path.
+    fn get_cell_styles_in(&self, s: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
+        self.0.borrow().get_cell_styles_in(s, range, out);
+    }
+    fn get_formatted_cell_values_in(&self, s: u32, range: RCRange, out: &mut Vec<Fetched<String>>) {
+        self.0.borrow().get_formatted_cell_values_in(s, range, out);
+    }
+    fn get_cell_types_in(&self, s: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
+        self.0.borrow().get_cell_types_in(s, range, out);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Column, DataGrid};
+    use iron_canvas_core::HAlign;
+
+    // A right-aligned column so the style readers exercise `column_default_style`
+    // rather than returning bare defaults — otherwise the comparison is trivial.
+    fn sample() -> DataGrid {
+        DataGrid::builder()
+            .column(Column::new("A").align(HAlign::Right))
+            .column(Column::new("B"))
+            .row(vec!["1".to_string(), "two".to_string()])
+            .row(vec!["3".to_string(), "four".to_string()])
+            .build()
+    }
+
+    // Review 2026-06-13 finding #2: the wrapper's forwarded bulk readers must
+    // produce exactly what direct `DataGrid` does — proving the per-frame pane
+    // fetch reaches the optimized `*_in` overrides, not the per-cell default
+    // loop, now that `DataGridModel` is what the orchestrator actually runs.
+    #[test]
+    fn wrapper_bulk_readers_match_direct_grid() {
+        let grid = sample();
+        let model = DataGridModel::empty();
+        model.replace(sample());
+        let range = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        };
+
+        let (mut dv, mut wv) = (Vec::new(), Vec::new());
+        grid.get_formatted_cell_values_in(0, range, &mut dv);
+        model.get_formatted_cell_values_in(0, range, &mut wv);
+        assert_eq!(dv, wv, "values diverge between direct grid and wrapper");
+
+        let (mut ds, mut ws) = (Vec::new(), Vec::new());
+        grid.get_cell_styles_in(0, range, &mut ds);
+        model.get_cell_styles_in(0, range, &mut ws);
+        assert_eq!(ds, ws, "styles diverge between direct grid and wrapper");
+
+        let (mut dt, mut wt) = (Vec::new(), Vec::new());
+        grid.get_cell_types_in(0, range, &mut dt);
+        model.get_cell_types_in(0, range, &mut wt);
+        assert_eq!(dt, wt, "types diverge between direct grid and wrapper");
     }
 }

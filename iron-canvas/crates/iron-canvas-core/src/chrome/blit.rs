@@ -196,27 +196,23 @@ impl BlitPlan {
     }
 }
 
-/// Dispatch input for `Chrome::next` — which construction regime the
-/// orchestrator selected for this frame. Exhaustive: adding a variant
-/// breaks every regime arm at compile time.
+/// Dispatch input for `Chrome::next` — which reuse-or-rebuild regime the
+/// orchestrator selected for this frame. Exhaustive: adding a variant breaks
+/// every regime arm at compile time. The blit fast-path is *not* here — it has
+/// a two-outcome result and lives in [`Chrome::next_blit`] returning
+/// [`super::BlitOutcome`], so it never widens into this shared dispatch.
 #[derive(Clone, Copy)]
 #[must_use = "FramePath dispatches Chrome::next; dropping it skips the chosen construction regime"]
-pub enum FramePath<'a> {
+pub enum FramePath {
     /// Full rebuild walk. `prev = Some` recycles slot Vec allocations;
     /// `prev = None` is the first-frame path.
     Fresh,
     /// Reuse prev's slot vecs verbatim; refresh per-frame state only
     /// (theme + pane_fingerprints rotation). `stale_panes` is caller-
-    /// supplied so a `SlotsReuse` following a `Blit` doesn't inherit the
+    /// supplied so a `SlotsReuse` following a blit doesn't inherit the
     /// blit's narrow strip mask and silently skip a content repaint.
     /// Requires `prev = Some`.
     SlotsReuse { stale_panes: PaneRegionMask },
-    /// Blit fast-path. Scroll-axis slot vec rebuilt around the plan;
-    /// cross-axis cloned from prev. Falls back to `Fresh` on the
-    /// row_header_thickness digit-boundary case. Requires `prev = Some`.
-    /// Borrows the plan from the orchestrator's `paint_viewport` stack
-    /// frame so no per-frame clone is needed.
-    Blit(&'a BlitPlan),
 }
 
 // Scroll-blit helpers

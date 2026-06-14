@@ -51,17 +51,29 @@ pub struct CellValueHash(u64);
 pub struct ActiveCellSnapshot {
     pub row: i32,
     pub col: i32,
-    pub value_hash: CellValueHash,
+    /// `None` when the fetch was `BridgeFailed` — an *unknown* value, distinct
+    /// from a known-empty (`Absent`) cell which hashes as `""`. An unknown on
+    /// either side of `matches` can't prove the cell is unchanged, so it must
+    /// reject the blit rather than blit stale pixels.
+    pub value_hash: Option<CellValueHash>,
 }
 
-fn hash_cell_value(model: &dyn CanvasModel, sheet: u32, row: i32, col: i32) -> CellValueHash {
-    let value = model
-        .get_formatted_cell_value(sheet, row, col)
-        .value()
-        .unwrap_or_default();
+// `None` for `BridgeFailed` (value unknown); `Absent` is a known-empty cell and
+// hashes as `""` so it stays comparable across frames.
+fn hash_cell_value(
+    model: &dyn CanvasModel,
+    sheet: u32,
+    row: i32,
+    col: i32,
+) -> Option<CellValueHash> {
+    let fetched = model.get_formatted_cell_value(sheet, row, col);
+    if fetched.is_bridge_failed() {
+        return None;
+    }
+    let value = fetched.value().unwrap_or_default();
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
-    CellValueHash(hasher.finish())
+    Some(CellValueHash(hasher.finish()))
 }
 
 impl ActiveCellSnapshot {
@@ -74,7 +86,13 @@ impl ActiveCellSnapshot {
     }
 
     pub fn matches(&self, model: &dyn CanvasModel, sheet: u32) -> bool {
-        hash_cell_value(model, sheet, self.row, self.col) == self.value_hash
+        // Blit only when both fetches are known AND equal. A `BridgeFailed`
+        // (`None`) at capture or compare time means "can't prove unchanged" →
+        // reject, forcing a fresh repaint instead of reusing stale pixels.
+        match (self.value_hash, hash_cell_value(model, sheet, self.row, self.col)) {
+            (Some(captured), Some(live)) => captured == live,
+            _ => false,
+        }
     }
 }
 
@@ -135,10 +153,26 @@ pub enum FrameValidity {
     Rebuild,
 }
 
+/// Outcome of [`Chrome::next_blit`]. The blit construction has exactly two
+/// results — in-place reuse succeeded, or it rejected and fell back to a full
+/// rebuild — so they are *variants*, not a tag the caller has to assert one
+/// case away from. Each carries the built `Chrome`; the caller dispatches the
+/// paint (blit copy vs full repaint) on which arm it got.
+#[must_use = "the built Chrome must become the next last_frame"]
+pub enum BlitOutcome {
+    /// In-place reuse succeeded: the kept band was blitted, only the strip
+    /// touched the model. Caller paints via `paint_grid_blit`.
+    Blitted(Chrome),
+    /// Reuse rejected (e.g. row-header digit-boundary 99 → 100) and the frame
+    /// was rebuilt `Fresh`. Caller invalidates caches and paints `paint_grid`.
+    FreshFallback(Chrome),
+}
+
 impl Chrome {
-    /// Build the next-frame `Chrome`. The `path` argument selects which
-    /// regime the orchestrator chose; the body branches once and inlines
-    /// the three former constructors.
+    /// Build the next-frame `Chrome` for the reuse-or-rebuild regimes. The
+    /// `path` argument selects which one; the body branches once and inlines
+    /// the two constructors. The blit fast-path is separate
+    /// ([`Self::next_blit`]) — it has a two-outcome result, not a regime tag.
     ///
     ///   * `Fresh` — full rebuild. `prev = Some` recycles slot Vec
     ///     allocations; `None` is the first-frame path. See
@@ -147,26 +181,16 @@ impl Chrome {
     ///     per-frame state (theme + `pane_fingerprints` rotation) is
     ///     refreshed. Caller refreshes overlay state separately
     ///     (`SelectionLayer::refresh` in the orchestrator).
-    ///   * `Blit(plan)` — caller has already issued `Painter::blit` to
-    ///     shift the kept band; this frame rebuilds only the scroll-axis
-    ///     slot vec (kept band heights/widths carry over from prev; the
-    ///     strip is the only band that hits the model) and clones the
-    ///     cross-axis vec. Falls back to `Fresh` when `row_header_thickness`
-    ///     would change across a digit boundary (e.g. row 99 → 100).
-    ///     Non-stale panes get their `pane_fingerprints` seeded from prev
-    ///     so the *next* frame's fingerprint compare doesn't false-
-    ///     mismatch against a build-default 0.
     ///
-    /// `SlotsReuse` and `Blit` require `prev = Some`; `None` falls
-    /// through to `Fresh` defensively. The orchestrator proves
-    /// `prev.is_some()` before selecting those paths, but the fallback
-    /// keeps `Chrome::next` total.
+    /// `SlotsReuse` requires `prev = Some`; `None` falls through to `Fresh`
+    /// defensively. The orchestrator proves `prev.is_some()` before selecting
+    /// that path, but the fallback keeps `Chrome::next` total.
     pub fn next(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
         canvas: CanvasSize,
         theme: &Rc<CanvasTheme>,
-        path: FramePath<'_>,
+        path: FramePath,
     ) -> Self {
         match path {
             FramePath::Fresh => {
@@ -189,22 +213,33 @@ impl Chrome {
                 prev.stale_panes = stale_panes;
                 prev
             }
-            FramePath::Blit(plan) => {
-                let Some(prev) = prev else {
-                    return Self::next(None, model, canvas, theme, FramePath::Fresh);
-                };
-                // Qualification passed (`screen_for_blit` returned a plan) but
-                // in-place reuse may still reject — e.g. row-header digit
-                // boundary at 99 → 100, where `row_header_thickness` widens by
-                // one digit and the cross-axis cell-area origin shifts. On
-                // reject `try_blit_reuse` hands `prev` back (`Err`) so the
-                // frame returns as `Fresh` (not the `Blitted` mislabel of
-                // yore); `paint_viewport_regime` dispatches on `frame.kind`
-                // and calls the full `paint_grid` path with cache invalidation.
-                match blit::try_blit_reuse(prev, model, canvas, theme, plan) {
-                    Ok(frame) => frame,
-                    Err(prev) => Self::next(Some(prev), model, canvas, theme, FramePath::Fresh),
-                }
+        }
+    }
+
+    /// Build the next-frame `Chrome` for the blit fast-path, returning a typed
+    /// [`BlitOutcome`] rather than a `Chrome` with an open `FrameKindTag`.
+    ///
+    /// Qualification passed (`screen_for_blit` returned a plan), but in-place
+    /// reuse may still reject — e.g. the row-header digit boundary at 99 → 100,
+    /// where `row_header_thickness` widens and the cross-axis cell-area origin
+    /// shifts. `try_blit_reuse` hands `prev` back (`Err`) on reject, and we
+    /// rebuild `Fresh`. The two results map straight to the two `BlitOutcome`
+    /// arms at the decision point, so no caller has to assert an impossible
+    /// `SlotsReused` away.
+    pub fn next_blit(
+        prev: Option<Chrome>,
+        model: &dyn CanvasModel,
+        canvas: CanvasSize,
+        theme: &Rc<CanvasTheme>,
+        plan: &BlitPlan,
+    ) -> BlitOutcome {
+        let Some(prev) = prev else {
+            return BlitOutcome::FreshFallback(Self::next(None, model, canvas, theme, FramePath::Fresh));
+        };
+        match blit::try_blit_reuse(prev, model, canvas, theme, plan) {
+            Ok(frame) => BlitOutcome::Blitted(frame),
+            Err(prev) => {
+                BlitOutcome::FreshFallback(Self::next(Some(prev), model, canvas, theme, FramePath::Fresh))
             }
         }
     }
@@ -329,8 +364,17 @@ impl Chrome {
     /// model. Per-pane content skipping happens later (inside
     /// `render_pane`) via the fingerprint compare; this method only
     /// decides whether the slot vecs themselves can be reused.
-    pub fn is_still_valid(&self, model: &dyn CanvasModel, size: CanvasSize) -> FrameValidity {
-        if size != self.canvas_size {
+    pub fn is_still_valid(
+        &self,
+        model: &dyn CanvasModel,
+        size: CanvasSize,
+        theme: &Rc<CanvasTheme>,
+    ) -> FrameValidity {
+        // Theme is frame-wide: a palette change makes every cached pixel stale,
+        // so reuse is invalid. Checked here (symmetric with `screen_for_blit`)
+        // rather than out-of-band in `set_theme`, so theme-safety is a property
+        // of the validity verdict, not of setter discipline.
+        if size != self.canvas_size || theme != &self.theme {
             return FrameValidity::Rebuild;
         }
         let Some(view) = model.get_selected_view() else {

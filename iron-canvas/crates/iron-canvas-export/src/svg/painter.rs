@@ -11,7 +11,7 @@ use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    approx_text_width,
+    approx_text_width, parse_font_size_px,
 };
 
 use crate::common::escape::xml_escape;
@@ -83,29 +83,19 @@ impl SvgPainter {
     }
 }
 
-// CSS font shorthand → (size_px, family). Skips weight/style tokens before
-// the size; everything after the size joins as the family. Falls back to
-// 12px sans-serif so a missing/garbled string never panics.
+// CSS font shorthand → (size_px, family). Size comes from the shared
+// `parse_font_size_px`; the family is everything after that token (only SVG
+// needs it — PDF/recorder share just the size). Falls back to sans-serif so a
+// missing/garbled string never panics.
 fn parse_font(font_css: &str) -> (f64, String) {
-    let mut size = 12.0;
-    let mut family_parts: Vec<&str> = Vec::new();
-    let mut found_size = false;
-    for tok in font_css.split_whitespace() {
-        if !found_size {
-            if let Some(n) = tok.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()) {
-                size = n;
-                found_size = true;
-            }
-        } else {
-            family_parts.push(tok);
-        }
-    }
-    let family = if family_parts.is_empty() {
-        "sans-serif".to_string()
-    } else {
-        family_parts.join(" ")
-    };
-    (size, family)
+    let toks: Vec<&str> = font_css.split_whitespace().collect();
+    let family = toks
+        .iter()
+        .position(|t| t.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()).is_some())
+        .map(|i| toks[i + 1..].join(" "))
+        .filter(|f| !f.is_empty())
+        .unwrap_or_else(|| "sans-serif".to_string());
+    (parse_font_size_px(font_css), family)
 }
 
 impl TextMetrics for SvgPainter {

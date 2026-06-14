@@ -12,6 +12,7 @@ use std::cell::{Cell, RefCell};
 use super::super::cell::CellPaint;
 use super::super::cell::text::TextLine;
 use crate::style::{CellDecoration, CellKind, CellStyle};
+use crate::types::fetched::Fetched;
 
 pub struct FrameCache {
     /// Scratch buffer parking each pane's resolved `CellPaint`s during the
@@ -39,8 +40,8 @@ pub struct FrameCache {
     /// `splice_strip_into` each blit frame. Parked here (not on `PaneBuffers`,
     /// whose contents must survive frames) so the strip path reuses one warm
     /// allocation per buffer instead of `Vec::new()`-ing four per scroll.
-    pub strip_styles: Cell<Vec<Option<CellStyle>>>,
-    pub strip_values: Cell<Vec<Option<String>>>,
-    pub strip_cell_types: Cell<Vec<Option<CellKind>>>,
+    pub strip_styles: Cell<Vec<Fetched<CellStyle>>>,
+    pub strip_values: Cell<Vec<Fetched<String>>>,
+    pub strip_cell_types: Cell<Vec<Fetched<CellKind>>>,
     pub strip_decorations: Cell<Vec<Option<CellDecoration>>>,
 }

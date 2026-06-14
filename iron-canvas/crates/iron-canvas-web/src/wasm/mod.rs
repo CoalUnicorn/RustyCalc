@@ -263,29 +263,29 @@ impl JsBackedModel {
     /// Per-cell style fill — the trait default's body, reachable as a real
     /// method so a flag-miss or batched-failure can degrade to today's exact
     /// behaviour. (`super` can't reach a trait default.)
-    fn styles_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
+    fn styles_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_cell_style(sheet, r, c).value());
+                out.push(self.get_cell_style(sheet, r, c));
             }
         }
     }
 
-    fn values_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<String>>) {
+    fn values_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<String>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_formatted_cell_value(sheet, r, c).value());
+                out.push(self.get_formatted_cell_value(sheet, r, c));
             }
         }
     }
 
-    fn types_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
+    fn types_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_cell_type(sheet, r, c).value());
+                out.push(self.get_cell_type(sheet, r, c));
             }
         }
     }
@@ -394,7 +394,7 @@ impl CellContentQuery for JsBackedModel {
         }
     }
 
-    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellStyle>>) {
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
         // D-1: structural absence routes to the per-cell path, untouched.
         if !self.has_styles_in {
             return self.styles_in_per_cell(sheet, range, out);
@@ -418,18 +418,19 @@ impl CellContentQuery for JsBackedModel {
         };
 
         // D-2: only a wrong-length array is untrustworthy now; a null element
-        // is a blank cell, kept as `None` for the renderer to paint over bg.
+        // is a blank cell. A *clean dense batch* never carries `BridgeFailed`:
+        // the whole-batch throw is the only failure here and routed to per-cell
+        // above — so a null element is `Absent`, not a transient failure.
         if !batch_is_dense(&decoded, range) {
             return self.styles_in_per_cell(sheet, range, out);
         }
         out.clear();
         // One theme borrow for the whole batch — not one cache hit per cell.
         self.with_theme(|t| {
-            out.extend(
-                decoded
-                    .into_iter()
-                    .map(|s| s.map(|s| ic_style_to_core(s, t))),
-            );
+            out.extend(decoded.into_iter().map(|s| match s {
+                Some(s) => Fetched::Value(ic_style_to_core(s, t)),
+                None => Fetched::Absent,
+            }));
         });
     }
 
@@ -437,7 +438,7 @@ impl CellContentQuery for JsBackedModel {
         &self,
         sheet: u32,
         range: RCRange,
-        out: &mut Vec<Option<String>>,
+        out: &mut Vec<Fetched<String>>,
     ) {
         if !self.has_values_in {
             return self.values_in_per_cell(sheet, range, out);
@@ -461,10 +462,13 @@ impl CellContentQuery for JsBackedModel {
             return self.values_in_per_cell(sheet, range, out);
         }
         out.clear();
-        out.extend(decoded);
+        out.extend(decoded.into_iter().map(|v| match v {
+            Some(v) => Fetched::Value(v),
+            None => Fetched::Absent,
+        }));
     }
 
-    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellKind>>) {
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
         if !self.has_types_in {
             return self.types_in_per_cell(sheet, range, out);
         }
@@ -486,14 +490,16 @@ impl CellContentQuery for JsBackedModel {
         if !batch_is_dense(&decoded, range) {
             return self.types_in_per_cell(sheet, range, out);
         }
-        // A valid discriminant maps to a `CellKind`; an out-of-range one yields
-        // `None` here — the same legitimate per-cell outcome, not a corruption.
+        // A valid discriminant maps to a `CellKind`; a null or out-of-range one
+        // yields `Absent` — the same legitimate per-cell outcome (matching
+        // single-cell `get_cell_type`), not a corruption.
         out.clear();
-        out.extend(
-            decoded
-                .into_iter()
-                .map(|d| d.and_then(cell_kind_from_discriminant)),
-        );
+        out.extend(decoded.into_iter().map(|d| {
+            match d.and_then(cell_kind_from_discriminant) {
+                Some(k) => Fetched::Value(k),
+                None => Fetched::Absent,
+            }
+        }));
     }
 }
 
