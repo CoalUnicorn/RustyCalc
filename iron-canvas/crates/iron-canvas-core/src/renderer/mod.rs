@@ -47,6 +47,7 @@
 //! marks the freeze boundary. See the diagram in `ARCHITECTURE.md` for
 //! the layout.
 
+pub mod blit_work;
 pub mod cache;
 pub mod cell;
 pub mod cf_types;
@@ -62,8 +63,9 @@ use std::rc::Rc;
 use crate::CanvasModel;
 pub use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome};
+use crate::renderer::blit_work::widen_blit_strip_to_pixel_clip;
 use crate::geometry::prim::Axis;
-use crate::renderer::cache::{FrameCache, PaneCache};
+use crate::renderer::cache::{FrameCache, PaneCache, PaneShiftPrep};
 pub use cache::ColorIntern;
 pub use cache::FontIntern;
 
@@ -187,36 +189,59 @@ impl<P: Painter> RendererCore<P> {
     }
 
     /// Scroll-blit variant: caller's `Painter::blit` already shifted the
-    /// kept band, so we rotate the cached pane buffers to match
-    /// (`try_shift` per pane in `plan.shift_panes()`), wrap BottomRight in
-    /// a clip to `plan.repaint_strip` so the strip alone is repainted, and
-    /// only refresh the header strip on the scroll axis (the cross-axis
-    /// header is unchanged).
+    /// kept band. We prepare each shifted pane's cache (`prepare_shift`
+    /// rotates the buffers in place), then dispatch ONCE on the typed
+    /// [`PaneShiftPrep`]: a `Shifted` pane strip-paints (BottomRight wrapped
+    /// in a clip to `plan.repaint_strip`); every other outcome falls through
+    /// to a full `render_pane` repaint. Only the scroll-axis header strip is
+    /// refreshed (the cross-axis header is unchanged).
+    ///
+    /// On a blit frame `frame.stale_panes == plan.shift_panes()`
+    /// (`next_blit` seeds `stale_panes` from `shift_panes`), so one loop over
+    /// the stale panes covers exactly the shifted set.
     pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
-        // Rotate cached pane buffers to follow the blit's pixel shift so
-        // `render_pane_blit`'s strip-fetch only refills the revealed band.
-        // Defensive: if a pane's prior range no longer aligns (canvas
-        // resize, axis change), drop it so the fallback fetches in bulk.
-        for pane in plan.shift_panes().regions() {
-            let pane_buf = self.pane_cache.pane(pane);
-            let Some(new_range) = pane.range(frame) else {
-                pane_buf.range.set(None);
-                continue;
-            };
-            let _ = pane_buf.try_shift(new_range, plan.axis);
-        }
-
         self.painter.begin_group(GroupClass::Grid);
         self.cache_show_grid(model);
 
         self.painter.begin_group(GroupClass::Cells);
         for pane in frame.stale_panes.regions() {
-            if matches!(pane, PaneRegion::BottomRight) {
-                self.painter.push_clip(plan.repaint_strip);
-                self.render_pane_blit(model, pane, frame, plan.repaint_strip);
-                self.painter.pop_clip();
-            } else {
-                self.render_pane_blit(model, pane, frame, plan.repaint_strip);
+            let Some(new_range) = pane.range(frame) else {
+                // Never-cached / empty live range: nothing to shift, full fetch.
+                self.pane_cache.pane(pane).range.set(None);
+                self.render_pane(model, pane, frame);
+                continue;
+            };
+            // `prepare_shift` rotates the cache buffers and reports why; the
+            // dispatch decision is made here, once, from the typed result.
+            match self.pane_cache.pane(pane).prepare_shift(new_range, plan.axis) {
+                PaneShiftPrep::Shifted {
+                    prev_range,
+                    new_range,
+                } => {
+                    // Build the pane's blit work in two halves: the cache emits
+                    // address-space work (no `Chrome` dependency), then a
+                    // renderer-local helper widens it against this frame's slot
+                    // geometry and attaches the pixel clip.
+                    let Some(address_work) =
+                        self.pane_cache.plan_blit_pane(prev_range, new_range, plan.axis)
+                    else {
+                        self.render_pane(model, pane, frame);
+                        continue;
+                    };
+                    let work = widen_blit_strip_to_pixel_clip(frame, plan, pane, address_work);
+                    match work.pixel_clip {
+                        Some(clip) => {
+                            self.painter.push_clip(clip);
+                            self.render_pane_blit(model, frame, &work);
+                            self.painter.pop_clip();
+                        }
+                        None => self.render_pane_blit(model, frame, &work),
+                    }
+                }
+                PaneShiftPrep::MissingCache
+                | PaneShiftPrep::IncompatibleRange { .. } => {
+                    self.render_pane(model, pane, frame);
+                }
             }
         }
         self.painter.end_group();

@@ -29,10 +29,9 @@ use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
 use crate::CellContentQuery;
 use crate::chrome::{Chrome, PaneRegion};
-use crate::geometry::pixel_rect::PixelRect;
-use crate::geometry::prim::Axis;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
+use crate::renderer::blit_work::BlitPaneWork;
 use crate::renderer::cf_types::CfDecorationPaint;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
@@ -231,103 +230,46 @@ impl<P: Painter> RendererCore<P> {
         self.paint_borders(p, theme);
     }
 
-    /// Blit-frame entry: try the strip-fetch fast path; fall back to the
-    /// full bulk walk if the pane cache can't support it (no prior range,
-    /// or the range delta isn't a clean single-axis shift). Cache rotation
-    /// has already happened in `render_grid_blit`.
+    /// Blit-frame entry: paint only the revealed strip. The cache rotation
+    /// (`try_shift`) and the strip/axis/clip computation already happened in
+    /// `render_grid_blit` — this consumes the precomputed [`BlitPaneWork`] and
+    /// fetches + paints the strip cells; kept-band cells keep their blitted
+    /// pixels and are skipped via their `None` slots.
     pub fn render_pane_blit(
         &self,
         model: &dyn CellContentQuery,
-        pane: PaneRegion,
         frame: &Chrome,
-        repaint_strip: PixelRect,
+        work: &BlitPaneWork,
     ) {
+        let pane = work.pane;
         let pane_idx = pane as usize;
         let pane_buf = self.pane_cache.pane(pane);
         let Some(range) = pane.range(frame) else {
             pane_buf.range.set(None);
             return;
         };
-        if let Some(prev_range) = pane_buf.range.get()
-            && let Some(axis) = infer_shift_axis(prev_range, range)
-        {
-            self.render_pane_strip(
-                model,
-                pane,
-                range,
-                axis,
-                prev_range,
-                pane_idx,
-                frame,
-                repaint_strip,
-            );
-            return;
-        }
-        self.render_pane(model, pane, frame);
+        self.render_pane_strip(model, pane, range, pane_idx, frame, work.strip_range);
     }
 
     /// Stage 3.3 strip path: kept-band pixels were preserved by the
-    /// painter blit; the freshly-revealed strip subrange is fetched from
-    /// the model and painted, kept-band cells are skipped via their
-    /// `None` slots. Sets `pane_fingerprints[idx]` to 0 — the partial
-    /// buffer can't produce a content fingerprint for next frame's Stage
-    /// 1 compare, so next frame falls through to a full bulk-fetch path.
-    #[allow(clippy::too_many_arguments)]
+    /// painter blit; the freshly-revealed strip subrange (`strip`, precomputed
+    /// in `render_grid_blit`) is fetched from the model and painted, kept-band
+    /// cells are skipped via their `None` slots. Sets `pane_fingerprints[idx]`
+    /// to 0 — the partial buffer can't produce a content fingerprint for next
+    /// frame's Stage 1 compare, so next frame falls through to a full
+    /// bulk-fetch path.
     fn render_pane_strip(
         &self,
         model: &dyn CellContentQuery,
         pane: PaneRegion,
         range: RCRange,
-        axis: Axis,
-        prev_range: RCRange,
         pane_idx: usize,
         frame: &Chrome,
-        repaint_strip: PixelRect,
+        strip: RCRange,
     ) {
         let theme = &frame.theme;
         let pane_buf = self.pane_cache.pane(pane);
 
-        let Some(mut strip) = compute_strip(prev_range, range, axis) else {
-            pane_buf.range.set(Some(range));
-            return;
-        };
-
-        // Pixel-rect alignment. `compute_strip` is an address-space proxy
-        // for `repaint_strip`; the two agree only when slot edges land on
-        // the canvas edge. On a non-aligned axis the partial slot at the
-        // canvas boundary transitions to fully-visible inside the dirty
-        // pixel rect — extend the RCRange to cover every slot whose pixel
-        // extent overlaps the rect.
-        match axis {
-            Axis::Column => {
-                let xmin = repaint_strip.top_left.x;
-                let xmax = xmin + repaint_strip.width;
-                let mut new_c1 = strip.c1;
-                let mut new_c2 = strip.c2;
-                for c in pane.cols(frame) {
-                    if c.left + c.width > xmin && c.left < xmax {
-                        new_c1 = new_c1.min(c.col);
-                        new_c2 = new_c2.max(c.col);
-                    }
-                }
-                strip.c1 = new_c1;
-                strip.c2 = new_c2;
-            }
-            Axis::Row => {
-                let ymin = repaint_strip.top_left.y;
-                let ymax = ymin + repaint_strip.height;
-                let mut new_r1 = strip.r1;
-                let mut new_r2 = strip.r2;
-                for r in pane.rows(frame) {
-                    if r.top + r.height > ymin && r.top < ymax {
-                        new_r1 = new_r1.min(r.row);
-                        new_r2 = new_r2.max(r.row);
-                    }
-                }
-                strip.r1 = new_r1;
-                strip.r2 = new_r2;
-            }
-        }
         // Strip-fetch scratch reused from `FrameCache` (take/set rhythm),
         // not `Vec::new()` per frame — `splice_strip_into` drains these into
         // the pane buffers, leaving warm capacity to park back below. The
@@ -379,84 +321,6 @@ impl<P: Painter> RendererCore<P> {
         let mut fps = frame.pane_fingerprints.get();
         fps[pane_idx] = 0;
         frame.pane_fingerprints.set(fps);
-    }
-}
-
-/// Identify a single-axis scroll between two pane RCRanges. Returns the
-/// scroll axis when one axis's endpoints differ and the other axis is
-/// identical, with both extents preserved. Used by `render_pane_blit`'s
-/// Stage 3.3 detect to switch into the strip-fetch branch.
-fn infer_shift_axis(prev: RCRange, new: RCRange) -> Option<Axis> {
-    let rows_same = prev.r1 == new.r1 && prev.r2 == new.r2;
-    let cols_same = prev.c1 == new.c1 && prev.c2 == new.c2;
-    let row_extent_same = (new.r2 - new.r1) == (prev.r2 - prev.r1);
-    let col_extent_same = (new.c2 - new.c1) == (prev.c2 - prev.c1);
-    if !row_extent_same || !col_extent_same {
-        return None;
-    }
-    match (rows_same, cols_same) {
-        (true, false) => Some(Axis::Column),
-        (false, true) => Some(Axis::Row),
-        (true, true) | (false, false) => None,
-    }
-}
-
-/// Slice of `new` lying outside `prev` along the scroll axis. Returns
-/// `None` if the ranges are identical along `axis` (delta == 0). Under
-/// `screen_for_blit` qualification, `|delta| < extent` is guaranteed so the
-/// no-overlap path is defensive only.
-fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
-    match axis {
-        Axis::Row => {
-            if new.r2 < prev.r1 || new.r1 > prev.r2 {
-                return Some(new);
-            }
-            if new.r1 < prev.r1 {
-                Some(RCRange {
-                    r1: new.r1,
-                    r2: prev.r1 - 1,
-                    c1: new.c1,
-                    c2: new.c2,
-                })
-            } else if new.r2 > prev.r2 {
-                // Includes `prev.r2` (not `prev.r2 + 1`) because that row
-                // was the overflow row in prev — its pixels were off-canvas
-                // and weren't shifted by the blit, so its on-canvas position
-                // in new needs a fresh paint.
-                Some(RCRange {
-                    r1: prev.r2,
-                    r2: new.r2,
-                    c1: new.c1,
-                    c2: new.c2,
-                })
-            } else {
-                None
-            }
-        }
-        Axis::Column => {
-            if new.c2 < prev.c1 || new.c1 > prev.c2 {
-                return Some(new);
-            }
-            if new.c1 < prev.c1 {
-                Some(RCRange {
-                    r1: new.r1,
-                    r2: new.r2,
-                    c1: new.c1,
-                    c2: prev.c1 - 1,
-                })
-            } else if new.c2 > prev.c2 {
-                // Mirror of the Row down-scroll case: prev.c2 was the
-                // overflow column whose pixels were off-canvas.
-                Some(RCRange {
-                    r1: new.r1,
-                    r2: new.r2,
-                    c1: prev.c2,
-                    c2: new.c2,
-                })
-            } else {
-                None
-            }
-        }
     }
 }
 

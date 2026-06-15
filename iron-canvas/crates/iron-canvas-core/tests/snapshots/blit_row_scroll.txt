@@ -1,0 +1,1602 @@
+[
+    Blit {
+        src: PixelRect {
+            top_left: Point {
+                x: 31,
+                y: 49,
+            },
+            width: 569,
+            height: 351,
+        },
+        dst: PixelRect {
+            top_left: Point {
+                x: 31,
+                y: 29,
+            },
+            width: 569,
+            height: 351,
+        },
+    },
+    BeginGroup {
+        class: Grid,
+    },
+    BeginGroup {
+        class: Cells,
+    },
+    PushClip {
+        rect: PixelRect {
+            top_left: Point {
+                x: 31,
+                y: 380,
+            },
+            width: 569,
+            height: 20,
+        },
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 31,
+                y: 369,
+            },
+            width: 720,
+            height: 60,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 31,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 111,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 191,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 271,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 351,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 431,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 511,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 591,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 671,
+                y: 369,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 31,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 111,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 191,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 271,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 351,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 431,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 511,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 591,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 671,
+                y: 389,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 31,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 111,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 191,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 271,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 351,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 431,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 511,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 591,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 671,
+                y: 409,
+            },
+            width: 80,
+            height: 20,
+        },
+        color: "#FFFFFF",
+    },
+    StrokeLine {
+        line: V {
+            x: 31,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 31,
+                to: 111,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 111,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 111,
+                to: 191,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 191,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 191,
+                to: 271,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 271,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 271,
+                to: 351,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 351,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 351,
+                to: 431,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 431,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 431,
+                to: 511,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 511,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 511,
+                to: 591,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 591,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 591,
+                to: 671,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 671,
+            span: Span {
+                from: 369,
+                to: 389,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 671,
+                to: 751,
+            },
+            y: 369,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 31,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 31,
+                to: 111,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 111,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 111,
+                to: 191,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 191,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 191,
+                to: 271,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 271,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 271,
+                to: 351,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 351,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 351,
+                to: 431,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 431,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 431,
+                to: 511,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 511,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 511,
+                to: 591,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 591,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 591,
+                to: 671,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 671,
+            span: Span {
+                from: 389,
+                to: 409,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 671,
+                to: 751,
+            },
+            y: 389,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 31,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 31,
+                to: 111,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 111,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 111,
+                to: 191,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 191,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 191,
+                to: 271,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 271,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 271,
+                to: 351,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 351,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 351,
+                to: 431,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 431,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 431,
+                to: 511,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 511,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 511,
+                to: 591,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 591,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 591,
+                to: 671,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: V {
+            x: 671,
+            span: Span {
+                from: 409,
+                to: 429,
+            },
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeLine {
+        line: H {
+            span: Span {
+                from: 671,
+                to: 751,
+            },
+            y: 409,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    PopClip,
+    EndGroup,
+    BeginGroup {
+        class: FrozenSep,
+    },
+    EndGroup,
+    BeginGroup {
+        class: Headers,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 29,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 30,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "2",
+        x: 15.0,
+        y: 39.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 49,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 50,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "3",
+        x: 15.0,
+        y: 59.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 69,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 70,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "4",
+        x: 15.0,
+        y: 79.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 89,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 90,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "5",
+        x: 15.0,
+        y: 99.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 109,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 110,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "6",
+        x: 15.0,
+        y: 119.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 129,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 130,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "7",
+        x: 15.0,
+        y: 139.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 149,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 150,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "8",
+        x: 15.0,
+        y: 159.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 169,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 170,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "9",
+        x: 15.0,
+        y: 179.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 189,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 190,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "10",
+        x: 15.0,
+        y: 199.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 209,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 210,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "11",
+        x: 15.0,
+        y: 219.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 229,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 230,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "12",
+        x: 15.0,
+        y: 239.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 249,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 250,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "13",
+        x: 15.0,
+        y: 259.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 269,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 270,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "14",
+        x: 15.0,
+        y: 279.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 289,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 290,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "15",
+        x: 15.0,
+        y: 299.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 309,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 310,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "16",
+        x: 15.0,
+        y: 319.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 329,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 330,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "17",
+        x: 15.0,
+        y: 339.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 349,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 350,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "18",
+        x: 15.0,
+        y: 359.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 369,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 370,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "19",
+        x: 15.0,
+        y: 379.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 389,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 390,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "20",
+        x: 15.0,
+        y: 399.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 409,
+            },
+            width: 30,
+            height: 20,
+        },
+        color: "#E0E0E0",
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 410,
+            },
+            width: 30,
+            height: 18,
+        },
+        color: "#FFF",
+    },
+    FillText {
+        text: "21",
+        x: 15.0,
+        y: 419.0,
+        font_css: "bold 12px Inter, Arial, sans-serif",
+        color: "#333",
+        align: Center,
+        baseline: Middle,
+    },
+    EndGroup,
+    BeginGroup {
+        class: Corner,
+    },
+    RectFill {
+        rect: PixelRect {
+            top_left: Point {
+                x: 0,
+                y: 0,
+            },
+            width: 30,
+            height: 28,
+        },
+        color: "#FFF",
+    },
+    StrokeHLine {
+        span: Span {
+            from: 0,
+            to: 600,
+        },
+        y: 28.5,
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    StrokeVLine {
+        x: 30.5,
+        span: Span {
+            from: 0,
+            to: 400,
+        },
+        color: "#E0E0E0",
+        width: 1.0,
+    },
+    EndGroup,
+    EndGroup,
+]

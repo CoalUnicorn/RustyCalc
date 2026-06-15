@@ -21,6 +21,9 @@ pub mod types;
 
 pub use orchestrator::{Orchestrator, PaintRegime, PaintRegimeTag};
 
+pub use renderer::blit_work::{widen_blit_strip_to_pixel_clip, BlitPaneWork};
+pub use renderer::cache::{PaneBlitAddressWork, PaneShiftPrep};
+
 pub use render_overlays::RenderOverlays;
 
 pub use decoration::{DecorationId, Layer};

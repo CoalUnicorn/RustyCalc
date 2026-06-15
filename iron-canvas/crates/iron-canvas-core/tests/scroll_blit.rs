@@ -9,10 +9,13 @@
 mod common;
 
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
+use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath, PaneRegion};
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
+use iron_canvas_core::{
+    BlitPaneWork, PaneBlitAddressWork, PaneShiftPrep, widen_blit_strip_to_pixel_clip,
+};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default as canvas};
@@ -446,4 +449,324 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
         smeared_text_ops.len(),
         smeared_text_ops,
     );
+}
+
+// ============================================================================
+// Stage 1 — BlitPaneWork construction
+//
+// Drive a Fresh frame to prime the pane cache, scroll one axis, qualify the
+// blit, then build the per-pane `BlitPaneWork` exactly as `render_grid_blit`
+// does (cache emits address-space work, the renderer-local helper widens it +
+// attaches the pixel clip). Assert the address-space `strip_range` and the
+// `pixel_clip` separately.
+// ============================================================================
+
+/// Build the `BlitPaneWork` for `pane` the same way `render_grid_blit` does:
+/// the cache emits address-space work read off the *pre-shift* cached range,
+/// then the renderer-local helper widens it against `frame1`'s slot geometry.
+/// Returns both halves so tests can assert the base (pre-widen) strip — where
+/// the overflow-row carry lives — and the widened strip + clip separately.
+/// Returns `None` when the pane has no cache / an incompatible range (the
+/// production fall-back-to-`render_pane` path).
+fn build_pane_work(
+    core: &RendererCore<RecorderPainter>,
+    frame1: &Chrome,
+    plan: &iron_canvas_core::chrome::BlitPlan,
+    pane: PaneRegion,
+) -> Option<(PaneBlitAddressWork, BlitPaneWork)> {
+    let new_range = pane.range(frame1)?;
+    let PaneShiftPrep::Shifted {
+        prev_range,
+        new_range,
+    } = core.pane_cache.pane(pane).prepare_shift(new_range, plan.axis)
+    else {
+        return None;
+    };
+    let address_work = core
+        .pane_cache
+        .plan_blit_pane(prev_range, new_range, plan.axis)?;
+    let work = widen_blit_strip_to_pixel_clip(frame1, plan, pane, address_work);
+    Some((address_work, work))
+}
+
+/// Drive Fresh frame 0 (priming the pane cache), apply `scroll`, qualify the
+/// blit, and hand back the live core + frame1 + plan for work construction.
+fn primed_blit(
+    m: &TestModel,
+    scroll: impl FnOnce(&TestModel),
+) -> (
+    RendererCore<RecorderPainter>,
+    Chrome,
+    iron_canvas_core::chrome::BlitPlan,
+) {
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let canvas = canvas();
+    let frame0 = Chrome::next(None, m, canvas, &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(m, &frame0);
+
+    scroll(m);
+    let plan = frame0
+        .screen_for_blit(m, canvas, &theme, &snap(m))
+        .expect("single-axis scroll must qualify for blit");
+    let BlitOutcome::Blitted(frame1) =
+        Chrome::next_blit(Some(frame0), m, canvas, &theme, &plan)
+    else {
+        panic!("single-axis scroll must blit in place");
+    };
+    (core, frame1, plan)
+}
+
+#[test]
+fn row_scroll_bottom_right_work_has_expected_strip() {
+    let m = TestModel::synthetic_grid();
+    let (core, frame1, plan) = primed_blit(&m, |m| m.set_top_row(2));
+
+    let (base, work) = build_pane_work(&core, &frame1, &plan, PaneRegion::BottomRight)
+        .expect("BottomRight has a cached range to shift");
+
+    // Base (pre-widen) strip: spans the new pane's full column extent and,
+    // along the scroll axis, begins at the prev overflow row.
+    assert_eq!(base.strip_range.c1, base.new_range.c1);
+    assert_eq!(base.strip_range.c2, base.new_range.c2);
+    assert_eq!(
+        base.strip_range.r1, base.prev_range.r2,
+        "base down-scroll strip must start at prev.r2 (the off-canvas overflow row)",
+    );
+    assert_eq!(base.strip_range.r2, base.new_range.r2);
+
+    // Widening only grows the strip toward the canvas edge — never past the
+    // overflow row — and the main scroll pane carries the pixel clip.
+    assert!(work.strip_range.r1 <= base.strip_range.r1);
+    assert_eq!(
+        work.pixel_clip,
+        Some(plan.repaint_strip),
+        "BottomRight work must carry the repaint-strip pixel clip",
+    );
+}
+
+#[test]
+fn col_scroll_bottom_right_work_has_expected_strip() {
+    let m = TestModel::synthetic_grid();
+    let (core, frame1, plan) = primed_blit(&m, |m| m.set_left_column(2));
+
+    let (base, work) = build_pane_work(&core, &frame1, &plan, PaneRegion::BottomRight)
+        .expect("BottomRight has a cached range to shift");
+
+    // Base strip spans the row extent unchanged and along the scroll axis
+    // begins at the prev overflow column.
+    assert_eq!(base.strip_range.r1, base.new_range.r1);
+    assert_eq!(base.strip_range.r2, base.new_range.r2);
+    assert_eq!(
+        base.strip_range.c1, base.prev_range.c2,
+        "base right-scroll strip must start at prev.c2 (the off-canvas overflow column)",
+    );
+    assert_eq!(base.strip_range.c2, base.new_range.c2);
+
+    assert!(work.strip_range.c1 <= base.strip_range.c1);
+    assert_eq!(
+        work.pixel_clip,
+        Some(plan.repaint_strip),
+        "BottomRight work must carry the repaint-strip pixel clip",
+    );
+}
+
+#[test]
+fn row_scroll_with_frozen_cols_includes_bottom_left_work() {
+    let m = TestModel::synthetic_grid().with_frozen_cols(2);
+    let (core, frame1, plan) = primed_blit(&m, |m| m.set_top_row(2));
+
+    // A row scroll with frozen columns shifts BottomLeft (the frozen-col
+    // band) alongside BottomRight.
+    assert!(
+        plan.shift_panes().contains_region(PaneRegion::BottomLeft),
+        "row scroll with frozen cols must shift BottomLeft",
+    );
+
+    let (base, work) = build_pane_work(&core, &frame1, &plan, PaneRegion::BottomLeft)
+        .expect("BottomLeft has a cached range to shift");
+
+    assert_eq!(
+        base.strip_range.r1, base.prev_range.r2,
+        "frozen-band base strip must also carry the overflow row",
+    );
+    // Frozen-band sibling paints its narrowed range with no extra clip.
+    assert_eq!(
+        work.pixel_clip, None,
+        "BottomLeft frozen-band work must not carry a pixel clip",
+    );
+}
+
+#[test]
+fn col_scroll_with_frozen_rows_includes_top_right_work() {
+    let m = TestModel::synthetic_grid().with_frozen_rows(2);
+    let (core, frame1, plan) = primed_blit(&m, |m| m.set_left_column(2));
+
+    assert!(
+        plan.shift_panes().contains_region(PaneRegion::TopRight),
+        "col scroll with frozen rows must shift TopRight",
+    );
+
+    let (base, work) = build_pane_work(&core, &frame1, &plan, PaneRegion::TopRight)
+        .expect("TopRight has a cached range to shift");
+
+    assert_eq!(
+        base.strip_range.c1, base.prev_range.c2,
+        "frozen-band base strip must also carry the overflow column",
+    );
+    assert_eq!(
+        work.pixel_clip, None,
+        "TopRight frozen-band work must not carry a pixel clip",
+    );
+}
+
+#[test]
+fn down_scroll_strip_includes_overflow_row() {
+    let m = TestModel::synthetic_grid();
+    let (core, frame1, plan) = primed_blit(&m, |m| m.set_top_row(2));
+
+    let (base, _work) = build_pane_work(&core, &frame1, &plan, PaneRegion::BottomRight)
+        .expect("BottomRight has a cached range to shift");
+
+    // The defining overflow-row invariant: the revealed band starts at
+    // prev.r2 (the off-canvas overflow row the blit never shifted), NOT
+    // prev.r2 + 1.
+    assert_eq!(base.strip_range.r1, base.prev_range.r2);
+    assert_ne!(base.strip_range.r1, base.prev_range.r2 + 1);
+}
+
+// ============================================================================
+// Stage 2 — typed shift prep
+//
+// Drive `PaneBuffers::prepare_shift` directly against a hand-seeded
+// `PaneCache` so the typed result and the in-place buffer rotation can be
+// asserted in isolation from frame/pixel geometry. The rotation tests
+// capture the expected post-shift buffer contents explicitly (computed by
+// hand from `apply_blit_shift`'s contract) — bit-identical to what the old
+// `try_shift(..) == true` path produced.
+// ============================================================================
+
+use iron_canvas_core::geometry::prim::Axis;
+use iron_canvas_core::renderer::cache::PaneCache;
+
+fn rng(r1: i32, r2: i32, c1: i32, c2: i32) -> iron_canvas_core::RCRange {
+    iron_canvas_core::RCRange { r1, r2, c1, c2 }
+}
+
+fn val(s: &str) -> iron_canvas_core::Fetched<String> {
+    iron_canvas_core::Fetched::Value(s.to_string())
+}
+
+/// `prepare_shift` rotates all four pane buffers in lockstep, so every buffer
+/// must enter at the prev range's slot count (`apply_blit_shift` debug-asserts
+/// it). The rotation tests only inspect `values`; seed the other three to the
+/// same length with placeholders so the shift is well-formed.
+fn seed_sibling_buffers(pane: &iron_canvas_core::renderer::cache::PaneBuffers, len: usize) {
+    pane.styles
+        .set(vec![iron_canvas_core::Fetched::Absent; len]);
+    pane.cell_types
+        .set(vec![iron_canvas_core::Fetched::Absent; len]);
+    pane.decorations.set(vec![None; len]);
+}
+
+#[test]
+fn prepare_shift_reports_missing_cache() {
+    let cache = PaneCache::default();
+    // No `range` seeded → cache is empty.
+    let prep = cache
+        .pane(PaneRegion::BottomRight)
+        .prepare_shift(rng(2, 3, 1, 2), Axis::Row);
+    assert_eq!(prep, PaneShiftPrep::MissingCache);
+}
+
+#[test]
+fn prepare_shift_reports_incompatible_range() {
+    let cache = PaneCache::default();
+    let pane = cache.pane(PaneRegion::BottomRight);
+    let prev = rng(1, 2, 1, 2);
+    pane.range.set(Some(prev));
+
+    // Row scroll but the orthogonal (column) extent changed → incompatible.
+    let new = rng(2, 3, 1, 5);
+    let prep = pane.prepare_shift(new, Axis::Row);
+    assert_eq!(
+        prep,
+        PaneShiftPrep::IncompatibleRange {
+            prev_range: prev,
+            new_range: new,
+        },
+    );
+    // Incompatible prep clears the cache so the fallback fetches fresh.
+    assert_eq!(pane.range.get(), None);
+}
+
+#[test]
+fn prepare_shift_rotates_row_buffers() {
+    let cache = PaneCache::default();
+    let pane = cache.pane(PaneRegion::BottomRight);
+    let prev = rng(1, 2, 1, 2);
+    pane.range.set(Some(prev));
+    // 2×2 row-major: (1,1)(1,2)(2,1)(2,2).
+    pane.values.set(vec![val("a"), val("b"), val("c"), val("d")]);
+    seed_sibling_buffers(pane, 4);
+
+    // Scroll down by one row: delta = +1, shift = 1 row × 2 cols = 2.
+    // rotate_left(2) → [c,d,a,b]; fill the trailing strip (last 2) → Absent.
+    let new = rng(2, 3, 1, 2);
+    let prep = pane.prepare_shift(new, Axis::Row);
+    assert_eq!(
+        prep,
+        PaneShiftPrep::Shifted {
+            prev_range: prev,
+            new_range: new,
+        },
+    );
+
+    let expected = vec![
+        val("c"),
+        val("d"),
+        iron_canvas_core::Fetched::Absent,
+        iron_canvas_core::Fetched::Absent,
+    ];
+    let got = pane.values.take();
+    assert_eq!(got, expected, "row rotation must be bit-identical to try_shift");
+
+    // Deliberate staleness: `range` stays `prev` until the strip paint commits.
+    assert_eq!(pane.range.get(), Some(prev));
+}
+
+#[test]
+fn prepare_shift_rotates_column_buffers() {
+    let cache = PaneCache::default();
+    let pane = cache.pane(PaneRegion::BottomRight);
+    let prev = rng(1, 2, 1, 2);
+    pane.range.set(Some(prev));
+    // 2×2 row-major: rows [a,b] / [c,d].
+    pane.values.set(vec![val("a"), val("b"), val("c"), val("d")]);
+    seed_sibling_buffers(pane, 4);
+
+    // Scroll right by one column: delta = +1, each row rotate_left(1), fill
+    // the trailing column with Absent → rows [b,Absent] / [d,Absent].
+    let new = rng(1, 2, 2, 3);
+    let prep = pane.prepare_shift(new, Axis::Column);
+    assert_eq!(
+        prep,
+        PaneShiftPrep::Shifted {
+            prev_range: prev,
+            new_range: new,
+        },
+    );
+
+    let expected = vec![
+        val("b"),
+        iron_canvas_core::Fetched::Absent,
+        val("d"),
+        iron_canvas_core::Fetched::Absent,
+    ];
+    let got = pane.values.take();
+    assert_eq!(
+        got, expected,
+        "column rotation must be bit-identical to try_shift"
+    );
+    assert_eq!(pane.range.get(), Some(prev));
 }

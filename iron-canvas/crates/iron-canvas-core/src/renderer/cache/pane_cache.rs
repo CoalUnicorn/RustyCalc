@@ -5,7 +5,7 @@
 //! for its [`crate::chrome::PaneRegion`], together with the `RCRange` the
 //! fetch covered. `render_pane` skips the model refetch when the cached
 //! `range` still matches the live pane range. Under a blit fast-path the
-//! caller calls [`PaneBuffers::try_shift`] first, rotating the buffers in
+//! caller calls [`PaneBuffers::prepare_shift`] first, rotating the buffers in
 //! place so the kept band survives and only the revealed strip needs a
 //! refetch.
 
@@ -38,25 +38,45 @@ pub struct PaneBuffers {
     pub range: Cell<Option<RCRange>>,
 }
 
+/// Typed outcome of [`PaneBuffers::prepare_shift`]. Replaces the old
+/// `bool` so the dispatch site can decide strip-paint vs full-fetch once,
+/// from a named reason, instead of dropping the bool and re-deriving the
+/// decision downstream.
+///
+/// `Shifted` carries the ranges the dispatch site needs to build the pane's
+/// `BlitPaneWork`. `MissingCache` is the never-cached case; `IncompatibleRange`
+/// is the stale-cache case (e.g. a frame before a canvas resize) — both route
+/// the pane through a full `render_pane` repaint.
+#[derive(Debug, PartialEq)]
+pub enum PaneShiftPrep {
+    Shifted { prev_range: RCRange, new_range: RCRange },
+    MissingCache,
+    IncompatibleRange { prev_range: RCRange, new_range: RCRange },
+}
+
 impl PaneBuffers {
     /// Rotate `styles` / `values` / `cell_types` in place from the cached
-    /// `prev_range` into `new_range` along `axis`. Returns `true` on
-    /// success; on `false` the cache has been cleared (`range` set to
-    /// `None`) so `render_pane` falls through to a full fetch instead of
-    /// reading shifted-but-mismatched buffers.
+    /// `prev_range` into `new_range` along `axis`, returning a typed
+    /// [`PaneShiftPrep`] explaining what happened. On `Shifted` the buffers
+    /// have been rotated so the kept band survives and the revealed strip
+    /// carries placeholders; on `IncompatibleRange` the cache is cleared
+    /// (`range` set to `None`) so the caller's full fetch reads fresh.
     ///
-    /// `range` is intentionally left at `prev_range` on success —
-    /// `render_pane` reads both `range` and the live pane range, infers
-    /// the single-axis shift, and runs the strip-fetch branch. Bumping
-    /// to `new_range` here would trip the range-equality early-exit and
-    /// skip the strip paint entirely.
-    pub fn try_shift(&self, new_range: RCRange, axis: Axis) -> bool {
+    /// `range` is intentionally left at `prev_range` on `Shifted` — the
+    /// shifted buffers hold `new_range` data, but the cache metadata stays
+    /// `prev_range` until the strip paint succeeds and commits the range.
+    /// Bumping it here would trip `render_pane`'s range-equality early-exit
+    /// and skip the strip paint entirely.
+    pub fn prepare_shift(&self, new_range: RCRange, axis: Axis) -> PaneShiftPrep {
         let Some(prev_range) = self.range.get() else {
-            return false;
+            return PaneShiftPrep::MissingCache;
         };
         if !shift_is_safe(prev_range, new_range, axis) {
             self.range.set(None);
-            return false;
+            return PaneShiftPrep::IncompatibleRange {
+                prev_range,
+                new_range,
+            };
         }
         let mut styles = self.styles.take();
         let mut values = self.values.take();
@@ -73,7 +93,10 @@ impl PaneBuffers {
         self.values.set(values);
         self.cell_types.set(cell_types);
         self.decorations.set(decorations);
-        true
+        PaneShiftPrep::Shifted {
+            prev_range,
+            new_range,
+        }
     }
 }
 
@@ -87,9 +110,43 @@ pub struct PaneCache {
     panes: [PaneBuffers; 4],
 }
 
+/// Address-space blit work for one shifted pane, computed before painting.
+/// Carries the cached `prev_range`, the live `new_range`, the scroll `axis`
+/// (taken from `BlitPlan`, never re-inferred), and the base revealed
+/// `strip_range`. A renderer-local helper widens `strip_range` to the pixel
+/// clip; this type is the cache's half of the split — no `Chrome` dependency.
+#[derive(Clone, Copy)]
+pub struct PaneBlitAddressWork {
+    pub axis: Axis,
+    pub prev_range: RCRange,
+    pub new_range: RCRange,
+    pub strip_range: RCRange,
+}
+
 impl PaneCache {
     pub fn pane(&self, region: PaneRegion) -> &PaneBuffers {
         &self.panes[region as usize]
+    }
+
+    /// Build address-space blit work from a `Shifted` [`PaneShiftPrep`]: the
+    /// prep already proved compatibility (its `Shifted` vs `IncompatibleRange`
+    /// split *is* the [`shift_is_safe`] predicate, single-sourced), so this
+    /// only computes the base revealed strip. `axis` flows from `BlitPlan`,
+    /// never re-inferred. Returns `None` only on the defensive zero-delta
+    /// case `compute_strip` rejects.
+    pub fn plan_blit_pane(
+        &self,
+        prev_range: RCRange,
+        new_range: RCRange,
+        axis: Axis,
+    ) -> Option<PaneBlitAddressWork> {
+        let strip_range = compute_strip(prev_range, new_range, axis)?;
+        Some(PaneBlitAddressWork {
+            axis,
+            prev_range,
+            new_range,
+            strip_range,
+        })
     }
 
     /// Drop the cached `range` for every pane named in `mask` so the next
@@ -110,6 +167,11 @@ impl PaneCache {
 /// be preserved. Stale caches (e.g. from a frame before a canvas resize)
 /// fail this check; callers drop them rather than feeding `apply_blit_shift`
 /// mismatched dimensions.
+///
+/// Single source of the compatibility predicate: called only from
+/// [`PaneBuffers::prepare_shift`], whose `Shifted` vs `IncompatibleRange`
+/// split *is* this invariant. `plan_blit_pane` reads `prepare_shift`'s
+/// `Shifted` result rather than re-testing.
 fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
     match axis {
         Axis::Row => {
@@ -203,4 +265,63 @@ fn apply_blit_shift<E: Clone>(
     }
 
     buf.resize(new_rows * new_cols, fill);
+}
+
+/// Slice of `new` lying outside `prev` along the scroll axis. Returns
+/// `None` if the ranges are identical along `axis` (delta == 0). Under
+/// `screen_for_blit` qualification, `|delta| < extent` is guaranteed so the
+/// no-overlap path is defensive only.
+fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
+    match axis {
+        Axis::Row => {
+            if new.r2 < prev.r1 || new.r1 > prev.r2 {
+                return Some(new);
+            }
+            if new.r1 < prev.r1 {
+                Some(RCRange {
+                    r1: new.r1,
+                    r2: prev.r1 - 1,
+                    c1: new.c1,
+                    c2: new.c2,
+                })
+            } else if new.r2 > prev.r2 {
+                // Includes `prev.r2` (not `prev.r2 + 1`) because that row
+                // was the overflow row in prev — its pixels were off-canvas
+                // and weren't shifted by the blit, so its on-canvas position
+                // in new needs a fresh paint.
+                Some(RCRange {
+                    r1: prev.r2,
+                    r2: new.r2,
+                    c1: new.c1,
+                    c2: new.c2,
+                })
+            } else {
+                None
+            }
+        }
+        Axis::Column => {
+            if new.c2 < prev.c1 || new.c1 > prev.c2 {
+                return Some(new);
+            }
+            if new.c1 < prev.c1 {
+                Some(RCRange {
+                    r1: new.r1,
+                    r2: new.r2,
+                    c1: new.c1,
+                    c2: prev.c1 - 1,
+                })
+            } else if new.c2 > prev.c2 {
+                // Mirror of the Row down-scroll case: prev.c2 was the
+                // overflow column whose pixels were off-canvas.
+                Some(RCRange {
+                    r1: new.r1,
+                    r2: new.r2,
+                    c1: prev.c2,
+                    c2: new.c2,
+                })
+            } else {
+                None
+            }
+        }
+    }
 }

@@ -18,5 +18,5 @@ mod pane_cache;
 mod scratch;
 
 pub use intern::{ColorIntern, FontIntern};
-pub use pane_cache::PaneCache;
+pub use pane_cache::{PaneBlitAddressWork, PaneBuffers, PaneCache, PaneShiftPrep};
 pub use scratch::FrameCache;
