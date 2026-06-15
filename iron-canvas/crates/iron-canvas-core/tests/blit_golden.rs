@@ -10,14 +10,14 @@ mod common;
 
 use std::path::PathBuf;
 
+use iron_canvas_core::CanvasModel;
 use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::CanvasModel;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{canvas_default as canvas, TestModel};
+use common::{TestModel, canvas_default as canvas};
 
 fn snap(m: &TestModel) -> ActiveCellSnapshot {
     let view = m.get_selected_view().expect("scroll model has view");
@@ -47,8 +47,7 @@ fn capture_scroll_ops(apply_scroll: impl FnOnce(&TestModel)) -> Vec<DrawOp> {
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-axis scroll must qualify for blit");
 
-    let BlitOutcome::Blitted(frame1) =
-        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
     else {
         panic!("single-axis scroll must blit in place");
     };

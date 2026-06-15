@@ -91,7 +91,11 @@ fn parse_font(font_css: &str) -> (f64, String) {
     let toks: Vec<&str> = font_css.split_whitespace().collect();
     let family = toks
         .iter()
-        .position(|t| t.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()).is_some())
+        .position(|t| {
+            t.strip_suffix("px")
+                .and_then(|n| n.parse::<f64>().ok())
+                .is_some()
+        })
         .map(|i| toks[i + 1..].join(" "))
         .filter(|f| !f.is_empty())
         .unwrap_or_else(|| "sans-serif".to_string());
@@ -159,7 +163,10 @@ impl Painter for SvgPainter {
         open_rect(rect, &mut body);
         body.push_str(" fill=\"none\" stroke=\"");
         xml_escape(color.as_str(), &mut body);
-        let _ = write!(body, "\" stroke-width=\"{width:.3}\" stroke-dasharray=\"4 3\"/>");
+        let _ = write!(
+            body,
+            "\" stroke-width=\"{width:.3}\" stroke-dasharray=\"4 3\"/>"
+        );
     }
 
     fn stroke_line(&self, line: Line, color: PaintColor, width: f64) {

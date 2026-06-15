@@ -301,7 +301,6 @@ impl Painter for RecorderPainter {
         self.group_depth.set(self.group_depth.get() - 1);
         self.push(DrawOp::EndGroup);
     }
-
 }
 
 impl BlitPainter for RecorderPainter {
@@ -622,7 +621,6 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
         }
         self.recorder.end_group();
     }
-
 }
 
 impl<P: Painter + BlitPainter> BlitPainter for RecordingPainter<P> {

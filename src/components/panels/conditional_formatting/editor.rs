@@ -280,7 +280,11 @@ fn cfvo_to_ui(cfvo: &Option<Cfvo>) -> (&'static str, String) {
 fn hex_bridge(sig: RwSignal<String>) -> (Signal<Option<HexColor>>, Callback<Option<HexColor>>) {
     let hex = Signal::derive(move || {
         let s = sig.get();
-        if s.is_empty() { None } else { HexColor::new(s).ok() }
+        if s.is_empty() {
+            None
+        } else {
+            HexColor::new(s).ok()
+        }
     });
     let on_change = Callback::new(move |c: Option<HexColor>| {
         sig.set(c.map(|h| h.as_str().to_owned()).unwrap_or_default());
@@ -422,9 +426,8 @@ pub fn CfRuleEditor() -> impl IntoView {
     let format_visible = RwSignal::new(true);
     // Sections introduced after the toggle pattern above derive straight from
     // the rule type, so existing arms can't leave them stale.
-    let rank_visible = Signal::derive(move || {
-        matches!(selected_rule_type.get().as_str(), "top10" | "bottom10")
-    });
+    let rank_visible =
+        Signal::derive(move || matches!(selected_rule_type.get().as_str(), "top10" | "bottom10"));
     let period_visible = Signal::derive(move || selected_rule_type.get() == "time_period");
     let bar_visible = Signal::derive(move || selected_rule_type.get() == "data_bar");
     let icon_set_visible = Signal::derive(move || selected_rule_type.get() == "icon_set");

@@ -99,8 +99,7 @@ fn blit_inside_stable_digit_band_keeps_blitted_kind() {
     let plan = prev
         .screen_for_blit(&model, canvas, &theme, &active)
         .expect("single-row scroll must qualify");
-    let BlitOutcome::Blitted(next) =
-        Chrome::next_blit(Some(prev), &model, canvas, &theme, &plan)
+    let BlitOutcome::Blitted(next) = Chrome::next_blit(Some(prev), &model, canvas, &theme, &plan)
     else {
         panic!("in-band scroll must reuse in place (Blitted)");
     };
@@ -140,7 +139,8 @@ fn bridge_failed_active_cell_rejects_blit() {
     let known = snap(&model);
     model.set_value_bridge_fail(true);
     assert!(
-        prev.screen_for_blit(&model, canvas, &theme, &known).is_none(),
+        prev.screen_for_blit(&model, canvas, &theme, &known)
+            .is_none(),
         "BridgeFailed at compare time must reject the blit"
     );
 

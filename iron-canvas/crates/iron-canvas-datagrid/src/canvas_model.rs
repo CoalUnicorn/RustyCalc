@@ -141,7 +141,12 @@ impl CellContentQuery for DataGrid {
         }
     }
 
-    fn get_formatted_cell_values_in(&self, _s: u32, range: RCRange, out: &mut Vec<Fetched<String>>) {
+    fn get_formatted_cell_values_in(
+        &self,
+        _s: u32,
+        range: RCRange,
+        out: &mut Vec<Fetched<String>>,
+    ) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {

@@ -494,12 +494,14 @@ impl CellContentQuery for JsBackedModel {
         // yields `Absent` — the same legitimate per-cell outcome (matching
         // single-cell `get_cell_type`), not a corruption.
         out.clear();
-        out.extend(decoded.into_iter().map(|d| {
-            match d.and_then(cell_kind_from_discriminant) {
-                Some(k) => Fetched::Value(k),
-                None => Fetched::Absent,
-            }
-        }));
+        out.extend(
+            decoded
+                .into_iter()
+                .map(|d| match d.and_then(cell_kind_from_discriminant) {
+                    Some(k) => Fetched::Value(k),
+                    None => Fetched::Absent,
+                }),
+        );
     }
 }
 

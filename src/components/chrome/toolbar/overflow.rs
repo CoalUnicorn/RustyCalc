@@ -52,25 +52,26 @@ pub fn OverflowRow(slots: Vec<ToolSlot>) -> impl IntoView {
     // the visible count on every container-width change.
     Effect::new(move |_| {
         let avail = width.get();
-        if widths.with_value(Vec::is_empty) {
-            if let Some(el) = row_ref.get() {
-                let kids = el.children();
-                let mut ws = Vec::new();
-                for i in 0..kids.length() {
-                    let Some(node) = kids.item(i) else { continue };
-                    let Ok(html_el) = node.dyn_into::<web_sys::HtmlElement>() else {
-                        continue;
-                    };
-                    if !html_el.class_list().contains("tb-grp") {
-                        continue;
-                    }
-                    ws.push(html_el.offset_width() as f64);
+        if widths.with_value(Vec::is_empty)
+            && let Some(el) = row_ref.get()
+        {
+            let kids = el.children();
+            let mut ws = Vec::new();
+            for i in 0..kids.length() {
+                let Some(node) = kids.item(i) else { continue };
+                let Ok(html_el) = node.dyn_into::<web_sys::HtmlElement>() else {
+                    continue;
+                };
+                if !html_el.class_list().contains("tb-grp") {
+                    continue;
                 }
-                if !ws.is_empty() {
-                    widths.set_value(ws);
-                }
+                ws.push(html_el.offset_width() as f64);
+            }
+            if !ws.is_empty() {
+                widths.set_value(ws);
             }
         }
+
         widths.with_value(|ws| {
             if !ws.is_empty() && avail > 0.0 {
                 visible.set(fit_count(ws, GAP, avail, MORE_W));

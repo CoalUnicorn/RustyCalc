@@ -89,7 +89,10 @@ impl ActiveCellSnapshot {
         // Blit only when both fetches are known AND equal. A `BridgeFailed`
         // (`None`) at capture or compare time means "can't prove unchanged" →
         // reject, forcing a fresh repaint instead of reusing stale pixels.
-        match (self.value_hash, hash_cell_value(model, sheet, self.row, self.col)) {
+        match (
+            self.value_hash,
+            hash_cell_value(model, sheet, self.row, self.col),
+        ) {
             (Some(captured), Some(live)) => captured == live,
             _ => false,
         }
@@ -234,13 +237,23 @@ impl Chrome {
         plan: &BlitPlan,
     ) -> BlitOutcome {
         let Some(prev) = prev else {
-            return BlitOutcome::FreshFallback(Self::next(None, model, canvas, theme, FramePath::Fresh));
+            return BlitOutcome::FreshFallback(Self::next(
+                None,
+                model,
+                canvas,
+                theme,
+                FramePath::Fresh,
+            ));
         };
         match blit::try_blit_reuse(prev, model, canvas, theme, plan) {
             Ok(frame) => BlitOutcome::Blitted(frame),
-            Err(prev) => {
-                BlitOutcome::FreshFallback(Self::next(Some(prev), model, canvas, theme, FramePath::Fresh))
-            }
+            Err(prev) => BlitOutcome::FreshFallback(Self::next(
+                Some(prev),
+                model,
+                canvas,
+                theme,
+                FramePath::Fresh,
+            )),
         }
     }
 

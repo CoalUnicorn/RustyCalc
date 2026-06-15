@@ -101,20 +101,21 @@ pub(super) fn install_raf_loop(
         // of `render_needed` (which is gated on workbook state changes).
         // No-op when no recording is loaded or play is paused.
         #[cfg(feature = "dev-tools")]
-        if let Some(app) = &app {
-            if app.playback_loaded.get_untracked() && app.playback_playing.get_untracked() {
-                canvas_handle.update_value(|slot| {
-                    if let Some(ic) = slot.as_mut() {
-                        if ic.tick_playback(crate::perf::now()) {
-                            app.playback_frame.set(ic.recording_current_frame());
-                        }
-                        // Engine auto-pauses at end-of-recording — mirror it.
-                        if !ic.is_playing() {
-                            app.playback_playing.set(false);
-                        }
+        if let Some(app) = &app
+            && app.playback_loaded.get_untracked()
+            && app.playback_playing.get_untracked()
+        {
+            canvas_handle.update_value(|slot| {
+                if let Some(ic) = slot.as_mut() {
+                    if ic.tick_playback(crate::perf::now()) {
+                        app.playback_frame.set(ic.recording_current_frame());
                     }
-                });
-            }
+                    // Engine auto-pauses at end-of-recording — mirror it.
+                    if !ic.is_playing() {
+                        app.playback_playing.set(false);
+                    }
+                }
+            });
         }
 
         if !render_needed.get_untracked() {
@@ -160,10 +161,10 @@ pub(super) fn install_raf_loop(
         // cell commit has happened so the panel stays on its placeholder
         // ("commit a cell to measure") and we don't spam the signal on
         // every scroll / resize / overlay tick.
-        if let Some(app) = &app {
-            if app.perf.commit_start.get_untracked().is_some() {
-                app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
-            }
+        if let Some(app) = &app
+            && app.perf.commit_start.get_untracked().is_some()
+        {
+            app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
         }
     });
 }

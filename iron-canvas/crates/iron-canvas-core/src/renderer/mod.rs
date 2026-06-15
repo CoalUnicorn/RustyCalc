@@ -63,8 +63,8 @@ use std::rc::Rc;
 use crate::CanvasModel;
 pub use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome};
-use crate::renderer::blit_work::widen_blit_strip_to_pixel_clip;
 use crate::geometry::prim::Axis;
+use crate::renderer::blit_work::widen_blit_strip_to_pixel_clip;
 use crate::renderer::cache::{FrameCache, PaneCache, PaneShiftPrep};
 pub use cache::ColorIntern;
 pub use cache::FontIntern;
@@ -213,7 +213,11 @@ impl<P: Painter> RendererCore<P> {
             };
             // `prepare_shift` rotates the cache buffers and reports why; the
             // dispatch decision is made here, once, from the typed result.
-            match self.pane_cache.pane(pane).prepare_shift(new_range, plan.axis) {
+            match self
+                .pane_cache
+                .pane(pane)
+                .prepare_shift(new_range, plan.axis)
+            {
                 PaneShiftPrep::Shifted {
                     prev_range,
                     new_range,
@@ -222,8 +226,9 @@ impl<P: Painter> RendererCore<P> {
                     // address-space work (no `Chrome` dependency), then a
                     // renderer-local helper widens it against this frame's slot
                     // geometry and attaches the pixel clip.
-                    let Some(address_work) =
-                        self.pane_cache.plan_blit_pane(prev_range, new_range, plan.axis)
+                    let Some(address_work) = self
+                        .pane_cache
+                        .plan_blit_pane(prev_range, new_range, plan.axis)
                     else {
                         self.render_pane(model, pane, frame);
                         continue;
@@ -238,8 +243,7 @@ impl<P: Painter> RendererCore<P> {
                         None => self.render_pane_blit(model, frame, &work),
                     }
                 }
-                PaneShiftPrep::MissingCache
-                | PaneShiftPrep::IncompatibleRange { .. } => {
+                PaneShiftPrep::MissingCache | PaneShiftPrep::IncompatibleRange { .. } => {
                     self.render_pane(model, pane, frame);
                 }
             }

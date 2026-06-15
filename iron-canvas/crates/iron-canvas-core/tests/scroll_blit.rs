@@ -74,8 +74,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
 
     // Simulate the orchestrator's blit fast-path on the same core so
     // the pane cache state carries across frames.
-    let BlitOutcome::Blitted(frame1) =
-        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
     else {
         panic!("single-row scroll must blit in place");
     };
@@ -165,8 +164,7 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-column scroll must qualify for blit");
 
-    let BlitOutcome::Blitted(frame1) =
-        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
     else {
         panic!("single-row scroll must blit in place");
     };
@@ -220,8 +218,7 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let plan = frame0
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-row scroll must qualify for blit");
-    let BlitOutcome::Blitted(frame1) =
-        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
     else {
         panic!("single-row scroll must blit in place");
     };
@@ -357,8 +354,7 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("single-row scroll must qualify for blit");
 
-    let BlitOutcome::Blitted(frame1) =
-        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
     else {
         panic!("single-row scroll must blit in place");
     };
@@ -411,8 +407,7 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
         .screen_for_blit(&m, canvas, &theme, &snap(&m))
         .expect("5-row scroll must qualify for blit");
 
-    let BlitOutcome::Blitted(frame1) =
-        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
     else {
         panic!("single-row scroll must blit in place");
     };
@@ -478,7 +473,10 @@ fn build_pane_work(
     let PaneShiftPrep::Shifted {
         prev_range,
         new_range,
-    } = core.pane_cache.pane(pane).prepare_shift(new_range, plan.axis)
+    } = core
+        .pane_cache
+        .pane(pane)
+        .prepare_shift(new_range, plan.axis)
     else {
         return None;
     };
@@ -509,8 +507,7 @@ fn primed_blit(
     let plan = frame0
         .screen_for_blit(m, canvas, &theme, &snap(m))
         .expect("single-axis scroll must qualify for blit");
-    let BlitOutcome::Blitted(frame1) =
-        Chrome::next_blit(Some(frame0), m, canvas, &theme, &plan)
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), m, canvas, &theme, &plan)
     else {
         panic!("single-axis scroll must blit in place");
     };
@@ -707,7 +704,8 @@ fn prepare_shift_rotates_row_buffers() {
     let prev = rng(1, 2, 1, 2);
     pane.range.set(Some(prev));
     // 2×2 row-major: (1,1)(1,2)(2,1)(2,2).
-    pane.values.set(vec![val("a"), val("b"), val("c"), val("d")]);
+    pane.values
+        .set(vec![val("a"), val("b"), val("c"), val("d")]);
     seed_sibling_buffers(pane, 4);
 
     // Scroll down by one row: delta = +1, shift = 1 row × 2 cols = 2.
@@ -729,7 +727,10 @@ fn prepare_shift_rotates_row_buffers() {
         iron_canvas_core::Fetched::Absent,
     ];
     let got = pane.values.take();
-    assert_eq!(got, expected, "row rotation must be bit-identical to try_shift");
+    assert_eq!(
+        got, expected,
+        "row rotation must be bit-identical to try_shift"
+    );
 
     // Deliberate staleness: `range` stays `prev` until the strip paint commits.
     assert_eq!(pane.range.get(), Some(prev));
@@ -742,7 +743,8 @@ fn prepare_shift_rotates_column_buffers() {
     let prev = rng(1, 2, 1, 2);
     pane.range.set(Some(prev));
     // 2×2 row-major: rows [a,b] / [c,d].
-    pane.values.set(vec![val("a"), val("b"), val("c"), val("d")]);
+    pane.values
+        .set(vec![val("a"), val("b"), val("c"), val("d")]);
     seed_sibling_buffers(pane, 4);
 
     // Scroll right by one column: delta = +1, each row rotate_left(1), fill

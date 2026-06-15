@@ -501,10 +501,20 @@ mod tests {
         let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
         let mut lines = vec![line(10.0), line(10.0)];
 
-        position_lines(&mut lines, HAlign::Left, VAlign::Bottom, rect, size_px, line_height);
+        position_lines(
+            &mut lines,
+            HAlign::Left,
+            VAlign::Bottom,
+            rect,
+            size_px,
+            line_height,
+        );
 
         // Line 0 center lands at 5.6 → top of glyph ≈ 5.6 - 7.2 < 0.
-        assert!(lines[0].center_y - line_height / 2.0 < 0.0, "test premise: top line crosses the top edge");
+        assert!(
+            lines[0].center_y - line_height / 2.0 < 0.0,
+            "test premise: top line crosses the top edge"
+        );
         assert!(
             lines_escape_cell(&lines, usable_w, rect, line_height),
             "bottom-anchored block crossing the top edge must clip"
@@ -519,7 +529,14 @@ mod tests {
         let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
         let mut lines = vec![line(10.0)];
 
-        position_lines(&mut lines, HAlign::Left, VAlign::Bottom, rect, size_px, line_height);
+        position_lines(
+            &mut lines,
+            HAlign::Left,
+            VAlign::Bottom,
+            rect,
+            size_px,
+            line_height,
+        );
 
         assert!(
             !lines_escape_cell(&lines, usable_w, rect, line_height),
@@ -535,7 +552,14 @@ mod tests {
         let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
         let mut lines = vec![line(usable_w + 1.0)];
 
-        position_lines(&mut lines, HAlign::Left, VAlign::Bottom, rect, size_px, line_height);
+        position_lines(
+            &mut lines,
+            HAlign::Left,
+            VAlign::Bottom,
+            rect,
+            size_px,
+            line_height,
+        );
 
         assert!(
             lines_escape_cell(&lines, usable_w, rect, line_height),

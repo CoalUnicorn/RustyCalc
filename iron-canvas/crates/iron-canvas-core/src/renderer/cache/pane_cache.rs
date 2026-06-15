@@ -49,9 +49,15 @@ pub struct PaneBuffers {
 /// the pane through a full `render_pane` repaint.
 #[derive(Debug, PartialEq)]
 pub enum PaneShiftPrep {
-    Shifted { prev_range: RCRange, new_range: RCRange },
+    Shifted {
+        prev_range: RCRange,
+        new_range: RCRange,
+    },
     MissingCache,
-    IncompatibleRange { prev_range: RCRange, new_range: RCRange },
+    IncompatibleRange {
+        prev_range: RCRange,
+        new_range: RCRange,
+    },
 }
 
 impl PaneBuffers {
@@ -87,7 +93,13 @@ impl PaneBuffers {
         // yet); `None` for the still-`Option` decoration buffer.
         apply_blit_shift(&mut styles, prev_range, new_range, axis, Fetched::Absent);
         apply_blit_shift(&mut values, prev_range, new_range, axis, Fetched::Absent);
-        apply_blit_shift(&mut cell_types, prev_range, new_range, axis, Fetched::Absent);
+        apply_blit_shift(
+            &mut cell_types,
+            prev_range,
+            new_range,
+            axis,
+            Fetched::Absent,
+        );
         apply_blit_shift(&mut decorations, prev_range, new_range, axis, None);
         self.styles.set(styles);
         self.values.set(values);

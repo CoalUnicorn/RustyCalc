@@ -204,14 +204,9 @@ impl<P: Painter> RendererCore<P> {
                 .get_mut(idx)
                 .and_then(Fetched::take_value)
                 .unwrap_or(CellKind::Text);
-            if let Some(tp) = TextPaint::resolve_into(
-                self,
-                p.rect,
-                &p.style,
-                text,
-                cell_type,
-                &mut text_lines,
-            ) {
+            if let Some(tp) =
+                TextPaint::resolve_into(self, p.rect, &p.style, text, cell_type, &mut text_lines)
+            {
                 self.paint_text(&tp, theme, &text_lines);
             }
         }
