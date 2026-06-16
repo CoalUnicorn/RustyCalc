@@ -90,6 +90,10 @@ pub fn ShareControls() -> impl IntoView {
                 ));
                 false
             }
+            Err(storage::ShareError::InvalidWord(e)) => {
+                share_error.set(e.to_string());
+                false
+            }
         }
     };
 

@@ -25,7 +25,12 @@ const MAX_SHARE_ENCODED: usize = MAX_SHARE_BYTES * 4 / 3 + 4;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ShareError {
-    TooLarge { size_kb: usize },
+    TooLarge {
+        size_kb: usize,
+    },
+    /// The verification word fails the grammar the receiver enforces, so a link
+    /// built from it could never be opened. Reject it at creation time instead.
+    InvalidWord(verify::VerifyError),
 }
 
 /// A share payload that has been decoded but not yet consented to by the
@@ -66,7 +71,7 @@ pub fn encode_for_share_url(model: &UserModel, word: Option<&str>) -> Result<Str
             size_kb: bytes.len() / 1024,
         });
     }
-    let wrapped = verify::encode_with_version(word, &bytes);
+    let wrapped = verify::encode_with_version(word, &bytes).map_err(ShareError::InvalidWord)?;
     Ok(URL_SAFE_NO_PAD.encode(&wrapped))
 }
 

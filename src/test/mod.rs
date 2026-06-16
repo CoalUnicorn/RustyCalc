@@ -20,3 +20,4 @@ mod model_style;
 mod mouse;
 mod state;
 mod toolbar_section;
+mod verify_share;

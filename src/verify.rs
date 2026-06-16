@@ -2,7 +2,7 @@ use sha2::{Digest, Sha256};
 
 use crate::storage::MAX_SHARE_BYTES;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerifyError {
     TooShort,
     NonAlphabetic,
@@ -60,21 +60,36 @@ pub fn hash_word(word: &str) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-pub fn encode_with_version(word: Option<&str>, bitcode_bytes: &[u8]) -> Vec<u8> {
+/// Frame `bitcode_bytes` with a share-version header.
+///
+/// `None` → a V0 (no-verification) payload. `Some(word)` → a V1 payload carrying
+/// a SHA-256 of the word, which the recipient must retype. The word is held to
+/// the *same* grammar `decode_with_consent` enforces on the receiver, so a
+/// sender can never mint a hash that no validate-passing word could match — i.e.
+/// a permanently un-openable link. That is why this returns a `Result`: an
+/// invalid word is refused here, at share-creation time.
+pub fn encode_with_version(
+    word: Option<&str>,
+    bitcode_bytes: &[u8],
+) -> Result<Vec<u8>, VerifyError> {
     match word {
         None => {
             let mut out = Vec::with_capacity(1 + bitcode_bytes.len());
             out.push(ShareVersion::V0 as u8);
             out.extend_from_slice(bitcode_bytes);
-            out
+            Ok(out)
         }
         Some(w) => {
-            let hash = hash_word(w);
+            // Mirror decode_with_consent: hold the word to the receiver's grammar
+            // before hashing, so a word nobody could retype (an un-openable link)
+            // is refused here at creation. validate_word trims, matching the hash.
+            let word = validate_word(w)?;
+            let hash = hash_word(word);
             let mut out = Vec::with_capacity(1 + 32 + bitcode_bytes.len());
             out.push(ShareVersion::V1 as u8);
             out.extend_from_slice(&hash);
             out.extend_from_slice(bitcode_bytes);
-            out
+            Ok(out)
         }
     }
 }
