@@ -67,6 +67,12 @@ impl CameraCanvas {
         self.orch.request_repaint();
     }
 
+    /// Current 1-based scroll anchors `(top_row, left_col)` — the live viewport,
+    /// captured before a re-extract so the user's scroll survives `set_grid`.
+    pub fn scroll_anchors(&self) -> (i32, i32) {
+        self.model.borrow_with(|g| g.scroll_anchors())
+    }
+
     /// Fit every column to its text, then return the grid's natural pixel
     /// size. The caller owns applying it (widget chrome + clamping live there).
     pub fn autosize(&mut self) -> (f64, f64) {

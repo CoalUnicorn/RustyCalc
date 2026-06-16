@@ -267,8 +267,13 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
             if theme_hit {
                 c.sync_theme_from_document();
             }
+            // `set_grid` swaps in a fresh DataGrid whose scroll resets to the
+            // top, so preserve where the user is actually looking: snapshot the
+            // live anchors first and restore them. Re-imposing spec.scroll would
+            // yank a scrolled camera back on every recalc.
+            let (top, left) = c.scroll_anchors();
             c.set_grid(model.with_value(|m| extract_grid(m, spec.source)));
-            c.set_scroll(spec.scroll.0, spec.scroll.1);
+            c.set_scroll(top, left);
         });
     });
 
@@ -346,7 +351,10 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
             class="camera-widget"
             style=move || {
                 let Some(s) = my_spec.get() else {
-                    return String::new();
+                    // Deleted but not yet unmounted by <For>: stay absolutely
+                    // positioned and hidden so we don't reflow into the grid's
+                    // flow for the frame before disposal.
+                    return String::from("position:absolute; display:none;");
                 };
                 format!(
                     "position:absolute; left:{}px; top:{}px; width:{}px; height:{}px; \
@@ -387,13 +395,24 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
                 >"✕"</button>
             </div>
             <Show when=move || settings_open.get()>
-                <div style="position:absolute; top:14px; left:4px; right:4px; z-index:2; \
-                            background: var(--bg-primary); border:1px solid var(--border-color); \
-                            padding:4px; display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
+                <div
+                    // The global workbook Esc router early-returns while an
+                    // <input> is focused, so the armed range field would trap
+                    // Esc. Handle it here: disarm capture and close the popover.
+                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                        if ev.key() == "Escape" {
+                            ev.stop_propagation();
+                            state.range_capture.set(None);
+                            settings_open.set(false);
+                        }
+                    }
+                    style="position:absolute; top:14px; left:4px; right:4px; z-index:2; \
+                           background: var(--bg-primary); border:1px solid var(--border-color); \
+                           padding:4px; display:flex; gap:4px; flex-wrap:wrap; align-items:center;">
                     <RangePickerInput
                         value=picker_text
                         target=RangeCaptureTarget::Camera(id)
-                        format=RangeFormat::SheetRelative
+                        format=RangeFormat::QualifiedAbsolute
                         placeholder="Source range"
                     />
                     <button type="button" class="cam-btn-apply" on:click=on_apply>"Apply"</button>

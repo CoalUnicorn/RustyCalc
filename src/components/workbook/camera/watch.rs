@@ -29,10 +29,12 @@ pub fn events_touch_source(
         ContentEvent::RangeChanged { sheet_area } => {
             sheet_area.sheet == source.sheet && overlaps(area, sheet_area.area.normalized())
         }
-        // Recalculation may update any cell value on the affected sheets.
-        ContentEvent::CalculationUpdated { affected_sheets } => {
-            affected_sheets.contains(&source.sheet)
-        }
+        // Recalculation can rewrite any cell value, including a formula *inside*
+        // `source` that references an affected sheet we can't see from the range
+        // alone. `affected_sheets` names where inputs changed, not every sheet
+        // whose displayed values did — so we can't prove the source disjoint.
+        // Honor the "never go stale" contract: any recalc is a hit.
+        ContentEvent::CalculationUpdated { .. } => true,
         // Named-range edits don't carry a location; conservatively skip —
         // they affect formula text, not cell values visible in a snapshot.
         ContentEvent::NamedRangesChanged => false,

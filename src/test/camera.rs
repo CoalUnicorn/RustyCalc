@@ -113,4 +113,16 @@ mod watch_tests {
         };
         assert!(!events_touch_source(src(), &[ev], &[]));
     }
+
+    // #5: a recalc can rewrite a source cell whose formula references *another*
+    // sheet, so a CalculationUpdated naming only other sheets must still
+    // re-extract. We can't see the source's cross-sheet deps from the range
+    // alone, so the "never go stale" contract over-reports rather than miss it.
+    #[test]
+    fn calculation_update_on_other_sheet_still_touches() {
+        let ev = ContentEvent::CalculationUpdated {
+            affected_sheets: vec![1],
+        };
+        assert!(events_touch_source(src(), &[ev], &[]));
+    }
 }
