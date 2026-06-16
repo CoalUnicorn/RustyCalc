@@ -152,7 +152,7 @@ pub trait TextMetrics {
 }
 
 #[diagnostic::on_unimplemented(
-    note = "see the canvas-patterns skill for the full `Painter` method surface (paint_*, blit, text) — reference impls live in CanvasPainter (web), SvgPainter, PdfPainter, RecorderPainter"
+    note = "implement the full `Painter` drawing surface (rect/path fills, clears, borders, text). Reference impls: `CanvasPainter` (iron-canvas-canvas2d), `SvgPainter` and `PdfPainter` (iron-canvas-export), `RecorderPainter` (iron-canvas-recorder)"
 )]
 pub trait Painter: TextMetrics {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor);

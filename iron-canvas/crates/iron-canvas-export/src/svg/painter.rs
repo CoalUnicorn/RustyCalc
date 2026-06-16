@@ -1,7 +1,10 @@
 //! SVG backend for `Painter`.
 //!
 //! Pure `std`. Emits a self-contained `<svg>` document for snapshot tests,
-//! exports, and headless rendering. Design notes: `docs/svg-painter.md`.
+//! exports, and headless rendering. Draw calls buffer into `body`; clip paths
+//! are emitted to a separate `defs` section and referenced by id.
+//! [`SvgPainter::finish`] drains both into one document, asserting clip/group
+//! balance.
 
 use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;

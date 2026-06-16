@@ -5,7 +5,7 @@
 //! per-paint clear (PDF is declarative — the page-open `cm` plus the
 //! emitted ops are the entire output). The Y-flip CTM that maps the
 //! painter's Y-down coords to PDF's Y-up user space is prepended by
-//! [`PdfSurface::finish`] rather than each painter op, so the painter
+//! [`PdfSurface::finish`](crate::pdf::PdfSurface::finish) rather than each painter op, so the painter
 //! itself never needs to think about it: `re` is emitted with the same
 //! `x y w h` we received from `PixelRect`.
 

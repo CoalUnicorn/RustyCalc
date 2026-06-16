@@ -2,9 +2,27 @@
 //! `Orchestrator` query read the same `Chrome`, so painted pixels and hit
 //! zones cannot disagree.
 //!
-//! Pure-axis walks live on `PaneSet`; `Chrome` composes them whenever a
-//! query spans both axes. See `ARCHITECTURE.md` for the build phases
-//! (A–E) and the `is_still_valid` cache rules.
+//! Pure-axis walks live on [`PaneSet`]; `Chrome` composes them whenever a
+//! query spans both axes.
+//!
+//! # Build phases
+//!
+//! `FramePath::Fresh` runs the private `Chrome::build` in five fixed-order
+//! phases. The order is load-bearing: phase C measures a value phase D needs,
+//! and both axis walks must finish before E assembles the shared `cell_origin`.
+//!
+//! ```text
+//! A  frozen counts   model.get_frozen_{rows,columns}_count(sheet)
+//! B  row walk        PaneSet::with_recycled(recycled).fill_rows(..)
+//! C  measure r.h.t.  row_header_thickness = measure_row_header_width(last_visible_row)
+//! D  col walk        pane_set.fill_cols(..)   // origin_x = row_header_thickness + CELL_AREA_INSET
+//! E  assemble        Chrome { pane_set, row_header_thickness, cell_origin, .. }
+//! ```
+//!
+//! `SlotsReuse` skips the walk: it keeps the previous slot vecs and refreshes
+//! only per-frame state. `Orchestrator::is_still_valid` decides between the two
+//! by comparing the previous frame's `sheet`, `canvas_size`, frozen counts, and
+//! `scroll_first` against the current signals; any divergence forces `Fresh`.
 
 use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
@@ -178,8 +196,8 @@ impl Chrome {
     /// ([`Self::next_blit`]) — it has a two-outcome result, not a regime tag.
     ///
     ///   * `Fresh` — full rebuild. `prev = Some` recycles slot Vec
-    ///     allocations; `None` is the first-frame path. See
-    ///     `ARCHITECTURE.md` for build phases A–E.
+    ///     allocations; `None` is the first-frame path. See the
+    ///     [module docs](crate::chrome) for build phases A–E.
     ///   * `SlotsReuse` — prev's slot vecs survive verbatim; only
     ///     per-frame state (theme + `pane_fingerprints` rotation) is
     ///     refreshed. Caller refreshes overlay state separately

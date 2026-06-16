@@ -14,8 +14,8 @@ use crate::model::{
 
 /// Top-level action dispatched from a keyboard event.
 ///
-/// [`super::classify::classify_key`] maps a key + modifier combination to one
-/// of these variants. [`super::dispatch::execute`] routes each variant to its
+/// [`crate::input::keyboard::classify_key`] maps a key + modifier combination to one
+/// of these variants. [`crate::input::keyboard::execute`] routes each variant to its
 /// category module (`nav`, `edit`, `format`, `structure`). `Copy`, `Cut`, and
 /// `Paste` are handled inline in `Workbook` because they need `AppClipboard`
 /// and async OS clipboard APIs.

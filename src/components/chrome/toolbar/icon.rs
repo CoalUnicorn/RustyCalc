@@ -69,7 +69,7 @@ pub enum ChromeIcon {
 /// (drawn as a `fill="none"` stroke at group `opacity`, so overlaps never
 /// darken) plus the active edge(s) as solid filled bars. Encoding meaning in
 /// shape rather than color lets the whole set recolor for hover/active/disabled
-/// and dark mode for free. Design source: `docs/designs/2026-06-01-border-icons-preview.html`.
+/// and dark mode for free.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BorderIcon {
     All,

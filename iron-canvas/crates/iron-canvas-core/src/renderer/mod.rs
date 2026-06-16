@@ -44,8 +44,20 @@
 //! `BottomLeft`, `BottomRight`) based on frozen rows and columns. Each
 //! quadrant is rendered by `render_pane()` against a different
 //! [`PaneRegion`](crate::chrome::PaneRegion); a thick separator line
-//! marks the freeze boundary. See the diagram in `ARCHITECTURE.md` for
-//! the layout.
+//! marks the freeze boundary:
+//!
+//! ```text
+//!           frozen cols │ scrollable cols
+//!         ──────────────┼──────────────────
+//! frozen   TopLeft      │ TopRight
+//! rows     (static)     │ (scrolls in X)
+//!         ──────────────┼──────────────────
+//! scroll   BottomLeft   │ BottomRight
+//! rows     (scrolls Y)  │ (scrolls in X and Y)
+//! ```
+//!
+//! With no frozen rows or columns the grid is a single `BottomRight`
+//! quadrant.
 
 pub mod blit_work;
 pub mod cache;

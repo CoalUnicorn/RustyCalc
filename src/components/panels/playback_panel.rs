@@ -1,6 +1,6 @@
 //! `.icr` recording playback controls.
 //!
-//! Status-bar sibling of [`PerfPanel`]. Renders only when the wasm was built
+//! Status-bar sibling of [`crate::components::panels::perf_panel::PerfPanel`]. Renders only when the wasm was built
 //! with `--features dev-tools` (runtime-checked via
 //! `IronCanvas::recording_supported()`). The panel itself is stateless — every
 //! interaction emits a [`PlaybackCmd`] which the Worksheet dispatch Effect

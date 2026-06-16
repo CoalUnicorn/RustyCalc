@@ -289,7 +289,6 @@ impl IronCanvas {
     /// If the hard-cap watchdog already fired, `header.partial` is `true`
     /// and the bytes are the truncated tail.
     #[cfg(feature = "dev-tools")]
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "stopRecording")]
     pub fn stop_recording(&mut self) -> Result<js_sys::Uint8Array, JsError> {
         if !matches!(self.mode, CanvasMode::Recording(_)) {
@@ -335,7 +334,6 @@ impl IronCanvas {
     /// next `paintIfDirty` repaints from fresh fetches. Without this call the
     /// stale cache silently misrenders theme colors (no error, host bug).
     /// No-op beyond the dirty mark for Rust-level models.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "themeChanged")]
     pub fn theme_changed(&mut self) {
         if let Some(m) = &self.js_model {
@@ -350,7 +348,6 @@ impl IronCanvas {
     /// one-shot orchestrator — never touching the live surfaces and
     /// never firing blit. See `SvgSurface::render` for the
     /// overlay-discard policy.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "exportSvg")]
     pub fn export_svg(&self, css_w: f64, css_h: f64) -> String {
         let Some(model) = self.model.as_ref() else {
@@ -367,7 +364,6 @@ impl IronCanvas {
     /// policy via `PdfSurface::render`. `Vec<u8>` auto-converts to
     /// `Uint8Array` across the wasm-bindgen boundary.
     #[cfg(feature = "pdf")]
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "exportPdf")]
     pub fn export_pdf(&self, css_w: f64, css_h: f64) -> Vec<u8> {
         let Some(model) = self.model.as_ref() else {
@@ -387,7 +383,6 @@ impl IronCanvas {
     /// JS-facing theme push from a host DOM node. Reads the upstream
     /// `--palette-*` custom properties off `el`'s computed style and
     /// builds a `CanvasTheme`.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "setThemeFromElement")]
     pub fn set_theme_from_element(&mut self, el: &web_sys::Element) {
         self.orch
@@ -730,7 +725,6 @@ impl IronCanvas {
     /// height so the displayed canvas matches. `exitPlayback` restores
     /// both. The pre-playback CSS dimensions and DPR are stashed on the
     /// session.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "loadRecording")]
     pub fn load_recording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
         if matches!(self.mode, CanvasMode::Recording(_)) {
@@ -770,7 +764,6 @@ impl IronCanvas {
     ///
     /// Refuses during an active capture — see `loadRecording` for the
     /// same reason.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "seekRecording")]
     pub fn seek_recording(&mut self, frame_idx: u32) -> Result<(), JsError> {
         match &mut self.mode {
@@ -798,7 +791,6 @@ impl IronCanvas {
     /// auto-pause contract would otherwise diverge: `Play` from the last
     /// frame would restart the timeline, but `Play` arriving one frame
     /// later (after the auto-pause) does not.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "playRecording")]
     pub fn play_recording(&mut self, now_ms: f64) -> Result<(), JsError> {
         let CanvasMode::Playback(s) = &mut self.mode else {
@@ -812,7 +804,6 @@ impl IronCanvas {
     }
 
     /// Halt the play loop. Idempotent.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "pauseRecording")]
     pub fn pause_recording(&mut self) {
         if let CanvasMode::Playback(s) = &mut self.mode {
@@ -822,7 +813,6 @@ impl IronCanvas {
 
     /// `true` while play is active. `false` when paused, at end-of-recording,
     /// or when no recording is loaded.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "isPlaying")]
     pub fn is_playing(&self) -> bool {
         matches!(
@@ -839,7 +829,6 @@ impl IronCanvas {
     /// Host pattern: call from the same rAF loop that drives `paintIfDirty`.
     /// `paintIfDirty` short-circuits while a session is loaded, so the two
     /// never paint in the same tick.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "tickPlayback")]
     pub fn tick_playback(&mut self, now_ms: f64) -> bool {
         let CanvasMode::Playback(s) = &mut self.mode else {
@@ -871,7 +860,6 @@ impl IronCanvas {
     /// worksheet returns on the next rAF tick. Restores the canvas CSS
     /// dimensions and resizes the orchestrator back to the pre-playback
     /// live size + DPR. No-op when no session is loaded.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "exitPlayback")]
     pub fn exit_playback(&mut self) {
         let CanvasMode::Playback(session) = std::mem::replace(&mut self.mode, CanvasMode::Live)
@@ -889,14 +877,12 @@ impl IronCanvas {
     }
 
     /// `true` while a playback session is loaded.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "playbackActive")]
     pub fn playback_active(&self) -> bool {
         matches!(self.mode, CanvasMode::Playback(_))
     }
 
     /// Total frames in the loaded recording, or 0 if none loaded.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "recordingFrameCount")]
     pub fn recording_frame_count(&self) -> u32 {
         if let CanvasMode::Playback(s) = &self.mode {
@@ -907,7 +893,6 @@ impl IronCanvas {
     }
 
     /// Current playback frame index, or 0 if none loaded.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "recordingCurrentFrame")]
     pub fn recording_current_frame(&self) -> u32 {
         if let CanvasMode::Playback(s) = &self.mode {

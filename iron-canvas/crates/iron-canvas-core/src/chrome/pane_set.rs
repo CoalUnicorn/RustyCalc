@@ -93,7 +93,8 @@ impl PaneSet {
     }
 
     /// Populate `rows` (frozen + scroll bands and `frozen_offset`) via
-    /// `AxisSlots::fill` (Phase B of `Chrome::build`; see `ARCHITECTURE.md`).
+    /// `AxisSlots::fill` (Phase B of `Chrome::build`; see the
+    /// [`chrome`](crate::chrome) module docs).
     /// Runs before the row-label measurement, so it does not depend on
     /// `row_header_thickness`.
     pub fn fill_rows(

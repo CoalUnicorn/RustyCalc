@@ -573,9 +573,9 @@ pub enum EvaluationMode {
 /// Run `f` on the model, optionally call `evaluate`.
 ///
 /// **PERFORMANCE OPTIMIZED:** Many `UserModel` methods call `evaluate()` internally.
-/// We pause evaluation before `f` so the model is evaluated at most once - after
-/// all mutations are done. This prevents double evaluation and can halve execution time.
-/// See docs/performance-evaluation.md for details.
+/// We `pause_evaluation()` before `f` and `resume_evaluation()` after, so the
+/// model is evaluated at most once — after all mutations are done. This prevents
+/// double evaluation and can halve execution time on formula-heavy sheets.
 ///
 /// **CALLER RESPONSIBILITY:** This function no longer automatically triggers redraws.
 /// The caller must emit appropriate events using `state.emit_event()`.

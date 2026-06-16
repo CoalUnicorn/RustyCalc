@@ -30,7 +30,7 @@ use crate::signal::GridSignals;
 /// via `clone_painter` at construction so paint methods don't need to
 /// re-borrow through the surface on every call.
 #[diagnostic::on_unimplemented(
-    note = "see the canvas-patterns skill for the `Surface` contract — reference impls live in WebSurface, SvgSurface, PdfSurface, MemSurface"
+    note = "a `Surface` owns one `Painter` and exposes `painter`, `clone_painter`, `resize`, `present`. Reference impls: `WebSurface` (iron-canvas-canvas2d), `SvgSurface` and `PdfSurface` (iron-canvas-export), `MemSurface` (iron-canvas-recorder)"
 )]
 pub trait Surface {
     type P: Painter + BlitPainter;

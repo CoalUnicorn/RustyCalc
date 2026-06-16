@@ -1,4 +1,4 @@
-//! Per-camera paint stack: Orchestrator<WebSurface> + DataGridModel,
+//! Per-camera paint stack: `Orchestrator<WebSurface>` + `DataGridModel`,
 //! the same composition as DataGridCanvas in iron-canvas-datagrid-web
 //! but driven natively — full CellStyle fidelity, no JS wire.
 

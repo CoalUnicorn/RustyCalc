@@ -1,7 +1,7 @@
 //! Share popover — shows the URL for the current workbook, an editable
 //! verification word, and a Copy button.
 //!
-//! Hosted by [`crate::components::chrome::toolbar::share_controls::ShareControls`]
+//! Hosted by `ShareControls`
 //! inside a `<Show when=open>` gate.
 
 use std::time::Duration;

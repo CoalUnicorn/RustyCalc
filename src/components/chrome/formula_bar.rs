@@ -1,5 +1,3 @@
-// See docs/leptos-patterns.md for component conventions.
-
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 

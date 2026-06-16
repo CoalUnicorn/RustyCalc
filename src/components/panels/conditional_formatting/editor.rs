@@ -1,6 +1,6 @@
 //! Conditional-formatting rule editor (right column of the CF dialog).
 //!
-//! Mirrors the in-progress [`CfRuleEditState`] into a set of local signals,
+//! Mirrors the in-progress [`crate::state::CfRuleEditState`] into a set of local signals,
 //! lets the user shape one rule (type, operator, formula, format), then writes
 //! it back through `add_/update_conditional_formatting`. Save/Delete emit a
 //! `FormatEvent::ConditionalFormattingChanged` so the canvas repaints and the

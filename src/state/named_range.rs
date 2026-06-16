@@ -13,7 +13,7 @@ use crate::input::formula::FormulaAnalysis;
 /// weight here.
 ///
 /// `sync_edit` works for both kinds of edit via the
-/// [`crate::input::formula::FormulaEditState`] trait.
+/// `FormulaEditState` trait.
 #[derive(Clone, Debug, PartialEq)]
 pub struct EditingDefinedName {
     /// `None` when creating a new row; `Some((name, scope))` when editing an
