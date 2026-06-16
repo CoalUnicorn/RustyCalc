@@ -588,15 +588,15 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
 
     fn begin_group(&self, class: GroupClass) {
         self.inner.begin_group(class);
-        if !self.enabled.get() {
-            return;
-        }
         let depth = self.skip_depth.get();
         if depth > 0 {
             // Already inside a suppressed group — bump depth and stay
             // suppressed; the matching `end_group` will balance via the
             // same counter.
             self.skip_depth.set(depth + 1);
+            return;
+        }
+        if !self.enabled.get() {
             return;
         }
         if self.skip_groups.borrow().contains(&class) {
@@ -610,13 +610,13 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
 
     fn end_group(&self) {
         self.inner.end_group();
-        if !self.enabled.get() {
-            return;
-        }
         let depth = self.skip_depth.get();
         if depth > 0 {
             // Match the suppressed begin; do not emit the end either.
             self.skip_depth.set(depth - 1);
+            return;
+        }
+        if !self.enabled.get() {
             return;
         }
         self.recorder.end_group();
@@ -1053,6 +1053,33 @@ mod tests {
             rect_fills, 1,
             "only the rect_fill inside Headers should be captured",
         );
+    }
+
+    #[test]
+    fn disabled_inside_skipped_group_still_balances_skip_depth() {
+        let surface = RecordingSurface::new(MemSurface::new());
+        surface.enable_recording();
+        let mut skip = HashSet::new();
+        skip.insert(GroupClass::Cells);
+        surface.set_skip_groups(skip);
+        surface.begin_frame();
+        let p = surface.painter();
+
+        p.begin_group(GroupClass::Cells);
+        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#aaa"));
+        surface.disable_recording();
+        p.end_group();
+
+        surface.enable_recording();
+        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#bbb"));
+        let ops = surface.end_frame();
+
+        assert_eq!(
+            ops.len(),
+            1,
+            "closing a skipped group while disabled must not leak skip_depth"
+        );
+        assert!(matches!(ops[0], DrawOp::RectFill { .. }));
     }
 
     #[test]

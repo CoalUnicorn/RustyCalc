@@ -67,19 +67,63 @@ impl<P: Painter> RendererCore<P> {
         };
 
         let theme = &frame.theme;
+        let reuses_slots = frame.kind.reuses_slots();
+
+        // On reused-slot frames, prior pixels are still visible until this
+        // method paints over them. A transient BridgeFailed fetch is therefore
+        // an instruction to hold the old pane atomically: no clear, no
+        // fingerprint commit, and no cache poisoning. Keep the prior buffers
+        // parked aside while the new fetch uses fresh scratch vectors. Fresh
+        // frames keep the old allocation-reuse path because there are no prior
+        // pane pixels to preserve.
+        let previous_buffers = if reuses_slots {
+            Some((
+                pane_buf.styles.take(),
+                pane_buf.values.take(),
+                pane_buf.cell_types.take(),
+                pane_buf.decorations.take(),
+            ))
+        } else {
+            None
+        };
 
         // Bulk-fetch styles + formatted values for the whole rectangular
         // range. UserModel default impls loop the per-cell accessors (no perf
         // change); JsBackedModel will override (W5) and collapse each to one
         // JS call per pane.
-        let mut pane_styles = pane_buf.styles.take();
+        let (mut pane_styles, mut pane_values, mut pane_cell_types, mut pane_decorations) =
+            match &previous_buffers {
+                Some((styles, values, cell_types, decorations)) => (
+                    Vec::with_capacity(styles.len()),
+                    Vec::with_capacity(values.len()),
+                    Vec::with_capacity(cell_types.len()),
+                    Vec::with_capacity(decorations.len()),
+                ),
+                None => (
+                    pane_buf.styles.take(),
+                    pane_buf.values.take(),
+                    pane_buf.cell_types.take(),
+                    pane_buf.decorations.take(),
+                ),
+            };
         model.get_cell_styles_in(frame.sheet, range, &mut pane_styles);
-        let mut pane_values = pane_buf.values.take();
         model.get_formatted_cell_values_in(frame.sheet, range, &mut pane_values);
-        let mut pane_cell_types = pane_buf.cell_types.take();
         model.get_cell_types_in(frame.sheet, range, &mut pane_cell_types);
-        let mut pane_decorations = pane_buf.decorations.take();
         model.get_cell_decorations_in(frame.sheet, range, &mut pane_decorations);
+
+        if reuses_slots
+            && (has_bridge_failure(&pane_styles)
+                || has_bridge_failure(&pane_values)
+                || has_bridge_failure(&pane_cell_types))
+        {
+            if let Some((styles, values, cell_types, decorations)) = previous_buffers {
+                pane_buf.styles.set(styles);
+                pane_buf.values.set(values);
+                pane_buf.cell_types.set(cell_types);
+                pane_buf.decorations.set(decorations);
+            }
+            return;
+        }
 
         // Fingerprint paint-skip: same content as the previous frame
         // ⇒ canvas pixels are still correct, skip the five-pass walk. Bulk
@@ -92,7 +136,7 @@ impl<P: Painter> RendererCore<P> {
         fps[pane_idx] = new_fp;
         frame.pane_fingerprints.set(fps);
 
-        if frame.kind.reuses_slots() {
+        if reuses_slots {
             if new_fp == frame.prev_pane_fingerprints[pane_idx] {
                 pane_buf.styles.set(pane_styles);
                 pane_buf.values.set(pane_values);
@@ -317,6 +361,10 @@ impl<P: Painter> RendererCore<P> {
         fps[pane_idx] = 0;
         frame.pane_fingerprints.set(fps);
     }
+}
+
+fn has_bridge_failure<T>(items: &[Fetched<T>]) -> bool {
+    items.iter().any(Fetched::is_bridge_failed)
 }
 
 /// Move the freshly-fetched strip cells into `pane_buf` at the indices

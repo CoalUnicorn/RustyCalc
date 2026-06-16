@@ -280,14 +280,18 @@ fn apply_blit_shift<E: Clone>(
 }
 
 /// Slice of `new` lying outside `prev` along the scroll axis. Returns
-/// `None` if the ranges are identical along `axis` (delta == 0). Under
-/// `screen_for_blit` qualification, `|delta| < extent` is guaranteed so the
-/// no-overlap path is defensive only.
+/// `None` if the ranges are identical along `axis` (delta == 0), or if a
+/// direct caller bypassed [`PaneBuffers::prepare_shift`] and handed us
+/// non-overlapping ranges. Valid blit callers prove overlap before this point.
 fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
     match axis {
         Axis::Row => {
             if new.r2 < prev.r1 || new.r1 > prev.r2 {
-                return Some(new);
+                debug_assert!(
+                    ranges_overlap(prev.r1, prev.r2, new.r1, new.r2),
+                    "compute_strip requires overlapping ranges from prepare_shift"
+                );
+                return None;
             }
             if new.r1 < prev.r1 {
                 Some(RCRange {
@@ -313,7 +317,11 @@ fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
         }
         Axis::Column => {
             if new.c2 < prev.c1 || new.c1 > prev.c2 {
-                return Some(new);
+                debug_assert!(
+                    ranges_overlap(prev.c1, prev.c2, new.c1, new.c2),
+                    "compute_strip requires overlapping ranges from prepare_shift"
+                );
+                return None;
             }
             if new.c1 < prev.c1 {
                 Some(RCRange {
@@ -335,5 +343,70 @@ fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
                 None
             }
         }
+    }
+}
+
+fn ranges_overlap(prev_start: i32, prev_end: i32, new_start: i32, new_end: i32) -> bool {
+    new_end >= prev_start && new_start <= prev_end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "compute_strip requires overlapping ranges")
+    )]
+    #[test]
+    fn compute_strip_rejects_non_overlapping_row_ranges() {
+        let prev = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 3,
+            c2: 4,
+        };
+        let new = RCRange {
+            r1: 10,
+            c1: 1,
+            r2: 12,
+            c2: 4,
+        };
+
+        #[cfg(debug_assertions)]
+        let _ = compute_strip(prev, new, Axis::Row);
+        #[cfg(not(debug_assertions))]
+        assert!(
+            compute_strip(prev, new, Axis::Row).is_none(),
+            "non-overlapping row ranges are invalid blit work, not a strip"
+        );
+    }
+
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "compute_strip requires overlapping ranges")
+    )]
+    #[test]
+    fn compute_strip_rejects_non_overlapping_column_ranges() {
+        let prev = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 4,
+            c2: 3,
+        };
+        let new = RCRange {
+            r1: 1,
+            c1: 10,
+            r2: 4,
+            c2: 12,
+        };
+
+        #[cfg(debug_assertions)]
+        let _ = compute_strip(prev, new, Axis::Column);
+        #[cfg(not(debug_assertions))]
+        assert!(
+            compute_strip(prev, new, Axis::Column).is_none(),
+            "non-overlapping column ranges are invalid blit work, not a strip"
+        );
     }
 }

@@ -132,7 +132,15 @@ pub fn slot_at<'a, S: AxisSlot>(frozen: &'a [S], scroll: &'a [S], id: i32) -> Op
         frozen.get((id - 1) as usize)
     } else {
         let first = scroll.first()?.id();
-        scroll.get((id - first) as usize)
+        debug_assert!(
+            scroll
+                .iter()
+                .enumerate()
+                .all(|(i, slot)| slot.id() == first + i as i32),
+            "slot_at requires dense contiguous scroll ids"
+        );
+        let idx = id.checked_sub(first)? as usize;
+        scroll.get(idx).filter(|slot| slot.id() == id)
     }
 }
 

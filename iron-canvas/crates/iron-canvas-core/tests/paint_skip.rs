@@ -82,3 +82,30 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
     );
     assert!(br_after > 0, "mutated pane must repaint");
 }
+
+#[test]
+fn slots_reuse_holds_prior_pane_on_bridge_failure() {
+    let m = TestModel::synthetic_grid();
+    m.set_cell(1, 1, "still here");
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let painter = std::rc::Rc::new(RecorderPainter::new());
+    let core = RendererCore::for_layer(std::rc::Rc::clone(&painter));
+
+    core.render_pane(&m, PaneRegion::BottomRight, &frame);
+    assert!(
+        !painter.ops().is_empty(),
+        "first paint must populate prior pane pixels and cache"
+    );
+    promote_to_slots_reuse(&mut frame);
+
+    m.set_value_bridge_fail(true);
+    let before_failure = painter.ops().len();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame);
+
+    assert_eq!(
+        painter.ops().len(),
+        before_failure,
+        "BridgeFailed during SlotsReuse must hold prior pixels, not clear and repaint blank"
+    );
+}

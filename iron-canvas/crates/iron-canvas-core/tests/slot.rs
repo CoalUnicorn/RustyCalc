@@ -122,6 +122,39 @@ fn slot_at_finds_frozen_then_scroll_then_misses() {
     assert!(slot_at(&frozen, &scroll, 99).is_none());
 }
 
+#[cfg_attr(
+    debug_assertions,
+    should_panic(expected = "dense contiguous scroll ids")
+)]
+#[test]
+fn slot_at_rejects_sparse_scroll_candidate() {
+    let frozen = vec![ColSlot {
+        col: 1,
+        left: 0,
+        width: 50,
+    }];
+    let scroll = vec![
+        ColSlot {
+            col: 7,
+            left: 50,
+            width: 50,
+        },
+        ColSlot {
+            col: 9,
+            left: 100,
+            width: 50,
+        },
+    ];
+
+    #[cfg(debug_assertions)]
+    let _ = slot_at(&frozen, &scroll, 8);
+    #[cfg(not(debug_assertions))]
+    assert!(
+        slot_at(&frozen, &scroll, 8).is_none(),
+        "sparse scroll ids must not index through to the next physical slot"
+    );
+}
+
 #[test]
 fn slot_at_frozen_only_works_with_empty_scroll() {
     let frozen = vec![
