@@ -32,6 +32,8 @@ pub struct EditingCell {
     /// Cached result of the last `analyze_formula()` call.
     /// Updated synchronously on each `on_input` event in formula_bar and cell_editor.
     pub(crate) formula_analysis: FormulaAnalysis,
-    /// Cursor position (byte offset) in `text`, updated on every input event.
+    /// Cursor position as a UTF-8 byte offset into `text` — not the DOM's
+    /// UTF-16 `selectionEnd`, which `sync_edit` converts. Updated on every
+    /// input event.
     pub(crate) cursor: usize,
 }

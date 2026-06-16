@@ -32,6 +32,10 @@ use super::analysis::{FormulaAnalysis, analyze_formula};
 
 /// Extract `(value, cursor)` from an input or textarea event target.
 ///
+/// `cursor` is a **UTF-16** code-unit offset (the DOM's `selectionEnd` unit),
+/// not a byte offset — feed it through [`sync_edit`], which converts to the
+/// byte offset that `EditingCell.cursor` and its readers assume.
+///
 /// Both `HtmlInputElement` and `HtmlTextAreaElement` expose `value()` and
 /// `selection_end()`, so callers don't need to branch on element type.
 /// `selection_end` can be `None` when the element hasn't received focus yet —
@@ -74,6 +78,8 @@ pub fn read_value_and_cursor(target: &web_sys::EventTarget) -> Option<(String, u
 /// not `text`) without either implementor leaking through the trait.
 pub trait FormulaEditState {
     fn context_cell(&self) -> CellAddress;
+    /// `cursor` is a UTF-8 byte offset into `text` — `sync_edit` has already
+    /// converted it from the DOM's UTF-16 unit.
     fn apply_edit(&mut self, text: String, cursor: usize, analysis: FormulaAnalysis);
 }
 
@@ -110,6 +116,10 @@ impl FormulaEditState for EditingDefinedName {
 /// No-ops when no session exists — the caller owns the decision to start
 /// one (e.g. formula bar's first-keystroke Accept path). Keeping that policy
 /// out here means every editor site can share the body without coupling.
+///
+/// `cursor` is the DOM's UTF-16 `selectionEnd`; it is converted to a UTF-8
+/// byte offset here — the single boundary — before being stored, so every
+/// downstream reader can index the formula string directly.
 pub fn sync_edit<T>(
     editing: Split<Option<T>>,
     value: String,
@@ -121,6 +131,12 @@ pub fn sync_edit<T>(
 {
     editing.update(|slot| {
         if let Some(c) = slot {
+            // `cursor` arrives as the DOM's UTF-16 `selectionEnd`; convert to a
+            // UTF-8 byte offset before storing. Every reader of the stored
+            // cursor — `is_in_reference_mode`, `splice_ref`, `refs_at_cursor` —
+            // indexes the formula by byte, so this is the single boundary that
+            // upholds the invariant documented on `EditingCell.cursor`.
+            let cursor = utf16_offset_to_byte(&value, cursor);
             let analysis = analyze_formula(&value, c.context_cell(), sheet_names, defined_names);
             c.apply_edit(value, cursor, analysis);
         }

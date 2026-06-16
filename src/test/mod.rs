@@ -9,6 +9,7 @@ mod camera;
 mod clipboard_bridge;
 mod color_picker;
 mod coord;
+mod edit_sync;
 mod formula_analysis;
 mod formula_input;
 mod formula_overlay;

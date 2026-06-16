@@ -26,6 +26,8 @@ pub struct EditingDefinedName {
     /// against ironcalc's `new_defined_name` / `update_defined_name` (both
     /// expect the body, not the `=…` form).
     pub(crate) formula: String,
+    /// Cursor position as a UTF-8 byte offset into `formula` (converted from
+    /// the DOM's UTF-16 by `sync_edit`).
     pub(crate) cursor: usize,
     pub(crate) formula_analysis: FormulaAnalysis,
     /// Cell whose position interprets relative refs in `formula`. Captured
