@@ -194,7 +194,7 @@ fn finish_commit(model: ModelStore, state: &WorkbookState, edit: &EditingCell, d
     mutate(model, EvaluationMode::Deferred, |m| m.nav_arrow(dir));
 
     let nav_address = model.with_value(CellAddress::from_view);
-    state.emit_events(vec![
+    let mut events = vec![
         SpreadsheetEvent::Content(ContentEvent::CellChanged {
             // The edited cell — `nav_arrow` above already moved the active
             // cell, so `active_cell()` here would report where the cursor
@@ -204,6 +204,9 @@ fn finish_commit(model: ModelStore, state: &WorkbookState, edit: &EditingCell, d
             old_value: None,
             new_value: Some(edit.text.clone()),
         }),
+        SpreadsheetEvent::Content(ContentEvent::CalculationUpdated {
+            affected_sheets: vec![edit.address.sheet],
+        }),
         SpreadsheetEvent::Navigation(NavigationEvent::EditingEnded {
             address: model.with_value(|m| m.active_cell()),
             committed: true,
@@ -211,7 +214,13 @@ fn finish_commit(model: ModelStore, state: &WorkbookState, edit: &EditingCell, d
         SpreadsheetEvent::Navigation(NavigationEvent::SelectionChanged {
             address: nav_address,
         }),
-    ]);
+    ];
+    if edit.text.starts_with('=') {
+        events.push(SpreadsheetEvent::Content(ContentEvent::FormulaChanged {
+            address: edit.address,
+        }));
+    }
+    state.emit_events(events);
 
     crate::util::refocus_workbook();
 }

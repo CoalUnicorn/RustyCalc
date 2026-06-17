@@ -5,7 +5,6 @@ use crate::model::CssColor;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum FormatEvent {
-    #[allow(dead_code)]
     CellStyleChanged {
         address: CellAddress,
     },

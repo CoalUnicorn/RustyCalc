@@ -38,6 +38,20 @@ fn body_clamps_leading_corner_and_keeps_shape() {
     assert_eq!(out, anchor(2, 1, 4, 3));
 }
 
+#[test]
+fn body_clamps_trailing_corner_and_keeps_shape() {
+    let out = dragged_ref_range(
+        anchor(LAST_ROW - 2, LAST_COLUMN - 2, LAST_ROW, LAST_COLUMN),
+        RefZone::Body,
+        cell(LAST_ROW - 1, LAST_COLUMN - 1),
+        cell(LAST_ROW + 10, LAST_COLUMN + 10),
+    );
+    assert_eq!(
+        out,
+        anchor(LAST_ROW - 2, LAST_COLUMN - 2, LAST_ROW, LAST_COLUMN)
+    );
+}
+
 // Body — anchor stored un-normalized (B6:B4 as the user typed it)
 // must drag identically to the normalized form.
 #[test]
@@ -140,6 +154,31 @@ fn corner_top_left_collapses_when_cursor_past_br() {
         cell(12, 6),
     );
     assert_eq!(out, anchor(10, 5, 10, 5));
+}
+
+#[test]
+fn edge_and_corner_drags_clamp_to_sheet_max() {
+    let edge = dragged_ref_range(
+        anchor(LAST_ROW - 3, LAST_COLUMN - 3, LAST_ROW - 1, LAST_COLUMN - 1),
+        RefZone::Edge(Side::Bottom),
+        cell(LAST_ROW - 1, LAST_COLUMN - 2),
+        cell(LAST_ROW + 99, LAST_COLUMN - 2),
+    );
+    assert_eq!(
+        edge,
+        anchor(LAST_ROW - 3, LAST_COLUMN - 3, LAST_ROW, LAST_COLUMN - 1)
+    );
+
+    let corner = dragged_ref_range(
+        anchor(LAST_ROW - 3, LAST_COLUMN - 3, LAST_ROW - 1, LAST_COLUMN - 1),
+        RefZone::Corner(RectCorner::BottomRight),
+        cell(LAST_ROW - 1, LAST_COLUMN - 1),
+        cell(LAST_ROW + 99, LAST_COLUMN + 99),
+    );
+    assert_eq!(
+        corner,
+        anchor(LAST_ROW - 3, LAST_COLUMN - 3, LAST_ROW, LAST_COLUMN)
+    );
 }
 
 // --- header_span tests ---

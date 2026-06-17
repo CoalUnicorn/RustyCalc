@@ -20,9 +20,11 @@ pub fn StatusBar() -> impl IntoView {
         let edit = state.editing_cell.get()?;
         match &edit.formula_analysis.status {
             FormulaStatus::NotFormula | FormulaStatus::Valid { .. } => None,
-            FormulaStatus::ParseError(e) => {
-                Some(format!("Parse error at col {}: {}", e.position, e.message))
-            }
+            FormulaStatus::ParseError(e) => Some(format!(
+                "Parse error at col {}: {}",
+                e.position + 1,
+                e.message
+            )),
             FormulaStatus::LexerError(e) => {
                 Some(format!("Syntax error at col {}: {}", e.position, e.message))
             }

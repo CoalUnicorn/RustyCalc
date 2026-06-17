@@ -6,7 +6,7 @@ use ironcalc_base::{
 };
 use leptos::prelude::WithValue;
 
-use crate::coord::{CellArea, SheetRange};
+use crate::coord::{CellAddress, CellArea, SheetRange};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
@@ -106,9 +106,7 @@ pub fn execute_format(
                 },
             )?;
 
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetFontFamily(family) => {
             let name = family.model_name();
@@ -120,9 +118,7 @@ pub fn execute_format(
                 |m| -> Result<(), FormatError> { set_font_name(m, name) },
             )?;
 
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetTextColor(hex) => {
             // IronCalc "font.color": empty string clears (-> transparent), hex string sets.
@@ -140,9 +136,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetBackgroundColor(hex) => {
             // IronCalc "fill.fg_color": empty string clears, hex string sets.
@@ -184,9 +178,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetBorder {
             side,
@@ -219,9 +211,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetNumFmt(code) => {
             let sa = model.with_value(SheetRange::from_view);
@@ -236,9 +226,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetHorizontalAlign(align) => {
             // HorizontalAlignment::Display gives the exact lowercase string ironcalc expects.
@@ -254,9 +242,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetVerticalAlign(align) => {
             let value = align.to_string();
@@ -271,9 +257,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::IncreaseDecimals | FormatAction::DecreaseDecimals => {
             let delta = if matches!(action, FormatAction::IncreaseDecimals) {
@@ -294,9 +278,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::ClearFormatting => {
             let sa = model.with_value(SheetRange::from_view);
@@ -310,9 +292,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
     }
     Ok(())
@@ -344,10 +324,26 @@ fn toggle_style(
         },
     )?;
 
-    state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-        area: sa.area.normalized().with_sheet(sa.sheet),
-    }));
+    emit_style_changed(state, sa);
     Ok(())
+}
+
+fn emit_style_changed(state: &WorkbookState, sa: SheetRange) {
+    let area = sa.area.normalized();
+    let event = if area.is_single_cell() {
+        FormatEvent::CellStyleChanged {
+            address: CellAddress {
+                sheet: sa.sheet,
+                row: area.r1,
+                column: area.c1,
+            },
+        }
+    } else {
+        FormatEvent::RangeStyleChanged {
+            area: area.with_sheet(sa.sheet),
+        }
+    };
+    state.emit_event(SpreadsheetEvent::Format(event));
 }
 
 /// Adjust the number of decimal places in a format string by `delta` (+1 or -1).

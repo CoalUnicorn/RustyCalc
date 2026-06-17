@@ -209,7 +209,7 @@ pub fn insert_newline_at_caret(
 /// Offsets at or past the end clamp to `s.len()`; one that would land
 /// mid-surrogate-pair resolves to the boundary just before it, since surrogate
 /// halves can't be addressed in UTF-8 anyway.
-fn utf16_offset_to_byte(s: &str, utf16_off: usize) -> usize {
+pub fn utf16_offset_to_byte(s: &str, utf16_off: usize) -> usize {
     let mut u16_count = 0;
     for (byte_idx, ch) in s.char_indices() {
         // Check before consuming this char: once the running UTF-16 count has

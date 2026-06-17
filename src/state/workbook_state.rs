@@ -96,6 +96,10 @@ pub enum ActiveDrawer {
 /// `None` when no rule is being edited (initial state, or after Save/Cancel).
 #[derive(Debug, Clone)]
 pub struct CfRuleEditState {
+    /// The sheet this rule belongs to, pinned when the edit begins. The CF
+    /// drawer is non-modal, so without this Save would target whatever sheet is
+    /// active at click time, not the one the rule was opened from (#18).
+    pub sheet: u32,
     /// `None` for new rules; `Some(idx)` for editing an existing rule at that index.
     pub index: Option<u32>,
     /// The sqref range (e.g. "A1:C10") — user can type or use cell selection.
@@ -131,6 +135,23 @@ impl WorkbookState {
             range_capture: Split::new(None),
             cameras: Split::new(Vec::new()),
         }
+    }
+
+    /// Reset all transient view/edit state to its initial (post-`new`) values.
+    /// Call this whenever the active workbook is swapped: the CF/named-range
+    /// drawers are non-modal and resolve their target lazily, so a rule left
+    /// mid-edit would Save into the new workbook, and an armed range-capture or
+    /// the old workbook's cameras would point at sheets that no longer exist
+    /// (#22). `DocumentReset` can't drive this — row/col ops and resize emit it
+    /// too and must not wipe open drawers.
+    pub(crate) fn reset_view_state(&self) {
+        self.editing_cell.set(None);
+        self.drag.set(DragState::Idle);
+        self.active_drawer.set(None);
+        self.editing_named_range.set(None);
+        self.editing_cf_rule.set(None);
+        self.range_capture.set(None);
+        self.cameras.set(Vec::new());
     }
 
     /// Active point-mode reference as a `RefNode`, or a 1x1 reference at the
@@ -194,10 +215,14 @@ impl WorkbookState {
         <gloo_storage::LocalStorage as GlooStorage>::set("rustycalc_recent_colors", &string_colors)
             .ok();
 
-        // Emit event for reactive subscribers
-        self.emit_event(SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
-            colors: string_colors,
-        }));
+        self.emit_events([
+            SpreadsheetEvent::Format(FormatEvent::RecentColorsUpdated {
+                colors: string_colors.clone(),
+            }),
+            SpreadsheetEvent::Format(FormatEvent::DocumentColorsChanged {
+                colors: string_colors,
+            }),
+        ]);
     }
 
     /// Restore keyboard focus to whichever formula input the user was editing.

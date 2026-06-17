@@ -201,29 +201,38 @@ pub fn CfRuleList() -> impl IntoView {
     let state = expect_context::<WorkbookState>();
     let model = expect_context::<ModelStore>();
 
+    // The sheet the list is bound to. A Memo so it re-notifies only when the
+    // active sheet actually changes — the navigation bus fires on every
+    // selection/scroll, but `get_selected_sheet` dedups via PartialEq, so the
+    // list won't rebuild on unrelated nav events. #18: the CF drawer is
+    // non-modal, so the list and its delete/edit actions must track the active
+    // sheet rather than read it lazily at click time.
+    let active_sheet = Memo::new(move |_| {
+        let _ = state.events.navigation.get();
+        model.with_value(|m| m.get_selected_sheet())
+    });
+
     // Recompute on every format event — CF add/update/delete each emit a
-    // `FormatEvent::ConditionalFormattingChanged`, which replaces this signal
-    // and re-runs the derive. Empty while the dialog is closed (not mounted).
+    // `FormatEvent::ConditionalFormattingChanged` — and whenever the active
+    // sheet changes. Empty while the dialog is closed (not mounted).
     let rules: Signal<Vec<ConditionalFormatting>> = Signal::derive(move || {
         let _ = state.events.format.get();
+        let sheet = active_sheet.get();
         if state.active_drawer.get() != Some(ActiveDrawer::ConditionalFormatting) {
             return Vec::new();
         }
-        model.with_value(|m| {
-            let sheet = m.get_selected_sheet();
-            m.get_conditional_formatting_list(sheet).unwrap_or_default()
-        })
+        model.with_value(|m| m.get_conditional_formatting_list(sheet).unwrap_or_default())
     });
 
     let delete_rule = move |index: u32| {
+        // Operate on the sheet the list is showing, not the live selection (#18).
+        let sheet = active_sheet.get_untracked();
         let result = try_mutate(model, EvaluationMode::Immediate, |m| {
-            let sheet = m.get_selected_sheet();
             m.delete_conditional_formatting(sheet, index)
         });
         match result {
             Ok(()) => {
                 state.editing_cf_rule.set(None);
-                let sheet = model.with_value(|m| m.get_selected_sheet());
                 state.emit_event(SpreadsheetEvent::Format(
                     FormatEvent::ConditionalFormattingChanged { sheet },
                 ));
@@ -233,10 +242,10 @@ pub fn CfRuleList() -> impl IntoView {
     };
 
     let edit_rule = move |idx: usize, cf: &ConditionalFormatting| {
+        let sheet = active_sheet.get_untracked();
         // Resolve the rule's real differential format before editing — the
         // stored `CfRule` only carries a `dxf_id`.
         let format = model.with_value(|m| {
-            let sheet = m.get_selected_sheet();
             m.get_dxf_for_conditional_formatting(sheet, idx as u32)
                 .ok()
                 .flatten()
@@ -250,6 +259,7 @@ pub fn CfRuleList() -> impl IntoView {
             return;
         };
         let edit = CfRuleEditState {
+            sheet,
             index: Some(idx as u32),
             range: cf.range.clone(),
             rule,
@@ -259,6 +269,7 @@ pub fn CfRuleList() -> impl IntoView {
 
     let new_rule = move |_: web_sys::MouseEvent| {
         let default = CfRuleEditState {
+            sheet: active_sheet.get_untracked(),
             index: None,
             range: String::new(),
             rule: CfRuleInput::CellIs {

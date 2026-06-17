@@ -9,7 +9,7 @@ use leptos::prelude::{UpdateValue, WithValue};
 
 use crate::app_state::AppState;
 use crate::events::{SpreadsheetEvent, StructureEvent};
-use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
+use crate::state::{ModelStore, StatusMessage, WorkbookState};
 use crate::storage::{self, WorkbookId};
 
 /// Workbook-level lifecycle operations.
@@ -108,7 +108,8 @@ pub fn execute_workbook(
             if let Some(uuid) = state.current_uuid.get_untracked() {
                 model.with_value(|m| storage::save(&uuid, m));
             }
-            let (new_uuid, new_model) = storage::create_new_from(new_model);
+            let (new_uuid, new_model) =
+                storage::create_new_from(new_model, storage::WorkbookOrigin::FileImport);
             activate(new_uuid, new_model, model, state);
             app.bump_registry();
         }
@@ -127,7 +128,6 @@ fn activate(
     model.update_value(|m| *m = new_model);
     storage::set_selected_uuid(&uuid);
     state.current_uuid.set(Some(uuid));
-    state.editing_cell.set(None);
-    state.drag.set(DragState::Idle);
+    state.reset_view_state();
     state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
 }

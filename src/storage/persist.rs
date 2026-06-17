@@ -199,23 +199,38 @@ pub fn create_new() -> (WorkbookId, UserModel<'static>) {
     (uuid, model)
 }
 
+/// Where a freshly-registered workbook came from. A file import is
+/// user-provided and trusted; a share link is quarantined (badged) until the
+/// first edit promotes it — so only `ShareLink` sets `shared_from_link` (#19).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WorkbookOrigin {
+    ShareLink,
+    FileImport,
+}
+
 /// Persist an already-constructed model under a fresh UUID and set it as selected.
 ///
-/// Used when the user uploads a file - the model is already in memory; we just
-/// need to register and persist it.
+/// Used when the user uploads a file or accepts a shared link — the model is
+/// already in memory; we just register and persist it. `origin` drives the
+/// shared-link quarantine badge.
 /// Safety: caller must ensure model originated from a trusted source
 /// (validated by both callers upstream — `share_verify.rs` verifies the
 /// shared payload, `workbook.rs` uploads from a user-provided file).
-pub fn create_new_from(model: UserModel<'static>) -> (WorkbookId, UserModel<'static>) {
+pub fn create_new_from(
+    model: UserModel<'static>,
+    origin: WorkbookOrigin,
+) -> (WorkbookId, UserModel<'static>) {
     let uuid = WorkbookId::new();
     save(&uuid, &model);
-    // Mark as ingested from a shared link so the sidebar can show a
-    // quarantine badge. The flag is cleared on the first user edit.
-    let mut registry = load_registry();
-    if let Some(meta) = registry.get_mut(&uuid) {
-        meta.shared_from_link = true;
+    // Badge share-link ingests so the sidebar can quarantine them; a file
+    // import is trusted and stays unbadged. The flag clears on the first edit.
+    if origin == WorkbookOrigin::ShareLink {
+        let mut registry = load_registry();
+        if let Some(meta) = registry.get_mut(&uuid) {
+            meta.shared_from_link = true;
+        }
+        save_registry(&registry);
     }
-    save_registry(&registry);
     set_selected_uuid(&uuid);
     (uuid, model)
 }

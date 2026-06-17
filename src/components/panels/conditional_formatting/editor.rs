@@ -18,7 +18,7 @@ use crate::components::ui::formula_field::FormulaField;
 use crate::components::ui::range_picker::{RangeFormat, RangePickerInput};
 use crate::coord::{CellAddress, TextRef, selection_a1_relative};
 use crate::events::{FormatEvent, SpreadsheetEvent};
-use crate::input::formula::{analyze_formula, splice_ref};
+use crate::input::formula::{analyze_formula, splice_ref, utf16_offset_to_byte};
 use crate::model::frontend_model::DefinedNameManager;
 use crate::model::style_types::HexColor;
 use crate::model::{EvaluationMode, SheetRoster, try_mutate};
@@ -487,16 +487,21 @@ pub fn CfRuleEditor() -> impl IntoView {
     let formula_refs = Signal::derive(move || formula_analysis.with(|a| a.refs().to_vec()));
     let formula_is_error = Signal::derive(move || formula_analysis.with(|a| a.has_any_error()));
 
-    // Grid point-picking state. `formula_cursor` tracks the caret so a grid
-    // selection can splice a reference at the right spot; `cf_formula_prev_span`
-    // remembers the just-inserted ref so a continued drag grows/replaces it
-    // instead of appending a new ref on every selection tick.
+    // Grid point-picking state. `formula_cursor` tracks the caret as a *byte*
+    // offset (converted in on_formula_input) so a grid selection can splice a
+    // reference at the right spot; `cf_formula_prev_span` remembers the
+    // just-inserted ref so a continued drag grows/replaces it instead of
+    // appending a new ref on every selection tick.
     let formula_cursor = RwSignal::new(0usize);
     let cf_formula_prev_span = RwSignal::new(None::<TextRef>);
 
     let on_formula_input = Callback::new(move |(v, cursor): (String, usize)| {
+        // `cursor` arrives as a UTF-16 offset (DOM selectionStart); store it as a
+        // byte offset so TextRef::at / splice_ref below slice `formula_text`
+        // correctly — the same invariant sync_edit keeps for the cell editor.
+        // Convert against `v` before it is moved into the signal.
+        formula_cursor.set(utf16_offset_to_byte(&v, cursor));
         formula_text.set(v);
-        formula_cursor.set(cursor);
         // Manual typing disarms grid-capture (so a stray selection can't clobber
         // hand-edited text) and invalidates the remembered insert span.
         if state.range_capture.get_untracked() == Some(RangeCaptureTarget::CfFormula) {
@@ -983,14 +988,15 @@ pub fn CfRuleEditor() -> impl IntoView {
             return;
         }
 
+        // Target the sheet pinned when the edit began, not the live selection:
+        // the CF drawer is non-modal, so the user may have switched sheets (#18).
+        let sheet = edit.sheet;
         let result = if let Some(index) = edit.index {
             try_mutate(model, EvaluationMode::Immediate, |m| {
-                let sheet = m.get_selected_sheet();
                 m.update_conditional_formatting(sheet, index, &range, rule)
             })
         } else {
             try_mutate(model, EvaluationMode::Immediate, |m| {
-                let sheet = m.get_selected_sheet();
                 m.add_conditional_formatting(sheet, &range, rule)
             })
         };
@@ -998,7 +1004,6 @@ pub fn CfRuleEditor() -> impl IntoView {
         match result {
             Ok(()) => {
                 state.editing_cf_rule.set(None);
-                let sheet = model.with_value(|m| m.get_selected_sheet());
                 state.emit_event(SpreadsheetEvent::Format(
                     FormatEvent::ConditionalFormattingChanged { sheet },
                 ));

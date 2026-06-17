@@ -86,7 +86,9 @@ pub fn FileOps() -> impl IntoView {
                     execute_workbook(WorkbookAction::Import(new_model), model, &state, app);
                 }
                 Err(e) => {
-                    web_sys::console::warn_1(&format!("xlsx import failed: {e}").into());
+                    state
+                        .status
+                        .set(Some(StatusMessage::Error(format!("Import failed: {e}"))));
                 }
             }
             // Allow the same file to be re-imported next time.
@@ -106,7 +108,9 @@ pub fn FileOps() -> impl IntoView {
                     }
                 }
                 Err(e) => {
-                    web_sys::console::warn_1(&format!("xlsx export failed: {e}").into());
+                    state
+                        .status
+                        .set(Some(StatusMessage::Error(format!("Export failed: {e}"))));
                 }
             }
         });

@@ -18,6 +18,7 @@ mod status;
 pub use analysis::{FormulaAnalysis, analyze_formula};
 pub use edit_sync::{
     insert_newline_at_caret, read_value_and_cursor, suppress_navigation_defaults, sync_edit,
+    utf16_offset_to_byte,
 };
 pub use input::{PointMoveCtx, PointMoveOutcome, splice_dragged_ref, splice_ref, try_point_move};
 pub use ref_mode::is_in_reference_mode;

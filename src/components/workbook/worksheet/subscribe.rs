@@ -52,10 +52,12 @@ pub(super) fn install_subscribe_effect(
 
         // Push the same state into the IronCanvas orchestrator. Each setter
         // value-compares, so redundant pushes (e.g. format-only events not
-        // touching theme) flip dirty only on the layers that actually need
-        // it. requestRepaint() at the end is the safety net that ensures
-        // content/format/structure events still fan out to both layers even
-        // when no value changed locally.
+        // touching theme) flip dirty only on the layers that actually need it.
+        // Dirty routing is then explicit per event class (below): structure and
+        // format request a full repaint (they can move slot geometry); content
+        // takes the markContentDirty fast path, raising the overlay bit only
+        // when a nav event co-fires (commit+Enter); nav-only repaints just the
+        // overlay.
         let OverlayTuple {
             extend_to,
             point_range,

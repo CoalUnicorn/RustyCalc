@@ -58,11 +58,28 @@ pub fn sanitize_name(raw: &str) -> String {
         })
         .collect();
 
-    if cleaned.len() <= 128 {
+    if cleaned.chars().count() <= 128 {
         cleaned
     } else {
         // Truncate at a char boundary.
         cleaned.chars().take(128).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_name;
+
+    #[test]
+    fn sanitize_name_keeps_128_multibyte_chars() {
+        let name = "é".repeat(128);
+        assert_eq!(sanitize_name(&name), name);
+    }
+
+    #[test]
+    fn sanitize_name_truncates_by_chars_not_bytes() {
+        let name = "é".repeat(129);
+        assert_eq!(sanitize_name(&name).chars().count(), 128);
     }
 }
 

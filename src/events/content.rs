@@ -13,11 +13,9 @@ pub enum ContentEvent {
     RangeChanged {
         sheet_area: SheetRange,
     },
-    #[allow(dead_code)]
     FormulaChanged {
         address: CellAddress,
     },
-    #[allow(dead_code)]
     CalculationUpdated {
         affected_sheets: Vec<u32>,
     },

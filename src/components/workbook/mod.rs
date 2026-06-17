@@ -175,9 +175,12 @@ pub fn Workbook() -> impl IntoView {
                     state.status.set(Some(StatusMessage::Error(e.to_string())));
                 }
                 let sheet_area = model.with_value(SheetRange::from_view);
-                state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
-                    sheet_area,
-                }));
+                state.emit_events([
+                    SpreadsheetEvent::Content(ContentEvent::RangeChanged { sheet_area }),
+                    SpreadsheetEvent::Content(ContentEvent::CalculationUpdated {
+                        affected_sheets: vec![sheet_area.sheet],
+                    }),
+                ]);
                 ev.prevent_default();
             }
             SpreadsheetAction::Paste => {
@@ -339,17 +342,23 @@ fn paste_from_clipboard(
                 }
             });
             let sheet_area = model.with_value(SheetRange::from_view);
-            state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
-                sheet_area,
-            }));
+            state.emit_events([
+                SpreadsheetEvent::Content(ContentEvent::RangeChanged { sheet_area }),
+                SpreadsheetEvent::Content(ContentEvent::CalculationUpdated {
+                    affected_sheets: vec![sheet_area.sheet],
+                }),
+            ]);
         });
     }
 
     if internal_pasted {
         let sheet_area = model.with_value(SheetRange::from_view);
-        state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
-            sheet_area,
-        }));
+        state.emit_events([
+            SpreadsheetEvent::Content(ContentEvent::RangeChanged { sheet_area }),
+            SpreadsheetEvent::Content(ContentEvent::CalculationUpdated {
+                affected_sheets: vec![sheet_area.sheet],
+            }),
+        ]);
     }
 
     internal_pasted

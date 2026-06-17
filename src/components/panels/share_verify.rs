@@ -45,10 +45,11 @@ pub fn ShareVerify() -> impl IntoView {
         if let Some(prev) = state.current_uuid.get_untracked() {
             model.with_value(|m| storage::save(&prev, m));
         }
-        let (new_uuid, new_model) = storage::create_new_from(loaded);
+        let (new_uuid, new_model) =
+            storage::create_new_from(loaded, storage::WorkbookOrigin::ShareLink);
         model.update_value(|m| *m = new_model);
         state.current_uuid.set(Some(new_uuid));
-        state.editing_cell.set(None);
+        state.reset_view_state();
         state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
         app.bump_registry();
         let _ = window().location().set_hash("");

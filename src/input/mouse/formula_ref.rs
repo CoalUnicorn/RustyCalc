@@ -12,6 +12,7 @@ use crate::coord::{CellAddress, SheetRange};
 use crate::input::formula::splice_dragged_ref;
 use crate::model::FormulaAnalyzer;
 use crate::state::{DragState, ModelStore, RefOverride, WorkbookState};
+use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 use iron_canvas_core::types::ui::{RectCorner, RefZone, Side};
 
 /// never runs. `ev.prevent_default()` only suppresses the browser default.
@@ -107,8 +108,8 @@ pub(crate) fn dragged_ref_range(
     let cell = |r: i32, c: i32, r2: i32, c2: i32| {
         let r1 = r.max(1).min(r2);
         let c1 = c.max(1).min(c2);
-        let r2 = r2.max(1);
-        let c2 = c2.max(1);
+        let r2 = r2.clamp(1, LAST_ROW);
+        let c2 = c2.clamp(1, LAST_COLUMN);
         SheetRange::new(anchor.sheet, r1, c1, r2, c2)
     };
     match zone {
@@ -120,8 +121,10 @@ pub(crate) fn dragged_ref_range(
             let dc = cursor.column - grab_cell.column;
             // Clamp the leading corner; apply the *clamped* delta to the
             // trailing corner so width/height stay constant (Excel-like move).
-            let new_r1 = (n.r1 + dr).max(1);
-            let new_c1 = (n.c1 + dc).max(1);
+            let max_r1 = LAST_ROW - n.height() + 1;
+            let max_c1 = LAST_COLUMN - n.width() + 1;
+            let new_r1 = (n.r1 + dr).clamp(1, max_r1);
+            let new_c1 = (n.c1 + dc).clamp(1, max_c1);
             let actual_dr = new_r1 - n.r1;
             let actual_dc = new_c1 - n.c1;
             let new_r2 = n.r2 + actual_dr;
