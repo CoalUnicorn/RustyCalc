@@ -13,7 +13,7 @@ use crate::components::{
     },
     panels::header_context_menu::HeaderContextMenuOverlay,
 };
-use crate::coord::{CellAddress, SheetRange};
+use crate::coord::SheetRange;
 use crate::events::{ContentEvent, SpreadsheetEvent};
 use crate::input::error::EditError;
 use crate::input::{
@@ -21,7 +21,7 @@ use crate::input::{
     formula::*,
     keyboard::{KeyMod, SpreadsheetAction, classify_key, execute},
 };
-use crate::model::{AppClipboard, EvaluationMode, PasteMode, mutate, try_mutate};
+use crate::model::{AppClipboard, EvaluationMode, FormulaAnalyzer, PasteMode, mutate, try_mutate};
 use crate::state::{
     CameraSpec, DragState, EditMode, ModelStore, PersistedCamera, StatusMessage, WorkbookState,
 };
@@ -58,7 +58,8 @@ pub fn Workbook() -> impl IntoView {
 
         if let Some(ref edit) = state.editing_cell.get_untracked() {
             let already_pointing = matches!(state.drag.get_untracked(), DragState::Pointing { .. });
-            let may_point = edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
+            let may_point =
+                key == "F4" || edit.mode == EditMode::Accept || edit.text_dirty || already_pointing;
 
             if may_point && !is_ctrl && !is_alt {
                 let caret_hit = if !already_pointing {
@@ -82,7 +83,37 @@ pub fn Workbook() -> impl IntoView {
                     ),
                 };
 
-                let editing = model.with_value(CellAddress::from_view);
+                // Formula refs are encoded relative to the cell being edited,
+                // which can differ from the live selection during point mode.
+                let editing = edit.address;
+
+                // F4 cycles the `$`-flags of the ref under the caret (or the
+                // live point-mode ref). It reuses the same current_ref/prev_span
+                // the arrow path resolves; prev_span.is_some() means there is a
+                // real ref to toggle (caret-on-ref or already pointing).
+                if key == "F4" {
+                    if let Some(span) = prev_span {
+                        let cycled = current_ref.cycle_absolute(&editing);
+                        let ref_str = cycled.to_localized(&editing.as_stringify_ctx());
+                        let (new_text, new_span) = splice_ref(&edit.text, span, &ref_str);
+                        let analysis = model.with_value(|m| m.analyze_at(&new_text, edit.address));
+                        state.editing_cell.update(|c| {
+                            if let Some(e) = c {
+                                e.text = new_text;
+                                e.cursor = new_span.end;
+                                e.formula_analysis = analysis;
+                                e.text_dirty = false;
+                            }
+                        });
+                        state.drag.set(DragState::Pointing {
+                            ref_node: cycled,
+                            ref_text: new_span,
+                        });
+                    }
+                    ev.prevent_default();
+                    return;
+                }
+
                 let ctx = PointMoveCtx {
                     text: &edit.text,
                     cursor: edit.cursor,

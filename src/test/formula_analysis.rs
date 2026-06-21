@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use crate::coord::{CellAddress, DefinedName, FormulaRefKind};
+use crate::coord::{CellAddress, DefinedName, FormulaRefKind, TextRef};
 use crate::input::formula::FormulaStatus;
 use ironcalc_base::expressions::types::CellReferenceRC;
 
@@ -246,6 +246,7 @@ fn absolute_flags_preserved() {
     // ast_leaves dropped them (the pre-refactor bug), stringify -> `A1`.
     let analysis = analyze_formula("=$A$1", editing_at(0), &[], &[]);
     assert_eq!(analysis.refs().len(), 1);
+    assert_eq!(analysis.refs()[0].span, TextRef { start: 1, end: 5 });
     assert_eq!(
         analysis.refs()[0].ref_node.to_localized(&ctx_at("")),
         "$A$1"
