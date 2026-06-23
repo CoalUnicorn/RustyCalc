@@ -34,6 +34,15 @@ jobs:
           path: RustyCalc
           submodules: recursive
 
+      # The gitlink must point at an IronCalc commit carrying the wasm zip
+      # patch (default zip features pull in C deps that break wasm32). Fail
+      # loud here instead of mid-compile if the pin drifts to a pristine commit.
+      - name: Verify IronCalc wasm zip patch present
+        working-directory: RustyCalc
+        run: |
+          grep -qF 'default-features = false, features = ["deflate"]' IronCalc/xlsx/Cargo.toml \
+            || { echo "::error::IronCalc/xlsx/Cargo.toml missing the wasm zip patch — submodule gitlink points at an unpatched commit"; exit 1; }
+
       - name: Install Rust toolchain (wasm32)
         uses: dtolnay/rust-toolchain@stable
         with:

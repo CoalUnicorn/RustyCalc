@@ -40,6 +40,15 @@ jobs:
           path: RustyCalc-dev
           submodules: recursive
 
+      # Both trees check out the same gitlink; fail loud if it drifts to an
+      # IronCalc commit lacking the wasm zip patch (breaks trunk build).
+      - name: Verify IronCalc wasm zip patch present
+        run: |
+          for d in RustyCalc-main RustyCalc-dev; do
+            grep -qF 'default-features = false, features = ["deflate"]' "$d/IronCalc/xlsx/Cargo.toml" \
+              || { echo "::error::$d: IronCalc/xlsx/Cargo.toml missing the wasm zip patch"; exit 1; }
+          done
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
