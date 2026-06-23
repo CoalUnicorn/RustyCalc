@@ -6,7 +6,7 @@
 //! which is also what drives the canvas repaint — one signal, both effects.
 
 use ironcalc_base::cf_types::{
-    CfRule, CfRuleInput, ConditionalFormatting, PeriodType, ValueOperator,
+    CfRule, CfRuleInput, ConditionalFormattingView, PeriodType, ValueOperator,
 };
 use ironcalc_base::types::Dxf;
 use leptos::prelude::*;
@@ -215,7 +215,7 @@ pub fn CfRuleList() -> impl IntoView {
     // Recompute on every format event — CF add/update/delete each emit a
     // `FormatEvent::ConditionalFormattingChanged` — and whenever the active
     // sheet changes. Empty while the dialog is closed (not mounted).
-    let rules: Signal<Vec<ConditionalFormatting>> = Signal::derive(move || {
+    let rules: Signal<Vec<ConditionalFormattingView>> = Signal::derive(move || {
         let _ = state.events.format.get();
         let sheet = active_sheet.get();
         if state.active_drawer.get() != Some(ActiveDrawer::ConditionalFormatting) {
@@ -241,12 +241,12 @@ pub fn CfRuleList() -> impl IntoView {
         }
     };
 
-    let edit_rule = move |idx: usize, cf: &ConditionalFormatting| {
+    let edit_rule = move |cf: &ConditionalFormattingView| {
         let sheet = active_sheet.get_untracked();
         // Resolve the rule's real differential format before editing — the
         // stored `CfRule` only carries a `dxf_id`.
         let format = model.with_value(|m| {
-            m.get_dxf_for_conditional_formatting(sheet, idx as u32)
+            m.get_dxf_for_conditional_formatting(sheet, cf.index as u32)
                 .ok()
                 .flatten()
                 .unwrap_or_default()
@@ -260,7 +260,7 @@ pub fn CfRuleList() -> impl IntoView {
         };
         let edit = CfRuleEditState {
             sheet,
-            index: Some(idx as u32),
+            index: Some(cf.index as u32),
             range: cf.range.clone(),
             rule,
         };
@@ -292,8 +292,8 @@ pub fn CfRuleList() -> impl IntoView {
             <div class="cfm-list-body">
                 <For
                     each=move || rules.get()
-                    key=|cf: &ConditionalFormatting| cf.priority
-                    children=move |cf: ConditionalFormatting| {
+                    key=|cf: &ConditionalFormattingView| cf.priority
+                    children=move |cf: ConditionalFormattingView| {
                         let range = cf.range.clone();
                         let label = rule_label(&cf.cf_rule).to_string();
                         let priority = cf.priority;
@@ -314,8 +314,8 @@ pub fn CfRuleList() -> impl IntoView {
                             <div
                                 class="cfm-list-item"
                                 on:click=move |_| {
-                                    if let Some((idx, rule)) = find_rule() {
-                                        e(idx, &rule);
+                                    if let Some((_, rule)) = find_rule() {
+                                        e(&rule);
                                     }
                                 }
                             >
@@ -325,8 +325,8 @@ pub fn CfRuleList() -> impl IntoView {
                                     class="cfm-item-delete"
                                     on:click=move |ev| {
                                         ev.stop_propagation();
-                                        if let Some((idx, _)) = find_rule() {
-                                            d(idx as u32);
+                                        if let Some((_, rule)) = find_rule() {
+                                            d(rule.index as u32);
                                         }
                                     }
                                     title="Delete rule"
