@@ -53,6 +53,7 @@ impl RefNode {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn range(
         sheet_index: u32,
         sheet_name: Option<String>,

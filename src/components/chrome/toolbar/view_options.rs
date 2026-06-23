@@ -44,7 +44,8 @@ pub fn GridLinesToggle() -> impl IntoView {
         let _ = state.events.format.get();
         let _ = state.events.navigation.get();
         model.with_value(|m| {
-            m.get_show_grid_lines(m.get_selected_sheet()).unwrap_or(true)
+            m.get_show_grid_lines(m.get_selected_sheet())
+                .unwrap_or(true)
         })
     });
 
@@ -52,7 +53,8 @@ pub fn GridLinesToggle() -> impl IntoView {
         let result = try_mutate(model, EvaluationMode::Deferred, |m| {
             let sheet = m.get_selected_sheet();
             let cur = m.get_show_grid_lines(sheet).unwrap_or(true);
-            m.set_show_grid_lines(sheet, !cur).map_err(FormatError::Engine)
+            m.set_show_grid_lines(sheet, !cur)
+                .map_err(FormatError::Engine)
         });
         if let Err(e) = result {
             state.status.set(Some(StatusMessage::Error(e.to_string())));
