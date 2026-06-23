@@ -42,7 +42,7 @@ use section::{ToolSlot, ToolbarSection};
 use share_controls::ShareControls;
 use style::BorderPicker;
 use tab_strip::TabStrip;
-use view_options::ShowHeadersToggle;
+use view_options::{GridLinesToggle, ShowHeadersToggle};
 
 /// Two-tier toolbar: a tab strip selecting a `ToolbarSection`, above a single
 /// overflow row whose slots are rebuilt for the active section.
@@ -65,6 +65,8 @@ pub fn Toolbar() -> impl IntoView {
 
     let undo_redo_state: Memo<(bool, bool)> = Memo::new(move |_| {
         let _ = state.events.content.get();
+        let _ = state.events.format.get();
+        let _ = state.events.structure.get();
         model.with_value(|m| (m.can_undo(), m.can_redo()))
     });
 
@@ -87,6 +89,9 @@ pub fn Toolbar() -> impl IntoView {
     let slots = move || match active_section.get() {
         ToolbarSection::Home => vec![
             ToolSlot::new("Undo/Redo", || view! { <UndoRedo /> }.into_any()),
+            ToolSlot::new("Number", || {
+                view! { <NumberFormatPicker /> <NumFmtQuickButtons /> }.into_any()
+            }),
             ToolSlot::new("Font", || view! { <FontFamily /> <FontSize /> }.into_any()),
             ToolSlot::new("Style", || {
                 view! {
@@ -107,9 +112,6 @@ pub fn Toolbar() -> impl IntoView {
             }),
         ],
         ToolbarSection::Data => vec![
-            ToolSlot::new("Number", || {
-                view! { <NumberFormatPicker /> <NumFmtQuickButtons /> }.into_any()
-            }),
             ToolSlot::new("Named ranges", || {
                 view! { <NamedRangesButton /> }.into_any()
             }),
@@ -120,6 +122,7 @@ pub fn Toolbar() -> impl IntoView {
         ToolbarSection::View => vec![
             ToolSlot::new("Freeze", || view! { <FreezePane /> }.into_any()),
             ToolSlot::new("Headers", || view! { <ShowHeadersToggle /> }.into_any()),
+            ToolSlot::new("Gridlines", || view! { <GridLinesToggle /> }.into_any()),
             ToolSlot::new("Camera", || view! { <InsertCamera /> }.into_any()),
         ],
         ToolbarSection::File => {
