@@ -1,0 +1,8 @@
+# Cap WASM linear memory at 256 MB so a crafted bitcode payload claiming
+# a multi-GB allocation traps quickly instead of degrading the tab into
+# multi-second GC death.
+#
+# rustflags belongs here, not in Cargo.toml — the manifest's [target.*]
+# table only accepts dependency keys, so Cargo ignored it there.
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=--max-memory=268435456"]

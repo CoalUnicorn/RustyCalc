@@ -310,7 +310,6 @@ dependencies = [
 name = "iron-canvas-web"
 version = "0.1.0-beta.2"
 dependencies = [
- "bitflags",
  "iron-canvas-canvas2d",
  "iron-canvas-core",
  "iron-canvas-export",
