@@ -7,7 +7,6 @@ pub enum HeaderContextMenu {
     Row { row: i32, count: i32 },
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub struct ContextMenuState {
     pub(crate) x: i32,

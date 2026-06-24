@@ -299,7 +299,7 @@ impl CellTextStyle {
 /// Fills `out` with `TextLine`s carrying `text` + `width`; `center_x`/`center_y`
 /// are left at `0.0` for the caller's positioning pass.
 ///
-/// **Measurement strategy.** Non-wrap path measures each `\n`-split line once.
+/// Measurement strategy: non-wrap path measures each `\n`-split line once.
 /// Wrap path measures each word once plus one space-width per call, then sums
 /// additively (`current_w + space_w + word_w`). Adjacent-glyph kerning across
 /// a space is sub-pixel for the proportional fonts this renderer ships, well

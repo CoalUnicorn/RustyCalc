@@ -140,7 +140,6 @@ impl RecorderPainter {
         Self::default()
     }
 
-    #[allow(dead_code)]
     pub fn ops(&self) -> std::cell::Ref<'_, Vec<DrawOp>> {
         self.ops.borrow()
     }

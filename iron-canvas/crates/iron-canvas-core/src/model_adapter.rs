@@ -35,9 +35,11 @@ pub trait CellContentQuery {
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
 
-    /// Base cell style plus any conditional-formatting overlay: the CF dxf
-    /// fill/font applied on top of the base style, plus optional data-bar,
-    /// icon-set, and rating decorations. `Absent` when no CF decoration applies
+    /// Conditional-formatting *decoration* for the cell, if any: an optional
+    /// data-bar, icon-set, or rating. Despite the `_style` in the name this
+    /// returns only the `CellDecoration` — the CF dxf *fill/font* overlay is
+    /// delivered separately, already merged into the base style by
+    /// `get_cell_styles_in`, not here. `Absent` when no CF decoration applies
     /// or when the model doesn't support CF (the renderer draws both the same).
     /// The default returns `Absent` so engines without CF support (and test
     /// stubs) compile unchanged.

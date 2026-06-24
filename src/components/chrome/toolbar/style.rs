@@ -2,10 +2,9 @@
 //!
 //! A "▦ ▾" trigger opens a [`Popover`] laid out as a compact 5-column grid of
 //! the ten border presets, followed by two collapsible menu rows:
-//! - **Border color** — option B: the row *is* the reusable base [`ColorPicker`]
-//!   trigger, so border colors flow through the same palette/recent-colors UI as
-//!   text/fill.
-//! - **Border style** — expands to a Thin/Medium/Thick weight selector.
+//! - Border color: the row is the reusable base [`ColorPicker`] trigger, so
+//!   border colors flow through the same palette/recent-colors UI as text/fill.
+//! - Border style: expands to a Thin/Medium/Thick weight selector.
 //!
 //! Color and weight persist across preset clicks within one open session, and
 //! seed from the active cell when the dropdown opens (see

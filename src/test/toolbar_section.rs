@@ -36,7 +36,7 @@ fn fit_count_everything_fits_no_more_button() {
 
 #[test]
 fn fit_count_reserves_room_for_more_when_overflowing() {
-    // full = 162 > 120 -> reserve 40 => budget 80. 30(=30)+4+30(=64)+4+30(=98>80) => 2.
+    // full = 132 > 120 -> reserve 40 => budget 80. 30(=30)+4+30(=64)+4+30(=98>80) => 2.
     assert_eq!(fit_count(&[30.0, 30.0, 30.0, 30.0], 4.0, 120.0, 40.0), 2);
 }
 

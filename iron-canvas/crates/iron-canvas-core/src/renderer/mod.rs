@@ -26,9 +26,9 @@
 //! Two paint entry points, each driven by `paint_if_dirty` per dirty layer:
 //!
 //! - [`RendererCore::render_grid`] paints cells (four frozen-pane
-//!   quadrants, each running four cell sub-passes: bg, then grid
-//!   borders, then explicit borders, then text), then frozen separators,
-//!   then headers, then the corner box.
+//!   quadrants, each running five cell sub-passes: bg, then CF decoration,
+//!   then grid borders, then explicit borders, then text), then frozen
+//!   separators, then headers, then the corner box.
 //! - `LayerBase::paint_overlay_layer` orchestrates the decorations in
 //!   `crate::decoration` (selection, autofill, clipboard, point-mode,
 //!   formula-refs) plus header highlights.
@@ -173,7 +173,7 @@ impl<P: Painter> RendererCore<P> {
         self.cache_show_grid(model);
 
         // `frame.stale_panes` is `ALL` on Fresh; narrower on SlotsReuse —
-        // either way each region listed needs its 4-pass walk.
+        // either way each region listed needs its 5-pass walk.
         self.painter.begin_group(GroupClass::Cells);
         for pane in frame.stale_panes.regions() {
             self.render_pane(model, pane, frame);

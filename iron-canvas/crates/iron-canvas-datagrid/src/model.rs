@@ -190,7 +190,7 @@ impl DataGrid {
         }
     }
 
-    // --- Mutation API (B.3): edits write through display order to source rows ---
+    // Mutation API (B.3): edits write through display order to source rows
 
     pub fn set_cell(&mut self, disp_row: usize, col: usize, value: impl Into<String>) {
         if let Some(&src) = self.order.get(disp_row)
@@ -218,7 +218,7 @@ impl DataGrid {
         self.clamp_view();
     }
 
-    // --- Sorting (B.4): permutes `order`, never `rows` (insertion order kept) ---
+    // Sorting (B.4): permutes `order`, never `rows` (insertion order kept)
 
     pub fn sort_by(&mut self, col: usize, dir: SortDirection) {
         self.sort = Some(SortState { column: col, dir });
@@ -258,7 +258,7 @@ impl DataGrid {
         });
     }
 
-    // --- Selection + viewport mutators (B.5): all 1-based DISPLAY coords ---
+    // Selection + viewport mutators (B.5): all 1-based DISPLAY coords
 
     pub fn set_selection(&mut self, r1: i32, c1: i32, r2: i32, c2: i32) {
         self.sel = [r1, c1, r2, c2];

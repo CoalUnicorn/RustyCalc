@@ -1,13 +1,13 @@
 //! Wasm-bound facade for the iron-canvas grid renderer.
 //!
-//! The pure-Rust application and domain layers live in `iron-canvas-core`.
-//! This crate hosts the Canvas2D `Painter` impl, the `wasm-bindgen`
-//! `IronCanvas` handle, the JS-bridged `JsBackedModel`, the `WebSurface`
-//! adapter, and the CSS-var theme bridge: every component that touches
-//! `web-sys`, `wasm-bindgen`, or `js-sys`.
+//! The pure-Rust application and domain layers live in `iron-canvas-core`;
+//! the Canvas2D `Painter` impl, `WebSurface` adapter, and CSS-var theme
+//! bridge live in `iron-canvas-canvas2d` (re-exported below). This crate
+//! owns the `wasm-bindgen` `IronCanvas` handle, the JS-bridged
+//! `JsBackedModel`, and the dev-tools recording / playback glue.
 //!
-//! Everything `iron-canvas-core` re-exports flows through here unchanged,
-//! so downstream call sites can name a single facade crate.
+//! Everything `iron-canvas-core` and `iron-canvas-canvas2d` re-export flows
+//! through here unchanged, so downstream call sites name a single facade crate.
 
 mod orchestrator;
 #[cfg(feature = "dev-tools")]

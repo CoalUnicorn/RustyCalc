@@ -7,8 +7,8 @@
 //! drains onto the live `IronCanvas`.
 //!
 //! Two visual modes:
-//! - **Idle** (no recording loaded): a single "📂 Load .icr" file picker.
-//! - **Loaded**: scrubber + play/pause + frame counter + exit.
+//! - Idle (no recording loaded): a single "📂 Load .icr" file picker.
+//! - Loaded: scrubber + play/pause + frame counter + exit.
 //!
 //! All wall-clock timing for play cadence is generated inside the rAF tick;
 //! this component never reads the clock.

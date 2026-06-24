@@ -5,7 +5,7 @@
 //! canvas / theme / active-cell mismatch, two-axis scroll); on a viable
 //! scroll it delegates to `try_blit_rows` / `try_blit_cols` here, which
 //! return a `BlitPlan` if the geometry checks out. The orchestrator then
-//! calls `Chrome::next(.., FramePath::Blit(plan))`, which routes through
+//! calls `Chrome::next_blit(.., &plan)`, which routes through
 //! `try_blit_reuse` to construct the next frame in place — kept band
 //! carries forward, only the strip hits the model.
 

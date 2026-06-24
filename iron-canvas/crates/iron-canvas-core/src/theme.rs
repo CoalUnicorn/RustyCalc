@@ -50,7 +50,7 @@ pub struct CanvasTheme {
     pub header_selected_color: Cow<'static, str>,
     pub default_text_color: Cow<'static, str>,
     /// Text color for cells whose value is an IronCalc error
-    /// (`CellType::ErrorValue` — `#VALUE!`, `#DIV/0!`, `#REF!`, etc.).
+    /// (`CellKind::Error` — `#VALUE!`, `#DIV/0!`, `#REF!`, etc.).
     pub error_text_color: Cow<'static, str>,
     pub selection_color: Cow<'static, str>,
     pub cell_bg: Cow<'static, str>,

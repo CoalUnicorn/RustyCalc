@@ -20,7 +20,6 @@ use crate::theme::{Theme, use_rusty_calc_theme};
 /// in prod (no `dev-tools` feature) it is written but never read, since the
 /// PerfPanel button is hidden by the runtime `recordingSupported()` guard.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum RecordingCmd {
     Start,
     Stop,

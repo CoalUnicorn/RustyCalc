@@ -11,7 +11,7 @@
 //! - [`click`] — the four hit-test-resolved click helpers
 //!   (`handle_*_click`) called from `mousedown` once a `HitTest` is known.
 //! - [`cursor_hint`] — `compute_cursor_hint`, which must mirror
-//!   `mousedown`'s hit-test priority exactly (see `// Why:` in that file).
+//!   `mousedown`'s hit-test priority exactly (see its module doc).
 //! - [`formula_ref`] — the formula-reference drag sub-grammar
 //!   (handle_formula_ref_mousedown, dragged_ref_range, commit_formula_ref_drag).
 

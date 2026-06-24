@@ -5,10 +5,10 @@ use crate::app_state::{AppState, ExportCmd, RecordingCmd};
 /// Displays the last commit->render timing breakdown.
 ///
 /// Shows four phases:
-/// - **Input**: `set_user_input()` - writing the value into the model
-/// - **Eval**: `evaluate()` - recalculating all formulas
-/// - **Render**: canvas `render()` - drawing the visible grid
-/// - **Total**: commit start to render complete
+/// - Input: `set_user_input()` writes the value into the model.
+/// - Eval: `evaluate()` recalculates all formulas.
+/// - Render: canvas `render()` draws the visible grid.
+/// - Total: commit start to render complete.
 #[component]
 pub fn PerfPanel() -> impl IntoView {
     let app = expect_context::<AppState>();

@@ -506,7 +506,7 @@ impl CellContentQuery for JsBackedModel {
 }
 
 /// Whether a batched `*_in` array can be trusted enough to skip the per-cell
-/// path: it must be **dense** — exactly the range's cell count, so every
+/// path: it must be dense, exactly the range's cell count, so every
 /// row-major index `out[(r-r1)*cols + (c-c1)]` lands on a real slot.
 ///
 /// A `None` *element* is no longer a reason to forfeit the batch. The bulk

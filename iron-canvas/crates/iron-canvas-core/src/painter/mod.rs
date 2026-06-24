@@ -54,7 +54,6 @@ impl<'a> PaintColor<'a> {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextAlign {
     Start,
@@ -112,7 +111,6 @@ impl GroupClass {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextBaseline {
     Top,
@@ -199,7 +197,7 @@ pub trait Painter: TextMetrics {
 
     /// Open a named group around subsequent draws. SVG emits `<g class="..">`,
     /// Recorder logs an op, Canvas-2D no-ops. The renderer brackets
-    /// `render_grid` / `render_overlays` so SVG output is structured per layer.
+    /// `render_grid` / `paint_overlay_layer` so SVG output is structured per layer.
     fn begin_group(&self, class: GroupClass);
     fn end_group(&self);
 }

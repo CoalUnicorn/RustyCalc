@@ -119,8 +119,10 @@ impl EventBus {
         }
 
         // Replace all 5 signals so no stale events from the previous action remain.
-        // Use update() not set(): set() uses PartialEq and suppresses notification
-        // when the same event fires twice on the same range. update() always notifies.
+        // Non-empty categories use update(): set() would compare via PartialEq and
+        // suppress notification when the same event fires twice on the same range,
+        // whereas update() always notifies. Empty categories use set(vec![]) so an
+        // already-empty signal stays a silent no-op.
         if content.is_empty() {
             self.content.set(vec![]);
         } else {

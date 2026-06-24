@@ -54,7 +54,7 @@ pub fn splice_dragged_ref(
 
 /// All state needed to evaluate a point-mode keypress, drawn from `EditingCell` and `DragState`.
 ///
-/// Passed to `try_point_move` so callers don't manage 8 separate parameters.
+/// Passed to `try_point_move` so callers don't manage 6 separate parameters.
 pub struct PointMoveCtx<'a> {
     pub text: &'a str,
     pub cursor: usize,

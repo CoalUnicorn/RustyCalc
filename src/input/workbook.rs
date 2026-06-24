@@ -44,7 +44,7 @@ pub fn execute_workbook(
                 return;
             }
             // Save the current workbook before switching. If encoding fails
-            // (e.g. model exceeds MAX_STORAGE_BYTES), warn the user instead of
+            // (e.g. model exceeds MAX_STORED_BYTES), warn the user instead of
             // silently losing changes.
             if let Some(uuid) = &cur {
                 let saved = model.with_value(|m| {

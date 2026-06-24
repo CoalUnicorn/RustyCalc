@@ -10,7 +10,7 @@
 //!
 //! ## Storage-agnostic by design
 //!
-//! The field does **not** own its text. The caller passes `value` (a read
+//! The field does not own its text. The caller passes `value` (a read
 //! signal) and an `on_input` callback that receives `(value, cursor)` on every
 //! keystroke. This lets two very different panels share one component:
 //!

@@ -197,7 +197,8 @@ fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
 
 /// Shift a row-major pane buffer in place to match a new pane `RCRange`,
 /// preserving entries whose `(row, col)` survived the scroll and leaving
-/// freshly-revealed slots as `None` for the caller's strip-fetch to fill.
+/// freshly-revealed slots as `fill` (the caller's placeholder) for the
+/// strip-fetch to overwrite.
 ///
 /// Invariants (caller-enforced; `screen_for_blit` already guarantees these):
 /// - `prev_range` and `new_range` differ on exactly the `axis` given.

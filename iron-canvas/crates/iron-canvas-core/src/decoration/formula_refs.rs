@@ -54,8 +54,9 @@ impl Layer for FormulaRefsLayer {
         y: i32,
     ) -> Option<HitTest> {
         // Reverse paint order: the last-painted ref claims overlapping
-        // hits. Filters mirror `paint`: non-Direct kinds and off-sheet
-        // refs never claim a hit.
+        // hits. Off-sheet refs are skipped as in `paint`; additionally only
+        // `Direct` refs are interactive — non-Direct kinds are painted but
+        // never claim a hit.
         for (ref_idx, fr) in self.refs.iter().enumerate().rev() {
             if !matches!(fr.kind, FormulaRefKind::Direct) {
                 continue;

@@ -36,9 +36,10 @@ pub struct CellPaint {
     /// Conditional-formatting decoration (data bar / icon / rating), if any
     /// CF rule with a decoration matches this cell. `None` for plain cells.
     /// CF *fill/font* overrides are not carried here — they ride the `style`
-    /// field, which the render pass sources from `ExtendedStyle::style` (the
-    /// base style with the CF dxf overlay already applied). Resolved in the
-    /// render loop (where the model is in scope), not in `resolve_cell_paint`.
+    /// field, which the render pass sources from `get_cell_styles_in` (the base
+    /// `CellStyle` with the CF dxf overlay already folded in by the bridge).
+    /// Resolved in the render loop (where the model is in scope), not in
+    /// `resolve_cell_paint`.
     pub cf_decoration: Option<CfDecorationPaint>,
 }
 
@@ -102,7 +103,7 @@ impl<'a> PaneCells<'a> {
 
     /// Walk only the cells whose `(row, col)` lies inside `strip`. Used by
     /// the scroll-blit strip-fetch path: the painter blit preserved the
-    /// kept-band pixels, so the four per-cell sub-passes must touch only
+    /// kept-band pixels, so the five per-cell sub-passes must touch only
     /// the freshly-revealed strip — iterating the full pane would re-paint
     /// the kept band on top of the already-correct pixels.
     ///

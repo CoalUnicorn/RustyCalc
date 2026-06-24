@@ -20,7 +20,7 @@
 //! ```
 //!
 //! `SlotsReuse` skips the walk: it keeps the previous slot vecs and refreshes
-//! only per-frame state. `Orchestrator::is_still_valid` decides between the two
+//! only per-frame state. `Chrome::is_still_valid` decides between the two
 //! by comparing the previous frame's `sheet`, `canvas_size`, frozen counts, and
 //! `scroll_first` against the current signals; any divergence forces `Fresh`.
 
@@ -152,10 +152,10 @@ pub struct Chrome {
     /// "slot vecs inherited from prev" predicate.
     pub kind: FrameKindTag,
     /// Which panes `render_grid` must paint this frame. `FramePath::Fresh`
-    /// sets this to `ALL`; `FramePath::Blit` narrows it to the panes the
-    /// `BlitPlan` shifts (cross-axis panes left intact are excluded);
+    /// sets this to `ALL`; the blit path (`try_blit_reuse`) narrows it to the
+    /// panes the `BlitPlan` shifts (cross-axis panes left intact are excluded);
     /// `FramePath::SlotsReuse { stale_panes }` takes it from the caller so
-    /// it never inherits a prior `Blit` frame's narrow mask.
+    /// it never inherits a prior `Blitted` frame's narrow mask.
     pub stale_panes: PaneRegionMask,
 }
 
@@ -385,8 +385,8 @@ impl Chrome {
             prev_pane_fingerprints,
             pane_fingerprints: Cell::new([0; 4]),
             kind: FrameKindTag::Fresh,
-            // Full repaint by default. The `FramePath::Blit` arm of
-            // `Chrome::next` overrides this when scroll-blit narrows the work.
+            // Full repaint by default. `try_blit_reuse` (via `Chrome::next_blit`)
+            // overrides this when scroll-blit narrows the work.
             stale_panes: PaneRegionMask::ALL,
         }
     }

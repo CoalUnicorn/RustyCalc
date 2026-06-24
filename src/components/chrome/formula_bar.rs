@@ -152,7 +152,7 @@ pub fn FormulaBar() -> impl IntoView {
     // absolute flags and sheet_name round-trip through the pipeline.
     //
     // The three primitives this closure composes are:
-    //   - FormulaAnalysis::refs_at_cursor(cursor) -> Iterator<&FormulaRef>
+    //   - FormulaAnalysis::refs_at_cursor(cursor) -> Iterator<&ActiveRef>
     //   - RefNode::to_localized(&CellReferenceRC) -> String
     //   - CellAddress::as_stringify_ctx() -> CellReferenceRC
     let ref_under_caret = move || -> String {

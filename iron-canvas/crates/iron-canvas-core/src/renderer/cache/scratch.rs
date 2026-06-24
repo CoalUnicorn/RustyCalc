@@ -21,8 +21,8 @@ pub struct FrameCache {
     /// avoid 4 Vec allocations per frame.
     pub text_slots: Cell<Vec<CellPaint>>,
     /// Per-frame cache of the active sheet's `get_show_grid_lines` flag.
-    /// Set once at the top of `render_grid`; read per-cell by `paint_borders`
-    /// to gate the right/bottom grid-line fallback. Avoids a model call per
+    /// Set once at the top of `render_grid`; read per-cell by `paint_borders_grid`
+    /// to gate the left/top grid-line fallback. Avoids a model call per
     /// cell on the hot pane walk.
     pub show_grid: Cell<bool>,
     /// Scratch line buffer parked here so `TextPaint::resolve_into` doesn't

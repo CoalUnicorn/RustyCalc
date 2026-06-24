@@ -2,12 +2,12 @@
 //! JS-supplied data grid through iron-canvas with ZERO IronCalc.
 //!
 //! ## Coordinate contract
-//! The JS-facing handle is **uniformly 0-based** for row/col. This handle is
+//! The JS-facing handle is uniformly 0-based for row/col. This handle is
 //! the single translation seam to the mixed-base pure model:
-//! - model `set_selection`/`set_active`/`set_scroll` take **1-based** display
+//! - model `set_selection`/`set_active`/`set_scroll` take 1-based display
 //!   coords → add 1 here;
-//! - model `set_cell`/`set_column_width` take **0-based** → pass JS through;
-//! - engine `HitTest::Cell`/`ResizeTarget::*Edge` are **1-based** → the wire
+//! - model `set_cell`/`set_column_width` take 0-based coords → pass JS through;
+//! - engine `HitTest::Cell`/`ResizeTarget::*Edge` are 1-based → the wire
 //!   mirrors subtract 1 before emitting to JS.
 //!
 //! ## Live / async data
@@ -78,7 +78,7 @@ impl DataGridCanvas {
         self.orch.request_repaint();
     }
 
-    // --- E.2 Optional frozen header row (default OFF) ---
+    // E.2 Optional frozen header row (default OFF)
 
     #[wasm_bindgen(js_name = "setFrozenHeader")]
     pub fn set_frozen_header(&mut self, on: bool) {
@@ -105,7 +105,7 @@ impl DataGridCanvas {
         self.orch.paint_if_dirty();
     }
 
-    // --- D.1 Scrolling ---
+    // D.1 Scrolling
 
     #[wasm_bindgen(js_name = "setScroll")]
     pub fn set_scroll(&mut self, top_row: i32, left_col: i32) {
@@ -120,7 +120,7 @@ impl DataGridCanvas {
         self.orch.request_repaint();
     }
 
-    // --- D.2 Selection + hit-test ---
+    // D.2 Selection + hit-test
 
     #[wasm_bindgen(js_name = "hitTest")]
     pub fn hit_test(&self, x: f64, y: f64) -> Result<JsValue, JsValue> {
@@ -154,7 +154,7 @@ impl DataGridCanvas {
         }
     }
 
-    // --- D.3 Column resize ---
+    // D.3 Column resize
 
     #[wasm_bindgen(js_name = "resizeHandleAt")]
     pub fn resize_handle_at(&self, x: f64, y: f64, tol: f64) -> Result<JsValue, JsValue> {
@@ -176,7 +176,7 @@ impl DataGridCanvas {
         self.orch.request_repaint(); // geometry changed → Fresh rebuild
     }
 
-    // --- D.4 Sort ---
+    // D.4 Sort
 
     #[wasm_bindgen(js_name = "sortByColumn")]
     pub fn sort_by_column(&mut self, col: i32, ascending: bool) {
@@ -211,7 +211,7 @@ impl DataGridCanvas {
         }
     }
 
-    // --- D.5 Live-update mutators ---
+    // D.5 Live-update mutators
 
     #[wasm_bindgen(js_name = "setCell")]
     pub fn set_cell(&mut self, row: i32, col: i32, value: String) {

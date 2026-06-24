@@ -134,7 +134,6 @@ pub trait ActiveCellQuery {
     fn toolbar_state(&self) -> ToolbarState;
 
     /// Number-format code of the active cell (e.g. `"general"`, `"#,##0.00"`).
-    #[allow(dead_code)]
     fn active_num_fmt(&self) -> String;
 
     /// Formatted display string of the active cell (what the user sees in the grid).
@@ -277,7 +276,9 @@ impl ActiveCellQuery for UserModel<'_> {
         // where `BorderItem` has `.color: Color` and `.style: BorderStyle`.
         // Bottom-first priority: in a spreadsheet the bottom edge carries the
         // most visual weight (row/total separators), so it best represents the
-        // cell's border when collapsing four edges into one picker value.
+        // cell's border when collapsing four edges into one picker value. The
+        // array below is ordered bottom/right/top/left so the first present
+        // edge wins.
         let dominant = [
             &style.border.bottom,
             &style.border.right,
@@ -572,13 +573,13 @@ pub enum EvaluationMode {
 
 /// Run `f` on the model, optionally call `evaluate`.
 ///
-/// **PERFORMANCE OPTIMIZED:** Many `UserModel` methods call `evaluate()` internally.
-/// We `pause_evaluation()` before `f` and `resume_evaluation()` after, so the
+/// Many `UserModel` methods call `evaluate()` internally. We
+/// `pause_evaluation()` before `f` and `resume_evaluation()` after, so the
 /// model is evaluated at most once — after all mutations are done. This prevents
 /// double evaluation and can halve execution time on formula-heavy sheets.
 ///
-/// **CALLER RESPONSIBILITY:** This function no longer automatically triggers redraws.
-/// The caller must emit appropriate events using `state.emit_event()`.
+/// This function does not trigger redraws. The caller must emit appropriate
+/// events using `state.emit_event()`.
 ///
 pub fn mutate(
     model: ModelStore,
@@ -637,5 +638,3 @@ pub fn try_mutate<E>(
     });
     outcome
 }
-
-// Tests

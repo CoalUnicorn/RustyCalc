@@ -31,7 +31,7 @@ fn body_translates_whole_rect() {
 // delta by the same amount so width/height stay constant.
 #[test]
 fn body_clamps_leading_corner_and_keeps_shape() {
-    // A2:C4 (3 wide × 3 tall). Grab at B3, drop at A3 (one col left).
+    // B2:D4 (3 wide × 3 tall). Grab at C3, drop at A3 (one col left).
     // Then drop one MORE col left — c1 would go to 0, clamps to 1,
     // and c2 must follow: 3 - 1 = 2 (since c1 moved from 2 to 1).
     let out = dragged_ref_range(anchor(2, 2, 4, 4), RefZone::Body, cell(3, 3), cell(3, 1));

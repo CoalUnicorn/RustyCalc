@@ -4,7 +4,7 @@
 //! (`pane_styles`, `pane_values`, `pane_cell_types`) and produces a `u64`
 //! summary of the painted-visible state. `render_pane` will compare the
 //! result against `frame.prev_pane_fingerprints[pane]` on slots-reuse
-//! frames: equal → skip the 4-pass walk; differ → repaint.
+//! frames: equal → skip the 5-pass walk; differ → repaint.
 //!
 //! Hash domain — the set of inputs that determine painted pixels.
 //! Anything that affects paint MUST be included; anything that doesn't

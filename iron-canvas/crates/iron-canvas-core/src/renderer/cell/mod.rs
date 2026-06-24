@@ -141,7 +141,7 @@ impl<P: Painter> RendererCore<P> {
                 pane_buf.styles.set(pane_styles);
                 pane_buf.values.set(pane_values);
                 pane_buf.cell_types.set(pane_cell_types);
-                // Set decorations back too: a later blit `try_shift` rotates
+                // Set decorations back too: a later blit `prepare_shift` rotates
                 // this buffer against the cached `Some(range)`; an empty vec
                 // would misalign indices and yield wrong decorations.
                 pane_buf.decorations.set(pane_decorations);
@@ -270,10 +270,11 @@ impl<P: Painter> RendererCore<P> {
     }
 
     /// Blit-frame entry: paint only the revealed strip. The cache rotation
-    /// (`try_shift`) and the strip/axis/clip computation already happened in
+    /// (`prepare_shift`) and the strip/axis/clip computation already happened in
     /// `render_grid_blit` — this consumes the precomputed [`BlitPaneWork`] and
     /// fetches + paints the strip cells; kept-band cells keep their blitted
-    /// pixels and are skipped via their `None` slots.
+    /// pixels and are skipped because `render_pane_strip` narrows the walk to
+    /// the strip (`PaneCells::for_strip`).
     pub fn render_pane_blit(
         &self,
         model: &dyn CellContentQuery,
@@ -292,8 +293,9 @@ impl<P: Painter> RendererCore<P> {
 
     /// Stage 3.3 strip path: kept-band pixels were preserved by the
     /// painter blit; the freshly-revealed strip subrange (`strip`, precomputed
-    /// in `render_grid_blit`) is fetched from the model and painted, kept-band
-    /// cells are skipped via their `None` slots. Sets `pane_fingerprints[idx]`
+    /// in `render_grid_blit`) is fetched from the model and painted; kept-band
+    /// cells are skipped because the walk is narrowed to the strip
+    /// (`PaneCells::for_strip`). Sets `pane_fingerprints[idx]`
     /// to 0 — the partial buffer can't produce a content fingerprint for next
     /// frame's Stage 1 compare, so next frame falls through to a full
     /// bulk-fetch path.

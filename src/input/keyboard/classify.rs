@@ -25,7 +25,7 @@ pub struct KeyMod {
 ///
 /// This function is pure - no side effects, no DOM access.
 ///
-/// **Point-mode arrow navigation** is excluded: it requires reading the
+/// Point-mode arrow navigation is excluded: it requires reading the
 /// textarea cursor position from the DOM, so it is handled as a pre-check
 /// in the keydown closure before this function is called.
 pub fn classify_key(

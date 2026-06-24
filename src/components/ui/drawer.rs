@@ -7,11 +7,11 @@
 //! fields inside the drawer capture grid selections).
 //!
 //! Consequently it deliberately omits two of Modal's behaviours:
-//! - **No backdrop** — nothing covers the grid, so grid clicks reach the canvas.
-//! - **No click-outside-to-close** — a click on the grid is a range pick, not a
-//!   dismissal; closing is only ever explicit (X button, Esc, host buttons).
+//! - No backdrop: grid clicks reach the canvas.
+//! - No click-outside-to-close: a grid click is a range pick, not a dismissal.
+//!   Closing is explicit (X button, Esc, host buttons).
 //!
-//! It keeps Modal's **document-level Esc listener**: the workbook keydown
+//! It keeps Modal's document-level Esc listener: the workbook keydown
 //! router early-returns when an `input`/`textarea`/`select` is focused
 //! (`workbook/mod.rs`), so a focused drawer field would otherwise swallow Esc.
 //! Registering on the document sidesteps that. The host decides what Esc means
@@ -45,7 +45,7 @@ impl DrawerWidth {
 /// over a scrollable body containing `children()`. Keeps no internal state.
 ///
 /// `on_close` fires on the close-button click or an Escape keydown anywhere in
-/// the document. It does **not** fire on grid/outside clicks (by design).
+/// the document. It does not fire on grid/outside clicks (by design).
 #[component]
 pub fn Drawer(
     #[prop(into)] title: String,
@@ -55,7 +55,7 @@ pub fn Drawer(
 ) -> impl IntoView {
     let close = move || on_close.run(());
 
-    // Esc closes from anywhere in the document — robust against a focused
+    // Esc closes from anywhere in the document, including a focused
     // drawer field (whose keydown the workbook router would otherwise ignore).
     let _ = use_event_listener(
         use_document(),

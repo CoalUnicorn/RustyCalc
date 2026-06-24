@@ -93,11 +93,11 @@ pub(super) fn commit_formula_ref_drag(
     });
 }
 
-/// Expand selection, update resize drag, or update autofill/point-mode
-/// preview while a button is held.
+/// Compute the dragged ref's new range from the grab zone and the cursor cell.
 ///
-/// If no button is held when this fires, mouseup was missed (pointer left
-/// caps at the sheet origin rather than producing zero-based addresses.
+/// `zone` picks which part of `anchor` moves (a corner/edge for a resize, the
+/// whole body for a translate); the result is clamped at the sheet origin
+/// rather than producing zero-based addresses.
 pub(crate) fn dragged_ref_range(
     anchor: SheetRange,
     zone: RefZone,

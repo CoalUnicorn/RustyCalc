@@ -29,7 +29,6 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
         self.0.get_untracked()
     }
 
-    #[allow(dead_code)]
     /// Reads the inner value via a closure. Stable primitive API;
     /// kept for potential external consumers that prefer the `with`
     /// pattern over `get()`.
@@ -49,7 +48,6 @@ impl<T: Clone + Send + Sync + 'static> Split<T> {
         self.1.update(f);
     }
 
-    #[allow(dead_code)]
     /// Returns the inner `ReadSignal`. Stable primitive API;
     /// kept for potential external consumers that need raw signal handles.
     pub fn read(&self) -> ReadSignal<T> {

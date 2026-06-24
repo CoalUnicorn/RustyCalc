@@ -232,12 +232,8 @@ fn test_validation_error_is_human_readable() {
 }
 
 // Identity preservation — ref_node must carry `absolute_row` /
-// `absolute_column` / `sheet_name` through analysis. These tests fail
-// until `ast_leaves` pushes the full Node via `RefNode::cell` /
-// `RefNode::range` Until then `refs()` is
-// empty for resolved refs, so `.refs().len()` is 0 and the `refs()[0]`
-// indexing panics — by design, making the stub's presence impossible
-// to miss in test output.
+// `absolute_column` / `sheet_name` through analysis, which requires
+// `ast_leaves` to push the full Node via `RefNode::cell` / `RefNode::range`.
 
 #[test]
 fn absolute_flags_preserved() {

@@ -149,7 +149,6 @@ impl IronCanvas {
     /// Whether this build supports `startRecording` / `stopRecording`.
     /// Always callable from JS so the host can hide its Record button on
     /// prod builds without `try`-sniffing the class shape.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "recordingSupported")]
     pub fn recording_supported() -> bool {
         cfg!(feature = "dev-tools")
@@ -176,7 +175,6 @@ impl IronCanvas {
     }
 
     /// Conservative repaint blanket — see `Orchestrator::request_repaint`.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "requestRepaint")]
     pub fn request_repaint(&mut self) {
         self.orch.request_repaint();
@@ -184,7 +182,6 @@ impl IronCanvas {
 
     /// JS-facing cell-content-changed signal — marks all four pane
     /// quadrants. Pane-granular masks stay Rust-internal.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "markContentDirty")]
     pub fn mark_content_dirty(&mut self) {
         self.orch
@@ -195,7 +192,6 @@ impl IronCanvas {
     /// (`dev-tools` feature only), brackets the paint with `begin_frame` /
     /// `end_frame` on both surfaces and pushes a `Frame` whenever at
     /// least one layer emitted ops. Idle rAF ticks are dropped.
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "paintIfDirty")]
     pub fn paint_if_dirty(&mut self) {
         #[cfg(feature = "dev-tools")]
@@ -227,7 +223,6 @@ impl IronCanvas {
     /// surfaces. Subsequent `paintIfDirty` calls capture frames until
     /// `stopRecording` (or the hard-cap watchdog) fires.
     #[cfg(feature = "dev-tools")]
-    #[allow(non_snake_case)]
     #[wasm_bindgen(js_name = "startRecording")]
     pub fn start_recording(&mut self, opts: JsValue) -> Result<(), JsError> {
         match &self.mode {

@@ -115,7 +115,8 @@ impl BorderPaint {
 
 impl BorderStroke {
     /// Map `BorderStyle` -> pixel width + double-line flag.
-    /// Dashed/dotted patterns degrade to solid 1 px in v1.
+    /// Dash/dot patterns render solid in v1 (no dash); width still follows the
+    /// Medium / Thick / thin tier (e.g. `MediumDashed` keeps `MEDIUM_BORDER_WIDTH`).
     fn from_border_style(s: &BorderStyle) -> Self {
         match s {
             BorderStyle::Medium

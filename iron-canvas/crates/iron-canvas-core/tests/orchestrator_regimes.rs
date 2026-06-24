@@ -4,10 +4,10 @@
 //! `Overlay`) through the same dispatch entry point a browser would use,
 //! and asserts the captured `DrawOp` log matches each regime's contract:
 //!
-//! - **Fresh**: full-canvas fill on the grid surface.
-//! - **SlotsReuse**: no full-canvas fill (prior pixels are reused).
-//! - **Viewport**: `DrawOp::Blit` ops on the grid surface (scroll-blit).
-//! - **Overlay**: zero new grid ops; overlay surface clears + repaints.
+//! - `Fresh`: full-canvas fill on the grid surface.
+//! - `SlotsReuse`: no full-canvas fill (prior pixels are reused).
+//! - `Viewport`: `DrawOp::Blit` ops on the grid surface (scroll-blit).
+//! - `Overlay`: zero new grid ops; overlay surface clears + repaints.
 
 #![allow(clippy::unwrap_used)]
 

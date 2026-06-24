@@ -1,7 +1,7 @@
 //! Single-axis blit machinery: qualification probes (kept-band extent
 //! verification + strip-size compute) and slot-Vec rebuilds for the
-//! scrolled axis. `Chrome::screen_for_blit` calls the probes; the
-//! `FramePath::Blit` arm of `Chrome::next` calls the rebuilds.
+//! scrolled axis. `Chrome::screen_for_blit` calls the probes;
+//! `Chrome::next_blit` (via `try_blit_reuse`) calls the rebuilds.
 //!
 //! Lives next to `chrome/blit.rs`. Splits off `chrome/pane_set.rs` so
 //! the latter only carries pure-axis geometry.

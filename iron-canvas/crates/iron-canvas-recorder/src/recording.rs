@@ -50,13 +50,13 @@
 //!
 //! # Compatibility rules
 //!
-//! - **`schema_version`**: exact-match enforced by `deserialize()`. A
+//! - `schema_version`: exact-match enforced by `deserialize()`. A
 //!   reader for v1 refuses v2 files (and vice versa).
-//! - **`iron_canvas_version`**: divergence is a *warning* on load. The
+//! - `iron_canvas_version`: divergence is a *warning* on load. The
 //!   recording still plays. The viewer surfaces this as a banner since
 //!   replay against drifted renderer output is the most common bug-repro
 //!   gap.
-//! - **`DrawOp` variants**: additive only within a schema version. Adding
+//! - `DrawOp` variants: additive only within a schema version. Adding
 //!   a new variant is a breaking change (older readers don't recognize
 //!   it) — bump the schema.
 //!

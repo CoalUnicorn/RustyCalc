@@ -53,7 +53,7 @@ pub fn ContextMenu(
 /// Convenience trigger button that records click coords and toggles `open`.
 ///
 /// For right-click or custom triggers, wire `set_open` / `set_pos` directly.
-/// Unused until the file bar and cell right-click context menus are wired up.
+/// Used by the left drawer's workbook-row context menu.
 #[allow(dead_code)]
 #[component]
 pub fn ContextMenuButton(

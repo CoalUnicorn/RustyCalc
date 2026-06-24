@@ -39,7 +39,7 @@ pub struct CellWire {
     pub align: Option<String>,
 }
 
-// --- Stage D result mirrors: engine enums are tuple-variant, so serialize
+// Stage D result mirrors: engine enums are tuple-variant, so serialize
 // through `{kind, …}` mirrors. All coords emitted to JS are 0-based. ---
 
 #[derive(Serialize)]

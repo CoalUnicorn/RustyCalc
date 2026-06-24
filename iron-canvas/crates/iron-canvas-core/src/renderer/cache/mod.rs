@@ -5,7 +5,7 @@
 //! | Lifetime              | Type                              | Resets via                                  |
 //! | --------------------- | --------------------------------- | ------------------------------------------- |
 //! | Per-call scratch      | [`FrameCache`]                    | `Cell::take` / `Cell::set` rhythm per pass  |
-//! | Cross-frame model     | [`PaneCache`] / [`PaneBuffers`]   | `invalidate(mask)` / `try_shift(..)` (blit) |
+//! | Cross-frame model     | [`PaneCache`] / [`PaneBuffers`]   | `invalidate(mask)` / `prepare_shift(..)` (blit) |
 //! | Renderer-lifetime     | [`FontIntern`], [`ColorIntern`]   | insert-only                                 |
 //!
 //! `font` is `pub(crate)` — pure CSS-string construction consumed by

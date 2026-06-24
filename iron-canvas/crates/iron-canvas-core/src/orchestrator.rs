@@ -7,9 +7,10 @@
 //! `Surface`), not two.
 //!
 //! `paint_if_dirty` drains both layers' typed `GridSignals` and picks one
-//! of four `PaintRegime` arms via `decide` (cheapness-ordered). The Fresh,
-//! SlotsReuse, and Viewport arms rebuild via a `Chrome::next(.., FramePath::*)`
-//! walk through the matching `LayerBase` paint method; the Overlay arm reuses
+//! of four `PaintRegime` arms via `decide` (cheapness-ordered). The Fresh and
+//! SlotsReuse arms rebuild via a `Chrome::next(.., FramePath::*)` walk through
+//! the matching `LayerBase` paint method; the Viewport arm goes through
+//! `Chrome::next_blit`; the Overlay arm reuses
 //! `last_frame` directly and repaints only the overlay. The query API
 //! (`hit_test`, `cell_rect`,
 //! `resize_handle_at`, `autofill_handle`) reads `last_frame`, so hits

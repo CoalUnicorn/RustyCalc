@@ -89,8 +89,9 @@ pub struct Span {
 
 /// Horizontal vs vertical axis.
 ///
-/// Shared across viewport offset math (`cell_offset` dispatches on axis) and
-/// header rect building (`Axis::header_rect`). Carries no payload - the
+/// Shared across the scroll-blit geometry (`BlitPlan::for_axis_scroll`
+/// dispatches on axis) and header rect building (`Axis::header_rect`).
+/// Carries no payload - the
 /// row/column index travels as a separate parameter so the same enum value
 /// can be used across call sites that don't care about a specific index.
 #[derive(Copy, Clone)]
