@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
-use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
+use iron_canvas_core::{CanvasModel, CanvasTheme};
 
 use crate::pdf::doc::{ContentStream, PdfDocument};
 use crate::pdf::painter::PdfPainter;
@@ -30,17 +30,8 @@ impl PdfSurface {
         }
     }
 
-    /// Construct a surface whose painter writes into an externally
-    /// owned `ContentStream`. The Commit 4 web facade uses this to
-    /// point both the grid and overlay `PdfSurface`s at one buffer.
-    pub fn with_stream(stream: Rc<RefCell<ContentStream>>, width: u32, height: u32) -> Self {
-        Self {
-            painter: Rc::new(PdfPainter::with_stream(stream, width, height)),
-        }
-    }
-
-    /// Hand back the shared stream so the matching overlay surface can
-    /// share the same buffer.
+    /// Hand back the painter's content-stream handle so it survives the
+    /// orchestrator drop — `render` grabs it before `drive_once`.
     pub fn stream(&self) -> Rc<RefCell<ContentStream>> {
         self.painter.stream()
     }
@@ -58,12 +49,11 @@ impl PdfSurface {
     /// Stream-first assembly: wrap an already-populated `ContentStream`
     /// in the page-open CTM and emit a complete single-page PDF.
     ///
-    /// Exposed so callers that don't hold the surface itself can still
-    /// assemble — `IronCanvas::exportPdf` (in `iron-canvas-web`) hands
-    /// both grid and overlay `PdfSurface`s into the throwaway
-    /// `Orchestrator`, which takes ownership; the only handle that
-    /// survives the orchestrator drop is the shared
-    /// `Rc<RefCell<ContentStream>>`.
+    /// Split from `finish` so `render` can assemble after the throwaway
+    /// `Orchestrator` (and its `Rc<PdfPainter>` clones) have dropped:
+    /// `render` grabs the grid surface's `stream()` handle up front,
+    /// drives the paint, then feeds that surviving stream here. The
+    /// overlay surface is never assembled — that is the overlay discard.
     ///
     /// The CTM `1 0 0 -1 0 H cm` flips painter Y-down into PDF Y-up —
     /// emitted exactly once here rather than once per paint call.
@@ -98,13 +88,7 @@ impl PdfSurface {
         let overlay = PdfSurface::new(width, height);
         let grid_stream = grid.stream();
 
-        let mut orch = Orchestrator::<PdfSurface>::new(grid, overlay);
-        orch.set_theme(theme.clone());
-        orch.set_model(model);
-        orch.resize(size, 1);
-        orch.request_repaint();
-        orch.paint_if_dirty();
-        drop(orch);
+        crate::drive_once(grid, overlay, model, theme, size);
 
         let stream = grid_stream.borrow();
         Self::build_document(&stream, width, height)

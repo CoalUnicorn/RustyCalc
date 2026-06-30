@@ -14,3 +14,6 @@ pdf = []
 
 [dependencies]
 iron-canvas-core = { path = "../iron-canvas-core" }
+
+[dev-dependencies]
+iron-canvas-datagrid = { path = "../iron-canvas-datagrid" }

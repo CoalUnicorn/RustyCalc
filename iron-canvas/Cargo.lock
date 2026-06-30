@@ -287,6 +287,7 @@ name = "iron-canvas-export"
 version = "0.1.0-beta.2"
 dependencies = [
  "iron-canvas-core",
+ "iron-canvas-datagrid",
 ]
 
 [[package]]
@@ -313,6 +314,7 @@ dependencies = [
  "iron-canvas-canvas2d",
  "iron-canvas-core",
  "iron-canvas-export",
+ "iron-canvas-ironcalc",
  "iron-canvas-recorder",
  "ironcalc_base",
  "js-sys",

@@ -20,18 +20,9 @@ use ironcalc_base::types as ic;
 
 use crate::wasm::diag::console_warn;
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{
-    Alignment, Border, BorderItem, BorderStyle, CellKind, CellStyle, FontStyle, HAlign, VAlign,
-};
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
-
-/// Local mirror of `iron-canvas-ironcalc::convert::color_to_css` — kept here,
-/// like the rest of `ic_style_to_core`, to avoid pulling that crate into the
-/// web crate's dep tree. Resolves theme slots; `None` for `Color::None`.
-fn ic_color_to_css(c: &ic::Color, theme: &ic::Theme) -> Option<String> {
-    let rgb = c.to_rgb(theme);
-    (!rgb.is_empty()).then_some(rgb)
-}
+use iron_canvas_core::{CellKind, CellStyle};
+use iron_canvas_ironcalc::convert::{color_to_css, style_to_core};
 
 #[wasm_bindgen]
 extern "C" {
@@ -356,7 +347,7 @@ impl CellContentQuery for JsBackedModel {
             return Fetched::BridgeFailed;
         };
         match serde_wasm_bindgen::from_value::<ic::Style>(jsv) {
-            Ok(s) => Fetched::Value(self.with_theme(|t| ic_style_to_core(s, t))),
+            Ok(s) => Fetched::Value(self.with_theme(|t| style_to_core(s, &|c| color_to_css(c, t)))),
             Err(e) => {
                 self.note_serde_err("getCellStyle", &e);
                 Fetched::BridgeFailed
@@ -428,7 +419,7 @@ impl CellContentQuery for JsBackedModel {
         // One theme borrow for the whole batch — not one cache hit per cell.
         self.with_theme(|t| {
             out.extend(decoded.into_iter().map(|s| match s {
-                Some(s) => Fetched::Value(ic_style_to_core(s, t)),
+                Some(s) => Fetched::Value(style_to_core(s, &|c| color_to_css(c, t))),
                 None => Fetched::Absent,
             }));
         });
@@ -570,82 +561,6 @@ fn cell_kind_from_discriminant(v: i32) -> Option<CellKind> {
     }
 }
 
-/// Convert an IronCalc `Style` (deserialized from JS) to the core `CellStyle`,
-/// resolving theme colors against the workbook theme.
-/// Mirrors `iron-canvas-ironcalc::convert::style_to_core` — kept local to
-/// avoid pulling `iron-canvas-ironcalc` into the web crate's dep tree.
-fn ic_style_to_core(s: ic::Style, theme: &ic::Theme) -> CellStyle {
-    CellStyle {
-        fill_color: ic_color_to_css(&s.fill.color, theme),
-        font: FontStyle {
-            name: s.font.name,
-            size: f64::from(s.font.sz),
-            color: ic_color_to_css(&s.font.color, theme),
-            bold: s.font.b,
-            italic: s.font.i,
-            underline: s.font.u,
-            strike: s.font.strike,
-        },
-        alignment: s.alignment.map(|a| Alignment {
-            horizontal: ic_halign_to_core(a.horizontal),
-            vertical: ic_valign_to_core(a.vertical),
-            wrap_text: a.wrap_text,
-        }),
-        border: Border {
-            left: s.border.left.map(|i| ic_border_item_to_core(i, theme)),
-            right: s.border.right.map(|i| ic_border_item_to_core(i, theme)),
-            top: s.border.top.map(|i| ic_border_item_to_core(i, theme)),
-            bottom: s.border.bottom.map(|i| ic_border_item_to_core(i, theme)),
-            diagonal_up: s.border.diagonal_up,
-            diagonal_down: s.border.diagonal_down,
-        },
-    }
-}
-
-fn ic_halign_to_core(h: ic::HorizontalAlignment) -> HAlign {
-    match h {
-        ic::HorizontalAlignment::Center => HAlign::Center,
-        ic::HorizontalAlignment::CenterContinuous => HAlign::CenterContinuous,
-        ic::HorizontalAlignment::Distributed => HAlign::Distributed,
-        ic::HorizontalAlignment::Fill => HAlign::Fill,
-        ic::HorizontalAlignment::General => HAlign::General,
-        ic::HorizontalAlignment::Justify => HAlign::Justify,
-        ic::HorizontalAlignment::Left => HAlign::Left,
-        ic::HorizontalAlignment::Right => HAlign::Right,
-    }
-}
-
-fn ic_valign_to_core(v: ic::VerticalAlignment) -> VAlign {
-    match v {
-        ic::VerticalAlignment::Bottom => VAlign::Bottom,
-        ic::VerticalAlignment::Center => VAlign::Center,
-        ic::VerticalAlignment::Distributed => VAlign::Distributed,
-        ic::VerticalAlignment::Justify => VAlign::Justify,
-        ic::VerticalAlignment::Top => VAlign::Top,
-    }
-}
-
-fn ic_border_item_to_core(b: ic::BorderItem, theme: &ic::Theme) -> BorderItem {
-    BorderItem {
-        style: ic_border_style_to_core(b.style),
-        color: ic_color_to_css(&b.color, theme),
-    }
-}
-
-fn ic_border_style_to_core(s: ic::BorderStyle) -> BorderStyle {
-    match s {
-        ic::BorderStyle::Thin => BorderStyle::Thin,
-        ic::BorderStyle::Medium => BorderStyle::Medium,
-        ic::BorderStyle::Thick => BorderStyle::Thick,
-        ic::BorderStyle::Double => BorderStyle::Double,
-        ic::BorderStyle::Dotted => BorderStyle::Dotted,
-        ic::BorderStyle::SlantDashDot => BorderStyle::SlantDashDot,
-        ic::BorderStyle::MediumDashed => BorderStyle::MediumDashed,
-        ic::BorderStyle::MediumDashDotDot => BorderStyle::MediumDashDotDot,
-        ic::BorderStyle::MediumDashDot => BorderStyle::MediumDashDot,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -723,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn mirror_resolves_theme_colors() {
+    fn js_style_conversion_resolves_theme_colors() {
         let theme = ic::Theme::default();
         let s = ic::Style {
             fill: ic::Fill {
@@ -731,10 +646,10 @@ mod tests {
             },
             ..ic::Style::default()
         };
-        let core = ic_style_to_core(s, &theme);
+        let core = style_to_core(s, &|c| color_to_css(c, &theme));
         assert_eq!(core.fill_color.as_deref(), Some("#4472C4"));
         assert_eq!(
-            ic_color_to_css(&ic::Color::None, &theme),
+            color_to_css(&ic::Color::None, &theme),
             None,
             "Color::None must stay None, not become an empty CSS string"
         );

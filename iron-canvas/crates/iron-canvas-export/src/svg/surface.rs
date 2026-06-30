@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
-use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
+use iron_canvas_core::{CanvasModel, CanvasTheme};
 
 use super::SvgPainter;
 
@@ -46,13 +46,7 @@ impl SvgSurface {
         let overlay = SvgSurface::new(width, height);
         let grid_painter = grid.clone_painter();
 
-        let mut orch = Orchestrator::<SvgSurface>::new(grid, overlay);
-        orch.set_theme(theme.clone());
-        orch.set_model(model);
-        orch.resize(size, 1);
-        orch.request_repaint();
-        orch.paint_if_dirty();
-        drop(orch);
+        crate::drive_once(grid, overlay, model, theme, size);
 
         grid_painter.finish()
     }

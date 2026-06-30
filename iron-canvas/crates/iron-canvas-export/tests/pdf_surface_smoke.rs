@@ -8,6 +8,12 @@
 
 #![cfg(feature = "pdf")]
 
+use std::rc::Rc;
+
+use iron_canvas_core::CanvasTheme;
+use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_datagrid::{Column, DataGrid};
+use iron_canvas_export::PdfSurface;
 use iron_canvas_export::pdf::PdfDocument as ReexportedDoc;
 use iron_canvas_export::pdf::doc::{ContentStream, PdfDocument, font, object, page};
 
@@ -165,6 +171,36 @@ fn content_stream_carries_declared_length() {
 fn indirect_ref_is_n_gen_r() {
     assert_eq!(object::indirect_ref(1), "1 0 R");
     assert_eq!(object::indirect_ref(42), "42 0 R");
+}
+
+#[test]
+fn pdf_render_discards_overlay() {
+    // render() finishes only the grid stream, so a selection — which paints only
+    // to the discarded overlay surface — must not change the grid PDF. The PDF
+    // writer is deterministic (no /ID, no timestamp), so identical grid content
+    // yields byte-identical PDFs; that is what assert_eq!(a, b) below verifies.
+    let size = CanvasSize { w: 300.0, h: 200.0 };
+    let theme = CanvasTheme::light();
+
+    let plain = DataGrid::builder()
+        .column(Column::new("A"))
+        .row(vec!["hello".to_string()])
+        .build();
+    let a = PdfSurface::render(Rc::new(plain), &theme, size);
+
+    let mut selected = DataGrid::builder()
+        .column(Column::new("A"))
+        .row(vec!["hello".to_string()])
+        .build();
+    selected.set_selection(1, 1, 3, 3); // overlay-only difference
+    let b = PdfSurface::render(Rc::new(selected), &theme, size);
+
+    assert!(a.starts_with(b"%PDF-1.7"), "not a valid PDF 1.7 document");
+    assert!(a.ends_with(b"%%EOF"), "missing %%EOF terminator");
+    assert_eq!(
+        a, b,
+        "selection (overlay-only) changed the grid PDF — overlay not discarded"
+    );
 }
 
 /// Linear subslice search — no `windows().position()` dependency, no
