@@ -12,7 +12,11 @@
  *   share-btn          -> tb-share   (migrated from file bar)
  */
 
-.tb-shell { display: flex; flex-direction: column; flex-shrink: 0; }
+.tb-shell {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
 
 .tb {
     display: flex;
@@ -122,9 +126,8 @@
 }
 
 .tb-num-fmt-dropdown {
-    position: absolute;
-    top: 100%;
-    left: 0;
+    /* Positioned by <Popover> via inline left/top (viewport coords) */
+    position: fixed;
     z-index: 200;
     min-width: 240px;
     background: var(--bg-secondary);
@@ -132,7 +135,6 @@
     border-radius: 4px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
     padding: 4px 0;
-    margin-top: 2px;
 }
 
 .tb-num-fmt-item {
@@ -173,7 +175,12 @@
     display: none;
 }
 
-.tb-ic { width: 18px; height: 18px; display: block; fill: currentColor; }
+.tb-ic {
+    width: 18px;
+    height: 18px;
+    display: block;
+    fill: currentColor;
+}
 
 /* Chrome header row: hamburger | tabs | sharing + chrome cluster. */
 .tb-head {
@@ -292,7 +299,9 @@
     font-size: 12.5px;
     cursor: pointer;
 }
-.tb-tab:hover { color: var(--text-primary); }
+.tb-tab:hover {
+    color: var(--text-primary);
+}
 .tb-tab.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
