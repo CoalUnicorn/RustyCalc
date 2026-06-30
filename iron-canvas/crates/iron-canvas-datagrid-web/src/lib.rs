@@ -5,9 +5,9 @@
 //! The JS-facing handle is uniformly 0-based for row/col. This handle is
 //! the single translation seam to the mixed-base pure model:
 //! - model `set_selection`/`set_active`/`set_scroll` take 1-based display
-//!   coords → add 1 here;
-//! - model `set_cell`/`set_column_width` take 0-based coords → pass JS through;
-//! - engine `HitTest::Cell`/`ResizeTarget::*Edge` are 1-based → the wire
+//!   coords -> add 1 here;
+//! - model `set_cell`/`set_column_width` take 0-based coords -> pass JS through;
+//! - engine `HitTest::Cell`/`ResizeTarget::*Edge` are 1-based -> the wire
 //!   mirrors subtract 1 before emitting to JS.
 //!
 //! ## Live / async data
@@ -110,7 +110,7 @@ impl DataGridCanvas {
     #[wasm_bindgen(js_name = "setScroll")]
     pub fn set_scroll(&mut self, top_row: i32, left_col: i32) {
         self.model
-            .borrow_mut_with(|g| g.set_scroll(top_row + 1, left_col + 1)); // 0→1 based
+            .borrow_mut_with(|g| g.set_scroll(top_row + 1, left_col + 1)); // 0->1 based
         self.orch.request_repaint();
     }
 
@@ -173,7 +173,7 @@ impl DataGridCanvas {
         }
         self.model
             .borrow_mut_with(|g| g.set_column_width(col as usize, width));
-        self.orch.request_repaint(); // geometry changed → Fresh rebuild
+        self.orch.request_repaint(); // geometry changed -> Fresh rebuild
     }
 
     // D.4 Sort

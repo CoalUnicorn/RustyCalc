@@ -65,7 +65,7 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
 
     let baseline_ops = core.painter().ops().len();
 
-    // Scroll by 1 row → top_row=2.
+    // Scroll by 1 row -> top_row=2.
     m.set_top_row(2);
 
     let plan = frame0
@@ -129,8 +129,8 @@ fn scroll_past_viewport_disqualifies_blit() {
         iron_canvas_core::chrome::FramePath::Fresh,
     );
 
-    // Canvas is 400 px tall, rows are 20 px → ~20 visible rows. Scroll
-    // by 100 rows → no overlap with prev viewport → screen_for_blit must bail.
+    // Canvas is 400 px tall, rows are 20 px -> ~20 visible rows. Scroll
+    // by 100 rows -> no overlap with prev viewport -> screen_for_blit must bail.
     m.set_top_row(101);
 
     let plan = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m));
@@ -271,7 +271,7 @@ fn active_cell_value_change_disqualifies_blit() {
     // against the live model on the *next* blit attempt.
     let active_at_paint = snap(&m);
 
-    // Simulate the bug: row 1's value flips "" → "R1" (proxy for an edit
+    // Simulate the bug: row 1's value flips "" -> "R1" (proxy for an edit
     // committed at the active cell) AND viewport scrolls by one row.
     m.set_data_until(5);
     m.set_top_row(2);
@@ -669,7 +669,7 @@ fn seed_sibling_buffers(pane: &iron_canvas_core::renderer::cache::PaneBuffers, l
 #[test]
 fn prepare_shift_reports_missing_cache() {
     let cache = PaneCache::default();
-    // No `range` seeded → cache is empty.
+    // No `range` seeded -> cache is empty.
     let prep = cache
         .pane(PaneRegion::BottomRight)
         .prepare_shift(rng(2, 3, 1, 2), Axis::Row);
@@ -683,7 +683,7 @@ fn prepare_shift_reports_incompatible_range() {
     let prev = rng(1, 2, 1, 2);
     pane.range.set(Some(prev));
 
-    // Row scroll but the orthogonal (column) extent changed → incompatible.
+    // Row scroll but the orthogonal (column) extent changed -> incompatible.
     let new = rng(2, 3, 1, 5);
     let prep = pane.prepare_shift(new, Axis::Row);
     assert_eq!(
@@ -709,7 +709,7 @@ fn prepare_shift_rotates_row_buffers() {
     seed_sibling_buffers(pane, 4);
 
     // Scroll down by one row: delta = +1, shift = 1 row × 2 cols = 2.
-    // rotate_left(2) → [c,d,a,b]; fill the trailing strip (last 2) → Absent.
+    // rotate_left(2) -> [c,d,a,b]; fill the trailing strip (last 2) -> Absent.
     let new = rng(2, 3, 1, 2);
     let prep = pane.prepare_shift(new, Axis::Row);
     assert_eq!(
@@ -748,7 +748,7 @@ fn prepare_shift_rotates_column_buffers() {
     seed_sibling_buffers(pane, 4);
 
     // Scroll right by one column: delta = +1, each row rotate_left(1), fill
-    // the trailing column with Absent → rows [b,Absent] / [d,Absent].
+    // the trailing column with Absent -> rows [b,Absent] / [d,Absent].
     let new = rng(1, 2, 2, 3);
     let prep = pane.prepare_shift(new, Axis::Column);
     assert_eq!(

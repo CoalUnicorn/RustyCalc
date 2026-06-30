@@ -1,4 +1,4 @@
-//! Event ↔ source-range intersection. Conservative: variants that carry no
+//! Event <-> source-range intersection. Conservative: variants that carry no
 //! locality (or whose locality we can't prove disjoint) return true, so a
 //! camera can over-repaint but never go stale.
 

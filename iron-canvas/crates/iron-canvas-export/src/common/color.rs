@@ -1,4 +1,4 @@
-//! `PaintColor`/CSS-color string → PDF `(r g b)` triple in `0.0..=1.0`.
+//! `PaintColor`/CSS-color string -> PDF `(r g b)` triple in `0.0..=1.0`.
 //!
 //! Handles the subset emitted by `CanvasTheme` + cell-style overrides:
 //! `#rgb`, `#rrggbb`, `#rrggbbaa` (alpha dropped — PDF rg/RG is opaque),
@@ -32,7 +32,7 @@ pub fn parse_css_color(css: &str) -> Rgb {
 
 fn parse_hex(rest: &str) -> Option<Rgb> {
     match rest.len() {
-        // #rgb — each digit expanded to a byte (`0xF` → `0xFF`, `0x3` → `0x33`).
+        // #rgb — each digit expanded to a byte (`0xF` -> `0xFF`, `0x3` -> `0x33`).
         3 => {
             let r = u8::from_str_radix(rest.get(0..1)?, 16).ok()?;
             let g = u8::from_str_radix(rest.get(1..2)?, 16).ok()?;

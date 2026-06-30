@@ -6,7 +6,7 @@
 //!
 //! Save / Delete dispatch through `create_defined_name` /
 //! `rename_defined_name` / `remove_defined_name`,
-//! each wrapped in `try_mutate(EvaluationMode::Immediate, …)` so dependent
+//! each wrapped in `try_mutate(EvaluationMode::Immediate, ...)` so dependent
 //! cells recompute before the next paint. Errors from ironcalc surface
 //! directly in the status bar — they're already user-readable strings
 //! ("name already exists", "invalid formula", etc.).
@@ -106,7 +106,7 @@ pub fn NamedRangeForm() -> impl IntoView {
         });
     };
 
-    // "workbook" sentinel ↔ None scope; numeric ↔ Some(sheet_index).
+    // "workbook" sentinel <-> None scope; numeric <-> Some(sheet_index).
     //
     // Maintains the invariant `context_cell.sheet == scope.unwrap_or(view_sheet)`
     // so unqualified refs in the formula body resolve against the scope sheet
@@ -287,7 +287,7 @@ pub fn NamedRangeForm() -> impl IntoView {
                     </div>
                 </div>
                 <Show when=nr_armed>
-                    <p class="rp-hint">"Selecting on grid… click ⊞ or press Esc when done."</p>
+                    <p class="rp-hint">"Selecting on grid... click ⊞ or press Esc when done."</p>
                 </Show>
                 <div class="nrm-btns">
                     <button

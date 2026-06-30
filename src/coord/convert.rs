@@ -6,7 +6,7 @@ use ironcalc_base::expressions::parser::DefinedNameS;
 
 use super::types::*;
 
-// --- ActiveRef → FormulaRef ---
+// --- ActiveRef -> FormulaRef ---
 
 impl From<ActiveRef> for FormulaRef {
     fn from(a: ActiveRef) -> Self {
@@ -18,7 +18,7 @@ impl From<ActiveRef> for FormulaRef {
     }
 }
 
-// --- SheetRange → SheetArea ---
+// --- SheetRange -> SheetArea ---
 
 impl From<SheetRange> for SheetArea {
     fn from(s: SheetRange) -> Self {
@@ -65,7 +65,7 @@ impl From<CellArea> for RCRange {
     }
 }
 
-// --- DefinedNameS → DefinedName ---
+// --- DefinedNameS -> DefinedName ---
 
 impl From<DefinedNameS> for DefinedName {
     fn from((name, scope, formula): DefinedNameS) -> Self {

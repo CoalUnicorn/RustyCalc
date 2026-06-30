@@ -84,7 +84,7 @@ fn slots_reuse_regime_skips_full_canvas_fill() {
 
     let grid_before = grid_ops_len(&orch);
 
-    // A content-dirty signal keeps the viewport stable → validity =
+    // A content-dirty signal keeps the viewport stable -> validity =
     // SlotsReuse. The decide cascade routes here because CONTENT blocks
     // the Viewport arm (blit on stale content is the recalc bug) and
     // validity stays SlotsReuse. Theme swaps no longer reach this regime
@@ -140,7 +140,7 @@ fn overlay_regime_leaves_grid_untouched() {
     let overlay_before = overlay_ops_len(&orch);
 
     // Autofill drag: raises OVERLAY only, no grid signal. Viewport
-    // unchanged → validity = SlotsReuse. decide() picks Overlay.
+    // unchanged -> validity = SlotsReuse. decide() picks Overlay.
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
     orch.paint_if_dirty();
 
@@ -413,7 +413,7 @@ fn last_regime_overlay_after_autofill_drag() {
 
 #[test]
 fn recording_serde_round_trip_across_all_four_regimes() {
-    // Drive Fresh → SlotsReuse → Viewport → Overlay through one
+    // Drive Fresh -> SlotsReuse -> Viewport -> Overlay through one
     // Orchestrator, collecting one Frame per regime, then serialize the
     // whole Recording and assert deserialize is bit-equal to the original.
     let stub = Rc::new(TestModel::synthetic_grid());
@@ -439,7 +439,7 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     };
 
     push(&mut orch, 0); // Fresh
-    // mark_content_dirty raises CONTENT; viewport stays valid → SlotsReuse.
+    // mark_content_dirty raises CONTENT; viewport stays valid -> SlotsReuse.
     // (set_theme used to land here too, but a palette change now invalidates
     // the paint cache and routes to Fresh, so it can't be used as a
     // SlotsReuse trigger.)

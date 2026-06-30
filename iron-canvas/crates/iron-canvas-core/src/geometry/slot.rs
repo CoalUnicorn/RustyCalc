@@ -2,7 +2,7 @@
 //!
 //! A slot carries the index, the absolute canvas coordinate of its leading
 //! edge, and its extent. `PaneSet` holds four vecs (frozen/scrollable ×
-//! row/column); every pixel↔cell query reads them directly, no prefix-sum
+//! row/column); every pixel<->cell query reads them directly, no prefix-sum
 //! decoding.
 
 use crate::CanvasModel;

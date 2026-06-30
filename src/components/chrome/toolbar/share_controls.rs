@@ -86,7 +86,7 @@ pub fn ShareControls() -> impl IntoView {
             Err(storage::ShareError::TooLarge { size_kb }) => {
                 share_error.set(format!(
                     "This workbook is too large to share via link ({size_kb} KB). \
-                     Use File → Download .xlsx instead."
+                     Use File -> Download .xlsx instead."
                 ));
                 false
             }

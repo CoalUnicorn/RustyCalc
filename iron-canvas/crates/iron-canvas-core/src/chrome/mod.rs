@@ -105,7 +105,7 @@ impl ActiveCellSnapshot {
 
     pub fn matches(&self, model: &dyn CanvasModel, sheet: u32) -> bool {
         // Blit only when both fetches are known AND equal. A `BridgeFailed`
-        // (`None`) at capture or compare time means "can't prove unchanged" →
+        // (`None`) at capture or compare time means "can't prove unchanged" ->
         // reject, forcing a fresh repaint instead of reusing stale pixels.
         match (
             self.value_hash,
@@ -184,7 +184,7 @@ pub enum BlitOutcome {
     /// In-place reuse succeeded: the kept band was blitted, only the strip
     /// touched the model. Caller paints via `paint_grid_blit`.
     Blitted(Chrome),
-    /// Reuse rejected (e.g. row-header digit-boundary 99 → 100) and the frame
+    /// Reuse rejected (e.g. row-header digit-boundary 99 -> 100) and the frame
     /// was rebuilt `Fresh`. Caller invalidates caches and paints `paint_grid`.
     FreshFallback(Chrome),
 }
@@ -197,7 +197,7 @@ impl Chrome {
     ///
     ///   * `Fresh` — full rebuild. `prev = Some` recycles slot Vec
     ///     allocations; `None` is the first-frame path. See the
-    ///     [module docs](crate::chrome) for build phases A–E.
+    ///     [module docs](crate::chrome) for build phases A-E.
     ///   * `SlotsReuse` — prev's slot vecs survive verbatim; only
     ///     per-frame state (theme + `pane_fingerprints` rotation) is
     ///     refreshed. Caller refreshes overlay state separately
@@ -241,7 +241,7 @@ impl Chrome {
     /// [`BlitOutcome`] rather than a `Chrome` with an open `FrameKindTag`.
     ///
     /// Qualification passed (`screen_for_blit` returned a plan), but in-place
-    /// reuse may still reject — e.g. the row-header digit boundary at 99 → 100,
+    /// reuse may still reject — e.g. the row-header digit boundary at 99 -> 100,
     /// where `row_header_thickness` widens and the cross-axis cell-area origin
     /// shifts. `try_blit_reuse` hands `prev` back (`Err`) on reject, and we
     /// rebuild `Fresh`. The two results map straight to the two `BlitOutcome`
@@ -282,7 +282,7 @@ impl Chrome {
         recycled: RecycledSlots,
         prev_pane_fingerprints: [u64; 4],
     ) -> Self {
-        // None ⇒ JS bridge transient (threw or shape malformed). Fall through
+        // None -> JS bridge transient (threw or shape malformed). Fall through
         // with the fresh-model default so the frame still builds; next animation
         // frame re-queries.
         let view = model.get_selected_view().unwrap_or(CanvasView {

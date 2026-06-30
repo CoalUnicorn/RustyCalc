@@ -1,5 +1,5 @@
 //! Data-driven header text: a model-supplied column label replaces the default
-//! A/B/C… spreadsheet label; columns left unset fall back to the default.
+//! A/B/C... spreadsheet label; columns left unset fall back to the default.
 
 mod common;
 

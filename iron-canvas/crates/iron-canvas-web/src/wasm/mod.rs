@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn batch_is_dense_rejects_wrong_length() {
-        // 2×2 range ⇒ 4 cells. Anything else can't be indexed row-major, so it
+        // 2×2 range -> 4 cells. Anything else can't be indexed row-major, so it
         // forfeits the batch and falls back to the per-cell path.
         let range = RCRange {
             r1: 1,

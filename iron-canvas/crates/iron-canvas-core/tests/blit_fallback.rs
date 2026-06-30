@@ -20,7 +20,7 @@ fn snap(m: &TestModel) -> ActiveCellSnapshot {
 
 #[test]
 fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
-    // 400 px tall canvas with 20 px rows ⇒ ~19 visible rows past the
+    // 400 px tall canvas with 20 px rows -> ~19 visible rows past the
     // 22 px header band. At top_row=980 the last visible row is 999
     // (3 digits, row_header_thickness = default). Scrolling to
     // top_row=981 makes the last visible row 1000 (4 digits), which
@@ -73,7 +73,7 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
     if next_row_header != prev_row_header {
         assert!(
             is_fallback,
-            "row_header widened ({}→{}), so try_blit_reuse must have fallen back to Fresh",
+            "row_header widened ({}->{}), so try_blit_reuse must have fallen back to Fresh",
             prev_row_header, next_row_header
         );
     }
@@ -127,7 +127,7 @@ fn bridge_failed_active_cell_rejects_blit() {
     let prev = Chrome::next(None, &model, canvas, &theme, FramePath::Fresh);
     model.set_top_row(11);
 
-    // Control: known, unchanged value ⇒ single-row scroll qualifies.
+    // Control: known, unchanged value -> single-row scroll qualifies.
     assert!(
         prev.screen_for_blit(&model, canvas, &theme, &snap(&model))
             .is_some(),
@@ -135,7 +135,7 @@ fn bridge_failed_active_cell_rejects_blit() {
     );
 
     // Compare-time failure: snapshot captured a known value, but the live
-    // re-hash now throws (`BridgeFailed`) ⇒ unknown ⇒ reject.
+    // re-hash now throws (`BridgeFailed`) -> unknown -> reject.
     let known = snap(&model);
     model.set_value_bridge_fail(true);
     assert!(
@@ -145,7 +145,7 @@ fn bridge_failed_active_cell_rejects_blit() {
     );
 
     // Capture-time failure: snapshot taken while the bridge is down (poisoned
-    // `None`); even once the bridge recovers, it can't prove unchanged ⇒ reject.
+    // `None`); even once the bridge recovers, it can't prove unchanged -> reject.
     let poisoned = snap(&model);
     model.set_value_bridge_fail(false);
     assert!(

@@ -234,7 +234,7 @@ impl IronCanvas {
                 return Err(JsError::new("cannot start a recording during playback"));
             }
         }
-        // `undefined` / `null` → default filter (record everything).
+        // `undefined` / `null` -> default filter (record everything).
         // Anything else is parsed as a `RecordingFilter` shape.
         let filter: RecordingFilter = if opts.is_undefined() || opts.is_null() {
             RecordingFilter::default()

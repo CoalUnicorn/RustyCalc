@@ -20,7 +20,7 @@ pub struct HoverLayer {
 }
 
 impl HoverLayer {
-    /// JS-facing 0-based hover coords → engine cell. Any negative
+    /// JS-facing 0-based hover coords -> engine cell. Any negative
     /// coordinate means "pointer left the grid" and clears the hover.
     pub fn cell_from_js(row: i32, col: i32) -> Option<(i32, i32)> {
         (row >= 0 && col >= 0).then(|| (row + 1, col + 1))

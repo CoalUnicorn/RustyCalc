@@ -1,4 +1,4 @@
-//! `handle_mousedown`: hit-test → drag start or click dispatch.
+//! `handle_mousedown`: hit-test -> drag start or click dispatch.
 //!
 //! Resize handles are probed first (they straddle the header/cell seam
 //! by `HIT_ZONE` px), then the normal hit-test routes to the four click

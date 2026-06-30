@@ -49,7 +49,7 @@ fn from_slots_reuse_emits_slots_reused() {
 /// `prev.stale_panes` — so a `SlotsReuse` chasing a `Blit` (whose
 /// `stale_panes` had been narrowed to the scrolled strip) would skip
 /// the unscrolled panes on the next content repaint. Reproduces the
-/// scroll-to-row-78 → DEL bug at the `Chrome::next` level without
+/// scroll-to-row-78 -> DEL bug at the `Chrome::next` level without
 /// needing canvas or orchestrator scaffolding.
 #[test]
 fn slots_reuse_uses_caller_supplied_stale_panes() {

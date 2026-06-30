@@ -48,7 +48,7 @@ pub struct WorkbookState {
     /// Cancel). The dialog's `<FormulaInput>` reads/writes through this signal
     /// via the shared [`crate::input::formula::sync_edit`] helper.
     pub(crate) editing_named_range: Split<Option<EditingDefinedName>>,
-    /// Combined row+column header visibility (View → Show Headers). App-level
+    /// Combined row+column header visibility (View -> Show Headers). App-level
     /// view preference; not persisted in the workbook. Read untracked by the
     /// canvas adapter; the toggle emits FormatEvent::LayoutChanged to repaint.
     pub(crate) show_headers: Split<bool>,

@@ -24,7 +24,7 @@ pub struct EditingDefinedName {
     pub(crate) scope: Option<u32>,
     /// Formula body without the leading `=`. Stored bare so it round-trips
     /// against ironcalc's `new_defined_name` / `update_defined_name` (both
-    /// expect the body, not the `=…` form).
+    /// expect the body, not the `=...` form).
     pub(crate) formula: String,
     /// Cursor position as a UTF-8 byte offset into `formula` (converted from
     /// the DOM's UTF-16 by `sync_edit`).

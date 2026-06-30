@@ -7,7 +7,7 @@ pub const DASHED_BORDER_WIDTH: i32 = 2;
 
 /// Width of the 1-px line separating a header strip from the cell area,
 /// stroked sharply by `draw_corner_box` at `header_thickness + 0.5`. The
-/// single source of truth for the header↔cell boundary: header strips and the
+/// single source of truth for the header<->cell boundary: header strips and the
 /// corner box fill `[0, thickness)`, this line occupies the next pixel, and
 /// the cell area begins one separator-width past the thickness (`CELL_AREA_INSET`).
 pub const HEADER_SEPARATOR_WIDTH: i32 = STANDARD_BORDER_WIDTH;

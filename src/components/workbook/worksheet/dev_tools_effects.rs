@@ -4,7 +4,7 @@
 //!
 //! All three Effects share the same shape: `let-else` to drop spurious
 //! re-fires from the trailing `set(None)`, `update_value` to access the
-//! orchestrator, an `Err` → `StatusMessage::Error` fallthrough.
+//! orchestrator, an `Err` -> `StatusMessage::Error` fallthrough.
 
 use leptos::prelude::*;
 

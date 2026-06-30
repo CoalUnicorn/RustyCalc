@@ -103,7 +103,7 @@ fn decoration_reaches_painter_and_skip_is_stable() {
 
     let core2 = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core2.render_pane(&model, PaneRegion::BottomRight, &frame);
-    // Unchanged content ⇒ fingerprint match ⇒ whole walk skipped, including
+    // Unchanged content -> fingerprint match -> whole walk skipped, including
     // the decoration pass; the set-back kept the buffer aligned.
     assert_eq!(
         core2.painter().ops().len(),

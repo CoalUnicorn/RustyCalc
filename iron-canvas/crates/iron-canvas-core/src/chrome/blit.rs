@@ -270,7 +270,7 @@ pub(super) fn try_blit_reuse(
     // invariant the caller's `Chrome::next` fallback relies on.
     //
     // Thickness gates cross-axis reuse: if the new last visible row label grew
-    // (e.g. row 99 → 100), origin_x shifts and every col slot's `.left` is off,
+    // (e.g. row 99 -> 100), origin_x shifts and every col slot's `.left` is off,
     // so we fall back to a full rebuild. It reads the rebuilt rows band (row
     // scroll) or the still-unchanged cross-axis band (column scroll) — neither
     // taken yet. Once it passes, the cross-axis Vec is moved, not cloned.

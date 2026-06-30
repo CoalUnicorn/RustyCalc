@@ -2,7 +2,7 @@
 //!
 //! Captures the full post-scroll `Vec<DrawOp>` for a row scroll and a column
 //! scroll via the direct `RendererCore` + `RecorderPainter` flow, then freezes
-//! it as a blessed snapshot. Stages 1–2 of the refactor are behaviour-
+//! it as a blessed snapshot. Stages 1-2 of the refactor are behaviour-
 //! preserving, so these snapshots must stay byte-for-byte identical. A diff is
 //! a real regression — do NOT regenerate the snapshot to make the test pass.
 

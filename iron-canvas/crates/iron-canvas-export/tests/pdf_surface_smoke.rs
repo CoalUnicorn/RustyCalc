@@ -1,9 +1,9 @@
 //! Commit 2 smoke test: hand-build the minimum spec-conformant PDF
-//! (Catalog → Pages → Page → Contents + Resources) and parse it back
+//! (Catalog -> Pages -> Page -> Contents + Resources) and parse it back
 //! to prove the `PdfDocument` writer emits a valid header, body, xref
 //! table, and trailer.
 //!
-//! End-to-end painter→PDF verification lives in `pdf_painter_smoke`
+//! End-to-end painter->PDF verification lives in `pdf_painter_smoke`
 //! (Commit 3); this test only covers the document writer.
 
 #![cfg(feature = "pdf")]

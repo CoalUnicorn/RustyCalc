@@ -1,4 +1,4 @@
-//! `handle_mouseup`: commit drag → emit events, reset to Idle.
+//! `handle_mouseup`: commit drag -> emit events, reset to Idle.
 
 use leptos::prelude::*;
 

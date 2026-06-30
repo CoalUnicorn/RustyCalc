@@ -116,7 +116,7 @@ fn frame_geometry_returns_zero_for_out_of_range_indices() {
     assert_eq!(p.col_extent_at(99999), 0);
 }
 
-// Chrome: pixel ↔ cell math
+// Chrome: pixel <-> cell math
 //
 // The frame is built fresh per test from the mock model and a canvas
 // size large enough to make the test cells fall inside the visible

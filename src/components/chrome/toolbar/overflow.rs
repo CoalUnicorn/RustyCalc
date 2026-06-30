@@ -1,4 +1,4 @@
-//! Overflow: the pure width→count partition plus the `OverflowRow` component
+//! Overflow: the pure width->count partition plus the `OverflowRow` component
 //! that measures slot widths once and collapses the overflow into a `⋯` menu.
 
 use leptos::html;

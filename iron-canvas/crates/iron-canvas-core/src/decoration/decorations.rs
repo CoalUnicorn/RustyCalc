@@ -14,7 +14,7 @@
 //!   reports whether anything changed. The caller raises `OVERLAY` on
 //!   `true`; silently poking a field and forgetting the raise is no longer
 //!   expressible, because the fields are private to this module.
-//! - The selection→autofill mirror that keeps the drag preview
+//! - The selection->autofill mirror that keeps the drag preview
 //!   paint-coherent is owned by `refresh_overlay_state`, the single source
 //!   of that invariant.
 
@@ -55,7 +55,7 @@ impl Decorations {
 
     /// Active-cell repaint coords, fired between the selection fill and
     /// stroke phases. Exposed so the orchestrator can gate
-    /// `CONTENT ⇒ OVERLAY` (a DEL on the active cell) without reaching past
+    /// `CONTENT -> OVERLAY` (a DEL on the active cell) without reaching past
     /// the group into the selection field.
     pub(crate) fn active_cell_repaint(&self) -> Option<RepaintActiveCell> {
         self.selection.active_cell_repaint()
@@ -63,7 +63,7 @@ impl Decorations {
 
     /// Back-to-front paint order for `LayerBase::paint_overlay_layer`.
     /// Selection is *not* in this slice — it drives the three-phase
-    /// fill → active-cell repaint → stroke sequence and is passed
+    /// fill -> active-cell repaint -> stroke sequence and is passed
     /// separately to the renderer.
     pub(crate) fn overlay_slice(&self) -> [&dyn Layer; 4] {
         [

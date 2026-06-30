@@ -62,7 +62,7 @@ pub fn hash_word(word: &str) -> [u8; 32] {
 
 /// Frame `bitcode_bytes` with a share-version header.
 ///
-/// `None` → a V0 (no-verification) payload. `Some(word)` → a V1 payload carrying
+/// `None` -> a V0 (no-verification) payload. `Some(word)` -> a V1 payload carrying
 /// a SHA-256 of the word, which the recipient must retype. The word is held to
 /// the *same* grammar `decode_with_consent` enforces on the receiver, so a
 /// sender can never mint a hash that no validate-passing word could match — i.e.

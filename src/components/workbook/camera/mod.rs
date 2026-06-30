@@ -244,7 +244,7 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
         });
     };
 
-    // EventBus → re-extract. Structure events (row/col insert/delete shift
+    // EventBus -> re-extract. Structure events (row/col insert/delete shift
     // ranges) and theme events (colors resolved at extraction) always trigger
     // a re-extract; content/format only when they intersect the source range.
     Effect::new(move |_| {

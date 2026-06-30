@@ -11,7 +11,7 @@
 //! taller. Re-fit-down stays on the double-click-the-border gesture.
 //!
 //! No feedback loop: this watches `content`; `SetRowHeight` emits only a
-//! `Format` event (`StructAction::SetRowHeight` → `FormatEvent::LayoutChanged`).
+//! `Format` event (`StructAction::SetRowHeight` -> `FormatEvent::LayoutChanged`).
 
 use leptos::prelude::*;
 

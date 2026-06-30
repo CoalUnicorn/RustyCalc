@@ -23,7 +23,7 @@ fn encode_rejects_words_the_receiver_would_reject() {
     );
 }
 
-// A validate-passing word still round-trips: encode → decode_payload → the
+// A validate-passing word still round-trips: encode -> decode_payload -> the
 // recipient's consent check accepts the same word.
 #[wasm_bindgen_test]
 fn valid_word_round_trips() {
@@ -37,7 +37,7 @@ fn valid_word_round_trips() {
     assert!(verify::decode_with_consent(&hash, "secret").is_ok());
 }
 
-// No word → V0, unchanged and infallible.
+// No word -> V0, unchanged and infallible.
 #[wasm_bindgen_test]
 fn no_word_encodes_v0() {
     let Ok(wrapped) = verify::encode_with_version(None, b"payload") else {

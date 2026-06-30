@@ -43,7 +43,7 @@ impl ContentStream {
         &self.body
     }
 
-    /// Serialise as a stream object body: `<< /Length N >>\nstream\n…\nendstream`.
+    /// Serialise as a stream object body: `<< /Length N >>\nstream\n...\nendstream`.
     /// Hand to `PdfDocument::add_object` as the `bytes` payload.
     pub fn into_object(self) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.body.len() + 32);

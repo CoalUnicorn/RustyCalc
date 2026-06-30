@@ -1,8 +1,8 @@
 //! URL Sharing
 //!
 //! Encodes the entire workbook into a URL hash fragment so a recipient can open
-//! a copy with no server round-trip. Raw model bytes → base64url (no padding)
-//! keeps the result safe for `#share=…` without percent-encoding. The 30 KB
+//! a copy with no server round-trip. Raw model bytes -> base64url (no padding)
+//! keeps the result safe for `#share=...` without percent-encoding. The 30 KB
 //! raw-byte ceiling keeps the resulting link well below practical browser URL
 //! limits (~64 KB on Chrome / ~32 KB on most others when shared via chat apps).
 
@@ -14,7 +14,7 @@ use crate::verify;
 use super::LOCALE;
 
 /// Maximum raw byte size for share-URL encoding.
-/// 30 KB raw → ~40 KB base64url, comfortably within practical hash-fragment
+/// 30 KB raw -> ~40 KB base64url, comfortably within practical hash-fragment
 /// limits across browsers and link-preview tools.
 pub const MAX_SHARE_BYTES: usize = 30_000;
 

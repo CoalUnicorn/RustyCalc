@@ -90,6 +90,6 @@ fn font_css_quotes_multi_word_family() {
 fn font_css_empty_family_falls_back_to_calibri() {
     use iron_canvas_core::CellStyle;
     let style = CellStyle::default(); // font.name is "" by default
-    // size=11.0, not bold, not italic → "11px Calibri"
+    // size=11.0, not bold, not italic -> "11px Calibri"
     assert_eq!(font_css(&style), "11px Calibri");
 }

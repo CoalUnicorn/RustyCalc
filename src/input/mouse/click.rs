@@ -2,7 +2,7 @@
 //!
 //! Called from `mousedown` once `IronCanvas::hit_test` classifies the
 //! click. These four are also exposed at the module facade because the
-//! header context menu (right-click → "Select column") synthesises
+//! header context menu (right-click -> "Select column") synthesises
 //! header-click events without going through `mousedown`.
 
 use leptos::prelude::*;

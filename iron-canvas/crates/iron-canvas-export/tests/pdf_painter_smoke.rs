@@ -8,7 +8,7 @@
 //! is ~200 LOC for marginal extra coverage over the existing
 //! `MemSurface`-driven integration tests in `iron-canvas-core`. The
 //! contract that needs covering for PDF is the new bit — the
-//! `Painter` → content-stream translation — and that's what each test
+//! `Painter` -> content-stream translation — and that's what each test
 //! below pins.
 
 #![cfg(feature = "pdf")]
@@ -210,7 +210,7 @@ fn fill_text_emits_BT_Tf_color_Tm_Tj_ET() {
 #[test]
 fn fill_text_align_center_shifts_x_by_half_width() {
     let p = PdfPainter::new(W, H);
-    // 4 chars at 10px each ⇒ width 40; centred at x=100 ⇒ tx = 80.
+    // 4 chars at 10px each -> width 40; centred at x=100 -> tx = 80.
     p.fill_text(
         "abcd",
         100.0,
@@ -306,7 +306,7 @@ fn finish_emits_y_flip_cm_at_page_origin() {
     let bytes = s.finish();
     // The CTM lives inside the /Contents stream object — search for the
     // exact `1 0 0 -1 0 <H> cm` payload independently of the wrapping
-    // `<< /Length N >> stream\n…\nendstream` framing.
+    // `<< /Length N >> stream\n...\nendstream` framing.
     let needle = format!("1 0 0 -1 0 {H} cm");
     assert!(
         find_substr(&bytes, needle.as_bytes()),

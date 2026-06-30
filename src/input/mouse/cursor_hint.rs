@@ -28,9 +28,9 @@ pub(super) fn compute_cursor_hint(icv: CanvasHandle, x: f64, y: f64) -> CursorHi
     }
 }
 
-/// `Body` → whole-range move; opposite-side `Edge`s share an axis
+/// `Body` -> whole-range move; opposite-side `Edge`s share an axis
 /// (top/bottom = NS, left/right = EW); diagonal `Corner` pairs share
-/// a slope (TL↔BR = NWSE, TR↔BL = NESW).
+/// a slope (TL<->BR = NWSE, TR<->BL = NESW).
 fn ref_zone_hint(zone: RefZone) -> CursorHint {
     match zone {
         RefZone::Body => CursorHint::RefMove,

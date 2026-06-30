@@ -94,7 +94,7 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_hidden() {
     // cell_origin.x must be 0 (confirmed by the geometry tests above).
     assert_eq!(
         frame0.cell_origin.x, 0,
-        "precondition: row header hidden → cell_origin.x == 0"
+        "precondition: row header hidden -> cell_origin.x == 0"
     );
 
     m.set_top_row(2);
@@ -128,7 +128,7 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_shown() {
     let expected_x = frame0.cell_origin.x;
     assert!(
         expected_x > 0,
-        "precondition: row header shown → cell_origin.x > 0"
+        "precondition: row header shown -> cell_origin.x > 0"
     );
 
     m.set_top_row(2);
@@ -184,7 +184,7 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_hidden() {
     // cell_origin.y must be 0 (confirmed by the geometry tests above).
     assert_eq!(
         frame0.cell_origin.y, 0,
-        "precondition: col header hidden → cell_origin.y == 0"
+        "precondition: col header hidden -> cell_origin.y == 0"
     );
 
     m.set_left_column(2);
@@ -218,7 +218,7 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_shown() {
     let expected_y = frame0.cell_origin.y;
     assert!(
         expected_y > 0,
-        "precondition: col header shown → cell_origin.y > 0"
+        "precondition: col header shown -> cell_origin.y > 0"
     );
 
     m.set_left_column(2);

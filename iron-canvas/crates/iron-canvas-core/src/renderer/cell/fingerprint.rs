@@ -4,7 +4,7 @@
 //! (`pane_styles`, `pane_values`, `pane_cell_types`) and produces a `u64`
 //! summary of the painted-visible state. `render_pane` will compare the
 //! result against `frame.prev_pane_fingerprints[pane]` on slots-reuse
-//! frames: equal → skip the 5-pass walk; differ → repaint.
+//! frames: equal -> skip the 5-pass walk; differ -> repaint.
 //!
 //! Hash domain — the set of inputs that determine painted pixels.
 //! Anything that affects paint MUST be included; anything that doesn't
@@ -20,7 +20,7 @@ use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
 
 /// Fingerprint the bulk-fetched buffers for one pane. Same range +
-/// same buffers ⇒ same `u64` (modulo `DefaultHasher` collision, 2⁻⁶⁴).
+/// same buffers -> same `u64` (modulo `DefaultHasher` collision).
 ///
 /// Range is folded in so two panes with structurally-identical data at
 /// different addresses don't collide.
@@ -73,8 +73,8 @@ pub fn compute_pane_fingerprint(
 
 /// Hashable view over the subset of `Style` fields that affect painted
 /// pixels. The field selection is load-bearing: a paint-read field the
-/// digest misses ⇒ stale pixels on skip; a paint-irrelevant field the
-/// digest includes ⇒ unnecessary repaint when only that field changed.
+/// digest misses -> stale pixels on skip; a paint-irrelevant field the
+/// digest includes -> unnecessary repaint when only that field changed.
 pub struct StyleDigest<'a>(pub &'a CellStyle);
 
 impl<'a> Hash for StyleDigest<'a> {

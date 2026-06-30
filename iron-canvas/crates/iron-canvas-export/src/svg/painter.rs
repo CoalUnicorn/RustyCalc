@@ -86,7 +86,7 @@ impl SvgPainter {
     }
 }
 
-// CSS font shorthand → (size_px, family). Size comes from the shared
+// CSS font shorthand -> (size_px, family). Size comes from the shared
 // `parse_font_size_px`; the family is everything after that token (only SVG
 // needs it — PDF/recorder share just the size). Falls back to sans-serif so a
 // missing/garbled string never panics.

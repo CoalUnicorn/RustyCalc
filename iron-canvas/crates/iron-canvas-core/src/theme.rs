@@ -284,7 +284,7 @@ impl ThemeVariables {
     }
 }
 
-/// Hex `#RRGGBB` (or `#RGB`) → `rgba(r,g,b,alpha)`. Returns `None` for any
+/// Hex `#RRGGBB` (or `#RGB`) -> `rgba(r,g,b,alpha)`. Returns `None` for any
 /// input that isn't a recognized hex literal (`rgb()`, `hsl()`, named colors,
 /// or a malformed string), so the caller falls back to the LIGHT default
 /// instead of synthesising a broken fill string.

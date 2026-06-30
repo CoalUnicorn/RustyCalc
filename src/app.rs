@@ -14,7 +14,7 @@ use crate::storage;
 
 #[component]
 pub fn App() -> impl IntoView {
-    // `#share=…` URLs are always staged in-memory pending user consent —
+    // `#share=...` URLs are always staged in-memory pending user consent —
     // never auto-persisted on first paint. Both V0 (no word) and V1 (word
     // verification) defer bitcode deserialization until after the recipient
     // clicks Accept in the ShareVerify modal, so a crafted payload can't

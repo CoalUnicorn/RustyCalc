@@ -11,7 +11,7 @@ pub fn xml_escape(s: &str, out: &mut String) {
     }
 }
 
-/// Escape a string for emission inside a PDF literal-string `(…)`.
+/// Escape a string for emission inside a PDF literal-string `(...)`.
 /// `(`, `)`, `\` get backslash-escaped; bytes outside printable ASCII
 /// become `\nnn` octal escapes (which keeps the content stream
 /// 7-bit-clean and avoids encoding ambiguity with WinAnsi-mapped bytes).

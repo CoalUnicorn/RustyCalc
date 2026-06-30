@@ -294,7 +294,7 @@ fn hex_bridge(sig: RwSignal<String>) -> (Signal<Option<HexColor>>, Callback<Opti
 
 /// One icon-set threshold row, lowest value first (the engine picks the last
 /// row whose threshold the cell value exceeds). `strict` mirrors the engine's
-/// inclusive flag: true ⇒ the icon applies at `>=`, false at `>`.
+/// inclusive flag: true -> the icon applies at `>=`, false at `>`.
 #[derive(Clone, Copy, PartialEq)]
 struct IconRow {
     id: usize,
@@ -467,7 +467,7 @@ pub fn CfRuleEditor() -> impl IntoView {
     // the analyzer here against the workbook's sheet + name tables, anchored at
     // the current view cell. `events.content` keeps those tables fresh; a
     // keystroke re-derives refs + validity cheaply. A plain literal like "100"
-    // analyzes as NotFormula → no refs, no error class.
+    // analyzes as NotFormula -> no refs, no error class.
     let analyzer_ctx = Memo::new(move |_| {
         let _ = state.events.content.get();
         model.with_value(|m| {
@@ -535,7 +535,7 @@ pub fn CfRuleEditor() -> impl IntoView {
 
         // First selection of a drag inserts at the caret; every later tick
         // replaces the ref we inserted last time, so a drag grows ONE reference
-        // (`A1` → `A1:B3`) instead of appending a new one each tick. `get_untracked`
+        // (`A1` -> `A1:B3`) instead of appending a new one each tick. `get_untracked`
         // throughout: this Effect is driven by the navigation bus, and must not
         // re-subscribe to the formula text (it writes it) or re-fire itself.
         let target_span = cf_formula_prev_span
@@ -929,7 +929,7 @@ pub fn CfRuleEditor() -> impl IntoView {
             "data_bar" => CfRuleInput::DataBar {
                 min: cfvo_from_ui(&bar_min_kind.get(), &bar_min_value.get()),
                 max: cfvo_from_ui(&bar_max_kind.get(), &bar_max_value.get()),
-                // Empty picker → Color::None → renderer's default bar colors.
+                // Empty picker -> Color::None -> renderer's default bar colors.
                 positive_color: Color::from_rgb(&bar_pos_color.get()).unwrap_or(Color::None),
                 negative_color: Color::from_rgb(&bar_neg_color.get()).unwrap_or(Color::None),
                 is_gradient: bar_gradient.get(),
@@ -1077,7 +1077,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                         <Show when=move || {
                             state.range_capture.get() == Some(RangeCaptureTarget::CfRange)
                         }>
-                            <p class="rp-hint">"Selecting on grid… click ⊞ or press Esc when done."</p>
+                            <p class="rp-hint">"Selecting on grid... click ⊞ or press Esc when done."</p>
                         </Show>
                     </div>
 
@@ -1131,7 +1131,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                                 </button>
                             </div>
                             <Show when=move || cf_formula_armed()>
-                                <p class="rp-hint">"Selecting on grid… click ⊞ or press Esc when done."</p>
+                                <p class="rp-hint">"Selecting on grid... click ⊞ or press Esc when done."</p>
                             </Show>
                         </div>
                     </Show>
@@ -1288,7 +1288,7 @@ pub fn CfRuleEditor() -> impl IntoView {
                     {/* Icon set thresholds (IconSet only), lowest bucket first */}
                     <Show when=move || icon_set_visible.get()>
                         <div class="cfm-section">
-                            <span class="cfm-section-title">"Icon Set (low → high)"</span>
+                            <span class="cfm-section-title">"Icon Set (low -> high)"</span>
                             <For
                                 each=move || icon_rows.get()
                                 key=|row: &IconRow| row.id

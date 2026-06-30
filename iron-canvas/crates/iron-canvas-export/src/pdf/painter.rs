@@ -251,7 +251,7 @@ impl Painter for PdfPainter {
             TextAlign::Center => x - text_width / 2.0,
             TextAlign::End => x - text_width,
         };
-        // Helvetica ascent ≈ 0.8·size, descent ≈ 0.2·size — Type1 base-14
+        // Helvetica ascent aprox 0.8 x size, descent aprox 0.2 x size — Type1 base-14
         // metrics aren't queryable without parsing AFM tables we don't
         // ship, so these are the published nominal ratios.
         let ty = match baseline {

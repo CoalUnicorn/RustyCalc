@@ -18,7 +18,7 @@
 //! via `on_close` (e.g. disarm a range pick first, then close).
 //!
 //! Like `Modal`, the host mounts it conditionally
-//! (`<Show when=is_open>{ <Drawer …/> }</Show>`) and owns the open signal.
+//! (`<Show when=is_open>{ <Drawer .../> }</Show>`) and owns the open signal.
 
 use leptos::ev::keydown;
 use leptos::prelude::*;

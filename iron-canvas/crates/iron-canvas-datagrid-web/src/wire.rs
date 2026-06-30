@@ -40,7 +40,7 @@ pub struct CellWire {
 }
 
 // Stage D result mirrors: engine enums are tuple-variant, so serialize
-// through `{kind, …}` mirrors. All coords emitted to JS are 0-based. ---
+// through `{kind, ...}` mirrors. All coords emitted to JS are 0-based. ---
 
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]

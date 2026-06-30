@@ -27,8 +27,8 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `1`). Mismatch → load fails.  |
-//! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch → warn-only. |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `1`). Mismatch -> load fails.  |
+//! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
 //! | `started_at_unix_ms`  | `u64`          | Wall-clock at `startRecording`. Host-supplied; tests pass `0`.       |

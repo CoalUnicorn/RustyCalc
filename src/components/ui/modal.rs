@@ -12,7 +12,7 @@
 //!   the X icon, post-save flow, etc.).
 //!
 //! The host is responsible for *mounting* the modal conditionally
-//! (`<Show when=is_open>{ <Modal …/> }</Show>`) — this component does not
+//! (`<Show when=is_open>{ <Modal .../> }</Show>`) — this component does not
 //! own the open/closed signal. The document-level listener registers only
 //! while the component is mounted (leptos_use unbinds it on owner drop).
 

@@ -1,4 +1,4 @@
-//! `handle_contextmenu`: right-click on header → show context menu.
+//! `handle_contextmenu`: right-click on header -> show context menu.
 //!
 //! Clicks in the cell grid are ignored — cell context menu not yet
 //! implemented.

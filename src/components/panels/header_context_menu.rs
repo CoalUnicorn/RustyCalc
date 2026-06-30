@@ -97,10 +97,10 @@ pub fn HeaderContextMenuOverlay() -> impl IntoView {
                     Some(ctx) => match ctx.target {
                         HeaderContextMenu::Column { col, count } => view! {
                             <ContextMenuItem
-                                icon="↔"
+                                icon="<->"
                                 on_click=move || open_resize(Axis::Col, col, count)
                             >
-                                "Column width…"
+                                "Column width..."
                             </ContextMenuItem>
                             <ContextMenuSeparator />
                             <ContextMenuItem
@@ -159,7 +159,7 @@ pub fn HeaderContextMenuOverlay() -> impl IntoView {
                                 icon="↕"
                                 on_click=move || open_resize(Axis::Row, row, count)
                             >
-                                "Row height…"
+                                "Row height..."
                             </ContextMenuItem>
                             <ContextMenuSeparator />
                             <ContextMenuItem

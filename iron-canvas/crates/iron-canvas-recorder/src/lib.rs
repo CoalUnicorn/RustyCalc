@@ -964,7 +964,7 @@ mod tests {
 
     #[test]
     fn skip_groups_drops_targeted_section() {
-        // Filter contains `Cells`; emit Grid → Cells → Headers as siblings.
+        // Filter contains `Cells`; emit Grid -> Cells -> Headers as siblings.
         // The Cells bracket and its inner rect_fill must be suppressed;
         // Grid and Headers (and the rect_fill inside Headers) must survive.
         let surface = RecordingSurface::new(MemSurface::new());
@@ -1023,9 +1023,9 @@ mod tests {
         p.begin_group(GroupClass::Cells);
         p.begin_group(GroupClass::FrozenSep); // nested inside skipped outer
         p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#aaa"));
-        p.end_group(); // ends FrozenSep — still suppressed (depth 2 → 1)
+        p.end_group(); // ends FrozenSep — still suppressed (depth 2 -> 1)
         p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#bbb"));
-        p.end_group(); // ends Cells — depth 1 → 0, capture resumes
+        p.end_group(); // ends Cells — depth 1 -> 0, capture resumes
         p.begin_group(GroupClass::Headers);
         p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#ccc"));
         p.end_group();

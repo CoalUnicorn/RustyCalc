@@ -115,7 +115,7 @@ fn corner_top_left_resizes_both_axes() {
 
 // Shrink — BottomRight corner with cursor INSIDE the anchor must
 // pull r2/c2 inward, keeping r1/c1 pinned at the opposite TopLeft.
-// Anchor B2:E10, grab BR, drop at C3 → expect B2:C3.
+// Anchor B2:E10, grab BR, drop at C3 -> expect B2:C3.
 #[test]
 fn corner_bottom_right_shrinks_when_cursor_inside_anchor() {
     let out = dragged_ref_range(
@@ -129,7 +129,7 @@ fn corner_bottom_right_shrinks_when_cursor_inside_anchor() {
 
 // Shrink — Right edge with cursor left of c2 must pull c2 inward
 // and keep r1/r2 pinned (single-axis resize).
-// Anchor B2:E10, grab Right edge, cursor at col 3 → expect B2:C10.
+// Anchor B2:E10, grab Right edge, cursor at col 3 -> expect B2:C10.
 #[test]
 fn edge_right_shrinks_when_cursor_left_of_c2() {
     let out = dragged_ref_range(
@@ -144,7 +144,7 @@ fn edge_right_shrinks_when_cursor_left_of_c2() {
 // Cross-anchor — dragging TopLeft past the BottomRight degenerates
 // to a single cell at the pinned (BR) anchor rather than flipping
 // or producing an inverted range. Anchor B2:E10, grab TL, cursor
-// at F12 (past BR) → expect E10:E10 (clamped collapse).
+// at F12 (past BR) -> expect E10:E10 (clamped collapse).
 #[test]
 fn corner_top_left_collapses_when_cursor_past_br() {
     let out = dragged_ref_range(

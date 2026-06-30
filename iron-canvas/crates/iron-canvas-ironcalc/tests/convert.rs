@@ -118,7 +118,7 @@ fn update_range_style_writes_theme_and_empty_clears() {
         height: 1,
     };
 
-    // "[idx, tint]" goes through Color::from_param → Color::Theme; the
+    // "[idx, tint]" goes through Color::from_param -> Color::Theme; the
     // resolver (borrowing the workbook theme) must yield the accent1 hex.
     if let Err(e) = m.update_range_style(&area, "fill.color", "[4, 0]") {
         panic!("theme fill write failed: {e}");

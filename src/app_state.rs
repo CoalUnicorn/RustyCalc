@@ -28,7 +28,7 @@ pub enum RecordingCmd {
 /// One-shot command from the PerfPanel export buttons to the Worksheet
 /// dispatch Effect. Same drain pattern as [`RecordingCmd`]. `Svg` is served
 /// by `IronCanvas::exportSvg` (always on); `Pdf` is served by
-/// `IronCanvas::exportPdf` (gated behind the `export → iron-canvas-web/pdf`
+/// `IronCanvas::exportPdf` (gated behind the `export -> iron-canvas-web/pdf`
 /// feature chain, orthogonal to `dev-tools`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExportCmd {

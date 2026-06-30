@@ -1,4 +1,4 @@
-//! Event-category → IronCanvas dispatch decision.
+//! Event-category -> IronCanvas dispatch decision.
 //!
 //! Reactive subscription Effect that tracks event signals and overlay
 //! changes. Does NOT render — only sets `render_needed` so the rAF loop

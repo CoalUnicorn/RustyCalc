@@ -46,8 +46,8 @@ fn render_pane_skips_on_idempotent_repaint() {
 
     promote_to_slots_reuse(&mut frame);
 
-    // Model unchanged ⇒ identical bulk-fetch buffers ⇒ identical
-    // fingerprint ⇒ the entire 4-pass walk is skipped. Recorder log
+    // Model unchanged -> identical bulk-fetch buffers -> identical
+    // fingerprint -> the entire 4-pass walk is skipped. Recorder log
     // must be byte-empty.
     let second = paint_pane(&m, &frame, PaneRegion::BottomRight);
     assert_eq!(
@@ -70,7 +70,7 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
 
     promote_to_slots_reuse(&mut frame);
 
-    // Col 5 lives past the frozen seam → BottomRight only.
+    // Col 5 lives past the frozen seam -> BottomRight only.
     m.set_cell(1, 5, "changed");
 
     let bl_after = paint_pane(&m, &frame, PaneRegion::BottomLeft);

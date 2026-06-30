@@ -181,7 +181,7 @@ impl TextPaint {
 }
 
 /// Assign each already-measured line its `center_x`/`center_y` anchor. Split out
-/// of `resolve_into` so the pipeline reads resolve → layout → position → assemble
+/// of `resolve_into` so the pipeline reads resolve -> layout -> position -> assemble
 /// without a 20-line alignment digression inline (B-4). Mutates `lines` in place;
 /// `width` must already be populated by `layout_into`.
 fn position_lines(
@@ -222,7 +222,7 @@ fn position_lines(
 /// compare: bottom/top alignment plus `TEXT_V_INSET_PX` can push a block that
 /// "fits" by total height past the top or bottom edge, and only the anchored
 /// centers reveal that. Glyphs are baseline-middle, so each spans
-/// `center_y ± line_height/2` (1.2·em over-estimates real glyph height, so the
+/// `center_y +- line_height/2` (1.2 x em over-estimates real glyph height, so the
 /// strict `<`/`>` err toward clipping a hair early — the safe direction).
 /// Supersedes the old `lines.len() > 1` proxy: catches a single tall line and a
 /// bottom-anchored block crossing the top edge, while still skipping the
@@ -304,7 +304,7 @@ impl CellTextStyle {
 /// additively (`current_w + space_w + word_w`). Adjacent-glyph kerning across
 /// a space is sub-pixel for the proportional fonts this renderer ships, well
 /// below the rounding the position pass already does — additive sum is within
-/// 1px of a fresh `measureText(full_line)` and avoids the O(words²) re-measure
+/// 1px of a fresh `measureText(full_line)` and avoids the O(words^2) re-measure
 /// the previous algorithm did on long wrapping cells.
 #[allow(clippy::too_many_arguments)]
 pub fn layout_into(
@@ -354,7 +354,7 @@ pub fn layout_into(
 
             if tentative_w > usable_w && !wrap_buf.is_empty() {
                 // Overflow with prior content: commit the line as-is, start
-                // fresh with this word alone (no leading space → no separator).
+                // fresh with this word alone (no leading space -> no separator).
                 write_line(out, &mut idx, wrap_buf, current_w);
                 wrap_buf.clear();
                 wrap_buf.push_str(word);
@@ -510,7 +510,7 @@ mod tests {
             line_height,
         );
 
-        // Line 0 center lands at 5.6 → top of glyph ≈ 5.6 - 7.2 < 0.
+        // Line 0 center lands at 5.6 -> top of glyph ≈ 5.6 - 7.2 < 0.
         assert!(
             lines[0].center_y - line_height / 2.0 < 0.0,
             "test premise: top line crosses the top edge"

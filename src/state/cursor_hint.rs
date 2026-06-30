@@ -2,7 +2,7 @@
 
 /// Cursor style hint derived from the idle hover position. Drives the
 /// `class` on `.ws-grid` so the cursor previews the action a mousedown
-/// here would start (resize, autofill, ref-drag, …). Drag state wins
+/// here would start (resize, autofill, ref-drag, ...). Drag state wins
 /// over this — the view composes both.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CursorHint {

@@ -409,10 +409,10 @@ fn extend_with_anchor_mixed_absolute_flag_promotion() {
 }
 
 /// Regression: `Absolute` named fields prevent the `(row_bool, col_bool)`
-/// swap that the old `cell(…, true, false)` signature was prone to.
+/// swap that the old `cell(..., true, false)` signature was prone to.
 #[test]
 fn absolute_flags_not_swapped() {
-    // Column-absolute (1 = A), row-relative (delta 0 from ctx row 1) → $A1
+    // Column-absolute (1 = A), row-relative (delta 0 from ctx row 1) -> $A1
     let n = RefNode::cell(
         0,
         None,
@@ -425,7 +425,7 @@ fn absolute_flags_not_swapped() {
     );
     assert_eq!(n.to_localized(&ctx_a1()), "$A1");
 
-    // Row-absolute (1), column-relative (delta 0 from ctx col 1) → A$1
+    // Row-absolute (1), column-relative (delta 0 from ctx col 1) -> A$1
     let n = RefNode::cell(
         0,
         None,
@@ -438,7 +438,7 @@ fn absolute_flags_not_swapped() {
     );
     assert_eq!(n.to_localized(&ctx_a1()), "A$1");
 
-    // Both relative → A1
+    // Both relative -> A1
     let n = RefNode::cell(
         0,
         None,
@@ -451,7 +451,7 @@ fn absolute_flags_not_swapped() {
     );
     assert_eq!(n.to_localized(&ctx_a1()), "A1");
 
-    // Both absolute → $A$1
+    // Both absolute -> $A$1
     let n = RefNode::cell(
         0,
         None,

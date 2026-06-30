@@ -73,7 +73,7 @@ impl PaneSet {
             .collect()
     }
 
-    /// Column mirror of [`resolve_row_labels`], falling back to the A/B/C…
+    /// Column mirror of [`resolve_row_labels`], falling back to the A/B/...
     /// spreadsheet name.
     pub(crate) fn resolve_col_labels(
         model: &dyn CanvasModel,
@@ -189,7 +189,7 @@ impl PaneSet {
     }
 }
 
-/// Decimal digit count, clamped to `≥ 1` so a zero input still reserves a slot.
+/// Decimal digit count, clamped to `>= 1` so a zero input still reserves a slot.
 fn digit_count(n: i32) -> i32 {
     let mut n = n.max(1);
     let mut d = 0;

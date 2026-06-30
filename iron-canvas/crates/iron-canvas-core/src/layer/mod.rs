@@ -50,7 +50,7 @@ pub trait Surface {
     /// Resize the backing store. `dpr` here scales the backing pixel
     /// buffer (e.g. `canvas.width = css.w * dpr`) — it does *not* set the
     /// painter's transform matrix. That side runs separately via
-    /// `LayerBase::resize` → `LayerOps::resize_for_dpr`. Two effects, one
+    /// `LayerBase::resize` -> `LayerOps::resize_for_dpr`. Two effects, one
     /// shared input; each backend resizes only what it owns.
     fn resize(&mut self, css: CanvasSize, dpr: i32);
 
@@ -141,7 +141,7 @@ where
 }
 
 /// Full-canvas pixel rect. Layer-wide fill / clear converge here so the
-/// `f64` (CSS) → `i32` (PixelRect) rounding lives in one place.
+/// `f64` (CSS) -> `i32` (PixelRect) rounding lives in one place.
 fn full_canvas_rect(size: CanvasSize) -> PixelRect {
     PixelRect {
         top_left: Point { x: 0, y: 0 },

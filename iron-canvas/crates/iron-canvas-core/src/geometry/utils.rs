@@ -1,4 +1,4 @@
-/// Spreadsheet column label for a 1-based column index ("A", "Z", "AA", …).
+/// Spreadsheet column label for a 1-based column index ("A", "Z", "AA",...).
 /// Bijective base-26; returns "" for `col < 1`.
 pub fn col_name(col: i32) -> String {
     if col < 1 {

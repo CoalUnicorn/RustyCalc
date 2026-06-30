@@ -63,7 +63,7 @@ fn scroll_inside_frozen_band_keeps_slots_reuse() {
     // frozen header rows.
     let model = TestModel::synthetic_grid().with_frozen_rows(3);
     let frame = fresh(&model);
-    // top_row default = 1; frozen_rows = 3 ⇒ effective top = 4.
+    // top_row default = 1; frozen_rows = 3 -> effective top = 4.
     // Move active cell within rows 1..=3 — top_row stays 1.
     model.set_top_row(2);
     assert_eq!(
@@ -133,7 +133,7 @@ fn frozen_rows_change_with_compensating_scroll_still_rebuilds() {
         .with_frozen_rows(3)
         .with_top_row(5);
     let frame = fresh(&model);
-    // Freeze grows by 2, scroll backs off by 2 → effective top unchanged
+    // Freeze grows by 2, scroll backs off by 2 -> effective top unchanged
     // (scroll_first(5, 5) == scroll_first(7, 5) == 5? Let me re-check.
     // scroll_first(3, 5) = max(4, 5) = 5. scroll_first(5, 5) = max(6, 5) = 6.
     // So actually effective top DOES change. Set top_row=6 too so effective

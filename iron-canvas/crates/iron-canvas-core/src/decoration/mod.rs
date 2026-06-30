@@ -3,11 +3,11 @@
 //!
 //! Each decoration owns its own snapshot state and implements `Layer`.
 //! `LayerBase::paint_overlay_layer` wraps every decoration's `paint` call
-//! in a `begin_group(layer.group()) … end_group()` pair, so decoration
+//! in a `begin_group(layer.group()) ... end_group()` pair, so decoration
 //! bodies stay free of group bookkeeping.
 //!
 //! `SelectionLayer` is special — it has a three-phase paint shape
-//! (fill → renderer's active-cell repaint → stroke) orchestrated by name
+//! (fill -> renderer's active-cell repaint -> stroke) orchestrated by name
 //! in `LayerBase::paint_overlay_layer`. The extra phases live as
 //! inherent methods on `SelectionLayer`, not on this trait.
 

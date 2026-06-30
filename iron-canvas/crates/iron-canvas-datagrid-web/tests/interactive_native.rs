@@ -60,7 +60,7 @@ fn scroll_changes_top_painted_row() {
     model.replace(fruit_grid());
     let mut orch = new_orch(&model);
 
-    // setScroll(2, 0) → 0-based JS, model is 1-based so top_row becomes 3.
+    // setScroll(2, 0) -> 0-based JS, model is 1-based so top_row becomes 3.
     model.borrow_mut_with(|g| g.set_scroll(2 + 1, 0 + 1));
     orch.request_repaint();
     orch.paint_if_dirty();
@@ -87,7 +87,7 @@ fn column_width_widens_following_column() {
     base.paint_if_dirty();
     let x_before = text_x(&base, "1").expect("col-1 value must paint at default width");
 
-    // setColumnWidth(0, 240.0): 0-based, geometry change → request_repaint.
+    // setColumnWidth(0, 240.0): 0-based, geometry change -> request_repaint.
     model.borrow_mut_with(|g| g.set_column_width(0, 240.0));
     let mut wide = new_orch(&model);
     wide.request_repaint();
@@ -135,7 +135,7 @@ fn idempotent_paint_records_no_new_text() {
     orch.paint_if_dirty();
     let count_first = grid_texts(&orch).len();
 
-    // No change → second paint is a clean no-op (fingerprint skip).
+    // No change -> second paint is a clean no-op (fingerprint skip).
     orch.paint_if_dirty();
     let count_second = grid_texts(&orch).len();
 
@@ -153,7 +153,7 @@ fn select_cell_strokes_overlay() {
     orch.request_repaint();
     orch.paint_if_dirty();
 
-    // selectCell(1, 0): 0-based JS → model active+selection at 1-based (2,1).
+    // selectCell(1, 0): 0-based JS -> model active+selection at 1-based (2,1).
     model.borrow_mut_with(|g| {
         g.set_active(1 + 1, 0 + 1);
         g.set_selection(1 + 1, 0 + 1, 1 + 1, 0 + 1);

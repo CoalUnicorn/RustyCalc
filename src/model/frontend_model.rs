@@ -61,7 +61,7 @@ impl FormulaAnalyzer for UserModel<'_> {
 
 /// Workbook defined names: read and CRUD. Every mutating call may change
 /// formula evaluation, so wrap call sites in
-/// `try_mutate(EvaluationMode::Immediate, …)`. Errors surface verbatim from
+/// `try_mutate(EvaluationMode::Immediate, ...)`. Errors surface verbatim from
 /// ironcalc as `Result<_, String>`.
 pub trait DefinedNameManager {
     /// Flattened from ironcalc's `DefinedNameS` tuples into our named-field

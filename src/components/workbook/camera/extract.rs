@@ -1,7 +1,7 @@
-//! Source-range extraction: UserModel cells → a headerless styled DataGrid.
+//! Source-range extraction: UserModel cells -> a headerless styled DataGrid.
 //! Mirrors WorksheetModelAdapter's per-cell calls (same merged-style path),
 //! but eagerly over the whole range — the camera is a snapshot, not a live
-//! adapter. Colors are resolved here (Color::Theme → CSS), so theme events
+//! adapter. Colors are resolved here (Color::Theme -> CSS), so theme events
 //! must trigger re-extraction.
 
 use ironcalc_base::UserModel;

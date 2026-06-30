@@ -1,4 +1,4 @@
-//! IronCalc → core styling conversions. Colors are no longer self-contained
+//! IronCalc -> core styling conversions. Colors are no longer self-contained
 //! (`ic::Color::Theme` needs the workbook theme), so conversions resolve them
 //! at this model boundary through a [`ColorResolver`] the caller builds over
 //! whatever theme access it already has — `UserModel::resolve_color` borrows
@@ -113,10 +113,10 @@ pub fn border_style_to_core(s: ic::BorderStyle) -> BorderStyle {
 }
 
 /// Map an IronCalc `ExtendedStyle` to a core `CellDecoration`. Returns `None`
-/// when no decoration applies (icon → data_bar → rating priority order).
+/// when no decoration applies (icon -> data_bar -> rating priority order).
 ///
 /// IconSpec is a String placeholder — `Debug` of `Icon` gives the variant
-/// name ("Circle", "ArrowUp", …), which is fine for a no-op decoration.
+/// name ("Circle", "ArrowUp", ...), which is fine for a no-op decoration.
 pub fn cell_decoration_from_extended(
     ext: &ic_cf::ExtendedStyle,
     resolve: ColorResolver,

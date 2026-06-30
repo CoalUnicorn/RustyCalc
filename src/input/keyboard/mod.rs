@@ -1,4 +1,4 @@
-//! Key → `SpreadsheetAction` → model mutation pipeline.
+//! Key -> `SpreadsheetAction` -> model mutation pipeline.
 //!
 //! - [`classify`] — pure key + modifier lookup table (`KeyMod`, `classify_key`)
 //! - [`dispatch`] — `execute()`: routes to per-category execute_* helpers

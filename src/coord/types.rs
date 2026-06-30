@@ -26,7 +26,7 @@ pub struct RefNode {
 }
 
 /// Named pair of absolute flags — prevents swapping row/column booleans
-/// at call sites (`cell(…, true, false)` was ambiguous).
+/// at call sites (`cell(..., true, false)` was ambiguous).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Absolute {
     pub row: bool,
@@ -156,7 +156,7 @@ impl RefNode {
     ///   supported, so `self.sheet_name.is_some()` implies the new ref
     ///   is on the same other sheet.
     ///
-    /// Cell↔range transitions: a single-cell self promotes to `RangeKind`
+    /// Cell<->range transitions: a single-cell self promotes to `RangeKind`
     /// when `new` is multi-cell (duplicating both absolute flags onto the
     /// new endpoint); a range self collapses to `ReferenceKind` when `new`
     /// is a single cell (endpoint 1's flags win — TopLeft is the canonical
@@ -461,7 +461,7 @@ impl RefNode {
     /// target is unchanged.
     ///
     /// Cell cycle, as `(row_abs, col_abs)`:
-    ///   `(F,F)` `A1` → `(T,T)` `$A$1` → `(T,F)` `A$1` → `(F,T)` `$A1` → `(F,F)`
+    ///   `(F,F)` `A1` -> `(T,T)` `$A$1` -> `(T,F)` `A$1` -> `(F,T)` `$A1` -> `(F,F)`
     /// Range endpoints advance independently, preserving mixed endpoint states.
     ///
     /// Re-encoding is the trap: a relative axis stores `coord - editing`, an
@@ -469,7 +469,7 @@ impl RefNode {
     /// [`Self::with_area`]). Flipping a flag therefore must add or subtract
     /// `editing.{row|column}`, not just toggle the boolean.
     pub fn cycle_absolute(&self, editing: &CellAddress) -> Self {
-        // Excel's cycle in (row_abs, col_abs): (F,F)→(T,T)→(T,F)→(F,T)→(F,F).
+        // Excel's cycle in (row_abs, col_abs): (F,F)->(T,T)->(T,F)->(F,T)->(F,F).
         let next = |row_abs: bool, col_abs: bool| match (row_abs, col_abs) {
             (false, false) => (true, true),
             (true, true) => (true, false),
@@ -806,7 +806,7 @@ impl CellAddress {
 }
 
 // ==============================================================================
-// Selection → A1 text (for grid range-picking in drawers)
+// Selection -> A1 text (for grid range-picking in drawers)
 // ==============================================================================
 //
 // The CF and Named-Range drawers fill a range field from the live grid
@@ -894,7 +894,7 @@ mod tests {
         assert_eq!(r4.to_localized(&ctx), "A1");
     }
 
-    // A range cycles both corners together: A1:B2 → $A$1:$B$2.
+    // A range cycles both corners together: A1:B2 -> $A$1:$B$2.
     #[test]
     fn f4_cycles_range_both_endpoints() {
         let editing = CellAddress {

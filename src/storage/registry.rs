@@ -30,8 +30,8 @@ pub struct WorkbookMeta {
 
 /// Clamp and sanitize a workbook name for safe display in the sidebar.
 ///
-/// Strips C0 control characters (U+0000–U+001F, U+007F) and bidi override
-/// characters (U+200E–U+200F, U+202A–U+202E, U+2066–U+2069) that could
+/// Strips C0 control characters (U+0000-U+001F, U+007F) and bidi override
+/// characters (U+200E-U+200F, U+202A-U+202E, U+2066-U+2069) that could
 /// confuse UI layout. Truncates to 128 characters so an attacker can't
 /// inject a 1 MB name through a poisoned localStorage registry.
 ///

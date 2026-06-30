@@ -11,7 +11,7 @@ use iron_canvas_core::geometry::slot::{
 
 #[test]
 fn fill_axis_walks_inclusive_range_and_returns_post_cursor() {
-    // 4 columns of 50 px each starting at x=10 → returns 10 + 4*50 = 210.
+    // 4 columns of 50 px each starting at x=10 -> returns 10 + 4*50 = 210.
     let mut slots: Vec<ColSlot> = Vec::new();
     let end = fill_axis(&mut slots, 1..=4, 10, None, |_| 50);
     assert_eq!(slots.len(), 4);
@@ -61,7 +61,7 @@ fn fill_axis_max_cursor_at_start_still_pushes_first_slot() {
 
 #[test]
 fn scroll_first_prefers_view_first_past_frozen_band() {
-    // No frozen → view always wins.
+    // No frozen -> view always wins.
     assert_eq!(scroll_first(0, 1), 1);
     assert_eq!(scroll_first(0, 50), 50);
     // Frozen pushes the floor.
@@ -174,7 +174,7 @@ fn slot_at_frozen_only_works_with_empty_scroll() {
     assert_eq!(slot_at(&frozen, &scroll, 2).map(|s| s.row), Some(2));
     assert!(
         slot_at(&frozen, &scroll, 3).is_none(),
-        "no scroll band → past-frozen returns None"
+        "no scroll band -> past-frozen returns None"
     );
 }
 
@@ -282,11 +282,11 @@ fn boundary_at_snaps_within_hit_zone_to_trailing_edge() {
         },
     ];
 
-    // Slot 1 ends at x=50. Hit zone 3 → x ∈ [47, 53] snaps to col 1.
+    // Slot 1 ends at x=50. Hit zone 3 -> x  [47, 53] snaps to col 1.
     assert_eq!(boundary_at(&frozen, &scroll, 50, 3), Some(1));
     assert_eq!(boundary_at(&frozen, &scroll, 47, 3), Some(1));
     assert_eq!(boundary_at(&frozen, &scroll, 53, 3), Some(1));
-    // Just past the zone → returns the NEXT slot's edge if within hit_zone.
+    // Just past the zone -> returns the NEXT slot's edge if within hit_zone.
     assert_eq!(boundary_at(&frozen, &scroll, 100, 3), Some(2));
 }
 
@@ -315,7 +315,7 @@ fn boundary_at_returns_none_in_slot_interior_and_breaks_early() {
         },
     ];
 
-    // Pixel mid-slot 1, hit_zone 5 → slot 1's end (100) > 50 + 5, so the
+    // Pixel mid-slot 1, hit_zone 5 -> slot 1's end (100) > 50 + 5, so the
     // loop breaks before inspecting slot 2. None returned because slot 1
     // itself isn't within the zone either.
     assert!(boundary_at(&frozen, &scroll, 50, 5).is_none());
@@ -347,6 +347,6 @@ fn boundary_at_walks_frozen_before_scroll() {
             height: 20,
         },
     ];
-    // Frozen slot 1 ends at y=20 → snaps to row 1.
+    // Frozen slot 1 ends at y=20 -> snaps to row 1.
     assert_eq!(boundary_at(&frozen, &scroll, 20, 2), Some(1));
 }

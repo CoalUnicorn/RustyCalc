@@ -126,7 +126,7 @@ impl<P: Painter> RendererCore<P> {
         }
 
         // Fingerprint paint-skip: same content as the previous frame
-        // ⇒ canvas pixels are still correct, skip the five-pass walk. Bulk
+        // -> canvas pixels are still correct, skip the five-pass walk. Bulk
         // fetch above is unconditional now — content changes that don't
         // raise CONTENT (e.g. recalc triggered by an upstream edit a
         // caller forgot to mark) are detected here via fingerprint

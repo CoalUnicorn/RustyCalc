@@ -5,8 +5,8 @@ A reusable color picker for toolbar, context menus, and sheet tabs.
 
 ```text
 ColorPicker (base - no WorkbookState dep)
-├ Dropdown placement → <button> trigger + <Popover> (click-outside + viewport clamp)
-├ Inline placement   → ctx-item trigger + inline expansion (position derived from parent menu)
+├ Dropdown placement -> <button> trigger + <Popover> (click-outside + viewport clamp)
+├ Inline placement   -> ctx-item trigger + inline expansion (position derived from parent menu)
 └ ColorPickerPanel   (placement-agnostic contents)
     ├ MainColorPalette
     ├ RecentColorsPalette

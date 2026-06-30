@@ -91,7 +91,7 @@ pub fn PerfPanel() -> impl IntoView {
                     {move || if app.recording_active.get() { "■ Stop" } else { "● Record" }}
                 </button>
                 {move || app.recording_active.get().then(|| view! {
-                    <span class="pp-recording-label">"Recording…"</span>
+                    <span class="pp-recording-label">"Recording..."</span>
                 })}
                 <span class="pp-sep">"|"</span>
                 <button

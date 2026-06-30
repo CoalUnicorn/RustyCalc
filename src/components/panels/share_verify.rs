@@ -9,7 +9,7 @@ use crate::storage::{self, SharedLoad};
 /// Maximum verification attempts before locking out the V1 word entry.
 const MAX_ATTEMPTS: u32 = 3;
 
-/// Consent modal shown when a `#share=…` URL is detected on startup.
+/// Consent modal shown when a `#share=...` URL is detected on startup.
 ///
 /// Bitcode parsing is deferred until the user accepts, so a crafted payload
 /// can't trigger expensive deserialization on first paint. V0 (no word) shows
@@ -124,7 +124,7 @@ pub fn ShareVerify() -> impl IntoView {
             })>
                 <div class="sv-container">
                     <p class="sv-description">
-                        "Source: Shared from URL · "
+                        "Source: Shared from URL "
                         {move || format!("{:.1} KB", size_kb())}
                     </p>
                     <Show when=is_v1

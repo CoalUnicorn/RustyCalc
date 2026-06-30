@@ -1,4 +1,4 @@
-//! `SpreadsheetAction` → category-module dispatch.
+//! `SpreadsheetAction` -> category-module dispatch.
 //!
 //! Each category (`nav`, `edit`, `format`, `structure`) returns its own
 //! `Result`; this layer maps every error to a `StatusMessage` so the status

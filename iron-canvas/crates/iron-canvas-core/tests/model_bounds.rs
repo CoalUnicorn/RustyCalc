@@ -76,7 +76,7 @@ fn blit_rebuild_agrees_with_fresh_at_the_bound() {
         .pane_set
         .rebuild_rows_for_row_scroll(&model, 95, canvas_default())
     else {
-        panic!("row rebuild must qualify for a plain 90→95 scroll");
+        panic!("row rebuild must qualify for a plain 90->95 scroll");
     };
     let rebuilt_ids: Vec<i32> = rebuilt.iter().map(|s| s.row).collect();
 

@@ -5,7 +5,7 @@
 //!
 //! Drives `RendererCore::<RecorderPainter>::render_grid` against a stub
 //! model and asserts structural invariants on the recorded `DrawOp` log
-//! that every Chrome sub-stage (1b–1e) must preserve. Stage 1a's
+//! that every Chrome sub-stage (1b-1e) must preserve. Stage 1a's
 //! assertions are intentionally weak — they only prove the harness
 //! compiles and runs against the current renderer. Stage 1e adds the
 //! row-header widening assertions.

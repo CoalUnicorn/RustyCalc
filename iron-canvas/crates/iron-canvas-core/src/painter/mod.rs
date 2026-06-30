@@ -62,7 +62,7 @@ pub enum TextAlign {
 }
 
 /// Typed group label for `Painter::begin_group`. Enumerates the layers and
-/// sub-sections the renderer brackets — SVG emits `<g class="…">` with the
+/// sub-sections the renderer brackets — SVG emits `<g class="...">` with the
 /// kebab-case form, the recorder serializes it through serde, the Canvas-2D
 /// backend no-ops on it. Closed set: a typed enum lets the recorder's
 /// `skip_groups` filter compare by variant rather than string content, and

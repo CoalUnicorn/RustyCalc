@@ -31,7 +31,7 @@ pub enum FormatAction {
     ToggleItalic,
     ToggleUnderline,
     ToggleStrikethrough,
-    /// Clamped to 1–409 in `execute_format()`.
+    /// Clamped to 1-409 in `execute_format()`.
     SetFontSize(f64),
     SetFontFamily(SafeFontFamily),
     SetTextColor(HexColor),

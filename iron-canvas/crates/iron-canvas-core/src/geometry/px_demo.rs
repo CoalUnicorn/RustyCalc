@@ -11,7 +11,7 @@ impl Px {
     pub const fn raw(self) -> i32 {
         self.0
     }
-    /// CSS px → device px. Only called at the canvas seam.
+    /// CSS px -> device px. Only called at the canvas seam.
     #[inline]
     pub fn to_device(self, dpr: f64) -> f64 {
         self.0 as f64 * dpr

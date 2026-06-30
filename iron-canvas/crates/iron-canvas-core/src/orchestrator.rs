@@ -320,7 +320,7 @@ where
         };
         let xi = x.round() as i32;
         let yi = y.round() as i32;
-        // No live selection → pass a zero range; the decoration layers that
+        // No live selection -> pass a zero range; the decoration layers that
         // consult `sel` (autofill, formula-refs) treat it as "no anchor"
         // and naturally fall through to the frame's pure cell hit-test.
         let sel = self.decos.selection().selection_range.unwrap_or_default();
@@ -399,7 +399,7 @@ where
     /// The `match` is exhaustive — adding a regime breaks the build here
     /// by design.
     pub fn paint_if_dirty(&mut self) {
-        // Model-absent ⇒ return *before* draining. Draining a CONTENT bit
+        // Model-absent -> return *before* draining. Draining a CONTENT bit
         // raised before the first model push would lose its paired
         // `pending_content` mask, breaking the `pending_content ⟺ CONTENT`
         // invariant the next real paint relies on.

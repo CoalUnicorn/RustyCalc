@@ -87,7 +87,7 @@ fn test_cross_sheet_ref_resolved() {
 // A bare ref resolves to the ANCHOR's sheet, not sheet 0. During point-mode
 // the anchor is the pinned edit origin; if a re-analysis passed the live view
 // cell (on another sheet) instead, the origin's `A1` would re-anchor to the
-// visible sheet and paint there. This pins the anchor→ref-sheet contract that
+// visible sheet and paint there. This pins the anchor->ref-sheet contract that
 // `FormulaAnalyzer::analyze_at` upholds at the call sites.
 #[test]
 fn test_bare_ref_anchors_to_editing_sheet_not_zero() {
