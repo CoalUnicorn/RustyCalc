@@ -144,7 +144,7 @@ where
 
     /// Resize both layers in one call. No public per-layer resize, so
     /// callers can't leave the pair half-sized.
-    pub fn resize(&mut self, size: CanvasSize, dpr: i32) {
+    pub fn resize(&mut self, size: CanvasSize, dpr: f64) {
         self.size = size;
         self.grid.resize(size, dpr);
         self.overlay.resize(size, dpr);

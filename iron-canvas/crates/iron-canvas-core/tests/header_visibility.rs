@@ -246,7 +246,7 @@ use std::rc::Rc;
 
 fn paint(model: Rc<TestModel>) -> Vec<DrawOp> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1);
+    orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(model);
     orch.paint_if_dirty();
     orch.grid_surface().recorder().ops().clone()
@@ -259,7 +259,7 @@ fn has_group(ops: &[DrawOp], class: GroupClass) -> bool {
 
 fn overlay_paint(model: Rc<TestModel>) -> Vec<DrawOp> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1);
+    orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(model);
     orch.paint_if_dirty();
     orch.overlay_surface().recorder().ops().clone()

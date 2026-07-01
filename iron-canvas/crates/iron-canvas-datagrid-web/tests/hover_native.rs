@@ -24,7 +24,7 @@ fn build() -> (Orchestrator<MemSurface>, Rc<HoverLayer>) {
     let model = Rc::new(DataGridModel::empty());
     model.replace(grid);
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_model(Rc::clone(&model) as Rc<dyn CanvasModel>);
     let hover = Rc::new(HoverLayer::default());
     orch.add_decoration(Rc::clone(&hover) as Rc<dyn Layer>);

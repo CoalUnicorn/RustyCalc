@@ -12,7 +12,7 @@ use std::rc::Rc;
 /// Paint the grid layer and collect every painted text string.
 fn grid_text(model: Rc<TestModel>) -> Vec<String> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1);
+    orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(model);
     orch.paint_if_dirty();
     orch.grid_surface()

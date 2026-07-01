@@ -58,7 +58,7 @@ impl Surface for WebSurface {
         Rc::clone(&self.painter)
     }
 
-    fn resize(&mut self, css: CanvasSize, dpr: i32) {
+    fn resize(&mut self, css: CanvasSize, dpr: f64) {
         let (target_w, target_h) = css.to_backing_size(dpr);
         if self.canvas.width() != target_w || self.canvas.height() != target_h {
             self.canvas.set_width(target_w);

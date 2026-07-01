@@ -55,7 +55,7 @@ fn build_fixture() -> Recording {
         DrawOp::BeginGroup {
             class: GroupClass::Grid,
         },
-        DrawOp::ApplyDprTransform { dpr: 1 },
+        DrawOp::ApplyDprTransform { dpr: 1.0 },
         DrawOp::InvalidateCache,
         DrawOp::ResetTextDefaults,
         DrawOp::BeginGroup {
@@ -144,7 +144,7 @@ fn build_fixture() -> Recording {
     let header = IcrHeader::new(
         200.0,
         100.0,
-        1,
+        1.0,
         ThemeSnapshot::from(&CanvasTheme::light()),
         0, // deterministic — never reads wall clock
     );
@@ -288,7 +288,7 @@ fn build_overlay_fixture() -> Recording {
     let header = IcrHeader::new(
         200.0,
         100.0,
-        1,
+        1.0,
         ThemeSnapshot::from(&CanvasTheme::light()),
         0,
     );

@@ -274,7 +274,7 @@ fn invalidate_cache_and_reset_text_defaults_are_no_ops() {
     let p = PdfPainter::new(W, H);
     p.invalidate_cache();
     p.reset_text_defaults();
-    p.apply_dpr_transform(2);
+    p.apply_dpr_transform(2.0);
     assert_eq!(stream_bytes(&p), b"", "no-op ops must emit nothing");
 }
 

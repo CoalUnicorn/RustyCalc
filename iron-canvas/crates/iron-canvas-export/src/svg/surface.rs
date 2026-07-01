@@ -67,7 +67,7 @@ impl Surface for SvgSurface {
     /// `resize` that disagrees would silently produce a mismatched
     /// `viewBox`. Callers must pair construction and `Orchestrator::resize`
     /// with the same `(w, h)` — the assert hardens that contract.
-    fn resize(&mut self, css: CanvasSize, _dpr: i32) {
+    fn resize(&mut self, css: CanvasSize, _dpr: f64) {
         debug_assert_eq!(
             (css.w.round() as i32, css.h.round() as i32),
             (self.painter.width, self.painter.height),

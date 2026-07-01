@@ -34,11 +34,11 @@ pub struct PlaybackSession {
     /// resize back to this.
     pub live_size: CanvasSize,
     /// Pre-playback live DPR. Mirrors `live_size`.
-    pub live_dpr: i32,
+    pub live_dpr: f64,
 }
 
 impl PlaybackSession {
-    pub fn new(recording: Recording, live_size: CanvasSize, live_dpr: i32) -> Self {
+    pub fn new(recording: Recording, live_size: CanvasSize, live_dpr: f64) -> Self {
         Self {
             recording,
             frame_idx: 0,

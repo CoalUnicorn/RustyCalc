@@ -20,8 +20,7 @@ use common::{TestModel, canvas_default};
 fn paint_pane(model: &TestModel, frame: &Chrome, pane: PaneRegion) -> usize {
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_pane(model, pane, frame);
-    let count = core.painter().ops().len();
-    count
+    core.painter().ops().len()
 }
 
 /// Mirrors the orchestrator's `SlotsReuse` branch: rotate the painted

@@ -28,7 +28,7 @@ use common::TestModel;
 
 fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_model(model);
     orch
 }
@@ -314,7 +314,7 @@ fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>>
     grid.enable_recording();
     overlay.enable_recording();
     let mut orch = Orchestrator::<RecordingSurface<MemSurface>>::new(grid, overlay);
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_model(model);
     orch
 }
@@ -466,7 +466,7 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     let header = IcrHeader::new(
         800.0,
         600.0,
-        1,
+        1.0,
         ThemeSnapshot::from(orch.theme()),
         0, // deterministic — tests don't read wall-clock for this field
     );

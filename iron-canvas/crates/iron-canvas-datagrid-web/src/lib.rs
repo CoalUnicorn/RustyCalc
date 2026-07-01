@@ -96,8 +96,8 @@ impl DataGridCanvas {
     }
 
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.orch
-            .resize(CanvasSize { w: css_w, h: css_h }, dpr as i32);
+        let dpr = dpr.round();
+        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr);
     }
 
     #[wasm_bindgen(js_name = "paintIfDirty")]

@@ -45,7 +45,7 @@ pub(crate) fn drive_once<S: Surface>(
     let mut orchestrator = Orchestrator::new(grid, overlay);
     orchestrator.set_theme(theme.clone());
     orchestrator.set_model(model);
-    orchestrator.resize(size, 1);
+    orchestrator.resize(size, 1.0);
     orchestrator.request_repaint();
     orchestrator.paint_if_dirty();
     // `orchestrator` (and its `Rc<P>` surface clones) drop here; the caller's

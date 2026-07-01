@@ -52,7 +52,7 @@ pub trait Surface {
     /// painter's transform matrix. That side runs separately via
     /// `LayerBase::resize` -> `LayerOps::resize_for_dpr`. Two effects, one
     /// shared input; each backend resizes only what it owns.
-    fn resize(&mut self, css: CanvasSize, dpr: i32);
+    fn resize(&mut self, css: CanvasSize, dpr: f64);
 
     /// Flush the rendered frame. Canvas-2D auto-presents (no-op);
     /// Cairo / off-screen image backends flush here.
@@ -134,7 +134,7 @@ where
         self.gate.drain()
     }
 
-    pub fn resize(&mut self, css: CanvasSize, dpr: i32) {
+    pub fn resize(&mut self, css: CanvasSize, dpr: f64) {
         self.surface.resize(css, dpr);
         self.renderer.resize_for_dpr(dpr);
     }

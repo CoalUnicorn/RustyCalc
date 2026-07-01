@@ -3,6 +3,10 @@
 //! native test), mirroring each handle method's mutate + dirty + repaint
 //! sequence, then inspects recorded `DrawOp`s.
 
+// `js_coord + 1` is written verbatim throughout to mirror the 0-based-JS ->
+// 1-based-model conversion these tests verify; `0 + 1` reads as "JS col 0".
+#![allow(clippy::identity_op)]
+
 use std::rc::Rc;
 
 use iron_canvas_core::CanvasModel;
@@ -25,7 +29,7 @@ fn fruit_grid() -> DataGrid {
 
 fn new_orch(model: &Rc<DataGridModel>) -> Orchestrator<MemSurface> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1);
+    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(Rc::clone(model) as Rc<dyn CanvasModel>);
     orch
 }

@@ -124,7 +124,7 @@ pub struct CanvasPainter {
     /// `apply_dpr_transform`. Read by `blit` so the source rect (which
     /// reads from the DPR-scaled backing store) is sized in backing-store
     /// pixels — dest coords go through the active transform unchanged.
-    pub dpr: Cell<i32>,
+    pub dpr: Cell<f64>,
     /// Painter-lifetime dedup of custom (`Borrowed`) color strings to
     /// `Rc<str>`. Distinct from `SetterCache`: `invalidate` resets the sticky
     /// binds, but the palette outlives invalidation — an interned color is
@@ -141,7 +141,7 @@ impl CanvasPainter {
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
             clip_depth: Cell::new(0),
-            dpr: Cell::new(1),
+            dpr: Cell::new(1.0),
             palette: RefCell::new(Vec::new()),
         }
     }
@@ -391,9 +391,9 @@ impl Painter for CanvasPainter {
         self.setter_cache.invalidate();
     }
 
-    fn apply_dpr_transform(&self, dpr: i32) {
+    fn apply_dpr_transform(&self, dpr: f64) {
         self.dpr.set(dpr);
-        let dpr_f = f64::from(dpr);
+        let dpr_f = dpr;
         self.ctx
             .set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
             .expect("set_transform should not fail");
@@ -430,7 +430,7 @@ impl BlitPainter for CanvasPainter {
         // flow through the active ctx.scale(dpr,dpr) transform, so only
         // src multiplies explicitly. This matches the asymmetry of
         // CanvasRenderingContext2D.drawImage's source/destination spaces.
-        let dpr = f64::from(self.dpr.get());
+        let dpr = self.dpr.get();
         let sx = f64::from(src.top_left.x) * dpr;
         let sy = f64::from(src.top_left.y) * dpr;
         let sw = f64::from(src.width) * dpr;

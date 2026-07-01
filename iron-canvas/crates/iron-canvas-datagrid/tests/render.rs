@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 fn painted(grid: DataGrid) -> Vec<String> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1);
+    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(Rc::new(grid));
     orch.paint_if_dirty();
     orch.grid_surface()

@@ -109,7 +109,7 @@ impl Surface for PdfSurface {
     /// PDF document dimensions are baked at `PdfSurface::new`; a later
     /// `resize` that disagrees would silently produce a mismatched
     /// `/MediaBox`. The assertion mirrors `SvgSurface::resize`.
-    fn resize(&mut self, css: CanvasSize, _dpr: i32) {
+    fn resize(&mut self, css: CanvasSize, _dpr: f64) {
         debug_assert_eq!(
             (css.w.round() as u32, css.h.round() as u32),
             (self.painter.width, self.painter.height),

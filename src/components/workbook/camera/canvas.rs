@@ -41,8 +41,7 @@ impl CameraCanvas {
     }
 
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.orch
-            .resize(CanvasSize { w: css_w, h: css_h }, dpr as i32);
+        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr);
         // alpha:false backing store reallocates to opaque black; force Fresh.
         self.orch.request_repaint();
     }

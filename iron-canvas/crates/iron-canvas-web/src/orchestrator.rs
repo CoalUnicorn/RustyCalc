@@ -120,7 +120,7 @@ pub struct IronCanvas {
     // before any `resize`, and a DPR of `0` in the recording header would
     // round-trip through playback nonsensically. Only read under `dev-tools`.
     #[cfg_attr(not(feature = "dev-tools"), allow(dead_code))]
-    last_dpr: i32,
+    last_dpr: f64,
     #[cfg(feature = "dev-tools")]
     mode: CanvasMode,
 }
@@ -140,7 +140,7 @@ impl IronCanvas {
             orch: Orchestrator::<FacadeSurface>::new(grid, overlay),
             model: None,
             js_model: None,
-            last_dpr: 1,
+            last_dpr: 1.0,
             #[cfg(feature = "dev-tools")]
             mode: CanvasMode::Live,
         })
@@ -156,9 +156,9 @@ impl IronCanvas {
 
     /// Resize both layers in one call.
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        let dpr_i = dpr.round() as i32;
-        self.last_dpr = dpr_i;
-        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr_i);
+        let dpr = dpr.round();
+        self.last_dpr = dpr;
+        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr);
     }
 
     /// Push a theme by name. Only `"dark"` is recognized; every other

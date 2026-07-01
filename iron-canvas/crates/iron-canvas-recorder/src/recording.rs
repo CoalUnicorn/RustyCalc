@@ -152,7 +152,7 @@ pub struct IcrHeader {
     /// the backing store and forward the right transform to the live
     /// painter without scanning frame 0 for the first
     /// `ApplyDprTransform`. Added in schema v2.
-    pub dpr: i32,
+    pub dpr: f64,
     pub theme: ThemeSnapshot,
     /// Unix epoch milliseconds when `startRecording` fired. Host-supplied.
     pub started_at_unix_ms: u64,
@@ -165,7 +165,7 @@ impl IcrHeader {
     pub fn new(
         canvas_w: f64,
         canvas_h: f64,
-        dpr: i32,
+        dpr: f64,
         theme: ThemeSnapshot,
         started_at_unix_ms: u64,
     ) -> Self {
@@ -257,7 +257,7 @@ mod tests {
         IcrHeader::new(
             800.0,
             400.0,
-            1,
+            1.0,
             ThemeSnapshot::from(&CanvasTheme::light()),
             0,
         )

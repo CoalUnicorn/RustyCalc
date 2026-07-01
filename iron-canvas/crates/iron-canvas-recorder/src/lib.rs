@@ -116,7 +116,7 @@ pub enum DrawOp {
     InvalidateCache,
     ResetTextDefaults,
     ApplyDprTransform {
-        dpr: i32,
+        dpr: f64,
     },
     BeginGroup {
         class: GroupClass,
@@ -283,7 +283,7 @@ impl Painter for RecorderPainter {
         self.push(DrawOp::ResetTextDefaults);
     }
 
-    fn apply_dpr_transform(&self, dpr: i32) {
+    fn apply_dpr_transform(&self, dpr: f64) {
         self.push(DrawOp::ApplyDprTransform { dpr });
     }
 
@@ -431,7 +431,7 @@ impl Surface for MemSurface {
         Rc::clone(&self.painter)
     }
 
-    fn resize(&mut self, _css: CanvasSize, _dpr: i32) {}
+    fn resize(&mut self, _css: CanvasSize, _dpr: f64) {}
     fn present(&self) {}
 }
 
@@ -578,7 +578,7 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
         }
     }
 
-    fn apply_dpr_transform(&self, dpr: i32) {
+    fn apply_dpr_transform(&self, dpr: f64) {
         self.inner.apply_dpr_transform(dpr);
         if self.should_record() {
             self.recorder.apply_dpr_transform(dpr);
@@ -722,7 +722,7 @@ impl<S: Surface> Surface for RecordingSurface<S> {
         Rc::clone(&self.painter)
     }
 
-    fn resize(&mut self, css: CanvasSize, dpr: i32) {
+    fn resize(&mut self, css: CanvasSize, dpr: f64) {
         self.inner.resize(css, dpr);
     }
 
@@ -837,7 +837,7 @@ mod tests {
         src.pop_clip();
         src.invalidate_cache();
         src.reset_text_defaults();
-        src.apply_dpr_transform(2);
+        src.apply_dpr_transform(2.0);
         src.begin_group(GroupClass::Grid);
         src.end_group();
         src.blit(r, r);

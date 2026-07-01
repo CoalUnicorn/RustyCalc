@@ -98,7 +98,7 @@ pub struct RendererCore<P: Painter> {
     /// renderer holds a shared handle so paint methods reach the painter
     /// without re-borrowing through the surface on every call.
     pub painter: Rc<P>,
-    dpr: i32,
+    dpr: f64,
     pub frame_cache: FrameCache,
     /// Renderer-lifetime per-pane bulk-fetch buffers + last-fetched range.
     /// Sibling of the intern tables below; survives across frames so
@@ -134,7 +134,7 @@ impl<P: Painter> RendererCore<P> {
 
     /// React to a backing-store resize: push the new DPR through the
     /// painter's transform, store it for snap math, and clear caches.
-    pub fn resize_for_dpr(&mut self, dpr: i32) {
+    pub fn resize_for_dpr(&mut self, dpr: f64) {
         self.painter.apply_dpr_transform(dpr);
         self.dpr = dpr;
         self.invalidate_paint_cache();
@@ -147,7 +147,7 @@ impl<P: Painter> RendererCore<P> {
     pub fn for_layer(painter: Rc<P>) -> Self {
         Self {
             painter,
-            dpr: 1,
+            dpr: 1.0,
             frame_cache: FrameCache {
                 text_slots: Cell::new(Vec::new()),
                 show_grid: Cell::new(true),
@@ -321,7 +321,7 @@ impl<P: Painter> RendererCore<P> {
 /// `LayerBase`'s `Surface::P` at the type level.
 pub trait LayerOps {
     type Painter: Painter;
-    fn resize_for_dpr(&mut self, dpr: i32);
+    fn resize_for_dpr(&mut self, dpr: f64);
 }
 
 pub struct GridRenderer<P: Painter> {
@@ -373,7 +373,7 @@ impl<P: BlitPainter> GridRenderer<P> {
 
 impl<P: Painter> LayerOps for GridRenderer<P> {
     type Painter = P;
-    fn resize_for_dpr(&mut self, dpr: i32) {
+    fn resize_for_dpr(&mut self, dpr: f64) {
         self.core.resize_for_dpr(dpr);
     }
 }
@@ -416,7 +416,7 @@ impl<P: Painter> OverlayRenderer<P> {
 
 impl<P: Painter> LayerOps for OverlayRenderer<P> {
     type Painter = P;
-    fn resize_for_dpr(&mut self, dpr: i32) {
+    fn resize_for_dpr(&mut self, dpr: f64) {
         self.core.resize_for_dpr(dpr);
     }
 }

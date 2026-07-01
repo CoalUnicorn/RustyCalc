@@ -12,7 +12,7 @@ use iron_canvas_recorder::MemSurface;
 
 fn build(model: Rc<DataGridModel>) -> Orchestrator<MemSurface> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_model(model as Rc<dyn CanvasModel>);
     orch
 }

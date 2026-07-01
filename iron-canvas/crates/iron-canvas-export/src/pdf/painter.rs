@@ -279,7 +279,7 @@ impl Painter for PdfPainter {
         // No setter cache to dump — PDF ops carry their own color/width.
     }
 
-    fn apply_dpr_transform(&self, _dpr: i32) {
+    fn apply_dpr_transform(&self, _dpr: f64) {
         // DPR doesn't apply to PDF user space (1/72" regardless of
         // device pixel density). The page-open CTM in PdfSurface::finish
         // already maps painter coords to PDF coords; nothing else needs

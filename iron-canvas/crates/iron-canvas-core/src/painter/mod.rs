@@ -187,7 +187,7 @@ pub trait Painter: TextMetrics {
     /// Called by `LayerBase::resize` after a canvas resize. Canvas-2D resets
     /// the transform and applies a DPR scale; SVG/Recorder backends can
     /// no-op or stash the value internally.
-    fn apply_dpr_transform(&self, dpr: i32);
+    fn apply_dpr_transform(&self, dpr: f64);
 
     /// Restore sticky text-alignment defaults. Canvas-2D resets these on
     /// `set_width/set_height`; this hook is called after `invalidate_cache`

@@ -27,7 +27,7 @@ pub struct SvgPainter {
     group_depth: Cell<u32>,
     pub(super) width: i32,
     pub(super) height: i32,
-    dpr: Cell<i32>,
+    dpr: Cell<f64>,
 }
 
 impl SvgPainter {
@@ -40,7 +40,7 @@ impl SvgPainter {
             group_depth: Cell::new(0),
             width,
             height,
-            dpr: Cell::new(1),
+            dpr: Cell::new(1.0),
         }
     }
 
@@ -61,10 +61,10 @@ impl SvgPainter {
         );
 
         let dpr = self.dpr.get();
-        let (attr_w, attr_h) = if dpr > 1 {
-            (self.width * dpr, self.height * dpr)
+        let (attr_w, attr_h) = if dpr > 1.0 {
+            (f64::from(self.width) * dpr, f64::from(self.height) * dpr)
         } else {
-            (self.width, self.height)
+            (f64::from(self.width), f64::from(self.height))
         };
 
         let defs = mem::take(&mut *self.defs.borrow_mut());
@@ -280,7 +280,7 @@ impl Painter for SvgPainter {
 
     fn reset_text_defaults(&self) {}
 
-    fn apply_dpr_transform(&self, dpr: i32) {
+    fn apply_dpr_transform(&self, dpr: f64) {
         self.dpr.set(dpr);
     }
 
@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn dpr_scales_attr_dimensions_only() {
         let p = SvgPainter::new(100, 50);
-        p.apply_dpr_transform(2);
+        p.apply_dpr_transform(2.0);
         let svg = p.finish();
         assert!(svg.contains("width=\"200\""));
         assert!(svg.contains("height=\"100\""));

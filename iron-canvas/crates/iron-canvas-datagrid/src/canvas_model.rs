@@ -64,26 +64,6 @@ impl CanvasModel for DataGrid {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use iron_canvas_core::CanvasModel;
-
-    #[test]
-    fn headerless_grid_hides_both_header_strips() {
-        let grid = DataGrid::builder().show_headers(false).build();
-        assert_eq!(grid.get_show_row_headers(0), Some(false));
-        assert_eq!(grid.get_show_col_headers(0), Some(false));
-    }
-
-    #[test]
-    fn headers_default_on() {
-        let grid = DataGrid::builder().build();
-        assert_eq!(grid.get_show_row_headers(0), Some(true));
-        assert_eq!(grid.get_show_col_headers(0), Some(true));
-    }
-}
-
 impl CellContentQuery for DataGrid {
     fn get_cell_style(&self, _s: u32, row: i32, column: i32) -> Fetched<CellStyle> {
         if row < 1 || column < 1 {
@@ -166,5 +146,25 @@ impl CellContentQuery for DataGrid {
         out.clear();
         let cells = (range.r2 - range.r1 + 1).max(0) * (range.c2 - range.c1 + 1).max(0);
         out.resize(cells as usize, Fetched::Value(CellKind::Text));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iron_canvas_core::CanvasModel;
+
+    #[test]
+    fn headerless_grid_hides_both_header_strips() {
+        let grid = DataGrid::builder().show_headers(false).build();
+        assert_eq!(grid.get_show_row_headers(0), Some(false));
+        assert_eq!(grid.get_show_col_headers(0), Some(false));
+    }
+
+    #[test]
+    fn headers_default_on() {
+        let grid = DataGrid::builder().build();
+        assert_eq!(grid.get_show_row_headers(0), Some(true));
+        assert_eq!(grid.get_show_col_headers(0), Some(true));
     }
 }
