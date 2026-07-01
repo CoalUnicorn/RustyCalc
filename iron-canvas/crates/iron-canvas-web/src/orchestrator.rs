@@ -156,7 +156,6 @@ impl IronCanvas {
 
     /// Resize both layers in one call.
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        let dpr = dpr.round();
         self.last_dpr = dpr;
         self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr);
     }
