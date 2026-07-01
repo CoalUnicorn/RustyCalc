@@ -68,6 +68,7 @@ pub struct DataGrid {
     sel: [i32; 4], // r1,c1,r2,c2 (1-based, display coords)
     frozen_header: bool,
     show_headers: bool,
+    show_selection: bool,
 }
 
 pub struct DataGridBuilder {
@@ -76,10 +77,11 @@ pub struct DataGridBuilder {
     default_row_h: Option<f64>,
     frozen_header: bool,
     show_headers: bool,
+    show_selection: bool,
 }
 
-// Manual `Default` (not derived) so `show_headers` starts ON; every other
-// field takes its own zero/empty default.
+// Manual `Default` (not derived) so `show_headers`/`show_selection` start ON;
+// every other field takes its own zero/empty default.
 impl Default for DataGridBuilder {
     fn default() -> Self {
         Self {
@@ -88,6 +90,7 @@ impl Default for DataGridBuilder {
             default_row_h: None,
             frozen_header: false,
             show_headers: true,
+            show_selection: true,
         }
     }
 }
@@ -134,6 +137,10 @@ impl DataGrid {
     }
     pub(crate) fn show_headers_enabled(&self) -> bool {
         self.show_headers
+    }
+
+    pub(crate) fn show_selection_enabled(&self) -> bool {
+        self.show_selection
     }
 
     pub fn set_column_width(&mut self, col: usize, width: f64) {
@@ -333,6 +340,10 @@ impl DataGridBuilder {
         self.show_headers = on;
         self
     }
+    pub fn show_selection(mut self, on: bool) -> Self {
+        self.show_selection = on;
+        self
+    }
     pub fn build(self) -> DataGrid {
         let order = (0..self.rows.len()).collect();
         let mut grid = DataGrid {
@@ -348,6 +359,7 @@ impl DataGridBuilder {
             sel: [1, 1, 1, 1],
             frozen_header: self.frozen_header,
             show_headers: self.show_headers,
+            show_selection: self.show_selection,
         };
         grid.clamp_view(); // keep viewport + selection valid for an empty grid
         grid

@@ -19,7 +19,10 @@ pub fn extract_grid(m: &UserModel, source: SheetRange) -> DataGrid {
 
     // DataGrid has a single grid-wide row height; the source's first row is
     // the best available default.
-    let mut builder = DataGrid::builder().show_headers(false).default_row_height(
+    let mut builder = DataGrid::builder()
+        .show_headers(false)
+        .show_selection(false)
+        .default_row_height(
         m.get_row_height(sheet, area.r1)
             .ok()
             .unwrap_or(DEFAULT_ROW_HEIGHT),

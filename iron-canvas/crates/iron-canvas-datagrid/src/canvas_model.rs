@@ -7,6 +7,9 @@ impl CanvasModel for DataGrid {
         0
     }
     fn get_selected_view(&self) -> Option<CanvasView> {
+        if !self.show_selection_enabled() {
+            return None;
+        }
         let [r1, c1, r2, c2] = self.selection_raw();
         Some(CanvasView {
             sheet: 0,
