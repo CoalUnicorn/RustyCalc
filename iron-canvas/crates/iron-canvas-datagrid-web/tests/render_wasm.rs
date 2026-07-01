@@ -5,17 +5,55 @@
 //! JS object literal with camelCase keys (`rowHeight`) must round-trip into
 //! `GridDataWire` without throwing.
 
-use iron_canvas_core::CanvasTheme;
+use iron_canvas_core::{CanvasSize, CanvasTheme};
+use iron_canvas_datagrid_web::DataGridCanvas;
 use iron_canvas_datagrid_web::wire::GridDataWire;
 use js_sys::{Array, Object, Reflect};
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_test::*;
+use web_sys::HtmlCanvasElement;
 
 wasm_bindgen_test_configure!(run_in_browser);
 
 fn set(obj: &Object, key: &str, val: JsValue) {
     // `Reflect::set` only errors on a non-object target; `obj` is an Object.
     let _ = Reflect::set(obj, &JsValue::from_str(key), &val);
+}
+
+fn make_canvas() -> HtmlCanvasElement {
+    web_sys::window()
+        .expect("browser window")
+        .document()
+        .expect("document")
+        .create_element("canvas")
+        .expect("create canvas element")
+        .dyn_into::<HtmlCanvasElement>()
+        .expect("element is a canvas")
+}
+
+// Regression test for a bug where `resize()` rounded `dpr` before
+// forwarding it to `WebSurface::resize`, silently mapping e.g. 1.25 -> 1
+// and 1.5 -> 2.
+#[wasm_bindgen_test]
+fn fractional_dpr_reaches_canvas_backing_store() {
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let mut canvas =
+        DataGridCanvas::new(grid.clone(), overlay.clone()).expect("create DataGridCanvas");
+
+    canvas.resize(300.0, 200.0, 1.25);
+
+    let (expect_w, expect_h) = CanvasSize { w: 300.0, h: 200.0 }.to_backing_size(1.25);
+    assert_eq!(
+        grid.width(),
+        expect_w,
+        "grid backing width must use unrounded DPR"
+    );
+    assert_eq!(
+        grid.height(),
+        expect_h,
+        "grid backing height must use unrounded DPR"
+    );
 }
 
 #[wasm_bindgen_test]

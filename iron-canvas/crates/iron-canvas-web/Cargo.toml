@@ -34,3 +34,6 @@ serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 iron-canvas-canvas2d = { version = "0.1.0-beta.2", path = "../iron-canvas-canvas2d" }
 iron-canvas-ironcalc = { version = "0.1.0-beta.2", path = "../iron-canvas-ironcalc" }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

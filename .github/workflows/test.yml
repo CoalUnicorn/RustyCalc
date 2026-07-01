@@ -48,6 +48,44 @@ jobs:
         working-directory: RustyCalc/iron-canvas
         run: cargo test --workspace --locked
 
+  # Browser-run wasm-bindgen tests for the two wasm-bindgen facades
+  # (iron-canvas-web, iron-canvas-datagrid-web). These are gated
+  # `#[cfg(target_arch = "wasm32")]` and never run under test-native above.
+  # ubuntu-latest ships Chrome + chromedriver, so no extra browser install.
+  test-wasm-browser:
+    name: cargo test (iron-canvas, wasm/browser)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout RustyCalc
+        uses: actions/checkout@v4
+        with:
+          path: RustyCalc
+          submodules: recursive
+
+      - name: Install Rust toolchain (wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: RustyCalc/iron-canvas
+          key: wasm-browser
+
+      # Version must track the wasm-bindgen version pinned in
+      # iron-canvas/Cargo.lock — the test runner and the compiled test
+      # binaries must match exactly or the run fails at the JS glue step.
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.120 --locked
+
+      - name: cargo test --target wasm32-unknown-unknown (browser)
+        working-directory: RustyCalc/iron-canvas
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+          CHROMEDRIVER: /usr/bin/chromedriver
+        run: cargo test --target wasm32-unknown-unknown -p iron-canvas-web -p iron-canvas-datagrid-web --locked
+
   # Feature-powerset check via cargo-hack.
   # Catches feature-wiring bugs like `recorder` -> `dev-tools` renames
   # where a forwarded feature stops resolving.
