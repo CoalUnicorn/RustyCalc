@@ -17,6 +17,7 @@ The shippable artifact for non-spreadsheet consumers. Composes `datagrid` (data)
   - **layout**: `resize`, `setFrozenHeader`, `setColumnWidth`, `resizeHandleAt`
   - **scroll**: `setScroll`, `scrollBy`
   - **selection / hit-test**: `hitTest`, `selectCell`, `setSelection`
+  - **custom overlay**: `setHover`
   - **sort**: `sortByColumn`, `clearSort`, `currentSort`
   - **theme**: `setThemeFromElement`, `setThemeName`
   - **paint / export**: `paintIfDirty`, `exportSvg`

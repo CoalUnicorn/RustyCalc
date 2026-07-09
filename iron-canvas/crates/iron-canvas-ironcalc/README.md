@@ -4,7 +4,7 @@ The orphan-rule bridge — teaches iron-canvas how to read an IronCalc workbook.
 
 ## What it does
 
-Implements `iron-canvas-core`'s `CanvasModel` trait for IronCalc's `UserModel`, and converts IronCalc's style/cell types into core's canvas types. Because both `CanvasModel` and `UserModel` are foreign to each other, the impl can't live in either crate — Rust's orphan rule forces it into this third crate via a local newtype. It also hosts the conditional-formatting bridge: `get_extended_cell_style()` surfaces per-cell CF decorations (data bars, icon sets, color scales) to the paint pipeline as `CellDecoration`s.
+Adapts IronCalc's `UserModel` to `iron-canvas-core`'s `CanvasModel` trait through the local `IronCalcModel` newtype, and converts IronCalc's style/cell types into core's canvas types. Because both `CanvasModel` and `UserModel` are foreign to each other, a direct impl is illegal; the local newtype is what makes the adapter legal under Rust's orphan rule. It also hosts the conditional-formatting bridge: `get_extended_cell_style()` surfaces per-cell CF decorations (data bars, icon sets, ratings) to the paint pipeline as `CellDecoration`s, while color-scale effects arrive through the merged cell style.
 
 ## Crate role
 

@@ -8,13 +8,13 @@ Provides two `Painter`/`Surface` implementations that serialize a frame to a doc
 
 ## Crate role
 
-The "save a picture of the grid" layer. Consumed by both web facades to back their `exportSvg`/`exportPdf` methods. Depends only on `iron-canvas-core`.
+The "save a picture of the grid" layer. `iron-canvas-web` uses it for SVG and optional PDF export; `iron-canvas-datagrid-web` uses its SVG path. Depends only on `iron-canvas-core`.
 
 ## Key exports
 
 - `SvgPainter`, `SvgSurface` (feature `svg`) — DPR-aware, XML-escaped `<svg>` with structured `<g>` groups and `<defs>` clip-paths; `SvgSurface::render(model, theme, size) -> String` is the one-shot entry point
 - `PdfPainter`, `PdfSurface` (feature `pdf`) — single-page PDF 1.7 via a hand-rolled writer; base-14 Helvetica, WinAnsi-only, no font embedding
-- `common` (module) — shared `xml_escape`, PDF string escaping, CSS-color and font-size parsing
+- `common` (module) — XML/PDF string escaping and CSS-color parsing
 
 ## Dependencies
 

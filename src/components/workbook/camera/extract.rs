@@ -23,10 +23,10 @@ pub fn extract_grid(m: &UserModel, source: SheetRange) -> DataGrid {
         .show_headers(false)
         .show_selection(false)
         .default_row_height(
-        m.get_row_height(sheet, area.r1)
-            .ok()
-            .unwrap_or(DEFAULT_ROW_HEIGHT),
-    );
+            m.get_row_height(sheet, area.r1)
+                .ok()
+                .unwrap_or(DEFAULT_ROW_HEIGHT),
+        );
 
     for col in area.columns() {
         builder = builder.column(

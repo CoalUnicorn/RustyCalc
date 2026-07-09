@@ -33,4 +33,4 @@ orch.set_theme(theme_from_element::from_element(&root_el));
 
 ## Relationship to sibling crates
 
-Consumed by both `iron-canvas-web` (spreadsheets) and `iron-canvas-datagrid-web` (plain grids). It is the only live-canvas backend; `export` and `recorder` are the static/test backends.
+Consumed by both `iron-canvas-web` (spreadsheets) and `iron-canvas-datagrid-web` (plain grids). It is the live-canvas backend; `export` serializes documents, while `recorder` provides an in-memory test surface and a decorator for capturing live painter calls.

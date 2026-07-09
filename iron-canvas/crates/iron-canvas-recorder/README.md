@@ -8,7 +8,7 @@ Records each painter operation as a `DrawOp` enum variant instead of rasterizing
 
 ## Crate role
 
-The test and dev-tooling backend. It implements `iron-canvas-core`'s `Painter`/`Surface` traits purely in memory, giving integration tests a deterministic, inspectable target. Used by `core` as a dev-dependency and optionally by `web` under its `dev-tools` feature.
+The test and dev-tooling backend. `RecorderPainter` and `MemSurface` implement `iron-canvas-core`'s `Painter`/`Surface` traits in memory, giving integration tests a deterministic target. `RecordingPainter<P>` and `RecordingSurface<S>` decorate a live backend for capture. Used by `core` as a dev-dependency and optionally by `web` under its `dev-tools` feature.
 
 ## Key exports
 
@@ -23,7 +23,7 @@ The test and dev-tooling backend. It implements `iron-canvas-core`'s `Painter`/`
 ## Dependencies
 
 - `iron-canvas-core` — the traits it records against
-- `serde`, `serde_json` — serialize op streams for snapshot assertions
+- `serde`, `serde_json` — serialize draw operations and `.icr` recordings
 
 ## Relationship to sibling crates
 
