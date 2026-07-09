@@ -94,11 +94,11 @@ const fs = require('fs');
 (async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
-    
+
     await page.goto('""" + app_url + """');
     await page.waitForSelector('canvas', { timeout: 30000 });
     await page.waitForTimeout(2000);
-    
+
     // Upload the xlsx file
     const xlsxBuffer = Buffer.from('""" + xlsx_b64 + """', 'base64');
     const fileInput = await page.$('input[accept=".xlsx"]');
@@ -107,14 +107,14 @@ const fs = require('fs');
         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         buffer: xlsxBuffer
     });
-    
+
     await page.waitForTimeout(3000);
 """ + sheet_js + """
     // Click SVG export and capture download
     const downloadPromise = page.waitForEvent('download', { timeout: 10000 });
     await page.locator('button:has-text("⇩ SVG")').click();
     const download = await downloadPromise;
-    
+
     // Read the download stream
     const stream = await download.createReadStream();
     const chunks = [];
@@ -124,7 +124,7 @@ const fs = require('fs');
     const svg = Buffer.concat(chunks).toString('utf8');
     fs.writeFileSync('""" + output_path + """', svg);
     console.log('SVG exported: ' + svg.length + ' bytes');
-    
+
     await browser.close();
 })();
 """

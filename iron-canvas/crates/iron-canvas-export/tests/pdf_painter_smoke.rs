@@ -24,6 +24,7 @@ use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
+use iron_canvas_export::common::metrics;
 use iron_canvas_export::pdf::{PdfPainter, PdfSurface};
 
 const W: u32 = 100;
@@ -210,7 +211,7 @@ fn fill_text_emits_BT_Tf_color_Tm_Tj_ET() {
 #[test]
 fn fill_text_align_center_shifts_x_by_half_width() {
     let p = PdfPainter::new(W, H);
-    // 4 chars at 10px each -> width 40; centred at x=100 -> tx = 80.
+    let width = metrics::helvetica_advance_width("abcd", 10.0);
     p.fill_text(
         "abcd",
         100.0,
@@ -222,7 +223,7 @@ fn fill_text_align_center_shifts_x_by_half_width() {
     );
     let s = snapshot(&p);
     assert!(
-        s.contains("1 0 0 -1 80.000 20.000 Tm"),
+        s.contains(&format!("1 0 0 -1 {:.3} 20.000 Tm", 100.0 - width / 2.0)),
         "centre alignment off: {s:?}"
     );
 }
@@ -230,6 +231,7 @@ fn fill_text_align_center_shifts_x_by_half_width() {
 #[test]
 fn fill_text_align_end_shifts_x_by_full_width() {
     let p = PdfPainter::new(W, H);
+    let width = metrics::helvetica_advance_width("abcd", 10.0);
     p.fill_text(
         "abcd",
         100.0,
@@ -241,7 +243,7 @@ fn fill_text_align_end_shifts_x_by_full_width() {
     );
     let s = snapshot(&p);
     assert!(
-        s.contains("1 0 0 -1 60.000 20.000 Tm"),
+        s.contains(&format!("1 0 0 -1 {:.3} 20.000 Tm", 100.0 - width)),
         "end alignment off: {s:?}"
     );
 }
@@ -279,12 +281,28 @@ fn invalidate_cache_and_reset_text_defaults_are_no_ops() {
 }
 
 #[test]
-fn measure_text_width_uses_font_size_and_char_count() {
+fn measure_text_width_uses_real_helvetica_metrics_not_declared_family() {
     let p = PdfPainter::new(W, H);
-    // CHAR_WIDTH_FACTOR = 1.0 — mirrors svg_painter's contract.
-    assert_eq!(p.measure_text_width("hello", "16px sans-serif"), 80.0);
-    assert_eq!(p.measure_text_width("hi", "bold 12px serif"), 24.0);
-    assert_eq!(p.measure_text_width("ab", "no-size"), 24.0); // default 12px
+    // PDF always draws the base-14 standard Helvetica font (`/F1`)
+    // regardless of the cell's declared family, so measurement must use
+    // real Helvetica advances, not the flat 1.0-factor estimate — and
+    // "sans-serif"/"serif" here must not change the result, only size does.
+    assert_eq!(
+        p.measure_text_width("hello", "16px sans-serif"),
+        metrics::helvetica_advance_width("hello", 16.0),
+    );
+    assert_eq!(
+        p.measure_text_width("hi", "bold 12px serif"),
+        metrics::helvetica_advance_width("hi", 12.0),
+    );
+    // No `<n>px` token -> DEFAULT_FONT_SIZE_PX (12.0).
+    assert_eq!(
+        p.measure_text_width("ab", "no-size"),
+        metrics::helvetica_advance_width("ab", 12.0),
+    );
+    // Regression guard against reverting to the old flat estimate
+    // (5 chars * 16px = 80.0).
+    assert!(p.measure_text_width("hello", "16px sans-serif") < 80.0);
 }
 
 // ---------------------------------------------------------------------------

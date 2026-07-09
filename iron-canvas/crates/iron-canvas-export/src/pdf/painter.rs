@@ -16,11 +16,12 @@ use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    approx_text_width, parse_font_size_px,
+    parse_font_size_px,
 };
 
 use crate::common::color::parse_css_color;
 use crate::common::escape::pdf_string_escape;
+use crate::common::metrics;
 use crate::pdf::doc::stream::ContentStream;
 
 /// Visible dash pattern when `rect_dashed` is invoked. Matches the
@@ -116,9 +117,13 @@ impl PdfPainter {
 }
 
 impl TextMetrics for PdfPainter {
+    // `fill_text` below always draws the base-14 standard Helvetica font
+    // (`/F1`), regardless of the cell's declared family — PDF has no
+    // embedded-font path, so `helvetica_advance_width` is the font that's
+    // actually painted, not an approximation of it.
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
         let size = parse_font_size_px(font_css);
-        approx_text_width(size, text)
+        metrics::helvetica_advance_width(text, size)
     }
 }
 
@@ -238,9 +243,10 @@ impl Painter for PdfPainter {
         let font_str = font_css.as_str();
         let size = parse_font_size_px(font_str);
 
-        // Approximate width without real font metrics — same estimate as
-        // measure_text_width, recomputed here to avoid a borrow round-trip.
-        let text_width = approx_text_width(size, text);
+        // Real Helvetica width — same as measure_text_width, recomputed
+        // here to avoid a borrow round-trip. Must stay in sync: `Tm`
+        // below positions the run using this same estimate.
+        let text_width = metrics::helvetica_advance_width(text, size);
 
         // Painter coords are Y-down. After the outer Y-flip CTM,
         // a counter-flipping text matrix (`1 0 0 -1 tx ty Tm`) restores

@@ -14,10 +14,11 @@ use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
-    approx_text_width, parse_font_size_px,
+    parse_font_size_px,
 };
 
 use crate::common::escape::xml_escape;
+use crate::common::metrics;
 
 pub struct SvgPainter {
     body: RefCell<String>,
@@ -25,6 +26,11 @@ pub struct SvgPainter {
     clip_depth: Cell<u32>,
     next_clip_id: Cell<u32>,
     group_depth: Cell<u32>,
+    /// Set the first time `fill_text` runs. Gates the `@font-face` block
+    /// `finish()` prepends to `defs` — cells with no text (or a painter
+    /// that never draws any) keep emitting no `<defs>` at all, same as
+    /// today, instead of always paying for the embedded font's data URI.
+    has_text: Cell<bool>,
     pub(super) width: i32,
     pub(super) height: i32,
     dpr: Cell<f64>,
@@ -38,6 +44,7 @@ impl SvgPainter {
             clip_depth: Cell::new(0),
             next_clip_id: Cell::new(0),
             group_depth: Cell::new(0),
+            has_text: Cell::new(false),
             width,
             height,
             dpr: Cell::new(1.0),
@@ -67,8 +74,22 @@ impl SvgPainter {
             (f64::from(self.width), f64::from(self.height))
         };
 
-        let defs = mem::take(&mut *self.defs.borrow_mut());
+        let mut defs = mem::take(&mut *self.defs.borrow_mut());
         let body = mem::take(&mut *self.body.borrow_mut());
+        // Embed the bundled Inter font as a data URI so any viewer — not
+        // just ones with Inter installed — renders the exact glyphs
+        // `measure_text_width` measured. Gated on `has_text`: a painter
+        // that never drew text keeps emitting no `<defs>` at all.
+        if self.has_text.get() {
+            let mut font_face = String::with_capacity(metrics::inter_base64().len() + 160);
+            let _ = write!(
+                font_face,
+                "<style>@font-face{{font-family:'Inter';src:url(data:font/truetype;base64,{}) format('truetype');}}</style>",
+                metrics::inter_base64()
+            );
+            font_face.push_str(&defs);
+            defs = font_face;
+        }
         let mut out = String::with_capacity(defs.len() + body.len() + 256);
         let _ = write!(
             out,
@@ -86,29 +107,14 @@ impl SvgPainter {
     }
 }
 
-// CSS font shorthand -> (size_px, family). Size comes from the shared
-// `parse_font_size_px`; the family is everything after that token (only SVG
-// needs it — PDF/recorder share just the size). Falls back to sans-serif so a
-// missing/garbled string never panics.
-fn parse_font(font_css: &str) -> (f64, String) {
-    let toks: Vec<&str> = font_css.split_whitespace().collect();
-    let family = toks
-        .iter()
-        .position(|t| {
-            t.strip_suffix("px")
-                .and_then(|n| n.parse::<f64>().ok())
-                .is_some()
-        })
-        .map(|i| toks[i + 1..].join(" "))
-        .filter(|f| !f.is_empty())
-        .unwrap_or_else(|| "sans-serif".to_string());
-    (parse_font_size_px(font_css), family)
-}
-
 impl TextMetrics for SvgPainter {
+    // Export always renders (and now always emits) the bundled Inter font —
+    // see `fill_text` — so wrap math must measure that same font, not the
+    // cell's declared family. `metrics::inter_advance_width` is the real
+    // glyph-advance sum; unmapped glyphs fall back to the flat estimate.
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
-        let (size, _) = parse_font(font_css);
-        approx_text_width(size, text)
+        let size = parse_font_size_px(font_css);
+        metrics::inter_advance_width(text, size)
     }
 }
 
@@ -250,7 +256,7 @@ impl Painter for SvgPainter {
         align: TextAlign,
         baseline: TextBaseline,
     ) {
-        let (size, family) = parse_font(font_css.as_str());
+        let size = parse_font_size_px(font_css.as_str());
         let anchor = match align {
             TextAlign::Start => "start",
             TextAlign::Center => "middle",
@@ -262,10 +268,18 @@ impl Painter for SvgPainter {
             TextBaseline::Bottom => "text-after-edge",
             TextBaseline::Alphabetic => "alphabetic",
         };
+        // The cell's declared family is intentionally not emitted here: SVG
+        // export always renders the bundled Inter font (embedded via
+        // `finish`'s `@font-face`), so `measure_text_width` and the glyphs a
+        // viewer actually paints agree regardless of what font the workbook
+        // itself names — see the metrics module doc comment.
+        self.has_text.set(true);
         let mut body = self.body.borrow_mut();
-        let _ = write!(body, "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"", x, y);
-        xml_escape(&family, &mut body);
-        let _ = write!(body, "\" font-size=\"{:.3}\" fill=\"", size);
+        let _ = write!(
+            body,
+            "<text x=\"{:.3}\" y=\"{:.3}\" font-family=\"Inter\" font-size=\"{:.3}\" fill=\"",
+            x, y, size
+        );
         xml_escape(color.as_str(), &mut body);
         let _ = write!(
             body,
@@ -313,6 +327,7 @@ impl BlitPainter for SvgPainter {
 #[cfg(test)]
 mod tests {
     use super::SvgPainter;
+    use crate::common::metrics;
     use iron_canvas_core::geometry::pixel_rect::PixelRect;
     use iron_canvas_core::geometry::prim::Point;
     use iron_canvas_core::painter::{
@@ -465,11 +480,59 @@ mod tests {
     }
 
     #[test]
-    fn measure_text_width_uses_font_size() {
+    fn measure_text_width_uses_real_inter_metrics_not_declared_family() {
+        // Export always renders (and measures) the bundled Inter font
+        // regardless of what family the cell declares — "sans-serif" /
+        // "serif" here must not change the result, only size does.
         let p = SvgPainter::new(10, 10);
-        assert_eq!(p.measure_text_width("hello", "16px sans-serif"), 80.0);
-        assert_eq!(p.measure_text_width("hi", "bold 12px serif"), 24.0);
-        assert_eq!(p.measure_text_width("ab", "no-size"), 24.0);
+        assert_eq!(
+            p.measure_text_width("hello", "16px sans-serif"),
+            metrics::inter_advance_width("hello", 16.0),
+        );
+        assert_eq!(
+            p.measure_text_width("hi", "bold 12px serif"),
+            metrics::inter_advance_width("hi", 12.0),
+        );
+        // No `<n>px` token -> DEFAULT_FONT_SIZE_PX (12.0).
+        assert_eq!(
+            p.measure_text_width("ab", "no-size"),
+            metrics::inter_advance_width("ab", 12.0),
+        );
+        // Real glyph advances, not the old flat 1.0-factor estimate
+        // (5 chars * 16px = 80.0) — regression guard against reverting to
+        // `approx_text_width`.
+        assert!(p.measure_text_width("hello", "16px sans-serif") < 80.0);
+    }
+
+    #[test]
+    fn finish_embeds_inter_font_face_only_when_text_was_drawn() {
+        let empty = SvgPainter::new(10, 10);
+        empty.rect_fill(rect(0, 0, 5, 5), PaintColor::Static("#fff"));
+        assert!(!empty.finish().contains("@font-face"));
+
+        let with_text = SvgPainter::new(10, 10);
+        with_text.fill_text(
+            "hi",
+            0.0,
+            0.0,
+            PaintColor::Static("12px Aptos Narrow"),
+            PaintColor::Static("#000"),
+            TextAlign::Start,
+            TextBaseline::Alphabetic,
+        );
+        let svg = with_text.finish();
+        // One embedded font is used for every cell, regardless of the
+        // cell's own declared family (`Aptos Narrow` above) — that's what
+        // keeps measured and rendered glyphs in agreement on any viewer.
+        assert!(svg.contains("@font-face"));
+        assert!(svg.contains("font-family:'Inter'"));
+        assert!(svg.contains("data:font/truetype;base64,"));
+        assert!(svg.contains("font-family=\"Inter\""));
+        assert_eq!(
+            svg.matches("@font-face").count(),
+            1,
+            "exactly one embedded font, not one per text element"
+        );
     }
 
     #[test]
