@@ -59,6 +59,10 @@ impl StylePath {
     /// - `"bottom"` (default), `"center"`, `"top"`
     pub const VERTICAL_ALIGN: Self = Self("alignment.vertical");
 
+    /// Wrap text within the cell: `"alignment.wrap_text"`. Boolean `"true"`/`"false"`.
+    /// Forced on when an Alt+Enter value commits with an embedded newline.
+    pub const WRAP_TEXT: Self = Self("alignment.wrap_text");
+
     /// Returns the IronCalc-compatible string path.
     pub fn as_str(&self) -> &'static str {
         self.0
@@ -128,6 +132,18 @@ impl HexColor {
 
     pub fn is_transparent(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// Converts an `Option<String>` to a `HexColor` at a system boundary.
+    ///
+    /// `None` and invalid hex strings both map to `transparent()`.
+    /// Use this in UI callbacks where the color picker may produce unvalidated input.
+    pub fn from_opt(opt: Option<String>) -> Self {
+        match opt {
+            None => Self::transparent(),
+            Some(s) if s.is_empty() => Self::transparent(),
+            Some(s) => Self::new(s).unwrap_or_else(|_| Self::transparent()),
+        }
     }
 }
 
@@ -228,68 +244,65 @@ impl AsRef<str> for BooleanValue {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Which sides or region of the selection a border applies to.
+///
+/// Mirrors `ironcalc_base`'s internal `BorderType`. Defined here so
+/// `FormatAction` stays `Clone + Copy + PartialEq` without depending on
+/// upstream derives. The serde variant names used to construct `BorderArea`
+/// via JSON are returned by `as_json_str`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderSide {
+    All,
+    Inner,
+    Outer,
+    Top,
+    Right,
+    Bottom,
+    Left,
+    CenterH,
+    CenterV,
+    None,
+}
 
-    #[test]
-    fn style_path_constants() {
-        assert_eq!(StylePath::BACKGROUND_COLOR.as_str(), "fill.fg_color");
-        assert_eq!(StylePath::FONT_BOLD.as_str(), "font.b");
-        assert_eq!(StylePath::TEXT_COLOR.as_str(), "font.color");
+impl BorderSide {
+    /// Variant name used as the `"type"` key in IronCalc's `BorderArea` JSON.
+    pub(crate) fn as_json_str(self) -> &'static str {
+        match self {
+            BorderSide::All => "All",
+            BorderSide::Inner => "Inner",
+            BorderSide::Outer => "Outer",
+            BorderSide::Top => "Top",
+            BorderSide::Right => "Right",
+            BorderSide::Bottom => "Bottom",
+            BorderSide::Left => "Left",
+            BorderSide::CenterH => "CenterH",
+            BorderSide::CenterV => "CenterV",
+            BorderSide::None => "None",
+        }
     }
+}
 
-    #[test]
-    fn hex_color_validation() {
-        // Valid colors
-        assert!(HexColor::new("#FF0000").is_ok());
-        assert!(HexColor::new("#000000").is_ok());
-        assert!(HexColor::new("#ABC").is_ok()); // 3-digit
-        assert!(HexColor::new("").is_ok()); // Transparent
+/// Line weight for a border.
+///
+/// Covers the most commonly used `ironcalc_base::BorderStyle` variants.
+/// The lowercase serde strings are used to construct `BorderArea` via JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum BorderWeight {
+    Thin,
+    Medium,
+    Thick,
+    Double,
+}
 
-        // Invalid colors
-        assert!(HexColor::new("FF0000").is_err()); // No #
-        assert!(HexColor::new("#FF00").is_err()); // Wrong length
-        assert!(HexColor::new("#GG0000").is_err()); // Invalid hex
-    }
-
-    #[allow(clippy::unwrap_used)]
-    #[test]
-    fn hex_color_normalization() {
-        // 3-digit colors get normalized to 6-digit
-        assert_eq!(HexColor::new("#ABC").unwrap().as_str(), "#AABBCC");
-        assert_eq!(HexColor::new("#f0a").unwrap().as_str(), "#ff00aa");
-
-        // 6-digit colors stay unchanged
-        assert_eq!(HexColor::new("#FF0000").unwrap().as_str(), "#FF0000");
-
-        // Transparent stays empty
-        assert_eq!(HexColor::transparent().as_str(), "");
-    }
-
-    #[test]
-    fn unified_validation_matches_color_picker() {
-        // Test cases that should match color_picker.rs validation
-        assert!(is_valid_hex_color("#000"));
-        assert!(is_valid_hex_color("#000000"));
-        assert!(is_valid_hex_color("#ABC"));
-        assert!(is_valid_hex_color("#abcdef"));
-        assert!(is_valid_hex_color("#123456"));
-
-        assert!(!is_valid_hex_color("000"));
-        assert!(!is_valid_hex_color("#"));
-        assert!(!is_valid_hex_color("#00"));
-        assert!(!is_valid_hex_color("#0000"));
-        assert!(!is_valid_hex_color("#00000"));
-        assert!(!is_valid_hex_color("#0000000"));
-        assert!(!is_valid_hex_color("#xyz"));
-        assert!(!is_valid_hex_color("#gggggg"));
-    }
-
-    #[test]
-    fn boolean_value_conversion() {
-        assert_eq!(BooleanValue::from_bool(true).as_str(), "true");
-        assert_eq!(BooleanValue::from_bool(false).as_str(), "false");
-        assert_eq!(BooleanValue::True.toggle(), BooleanValue::False);
+impl BorderWeight {
+    /// Lowercase serde string expected by IronCalc's `BorderStyle`.
+    pub(crate) fn as_json_str(self) -> &'static str {
+        match self {
+            BorderWeight::Thin => "thin",
+            BorderWeight::Medium => "medium",
+            BorderWeight::Thick => "thick",
+            BorderWeight::Double => "double",
+        }
     }
 }

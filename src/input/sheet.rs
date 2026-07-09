@@ -6,12 +6,13 @@
 //!
 //! Follows the `WorkbookAction` pattern in `workbook.rs`.
 
+use ironcalc_base::types::Color;
 use leptos::prelude::WithValue;
 
 use crate::events::{FormatEvent, NavigationEvent, SpreadsheetEvent, StructureEvent};
 use crate::input::error::SheetError;
-use crate::model::{EvaluationMode, SheetQuery, try_mutate};
-use crate::state::{ModelStore, StatusMessage, WorkbookState};
+use crate::model::{EvaluationMode, SheetRoster, try_mutate};
+use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
 
 /// Sheet-level operations on the current workbook.
 ///
@@ -48,6 +49,22 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
             let previous = model.with_value(|m| m.get_selected_view().sheet);
             if previous == *sheet_idx {
                 return;
+            }
+
+            // Tabs stay live during formula edit: point-mode survives the
+            // switch (the next click on the new sheet supplies a
+            // sheet-qualified ref). Every other drag is position-dependent
+            // on the outgoing sheet and is cancelled.
+            match state.drag.get_untracked() {
+                DragState::Idle | DragState::Pointing { .. } => {}
+                DragState::DraggingFormulaRef { .. } => {
+                    state.dragged_ref_override.set(None);
+                    state.drag.set(DragState::Idle);
+                }
+                DragState::Selecting
+                | DragState::Extending { .. }
+                | DragState::ResizingCol { .. }
+                | DragState::ResizingRow { .. } => state.drag.set(DragState::Idle),
             }
 
             if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
@@ -162,8 +179,14 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
 
         SheetAction::SetColor { sheet, color } => {
             let hex = color.as_deref().unwrap_or("");
+            let sheet_color = if hex.is_empty() {
+                Color::None
+            } else {
+                Color::from_rgb(hex).unwrap_or(Color::None)
+            };
             if let Err(e) = try_mutate(model, EvaluationMode::Deferred, |m| {
-                m.set_sheet_color(*sheet, hex).map_err(SheetError::Engine)
+                m.set_sheet_color(*sheet, &sheet_color)
+                    .map_err(SheetError::Engine)
             }) {
                 state.status.set(Some(StatusMessage::Error(e.to_string())));
                 return;
@@ -180,10 +203,14 @@ pub fn execute_sheet(action: &SheetAction, model: ModelStore, state: &WorkbookSt
         }
 
         SheetAction::Duplicate(_) => {
-            todo!("SheetAction::Duplicate not yet implemented")
+            state.status.set(Some(StatusMessage::Error(
+                "Duplicate sheet is not yet implemented".into(),
+            )));
         }
         SheetAction::Move { .. } => {
-            todo!("SheetAction::Move not yet implemented")
+            state.status.set(Some(StatusMessage::Error(
+                "Move sheet is not yet implemented".into(),
+            )));
         }
     }
 }

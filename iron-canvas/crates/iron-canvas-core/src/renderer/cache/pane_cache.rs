@@ -1,21 +1,21 @@
 //! Cross-frame per-pane model data, plus the blit-aware shift that lets
 //! the cache survive a single-axis scroll.
 //!
-//! Each [`PaneBuffers`] holds the styles/values/cell_types last fetched
+//! Each [`PaneBuffers`] holds the styles/values/cell_types/decorations last fetched
 //! for its [`crate::chrome::PaneRegion`], together with the `RCRange` the
 //! fetch covered. `render_pane` skips the model refetch when the cached
 //! `range` still matches the live pane range. Under a blit fast-path the
-//! caller calls [`PaneBuffers::try_shift`] first, rotating the buffers in
+//! caller calls [`PaneBuffers::prepare_shift`] first, rotating the buffers in
 //! place so the kept band survives and only the revealed strip needs a
 //! refetch.
 
 use std::cell::Cell;
 
-use ironcalc_base::types::{CellType, Style};
-
 use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
+use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
+use crate::types::fetched::Fetched;
 
 /// Per-pane buffers that survive across frames. Holds the most recent
 /// bulk-fetch output for one `PaneRegion`, plus the `RCRange` they were
@@ -28,50 +28,92 @@ use crate::types::coord::RCRange;
 /// FrameCache scratch buffers used pre-Stage-3).
 #[derive(Default)]
 pub struct PaneBuffers {
-    pub styles: Cell<Vec<Option<Style>>>,
-    pub values: Cell<Vec<Option<String>>>,
-    pub cell_types: Cell<Vec<Option<CellType>>>,
+    pub styles: Cell<Vec<Fetched<CellStyle>>>,
+    pub values: Cell<Vec<Fetched<String>>>,
+    pub cell_types: Cell<Vec<Fetched<CellKind>>>,
+    pub decorations: Cell<Vec<Option<CellDecoration>>>,
     /// The address-space range the buffers above were fetched for. `None`
     /// when this pane has never been painted, or was last seen empty
     /// (e.g. unfrozen-axis pane on a sheet without freezes).
     pub range: Cell<Option<RCRange>>,
 }
 
+/// Typed outcome of [`PaneBuffers::prepare_shift`]. Replaces the old
+/// `bool` so the dispatch site can decide strip-paint vs full-fetch once,
+/// from a named reason, instead of dropping the bool and re-deriving the
+/// decision downstream.
+///
+/// `Shifted` carries the ranges the dispatch site needs to build the pane's
+/// `BlitPaneWork`. `MissingCache` is the never-cached case; `IncompatibleRange`
+/// is the stale-cache case (e.g. a frame before a canvas resize) — both route
+/// the pane through a full `render_pane` repaint.
+#[derive(Debug, PartialEq)]
+pub enum PaneShiftPrep {
+    Shifted {
+        prev_range: RCRange,
+        new_range: RCRange,
+    },
+    MissingCache,
+    IncompatibleRange {
+        prev_range: RCRange,
+        new_range: RCRange,
+    },
+}
+
 impl PaneBuffers {
     /// Rotate `styles` / `values` / `cell_types` in place from the cached
-    /// `prev_range` into `new_range` along `axis`. Returns `true` on
-    /// success; on `false` the cache has been cleared (`range` set to
-    /// `None`) so `render_pane` falls through to a full fetch instead of
-    /// reading shifted-but-mismatched buffers.
+    /// `prev_range` into `new_range` along `axis`, returning a typed
+    /// [`PaneShiftPrep`] explaining what happened. On `Shifted` the buffers
+    /// have been rotated so the kept band survives and the revealed strip
+    /// carries placeholders; on `IncompatibleRange` the cache is cleared
+    /// (`range` set to `None`) so the caller's full fetch reads fresh.
     ///
-    /// `range` is intentionally left at `prev_range` on success —
-    /// `render_pane` reads both `range` and the live pane range, infers
-    /// the single-axis shift, and runs the strip-fetch branch. Bumping
-    /// to `new_range` here would trip the range-equality early-exit and
-    /// skip the strip paint entirely.
-    pub fn try_shift(&self, new_range: RCRange, axis: Axis) -> bool {
+    /// `range` is intentionally left at `prev_range` on `Shifted` — the
+    /// shifted buffers hold `new_range` data, but the cache metadata stays
+    /// `prev_range` until the strip paint succeeds and commits the range.
+    /// Bumping it here would trip `render_pane`'s range-equality early-exit
+    /// and skip the strip paint entirely.
+    pub fn prepare_shift(&self, new_range: RCRange, axis: Axis) -> PaneShiftPrep {
         let Some(prev_range) = self.range.get() else {
-            return false;
+            return PaneShiftPrep::MissingCache;
         };
         if !shift_is_safe(prev_range, new_range, axis) {
             self.range.set(None);
-            return false;
+            return PaneShiftPrep::IncompatibleRange {
+                prev_range,
+                new_range,
+            };
         }
         let mut styles = self.styles.take();
         let mut values = self.values.take();
         let mut cell_types = self.cell_types.take();
-        apply_blit_shift(&mut styles, prev_range, new_range, axis);
-        apply_blit_shift(&mut values, prev_range, new_range, axis);
-        apply_blit_shift(&mut cell_types, prev_range, new_range, axis);
+        let mut decorations = self.decorations.take();
+        // Revealed strip slots are placeholders the strip-fetch overwrites this
+        // same frame. `Fetched::Absent` for the content buffers (nothing fetched
+        // yet); `None` for the still-`Option` decoration buffer.
+        apply_blit_shift(&mut styles, prev_range, new_range, axis, Fetched::Absent);
+        apply_blit_shift(&mut values, prev_range, new_range, axis, Fetched::Absent);
+        apply_blit_shift(
+            &mut cell_types,
+            prev_range,
+            new_range,
+            axis,
+            Fetched::Absent,
+        );
+        apply_blit_shift(&mut decorations, prev_range, new_range, axis, None);
         self.styles.set(styles);
         self.values.set(values);
         self.cell_types.set(cell_types);
-        true
+        self.decorations.set(decorations);
+        PaneShiftPrep::Shifted {
+            prev_range,
+            new_range,
+        }
     }
 }
 
 /// Four pane buffers, indexed by `PaneRegion as usize`. Renderer-lifetime
-/// (sits alongside `FontIntern` / `ColNameIntern` / `ColorIntern`) — the
+/// (sits alongside `FontIntern` / `ColorIntern`) — the
 /// Stage 1 fingerprint-skip already proved we want cross-frame content
 /// caching; Stage 3.1 graduates it from FrameCache scratch into a
 /// first-class durable cache.
@@ -80,9 +122,43 @@ pub struct PaneCache {
     panes: [PaneBuffers; 4],
 }
 
+/// Address-space blit work for one shifted pane, computed before painting.
+/// Carries the cached `prev_range`, the live `new_range`, the scroll `axis`
+/// (taken from `BlitPlan`, never re-inferred), and the base revealed
+/// `strip_range`. A renderer-local helper widens `strip_range` to the pixel
+/// clip; this type is the cache's half of the split — no `Chrome` dependency.
+#[derive(Clone, Copy)]
+pub struct PaneBlitAddressWork {
+    pub axis: Axis,
+    pub prev_range: RCRange,
+    pub new_range: RCRange,
+    pub strip_range: RCRange,
+}
+
 impl PaneCache {
     pub fn pane(&self, region: PaneRegion) -> &PaneBuffers {
         &self.panes[region as usize]
+    }
+
+    /// Build address-space blit work from a `Shifted` [`PaneShiftPrep`]: the
+    /// prep already proved compatibility (its `Shifted` vs `IncompatibleRange`
+    /// split *is* the [`shift_is_safe`] predicate, single-sourced), so this
+    /// only computes the base revealed strip. `axis` flows from `BlitPlan`,
+    /// never re-inferred. Returns `None` only on the defensive zero-delta
+    /// case `compute_strip` rejects.
+    pub fn plan_blit_pane(
+        &self,
+        prev_range: RCRange,
+        new_range: RCRange,
+        axis: Axis,
+    ) -> Option<PaneBlitAddressWork> {
+        let strip_range = compute_strip(prev_range, new_range, axis)?;
+        Some(PaneBlitAddressWork {
+            axis,
+            prev_range,
+            new_range,
+            strip_range,
+        })
     }
 
     /// Drop the cached `range` for every pane named in `mask` so the next
@@ -103,6 +179,11 @@ impl PaneCache {
 /// be preserved. Stale caches (e.g. from a frame before a canvas resize)
 /// fail this check; callers drop them rather than feeding `apply_blit_shift`
 /// mismatched dimensions.
+///
+/// Single source of the compatibility predicate: called only from
+/// [`PaneBuffers::prepare_shift`], whose `Shifted` vs `IncompatibleRange`
+/// split *is* this invariant. `plan_blit_pane` reads `prepare_shift`'s
+/// `Shifted` result rather than re-testing.
 fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
     match axis {
         Axis::Row => {
@@ -116,7 +197,8 @@ fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
 
 /// Shift a row-major pane buffer in place to match a new pane `RCRange`,
 /// preserving entries whose `(row, col)` survived the scroll and leaving
-/// freshly-revealed slots as `None` for the caller's strip-fetch to fill.
+/// freshly-revealed slots as `fill` (the caller's placeholder) for the
+/// strip-fetch to overwrite.
 ///
 /// Invariants (caller-enforced; `screen_for_blit` already guarantees these):
 /// - `prev_range` and `new_range` differ on exactly the `axis` given.
@@ -127,17 +209,20 @@ fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
 /// - At entry, `buf.len() == prev_rows * prev_cols`.
 ///
 /// On exit, `buf.len() == new_rows * new_cols`. Strip slots (the newly-
-/// revealed band along `axis`) are `None`; kept-band slots carry the
-/// values that were at those `(row, col)` pairs in `prev_range`.
+/// revealed band along `axis`) carry `fill` (the caller's placeholder for an
+/// un-fetched slot — `Fetched::Absent` for content, `None` for decorations);
+/// kept-band slots carry the values that were at those `(row, col)` pairs in
+/// `prev_range`.
 ///
-/// Note: this operates on `Vec<Option<T>>` for arbitrary `T` — no `Copy`
+/// Note: this operates on `Vec<E>` for arbitrary `E: Clone` — no `Copy`
 /// bound. Use `slice::rotate_left` / `rotate_right` (which work for any
-/// `T`), not `copy_within` (which is `T: Copy` only).
-fn apply_blit_shift<T>(
-    buf: &mut Vec<Option<T>>,
+/// `E`), not `copy_within` (which is `E: Copy` only).
+fn apply_blit_shift<E: Clone>(
+    buf: &mut Vec<E>,
     prev_range: RCRange,
     new_range: RCRange,
     axis: Axis,
+    fill: E,
 ) {
     let prev_rows = (prev_range.r2 - prev_range.r1 + 1) as usize;
     let prev_cols = (prev_range.c2 - prev_range.c1 + 1) as usize;
@@ -151,7 +236,7 @@ fn apply_blit_shift<T>(
             // Vertical scroll: row-major layout means the kept-band moves in
             // whole-row blocks of `cols` slots. Rotate the entire buffer by
             // `|delta_rows| * cols`; the displaced rows land in the strip,
-            // which we then overwrite with None for strip-fetch to fill.
+            // which we then overwrite with `fill` for strip-fetch to replace.
             debug_assert_eq!(prev_cols, new_cols);
             debug_assert_eq!(prev_rows, new_rows);
             let cols = prev_cols;
@@ -160,11 +245,11 @@ fn apply_blit_shift<T>(
                 let shift = delta as usize * cols;
                 buf.rotate_left(shift);
                 let strip_start = buf.len() - shift;
-                buf[strip_start..].fill_with(|| None);
+                buf[strip_start..].fill(fill.clone());
             } else if delta < 0 {
                 let shift = (-delta) as usize * cols;
                 buf.rotate_right(shift);
-                buf[..shift].fill_with(|| None);
+                buf[..shift].fill(fill.clone());
             }
         }
         Axis::Column => {
@@ -180,17 +265,149 @@ fn apply_blit_shift<T>(
                 let shift = delta as usize;
                 for row in buf.chunks_exact_mut(cols) {
                     row.rotate_left(shift);
-                    row[cols - shift..].fill_with(|| None);
+                    row[cols - shift..].fill(fill.clone());
                 }
             } else if delta < 0 {
                 let shift = (-delta) as usize;
                 for row in buf.chunks_exact_mut(cols) {
                     row.rotate_right(shift);
-                    row[..shift].fill_with(|| None);
+                    row[..shift].fill(fill.clone());
                 }
             }
         }
     }
 
-    buf.resize_with(new_rows * new_cols, || None);
+    buf.resize(new_rows * new_cols, fill);
+}
+
+/// Slice of `new` lying outside `prev` along the scroll axis. Returns
+/// `None` if the ranges are identical along `axis` (delta == 0), or if a
+/// direct caller bypassed [`PaneBuffers::prepare_shift`] and handed us
+/// non-overlapping ranges. Valid blit callers prove overlap before this point.
+fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
+    match axis {
+        Axis::Row => {
+            if new.r2 < prev.r1 || new.r1 > prev.r2 {
+                debug_assert!(
+                    ranges_overlap(prev.r1, prev.r2, new.r1, new.r2),
+                    "compute_strip requires overlapping ranges from prepare_shift"
+                );
+                return None;
+            }
+            if new.r1 < prev.r1 {
+                Some(RCRange {
+                    r1: new.r1,
+                    r2: prev.r1 - 1,
+                    c1: new.c1,
+                    c2: new.c2,
+                })
+            } else if new.r2 > prev.r2 {
+                // Includes `prev.r2` (not `prev.r2 + 1`) because that row
+                // was the overflow row in prev — its pixels were off-canvas
+                // and weren't shifted by the blit, so its on-canvas position
+                // in new needs a fresh paint.
+                Some(RCRange {
+                    r1: prev.r2,
+                    r2: new.r2,
+                    c1: new.c1,
+                    c2: new.c2,
+                })
+            } else {
+                None
+            }
+        }
+        Axis::Column => {
+            if new.c2 < prev.c1 || new.c1 > prev.c2 {
+                debug_assert!(
+                    ranges_overlap(prev.c1, prev.c2, new.c1, new.c2),
+                    "compute_strip requires overlapping ranges from prepare_shift"
+                );
+                return None;
+            }
+            if new.c1 < prev.c1 {
+                Some(RCRange {
+                    r1: new.r1,
+                    r2: new.r2,
+                    c1: new.c1,
+                    c2: prev.c1 - 1,
+                })
+            } else if new.c2 > prev.c2 {
+                // Mirror of the Row down-scroll case: prev.c2 was the
+                // overflow column whose pixels were off-canvas.
+                Some(RCRange {
+                    r1: new.r1,
+                    r2: new.r2,
+                    c1: prev.c2,
+                    c2: new.c2,
+                })
+            } else {
+                None
+            }
+        }
+    }
+}
+
+fn ranges_overlap(prev_start: i32, prev_end: i32, new_start: i32, new_end: i32) -> bool {
+    new_end >= prev_start && new_start <= prev_end
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "compute_strip requires overlapping ranges")
+    )]
+    #[test]
+    fn compute_strip_rejects_non_overlapping_row_ranges() {
+        let prev = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 3,
+            c2: 4,
+        };
+        let new = RCRange {
+            r1: 10,
+            c1: 1,
+            r2: 12,
+            c2: 4,
+        };
+
+        #[cfg(debug_assertions)]
+        let _ = compute_strip(prev, new, Axis::Row);
+        #[cfg(not(debug_assertions))]
+        assert!(
+            compute_strip(prev, new, Axis::Row).is_none(),
+            "non-overlapping row ranges are invalid blit work, not a strip"
+        );
+    }
+
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "compute_strip requires overlapping ranges")
+    )]
+    #[test]
+    fn compute_strip_rejects_non_overlapping_column_ranges() {
+        let prev = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 4,
+            c2: 3,
+        };
+        let new = RCRange {
+            r1: 1,
+            c1: 10,
+            r2: 4,
+            c2: 12,
+        };
+
+        #[cfg(debug_assertions)]
+        let _ = compute_strip(prev, new, Axis::Column);
+        #[cfg(not(debug_assertions))]
+        assert!(
+            compute_strip(prev, new, Axis::Column).is_none(),
+            "non-overlapping column ranges are invalid blit work, not a strip"
+        );
+    }
 }

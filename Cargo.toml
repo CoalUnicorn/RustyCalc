@@ -13,6 +13,7 @@ ironcalc_base = { version = "0.7.1", path = "IronCalc/base"  }
 ironcalc = { version = "0.7.1", path = "IronCalc/xlsx" }
 iron-canvas-web = { path = "iron-canvas/crates/iron-canvas-web" }
 iron-canvas-core = { path = "iron-canvas/crates/iron-canvas-core" }
+iron-canvas-ironcalc = { path = "iron-canvas/crates/iron-canvas-ironcalc" }
 
 
 web-sys = { version = "0.3", features = [
@@ -26,25 +27,22 @@ web-sys = { version = "0.3", features = [
 ] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-gloo-storage = "0.3"
-gloo-net = "0.6"
+gloo-storage = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
-leptos-use = "0.18"
+leptos-use = "0.19"
 js-sys = "0.3"  # For enhanced storage date/time functions
-thiserror = "1.0"  # For structured error types
-codee = { version = "0.3.5", features = ["json_serde"] }
-# leptos_i18n = "0.6.1"
-chrono = { version = "0.4", features =  ["serde", "wasmbind"] }
+thiserror = "2.0"  # For structured error types
 sha2 = { version = "0.11.0", default-features = false }
+iron-canvas-datagrid = { version = "0.1.0-beta.2", path = "iron-canvas/crates/iron-canvas-datagrid" }
+iron-canvas-canvas2d = { version = "0.1.0-beta.2", path = "iron-canvas/crates/iron-canvas-canvas2d" }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 console_error_panic_hook = "0.1.7"
 
 [profile.release]
-#inherits = "release"
 opt-level = "z"
 lto = true
 codegen-units = 1
@@ -53,13 +51,5 @@ strip = true
 
 [features]
 tauri = []
-dev-tools = ["iron-canvas-web/dev-tools", "iron-canvas-web/pdf"]
-
-[package.metadata.leptos]
-lib-profile-release = "wasm-release"
-
-# Cap WASM linear memory at 256 MB so a crafted bitcode payload claiming
-# a multi-GB allocation traps quickly instead of degrading the tab into
-# multi-second GC death. See docs/reviews/2026-05-26-security-audit.md.
-[target.wasm32-unknown-unknown]
-rustflags = ["-C", "link-arg=--max-memory=268435456"]
+dev-tools = ["iron-canvas-web/dev-tools", "export"]
+export = ["iron-canvas-web/pdf"]

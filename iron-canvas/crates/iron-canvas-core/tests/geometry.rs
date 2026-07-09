@@ -9,7 +9,7 @@ use iron_canvas_core::geometry::utils::col_name;
 #[test]
 fn backing_size_scales_by_dpr() {
     assert_eq!(
-        CanvasSize { w: 100.0, h: 200.0 }.to_backing_size(2),
+        CanvasSize { w: 100.0, h: 200.0 }.to_backing_size(2.0),
         (200, 400)
     );
 }
@@ -21,7 +21,7 @@ fn backing_size_at_1x_dpr_equals_css() {
             w: 1920.0,
             h: 1080.0
         }
-        .to_backing_size(1),
+        .to_backing_size(1.0),
         (1920, 1080)
     );
 }
@@ -29,7 +29,7 @@ fn backing_size_at_1x_dpr_equals_css() {
 #[test]
 fn backing_size_truncates_fractional_pixels() {
     assert_eq!(
-        CanvasSize { w: 100.3, h: 50.7 }.to_backing_size(2),
+        CanvasSize { w: 100.3, h: 50.7 }.to_backing_size(2.0),
         (200, 101)
     );
 }

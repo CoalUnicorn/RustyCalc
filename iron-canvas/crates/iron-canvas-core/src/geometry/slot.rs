@@ -2,11 +2,11 @@
 //!
 //! A slot carries the index, the absolute canvas coordinate of its leading
 //! edge, and its extent. `PaneSet` holds four vecs (frozen/scrollable ×
-//! row/column); every pixel↔cell query reads them directly, no prefix-sum
+//! row/column); every pixel<->cell query reads them directly, no prefix-sum
 //! decoding.
 
 use crate::CanvasModel;
-use crate::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
+use crate::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RowSlot {
@@ -25,8 +25,9 @@ pub struct ColSlot {
 }
 
 /// Axis-symmetric slot view. Lets every walk over `PaneSet`'s slot vecs share
-/// one implementation regardless of axis. `end` defaults to `start + extent`
-/// to subsume `RowSlot::bottom` / `ColSlot::right` for generic callers.
+/// one implementation regardless of axis. `end` defaults to `start + extent`,
+/// giving generic callers the far edge (row bottom / col right) without an
+/// axis-specific accessor.
 pub trait AxisSlot: Sized {
     fn new(id: i32, start: i32, extent: i32) -> Self;
     fn id(&self) -> i32;
@@ -89,22 +90,22 @@ impl AxisSlot for ColSlot {
 /// `max_cursor`. Returns the cursor past the last accepted slot (where the
 /// next slot would sit) — used by the frozen pass to compute the band offset.
 ///
-/// `max_cursor = i32::MAX` disables the break, used for the frozen band which
+/// `max_cursor = None` disables the break, used for the frozen band which
 /// always paints regardless of viewport size. For the scroll band callers
-/// pass `canvas_extent.ceil() as i32` — exactly equivalent to the original
-/// `f64::from(cursor) >= canvas_extent` test, for any positive extent.
+/// pass `Some(canvas_extent.ceil() as i32)` — exactly equivalent to the
+/// original `f64::from(cursor) >= canvas_extent` test, for any positive extent.
 pub fn fill_axis<S: AxisSlot>(
     slots: &mut Vec<S>,
     range: std::ops::RangeInclusive<i32>,
     start: i32,
-    max_cursor: i32,
+    max_cursor: Option<i32>,
     mut measure: impl FnMut(i32) -> i32,
 ) -> i32 {
     let mut cursor = start;
     for id in range {
         let extent = measure(id);
         slots.push(S::new(id, cursor, extent));
-        if cursor >= max_cursor {
+        if max_cursor.is_some_and(|max| cursor >= max) {
             break;
         }
         cursor += extent;
@@ -131,7 +132,15 @@ pub fn slot_at<'a, S: AxisSlot>(frozen: &'a [S], scroll: &'a [S], id: i32) -> Op
         frozen.get((id - 1) as usize)
     } else {
         let first = scroll.first()?.id();
-        scroll.get((id - first) as usize)
+        debug_assert!(
+            scroll
+                .iter()
+                .enumerate()
+                .all(|(i, slot)| slot.id() == first + i as i32),
+            "slot_at requires dense contiguous scroll ids"
+        );
+        let idx = id.checked_sub(first)? as usize;
+        scroll.get(idx).filter(|slot| slot.id() == id)
     }
 }
 
@@ -161,24 +170,145 @@ pub fn pixel_to_id<S: AxisSlot>(frozen: &[S], scroll: &[S], pixel: i32) -> Optio
     None
 }
 
-/// Snap `pixel` to a slot's trailing edge when it falls within `hit_zone`.
-/// Breaks once a slot's end is past the hit zone — slot vecs are monotonic
-/// so no later slot can match.
+/// Snap `pixel` to a slot's trailing edge when it falls within `tolerance`.
+/// Breaks once a slot's end is past the tolerance band — slot vecs are
+/// monotonic so no later slot can match.
+///
+/// Tie-break: when two adjacent edges both fall within `tolerance` (thin slots
+/// at high zoom-out, or a generous `tolerance`), the **first** in iteration
+/// order wins — not the nearest. Correct for normal zoom and tolerances; a
+/// nearest-edge scan would be needed if that stops holding.
+///
+/// The frozen-then-scroll chain is treated as one ascending pixel space, so
+/// the post-`tolerance` break in the frozen leg must not cut off a still-
+/// reachable scroll slot. That holds only while the scroll band starts at or
+/// after the frozen band ends; the `debug_assert!` guards that seam invariant.
 pub fn boundary_at<S: AxisSlot>(
     frozen: &[S],
     scroll: &[S],
     pixel: i32,
-    hit_zone: i32,
+    tolerance: i32,
 ) -> Option<i32> {
+    debug_assert!(
+        match (frozen.last(), scroll.first()) {
+            (Some(f), Some(s)) => s.start() >= f.end(),
+            _ => true,
+        },
+        "boundary_at seam: scroll band must start at or after the frozen band ends"
+    );
     for s in frozen.iter().chain(scroll.iter()) {
-        if (s.end() - pixel).abs() <= hit_zone {
+        if (s.end() - pixel).abs() <= tolerance {
             return Some(s.id());
         }
-        if s.end() > pixel + hit_zone {
+        if s.end() > pixel + tolerance {
             break;
         }
     }
     None
+}
+
+/// Frozen + scroll slot pair for one axis, plus the canvas coordinate where
+/// the scroll band begins (past the frozen band and its separator — `y` for
+/// rows, `x` for cols). Owns the axis-generic queries `PaneSet` previously
+/// delegated through the free fns above *twice*, once per axis. `PaneSet`
+/// composes one `AxisSlots` per axis instead of four flat vecs.
+#[derive(Clone, Debug)]
+pub struct AxisSlots<S: AxisSlot> {
+    pub frozen: Vec<S>,
+    pub scroll: Vec<S>,
+    pub frozen_offset: i32,
+    /// Last addressable slot id this axis walks to (`CanvasModel::last_row`
+    /// / `last_column`), snapshotted by `fill`. The blit-path rebuilds and
+    /// the autofill-handle guard read this instead of re-querying the model,
+    /// so a frame's queries stay coherent with its painted extent.
+    pub last_id: i32,
+}
+
+impl<S: AxisSlot> AxisSlots<S> {
+    #[inline]
+    pub fn frozen_count(&self) -> i32 {
+        self.frozen.len() as i32
+    }
+
+    #[inline]
+    pub fn slot(&self, id: i32) -> Option<&S> {
+        slot_at(&self.frozen, &self.scroll, id)
+    }
+
+    /// First scroll-band id (top row / left column), or 1 on an empty band.
+    #[inline]
+    pub fn top(&self) -> i32 {
+        top_id(&self.scroll)
+    }
+
+    #[inline]
+    pub fn last_visible(&self) -> i32 {
+        last_visible_id(&self.scroll)
+    }
+
+    #[inline]
+    pub fn pixel_to_id(&self, pixel: i32) -> Option<i32> {
+        pixel_to_id(&self.frozen, &self.scroll, pixel)
+    }
+
+    #[inline]
+    pub fn boundary_at(&self, pixel: i32, tolerance: i32) -> Option<i32> {
+        boundary_at(&self.frozen, &self.scroll, pixel, tolerance)
+    }
+
+    /// Leading-edge coordinate of `id`'s slot (row top / col left); 0 off-frame.
+    #[inline]
+    pub fn to_pixel(&self, id: i32) -> i32 {
+        self.slot(id).map(|s| s.start()).unwrap_or(0)
+    }
+
+    /// Extent of `id`'s slot (row height / col width); 0 off-frame.
+    #[inline]
+    pub fn extent_at(&self, id: i32) -> i32 {
+        self.slot(id).map(|s| s.extent()).unwrap_or(0)
+    }
+
+    #[inline]
+    pub fn contains(&self, id: i32) -> bool {
+        self.slot(id).is_some()
+    }
+
+    /// Populate `frozen` + `scroll` and record `frozen_offset`. Walks the
+    /// frozen band first (always painted — `None` disables the viewport
+    /// break), notes where the scroll band starts, then walks the scroll band
+    /// from `view_first` to `last`, breaking at the canvas edge.
+    ///
+    /// `frozen_offset` is the seam invariant `boundary_at` relies on: the
+    /// scroll band must begin at or after the frozen band ends.
+    // Mirrors `fill_axis`'s walker shape — each arg is an independent axis
+    // input (counts, origin, viewport bound, measure); bundling them would
+    // only add an indirection struct.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fill(
+        &mut self,
+        model: &dyn CanvasModel,
+        frozen_count: i32,
+        origin: i32,
+        view_first: i32,
+        last: i32,
+        canvas_extent: i32,
+        mut measure: impl FnMut(&dyn CanvasModel, i32) -> i32,
+    ) {
+        self.last_id = last;
+        self.frozen.reserve(frozen_count as usize);
+        let after_frozen = fill_axis(&mut self.frozen, 1..=frozen_count, origin, None, |id| {
+            measure(model, id)
+        });
+        self.frozen_offset = after_frozen + if frozen_count > 0 { FROZEN_SEP } else { 0 };
+
+        let _ = fill_axis(
+            &mut self.scroll,
+            scroll_first(frozen_count, view_first)..=last,
+            self.frozen_offset,
+            Some(canvas_extent),
+            |id| measure(model, id),
+        );
+    }
 }
 
 pub fn row_height(model: &dyn CanvasModel, row: i32) -> i32 {
@@ -195,4 +325,49 @@ pub fn col_width(model: &dyn CanvasModel, col: i32) -> i32 {
         .get_column_width(sheet, col)
         .unwrap_or(DEFAULT_COL_WIDTH)
         .round() as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two frozen rows (ids 1,2) at y=0,20 then a scroll band starting at the
+    /// recorded `frozen_offset`, ids 5.. (the user scrolled past 3,4).
+    fn rows() -> AxisSlots<RowSlot> {
+        AxisSlots {
+            frozen: vec![RowSlot::new(1, 0, 20), RowSlot::new(2, 20, 20)],
+            scroll: vec![RowSlot::new(5, 48, 20), RowSlot::new(6, 68, 20)],
+            frozen_offset: 48,
+            last_id: 6,
+        }
+    }
+
+    #[test]
+    fn slot_lookup_spans_frozen_then_scroll() {
+        let r = rows();
+        assert_eq!(r.frozen_count(), 2);
+        assert_eq!(r.slot(2).map(|s| s.start()), Some(20)); // frozen
+        assert_eq!(r.slot(5).map(|s| s.start()), Some(48)); // scroll, id-indexed
+        assert!(r.slot(3).is_none()); // scrolled off, between the bands
+    }
+
+    #[test]
+    fn pixel_and_boundary_walk_one_ascending_space() {
+        let r = rows();
+        assert_eq!(r.pixel_to_id(25), Some(2)); // inside frozen row 2
+        assert_eq!(r.pixel_to_id(50), Some(5)); // inside first scroll row
+        assert_eq!(r.boundary_at(40, 3), Some(2)); // frozen row 2's trailing edge
+        assert_eq!(r.boundary_at(88, 3), Some(6)); // last scroll row's edge
+    }
+
+    #[test]
+    fn pixel_accessors_resolve_edges_and_extents() {
+        let r = rows();
+        assert_eq!(r.top(), 5);
+        assert_eq!(r.last_visible(), 6);
+        assert_eq!(r.to_pixel(6), 68);
+        assert_eq!(r.extent_at(6), 20);
+        assert_eq!(r.to_pixel(99), 0); // off-frame falls back to 0
+        assert!(r.contains(1) && !r.contains(99));
+    }
 }

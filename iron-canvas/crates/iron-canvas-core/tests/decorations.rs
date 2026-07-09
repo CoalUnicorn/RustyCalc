@@ -17,7 +17,7 @@ use iron_canvas_recorder::{DrawOp, RecorderPainter};
 use common::{TestModel, canvas_default};
 
 fn fresh_frame(model: &TestModel) -> Chrome {
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh)
 }
 
@@ -58,7 +58,7 @@ fn clipboard_wrong_sheet_emits_no_ops() {
 
 #[test]
 fn clipboard_off_screen_emits_no_ops() {
-    // 600×400 canvas with 20px rows ⇒ ~19 visible rows past the header.
+    // 600×400 canvas with 20px rows -> ~19 visible rows past the header.
     // Row 9999 is far off-screen, so range_rect bails to None.
     let model = TestModel::synthetic_grid();
     let frame = fresh_frame(&model);
@@ -107,7 +107,7 @@ fn point_mode_empty_emits_no_ops() {
     let painter = RecorderPainter::new();
     let layer = PointModeLayer::default();
     layer.paint(&frame, &painter);
-    assert!(painter.ops().is_empty(), "no point range → no paint");
+    assert!(painter.ops().is_empty(), "no point range -> no paint");
 }
 
 #[test]

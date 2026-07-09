@@ -124,7 +124,7 @@ fn empty_variables_build_equals_set_theme_name_light() {
     assert_eq!(from_vars, from_name);
 }
 
-// Stage 3 (part 1): CSS-var reader → ThemeVariables.
+// Stage 3 (part 1): CSS-var reader -> ThemeVariables.
 
 fn map_reader(map: HashMap<&'static str, &'static str>) -> impl Fn(&str) -> Option<String> {
     move |k: &str| map.get(k).map(|v| (*v).to_string())
@@ -172,7 +172,7 @@ fn primary_main_drives_selection_pointing_and_alpha_tints() {
 fn primary_main_with_short_hex_expands_correctly() {
     let map = HashMap::from([("--palette-primary-main", "#0af")]);
     let v = ThemeVariables::from_css_reader(map_reader(map));
-    // #0af → #00aaff → rgba(0,170,255,...)
+    // #0af -> #00aaff -> rgba(0,170,255,...)
     assert_eq!(v.selection_fill.as_deref(), Some("rgba(0,170,255,0.12)"));
 }
 

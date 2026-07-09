@@ -2,13 +2,13 @@
 //! marching ants, point-mode range, formula-ref highlights.
 //!
 //! Each decoration owns its own snapshot state and implements `Layer`.
-//! `OverlayLayer::paint` wraps every decoration's `paint` call in a
-//! `begin_group(layer.group()) … end_group()` pair, so decoration bodies
-//! stay free of group bookkeeping.
+//! `LayerBase::paint_overlay_layer` wraps every decoration's `paint` call
+//! in a `begin_group(layer.group()) ... end_group()` pair, so decoration
+//! bodies stay free of group bookkeeping.
 //!
 //! `SelectionLayer` is special — it has a three-phase paint shape
-//! (fill → renderer's active-cell repaint → stroke) orchestrated by name
-//! in `OverlayRenderer::paint_overlay_layer`. The extra phases live as
+//! (fill -> renderer's active-cell repaint -> stroke) orchestrated by name
+//! in `LayerBase::paint_overlay_layer`. The extra phases live as
 //! inherent methods on `SelectionLayer`, not on this trait.
 
 use crate::chrome::Chrome;
@@ -18,6 +18,7 @@ use crate::types::ui::HitTest;
 
 pub mod autofill;
 pub mod clipboard;
+pub(crate) mod decorations;
 pub mod formula_refs;
 pub mod point_mode;
 pub mod selection;
@@ -27,6 +28,9 @@ pub use clipboard::ClipboardLayer;
 pub use formula_refs::FormulaRefsLayer;
 pub use point_mode::PointModeLayer;
 pub use selection::{RepaintActiveCell, SelectionLayer};
+
+pub use decorations::DecorationId;
+pub(crate) use decorations::Decorations;
 
 pub trait Layer {
     /// Stable tag for the `begin_group`/`end_group` wrapper the orchestrator

@@ -5,16 +5,16 @@
 //! canvas / theme / active-cell mismatch, two-axis scroll); on a viable
 //! scroll it delegates to `try_blit_rows` / `try_blit_cols` here, which
 //! return a `BlitPlan` if the geometry checks out. The orchestrator then
-//! calls `Chrome::next(.., FramePath::Blit(plan))`, which routes through
+//! calls `Chrome::next_blit(.., &plan)`, which routes through
 //! `try_blit_reuse` to construct the next frame in place — kept band
 //! carries forward, only the strip hits the model.
 
 use std::cell::Cell;
+use std::rc::Rc;
 
-use crate::geometry::constants::CELL_AREA_INSET;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
-use crate::geometry::slot::scroll_first;
+use crate::geometry::slot::{AxisSlots, RowSlot, scroll_first};
 use crate::theme::CanvasTheme;
 use crate::{CanvasModel, CanvasSize};
 
@@ -196,27 +196,23 @@ impl BlitPlan {
     }
 }
 
-/// Dispatch input for `Chrome::next` — which construction regime the
-/// orchestrator selected for this frame. Exhaustive: adding a variant
-/// breaks every regime arm at compile time.
+/// Dispatch input for `Chrome::next` — which reuse-or-rebuild regime the
+/// orchestrator selected for this frame. Exhaustive: adding a variant breaks
+/// every regime arm at compile time. The blit fast-path is *not* here — it has
+/// a two-outcome result and lives in [`Chrome::next_blit`] returning
+/// [`super::BlitOutcome`], so it never widens into this shared dispatch.
 #[derive(Clone, Copy)]
 #[must_use = "FramePath dispatches Chrome::next; dropping it skips the chosen construction regime"]
-pub enum FramePath<'a> {
+pub enum FramePath {
     /// Full rebuild walk. `prev = Some` recycles slot Vec allocations;
     /// `prev = None` is the first-frame path.
     Fresh,
     /// Reuse prev's slot vecs verbatim; refresh per-frame state only
     /// (theme + pane_fingerprints rotation). `stale_panes` is caller-
-    /// supplied so a `SlotsReuse` following a `Blit` doesn't inherit the
+    /// supplied so a `SlotsReuse` following a blit doesn't inherit the
     /// blit's narrow strip mask and silently skip a content repaint.
     /// Requires `prev = Some`.
     SlotsReuse { stale_panes: PaneRegionMask },
-    /// Blit fast-path. Scroll-axis slot vec rebuilt around the plan;
-    /// cross-axis cloned from prev. Falls back to `Fresh` on the
-    /// row_header_thickness digit-boundary case. Requires `prev = Some`.
-    /// Borrows the plan from the orchestrator's `paint_viewport` stack
-    /// frame so no per-frame clone is needed.
-    Blit(&'a BlitPlan),
 }
 
 // Scroll-blit helpers
@@ -227,57 +223,119 @@ pub enum FramePath<'a> {
 // still reports — that is the final qualification that the shifted pixels
 // will land where the new chrome would paint them.
 
-/// Build the next-frame Chrome by reusing as much of `prev` as the blit
-/// plan guarantees is unchanged: cross-axis slot vec is cloned verbatim,
-/// scroll-axis kept band carries forward heights/widths, only the strip
-/// touches the model. Returns `None` on the one cross-axis-affecting
-/// edge case (row_header_thickness changes across a digit boundary) or
-/// any model anomaly — the caller falls through to a full `Chrome::next`.
-pub(super) fn try_blit_reuse(
-    prev: &Chrome,
-    model: &dyn CanvasModel,
-    canvas: CanvasSize,
-    theme: &CanvasTheme,
-    plan: &BlitPlan,
-) -> Option<Chrome> {
-    let view = model.get_selected_view()?;
-    let frozen_rows_count = prev.pane_set.frozen_rows_count();
-    let frozen_cols_count = prev.pane_set.frozen_cols_count();
-    let new_top = scroll_first(frozen_rows_count, view.top_row);
-    let new_left = scroll_first(frozen_cols_count, view.left_column);
-
-    let (scroll_rows, scroll_cols) = match plan.axis {
-        Axis::Row => (
-            prev.pane_set
-                .rebuild_rows_for_row_scroll(model, new_top, canvas)?,
-            prev.pane_set.scroll_cols.clone(),
-        ),
-        Axis::Column => (
-            prev.pane_set.scroll_rows.clone(),
-            prev.pane_set
-                .rebuild_cols_for_col_scroll(model, new_left, canvas)?,
-        ),
-    };
-
-    // Row header thickness gates cross-axis reuse. If the new last
-    // visible row label grew (e.g. row 99 → 100), origin_x shifts and
-    // every col slot's `.left` is off — fall back to full rebuild.
+/// Row-header thickness implied by the last visible row's label — the value
+/// the blit gate compares against `prev`. `scroll_rows` is the scrolled axis's
+/// band (rebuilt or unchanged); an empty band falls back to the first scroll id.
+fn blit_row_header_thickness(scroll_rows: &[RowSlot], frozen_rows_count: i32, new_top: i32) -> i32 {
     let last_visible_row = scroll_rows
         .last()
         .map(|s| s.row)
         .unwrap_or((frozen_rows_count + 1).max(new_top));
-    let row_header_thickness = measure_row_header_width(last_visible_row);
-    if row_header_thickness != prev.row_header_thickness {
-        return None;
-    }
+    measure_row_header_width(last_visible_row)
+}
 
+/// Build the next-frame Chrome by reusing as much of `prev` as the blit
+/// plan guarantees is unchanged: the cross-axis slot Vec and both frozen
+/// Vecs are *moved* out of `prev` (their heap allocation transfers to the
+/// new frame — no per-scroll-frame clone), the scroll-axis kept band
+/// carries forward heights/widths, only the strip touches the model.
+///
+/// Takes `prev` by value and returns `Err(prev)` — handing it back intact —
+/// on the one cross-axis-affecting edge case (row_header_thickness changes
+/// across a digit boundary) or any model anomaly, so the caller can fall
+/// through to a full `Chrome::next`. Every `Err` return happens *before* the
+/// first move out of `prev`, so the returned `prev` is always whole.
+// `Chrome` is large and intentionally returned by value on *both* arms (the
+// zero-copy give-back); boxing the `Err` wouldn't shrink the equally-large
+// `Ok(Chrome)` and would add a heap alloc on the rare fallback.
+#[allow(clippy::result_large_err)]
+pub(super) fn try_blit_reuse(
+    mut prev: Chrome,
+    model: &dyn CanvasModel,
+    canvas: CanvasSize,
+    theme: &Rc<CanvasTheme>,
+    plan: &BlitPlan,
+) -> Result<Chrome, Chrome> {
+    let Some(view) = model.get_selected_view() else {
+        return Err(prev);
+    };
+    let frozen_rows_count = prev.pane_set.rows.frozen_count();
+    let frozen_cols_count = prev.pane_set.cols.frozen_count();
+    let new_top = scroll_first(frozen_rows_count, view.top_row);
+    let new_left = scroll_first(frozen_cols_count, view.left_column);
+
+    // Rebuild the scrolled axis band, gate on row-header thickness, *then* move
+    // the unchanged cross-axis band out of `prev`. The gate runs before the
+    // first `mem::take`, so every `Err` below hands `prev` back whole — the
+    // invariant the caller's `Chrome::next` fallback relies on.
+    //
+    // Thickness gates cross-axis reuse: if the new last visible row label grew
+    // (e.g. row 99 -> 100), origin_x shifts and every col slot's `.left` is off,
+    // so we fall back to a full rebuild. It reads the rebuilt rows band (row
+    // scroll) or the still-unchanged cross-axis band (column scroll) — neither
+    // taken yet. Once it passes, the cross-axis Vec is moved, not cloned.
+    let (scroll_rows, scroll_cols, row_header_thickness) = match plan.axis {
+        Axis::Row => {
+            let rows = match prev
+                .pane_set
+                .rebuild_rows_for_row_scroll(model, new_top, canvas)
+            {
+                Some(rows) => rows,
+                None => return Err(prev),
+            };
+            let thickness = blit_row_header_thickness(&rows, frozen_rows_count, new_top);
+            if thickness != prev.row_header_thickness {
+                return Err(prev);
+            }
+            let cols = std::mem::take(&mut prev.pane_set.cols.scroll);
+            (rows, cols, thickness)
+        }
+        Axis::Column => {
+            let cols = match prev
+                .pane_set
+                .rebuild_cols_for_col_scroll(model, new_left, canvas)
+            {
+                Some(cols) => cols,
+                None => return Err(prev),
+            };
+            // Cross-axis rows band is unchanged across a column scroll; read it
+            // (not taken yet) for the gate.
+            let thickness =
+                blit_row_header_thickness(&prev.pane_set.rows.scroll, frozen_rows_count, new_top);
+            if thickness != prev.row_header_thickness {
+                return Err(prev);
+            }
+            let rows = std::mem::take(&mut prev.pane_set.rows.scroll);
+            (rows, cols, thickness)
+        }
+    };
+
+    // The scroll-axis vec changed under the blit, so its labels must be
+    // re-resolved; rebuilding both keeps the parallel-vec invariant trivially
+    // correct. Shares resolution with Chrome::build via PaneSet::resolve_*.
+    let sheet = prev.sheet;
+    let row_header_labels =
+        PaneSet::resolve_row_labels(model, sheet, &prev.pane_set.rows.frozen, &scroll_rows);
+    let col_header_labels =
+        PaneSet::resolve_col_labels(model, sheet, &prev.pane_set.cols.frozen, &scroll_cols);
+
+    // Frozen bands are unchanged across a scroll, and their labels are now
+    // resolved — move the Vecs out of `prev` (this is the last read of them).
     let pane_set = PaneSet {
-        frozen_rows: prev.pane_set.frozen_rows.clone(),
-        scroll_rows,
-        frozen_offset_y: prev.pane_set.frozen_offset_y,
-        frozen_cols: prev.pane_set.frozen_cols.clone(),
-        scroll_cols,
-        frozen_offset_x: prev.pane_set.frozen_offset_x,
+        rows: AxisSlots {
+            frozen: std::mem::take(&mut prev.pane_set.rows.frozen),
+            scroll: scroll_rows,
+            frozen_offset: prev.pane_set.rows.frozen_offset,
+            last_id: prev.pane_set.rows.last_id,
+        },
+        cols: AxisSlots {
+            frozen: std::mem::take(&mut prev.pane_set.cols.frozen),
+            scroll: scroll_cols,
+            frozen_offset: prev.pane_set.cols.frozen_offset,
+            last_id: prev.pane_set.cols.last_id,
+        },
+        row_header_labels,
+        col_header_labels,
     };
 
     let stale = plan.shift_panes();
@@ -291,14 +349,14 @@ pub(super) fn try_blit_reuse(
         seeded_fps[region as usize] = 0;
     }
 
-    Some(Chrome {
+    Ok(Chrome {
         sheet: prev.sheet,
         pane_set,
         row_header_thickness,
         col_header_thickness: prev.col_header_thickness,
         cell_origin: prev.cell_origin,
         canvas_size: canvas,
-        theme: theme.clone(),
+        theme: Rc::clone(theme),
         prev_pane_fingerprints: prev_fps,
         pane_fingerprints: Cell::new(seeded_fps),
         kind: FrameKindTag::Blitted,
@@ -312,8 +370,8 @@ pub(super) fn try_blit_rows(
     sheet: u32,
     new_top: i32,
 ) -> Option<BlitPlan> {
-    let pane_x = prev.pane_set.frozen_offset_x;
-    let pane_y = prev.pane_set.frozen_offset_y;
+    let pane_x = prev.pane_set.cols.frozen_offset;
+    let pane_y = prev.pane_set.rows.frozen_offset;
     // pane_h is bounded by the canvas backing store extent, not by
     // `scroll_rows.last().top + height`. `fill_axis` pushes one row past
     // the canvas edge (the "overflow row") whose pixels were never on
@@ -326,10 +384,10 @@ pub(super) fn try_blit_rows(
         return None;
     }
     // Frozen-cols band only exists when frozen_cols > 0; otherwise the
-    // gap between row_header_thickness and pane_x is the 1-px chrome
-    // stroke alone, NOT a paintable pane.
-    let frozen_band_x = prev.row_header_thickness + CELL_AREA_INSET;
-    let frozen_band_w = if prev.pane_set.frozen_cols_count() > 0 {
+    // gap between cell_origin.x and pane_x is the 1-px chrome stroke
+    // alone, NOT a paintable pane.
+    let frozen_band_x = prev.cell_origin.x;
+    let frozen_band_w = if prev.pane_set.cols.frozen_count() > 0 {
         pane_x - frozen_band_x
     } else {
         0
@@ -372,8 +430,8 @@ pub(super) fn try_blit_cols(
     sheet: u32,
     new_left: i32,
 ) -> Option<BlitPlan> {
-    let pane_x = prev.pane_set.frozen_offset_x;
-    let pane_y = prev.pane_set.frozen_offset_y;
+    let pane_x = prev.pane_set.cols.frozen_offset;
+    let pane_y = prev.pane_set.rows.frozen_offset;
     // pane_w is bounded by the canvas backing store extent, not by
     // `scroll_cols.last().left + width` — mirror of the comment in
     // try_blit_rows.
@@ -382,8 +440,8 @@ pub(super) fn try_blit_cols(
     if pane_w <= 0 || pane_h <= 0 {
         return None;
     }
-    let frozen_band_y = prev.col_header_thickness + CELL_AREA_INSET;
-    let frozen_band_h = if prev.pane_set.frozen_rows_count() > 0 {
+    let frozen_band_y = prev.cell_origin.y;
+    let frozen_band_h = if prev.pane_set.rows.frozen_count() > 0 {
         pane_y - frozen_band_y
     } else {
         0

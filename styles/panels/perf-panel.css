@@ -1,0 +1,107 @@
+/* Perf Panel — prefix: pp-
+ *
+ * Mapping:
+ *   perf-panel   -> pp
+ *   perf-label   -> pp-label
+ *   perf-detail  -> pp-detail
+ *   perf-total   -> pp-total
+ *   perf-formula -> pp-formula
+ */
+
+.pp {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 10px;
+    height: 24px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-inner);
+    flex-shrink: 0;
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--text-dim);
+    overflow: hidden;
+}
+
+.pp .pp-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    flex-shrink: 0;
+}
+
+.pp .pp-detail {
+    flex-shrink: 0;
+}
+
+.pp .pp-total {
+    font-weight: 600;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.pp .pp-formula {
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 300px;
+}
+
+/* Separator between sections (perf timing | playback | recording) */
+.pp .pp-sep {
+    color: var(--border-inner);
+    flex-shrink: 0;
+    user-select: none;
+    padding: 0 2px;
+}
+
+/* Record button */
+.pp .pp-record-btn {
+    padding: 0 6px;
+    height: 18px;
+    font-size: 11px;
+    font-family: monospace;
+    border: 1px solid var(--border-inner);
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.pp .pp-record-btn:hover { background: var(--bg-hover); }
+.pp .pp-record-btn.active {
+    background: var(--error);
+    color: #fff;
+    border-color: var(--error);
+}
+.pp .pp-record-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+}
+
+/* Recording indicator */
+.pp .pp-recording-label {
+    font-weight: 600;
+    color: var(--error);
+    animation: pp-pulse 1s ease-in-out infinite;
+}
+@keyframes pp-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.4; }
+}
+
+/* Export buttons */
+.pp .pp-export-btn {
+    padding: 0 6px;
+    height: 18px;
+    font-size: 11px;
+    font-family: monospace;
+    border: 1px solid var(--border-inner);
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.pp .pp-export-btn:hover { background: var(--bg-hover); }

@@ -20,8 +20,7 @@ use common::{TestModel, canvas_default};
 fn paint_pane(model: &TestModel, frame: &Chrome, pane: PaneRegion) -> usize {
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_pane(model, pane, frame);
-    let count = core.painter().ops().len();
-    count
+    core.painter().ops().len()
 }
 
 /// Mirrors the orchestrator's `SlotsReuse` branch: rotate the painted
@@ -35,7 +34,7 @@ fn promote_to_slots_reuse(frame: &mut Chrome) {
 #[test]
 fn render_pane_skips_on_idempotent_repaint() {
     let m = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
 
     // First paint runs through the full 4-pass walk; the kind is Fresh,
@@ -46,8 +45,8 @@ fn render_pane_skips_on_idempotent_repaint() {
 
     promote_to_slots_reuse(&mut frame);
 
-    // Model unchanged ⇒ identical bulk-fetch buffers ⇒ identical
-    // fingerprint ⇒ the entire 4-pass walk is skipped. Recorder log
+    // Model unchanged -> identical bulk-fetch buffers -> identical
+    // fingerprint -> the entire 4-pass walk is skipped. Recorder log
     // must be byte-empty.
     let second = paint_pane(&m, &frame, PaneRegion::BottomRight);
     assert_eq!(
@@ -62,7 +61,7 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
     // cols 1..=2, BottomRight owns cols 3..=. A mutation in one pane
     // must leave the other pane's fingerprint untouched.
     let m = TestModel::synthetic_grid().with_frozen_cols(2);
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
 
     let _ = paint_pane(&m, &frame, PaneRegion::BottomLeft);
@@ -70,7 +69,7 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
 
     promote_to_slots_reuse(&mut frame);
 
-    // Col 5 lives past the frozen seam → BottomRight only.
+    // Col 5 lives past the frozen seam -> BottomRight only.
     m.set_cell(1, 5, "changed");
 
     let bl_after = paint_pane(&m, &frame, PaneRegion::BottomLeft);
@@ -81,4 +80,31 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
         "unaffected pane must skip — per-pane fingerprint is the load-bearing claim",
     );
     assert!(br_after > 0, "mutated pane must repaint");
+}
+
+#[test]
+fn slots_reuse_holds_prior_pane_on_bridge_failure() {
+    let m = TestModel::synthetic_grid();
+    m.set_cell(1, 1, "still here");
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let painter = std::rc::Rc::new(RecorderPainter::new());
+    let core = RendererCore::for_layer(std::rc::Rc::clone(&painter));
+
+    core.render_pane(&m, PaneRegion::BottomRight, &frame);
+    assert!(
+        !painter.ops().is_empty(),
+        "first paint must populate prior pane pixels and cache"
+    );
+    promote_to_slots_reuse(&mut frame);
+
+    m.set_value_bridge_fail(true);
+    let before_failure = painter.ops().len();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame);
+
+    assert_eq!(
+        painter.ops().len(),
+        before_failure,
+        "BridgeFailed during SlotsReuse must hold prior pixels, not clear and repaint blank"
+    );
 }

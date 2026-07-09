@@ -5,18 +5,18 @@
 //! | Lifetime              | Type                              | Resets via                                  |
 //! | --------------------- | --------------------------------- | ------------------------------------------- |
 //! | Per-call scratch      | [`FrameCache`]                    | `Cell::take` / `Cell::set` rhythm per pass  |
-//! | Cross-frame model     | [`PaneCache`] / [`PaneBuffers`]   | `invalidate(mask)` / `try_shift(..)` (blit) |
-//! | Renderer-lifetime     | [`FontIntern`], [`ColNameIntern`], [`ColorIntern`] | insert-only                           |
+//! | Cross-frame model     | [`PaneCache`] / [`PaneBuffers`]   | `invalidate(mask)` / `prepare_shift(..)` (blit) |
+//! | Renderer-lifetime     | [`FontIntern`], [`ColorIntern`]   | insert-only                                 |
 //!
-//! `font` is module-private — pure CSS-string construction consumed only
-//! by [`FontIntern`]. Splitting it keeps the formatting concern separable
-//! from the deduplication concern without exposing either upstream.
+//! `font` is `pub(crate)` — pure CSS-string construction consumed by
+//! [`FontIntern`] and by `autofit` (which must produce identical font
+//! strings to those the renderer paints).
 
-mod font;
+pub(crate) mod font;
 mod intern;
 mod pane_cache;
 mod scratch;
 
-pub use intern::{ColNameIntern, ColorIntern, FontIntern};
-pub use pane_cache::PaneCache;
+pub use intern::{ColorIntern, FontIntern};
+pub use pane_cache::{PaneBlitAddressWork, PaneBuffers, PaneCache, PaneShiftPrep};
 pub use scratch::FrameCache;

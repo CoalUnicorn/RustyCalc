@@ -10,10 +10,11 @@ use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Span};
+use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    approx_text_width, parse_font_size_px,
 };
 
 use serde::{Deserialize, Serialize};
@@ -52,15 +53,14 @@ pub struct RecordingFilter {
     pub skip_groups: HashSet<GroupClass>,
 }
 
-/// Per-char width factor as a fraction of font size. Matches the
-/// approx-char-width fallback in `text_paint.rs::layout_into` so wrap math
-/// in tests stays internally consistent with the layout's own fallback.
-const CHAR_WIDTH_FACTOR: f64 = 1.0;
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DrawOp {
     RectFill {
         rect: PixelRect,
+        color: String,
+    },
+    FillPath {
+        points: Vec<Point>,
         color: String,
     },
     ClearRect {
@@ -116,7 +116,7 @@ pub enum DrawOp {
     InvalidateCache,
     ResetTextDefaults,
     ApplyDprTransform {
-        dpr: i32,
+        dpr: f64,
     },
     BeginGroup {
         class: GroupClass,
@@ -140,7 +140,6 @@ impl RecorderPainter {
         Self::default()
     }
 
-    #[allow(dead_code)]
     pub fn ops(&self) -> std::cell::Ref<'_, Vec<DrawOp>> {
         self.ops.borrow()
     }
@@ -166,11 +165,7 @@ impl RecorderPainter {
 
 impl TextMetrics for RecorderPainter {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
-        let font_size_px = font_css
-            .split_whitespace()
-            .find_map(|tok| tok.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()))
-            .unwrap_or(12.0);
-        text.chars().count() as f64 * font_size_px * CHAR_WIDTH_FACTOR
+        approx_text_width(parse_font_size_px(font_css), text)
     }
 }
 
@@ -178,6 +173,13 @@ impl Painter for RecorderPainter {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor) {
         self.push(DrawOp::RectFill {
             rect,
+            color: color.as_str().to_string(),
+        });
+    }
+
+    fn fill_path(&self, points: &[Point], color: PaintColor) {
+        self.push(DrawOp::FillPath {
+            points: points.to_vec(),
             color: color.as_str().to_string(),
         });
     }
@@ -281,7 +283,7 @@ impl Painter for RecorderPainter {
         self.push(DrawOp::ResetTextDefaults);
     }
 
-    fn apply_dpr_transform(&self, dpr: i32) {
+    fn apply_dpr_transform(&self, dpr: f64) {
         self.push(DrawOp::ApplyDprTransform { dpr });
     }
 
@@ -324,6 +326,9 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
         match op {
             DrawOp::RectFill { rect, color } => {
                 target.rect_fill(*rect, PaintColor::Borrowed(color));
+            }
+            DrawOp::FillPath { points, color } => {
+                target.fill_path(points, PaintColor::Borrowed(color));
             }
             DrawOp::ClearRect { rect } => target.clear_rect(*rect),
             DrawOp::RectStroke { rect, color, width } => {
@@ -426,7 +431,7 @@ impl Surface for MemSurface {
         Rc::clone(&self.painter)
     }
 
-    fn resize(&mut self, _css: CanvasSize, _dpr: i32) {}
+    fn resize(&mut self, _css: CanvasSize, _dpr: f64) {}
     fn present(&self) {}
 }
 
@@ -468,6 +473,13 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
         self.inner.rect_fill(rect, color);
         if self.should_record() {
             self.recorder.rect_fill(rect, color);
+        }
+    }
+
+    fn fill_path(&self, points: &[Point], color: PaintColor) {
+        self.inner.fill_path(points, color);
+        if self.should_record() {
+            self.recorder.fill_path(points, color);
         }
     }
 
@@ -566,7 +578,7 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
         }
     }
 
-    fn apply_dpr_transform(&self, dpr: i32) {
+    fn apply_dpr_transform(&self, dpr: f64) {
         self.inner.apply_dpr_transform(dpr);
         if self.should_record() {
             self.recorder.apply_dpr_transform(dpr);
@@ -575,15 +587,15 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
 
     fn begin_group(&self, class: GroupClass) {
         self.inner.begin_group(class);
-        if !self.enabled.get() {
-            return;
-        }
         let depth = self.skip_depth.get();
         if depth > 0 {
             // Already inside a suppressed group — bump depth and stay
             // suppressed; the matching `end_group` will balance via the
             // same counter.
             self.skip_depth.set(depth + 1);
+            return;
+        }
+        if !self.enabled.get() {
             return;
         }
         if self.skip_groups.borrow().contains(&class) {
@@ -597,13 +609,13 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
 
     fn end_group(&self) {
         self.inner.end_group();
-        if !self.enabled.get() {
-            return;
-        }
         let depth = self.skip_depth.get();
         if depth > 0 {
             // Match the suppressed begin; do not emit the end either.
             self.skip_depth.set(depth - 1);
+            return;
+        }
+        if !self.enabled.get() {
             return;
         }
         self.recorder.end_group();
@@ -710,7 +722,7 @@ impl<S: Surface> Surface for RecordingSurface<S> {
         Rc::clone(&self.painter)
     }
 
-    fn resize(&mut self, css: CanvasSize, dpr: i32) {
+    fn resize(&mut self, css: CanvasSize, dpr: f64) {
         self.inner.resize(css, dpr);
     }
 
@@ -780,6 +792,14 @@ mod tests {
         let src = RecorderPainter::new();
         let r = rect(0.0, 0.0, 10.0, 10.0);
         src.rect_fill(r, PaintColor::Static("#ff0000"));
+        src.fill_path(
+            &[
+                Point { x: 0, y: 0 },
+                Point { x: 10, y: 0 },
+                Point { x: 5, y: 8 },
+            ],
+            PaintColor::Static("#abc"),
+        );
         src.clear_rect(r);
         src.rect_stroke(r, PaintColor::Static("#00ff00"), 1.0);
         src.rect_dashed(r, PaintColor::Static("#0000ff"), 2.0);
@@ -817,7 +837,7 @@ mod tests {
         src.pop_clip();
         src.invalidate_cache();
         src.reset_text_defaults();
-        src.apply_dpr_transform(2);
+        src.apply_dpr_transform(2.0);
         src.begin_group(GroupClass::Grid);
         src.end_group();
         src.blit(r, r);
@@ -944,7 +964,7 @@ mod tests {
 
     #[test]
     fn skip_groups_drops_targeted_section() {
-        // Filter contains `Cells`; emit Grid → Cells → Headers as siblings.
+        // Filter contains `Cells`; emit Grid -> Cells -> Headers as siblings.
         // The Cells bracket and its inner rect_fill must be suppressed;
         // Grid and Headers (and the rect_fill inside Headers) must survive.
         let surface = RecordingSurface::new(MemSurface::new());
@@ -1003,9 +1023,9 @@ mod tests {
         p.begin_group(GroupClass::Cells);
         p.begin_group(GroupClass::FrozenSep); // nested inside skipped outer
         p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#aaa"));
-        p.end_group(); // ends FrozenSep — still suppressed (depth 2 → 1)
+        p.end_group(); // ends FrozenSep — still suppressed (depth 2 -> 1)
         p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#bbb"));
-        p.end_group(); // ends Cells — depth 1 → 0, capture resumes
+        p.end_group(); // ends Cells — depth 1 -> 0, capture resumes
         p.begin_group(GroupClass::Headers);
         p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#ccc"));
         p.end_group();
@@ -1032,6 +1052,33 @@ mod tests {
             rect_fills, 1,
             "only the rect_fill inside Headers should be captured",
         );
+    }
+
+    #[test]
+    fn disabled_inside_skipped_group_still_balances_skip_depth() {
+        let surface = RecordingSurface::new(MemSurface::new());
+        surface.enable_recording();
+        let mut skip = HashSet::new();
+        skip.insert(GroupClass::Cells);
+        surface.set_skip_groups(skip);
+        surface.begin_frame();
+        let p = surface.painter();
+
+        p.begin_group(GroupClass::Cells);
+        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#aaa"));
+        surface.disable_recording();
+        p.end_group();
+
+        surface.enable_recording();
+        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#bbb"));
+        let ops = surface.end_frame();
+
+        assert_eq!(
+            ops.len(),
+            1,
+            "closing a skipped group while disabled must not leak skip_depth"
+        );
+        assert!(matches!(ops[0], DrawOp::RectFill { .. }));
     }
 
     #[test]

@@ -1,13 +1,13 @@
-//! `Orchestrator<MemSurface, _>` four-regime integration test.
+//! `Orchestrator<MemSurface>` four-regime integration test.
 //!
 //! Drives all four `PaintRegime` arms (`Fresh`, `SlotsReuse`, `Viewport`,
 //! `Overlay`) through the same dispatch entry point a browser would use,
 //! and asserts the captured `DrawOp` log matches each regime's contract:
 //!
-//! - **Fresh**: full-canvas fill on the grid surface.
-//! - **SlotsReuse**: no full-canvas fill (prior pixels are reused).
-//! - **Viewport**: `DrawOp::Blit` ops on the grid surface (scroll-blit).
-//! - **Overlay**: zero new grid ops; overlay surface clears + repaints.
+//! - `Fresh`: full-canvas fill on the grid surface.
+//! - `SlotsReuse`: no full-canvas fill (prior pixels are reused).
+//! - `Viewport`: `DrawOp::Blit` ops on the grid surface (scroll-blit).
+//! - `Overlay`: zero new grid ops; overlay surface clears + repaints.
 
 #![allow(clippy::unwrap_used)]
 
@@ -18,7 +18,7 @@ use std::rc::Rc;
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::types::coord::AutofillTarget;
-use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
+use iron_canvas_core::{CanvasTheme, Orchestrator};
 
 use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
@@ -26,30 +26,23 @@ use iron_canvas_recorder::{DrawOp, MemSurface, RecorderPainter, RecordingSurface
 
 use common::TestModel;
 
-fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface, Rc<TestModel>> {
-    let mut orch =
-        Orchestrator::<MemSurface, Rc<TestModel>>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
+fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface> {
+    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_model(model);
     orch
 }
 
-fn grid_ops_len<M: CanvasModel>(orch: &Orchestrator<MemSurface, M>) -> usize {
+fn grid_ops_len(orch: &Orchestrator<MemSurface>) -> usize {
     orch.grid_surface().recorder().ops().len()
 }
-fn overlay_ops_len<M: CanvasModel>(orch: &Orchestrator<MemSurface, M>) -> usize {
+fn overlay_ops_len(orch: &Orchestrator<MemSurface>) -> usize {
     orch.overlay_surface().recorder().ops().len()
 }
-fn grid_ops_since<M: CanvasModel>(
-    orch: &Orchestrator<MemSurface, M>,
-    cursor: usize,
-) -> Vec<DrawOp> {
+fn grid_ops_since(orch: &Orchestrator<MemSurface>, cursor: usize) -> Vec<DrawOp> {
     orch.grid_surface().recorder().ops()[cursor..].to_vec()
 }
-fn overlay_ops_since<M: CanvasModel>(
-    orch: &Orchestrator<MemSurface, M>,
-    cursor: usize,
-) -> Vec<DrawOp> {
+fn overlay_ops_since(orch: &Orchestrator<MemSurface>, cursor: usize) -> Vec<DrawOp> {
     orch.overlay_surface().recorder().ops()[cursor..].to_vec()
 }
 
@@ -91,7 +84,7 @@ fn slots_reuse_regime_skips_full_canvas_fill() {
 
     let grid_before = grid_ops_len(&orch);
 
-    // A content-dirty signal keeps the viewport stable → validity =
+    // A content-dirty signal keeps the viewport stable -> validity =
     // SlotsReuse. The decide cascade routes here because CONTENT blocks
     // the Viewport arm (blit on stale content is the recalc bug) and
     // validity stays SlotsReuse. Theme swaps no longer reach this regime
@@ -147,7 +140,7 @@ fn overlay_regime_leaves_grid_untouched() {
     let overlay_before = overlay_ops_len(&orch);
 
     // Autofill drag: raises OVERLAY only, no grid signal. Viewport
-    // unchanged → validity = SlotsReuse. decide() picks Overlay.
+    // unchanged -> validity = SlotsReuse. decide() picks Overlay.
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
     orch.paint_if_dirty();
 
@@ -277,7 +270,7 @@ fn set_model_drops_last_frame_and_forces_fresh() {
     // paint here would land on SlotsReuse. We're proving set_model defeats
     // that path even with a steady viewport / sheet / freeze / size.
     let stub_b = Rc::new(TestModel::synthetic_grid());
-    orch.set_model(Rc::clone(&stub_b));
+    orch.set_model(stub_b.clone());
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
@@ -315,13 +308,13 @@ fn set_model_drops_last_frame_and_forces_fresh() {
 //   2. The captured per-frame op streams round-trip through serde +
 //      replay() byte-equal against the originals.
 
-fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>> {
+fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>> {
     let grid = RecordingSurface::new(MemSurface::new());
     let overlay = RecordingSurface::new(MemSurface::new());
     grid.enable_recording();
     overlay.enable_recording();
-    let mut orch = Orchestrator::<RecordingSurface<MemSurface>, Rc<TestModel>>::new(grid, overlay);
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1);
+    let mut orch = Orchestrator::<RecordingSurface<MemSurface>>::new(grid, overlay);
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_model(model);
     orch
 }
@@ -329,7 +322,7 @@ fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>,
 /// Bracket a paint with begin_frame/end_frame on both surfaces and
 /// return (grid_ops, overlay_ops, regime, signals_bits).
 fn paint_and_capture(
-    orch: &mut Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>>,
+    orch: &mut Orchestrator<RecordingSurface<MemSurface>>,
 ) -> (Vec<DrawOp>, Vec<DrawOp>, Option<PaintRegimeTag>, u8) {
     orch.grid_surface().begin_frame();
     orch.overlay_surface().begin_frame();
@@ -374,11 +367,11 @@ fn last_regime_fresh_after_initial_paint() {
 
 #[test]
 fn last_regime_fresh_after_theme_swap() {
-    // Theme is frame-wide: the per-cell paint cache and last_frame's
-    // theme snapshot both go stale on a palette change, so set_theme
-    // drops last_frame and invalidates the paint cache. The next paint
-    // takes the Fresh arm; SlotsReuse would repaint stale-color cells
-    // under fresh chrome.
+    // Theme is frame-wide: a palette change makes the cached frame's
+    // pixels stale. `is_still_valid` rejects the theme-mismatched frame
+    // (and `set_theme` invalidates the content-keyed paint cache), so the
+    // next paint takes the Fresh arm; SlotsReuse would repaint stale-color
+    // cells under fresh chrome.
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
@@ -420,15 +413,14 @@ fn last_regime_overlay_after_autofill_drag() {
 
 #[test]
 fn recording_serde_round_trip_across_all_four_regimes() {
-    // Drive Fresh → SlotsReuse → Viewport → Overlay through one
+    // Drive Fresh -> SlotsReuse -> Viewport -> Overlay through one
     // Orchestrator, collecting one Frame per regime, then serialize the
     // whole Recording and assert deserialize is bit-equal to the original.
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
 
     let mut frames: Vec<Frame> = Vec::new();
-    let mut push = |orch: &mut Orchestrator<RecordingSurface<MemSurface>, Rc<TestModel>>,
-                    t_ms: u64| {
+    let mut push = |orch: &mut Orchestrator<RecordingSurface<MemSurface>>, t_ms: u64| {
         let (grid_ops, overlay_ops, regime, signals) = paint_and_capture(orch);
         // Skip idle frames so the recording matches the production
         // paint_if_dirty drop-empty-frames behavior.
@@ -447,7 +439,7 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     };
 
     push(&mut orch, 0); // Fresh
-    // mark_content_dirty raises CONTENT; viewport stays valid → SlotsReuse.
+    // mark_content_dirty raises CONTENT; viewport stays valid -> SlotsReuse.
     // (set_theme used to land here too, but a palette change now invalidates
     // the paint cache and routes to Fresh, so it can't be used as a
     // SlotsReuse trigger.)
@@ -474,7 +466,7 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     let header = IcrHeader::new(
         800.0,
         600.0,
-        1,
+        1.0,
         ThemeSnapshot::from(orch.theme()),
         0, // deterministic — tests don't read wall-clock for this field
     );

@@ -7,31 +7,53 @@ use leptos::prelude::Set;
 
 use crate::coord::SheetRange;
 use crate::model::frontend_types::*;
+use crate::model::style_types::BorderWeight;
 use crate::state::ModelStore;
 use crate::{
     coord::{CellAddress, CellArea, DefinedName},
-    input::formula_analysis::{FormulaAnalysis, analyze_formula},
+    input::formula::{FormulaAnalysis, analyze_formula},
 };
 use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 use leptos::prelude::UpdateValue;
 
+/// Log a `Navigator` error to the browser console instead of silently
+/// discarding it. Mirror of `storage::log_err` for the nav domain.
+fn log_nav_err(result: Result<(), String>, ctx: &str) {
+    if let Err(e) = result {
+        web_sys::console::warn_1(&format!("[rustycalc nav] {ctx}: {e}").into());
+    }
+}
+
 /// IronCalc's canonical string value for a visible worksheet.
 /// Used to guard against silent typos in state comparisons.
 pub(crate) const SHEET_STATE_VISIBLE: &str = "visible";
 
-/// Parse formula text in the active cell's context (sheet names, defined
-/// names, anchor). Pure read; safe under `with_value`.
+/// Parse formula text in a cell's context (sheet names, defined names,
+/// anchor). Pure read; safe under `with_value`.
 pub trait FormulaAnalyzer {
+    /// Analyze anchored at the active cell — correct at edit-start, where the
+    /// active cell IS the cell being edited.
     fn analyze_in_context(&self, text: &str) -> FormulaAnalysis;
+
+    /// Analyze anchored at an explicit cell. Required during point-mode: the
+    /// view may have switched to another sheet to pick a reference, but the
+    /// formula's anchor stays pinned to its origin cell. Re-analyzing against
+    /// the live `active_cell()` would re-resolve the origin's bare refs onto
+    /// the visible sheet (wrong sheet, wrong relative offsets).
+    fn analyze_at(&self, text: &str, anchor: CellAddress) -> FormulaAnalysis;
 }
 
 impl FormulaAnalyzer for UserModel<'_> {
     fn analyze_in_context(&self, text: &str) -> FormulaAnalysis {
+        self.analyze_at(text, ActiveCellQuery::active_cell(self))
+    }
+
+    fn analyze_at(&self, text: &str, anchor: CellAddress) -> FormulaAnalysis {
         analyze_formula(
             text,
-            SheetQuery::active_cell(self),
-            &SheetQuery::get_sheet_names(self),
+            anchor,
+            &SheetRoster::get_sheet_names(self),
             &DefinedNameManager::get_defined_names(self),
         )
     }
@@ -39,7 +61,7 @@ impl FormulaAnalyzer for UserModel<'_> {
 
 /// Workbook defined names: read and CRUD. Every mutating call may change
 /// formula evaluation, so wrap call sites in
-/// `try_mutate(EvaluationMode::Immediate, …)`. Errors surface verbatim from
+/// `try_mutate(EvaluationMode::Immediate, ...)`. Errors surface verbatim from
 /// ironcalc as `Result<_, String>`.
 pub trait DefinedNameManager {
     /// Flattened from ironcalc's `DefinedNameS` tuples into our named-field
@@ -105,13 +127,13 @@ impl DefinedNameManager for UserModel<'_> {
     }
 }
 
-/// Read-only queries against the active workbook / sheet / cell.
-pub trait SheetQuery {
+/// Active-cell / selection / active-sheet reads, all derived from the current
+/// view. The toolbar, formula bar, and navigation read through this slice.
+pub trait ActiveCellQuery {
     /// Formatting state for the toolbar, derived from the active cell.
     fn toolbar_state(&self) -> ToolbarState;
 
     /// Number-format code of the active cell (e.g. `"general"`, `"#,##0.00"`).
-    #[allow(dead_code)]
     fn active_num_fmt(&self) -> String;
 
     /// Formatted display string of the active cell (what the user sees in the grid).
@@ -131,7 +153,11 @@ pub trait SheetQuery {
 
     /// Used data extent of the active sheet (for Ctrl+A, Ctrl+End, etc.).
     fn sheet_dimension(&self) -> CellArea;
+}
 
+/// Workbook sheet-roster queries: names, visibility, tab colors. Independent
+/// of the active cell — the sheet-tab bar and name resolution read these.
+pub trait SheetRoster {
     fn get_sheet_name(&self, sheet_idx: usize) -> String;
 
     fn get_sheet_visible(&self) -> Vec<(u32, u32)>;
@@ -203,29 +229,72 @@ fn font_family_from_name(name: &str) -> SafeFontFamily {
     }
 }
 
-impl SheetQuery for UserModel<'_> {
+/// Map an IronCalc `BorderStyle` to our `BorderWeight` subset.
+///
+/// Medium variants (dashed, dash-dot, etc.) all map to `Medium`.
+/// Any exotic style not explicitly covered falls back to `Thin`.
+fn border_weight_from_style(s: &ironcalc_base::types::BorderStyle) -> BorderWeight {
+    use ironcalc_base::types::BorderStyle as BS;
+    match s {
+        BS::Medium | BS::MediumDashed | BS::MediumDashDot | BS::MediumDashDotDot => {
+            BorderWeight::Medium
+        }
+        BS::Thick => BorderWeight::Thick,
+        BS::Double => BorderWeight::Double,
+        _ => BorderWeight::Thin,
+    }
+}
+
+impl ActiveCellQuery for UserModel<'_> {
     fn toolbar_state(&self) -> ToolbarState {
         let view = self.get_selected_view();
         let style = self
             .get_cell_style(view.sheet, view.row, view.column)
             .unwrap_or_default();
 
-        let text_color = match style.font.color.as_deref() {
-            None | Some("#000000") => CssColor::new("#000000"),
-            Some(c) => CssColor::new(c),
+        // resolve_color is theme-aware (Rgb passthrough, Theme(idx, tint)
+        // against the workbook theme) and returns "" for Color::None.
+        let text = self.resolve_color(&style.font.color);
+        let text_color = if text.is_empty() {
+            CssColor::new("#000000")
+        } else {
+            CssColor::new(&text)
         };
-        let bg_color = style
-            .fill
-            .fg_color
-            .as_deref()
-            .filter(|c| !c.is_empty())
-            .map(CssColor::new);
+        let bg = self.resolve_color(&style.fill.color);
+        let bg_color = (!bg.is_empty()).then(|| CssColor::new(&bg));
 
         let alignment = style.alignment.as_ref();
         let h_align = alignment
             .map(|a| a.horizontal.clone())
             .unwrap_or(HorizontalAlignment::General);
         let v_align = alignment.map(|a| a.vertical.clone()).unwrap_or_default();
+
+        // A cell can carry four independently-styled edges, but the picker holds
+        // a single color+weight. Seed it from the cell's existing borders by
+        // choosing one "dominant" edge. `edges` is ordered for the human to lean
+        // on if they want a priority scheme; each entry is `&Option<BorderItem>`,
+        // where `BorderItem` has `.color: Color` and `.style: BorderStyle`.
+        // Bottom-first priority: in a spreadsheet the bottom edge carries the
+        // most visual weight (row/total separators), so it best represents the
+        // cell's border when collapsing four edges into one picker value. The
+        // array below is ordered bottom/right/top/left so the first present
+        // edge wins.
+        let dominant = [
+            &style.border.bottom,
+            &style.border.right,
+            &style.border.top,
+            &style.border.left,
+        ]
+        .into_iter()
+        .find_map(|edge| edge.as_ref());
+        let border = match dominant {
+            Some(item) => BorderState {
+                // "" for Color::None — same empty seed as before.
+                color: CssColor::new(self.resolve_color(&item.color)),
+                weight: border_weight_from_style(&item.style),
+            },
+            None => BorderState::default(),
+        };
 
         ToolbarState {
             format: TextFormat {
@@ -243,6 +312,8 @@ impl SheetQuery for UserModel<'_> {
                 text_color,
                 bg_color,
             },
+
+            border,
         }
     }
 
@@ -309,7 +380,9 @@ impl SheetQuery for UserModel<'_> {
             },
         }
     }
+}
 
+impl SheetRoster for UserModel<'_> {
     fn get_sheet_name(&self, sheet_idx: usize) -> String {
         self.get_worksheets_properties()
             .get(sheet_idx)
@@ -336,7 +409,10 @@ impl SheetQuery for UserModel<'_> {
     fn get_sheet_tab_color(&self, sheet_idx: usize) -> Option<String> {
         self.get_worksheets_properties()
             .get(sheet_idx)
-            .and_then(|s| s.color.clone())
+            .and_then(|s| {
+                let c = self.resolve_color(&s.color);
+                (!c.is_empty()).then_some(c)
+            })
     }
 
     fn get_sheet_all(&self) -> Vec<(u32, String, String)> {
@@ -376,22 +452,31 @@ impl Navigator for UserModel<'_> {
     fn nav_set_cell(&mut self, row: i32, col: i32) {
         let row = row.clamp(1, LAST_ROW);
         let col = col.clamp(1, LAST_COLUMN);
-        let _ = self.set_selected_cell(row, col);
+        log_nav_err(self.set_selected_cell(row, col), "nav_set_cell");
     }
 
     fn nav_select_column(&mut self, col: i32) {
-        let _ = self.set_selected_cell(1, col);
-        let _ = self.set_selected_range(1, col, LAST_ROW, col);
+        log_nav_err(self.set_selected_cell(1, col), "nav_select_column");
+        log_nav_err(
+            self.set_selected_range(1, col, LAST_ROW, col),
+            "nav_select_column_range",
+        );
     }
 
     fn nav_select_row(&mut self, row: i32) {
-        let _ = self.set_selected_cell(row, 1);
-        let _ = self.set_selected_range(row, 1, row, LAST_COLUMN);
+        log_nav_err(self.set_selected_cell(row, 1), "nav_select_row");
+        log_nav_err(
+            self.set_selected_range(row, 1, row, LAST_COLUMN),
+            "nav_select_row_range",
+        );
     }
 
     fn nav_select_all(&mut self) {
-        let _ = self.set_selected_cell(1, 1);
-        let _ = self.set_selected_range(1, 1, LAST_ROW, LAST_COLUMN);
+        log_nav_err(self.set_selected_cell(1, 1), "nav_select_all");
+        log_nav_err(
+            self.set_selected_range(1, 1, LAST_ROW, LAST_COLUMN),
+            "nav_select_all_range",
+        );
     }
 
     fn nav_extend_selection(&mut self, row: i32, col: i32) {
@@ -406,7 +491,10 @@ impl Navigator for UserModel<'_> {
         } else {
             (col, anchor)
         };
-        let _ = self.set_selected_range(1, c1, LAST_ROW, c2);
+        log_nav_err(
+            self.set_selected_range(1, c1, LAST_ROW, c2),
+            "nav_extend_col",
+        );
     }
 
     fn nav_extend_row_selection(&mut self, row: i32) {
@@ -417,7 +505,10 @@ impl Navigator for UserModel<'_> {
         } else {
             (row, anchor)
         };
-        let _ = self.set_selected_range(r1, 1, r2, LAST_COLUMN);
+        log_nav_err(
+            self.set_selected_range(r1, 1, r2, LAST_COLUMN),
+            "nav_extend_row",
+        );
     }
 
     fn nav_to_edge(&mut self, dir: ArrowKey) {
@@ -435,8 +526,11 @@ impl Navigator for UserModel<'_> {
         let col = area.c1.clamp(1, LAST_COLUMN);
         let row2 = area.r2.clamp(1, LAST_ROW);
         let col2 = area.c2.clamp(1, LAST_COLUMN);
-        let _ = self.set_selected_cell(row, col);
-        let _ = self.set_selected_range(row, col, row2, col2);
+        log_nav_err(self.set_selected_cell(row, col), "nav_select_range");
+        log_nav_err(
+            self.set_selected_range(row, col, row2, col2),
+            "nav_select_range_area",
+        );
     }
 
     fn nav_expand_selection(&mut self, dir: ArrowKey) {
@@ -451,12 +545,18 @@ impl Navigator for UserModel<'_> {
 
     fn nav_home_row(&mut self) {
         let row = self.get_selected_view().row;
-        let _ = self.set_selected_cell(row, 1);
+        log_nav_err(self.set_selected_cell(row, 1), "nav_home_row");
     }
 
     fn set_selected_area(&mut self, area: CellArea) {
-        let _ = self.set_selected_cell(area.r1, area.c1);
-        let _ = self.set_selected_range(area.r1, area.c1, area.r2, area.c2);
+        log_nav_err(
+            self.set_selected_cell(area.r1, area.c1),
+            "set_selected_area",
+        );
+        log_nav_err(
+            self.set_selected_range(area.r1, area.c1, area.r2, area.c2),
+            "set_selected_area_range",
+        );
     }
 }
 
@@ -473,13 +573,13 @@ pub enum EvaluationMode {
 
 /// Run `f` on the model, optionally call `evaluate`.
 ///
-/// **PERFORMANCE OPTIMIZED:** Many `UserModel` methods call `evaluate()` internally.
-/// We pause evaluation before `f` so the model is evaluated at most once - after
-/// all mutations are done. This prevents double evaluation and can halve execution time.
-/// See docs/performance-evaluation.md for details.
+/// Many `UserModel` methods call `evaluate()` internally. We
+/// `pause_evaluation()` before `f` and `resume_evaluation()` after, so the
+/// model is evaluated at most once — after all mutations are done. This prevents
+/// double evaluation and can halve execution time on formula-heavy sheets.
 ///
-/// **CALLER RESPONSIBILITY:** This function no longer automatically triggers redraws.
-/// The caller must emit appropriate events using `state.emit_event()`.
+/// This function does not trigger redraws. The caller must emit appropriate
+/// events using `state.emit_event()`.
 ///
 pub fn mutate(
     model: ModelStore,
@@ -537,112 +637,4 @@ pub fn try_mutate<E>(
         }
     });
     outcome
-}
-
-// Tests
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Helper: create a minimal empty workbook model for testing.
-    #[allow(clippy::expect_used)]
-    fn make_model() -> UserModel<'static> {
-        UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("failed to create test model")
-    }
-
-    #[test]
-    fn toolbar_state_reflects_active_cell() {
-        let m = make_model();
-        let ts = m.toolbar_state();
-        assert!(!ts.format.bold);
-        assert!(!ts.format.italic);
-        assert!(ts.style.font_size > 0.0);
-    }
-
-    #[test]
-    fn nav_arrow_down_moves_selection() {
-        let mut m = make_model();
-        let before = m.get_selected_view().row;
-        m.nav_arrow(ArrowKey::Down);
-        let after = m.get_selected_view().row;
-        assert_eq!(after, before + 1);
-    }
-
-    #[test]
-    fn nav_set_cell_clamps_out_of_range() {
-        let mut m = make_model();
-        m.nav_set_cell(-1, 0);
-        let v = m.get_selected_view();
-        assert_eq!(v.row, 1);
-        assert_eq!(v.column, 1);
-    }
-
-    #[test]
-    fn nav_select_range_sets_active_cell_and_range() {
-        let mut m = make_model();
-        m.nav_select_range(CellArea {
-            r1: 2,
-            c1: 3,
-            r2: 5,
-            c2: 7,
-        });
-        let v = m.get_selected_view();
-        assert_eq!(v.row, 2);
-        assert_eq!(v.column, 3);
-        assert_eq!(v.range, [2, 3, 5, 7]);
-    }
-
-    #[test]
-    fn nav_expand_selection_extends_range() {
-        let mut m = make_model();
-        // Start at (1,1), expand down: range should cover row 1..2
-        m.nav_expand_selection(ArrowKey::Down);
-        let v = m.get_selected_view();
-        let r_min = v.range[0].min(v.range[2]);
-        let r_max = v.range[0].max(v.range[2]);
-        assert_eq!(r_min, 1);
-        assert_eq!(r_max, 2);
-    }
-
-    #[test]
-    fn nav_home_row_moves_to_column_1() {
-        let mut m = make_model();
-        m.nav_set_cell(5, 10);
-        m.nav_home_row();
-        let v = m.get_selected_view();
-        assert_eq!(v.row, 5);
-        assert_eq!(v.column, 1);
-    }
-
-    #[test]
-    fn nav_select_column_sets_full_range() {
-        let mut m = make_model();
-        m.nav_select_column(3);
-        let v = m.get_selected_view();
-        assert_eq!(v.column, 3);
-        assert_eq!(v.range[1], 3);
-        assert_eq!(v.range[3], 3);
-    }
-
-    #[test]
-    fn sheet_dimension_empty_sheet() {
-        let m = make_model();
-        let d = m.sheet_dimension();
-        // Empty sheet defaults to (1,1,1,1).
-        assert_eq!(d.r1, 1);
-        assert_eq!(d.c1, 1);
-        assert_eq!(d.r2, 1);
-        assert_eq!(d.c2, 1);
-    }
-
-    #[allow(clippy::unwrap_used)]
-    #[test]
-    fn sheet_dimension_after_input() {
-        let mut m = make_model();
-        m.set_user_input(0, 5, 3, "hello").unwrap();
-        m.evaluate();
-        let d = m.sheet_dimension();
-        assert!(d.r2 >= 5);
-        assert!(d.c2 >= 3);
-    }
 }

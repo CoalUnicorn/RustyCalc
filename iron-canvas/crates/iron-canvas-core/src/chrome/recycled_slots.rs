@@ -16,13 +16,11 @@ pub struct RecycledSlots {
 
 impl RecycledSlots {
     pub(super) fn from_pane_set(pane_set: PaneSet) -> Self {
-        let PaneSet {
-            mut frozen_rows,
-            mut scroll_rows,
-            mut frozen_cols,
-            mut scroll_cols,
-            ..
-        } = pane_set;
+        let PaneSet { rows, cols, .. } = pane_set;
+        let mut frozen_rows = rows.frozen;
+        let mut scroll_rows = rows.scroll;
+        let mut frozen_cols = cols.frozen;
+        let mut scroll_cols = cols.scroll;
         frozen_rows.clear();
         scroll_rows.clear();
         frozen_cols.clear();

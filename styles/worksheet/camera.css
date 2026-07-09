@@ -1,0 +1,21 @@
+/* Camera widget — floating live picture of a cell range.
+ * Structural/positional styles are inline in camera/mod.rs (spec-driven);
+ * only reusable button styling lives here. */
+
+.cam-btn-apply {
+    background: var(--accent, #4a86e8);
+    color: #fff;
+    border: none;
+    padding: 2px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+.cam-btn-cancel {
+    background: var(--btn-secondary, #f0f0f0);
+    color: var(--text, #333);
+    border: 1px solid var(--border, #ccc);
+    padding: 2px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+}

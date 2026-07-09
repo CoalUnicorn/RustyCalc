@@ -1,0 +1,61 @@
+/* Cell Editor — prefix: ce-
+ *
+ * Mapping:
+ *   cell-editor -> ce
+ *
+ * The cell-editor textarea lives inside an `.fe-host` wrapper that owns
+ * the absolute positioning over the canvas, the border, and the background.
+ * The textarea itself is fully transparent — colored ref tokens come from
+ * the sibling `.fe-overlay` div underneath.
+ */
+
+/* Host wrapper — positioned over the canvas, owns border + background. */
+.fe-host--cell {
+    position: absolute;
+    z-index: 10;
+    border: 2px solid var(--accent);
+    background: var(--cell-editor-bg);
+    overflow: hidden;
+}
+
+.fe-host--cell.formula-error {
+    border-color: var(--error);
+}
+
+/* The textarea fills the host. Text is transparent so the overlay shows
+ * through; caret-color keeps the native caret visible. */
+.ce {
+    position: absolute;
+    inset: 0;
+    border: none;
+    padding: 1px 3px;
+    /* Match the overlay's wrap behaviour. */
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    resize: none;
+    outline: none;
+    overflow: hidden;
+    background: transparent;
+    color: transparent;
+    caret-color: var(--text-strong);
+    /* Above the overlay so the caret renders on top of colored spans. */
+    z-index: 1;
+}
+
+/* Overlay padding must match textarea padding (1px 3px) so character
+ * positions align. Without this, the overlay text starts 3px left of the
+ * textarea text, causing the cursor to appear offset and the offset to
+ * compound as text wraps. */
+.fe-host--cell .fe-overlay {
+    padding: 1px 3px;
+}
+
+/* Selection on the transparent textarea: flip the text visible so the user
+ * can read what they selected, and paint a semi-transparent accent band
+ * behind it. The tint stays translucent so the colored overlay tokens
+ * underneath still show through. */
+.ce::selection {
+    color: var(--text-strong);
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+}

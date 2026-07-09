@@ -10,7 +10,7 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
 use crate::types::coord::{FormulaRef, FormulaRefKind, RCRange};
-use crate::types::ui::{Corner, HitTest, RefZone, Side};
+use crate::types::ui::{HitTest, RectCorner, RefZone, Side};
 
 #[derive(Default)]
 pub struct FormulaRefsLayer {
@@ -54,8 +54,9 @@ impl Layer for FormulaRefsLayer {
         y: i32,
     ) -> Option<HitTest> {
         // Reverse paint order: the last-painted ref claims overlapping
-        // hits. Filters mirror `paint`: non-Direct kinds and off-sheet
-        // refs never claim a hit.
+        // hits. Off-sheet refs are skipped as in `paint`; additionally only
+        // `Direct` refs are interactive — non-Direct kinds are painted but
+        // never claim a hit.
         for (ref_idx, fr) in self.refs.iter().enumerate().rev() {
             if !matches!(fr.kind, FormulaRefKind::Direct) {
                 continue;
@@ -67,20 +68,20 @@ impl Layer for FormulaRefsLayer {
                 continue;
             };
             if let Some(zone) = classify_ref_zone(rect, x, y, REF_HANDLE_HIT_PAD_PX) {
-                // grab_row/grab_col are the cell the pointer is over right
+                // grab_row/grab_column are the cell the pointer is over right
                 // now. `None` means the pointer sits over chrome or off-
                 // grid; treat that as no hit even if the zone classified.
-                let Some(grab_row) = frame.pane_set.pixel_to_row(y) else {
+                let Some(grab_row) = frame.pane_set.rows.pixel_to_id(y) else {
                     continue;
                 };
-                let Some(grab_col) = frame.pane_set.pixel_to_col(x) else {
+                let Some(grab_column) = frame.pane_set.cols.pixel_to_id(x) else {
                     continue;
                 };
                 return Some(HitTest::FormulaRef {
                     ref_idx,
                     zone,
                     grab_row,
-                    grab_col,
+                    grab_column,
                 });
             }
         }
@@ -108,10 +109,10 @@ fn classify_ref_zone(rect: PixelRect, x: i32, y: i32, pad: i32) -> Option<RefZon
     let near_bottom = (y - b).abs() <= pad;
 
     let corner = match (near_top, near_right, near_bottom, near_left) {
-        (true, _, _, true) => Some(Corner::TopLeft),
-        (true, true, _, _) => Some(Corner::TopRight),
-        (_, _, true, true) => Some(Corner::BottomLeft),
-        (_, true, true, _) => Some(Corner::BottomRight),
+        (true, _, _, true) => Some(RectCorner::TopLeft),
+        (true, true, _, _) => Some(RectCorner::TopRight),
+        (_, _, true, true) => Some(RectCorner::BottomLeft),
+        (_, true, true, _) => Some(RectCorner::BottomRight),
         _ => None,
     };
     if let Some(c) = corner {
@@ -159,7 +160,7 @@ mod tests {
     fn classify_corner_top_left() {
         assert_eq!(
             classify_ref_zone(rect(100, 100, 200, 80), 102, 103, 8),
-            Some(RefZone::Corner(Corner::TopLeft))
+            Some(RefZone::Corner(RectCorner::TopLeft))
         );
     }
 
@@ -168,7 +169,7 @@ mod tests {
         // rect: x=100, y=100, w=200, h=80 — right=300, bottom=180.
         assert_eq!(
             classify_ref_zone(rect(100, 100, 200, 80), 297, 178, 8),
-            Some(RefZone::Corner(Corner::BottomRight))
+            Some(RefZone::Corner(RectCorner::BottomRight))
         );
     }
 

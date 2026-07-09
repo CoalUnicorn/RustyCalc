@@ -13,7 +13,7 @@ use common::{TestModel, canvas_default};
 #[test]
 fn next_frame_emits_fresh_when_no_prev() {
     let model = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let frame = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
     assert_eq!(frame.kind, FrameKindTag::Fresh);
     assert!(
@@ -25,7 +25,7 @@ fn next_frame_emits_fresh_when_no_prev() {
 #[test]
 fn from_slots_reuse_emits_slots_reused() {
     let model = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let fresh = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
     let reused = Chrome::next(
         Some(fresh),
@@ -49,12 +49,12 @@ fn from_slots_reuse_emits_slots_reused() {
 /// `prev.stale_panes` — so a `SlotsReuse` chasing a `Blit` (whose
 /// `stale_panes` had been narrowed to the scrolled strip) would skip
 /// the unscrolled panes on the next content repaint. Reproduces the
-/// scroll-to-row-78 → DEL bug at the `Chrome::next` level without
+/// scroll-to-row-78 -> DEL bug at the `Chrome::next` level without
 /// needing canvas or orchestrator scaffolding.
 #[test]
 fn slots_reuse_uses_caller_supplied_stale_panes() {
     let model = TestModel::synthetic_grid();
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let mut prev = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
     prev.stale_panes = PaneRegionMask::EMPTY;
 
@@ -72,14 +72,14 @@ fn slots_reuse_uses_caller_supplied_stale_panes() {
 }
 
 /// Documents the Stage 5 invariant: adding a `FrameKindTag` variant must
-/// break every regime arm in `orchestrator::paint_*`. The non-exhaustive
-/// `match` blocks in `paint_viewport` / `paint_content` / `paint_rebuild`
-/// (no `_ =>` arm) enforce this at compile time.
+/// break the dispatch in `Orchestrator::paint_viewport_regime`. Its
+/// non-exhaustive `match frame.kind` (no `_ =>` arm) enforces this at
+/// compile time.
 ///
 /// To verify locally:
 /// 1. Add a fourth variant `Speculative` to `FrameKindTag` in `chrome/kind.rs`.
-/// 2. `cargo check -p iron-canvas` — expect `error[E0004]` at three call
-///    sites in `orchestrator.rs`.
+/// 2. `cargo check -p iron-canvas-core` — expect `error[E0004]` in
+///    `orchestrator.rs`.
 /// 3. Revert.
 ///
 /// This test does NOT do the experiment automatically; it pins the variant

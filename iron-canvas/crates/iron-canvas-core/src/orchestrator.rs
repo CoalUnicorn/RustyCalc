@@ -1,25 +1,28 @@
 //! Frame dispatch and state aggregator. Backend-agnostic; the wasm-bound
 //! `IronCanvas` facade in `iron-canvas-web` owns an
-//! `Orchestrator<WebSurface, Rc<dyn CanvasModel>>` and delegates every
-//! setter, query, and paint call here.
+//! `Orchestrator<FacadeSurface>` (`WebSurface` by default,
+//! `RecordingSurface<WebSurface>` under dev-tools) and delegates every
+//! setter, query, and paint call here. The model is held as
+//! `Rc<dyn CanvasModel>`, so the struct carries one type parameter (the
+//! `Surface`), not two.
 //!
 //! `paint_if_dirty` drains both layers' typed `GridSignals` and picks one
-//! of four `PaintRegime` arms via `decide` (cheapness-ordered). Each arm
-//! runs a `Chrome::next(.., FramePath::*)` walk through the matching
-//! `LayerBase` paint method. The query API (`hit_test`, `cell_rect`,
+//! of four `PaintRegime` arms via `decide` (cheapness-ordered). The Fresh and
+//! SlotsReuse arms rebuild via a `Chrome::next(.., FramePath::*)` walk through
+//! the matching `LayerBase` paint method; the Viewport arm goes through
+//! `Chrome::next_blit`; the Overlay arm reuses
+//! `last_frame` directly and repaints only the overlay. The query API
+//! (`hit_test`, `cell_rect`,
 //! `resize_handle_at`, `autofill_handle`) reads `last_frame`, so hits
 //! agree with painted pixels by construction.
 
-use std::cell::Cell;
+use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::CanvasModel;
-use crate::chrome::{BlitPlan, Chrome, FrameKindTag, FramePath, FrameValidity, PaneRegionMask};
-use crate::decoration::{
-    Layer, autofill::AutofillLayer, clipboard::ClipboardLayer, formula_refs::FormulaRefsLayer,
-    point_mode::PointModeLayer, selection::SelectionLayer,
-};
+use crate::chrome::{BlitOutcome, BlitPlan, Chrome, FramePath, FrameValidity, PaneRegionMask};
+use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
@@ -75,21 +78,16 @@ impl From<&PaintRegime> for PaintRegimeTag {
     }
 }
 
-pub struct Orchestrator<S, M>
+pub struct Orchestrator<S>
 where
     S: Surface,
     S::P: BlitPainter,
-    M: CanvasModel,
 {
     pub(crate) grid: LayerBase<S, GridRenderer<S::P>>,
     pub(crate) overlay: LayerBase<S, OverlayRenderer<S::P>>,
-    theme: CanvasTheme,
-    selection: SelectionLayer,
-    autofill: AutofillLayer,
-    clipboard: ClipboardLayer,
-    point_mode: PointModeLayer,
-    formula_refs: FormulaRefsLayer,
-    model: Option<M>,
+    theme: Rc<CanvasTheme>,
+    decos: Decorations,
+    model: Option<Rc<dyn CanvasModel>>,
     last_frame: Option<Chrome>,
     /// Logical (CSS) canvas size; written by `resize`, read when building
     /// the next `Chrome`.
@@ -102,18 +100,18 @@ where
     pending_content: PaneRegionMask,
     /// Last regime `paint_if_dirty` dispatched. Stamped after `decide`,
     /// read by the recording pipeline via `last_regime()`. `None` before
-    /// the first paint. `Cell` so the accessor takes `&self`.
-    last_regime: Cell<Option<PaintRegimeTag>>,
+    /// the first paint. Plain field — `paint_if_dirty` already holds
+    /// `&mut self`, so no interior mutability is needed.
+    last_regime: Option<PaintRegimeTag>,
     /// `GridSignals` drained by the last `paint_if_dirty`. Empty before
-    /// the first paint. `Cell` so the accessor takes `&self`.
-    last_signals: Cell<GridSignals>,
+    /// the first paint.
+    last_signals: GridSignals,
 }
 
-impl<S, M> Orchestrator<S, M>
+impl<S> Orchestrator<S>
 where
     S: Surface,
     S::P: BlitPainter,
-    M: CanvasModel,
 {
     pub fn new(grid_surface: S, overlay_surface: S) -> Self {
         let grid_renderer = GridRenderer::for_layer(grid_surface.clone_painter());
@@ -121,36 +119,32 @@ where
         Self {
             grid: LayerBase::new(grid_surface, grid_renderer),
             overlay: LayerBase::new(overlay_surface, overlay_renderer),
-            theme: CanvasTheme::light(),
-            selection: SelectionLayer::default(),
-            autofill: AutofillLayer::default(),
-            clipboard: ClipboardLayer::default(),
-            point_mode: PointModeLayer::default(),
-            formula_refs: FormulaRefsLayer::default(),
+            theme: Rc::new(CanvasTheme::light()),
+            decos: Decorations::default(),
             model: None,
             last_frame: None,
             size: CanvasSize { w: 0.0, h: 0.0 },
             pending_content: PaneRegionMask::EMPTY,
-            last_regime: Cell::new(None),
-            last_signals: Cell::new(GridSignals::empty()),
+            last_regime: None,
+            last_signals: GridSignals::empty(),
         }
     }
 
     /// Regime stamped by the last `paint_if_dirty`. `None` before the
     /// first paint. Read by the recording pipeline.
     pub fn last_regime(&self) -> Option<PaintRegimeTag> {
-        self.last_regime.get()
+        self.last_regime
     }
 
     /// `GridSignals` word the last `paint_if_dirty` acted upon. Empty
     /// before the first paint.
     pub fn last_signals(&self) -> GridSignals {
-        self.last_signals.get()
+        self.last_signals
     }
 
     /// Resize both layers in one call. No public per-layer resize, so
     /// callers can't leave the pair half-sized.
-    pub fn resize(&mut self, size: CanvasSize, dpr: i32) {
+    pub fn resize(&mut self, size: CanvasSize, dpr: f64) {
         self.size = size;
         self.grid.resize(size, dpr);
         self.overlay.resize(size, dpr);
@@ -174,64 +168,72 @@ where
     /// pass lets the Leptos host's per-frame reactive memo cost a single
     /// raise instead of four.
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
-        let RenderOverlays {
-            extend_to,
-            clipboard,
-            point_range,
-            formula_refs,
-        } = overlays;
-        let changed = self.autofill.extend_to != extend_to
-            || self.clipboard.clipboard != clipboard
-            || self.point_mode.point_range != point_range
-            || self.formula_refs.refs != formula_refs;
-        if !changed {
-            return;
+        if self.decos.set_overlays(overlays) {
+            self.overlay.raise(GridSignals::OVERLAY);
         }
-        self.autofill.extend_to = extend_to;
-        self.clipboard.clipboard = clipboard;
-        self.point_mode.point_range = point_range;
-        self.formula_refs.refs = formula_refs;
-        self.overlay.raise(GridSignals::OVERLAY);
     }
 
     pub fn set_extend_to(&mut self, target: Option<AutofillTarget>) {
-        if self.autofill.extend_to != target {
-            self.autofill.extend_to = target;
+        if self.decos.set_extend_to(target) {
             self.overlay.raise(GridSignals::OVERLAY);
         }
     }
 
     pub fn set_clipboard(&mut self, area: Option<SheetArea>) {
-        if self.clipboard.clipboard != area {
-            self.clipboard.clipboard = area;
+        if self.decos.set_clipboard(area) {
             self.overlay.raise(GridSignals::OVERLAY);
         }
     }
 
     pub fn set_point_range(&mut self, range: Option<RCRange>) {
-        if self.point_mode.point_range != range {
-            self.point_mode.point_range = range;
+        if self.decos.set_point_range(range) {
             self.overlay.raise(GridSignals::OVERLAY);
         }
     }
 
     pub fn set_formula_refs(&mut self, refs: Vec<FormulaRef>) {
-        if self.formula_refs.refs != refs {
-            self.formula_refs.refs = refs;
+        if self.decos.set_formula_refs(refs) {
             self.overlay.raise(GridSignals::OVERLAY);
         }
     }
 
+    /// Install a consumer-owned overlay decoration above every built-in.
+    /// The layer paints from the next frame onward — never retroactively
+    /// onto a frame already emitted — and its `hit_test` runs before every
+    /// built-in zone, so returning `Some` at the autofill-handle pixel
+    /// steals the handle drag: stay paint-only (the trait default) unless
+    /// that shadowing is intended. The registry holds a strong `Rc`; keep
+    /// a typed clone, mutate through interior mutability, and call
+    /// [`Self::request_overlay_repaint`] after each change — unlike the
+    /// built-in setters, nothing here compares state for you.
+    pub fn add_decoration(&mut self, layer: Rc<dyn Layer>) -> DecorationId {
+        let id = self.decos.add_custom(layer);
+        self.overlay.raise(GridSignals::OVERLAY);
+        id
+    }
+
+    /// Remove a custom decoration. Removal is explicit — a layer whose
+    /// consumer handle was dropped still participates in the paint and hit
+    /// loops (as a no-op) until removed here. Raises `OVERLAY` only when
+    /// the id was found, so a stale-id call cannot trigger a repaint.
+    pub fn remove_decoration(&mut self, id: DecorationId) -> bool {
+        let removed = self.decos.remove_custom(id);
+        if removed {
+            self.overlay.raise(GridSignals::OVERLAY);
+        }
+        removed
+    }
+
     /// Push a theme. Value-compares against `self.theme` and, on change,
-    /// drops `last_frame`, invalidates the renderer paint cache, and
-    /// marks both layers dirty. Theme is frame-wide — the per-cell pixel
-    /// cache holds the old palette and `is_still_valid` does not check
-    /// theme, so without the cache invalidation `SlotsReuse` would
-    /// repaint stale-color cells under fresh chrome.
+    /// invalidates the renderer paint cache and marks both layers dirty.
+    /// `is_still_valid` now rejects a theme-mismatched frame itself, so the
+    /// next paint reaches `Fresh` through the validity verdict — no out-of-band
+    /// `last_frame` drop needed here. The paint-cache invalidation stays: the
+    /// per-cell fingerprint cache is keyed on content, not palette, so even a
+    /// Fresh rebuild would fingerprint-skip stale-color cells without it.
     pub fn set_theme(&mut self, theme: CanvasTheme) {
-        if theme != self.theme {
-            self.theme = theme;
-            self.last_frame = None;
+        if theme != *self.theme {
+            self.theme = Rc::new(theme);
             self.grid.invalidate_paint_cache();
             self.grid
                 .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
@@ -244,11 +246,11 @@ where
         self.set_theme(vars.build());
     }
 
-    /// Push a new data model. The generic-`M` API loses the Rc::ptr_eq
-    /// idempotence today's IronCanvas had: every set_model is treated as
-    /// a change. JS-side typically pushes once per workbook, so the
-    /// difference is the worst-case repaint after a redundant push.
-    pub fn set_model(&mut self, model: M) {
+    /// Push a new data model. No `Rc::ptr_eq` dedupe: every call is
+    /// treated as a change and forces the next paint to Fresh. JS-side
+    /// typically pushes once per workbook, so the cost is one worst-case
+    /// repaint after a redundant push.
+    pub fn set_model(&mut self, model: Rc<dyn CanvasModel>) {
         self.model = Some(model);
         // `is_still_valid` doesn't see model identity, so a workbook swap
         // with the same scroll/sheet/freeze/size would otherwise reuse the
@@ -287,18 +289,23 @@ where
     }
 
     pub fn selection(&self) -> &SelectionLayer {
-        &self.selection
+        self.decos.selection()
     }
 
-    /// Cross-crate test surface — the recorder backend reads the grid
-    /// surface to inspect emitted `DrawOp`s. Production must not branch
-    /// on this.
-    #[doc(hidden)]
+    /// Surface introspection — direct access to the grid surface for
+    /// callers that read or drive it outside the paint pipeline. Two
+    /// consumer classes use it: this crate's recorder integration tests
+    /// (inspecting emitted `DrawOp`s) and `iron-canvas-web`'s `dev-tools`
+    /// recording/playback. Gated behind `surface-introspection` so the
+    /// prod build doesn't carry the symbol.
+    #[cfg(feature = "surface-introspection")]
     pub fn grid_surface(&self) -> &S {
         &self.grid.surface
     }
 
-    #[doc(hidden)]
+    /// Overlay-surface counterpart to [`Self::grid_surface`]; same
+    /// `surface-introspection` gate and the same two consumer classes.
+    #[cfg(feature = "surface-introspection")]
     pub fn overlay_surface(&self) -> &S {
         &self.overlay.surface
     }
@@ -313,18 +320,18 @@ where
         };
         let xi = x.round() as i32;
         let yi = y.round() as i32;
-        let layers: [&dyn Layer; 5] = [
-            &self.formula_refs,
-            &self.point_mode,
-            &self.clipboard,
-            &self.autofill,
-            &self.selection,
-        ];
-        // No live selection → pass a zero range; the decoration layers that
+        // No live selection -> pass a zero range; the decoration layers that
         // consult `sel` (autofill, formula-refs) treat it as "no anchor"
         // and naturally fall through to the frame's pure cell hit-test.
-        let sel = self.selection.selection_range.unwrap_or_default();
-        for layer in layers {
+        let sel = self.decos.selection().selection_range.unwrap_or_default();
+        // Custom band first — front-to-back is reverse insertion order,
+        // mirroring its paint position above every built-in.
+        for (_, layer) in self.decos.custom_layers().iter().rev() {
+            if let Some(hit) = layer.hit_test(frame, sel, xi, yi) {
+                return hit;
+            }
+        }
+        for layer in self.decos.hit_order() {
             if let Some(hit) = layer.hit_test(frame, sel, xi, yi) {
                 return hit;
             }
@@ -345,8 +352,8 @@ where
         let frame = self.last_frame.as_ref()?;
         let xi = x.round() as i32;
         let yi = y.round() as i32;
-        let row = frame.pane_set.pixel_to_row(yi)?;
-        let col = frame.pane_set.pixel_to_col(xi)?;
+        let row = frame.pane_set.rows.pixel_to_id(yi)?;
+        let col = frame.pane_set.cols.pixel_to_id(xi)?;
         Some((row, col))
     }
 
@@ -362,10 +369,29 @@ where
         self.last_frame.as_ref()?.cell_rect(row, column)
     }
 
+    /// Auto-fit width for `col`: widest formatted value across the
+    /// `[first_row, last_row]` used-row span, plus padding. `None` when the
+    /// model is absent or no scanned cell in `col` has text. Pure
+    /// measurement — the consumer applies the returned extent.
+    pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
+        let model = self.model.as_deref()?;
+        let metrics = self.grid.surface.painter();
+        crate::autofit::fit_width(model, metrics, col, first_row, last_row)
+    }
+
+    /// Auto-fit height for `row`: tallest font across the `[first_col,
+    /// last_col]` used-column span, plus padding. Same absence semantics as
+    /// `fit_column_width`.
+    pub fn fit_row_height(&self, row: i32, first_col: i32, last_col: i32) -> Option<f64> {
+        let model = self.model.as_deref()?;
+        let metrics = self.grid.surface.painter();
+        crate::autofit::fit_height(model, metrics, row, first_col, last_col)
+    }
+
     pub fn autofill_handle(&self) -> Option<Point> {
         self.last_frame
             .as_ref()?
-            .autofill_handle(self.selection.selection_range?)
+            .autofill_handle(self.decos.selection().selection_range?)
     }
 
     /// Paint whichever layers are dirty. Dispatches via `decide` into one
@@ -373,32 +399,40 @@ where
     /// The `match` is exhaustive — adding a regime breaks the build here
     /// by design.
     pub fn paint_if_dirty(&mut self) {
-        let signals = self.grid.drain_signals() | self.overlay.drain_signals();
-        if signals.is_empty() {
+        // Model-absent -> return *before* draining. Draining a CONTENT bit
+        // raised before the first model push would lose its paired
+        // `pending_content` mask, breaking the `pending_content ⟺ CONTENT`
+        // invariant the next real paint relies on.
+        if self.model.is_none() {
             return;
         }
-        // Lift the model out so subsequent paint methods can take `&mut
-        // self` without overlapping the model borrow. Restored at the end.
+        let signals = self.grid.drain_signals() | self.overlay.drain_signals();
+        if signals.is_empty() {
+            // Nothing drained, model never taken — nothing to restore.
+            return;
+        }
+        // Lift the model out so the paint methods can take `&mut self`
+        // without overlapping the model borrow. The `is_none` guard above
+        // makes the `else` unreachable, but `let-else` keeps it panic-free.
         let Some(model) = self.model.take() else {
             return;
         };
 
-        {
-            let model_dyn: &dyn CanvasModel = &model;
-            let regime = self.decide(signals, model_dyn);
-            self.last_regime.set(Some(PaintRegimeTag::from(&regime)));
-            self.last_signals.set(signals);
-            match regime {
-                PaintRegime::Overlay => self.paint_overlay_regime(model_dyn),
-                PaintRegime::Viewport(plan) => self.paint_viewport_regime(model_dyn, plan),
-                PaintRegime::SlotsReuse { mask, signals } => {
-                    self.paint_slots_reuse_regime(model_dyn, mask, signals)
-                }
-                PaintRegime::Fresh(signals) => self.paint_fresh_regime(model_dyn, signals),
+        let model_dyn: &dyn CanvasModel = model.as_ref();
+        let regime = self.decide(signals, model_dyn);
+        self.last_regime = Some(PaintRegimeTag::from(&regime));
+        self.last_signals = signals;
+        match regime {
+            PaintRegime::Overlay => self.paint_overlay_regime(model_dyn),
+            PaintRegime::Viewport(plan) => self.paint_viewport_regime(model_dyn, plan),
+            PaintRegime::SlotsReuse { mask, signals } => {
+                self.paint_slots_reuse_regime(model_dyn, mask, signals)
             }
-            self.pending_content = PaneRegionMask::EMPTY;
+            PaintRegime::Fresh(signals) => self.paint_fresh_regime(model_dyn, signals),
         }
+        self.pending_content = PaneRegionMask::EMPTY;
 
+        // Single restore site.
         self.model = Some(model);
     }
 
@@ -412,7 +446,7 @@ where
             .last_frame
             .as_ref()
             .map_or(FrameValidity::Rebuild, |f| {
-                f.is_still_valid(model, self.size)
+                f.is_still_valid(model, self.size, &self.theme)
             });
 
         if !sig.grid_dirty()
@@ -434,7 +468,7 @@ where
         // Without a live selection there is nothing to re-hash, so the
         // blit attempt is skipped entirely and dispatch falls through.
         if !content_dirty
-            && let Some(active) = self.selection.active_cell.as_ref()
+            && let Some(active) = self.decos.selection().active_cell.as_ref()
             && let Some(frame) = self.last_frame.as_ref()
             && let Some(plan) = frame.screen_for_blit(model, self.size, &self.theme, active)
         {
@@ -453,35 +487,21 @@ where
         PaintRegime::Fresh(sig)
     }
 
-    /// Refresh per-paint overlay state from the live model and mirror
-    /// the selection rectangle into `AutofillLayer` so the preview is
-    /// paint-coherent with the painted selection. Single source of
-    /// truth for the cross-decoration mirror — every regime calls this
-    /// instead of `self.selection.refresh(model)` directly.
-    fn refresh_overlay_state(&mut self, model: &dyn CanvasModel) {
-        self.selection.refresh(model);
-        self.autofill.selection_range = self.selection.selection_range.unwrap_or_default();
-    }
-
     /// Overlay-only fast path. Triggered by autofill drag, clipboard state
     /// change, formula-ref highlight updates, and active-cell moves —
     /// anything that leaves grid pixels untouched. `decide` proves the
     /// preconditions (slot vecs still match, `last_frame` is `Some`).
     fn paint_overlay_regime(&mut self, model: &dyn CanvasModel) {
-        self.refresh_overlay_state(model);
+        self.decos.refresh_overlay_state(model);
         let Some(prev) = self.last_frame.as_ref() else {
             return;
         };
         self.overlay.paint_overlay_layer(
             model,
             prev,
-            &self.selection,
-            &[
-                &self.autofill,
-                &self.clipboard,
-                &self.point_mode,
-                &self.formula_refs,
-            ],
+            self.decos.selection(),
+            &self.decos.overlay_slice(),
+            self.decos.custom_layers(),
         );
     }
 
@@ -490,44 +510,34 @@ where
     /// verdict and the supplied plan. Always repaints the overlay too —
     /// a viewport shift moves every overlay primitive's pixel position.
     ///
-    /// `Chrome::next(Blit)` may demote to `Fresh` when in-place reuse
-    /// rejects (e.g. row-header digit boundary). We dispatch on
-    /// `frame.kind` so the demoted path takes the full repaint with cache
-    /// invalidation, instead of a `paint_grid_blit` that would carry
+    /// `Chrome::next_blit` may demote to `Fresh` when in-place reuse rejects
+    /// (e.g. row-header digit boundary). The `BlitOutcome` variant we get back
+    /// *is* the dispatch — the `FreshFallback` arm takes the full repaint with
+    /// cache invalidation, instead of a `paint_grid_blit` that would carry
     /// stale per-pane caches against the freshly rebuilt slot vecs.
     fn paint_viewport_regime(&mut self, model: &dyn CanvasModel, plan: BlitPlan) {
         let Some(prev) = self.last_frame.take() else {
             return;
         };
-        let frame = Chrome::next(
-            Some(prev),
-            model,
-            self.size,
-            &self.theme,
-            FramePath::Blit(&plan),
-        );
-        match frame.kind {
-            FrameKindTag::Blitted => self.grid.paint_grid_blit(model, &frame, &plan),
-            FrameKindTag::Fresh => {
+        let frame = match Chrome::next_blit(Some(prev), model, self.size, &self.theme, &plan) {
+            BlitOutcome::Blitted(frame) => {
+                self.grid.paint_grid_blit(model, &frame, &plan);
+                frame
+            }
+            BlitOutcome::FreshFallback(frame) => {
                 self.grid.invalidate_pane_cache(PaneRegionMask::ALL);
                 self.grid.invalidate_paint_cache();
                 self.grid.paint_grid(model, &frame);
+                frame
             }
-            FrameKindTag::SlotsReused => {
-                unreachable!("Chrome::next(Blit) only returns Blitted (reuse) or Fresh (fallback)")
-            }
-        }
-        self.refresh_overlay_state(model);
+        };
+        self.decos.refresh_overlay_state(model);
         self.overlay.paint_overlay_layer(
             model,
             &frame,
-            &self.selection,
-            &[
-                &self.autofill,
-                &self.clipboard,
-                &self.point_mode,
-                &self.formula_refs,
-            ],
+            self.decos.selection(),
+            &self.decos.overlay_slice(),
+            self.decos.custom_layers(),
         );
         self.last_frame = Some(frame);
     }
@@ -560,25 +570,21 @@ where
         // CONTENT-only signal the grid just repainted with new values,
         // so the next paint's `screen_for_blit` must compare against
         // the post-edit hash.
-        self.refresh_overlay_state(model);
+        self.decos.refresh_overlay_state(model);
         // Active-cell-repaint hook paints model-derived pixels on the
         // overlay — so CONTENT implies OVERLAY when an active cell exists.
         // Without this, DEL on the active cell clears the model but the
         // overlay still shows the old value on top of the grid.
         let must_paint_overlay = signals.overlay_dirty()
             || (signals.contains(GridSignals::CONTENT)
-                && self.selection.active_cell_repaint().is_some());
+                && self.decos.active_cell_repaint().is_some());
         if must_paint_overlay {
             self.overlay.paint_overlay_layer(
                 model,
                 &frame,
-                &self.selection,
-                &[
-                    &self.autofill,
-                    &self.clipboard,
-                    &self.point_mode,
-                    &self.formula_refs,
-                ],
+                self.decos.selection(),
+                &self.decos.overlay_slice(),
+                self.decos.custom_layers(),
             );
         }
         self.last_frame = Some(frame);
@@ -599,18 +605,14 @@ where
         }
         self.grid.invalidate_paint_cache();
         self.grid.paint_grid(model, &frame);
-        self.refresh_overlay_state(model);
+        self.decos.refresh_overlay_state(model);
         if signals.overlay_dirty() {
             self.overlay.paint_overlay_layer(
                 model,
                 &frame,
-                &self.selection,
-                &[
-                    &self.autofill,
-                    &self.clipboard,
-                    &self.point_mode,
-                    &self.formula_refs,
-                ],
+                self.decos.selection(),
+                &self.decos.overlay_slice(),
+                self.decos.custom_layers(),
             );
         }
         self.last_frame = Some(frame);

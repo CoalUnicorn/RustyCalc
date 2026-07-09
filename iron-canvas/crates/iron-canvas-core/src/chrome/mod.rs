@@ -2,16 +2,35 @@
 //! `Orchestrator` query read the same `Chrome`, so painted pixels and hit
 //! zones cannot disagree.
 //!
-//! Pure-axis walks live on `PaneSet`; `Chrome` composes them whenever a
-//! query spans both axes. See `ARCHITECTURE.md` for the build phases
-//! (A–E) and the `is_still_valid` cache rules.
+//! Pure-axis walks live on [`PaneSet`]; `Chrome` composes them whenever a
+//! query spans both axes.
+//!
+//! # Build phases
+//!
+//! `FramePath::Fresh` runs the private `Chrome::build` in five fixed-order
+//! phases. The order is load-bearing: phase C measures a value phase D needs,
+//! and both axis walks must finish before E assembles the shared `cell_origin`.
+//!
+//! ```text
+//! A  frozen counts   model.get_frozen_{rows,columns}_count(sheet)
+//! B  row walk        PaneSet::with_recycled(recycled).fill_rows(..)
+//! C  measure r.h.t.  row_header_thickness = measure_row_header_width(last_visible_row)
+//! D  col walk        pane_set.fill_cols(..)   // origin_x = row_header_thickness + CELL_AREA_INSET
+//! E  assemble        Chrome { pane_set, row_header_thickness, cell_origin, .. }
+//! ```
+//!
+//! `SlotsReuse` skips the walk: it keeps the previous slot vecs and refreshes
+//! only per-frame state. `Chrome::is_still_valid` decides between the two
+//! by comparing the previous frame's `sheet`, `canvas_size`, frozen counts, and
+//! `scroll_first` against the current signals; any divergence forces `Fresh`.
 
 use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 
 use crate::geometry::{
-    constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW},
+    constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
     pixel_rect::PixelRect,
     prim::Point,
     slot::scroll_first,
@@ -33,10 +52,11 @@ pub use pane_region::{PaneRegion, PaneRegionMask};
 pub use pane_set::{PaneSet, measure_row_header_width};
 pub use recycled_slots::RecycledSlots;
 
-/// Per-process digest of a formatted cell value. `DefaultHasher` is
-/// randomly seeded per run, so equality only holds within one process.
-/// The newtype shape blocks accidental serialization / cross-process
-/// comparison at the type system level.
+/// In-process digest of a formatted cell value. `DefaultHasher` output is
+/// only stable within one std version, so the digest must never be
+/// persisted or compared across builds. The newtype shape blocks
+/// accidental serialization / cross-process comparison at the type
+/// system level.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CellValueHash(u64);
 
@@ -49,16 +69,29 @@ pub struct CellValueHash(u64);
 pub struct ActiveCellSnapshot {
     pub row: i32,
     pub col: i32,
-    pub value_hash: CellValueHash,
+    /// `None` when the fetch was `BridgeFailed` — an *unknown* value, distinct
+    /// from a known-empty (`Absent`) cell which hashes as `""`. An unknown on
+    /// either side of `matches` can't prove the cell is unchanged, so it must
+    /// reject the blit rather than blit stale pixels.
+    pub value_hash: Option<CellValueHash>,
 }
 
-fn hash_cell_value(model: &dyn CanvasModel, sheet: u32, row: i32, col: i32) -> CellValueHash {
-    let value = model
-        .get_formatted_cell_value(sheet, row, col)
-        .unwrap_or_default();
+// `None` for `BridgeFailed` (value unknown); `Absent` is a known-empty cell and
+// hashes as `""` so it stays comparable across frames.
+fn hash_cell_value(
+    model: &dyn CanvasModel,
+    sheet: u32,
+    row: i32,
+    col: i32,
+) -> Option<CellValueHash> {
+    let fetched = model.get_formatted_cell_value(sheet, row, col);
+    if fetched.is_bridge_failed() {
+        return None;
+    }
+    let value = fetched.value().unwrap_or_default();
     let mut hasher = DefaultHasher::new();
     value.hash(&mut hasher);
-    CellValueHash(hasher.finish())
+    Some(CellValueHash(hasher.finish()))
 }
 
 impl ActiveCellSnapshot {
@@ -71,7 +104,16 @@ impl ActiveCellSnapshot {
     }
 
     pub fn matches(&self, model: &dyn CanvasModel, sheet: u32) -> bool {
-        hash_cell_value(model, sheet, self.row, self.col) == self.value_hash
+        // Blit only when both fetches are known AND equal. A `BridgeFailed`
+        // (`None`) at capture or compare time means "can't prove unchanged" ->
+        // reject, forcing a fresh repaint instead of reusing stale pixels.
+        match (
+            self.value_hash,
+            hash_cell_value(model, sheet, self.row, self.col),
+        ) {
+            (Some(captured), Some(live)) => captured == live,
+            _ => false,
+        }
     }
 }
 
@@ -91,10 +133,15 @@ pub struct Chrome {
     /// Theme this frame was painted with. The renderer reads `frame.theme`
     /// directly; `IronCanvas::set_theme` marks both layers dirty on change,
     /// so the overlay-only fast path never paints against a stale theme.
-    pub theme: CanvasTheme,
+    ///
+    /// `Rc` so the per-frame snapshot is a refcount bump, not a deep clone of
+    /// every color `String` — `Chrome` is rebuilt on every Fresh/SlotsReuse/
+    /// Blit frame (B-1).
+    pub theme: Rc<CanvasTheme>,
     /// Pane content fingerprints from the *previous* frame, snapshotted
     /// in `Chrome::next`. Indexed by `PaneRegion as usize`. Zero on first
-    /// paint and after a `Rebuild` so the natural compare always misses.
+    /// paint; a Fresh rebuild carries prev's values, but the per-pane
+    /// compare is gated on `kind.reuses_slots()`, so Fresh never skips.
     pub prev_pane_fingerprints: [u64; 4],
     /// Pane content fingerprints written by `render_pane` after each
     /// bulk-fetch. `Cell` so paint code stays on `&Chrome` (matches the
@@ -105,10 +152,10 @@ pub struct Chrome {
     /// "slot vecs inherited from prev" predicate.
     pub kind: FrameKindTag,
     /// Which panes `render_grid` must paint this frame. `FramePath::Fresh`
-    /// sets this to `ALL`; `FramePath::Blit` narrows it to the panes the
-    /// `BlitPlan` shifts (cross-axis panes left intact are excluded);
+    /// sets this to `ALL`; the blit path (`try_blit_reuse`) narrows it to the
+    /// panes the `BlitPlan` shifts (cross-axis panes left intact are excluded);
     /// `FramePath::SlotsReuse { stale_panes }` takes it from the caller so
-    /// it never inherits a prior `Blit` frame's narrow mask.
+    /// it never inherits a prior `Blitted` frame's narrow mask.
     pub stale_panes: PaneRegionMask,
 }
 
@@ -127,38 +174,44 @@ pub enum FrameValidity {
     Rebuild,
 }
 
+/// Outcome of [`Chrome::next_blit`]. The blit construction has exactly two
+/// results — in-place reuse succeeded, or it rejected and fell back to a full
+/// rebuild — so they are *variants*, not a tag the caller has to assert one
+/// case away from. Each carries the built `Chrome`; the caller dispatches the
+/// paint (blit copy vs full repaint) on which arm it got.
+#[must_use = "the built Chrome must become the next last_frame"]
+pub enum BlitOutcome {
+    /// In-place reuse succeeded: the kept band was blitted, only the strip
+    /// touched the model. Caller paints via `paint_grid_blit`.
+    Blitted(Chrome),
+    /// Reuse rejected (e.g. row-header digit-boundary 99 -> 100) and the frame
+    /// was rebuilt `Fresh`. Caller invalidates caches and paints `paint_grid`.
+    FreshFallback(Chrome),
+}
+
 impl Chrome {
-    /// Build the next-frame `Chrome`. The `path` argument selects which
-    /// regime the orchestrator chose; the body branches once and inlines
-    /// the three former constructors.
+    /// Build the next-frame `Chrome` for the reuse-or-rebuild regimes. The
+    /// `path` argument selects which one; the body branches once and inlines
+    /// the two constructors. The blit fast-path is separate
+    /// ([`Self::next_blit`]) — it has a two-outcome result, not a regime tag.
     ///
     ///   * `Fresh` — full rebuild. `prev = Some` recycles slot Vec
-    ///     allocations; `None` is the first-frame path. See
-    ///     `ARCHITECTURE.md` for build phases A–E.
+    ///     allocations; `None` is the first-frame path. See the
+    ///     [module docs](crate::chrome) for build phases A-E.
     ///   * `SlotsReuse` — prev's slot vecs survive verbatim; only
     ///     per-frame state (theme + `pane_fingerprints` rotation) is
     ///     refreshed. Caller refreshes overlay state separately
     ///     (`SelectionLayer::refresh` in the orchestrator).
-    ///   * `Blit(plan)` — caller has already issued `Painter::blit` to
-    ///     shift the kept band; this frame rebuilds only the scroll-axis
-    ///     slot vec (kept band heights/widths carry over from prev; the
-    ///     strip is the only band that hits the model) and clones the
-    ///     cross-axis vec. Falls back to `Fresh` when `row_header_thickness`
-    ///     would change across a digit boundary (e.g. row 99 → 100).
-    ///     Non-stale panes get their `pane_fingerprints` seeded from prev
-    ///     so the *next* frame's fingerprint compare doesn't false-
-    ///     mismatch against a build-default 0.
     ///
-    /// `SlotsReuse` and `Blit` require `prev = Some`; `None` falls
-    /// through to `Fresh` defensively. The orchestrator proves
-    /// `prev.is_some()` before selecting those paths, but the fallback
-    /// keeps `Chrome::next` total.
+    /// `SlotsReuse` requires `prev = Some`; `None` falls through to `Fresh`
+    /// defensively. The orchestrator proves `prev.is_some()` before selecting
+    /// that path, but the fallback keeps `Chrome::next` total.
     pub fn next(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
         canvas: CanvasSize,
-        theme: &CanvasTheme,
-        path: FramePath<'_>,
+        theme: &Rc<CanvasTheme>,
+        path: FramePath,
     ) -> Self {
         match path {
             FramePath::Fresh => {
@@ -176,38 +229,60 @@ impl Chrome {
                     return Self::next(None, model, canvas, theme, FramePath::Fresh);
                 };
                 prev.prev_pane_fingerprints = prev.pane_fingerprints.replace([0; 4]);
-                prev.theme = theme.clone();
+                prev.theme = Rc::clone(theme);
                 prev.kind = FrameKindTag::SlotsReused;
                 prev.stale_panes = stale_panes;
                 prev
             }
-            FramePath::Blit(plan) => {
-                let Some(prev) = prev else {
-                    return Self::next(None, model, canvas, theme, FramePath::Fresh);
-                };
-                if let Some(frame) = blit::try_blit_reuse(&prev, model, canvas, theme, plan) {
-                    return frame;
-                }
-                // Qualification passed (`screen_for_blit` returned a plan) but
-                // in-place reuse rejected — e.g. row-header digit boundary at
-                // 99 → 100, where `row_header_thickness` widens by one digit
-                // and the cross-axis cell-area origin shifts. The frame
-                // returns as `Fresh` (not the `Blitted` mislabel of yore);
-                // `paint_viewport_regime` dispatches on `frame.kind` and
-                // calls the full `paint_grid` path with cache invalidation.
-                Self::next(Some(prev), model, canvas, theme, FramePath::Fresh)
-            }
+        }
+    }
+
+    /// Build the next-frame `Chrome` for the blit fast-path, returning a typed
+    /// [`BlitOutcome`] rather than a `Chrome` with an open `FrameKindTag`.
+    ///
+    /// Qualification passed (`screen_for_blit` returned a plan), but in-place
+    /// reuse may still reject — e.g. the row-header digit boundary at 99 -> 100,
+    /// where `row_header_thickness` widens and the cross-axis cell-area origin
+    /// shifts. `try_blit_reuse` hands `prev` back (`Err`) on reject, and we
+    /// rebuild `Fresh`. The two results map straight to the two `BlitOutcome`
+    /// arms at the decision point, so no caller has to assert an impossible
+    /// `SlotsReused` away.
+    pub fn next_blit(
+        prev: Option<Chrome>,
+        model: &dyn CanvasModel,
+        canvas: CanvasSize,
+        theme: &Rc<CanvasTheme>,
+        plan: &BlitPlan,
+    ) -> BlitOutcome {
+        let Some(prev) = prev else {
+            return BlitOutcome::FreshFallback(Self::next(
+                None,
+                model,
+                canvas,
+                theme,
+                FramePath::Fresh,
+            ));
+        };
+        match blit::try_blit_reuse(prev, model, canvas, theme, plan) {
+            Ok(frame) => BlitOutcome::Blitted(frame),
+            Err(prev) => BlitOutcome::FreshFallback(Self::next(
+                Some(prev),
+                model,
+                canvas,
+                theme,
+                FramePath::Fresh,
+            )),
         }
     }
 
     fn build(
         model: &dyn CanvasModel,
         canvas: CanvasSize,
-        theme: &CanvasTheme,
+        theme: &Rc<CanvasTheme>,
         recycled: RecycledSlots,
         prev_pane_fingerprints: [u64; 4],
     ) -> Self {
-        // None ⇒ JS bridge transient (threw or shape malformed). Fall through
+        // None -> JS bridge transient (threw or shape malformed). Fall through
         // with the fresh-model default so the frame still builds; next animation
         // frame re-queries.
         let view = model.get_selected_view().unwrap_or(CanvasView {
@@ -225,37 +300,75 @@ impl Chrome {
         });
         let sheet = model.get_selected_sheet();
 
+        // Visibility is modelled as thickness 0. CELL_AREA_INSET only reserves
+        // the 1-px chrome border that draw_corner_box strokes; a hidden strip
+        // paints no such border, so its thickness AND inset collapse to 0 and
+        // cells reclaim the full edge (cell_origin follows from origin_x/_y).
+        let show_row = model.get_show_row_headers(sheet).unwrap_or(true);
+        let show_col = model.get_show_col_headers(sheet).unwrap_or(true);
+
         // Phase A — frozen counts only.
         let frozen_row_count = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_col_count = model.get_frozen_columns_count(sheet).unwrap_or(0);
 
         let mut pane_set = PaneSet::with_recycled(recycled);
 
-        // Phase B — row walk.
-        let origin_y = HEADER_ROW_HEIGHT + CELL_AREA_INSET;
-        pane_set.fill_rows(model, frozen_row_count, origin_y, view.top_row, canvas.h);
+        // Phase B — row walk, bounded by the model's grid (Excel's
+        // LAST_ROW/LAST_COLUMN by default; finite models override).
+        let last_row = model.last_row(sheet);
+        let last_column = model.last_column(sheet);
+        let origin_y = if show_col {
+            HEADER_ROW_HEIGHT + CELL_AREA_INSET
+        } else {
+            0
+        };
+        pane_set.fill_rows(
+            model,
+            frozen_row_count,
+            origin_y,
+            view.top_row,
+            last_row,
+            canvas.h,
+        );
 
         // Phase C — measure row_header_thickness from the last visible row label.
         let last_visible_row = pane_set
-            .scroll_rows
+            .rows
+            .scroll
             .last()
             .map(|s| s.row)
             .unwrap_or((frozen_row_count + 1).max(view.top_row));
-        let row_header_thickness = measure_row_header_width(last_visible_row);
+        let row_header_thickness = if show_row {
+            measure_row_header_width(last_visible_row)
+        } else {
+            0
+        };
 
         // Phase D — col walk uses the measured width to anchor `origin_x`.
-        let origin_x = row_header_thickness + CELL_AREA_INSET;
+        let origin_x = if show_row {
+            row_header_thickness + CELL_AREA_INSET
+        } else {
+            0
+        };
         pane_set.fill_cols(
             model,
             frozen_col_count,
             origin_x,
             view.left_column,
+            last_column,
             canvas.w,
         );
 
+        // Data-driven header labels in walk_header_strip (frozen ++ scroll)
+        // order so header_strip can zip slots <-> labels positionally.
+        pane_set.row_header_labels =
+            PaneSet::resolve_row_labels(model, sheet, &pane_set.rows.frozen, &pane_set.rows.scroll);
+        pane_set.col_header_labels =
+            PaneSet::resolve_col_labels(model, sheet, &pane_set.cols.frozen, &pane_set.cols.scroll);
+
         // Phase E — assemble. `cell_origin` reuses the locals from B/D so
         // there's a single source of truth for the cell-area top-left.
-        let col_header_thickness = HEADER_ROW_HEIGHT;
+        let col_header_thickness = if show_col { HEADER_ROW_HEIGHT } else { 0 };
         let cell_origin = Point {
             x: origin_x,
             y: origin_y,
@@ -268,12 +381,12 @@ impl Chrome {
             col_header_thickness,
             cell_origin,
             canvas_size: canvas,
-            theme: theme.clone(),
+            theme: Rc::clone(theme),
             prev_pane_fingerprints,
             pane_fingerprints: Cell::new([0; 4]),
             kind: FrameKindTag::Fresh,
-            // Full repaint by default. The `FramePath::Blit` arm of
-            // `Chrome::next` overrides this when scroll-blit narrows the work.
+            // Full repaint by default. `try_blit_reuse` (via `Chrome::next_blit`)
+            // overrides this when scroll-blit narrows the work.
             stale_panes: PaneRegionMask::ALL,
         }
     }
@@ -282,8 +395,17 @@ impl Chrome {
     /// model. Per-pane content skipping happens later (inside
     /// `render_pane`) via the fingerprint compare; this method only
     /// decides whether the slot vecs themselves can be reused.
-    pub fn is_still_valid(&self, model: &dyn CanvasModel, size: CanvasSize) -> FrameValidity {
-        if size != self.canvas_size {
+    pub fn is_still_valid(
+        &self,
+        model: &dyn CanvasModel,
+        size: CanvasSize,
+        theme: &Rc<CanvasTheme>,
+    ) -> FrameValidity {
+        // Theme is frame-wide: a palette change makes every cached pixel stale,
+        // so reuse is invalid. Checked here (symmetric with `screen_for_blit`)
+        // rather than out-of-band in `set_theme`, so theme-safety is a property
+        // of the validity verdict, not of setter discipline.
+        if size != self.canvas_size || theme != &self.theme {
             return FrameValidity::Rebuild;
         }
         let Some(view) = model.get_selected_view() else {
@@ -297,8 +419,8 @@ impl Chrome {
         if self.pane_set.top_row() != want_top || self.pane_set.left_column() != want_left {
             return FrameValidity::Rebuild;
         }
-        if frozen_rows == self.pane_set.frozen_rows_count()
-            && frozen_cols == self.pane_set.frozen_cols_count()
+        if frozen_rows == self.pane_set.rows.frozen_count()
+            && frozen_cols == self.pane_set.cols.frozen_count()
             && sheet == self.sheet
         {
             FrameValidity::SlotsReuse
@@ -321,7 +443,7 @@ impl Chrome {
         &self,
         model: &dyn CanvasModel,
         canvas: CanvasSize,
-        theme: &CanvasTheme,
+        theme: &Rc<CanvasTheme>,
         active_cell: &ActiveCellSnapshot,
     ) -> Option<BlitPlan> {
         if canvas != self.canvas_size || theme != &self.theme {
@@ -333,8 +455,8 @@ impl Chrome {
         }
         let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
         let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        if frozen_rows != self.pane_set.frozen_rows_count()
-            || frozen_cols != self.pane_set.frozen_cols_count()
+        if frozen_rows != self.pane_set.rows.frozen_count()
+            || frozen_cols != self.pane_set.cols.frozen_count()
         {
             return None;
         }
@@ -381,8 +503,8 @@ impl Chrome {
     /// model access.
     pub fn range_rect(&self, range: RCRange) -> Option<PixelRect> {
         let p = &self.pane_set;
-        let frozen_rows = p.frozen_rows_count();
-        let frozen_cols = p.frozen_cols_count();
+        let frozen_rows = p.rows.frozen_count();
+        let frozen_cols = p.cols.frozen_count();
 
         if !self.range_intersects_fold(range, frozen_rows, frozen_cols) {
             return None;
@@ -431,10 +553,13 @@ impl Chrome {
         let norm = selection_range.normalized();
         let r2 = norm.r2;
         let c2 = norm.c2;
-        if r2 >= LAST_ROW || c2 >= LAST_COLUMN {
+        let p = &self.pane_set;
+        // Selections reaching the grid's last row/column (full-row,
+        // full-column, or up against a finite model's data boundary) get
+        // no handle — there is nothing beyond to fill into.
+        if r2 >= p.rows.last_id || c2 >= p.cols.last_id {
             return None;
         }
-        let p = &self.pane_set;
         if !p.row_in_frame(r2) || !p.col_in_frame(c2) {
             return None;
         }
@@ -465,18 +590,18 @@ impl Chrome {
         }
         let p = &self.pane_set;
         if y < self.cell_origin.y {
-            return match p.pixel_to_col(x) {
-                Some(c) => HitTest::ColHeader(c),
+            return match p.cols.pixel_to_id(x) {
+                Some(c) => HitTest::ColumnHeader(c),
                 None => HitTest::Outside,
             };
         }
         if x < self.cell_origin.x {
-            return match p.pixel_to_row(y) {
+            return match p.rows.pixel_to_id(y) {
                 Some(r) => HitTest::RowHeader(r),
                 None => HitTest::Outside,
             };
         }
-        let (Some(row), Some(column)) = (p.pixel_to_row(y), p.pixel_to_col(x)) else {
+        let (Some(row), Some(column)) = (p.rows.pixel_to_id(y), p.cols.pixel_to_id(x)) else {
             return HitTest::Outside;
         };
         // `AutofillHandle` is resolved by `AutofillLayer::hit_test` in
@@ -489,14 +614,16 @@ impl Chrome {
         if y < self.col_header_thickness && x > self.row_header_thickness {
             return self
                 .pane_set
-                .col_boundary_at(x, tolerance)
-                .map(ResizeTarget::Column);
+                .cols
+                .boundary_at(x, tolerance)
+                .map(ResizeTarget::ColumnEdge);
         }
         if x < self.row_header_thickness && y > self.col_header_thickness {
             return self
                 .pane_set
-                .row_boundary_at(y, tolerance)
-                .map(ResizeTarget::Row);
+                .rows
+                .boundary_at(y, tolerance)
+                .map(ResizeTarget::RowEdge);
         }
         None
     }

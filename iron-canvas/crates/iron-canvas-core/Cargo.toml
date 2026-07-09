@@ -7,10 +7,21 @@ edition.workspace = true
 [lib]
 crate-type = ["rlib"]
 
+[features]
+# Exposes `Orchestrator::{grid_surface, overlay_surface}` for surface
+# introspection. Off in prod builds; turned on by this crate's own
+# integration tests (via the self dev-dependency below) and by
+# `iron-canvas-web`'s `dev-tools` feature (recording + playback).
+surface-introspection = []
+
 [dependencies]
-ironcalc_base = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 bitflags = {workspace = true}
 
 [dev-dependencies]
 iron-canvas-recorder = { path = "../iron-canvas-recorder" }
+# Self dev-dependency: a crate cannot enable its own feature for its
+# `tests/` any other way (`#[cfg(test)]` doesn't reach the lib build).
+# This turns `surface-introspection` on for the integration tests that
+# read the recorder surfaces, while the plain `cargo build` keeps it off.
+iron-canvas-core = { path = ".", features = ["surface-introspection"] }

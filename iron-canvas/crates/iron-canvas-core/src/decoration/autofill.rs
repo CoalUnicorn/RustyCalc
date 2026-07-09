@@ -60,8 +60,8 @@ impl Layer for AutofillLayer {
         {
             return None;
         }
-        let row = frame.pane_set.pixel_to_row(y)?;
-        let column = frame.pane_set.pixel_to_col(x)?;
+        let row = frame.pane_set.rows.pixel_to_id(y)?;
+        let column = frame.pane_set.cols.pixel_to_id(x)?;
         Some(HitTest::AutofillHandle { row, column })
     }
 }

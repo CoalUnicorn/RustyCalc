@@ -18,10 +18,9 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
 
-use ironcalc_base::types::{CellType, Style};
-
 use iron_canvas_core::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
-use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, CellContentQuery, RCRange};
+use iron_canvas_core::{CellDecoration, CellKind, CellStyle, Fetched};
 
 pub struct TestModel {
     sheet: Cell<u32>,
@@ -32,16 +31,28 @@ pub struct TestModel {
     row_height_overrides: RefCell<BTreeMap<i32, f64>>,
     col_width_overrides: RefCell<BTreeMap<i32, f64>>,
     cell_values: RefCell<HashMap<(i32, i32), String>>,
+    decorations: RefCell<HashMap<(i32, i32), CellDecoration>>,
+    column_headers: RefCell<HashMap<i32, String>>,
     /// When > 0, rows `1..=data_until` return `"R{row}"` for any column
     /// not explicitly set via `set_cell`. Lets a test populate a synthetic
     /// data band without enumerating cells.
     data_until: Cell<i32>,
+    /// Grid bounds reported via `last_row` / `last_column`. Default to the
+    /// Excel constants; `with_last_row` shrinks them to model a finite grid.
+    last_row: Cell<i32>,
+    last_column: Cell<i32>,
     top_row: Cell<i32>,
     left_column: Cell<i32>,
     active_row: Cell<i32>,
     active_col: Cell<i32>,
     selection: Cell<RCRange>,
     show_grid: Cell<bool>,
+    show_row_headers: Cell<bool>,
+    show_col_headers: Cell<bool>,
+    /// When set, `get_formatted_cell_value` reports a transient
+    /// `Fetched::BridgeFailed` — simulating a JS-bridge throw so tests can
+    /// exercise the active-cell repaint's atomic-skip path.
+    value_bridge_fail: Cell<bool>,
 }
 
 impl Default for TestModel {
@@ -55,7 +66,11 @@ impl Default for TestModel {
             row_height_overrides: RefCell::default(),
             col_width_overrides: RefCell::default(),
             cell_values: RefCell::default(),
+            decorations: RefCell::default(),
+            column_headers: RefCell::default(),
             data_until: Cell::new(0),
+            last_row: Cell::new(iron_canvas_core::LAST_ROW),
+            last_column: Cell::new(iron_canvas_core::LAST_COLUMN),
             top_row: Cell::new(1),
             left_column: Cell::new(1),
             active_row: Cell::new(1),
@@ -67,6 +82,9 @@ impl Default for TestModel {
                 c2: 1,
             }),
             show_grid: Cell::new(true),
+            show_row_headers: Cell::new(true),
+            show_col_headers: Cell::new(true),
+            value_bridge_fail: Cell::new(false),
         }
     }
 }
@@ -134,6 +152,20 @@ impl TestModel {
         self.data_until.set(row);
         self
     }
+    pub fn with_last_row(self, row: i32) -> Self {
+        self.last_row.set(row);
+        self
+    }
+    pub fn with_last_column(self, col: i32) -> Self {
+        self.last_column.set(col);
+        self
+    }
+    pub fn with_column_header(self, col: i32, text: &str) -> Self {
+        self.column_headers
+            .borrow_mut()
+            .insert(col, text.to_string());
+        self
+    }
     pub fn with_default_row_height(self, h: f64) -> Self {
         self.default_row_height.set(h);
         self
@@ -144,6 +176,14 @@ impl TestModel {
     }
     pub fn with_show_grid(self, b: bool) -> Self {
         self.show_grid.set(b);
+        self
+    }
+    pub fn with_hidden_row_headers(self) -> Self {
+        self.show_row_headers.set(false);
+        self
+    }
+    pub fn with_hidden_col_headers(self) -> Self {
+        self.show_col_headers.set(false);
         self
     }
 
@@ -185,8 +225,14 @@ impl TestModel {
             .borrow_mut()
             .insert((row, col), value.to_string());
     }
+    pub fn set_decoration(&self, row: i32, col: i32, deco: CellDecoration) {
+        self.decorations.borrow_mut().insert((row, col), deco);
+    }
     pub fn set_data_until(&self, row: i32) {
         self.data_until.set(row);
+    }
+    pub fn set_value_bridge_fail(&self, fail: bool) {
+        self.value_bridge_fail.set(fail);
     }
     pub fn set_sheet(&self, sheet: u32) {
         self.sheet.set(sheet);
@@ -238,21 +284,48 @@ impl CanvasModel for TestModel {
     fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
         Some(self.show_grid.get())
     }
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Option<Style> {
-        Some(Style::default())
+    fn last_row(&self, _: u32) -> i32 {
+        self.last_row.get()
     }
-    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Option<CellType> {
-        Some(CellType::Text)
+    fn last_column(&self, _: u32) -> i32 {
+        self.last_column.get()
     }
-    fn get_formatted_cell_value(&self, _: u32, row: i32, col: i32) -> Option<String> {
+    fn get_show_row_headers(&self, _: u32) -> Option<bool> {
+        Some(self.show_row_headers.get())
+    }
+    fn get_show_col_headers(&self, _: u32) -> Option<bool> {
+        Some(self.show_col_headers.get())
+    }
+    fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
+        self.column_headers.borrow().get(&column).cloned()
+    }
+}
+
+impl CellContentQuery for TestModel {
+    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Fetched<CellStyle> {
+        Fetched::Value(CellStyle::default())
+    }
+    fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Fetched<CellKind> {
+        Fetched::Value(CellKind::Text)
+    }
+    fn get_extended_cell_style(&self, _: u32, row: i32, col: i32) -> Fetched<CellDecoration> {
+        match self.decorations.borrow().get(&(row, col)).cloned() {
+            Some(d) => Fetched::Value(d),
+            None => Fetched::Absent,
+        }
+    }
+    fn get_formatted_cell_value(&self, _: u32, row: i32, col: i32) -> Fetched<String> {
+        if self.value_bridge_fail.get() {
+            return Fetched::BridgeFailed;
+        }
         if let Some(v) = self.cell_values.borrow().get(&(row, col)) {
-            return Some(v.clone());
+            return Fetched::Value(v.clone());
         }
         let data_until = self.data_until.get();
         if data_until > 0 && (1..=data_until).contains(&row) {
-            return Some(format!("R{row}"));
+            return Fetched::Value(format!("R{row}"));
         }
-        Some(String::new())
+        Fetched::Value(String::new())
     }
 }
 

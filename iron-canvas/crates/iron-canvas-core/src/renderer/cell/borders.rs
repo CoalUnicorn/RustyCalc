@@ -14,7 +14,7 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 
-use ironcalc_base::types::{Border, BorderItem, BorderStyle};
+use crate::style::{Border, BorderItem, BorderStyle};
 
 use super::paint::CellPaint;
 use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
@@ -87,7 +87,7 @@ impl BorderPaint {
     /// Thin grid-color stroke used as the left/top fallback when a cell has
     /// no explicit border on that edge. `Cow::clone` is a pointer copy for
     /// built-in themes and a `String::clone` for host-page themes.
-    fn grid_line(theme: &CanvasTheme) -> Self {
+    pub(super) fn grid_line(theme: &CanvasTheme) -> Self {
         Self {
             color: BorderColor::Static(theme.grid_color.clone()),
             stroke: BorderStroke {
@@ -115,7 +115,8 @@ impl BorderPaint {
 
 impl BorderStroke {
     /// Map `BorderStyle` -> pixel width + double-line flag.
-    /// Dashed/dotted patterns degrade to solid 1 px in v1.
+    /// Dash/dot patterns render solid in v1 (no dash); width still follows the
+    /// Medium / Thick / thin tier (e.g. `MediumDashed` keeps `MEDIUM_BORDER_WIDTH`).
     fn from_border_style(s: &BorderStyle) -> Self {
         match s {
             BorderStyle::Medium
@@ -148,19 +149,21 @@ impl<P: Painter> RendererCore<P> {
     /// Reads `p.borders` (pre-resolved at iteration time) so an explicit
     /// border on left/top still suppresses the grid stroke without re-walking
     /// `style.border`.
-    pub(super) fn paint_borders_grid(&self, p: &CellPaint, theme: &CanvasTheme) {
+    /// `grid` is the theme's grid-line `BorderPaint`, resolved once per pass by
+    /// the caller and shared across every cell — it's frame-invariant, so
+    /// rebuilding it per slot only re-cloned `theme.grid_color` for nothing (B-3).
+    pub(super) fn paint_borders_grid(&self, p: &CellPaint, grid: &BorderPaint) {
         if !self.frame_cache.show_grid.get() {
             return;
         }
-        if p.style.fill.fg_color.is_some() {
+        if p.style.fill_color.is_some() {
             return;
         }
-        let grid = BorderPaint::grid_line(theme);
         if p.borders.left.is_none() {
-            self.paint_border(BorderEdge::Left, p.rect, &grid);
+            self.paint_border(BorderEdge::Left, p.rect, grid);
         }
         if p.borders.top.is_none() {
-            self.paint_border(BorderEdge::Top, p.rect, &grid);
+            self.paint_border(BorderEdge::Top, p.rect, grid);
         }
     }
 
@@ -188,14 +191,19 @@ impl<P: Painter> RendererCore<P> {
     /// sub-passes in their canonical order: grid fallback first, explicit
     /// over the top.
     pub(super) fn paint_borders(&self, p: &CellPaint, theme: &CanvasTheme) {
-        self.paint_borders_grid(p, theme);
+        self.paint_borders_grid(p, &BorderPaint::grid_line(theme));
         self.paint_borders_explicit(p);
     }
 
     /// Stroke one resolved border. `Double`-style borders render as two
     /// parallel strokes offset ±1 px on the cross-axis.
     fn paint_border(&self, edge: BorderEdge, rect: PixelRect, b: &BorderPaint) {
-        let line = edge.line(rect);
+        // Extend each edge by half its width so perpendicular borders overlap
+        // at the corner instead of leaving a butt-cap notch. With the painter's
+        // parity-aware pixel snap, `width_px / 2` is the exact reach of the
+        // crossing edge's band from its centerline (0 for 1-px borders, which
+        // already meet cleanly).
+        let line = edge.line(rect).extend(b.stroke.width_px / 2);
         let offsets: &[i32] = if b.stroke.double { &[-1, 1] } else { &[0] };
         let color = match &b.color {
             BorderColor::Static(s) => PaintColor::from_theme_str(s),

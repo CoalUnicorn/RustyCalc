@@ -1,7 +1,7 @@
 //! Pixel- and cell-space primitives.
 //!
 //! Every visible artifact composes from [`pixel_rect::PixelRect`] and
-//! [`prim::Line`]. The cell-address ↔ pixel-rect mapping lives in
+//! [`prim::Line`]. The cell-address <-> pixel-rect mapping lives in
 //! [`slot`]; layout values in [`constants`]; the Excel-style column
 //! label helper in [`utils`].
 
@@ -21,10 +21,7 @@ pub struct CanvasSize {
 impl CanvasSize {
     /// Physical backing-store dimensions from CSS size and DPR.
     /// Truncates fractional pixels — matches browser canvas rounding behaviour.
-    pub fn to_backing_size(self, dpr: i32) -> (u32, u32) {
-        (
-            (self.w * f64::from(dpr)) as u32,
-            (self.h * f64::from(dpr)) as u32,
-        )
+    pub fn to_backing_size(self, dpr: f64) -> (u32, u32) {
+        ((self.w * dpr) as u32, (self.h * dpr) as u32)
     }
 }

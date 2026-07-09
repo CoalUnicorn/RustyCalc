@@ -1,0 +1,505 @@
+/* Toolbar — prefix: tb-
+ *
+ * Mapping:
+ *   toolbar            -> tb
+ *   toolbar-btn        -> tb-btn
+ *   toolbar-btn active -> tb-btn active
+ *   toolbar-sep        -> tb-sep
+ *   toolbar-font-family -> tb-font
+ *   toolbar-font-size  -> tb-size
+ *   font-size-btn      -> tb-size-btn
+ *   theme-btn          -> tb-theme   (migrated from file bar)
+ *   share-btn          -> tb-share   (migrated from file bar)
+ */
+
+.tb-shell {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+.tb {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    height: 36px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-inner);
+    flex-shrink: 0;
+    overflow: hidden; /* clip the pre-measure first frame */
+}
+
+.tb .tb-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.tb .tb-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-inner);
+}
+
+.tb .tb-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.tb .tb-btn.active:hover {
+    opacity: 0.9;
+}
+
+.tb .tb-btn:disabled {
+    opacity: 0.35;
+    cursor: default;
+    pointer-events: none;
+}
+
+.tb .tb-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--border-inner);
+    margin: 0 4px;
+    flex-shrink: 0;
+}
+
+.tb .tb-size {
+    width: 36px;
+    height: 28px;
+    padding: 0;
+    font-size: 12px;
+    text-align: center;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    background: var(--btn-bg);
+    color: var(--text-primary);
+}
+
+.tb .tb-size:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.tb .tb-size-btn {
+    padding: 0 6px;
+    font-size: 16px;
+    min-width: 28px;
+    justify-content: center;
+}
+
+.tb .tb-font {
+    height: 28px;
+    padding: 0 4px;
+    font-size: 13px;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    background: var(--btn-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+    min-width: 120px;
+}
+
+.tb .tb-font:hover {
+    border-color: var(--accent);
+}
+
+.tb .tb-font:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+/* ── Number format picker ───────────────────────── */
+
+.tb-num-fmt {
+    position: relative;
+    display: inline-block;
+}
+
+.tb-num-fmt-dropdown {
+    /* Positioned by <Popover> via inline left/top (viewport coords) */
+    position: fixed;
+    z-index: 200;
+    min-width: 240px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    padding: 4px 0;
+}
+
+.tb-num-fmt-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    width: 100%;
+    padding: 5px 10px;
+    font-size: 13px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+    box-sizing: border-box;
+}
+
+.tb-num-fmt-item:hover {
+    background: var(--bg-hover);
+}
+
+.tb-num-fmt-check {
+    width: 1.2em;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.tb-num-fmt-label {
+    flex: 1;
+}
+
+.tb-num-fmt-preview {
+    opacity: 0.5;
+    font-size: 0.85em;
+}
+
+.tb-num-fmt-preview--empty {
+    display: none;
+}
+
+.tb-ic {
+    width: 18px;
+    height: 18px;
+    display: block;
+    fill: currentColor;
+}
+
+/* Chrome header row: hamburger | tabs | sharing + chrome cluster. */
+.tb-head {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 30px;
+    padding: 0 8px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-inner);
+    flex-shrink: 0;
+}
+.tb-head-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.tb-ham {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.tb-ham:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+.tb-repo {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 12px;
+}
+.tb-repo:hover {
+    color: var(--text-primary);
+}
+.tb-ver {
+    font-variant-numeric: tabular-nums;
+}
+.tb-trust {
+    padding: 2px 10px;
+    height: 26px;
+    font-size: 12px;
+    font-family: inherit;
+    border: 1px solid var(--warning, #c8a000);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--warning, #c8a000);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tb-trust:hover {
+    background: var(--bg-hover);
+}
+
+/* Theme toggle — circular icon button. Migrated from the former file bar's
+ * `.fl-theme`; standalone (no `.tb-btn`) so the round geometry isn't fighting
+ * the rectangular base button. */
+.tb-theme {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border-inner);
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    transition:
+        background 0.12s,
+        border-color 0.12s;
+}
+.tb-theme:hover {
+    background: var(--bg-hover-strong);
+    border-color: var(--border-color);
+}
+
+/* Share — primary action, so it overrides the transparent `.tb-btn` base with
+ * an accent fill. Uses `.tb` ancestor to match `.tb-btn`'s specificity and wins
+ * by appearing later in the file. */
+.tb .tb-share {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+.tb .tb-share:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    opacity: 0.9;
+}
+
+.tb-tabstrip {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+.tb-tab {
+    height: 30px;
+    padding: 0 12px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.tb-tab:hover {
+    color: var(--text-primary);
+}
+.tb-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+}
+
+.tb-grp {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.tb-overflow {
+    position: relative;
+    margin-left: auto;
+    flex: 0 0 auto;
+}
+
+.tb-overflow-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 200;
+    min-width: 200px;
+    margin-top: 2px;
+    padding: 5px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.tb-overflow-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 4px 8px;
+    border-radius: 6px;
+}
+
+.tb-overflow-item:hover {
+    background: var(--bg-hover);
+}
+
+.tb-overflow-label {
+    font-size: 12.5px;
+    color: var(--text-primary);
+}
+
+/* ==========================================================================
+   Border picker: trigger + Popover dropdown laid out as a 5-column preset grid
+   above two menu rows — "Border color" (the reusable base ColorPicker) and
+   "Border style" (expands to a Thin/Medium/Thick weight selector).
+   ========================================================================== */
+.tb-border {
+    position: relative;
+    display: inline-block;
+}
+
+.tb-border-dropdown {
+    /* Positioned by <Popover> via inline left/top (viewport coords), so this
+       must be `fixed` — `absolute` would resolve against `.tb-border` and fling
+       the panel off-screen. Matches the working `.cp-drop` convention. */
+    position: fixed;
+    z-index: 200;
+    min-width: 180px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    padding: 6px 0;
+}
+
+/* Preset grid: all ten glyphs, 5 per row. */
+.tb-border-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
+    padding: 6px;
+}
+
+.tb-border-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+
+.tb-border-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-inner);
+}
+
+.tb-border-sep {
+    height: 1px;
+    background: var(--border-inner);
+    margin: 2px 0;
+}
+
+/* "Border color" row (the base ColorPicker trigger) + the "Border style" label
+   share one look so the two read as a consistent list. */
+.tb-border-menu-label-row,
+.tb-border-dropdown .cp,
+.tb-border-dropdown .cp-trigger {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.tb-border-menu-label-row,
+.tb-border-dropdown .cp-trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 7px 10px;
+    font-size: 12px;
+    text-align: left;
+    color: var(--text-primary);
+    background: none;
+    border: none;
+    border-radius: 0;
+}
+
+/* Only the color row is interactive; the style label is static. */
+.tb-border-dropdown .cp-trigger {
+    cursor: pointer;
+}
+
+.tb-border-dropdown .cp-trigger:hover {
+    background: var(--bg-hover);
+}
+
+.tb-border-menu-ic {
+    display: flex;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+
+.tb-border-menu-ic svg {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+.tb-border-menu-label {
+    flex: 1;
+}
+
+.tb-border-swatch {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+/* Weight options: three equal buttons, each a name above a line-weight preview. */
+.tb-border-weight-row {
+    display: flex;
+    gap: 4px;
+    padding: 0 10px 8px;
+}
+
+.tb-border-weight-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 4px;
+    font-size: 11px;
+    line-height: 1.2;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-inner);
+    border-radius: 3px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.tb-border-weight-btn:hover {
+    background: var(--bg-hover);
+}
+
+.tb-border-weight-btn--active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+/* Line preview; thickness comes from an inline `border-top` per weight. */
+.tb-border-weight-preview {
+    width: 100%;
+    /* border-top set inline (1/2/3px); currentColor follows the button text,
+       so it turns white when the button is active. */
+}

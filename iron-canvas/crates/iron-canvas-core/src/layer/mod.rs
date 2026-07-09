@@ -14,7 +14,7 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 use crate::chrome::{BlitPlan, Chrome, PaneRegionMask};
-use crate::decoration::{Layer, selection::SelectionLayer};
+use crate::decoration::{DecorationId, Layer, selection::SelectionLayer};
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
@@ -30,7 +30,7 @@ use crate::signal::GridSignals;
 /// via `clone_painter` at construction so paint methods don't need to
 /// re-borrow through the surface on every call.
 #[diagnostic::on_unimplemented(
-    note = "see the canvas-patterns skill for the `Surface` contract — reference impls live in WebSurface, SvgSurface, PdfSurface, MemSurface"
+    note = "a `Surface` owns one `Painter` and exposes `painter`, `clone_painter`, `resize`, `present`. Reference impls: `WebSurface` (iron-canvas-canvas2d), `SvgSurface` and `PdfSurface` (iron-canvas-export), `MemSurface` (iron-canvas-recorder)"
 )]
 pub trait Surface {
     type P: Painter + BlitPainter;
@@ -50,9 +50,9 @@ pub trait Surface {
     /// Resize the backing store. `dpr` here scales the backing pixel
     /// buffer (e.g. `canvas.width = css.w * dpr`) — it does *not* set the
     /// painter's transform matrix. That side runs separately via
-    /// `LayerBase::resize` → `LayerOps::resize_for_dpr`. Two effects, one
+    /// `LayerBase::resize` -> `LayerOps::resize_for_dpr`. Two effects, one
     /// shared input; each backend resizes only what it owns.
-    fn resize(&mut self, css: CanvasSize, dpr: i32);
+    fn resize(&mut self, css: CanvasSize, dpr: f64);
 
     /// Flush the rendered frame. Canvas-2D auto-presents (no-op);
     /// Cairo / off-screen image backends flush here.
@@ -134,14 +134,14 @@ where
         self.gate.drain()
     }
 
-    pub fn resize(&mut self, css: CanvasSize, dpr: i32) {
+    pub fn resize(&mut self, css: CanvasSize, dpr: f64) {
         self.surface.resize(css, dpr);
         self.renderer.resize_for_dpr(dpr);
     }
 }
 
 /// Full-canvas pixel rect. Layer-wide fill / clear converge here so the
-/// `f64` (CSS) → `i32` (PixelRect) rounding lives in one place.
+/// `f64` (CSS) -> `i32` (PixelRect) rounding lives in one place.
 fn full_canvas_rect(size: CanvasSize) -> PixelRect {
     PixelRect {
         top_left: Point { x: 0, y: 0 },
@@ -202,6 +202,7 @@ where
         frame: &Chrome,
         selection: &SelectionLayer,
         others: &[&dyn Layer],
+        customs: &[(DecorationId, Rc<dyn Layer>)],
     ) {
         let size = frame.canvas_size;
         let painter = self.surface.painter();
@@ -232,15 +233,26 @@ where
 
         if let Some(sel) = selection.selection_range {
             painter.begin_group(GroupClass::HeaderHighlights);
-            self.renderer
-                .render_header_highlights(Axis::Row, frame, sel);
-            self.renderer
-                .render_header_highlights(Axis::Column, frame, sel);
+            if frame.row_header_thickness > 0 {
+                self.renderer
+                    .render_header_highlights(Axis::Row, frame, sel);
+            }
+            if frame.col_header_thickness > 0 {
+                self.renderer
+                    .render_header_highlights(Axis::Column, frame, sel);
+            }
             painter.end_group();
         }
 
         // Other decorations: one group each, named by the layer itself.
         for layer in others {
+            painter.begin_group(layer.group());
+            layer.paint(frame, painter);
+            painter.end_group();
+        }
+        // Consumer band — topmost, insertion order back-to-front. Same
+        // bracket-per-layer contract as the built-ins above.
+        for (_, layer) in customs {
             painter.begin_group(layer.group());
             layer.paint(frame, painter);
             painter.end_group();

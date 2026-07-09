@@ -1,12 +1,11 @@
 //! Single-axis blit machinery: qualification probes (kept-band extent
 //! verification + strip-size compute) and slot-Vec rebuilds for the
-//! scrolled axis. `Chrome::screen_for_blit` calls the probes; the
-//! `FramePath::Blit` arm of `Chrome::next` calls the rebuilds.
+//! scrolled axis. `Chrome::screen_for_blit` calls the probes;
+//! `Chrome::next_blit` (via `try_blit_reuse`) calls the rebuilds.
 //!
 //! Lives next to `chrome/blit.rs`. Splits off `chrome/pane_set.rs` so
 //! the latter only carries pure-axis geometry.
 
-use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
 use crate::geometry::slot::{AxisSlot, ColSlot, RowSlot, col_width, fill_axis, row_height};
 use crate::{CanvasModel, CanvasSize};
 
@@ -124,7 +123,7 @@ fn rebuild_axis_slots<S: AxisSlot>(
             &mut new_slots,
             new_first_idx..=strip_last,
             frozen_offset,
-            i32::MAX,
+            None,
             &measure,
         );
         let strip_size = strip_cursor_end - frozen_offset;
@@ -151,7 +150,7 @@ fn rebuild_axis_slots<S: AxisSlot>(
             &mut new_slots,
             next_id..=last_idx_limit,
             cursor,
-            max_cursor,
+            Some(max_cursor),
             &measure,
         );
     }
@@ -168,7 +167,7 @@ impl PaneSet {
         pane_y: i32,
         pane_h: i32,
     ) -> Option<(i32, ShiftDir)> {
-        probe_axis_shift(&self.scroll_rows, new_top, pane_y, pane_h, |r| {
+        probe_axis_shift(&self.rows.scroll, new_top, pane_y, pane_h, |r| {
             model.get_row_height(sheet, r).map(|h| h.round() as i32)
         })
     }
@@ -181,7 +180,7 @@ impl PaneSet {
         pane_x: i32,
         pane_w: i32,
     ) -> Option<(i32, ShiftDir)> {
-        probe_axis_shift(&self.scroll_cols, new_left, pane_x, pane_w, |c| {
+        probe_axis_shift(&self.cols.scroll, new_left, pane_x, pane_w, |c| {
             model.get_column_width(sheet, c).map(|w| w.round() as i32)
         })
     }
@@ -193,11 +192,14 @@ impl PaneSet {
         canvas: CanvasSize,
     ) -> Option<Vec<RowSlot>> {
         rebuild_axis_slots(
-            &self.scroll_rows,
-            self.frozen_offset_y,
+            &self.rows.scroll,
+            self.rows.frozen_offset,
             canvas.h.ceil() as i32,
             new_top,
-            LAST_ROW,
+            // prev's fill-time snapshot: the blit path is gated on
+            // !content_dirty, so the model's bound cannot have moved
+            // since prev was built — both rebuild paths agree.
+            self.rows.last_id,
             |r| row_height(model, r),
         )
     }
@@ -209,11 +211,11 @@ impl PaneSet {
         canvas: CanvasSize,
     ) -> Option<Vec<ColSlot>> {
         rebuild_axis_slots(
-            &self.scroll_cols,
-            self.frozen_offset_x,
+            &self.cols.scroll,
+            self.cols.frozen_offset,
             canvas.w.ceil() as i32,
             new_left,
-            LAST_COLUMN,
+            self.cols.last_id,
             |c| col_width(model, c),
         )
     }

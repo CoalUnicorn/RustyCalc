@@ -10,9 +10,12 @@ use iron_canvas_core::theme::CanvasTheme;
 
 use common::{TestModel, canvas_default};
 
+fn light() -> std::rc::Rc<CanvasTheme> {
+    std::rc::Rc::new(CanvasTheme::light())
+}
+
 fn fresh(model: &TestModel) -> Chrome {
-    let theme = CanvasTheme::light();
-    Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh)
+    Chrome::next(None, model, canvas_default(), &light(), FramePath::Fresh)
 }
 
 #[test]
@@ -20,7 +23,7 @@ fn unchanged_state_reports_slots_reuse() {
     let model = TestModel::synthetic_grid();
     let frame = fresh(&model);
     assert_eq!(
-        frame.is_still_valid(&model, canvas_default()),
+        frame.is_still_valid(&model, canvas_default(), &light()),
         FrameValidity::SlotsReuse
     );
 }
@@ -34,7 +37,7 @@ fn canvas_size_change_forces_rebuild() {
         h: canvas_default().h,
     };
     assert_eq!(
-        frame.is_still_valid(&model, resized),
+        frame.is_still_valid(&model, resized, &light()),
         FrameValidity::Rebuild,
         "any canvas-size delta must invalidate the slot vecs"
     );
@@ -46,7 +49,7 @@ fn scroll_change_forces_rebuild() {
     let frame = fresh(&model);
     model.set_top_row(5);
     assert_eq!(
-        frame.is_still_valid(&model, canvas_default()),
+        frame.is_still_valid(&model, canvas_default(), &light()),
         FrameValidity::Rebuild
     );
 }
@@ -60,11 +63,11 @@ fn scroll_inside_frozen_band_keeps_slots_reuse() {
     // frozen header rows.
     let model = TestModel::synthetic_grid().with_frozen_rows(3);
     let frame = fresh(&model);
-    // top_row default = 1; frozen_rows = 3 ⇒ effective top = 4.
+    // top_row default = 1; frozen_rows = 3 -> effective top = 4.
     // Move active cell within rows 1..=3 — top_row stays 1.
     model.set_top_row(2);
     assert_eq!(
-        frame.is_still_valid(&model, canvas_default()),
+        frame.is_still_valid(&model, canvas_default(), &light()),
         FrameValidity::SlotsReuse,
         "scrolling within the frozen band must not invalidate"
     );
@@ -76,7 +79,7 @@ fn frozen_rows_count_change_forces_rebuild() {
     let frame = fresh(&model);
     model.set_frozen_rows(3);
     assert_eq!(
-        frame.is_still_valid(&model, canvas_default()),
+        frame.is_still_valid(&model, canvas_default(), &light()),
         FrameValidity::Rebuild,
         "freeze count delta must rebuild — the pane band boundaries shift"
     );
@@ -88,7 +91,7 @@ fn frozen_cols_count_change_forces_rebuild() {
     let frame = fresh(&model);
     model.set_frozen_cols(4);
     assert_eq!(
-        frame.is_still_valid(&model, canvas_default()),
+        frame.is_still_valid(&model, canvas_default(), &light()),
         FrameValidity::Rebuild
     );
 }
@@ -99,9 +102,25 @@ fn sheet_change_forces_rebuild() {
     let frame = fresh(&model);
     model.set_sheet(1);
     assert_eq!(
-        frame.is_still_valid(&model, canvas_default()),
+        frame.is_still_valid(&model, canvas_default(), &light()),
         FrameValidity::Rebuild,
         "sheet swap invalidates cached pane content even if geometry matches"
+    );
+}
+
+#[test]
+fn theme_change_forces_rebuild() {
+    // Altitude fix: theme identity is a frame-validity input, not an
+    // out-of-band `set_theme` concern. A palette swap makes every cached pixel
+    // stale, so even with identical geometry the verdict must be Rebuild — else
+    // SlotsReuse would repaint stale-color cells under fresh chrome.
+    let model = TestModel::synthetic_grid();
+    let frame = fresh(&model); // built with light()
+    let dark = std::rc::Rc::new(CanvasTheme::dark());
+    assert_eq!(
+        frame.is_still_valid(&model, canvas_default(), &dark),
+        FrameValidity::Rebuild,
+        "a theme change must invalidate the frame regardless of geometry"
     );
 }
 
@@ -114,7 +133,7 @@ fn frozen_rows_change_with_compensating_scroll_still_rebuilds() {
         .with_frozen_rows(3)
         .with_top_row(5);
     let frame = fresh(&model);
-    // Freeze grows by 2, scroll backs off by 2 → effective top unchanged
+    // Freeze grows by 2, scroll backs off by 2 -> effective top unchanged
     // (scroll_first(5, 5) == scroll_first(7, 5) == 5? Let me re-check.
     // scroll_first(3, 5) = max(4, 5) = 5. scroll_first(5, 5) = max(6, 5) = 6.
     // So actually effective top DOES change. Set top_row=6 too so effective
@@ -122,7 +141,7 @@ fn frozen_rows_change_with_compensating_scroll_still_rebuilds() {
     model.set_frozen_rows(5);
     model.set_top_row(6);
     assert_eq!(
-        frame.is_still_valid(&model, canvas_default()),
+        frame.is_still_valid(&model, canvas_default(), &light()),
         FrameValidity::Rebuild,
         "frozen count change must rebuild regardless of compensating scroll"
     );

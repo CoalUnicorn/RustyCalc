@@ -1,6 +1,6 @@
 //! Buffered two-pass PDF document builder.
 //!
-//! Callers register indirect objects in allocation order (1, 2, 3, …);
+//! Callers register indirect objects in allocation order (1, 2, 3, ...);
 //! `finish()` emits the PDF header, body with tracked byte offsets, the
 //! cross-reference table, and the trailer in one pass. The two-pass
 //! shape is forced by PDF's xref requirement: every entry is the byte

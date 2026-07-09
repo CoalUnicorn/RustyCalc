@@ -12,14 +12,15 @@
 //! wipes the painter's font/fill state cache and forces the next cell's
 //! binds to miss).
 
-use std::borrow::Cow;
 use std::rc::Rc;
 
-use ironcalc_base::types::{CellType, HorizontalAlignment, Style, VerticalAlignment};
+use crate::style::{CellKind, CellStyle, HAlign, VAlign};
 
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
-use crate::painter::{PaintColor, Painter, TextAlign, TextBaseline, TextMetrics};
+use crate::painter::{
+    CHAR_WIDTH_FACTOR, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
 use crate::theme::CanvasTheme;
@@ -28,10 +29,12 @@ use crate::theme::CanvasTheme;
 
 /// Below this in either pixel dimension, no text is laid out at all.
 const MIN_TEXT_DIM_PX: f64 = 10.0;
-const CHAR_WIDTH_FACTOR: f64 = 1.0;
-const LINE_HEIGHT_FACTOR: f64 = 2.0;
+// Excel uses single line spacing inside a cell — the font's natural line
+// height, ~1.2x the em for Calibri. Matches `.fe-text` (formula-overlay.css)
+// so canvas display and the DOM editor stack lines identically.
+pub(crate) const LINE_HEIGHT_FACTOR: f64 = 1.2;
 const TEXT_V_INSET_PX: f64 = 4.0;
-const CELL_PADDING: f64 = 4.0;
+pub(crate) const CELL_PADDING: f64 = 4.0;
 
 //  paint constants
 
@@ -59,7 +62,7 @@ pub struct TextPaint {
     /// backends that can't measure glyphs accurately (SVG) can use
     /// `text-anchor="start"` / `"end"` anchored on cell boundaries instead
     /// of the `CHAR_WIDTH_FACTOR`-approximated `center_x`.
-    pub h_align: HorizontalAlignment,
+    pub h_align: HAlign,
     /// True when at least one line overflows horizontally or there are
     /// multiple lines (which can overflow vertically). Resolved here so
     /// `paint_text` can skip `push_clip`/`pop_clip` when the cell can't
@@ -68,18 +71,20 @@ pub struct TextPaint {
     pub needs_clip: bool,
 }
 
-/// Per-cell text color split between the theme-default path (`Static`) and
-/// the per-cell-override path (`Owned`). `Static` carries `Cow<'static, str>` —
-/// `Cow::Borrowed` for built-in themes ptr-eqs through the painter cache,
-/// `Cow::Owned` for host-page themes content-eqs. `Owned` carries an interned
-/// `Rc<str>` from `ColorIntern` so steady-state resolution is `Rc::clone`
-/// after the first sighting. Mirrors `BorderColor` in `cell/borders.rs`.
+/// Per-cell text color. The theme paths (`ThemeDefault`, `ThemeError`) carry no
+/// payload — they name a theme slot resolved at paint time against the live
+/// `CanvasTheme`, so a text cell never clones the theme's color `String` (B-5:
+/// on host-page `Cow::Owned` themes that was one alloc per text cell per frame).
+/// `Owned` carries an interned `Rc<str>` from `ColorIntern` for the per-cell
+/// font-color override — `Rc::clone` after the first sighting.
 pub enum TextColor {
-    Static(Cow<'static, str>),
+    ThemeDefault,
+    ThemeError,
     Owned(Rc<str>),
 }
 
-/// One visual line of text inside a cell, positioned for center-aligned rendering.
+/// One visual line of text inside a cell, positioned for paint
+/// (`center_x`/`center_y` carry the resolved anchor point).
 pub struct TextLine {
     pub text: String,
     pub center_x: f64,
@@ -90,7 +95,7 @@ pub struct TextLine {
 //  resolve
 
 impl TextPaint {
-    /// Build a `TextPaint` for `addr` at `rect` and fill `lines` with the
+    /// Build a `TextPaint` at `rect` and fill `lines` with the
     /// resolved per-line text/width/position. Returns `None` (with `lines`
     /// left empty) for empty/too-small cells. Formatted value AND cell type
     /// are supplied by the caller — `render_pane` drains both from the
@@ -105,10 +110,9 @@ impl TextPaint {
     pub fn resolve_into<P: Painter>(
         renderer: &RendererCore<P>,
         rect: PixelRect,
-        theme: &CanvasTheme,
-        style: &Style,
+        style: &CellStyle,
         text: String,
-        cell_type: CellType,
+        cell_type: CellKind,
         lines: &mut Vec<TextLine>,
     ) -> Option<TextPaint> {
         if text.is_empty() {
@@ -125,15 +129,15 @@ impl TextPaint {
             h_align,
             v_align,
             wrap_text,
-        } = CellTextStyle::resolve(cell_type, theme, style, &renderer.color_intern);
+        } = CellTextStyle::resolve(cell_type, style, &renderer.color_intern);
 
         // Font interning: skips `FontStyle::build` on cache hit. Same lookup
         // is shared across cells with identical (size, weight, slant, family).
-        let size_px = f64::from(style.font.sz);
+        let size_px = style.font.size;
         let font_css = renderer.font_intern.get_or_build(
             size_px,
-            style.font.b,
-            style.font.i,
+            style.font.bold,
+            style.font.italic,
             &style.font.name,
             "Calibri",
         );
@@ -141,9 +145,6 @@ impl TextPaint {
         let approx_char_w = size_px * CHAR_WIDTH_FACTOR;
         let line_height = size_px * LINE_HEIGHT_FACTOR;
         let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
-        let right = rect.right();
-        let bottom = rect.bottom();
-        let center = rect.center();
 
         // Layout pass: split + wrap, measuring once. `lines` comes back with
         // text + width populated and `center_x/y` left at 0.0 for the position
@@ -162,36 +163,9 @@ impl TextPaint {
         );
         drop(wrap_buf);
 
-        let line_count = lines.len() as f64;
-        for (i, line) in lines.iter_mut().enumerate() {
-            let i_f = i as f64;
-            let tw = line.width;
-            // foreign #[non_exhaustive]: HorizontalAlignment is upstream (ironcalc).
-            // Left / General / Justify / Distributed / Fill default to left-anchored.
-            line.center_x = match h_align {
-                HorizontalAlignment::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
-                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => {
-                    f64::from(center.x)
-                }
-                _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
-            };
-            // foreign #[non_exhaustive]: VerticalAlignment is upstream (ironcalc).
-            // Top / Justify / Distributed default to top-anchored.
-            line.center_y = match v_align {
-                VerticalAlignment::Bottom => {
-                    f64::from(bottom) - size_px / 2.0 - TEXT_V_INSET_PX
-                        + (i_f - line_count + 1.0) * line_height
-                }
-                VerticalAlignment::Center => {
-                    f64::from(center.y) + (i_f + (1.0 - line_count) / 2.0) * line_height
-                }
-                _ => {
-                    f64::from(rect.top_left.y) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height
-                }
-            };
-        }
+        position_lines(lines, h_align, v_align, rect, size_px, line_height);
 
-        let needs_clip = lines.len() > 1 || lines.iter().any(|l| l.width > usable_w);
+        let needs_clip = lines_escape_cell(lines, usable_w, rect, line_height);
 
         Some(TextPaint {
             clip: rect,
@@ -206,6 +180,62 @@ impl TextPaint {
     }
 }
 
+/// Assign each already-measured line its `center_x`/`center_y` anchor. Split out
+/// of `resolve_into` so the pipeline reads resolve -> layout -> position -> assemble
+/// without a 20-line alignment digression inline (B-4). Mutates `lines` in place;
+/// `width` must already be populated by `layout_into`.
+fn position_lines(
+    lines: &mut [TextLine],
+    h_align: HAlign,
+    v_align: VAlign,
+    rect: PixelRect,
+    size_px: f64,
+    line_height: f64,
+) {
+    let right = rect.right();
+    let bottom = rect.bottom();
+    let center = rect.center();
+    let line_count = lines.len() as f64;
+    for (i, line) in lines.iter_mut().enumerate() {
+        let i_f = i as f64;
+        let tw = line.width;
+        // Left / General / Justify / Distributed / Fill default to left-anchored.
+        line.center_x = match h_align {
+            HAlign::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
+            HAlign::Center | HAlign::CenterContinuous => f64::from(center.x),
+            _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
+        };
+        // Top / Justify / Distributed default to top-anchored.
+        line.center_y = match v_align {
+            VAlign::Bottom => {
+                f64::from(bottom) - size_px / 2.0 - TEXT_V_INSET_PX
+                    + (i_f - line_count + 1.0) * line_height
+            }
+            VAlign::Center => f64::from(center.y) + (i_f + (1.0 - line_count) / 2.0) * line_height,
+            _ => f64::from(rect.top_left.y) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
+        };
+    }
+}
+
+/// Clip iff any *positioned* line escapes the cell box on either axis. Vertical
+/// reads the resolved `center_y` (post-`position_lines`), not a raw block-height
+/// compare: bottom/top alignment plus `TEXT_V_INSET_PX` can push a block that
+/// "fits" by total height past the top or bottom edge, and only the anchored
+/// centers reveal that. Glyphs are baseline-middle, so each spans
+/// `center_y +- line_height/2` (1.2 x em over-estimates real glyph height, so the
+/// strict `<`/`>` err toward clipping a hair early — the safe direction).
+/// Supersedes the old `lines.len() > 1` proxy: catches a single tall line and a
+/// bottom-anchored block crossing the top edge, while still skipping the
+/// save/restore for multi-line cells that genuinely fit.
+fn lines_escape_cell(lines: &[TextLine], usable_w: f64, rect: PixelRect, line_height: f64) -> bool {
+    let half_line = line_height / 2.0;
+    let top = f64::from(rect.top_left.y);
+    let bottom = f64::from(rect.bottom());
+    lines.iter().any(|l| {
+        l.width > usable_w || l.center_y - half_line < top || l.center_y + half_line > bottom
+    })
+}
+
 /// Per-cell text styling resolved from the model's raw `Style`. Private step
 /// inside `TextPaint::resolve_into`. Font css is interned separately via
 /// `FontIntern` so this struct carries no per-cell `String`.
@@ -213,61 +243,44 @@ struct CellTextStyle {
     text_color: TextColor,
     underline: bool,
     strike: bool,
-    h_align: HorizontalAlignment,
-    v_align: VerticalAlignment,
+    h_align: HAlign,
+    v_align: VAlign,
     wrap_text: bool,
 }
 
 impl CellTextStyle {
-    fn resolve(
-        cell_type: CellType,
-        theme: &CanvasTheme,
-        style: &Style,
-        intern: &ColorIntern,
-    ) -> Self {
-        // IronCalc collapses every error variant (#VALUE!, #DIV/0!, #REF!, #NAME?,
-        // #NUM!, #N/A, #NULL!, #SPILL!, #CIRC!, plus IronCalc-only #ERROR!/#N/IMPL!)
-        // into the single CellType::ErrorValue discriminator. All render in
-        // the theme's error color; per-error-kind styling would need a new
-        // model accessor.
-        let text_color = if matches!(cell_type, CellType::ErrorValue) {
-            TextColor::Static(theme.error_text_color.clone())
+    fn resolve(cell_type: CellKind, style: &CellStyle, intern: &ColorIntern) -> Self {
+        // Error cells render in the theme's error color regardless of per-cell
+        // font color. CellKind::Error covers all IronCalc error variants. Both
+        // theme slots resolve at paint time (B-5), so this is payload-free.
+        let text_color = if matches!(cell_type, CellKind::Error) {
+            TextColor::ThemeError
         } else {
             match style.font.color.as_deref() {
-                None | Some("#000000") => TextColor::Static(theme.default_text_color.clone()),
+                None | Some("#000000") => TextColor::ThemeDefault,
                 Some(c) => TextColor::Owned(intern.get(c)),
             }
         };
 
         let alignment = style.alignment.as_ref();
-        let h_align = match alignment.map(|a| &a.horizontal) {
-            Some(HorizontalAlignment::Right) => HorizontalAlignment::Right,
-            Some(HorizontalAlignment::Center) | Some(HorizontalAlignment::CenterContinuous) => {
-                HorizontalAlignment::Center
-            }
-            Some(HorizontalAlignment::Left) | Some(HorizontalAlignment::Fill) => {
-                HorizontalAlignment::Left
-            }
-            // Canvas 2D has no justify/distributed - fall back to left.
-            Some(HorizontalAlignment::Justify) | Some(HorizontalAlignment::Distributed) => {
-                HorizontalAlignment::Left
-            }
+        let h_align = match alignment.map(|a| a.horizontal) {
+            Some(HAlign::Right) => HAlign::Right,
+            Some(HAlign::Center) | Some(HAlign::CenterContinuous) => HAlign::Center,
+            Some(HAlign::Left) | Some(HAlign::Fill) => HAlign::Left,
+            // Canvas 2D has no justify/distributed — fall back to left.
+            Some(HAlign::Justify) | Some(HAlign::Distributed) => HAlign::Left,
             // General or unset: numbers right, everything else left.
-            // foreign #[non_exhaustive]: CellType is upstream (ironcalc) —
-            // Text / LogicalValue / ErrorValue / Array / CompoundData default to left.
-            None | Some(HorizontalAlignment::General) => match cell_type {
-                CellType::Number => HorizontalAlignment::Right,
-                _ => HorizontalAlignment::Left,
+            None | Some(HAlign::General) => match cell_type {
+                CellKind::Number => HAlign::Right,
+                _ => HAlign::Left,
             },
         };
-        let v_align = alignment
-            .map(|a| a.vertical.clone())
-            .unwrap_or(VerticalAlignment::Bottom);
+        let v_align = alignment.map(|a| a.vertical).unwrap_or(VAlign::Bottom);
         let wrap_text = alignment.is_some_and(|a| a.wrap_text);
 
         Self {
             text_color,
-            underline: style.font.u,
+            underline: style.font.underline,
             strike: style.font.strike,
             h_align,
             v_align,
@@ -286,12 +299,12 @@ impl CellTextStyle {
 /// Fills `out` with `TextLine`s carrying `text` + `width`; `center_x`/`center_y`
 /// are left at `0.0` for the caller's positioning pass.
 ///
-/// **Measurement strategy.** Non-wrap path measures each `\n`-split line once.
+/// Measurement strategy: non-wrap path measures each `\n`-split line once.
 /// Wrap path measures each word once plus one space-width per call, then sums
 /// additively (`current_w + space_w + word_w`). Adjacent-glyph kerning across
 /// a space is sub-pixel for the proportional fonts this renderer ships, well
 /// below the rounding the position pass already does — additive sum is within
-/// 1px of a fresh `measureText(full_line)` and avoids the O(words²) re-measure
+/// 1px of a fresh `measureText(full_line)` and avoids the O(words^2) re-measure
 /// the previous algorithm did on long wrapping cells.
 #[allow(clippy::too_many_arguments)]
 pub fn layout_into(
@@ -341,7 +354,7 @@ pub fn layout_into(
 
             if tentative_w > usable_w && !wrap_buf.is_empty() {
                 // Overflow with prior content: commit the line as-is, start
-                // fresh with this word alone (no leading space → no separator).
+                // fresh with this word alone (no leading space -> no separator).
                 write_line(out, &mut idx, wrap_buf, current_w);
                 wrap_buf.clear();
                 wrap_buf.push_str(word);
@@ -386,13 +399,14 @@ impl<P: Painter> RendererCore<P> {
     /// just filled; passing it alongside `t` keeps the per-cell allocation off
     /// the path while preserving the old "set state then clip then stroke"
     /// ordering.
-    pub fn paint_text(&self, t: &TextPaint, lines: &[TextLine]) {
-        // TextColor::Static carries the theme color; the helper routes
-        // Cow::Borrowed through the painter's ptr-eq fast path and Cow::Owned
-        // through content-eq. TextColor::Owned is a per-cell custom color
-        // from the font's explicit color attribute.
+    pub fn paint_text(&self, t: &TextPaint, theme: &CanvasTheme, lines: &[TextLine]) {
+        // The theme text colors resolve here, at paint time, rather than being
+        // cloned into every cell at resolve time (B-5). `from_theme_str` still
+        // routes the built-in `Cow::Borrowed` slot through the painter's ptr-eq
+        // fast path. `TextColor::Owned` is the per-cell font-color override.
         let color = match &t.color {
-            TextColor::Static(s) => PaintColor::from_theme_str(s),
+            TextColor::ThemeDefault => PaintColor::from_theme_str(&theme.default_text_color),
+            TextColor::ThemeError => PaintColor::from_theme_str(&theme.error_text_color),
             TextColor::Owned(s) => PaintColor::Borrowed(s),
         };
         // `font_css` is interned `Rc<str>` per (size, weight, slant, family);
@@ -408,12 +422,8 @@ impl<P: Painter> RendererCore<P> {
         }
         for line in lines {
             let (x, align) = match t.h_align {
-                HorizontalAlignment::Right => {
-                    (f64::from(t.clip.right()) - CELL_PADDING, TextAlign::End)
-                }
-                HorizontalAlignment::Center | HorizontalAlignment::CenterContinuous => {
-                    (line.center_x, TextAlign::Center)
-                }
+                HAlign::Right => (f64::from(t.clip.right()) - CELL_PADDING, TextAlign::End),
+                HAlign::Center | HAlign::CenterContinuous => (line.center_x, TextAlign::Center),
                 _ => {
                     // Left / General / Justify / Distributed / Fill — start-anchored
                     // on the cell's left edge. No width approximation needed; the
@@ -453,5 +463,107 @@ impl<P: Painter> RendererCore<P> {
         if t.needs_clip {
             self.painter.pop_clip();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::prim::Point;
+
+    fn line(width: f64) -> TextLine {
+        TextLine {
+            text: "x".to_string(),
+            center_x: 0.0,
+            center_y: 0.0,
+            width,
+        }
+    }
+
+    fn rect(height: i32) -> PixelRect {
+        PixelRect {
+            top_left: Point { x: 0, y: 0 },
+            width: 100,
+            height,
+        }
+    }
+
+    // Regression (review 2026-06-13 finding #1): a bottom-aligned two-line cell
+    // whose block height *fits* the row can still cross the top edge once
+    // `position_lines` anchors it at the bottom with `TEXT_V_INSET_PX`. The
+    // raw block-height predicate missed this; the positioned-bounds check
+    // must clip it.
+    #[test]
+    fn bottom_aligned_block_fits_height_but_escapes_top_edge() {
+        let size_px = 12.0;
+        let line_height = size_px * LINE_HEIGHT_FACTOR; // 14.4
+        let rect = rect(30); // block = 2 * 14.4 = 28.8 < 30, so "fits" by height
+        let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
+        let mut lines = vec![line(10.0), line(10.0)];
+
+        position_lines(
+            &mut lines,
+            HAlign::Left,
+            VAlign::Bottom,
+            rect,
+            size_px,
+            line_height,
+        );
+
+        // Line 0 center lands at 5.6 -> top of glyph ≈ 5.6 - 7.2 < 0.
+        assert!(
+            lines[0].center_y - line_height / 2.0 < 0.0,
+            "test premise: top line crosses the top edge"
+        );
+        assert!(
+            lines_escape_cell(&lines, usable_w, rect, line_height),
+            "bottom-anchored block crossing the top edge must clip"
+        );
+    }
+
+    #[test]
+    fn single_line_that_fits_does_not_clip() {
+        let size_px = 11.0;
+        let line_height = size_px * LINE_HEIGHT_FACTOR;
+        let rect = rect(20);
+        let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
+        let mut lines = vec![line(10.0)];
+
+        position_lines(
+            &mut lines,
+            HAlign::Left,
+            VAlign::Bottom,
+            rect,
+            size_px,
+            line_height,
+        );
+
+        assert!(
+            !lines_escape_cell(&lines, usable_w, rect, line_height),
+            "a single short line in a normal row must not pay the clip round-trip"
+        );
+    }
+
+    #[test]
+    fn line_wider_than_usable_width_clips() {
+        let size_px = 11.0;
+        let line_height = size_px * LINE_HEIGHT_FACTOR;
+        let rect = rect(20);
+        let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
+        let mut lines = vec![line(usable_w + 1.0)];
+
+        position_lines(
+            &mut lines,
+            HAlign::Left,
+            VAlign::Bottom,
+            rect,
+            size_px,
+            line_height,
+        );
+
+        assert!(
+            lines_escape_cell(&lines, usable_w, rect, line_height),
+            "horizontal overflow must clip"
+        );
     }
 }

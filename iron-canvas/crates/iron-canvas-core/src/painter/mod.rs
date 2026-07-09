@@ -15,7 +15,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::Span;
 use crate::geometry::pixel_rect::PixelRect;
-use crate::geometry::prim::Line;
+use crate::geometry::prim::{Line, Point};
+
+pub mod shapes;
+pub use shapes::PainterShapes;
 
 /// Color/font argument for the `Painter` surface. The `Static` variant carries
 /// a `&'static str` whose address is stable for the program lifetime, so the
@@ -51,7 +54,6 @@ impl<'a> PaintColor<'a> {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextAlign {
     Start,
@@ -60,7 +62,7 @@ pub enum TextAlign {
 }
 
 /// Typed group label for `Painter::begin_group`. Enumerates the layers and
-/// sub-sections the renderer brackets — SVG emits `<g class="…">` with the
+/// sub-sections the renderer brackets — SVG emits `<g class="...">` with the
 /// kebab-case form, the recorder serializes it through serde, the Canvas-2D
 /// backend no-ops on it. Closed set: a typed enum lets the recorder's
 /// `skip_groups` filter compare by variant rather than string content, and
@@ -82,6 +84,9 @@ pub enum GroupClass {
     FormulaRefs,
     ActiveCellRepaint,
     HeaderHighlights,
+    /// Consumer band (`Orchestrator::add_decoration`) — every custom
+    /// decoration shares this bracket.
+    Custom,
 }
 
 impl GroupClass {
@@ -101,11 +106,11 @@ impl GroupClass {
             GroupClass::FormulaRefs => "formula-refs",
             GroupClass::ActiveCellRepaint => "active-cell-repaint",
             GroupClass::HeaderHighlights => "header-highlights",
+            GroupClass::Custom => "custom",
         }
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TextBaseline {
     Top,
@@ -114,15 +119,45 @@ pub enum TextBaseline {
     Alphabetic,
 }
 
+/// Per-char width as a fraction of font size — the deterministic glyph-width
+/// estimate shared by every backend without a host text metric (SVG, PDF,
+/// Recorder) and by `layout_into`'s measure-fallback. One value keeps wrap
+/// math identical across all non-browser surfaces (measured == painted).
+pub const CHAR_WIDTH_FACTOR: f64 = 1.0;
+
+/// Deterministic text-width estimate: `chars × font_size_px × CHAR_WIDTH_FACTOR`.
+/// The single fallback every measureless `TextMetrics` backend serializes; each
+/// backend parses `font_size_px` via [`parse_font_size_px`] before calling.
+pub fn approx_text_width(font_size_px: f64, text: &str) -> f64 {
+    text.chars().count() as f64 * font_size_px * CHAR_WIDTH_FACTOR
+}
+
+/// Default size when a CSS `font` shorthand carries no `<n>px` token.
+pub const DEFAULT_FONT_SIZE_PX: f64 = 12.0;
+
+/// Extract the first `<n>px` token from a CSS `font` shorthand, falling back to
+/// [`DEFAULT_FONT_SIZE_PX`] when none is present. The single size parser every
+/// measureless backend (SVG, PDF, Recorder) shares so they agree on wrap math.
+pub fn parse_font_size_px(font_css: &str) -> f64 {
+    font_css
+        .split_whitespace()
+        .find_map(|tok| tok.strip_suffix("px").and_then(|n| n.parse::<f64>().ok()))
+        .unwrap_or(DEFAULT_FONT_SIZE_PX)
+}
+
 pub trait TextMetrics {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64;
 }
 
 #[diagnostic::on_unimplemented(
-    note = "see the canvas-patterns skill for the full `Painter` method surface (paint_*, blit, text) — reference impls live in CanvasPainter (web), SvgPainter, PdfPainter, RecorderPainter"
+    note = "implement the full `Painter` drawing surface (rect/path fills, clears, borders, text). Reference impls: `CanvasPainter` (iron-canvas-canvas2d), `SvgPainter` and `PdfPainter` (iron-canvas-export), `RecorderPainter` (iron-canvas-recorder)"
 )]
 pub trait Painter: TextMetrics {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor);
+    /// Fill the closed polygon defined by `points`, in pixel space. The path
+    /// implicitly closes from `points.last()` to `points.first()`. Empty or
+    /// single-point input is a no-op.
+    fn fill_path(&self, points: &[Point], color: PaintColor);
     /// Clear the pixels under `rect` to fully transparent. Canvas-2D maps
     /// to `ctx.clearRect`; backends that don't compose alpha (SVG, Recorder)
     /// may no-op.
@@ -152,7 +187,7 @@ pub trait Painter: TextMetrics {
     /// Called by `LayerBase::resize` after a canvas resize. Canvas-2D resets
     /// the transform and applies a DPR scale; SVG/Recorder backends can
     /// no-op or stash the value internally.
-    fn apply_dpr_transform(&self, dpr: i32);
+    fn apply_dpr_transform(&self, dpr: f64);
 
     /// Restore sticky text-alignment defaults. Canvas-2D resets these on
     /// `set_width/set_height`; this hook is called after `invalidate_cache`
@@ -162,7 +197,7 @@ pub trait Painter: TextMetrics {
 
     /// Open a named group around subsequent draws. SVG emits `<g class="..">`,
     /// Recorder logs an op, Canvas-2D no-ops. The renderer brackets
-    /// `render_grid` / `render_overlays` so SVG output is structured per layer.
+    /// `render_grid` / `paint_overlay_layer` so SVG output is structured per layer.
     fn begin_group(&self, class: GroupClass);
     fn end_group(&self);
 }

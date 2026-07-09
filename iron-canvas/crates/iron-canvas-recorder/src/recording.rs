@@ -27,8 +27,8 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `1`). Mismatch → load fails.  |
-//! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch → warn-only. |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `1`). Mismatch -> load fails.  |
+//! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
 //! | `started_at_unix_ms`  | `u64`          | Wall-clock at `startRecording`. Host-supplied; tests pass `0`.       |
@@ -50,13 +50,13 @@
 //!
 //! # Compatibility rules
 //!
-//! - **`schema_version`**: exact-match enforced by `deserialize()`. A
+//! - `schema_version`: exact-match enforced by `deserialize()`. A
 //!   reader for v1 refuses v2 files (and vice versa).
-//! - **`iron_canvas_version`**: divergence is a *warning* on load. The
+//! - `iron_canvas_version`: divergence is a *warning* on load. The
 //!   recording still plays. The viewer surfaces this as a banner since
 //!   replay against drifted renderer output is the most common bug-repro
 //!   gap.
-//! - **`DrawOp` variants**: additive only within a schema version. Adding
+//! - `DrawOp` variants: additive only within a schema version. Adding
 //!   a new variant is a breaking change (older readers don't recognize
 //!   it) — bump the schema.
 //!
@@ -76,10 +76,6 @@ use crate::DrawOp;
 
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
-///
-/// v2 (2026-05): added `IcrHeader::dpr` so playback can resize the live
-/// canvas to recording dimensions without scanning frame 0 for the first
-/// `ApplyDprTransform` op.
 pub const ICR_SCHEMA_VERSION: u32 = 2;
 
 /// Per-paint-tick capture. Built by the host (e.g. `IronCanvas::paintIfDirty`
@@ -156,7 +152,7 @@ pub struct IcrHeader {
     /// the backing store and forward the right transform to the live
     /// painter without scanning frame 0 for the first
     /// `ApplyDprTransform`. Added in schema v2.
-    pub dpr: i32,
+    pub dpr: f64,
     pub theme: ThemeSnapshot,
     /// Unix epoch milliseconds when `startRecording` fired. Host-supplied.
     pub started_at_unix_ms: u64,
@@ -169,7 +165,7 @@ impl IcrHeader {
     pub fn new(
         canvas_w: f64,
         canvas_h: f64,
-        dpr: i32,
+        dpr: f64,
         theme: ThemeSnapshot,
         started_at_unix_ms: u64,
     ) -> Self {
@@ -261,7 +257,7 @@ mod tests {
         IcrHeader::new(
             800.0,
             400.0,
-            1,
+            1.0,
             ThemeSnapshot::from(&CanvasTheme::light()),
             0,
         )

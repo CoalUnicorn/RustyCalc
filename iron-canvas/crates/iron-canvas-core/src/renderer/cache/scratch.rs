@@ -11,6 +11,8 @@ use std::cell::{Cell, RefCell};
 
 use super::super::cell::CellPaint;
 use super::super::cell::text::TextLine;
+use crate::style::{CellDecoration, CellKind, CellStyle};
+use crate::types::fetched::Fetched;
 
 pub struct FrameCache {
     /// Scratch buffer parking each pane's resolved `CellPaint`s during the
@@ -19,14 +21,10 @@ pub struct FrameCache {
     /// avoid 4 Vec allocations per frame.
     pub text_slots: Cell<Vec<CellPaint>>,
     /// Per-frame cache of the active sheet's `get_show_grid_lines` flag.
-    /// Set once at the top of `render_grid`; read per-cell by `paint_borders`
-    /// to gate the right/bottom grid-line fallback. Avoids a model call per
+    /// Set once at the top of `render_grid`; read per-cell by `paint_borders_grid`
+    /// to gate the left/top grid-line fallback. Avoids a model call per
     /// cell on the hot pane walk.
     pub show_grid: Cell<bool>,
-    /// Scratch String formatted into for row-header labels (`write!` instead
-    /// of `i32::to_string()`). Cleared per-call; capacity persists across
-    /// frames so steady-state row-label paints don't re-allocate.
-    pub label_buf: RefCell<String>,
     /// Scratch line buffer parked here so `TextPaint::resolve_into` doesn't
     /// allocate a fresh `Vec<TextLine>` per cell with text. `layout_into`
     /// overwrites slots in place via a counter and `truncate`s the tail, so
@@ -37,4 +35,13 @@ pub struct FrameCache {
     /// `String` across every wrapped raw-line of every cell, so the wrap
     /// branch is alloc-free in steady state. Renderer-lifetime, not per-cell.
     pub wrap_buf: RefCell<String>,
+    /// Strip-fetch scratch for `render_pane_strip`: the freshly-revealed
+    /// subrange's bulk-fetch output, drained into the pane buffers by
+    /// `splice_strip_into` each blit frame. Parked here (not on `PaneBuffers`,
+    /// whose contents must survive frames) so the strip path reuses one warm
+    /// allocation per buffer instead of `Vec::new()`-ing four per scroll.
+    pub strip_styles: Cell<Vec<Fetched<CellStyle>>>,
+    pub strip_values: Cell<Vec<Fetched<String>>>,
+    pub strip_cell_types: Cell<Vec<Fetched<CellKind>>>,
+    pub strip_decorations: Cell<Vec<Option<CellDecoration>>>,
 }

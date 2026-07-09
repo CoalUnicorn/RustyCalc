@@ -1,0 +1,102 @@
+/* Share Verify Modal — prefix: sv-
+ * Consent modal shown when opening a shared workbook link.
+ * Rendered inside <Modal>, which provides .md-backdrop / .md-box / .md-body.
+ * The sv-* classes style the inner content: description, word input,
+ * action buttons, and error messages.
+ */
+
+.sv-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.sv-description {
+    margin: 0;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    color: var(--text-strong);
+    line-height: 1.5;
+}
+
+.sv-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.sv-word-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    background: var(--bg-secondary);
+    color: var(--text-strong);
+}
+
+.sv-word-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.sv-word-input::placeholder {
+    color: var(--text-dim);
+}
+
+.sv-word-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Primary action button — accent-colored, matches .sp-copy-btn pattern */
+.sv-submit-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    background: var(--accent);
+    color: white;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.sv-submit-btn:hover:not(:disabled) {
+    opacity: 0.9;
+}
+
+.sv-submit-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Secondary button — border-only, matches modal close button pattern */
+.sv-dismiss-btn {
+    padding: 6px 14px;
+    border: 1px solid var(--border-inner);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-strong);
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.sv-dismiss-btn:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+}
+
+/* Error display — danger-colored box, matches .sp-error-banner palette */
+.sv-error {
+    padding: 8px 12px;
+    background: var(--danger-bg, #fde8e8);
+    color: var(--danger-text, #c41e3a);
+    border: 1px solid var(--danger-border, #f5c6cb);
+    border-radius: 4px;
+    font-family: Inter, Arial, sans-serif;
+    font-size: 13px;
+}

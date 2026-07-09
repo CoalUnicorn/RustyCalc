@@ -50,7 +50,7 @@ pub struct CanvasTheme {
     pub header_selected_color: Cow<'static, str>,
     pub default_text_color: Cow<'static, str>,
     /// Text color for cells whose value is an IronCalc error
-    /// (`CellType::ErrorValue` — `#VALUE!`, `#DIV/0!`, `#REF!`, etc.).
+    /// (`CellKind::Error` — `#VALUE!`, `#DIV/0!`, `#REF!`, etc.).
     pub error_text_color: Cow<'static, str>,
     pub selection_color: Cow<'static, str>,
     pub cell_bg: Cow<'static, str>,
@@ -112,17 +112,17 @@ pub const DARK: CanvasTheme = CanvasTheme {
 ///
 /// Bridges IronCalc upstream's CSS-var contract (`--palette-sheet-*`,
 /// `--palette-primary-main`, etc.) to the renderer's resolved palette.
-/// `from_css_reader` (and the wasm32 `CanvasTheme::from_element` that wraps
-/// it) populates these fields from a DOM element's computed style; the
-/// `From<ThemeVariables> for CanvasTheme` impl performs the per-field
-/// fallback to `LIGHT`.
+/// `from_css_reader` (and the wasm32 `iron_canvas_canvas2d::theme_from_element`
+/// helpers that wrap it) populate these fields from a DOM element's computed
+/// style; the `From<ThemeVariables> for CanvasTheme` impl performs the
+/// per-field fallback to `LIGHT`.
 ///
 /// # Derived fields
 ///
-/// Some `CanvasTheme` fields have no direct upstream CSS-var equivalent.
-/// `from_css_reader` derives them from sparser inputs:
+/// Most fields read a single matching CSS var, but the "selection blue" group
+/// has no dedicated keys — one `--palette-primary-main` lookup fans out to all
+/// four:
 ///
-/// - `error_text_color` from `--palette-error-main`.
 /// - `selection_color`, `pointing` from `--palette-primary-main`.
 /// - `selection_fill` from `--palette-primary-main` at ~12% alpha.
 /// - `pointing_tint` from `--palette-primary-main` at ~8% alpha.
@@ -248,8 +248,8 @@ impl ThemeVariables {
     /// `None` (or an empty string after trim, which the helper treats as
     /// `None`) leaves the corresponding field unset; the `From` impl then
     /// falls back to `CanvasTheme::light()`. The DOM-bridge wrappers
-    /// (`CanvasTheme::from_element`, `from_root`) close over a
-    /// `CssStyleDeclaration::get_property_value` call; tests pass an
+    /// (`iron_canvas_canvas2d::theme_from_element::{from_element, from_root}`)
+    /// close over a `CssStyleDeclaration::get_property_value` call; tests pass an
     /// in-memory `HashMap` lookup so the derivation logic stays
     /// host-testable.
     ///
@@ -284,12 +284,15 @@ impl ThemeVariables {
     }
 }
 
-/// Hex `#RRGGBB` (or `#RGB`) → `rgba(r,g,b,alpha)`. Returns `None` for any
+/// Hex `#RRGGBB` (or `#RGB`) -> `rgba(r,g,b,alpha)`. Returns `None` for any
 /// input that isn't a recognized hex literal (`rgb()`, `hsl()`, named colors,
 /// or a malformed string), so the caller falls back to the LIGHT default
 /// instead of synthesising a broken fill string.
 fn derive_rgba(hex: &str, alpha: f64) -> Option<String> {
-    let hex = hex.trim().strip_prefix('#')?;
+    // `is_ascii` guard: `hex.len()` is a byte count, but the arms below slice
+    // by byte index — a multibyte value of byte-length 3 or 6 would slice
+    // through a UTF-8 char boundary and panic. ASCII hex is the only valid form.
+    let hex = hex.trim().strip_prefix('#').filter(|h| h.is_ascii())?;
     let (r, g, b) = match hex.len() {
         3 => (
             u8::from_str_radix(&hex[0..1].repeat(2), 16).ok()?,

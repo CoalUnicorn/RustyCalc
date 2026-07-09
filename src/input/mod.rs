@@ -1,9 +1,8 @@
+pub mod action;
 pub mod edit;
-pub mod edit_sync;
 pub mod error;
 pub mod format;
-pub mod formula_analysis;
-pub mod formula_input;
+pub mod formula;
 pub mod formula_overlay;
 pub mod keyboard;
 pub mod mouse;

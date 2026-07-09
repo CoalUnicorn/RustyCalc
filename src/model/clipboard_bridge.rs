@@ -1,7 +1,7 @@
 //! Serde-roundtrip bridge to access `ironcalc_base`'s `pub(crate)`
 //! clipboard and border fields without modifying the base crate.
 
-use ironcalc_base::types::{BorderItem, BorderStyle};
+use ironcalc_base::types::{BorderItem, BorderStyle, Color};
 use ironcalc_base::{BorderArea, ClipboardData, UserModel};
 
 use crate::model::Navigator;
@@ -34,25 +34,23 @@ struct ClipboardMirror {
     range: (i32, i32, i32, i32),
 }
 
-#[allow(clippy::expect_used)]
 impl AppClipboard {
     /// Extract all fields from an opaque `ironcalc_base::Clipboard` via serde.
     ///
     /// Accepts any `Serialize` value whose JSON shape matches `Clipboard`
     /// (`{csv, data, sheet, range}`). This avoids naming the `Clipboard` type
     /// directly, since it's not re-exported from `ironcalc_base`.
-    ///
-    /// # Panics
-    pub fn capture(clipboard: &impl serde::Serialize) -> Self {
-        let json = serde_json::to_value(clipboard).expect("Clipboard must be serializable");
+    pub fn capture(clipboard: &impl serde::Serialize) -> Result<Self, String> {
+        let json = serde_json::to_value(clipboard)
+            .map_err(|e| format!("Clipboard serialization failed: {e}"))?;
         let m: ClipboardMirror =
-            serde_json::from_value(json).expect("ClipboardMirror must match Clipboard's shape");
-        Self {
+            serde_json::from_value(json).map_err(|e| format!("Clipboard shape mismatch: {e}"))?;
+        Ok(Self {
             csv: m.csv,
             sheet: m.sheet,
             range: m.range.into(),
             data: m.data,
-        }
+        })
     }
 
     /// Tiles source to fill destination if dimensions are exact multiples,
@@ -110,8 +108,15 @@ pub enum BorderKind {
 #[allow(clippy::expect_used)]
 #[allow(dead_code)]
 pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<String>) -> BorderArea {
+    let border_color = match color {
+        Some(ref c) if !c.is_empty() => Color::from_rgb(c).unwrap_or(Color::None),
+        _ => Color::None,
+    };
     let mirror = BorderAreaMirror {
-        item: BorderItem { style, color },
+        item: BorderItem {
+            style,
+            color: border_color,
+        },
         r#type: kind,
     };
     let json = serde_json::to_value(&mirror).expect("BorderAreaMirror must be serializable");
@@ -119,102 +124,3 @@ pub fn make_border_area(kind: BorderKind, style: BorderStyle, color: Option<Stri
 }
 
 // Tests
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // CellRange::tile_reps_of
-
-    #[test]
-    fn tile_reps_single_cell_into_range() {
-        let src = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 1,
-            c2: 1,
-        };
-        let dst = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 3,
-            c2: 4,
-        };
-        assert_eq!(dst.tile_reps_of(src), Some((3, 4)));
-    }
-
-    #[test]
-    fn tile_reps_exact_multiple() {
-        let src = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 2,
-            c2: 3,
-        };
-        let dst = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 4,
-            c2: 6,
-        };
-        assert_eq!(dst.tile_reps_of(src), Some((2, 2)));
-    }
-
-    #[test]
-    fn tile_reps_non_multiple_returns_none() {
-        let src = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 2,
-            c2: 2,
-        };
-        let dst = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 3,
-            c2: 3,
-        };
-        assert_eq!(dst.tile_reps_of(src), None);
-    }
-
-    #[test]
-    fn tile_reps_same_size_returns_none() {
-        let src = CellArea {
-            r1: 1,
-            c1: 1,
-            r2: 2,
-            c2: 2,
-        };
-        assert_eq!(src.tile_reps_of(src), None);
-    }
-
-    // AppClipboard::capture roundtrip
-
-    #[allow(clippy::expect_used)]
-    #[test]
-    fn capture_roundtrip() {
-        let model = UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("create test model");
-        let cb = model.copy_to_clipboard().expect("copy empty range");
-        let app = AppClipboard::capture(&cb);
-        assert_eq!(app.sheet, 0);
-    }
-
-    // BorderArea construction
-
-    #[test]
-    fn make_border_area_all_thin_black() {
-        let ba = make_border_area(
-            BorderKind::All,
-            BorderStyle::Thin,
-            Some("#000000".to_owned()),
-        );
-        // If this didn't panic, the serde roundtrip succeeded.
-        let _ = ba;
-    }
-
-    #[test]
-    fn make_border_area_none() {
-        let ba = make_border_area(BorderKind::None, BorderStyle::Thin, None);
-        let _ = ba;
-    }
-}

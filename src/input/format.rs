@@ -6,12 +6,12 @@ use ironcalc_base::{
 };
 use leptos::prelude::WithValue;
 
-use crate::coord::{CellArea, SheetRange};
+use crate::coord::{CellAddress, CellArea, SheetRange};
 use crate::events::{FormatEvent, SpreadsheetEvent};
 use crate::input::error::FormatError;
 use crate::model::{
-    EvaluationMode, SafeFontFamily, SheetQuery, ToolbarState,
-    style_types::{BooleanValue, HexColor, StylePath},
+    ActiveCellQuery, EvaluationMode, SafeFontFamily, ToolbarState,
+    style_types::{BooleanValue, BorderSide, BorderWeight, HexColor, StylePath},
     try_mutate,
 };
 use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
@@ -31,11 +31,21 @@ pub enum FormatAction {
     ToggleItalic,
     ToggleUnderline,
     ToggleStrikethrough,
-    /// Clamped to 1–409 in `execute_format()`.
+    /// Clamped to 1-409 in `execute_format()`.
     SetFontSize(f64),
     SetFontFamily(SafeFontFamily),
     SetTextColor(HexColor),
     SetBackgroundColor(HexColor),
+    /// Apply a border preset to the selected range.
+    ///
+    /// `side` controls which edges are affected; `weight` controls line
+    /// thickness; `color` is the line color (`#RRGGBB`). Use
+    /// [`BorderSide::None`] to clear all borders.
+    SetBorder {
+        side: BorderSide,
+        weight: BorderWeight,
+        color: HexColor,
+    },
     /// Apply a number format code to the selection. `"general"` resets to auto.
     SetNumFmt(String),
     /// Reset all formatting (font, color, borders, number format) on the selection.
@@ -77,32 +87,26 @@ pub fn execute_format(
             let size = size.clamp(1.0, 409.0);
             let sa = model.with_value(SheetRange::from_view);
 
-            /*
-            FIXME:  how we handle cell area / columns / rows selection with different
-                    font sizing. How excel handle this?
-                1.  Currently if selection includes empty cell default size 13px and bigger we decrement,
-                    it will throw console err like:
-                    [ironcalc] set_font_size: Invalid value for font size: '-43'.
-                    [ironcalc] set_font_size: Invalid value for font size: '0'.
-            */
             try_mutate(
                 model,
                 EvaluationMode::Deferred,
                 |m| -> Result<(), FormatError> {
                     let area = m.selection();
-                    let val = format!(
-                        "{}",
-                        size as i32 - m.toolbar_state().style.font_size.round() as i32
-                    );
-                    m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
-                        .map_err(FormatError::Engine)?;
+                    let current = m.toolbar_state().style.font_size;
+                    // Skip when the active cell has no font size — applying a relative
+                    // delta to empty cells in the range can produce negative sizes
+                    // (IronCalc logs `set_font_size: Invalid value for font size: '-43'`).
+                    // Once IronCalc handles empty-cell delta clamping, remove this guard.
+                    if current > 0.0 {
+                        let val = format!("{}", size as i32 - current.round() as i32);
+                        m.update_range_style(&area, StylePath::FONT_SIZE_DELTA.as_str(), &val)
+                            .map_err(FormatError::Engine)?;
+                    }
                     Ok(())
                 },
             )?;
 
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetFontFamily(family) => {
             let name = family.model_name();
@@ -114,9 +118,7 @@ pub fn execute_format(
                 |m| -> Result<(), FormatError> { set_font_name(m, name) },
             )?;
 
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetTextColor(hex) => {
             // IronCalc "font.color": empty string clears (-> transparent), hex string sets.
@@ -134,9 +136,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetBackgroundColor(hex) => {
             // IronCalc "fill.fg_color": empty string clears, hex string sets.
@@ -178,9 +178,40 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
+        }
+        FormatAction::SetBorder {
+            side,
+            weight,
+            color,
+        } => {
+            // `BorderArea` has `pub(crate)` fields but derives `Deserialize`, so
+            // we construct it from JSON using the serde variant names rather than
+            // coupling to upstream internals. `set_area_with_border` then applies
+            // the preset across the selection (e.g. `Outer` draws only the
+            // perimeter, `Inner` only the interior grid).
+            let sa = model.with_value(SheetRange::from_view);
+            let type_str = side.as_json_str();
+            let style_str = weight.as_json_str();
+            let color_str = color.as_str().to_owned();
+
+            try_mutate(
+                model,
+                EvaluationMode::Deferred,
+                move |m| -> Result<(), FormatError> {
+                    let area = m.selection();
+                    let json = serde_json::json!({
+                        "item": { "style": style_str, "color": color_str },
+                        "type": type_str,
+                    });
+                    let border_area: ironcalc_base::BorderArea = serde_json::from_value(json)
+                        .map_err(|e| FormatError::Engine(e.to_string()))?;
+                    m.set_area_with_border(&area, &border_area)
+                        .map_err(FormatError::Engine)?;
+                    Ok(())
+                },
+            )?;
+            emit_style_changed(state, sa);
         }
         FormatAction::SetNumFmt(code) => {
             let sa = model.with_value(SheetRange::from_view);
@@ -195,9 +226,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetHorizontalAlign(align) => {
             // HorizontalAlignment::Display gives the exact lowercase string ironcalc expects.
@@ -213,9 +242,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::SetVerticalAlign(align) => {
             let value = align.to_string();
@@ -230,9 +257,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::IncreaseDecimals | FormatAction::DecreaseDecimals => {
             let delta = if matches!(action, FormatAction::IncreaseDecimals) {
@@ -253,9 +278,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
         FormatAction::ClearFormatting => {
             let sa = model.with_value(SheetRange::from_view);
@@ -269,9 +292,7 @@ pub fn execute_format(
                     Ok(())
                 },
             )?;
-            state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-                area: sa.area.normalized().with_sheet(sa.sheet),
-            }));
+            emit_style_changed(state, sa);
         }
     }
     Ok(())
@@ -303,10 +324,26 @@ fn toggle_style(
         },
     )?;
 
-    state.emit_event(SpreadsheetEvent::Format(FormatEvent::RangeStyleChanged {
-        area: sa.area.normalized().with_sheet(sa.sheet),
-    }));
+    emit_style_changed(state, sa);
     Ok(())
+}
+
+fn emit_style_changed(state: &WorkbookState, sa: SheetRange) {
+    let area = sa.area.normalized();
+    let event = if area.is_single_cell() {
+        FormatEvent::CellStyleChanged {
+            address: CellAddress {
+                sheet: sa.sheet,
+                row: area.r1,
+                column: area.c1,
+            },
+        }
+    } else {
+        FormatEvent::RangeStyleChanged {
+            area: area.with_sheet(sa.sheet),
+        }
+    };
+    state.emit_event(SpreadsheetEvent::Format(event));
 }
 
 /// Adjust the number of decimal places in a format string by `delta` (+1 or -1).

@@ -9,11 +9,9 @@
 //! selection overlay to restore the active cell on top of the
 //! semi-transparent selection fill.
 
-use ironcalc_base::types::{CellType, Style};
-
 use super::borders::ResolvedBorders;
 use super::text::TextPaint;
-use crate::CanvasModel;
+use crate::CellContentQuery;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
@@ -21,6 +19,8 @@ use crate::geometry::slot::{ColSlot, RowSlot};
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
+use crate::renderer::cf_types::CfDecorationPaint;
+use crate::style::{CellKind, CellStyle};
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
@@ -28,11 +28,19 @@ pub struct CellPaint {
     pub row: i32,
     pub col: i32,
     pub rect: PixelRect,
-    pub style: Style,
+    pub style: CellStyle,
     /// Per-edge resolved border paints. Computed once at iteration time so
     /// the explicit-border sub-pass in `render_pane` is pure pixel pushing —
     /// no `BorderPaint::resolve` calls inside the paint loop.
     pub borders: ResolvedBorders,
+    /// Conditional-formatting decoration (data bar / icon / rating), if any
+    /// CF rule with a decoration matches this cell. `None` for plain cells.
+    /// CF *fill/font* overrides are not carried here — they ride the `style`
+    /// field, which the render pass sources from `get_cell_styles_in` (the base
+    /// `CellStyle` with the CF dxf overlay already folded in by the bridge).
+    /// Resolved in the render loop (where the model is in scope), not in
+    /// `resolve_cell_paint`.
+    pub cf_decoration: Option<CfDecorationPaint>,
 }
 
 impl CellPaint {
@@ -43,7 +51,7 @@ impl CellPaint {
     /// pure pixel pushers.
     pub fn resolve_cell_paint(
         slot: CellSlot,
-        own_style: Style,
+        own_style: CellStyle,
         theme: &CanvasTheme,
         intern: &ColorIntern,
     ) -> Option<CellPaint> {
@@ -57,6 +65,7 @@ impl CellPaint {
             rect: slot.rect,
             style: own_style,
             borders,
+            cf_decoration: None,
         })
     }
 }
@@ -94,7 +103,7 @@ impl<'a> PaneCells<'a> {
 
     /// Walk only the cells whose `(row, col)` lies inside `strip`. Used by
     /// the scroll-blit strip-fetch path: the painter blit preserved the
-    /// kept-band pixels, so the four per-cell sub-passes must touch only
+    /// kept-band pixels, so the five per-cell sub-passes must touch only
     /// the freshly-revealed strip — iterating the full pane would re-paint
     /// the kept band on top of the already-correct pixels.
     ///
@@ -157,7 +166,7 @@ impl<P: Painter> RendererCore<P> {
         // Branch on the model's per-cell override: zero-alloc Static path for
         // the theme default, Borrowed for the colored case. Avoids feeding
         // every theme-default cell through the painter's allocating cache miss.
-        let color = match p.style.fill.fg_color.as_deref() {
+        let color = match p.style.fill_color.as_deref() {
             Some(c) => PaintColor::Borrowed(c),
             None => PaintColor::from_theme_str(&theme.cell_bg),
         };
@@ -170,7 +179,7 @@ impl<P: Painter> RendererCore<P> {
     /// implicit — taken from `frame.sheet`.
     pub fn repaint_active_cell(
         &self,
-        model: &dyn CanvasModel,
+        model: &dyn CellContentQuery,
         row: i32,
         column: i32,
         frame: &Chrome,
@@ -180,7 +189,24 @@ impl<P: Painter> RendererCore<P> {
         let Some(rect) = frame.range_rect(range) else {
             return;
         };
-        let Some(own_style) = model.get_cell_style(sheet, row, column) else {
+
+        // Fetch every input *before* touching the painter. The overlay was
+        // cleared at the top of the frame, so this method either fully repaints
+        // the active cell or leaves the grid layer's prior pixels showing
+        // through. A transient `BridgeFailed` on any field must take the second
+        // path: painting an opaque background and then *skipping* the failed
+        // text would hide the grid's correct content behind a blank box — the
+        // A-3 flash. `Absent` is not a failure (a blank cell legitimately has
+        // no text), so it does not abort. Native models never report
+        // `BridgeFailed`, making this a no-op for every non-JS host.
+        let style = model.get_cell_style(sheet, row, column);
+        let value = model.get_formatted_cell_value(sheet, row, column);
+        let cell_type = model.get_cell_type(sheet, row, column);
+        if style.is_bridge_failed() || value.is_bridge_failed() || cell_type.is_bridge_failed() {
+            return;
+        }
+
+        let Some(own_style) = style.value() else {
             return;
         };
         let theme = &frame.theme;
@@ -198,20 +224,12 @@ impl<P: Painter> RendererCore<P> {
         };
         self.paint_cell(&paint, theme);
         let mut text_lines = self.frame_cache.text_lines.take();
-        if let Some(text) = model.get_formatted_cell_value(sheet, row, column) {
-            let cell_type = model
-                .get_cell_type(sheet, row, column)
-                .unwrap_or(CellType::Text);
-            if let Some(t) = TextPaint::resolve_into(
-                self,
-                rect,
-                theme,
-                &paint.style,
-                text,
-                cell_type,
-                &mut text_lines,
-            ) {
-                self.paint_text(&t, &text_lines);
+        if let Some(text) = value.value() {
+            let cell_type = cell_type.unwrap_or(CellKind::Text);
+            if let Some(t) =
+                TextPaint::resolve_into(self, rect, &paint.style, text, cell_type, &mut text_lines)
+            {
+                self.paint_text(&t, theme, &text_lines);
             }
         }
         self.frame_cache.text_lines.set(text_lines);

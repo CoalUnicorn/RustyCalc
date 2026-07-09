@@ -5,7 +5,7 @@
 //! per-paint clear (PDF is declarative — the page-open `cm` plus the
 //! emitted ops are the entire output). The Y-flip CTM that maps the
 //! painter's Y-down coords to PDF's Y-up user space is prepended by
-//! [`PdfSurface::finish`] rather than each painter op, so the painter
+//! [`PdfSurface::finish`](crate::pdf::PdfSurface::finish) rather than each painter op, so the painter
 //! itself never needs to think about it: `re` is emitted with the same
 //! `x y w h` we received from `PixelRect`.
 
@@ -13,14 +13,15 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{Line, Span};
+use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
+    parse_font_size_px,
 };
 
 use crate::common::color::parse_css_color;
 use crate::common::escape::pdf_string_escape;
-use crate::common::text::{CHAR_WIDTH_FACTOR, parse_font_size_px};
+use crate::common::metrics;
 use crate::pdf::doc::stream::ContentStream;
 
 /// Visible dash pattern when `rect_dashed` is invoked. Matches the
@@ -116,9 +117,13 @@ impl PdfPainter {
 }
 
 impl TextMetrics for PdfPainter {
+    // `fill_text` below always draws the base-14 standard Helvetica font
+    // (`/F1`), regardless of the cell's declared family — PDF has no
+    // embedded-font path, so `helvetica_advance_width` is the font that's
+    // actually painted, not an approximation of it.
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
         let size = parse_font_size_px(font_css);
-        text.chars().count() as f64 * size * CHAR_WIDTH_FACTOR
+        metrics::helvetica_advance_width(text, size)
     }
 }
 
@@ -128,6 +133,23 @@ impl Painter for PdfPainter {
         self.emit_fill_color(color);
         self.emit_rect(x, y, w, h);
         self.write_str("f\n");
+    }
+
+    fn fill_path(&self, points: &[Point], color: PaintColor) {
+        if points.len() < 2 {
+            return;
+        }
+        self.emit_fill_color(color);
+        let first = points[0];
+        self.write_str(&format!(
+            "{:.3} {:.3} m\n",
+            f64::from(first.x),
+            f64::from(first.y)
+        ));
+        for p in &points[1..] {
+            self.write_str(&format!("{:.3} {:.3} l\n", f64::from(p.x), f64::from(p.y)));
+        }
+        self.write_str("h\nf\n"); // h closes the subpath; f fills
     }
 
     fn clear_rect(&self, rect: PixelRect) {
@@ -221,9 +243,10 @@ impl Painter for PdfPainter {
         let font_str = font_css.as_str();
         let size = parse_font_size_px(font_str);
 
-        // Approximate width without real font metrics — same formula as
-        // measure_text_width, kept inline to avoid a borrow round-trip.
-        let text_width = text.chars().count() as f64 * size * CHAR_WIDTH_FACTOR;
+        // Real Helvetica width — same as measure_text_width, recomputed
+        // here to avoid a borrow round-trip. Must stay in sync: `Tm`
+        // below positions the run using this same estimate.
+        let text_width = metrics::helvetica_advance_width(text, size);
 
         // Painter coords are Y-down. After the outer Y-flip CTM,
         // a counter-flipping text matrix (`1 0 0 -1 tx ty Tm`) restores
@@ -234,7 +257,7 @@ impl Painter for PdfPainter {
             TextAlign::Center => x - text_width / 2.0,
             TextAlign::End => x - text_width,
         };
-        // Helvetica ascent ≈ 0.8·size, descent ≈ 0.2·size — Type1 base-14
+        // Helvetica ascent aprox 0.8 x size, descent aprox 0.2 x size — Type1 base-14
         // metrics aren't queryable without parsing AFM tables we don't
         // ship, so these are the published nominal ratios.
         let ty = match baseline {
@@ -262,7 +285,7 @@ impl Painter for PdfPainter {
         // No setter cache to dump — PDF ops carry their own color/width.
     }
 
-    fn apply_dpr_transform(&self, _dpr: i32) {
+    fn apply_dpr_transform(&self, _dpr: f64) {
         // DPR doesn't apply to PDF user space (1/72" regardless of
         // device pixel density). The page-open CTM in PdfSurface::finish
         // already maps painter coords to PDF coords; nothing else needs

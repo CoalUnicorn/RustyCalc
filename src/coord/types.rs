@@ -26,7 +26,7 @@ pub struct RefNode {
 }
 
 /// Named pair of absolute flags — prevents swapping row/column booleans
-/// at call sites (`cell(…, true, false)` was ambiguous).
+/// at call sites (`cell(..., true, false)` was ambiguous).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Absolute {
     pub row: bool,
@@ -53,6 +53,7 @@ impl RefNode {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn range(
         sheet_index: u32,
         sheet_name: Option<String>,
@@ -155,7 +156,7 @@ impl RefNode {
     ///   supported, so `self.sheet_name.is_some()` implies the new ref
     ///   is on the same other sheet.
     ///
-    /// Cell↔range transitions: a single-cell self promotes to `RangeKind`
+    /// Cell<->range transitions: a single-cell self promotes to `RangeKind`
     /// when `new` is multi-cell (duplicating both absolute flags onto the
     /// new endpoint); a range self collapses to `ReferenceKind` when `new`
     /// is a single cell (endpoint 1's flags win — TopLeft is the canonical
@@ -393,42 +394,45 @@ impl RefNode {
         Self { inner }
     }
 
-    /// Produce a single-cell `RefNode` at absolute `(abs_row, abs_col)`,
-    /// preserving this RefNode's `absolute_row` / `absolute_column` /
-    /// `sheet_name` / `sheet_index`. A `RangeKind` collapses to a cell
-    /// inheriting the trailing corner's flags — matches `extend_trailing`'s
-    /// "click kills the range selection" semantics.
+    /// Produce a single-cell `RefNode` at absolute `(abs_row, abs_col)` on
+    /// `view_sheet`, preserving this RefNode's `absolute_row` /
+    /// `absolute_column` flags. A `RangeKind` collapses to a cell inheriting
+    /// the trailing corner's flags — matches `extend_trailing`'s "click kills
+    /// the range selection" semantics.
     ///
     /// This is the click-to-replace primitive: when the caret sits on
     /// `$A$1` and the user clicks B5, the result is `$B$5`. Flag inheritance
     /// is what makes it Excel-parity instead of "drop to bare relative".
-    pub fn relocate_to(&self, abs_row: i32, abs_col: i32, editing: &CellAddress) -> Self {
-        let (sheet_name, sheet_index, abs_r_flag, abs_c_flag) = match &self.inner {
+    ///
+    /// The clicked cell's sheet wins (Excel parity: replace means replace) —
+    /// the old ref's qualification is NOT preserved. Qualification is
+    /// re-derived against the edit origin, mirroring [`Self::from_cell_area`]:
+    /// `Some(view_sheet_name)` iff `view_sheet != editing.sheet`.
+    pub fn relocate_to(
+        &self,
+        abs_row: i32,
+        abs_col: i32,
+        editing: &CellAddress,
+        view_sheet: u32,
+        view_sheet_name: &str,
+    ) -> Self {
+        let (abs_r_flag, abs_c_flag) = match &self.inner {
             Node::ReferenceKind {
-                sheet_name,
-                sheet_index,
                 absolute_row,
                 absolute_column,
                 ..
-            } => (
-                sheet_name.clone(),
-                *sheet_index,
-                *absolute_row,
-                *absolute_column,
-            ),
+            } => (*absolute_row, *absolute_column),
             Node::RangeKind {
-                sheet_name,
-                sheet_index,
                 absolute_row2,
                 absolute_column2,
                 ..
-            } => (
-                sheet_name.clone(),
-                *sheet_index,
-                *absolute_row2,
-                *absolute_column2,
-            ),
+            } => (*absolute_row2, *absolute_column2),
             _ => unreachable!("RefNode invariant: inner is ReferenceKind or RangeKind"),
+        };
+        let sheet_name = if view_sheet == editing.sheet {
+            None
+        } else {
+            Some(view_sheet_name.to_owned())
         };
         let row = if abs_r_flag {
             abs_row
@@ -441,7 +445,7 @@ impl RefNode {
             abs_col - editing.column
         };
         Self::cell(
-            sheet_index,
+            view_sheet,
             sheet_name,
             row,
             column,
@@ -450,6 +454,82 @@ impl RefNode {
                 column: abs_c_flag,
             },
         )
+    }
+
+    /// F4 toggle: advance this ref's absolute (`$`) flags one step through the
+    /// Excel cycle, re-encoding coordinates against `editing` so the resolved
+    /// target is unchanged.
+    ///
+    /// Cell cycle, as `(row_abs, col_abs)`:
+    ///   `(F,F)` `A1` -> `(T,T)` `$A$1` -> `(T,F)` `A$1` -> `(F,T)` `$A1` -> `(F,F)`
+    /// Range endpoints advance independently, preserving mixed endpoint states.
+    ///
+    /// Re-encoding is the trap: a relative axis stores `coord - editing`, an
+    /// absolute axis stores the literal `coord` (mirroring [`Self::area`] /
+    /// [`Self::with_area`]). Flipping a flag therefore must add or subtract
+    /// `editing.{row|column}`, not just toggle the boolean.
+    pub fn cycle_absolute(&self, editing: &CellAddress) -> Self {
+        // Excel's cycle in (row_abs, col_abs): (F,F)->(T,T)->(T,F)->(F,T)->(F,F).
+        let next = |row_abs: bool, col_abs: bool| match (row_abs, col_abs) {
+            (false, false) => (true, true),
+            (true, true) => (true, false),
+            (true, false) => (false, true),
+            (false, true) => (false, false),
+        };
+        // Re-encode an axis to the new flag: absolute stores the literal coord,
+        // relative stores the offset from the editing cell.
+        let encode = |abs: bool, coord: i32, base: i32| if abs { coord } else { coord - base };
+
+        // Resolve to absolute coords first, then rebuild against the new flags.
+        let resolved = self.area(editing).area;
+        match &self.inner {
+            Node::ReferenceKind {
+                sheet_name,
+                sheet_index,
+                absolute_row,
+                absolute_column,
+                ..
+            } => {
+                let (row_abs, col_abs) = next(*absolute_row, *absolute_column);
+                Self {
+                    inner: Node::ReferenceKind {
+                        sheet_name: sheet_name.clone(),
+                        sheet_index: *sheet_index,
+                        absolute_row: row_abs,
+                        absolute_column: col_abs,
+                        row: encode(row_abs, resolved.r1, editing.row),
+                        column: encode(col_abs, resolved.c1, editing.column),
+                    },
+                }
+            }
+            Node::RangeKind {
+                sheet_name,
+                sheet_index,
+                absolute_row1,
+                absolute_column1,
+                absolute_row2,
+                absolute_column2,
+                ..
+            } => {
+                let (row1_abs, col1_abs) = next(*absolute_row1, *absolute_column1);
+                let (row2_abs, col2_abs) = next(*absolute_row2, *absolute_column2);
+                Self {
+                    inner: Node::RangeKind {
+                        sheet_name: sheet_name.clone(),
+                        sheet_index: *sheet_index,
+                        absolute_row1: row1_abs,
+                        absolute_column1: col1_abs,
+                        row1: encode(row1_abs, resolved.r1, editing.row),
+                        column1: encode(col1_abs, resolved.c1, editing.column),
+                        absolute_row2: row2_abs,
+                        absolute_column2: col2_abs,
+                        row2: encode(row2_abs, resolved.r2, editing.row),
+                        column2: encode(col2_abs, resolved.c2, editing.column),
+                    },
+                }
+            }
+            _ => unreachable!("RefNode invariant: inner is ReferenceKind or RangeKind"),
+        }
     }
 }
 
@@ -722,5 +802,142 @@ impl CellAddress {
             row: self.row,
             column: self.column,
         }
+    }
+}
+
+// ==============================================================================
+// Selection -> A1 text (for grid range-picking in drawers)
+// ==============================================================================
+//
+// The CF and Named-Range drawers fill a range field from the live grid
+// selection. Each consumer wants a different A1 shape, so we expose two
+// formatters built on the same `RefNode` stringifier the formula bar uses —
+// guaranteeing the output is exactly what the engine round-trips.
+
+/// The current selection as a **sheet-relative** A1 string (`B2:D8`) — no
+/// sheet prefix, no `$`. This is the shape a CF sqref wants.
+///
+/// We reuse point-mode's relative encoding: `from_cell_area` stores each
+/// coordinate as an offset from the active cell, and `to_localized` against
+/// that same anchor reconstructs the real address. Because the selection is
+/// always on the active sheet, the node carries `sheet_name: None`, so no
+/// `Sheet!` prefix is emitted.
+pub fn selection_a1_relative(model: &UserModel<'static>) -> String {
+    let selection = SheetRange::from_view(model);
+    let active = CellAddress::from_view(model);
+    RefNode::from_cell_area(selection, active, "").to_localized(&active.as_stringify_ctx())
+}
+
+/// The current selection as a **sheet-qualified absolute** A1 string
+/// (`Sheet1!$B$2:$D$8`) — the shape a Named Range "refers to".
+///
+/// Absolute refs store the 1-based coordinate verbatim (no offset), so the
+/// stringify anchor is irrelevant; `Some(sheet_name)` forces the `Sheet!`
+/// qualifier.
+pub fn selection_a1_qualified_absolute(model: &UserModel<'static>) -> String {
+    let selection = SheetRange::from_view(model);
+    let sheet_name = model
+        .get_worksheets_properties()
+        .get(selection.sheet as usize)
+        .map(|s| s.name.clone())
+        .unwrap_or_default();
+    let abs = Absolute {
+        row: true,
+        column: true,
+    };
+    let area = selection.area;
+    let node = if area.is_single_cell() {
+        RefNode::cell(selection.sheet, Some(sheet_name), area.r1, area.c1, abs)
+    } else {
+        RefNode::range(
+            selection.sheet,
+            Some(sheet_name),
+            area.r1,
+            area.c1,
+            abs,
+            area.r2,
+            area.c2,
+            abs,
+        )
+    };
+    node.to_localized(&CellAddress::from_view(model).as_stringify_ctx())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // F4 walks a single cell through all four `$`-states and back to the start.
+    // The ref resolves to A1 throughout — only the markup changes — so the
+    // editing-cell offset re-encoding must hold the target steady.
+    #[test]
+    fn f4_cycles_cell_through_four_states() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 2,
+            column: 2,
+        };
+        let ctx = editing.as_stringify_ctx();
+        let r0 = RefNode::from_cell_area(SheetRange::from_cell(0, 1, 1), editing, "");
+        assert_eq!(r0.to_localized(&ctx), "A1");
+
+        let r1 = r0.cycle_absolute(&editing);
+        assert_eq!(r1.to_localized(&ctx), "$A$1");
+
+        let r2 = r1.cycle_absolute(&editing);
+        assert_eq!(r2.to_localized(&ctx), "A$1");
+
+        let r3 = r2.cycle_absolute(&editing);
+        assert_eq!(r3.to_localized(&ctx), "$A1");
+
+        let r4 = r3.cycle_absolute(&editing);
+        assert_eq!(r4.to_localized(&ctx), "A1");
+    }
+
+    // A range cycles both corners together: A1:B2 -> $A$1:$B$2.
+    #[test]
+    fn f4_cycles_range_both_endpoints() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 1,
+            column: 1,
+        };
+        let ctx = editing.as_stringify_ctx();
+        let r0 = RefNode::from_cell_area(SheetRange::new(0, 1, 1, 2, 2), editing, "");
+        assert_eq!(r0.to_localized(&ctx), "A1:B2");
+
+        let r1 = r0.cycle_absolute(&editing);
+        assert_eq!(r1.to_localized(&ctx), "$A$1:$B$2");
+    }
+
+    #[test]
+    fn f4_cycles_mixed_range_endpoints_independently() {
+        let editing = CellAddress {
+            sheet: 0,
+            row: 3,
+            column: 3,
+        };
+        let ctx = editing.as_stringify_ctx();
+        let r0 = RefNode::range(
+            0,
+            None,
+            -2,
+            -2,
+            Absolute {
+                row: false,
+                column: false,
+            },
+            2,
+            2,
+            Absolute {
+                row: true,
+                column: true,
+            },
+        );
+        assert_eq!(r0.to_localized(&ctx), "A1:$B$2");
+
+        let r1 = r0.cycle_absolute(&editing);
+        assert_eq!(r1.to_localized(&ctx), "$A$1:B$2");
+        assert_eq!(r1.area(&editing), r0.area(&editing));
     }
 }

@@ -8,8 +8,8 @@ use ironcalc_base::UserModel;
 use leptos::prelude::{UpdateValue, WithValue};
 
 use crate::app_state::AppState;
-use crate::events::{ContentEvent, SpreadsheetEvent};
-use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
+use crate::events::{SpreadsheetEvent, StructureEvent};
+use crate::state::{ModelStore, StatusMessage, WorkbookState};
 use crate::storage::{self, WorkbookId};
 
 /// Workbook-level lifecycle operations.
@@ -44,7 +44,7 @@ pub fn execute_workbook(
                 return;
             }
             // Save the current workbook before switching. If encoding fails
-            // (e.g. model exceeds MAX_STORAGE_BYTES), warn the user instead of
+            // (e.g. model exceeds MAX_STORED_BYTES), warn the user instead of
             // silently losing changes.
             if let Some(uuid) = &cur {
                 let saved = model.with_value(|m| {
@@ -108,7 +108,8 @@ pub fn execute_workbook(
             if let Some(uuid) = state.current_uuid.get_untracked() {
                 model.with_value(|m| storage::save(&uuid, m));
             }
-            let (new_uuid, new_model) = storage::create_new_from(new_model);
+            let (new_uuid, new_model) =
+                storage::create_new_from(new_model, storage::WorkbookOrigin::FileImport);
             activate(new_uuid, new_model, model, state);
             app.bump_registry();
         }
@@ -127,7 +128,6 @@ fn activate(
     model.update_value(|m| *m = new_model);
     storage::set_selected_uuid(&uuid);
     state.current_uuid.set(Some(uuid));
-    state.editing_cell.set(None);
-    state.drag.set(DragState::Idle);
-    state.emit_event(SpreadsheetEvent::Content(ContentEvent::GenericChange));
+    state.reset_view_state();
+    state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
 }

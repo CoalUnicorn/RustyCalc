@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>iron-canvas datagrid web-test</title>
+        <style>
+            body {
+                margin: 0;
+                padding: 16px;
+                font:
+                    14px system-ui,
+                    sans-serif;
+                background: #f7f7f8;
+                color: #222;
+            }
+            h1 {
+                font-size: 16px;
+                margin: 0 0 12px;
+            }
+            #status {
+                margin: 0 0 12px;
+                color: #555;
+            }
+            #status.err {
+                color: #b00020;
+                font-family: ui-monospace, SFMono-Regular, monospace;
+                white-space: pre-wrap;
+            }
+            .stack {
+                position: relative;
+                width: 800px;
+                height: 400px;
+                background: #fff;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+            }
+            .stack canvas {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
+                display: block;
+            }
+            .stack canvas.overlay {
+                pointer-events: none;
+            }
+            .controls {
+                margin-top: 12px;
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                flex-wrap: wrap;
+            }
+            .controls button {
+                font: inherit;
+                padding: 4px 12px;
+                background: #f7f7f8;
+                border: 1px solid #d8d8dc;
+                border-radius: 4px;
+                cursor: pointer;
+                color: #333;
+            }
+            .controls label {
+                display: inline-flex;
+                gap: 4px;
+                align-items: center;
+                color: #555;
+            }
+            .hint {
+                margin: 8px 0 0;
+                color: #888;
+                font-size: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>iron-canvas &mdash; datagrid harness</h1>
+        <div id="status">loading wasm…</div>
+        <div class="stack" id="stack">
+            <canvas id="grid"></canvas>
+            <canvas id="overlay" class="overlay"></canvas>
+        </div>
+        <div class="controls">
+            <button id="save-svg" type="button">Save as SVG</button>
+            <button id="append-row" type="button">Append row</button>
+            <button id="toggle-live" type="button">Live: off</button>
+            <button id="toggle-theme" type="button">Theme: light</button>
+            <label>
+                <input id="frozen-header" type="checkbox" checked />
+                Frozen header
+            </label>
+        </div>
+        <div class="hint">
+            Click a column header to sort (click again to flip). Click a cell to
+            select. Drag a column edge to resize. Scroll with the mouse wheel.
+        </div>
+
+        <script type="module">
+            import init, {
+                DataGridCanvas,
+            } from "./vendor/iron-canvas-datagrid/iron_canvas_datagrid_web.js";
+
+            const statusEl = document.getElementById("status");
+            const stackEl = document.getElementById("stack");
+            const gridEl = document.getElementById("grid");
+            const overlayEl = document.getElementById("overlay");
+
+            const setStatus = (msg) => {
+                statusEl.className = "";
+                statusEl.textContent = msg;
+            };
+            const setError = (msg) => {
+                statusEl.className = "err";
+                statusEl.textContent = msg;
+            };
+
+            // A sample dataset: four columns (one numeric, right-aligned)
+            // and enough rows that vertical scrolling is visible. A couple of
+            // cells carry bold / fill / color styling to exercise CellStyle.
+            const FIRST_NAMES = [
+                "Ada", "Grace", "Alan", "Linus", "Margaret", "Dennis",
+                "Ken", "Barbara", "Donald", "Edsger", "Niklaus", "John",
+                "Tim", "Bjarne", "Guido", "James", "Anders", "Brendan",
+            ];
+            const TEAMS = ["Core", "Web", "Infra", "Render"];
+
+            const sampleRows = FIRST_NAMES.map((name, i) => ({
+                cells: [
+                    { value: String(i + 1) },
+                    {
+                        value: name,
+                        // Highlight a couple of rows to show fill/bold/color.
+                        bold: i === 0,
+                        fill: i === 0 ? "#fff3bf" : undefined,
+                        color: i === 2 ? "#1971c2" : undefined,
+                    },
+                    { value: TEAMS[i % TEAMS.length] },
+                    // Numeric column, right-aligned per-cell.
+                    { value: String((i * 7 + 3) % 97), align: "right" },
+                ],
+            }));
+
+            const sample = {
+                columns: [
+                    { header: "ID", width: 60, align: "right" },
+                    { header: "Name", width: 160 },
+                    { header: "Team", width: 120 },
+                    { header: "Qty", width: 100, align: "right" },
+                ],
+                rows: sampleRows,
+                rowHeight: 24,
+            };
+
+            let phase = "init wasm";
+            try {
+                await init();
+
+                phase = "new DataGridCanvas";
+                const canvas = new DataGridCanvas(gridEl, overlayEl);
+
+                phase = "setData";
+                canvas.setData(sample);
+
+                phase = "frozen header default";
+                canvas.setFrozenHeader(true);
+
+                phase = "resize";
+                // Pass CSS px + dpr; the Rust resize() multiplies by dpr to set
+                // the backing-store width/height itself.
+                const rect = stackEl.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+                canvas.resize(rect.width, rect.height, dpr);
+
+                // --- wheel: one row per notch, preventing page scroll ---
+                phase = "wire wheel";
+                stackEl.addEventListener(
+                    "wheel",
+                    (ev) => {
+                        ev.preventDefault();
+                        canvas.scrollBy(Math.sign(ev.deltaY), 0);
+                    },
+                    { passive: false },
+                );
+
+                // Canvas-relative CSS px from a pointer event. hitTest /
+                // resizeHandleAt expect coords measured from the canvas's
+                // top-left, so subtract the bounding rect origin.
+                const localXY = (ev) => {
+                    const r = gridEl.getBoundingClientRect();
+                    return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+                };
+
+                // --- column resize drag state ---
+                let drag = null; // { col, startX, startWidth }
+
+                phase = "wire mousedown";
+                gridEl.addEventListener("mousedown", (ev) => {
+                    const { x, y } = localXY(ev);
+
+                    // A column-edge handle wins over a header/cell click.
+                    const handle = canvas.resizeHandleAt(x, y, 4);
+                    if (handle && handle.kind === "columnEdge") {
+                        const startWidth = sample.columns[handle.index]
+                            ? sample.columns[handle.index].width || 100
+                            : 100;
+                        drag = { col: handle.index, startX: x, startWidth };
+                        ev.preventDefault();
+                        return;
+                    }
+
+                    const hit = canvas.hitTest(x, y);
+                    if (hit.kind === "columnHeader") {
+                        // Toggle sort: same column flips direction, new column
+                        // starts ascending.
+                        const cur = canvas.currentSort();
+                        const ascending =
+                            cur && cur.column === hit.col ? !cur.ascending : true;
+                        canvas.sortByColumn(hit.col, ascending);
+                    } else if (hit.kind === "cell") {
+                        canvas.selectCell(hit.row, hit.col);
+                    }
+                });
+
+                phase = "wire mousemove";
+                gridEl.addEventListener("mousemove", (ev) => {
+                    const { x, y } = localXY(ev);
+
+                    if (drag) {
+                        const newWidth = Math.max(
+                            24,
+                            drag.startWidth + (x - drag.startX),
+                        );
+                        canvas.setColumnWidth(drag.col, newWidth);
+                        return;
+                    }
+
+                    // Cursor affordance over a resizable column edge.
+                    const handle = canvas.resizeHandleAt(x, y, 4);
+                    gridEl.style.cursor =
+                        handle && handle.kind === "columnEdge"
+                            ? "col-resize"
+                            : "default";
+                });
+
+                phase = "wire mouseup";
+                window.addEventListener("mouseup", () => {
+                    if (drag) {
+                        // Persist the dragged width back into the JS dataset so
+                        // a subsequent drag on the same edge starts correctly.
+                        sample.columns[drag.col].width = undefined;
+                        drag = null;
+                    }
+                });
+
+                // --- buttons ---
+                phase = "wire save-svg";
+                document
+                    .getElementById("save-svg")
+                    .addEventListener("click", () => {
+                        const svg = canvas.exportSvg(rect.width, rect.height);
+                        const blob = new Blob([svg], { type: "image/svg+xml" });
+                        const url = URL.createObjectURL(blob);
+                        const a = Object.assign(document.createElement("a"), {
+                            href: url,
+                            download: "datagrid.svg",
+                        });
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        URL.revokeObjectURL(url);
+                    });
+
+                let appendCount = 0;
+                const appendOne = () => {
+                    appendCount += 1;
+                    const id = sample.rows.length + appendCount;
+                    canvas.appendRows([
+                        [
+                            String(id),
+                            "Row " + id,
+                            TEAMS[id % TEAMS.length],
+                            String((id * 7 + 3) % 97),
+                        ],
+                    ]);
+                };
+
+                phase = "wire append-row";
+                document
+                    .getElementById("append-row")
+                    .addEventListener("click", appendOne);
+
+                phase = "wire live toggle";
+                let liveTimer = null;
+                const liveBtn = document.getElementById("toggle-live");
+                liveBtn.addEventListener("click", () => {
+                    if (liveTimer) {
+                        clearInterval(liveTimer);
+                        liveTimer = null;
+                        liveBtn.textContent = "Live: off";
+                    } else {
+                        liveTimer = setInterval(appendOne, 1000);
+                        liveBtn.textContent = "Live: on";
+                    }
+                });
+
+                phase = "wire theme toggle";
+                let dark = false;
+                const themeBtn = document.getElementById("toggle-theme");
+                themeBtn.addEventListener("click", () => {
+                    dark = !dark;
+                    canvas.setThemeName(dark ? "dark" : "light");
+                    themeBtn.textContent = dark ? "Theme: dark" : "Theme: light";
+                });
+
+                phase = "wire frozen-header checkbox";
+                document
+                    .getElementById("frozen-header")
+                    .addEventListener("change", (ev) => {
+                        canvas.setFrozenHeader(ev.target.checked);
+                    });
+
+                // --- paint loop ---
+                phase = "paint loop";
+                const loop = () => {
+                    canvas.paintIfDirty();
+                    requestAnimationFrame(loop);
+                };
+                requestAnimationFrame(loop);
+
+                setStatus(
+                    "ready — click headers to sort, drag edges to resize, scroll to page.",
+                );
+            } catch (e) {
+                const detail =
+                    e instanceof Error
+                        ? e.stack || e.message
+                        : typeof e === "object" && e !== null
+                          ? JSON.stringify(e, Object.getOwnPropertyNames(e), 2)
+                          : String(e);
+                console.error("[" + phase + "]", e);
+                setError("[" + phase + "] " + detail);
+            }
+        </script>
+    </body>
+</html>

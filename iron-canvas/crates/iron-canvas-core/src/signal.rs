@@ -1,5 +1,5 @@
-//! Typed dirty signals for `PaintGate`. Replaces the prior `Cell<bool>`
-//! payload so `IronCanvas::decide` can dispatch on *what* changed rather
+//! Typed dirty signals for `PaintGate`. Each raised bit carries intent as a
+//! payload so `Orchestrator::decide` can dispatch on *what* changed rather
 //! than re-deriving intent from `is_still_valid` + `screen_for_blit`. Bit layout
 //! mirrors `chrome::pane_region::PaneRegionMask`.
 

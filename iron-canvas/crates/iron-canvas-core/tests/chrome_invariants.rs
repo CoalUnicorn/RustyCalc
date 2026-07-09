@@ -5,7 +5,7 @@
 //!
 //! Drives `RendererCore::<RecorderPainter>::render_grid` against a stub
 //! model and asserts structural invariants on the recorded `DrawOp` log
-//! that every Chrome sub-stage (1b–1e) must preserve. Stage 1a's
+//! that every Chrome sub-stage (1b-1e) must preserve. Stage 1a's
 //! assertions are intentionally weak — they only prove the harness
 //! compiles and runs against the current renderer. Stage 1e adds the
 //! row-header widening assertions.
@@ -32,7 +32,7 @@ fn scrolled_to(top_row: i32) -> TestModel {
 }
 
 fn drive_render_grid(model: &TestModel, check: impl FnOnce(&Chrome, &[DrawOp])) {
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     let frame = Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(model, &frame);
@@ -214,7 +214,8 @@ fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
         );
         let first_col = frame
             .pane_set
-            .scroll_cols
+            .cols
+            .scroll
             .first()
             .expect("scrolled view must emit at least one column slot");
         assert_eq!(
@@ -224,7 +225,8 @@ fn column_headers_align_with_cell_columns_at_7_digit_scroll() {
         );
         let first_row = frame
             .pane_set
-            .scroll_rows
+            .rows
+            .scroll
             .first()
             .expect("scrolled view must emit at least one row slot");
         assert_eq!(

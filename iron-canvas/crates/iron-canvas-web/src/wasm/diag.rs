@@ -1,9 +1,10 @@
 //! Dep-free `console.warn` shim.
 //!
-//! Lives outside `wasm.rs` so both the JS-bridge diagnostics layer
-//! (`JsBackedModel` throw / serde counters) and `painter::canvas`
-//! (`measure_text_width` fallback) can call into the same binding
-//! without `painter -> wasm` becoming a layering smell.
+//! Shared by this crate's two diagnostic surfaces: `JsBackedModel`'s
+//! throw / serde counters and the recording watchdog in `orchestrator`
+//! (soft-warn / hard-cap). The Canvas2D painter lives in the separate
+//! `iron-canvas-canvas2d` crate and carries its own local `console.warn`
+//! binding (its `measure_text_width` fallback), so it does not route here.
 
 use wasm_bindgen::prelude::*;
 
@@ -11,7 +12,4 @@ use wasm_bindgen::prelude::*;
 extern "C" {
     #[wasm_bindgen(js_namespace = console, js_name = warn)]
     pub(crate) fn console_warn(s: &str);
-
-    #[wasm_bindgen(js_namespace = console, js_name = log)]
-    pub(crate) fn console_log(s: &str);
 }

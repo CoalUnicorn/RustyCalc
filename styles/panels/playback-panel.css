@@ -1,0 +1,76 @@
+/* Playback Panel — prefix: pb-
+ *
+ * Renders inside the perf panel bar. Two modes:
+ * - Idle: "📂 Load .icr" file picker
+ * - Loaded: play/pause btn + scrubber + frame counter + close btn
+ *
+ * Mapping:
+ *   playback-panel → sits inside .pp bar, no root
+ *   pb-label        → playback section label
+ *   pb-btn          → play/pause + close buttons
+ *   pb-btn.active   → playing state
+ *   pb-scrub        → frame range slider
+ *   pb-counter      → "N / M" frame counter
+ *   pb-load         → idle-state "Load .icr" label
+ */
+
+.pb-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    flex-shrink: 0;
+}
+
+.pb-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    height: 20px;
+    padding: 0 4px;
+    font-size: 12px;
+    border: 1px solid var(--border-inner);
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.pb-btn:hover {
+    background: var(--bg-hover);
+}
+
+.pb-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.pb-scrub {
+    width: 100px;
+    height: 16px;
+    margin: 0 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.pb-counter {
+    font-size: 11px;
+    font-family: monospace;
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 60px;
+}
+
+.pb-load {
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.pb-load:hover {
+    color: var(--text-primary);
+}

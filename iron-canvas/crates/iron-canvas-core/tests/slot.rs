@@ -11,9 +11,9 @@ use iron_canvas_core::geometry::slot::{
 
 #[test]
 fn fill_axis_walks_inclusive_range_and_returns_post_cursor() {
-    // 4 columns of 50 px each starting at x=10 → returns 10 + 4*50 = 210.
+    // 4 columns of 50 px each starting at x=10 -> returns 10 + 4*50 = 210.
     let mut slots: Vec<ColSlot> = Vec::new();
-    let end = fill_axis(&mut slots, 1..=4, 10, i32::MAX, |_| 50);
+    let end = fill_axis(&mut slots, 1..=4, 10, None, |_| 50);
     assert_eq!(slots.len(), 4);
     assert_eq!(slots[0].col, 1);
     assert_eq!(slots[0].left, 10);
@@ -31,7 +31,7 @@ fn fill_axis_breaks_post_push_at_max_cursor() {
     // entirely off-canvas; that overshoot is intentional so consumers
     // never miss the last visible boundary.
     let mut slots: Vec<ColSlot> = Vec::new();
-    let end = fill_axis(&mut slots, 1..=10, 0, 110, |_| 50);
+    let end = fill_axis(&mut slots, 1..=10, 0, Some(110), |_| 50);
     assert_eq!(slots.len(), 4);
     assert_eq!(slots.last().expect("at least one slot").col, 4);
     assert_eq!(slots[3].left, 150);
@@ -42,7 +42,7 @@ fn fill_axis_breaks_post_push_at_max_cursor() {
 fn fill_axis_empty_range_pushes_nothing_and_returns_start() {
     let mut slots: Vec<RowSlot> = Vec::new();
     #[allow(clippy::reversed_empty_ranges)]
-    let end = fill_axis(&mut slots, 5..=4, 100, i32::MAX, |_| 20);
+    let end = fill_axis(&mut slots, 5..=4, 100, None, |_| 20);
     assert!(slots.is_empty());
     assert_eq!(end, 100);
 }
@@ -51,17 +51,17 @@ fn fill_axis_empty_range_pushes_nothing_and_returns_start() {
 fn fill_axis_max_cursor_at_start_still_pushes_first_slot() {
     // The break is post-push, so the first slot lands even when
     // max_cursor == start. This is the load-bearing case for the frozen
-    // band passing `max_cursor = i32::MAX` vs the scroll band passing
+    // band passing `max_cursor = None` vs the scroll band passing
     // a real ceiling — the frozen band never short-circuits, but the
     // scroll band must still emit at least one slot per call.
     let mut slots: Vec<ColSlot> = Vec::new();
-    fill_axis(&mut slots, 1..=10, 0, 0, |_| 50);
+    fill_axis(&mut slots, 1..=10, 0, Some(0), |_| 50);
     assert_eq!(slots.len(), 1, "first slot pushes before the break check");
 }
 
 #[test]
 fn scroll_first_prefers_view_first_past_frozen_band() {
-    // No frozen → view always wins.
+    // No frozen -> view always wins.
     assert_eq!(scroll_first(0, 1), 1);
     assert_eq!(scroll_first(0, 50), 50);
     // Frozen pushes the floor.
@@ -122,6 +122,39 @@ fn slot_at_finds_frozen_then_scroll_then_misses() {
     assert!(slot_at(&frozen, &scroll, 99).is_none());
 }
 
+#[cfg_attr(
+    debug_assertions,
+    should_panic(expected = "dense contiguous scroll ids")
+)]
+#[test]
+fn slot_at_rejects_sparse_scroll_candidate() {
+    let frozen = vec![ColSlot {
+        col: 1,
+        left: 0,
+        width: 50,
+    }];
+    let scroll = vec![
+        ColSlot {
+            col: 7,
+            left: 50,
+            width: 50,
+        },
+        ColSlot {
+            col: 9,
+            left: 100,
+            width: 50,
+        },
+    ];
+
+    #[cfg(debug_assertions)]
+    let _ = slot_at(&frozen, &scroll, 8);
+    #[cfg(not(debug_assertions))]
+    assert!(
+        slot_at(&frozen, &scroll, 8).is_none(),
+        "sparse scroll ids must not index through to the next physical slot"
+    );
+}
+
 #[test]
 fn slot_at_frozen_only_works_with_empty_scroll() {
     let frozen = vec![
@@ -141,7 +174,7 @@ fn slot_at_frozen_only_works_with_empty_scroll() {
     assert_eq!(slot_at(&frozen, &scroll, 2).map(|s| s.row), Some(2));
     assert!(
         slot_at(&frozen, &scroll, 3).is_none(),
-        "no scroll band → past-frozen returns None"
+        "no scroll band -> past-frozen returns None"
     );
 }
 
@@ -249,11 +282,11 @@ fn boundary_at_snaps_within_hit_zone_to_trailing_edge() {
         },
     ];
 
-    // Slot 1 ends at x=50. Hit zone 3 → x ∈ [47, 53] snaps to col 1.
+    // Slot 1 ends at x=50. Hit zone 3 -> x  [47, 53] snaps to col 1.
     assert_eq!(boundary_at(&frozen, &scroll, 50, 3), Some(1));
     assert_eq!(boundary_at(&frozen, &scroll, 47, 3), Some(1));
     assert_eq!(boundary_at(&frozen, &scroll, 53, 3), Some(1));
-    // Just past the zone → returns the NEXT slot's edge if within hit_zone.
+    // Just past the zone -> returns the NEXT slot's edge if within hit_zone.
     assert_eq!(boundary_at(&frozen, &scroll, 100, 3), Some(2));
 }
 
@@ -282,7 +315,7 @@ fn boundary_at_returns_none_in_slot_interior_and_breaks_early() {
         },
     ];
 
-    // Pixel mid-slot 1, hit_zone 5 → slot 1's end (100) > 50 + 5, so the
+    // Pixel mid-slot 1, hit_zone 5 -> slot 1's end (100) > 50 + 5, so the
     // loop breaks before inspecting slot 2. None returned because slot 1
     // itself isn't within the zone either.
     assert!(boundary_at(&frozen, &scroll, 50, 5).is_none());
@@ -314,6 +347,6 @@ fn boundary_at_walks_frozen_before_scroll() {
             height: 20,
         },
     ];
-    // Frozen slot 1 ends at y=20 → snaps to row 1.
+    // Frozen slot 1 ends at y=20 -> snaps to row 1.
     assert_eq!(boundary_at(&frozen, &scroll, 20, 2), Some(1));
 }

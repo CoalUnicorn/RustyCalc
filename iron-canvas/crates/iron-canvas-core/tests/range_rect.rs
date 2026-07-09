@@ -13,7 +13,7 @@ use iron_canvas_core::theme::CanvasTheme;
 use common::{TestModel, canvas_default};
 
 fn fresh(model: &TestModel) -> Chrome {
-    let theme = CanvasTheme::light();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
     Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh)
 }
 
@@ -21,7 +21,7 @@ fn fresh(model: &TestModel) -> Chrome {
 
 #[test]
 fn range_entirely_below_viewport_returns_none() {
-    // Canvas 400 tall, 20 px rows ⇒ ~19 visible rows. Rows 500..600 are
+    // Canvas 400 tall, 20 px rows -> ~19 visible rows. Rows 500..600 are
     // far below.
     let model = TestModel::synthetic_grid();
     let frame = fresh(&model);
@@ -33,7 +33,7 @@ fn range_entirely_below_viewport_returns_none() {
 
 #[test]
 fn range_entirely_right_of_viewport_returns_none() {
-    // Canvas 600 wide, 80 px cols ⇒ ~7 visible cols. Cols 500..510 are
+    // Canvas 600 wide, 80 px cols -> ~7 visible cols. Cols 500..510 are
     // far right.
     let model = TestModel::synthetic_grid();
     let frame = fresh(&model);

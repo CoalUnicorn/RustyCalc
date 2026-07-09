@@ -1,5 +1,6 @@
-//! Runtime tag for `Chrome` — which `FramePath` arm of `Chrome::next`
-//! produced this frame. Diagnostics and per-pane fingerprint gating
+//! Runtime tag for `Chrome` — which construction path (a `Chrome::next`
+//! `FramePath` arm, or `Chrome::next_blit`) produced this frame.
+//! Diagnostics and per-pane fingerprint gating
 //! read it; orchestrator `paint_*` arms dispatch on `PaintRegime`
 //! upstream so they never need to match on this tag.
 
@@ -11,7 +12,7 @@ pub enum FrameKindTag {
     /// `FramePath::SlotsReuse`: prev's slot vecs reused as-is; only
     /// per-frame state (theme, pane_fingerprints rotation) refreshed.
     SlotsReused,
-    /// `FramePath::Blit(&plan)`: scroll-axis slot vec rebuilt around
+    /// `Chrome::next_blit(.., &plan)`: scroll-axis slot vec rebuilt around
     /// a `BlitPlan`; cross-axis slot vec reused from prev.
     Blitted,
 }

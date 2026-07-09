@@ -21,15 +21,15 @@ pub enum PaneRegion {
 impl PaneRegion {
     pub fn rows(self, frame: &Chrome) -> &[RowSlot] {
         match self {
-            PaneRegion::TopLeft | PaneRegion::TopRight => &frame.pane_set.frozen_rows,
-            PaneRegion::BottomLeft | PaneRegion::BottomRight => &frame.pane_set.scroll_rows,
+            PaneRegion::TopLeft | PaneRegion::TopRight => &frame.pane_set.rows.frozen,
+            PaneRegion::BottomLeft | PaneRegion::BottomRight => &frame.pane_set.rows.scroll,
         }
     }
 
     pub fn cols(self, frame: &Chrome) -> &[ColSlot] {
         match self {
-            PaneRegion::TopLeft | PaneRegion::BottomLeft => &frame.pane_set.frozen_cols,
-            PaneRegion::TopRight | PaneRegion::BottomRight => &frame.pane_set.scroll_cols,
+            PaneRegion::TopLeft | PaneRegion::BottomLeft => &frame.pane_set.cols.frozen,
+            PaneRegion::TopRight | PaneRegion::BottomRight => &frame.pane_set.cols.scroll,
         }
     }
 
@@ -59,7 +59,7 @@ bitflags::bitflags! {
     /// Bitset over `PaneRegion`. `Chrome.stale_panes` carries one of these
     /// to tell `render_grid` which quadrants still need painting. Bit
     /// positions are pinned to `PaneRegion as u8` so `with(region)` /
-    /// `iter()` can map between enum and bit by left-shift.
+    /// `regions()` can map between enum and bit by left-shift.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct PaneRegionMask: u8 {
         const TOP_LEFT     = 1 << PaneRegion::TopLeft as u8;

@@ -2,12 +2,12 @@
 //!
 //! # Lifecycle
 //!
-//! `Orchestrator<S, M>` (in [`crate::orchestrator`]) owns two
+//! `Orchestrator<S>` (in [`crate::orchestrator`]) owns two
 //! [`LayerBase<S, R>`](crate::layer::LayerBase) values: one for the grid,
 //! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::layer::Surface),
 //! a [`PaintGate`](crate::layer::PaintGate), and a layer-specific renderer
 //! wrapping [`RendererCore`]. In the wasm build the surface is
-//! `iron_canvas_web::WebSurface`; the grid context uses `alpha: false`
+//! `iron_canvas_canvas2d::WebSurface`; the grid context uses `alpha: false`
 //! (opaque, skips alpha compositing) and the overlay uses
 //! `alpha: true, desynchronized: true`. The renderer is long-lived per
 //! layer, so the painter's cached fill/stroke/font/line-width state
@@ -26,9 +26,9 @@
 //! Two paint entry points, each driven by `paint_if_dirty` per dirty layer:
 //!
 //! - [`RendererCore::render_grid`] paints cells (four frozen-pane
-//!   quadrants, each running four cell sub-passes: bg, then grid
-//!   borders, then explicit borders, then text), then frozen separators,
-//!   then headers, then the corner box.
+//!   quadrants, each running five cell sub-passes: bg, then CF decoration,
+//!   then grid borders, then explicit borders, then text), then frozen
+//!   separators, then headers, then the corner box.
 //! - `LayerBase::paint_overlay_layer` orchestrates the decorations in
 //!   `crate::decoration` (selection, autofill, clipboard, point-mode,
 //!   formula-refs) plus header highlights.
@@ -44,16 +44,30 @@
 //! `BottomLeft`, `BottomRight`) based on frozen rows and columns. Each
 //! quadrant is rendered by `render_pane()` against a different
 //! [`PaneRegion`](crate::chrome::PaneRegion); a thick separator line
-//! marks the freeze boundary. See the diagram in `ARCHITECTURE.md` for
-//! the layout.
+//! marks the freeze boundary:
+//!
+//! ```text
+//!           frozen cols │ scrollable cols
+//!         ──────────────┼──────────────────
+//! frozen   TopLeft      │ TopRight
+//! rows     (static)     │ (scrolls in X)
+//!         ──────────────┼──────────────────
+//! scroll   BottomLeft   │ BottomRight
+//! rows     (scrolls Y)  │ (scrolls in X and Y)
+//! ```
+//!
+//! With no frozen rows or columns the grid is a single `BottomRight`
+//! quadrant.
 
+pub mod blit_work;
 pub mod cache;
 pub mod cell;
+pub mod cf_types;
 pub mod frame;
-// `renderer/overlay/` has moved to `src/layer/decoration/`. Each
-// decoration is now a struct that impls `Layer`; the orchestration that
-// used to live in `RendererCore::render_overlays` is now in
-// `OverlayLayer::paint`.
+// `renderer/overlay/` has moved to `src/decoration/`. Each decoration is
+// a struct that impls `Layer`; the orchestration that used to live in
+// `RendererCore::render_overlays` is now in
+// `LayerBase::paint_overlay_layer` (src/layer/mod.rs).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -62,8 +76,8 @@ use crate::CanvasModel;
 pub use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome};
 use crate::geometry::prim::Axis;
-use crate::renderer::cache::{FrameCache, PaneCache};
-pub use cache::ColNameIntern;
+use crate::renderer::blit_work::widen_blit_strip_to_pixel_clip;
+use crate::renderer::cache::{FrameCache, PaneCache, PaneShiftPrep};
 pub use cache::ColorIntern;
 pub use cache::FontIntern;
 
@@ -78,13 +92,13 @@ use crate::painter::{BlitPainter, GroupClass, Painter};
 /// re-export only what their layer is allowed to perform: `GridRenderer`
 /// exposes `render_grid` + the four-phase pipeline; `OverlayRenderer`
 /// exposes `painter()` + `repaint_active_cell` + `render_header_highlights`
-/// for `OverlayLayer` to drive the decoration walk.
+/// for `LayerBase::paint_overlay_layer` to drive the decoration walk.
 pub struct RendererCore<P: Painter> {
     /// The surface owns the painter as the semantic source of truth; the
     /// renderer holds a shared handle so paint methods reach the painter
     /// without re-borrowing through the surface on every call.
     pub painter: Rc<P>,
-    dpr: i32,
+    dpr: f64,
     pub frame_cache: FrameCache,
     /// Renderer-lifetime per-pane bulk-fetch buffers + last-fetched range.
     /// Sibling of the intern tables below; survives across frames so
@@ -95,10 +109,6 @@ pub struct RendererCore<P: Painter> {
     /// `FrameCache` because identical fonts repeat across frames, not just
     /// within a single paint.
     pub font_intern: FontIntern,
-    /// Renderer-lifetime intern of column-letter labels. Same rationale as
-    /// `font_intern` — column names repeat every frame; cache once, clone the
-    /// `Rc<str>` thereafter.
-    pub col_intern: ColNameIntern,
     /// Renderer-lifetime intern of per-cell color overrides (border + text).
     /// Hot-path callers (`BorderPaint::resolve`, `CellTextStyle::resolve`)
     /// previously allocated a fresh `String` per cell per frame; the intern
@@ -124,7 +134,7 @@ impl<P: Painter> RendererCore<P> {
 
     /// React to a backing-store resize: push the new DPR through the
     /// painter's transform, store it for snap math, and clear caches.
-    pub fn resize_for_dpr(&mut self, dpr: i32) {
+    pub fn resize_for_dpr(&mut self, dpr: f64) {
         self.painter.apply_dpr_transform(dpr);
         self.dpr = dpr;
         self.invalidate_paint_cache();
@@ -137,17 +147,19 @@ impl<P: Painter> RendererCore<P> {
     pub fn for_layer(painter: Rc<P>) -> Self {
         Self {
             painter,
-            dpr: 1,
+            dpr: 1.0,
             frame_cache: FrameCache {
                 text_slots: Cell::new(Vec::new()),
                 show_grid: Cell::new(true),
-                label_buf: RefCell::new(String::new()),
                 text_lines: Cell::new(Vec::new()),
                 wrap_buf: RefCell::new(String::new()),
+                strip_styles: Cell::new(Vec::new()),
+                strip_values: Cell::new(Vec::new()),
+                strip_cell_types: Cell::new(Vec::new()),
+                strip_decorations: Cell::new(Vec::new()),
             },
             pane_cache: PaneCache::default(),
             font_intern: FontIntern::new(),
-            col_intern: ColNameIntern::new(),
             color_intern: ColorIntern::new(),
         }
     }
@@ -161,7 +173,7 @@ impl<P: Painter> RendererCore<P> {
         self.cache_show_grid(model);
 
         // `frame.stale_panes` is `ALL` on Fresh; narrower on SlotsReuse —
-        // either way each region listed needs its 4-pass walk.
+        // either way each region listed needs its 5-pass walk.
         self.painter.begin_group(GroupClass::Cells);
         for pane in frame.stale_panes.regions() {
             self.render_pane(model, pane, frame);
@@ -175,48 +187,77 @@ impl<P: Painter> RendererCore<P> {
         self.painter.end_group();
 
         self.painter.begin_group(GroupClass::Headers);
-        self.render_headers_base(Axis::Row, frame);
-        self.render_headers_base(Axis::Column, frame);
+        if frame.row_header_thickness > 0 {
+            self.render_headers_base(Axis::Row, frame);
+        }
+        if frame.col_header_thickness > 0 {
+            self.render_headers_base(Axis::Column, frame);
+        }
         self.painter.end_group();
 
-        self.painter.begin_group(GroupClass::Corner);
-        self.draw_corner_box(frame);
-        self.painter.end_group();
+        self.draw_corner_box_if_needed(frame);
 
         self.painter.end_group();
     }
 
     /// Scroll-blit variant: caller's `Painter::blit` already shifted the
-    /// kept band, so we rotate the cached pane buffers to match
-    /// (`try_shift` per pane in `plan.shift_panes()`), wrap BottomRight in
-    /// a clip to `plan.repaint_strip` so the strip alone is repainted, and
-    /// only refresh the header strip on the scroll axis (the cross-axis
-    /// header is unchanged).
+    /// kept band. We prepare each shifted pane's cache (`prepare_shift`
+    /// rotates the buffers in place), then dispatch ONCE on the typed
+    /// [`PaneShiftPrep`]: a `Shifted` pane strip-paints (BottomRight wrapped
+    /// in a clip to `plan.repaint_strip`); every other outcome falls through
+    /// to a full `render_pane` repaint. Only the scroll-axis header strip is
+    /// refreshed (the cross-axis header is unchanged).
+    ///
+    /// On a blit frame `frame.stale_panes == plan.shift_panes()`
+    /// (`next_blit` seeds `stale_panes` from `shift_panes`), so one loop over
+    /// the stale panes covers exactly the shifted set.
     pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
-        // Rotate cached pane buffers to follow the blit's pixel shift so
-        // `render_pane_blit`'s strip-fetch only refills the revealed band.
-        // Defensive: if a pane's prior range no longer aligns (canvas
-        // resize, axis change), drop it so the fallback fetches in bulk.
-        for pane in plan.shift_panes().regions() {
-            let pane_buf = self.pane_cache.pane(pane);
-            let Some(new_range) = pane.range(frame) else {
-                pane_buf.range.set(None);
-                continue;
-            };
-            let _ = pane_buf.try_shift(new_range, plan.axis);
-        }
-
         self.painter.begin_group(GroupClass::Grid);
         self.cache_show_grid(model);
 
         self.painter.begin_group(GroupClass::Cells);
         for pane in frame.stale_panes.regions() {
-            if matches!(pane, PaneRegion::BottomRight) {
-                self.painter.push_clip(plan.repaint_strip);
-                self.render_pane_blit(model, pane, frame, plan.repaint_strip);
-                self.painter.pop_clip();
-            } else {
-                self.render_pane_blit(model, pane, frame, plan.repaint_strip);
+            let Some(new_range) = pane.range(frame) else {
+                // Never-cached / empty live range: nothing to shift, full fetch.
+                self.pane_cache.pane(pane).range.set(None);
+                self.render_pane(model, pane, frame);
+                continue;
+            };
+            // `prepare_shift` rotates the cache buffers and reports why; the
+            // dispatch decision is made here, once, from the typed result.
+            match self
+                .pane_cache
+                .pane(pane)
+                .prepare_shift(new_range, plan.axis)
+            {
+                PaneShiftPrep::Shifted {
+                    prev_range,
+                    new_range,
+                } => {
+                    // Build the pane's blit work in two halves: the cache emits
+                    // address-space work (no `Chrome` dependency), then a
+                    // renderer-local helper widens it against this frame's slot
+                    // geometry and attaches the pixel clip.
+                    let Some(address_work) = self
+                        .pane_cache
+                        .plan_blit_pane(prev_range, new_range, plan.axis)
+                    else {
+                        self.render_pane(model, pane, frame);
+                        continue;
+                    };
+                    let work = widen_blit_strip_to_pixel_clip(frame, plan, pane, address_work);
+                    match work.pixel_clip {
+                        Some(clip) => {
+                            self.painter.push_clip(clip);
+                            self.render_pane_blit(model, frame, &work);
+                            self.painter.pop_clip();
+                        }
+                        None => self.render_pane_blit(model, frame, &work),
+                    }
+                }
+                PaneShiftPrep::MissingCache | PaneShiftPrep::IncompatibleRange { .. } => {
+                    self.render_pane(model, pane, frame);
+                }
             }
         }
         self.painter.end_group();
@@ -228,14 +269,30 @@ impl<P: Painter> RendererCore<P> {
         // Only the scroll-axis header strip shifted; the cross-axis
         // strip's pixels are unchanged.
         self.painter.begin_group(GroupClass::Headers);
-        self.render_headers_base(plan.axis, frame);
+        let axis_thickness = match plan.axis {
+            Axis::Row => frame.row_header_thickness,
+            Axis::Column => frame.col_header_thickness,
+        };
+        if axis_thickness > 0 {
+            self.render_headers_base(plan.axis, frame);
+        }
         self.painter.end_group();
 
-        self.painter.begin_group(GroupClass::Corner);
-        self.draw_corner_box(frame);
-        self.painter.end_group();
+        self.draw_corner_box_if_needed(frame);
 
         self.painter.end_group();
+    }
+
+    /// Paint the header corner box, gated for *correctness*: at thickness 0 it
+    /// would still stroke 0.5px border lines spanning the full canvas. Shared
+    /// by `render_grid` and `render_grid_blit` (the one block identical between
+    /// them — the header strips differ, full vs scroll-axis only).
+    fn draw_corner_box_if_needed(&self, frame: &Chrome) {
+        if frame.row_header_thickness > 0 && frame.col_header_thickness > 0 {
+            self.painter.begin_group(GroupClass::Corner);
+            self.draw_corner_box(frame);
+            self.painter.end_group();
+        }
     }
 
     /// Cache the per-sheet grid-line toggle once for this frame so the
@@ -264,7 +321,7 @@ impl<P: Painter> RendererCore<P> {
 /// `LayerBase`'s `Surface::P` at the type level.
 pub trait LayerOps {
     type Painter: Painter;
-    fn resize_for_dpr(&mut self, dpr: i32);
+    fn resize_for_dpr(&mut self, dpr: f64);
 }
 
 pub struct GridRenderer<P: Painter> {
@@ -281,9 +338,10 @@ impl<P: Painter> GridRenderer<P> {
     }
 
     /// Drop cached pane-buffer ranges for the masked panes. Plumbed through
-    /// from `IronCanvas::paint_content` so a cell-content-changed regime
-    /// can force the named panes to refetch on their next `render_pane`
-    /// while unmasked panes keep their fingerprint-skip win.
+    /// from the orchestrator's content-dirty regime arms so a
+    /// cell-content-changed paint can force the named panes to refetch on
+    /// their next `render_pane` while unmasked panes keep their
+    /// fingerprint-skip win.
     pub fn invalidate_pane_cache(&self, mask: crate::chrome::PaneRegionMask) {
         self.core.pane_cache.invalidate(mask);
     }
@@ -315,7 +373,7 @@ impl<P: BlitPainter> GridRenderer<P> {
 
 impl<P: Painter> LayerOps for GridRenderer<P> {
     type Painter = P;
-    fn resize_for_dpr(&mut self, dpr: i32) {
+    fn resize_for_dpr(&mut self, dpr: f64) {
         self.core.resize_for_dpr(dpr);
     }
 }
@@ -358,7 +416,7 @@ impl<P: Painter> OverlayRenderer<P> {
 
 impl<P: Painter> LayerOps for OverlayRenderer<P> {
     type Painter = P;
-    fn resize_for_dpr(&mut self, dpr: i32) {
+    fn resize_for_dpr(&mut self, dpr: f64) {
         self.core.resize_for_dpr(dpr);
     }
 }

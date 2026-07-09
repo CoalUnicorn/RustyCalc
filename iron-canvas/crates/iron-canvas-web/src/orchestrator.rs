@@ -11,12 +11,15 @@ use web_sys::HtmlCanvasElement;
 use crate::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::wasm::JsBackedModel;
-use crate::web_surface::WebSurface;
+use iron_canvas_canvas2d::WebSurface;
+// `Surface` is only needed by the dev-tools recording path
+// (`grid_surface().painter()`); the export helpers no longer use it.
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
+#[cfg(feature = "dev-tools")]
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
@@ -102,17 +105,22 @@ enum CanvasMode {
 
 #[wasm_bindgen]
 pub struct IronCanvas {
-    orch: Orchestrator<FacadeSurface, Rc<dyn CanvasModel>>,
+    orch: Orchestrator<FacadeSurface>,
     // Cached so SVG export can re-push the live model into a throwaway
     // orchestrator. Updated alongside every `set_model` / `setModel`.
     model: Option<Rc<dyn CanvasModel>>,
+    // Typed twin of `model`, kept only when the model came through `setModel`
+    // (the JS path) — `themeChanged` needs `JsBackedModel::theme_changed`,
+    // which the type-erased `Rc<dyn CanvasModel>` can't reach. `None` for
+    // Rust-level models, whose theme handling lives host-side.
+    js_model: Option<Rc<JsBackedModel>>,
     // Live DPR — the engine doesn't retain it across `resize` calls, and
     // both the recording header and playback restore need it. Initialized
     // to `1` because some entry paths (the test surface) call `startRecording`
     // before any `resize`, and a DPR of `0` in the recording header would
     // round-trip through playback nonsensically. Only read under `dev-tools`.
     #[cfg_attr(not(feature = "dev-tools"), allow(dead_code))]
-    last_dpr: i32,
+    last_dpr: f64,
     #[cfg(feature = "dev-tools")]
     mode: CanvasMode,
 }
@@ -129,9 +137,10 @@ impl IronCanvas {
         let grid = wrap_surface(WebSurface::grid(grid_canvas)?);
         let overlay = wrap_surface(WebSurface::overlay(overlay_canvas)?);
         Ok(IronCanvas {
-            orch: Orchestrator::<FacadeSurface, Rc<dyn CanvasModel>>::new(grid, overlay),
+            orch: Orchestrator::<FacadeSurface>::new(grid, overlay),
             model: None,
-            last_dpr: 1,
+            js_model: None,
+            last_dpr: 1.0,
             #[cfg(feature = "dev-tools")]
             mode: CanvasMode::Live,
         })
@@ -140,16 +149,15 @@ impl IronCanvas {
     /// Whether this build supports `startRecording` / `stopRecording`.
     /// Always callable from JS so the host can hide its Record button on
     /// prod builds without `try`-sniffing the class shape.
-    #[allow(non_snake_case)]
-    pub fn recordingSupported() -> bool {
+    #[wasm_bindgen(js_name = "recordingSupported")]
+    pub fn recording_supported() -> bool {
         cfg!(feature = "dev-tools")
     }
 
     /// Resize both layers in one call.
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        let dpr_i = dpr.round() as i32;
-        self.last_dpr = dpr_i;
-        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr_i);
+        self.last_dpr = dpr;
+        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr);
     }
 
     /// Push a theme by name. Only `"dark"` is recognized; every other
@@ -166,15 +174,15 @@ impl IronCanvas {
     }
 
     /// Conservative repaint blanket — see `Orchestrator::request_repaint`.
-    #[allow(non_snake_case)]
-    pub fn requestRepaint(&mut self) {
+    #[wasm_bindgen(js_name = "requestRepaint")]
+    pub fn request_repaint(&mut self) {
         self.orch.request_repaint();
     }
 
     /// JS-facing cell-content-changed signal — marks all four pane
     /// quadrants. Pane-granular masks stay Rust-internal.
-    #[allow(non_snake_case)]
-    pub fn markContentDirty(&mut self) {
+    #[wasm_bindgen(js_name = "markContentDirty")]
+    pub fn mark_content_dirty(&mut self) {
         self.orch
             .mark_content_dirty(iron_canvas_core::chrome::PaneRegionMask::ALL);
     }
@@ -183,8 +191,8 @@ impl IronCanvas {
     /// (`dev-tools` feature only), brackets the paint with `begin_frame` /
     /// `end_frame` on both surfaces and pushes a `Frame` whenever at
     /// least one layer emitted ops. Idle rAF ticks are dropped.
-    #[allow(non_snake_case)]
-    pub fn paintIfDirty(&mut self) {
+    #[wasm_bindgen(js_name = "paintIfDirty")]
+    pub fn paint_if_dirty(&mut self) {
         #[cfg(feature = "dev-tools")]
         if matches!(self.mode, CanvasMode::Playback(_)) {
             return;
@@ -214,8 +222,8 @@ impl IronCanvas {
     /// surfaces. Subsequent `paintIfDirty` calls capture frames until
     /// `stopRecording` (or the hard-cap watchdog) fires.
     #[cfg(feature = "dev-tools")]
-    #[allow(non_snake_case)]
-    pub fn startRecording(&mut self, opts: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "startRecording")]
+    pub fn start_recording(&mut self, opts: JsValue) -> Result<(), JsError> {
         match &self.mode {
             CanvasMode::Live => {}
             CanvasMode::Recording(_) => {
@@ -225,7 +233,7 @@ impl IronCanvas {
                 return Err(JsError::new("cannot start a recording during playback"));
             }
         }
-        // `undefined` / `null` → default filter (record everything).
+        // `undefined` / `null` -> default filter (record everything).
         // Anything else is parsed as a `RecordingFilter` shape.
         let filter: RecordingFilter = if opts.is_undefined() || opts.is_null() {
             RecordingFilter::default()
@@ -275,8 +283,8 @@ impl IronCanvas {
     /// If the hard-cap watchdog already fired, `header.partial` is `true`
     /// and the bytes are the truncated tail.
     #[cfg(feature = "dev-tools")]
-    #[allow(non_snake_case)]
-    pub fn stopRecording(&mut self) -> Result<js_sys::Uint8Array, JsError> {
+    #[wasm_bindgen(js_name = "stopRecording")]
+    pub fn stop_recording(&mut self) -> Result<js_sys::Uint8Array, JsError> {
         if !matches!(self.mode, CanvasMode::Recording(_)) {
             return Err(JsError::new("no active recording"));
         }
@@ -306,81 +314,60 @@ impl IronCanvas {
     /// catch sees a real `Error` with `.message` and `.stack`.
     #[allow(non_snake_case)]
     pub fn setModel(&mut self, model: JsValue) -> Result<(), JsError> {
-        let backed: Rc<dyn CanvasModel> = Rc::new(JsBackedModel::try_from_js_value(model)?);
-        self.model = Some(Rc::clone(&backed));
-        self.orch.set_model(backed);
+        let backed = Rc::new(JsBackedModel::try_from_js_value(model)?);
+        self.js_model = Some(Rc::clone(&backed));
+        let erased: Rc<dyn CanvasModel> = backed;
+        self.model = Some(Rc::clone(&erased));
+        self.orch.set_model(erased);
         Ok(())
     }
 
+    /// Host contract for workbook-theme changes: call after
+    /// `model.setTheme(...)`. Drops the bridge's cached theme and marks
+    /// content dirty — a theme swap changes every style fingerprint, so the
+    /// next `paintIfDirty` repaints from fresh fetches. Without this call the
+    /// stale cache silently misrenders theme colors (no error, host bug).
+    /// No-op beyond the dirty mark for Rust-level models.
+    #[wasm_bindgen(js_name = "themeChanged")]
+    pub fn theme_changed(&mut self) {
+        if let Some(m) = &self.js_model {
+            m.theme_changed();
+        }
+        self.mark_content_dirty();
+    }
+
     /// Render the current sheet as a self-contained SVG string. Returns
-    /// an empty string if no model has been pushed yet. The export
-    /// reads the live theme but uses a one-shot orchestrator — never
-    /// touches the live grid / overlay surfaces and never fires blit
-    /// (always `PaintRegime::Fresh`). Overlays (selection, marching
-    /// ants, autofill handle, formula refs) are deliberately omitted
-    /// — the overlay surface's SVG output is built but discarded.
-    ///
-    /// Why the overlay-discard strategy yields a clean grid SVG even
-    /// though the throwaway orchestrator's `SelectionLayer` defaults to
-    /// an A1 active cell: `LayerBase::paint_overlay_layer` invokes the
-    /// `after_paint_renderer_hook` (active-cell repaint) through the
-    /// **overlay** renderer's painter, not the grid's. The hook's output
-    /// goes to the discarded overlay surface; the grid surface only
-    /// receives `render_grid`'s cell / borders / chrome draws.
-    #[allow(non_snake_case)]
-    pub fn exportSvg(&self, css_w: f64, css_h: f64) -> String {
+    /// an empty string if no model has been pushed yet. Reads the live
+    /// theme but delegates to `SvgSurface::render`, which drives a
+    /// one-shot orchestrator — never touching the live surfaces and
+    /// never firing blit. See `SvgSurface::render` for the
+    /// overlay-discard policy.
+    #[wasm_bindgen(js_name = "exportSvg")]
+    pub fn export_svg(&self, css_w: f64, css_h: f64) -> String {
         let Some(model) = self.model.as_ref() else {
             return String::new();
         };
-        let width = css_w.round() as i32;
-        let height = css_h.round() as i32;
-
-        let grid = SvgSurface::new(width, height);
-        let overlay = SvgSurface::new(width, height);
-        let grid_painter = grid.clone_painter();
-
-        let mut export_orch = Orchestrator::<SvgSurface, Rc<dyn CanvasModel>>::new(grid, overlay);
-        export_orch.set_theme(self.orch.theme().clone());
-        export_orch.set_model(Rc::clone(model));
-        export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
-        export_orch.request_repaint();
-        export_orch.paint_if_dirty();
-        drop(export_orch);
-
-        grid_painter.finish()
+        SvgSurface::render(
+            Rc::clone(model),
+            self.orch.theme(),
+            CanvasSize { w: css_w, h: css_h },
+        )
     }
 
-    /// JS-facing PDF export. Mirrors `exportSvg` exactly: grid and
-    /// overlay surfaces each own their own `ContentStream`; the overlay
-    /// stream is silently dropped when the throwaway orchestrator
-    /// releases its surfaces. Only the grid stream feeds
-    /// `build_document`, so the resulting PDF carries no selection,
-    /// marching ants, autofill handle, or formula refs — same policy as
-    /// SVG export. `Vec<u8>` auto-converts to `Uint8Array` across the
-    /// wasm-bindgen boundary.
+    /// JS-facing PDF export. Mirrors `exportSvg`'s overlay-discard
+    /// policy via `PdfSurface::render`. `Vec<u8>` auto-converts to
+    /// `Uint8Array` across the wasm-bindgen boundary.
     #[cfg(feature = "pdf")]
-    #[allow(non_snake_case)]
-    pub fn exportPdf(&self, css_w: f64, css_h: f64) -> Vec<u8> {
+    #[wasm_bindgen(js_name = "exportPdf")]
+    pub fn export_pdf(&self, css_w: f64, css_h: f64) -> Vec<u8> {
         let Some(model) = self.model.as_ref() else {
             return Vec::new();
         };
-        let width = css_w.round() as u32;
-        let height = css_h.round() as u32;
-
-        let grid = PdfSurface::new(width, height);
-        let overlay = PdfSurface::new(width, height);
-        let grid_stream = grid.stream();
-
-        let mut export_orch = Orchestrator::<PdfSurface, Rc<dyn CanvasModel>>::new(grid, overlay);
-        export_orch.set_theme(self.orch.theme().clone());
-        export_orch.set_model(Rc::clone(model));
-        export_orch.resize(CanvasSize { w: css_w, h: css_h }, 1);
-        export_orch.request_repaint();
-        export_orch.paint_if_dirty();
-        drop(export_orch);
-
-        let stream = grid_stream.borrow();
-        PdfSurface::build_document(&stream, width, height)
+        PdfSurface::render(
+            Rc::clone(model),
+            self.orch.theme(),
+            CanvasSize { w: css_w, h: css_h },
+        )
     }
 }
 
@@ -390,8 +377,8 @@ impl IronCanvas {
     /// JS-facing theme push from a host DOM node. Reads the upstream
     /// `--palette-*` custom properties off `el`'s computed style and
     /// builds a `CanvasTheme`.
-    #[allow(non_snake_case)]
-    pub fn setThemeFromElement(&mut self, el: &web_sys::Element) {
+    #[wasm_bindgen(js_name = "setThemeFromElement")]
+    pub fn set_theme_from_element(&mut self, el: &web_sys::Element) {
         self.orch
             .set_theme(crate::theme_from_element::from_element(el));
         self.restamp_recording_theme();
@@ -407,16 +394,16 @@ impl IronCanvas {
 impl IronCanvas {
     /// Resolve the cursor against the last painted frame. See
     /// `crate::wire::HitTestWire` for the JS shape (tagged on `kind`).
-    #[allow(non_snake_case)]
-    pub fn hitTest(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
+    #[wasm_bindgen(js_name = "hitTest")]
+    pub fn hit_test_js(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
         let wire: crate::wire::HitTestWire = self.orch.hit_test(x, y).into();
         Ok(serde_wasm_bindgen::to_value(&wire)?)
     }
 
     /// Pixel rect of a 1-based cell, or `null` if the cell isn't laid out
     /// (e.g. off-screen rows that the slot map hasn't materialized).
-    #[allow(non_snake_case)]
-    pub fn cellRect(&self, row: i32, column: i32) -> Result<JsValue, JsError> {
+    #[wasm_bindgen(js_name = "cellRect")]
+    pub fn cell_rect_js(&self, row: i32, column: i32) -> Result<JsValue, JsError> {
         match self.orch.cell_rect(row, column) {
             Some(rect) => Ok(serde_wasm_bindgen::to_value(&rect)?),
             None => Ok(JsValue::NULL),
@@ -425,8 +412,8 @@ impl IronCanvas {
 
     /// Resize-handle hit-test. `tolerance` is the slop band in CSS pixels.
     /// Returns `null` if no row/column trailing edge is within tolerance.
-    #[allow(non_snake_case)]
-    pub fn resizeHandleAt(&self, x: f64, y: f64, tolerance: f64) -> Result<JsValue, JsError> {
+    #[wasm_bindgen(js_name = "resizeHandleAt")]
+    pub fn resize_handle_at_js(&self, x: f64, y: f64, tolerance: f64) -> Result<JsValue, JsError> {
         match self.orch.resize_handle_at(x, y, tolerance) {
             Some(target) => {
                 let wire: crate::wire::ResizeTargetWire = target.into();
@@ -438,8 +425,8 @@ impl IronCanvas {
 
     /// Pixel position of the autofill handle, or `null` if no selection is
     /// drawn (the handle is anchored to the active selection).
-    #[allow(non_snake_case)]
-    pub fn autofillHandlePos(&self) -> Result<JsValue, JsError> {
+    #[wasm_bindgen(js_name = "autofillHandlePos")]
+    pub fn autofill_handle_pos(&self) -> Result<JsValue, JsError> {
         match self.orch.autofill_handle() {
             Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
             None => Ok(JsValue::NULL),
@@ -449,8 +436,8 @@ impl IronCanvas {
     /// Layer-bypassing cell resolver. Returns `{row, column}` or `null`.
     /// Bypasses overlay layers (formula-ref dragging, etc.) that would
     /// otherwise claim the pointer.
-    #[allow(non_snake_case)]
-    pub fn pixelToCell(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
+    #[wasm_bindgen(js_name = "pixelToCell")]
+    pub fn pixel_to_cell_js(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
         match self.orch.pixel_to_cell(x, y) {
             Some((row, column)) => {
                 let wire = crate::wire::CellCoordWire { row, column };
@@ -461,8 +448,8 @@ impl IronCanvas {
     }
 
     /// Current CSS-pixel size of the drawable area: `{ w, h }`.
-    #[allow(non_snake_case)]
-    pub fn canvasSize(&self) -> Result<JsValue, JsError> {
+    #[wasm_bindgen(js_name = "canvasSize")]
+    pub fn canvas_size_js(&self) -> Result<JsValue, JsError> {
         let wire: crate::wire::CanvasSizeWire = self.orch.canvas_size().into();
         Ok(serde_wasm_bindgen::to_value(&wire)?)
     }
@@ -474,38 +461,38 @@ impl IronCanvas {
     /// Mark the overlay layer dirty without changing state. Use after the
     /// host mutates anything the overlay reads from the model (selection,
     /// active cell, formula text) but not held in `RenderOverlays`.
-    #[allow(non_snake_case)]
-    pub fn requestOverlayRepaint(&mut self) {
+    #[wasm_bindgen(js_name = "requestOverlayRepaint")]
+    pub fn request_overlay_repaint_js(&mut self) {
         self.orch.request_overlay_repaint();
     }
 
     /// Autofill drag target. Pass `null` to clear (drag ended / cancelled).
-    #[allow(non_snake_case)]
-    pub fn setExtendTo(&mut self, target: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "setExtendTo")]
+    pub fn set_extend_to_js(&mut self, target: JsValue) -> Result<(), JsError> {
         let wire: Option<crate::wire::AutofillTargetWire> = serde_wasm_bindgen::from_value(target)?;
         self.orch.set_extend_to(wire.map(Into::into));
         Ok(())
     }
 
     /// Clipboard marching-ants rectangle. Pass `null` to clear.
-    #[allow(non_snake_case)]
-    pub fn setClipboard(&mut self, area: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "setClipboard")]
+    pub fn set_clipboard_js(&mut self, area: JsValue) -> Result<(), JsError> {
         let wire: Option<crate::wire::SheetAreaWire> = serde_wasm_bindgen::from_value(area)?;
         self.orch.set_clipboard(wire.map(Into::into));
         Ok(())
     }
 
     /// Formula-entry point-mode range highlight. Pass `null` to clear.
-    #[allow(non_snake_case)]
-    pub fn setPointRange(&mut self, range: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "setPointRange")]
+    pub fn set_point_range_js(&mut self, range: JsValue) -> Result<(), JsError> {
         let wire: Option<crate::wire::RCRangeWire> = serde_wasm_bindgen::from_value(range)?;
         self.orch.set_point_range(wire.map(Into::into));
         Ok(())
     }
 
     /// Replace the per-formula draggable references.
-    #[allow(non_snake_case)]
-    pub fn setFormulaRefs(&mut self, refs: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "setFormulaRefs")]
+    pub fn set_formula_refs_js(&mut self, refs: JsValue) -> Result<(), JsError> {
         let wire: Vec<crate::wire::FormulaRefWire> = serde_wasm_bindgen::from_value(refs)?;
         let refs: Vec<iron_canvas_core::FormulaRef> = wire.into_iter().map(Into::into).collect();
         self.orch.set_formula_refs(refs);
@@ -515,8 +502,8 @@ impl IronCanvas {
     /// Full overlay-state push. Currently infallible at the boundary; the
     /// `Result` is preserved so future invariant checks can surface as a
     /// `JsError` without touching the call site.
-    #[allow(non_snake_case)]
-    pub fn setOverlays(&mut self, overlays: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "setOverlays")]
+    pub fn set_overlays_js(&mut self, overlays: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::RenderOverlaysWire = serde_wasm_bindgen::from_value(overlays)?;
         let engine = wire.into_engine().map_err(|msg| JsError::new(&msg))?;
         self.orch.set_overlays(engine);
@@ -531,8 +518,8 @@ impl IronCanvas {
     /// throw a `JsError`. For partial overrides with a LIGHT fallback, use
     /// `setThemeVariables`. For CSS-var driven themes, prefer the existing
     /// `setThemeFromElement`.
-    #[allow(non_snake_case)]
-    pub fn setTheme(&mut self, theme: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "setTheme")]
+    pub fn set_theme_js(&mut self, theme: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::CanvasThemeWire = serde_wasm_bindgen::from_value(theme)?;
         self.orch.set_theme(wire.into());
         self.restamp_recording_theme();
@@ -542,8 +529,8 @@ impl IronCanvas {
     /// Partial theme override. Each key is optional; missing keys fall back
     /// to `CanvasTheme::light()` via the engine's
     /// `From<ThemeVariables> for CanvasTheme` impl.
-    #[allow(non_snake_case)]
-    pub fn setThemeVariables(&mut self, vars: JsValue) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "setThemeVariables")]
+    pub fn set_theme_variables_js(&mut self, vars: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::ThemeVariablesWire = serde_wasm_bindgen::from_value(vars)?;
         self.orch.set_theme_variables(wire.into());
         self.restamp_recording_theme();
@@ -589,6 +576,8 @@ impl IronCanvas {
     /// (e.g. `WorksheetModelAdapter`) route through here.
     pub fn set_model(&mut self, model: Rc<dyn CanvasModel>) {
         self.model = Some(Rc::clone(&model));
+        // A Rust-level model replaces any JS one; its theme is host-resolved.
+        self.js_model = None;
         self.orch.set_model(model);
     }
 
@@ -613,6 +602,14 @@ impl IronCanvas {
 
     pub fn cell_rect(&self, row: i32, column: i32) -> Option<PixelRect> {
         self.orch.cell_rect(row, column)
+    }
+
+    pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
+        self.orch.fit_column_width(col, first_row, last_row)
+    }
+
+    pub fn fit_row_height(&self, row: i32, first_col: i32, last_col: i32) -> Option<f64> {
+        self.orch.fit_row_height(row, first_col, last_col)
     }
 
     pub fn autofill_handle(&self) -> Option<Point> {
@@ -722,8 +719,8 @@ impl IronCanvas {
     /// height so the displayed canvas matches. `exitPlayback` restores
     /// both. The pre-playback CSS dimensions and DPR are stashed on the
     /// session.
-    #[allow(non_snake_case)]
-    pub fn loadRecording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "loadRecording")]
+    pub fn load_recording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
         if matches!(self.mode, CanvasMode::Recording(_)) {
             return Err(JsError::new(
                 "cannot load a recording while a capture is active",
@@ -761,8 +758,8 @@ impl IronCanvas {
     ///
     /// Refuses during an active capture — see `loadRecording` for the
     /// same reason.
-    #[allow(non_snake_case)]
-    pub fn seekRecording(&mut self, frame_idx: u32) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "seekRecording")]
+    pub fn seek_recording(&mut self, frame_idx: u32) -> Result<(), JsError> {
         match &mut self.mode {
             CanvasMode::Recording(_) => {
                 return Err(JsError::new(
@@ -788,8 +785,8 @@ impl IronCanvas {
     /// auto-pause contract would otherwise diverge: `Play` from the last
     /// frame would restart the timeline, but `Play` arriving one frame
     /// later (after the auto-pause) does not.
-    #[allow(non_snake_case)]
-    pub fn playRecording(&mut self, now_ms: f64) -> Result<(), JsError> {
+    #[wasm_bindgen(js_name = "playRecording")]
+    pub fn play_recording(&mut self, now_ms: f64) -> Result<(), JsError> {
         let CanvasMode::Playback(s) = &mut self.mode else {
             return Err(JsError::new("no recording loaded"));
         };
@@ -801,8 +798,8 @@ impl IronCanvas {
     }
 
     /// Halt the play loop. Idempotent.
-    #[allow(non_snake_case)]
-    pub fn pauseRecording(&mut self) {
+    #[wasm_bindgen(js_name = "pauseRecording")]
+    pub fn pause_recording(&mut self) {
         if let CanvasMode::Playback(s) = &mut self.mode {
             s.clock = PlayClock::Paused;
         }
@@ -810,8 +807,8 @@ impl IronCanvas {
 
     /// `true` while play is active. `false` when paused, at end-of-recording,
     /// or when no recording is loaded.
-    #[allow(non_snake_case)]
-    pub fn isPlaying(&self) -> bool {
+    #[wasm_bindgen(js_name = "isPlaying")]
+    pub fn is_playing(&self) -> bool {
         matches!(
             &self.mode,
             CanvasMode::Playback(s) if matches!(s.clock, PlayClock::Playing { .. })
@@ -826,8 +823,8 @@ impl IronCanvas {
     /// Host pattern: call from the same rAF loop that drives `paintIfDirty`.
     /// `paintIfDirty` short-circuits while a session is loaded, so the two
     /// never paint in the same tick.
-    #[allow(non_snake_case)]
-    pub fn tickPlayback(&mut self, now_ms: f64) -> bool {
+    #[wasm_bindgen(js_name = "tickPlayback")]
+    pub fn tick_playback(&mut self, now_ms: f64) -> bool {
         let CanvasMode::Playback(s) = &mut self.mode else {
             return false;
         };
@@ -857,8 +854,8 @@ impl IronCanvas {
     /// worksheet returns on the next rAF tick. Restores the canvas CSS
     /// dimensions and resizes the orchestrator back to the pre-playback
     /// live size + DPR. No-op when no session is loaded.
-    #[allow(non_snake_case)]
-    pub fn exitPlayback(&mut self) {
+    #[wasm_bindgen(js_name = "exitPlayback")]
+    pub fn exit_playback(&mut self) {
         let CanvasMode::Playback(session) = std::mem::replace(&mut self.mode, CanvasMode::Live)
         else {
             return;
@@ -874,14 +871,14 @@ impl IronCanvas {
     }
 
     /// `true` while a playback session is loaded.
-    #[allow(non_snake_case)]
-    pub fn playbackActive(&self) -> bool {
+    #[wasm_bindgen(js_name = "playbackActive")]
+    pub fn playback_active(&self) -> bool {
         matches!(self.mode, CanvasMode::Playback(_))
     }
 
     /// Total frames in the loaded recording, or 0 if none loaded.
-    #[allow(non_snake_case)]
-    pub fn recordingFrameCount(&self) -> u32 {
+    #[wasm_bindgen(js_name = "recordingFrameCount")]
+    pub fn recording_frame_count(&self) -> u32 {
         if let CanvasMode::Playback(s) = &self.mode {
             s.frame_count()
         } else {
@@ -890,8 +887,8 @@ impl IronCanvas {
     }
 
     /// Current playback frame index, or 0 if none loaded.
-    #[allow(non_snake_case)]
-    pub fn recordingCurrentFrame(&self) -> u32 {
+    #[wasm_bindgen(js_name = "recordingCurrentFrame")]
+    pub fn recording_current_frame(&self) -> u32 {
         if let CanvasMode::Playback(s) = &self.mode {
             s.frame_idx
         } else {

@@ -1,0 +1,212 @@
+/* Conditional Formatting drawer — stacked panes (rule list above editor).
+ *
+ * Prefix: cfm-
+ *
+ * Layout: .cfm is the drawer body; .cfm-list (scrollable list of rules) sits
+ * above .cfm-editor (form for the currently selected rule). Stacked vertically
+ * to fit the narrower right-side drawer.
+ */
+
+.cfm {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.cfm-list {
+    width: 100%;
+    border-bottom: 1px solid var(--border, #ddd);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    max-height: 220px;
+}
+.cfm-list-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border, #ddd);
+    font-weight: 600;
+}
+.cfm-list-body {
+    flex: 1;
+    overflow-y: auto;
+}
+.cfm-list-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-light, #f0f0f0);
+    gap: 8px;
+}
+.cfm-list-item:hover {
+    background: var(--hover-bg, #f5f5f5);
+}
+.cfm-item-label {
+    font-weight: 500;
+    min-width: 80px;
+}
+.cfm-item-range {
+    color: var(--text-muted, #888);
+    font-size: 0.85em;
+    flex: 1;
+}
+.cfm-item-delete {
+    background: none;
+    border: none;
+    color: var(--danger, #e00);
+    cursor: pointer;
+    font-size: 1.1em;
+    padding: 2px 6px;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+.cfm-list-item:hover .cfm-item-delete {
+    opacity: 1;
+}
+.cfm-btn-new {
+    background: var(--accent, #4a86e8);
+    color: #fff;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+}
+
+.cfm-editor {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+}
+.cfm-editor-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted, #888);
+}
+.cfm-editor-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.cfm-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.cfm-field-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.cfm-label {
+    font-size: 0.85em;
+    font-weight: 500;
+    color: var(--text-muted, #666);
+}
+.cfm-input {
+    padding: 6px 8px;
+    border: 1px solid var(--border, #ccc);
+    border-radius: 4px;
+    font-size: 0.9em;
+    background: var(--input-bg, #fff);
+    color: var(--text, #333);
+}
+.cfm-input-color {
+    width: 40px;
+    height: 28px;
+    padding: 2px;
+}
+.cfm-select {
+    padding: 6px 8px;
+    border: 1px solid var(--border, #ccc);
+    border-radius: 4px;
+    font-size: 0.9em;
+    background: var(--input-bg, #fff);
+    color: var(--text, #333);
+}
+.cfm-section {
+    border-top: 1px solid var(--border-light, #eee);
+    padding-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.cfm-section-title {
+    font-weight: 600;
+    font-size: 0.9em;
+}
+.cfm-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9em;
+    cursor: pointer;
+}
+.cfm-editor-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-light, #eee);
+}
+.cfm-btn-save {
+    background: var(--accent, #4a86e8);
+    color: #fff;
+    border: none;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+.cfm-btn-cancel {
+    background: var(--btn-secondary, #f0f0f0);
+    color: var(--text, #333);
+    border: 1px solid var(--border, #ccc);
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+/* Color-picker trigger swatch inside the CF drawer — replace the default
+ * 12×3px absolute strip with a proper framed swatch. The trigger button
+ * becomes a 24×24 container; .cp-bar fills it edge-to-edge. */
+.cfm .cp-trigger {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border-color, #d0d7de);
+    border-radius: 4px;
+    overflow: hidden;
+    cursor: pointer;
+}
+.cfm .cp-trigger:hover {
+    border-color: var(--accent, #0969da);
+}
+.cfm .cp-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: auto;
+    width: 100%;
+    height: 100%;
+    /* Cancel the toolbar variant's centering transform — there a 12px strip is
+     * centered under an icon; here the bar fills the swatch edge-to-edge. */
+    transform: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+
+/* The Value/Formula field shares its row with the ⊞ grid-pick button (.rp-wrap
+ * is the flex row, reused from RangePickerInput). Let the field take the slack;
+ * min-width:0 lets it shrink instead of overflowing the drawer. */
+.cfm .rp-wrap .ff-host {
+    flex: 1;
+    min-width: 0;
+}

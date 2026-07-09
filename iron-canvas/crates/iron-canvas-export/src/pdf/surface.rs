@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
+use iron_canvas_core::{CanvasModel, CanvasTheme};
 
 use crate::pdf::doc::{ContentStream, PdfDocument};
 use crate::pdf::painter::PdfPainter;
@@ -29,17 +30,8 @@ impl PdfSurface {
         }
     }
 
-    /// Construct a surface whose painter writes into an externally
-    /// owned `ContentStream`. The Commit 4 web facade uses this to
-    /// point both the grid and overlay `PdfSurface`s at one buffer.
-    pub fn with_stream(stream: Rc<RefCell<ContentStream>>, width: u32, height: u32) -> Self {
-        Self {
-            painter: Rc::new(PdfPainter::with_stream(stream, width, height)),
-        }
-    }
-
-    /// Hand back the shared stream so the matching overlay surface can
-    /// share the same buffer.
+    /// Hand back the painter's content-stream handle so it survives the
+    /// orchestrator drop — `render` grabs it before `drive_once`.
     pub fn stream(&self) -> Rc<RefCell<ContentStream>> {
         self.painter.stream()
     }
@@ -57,12 +49,11 @@ impl PdfSurface {
     /// Stream-first assembly: wrap an already-populated `ContentStream`
     /// in the page-open CTM and emit a complete single-page PDF.
     ///
-    /// Exposed so callers that don't hold the surface itself can still
-    /// assemble — `IronCanvas::exportPdf` (in `iron-canvas-web`) hands
-    /// both grid and overlay `PdfSurface`s into the throwaway
-    /// `Orchestrator`, which takes ownership; the only handle that
-    /// survives the orchestrator drop is the shared
-    /// `Rc<RefCell<ContentStream>>`.
+    /// Split from `finish` so `render` can assemble after the throwaway
+    /// `Orchestrator` (and its `Rc<PdfPainter>` clones) have dropped:
+    /// `render` grabs the grid surface's `stream()` handle up front,
+    /// drives the paint, then feeds that surviving stream here. The
+    /// overlay surface is never assembled — that is the overlay discard.
     ///
     /// The CTM `1 0 0 -1 0 H cm` flips painter Y-down into PDF Y-up —
     /// emitted exactly once here rather than once per paint call.
@@ -81,6 +72,27 @@ impl PdfSurface {
         doc.add_object(5, 0, font::resources_object_with_helvetica());
         doc.finish()
     }
+
+    /// One-shot render of `model` into a single-page PDF document.
+    ///
+    /// Mirrors [`crate::svg::SvgSurface::render`]'s overlay-discard
+    /// policy: both grid and overlay surfaces are driven by a throwaway
+    /// `Orchestrator`, but only the grid stream feeds `build_document`,
+    /// so the PDF carries no selection, marching ants, autofill handle,
+    /// or formula refs.
+    pub fn render(model: Rc<dyn CanvasModel>, theme: &CanvasTheme, size: CanvasSize) -> Vec<u8> {
+        let width = size.w.round() as u32;
+        let height = size.h.round() as u32;
+
+        let grid = PdfSurface::new(width, height);
+        let overlay = PdfSurface::new(width, height);
+        let grid_stream = grid.stream();
+
+        crate::drive_once(grid, overlay, model, theme, size);
+
+        let stream = grid_stream.borrow();
+        Self::build_document(&stream, width, height)
+    }
 }
 
 impl Surface for PdfSurface {
@@ -97,7 +109,7 @@ impl Surface for PdfSurface {
     /// PDF document dimensions are baked at `PdfSurface::new`; a later
     /// `resize` that disagrees would silently produce a mismatched
     /// `/MediaBox`. The assertion mirrors `SvgSurface::resize`.
-    fn resize(&mut self, css: CanvasSize, _dpr: i32) {
+    fn resize(&mut self, css: CanvasSize, _dpr: f64) {
         debug_assert_eq!(
             (css.w.round() as u32, css.h.round() as u32),
             (self.painter.width, self.painter.height),

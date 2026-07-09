@@ -5,9 +5,12 @@ pub const MEDIUM_BORDER_WIDTH: i32 = 2;
 pub const THICK_BORDER_WIDTH: i32 = 3;
 pub const DASHED_BORDER_WIDTH: i32 = 2;
 
-/// Pixel offset from the canvas edge to the chrome's outer 1-px border
-/// line, which `draw_corner_box` strokes sharply at `header_thickness + 0.5`.
-pub const HEADER_OFFSET: i32 = 1;
+/// Width of the 1-px line separating a header strip from the cell area,
+/// stroked sharply by `draw_corner_box` at `header_thickness + 0.5`. The
+/// single source of truth for the header<->cell boundary: header strips and the
+/// corner box fill `[0, thickness)`, this line occupies the next pixel, and
+/// the cell area begins one separator-width past the thickness (`CELL_AREA_INSET`).
+pub const HEADER_SEPARATOR_WIDTH: i32 = STANDARD_BORDER_WIDTH;
 
 /// Height of the column-header strip in pixels. Static — the strip never
 /// resizes to fit content.
@@ -23,15 +26,12 @@ pub const HEADER_COL_WIDTH: i32 = 30;
 /// `pane_set` reserves between the frozen and scrolling pane bands.
 pub const FROZEN_SEP: i32 = 3;
 
-/// Pixel offset from a header strip's outer edge to the cell area origin.
-/// `HEADER_OFFSET` reserves the 1-px chrome border line (`draw_corner_box`
-/// strokes it sharply at `header_thickness + 0.5`); the extra
-/// `SELECTION_BORDER_WIDTH / 2` reserves a 1-px breathing buffer between
-/// the chrome border and the cell area so the selection — which
-/// `draw_selection` insets by `SELECTION_BORDER_WIDTH / 2` to keep the
-/// centered stroke inside the cell — paints with a visible gap from
-/// chrome at row 1 / col A.
-pub const CELL_AREA_INSET: i32 = HEADER_OFFSET;
+/// Pixel offset from a header strip's outer edge (`header_thickness`) to the
+/// cell area origin: `cell_origin = header_thickness + CELL_AREA_INSET`. This
+/// is exactly the separator line's width — the strip fills `[0, thickness)`,
+/// the separator occupies the single pixel at `thickness`, and the cell area
+/// starts immediately after at `thickness + HEADER_SEPARATOR_WIDTH`.
+pub const CELL_AREA_INSET: i32 = HEADER_SEPARATOR_WIDTH;
 /// Side length of the autofill handle square. The handle's top-left sits at
 /// the selection's bottom-right corner (Excel anchor) so it visually pokes
 /// outside the selection rectangle.

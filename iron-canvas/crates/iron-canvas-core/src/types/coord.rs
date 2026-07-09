@@ -1,6 +1,8 @@
 /// Inclusive rectangular range of cells. The two corners may be in either
-/// order — call [`RCRange::normalized`] if you need `r1 <= r2` and
-/// `c1 <= c2`.
+/// order: the geometry accessors (`height`/`width`/`contains`/`cells`)
+/// normalize internally, so they are correct regardless of corner order.
+/// Call [`RCRange::normalized`] only when you need the raw fields ordered
+/// (`r1 <= r2`, `c1 <= c2`).
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct RCRange {
     pub r1: i32,
@@ -17,11 +19,11 @@ impl RCRange {
     }
 
     pub fn height(self) -> i32 {
-        self.r2 - self.r1 + 1
+        (self.r2 - self.r1).abs() + 1
     }
 
     pub fn width(self) -> i32 {
-        self.c2 - self.c1 + 1
+        (self.c2 - self.c1).abs() + 1
     }
     /// Swap corners so `r1 <= r2` and `c1 <= c2`.
     ///
@@ -57,12 +59,14 @@ impl RCRange {
     /// assert_eq!(v, vec![(1, 1), (1, 2), (2, 1), (2, 2)]);
     /// ```
     pub fn cells(self) -> impl Iterator<Item = (i32, i32)> {
-        self.rows()
-            .flat_map(move |row| self.columns().map(move |col| (row, col)))
+        let n = self.normalized();
+        n.rows()
+            .flat_map(move |row| n.columns().map(move |col| (row, col)))
     }
 
     pub fn contains(self, row: i32, col: i32) -> bool {
-        (self.r1..=self.r2).contains(&row) && (self.c1..=self.c2).contains(&col)
+        let n = self.normalized();
+        (n.r1..=n.r2).contains(&row) && (n.c1..=n.c2).contains(&col)
     }
 
     pub fn from_cell(row: i32, col: i32) -> Self {
@@ -127,4 +131,33 @@ pub struct FormulaRef {
     pub sheet_area: SheetArea,
     pub color_idx: usize,
     pub kind: FormulaRefKind,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A range with reversed corners must report the same geometry as its
+    // normalized form — height/width stay positive, contains/cells aren't empty.
+    #[test]
+    fn reversed_range_geometry_matches_normalized() {
+        let reversed = RCRange {
+            r1: 5,
+            c1: 3,
+            r2: 2,
+            c2: 1,
+        };
+        let forward = reversed.normalized();
+
+        assert_eq!(reversed.height(), forward.height());
+        assert_eq!(reversed.width(), forward.width());
+        assert!(reversed.height() > 0 && reversed.width() > 0);
+
+        assert!(reversed.contains(3, 2));
+        assert!(!reversed.contains(6, 2));
+
+        let cells: Vec<_> = reversed.cells().collect();
+        assert_eq!(cells, forward.cells().collect::<Vec<_>>());
+        assert!(!cells.is_empty());
+    }
 }

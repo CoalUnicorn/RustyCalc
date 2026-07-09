@@ -1,5 +1,5 @@
-use crate::components::left_drawer::LeftDrawer;
-use crate::components::share_verify::ShareVerify;
+use crate::components::chrome::left_drawer::LeftDrawer;
+use crate::components::panels::share_verify::ShareVerify;
 use crate::components::workbook::Workbook;
 
 use base64::Engine;
@@ -14,7 +14,7 @@ use crate::storage;
 
 #[component]
 pub fn App() -> impl IntoView {
-    // `#share=…` URLs are always staged in-memory pending user consent —
+    // `#share=...` URLs are always staged in-memory pending user consent —
     // never auto-persisted on first paint. Both V0 (no word) and V1 (word
     // verification) defer bitcode deserialization until after the recipient
     // clicks Accept in the ShareVerify modal, so a crafted payload can't
@@ -71,15 +71,16 @@ pub fn App() -> impl IntoView {
     //            in input/workbook.rs before model replacement.
     let debounced_save = use_debounce_fn_with_options(
         move || {
-            if let Some(uuid) = wb_state.current_uuid.get_untracked() {
-                model.with_value(|m| {
-                    storage::save(&uuid, m);
-                    web_sys::console::time_with_label("bitcode::to_bytes");
-                    let bytes = m.to_bytes();
-                    web_sys::console::time_end_with_label("bitcode::to_bytes");
-                    pre_serialized.set_value(Some(bytes));
-                });
-            }
+            let Some(uuid) = wb_state.current_uuid.get_untracked() else {
+                return;
+            };
+            model.with_value(|m| {
+                storage::save(&uuid, m);
+                web_sys::console::time_with_label("bitcode::to_bytes");
+                let bytes = m.to_bytes();
+                web_sys::console::time_end_with_label("bitcode::to_bytes");
+                pre_serialized.set_value(Some(bytes));
+            });
         },
         1000.0,
         DebounceOptions::default().max_wait(Some(5000.0)),
@@ -98,20 +99,24 @@ pub fn App() -> impl IntoView {
     {
         use wasm_bindgen::prelude::*;
         let cb = Closure::<dyn Fn(web_sys::Event)>::new(move |_: web_sys::Event| {
-            if let Some(uuid) = wb_state.current_uuid.get_untracked() {
-                // Fast path: write the bytes the idle save already produced,
-                // bypassing a fresh bitcode pass. Registry was updated then too,
-                // so we only need to flush the model payload here.
-                if let Some(bytes) = pre_serialized.get_value() {
-                    let mut full = Vec::with_capacity(5 + bytes.len());
-                    full.extend_from_slice(b"RCAL");
-                    full.push(1u8);
-                    full.extend_from_slice(&bytes);
-                    let encoded = base64::engine::general_purpose::STANDARD.encode(&full);
-                    let _ = gloo_storage::LocalStorage::set(uuid.to_string(), &encoded);
-                } else {
-                    model.with_value(|m| storage::save(&uuid, m));
-                }
+            let Some(uuid) = wb_state.current_uuid.get_untracked() else {
+                return;
+            };
+            // Fast path: write the bytes the idle save already produced,
+            // bypassing a fresh bitcode pass. Registry was updated then too,
+            // so we only need to flush the model payload here.
+            if let Some(bytes) = pre_serialized.get_value() {
+                let mut full = Vec::with_capacity(5 + bytes.len());
+                full.extend_from_slice(b"RCAL");
+                full.push(1u8);
+                full.extend_from_slice(&bytes);
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&full);
+                storage::log_err(
+                    gloo_storage::LocalStorage::set(uuid.to_string(), &encoded),
+                    "beforeunload save",
+                );
+            } else {
+                model.with_value(|m| storage::save(&uuid, m));
             }
         });
         if let Ok(win) =
