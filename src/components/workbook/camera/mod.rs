@@ -111,6 +111,21 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
     });
     on_cleanup(pause);
 
+    // Webfont finished loading: cached text widths may be fallback-font
+    // stale. Listener is scope-bound — use_event_listener detaches it when
+    // this camera unmounts with the <For> list.
+    let _ = leptos_use::use_event_listener(
+        web_sys::EventTarget::from(document().fonts()),
+        leptos::ev::Custom::<web_sys::Event>::new("loadingdone"),
+        move |_| {
+            cam.update_value(|slot| {
+                if let Some(c) = slot.as_mut() {
+                    c.fonts_changed();
+                }
+            });
+        },
+    );
+
     // Drag state: pointer offset from widget origin at grab time. Pointer
     // capture keeps moves flowing even when the cursor outruns the grip.
     // Both grab and move use client coordinates, so the container offset

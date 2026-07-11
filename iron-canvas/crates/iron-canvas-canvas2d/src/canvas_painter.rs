@@ -21,6 +21,8 @@ use iron_canvas_core::painter::{
     approx_text_width, parse_font_size_px,
 };
 
+use crate::measure_cache::MeasureCache;
+
 // Private `console.warn` binding — zero IronCalc, kept local so this crate
 // does not depend on `iron-canvas-web`'s `wasm` diagnostics module.
 #[wasm_bindgen]
@@ -131,6 +133,13 @@ pub struct CanvasPainter {
     /// still a valid key. Not cleared, so cardinality tracks the sheet's
     /// distinct-color set (bounded, like `ColorIntern`).
     palette: RefCell<Vec<Rc<str>>>,
+    /// Memo of `ctx.measure_text` widths keyed `(font_css, text)`.
+    /// Interior mutability because `TextMetrics::measure_text_width` takes
+    /// `&self`. `get` and `insert` are separate short borrows — never held
+    /// across the JS measure call. Content-keyed, so `SetterCache`
+    /// invalidation must NOT touch it; only `clear_measure_cache` (font
+    /// load) empties it.
+    measure_cache: RefCell<MeasureCache>,
 }
 
 impl CanvasPainter {
@@ -143,6 +152,7 @@ impl CanvasPainter {
             clip_depth: Cell::new(0),
             dpr: Cell::new(1.0),
             palette: RefCell::new(Vec::new()),
+            measure_cache: RefCell::new(MeasureCache::default()),
         }
     }
 
@@ -212,6 +222,14 @@ impl CanvasPainter {
         palette.push(Rc::clone(&rc));
         rc
     }
+
+    /// Drop all memoized text widths. Called via the facades'
+    /// `fontsChanged()` when `document.fonts` finishes loading — widths
+    /// measured against a fallback font are stale the moment the real
+    /// font arrives.
+    pub fn clear_measure_cache(&self) {
+        self.measure_cache.borrow_mut().clear();
+    }
 }
 
 impl Drop for CanvasPainter {
@@ -226,20 +244,28 @@ impl Drop for CanvasPainter {
 
 impl TextMetrics for CanvasPainter {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
+        if let Some(w) = self.measure_cache.borrow().get(font_css, text) {
+            return w;
+        }
         // Metrics callers (FontIntern + HEADER_FONT only feed `fill_text`)
         // pass an `&str` here. Treat as Borrowed — the cache will still hit
         // against a previously cached Static via content-eq if it was the
         // same literal.
         self.set_font_cached(PaintColor::Borrowed(font_css));
         match self.ctx.measure_text(text) {
-            Ok(m) => m.width(),
+            Ok(m) => {
+                let w = m.width();
+                self.measure_cache.borrow_mut().insert(font_css, text, w);
+                w
+            }
             Err(_) => {
                 // Debug builds: crash on first occurrence so a regressing
                 // ctx state (lost context, bad font_css) is caught loud
                 // in dev. Release: fall back to the shared `approx_text_width`
                 // estimate so a measure error agrees with the SVG/PDF/recorder
                 // backends instead of diverging; a single console.warn whispers
-                // once per session.
+                // once per session. Deliberately NOT cached: a broken ctx must
+                // keep remeasuring so recovery heals.
                 debug_assert!(
                     false,
                     "CanvasPainter::measure_text_width: ctx.measure_text errored; \

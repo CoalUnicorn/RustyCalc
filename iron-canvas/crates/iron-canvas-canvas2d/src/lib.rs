@@ -7,6 +7,7 @@
 //! data-grid facade with no spreadsheet semantics.
 
 mod canvas_painter;
+mod measure_cache;
 pub mod theme_from_element;
 mod web_surface;
 

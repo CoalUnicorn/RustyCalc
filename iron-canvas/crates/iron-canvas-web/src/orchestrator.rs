@@ -11,15 +11,15 @@ use web_sys::HtmlCanvasElement;
 use crate::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::wasm::JsBackedModel;
-use iron_canvas_canvas2d::WebSurface;
-// `Surface` is only needed by the dev-tools recording path
-// (`grid_surface().painter()`); the export helpers no longer use it.
+use iron_canvas_canvas2d::{CanvasPainter, WebSurface};
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
-#[cfg(feature = "dev-tools")]
+// `Surface` is needed in all builds for `clone_painter` at construction
+// (fontsChanged handles); dev-tools additionally uses it for the
+// recording path (`grid_surface().painter()`).
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
@@ -114,6 +114,13 @@ pub struct IronCanvas {
     // which the type-erased `Rc<dyn CanvasModel>` can't reach. `None` for
     // Rust-level models, whose theme handling lives host-side.
     js_model: Option<Rc<JsBackedModel>>,
+    // Painter handles taken at construction, before the surfaces move into
+    // the core orchestrator (and before the dev-tools RecordingSurface wrap,
+    // which shares the same inner painter). `fontsChanged` clears the
+    // Canvas2D text-measure memos through these without routing a font
+    // concept through core.
+    grid_painter: Rc<CanvasPainter>,
+    overlay_painter: Rc<CanvasPainter>,
     // Live DPR — the engine doesn't retain it across `resize` calls, and
     // both the recording header and playback restore need it. Initialized
     // to `1` because some entry paths (the test surface) call `startRecording`
@@ -134,12 +141,18 @@ impl IronCanvas {
         grid_canvas: HtmlCanvasElement,
         overlay_canvas: HtmlCanvasElement,
     ) -> Result<IronCanvas, JsValue> {
-        let grid = wrap_surface(WebSurface::grid(grid_canvas)?);
-        let overlay = wrap_surface(WebSurface::overlay(overlay_canvas)?);
+        let grid_ws = WebSurface::grid(grid_canvas)?;
+        let overlay_ws = WebSurface::overlay(overlay_canvas)?;
+        let grid_painter = grid_ws.clone_painter();
+        let overlay_painter = overlay_ws.clone_painter();
+        let grid = wrap_surface(grid_ws);
+        let overlay = wrap_surface(overlay_ws);
         Ok(IronCanvas {
             orch: Orchestrator::<FacadeSurface>::new(grid, overlay),
             model: None,
             js_model: None,
+            grid_painter,
+            overlay_painter,
             last_dpr: 1.0,
             #[cfg(feature = "dev-tools")]
             mode: CanvasMode::Live,
@@ -333,6 +346,19 @@ impl IronCanvas {
         if let Some(m) = &self.js_model {
             m.theme_changed();
         }
+        self.mark_content_dirty();
+    }
+
+    /// Fonts finished loading after paints already ran — memoized text
+    /// widths may reflect a fallback font. Clear the Canvas2D measure
+    /// memos and repaint. Host wiring (addEventListener, never the
+    /// single-slot `onloadingdone =` property — multiple canvases share
+    /// `document.fonts`):
+    /// `document.fonts.addEventListener("loadingdone", () => canvas.fontsChanged());`
+    #[wasm_bindgen(js_name = "fontsChanged")]
+    pub fn fonts_changed(&mut self) {
+        self.grid_painter.clear_measure_cache();
+        self.overlay_painter.clear_measure_cache();
         self.mark_content_dirty();
     }
 

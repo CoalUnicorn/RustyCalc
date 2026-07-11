@@ -4,9 +4,10 @@
 
 use std::rc::Rc;
 
-use iron_canvas_canvas2d::WebSurface;
+use iron_canvas_canvas2d::{CanvasPainter, WebSurface};
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::layer::Surface;
 use iron_canvas_core::{CanvasModel, Orchestrator};
 use iron_canvas_datagrid::{DataGrid, DataGridModel};
 use leptos::prelude::window;
@@ -16,6 +17,10 @@ use web_sys::HtmlCanvasElement;
 pub struct CameraCanvas {
     orch: Orchestrator<WebSurface>,
     model: Rc<DataGridModel>,
+    // Painter handles for fonts_changed, taken before the surfaces move
+    // into the orchestrator — same pattern as IronCanvas/DataGridCanvas.
+    grid_painter: Rc<CanvasPainter>,
+    overlay_painter: Rc<CanvasPainter>,
 }
 
 impl CameraCanvas {
@@ -24,12 +29,18 @@ impl CameraCanvas {
         overlay_canvas: HtmlCanvasElement,
     ) -> Result<Self, JsValue> {
         let model = Rc::new(DataGridModel::empty());
-        let mut orch = Orchestrator::<WebSurface>::new(
-            WebSurface::grid(grid_canvas)?,
-            WebSurface::overlay(overlay_canvas)?,
-        );
+        let grid_ws = WebSurface::grid(grid_canvas)?;
+        let overlay_ws = WebSurface::overlay(overlay_canvas)?;
+        let grid_painter = grid_ws.clone_painter();
+        let overlay_painter = overlay_ws.clone_painter();
+        let mut orch = Orchestrator::<WebSurface>::new(grid_ws, overlay_ws);
         orch.set_model(Rc::clone(&model) as Rc<dyn CanvasModel>);
-        let mut cam = Self { orch, model };
+        let mut cam = Self {
+            orch,
+            model,
+            grid_painter,
+            overlay_painter,
+        };
         cam.sync_theme_from_document();
         Ok(cam)
     }
@@ -98,5 +109,15 @@ impl CameraCanvas {
 
     pub fn paint_if_dirty(&mut self) {
         self.orch.paint_if_dirty();
+    }
+
+    /// See `IronCanvas::fontsChanged` — clear text-measure memos after
+    /// `document.fonts` finishes loading, then repaint. The camera rAF
+    /// loop calls `paint_if_dirty` unconditionally, so marking dirty is
+    /// enough — no render gate to poke.
+    pub fn fonts_changed(&mut self) {
+        self.grid_painter.clear_measure_cache();
+        self.overlay_painter.clear_measure_cache();
+        self.orch.mark_content_dirty(PaneRegionMask::ALL);
     }
 }
