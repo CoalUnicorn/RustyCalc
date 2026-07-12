@@ -200,6 +200,19 @@ impl IronCanvas {
             .mark_content_dirty(iron_canvas_core::chrome::PaneRegionMask::ALL);
     }
 
+    /// Row-scoped `markContentDirty`: names the damaged rows so the engine
+    /// can clip the repaint to those bands (typing, single-cell edit,
+    /// recalc diff). Degrades to the full content path automatically when
+    /// damage info is incomplete. Rows are inclusive, order-insensitive
+    /// (`CellDamage::add_rows` normalizes reversed spans), in the same row
+    /// coordinates the model bridge uses; rows outside the viewport
+    /// intersect to nothing at paint time and cost nothing.
+    #[wasm_bindgen(js_name = "markRowsDamaged")]
+    pub fn mark_rows_damaged(&mut self, sheet: u32, row_start: i32, row_end: i32) {
+        self.orch
+            .mark_rows_damaged(sheet, iron_canvas_core::signal::RowSpan { r1: row_start, r2: row_end });
+    }
+
     /// Paint whichever layers are dirty. When a recording is active
     /// (`dev-tools` feature only), brackets the paint with `begin_frame` /
     /// `end_frame` on both surfaces and pushes a `Frame` whenever at

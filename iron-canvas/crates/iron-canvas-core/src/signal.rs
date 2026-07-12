@@ -31,3 +31,80 @@ impl GridSignals {
         self.intersects(Self::OVERLAY)
     }
 }
+
+/// Row-band damage accumulated alongside the CONTENT bit — the third
+/// repaint input, disjoint from both blit (viewport shift) and the
+/// pane-level `pending_content` mask. Bands are full pane width because
+/// cell text may overflow horizontally into row neighbours (`render_pane`
+/// paints text last, unclipped); a full-width band is the smallest repaint
+/// unit that cannot erase or orphan overflow pixels.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum CellDamage {
+    /// No damage recorded since the last paint.
+    #[default]
+    Clean,
+    /// Every CONTENT raise since the last paint named its rows on one
+    /// sheet; repaint may clip to these bands. Spans are sorted, disjoint,
+    /// and merged.
+    Rows { sheet: u32, spans: Vec<RowSpan> },
+    /// Damage info is incomplete — an un-rowed CONTENT raise, a second
+    /// sheet, or more than `MAX_DAMAGE_SPANS` disjoint bands. Repaint
+    /// falls back to the pane-mask path.
+    Exceeded,
+}
+
+/// Inclusive row band in `RCRange` row coordinates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowSpan {
+    pub r1: i32,
+    pub r2: i32,
+}
+
+/// Above this many disjoint bands a clipped repaint stops paying for
+/// itself against one whole-pane walk.
+// ponytail: fixed cap; tune only with profiler evidence.
+const MAX_DAMAGE_SPANS: usize = 8;
+
+impl CellDamage {
+    pub fn add_rows(&mut self, sheet: u32, span: RowSpan) {
+        // Callers may hand spans in either order; a reversed span would
+        // survive merging and then silently intersect to nothing at paint
+        // time — stale pixels with CONTENT already drained.
+        let span = RowSpan {
+            r1: span.r1.min(span.r2),
+            r2: span.r1.max(span.r2),
+        };
+        match self {
+            CellDamage::Clean => {
+                *self = CellDamage::Rows { sheet, spans: vec![span] };
+            }
+            CellDamage::Rows { sheet: s, spans } if *s == sheet => {
+                spans.push(span);
+                spans.sort_by_key(|s| s.r1);
+                let mut merged: Vec<RowSpan> = Vec::with_capacity(spans.len());
+                for sp in spans.drain(..) {
+                    match merged.last_mut() {
+                        // +1: adjacent bands repaint as one strip.
+                        Some(last) if sp.r1 <= last.r2 + 1 => {
+                            last.r2 = last.r2.max(sp.r2);
+                        }
+                        _ => merged.push(sp),
+                    }
+                }
+                if merged.len() > MAX_DAMAGE_SPANS {
+                    *self = CellDamage::Exceeded;
+                } else {
+                    *spans = merged;
+                }
+            }
+            CellDamage::Rows { .. } => *self = CellDamage::Exceeded,
+            CellDamage::Exceeded => {}
+        }
+    }
+
+    /// An un-rowed CONTENT raise: whatever rows were (or will be) recorded
+    /// no longer cover everything that changed.
+    pub fn poison(&mut self) {
+        *self = CellDamage::Exceeded;
+    }
+}

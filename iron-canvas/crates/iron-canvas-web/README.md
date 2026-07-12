@@ -4,7 +4,7 @@ The `#[wasm_bindgen]` facade for IronCalc spreadsheets — the full spreadsheet 
 
 ## What it does
 
-Exposes `IronCanvas` to JavaScript: bind it to an IronCalc-compatible model handle and a pair of canvases, and it renders a live spreadsheet with selection, marching ants, formula-reference overlays, autofill handles, and frozen panes. It owns the repaint lifecycle (`requestRepaint` / `markContentDirty` / `paintIfDirty`), always supports SVG export, and exposes PDF export when built with its `pdf` feature.
+Exposes `IronCanvas` to JavaScript: bind it to an IronCalc-compatible model handle and a pair of canvases, and it renders a live spreadsheet with selection, marching ants, formula-reference overlays, autofill handles, and frozen panes. It owns the repaint lifecycle (`requestRepaint` / `markContentDirty` / `markRowsDamaged` / `paintIfDirty`), always supports SVG export, and exposes PDF export when built with its `pdf` feature.
 
 ## Crate role
 
@@ -14,7 +14,7 @@ The primary shippable artifact for spreadsheet consumers: RustyCalc's Leptos fro
 
 - `IronCanvas` (`#[wasm_bindgen]`) — JS API:
   - **lifecycle**: `create`, `setModel`, `resize`, `dispose`
-  - **paint**: `requestRepaint`, `markContentDirty`, `paintIfDirty`
+  - **paint**: `requestRepaint`, `markContentDirty`, `markRowsDamaged`, `paintIfDirty`
   - **theme**: `set_theme_name`, `setThemeFromElement`, `themeChanged`
   - **export**: `exportSvg`; `exportPdf` with feature `pdf`
   - **queries**: `hitTest`, `cellRect`, `resizeHandleAt`, `autofillHandlePos`

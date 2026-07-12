@@ -1,11 +1,13 @@
-//! `Orchestrator<MemSurface>` four-regime integration test.
+//! `Orchestrator<MemSurface>` five-regime integration test.
 //!
-//! Drives all four `PaintRegime` arms (`Fresh`, `SlotsReuse`, `Viewport`,
-//! `Overlay`) through the same dispatch entry point a browser would use,
-//! and asserts the captured `DrawOp` log matches each regime's contract:
+//! Drives all five `PaintRegime` arms (`Fresh`, `SlotsReuse`, `Damage`,
+//! `Viewport`, `Overlay`) through the same dispatch entry point a browser
+//! would use, and asserts the captured `DrawOp` log matches each regime's
+//! contract:
 //!
 //! - `Fresh`: full-canvas fill on the grid surface.
 //! - `SlotsReuse`: no full-canvas fill (prior pixels are reused).
+//! - `Damage`: row-band-clipped repaint, strictly fewer ops than SlotsReuse.
 //! - `Viewport`: `DrawOp::Blit` ops on the grid surface (scroll-blit).
 //! - `Overlay`: zero new grid ops; overlay surface clears + repaints.
 
@@ -17,6 +19,8 @@ use std::rc::Rc;
 
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::painter::GroupClass;
+use iron_canvas_core::signal::RowSpan;
 use iron_canvas_core::types::coord::AutofillTarget;
 use iron_canvas_core::{CanvasTheme, Orchestrator};
 
@@ -412,8 +416,8 @@ fn last_regime_overlay_after_autofill_drag() {
 }
 
 #[test]
-fn recording_serde_round_trip_across_all_four_regimes() {
-    // Drive Fresh -> SlotsReuse -> Viewport -> Overlay through one
+fn recording_serde_round_trip_across_all_five_regimes() {
+    // Drive Fresh -> Damage -> SlotsReuse -> Viewport -> Overlay through one
     // Orchestrator, collecting one Frame per regime, then serialize the
     // whole Recording and assert deserialize is bit-equal to the original.
     let stub = Rc::new(TestModel::synthetic_grid());
@@ -439,6 +443,12 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     };
 
     push(&mut orch, 0); // Fresh
+    // mark_rows_damaged names row 2 on sheet 0 with an actual edit behind it:
+    // viewport stays reusable and every CONTENT raise since the last paint
+    // named its rows on the on-screen sheet -> Damage.
+    stub.set_cell(2, 1, "changed");
+    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    push(&mut orch, 8); // Damage
     // mark_content_dirty raises CONTENT; viewport stays valid -> SlotsReuse.
     // (set_theme used to land here too, but a palette change now invalidates
     // the paint cache and routes to Fresh, so it can't be used as a
@@ -451,12 +461,13 @@ fn recording_serde_round_trip_across_all_four_regimes() {
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
     push(&mut orch, 48); // Overlay
 
-    assert_eq!(frames.len(), 4, "all four regimes should produce frames");
+    assert_eq!(frames.len(), 5, "all five regimes should produce frames");
     let regimes: Vec<_> = frames.iter().map(|f| f.regime).collect();
     assert_eq!(
         regimes,
         vec![
             PaintRegimeTag::Fresh,
+            PaintRegimeTag::Damage,
             PaintRegimeTag::SlotsReuse,
             PaintRegimeTag::Viewport,
             PaintRegimeTag::Overlay,
@@ -487,4 +498,135 @@ fn recording_serde_round_trip_across_all_four_regimes() {
         assert_eq!(replay_and_drain(&restored.grid_ops), orig.grid_ops);
         assert_eq!(replay_and_drain(&restored.overlay_ops), orig.overlay_ops);
     }
+}
+
+// ─── Damage regime ───
+
+#[test]
+fn damage_regime_paints_far_less_than_slots_reuse() {
+    // Same model, same content signal — one orchestrator takes the mask
+    // path, one the damage path. The band repaint being strictly smaller
+    // is the entire point of the regime.
+    //
+    // The row-2 edit below is load-bearing: `render_pane`'s per-pane
+    // fingerprint is one combined hash over the whole pane range, so an
+    // *unedited* mask=ALL content signal fetches identical bytes and
+    // fingerprint-skips the entire SlotsReuse walk for free (0 cell ops,
+    // header/corner only) — which would make SlotsReuse cheaper than
+    // Damage's unconditional named-row repaint no matter the grid size.
+    // A real edit is what actually raises CONTENT in production; it's
+    // what makes SlotsReuse pay for the full-pane walk the comparison is
+    // meant to contrast against Damage's clipped one-row band.
+    let stub = Rc::new(TestModel::synthetic_grid());
+
+    let mut slots = build(Rc::clone(&stub));
+    slots.paint_if_dirty();
+    let mut damage = build(Rc::clone(&stub));
+    damage.paint_if_dirty();
+
+    stub.set_cell(2, 1, "changed");
+
+    let before = grid_ops_len(&slots);
+    slots.mark_content_dirty(PaneRegionMask::ALL);
+    slots.paint_if_dirty();
+    let slots_ops = grid_ops_len(&slots) - before;
+
+    let before = grid_ops_len(&damage);
+    damage.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    damage.paint_if_dirty();
+    let damage_ops = grid_ops_len(&damage) - before;
+
+    assert_eq!(damage.last_regime(), Some(PaintRegimeTag::Damage));
+    assert!(damage_ops > 0, "damage must repaint the band");
+    assert!(
+        damage_ops * 3 < slots_ops,
+        "one-row band repaint must be far smaller than the full SlotsReuse walk (got {damage_ops} vs {slots_ops})"
+    );
+}
+
+#[test]
+fn damage_regime_repaints_chrome_like_other_grid_regimes() {
+    // The damage renderer must run the full grid wrapper: frozen
+    // separators paint after cells (winning back boundary pixels the
+    // band re-stroked) and headers/corner stay in the sequence. Group
+    // markers are the observable contract.
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let before = grid_ops_len(&orch);
+    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.paint_if_dirty();
+    let ops = grid_ops_since(&orch, before);
+
+    for class in [
+        GroupClass::Grid,
+        GroupClass::Cells,
+        GroupClass::FrozenSep,
+        GroupClass::Headers,
+    ] {
+        assert!(
+            ops.iter()
+                .any(|op| matches!(op, DrawOp::BeginGroup { class: c } if *c == class)),
+            "damage paint must emit the {class:?} group like every grid regime"
+        );
+    }
+}
+
+#[test]
+fn plain_content_dirty_poisons_damage_to_slots_reuse() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.paint_if_dirty();
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+}
+
+#[test]
+fn cross_sheet_damage_degrades_to_slots_reuse() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_rows_damaged(1, RowSpan { r1: 3, r2: 3 });
+    orch.paint_if_dirty();
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+}
+
+#[test]
+fn damage_is_drained_by_the_paint() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.paint_if_dirty();
+    let after = grid_ops_len(&orch);
+    orch.paint_if_dirty(); // nothing raised since -> no-op
+    assert_eq!(grid_ops_len(&orch), after);
+}
+
+#[test]
+fn damage_with_active_cell_repaints_overlay() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_active(1, 1));
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let overlay_before = overlay_ops_len(&orch);
+    stub.set_cell(1, 1, "");
+    orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 });
+    orch.paint_if_dirty();
+
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Damage));
+    let new_overlay_ops = overlay_ops_since(&orch, overlay_before);
+    assert!(
+        new_overlay_ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::ClearRect { .. })),
+        "CONTENT via Damage with an active cell must clear and repaint the overlay"
+    );
 }

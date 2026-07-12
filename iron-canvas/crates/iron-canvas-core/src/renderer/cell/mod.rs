@@ -33,6 +33,7 @@ use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::blit_work::BlitPaneWork;
 use crate::renderer::cf_types::CfDecorationPaint;
+use crate::signal::RowSpan;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
@@ -289,6 +290,47 @@ impl<P: Painter> RendererCore<P> {
             return;
         };
         self.render_pane_strip(model, pane, range, pane_idx, frame, work.strip_range);
+    }
+
+    /// Damage-frame entry for one pane: repaint only the full-width row
+    /// bands in `spans`, via the same strip machinery the blit path uses.
+    /// Kept rows keep their pixels; each band fetch splices into the pane
+    /// buffers and zeroes the pane fingerprint (`render_pane_strip`).
+    pub fn render_pane_damage(
+        &self,
+        model: &dyn CellContentQuery,
+        frame: &Chrome,
+        pane: PaneRegion,
+        spans: &[RowSpan],
+    ) {
+        let pane_idx = pane as usize;
+        let pane_buf = self.pane_cache.pane(pane);
+        let Some(range) = pane.range(frame) else {
+            pane_buf.range.set(None);
+            return;
+        };
+        // `splice_strip_into` indexes the cached pane buffers; they are
+        // only aligned when the cached range matches this frame's. A
+        // mismatch (e.g. partial post-blit buffers) demotes the pane to
+        // the full walk instead of splicing at wrong indices.
+        if pane_buf.range.get() != Some(range) {
+            self.render_pane(model, pane, frame);
+            return;
+        }
+        for span in spans {
+            let r1 = span.r1.max(range.r1);
+            let r2 = span.r2.min(range.r2);
+            if r1 > r2 {
+                continue;
+            }
+            let band = RCRange {
+                r1,
+                c1: range.c1,
+                r2,
+                c2: range.c2,
+            };
+            self.render_pane_strip(model, pane, range, pane_idx, frame, band);
+        }
     }
 
     /// Stage 3.3 strip path: kept-band pixels were preserved by the

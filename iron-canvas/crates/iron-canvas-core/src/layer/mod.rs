@@ -20,7 +20,7 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::painter::{BlitPainter, GroupClass, PaintColor, Painter};
 use crate::renderer::{GridRenderer, LayerOps, OverlayRenderer};
-use crate::signal::GridSignals;
+use crate::signal::{GridSignals, RowSpan};
 
 /// Drawing target abstraction. Production wasm holds one Surface per
 /// `<canvas>` (grid + overlay); a Cairo backend would hold one per
@@ -179,6 +179,17 @@ where
             self.renderer.painter_blit(s.src, s.dst);
         }
         self.renderer.render_grid_blit(model, frame, plan);
+    }
+
+    /// Damage grid paint: prior pixels stay; only the damaged full-width
+    /// row bands refetch and repaint. No full-canvas bg fill by design.
+    pub fn paint_grid_damage(
+        &mut self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        spans: &[RowSpan],
+    ) {
+        self.renderer.render_grid_damage(model, frame, spans);
     }
 
     pub fn invalidate_paint_cache(&mut self) {
