@@ -610,6 +610,61 @@ fn damage_is_drained_by_the_paint() {
     assert_eq!(grid_ops_len(&orch), after);
 }
 
+// ─── present() contract ───
+
+/// Every regime arm must call `Surface::present()` exactly once per layer
+/// it actually painted, and must NOT present a layer it left untouched
+/// (Overlay regime skips the grid entirely). `MemSurface::presents()`
+/// counts real `present()` calls — this is the counting test Task 2's
+/// `WebSurface` back-buffer flip depends on.
+#[test]
+fn every_paint_arm_presents_the_surfaces_it_painted() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+
+    // Fresh: paints grid + overlay -> one present each.
+    orch.paint_if_dirty();
+    assert_eq!(orch.grid_surface().presents(), 1, "Fresh presents the grid");
+    assert_eq!(
+        orch.overlay_surface().presents(),
+        1,
+        "Fresh presents the overlay"
+    );
+
+    // Overlay regime: grid pixels untouched -> grid must NOT re-present.
+    orch.request_overlay_repaint();
+    orch.paint_if_dirty();
+    assert_eq!(
+        orch.grid_surface().presents(),
+        1,
+        "Overlay regime must not present the grid"
+    );
+    assert_eq!(
+        orch.overlay_surface().presents(),
+        2,
+        "Overlay regime presents the overlay"
+    );
+
+    // SlotsReuse (content dirty, viewport stable): grid presents again.
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.paint_if_dirty();
+    assert_eq!(
+        orch.grid_surface().presents(),
+        2,
+        "SlotsReuse presents the grid"
+    );
+
+    // Viewport (scroll one row): grid blit + overlay repaint -> both present.
+    stub.set_top_row(2);
+    orch.request_overlay_repaint();
+    orch.paint_if_dirty();
+    assert_eq!(
+        orch.grid_surface().presents(),
+        3,
+        "Viewport presents the grid"
+    );
+}
+
 #[test]
 fn damage_with_active_cell_repaints_overlay() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(1, 1));

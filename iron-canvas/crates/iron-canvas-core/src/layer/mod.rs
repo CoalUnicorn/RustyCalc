@@ -138,6 +138,13 @@ where
         self.surface.resize(css, dpr);
         self.renderer.resize_for_dpr(dpr);
     }
+
+    /// Flush this layer's surface. Callers present a layer iff the current
+    /// paint arm actually painted it — see the regime arms in
+    /// `orchestrator.rs` for the per-arm "painted -> present" wiring.
+    pub fn present(&self) {
+        self.surface.present();
+    }
 }
 
 /// Full-canvas pixel rect. Layer-wide fill / clear converge here so the

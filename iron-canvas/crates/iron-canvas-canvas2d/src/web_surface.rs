@@ -4,7 +4,8 @@
 //! `grid` (opaque) and one `overlay` (`alpha: true, desynchronized: true`).
 //! The painter is wrapped in `Rc` so the renderer can hold its own owning
 //! handle to the same painter without ever lifetime-borrowing through the
-//! surface.
+//! surface. Grid is double-buffered (paints into a detached back canvas,
+//! `present` flips it to the visible front canvas); overlay draws direct.
 
 use std::rc::Rc;
 
@@ -19,22 +20,36 @@ use crate::canvas_painter::CanvasPainter;
 pub struct WebSurface {
     canvas: HtmlCanvasElement,
     painter: Rc<CanvasPainter>,
+    /// Double-buffer state — `Some` only for the grid surface. `back` is the
+    /// detached canvas the painter draws into; `front_ctx` is the visible
+    /// canvas' own 2d context, used only by `present`.
+    back: Option<HtmlCanvasElement>,
+    front_ctx: Option<CanvasRenderingContext2d>,
 }
 
 impl WebSurface {
     pub fn grid(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
-        let ctx = create_2d_context(&canvas, false, false)?;
+        let back = create_detached_canvas(&canvas)?;
+        let back_ctx = create_2d_context(&back, false, false)?;
+        let front_ctx = create_2d_context(&canvas, false, false)?;
+        // The 1:1 present copy must never resample; re-pinned on resize too
+        // because a backing-store resize wipes ctx state.
+        front_ctx.set_image_smoothing_enabled(false);
         Ok(Self {
+            painter: Rc::new(CanvasPainter::with_blit_source(back_ctx, canvas.clone())),
             canvas,
-            painter: Rc::new(CanvasPainter::new(ctx)),
+            back: Some(back),
+            front_ctx: Some(front_ctx),
         })
     }
 
     pub fn overlay(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
         let ctx = create_2d_context(&canvas, true, true)?;
         Ok(Self {
-            canvas,
             painter: Rc::new(CanvasPainter::new(ctx)),
+            canvas,
+            back: None,
+            front_ctx: None,
         })
     }
 
@@ -60,9 +75,14 @@ impl Surface for WebSurface {
 
     fn resize(&mut self, css: CanvasSize, dpr: f64) {
         let (target_w, target_h) = css.to_backing_size(dpr);
-        if self.canvas.width() != target_w || self.canvas.height() != target_h {
-            self.canvas.set_width(target_w);
-            self.canvas.set_height(target_h);
+        for c in std::iter::once(&self.canvas).chain(self.back.iter()) {
+            if c.width() != target_w || c.height() != target_h {
+                c.set_width(target_w);
+                c.set_height(target_h);
+            }
+        }
+        if let Some(front) = &self.front_ctx {
+            front.set_image_smoothing_enabled(false);
         }
         // `LayerBase::resize` follows up with `LayerOps::resize_for_dpr`,
         // which routes through `RendererCore::resize_for_dpr` and calls
@@ -71,8 +91,25 @@ impl Surface for WebSurface {
     }
 
     fn present(&self) {
-        // Canvas-2D auto-presents per draw call.
+        // Overlay surfaces draw direct — nothing to flip.
+        let (Some(back), Some(front)) = (&self.back, &self.front_ctx) else {
+            return;
+        };
+        // front_ctx carries no transform, so this is a 1:1 backing-pixel copy.
+        let _ = front.draw_image_with_html_canvas_element(back, 0.0, 0.0);
     }
+}
+
+/// Back buffer for the grid layer. A detached `<canvas>` element (not an
+/// `OffscreenCanvas`): it keeps the ctx type `CanvasRenderingContext2d`, so
+/// `CanvasPainter` needs no second context plumbing.
+fn create_detached_canvas(sibling: &HtmlCanvasElement) -> Result<HtmlCanvasElement, JsValue> {
+    sibling
+        .owner_document()
+        .ok_or_else(|| JsValue::from_str("grid canvas has no owner document"))?
+        .create_element("canvas")?
+        .dyn_into::<HtmlCanvasElement>()
+        .map_err(|_| JsValue::from_str("created element is not a canvas"))
 }
 
 /// Build the 2D context with the given options. Grid uses `alpha: false`

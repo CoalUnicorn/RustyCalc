@@ -548,6 +548,7 @@ where
             &self.decos.overlay_slice(),
             self.decos.custom_layers(),
         );
+        self.overlay.present();
     }
 
     /// Scroll-blit fast path. `decide` already filtered no-op scrolls and
@@ -576,6 +577,7 @@ where
                 frame
             }
         };
+        self.grid.present();
         self.decos.refresh_overlay_state(model);
         self.overlay.paint_overlay_layer(
             model,
@@ -584,6 +586,7 @@ where
             &self.decos.overlay_slice(),
             self.decos.custom_layers(),
         );
+        self.overlay.present();
         self.last_frame = Some(frame);
     }
 
@@ -610,6 +613,7 @@ where
             },
         );
         self.grid.paint_grid_damage(model, &frame, &spans);
+        self.grid.present();
         self.decos.refresh_overlay_state(model);
         // CONTENT is implied in this arm, so the active-cell-repaint hook
         // fires unconditionally — same reasoning as the SlotsReuse arm.
@@ -621,6 +625,7 @@ where
                 &self.decos.overlay_slice(),
                 self.decos.custom_layers(),
             );
+            self.overlay.present();
         }
         self.last_frame = Some(frame);
     }
@@ -649,6 +654,7 @@ where
         self.grid.invalidate_paint_cache();
 
         self.grid.paint_grid(model, &frame);
+        self.grid.present();
         // Refresh the selection snapshot unconditionally: even on a
         // CONTENT-only signal the grid just repainted with new values,
         // so the next paint's `screen_for_blit` must compare against
@@ -669,6 +675,7 @@ where
                 &self.decos.overlay_slice(),
                 self.decos.custom_layers(),
             );
+            self.overlay.present();
         }
         self.last_frame = Some(frame);
     }
@@ -688,6 +695,7 @@ where
         }
         self.grid.invalidate_paint_cache();
         self.grid.paint_grid(model, &frame);
+        self.grid.present();
         self.decos.refresh_overlay_state(model);
         if signals.overlay_dirty() {
             self.overlay.paint_overlay_layer(
@@ -697,6 +705,7 @@ where
                 &self.decos.overlay_slice(),
                 self.decos.custom_layers(),
             );
+            self.overlay.present();
         }
         self.last_frame = Some(frame);
     }

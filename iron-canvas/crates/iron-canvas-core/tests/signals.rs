@@ -55,7 +55,10 @@ fn damage_merges_adjacent_spans() {
     d.add_rows(0, RowSpan { r1: 7, r2: 8 });
     assert_eq!(
         d,
-        CellDamage::Rows { sheet: 0, spans: vec![RowSpan { r1: 5, r2: 8 }] }
+        CellDamage::Rows {
+            sheet: 0,
+            spans: vec![RowSpan { r1: 5, r2: 8 }]
+        }
     );
 }
 
@@ -72,7 +75,13 @@ fn damage_exceeds_past_span_cap() {
     let mut d = CellDamage::default();
     // 9 disjoint spans (rows 0, 10, 20, … 80) blow the cap of 8.
     for i in 0..9 {
-        d.add_rows(0, RowSpan { r1: i * 10, r2: i * 10 });
+        d.add_rows(
+            0,
+            RowSpan {
+                r1: i * 10,
+                r2: i * 10,
+            },
+        );
     }
     assert_eq!(d, CellDamage::Exceeded);
 }
@@ -86,7 +95,10 @@ fn damage_normalizes_reversed_spans() {
     d.add_rows(0, RowSpan { r1: 9, r2: 5 });
     assert_eq!(
         d,
-        CellDamage::Rows { sheet: 0, spans: vec![RowSpan { r1: 5, r2: 9 }] }
+        CellDamage::Rows {
+            sheet: 0,
+            spans: vec![RowSpan { r1: 5, r2: 9 }]
+        }
     );
 }
 

@@ -76,7 +76,10 @@ impl CellDamage {
         };
         match self {
             CellDamage::Clean => {
-                *self = CellDamage::Rows { sheet, spans: vec![span] };
+                *self = CellDamage::Rows {
+                    sheet,
+                    spans: vec![span],
+                };
             }
             CellDamage::Rows { sheet: s, spans } if *s == sheet => {
                 spans.push(span);
