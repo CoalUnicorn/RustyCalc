@@ -395,22 +395,31 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
 }
 
 /// In-memory `Surface` adapter. Drives `Orchestrator` for tests: every
-/// drawn op is captured by the wrapped `RecorderPainter`. `resize` /
-/// `present` are no-ops — the recorder has no backing pixel buffer.
+/// drawn op is captured by the wrapped `RecorderPainter`. `resize` is a
+/// no-op — the recorder has no backing pixel buffer — but `present` counts
+/// each call so orchestrator tests can assert the "present iff painted"
+/// contract without a real flush target.
 pub struct MemSurface {
     painter: Rc<RecorderPainter>,
+    presents: Cell<u32>,
 }
 
 impl MemSurface {
     pub fn new() -> Self {
         Self {
             painter: Rc::new(RecorderPainter::new()),
+            presents: Cell::new(0),
         }
     }
 
     /// Direct handle to the recorder for op-log assertions.
     pub fn recorder(&self) -> &RecorderPainter {
         &self.painter
+    }
+
+    /// Number of `present()` flips the orchestrator has requested.
+    pub fn presents(&self) -> u32 {
+        self.presents.get()
     }
 }
 
@@ -432,7 +441,9 @@ impl Surface for MemSurface {
     }
 
     fn resize(&mut self, _css: CanvasSize, _dpr: f64) {}
-    fn present(&self) {}
+    fn present(&self) {
+        self.presents.set(self.presents.get() + 1);
+    }
 }
 
 /// Painter wrapper that forwards every op to an inner painter and, only

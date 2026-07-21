@@ -235,6 +235,9 @@
                 phase = "resize";
                 canvas.resize(800, 400, window.devicePixelRatio || 1);
 
+                phase = "wire font-load invalidation";
+                document.fonts.addEventListener("loadingdone", () => { canvas.fontsChanged(); });
+
                 phase = "bridge snapshot";
                 console.log("bridge snapshot", {
                     selectedView: model.getSelectedView(),

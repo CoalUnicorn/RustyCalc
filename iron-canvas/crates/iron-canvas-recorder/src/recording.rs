@@ -7,17 +7,17 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v1)
+//! # On-disk layout (v3)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":1,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":3,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
-//!    {"frame_idx":0,"t_ms":0,"regime":"Fresh",...},
-//!    {"frame_idx":1,"t_ms":17,"regime":"Overlay",...}
+//!    {"frame_idx":0,"t_ms":0,"regime":"fresh",...},
+//!    {"frame_idx":1,"t_ms":17,"regime":"overlay",...}
 //!  ]}
 //! ```
 //!
@@ -27,7 +27,7 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `1`). Mismatch -> load fails.  |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `3`). Mismatch -> load fails.  |
 //! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
@@ -40,9 +40,9 @@
 //! | --------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
 //! | `frame_idx`     | `u32`                                 | Monotonic index; `0` for the first captured frame.                                     |
 //! | `t_ms`          | `u64`                                 | Milliseconds since `started_at_unix_ms`.                                               |
-//! | `regime`        | `PaintRegimeTag`                      | Which dispatch arm painted this frame: `Fresh` / `SlotsReuse` / `Viewport` / `Overlay`.|
+//! | `regime`        | `PaintRegimeTag`                      | Which dispatch arm painted this frame: `fresh` / `slots_reuse` / `viewport` / `overlay` / `damage`.|
 //! | `signals`       | `u8`                                  | `GridSignals::bits()` — VIEWPORT(1) \| CONTENT(2) \| STRUCTURAL(4) \| OVERLAY(8).      |
-//! | `grid_ops`      | `Vec<DrawOp>`                         | Ops captured from the grid surface for this frame. May be empty for `Overlay`.        |
+//! | `grid_ops`      | `Vec<DrawOp>`                         | Ops captured from the grid surface for this frame. May be empty for `overlay`.        |
 //! | `overlay_ops`   | `Vec<DrawOp>`                         | Ops captured from the overlay surface for this frame.                                  |
 //!
 //! Empty frames (no ops on either layer) are dropped by the producer —
@@ -51,7 +51,7 @@
 //! # Compatibility rules
 //!
 //! - `schema_version`: exact-match enforced by `deserialize()`. A
-//!   reader for v1 refuses v2 files (and vice versa).
+//!   reader for v2 refuses v3 files (and vice versa).
 //! - `iron_canvas_version`: divergence is a *warning* on load. The
 //!   recording still plays. The viewer surfaces this as a banner since
 //!   replay against drifted renderer output is the most common bug-repro
@@ -76,7 +76,7 @@ use crate::DrawOp;
 
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
-pub const ICR_SCHEMA_VERSION: u32 = 2;
+pub const ICR_SCHEMA_VERSION: u32 = 3;
 
 /// Per-paint-tick capture. Built by the host (e.g. `IronCanvas::paintIfDirty`
 /// wrapper) by reading `Orchestrator::last_regime()` + `last_signals()`

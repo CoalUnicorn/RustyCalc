@@ -167,4 +167,20 @@ pub(super) fn install_raf_loop(
             app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
         }
     });
+
+    // Webfont finished loading: clear the engine's text-measure memos and
+    // raise the app render gate — the rAF loop short-circuits on
+    // `render_needed`, so engine-side dirty bits alone never reach paint.
+    let _ = leptos_use::use_event_listener(
+        web_sys::EventTarget::from(document().fonts()),
+        leptos::ev::Custom::<web_sys::Event>::new("loadingdone"),
+        move |_| {
+            canvas_handle.update_value(|slot| {
+                if let Some(ic) = slot.as_mut() {
+                    ic.fonts_changed();
+                }
+            });
+            render_needed.set(true);
+        },
+    );
 }

@@ -24,6 +24,7 @@ web-sys = { version = "0.3", features = [
     "HtmlInputElement", "HtmlTextAreaElement",
     "Crypto", "DomStringMap", "Performance",
     "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement",
+    "FontFaceSet",
 ] }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"

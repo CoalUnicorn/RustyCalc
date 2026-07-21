@@ -170,6 +170,9 @@
                 const dpr = window.devicePixelRatio || 1;
                 canvas.resize(rect.width, rect.height, dpr);
 
+                phase = "wire font-load invalidation";
+                document.fonts.addEventListener("loadingdone", () => { canvas.fontsChanged(); });
+
                 // --- wheel: one row per notch, preventing page scroll ---
                 phase = "wire wheel";
                 stackEl.addEventListener(

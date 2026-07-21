@@ -19,9 +19,10 @@
 
 use std::rc::Rc;
 
-use iron_canvas_canvas2d::WebSurface;
+use iron_canvas_canvas2d::{CanvasPainter, WebSurface};
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::layer::Surface;
 use iron_canvas_core::{CanvasModel, CanvasTheme, Layer, Orchestrator};
 use iron_canvas_datagrid::SortDirection;
 use iron_canvas_export::SvgSurface;
@@ -39,6 +40,10 @@ pub struct DataGridCanvas {
     orch: Orchestrator<WebSurface>,
     model: Rc<DataGridModel>,
     hover: Rc<HoverLayer>,
+    // See IronCanvas: painter handles for fontsChanged, taken before the
+    // surfaces move into the orchestrator.
+    grid_painter: Rc<CanvasPainter>,
+    overlay_painter: Rc<CanvasPainter>,
 }
 
 #[wasm_bindgen]
@@ -49,14 +54,21 @@ impl DataGridCanvas {
         overlay_canvas: web_sys::HtmlCanvasElement,
     ) -> Result<DataGridCanvas, JsValue> {
         let model = Rc::new(DataGridModel::empty());
-        let mut orch = Orchestrator::<WebSurface>::new(
-            WebSurface::grid(grid_canvas)?,
-            WebSurface::overlay(overlay_canvas)?,
-        );
+        let grid_ws = WebSurface::grid(grid_canvas)?;
+        let overlay_ws = WebSurface::overlay(overlay_canvas)?;
+        let grid_painter = grid_ws.clone_painter();
+        let overlay_painter = overlay_ws.clone_painter();
+        let mut orch = Orchestrator::<WebSurface>::new(grid_ws, overlay_ws);
         orch.set_model(Rc::clone(&model) as Rc<dyn CanvasModel>);
         let hover = Rc::new(HoverLayer::default());
         orch.add_decoration(Rc::clone(&hover) as Rc<dyn Layer>);
-        Ok(Self { orch, model, hover })
+        Ok(Self {
+            orch,
+            model,
+            hover,
+            grid_painter,
+            overlay_painter,
+        })
     }
 
     // --- E.1 Theming ---
@@ -76,6 +88,15 @@ impl DataGridCanvas {
         };
         self.orch.set_theme(theme);
         self.orch.request_repaint();
+    }
+
+    /// See `IronCanvas::fontsChanged` — same contract: clear text-measure
+    /// memos after `document.fonts` finishes loading, then repaint.
+    #[wasm_bindgen(js_name = "fontsChanged")]
+    pub fn fonts_changed(&mut self) {
+        self.grid_painter.clear_measure_cache();
+        self.overlay_painter.clear_measure_cache();
+        self.orch.mark_content_dirty(PaneRegionMask::ALL);
     }
 
     // E.2 Optional frozen header row (default OFF)

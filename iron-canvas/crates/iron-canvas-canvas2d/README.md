@@ -4,7 +4,7 @@ The HTML5 Canvas2D backend — `iron-canvas-core`'s `Painter` impl for the brows
 
 ## What it does
 
-Turns abstract paint calls into `CanvasRenderingContext2d` operations. `CanvasPainter` caches ctx-state setters (fill style, font, stroke) so redundant property writes never cross the JS boundary, and `WebSurface` wraps an `HtmlCanvasElement` as a core `Surface`. A small CSS-variable bridge reads theme tokens straight off a DOM element.
+Turns abstract paint calls into `CanvasRenderingContext2d` operations. `CanvasPainter` caches ctx-state setters (fill style, font, stroke) so redundant property writes never cross the JS boundary, memoizes `measure_text` widths per `(font, text)` (cleared via the facades' `fontsChanged()`), and `WebSurface` wraps an `HtmlCanvasElement` as a core `Surface`. A small CSS-variable bridge reads theme tokens straight off a DOM element.
 
 ## Crate role
 

@@ -20,6 +20,7 @@
 use leptos::prelude::*;
 
 use crate::coord::SheetRange;
+use crate::events::ContentEvent;
 use crate::input::mouse::CanvasHandle;
 use crate::state::WorkbookState;
 use iron_canvas_core::*;
@@ -36,7 +37,8 @@ pub(super) fn install_subscribe_effect(
     render_needed: RwSignal<bool>,
 ) {
     Effect::new(move |prev: Option<OverlayTuple>| {
-        let has_content = !state.events.content.get().is_empty();
+        let content_events = state.events.content.get();
+        let has_content = !content_events.is_empty();
         let has_structure = !state.events.structure.get().is_empty();
         let has_format = !state.events.format.get().is_empty();
         let has_nav = !state.events.navigation.get().is_empty();
@@ -55,9 +57,9 @@ pub(super) fn install_subscribe_effect(
         // touching theme) flip dirty only on the layers that actually need it.
         // Dirty routing is then explicit per event class (below): structure and
         // format request a full repaint (they can move slot geometry); content
-        // takes the markContentDirty fast path, raising the overlay bit only
-        // when a nav event co-fires (commit+Enter); nav-only repaints just the
-        // overlay.
+        // takes the row-damage fast path where the event names its rows,
+        // raising the overlay bit only when a nav event co-fires
+        // (commit+Enter); nav-only repaints just the overlay.
         let OverlayTuple {
             extend_to,
             point_range,
@@ -83,14 +85,33 @@ pub(super) fn install_subscribe_effect(
                 ic.set_overlays(overlays);
                 // Format events include row/col resize (LayoutChanged) — those
                 // mutate slot pixel geometry and must drop last_frame, so they
-                // route through requestRepaint with structure. Content edits
-                // go through markContentDirty for the SlotsReuse fast path;
-                // nav co-firing (commit-Enter) needs an explicit overlay raise
-                // because markContentDirty leaves the overlay bit untouched.
+                // route through requestRepaint with structure. Row-addressed
+                // content edits feed markRowsDamaged (Damage regime: one row
+                // band fetched + repainted); un-rowed events fall back to
+                // markContentDirty, which poisons the batch to the pane-mask
+                // path inside the engine — conservative, never wrong. Nav
+                // co-firing (commit-Enter) needs an explicit overlay raise
+                // because neither content raise touches the overlay bit.
                 if has_structure || has_format {
                     ic.request_repaint();
                 } else if has_content {
-                    ic.mark_content_dirty();
+                    for event in &content_events {
+                        match event {
+                            ContentEvent::CellChanged { address, .. } => {
+                                ic.mark_rows_damaged(address.sheet, address.row, address.row);
+                            }
+                            ContentEvent::RangeChanged { sheet_area } => {
+                                ic.mark_rows_damaged(
+                                    sheet_area.sheet,
+                                    sheet_area.area.r1,
+                                    sheet_area.area.r2,
+                                );
+                            }
+                            ContentEvent::FormulaChanged { .. }
+                            | ContentEvent::CalculationUpdated { .. }
+                            | ContentEvent::NamedRangesChanged => ic.mark_content_dirty(),
+                        }
+                    }
                     if has_nav {
                         ic.request_overlay_repaint();
                     }

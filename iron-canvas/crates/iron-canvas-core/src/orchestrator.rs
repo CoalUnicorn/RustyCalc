@@ -7,10 +7,10 @@
 //! `Surface`), not two.
 //!
 //! `paint_if_dirty` drains both layers' typed `GridSignals` and picks one
-//! of four `PaintRegime` arms via `decide` (cheapness-ordered). The Fresh and
-//! SlotsReuse arms rebuild via a `Chrome::next(.., FramePath::*)` walk through
-//! the matching `LayerBase` paint method; the Viewport arm goes through
-//! `Chrome::next_blit`; the Overlay arm reuses
+//! of five `PaintRegime` arms via `decide` (cheapness-ordered). The Fresh,
+//! SlotsReuse, and Damage arms rebuild via a `Chrome::next(.., FramePath::*)`
+//! walk through the matching `LayerBase` paint method; the Viewport arm goes
+//! through `Chrome::next_blit`; the Overlay arm reuses
 //! `last_frame` directly and repaints only the overlay. The query API
 //! (`hit_test`, `cell_rect`,
 //! `resize_handle_at`, `autofill_handle`) reads `last_frame`, so hits
@@ -30,7 +30,7 @@ use crate::layer::{LayerBase, Surface};
 use crate::painter::BlitPainter;
 use crate::render_overlays::RenderOverlays;
 use crate::renderer::{GridRenderer, OverlayRenderer};
-use crate::signal::GridSignals;
+use crate::signal::{CellDamage, GridSignals, RowSpan};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -44,6 +44,12 @@ use crate::types::ui::{HitTest, ResizeTarget};
 pub enum PaintRegime {
     Overlay,
     Viewport(BlitPlan),
+    /// Content change whose rows are fully known: repaint only those
+    /// full-width bands per pane via the blit strip machinery.
+    Damage {
+        spans: Vec<RowSpan>,
+        signals: GridSignals,
+    },
     SlotsReuse {
         mask: PaneRegionMask,
         signals: GridSignals,
@@ -65,6 +71,7 @@ pub enum PaintRegimeTag {
     Viewport,
     SlotsReuse,
     Fresh,
+    Damage,
 }
 
 impl From<&PaintRegime> for PaintRegimeTag {
@@ -74,6 +81,7 @@ impl From<&PaintRegime> for PaintRegimeTag {
             PaintRegime::Viewport(_) => PaintRegimeTag::Viewport,
             PaintRegime::SlotsReuse { .. } => PaintRegimeTag::SlotsReuse,
             PaintRegime::Fresh(_) => PaintRegimeTag::Fresh,
+            PaintRegime::Damage { .. } => PaintRegimeTag::Damage,
         }
     }
 }
@@ -98,6 +106,9 @@ where
     /// the viewport is otherwise reusable. Reset to `EMPTY` at the end of
     /// every `paint_if_dirty`.
     pending_content: PaneRegionMask,
+    /// Row-band damage paired with `pending_content`. `CellDamage::Rows`
+    /// only when every CONTENT raise since the last paint named its rows.
+    pending_damage: CellDamage,
     /// Last regime `paint_if_dirty` dispatched. Stamped after `decide`,
     /// read by the recording pipeline via `last_regime()`. `None` before
     /// the first paint. Plain field — `paint_if_dirty` already holds
@@ -125,6 +136,7 @@ where
             last_frame: None,
             size: CanvasSize { w: 0.0, h: 0.0 },
             pending_content: PaneRegionMask::EMPTY,
+            pending_damage: CellDamage::Clean,
             last_regime: None,
             last_signals: GridSignals::empty(),
         }
@@ -158,6 +170,7 @@ where
     pub fn request_repaint(&mut self) {
         self.last_frame = None;
         self.pending_content = PaneRegionMask::EMPTY;
+        self.pending_damage = CellDamage::Clean;
         self.grid
             .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
         self.overlay.raise(GridSignals::OVERLAY);
@@ -257,6 +270,7 @@ where
         // prev pane_set (stale row heights / column widths).
         self.last_frame = None;
         self.pending_content = PaneRegionMask::EMPTY;
+        self.pending_damage = CellDamage::Clean;
         self.grid
             .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
         self.overlay.raise(GridSignals::OVERLAY);
@@ -276,7 +290,17 @@ where
     /// fixes the recalc bug where a formula dependent on an edited
     /// cell silently kept painting the stale cached value.
     pub fn mark_content_dirty(&mut self, mask: PaneRegionMask) {
+        self.pending_damage.poison();
         self.pending_content |= mask;
+        self.grid.raise(GridSignals::CONTENT);
+    }
+
+    /// Row-scoped `mark_content_dirty`: also names the damaged rows so
+    /// `decide` can clip the repaint to full-width bands. Degrades to the
+    /// pane-mask path whenever row info is incomplete (see `CellDamage`).
+    pub fn mark_rows_damaged(&mut self, sheet: u32, span: RowSpan) {
+        self.pending_damage.add_rows(sheet, span);
+        self.pending_content |= PaneRegionMask::ALL;
         self.grid.raise(GridSignals::CONTENT);
     }
 
@@ -395,14 +419,14 @@ where
     }
 
     /// Paint whichever layers are dirty. Dispatches via `decide` into one
-    /// of four named regimes: `Overlay`, `Viewport`, `SlotsReuse`, `Fresh`.
-    /// The `match` is exhaustive — adding a regime breaks the build here
-    /// by design.
+    /// of five named regimes: `Overlay`, `Viewport`, `Damage`, `SlotsReuse`,
+    /// `Fresh`. The `match` is exhaustive — adding a regime breaks the
+    /// build here by design.
     pub fn paint_if_dirty(&mut self) {
         // Model-absent -> return *before* draining. Draining a CONTENT bit
         // raised before the first model push would lose its paired
-        // `pending_content` mask, breaking the `pending_content ⟺ CONTENT`
-        // invariant the next real paint relies on.
+        // `pending_content` / `pending_damage` state, breaking the
+        // `pending_content ⟺ CONTENT` invariant the next real paint relies on.
         if self.model.is_none() {
             return;
         }
@@ -429,8 +453,12 @@ where
                 self.paint_slots_reuse_regime(model_dyn, mask, signals)
             }
             PaintRegime::Fresh(signals) => self.paint_fresh_regime(model_dyn, signals),
+            PaintRegime::Damage { spans, signals } => {
+                self.paint_damage_regime(model_dyn, spans, signals)
+            }
         }
         self.pending_content = PaneRegionMask::EMPTY;
+        self.pending_damage = CellDamage::Clean;
 
         // Single restore site.
         self.model = Some(model);
@@ -475,6 +503,23 @@ where
             return PaintRegime::Viewport(plan);
         }
 
+        // Damage fast path: viewport reusable, every CONTENT raise named its
+        // rows, and they were recorded against the sheet still on screen.
+        // STRUCTURAL bars the arm — band-clipping must not paper over a
+        // geometry/theme change that happens to keep SlotsReuse validity.
+        if content_dirty
+            && !sig.contains(GridSignals::STRUCTURAL)
+            && matches!(validity, FrameValidity::SlotsReuse)
+            && let Some(frame) = self.last_frame.as_ref()
+            && let CellDamage::Rows { sheet, spans } = &self.pending_damage
+            && *sheet == frame.sheet
+        {
+            return PaintRegime::Damage {
+                spans: spans.clone(),
+                signals: sig,
+            };
+        }
+
         if matches!(validity, FrameValidity::SlotsReuse) && self.last_frame.is_some() {
             let mask = if content_dirty && !self.pending_content.is_empty() {
                 self.pending_content
@@ -503,6 +548,7 @@ where
             &self.decos.overlay_slice(),
             self.decos.custom_layers(),
         );
+        self.overlay.present();
     }
 
     /// Scroll-blit fast path. `decide` already filtered no-op scrolls and
@@ -531,6 +577,7 @@ where
                 frame
             }
         };
+        self.grid.present();
         self.decos.refresh_overlay_state(model);
         self.overlay.paint_overlay_layer(
             model,
@@ -539,6 +586,47 @@ where
             &self.decos.overlay_slice(),
             self.decos.custom_layers(),
         );
+        self.overlay.present();
+        self.last_frame = Some(frame);
+    }
+
+    /// Damage regime: slot vecs survive (same preconditions as SlotsReuse),
+    /// prior grid pixels stay, only the damaged bands refetch + repaint.
+    /// No cache invalidation — the strip path splices fetched bands into
+    /// the pane buffers and zeroes the pane fingerprint itself.
+    fn paint_damage_regime(
+        &mut self,
+        model: &dyn CanvasModel,
+        spans: Vec<RowSpan>,
+        signals: GridSignals,
+    ) {
+        let Some(prev) = self.last_frame.take() else {
+            return;
+        };
+        let frame = Chrome::next(
+            Some(prev),
+            model,
+            self.size,
+            &self.theme,
+            FramePath::SlotsReuse {
+                stale_panes: PaneRegionMask::EMPTY,
+            },
+        );
+        self.grid.paint_grid_damage(model, &frame, &spans);
+        self.grid.present();
+        self.decos.refresh_overlay_state(model);
+        // CONTENT is implied in this arm, so the active-cell-repaint hook
+        // fires unconditionally — same reasoning as the SlotsReuse arm.
+        if signals.overlay_dirty() || self.decos.active_cell_repaint().is_some() {
+            self.overlay.paint_overlay_layer(
+                model,
+                &frame,
+                self.decos.selection(),
+                &self.decos.overlay_slice(),
+                self.decos.custom_layers(),
+            );
+            self.overlay.present();
+        }
         self.last_frame = Some(frame);
     }
 
@@ -566,6 +654,7 @@ where
         self.grid.invalidate_paint_cache();
 
         self.grid.paint_grid(model, &frame);
+        self.grid.present();
         // Refresh the selection snapshot unconditionally: even on a
         // CONTENT-only signal the grid just repainted with new values,
         // so the next paint's `screen_for_blit` must compare against
@@ -586,6 +675,7 @@ where
                 &self.decos.overlay_slice(),
                 self.decos.custom_layers(),
             );
+            self.overlay.present();
         }
         self.last_frame = Some(frame);
     }
@@ -605,6 +695,7 @@ where
         }
         self.grid.invalidate_paint_cache();
         self.grid.paint_grid(model, &frame);
+        self.grid.present();
         self.decos.refresh_overlay_state(model);
         if signals.overlay_dirty() {
             self.overlay.paint_overlay_layer(
@@ -614,6 +705,7 @@ where
                 &self.decos.overlay_slice(),
                 self.decos.custom_layers(),
             );
+            self.overlay.present();
         }
         self.last_frame = Some(frame);
     }

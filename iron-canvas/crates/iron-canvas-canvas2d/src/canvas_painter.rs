@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use wasm_bindgen::prelude::*;
-use web_sys::{CanvasRenderingContext2d, js_sys};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, js_sys};
 
 use iron_canvas_core::geometry::{
     pixel_rect::PixelRect,
@@ -20,6 +20,8 @@ use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
     approx_text_width, parse_font_size_px,
 };
+
+use crate::measure_cache::MeasureCache;
 
 // Private `console.warn` binding — zero IronCalc, kept local so this crate
 // does not depend on `iron-canvas-web`'s `wasm` diagnostics module.
@@ -116,6 +118,11 @@ impl SetterCache {
 
 pub struct CanvasPainter {
     pub ctx: CanvasRenderingContext2d,
+    /// Cross-canvas blit source. `Some` on the double-buffered grid layer:
+    /// `blit` reads the kept band from the front (visible) canvas instead of
+    /// self-copying `ctx`'s own canvas — same-canvas `drawImage` is the
+    /// interpolation hazard documented in `apply_dpr_transform`.
+    blit_src: Option<HtmlCanvasElement>,
     pub(crate) setter_cache: SetterCache,
     pub dash_pattern: js_sys::Array,
     pub dash_empty: js_sys::Array,
@@ -131,19 +138,37 @@ pub struct CanvasPainter {
     /// still a valid key. Not cleared, so cardinality tracks the sheet's
     /// distinct-color set (bounded, like `ColorIntern`).
     palette: RefCell<Vec<Rc<str>>>,
+    /// Memo of `ctx.measure_text` widths keyed `(font_css, text)`.
+    /// Interior mutability because `TextMetrics::measure_text_width` takes
+    /// `&self`. `get` and `insert` are separate short borrows — never held
+    /// across the JS measure call. Content-keyed, so `SetterCache`
+    /// invalidation must NOT touch it; only `clear_measure_cache` (font
+    /// load) empties it.
+    measure_cache: RefCell<MeasureCache>,
 }
 
 impl CanvasPainter {
     pub fn new(ctx: CanvasRenderingContext2d) -> Self {
         Self {
             ctx,
+            blit_src: None,
             setter_cache: SetterCache::default(),
             dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
             dash_empty: js_sys::Array::new(),
             clip_depth: Cell::new(0),
             dpr: Cell::new(1.0),
             palette: RefCell::new(Vec::new()),
+            measure_cache: RefCell::new(MeasureCache::default()),
         }
+    }
+
+    /// Construct a painter whose `blit` reads the kept band from `src` (the
+    /// front/visible canvas) instead of `ctx`'s own backing store. Used for
+    /// the double-buffered grid layer; see `blit_src`.
+    pub fn with_blit_source(ctx: CanvasRenderingContext2d, src: HtmlCanvasElement) -> Self {
+        let mut painter = Self::new(ctx);
+        painter.blit_src = Some(src);
+        painter
     }
 
     pub(crate) fn set_fill_cached(&self, color: PaintColor) {
@@ -212,6 +237,14 @@ impl CanvasPainter {
         palette.push(Rc::clone(&rc));
         rc
     }
+
+    /// Drop all memoized text widths. Called via the facades'
+    /// `fontsChanged()` when `document.fonts` finishes loading — widths
+    /// measured against a fallback font are stale the moment the real
+    /// font arrives.
+    pub fn clear_measure_cache(&self) {
+        self.measure_cache.borrow_mut().clear();
+    }
 }
 
 impl Drop for CanvasPainter {
@@ -226,20 +259,28 @@ impl Drop for CanvasPainter {
 
 impl TextMetrics for CanvasPainter {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
+        if let Some(w) = self.measure_cache.borrow().get(font_css, text) {
+            return w;
+        }
         // Metrics callers (FontIntern + HEADER_FONT only feed `fill_text`)
         // pass an `&str` here. Treat as Borrowed — the cache will still hit
         // against a previously cached Static via content-eq if it was the
         // same literal.
         self.set_font_cached(PaintColor::Borrowed(font_css));
         match self.ctx.measure_text(text) {
-            Ok(m) => m.width(),
+            Ok(m) => {
+                let w = m.width();
+                self.measure_cache.borrow_mut().insert(font_css, text, w);
+                w
+            }
             Err(_) => {
                 // Debug builds: crash on first occurrence so a regressing
                 // ctx state (lost context, bad font_css) is caught loud
                 // in dev. Release: fall back to the shared `approx_text_width`
                 // estimate so a measure error agrees with the SVG/PDF/recorder
                 // backends instead of diverging; a single console.warn whispers
-                // once per session.
+                // once per session. Deliberately NOT cached: a broken ctx must
+                // keep remeasuring so recovery heals.
                 debug_assert!(
                     false,
                     "CanvasPainter::measure_text_width: ctx.measure_text errored; \
@@ -399,13 +440,15 @@ impl Painter for CanvasPainter {
             .expect("set_transform should not fail");
         self.ctx.scale(dpr_f, dpr_f).expect("scale should not fail");
         // Canvas2D defaults `imageSmoothingEnabled = true`, which bilinear-
-        // interpolates `drawImage` source pixels. `Painter::blit` calls
-        // drawImage with src/dst on the same canvas — every interpolation
-        // pass smudges 1-pixel edges in the kept band. After a scroll
-        // round-trip those smudges visibly accumulate as horizontal /
-        // vertical lines across cells that should be empty. Disable here
-        // because the ctx state is wiped on every canvas resize and this
-        // method is the canonical re-init point.
+        // interpolates `drawImage` source pixels. `Painter::blit` without a
+        // `blit_src` calls drawImage with src/dst on the same canvas — every
+        // interpolation pass smudges 1-pixel edges in the kept band. After a
+        // scroll round-trip those smudges visibly accumulate as horizontal /
+        // vertical lines across cells that should be empty. The grid layer's
+        // cross-canvas `blit_src` (see the `blit_src` field doc) avoids the
+        // self-copy entirely, but this stays disabled for both paths because
+        // the ctx state is wiped on every canvas resize and this method is
+        // the canonical re-init point.
         self.ctx.set_image_smoothing_enabled(false);
     }
 
@@ -420,11 +463,19 @@ impl Painter for CanvasPainter {
 
 impl BlitPainter for CanvasPainter {
     fn blit(&self, src: PixelRect, dst: PixelRect) {
-        // `ctx.canvas()` is None only for a detached OffscreenCanvas ctx,
-        // which iron-canvas never constructs — but the API returns Option,
-        // so dropping on None keeps blit a silent no-op rather than a panic.
-        let Some(canvas) = self.ctx.canvas() else {
-            return;
+        // Prefer the cross-canvas source (front buffer). Fall back to the
+        // painter's own canvas for direct-drawn surfaces; `ctx.canvas()` is
+        // None only for a detached OffscreenCanvas ctx, which iron-canvas
+        // never constructs — dropping on None keeps blit a silent no-op.
+        let fallback;
+        let canvas: &HtmlCanvasElement = if let Some(front) = &self.blit_src {
+            front
+        } else {
+            let Some(own) = self.ctx.canvas() else {
+                return;
+            };
+            fallback = own;
+            &fallback
         };
         // Source coords address the DPR-scaled backing store; dest coords
         // flow through the active ctx.scale(dpr,dpr) transform, so only
@@ -443,7 +494,7 @@ impl BlitPainter for CanvasPainter {
         let _ = self
             .ctx
             .draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
-                &canvas, sx, sy, sw, sh, dx, dy, dw, dh,
+                canvas, sx, sy, sw, sh, dx, dy, dw, dh,
             );
     }
 }

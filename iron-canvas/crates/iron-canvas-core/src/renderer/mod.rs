@@ -74,10 +74,11 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 pub use crate::chrome::PaneRegion;
-use crate::chrome::{BlitPlan, Chrome};
+use crate::chrome::{BlitPlan, Chrome, PaneRegionMask};
 use crate::geometry::prim::Axis;
 use crate::renderer::blit_work::widen_blit_strip_to_pixel_clip;
 use crate::renderer::cache::{FrameCache, PaneCache, PaneShiftPrep};
+use crate::signal::RowSpan;
 pub use cache::ColorIntern;
 pub use cache::FontIntern;
 
@@ -283,6 +284,39 @@ impl<P: Painter> RendererCore<P> {
         self.painter.end_group();
     }
 
+    /// Damage variant: prior pixels stay; only the damaged full-width row
+    /// bands per pane refetch + repaint. Same outer sequence as
+    /// `render_grid` — cells, then frozen separators (they must win pixels
+    /// back from the band's re-stroked grid lines at the freeze boundary),
+    /// then headers and corner, all inside the Grid group.
+    pub fn render_grid_damage(&self, model: &dyn CanvasModel, frame: &Chrome, spans: &[RowSpan]) {
+        self.painter.begin_group(GroupClass::Grid);
+        self.cache_show_grid(model);
+
+        self.painter.begin_group(GroupClass::Cells);
+        for pane in PaneRegionMask::ALL.regions() {
+            self.render_pane_damage(model, frame, pane, spans);
+        }
+        self.painter.end_group();
+
+        self.painter.begin_group(GroupClass::FrozenSep);
+        self.draw_frozen_separators(frame);
+        self.painter.end_group();
+
+        self.painter.begin_group(GroupClass::Headers);
+        if frame.row_header_thickness > 0 {
+            self.render_headers_base(Axis::Row, frame);
+        }
+        if frame.col_header_thickness > 0 {
+            self.render_headers_base(Axis::Column, frame);
+        }
+        self.painter.end_group();
+
+        self.draw_corner_box_if_needed(frame);
+
+        self.painter.end_group();
+    }
+
     /// Paint the header corner box, gated for *correctness*: at thickness 0 it
     /// would still stroke 0.5px border lines spanning the full canvas. Shared
     /// by `render_grid` and `render_grid_blit` (the one block identical between
@@ -335,6 +369,10 @@ impl<P: Painter> GridRenderer<P> {
 
     pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
         self.core.render_grid_blit(model, frame, plan);
+    }
+
+    pub fn render_grid_damage(&self, model: &dyn CanvasModel, frame: &Chrome, spans: &[RowSpan]) {
+        self.core.render_grid_damage(model, frame, spans);
     }
 
     /// Drop cached pane-buffer ranges for the masked panes. Plumbed through
