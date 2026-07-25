@@ -32,6 +32,7 @@ pub struct TestModel {
     col_width_overrides: RefCell<BTreeMap<i32, f64>>,
     cell_values: RefCell<HashMap<(i32, i32), String>>,
     decorations: RefCell<HashMap<(i32, i32), CellDecoration>>,
+    cell_styles: RefCell<HashMap<(i32, i32), CellStyle>>,
     column_headers: RefCell<HashMap<i32, String>>,
     /// When > 0, rows `1..=data_until` return `"R{row}"` for any column
     /// not explicitly set via `set_cell`. Lets a test populate a synthetic
@@ -53,6 +54,12 @@ pub struct TestModel {
     /// `Fetched::BridgeFailed` — simulating a JS-bridge throw so tests can
     /// exercise the active-cell repaint's atomic-skip path.
     value_bridge_fail: Cell<bool>,
+    /// Counts calls to any of the four bulk `*_in` accessors. Task 4's
+    /// row-band repaint must reuse the buffers `render_pane` already
+    /// bulk-fetched once this frame — this counter is the evidence a test
+    /// can check that N row spans painted from those buffers cost zero
+    /// additional model queries, rather than trusting "it looks right".
+    bulk_fetch_calls: Cell<u32>,
 }
 
 impl Default for TestModel {
@@ -67,6 +74,7 @@ impl Default for TestModel {
             col_width_overrides: RefCell::default(),
             cell_values: RefCell::default(),
             decorations: RefCell::default(),
+            cell_styles: RefCell::default(),
             column_headers: RefCell::default(),
             data_until: Cell::new(0),
             last_row: Cell::new(iron_canvas_core::LAST_ROW),
@@ -85,6 +93,7 @@ impl Default for TestModel {
             show_row_headers: Cell::new(true),
             show_col_headers: Cell::new(true),
             value_bridge_fail: Cell::new(false),
+            bulk_fetch_calls: Cell::new(0),
         }
     }
 }
@@ -228,6 +237,9 @@ impl TestModel {
     pub fn set_decoration(&self, row: i32, col: i32, deco: CellDecoration) {
         self.decorations.borrow_mut().insert((row, col), deco);
     }
+    pub fn set_style(&self, row: i32, col: i32, style: CellStyle) {
+        self.cell_styles.borrow_mut().insert((row, col), style);
+    }
     pub fn set_data_until(&self, row: i32) {
         self.data_until.set(row);
     }
@@ -240,6 +252,15 @@ impl TestModel {
 
     pub fn selection_range(&self) -> RCRange {
         self.selection.get()
+    }
+
+    /// Total calls across all four bulk `*_in` accessors since construction
+    /// (or since the last `reset_bulk_fetch_calls`). See the field doc.
+    pub fn bulk_fetch_calls(&self) -> u32 {
+        self.bulk_fetch_calls.get()
+    }
+    pub fn reset_bulk_fetch_calls(&self) {
+        self.bulk_fetch_calls.set(0);
     }
 }
 
@@ -302,8 +323,11 @@ impl CanvasModel for TestModel {
 }
 
 impl CellContentQuery for TestModel {
-    fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Fetched<CellStyle> {
-        Fetched::Value(CellStyle::default())
+    fn get_cell_style(&self, _: u32, row: i32, col: i32) -> Fetched<CellStyle> {
+        match self.cell_styles.borrow().get(&(row, col)).cloned() {
+            Some(s) => Fetched::Value(s),
+            None => Fetched::Value(CellStyle::default()),
+        }
     }
     fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Fetched<CellKind> {
         Fetched::Value(CellKind::Text)
@@ -326,6 +350,57 @@ impl CellContentQuery for TestModel {
             return Fetched::Value(format!("R{row}"));
         }
         Fetched::Value(String::new())
+    }
+
+    // Overridden (rather than left as the trait's per-cell-looping default)
+    // solely to increment `bulk_fetch_calls` before forwarding — the loop
+    // body below is otherwise byte-identical to `CellContentQuery`'s
+    // default impl for each of these four methods.
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
+        self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_cell_style(sheet, r, c));
+            }
+        }
+    }
+    fn get_formatted_cell_values_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Fetched<String>>,
+    ) {
+        self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_formatted_cell_value(sheet, r, c));
+            }
+        }
+    }
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
+        self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_cell_type(sheet, r, c));
+            }
+        }
+    }
+    fn get_cell_decorations_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Fetched<CellDecoration>>,
+    ) {
+        self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(self.get_extended_cell_style(sheet, r, c));
+            }
+        }
     }
 }
 

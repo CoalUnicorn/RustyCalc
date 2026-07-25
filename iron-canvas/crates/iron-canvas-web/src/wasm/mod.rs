@@ -18,6 +18,26 @@ use wasm_bindgen::prelude::*;
 
 use ironcalc_base::types as ic;
 
+/// Upstream `getCellStyle` returns the CF-merged `ExtendedStyle` wrapper
+/// (`{ style, icon, data_bar, rating }`); other hosts may return a bare
+/// `Style`. Decorations are ignored here — CF-visual painting via the
+/// bridge is an accepted gap (see design doc's Known Gaps).
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum JsStyle {
+    Bare(ic::Style),
+    Extended { style: ic::Style },
+}
+
+impl From<JsStyle> for ic::Style {
+    fn from(s: JsStyle) -> Self {
+        match s {
+            JsStyle::Bare(style) => style,
+            JsStyle::Extended { style } => style,
+        }
+    }
+}
+
 use crate::wasm::diag::console_warn;
 use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
@@ -52,6 +72,14 @@ extern "C" {
 
     #[wasm_bindgen(catch, method, js_name = "getShowGridLines")]
     fn get_show_grid_lines(this: &IronCalcModelHandle, sheet: u32) -> Result<bool, JsValue>;
+
+    // Optional on the host — probed once in `new`. Absence means the host
+    // wants standard header chrome, mirroring the trait default.
+    #[wasm_bindgen(catch, method, js_name = "getShowRowHeaders")]
+    fn get_show_row_headers(this: &IronCalcModelHandle, sheet: u32) -> Result<bool, JsValue>;
+
+    #[wasm_bindgen(catch, method, js_name = "getShowColHeaders")]
+    fn get_show_col_headers(this: &IronCalcModelHandle, sheet: u32) -> Result<bool, JsValue>;
 
     #[wasm_bindgen(catch, method, js_name = "getCellStyle")]
     fn get_cell_style(
@@ -127,6 +155,8 @@ pub struct JsBackedModel {
     has_values_in: bool,
     has_types_in: bool,
     has_get_theme: bool,
+    has_show_row_headers: bool,
+    has_show_col_headers: bool,
     // Workbook theme, fetched lazily and cached for the model's lifetime
     // (user decision: cache once, explicit refresh). The host must call
     // `IronCanvas.themeChanged()` after `model.setTheme(...)` — a stale
@@ -141,6 +171,8 @@ impl JsBackedModel {
         let has_values_in = Self::has_method(&handle, "getFormattedCellValuesIn");
         let has_types_in = Self::has_method(&handle, "getCellTypesIn");
         let has_get_theme = Self::has_method(&handle, "getTheme");
+        let has_show_row_headers = Self::has_method(&handle, "getShowRowHeaders");
+        let has_show_col_headers = Self::has_method(&handle, "getShowColHeaders");
         Self {
             handle,
             js_throw_count: Cell::new(0),
@@ -149,6 +181,8 @@ impl JsBackedModel {
             has_values_in,
             has_types_in,
             has_get_theme,
+            has_show_row_headers,
+            has_show_col_headers,
             theme: RefCell::new(None),
         }
     }
@@ -327,6 +361,26 @@ impl CanvasModel for JsBackedModel {
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
         self.note_throw("getShowGridLines", self.handle.get_show_grid_lines(sheet))
     }
+
+    fn get_show_row_headers(&self, sheet: u32) -> Option<bool> {
+        if !self.has_show_row_headers {
+            return Some(true);
+        }
+        self.note_throw(
+            "getShowRowHeaders",
+            self.handle.get_show_row_headers(sheet),
+        )
+    }
+
+    fn get_show_col_headers(&self, sheet: u32) -> Option<bool> {
+        if !self.has_show_col_headers {
+            return Some(true);
+        }
+        self.note_throw(
+            "getShowColHeaders",
+            self.handle.get_show_col_headers(sheet),
+        )
+    }
 }
 
 impl CellContentQuery for JsBackedModel {
@@ -346,8 +400,11 @@ impl CellContentQuery for JsBackedModel {
         ) else {
             return Fetched::BridgeFailed;
         };
-        match serde_wasm_bindgen::from_value::<ic::Style>(jsv) {
-            Ok(s) => Fetched::Value(self.with_theme(|t| style_to_core(s, &|c| color_to_css(c, t)))),
+        match serde_wasm_bindgen::from_value::<JsStyle>(jsv) {
+            Ok(s) => {
+                let s: ic::Style = s.into();
+                Fetched::Value(self.with_theme(|t| style_to_core(s, &|c| color_to_css(c, t))))
+            }
             Err(e) => {
                 self.note_serde_err("getCellStyle", &e);
                 Fetched::BridgeFailed
@@ -400,7 +457,7 @@ impl CellContentQuery for JsBackedModel {
             None => return self.styles_in_per_cell(sheet, range, out),
         };
         // The array element shape is the per-cell shape — no new wire struct.
-        let decoded: Vec<Option<ic::Style>> = match serde_wasm_bindgen::from_value(jsv) {
+        let decoded: Vec<Option<JsStyle>> = match serde_wasm_bindgen::from_value(jsv) {
             Ok(v) => v,
             Err(e) => {
                 self.note_serde_err("getCellStylesIn", &e);
@@ -419,7 +476,7 @@ impl CellContentQuery for JsBackedModel {
         // One theme borrow for the whole batch — not one cache hit per cell.
         self.with_theme(|t| {
             out.extend(decoded.into_iter().map(|s| match s {
-                Some(s) => Fetched::Value(style_to_core(s, &|c| color_to_css(c, t))),
+                Some(s) => Fetched::Value(style_to_core(s.into(), &|c| color_to_css(c, t))),
                 None => Fetched::Absent,
             }));
         });
@@ -653,6 +710,59 @@ mod tests {
             None,
             "Color::None must stay None, not become an empty CSS string"
         );
+    }
+}
+
+#[cfg(test)]
+mod js_style_tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    /// Never `Style::default()`. Both arms of the untagged enum yield a
+    /// `Style`, so a fixture equal to the default cannot distinguish "decoded
+    /// the right arm" from "picked the wrong arm and got a default back" —
+    /// the assertion would hold either way.
+    fn distinctive_style() -> ic::Style {
+        ic::Style {
+            num_fmt: "0.00%".to_string(),
+            quote_prefix: true,
+            ..ic::Style::default()
+        }
+    }
+
+    #[wasm_bindgen_test]
+    fn decodes_bare_style() {
+        let bare = distinctive_style();
+        let js = serde_wasm_bindgen::to_value(&bare).expect("Style always serializes");
+        let decoded: ic::Style = serde_wasm_bindgen::from_value::<JsStyle>(js)
+            .expect("bare Style payload must decode")
+            .into();
+        assert_eq!(decoded, bare);
+    }
+
+    #[wasm_bindgen_test]
+    fn decodes_extended_style_wrapper() {
+        #[derive(serde::Serialize)]
+        struct ExtendedFixture {
+            style: ic::Style,
+            icon: Option<()>,
+            data_bar: Option<()>,
+            rating: Option<()>,
+        }
+        let inner = distinctive_style();
+        let wrapped = ExtendedFixture {
+            style: inner.clone(),
+            icon: None,
+            data_bar: None,
+            rating: None,
+        };
+        let js = serde_wasm_bindgen::to_value(&wrapped).expect("fixture always serializes");
+        let decoded: ic::Style = serde_wasm_bindgen::from_value::<JsStyle>(js)
+            .expect("ExtendedStyle payload must decode")
+            .into();
+        assert_eq!(decoded, inner);
     }
 }
 

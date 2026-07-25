@@ -9,13 +9,103 @@
 //! place so the kept band survives and only the revealed strip needs a
 //! refetch.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
+use crate::renderer::cell::fingerprint::{PaneFingerprint, rebuild_pane_fingerprint_in_place};
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
+
+/// One pane's painted-pixel fingerprint state, a sibling of
+/// [`PaneBuffers`]'s model-buffer cache (`range`).
+///
+/// A stale painted tree is *self-disqualifying* — no separate "is this tree
+/// valid" marker is needed. The pane's address-space `range` is folded into
+/// `PaneFingerprint.digest` itself (`build_pane_fingerprint` hashes
+/// `range.r1/c1/r2/c2` before any row), and `plan_pane_repaint` gates on
+/// `painted.range != scratch.range -> Full` right after its digest compare.
+/// A scroll always changes the live range, so a tree left over from before a
+/// scroll can never digest-equal (nor range-equal) a freshly rebuilt tree for
+/// the new range — the compare already forces a full repaint. A partial strip
+/// paint (`render_pane_strip`) simply doesn't `commit`, so `painted` keeps
+/// last full paint's range/digest; the next frame's compare against that
+/// naturally decides Skip or repaint on its own merits.
+///
+/// Ownership lives here (renderer-lifetime, on `RendererCore` via
+/// `PaneCache`) rather than on `Chrome` (rebuilt every `Fresh`/`SlotsReuse`/
+/// `Blitted` frame) — nothing has to be manually carried forward across a
+/// frame rebuild, unlike the scalar arrays this replaces.
+///
+/// Two persistent slots, not one: comparing "what did we last paint" against
+/// "what would we paint now" needs both trees alive at once, and the *next*
+/// frame needs a warm `Vec`-backed target to rebuild into without
+/// reallocating. `painted` is last frame's committed tree; `scratch` is
+/// rebuilt in place every frame via [`rebuild_pane_fingerprint_in_place`]
+/// (reusing whatever capacity is already there) and then, on a successful
+/// skip or paint, traded for `painted` via `mem::swap` — zero allocation,
+/// zero clone. The tree that's now stale becomes next frame's `scratch`
+/// target.
+#[derive(Default)]
+pub(crate) struct PaneFingerprintState {
+    painted: RefCell<PaneFingerprint>,
+    scratch: RefCell<PaneFingerprint>,
+}
+
+impl PaneFingerprintState {
+    /// Rebuild `scratch` in place from this frame's freshly bulk-fetched
+    /// buffers (reusing its warm `Vec` capacity from whatever was last
+    /// painted or scratched here). The caller then diffs `scratch` against
+    /// `painted` via [`Self::with_trees`] + `plan_pane_repaint`, whose first
+    /// line is the whole-pane digest-equal Skip fast path.
+    pub(crate) fn rebuild_scratch(
+        &self,
+        styles: &[Fetched<CellStyle>],
+        values: &[Fetched<String>],
+        cell_types: &[Fetched<CellKind>],
+        decorations: &[Fetched<CellDecoration>],
+        range: RCRange,
+    ) {
+        let mut scratch = self.scratch.borrow_mut();
+        rebuild_pane_fingerprint_in_place(
+            &mut scratch,
+            styles,
+            values,
+            cell_types,
+            decorations,
+            range,
+        );
+    }
+
+    /// Commit the just-rebuilt `scratch` tree as the pane's newly painted
+    /// state via `mem::swap` — no allocation, no clone. Must be called
+    /// exactly once per successful `render_pane` outcome (skip or full
+    /// paint), and never on a preflight failure (see `render_pane`).
+    pub(crate) fn commit(&self) {
+        std::mem::swap(
+            &mut *self.painted.borrow_mut(),
+            &mut *self.scratch.borrow_mut(),
+        );
+    }
+
+    /// Borrow both trees at once for a row/cell-level comparison (e.g.
+    /// `fingerprint::plan_pane_repaint`), which needs both the whole-pane
+    /// digest and the per-row digests to decide Skip / Rows / Full.
+    ///
+    /// A closure, not a `(Ref<PaneFingerprint>, Ref<PaneFingerprint>)` pair,
+    /// so both `RefCell` borrows are guaranteed to end together at the end
+    /// of one call, matching the borrow discipline `rebuild_scratch` and
+    /// `commit` already use elsewhere in this file — a caller holding one
+    /// borrow past the other's drop is exactly the hazard a `Ref` pair
+    /// returned by value would invite.
+    pub(crate) fn with_trees<R>(
+        &self,
+        f: impl FnOnce(&PaneFingerprint, &PaneFingerprint) -> R,
+    ) -> R {
+        f(&self.painted.borrow(), &self.scratch.borrow())
+    }
+}
 
 /// Per-pane buffers that survive across frames. Holds the most recent
 /// bulk-fetch output for one `PaneRegion`, plus the `RCRange` they were
@@ -31,11 +121,15 @@ pub struct PaneBuffers {
     pub styles: Cell<Vec<Fetched<CellStyle>>>,
     pub values: Cell<Vec<Fetched<String>>>,
     pub cell_types: Cell<Vec<Fetched<CellKind>>>,
-    pub decorations: Cell<Vec<Option<CellDecoration>>>,
+    pub decorations: Cell<Vec<Fetched<CellDecoration>>>,
     /// The address-space range the buffers above were fetched for. `None`
     /// when this pane has never been painted, or was last seen empty
     /// (e.g. unfrozen-axis pane on a sheet without freezes).
     pub range: Cell<Option<RCRange>>,
+    /// The pane's last-committed painted-pixel fingerprint tree. See
+    /// [`PaneFingerprintState`]'s doc for how a stale tree self-disqualifies
+    /// via its baked-in range, needing no separate validity marker.
+    pub(crate) fingerprint: PaneFingerprintState,
 }
 
 /// Typed outcome of [`PaneBuffers::prepare_shift`]. Replaces the old
@@ -73,24 +167,51 @@ impl PaneBuffers {
     /// `prev_range` until the strip paint succeeds and commits the range.
     /// Bumping it here would trip `render_pane`'s range-equality early-exit
     /// and skip the strip paint entirely.
-    pub fn prepare_shift(&self, new_range: RCRange, axis: Axis) -> PaneShiftPrep {
+    /// Pure classification half of [`Self::prepare_shift`]: reports which
+    /// [`PaneShiftPrep`] variant this pane/range/axis is, WITHOUT rotating the
+    /// buffers or clearing the cached `range`. The blit preflight
+    /// (`RendererCore::prefetch_blit_strips`) uses this to compute a shifted
+    /// pane's revealed strip and fetch it *before* any pixel is shifted or any
+    /// cache mutated — so a strip fetch that fails leaves the pane untouched.
+    /// The actual rotation is deferred to `prepare_shift` on the paint pass.
+    pub fn classify_shift(&self, new_range: RCRange, axis: Axis) -> PaneShiftPrep {
         let Some(prev_range) = self.range.get() else {
             return PaneShiftPrep::MissingCache;
         };
         if !shift_is_safe(prev_range, new_range, axis) {
-            self.range.set(None);
             return PaneShiftPrep::IncompatibleRange {
                 prev_range,
                 new_range,
             };
         }
+        PaneShiftPrep::Shifted {
+            prev_range,
+            new_range,
+        }
+    }
+
+    pub fn prepare_shift(&self, new_range: RCRange, axis: Axis) -> PaneShiftPrep {
+        let prev_range = match self.classify_shift(new_range, axis) {
+            PaneShiftPrep::MissingCache => return PaneShiftPrep::MissingCache,
+            PaneShiftPrep::IncompatibleRange {
+                prev_range,
+                new_range,
+            } => {
+                self.range.set(None);
+                return PaneShiftPrep::IncompatibleRange {
+                    prev_range,
+                    new_range,
+                };
+            }
+            PaneShiftPrep::Shifted { prev_range, .. } => prev_range,
+        };
         let mut styles = self.styles.take();
         let mut values = self.values.take();
         let mut cell_types = self.cell_types.take();
         let mut decorations = self.decorations.take();
         // Revealed strip slots are placeholders the strip-fetch overwrites this
-        // same frame. `Fetched::Absent` for the content buffers (nothing fetched
-        // yet); `None` for the still-`Option` decoration buffer.
+        // same frame — `Fetched::Absent` for all four buffers (nothing fetched
+        // yet).
         apply_blit_shift(&mut styles, prev_range, new_range, axis, Fetched::Absent);
         apply_blit_shift(&mut values, prev_range, new_range, axis, Fetched::Absent);
         apply_blit_shift(
@@ -100,7 +221,13 @@ impl PaneBuffers {
             axis,
             Fetched::Absent,
         );
-        apply_blit_shift(&mut decorations, prev_range, new_range, axis, None);
+        apply_blit_shift(
+            &mut decorations,
+            prev_range,
+            new_range,
+            axis,
+            Fetched::Absent,
+        );
         self.styles.set(styles);
         self.values.set(values);
         self.cell_types.set(cell_types);
@@ -166,6 +293,14 @@ impl PaneCache {
     /// of trusting the stale buffers. The buffer Vecs stay allocated —
     /// the refetch path overwrites them in place. Unmasked panes are
     /// untouched and keep fingerprint-skipping.
+    ///
+    /// Buffer-range invalidation only — never the painted-pixel tree. A
+    /// masked pane whose refetch comes back byte-identical to what's already
+    /// on screen (e.g. a content-dirty signal with no actual edit behind it)
+    /// still finds its prior `painted` tree intact and skips the repaint for
+    /// free; dropping the tree here would turn every SlotsReuse content signal
+    /// into an unconditional whole-pane repaint, defeating the fingerprint
+    /// skip this cache exists to provide.
     pub fn invalidate(&self, mask: PaneRegionMask) {
         for region in mask.regions() {
             self.panes[region as usize].range.set(None);

@@ -34,10 +34,16 @@ impl GridSignals {
 
 /// Row-band damage accumulated alongside the CONTENT bit — the third
 /// repaint input, disjoint from both blit (viewport shift) and the
-/// pane-level `pending_content` mask. Bands are full pane width because
-/// cell text may overflow horizontally into row neighbours (`render_pane`
-/// paints text last, unclipped); a full-width band is the smallest repaint
-/// unit that cannot erase or orphan overflow pixels.
+/// pane-level `pending_content` mask. Rows, not cell rectangles, are the
+/// repaint unit for two distinct reasons: a row's top/bottom border may be
+/// owned by (painted from) the row *above*/*below* it, so a rectangle
+/// clipped to just the changed cell could leave a stale shared-edge stroke
+/// behind or fail to draw a new one (`fingerprint::plan_pane_repaint`'s
+/// border-safety check exists for exactly this); and cell text may overflow
+/// horizontally into row neighbours (`render_pane` paints text last,
+/// unclipped), which a future spill feature would only make more common —
+/// a full-width band is the smallest repaint unit that cannot erase or
+/// orphan overflow pixels either way.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum CellDamage {
     /// No damage recorded since the last paint.

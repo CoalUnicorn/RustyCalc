@@ -508,15 +508,25 @@ fn damage_regime_paints_far_less_than_slots_reuse() {
     // path, one the damage path. The band repaint being strictly smaller
     // is the entire point of the regime.
     //
-    // The row-2 edit below is load-bearing: `render_pane`'s per-pane
-    // fingerprint is one combined hash over the whole pane range, so an
-    // *unedited* mask=ALL content signal fetches identical bytes and
-    // fingerprint-skips the entire SlotsReuse walk for free (0 cell ops,
-    // header/corner only) — which would make SlotsReuse cheaper than
-    // Damage's unconditional named-row repaint no matter the grid size.
-    // A real edit is what actually raises CONTENT in production; it's
-    // what makes SlotsReuse pay for the full-pane walk the comparison is
-    // meant to contrast against Damage's clipped one-row band.
+    // The edit below must be load-bearing in TWO ways now:
+    //
+    // 1. (pre-Task-4 reason, still true) An *unedited* mask=ALL content
+    //    signal fetches identical bytes and fingerprint-skips the entire
+    //    SlotsReuse walk for free (0 cell ops) — which would make
+    //    SlotsReuse cheaper than Damage's unconditional named-row repaint
+    //    no matter the grid size. A real edit is what actually raises
+    //    CONTENT in production.
+    // 2. (Task 4) `render_pane`'s SlotsReuse mismatch now ALSO clips to a
+    //    row-band repaint when `plan_pane_repaint` finds the change safe —
+    //    a single-row edit like the old `stub.set_cell(2, 1, ...)` fixture
+    //    would make SlotsReuse pay for the SAME clipped one-row band
+    //    Damage takes, collapsing the very gap this test exists to prove.
+    //    Nine widely-spread row edits exceed `plan_pane_repaint`'s merge
+    //    cap (`MAX_DAMAGE_SPANS`), forcing SlotsReuse's mismatch back onto
+    //    the unclipped whole-pane walk this comparison is meant to
+    //    contrast against Damage's still-clipped single-row band (Damage
+    //    paints only the row named in `mark_rows_damaged` below,
+    //    regardless of how many rows actually changed).
     let stub = Rc::new(TestModel::synthetic_grid());
 
     let mut slots = build(Rc::clone(&stub));
@@ -524,7 +534,9 @@ fn damage_regime_paints_far_less_than_slots_reuse() {
     let mut damage = build(Rc::clone(&stub));
     damage.paint_if_dirty();
 
-    stub.set_cell(2, 1, "changed");
+    for row in [2, 5, 8, 11, 14, 17, 20, 23, 26] {
+        stub.set_cell(row, 1, "changed");
+    }
 
     let before = grid_ops_len(&slots);
     slots.mark_content_dirty(PaneRegionMask::ALL);
@@ -662,6 +674,67 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
         orch.grid_surface().presents(),
         3,
         "Viewport presents the grid"
+    );
+}
+
+/// Slice out the ops painted strictly between one `GroupClass::Cells`
+/// `BeginGroup` and its matching `EndGroup` — the cell band only, excluding
+/// the headers/frozen-separator ops that repaint every Damage frame
+/// regardless and would otherwise mask a strip's atomic no-op. Cells never
+/// nests another group inside it, so the first `EndGroup` after the marker
+/// closes it.
+fn cells_group_ops(ops: &[DrawOp]) -> Vec<DrawOp> {
+    let start = ops
+        .iter()
+        .position(|op| matches!(op, DrawOp::BeginGroup { class } if *class == GroupClass::Cells))
+        .expect("ops must contain a Cells group");
+    let end = ops[start + 1..]
+        .iter()
+        .position(|op| matches!(op, DrawOp::EndGroup))
+        .expect("Cells group must close");
+    ops[start + 1..start + 1 + end].to_vec()
+}
+
+/// Task 5, acceptance criterion 2, at the orchestrator wiring level (the
+/// unit-level proof lives in `row_fingerprint_repaint.rs`'s
+/// `lifecycle_bridge_failed_damage_strip_is_atomic`): a transient
+/// `BridgeFailed` on the Damage regime's strip fetch must paint literally
+/// zero ops inside the `Cells` group — the atomic preflight rejects the
+/// whole strip before any splice/clear/paint. Filtered to the `Cells` group
+/// specifically because headers and the frozen separator still repaint
+/// every Damage frame regardless of the strip's outcome.
+#[test]
+fn damage_regime_bridge_failure_paints_no_cell_ops() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh — primes the pane cache + painted tree.
+
+    stub.set_value_bridge_fail(true);
+    let grid_before = grid_ops_len(&orch);
+    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.paint_if_dirty();
+    let new_grid_ops = grid_ops_since(&orch, grid_before);
+
+    assert!(
+        cells_group_ops(&new_grid_ops).is_empty(),
+        "a BridgeFailed Damage strip must paint zero ops inside the Cells \
+         group; got {:?}",
+        new_grid_ops
+    );
+
+    // The atomic-skip path must not poison future frames: once the bridge
+    // recovers, Damage must repaint the edited cell normally.
+    stub.set_value_bridge_fail(false);
+    stub.set_cell(2, 1, "changed");
+    let grid_before = grid_ops_len(&orch);
+    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.paint_if_dirty();
+    let new_grid_ops = grid_ops_since(&orch, grid_before);
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Damage));
+    assert!(
+        !cells_group_ops(&new_grid_ops).is_empty(),
+        "Damage must repaint the Cells group normally on the next \
+         successful frame after a BridgeFailed strip"
     );
 }
 

@@ -153,7 +153,10 @@ fn rgb_hex([r, g, b]: [u8; 3]) -> String {
 
 /// Parse a `#RRGGBB` hex string into `[R, G, B]`. Returns `None` for
 /// invalid formats or non-hex characters.
-fn parse_hex_color(hex: &str) -> Option<[u8; 3]> {
+///
+/// `pub(crate)`: also used by `fingerprint.rs`'s `hash_decoration` to hash a
+/// data bar's resolved color without constructing a `CfDecorationPaint`.
+pub(crate) fn parse_hex_color(hex: &str) -> Option<[u8; 3]> {
     let hex = hex.trim_start_matches('#');
     if hex.len() != 6 {
         return None;

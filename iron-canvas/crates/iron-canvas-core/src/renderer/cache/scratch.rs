@@ -43,5 +43,5 @@ pub struct FrameCache {
     pub strip_styles: Cell<Vec<Fetched<CellStyle>>>,
     pub strip_values: Cell<Vec<Fetched<String>>>,
     pub strip_cell_types: Cell<Vec<Fetched<CellKind>>>,
-    pub strip_decorations: Cell<Vec<Option<CellDecoration>>>,
+    pub strip_decorations: Cell<Vec<Fetched<CellDecoration>>>,
 }

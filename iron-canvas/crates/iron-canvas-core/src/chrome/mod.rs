@@ -24,7 +24,6 @@
 //! by comparing the previous frame's `sheet`, `canvas_size`, frozen counts, and
 //! `scroll_first` against the current signals; any divergence forces `Fresh`.
 
-use std::cell::Cell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -138,15 +137,6 @@ pub struct Chrome {
     /// every color `String` — `Chrome` is rebuilt on every Fresh/SlotsReuse/
     /// Blit frame (B-1).
     pub theme: Rc<CanvasTheme>,
-    /// Pane content fingerprints from the *previous* frame, snapshotted
-    /// in `Chrome::next`. Indexed by `PaneRegion as usize`. Zero on first
-    /// paint; a Fresh rebuild carries prev's values, but the per-pane
-    /// compare is gated on `kind.reuses_slots()`, so Fresh never skips.
-    pub prev_pane_fingerprints: [u64; 4],
-    /// Pane content fingerprints written by `render_pane` after each
-    /// bulk-fetch. `Cell` so paint code stays on `&Chrome` (matches the
-    /// crate convention that paint never holds a mutable Chrome).
-    pub pane_fingerprints: Cell<[u64; 4]>,
     /// Which constructor produced this frame. Renderer diagnostics and
     /// paint-skip gating read it; `FrameKindTag::reuses_slots()` is the
     /// "slot vecs inherited from prev" predicate.
@@ -199,9 +189,8 @@ impl Chrome {
     ///     allocations; `None` is the first-frame path. See the
     ///     [module docs](crate::chrome) for build phases A-E.
     ///   * `SlotsReuse` — prev's slot vecs survive verbatim; only
-    ///     per-frame state (theme + `pane_fingerprints` rotation) is
-    ///     refreshed. Caller refreshes overlay state separately
-    ///     (`SelectionLayer::refresh` in the orchestrator).
+    ///     per-frame state (theme) is refreshed. Caller refreshes overlay
+    ///     state separately (`SelectionLayer::refresh` in the orchestrator).
     ///
     /// `SlotsReuse` requires `prev = Some`; `None` falls through to `Fresh`
     /// defensively. The orchestrator proves `prev.is_some()` before selecting
@@ -215,20 +204,16 @@ impl Chrome {
     ) -> Self {
         match path {
             FramePath::Fresh => {
-                let (recycled, prev_fps) = match prev {
-                    Some(c) => (
-                        RecycledSlots::from_pane_set(c.pane_set),
-                        c.pane_fingerprints.get(),
-                    ),
-                    None => (RecycledSlots::default(), [0u64; 4]),
+                let recycled = match prev {
+                    Some(c) => RecycledSlots::from_pane_set(c.pane_set),
+                    None => RecycledSlots::default(),
                 };
-                Self::build(model, canvas, theme, recycled, prev_fps)
+                Self::build(model, canvas, theme, recycled)
             }
             FramePath::SlotsReuse { stale_panes } => {
                 let Some(mut prev) = prev else {
                     return Self::next(None, model, canvas, theme, FramePath::Fresh);
                 };
-                prev.prev_pane_fingerprints = prev.pane_fingerprints.replace([0; 4]);
                 prev.theme = Rc::clone(theme);
                 prev.kind = FrameKindTag::SlotsReused;
                 prev.stale_panes = stale_panes;
@@ -280,7 +265,6 @@ impl Chrome {
         canvas: CanvasSize,
         theme: &Rc<CanvasTheme>,
         recycled: RecycledSlots,
-        prev_pane_fingerprints: [u64; 4],
     ) -> Self {
         // None -> JS bridge transient (threw or shape malformed). Fall through
         // with the fresh-model default so the frame still builds; next animation
@@ -382,8 +366,6 @@ impl Chrome {
             cell_origin,
             canvas_size: canvas,
             theme: Rc::clone(theme),
-            prev_pane_fingerprints,
-            pane_fingerprints: Cell::new([0; 4]),
             kind: FrameKindTag::Fresh,
             // Full repaint by default. `try_blit_reuse` (via `Chrome::next_blit`)
             // overrides this when scroll-blit narrows the work.

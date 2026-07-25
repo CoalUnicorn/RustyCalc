@@ -22,6 +22,6 @@ bitflags = {workspace = true}
 iron-canvas-recorder = { path = "../iron-canvas-recorder" }
 # Self dev-dependency: a crate cannot enable its own feature for its
 # `tests/` any other way (`#[cfg(test)]` doesn't reach the lib build).
-# This turns `surface-introspection` on for the integration tests that
-# read the recorder surfaces, while the plain `cargo build` keeps it off.
+# This turns `surface-introspection` on for the integration tests that need
+# it, while the plain `cargo build` keeps it off.
 iron-canvas-core = { path = ".", features = ["surface-introspection"] }

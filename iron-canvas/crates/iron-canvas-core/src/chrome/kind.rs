@@ -1,8 +1,9 @@
 //! Runtime tag for `Chrome` — which construction path (a `Chrome::next`
 //! `FramePath` arm, or `Chrome::next_blit`) produced this frame.
-//! Diagnostics and per-pane fingerprint gating
-//! read it; orchestrator `paint_*` arms dispatch on `PaintRegime`
-//! upstream so they never need to match on this tag.
+//! Diagnostics and `PaneCache`'s per-pane painted-fingerprint gating
+//! (`render_pane`, via `reuses_slots()`) read it; orchestrator `paint_*`
+//! arms dispatch on `PaintRegime` upstream so they never need to match on
+//! this tag.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameKindTag {
@@ -10,7 +11,7 @@ pub enum FrameKindTag {
     /// through `Chrome::build`. First paint, or structural divergence.
     Fresh,
     /// `FramePath::SlotsReuse`: prev's slot vecs reused as-is; only
-    /// per-frame state (theme, pane_fingerprints rotation) refreshed.
+    /// per-frame state (theme) refreshed.
     SlotsReused,
     /// `Chrome::next_blit(.., &plan)`: scroll-axis slot vec rebuilt around
     /// a `BlitPlan`; cross-axis slot vec reused from prev.

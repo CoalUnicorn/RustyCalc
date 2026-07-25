@@ -102,19 +102,22 @@ pub trait CellContentQuery {
     }
 
     /// Bulk-fetch CF decorations for `range` on `sheet`. Same dense
-    /// row-major layout and `None`-as-absent semantics as the other
-    /// `*_in` accessors; rides the same pane-cache / blit machinery so
-    /// decorations stay aligned with styles/values/types across scrolls.
+    /// row-major layout and `Vec<Fetched<T>>` rationale as `get_cell_styles_in` —
+    /// a per-slot `BridgeFailed` must reach the pane buffer distinctly from
+    /// `Absent` so the preflight (and the fingerprint) can tell a transient
+    /// bridge failure apart from a legitimately empty cell. Rides the same
+    /// pane-cache / blit machinery so decorations stay aligned with
+    /// styles/values/types across scrolls.
     fn get_cell_decorations_in(
         &self,
         sheet: u32,
         range: RCRange,
-        out: &mut Vec<Option<CellDecoration>>,
+        out: &mut Vec<Fetched<CellDecoration>>,
     ) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_extended_cell_style(sheet, r, c).value());
+                out.push(self.get_extended_cell_style(sheet, r, c));
             }
         }
     }
@@ -218,7 +221,7 @@ impl<T: CellContentQuery + ?Sized> CellContentQuery for Rc<T> {
         fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>);
         fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<String>>);
         fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>);
-        fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellDecoration>>);
+        fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellDecoration>>);
     }
 }
 
@@ -262,6 +265,13 @@ mod tests {
         fn get_formatted_cell_value(&self, _s: u32, _row: i32, _col: i32) -> Fetched<String> {
             Fetched::Absent
         }
+        fn get_extended_cell_style(&self, _s: u32, row: i32, col: i32) -> Fetched<CellDecoration> {
+            match (row, col) {
+                (1, 1) => Fetched::BridgeFailed,
+                (1, 2) => Fetched::Value(CellDecoration::Icon("ArrowUp".to_string())),
+                _ => Fetched::Absent,
+            }
+        }
     }
 
     // Stage 1 (Fetched bulk channel): the default `get_cell_styles_in` loop must
@@ -283,6 +293,28 @@ mod tests {
         // Row-major: (1,1), (1,2), (2,1), (2,2).
         assert!(matches!(out[0], Fetched::BridgeFailed));
         assert!(matches!(out[1], Fetched::Value(_)));
+        assert!(matches!(out[2], Fetched::Absent));
+        assert!(matches!(out[3], Fetched::Absent));
+    }
+
+    // Acceptance 5: the default `get_cell_decorations_in` loop must forward
+    // each `Fetched` verbatim, same as the style bulk path above — a
+    // per-cell `BridgeFailed` must not collapse to `Absent`/`None` on its
+    // way through the bulk decoration query.
+    #[test]
+    fn default_bulk_decorations_preserve_bridge_failed_per_slot() {
+        let range = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        };
+        let mut out = Vec::new();
+        PerCellOutcomeModel.get_cell_decorations_in(0, range, &mut out);
+
+        // Row-major: (1,1), (1,2), (2,1), (2,2).
+        assert!(matches!(out[0], Fetched::BridgeFailed));
+        assert!(matches!(out[1], Fetched::Value(CellDecoration::Icon(_))));
         assert!(matches!(out[2], Fetched::Absent));
         assert!(matches!(out[3], Fetched::Absent));
     }

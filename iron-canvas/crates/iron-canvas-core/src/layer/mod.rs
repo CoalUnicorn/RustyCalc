@@ -181,7 +181,20 @@ where
 
     /// Scroll-blit grid paint: shift the kept band per `BlitPlan::shifts`,
     /// then run `render_grid_blit` (which only repaints the revealed strip).
+    ///
+    /// The preflight (`prefetch_blit_strips`) fetches and bridge-validates
+    /// every revealed strip BEFORE a single pixel is shifted. If any fetch
+    /// fails, the whole frame is abandoned as a no-op: no shift, no paint. This
+    /// is deliberate and minimal — shifting pixels and then discovering the
+    /// fetch failed is the bug being fixed (it strands stale, misplaced pixels
+    /// in the revealed strip). A fallback full repaint is intentionally NOT
+    /// attempted here; a future frame reconciles once the bridge recovers via
+    /// the normal frame-kind dispatch, so a reader should not "upgrade" this
+    /// no-op without re-deriving why it is sufficient.
     pub fn paint_grid_blit(&mut self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
+        if !self.renderer.prefetch_blit_strips(model, frame, plan) {
+            return;
+        }
         for s in &plan.shifts {
             self.renderer.painter_blit(s.src, s.dst);
         }

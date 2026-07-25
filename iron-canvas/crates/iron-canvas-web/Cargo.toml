@@ -28,7 +28,8 @@ web-sys = { version = "0.3", features = [
     "CanvasRenderingContext2d",
     "HtmlCanvasElement","OffscreenCanvas",
     "TextMetrics",
-    "Window","Element", "Document", "CssStyleDeclaration"
+    "Window","Element", "Document", "CssStyleDeclaration",
+    "ImageData"
 ] }
 serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"

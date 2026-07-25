@@ -592,8 +592,11 @@ where
 
     /// Damage regime: slot vecs survive (same preconditions as SlotsReuse),
     /// prior grid pixels stay, only the damaged bands refetch + repaint.
-    /// No cache invalidation — the strip path splices fetched bands into
-    /// the pane buffers and zeroes the pane fingerprint itself.
+    /// No cache invalidation here — the strip path (`render_pane_strip`)
+    /// splices fetched bands into the pane buffers and invalidates the pane
+    /// fingerprint itself, atomically: a transient bridge failure on any of
+    /// the four strip buffers leaves that pane's buffers, pixels, range,
+    /// and tree untouched instead of partially splicing.
     fn paint_damage_regime(
         &mut self,
         model: &dyn CanvasModel,
@@ -633,6 +636,9 @@ where
     /// SlotsReuse regime: prev's slot vecs survive (viewport unchanged);
     /// only `pane_cache` entries inside `mask` are invalidated so
     /// `render_pane` refetches there. Unmasked panes fingerprint-skip.
+    /// `invalidate_pane_cache` drops buffer *ranges* only, never painted
+    /// trees — a masked pane whose refetch matches its prior content still
+    /// fingerprint-skips (see `PaneCache::invalidate`'s doc).
     fn paint_slots_reuse_regime(
         &mut self,
         model: &dyn CanvasModel,

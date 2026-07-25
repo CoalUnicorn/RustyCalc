@@ -9,7 +9,6 @@
 //! `try_blit_reuse` to construct the next frame in place — kept band
 //! carries forward, only the strip hits the model.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::geometry::pixel_rect::PixelRect;
@@ -208,10 +207,9 @@ pub enum FramePath {
     /// `prev = None` is the first-frame path.
     Fresh,
     /// Reuse prev's slot vecs verbatim; refresh per-frame state only
-    /// (theme + pane_fingerprints rotation). `stale_panes` is caller-
-    /// supplied so a `SlotsReuse` following a blit doesn't inherit the
-    /// blit's narrow strip mask and silently skip a content repaint.
-    /// Requires `prev = Some`.
+    /// (theme). `stale_panes` is caller-supplied so a `SlotsReuse`
+    /// following a blit doesn't inherit the blit's narrow strip mask and
+    /// silently skip a content repaint. Requires `prev = Some`.
     SlotsReuse { stale_panes: PaneRegionMask },
 }
 
@@ -338,16 +336,13 @@ pub(super) fn try_blit_reuse(
         col_header_labels,
     };
 
+    // The panes named in `plan.shift_panes()` route through
+    // `render_pane_blit` -> `render_pane_strip`, which invalidates its own
+    // pane's painted-fingerprint tree unconditionally on every strip paint
+    // (`PaneCache`, not `Chrome`, owns that state — see `pane_cache.rs`).
+    // Untouched panes keep their painted tree and short-circuit on the
+    // next frame's compare via a digest match.
     let stale = plan.shift_panes();
-    // Seed next frame's per-pane fingerprints: carry prev's forward, then
-    // zero out the regions the blit touched so their next paint refetches
-    // and re-fingerprints. Untouched regions short-circuit on the next
-    // frame's cache check via fingerprint match.
-    let prev_fps = prev.pane_fingerprints.get();
-    let mut seeded_fps = prev_fps;
-    for region in stale.regions() {
-        seeded_fps[region as usize] = 0;
-    }
 
     Ok(Chrome {
         sheet: prev.sheet,
@@ -357,8 +352,6 @@ pub(super) fn try_blit_reuse(
         cell_origin: prev.cell_origin,
         canvas_size: canvas,
         theme: Rc::clone(theme),
-        prev_pane_fingerprints: prev_fps,
-        pane_fingerprints: Cell::new(seeded_fps),
         kind: FrameKindTag::Blitted,
         stale_panes: stale,
     })

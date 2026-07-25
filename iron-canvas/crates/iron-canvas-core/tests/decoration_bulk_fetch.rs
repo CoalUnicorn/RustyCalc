@@ -11,7 +11,7 @@ use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegion};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CellDecoration, DataBarSpec};
+use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default};
@@ -56,9 +56,15 @@ fn bulk_method_places_decoration_at_correct_index() {
     let target = ((2 - range.r1) * cols as i32 + (3 - range.c1)) as usize;
     for (i, slot) in out.iter().enumerate() {
         if i == target {
-            assert!(slot.is_some(), "decorated cell present at its index");
+            assert!(
+                matches!(slot, Fetched::Value(_)),
+                "decorated cell present at its index"
+            );
         } else {
-            assert!(slot.is_none(), "non-decorated slot {i} must be None");
+            assert!(
+                matches!(slot, Fetched::Absent),
+                "non-decorated slot {i} must be Absent"
+            );
         }
     }
 }
@@ -66,7 +72,7 @@ fn bulk_method_places_decoration_at_correct_index() {
 // Trait helper to call the bulk method without naming `CanvasModel` twice.
 use iron_canvas_core::CanvasModel;
 trait CanvasModelExt: CanvasModel {
-    fn decorations(&self, range: RCRange, out: &mut Vec<Option<CellDecoration>>) {
+    fn decorations(&self, range: RCRange, out: &mut Vec<Fetched<CellDecoration>>) {
         self.get_cell_decorations_in(self.get_selected_sheet(), range, out);
     }
 }
@@ -90,6 +96,9 @@ fn decoration_reaches_painter_and_skip_is_stable() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let mut frame = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
 
+    // Painted-fingerprint state lives on `PaneCache` (on `RendererCore`),
+    // not `Chrome` — so the same `core` must paint both frames for the
+    // second call's compare to see the first call's committed tree.
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_pane(&model, PaneRegion::BottomRight, &frame);
     assert_eq!(
@@ -98,16 +107,15 @@ fn decoration_reaches_painter_and_skip_is_stable() {
         "bulk fetch must deliver exactly one data-bar RectFill",
     );
 
-    frame.prev_pane_fingerprints = frame.pane_fingerprints.replace([0; 4]);
     frame.kind = FrameKindTag::SlotsReused;
 
-    let core2 = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core2.render_pane(&model, PaneRegion::BottomRight, &frame);
+    let ops_before = core.painter().ops().len();
+    core.render_pane(&model, PaneRegion::BottomRight, &frame);
     // Unchanged content -> fingerprint match -> whole walk skipped, including
     // the decoration pass; the set-back kept the buffer aligned.
     assert_eq!(
-        core2.painter().ops().len(),
-        0,
+        core.painter().ops().len(),
+        ops_before,
         "idempotent repaint must skip entirely after the decoration set-back",
     );
 }

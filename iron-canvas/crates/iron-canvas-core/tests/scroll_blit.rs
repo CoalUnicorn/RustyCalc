@@ -9,7 +9,9 @@
 mod common;
 
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath, PaneRegion};
+use iron_canvas_core::chrome::{
+    ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, PaneRegion,
+};
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
@@ -300,6 +302,257 @@ fn active_cell_value_unchanged_allows_blit() {
     assert!(
         plan.is_some(),
         "pure scroll with unchanged active-cell value must qualify for the blit",
+    );
+}
+
+/// Task 5, acceptance criterion 4 (row-axis half): `render_grid_blit` only
+/// visits `frame.stale_panes` (== `plan.shift_panes()`), so a pure row
+/// scroll must never touch the frozen row band's panes at all — proven
+/// directly via the public `PaneBuffers::range` field staying byte-identical
+/// to what the priming Fresh paint set, not just "no ops observed."
+#[test]
+fn row_scroll_leaves_frozen_row_band_panes_untouched() {
+    // Frozen rows only (mirrors `col_scroll_with_frozen_rows_includes_top_right_work`'s
+    // fixture): TopRight exists as the frozen row band; TopLeft/BottomLeft don't
+    // (no frozen columns), so only TopRight is meaningful to check here.
+    let m = TestModel::synthetic_grid().with_frozen_rows(2);
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let canvas = canvas();
+
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(&m, &frame0);
+
+    let top_right_before = core.pane_cache.pane(PaneRegion::TopRight).range.get();
+    assert!(
+        top_right_before.is_some(),
+        "TopRight must be primed by Fresh"
+    );
+
+    // With frozen_rows=2, `scroll_first` clamps the scroll band's first row
+    // to `max(frozen+1, view.top_row)` — top_row=1 or 2 both clamp to 3
+    // (frame0's own starting point), which would be a no-op scroll. top_row=4
+    // is the first value that actually shifts the scroll band.
+    m.set_top_row(4);
+    let plan = frame0
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
+        .expect("row scroll must qualify for blit");
+    assert!(plan.shift_panes().contains_region(PaneRegion::BottomRight));
+    assert!(
+        !plan.shift_panes().contains_region(PaneRegion::TopRight),
+        "a row-axis scroll must not shift the frozen row band"
+    );
+
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("row scroll must blit in place");
+    };
+    issue_blits(core.painter(), &plan);
+    core.render_grid_blit(&m, &frame1, &plan);
+
+    assert_eq!(
+        core.pane_cache.pane(PaneRegion::TopRight).range.get(),
+        top_right_before,
+        "row scroll must not touch the frozen row band's cache at all"
+    );
+    // The shifted pane's cache DOES change (rotated to the new range) —
+    // the asymmetry is the point of this test.
+    assert_ne!(
+        core.pane_cache.pane(PaneRegion::BottomRight).range.get(),
+        None
+    );
+}
+
+/// Task 5, acceptance criterion 4 (column-axis half): mirror of the row-axis
+/// test above — a pure column scroll must leave the frozen column band
+/// (`BottomLeft`) untouched.
+#[test]
+fn column_scroll_leaves_frozen_column_band_panes_untouched() {
+    // Frozen columns only (mirrors `row_scroll_with_frozen_cols_includes_bottom_left_work`'s
+    // fixture): BottomLeft exists as the frozen column band.
+    let m = TestModel::synthetic_grid().with_frozen_cols(2);
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let canvas = canvas();
+
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(&m, &frame0);
+
+    let bottom_left_before = core.pane_cache.pane(PaneRegion::BottomLeft).range.get();
+    assert!(
+        bottom_left_before.is_some(),
+        "BottomLeft must be primed by Fresh"
+    );
+
+    // Mirror of the row-axis test's `scroll_first` clamping note, on columns.
+    m.set_left_column(4);
+    let plan = frame0
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
+        .expect("column scroll must qualify for blit");
+    assert!(plan.shift_panes().contains_region(PaneRegion::BottomRight));
+    assert!(
+        !plan.shift_panes().contains_region(PaneRegion::BottomLeft),
+        "a column-axis scroll must not shift the frozen column band"
+    );
+
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("column scroll must blit in place");
+    };
+    issue_blits(core.painter(), &plan);
+    core.render_grid_blit(&m, &frame1, &plan);
+
+    assert_eq!(
+        core.pane_cache.pane(PaneRegion::BottomLeft).range.get(),
+        bottom_left_before,
+        "column scroll must not touch the frozen column band's cache at all"
+    );
+    assert_ne!(
+        core.pane_cache.pane(PaneRegion::BottomRight).range.get(),
+        None
+    );
+}
+
+/// Task 5, acceptance criterion 5, via the blit path specifically. The only
+/// existing reseed test (`row_fingerprint_repaint.rs`'s
+/// `lifecycle_damage_strip_scopes_to_intersected_pane_and_reseeds_on_next_paint`)
+/// drives `render_pane_damage`; `render_pane_blit` shares `render_pane_
+/// strip`'s body but that sharing was inferred, not demonstrated, for the
+/// blit caller. Proven here directly: after a row scroll shifts
+/// `BottomRight` (invalidating its painted tree via the strip splice), the
+/// very next paint with unchanged content must find a real mismatch and
+/// reseed a fresh tree — and the paint after THAT must Skip, proving the
+/// reseed actually committed.
+#[test]
+fn row_scroll_shifted_pane_reseeds_and_skips_on_next_unchanged_paint() {
+    let m = TestModel::synthetic_grid();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let canvas = canvas();
+
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(&m, &frame0);
+
+    m.set_top_row(2);
+    let plan = frame0
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
+        .expect("row scroll must qualify for blit");
+    let BlitOutcome::Blitted(mut frame1) =
+        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("row scroll must blit in place");
+    };
+    issue_blits(core.painter(), &plan);
+    core.render_grid_blit(&m, &frame1, &plan);
+
+    // A strip splice never commits into the painted tree — the scroll
+    // changed the pane's live range, and range is baked into the digest, so
+    // the reseed below is forced by the range mismatch itself. The
+    // reseed→repaint→skip sequence proves that end to end through public
+    // draw-op behaviour.
+
+    // Promote to a plain SlotsReuse frame at the SAME geometry (content
+    // unchanged since the blit) to drive `render_pane`'s own mismatch/skip
+    // dispatch directly, mirroring `row_fingerprint_repaint.rs`'s
+    // `promote_to_slots_reuse` helper.
+    frame1.kind = FrameKindTag::SlotsReused;
+
+    let reseed_ops_before = core.painter().ops().len();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame1);
+    assert!(
+        core.painter().ops().len() > reseed_ops_before,
+        "the first paint after a shifted pane's strip must reseed the tree \
+         with a real repaint, not spuriously Skip"
+    );
+
+    let idempotent_ops_before = core.painter().ops().len();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame1);
+    assert_eq!(
+        core.painter().ops().len(),
+        idempotent_ops_before,
+        "once reseeded via the blit path, an unchanged repaint must Skip again"
+    );
+}
+
+/// Fix B regression (blit atomicity): a `BridgeFailed` fetch on the revealed
+/// strip must abort the WHOLE blit frame BEFORE any pixel is shifted, not
+/// shift the kept band and only then discover the fetch failed (which strands
+/// stale, now-misplaced pixels in the revealed strip with nothing to repaint
+/// them). Drives the real gated sequence `LayerBase::paint_grid_blit` runs:
+/// `prefetch_blit_strips` first, and shift + paint only if it returns true.
+#[test]
+fn blit_preflight_bridge_failure_aborts_frame_without_shifting() {
+    let m = TestModel::synthetic_grid();
+    m.set_data_until(30); // Real content, so a stray paint would be visible.
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let canvas = canvas();
+
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(&m, &frame0);
+
+    let range_before = core.pane_cache.pane(PaneRegion::BottomRight).range.get();
+    assert!(
+        range_before.is_some(),
+        "Fresh must prime BottomRight's cached range"
+    );
+
+    m.set_top_row(2);
+    let plan = frame0
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
+        .expect("single-row scroll must qualify for blit");
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("single-row scroll must blit in place");
+    };
+
+    // On the blit path only the revealed strip is fetched (the kept band is
+    // preserved by the pixel blit), so failing all value fetches from here
+    // fails exactly — and only — the strip fetch.
+    m.set_value_bridge_fail(true);
+
+    let baseline_ops = core.painter().ops().len();
+
+    // Mirror `LayerBase::paint_grid_blit`'s gated sequence exactly.
+    let proceeded = core.prefetch_blit_strips(&m, &frame1, &plan);
+    if proceeded {
+        issue_blits(core.painter(), &plan);
+        core.render_grid_blit(&m, &frame1, &plan);
+    }
+
+    assert!(
+        !proceeded,
+        "a BridgeFailed fetch on the revealed strip must abort the blit frame"
+    );
+
+    let new_ops: Vec<DrawOp> = core
+        .painter()
+        .ops()
+        .iter()
+        .skip(baseline_ops)
+        .cloned()
+        .collect();
+    assert_eq!(
+        count_blits(&new_ops),
+        0,
+        "an aborted blit frame must shift zero pixels, got: {new_ops:#?}"
+    );
+    assert_eq!(
+        count_rect_fills(&new_ops),
+        0,
+        "an aborted blit frame must not clear or paint the would-have-been-revealed strip"
+    );
+    assert!(
+        new_ops.is_empty(),
+        "an aborted blit frame must be a complete no-op for the grid layer, got: {new_ops:#?}"
+    );
+
+    // Cache untouched: the deferred `prepare_shift` never ran, so the pane's
+    // buffers weren't rotated and its cached range wasn't advanced.
+    assert_eq!(
+        core.pane_cache.pane(PaneRegion::BottomRight).range.get(),
+        range_before,
+        "an aborted blit frame must leave the pane's cached range exactly as it was"
     );
 }
 
@@ -663,7 +916,8 @@ fn seed_sibling_buffers(pane: &iron_canvas_core::renderer::cache::PaneBuffers, l
         .set(vec![iron_canvas_core::Fetched::Absent; len]);
     pane.cell_types
         .set(vec![iron_canvas_core::Fetched::Absent; len]);
-    pane.decorations.set(vec![None; len]);
+    pane.decorations
+        .set(vec![iron_canvas_core::Fetched::Absent; len]);
 }
 
 #[test]

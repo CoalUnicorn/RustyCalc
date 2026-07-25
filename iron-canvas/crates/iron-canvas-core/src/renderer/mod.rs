@@ -85,6 +85,28 @@ pub use cache::FontIntern;
 pub use self::cell::text::{TextLine, layout_into};
 
 use crate::painter::{BlitPainter, GroupClass, Painter};
+use crate::style::{CellDecoration, CellKind, CellStyle};
+use crate::types::coord::RCRange;
+use crate::types::fetched::Fetched;
+
+/// Per-pane staging for the blit preflight, indexed by `PaneRegion as usize`
+/// (mirroring `PaneCache`'s own `[PaneBuffers; 4]`).
+/// [`RendererCore::prefetch_blit_strips`] fetches and bridge-validates each
+/// shifted pane's revealed strip into one of these BEFORE any pixel is
+/// shifted; `render_pane_blit` then paints from the staged buffers instead of
+/// re-fetching. `Cell`-wrapped so the take/park rhythm keeps the `Vec`
+/// capacity warm across frames — never a per-frame allocation.
+#[derive(Default)]
+struct BlitStripStage {
+    /// True only between a successful preflight fetch and the paint that
+    /// consumes it; `render_pane_blit` clears it via `take`.
+    ready: Cell<bool>,
+    strip: Cell<Option<RCRange>>,
+    styles: Cell<Vec<Fetched<CellStyle>>>,
+    values: Cell<Vec<Fetched<String>>>,
+    cell_types: Cell<Vec<Fetched<CellKind>>>,
+    decorations: Cell<Vec<Fetched<CellDecoration>>>,
+}
 
 /// Shared renderer core. Holds the painter `P`, dpr, the per-frame
 /// `FrameCache`, and the renderer-lifetime intern tables (font, column
@@ -115,6 +137,10 @@ pub struct RendererCore<P: Painter> {
     /// previously allocated a fresh `String` per cell per frame; the intern
     /// makes those calls `Rc::clone` after the first sighting of each color.
     pub color_intern: ColorIntern,
+    /// Per-pane blit-preflight staging (`prefetch_blit_strips` fills it,
+    /// `render_pane_blit` drains it). Renderer-lifetime scratch, not part of
+    /// the pane cache — mutating it never counts as touching cache state.
+    blit_stage: [BlitStripStage; 4],
 }
 
 impl<P: Painter> RendererCore<P> {
@@ -162,6 +188,7 @@ impl<P: Painter> RendererCore<P> {
             pane_cache: PaneCache::default(),
             font_intern: FontIntern::new(),
             color_intern: ColorIntern::new(),
+            blit_stage: std::array::from_fn(|_| BlitStripStage::default()),
         }
     }
 
@@ -369,6 +396,18 @@ impl<P: Painter> GridRenderer<P> {
 
     pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
         self.core.render_grid_blit(model, frame, plan);
+    }
+
+    /// Whole-frame blit preflight — see [`RendererCore::prefetch_blit_strips`].
+    /// `paint_grid_blit` calls this BEFORE shifting any pixel; a `false`
+    /// return means the frame is a no-op.
+    pub fn prefetch_blit_strips(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        plan: &BlitPlan,
+    ) -> bool {
+        self.core.prefetch_blit_strips(model, frame, plan)
     }
 
     pub fn render_grid_damage(&self, model: &dyn CanvasModel, frame: &Chrome, spans: &[RowSpan]) {
