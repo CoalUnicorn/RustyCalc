@@ -648,6 +648,18 @@ impl IronCanvas {
         self.orch.cell_rect(row, column)
     }
 
+    pub fn scroll_pane_rect(&self) -> Option<PixelRect> {
+        self.orch.scroll_pane_rect()
+    }
+
+    pub fn legal_scroll_origin(&self) -> Option<(i32, i32)> {
+        self.orch.legal_scroll_origin()
+    }
+
+    pub fn scroll_to_show(&self, row: i32, column: i32) -> Option<(i32, i32)> {
+        self.orch.scroll_to_show(row, column)
+    }
+
     pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
         self.orch.fit_column_width(col, first_row, last_row)
     }

@@ -16,13 +16,10 @@ use crate::input::formula::splice_ref;
 use crate::model::{ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetRoster, try_mutate};
 use crate::state::{DragState, ModelStore, RefOverride, StatusMessage, WorkbookState};
 use iron_canvas_core::{
-    geometry::constants::{
-        DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN,
-        LAST_ROW,
-    },
+    geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW},
     types::ui::HitTest,
 };
-use iron_canvas_web::CanvasSize;
+use iron_canvas_web::PixelRect;
 use ironcalc_base::UserModel;
 
 use super::cursor_hint::compute_cursor_hint;
@@ -67,10 +64,14 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
                 }
             });
             let sheet_area = model.with_value(SheetRange::from_view);
+            state.scroll_into_view.set_value(true);
             state.emit_event(SpreadsheetEvent::Navigation(
                 NavigationEvent::SelectionRangeChanged { sheet_area },
             ));
         }
+        // Deliberately does *not* arm scroll_into_view: this arm scrolls the
+        // viewport while leaving the selection put, so following the active
+        // cell would drag the view straight back.
         DragState::Extending { .. } => {
             // set_top_left_visible_cell scrolls without touching the selection
             // range — the source cells the autofill will fill from must stay intact.
@@ -113,8 +114,13 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
     ));
 }
 
-/// Compute the scroll direction from the cursor position and the canvas bounds,
-/// then start or stop the auto-scroll timer accordingly.
+/// Compute the scroll direction from the cursor position and the *scrollable
+/// pane's* bounds, then start or stop the auto-scroll timer accordingly.
+///
+/// `pane` is the region past the frozen bands — never the whole canvas. With
+/// panes frozen, the pane's near edges sit a frozen band's worth in from the
+/// canvas origin, and a zone measured off the canvas would fire deep inside
+/// the frozen band, which doesn't scroll.
 ///
 /// If the cursor has moved back into the safe zone, the running timer is cancelled.
 /// If a timer is already running and the direction changed, the new direction is
@@ -122,22 +128,30 @@ fn autoscroll_tick(model: ModelStore, state: WorkbookState, icv: CanvasHandle) {
 fn update_autoscroll(
     x: f64,
     y: f64,
-    canvas_w: f64,
-    canvas_h: f64,
+    pane: Option<PixelRect>,
     model: ModelStore,
     state: WorkbookState,
     icv: CanvasHandle,
 ) {
-    let dx = if x > canvas_w - AUTOSCROLL_ZONE {
+    let Some(pane) = pane else {
+        return;
+    };
+    // An axis whose frozen band fills the canvas has no scrollable extent, so
+    // its near and far edge zones would overlap and latch a direction.
+    let dx = if pane.width <= 0 {
+        0
+    } else if x > f64::from(pane.right()) - AUTOSCROLL_ZONE {
         1
-    } else if x < f64::from(HEADER_COL_WIDTH) + AUTOSCROLL_ZONE {
+    } else if x < f64::from(pane.top_left.x) + AUTOSCROLL_ZONE {
         -1
     } else {
         0
     };
-    let dy = if y > canvas_h - AUTOSCROLL_ZONE {
+    let dy = if pane.height <= 0 {
+        0
+    } else if y > f64::from(pane.bottom()) - AUTOSCROLL_ZONE {
         1
-    } else if y < f64::from(HEADER_ROW_HEIGHT) + AUTOSCROLL_ZONE {
+    } else if y < f64::from(pane.top_left.y) + AUTOSCROLL_ZONE {
         -1
     } else {
         0
@@ -290,20 +304,13 @@ pub fn handle_mousemove(
         return;
     };
 
-    // Sentinel size when the canvas isn't mounted yet: f64::MAX guarantees the
-    // cursor is never within AUTOSCROLL_ZONE of any edge, so update_autoscroll
-    // is a no-op pre-mount instead of latching onto a zero-sized canvas.
-    let CanvasSize {
-        w: canvas_w,
-        h: canvas_h,
-    } = with_canvas(icv, |ic| ic.canvas_size()).unwrap_or(CanvasSize {
-        w: f64::MAX,
-        h: f64::MAX,
-    });
+    // `None` until the first paint (no frame, so no pane geometry) — the drag
+    // state below still updates, only the edge-scroll is skipped.
+    let pane = with_canvas(icv, |ic| ic.scroll_pane_rect()).flatten();
 
     match state.drag.get_untracked() {
         DragState::Extending { .. } => {
-            update_autoscroll(x, y, canvas_w, canvas_h, model, state, icv);
+            update_autoscroll(x, y, pane, model, state, icv);
             state.drag.set(DragState::Extending {
                 to_row: row,
                 to_col: col,
@@ -363,7 +370,7 @@ pub fn handle_mousemove(
             }
         }
         DragState::Selecting => {
-            update_autoscroll(x, y, canvas_w, canvas_h, model, state, icv);
+            update_autoscroll(x, y, pane, model, state, icv);
             let (eff_row, eff_col) = model.with_value(|m| {
                 let view = m.get_selected_view();
                 let ec = if col == view.left_column && view.left_column > 1 {

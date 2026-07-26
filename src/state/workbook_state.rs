@@ -41,6 +41,11 @@ pub struct WorkbookState {
     pub(crate) context_menu: Split<Option<ContextMenuState>>,
     pub(crate) status: Split<Option<StatusMessage>>,
     pub(crate) autoscroll: AutoscrollState,
+    /// Raised when something moved the selection and the viewport may have to
+    /// follow. The rAF loop consumes it before painting, because only the
+    /// renderer knows whether the new active cell actually fits on screen.
+    /// Non-reactive: it schedules work on an already-scheduled frame.
+    pub(crate) scroll_into_view: StoredValue<bool>,
     /// Which drawer panel (if any) is open — see [`ActiveDrawer`].
     pub(crate) active_drawer: Split<Option<ActiveDrawer>>,
     /// Selected / in-progress row in the Manage Named Ranges dialog.
@@ -128,6 +133,7 @@ impl WorkbookState {
             context_menu: Split::new(None),
             status: Split::new(None),
             autoscroll: AutoscrollState::new(),
+            scroll_into_view: StoredValue::new(false),
             active_drawer: Split::new(None),
             editing_named_range: Split::new(None),
             show_headers: Split::new(true),

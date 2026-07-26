@@ -36,6 +36,9 @@ pub fn handle_wheel(ev: web_sys::WheelEvent, model: ModelStore, state: WorkbookS
             }
         }
     });
+    // Wheel navigation moves the selection (it routes through nav_arrow /
+    // nav_page), so the viewport has to follow it like any other navigation.
+    state.scroll_into_view.set_value(true);
     let (sheet, top_row, left_col) = model.with_value(|m| {
         let v = m.get_selected_view();
         (v.sheet, v.top_row, v.left_column)

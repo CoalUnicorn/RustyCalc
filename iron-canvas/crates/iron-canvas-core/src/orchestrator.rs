@@ -393,6 +393,88 @@ where
         self.last_frame.as_ref()?.cell_rect(row, column)
     }
 
+    /// Canvas-space rect of the scrollable pane — everything past the frozen
+    /// bands, running to the canvas edge.
+    ///
+    /// Edge-triggered host behaviour (autoscroll while dragging a selection)
+    /// must measure against this, not against the canvas: the near edges sit
+    /// `frozen_offset` in from the origin on each axis, which is header
+    /// thickness on an unfrozen sheet but header + frozen band + separator
+    /// once panes are frozen. `None` before the first paint.
+    /// Frozen bands wider or taller than the canvas leave no scrollable
+    /// extent at all; the rect collapses to zero rather than going negative,
+    /// and callers must treat a zero extent as "nothing scrolls on this axis".
+    pub fn scroll_pane_rect(&self) -> Option<PixelRect> {
+        let frame = self.last_frame.as_ref()?;
+        let top_left = Point {
+            x: frame.pane_set.cols.frozen_offset,
+            y: frame.pane_set.rows.frozen_offset,
+        };
+        // The frame's own canvas size, not `self.size` — a resize between the
+        // last paint and this query must not be mixed into a snapshot answer.
+        Some(PixelRect {
+            top_left,
+            width: (frame.canvas_size.w as i32 - top_left.x).max(0),
+            height: (frame.canvas_size.h as i32 - top_left.y).max(0),
+        })
+    }
+
+    /// The scroll origin the renderer will actually honour for the model's
+    /// current view — `scroll_first` applied to both axes.
+    ///
+    /// A scroll band never starts inside the frozen run, but nothing stops a
+    /// model's `top_row` from sitting there (freezing panes does not move it).
+    /// The renderer clamps silently, so the model can hold a value that
+    /// disagrees with every painted pixel. Hosts write this back *before* any
+    /// navigation that computes from `top_row` — page up/down derives its new
+    /// selection from it, so a correction afterwards arrives too late.
+    ///
+    /// Reads the live model rather than the painted frame on purpose: a scroll
+    /// made since the last paint is legitimate and must survive the sync.
+    /// `None` when there is no model or no view.
+    pub fn legal_scroll_origin(&self) -> Option<(i32, i32)> {
+        let model = self.model.as_deref()?;
+        let view = model.get_selected_view()?;
+        let frozen_rows = model.get_frozen_rows_count(view.sheet).unwrap_or(0);
+        let frozen_cols = model.get_frozen_columns_count(view.sheet).unwrap_or(0);
+        Some((
+            crate::geometry::slot::scroll_first(frozen_rows, view.top_row),
+            crate::geometry::slot::scroll_first(frozen_cols, view.left_column),
+        ))
+    }
+
+    /// Minimal `(top_row, left_column)` that brings `(row, column)` fully
+    /// inside the scroll pane, or `None` when it already is (or when there is
+    /// no painted frame or model to measure against).
+    ///
+    /// Answers from painted geometry, so it accounts for the frozen bands,
+    /// measured header thickness, hidden rows and a partial trailing row —
+    /// none of which the model's `window_width`/`window_height` arithmetic can
+    /// see. A target inside a frozen band never scrolls its axis; a target
+    /// taller or wider than the pane aligns to the pane's near edge.
+    pub fn scroll_to_show(&self, row: i32, column: i32) -> Option<(i32, i32)> {
+        let frame = self.last_frame.as_ref()?;
+        let model = self.model.as_deref()?;
+        let view = model.get_selected_view()?;
+        let pane = self.scroll_pane_rect()?;
+
+        let top = origin_showing(
+            row,
+            view.top_row,
+            frame.pane_set.rows.frozen_count(),
+            pane.height,
+            |id| crate::geometry::slot::row_height(model, id),
+        );
+        let left = origin_showing(
+            column,
+            view.left_column,
+            frame.pane_set.cols.frozen_count(),
+            pane.width,
+            |id| crate::geometry::slot::col_width(model, id),
+        );
+        ((top, left) != (view.top_row, view.left_column)).then_some((top, left))
+    }
+
     /// Auto-fit width for `col`: widest formatted value across the
     /// `[first_row, last_row]` used-row span, plus padding. `None` when the
     /// model is absent or no scanned cell in `col` has text. Pure

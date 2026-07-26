@@ -21,12 +21,18 @@ pub struct PerfTimings {
     /// `performance.now()` just after `evaluate()`.
     pub eval_done: RwSignal<Option<f64>>,
     /// Duration of the last `paintIfDirty()` call in milliseconds — measured
-    /// inside the rAF loop only on frames that actually rendered (gated by
-    /// `render_needed`). Independent of the commit pipeline: scroll-only or
-    /// overlay-only repaints update this too.
+    /// inside the rAF loop only on frames that actually rendered (the loop
+    /// is demand-driven and only runs when poked). Independent of the
+    /// commit pipeline: scroll-only or overlay-only repaints update this too.
     pub render_ms: RwSignal<Option<f64>>,
     /// The formula/text that was committed (for display).
     pub last_formula: RwSignal<Option<String>>,
+    /// One-line paint attribution for the last frame, straight from
+    /// `IronCanvas.frameTrace()`: regime + per-pane verdict + cells fetched.
+    /// Only sampled while the panel is open — reading it costs a wasm call
+    /// per frame, and an instrument that runs when nobody is watching taxes
+    /// the timings it exists to explain.
+    pub frame_trace: RwSignal<Option<String>>,
 }
 
 impl PerfTimings {
@@ -41,6 +47,7 @@ impl PerfTimings {
             eval_done: RwSignal::new(Some(0.0)),
             render_ms: RwSignal::new(Some(0.0)),
             last_formula: RwSignal::new(None),
+            frame_trace: RwSignal::new(None),
         }
     }
 }

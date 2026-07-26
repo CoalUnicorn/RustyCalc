@@ -19,6 +19,10 @@ use std::rc::Rc;
 
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::geometry::constants::{
+    CELL_AREA_INSET, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
+    HEADER_ROW_HEIGHT,
+};
 use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::signal::RowSpan;
 use iron_canvas_core::types::coord::AutofillTarget;
@@ -757,4 +761,53 @@ fn damage_with_active_cell_repaints_overlay() {
             .any(|op| matches!(op, DrawOp::ClearRect { .. })),
         "CONTENT via Damage with an active cell must clear and repaint the overlay"
     );
+}
+
+/// The scrollable pane starts after the frozen bands, not at the canvas
+/// origin. Hosts that trigger on the pane's edges (autoscroll while
+/// dragging a selection) read this rect; measuring against the canvas puts
+/// the near edges `frozen_offset` px inside the frozen band, where nothing
+/// scrolls.
+#[test]
+fn scroll_pane_rect_starts_after_the_frozen_bands() {
+    let mut orch = build(Rc::new(TestModel::new().with_frozen(1, 3)));
+    assert_eq!(
+        orch.scroll_pane_rect(),
+        None,
+        "no painted frame yet — the host must not autoscroll pre-mount"
+    );
+
+    orch.paint_if_dirty();
+
+    let x = (f64::from(HEADER_COL_WIDTH + CELL_AREA_INSET)
+        + 3.0 * DEFAULT_COL_WIDTH
+        + f64::from(FROZEN_SEP))
+    .round() as i32;
+    let y = (f64::from(HEADER_ROW_HEIGHT + CELL_AREA_INSET)
+        + DEFAULT_ROW_HEIGHT
+        + f64::from(FROZEN_SEP))
+    .round() as i32;
+    assert_eq!(
+        orch.scroll_pane_rect(),
+        Some(PixelRect {
+            top_left: Point { x, y },
+            width: 800 - x,
+            height: 600 - y,
+        })
+    );
+}
+
+/// Frozen bands can exceed the canvas. The pane collapses to zero extent
+/// rather than reporting a negative one — a negative width/height would flow
+/// straight into the host's scroll-window budget and edge-scroll thresholds.
+#[test]
+fn scroll_pane_rect_collapses_to_zero_when_frozen_bands_exceed_the_canvas() {
+    let mut orch = build(Rc::new(TestModel::new().with_frozen(400, 400)));
+    orch.paint_if_dirty();
+
+    let Some(rect) = orch.scroll_pane_rect() else {
+        unreachable!("a painted frame must yield a rect");
+    };
+    assert_eq!((rect.width, rect.height), (0, 0));
+    assert!(rect.top_left.x > 800 && rect.top_left.y > 600);
 }
