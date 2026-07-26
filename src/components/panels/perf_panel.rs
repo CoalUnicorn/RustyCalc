@@ -33,6 +33,12 @@ pub fn PerfPanel() -> impl IntoView {
 
     let formula_text = move || perf.last_formula.get().unwrap_or_default();
 
+    // Which renderer path drew the last frame. Reads e.g.
+    // "SlotsReuse tl:skip tr:- bl:- br:FULL fetched=8000" — a `FULL` on the
+    // frame right after a `Viewport` is the post-blit full repaint described
+    // in iron-canvas/docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md.
+    let frame_trace = move || perf.frame_trace.get();
+
     // Runtime detect: only render the record button when the wasm was built
     // with `--features dev-tools`. In prod-flavor builds `recording_supported()`
     // returns false and the button row never reaches the DOM.
@@ -79,6 +85,15 @@ pub fn PerfPanel() -> impl IntoView {
                     }.into_any()
                 }
             }}
+            {move || frame_trace().map(|t| view! {
+                <span class="pp-sep">"|"</span>
+                <span
+                    class="pp-trace"
+                    title="Last frame: regime + per-pane verdict (tl tr bl br) + cell slots fetched"
+                >
+                    {t}
+                </span>
+            })}
             {recording_supported.then(|| view! {
                 <span class="pp-sep">"|"</span>
                 <button

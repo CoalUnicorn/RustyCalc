@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod editing;
+pub(crate) mod one_shot_raf;
 pub mod worksheet;
 
 use leptos::prelude::*;

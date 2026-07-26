@@ -1,8 +1,8 @@
 //! Event-category -> IronCanvas dispatch decision.
 //!
 //! Reactive subscription Effect that tracks event signals and overlay
-//! changes. Does NOT render — only sets `render_needed` so the rAF loop
-//! can do the draw on the next animation frame.
+//! changes. Does NOT render — only pokes the demand-driven render loop
+//! (`use_one_shot_raf`) so it can do the draw on the next animation frame.
 //!
 //! Decoupling subscription from rendering is the key to smooth navigation:
 //! holding an arrow key fires ~30 keydown events per second, each emitting
@@ -34,7 +34,7 @@ pub(super) fn install_subscribe_effect(
     theme_dirty: StoredValue<bool>,
     reactive_overlay: Memo<OverlayTuple>,
     clipboard_draw: ClipboardDraw,
-    render_needed: RwSignal<bool>,
+    poke: impl Fn() + Clone + 'static,
 ) {
     Effect::new(move |prev: Option<OverlayTuple>| {
         let content_events = state.events.content.get();
@@ -50,7 +50,7 @@ pub(super) fn install_subscribe_effect(
         {
             return overlay;
         }
-        render_needed.set(true);
+        poke();
 
         // Push the same state into the IronCanvas orchestrator. Each setter
         // value-compares, so redundant pushes (e.g. format-only events not

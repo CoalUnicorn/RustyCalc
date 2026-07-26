@@ -86,6 +86,156 @@ impl From<&PaintRegime> for PaintRegimeTag {
     }
 }
 
+/// What one pane's `render_pane*` call decided this frame. Mirrors
+/// `RepaintPlan` plus the two outcomes the planner never produces, so every
+/// exit from `render_pane` / `render_pane_blit` / `render_pane_strip` maps to
+/// exactly one variant — the relationship `PaintRegimeTag` already has to
+/// `PaintRegime`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneVerdict {
+    Skip,
+    Rows {
+        spans: u8,
+        rows: u16,
+    },
+    Full,
+    Strip,
+    /// `render_pane`'s own bridge preflight held this pane's prior buffers.
+    Held,
+}
+
+impl fmt::Display for PaneVerdict {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Skip => f.write_str("skip"),
+            Self::Rows { spans, rows } => write!(f, "rows{spans}/{rows}"),
+            Self::Full => f.write_str("FULL"),
+            Self::Strip => f.write_str("strip"),
+            Self::Held => f.write_str("held"),
+        }
+    }
+}
+
+/// Smallest band origin along one axis that shows `target` in full, given the
+/// axis's frozen count, its scrollable `extent` in pixels, and where the band
+/// currently starts.
+///
+/// The backward walk is bounded by how many slots fit in `extent`, so a jump of
+/// 100k rows costs the same as a jump of one. Returning `current` unchanged is
+/// the "already visible / nothing to do" answer.
+fn origin_showing(
+    target: i32,
+    current: i32,
+    frozen: i32,
+    extent: i32,
+    mut measure: impl FnMut(i32) -> i32,
+) -> i32 {
+    // A collapsed axis scrolls nowhere, and a frozen target is always painted.
+    if extent <= 0 || target <= frozen {
+        return current;
+    }
+    // The band can never legally start inside the frozen run, whatever the
+    // model thinks; adopting the clamp here is what heals a stale `top_row`.
+    let current = current.max(frozen + 1);
+    if target < current {
+        return target; // scrolled past it — flush against the near edge
+    }
+
+    // Walk back from the target while the run still fits. `smallest` is then
+    // the earliest origin that shows the target in full, so any origin at or
+    // after it also shows it — hence the `max` rather than a second forward sum.
+    let mut smallest = target;
+    let mut run = measure(target);
+    while smallest > frozen + 1 {
+        let previous = measure(smallest - 1);
+        if run + previous > extent {
+            break;
+        }
+        smallest -= 1;
+        run += previous;
+    }
+    current.max(smallest)
+}
+
+/// Whole-frame outcome, separate from the per-pane verdicts because the blit
+/// preflight aborts *before* any `render_pane*` runs: `prefetch_blit_strips`
+/// returns `false` and `paint_grid_blit` returns without shifting a pixel.
+/// Recording that as one pane's verdict would imply the other panes painted.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum FrameOutcome {
+    #[default]
+    Painted,
+    HeldOnBridgeFailure(PaneRegion),
+}
+
+/// A pane the blit preflight could not stage a strip for, so it fell through to
+/// a whole-pane `render_pane` on a frame that was supposed to be cheap. Carries
+/// the reason because the two have different fixes: a cold cache means some
+/// earlier frame dropped the pane's range, while an incompatible range means
+/// `shift_is_safe` rejected the geometry (for a row scroll, the visible row
+/// count changed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlitFallback {
+    pub pane: PaneRegion,
+    pub cold_cache: bool,
+}
+
+/// Per-frame attribution: which regime ran, what each pane decided, and how
+/// much model traffic it cost. Written by the renderer during paint, stamped
+/// into `Orchestrator.last_trace` at the end of `paint_if_dirty`.
+///
+/// Exists to answer "which path painted this frame?" without a code read —
+/// specifically whether a post-blit `SlotsReuse` reports `Full`, which is the
+/// hypothesis in `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FrameTrace {
+    /// `None` before the first painted frame. `PaintRegimeTag` has no
+    /// `Default` on purpose — inventing one would name a regime that never ran.
+    pub regime: Option<PaintRegimeTag>,
+    /// The signal word `decide` acted on. Included because the regime alone
+    /// cannot explain itself: `SlotsReuse` is the fallthrough arm, so seeing it
+    /// tells you which arms were *rejected* only once you know which bits were
+    /// raised.
+    pub signals: GridSignals,
+    /// Indexed by `PaneRegion as usize`. `None` = pane not visited this frame.
+    pub panes: [Option<PaneVerdict>; 4],
+    pub outcome: FrameOutcome,
+    /// Set when a `Viewport` frame had to abandon the strip path for a pane.
+    /// Still the expensive case even though `take_validated_pane_fetch` folds
+    /// the two bridge crossings into one: the pane pays a whole-pane five-pass
+    /// walk on a frame that was supposed to repaint a strip.
+    pub blit_fallback: Option<BlitFallback>,
+    /// Cell slots handed to the model: summed over the four bulk accessors and
+    /// counted per call, so one 1000-cell pane fetch reads 4000. An unshiftable
+    /// pane is charged once — `render_pane` adopts the buffers the preflight
+    /// already validated instead of refetching the same cells.
+    pub fetched_cell_slots: usize,
+}
+
+impl fmt::Display for FrameTrace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.regime {
+            Some(r) => write!(f, "{r:?}")?,
+            None => f.write_str("-")?,
+        }
+        write!(f, "[{:?}]", self.signals)?;
+        for (i, name) in ["tl", "tr", "bl", "br"].iter().enumerate() {
+            match self.panes.get(i).copied().flatten() {
+                Some(v) => write!(f, " {name}:{v}")?,
+                None => write!(f, " {name}:-")?,
+            }
+        }
+        if let FrameOutcome::HeldOnBridgeFailure(pane) = self.outcome {
+            write!(f, " HELD({pane:?})")?;
+        }
+        if let Some(fb) = self.blit_fallback {
+            let why = if fb.cold_cache { "cold" } else { "range" };
+            write!(f, " unshift({:?},{why})", fb.pane)?;
+        }
+        write!(f, " fetched={}", self.fetched_cell_slots)
+    }
+}
+
 pub struct Orchestrator<S>
 where
     S: Surface,

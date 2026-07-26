@@ -10,9 +10,9 @@ pub use watch::events_touch_source;
 use canvas::CameraCanvas;
 use leptos::html;
 use leptos::prelude::*;
-use leptos_use::use_raf_fn;
-use leptos_use::utils::Pausable;
 use wasm_bindgen::JsCast;
+
+use crate::components::workbook::one_shot_raf::use_one_shot_raf;
 
 use crate::components::ui::range_picker::{RangeFormat, RangePickerInput};
 use crate::coord::SheetRange;
@@ -67,64 +67,72 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
         });
     };
 
-    // Unlike the worksheet's app-lifetime loop, cameras come and go with the
-    // <For> list — pause the rAF loop on disposal or it outlives the widget.
-    let Pausable { pause, .. } = use_raf_fn(move |_| {
-        cam.update_value(|slot| {
-            if slot.is_some() {
+    // Cameras come and go with the <For> list. `use_one_shot_raf`'s
+    // internal `on_cleanup` (inside `leptos_use::use_raf_fn`) already
+    // pauses on widget disposal, so no explicit pause hookup is needed here
+    // (unlike the previous `use_raf_fn` + manual `on_cleanup(pause)` pair).
+    let paint = move || -> bool {
+        let constructed = cam.with_value(|slot| slot.is_some());
+        if constructed {
+            cam.update_value(|slot| {
                 if let Some(c) = slot.as_mut() {
                     c.paint_if_dirty();
                 }
-                return;
-            }
-            // Wait until both canvas elements are in the DOM.
-            let Some(grid_el) = grid_ref.get_untracked() else {
-                return;
-            };
-            let Some(overlay_el) = overlay_ref.get_untracked() else {
-                return;
-            };
-            // Guard against the zero-size-container edge case: refs resolved
-            // but the layout pass hasn't measured yet (mirrors raf_loop.rs).
-            let w = grid_el.client_width() as f64;
-            let h = grid_el.client_height() as f64;
-            if w <= 0.0 || h <= 0.0 {
-                return;
-            }
-            let Some(spec) = my_spec.get_untracked() else {
-                return;
-            };
-            let dpr = window().device_pixel_ratio();
-            match CameraCanvas::create(grid_el, overlay_el) {
-                Ok(mut c) => {
-                    c.resize(w, h, dpr);
-                    c.set_grid(model.with_value(|m| extract_grid(m, spec.source)));
-                    c.set_scroll(spec.scroll.0, spec.scroll.1);
-                    if spec.autosize {
-                        apply_autosize(&mut c);
-                    }
-                    *slot = Some(c);
+            });
+            return false;
+        }
+        // Wait until both canvas elements are in the DOM.
+        let Some(grid_el) = grid_ref.get_untracked() else {
+            return true;
+        };
+        let Some(overlay_el) = overlay_ref.get_untracked() else {
+            return true;
+        };
+        // Guard against the zero-size-container edge case: refs resolved
+        // but the layout pass hasn't measured yet (mirrors raf_loop.rs).
+        let w = grid_el.client_width() as f64;
+        let h = grid_el.client_height() as f64;
+        if w <= 0.0 || h <= 0.0 {
+            return true;
+        }
+        let Some(spec) = my_spec.get_untracked() else {
+            return true;
+        };
+        let dpr = window().device_pixel_ratio();
+        match CameraCanvas::create(grid_el, overlay_el) {
+            Ok(mut c) => {
+                c.resize(w, h, dpr);
+                c.set_grid(model.with_value(|m| extract_grid(m, spec.source)));
+                c.set_scroll(spec.scroll.0, spec.scroll.1);
+                if spec.autosize {
+                    apply_autosize(&mut c);
                 }
-                Err(e) => leptos::logging::error!("camera canvas init failed: {e:?}"),
+                cam.update_value(|slot| *slot = Some(c));
             }
-        });
-    });
-    on_cleanup(pause);
+            Err(e) => leptos::logging::error!("camera canvas init failed: {e:?}"),
+        }
+        true
+    };
+    let poke = use_one_shot_raf(paint);
 
     // Webfont finished loading: cached text widths may be fallback-font
     // stale. Listener is scope-bound — use_event_listener detaches it when
     // this camera unmounts with the <For> list.
-    let _ = leptos_use::use_event_listener(
-        web_sys::EventTarget::from(document().fonts()),
-        leptos::ev::Custom::<web_sys::Event>::new("loadingdone"),
-        move |_| {
-            cam.update_value(|slot| {
-                if let Some(c) = slot.as_mut() {
-                    c.fonts_changed();
-                }
-            });
-        },
-    );
+    let _ = {
+        let poke = poke.clone();
+        leptos_use::use_event_listener(
+            web_sys::EventTarget::from(document().fonts()),
+            leptos::ev::Custom::<web_sys::Event>::new("loadingdone"),
+            move |_| {
+                cam.update_value(|slot| {
+                    if let Some(c) = slot.as_mut() {
+                        c.fonts_changed();
+                    }
+                });
+                poke();
+            },
+        )
+    };
 
     // Drag state: pointer offset from widget origin at grab time. Pointer
     // capture keeps moves flowing even when the cursor outruns the grip.
@@ -196,33 +204,37 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
         )));
     };
 
-    let on_handle_move = move |ev: web_sys::PointerEvent| {
-        let Some((sx, sy, sw, sh)) = resize_grab.get_value() else {
-            return;
-        };
-        if ev.buttons() == 0 {
-            resize_grab.set_value(None);
-            return;
+    let on_handle_move = {
+        let poke = poke.clone();
+        move |ev: web_sys::PointerEvent| {
+            let Some((sx, sy, sw, sh)) = resize_grab.get_value() else {
+                return;
+            };
+            if ev.buttons() == 0 {
+                resize_grab.set_value(None);
+                return;
+            }
+            let w = (sw + ev.client_x() as f64 - sx).max(MIN_W);
+            let h = (sh + ev.client_y() as f64 - sy).max(MIN_H);
+            state.cameras.update(|cams| {
+                if let Some(c) = cams.iter_mut().find(|c| c.id == id) {
+                    c.size = (w, h);
+                }
+            });
+            // spec.size is the outer widget box; the canvas area excludes the
+            // grip strip and the 1px borders (matching what client_width/height
+            // measure on the init path).
+            cam.update_value(|slot| {
+                if let Some(c) = slot.as_mut() {
+                    c.resize(
+                        w - 2.0 * BORDER_PX,
+                        h - GRIP_H - 2.0 * BORDER_PX,
+                        window().device_pixel_ratio(),
+                    );
+                }
+            });
+            poke();
         }
-        let w = (sw + ev.client_x() as f64 - sx).max(MIN_W);
-        let h = (sh + ev.client_y() as f64 - sy).max(MIN_H);
-        state.cameras.update(|cams| {
-            if let Some(c) = cams.iter_mut().find(|c| c.id == id) {
-                c.size = (w, h);
-            }
-        });
-        // spec.size is the outer widget box; the canvas area excludes the
-        // grip strip and the 1px borders (matching what client_width/height
-        // measure on the init path).
-        cam.update_value(|slot| {
-            if let Some(c) = slot.as_mut() {
-                c.resize(
-                    w - 2.0 * BORDER_PX,
-                    h - GRIP_H - 2.0 * BORDER_PX,
-                    window().device_pixel_ratio(),
-                );
-            }
-        });
     };
 
     let on_handle_up = move |_: web_sys::PointerEvent| resize_grab.set_value(None);
@@ -231,66 +243,74 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
     // keeps CameraSpec.scroll truthful. The nested cameras.update inside
     // cam.update_value is safe: signal writes only schedule a reactive flush
     // after this closure returns — nothing re-enters cam synchronously.
-    let on_wheel = move |ev: web_sys::WheelEvent| {
-        ev.prevent_default();
-        let d_rows = match ev.delta_y().partial_cmp(&0.0) {
-            Some(std::cmp::Ordering::Greater) => 1,
-            Some(std::cmp::Ordering::Less) => -1,
-            _ => 0,
-        };
-        let d_cols = match ev.delta_x().partial_cmp(&0.0) {
-            Some(std::cmp::Ordering::Greater) => 1,
-            Some(std::cmp::Ordering::Less) => -1,
-            _ => 0,
-        };
-        if d_rows == 0 && d_cols == 0 {
-            return;
-        }
-        cam.update_value(|slot| {
-            let Some(c) = slot.as_mut() else {
-                return;
+    let on_wheel = {
+        let poke = poke.clone();
+        move |ev: web_sys::WheelEvent| {
+            ev.prevent_default();
+            let d_rows = match ev.delta_y().partial_cmp(&0.0) {
+                Some(std::cmp::Ordering::Greater) => 1,
+                Some(std::cmp::Ordering::Less) => -1,
+                _ => 0,
             };
-            let (top, left) = c.scroll_by(d_rows, d_cols);
-            state.cameras.update(|cams| {
-                if let Some(s) = cams.iter_mut().find(|s| s.id == id) {
-                    s.scroll = (top, left);
-                }
+            let d_cols = match ev.delta_x().partial_cmp(&0.0) {
+                Some(std::cmp::Ordering::Greater) => 1,
+                Some(std::cmp::Ordering::Less) => -1,
+                _ => 0,
+            };
+            if d_rows == 0 && d_cols == 0 {
+                return;
+            }
+            cam.update_value(|slot| {
+                let Some(c) = slot.as_mut() else {
+                    return;
+                };
+                let (top, left) = c.scroll_by(d_rows, d_cols);
+                state.cameras.update(|cams| {
+                    if let Some(s) = cams.iter_mut().find(|s| s.id == id) {
+                        s.scroll = (top, left);
+                    }
+                });
             });
-        });
+            poke();
+        }
     };
 
     // EventBus -> re-extract. Structure events (row/col insert/delete shift
     // ranges) and theme events (colors resolved at extraction) always trigger
     // a re-extract; content/format only when they intersect the source range.
-    Effect::new(move |_| {
-        let content = state.events.content.get();
-        let format = state.events.format.get();
-        let structure_hit = !state.events.structure.get().is_empty();
-        let theme_hit = !state.events.theme.get().is_empty();
+    {
+        let poke = poke.clone();
+        Effect::new(move |_| {
+            let content = state.events.content.get();
+            let format = state.events.format.get();
+            let structure_hit = !state.events.structure.get().is_empty();
+            let theme_hit = !state.events.theme.get().is_empty();
 
-        let Some(spec) = my_spec.get_untracked() else {
-            return;
-        };
-        let local_hit = events_touch_source(spec.source, &content, &format);
-        if !(structure_hit || theme_hit || local_hit) {
-            return;
-        }
-        cam.update_value(|slot| {
-            let Some(c) = slot.as_mut() else {
+            let Some(spec) = my_spec.get_untracked() else {
                 return;
             };
-            if theme_hit {
-                c.sync_theme_from_document();
+            let local_hit = events_touch_source(spec.source, &content, &format);
+            if !(structure_hit || theme_hit || local_hit) {
+                return;
             }
-            // `set_grid` swaps in a fresh DataGrid whose scroll resets to the
-            // top, so preserve where the user is actually looking: snapshot the
-            // live anchors first and restore them. Re-imposing spec.scroll would
-            // yank a scrolled camera back on every recalc.
-            let (top, left) = c.scroll_anchors();
-            c.set_grid(model.with_value(|m| extract_grid(m, spec.source)));
-            c.set_scroll(top, left);
+            cam.update_value(|slot| {
+                let Some(c) = slot.as_mut() else {
+                    return;
+                };
+                if theme_hit {
+                    c.sync_theme_from_document();
+                }
+                // `set_grid` swaps in a fresh DataGrid whose scroll resets to the
+                // top, so preserve where the user is actually looking: snapshot the
+                // live anchors first and restore them. Re-imposing spec.scroll would
+                // yank a scrolled camera back on every recalc.
+                let (top, left) = c.scroll_anchors();
+                c.set_grid(model.with_value(|m| extract_grid(m, spec.source)));
+                c.set_scroll(top, left);
+            });
+            poke();
         });
-    });
+    }
 
     // --- Settings popover: re-point the source range ---
 
@@ -309,31 +329,16 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
         }
     });
 
-    let on_apply = move |_: web_sys::MouseEvent| {
-        if let Some(source) = pending_source.get_value() {
-            state.cameras.update(|cams| {
-                if let Some(c) = cams.iter_mut().find(|c| c.id == id) {
-                    c.source = source;
-                    c.scroll = (1, 1);
-                }
-            });
+    let on_dblclick = {
+        let poke = poke.clone();
+        move |_| {
             cam.update_value(|slot| {
                 if let Some(c) = slot.as_mut() {
-                    c.set_grid(model.with_value(|m| extract_grid(m, source)));
-                    c.set_scroll(1, 1);
-                    // Re-point shrink-wraps to the new range; without this the
-                    // widget keeps the previous range's (often wider) size.
                     apply_autosize(c);
                 }
             });
+            poke();
         }
-        state.range_capture.set(None);
-        settings_open.set(false);
-    };
-
-    let on_cancel = move |_: web_sys::MouseEvent| {
-        state.range_capture.set(None);
-        settings_open.set(false);
     };
 
     let on_grip_button_down = move |ev: web_sys::PointerEvent| {
@@ -430,8 +435,41 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
                         format=RangeFormat::QualifiedAbsolute
                         placeholder="Source range"
                     />
-                    <button type="button" class="cam-btn-apply" on:click=on_apply>"Apply"</button>
-                    <button type="button" class="cam-btn-cancel" on:click=on_cancel>"Cancel"</button>
+                    <button
+                        type="button"
+                        class="cam-btn-apply"
+                        on:click={
+                            let poke = poke.clone();
+                            move |_: web_sys::MouseEvent| {
+                                if let Some(source) = pending_source.get_value() {
+                                    state.cameras.update(|cams| {
+                                        if let Some(c) = cams.iter_mut().find(|c| c.id == id) {
+                                            c.source = source;
+                                            c.scroll = (1, 1);
+                                        }
+                                    });
+                                    cam.update_value(|slot| {
+                                        if let Some(c) = slot.as_mut() {
+                                            c.set_grid(model.with_value(|m| extract_grid(m, source)));
+                                            c.set_scroll(1, 1);
+                                            apply_autosize(c);
+                                        }
+                                    });
+                                    poke();
+                                }
+                                state.range_capture.set(None);
+                                settings_open.set(false);
+                            }
+                        }
+                    >"Apply"</button>
+                    <button
+                        type="button"
+                        class="cam-btn-cancel"
+                        on:click=move |_: web_sys::MouseEvent| {
+                            state.range_capture.set(None);
+                            settings_open.set(false);
+                        }
+                    >"Cancel"</button>
                 </div>
             </Show>
             <div
@@ -446,11 +484,7 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
                 on:pointermove=on_handle_move
                 on:pointerup=on_handle_up
                 on:pointercancel=on_handle_up
-                on:dblclick=move |_| cam.update_value(|slot| {
-                    if let Some(c) = slot.as_mut() {
-                        apply_autosize(c);
-                    }
-                })
+                on:dblclick=on_dblclick
                 style="position:absolute; right:0; bottom:0; width:12px; height:12px; \
                        cursor:nwse-resize;"
             ></div>
