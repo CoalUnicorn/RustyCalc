@@ -28,7 +28,8 @@ use self::borders::BorderPaint;
 use self::fingerprint::{RepaintPlan, plan_pane_repaint};
 use self::text::TextPaint;
 use crate::CellContentQuery;
-use crate::chrome::{BlitPlan, Chrome, PaneRegion};
+use crate::chrome::{BlitPlan, Chrome, FrameKindTag, PaneRegion};
+use crate::orchestrator::PaneVerdict;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::blit_work::{BlitPaneWork, widen_blit_strip_to_pixel_clip};
@@ -91,7 +92,15 @@ impl<P: Painter> RendererCore<P> {
         // parked aside while the new fetch uses fresh scratch vectors. Fresh
         // frames keep the old allocation-reuse path because there are no prior
         // pane pixels to preserve.
-        let previous_buffers = if reuses_slots {
+        // A blit frame that could not shift this pane already fetched and
+        // bridge-validated this exact range in `unshiftable_pane_is_safe`.
+        // Adopting it is the whole point: that pane is the one place the
+        // renderer would otherwise cross the bridge twice for the same cells,
+        // on the most expensive frame it produces.
+        let staged = self.take_validated_pane_fetch(pane, range, frame);
+        let staged_fetch = staged.is_some();
+
+        let previous_buffers = if reuses_slots && !staged_fetch {
             Some((
                 pane_buf.styles.take(),
                 pane_buf.values.take(),
@@ -107,26 +116,36 @@ impl<P: Painter> RendererCore<P> {
         // change); JsBackedModel will override (W5) and collapse each to one
         // JS call per pane.
         let (mut pane_styles, mut pane_values, mut pane_cell_types, mut pane_decorations) =
-            match &previous_buffers {
-                Some((styles, values, cell_types, decorations)) => (
-                    Vec::with_capacity(styles.len()),
-                    Vec::with_capacity(values.len()),
-                    Vec::with_capacity(cell_types.len()),
-                    Vec::with_capacity(decorations.len()),
-                ),
-                None => (
-                    pane_buf.styles.take(),
-                    pane_buf.values.take(),
-                    pane_buf.cell_types.take(),
-                    pane_buf.decorations.take(),
-                ),
+            match staged {
+                Some(buffers) => buffers,
+                None => match &previous_buffers {
+                    Some((styles, values, cell_types, decorations)) => (
+                        Vec::with_capacity(styles.len()),
+                        Vec::with_capacity(values.len()),
+                        Vec::with_capacity(cell_types.len()),
+                        Vec::with_capacity(decorations.len()),
+                    ),
+                    None => (
+                        pane_buf.styles.take(),
+                        pane_buf.values.take(),
+                        pane_buf.cell_types.take(),
+                        pane_buf.decorations.take(),
+                    ),
+                },
             };
-        model.get_cell_styles_in(frame.sheet, range, &mut pane_styles);
-        model.get_formatted_cell_values_in(frame.sheet, range, &mut pane_values);
-        model.get_cell_types_in(frame.sheet, range, &mut pane_cell_types);
-        model.get_cell_decorations_in(frame.sheet, range, &mut pane_decorations);
+        if !staged_fetch {
+            model.get_cell_styles_in(frame.sheet, range, &mut pane_styles);
+            model.get_formatted_cell_values_in(frame.sheet, range, &mut pane_values);
+            model.get_cell_types_in(frame.sheet, range, &mut pane_cell_types);
+            model.get_cell_decorations_in(frame.sheet, range, &mut pane_decorations);
+            self.trace_fetch(range);
+        }
 
-        if reuses_slots
+        // A staged fetch was already bridge-validated by the preflight, and
+        // `previous_buffers` is `None` on that path, so there is nothing to
+        // restore and nothing to re-scan.
+        if !staged_fetch
+            && reuses_slots
             && (has_bridge_failure(&pane_styles)
                 || has_bridge_failure(&pane_values)
                 || has_bridge_failure(&pane_cell_types)
@@ -142,6 +161,7 @@ impl<P: Painter> RendererCore<P> {
             // never touched on this path (no `take`/`store` above), so a
             // run of consecutive failures leaves it exactly as the last
             // successful paint left it.
+            self.trace_pane(pane, PaneVerdict::Held);
             return;
         }
 
@@ -172,6 +192,7 @@ impl<P: Painter> RendererCore<P> {
         // runs for it.
         if !reuses_slots {
             pane_buf.fingerprint.commit();
+            self.trace_pane(pane, PaneVerdict::Full);
             self.paint_pane_cells(
                 PaneCells::new(&pane, frame),
                 pane,
@@ -192,6 +213,7 @@ impl<P: Painter> RendererCore<P> {
         // needed ahead of it (range is baked into the digest, so a stale
         // painted tree can't spuriously Skip; see `PaneFingerprintState`).
         let plan = pane_buf.fingerprint.with_trees(plan_pane_repaint);
+        self.trace_pane(pane, PaneVerdict::from(&plan));
 
         match plan {
             RepaintPlan::Skip => {
@@ -469,8 +491,13 @@ impl<P: Painter> RendererCore<P> {
                 // Not shift-and-strippable, so `render_grid_blit` hands this
                 // pane to the full `render_pane` — but only AFTER
                 // `paint_grid_blit` has already shifted its pixels.
+                if pane.range(frame).is_some() {
+                    let cold_cache = self.pane_cache.pane(pane).range.get().is_none();
+                    self.trace_blit_fallback(pane, cold_cache);
+                }
                 if !self.unshiftable_pane_is_safe(model, pane, frame) {
                     self.clear_blit_stage_readiness();
+                    self.trace_frame_held(pane);
                     return false;
                 }
                 continue;
@@ -485,6 +512,7 @@ impl<P: Painter> RendererCore<P> {
             model.get_formatted_cell_values_in(frame.sheet, work.strip_range, &mut values);
             model.get_cell_types_in(frame.sheet, work.strip_range, &mut cell_types);
             model.get_cell_decorations_in(frame.sheet, work.strip_range, &mut decorations);
+            self.trace_fetch(work.strip_range);
             let failed = has_bridge_failure(&styles)
                 || has_bridge_failure(&values)
                 || has_bridge_failure(&cell_types)
@@ -501,6 +529,7 @@ impl<P: Painter> RendererCore<P> {
                 // every slot's readiness so a partially-populated stage can
                 // never paint on a later call.
                 self.clear_blit_stage_readiness();
+                self.trace_frame_held(pane);
                 return false;
             }
             stage.ready.set(true);
@@ -508,10 +537,44 @@ impl<P: Painter> RendererCore<P> {
         true
     }
 
+    /// Drop every staged fetch's claim to be consumable — both the strip
+    /// stagings and the whole-pane ones. Called at preflight entry and on any
+    /// abort, so a partially-populated stage can never feed a later paint.
     fn clear_blit_stage_readiness(&self) {
         for stage in &self.blit_stage {
             stage.ready.set(false);
+            stage.full_pane.set(None);
         }
+    }
+
+    /// Adopt the full-range fetch the preflight already validated for `pane`,
+    /// if there is one. Hands the pane's own (about-to-be-overwritten) buffers
+    /// back to the stage so neither pool loses its warm capacity.
+    ///
+    /// Two guards, both load-bearing: the stage outlives the frame, so without
+    /// the `Blitted` check a later ordinary paint could adopt a stale fetch,
+    /// and without the range check a same-geometry frame could adopt one for
+    /// the wrong address space.
+    fn take_validated_pane_fetch(
+        &self,
+        pane: PaneRegion,
+        range: RCRange,
+        frame: &Chrome,
+    ) -> Option<StripBuffers> {
+        if !matches!(frame.kind, FrameKindTag::Blitted) {
+            return None;
+        }
+        let stage = &self.blit_stage[pane as usize];
+        if stage.full_pane.take() != Some(range) {
+            return None;
+        }
+        let pane_buf = self.pane_cache.pane(pane);
+        Some((
+            stage.styles.replace(pane_buf.styles.take()),
+            stage.values.replace(pane_buf.values.take()),
+            stage.cell_types.replace(pane_buf.cell_types.take()),
+            stage.decorations.replace(pane_buf.decorations.take()),
+        ))
     }
 
     /// The shift-and-strip half of the preflight's per-pane classification:
@@ -541,7 +604,12 @@ impl<P: Painter> RendererCore<P> {
         let address_work = self
             .pane_cache
             .plan_blit_pane(prev_range, new_range, plan.axis)?;
-        Some(widen_blit_strip_to_pixel_clip(frame, plan, pane, address_work))
+        Some(widen_blit_strip_to_pixel_clip(
+            frame,
+            plan,
+            pane,
+            address_work,
+        ))
     }
 
     /// Decide whether the frame may still proceed given a `stale_panes` pane
@@ -587,6 +655,7 @@ impl<P: Painter> RendererCore<P> {
         model.get_formatted_cell_values_in(frame.sheet, range, &mut values);
         model.get_cell_types_in(frame.sheet, range, &mut cell_types);
         model.get_cell_decorations_in(frame.sheet, range, &mut decorations);
+        self.trace_fetch(range);
         let ok = !(has_bridge_failure(&styles)
             || has_bridge_failure(&values)
             || has_bridge_failure(&cell_types)
@@ -596,6 +665,12 @@ impl<P: Painter> RendererCore<P> {
         stage.values.set(values);
         stage.cell_types.set(cell_types);
         stage.decorations.set(decorations);
+        if ok {
+            // Hand this fetch to the `render_pane` that `render_grid_blit` is
+            // about to run for this pane. On failure the frame is abandoned, so
+            // there is nothing to hand over.
+            stage.full_pane.set(Some(range));
+        }
         ok
     }
 
@@ -630,6 +705,8 @@ impl<P: Painter> RendererCore<P> {
         let stage = &self.blit_stage[pane as usize];
         if stage.ready.take() {
             debug_assert_eq!(stage.strip.get(), Some(work.strip_range));
+            // The preflight already charged this strip's fetch to the trace.
+            self.trace_pane(pane, PaneVerdict::Strip);
             let strip_styles = stage.styles.take();
             let strip_values = stage.values.take();
             let strip_cell_types = stage.cell_types.take();
@@ -738,6 +815,7 @@ impl<P: Painter> RendererCore<P> {
         model.get_formatted_cell_values_in(frame.sheet, strip, &mut strip_values);
         model.get_cell_types_in(frame.sheet, strip, &mut strip_cell_types);
         model.get_cell_decorations_in(frame.sheet, strip, &mut strip_decorations);
+        self.trace_fetch(strip);
 
         if has_bridge_failure(&strip_styles)
             || has_bridge_failure(&strip_values)
@@ -753,8 +831,10 @@ impl<P: Painter> RendererCore<P> {
             self.frame_cache.strip_values.set(strip_values);
             self.frame_cache.strip_cell_types.set(strip_cell_types);
             self.frame_cache.strip_decorations.set(strip_decorations);
+            self.trace_pane(pane, PaneVerdict::Held);
             return;
         }
+        self.trace_pane(pane, PaneVerdict::Strip);
 
         let (strip_styles, strip_values, strip_cell_types, strip_decorations) = self
             .paint_strip_from_fetched(

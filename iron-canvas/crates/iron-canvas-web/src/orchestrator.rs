@@ -244,6 +244,17 @@ impl IronCanvas {
         }
     }
 
+    /// One-line attribution for the last painted frame: regime, per-pane
+    /// verdict (`tl tr bl br`), and the cell slots handed to the model.
+    /// Poll it per rAF tick to see which path a spiking frame took —
+    /// `Viewport tl:strip … ` then `SlotsReuse tl:FULL …` is the post-blit
+    /// full repaint that
+    /// `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md` targets.
+    #[wasm_bindgen(js_name = "frameTrace")]
+    pub fn frame_trace(&self) -> String {
+        self.orch.last_trace().to_string()
+    }
+
     /// Start a paint-level recording. Errors if a recording is already
     /// active. `opts` is an optional `RecordingFilter` JS object —
     /// `{ layers?: "both"|"gridOnly"|"overlayOnly", skipGroups?: string[] }`.

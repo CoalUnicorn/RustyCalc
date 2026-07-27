@@ -16,12 +16,15 @@
 //! `resize_handle_at`, `autofill_handle`) reads `last_frame`, so hits
 //! agree with painted pixels by construction.
 
+use std::fmt;
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::CanvasModel;
-use crate::chrome::{BlitOutcome, BlitPlan, Chrome, FramePath, FrameValidity, PaneRegionMask};
+use crate::chrome::{
+    BlitOutcome, BlitPlan, Chrome, FramePath, FrameValidity, PaneRegion, PaneRegionMask,
+};
 use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
@@ -134,9 +137,6 @@ fn origin_showing(
     if extent <= 0 || target <= frozen {
         return current;
     }
-    // The band can never legally start inside the frozen run, whatever the
-    // model thinks; adopting the clamp here is what heals a stale `top_row`.
-    let current = current.max(frozen + 1);
     if target < current {
         return target; // scrolled past it — flush against the near edge
     }
@@ -144,6 +144,8 @@ fn origin_showing(
     // Walk back from the target while the run still fits. `smallest` is then
     // the earliest origin that shows the target in full, so any origin at or
     // after it also shows it — hence the `max` rather than a second forward sum.
+    // The loop floor also keeps `smallest` out of the frozen run, so the result
+    // is a legal origin without clamping `current` on the way in.
     let mut smallest = target;
     let mut run = measure(target);
     while smallest > frozen + 1 {
@@ -267,6 +269,9 @@ where
     /// `GridSignals` drained by the last `paint_if_dirty`. Empty before
     /// the first paint.
     last_signals: GridSignals,
+    /// Per-pane attribution for the last `paint_if_dirty`. Collected by the
+    /// grid renderer during paint, stamped here after dispatch.
+    last_trace: FrameTrace,
 }
 
 impl<S> Orchestrator<S>
@@ -289,7 +294,14 @@ where
             pending_damage: CellDamage::Clean,
             last_regime: None,
             last_signals: GridSignals::empty(),
+            last_trace: FrameTrace::default(),
         }
+    }
+
+    /// Per-pane attribution for the last `paint_if_dirty`. All-`None` panes
+    /// before the first paint.
+    pub fn last_trace(&self) -> FrameTrace {
+        self.last_trace
     }
 
     /// Regime stamped by the last `paint_if_dirty`. `None` before the
@@ -678,6 +690,10 @@ where
         let regime = self.decide(signals, model_dyn);
         self.last_regime = Some(PaintRegimeTag::from(&regime));
         self.last_signals = signals;
+        // Clear before dispatch so the trace describes this frame only. An
+        // `Overlay` regime legitimately leaves every pane `None` — it never
+        // calls a grid pane renderer.
+        self.grid.renderer.reset_trace();
         match regime {
             PaintRegime::Overlay => self.paint_overlay_regime(model_dyn),
             PaintRegime::Viewport(plan) => self.paint_viewport_regime(model_dyn, plan),
@@ -691,6 +707,10 @@ where
         }
         self.pending_content = PaneRegionMask::EMPTY;
         self.pending_damage = CellDamage::Clean;
+
+        self.last_trace = self.grid.renderer.trace();
+        self.last_trace.regime = self.last_regime;
+        self.last_trace.signals = signals;
 
         // Single restore site.
         self.model = Some(model);
@@ -946,5 +966,60 @@ where
             self.overlay.present();
         }
         self.last_frame = Some(frame);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::origin_showing;
+
+    /// Uniform rows, so `extent / 20` is how many fit and every expectation
+    /// below is arithmetic a reader can redo in their head.
+    fn rows_20(_id: i32) -> i32 {
+        20
+    }
+
+    #[test]
+    fn stays_put_when_there_is_nothing_to_scroll() {
+        // A collapsed axis has nowhere to put the target.
+        assert_eq!(origin_showing(50, 7, 0, 0, rows_20), 7);
+        assert_eq!(origin_showing(50, 7, 0, -100, rows_20), 7);
+        // A frozen target is painted whatever the scrollable band shows.
+        assert_eq!(origin_showing(2, 7, 3, 500, rows_20), 7);
+    }
+
+    #[test]
+    fn flushes_against_the_near_edge_when_scrolled_past() {
+        assert_eq!(origin_showing(5, 20, 0, 500, rows_20), 5);
+    }
+
+    /// The trailing `max` earns its keep here: the walk finds row 8 as the
+    /// earliest origin that fits, but the band already sits at 10 and already
+    /// shows row 12 — scrolling back to 8 would be visible, pointless motion.
+    #[test]
+    fn leaves_an_already_visible_target_alone() {
+        assert_eq!(origin_showing(12, 10, 0, 100, rows_20), 10);
+    }
+
+    /// A target past the far edge pulls the origin forward — to the *smallest*
+    /// origin that still shows the target whole, not merely to the target.
+    #[test]
+    fn walks_back_to_the_smallest_origin_that_shows_the_target() {
+        // Five 20 px rows fill 100, so 26..=30 is the earliest band showing 30.
+        // An implementation that stopped after one step would answer 29.
+        assert_eq!(origin_showing(30, 2, 0, 100, rows_20), 26);
+    }
+
+    /// Rows of 8/19/30/41/52 px on a five-row cycle, so a walk that assumed a
+    /// uniform height cannot land on the right origin by symmetry.
+    fn rows_uneven(id: i32) -> i32 {
+        8 + id.rem_euclid(5) * 11
+    }
+
+    /// The walk accumulates real heights: rows 30 (8 px) and 29 (52 px) fill 60
+    /// of the 100 px band, and taking row 28 (41 px) too would overflow it.
+    #[test]
+    fn walk_sums_actual_row_heights_rather_than_assuming_uniform_rows() {
+        assert_eq!(origin_showing(30, 2, 0, 100, rows_uneven), 29);
     }
 }

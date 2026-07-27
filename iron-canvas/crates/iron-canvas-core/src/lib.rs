@@ -20,7 +20,9 @@ mod style;
 pub mod theme;
 pub mod types;
 
-pub use orchestrator::{Orchestrator, PaintRegime, PaintRegimeTag};
+pub use orchestrator::{
+    FrameOutcome, FrameTrace, Orchestrator, PaintRegime, PaintRegimeTag, PaneVerdict,
+};
 
 pub use renderer::blit_work::{BlitPaneWork, widen_blit_strip_to_pixel_clip};
 pub use renderer::cache::{PaneBlitAddressWork, PaneShiftPrep};

@@ -27,6 +27,7 @@ use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::signal::RowSpan;
 use iron_canvas_core::types::coord::AutofillTarget;
 use iron_canvas_core::{CanvasTheme, Orchestrator};
+use iron_canvas_core::{PixelRect, Point};
 
 use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};

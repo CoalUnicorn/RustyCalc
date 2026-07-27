@@ -84,6 +84,7 @@ pub use cache::FontIntern;
 
 pub use self::cell::text::{TextLine, layout_into};
 
+use crate::orchestrator::{BlitFallback, FrameOutcome, FrameTrace, PaneVerdict};
 use crate::painter::{BlitPainter, GroupClass, Painter};
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
@@ -102,6 +103,13 @@ struct BlitStripStage {
     /// consumes it; `render_pane_blit` clears it via `take`.
     ready: Cell<bool>,
     strip: Cell<Option<RCRange>>,
+    /// Set when the preflight validated a pane's WHOLE range rather than a
+    /// strip (`unshiftable_pane_is_safe`, for a pane the blit could not shift).
+    /// The range it was fetched for, so the `render_pane` that follows can
+    /// adopt the fetch instead of repeating it — that pane is otherwise the
+    /// only place in the renderer that crosses the bridge twice for the same
+    /// cells in one frame. Cleared by whoever consumes it.
+    full_pane: Cell<Option<RCRange>>,
     styles: Cell<Vec<Fetched<CellStyle>>>,
     values: Cell<Vec<Fetched<String>>>,
     cell_types: Cell<Vec<Fetched<CellKind>>>,
@@ -141,11 +149,61 @@ pub struct RendererCore<P: Painter> {
     /// `render_pane_blit` drains it). Renderer-lifetime scratch, not part of
     /// the pane cache — mutating it never counts as touching cache state.
     blit_stage: [BlitStripStage; 4],
+    /// This frame's paint attribution. `Cell` because every paint method runs
+    /// on `&self` (the crate's paint-never-holds-`&mut` convention), and
+    /// `FrameTrace` is `Copy`.
+    trace: Cell<FrameTrace>,
 }
 
 impl<P: Painter> RendererCore<P> {
     pub fn painter(&self) -> &P {
         self.painter.as_ref()
+    }
+
+    /// Clear the trace for a new frame. Called once by `paint_if_dirty`
+    /// before dispatch, never by a paint method — a paint method that reset
+    /// it would erase the sibling panes' verdicts.
+    pub fn reset_trace(&self) {
+        self.trace.set(FrameTrace::default());
+    }
+
+    pub fn trace(&self) -> FrameTrace {
+        self.trace.get()
+    }
+
+    fn trace_pane(&self, pane: PaneRegion, verdict: PaneVerdict) {
+        let mut t = self.trace.get();
+        if let Some(slot) = t.panes.get_mut(pane as usize) {
+            *slot = Some(verdict);
+        }
+        self.trace.set(t);
+    }
+
+    /// Record that a `Viewport` frame lost the strip path for `pane`. Only the
+    /// first such pane is kept — it is already enough to explain the frame's
+    /// cost, and the fix is per-reason, not per-pane.
+    fn trace_blit_fallback(&self, pane: PaneRegion, cold_cache: bool) {
+        let mut t = self.trace.get();
+        if t.blit_fallback.is_none() {
+            t.blit_fallback = Some(BlitFallback { pane, cold_cache });
+        }
+        self.trace.set(t);
+    }
+
+    fn trace_frame_held(&self, pane: PaneRegion) {
+        let mut t = self.trace.get();
+        t.outcome = FrameOutcome::HeldOnBridgeFailure(pane);
+        self.trace.set(t);
+    }
+
+    /// Charge one bulk-fetch round (all four accessors) over `range`. The
+    /// direct read on invariant I1: the model round-trip is unconditional, so
+    /// this rises with pane area no matter which verdict follows.
+    fn trace_fetch(&self, range: RCRange) {
+        let cells = range.height() as usize * range.width() as usize;
+        let mut t = self.trace.get();
+        t.fetched_cell_slots += cells * 4;
+        self.trace.set(t);
     }
 }
 
@@ -189,6 +247,7 @@ impl<P: Painter> RendererCore<P> {
             font_intern: FontIntern::new(),
             color_intern: ColorIntern::new(),
             blit_stage: std::array::from_fn(|_| BlitStripStage::default()),
+            trace: Cell::new(FrameTrace::default()),
         }
     }
 
@@ -421,6 +480,14 @@ impl<P: Painter> GridRenderer<P> {
     /// fingerprint-skip win.
     pub fn invalidate_pane_cache(&self, mask: crate::chrome::PaneRegionMask) {
         self.core.pane_cache.invalidate(mask);
+    }
+
+    pub fn reset_trace(&self) {
+        self.core.reset_trace();
+    }
+
+    pub fn trace(&self) -> FrameTrace {
+        self.core.trace()
     }
 
     pub fn for_layer(painter: Rc<P>) -> Self {

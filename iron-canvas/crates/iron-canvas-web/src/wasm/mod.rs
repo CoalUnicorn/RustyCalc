@@ -366,20 +366,14 @@ impl CanvasModel for JsBackedModel {
         if !self.has_show_row_headers {
             return Some(true);
         }
-        self.note_throw(
-            "getShowRowHeaders",
-            self.handle.get_show_row_headers(sheet),
-        )
+        self.note_throw("getShowRowHeaders", self.handle.get_show_row_headers(sheet))
     }
 
     fn get_show_col_headers(&self, sheet: u32) -> Option<bool> {
         if !self.has_show_col_headers {
             return Some(true);
         }
-        self.note_throw(
-            "getShowColHeaders",
-            self.handle.get_show_col_headers(sheet),
-        )
+        self.note_throw("getShowColHeaders", self.handle.get_show_col_headers(sheet))
     }
 }
 

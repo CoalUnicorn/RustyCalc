@@ -10,13 +10,13 @@ mod common;
 
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::chrome::{
-    ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, PaneRegion,
+    ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, PaneRegion, PaneRegionMask,
 };
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
-    BlitPaneWork, PaneBlitAddressWork, PaneShiftPrep, widen_blit_strip_to_pixel_clip,
+    BlitPaneWork, PaneBlitAddressWork, PaneShiftPrep, PaneVerdict, widen_blit_strip_to_pixel_clip,
 };
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
@@ -471,6 +471,141 @@ fn row_scroll_shifted_pane_reseeds_and_skips_on_next_unchanged_paint() {
         core.painter().ops().len(),
         idempotent_ops_before,
         "once reseeded via the blit path, an unchanged repaint must Skip again"
+    );
+}
+
+/// Stage 1 of `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md`,
+/// in machine-checkable form: the design's whole premise is that the first
+/// `SlotsReuse` paint after a blit reports `Full` even though nothing changed,
+/// because the strip path never committed the tree and `plan_pane_repaint`
+/// treats the resulting range mismatch as unconditionally `Full`.
+///
+/// The sibling test above proves the same thing through draw-op counts. This
+/// one names it, so if a later change makes the post-blit paint cheap, the
+/// trace says which verdict replaced `Full` instead of just "fewer ops".
+#[test]
+fn frame_trace_names_the_post_blit_slots_reuse_paint_as_full() {
+    let m = TestModel::synthetic_grid();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let canvas = canvas();
+
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(&m, &frame0);
+
+    m.set_top_row(2);
+    let plan = frame0
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
+        .expect("row scroll must qualify for blit");
+    let BlitOutcome::Blitted(mut frame1) =
+        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("row scroll must blit in place");
+    };
+
+    core.reset_trace();
+    core.prefetch_blit_strips(&m, &frame1, &plan);
+    issue_blits(core.painter(), &plan);
+    core.render_grid_blit(&m, &frame1, &plan);
+    let blit_trace = core.trace();
+    assert_eq!(
+        blit_trace.panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Strip),
+        "the blit frame itself must report the cheap strip path"
+    );
+    assert!(
+        blit_trace.fetched_cell_slots > 0,
+        "a strip fetch is still four bulk accessor calls"
+    );
+
+    frame1.kind = FrameKindTag::SlotsReused;
+
+    core.reset_trace();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame1);
+    assert_eq!(
+        core.trace().panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Full),
+        "the first post-blit SlotsReuse paint repaints the whole pane despite \
+         unchanged content — the spike this design targets"
+    );
+
+    core.reset_trace();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame1);
+    assert_eq!(
+        core.trace().panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Skip),
+        "once reseeded, an unchanged repaint skips"
+    );
+    assert!(
+        core.trace().fetched_cell_slots > 0,
+        "invariant I1: even a Skip pays the full four-accessor round-trip"
+    );
+}
+
+/// The 55 ms browser spike, reduced to a fixture. A pane that reaches a blit
+/// frame without a usable cached range cannot be strip-painted, so
+/// `render_grid_blit` hands it to the full `render_pane` — after
+/// `unshiftable_pane_is_safe` has already fetched and bridge-validated that
+/// same full range. Fetching it twice is the cost that made the frame
+/// pathological; the fallback must adopt the preflight's buffers instead.
+///
+/// Asserted through `FrameTrace.fetched_cell_slots` rather than a cell count so
+/// the test states the invariant ("no second round-trip") rather than a
+/// viewport-dependent number.
+#[test]
+fn unshiftable_pane_on_a_blit_frame_fetches_once_not_twice() {
+    let m = TestModel::synthetic_grid();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let canvas = canvas();
+
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(&m, &frame0);
+
+    m.set_top_row(2);
+    let plan = frame0
+        .screen_for_blit(&m, canvas, &theme, &snap(&m))
+        .expect("row scroll must qualify for blit");
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("row scroll must blit in place");
+    };
+
+    // Force every pane off the strip path. A cold cache is the reproducible
+    // half of the browser case; the other half (`IncompatibleRange`, a visible
+    // row count that changed by one) reaches the same fallback.
+    core.pane_cache.invalidate(PaneRegionMask::ALL);
+
+    core.reset_trace();
+    assert!(
+        core.prefetch_blit_strips(&m, &frame1, &plan),
+        "a healthy bridge must not abort the frame"
+    );
+    let after_preflight = core.trace().fetched_cell_slots;
+    assert!(
+        after_preflight > 0,
+        "the preflight validates the unshiftable pane's whole range"
+    );
+
+    issue_blits(core.painter(), &plan);
+    core.render_grid_blit(&m, &frame1, &plan);
+
+    let trace = core.trace();
+    assert_eq!(
+        trace.fetched_cell_slots, after_preflight,
+        "the fallback render_pane must adopt the preflight's validated fetch, \
+         not cross the bridge a second time for the same cells"
+    );
+    assert_eq!(
+        trace.panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Full),
+        "an unshiftable pane still repaints in full — only the refetch is gone"
+    );
+    assert!(
+        trace
+            .blit_fallback
+            .is_some_and(|fb| fb.pane == PaneRegion::BottomRight && fb.cold_cache),
+        "the trace must name the pane that lost the strip path, and why"
     );
 }
 

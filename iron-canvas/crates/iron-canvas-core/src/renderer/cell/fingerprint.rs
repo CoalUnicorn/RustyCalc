@@ -25,6 +25,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use crate::orchestrator::PaneVerdict;
 use crate::renderer::cf_types::parse_hex_color;
 use crate::signal::{CellDamage, RowSpan};
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
@@ -430,6 +431,25 @@ pub(crate) enum RepaintPlan {
     /// the two trees don't share a range, or a span's internal boundary
     /// carries shared-border risk.
     Full,
+}
+
+/// Trace projection: the planner's verdict as reported to `FrameTrace`. Lives
+/// here so a new `RepaintPlan` variant breaks this match, not the trace.
+impl From<&RepaintPlan> for PaneVerdict {
+    fn from(plan: &RepaintPlan) -> Self {
+        match plan {
+            RepaintPlan::Skip => Self::Skip,
+            RepaintPlan::Rows(spans) => Self::Rows {
+                spans: spans.len().min(u8::MAX as usize) as u8,
+                rows: spans
+                    .iter()
+                    .map(|s| (s.r2 - s.r1 + 1).max(0) as u32)
+                    .sum::<u32>()
+                    .min(u16::MAX as u32) as u16,
+            },
+            RepaintPlan::Full => Self::Full,
+        }
+    }
 }
 
 /// The `CellDamage` instance this planner feeds is scoped to a single
