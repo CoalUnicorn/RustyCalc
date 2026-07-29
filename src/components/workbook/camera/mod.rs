@@ -8,6 +8,7 @@ pub use extract::extract_grid;
 pub use watch::events_touch_source;
 
 use canvas::CameraCanvas;
+use iron_canvas_core::PaintResult;
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -74,12 +75,13 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
     let paint = move || -> bool {
         let constructed = cam.with_value(|slot| slot.is_some());
         if constructed {
+            let mut result = PaintResult::Idle;
             cam.update_value(|slot| {
                 if let Some(c) = slot.as_mut() {
-                    c.paint_if_dirty();
+                    result = c.paint_if_dirty();
                 }
             });
-            return false;
+            return keep_camera_raf_alive(result);
         }
         // Wait until both canvas elements are in the DOM.
         let Some(grid_el) = grid_ref.get_untracked() else {
@@ -489,6 +491,22 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
                        cursor:nwse-resize;"
             ></div>
         </div>
+    }
+}
+
+fn keep_camera_raf_alive(result: PaintResult) -> bool {
+    matches!(result, PaintResult::Retry)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn camera_retry_keeps_one_shot_raf_alive() {
+        assert!(keep_camera_raf_alive(PaintResult::Retry));
+        assert!(!keep_camera_raf_alive(PaintResult::Idle));
+        assert!(!keep_camera_raf_alive(PaintResult::Painted));
     }
 }
 

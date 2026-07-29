@@ -255,15 +255,22 @@ impl<P: Painter> RendererCore<P> {
     /// quadrant), frozen separators, both header strips, corner box. Does
     /// **not** clear the canvas — caller owns the clear so layer-owned
     /// renderers can paint a background fill instead.
-    pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) {
+    ///
+    /// Returns the mask of panes whose content work was held (see
+    /// `render_pane`) — `EMPTY` when every visited pane painted or skipped
+    /// cleanly.
+    pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> PaneRegionMask {
         self.painter.begin_group(GroupClass::Grid);
         self.cache_show_grid(model);
 
         // `frame.stale_panes` is `ALL` on Fresh; narrower on SlotsReuse —
         // either way each region listed needs its 5-pass walk.
+        let mut held = PaneRegionMask::EMPTY;
         self.painter.begin_group(GroupClass::Cells);
         for pane in frame.stale_panes.regions() {
-            self.render_pane(model, pane, frame);
+            if self.render_pane(model, pane, frame) {
+                held = held.with(pane);
+            }
         }
         self.painter.end_group();
 
@@ -285,6 +292,7 @@ impl<P: Painter> RendererCore<P> {
         self.draw_corner_box_if_needed(frame);
 
         self.painter.end_group();
+        held
     }
 
     /// Scroll-blit variant: caller's `Painter::blit` already shifted the
@@ -375,13 +383,24 @@ impl<P: Painter> RendererCore<P> {
     /// `render_grid` — cells, then frozen separators (they must win pixels
     /// back from the band's re-stroked grid lines at the freeze boundary),
     /// then headers and corner, all inside the Grid group.
-    pub fn render_grid_damage(&self, model: &dyn CanvasModel, frame: &Chrome, spans: &[RowSpan]) {
+    ///
+    /// Returns the mask of panes whose damage work was held — see
+    /// `render_grid`'s doc for the same contract on the SlotsReuse path.
+    pub fn render_grid_damage(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        spans: &[RowSpan],
+    ) -> PaneRegionMask {
         self.painter.begin_group(GroupClass::Grid);
         self.cache_show_grid(model);
 
+        let mut held = PaneRegionMask::EMPTY;
         self.painter.begin_group(GroupClass::Cells);
         for pane in PaneRegionMask::ALL.regions() {
-            self.render_pane_damage(model, frame, pane, spans);
+            if self.render_pane_damage(model, frame, pane, spans) {
+                held = held.with(pane);
+            }
         }
         self.painter.end_group();
 
@@ -401,6 +420,7 @@ impl<P: Painter> RendererCore<P> {
         self.draw_corner_box_if_needed(frame);
 
         self.painter.end_group();
+        held
     }
 
     /// Paint the header corner box, gated for *correctness*: at thickness 0 it
@@ -449,8 +469,8 @@ pub struct GridRenderer<P: Painter> {
 }
 
 impl<P: Painter> GridRenderer<P> {
-    pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) {
-        self.core.render_grid(model, frame);
+    pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> PaneRegionMask {
+        self.core.render_grid(model, frame)
     }
 
     pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
@@ -469,8 +489,13 @@ impl<P: Painter> GridRenderer<P> {
         self.core.prefetch_blit_strips(model, frame, plan)
     }
 
-    pub fn render_grid_damage(&self, model: &dyn CanvasModel, frame: &Chrome, spans: &[RowSpan]) {
-        self.core.render_grid_damage(model, frame, spans);
+    pub fn render_grid_damage(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        spans: &[RowSpan],
+    ) -> PaneRegionMask {
+        self.core.render_grid_damage(model, frame, spans)
     }
 
     /// Drop cached pane-buffer ranges for the masked panes. Plumbed through

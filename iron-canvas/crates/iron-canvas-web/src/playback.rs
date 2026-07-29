@@ -106,8 +106,20 @@ pub fn find_fresh_anchor(frames: &[Frame], target: u32) -> Option<u32> {
 /// Generic over `Painter + BlitPainter` so it works against both the bare
 /// `CanvasPainter` and the dev-tools `RecordingPainter<CanvasPainter>` that
 /// `RecordingSurface` returns from `painter()`.
-pub fn replay_through<P>(grid: &P, overlay: &P, recording: &Recording, target_idx: u32)
-where
+///
+/// `present_grid` is called after **every** replayed grid frame, not once
+/// at the end. `CanvasPainter::blit` reads its kept band from the
+/// *visible front* canvas, while replay paints into the detached back
+/// canvas — a `Blit` op replayed before its predecessor's pixels are
+/// presented reads stale/cleared front pixels and corrupts the composite.
+/// Mirrors the live loop, which presents after every painted frame.
+pub fn replay_through<P>(
+    grid: &P,
+    overlay: &P,
+    recording: &Recording,
+    target_idx: u32,
+    present_grid: &dyn Fn(),
+) where
     P: Painter + BlitPainter,
 {
     let frames = &recording.frames;
@@ -125,6 +137,7 @@ where
     grid.invalidate_cache();
     for frame in &frames[anchor as usize..=target_idx as usize] {
         replay(grid, &frame.grid_ops);
+        present_grid();
     }
 
     // Overlay: per-frame. The recorded ops include their own clear when

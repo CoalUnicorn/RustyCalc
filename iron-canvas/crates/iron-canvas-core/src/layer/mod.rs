@@ -157,6 +157,14 @@ fn full_canvas_rect(size: CanvasSize) -> PixelRect {
     }
 }
 
+/// Outcome of the blit grid paint. `Held` = the preflight aborted before
+/// any pixel shifted; the caller must not present or commit the frame.
+#[must_use]
+pub enum BlitPaint {
+    Painted,
+    Held,
+}
+
 // Grid-layer specialization. Lives here, not on `GridRenderer<P>`, because the
 // full-canvas bg fill is the *surface's* concern — the renderer paints cells
 // and chrome through the painter, but the layer-wide clear is a once-per-frame
@@ -169,14 +177,16 @@ where
     /// Full grid paint (Fresh / SlotsReuse). Fills the canvas bg only when
     /// the frame's slot vecs are fresh; SlotsReuse paths preserve last
     /// frame's pixels so per-pane fingerprint-skip wins are preserved.
-    pub fn paint_grid(&mut self, model: &dyn CanvasModel, frame: &Chrome) {
+    ///
+    /// Returns the held-pane mask from `render_grid` — see its doc.
+    pub fn paint_grid(&mut self, model: &dyn CanvasModel, frame: &Chrome) -> PaneRegionMask {
         if !frame.kind.reuses_slots() {
             self.surface.painter().rect_fill(
                 full_canvas_rect(frame.canvas_size),
                 PaintColor::from_theme_str(&frame.theme.cell_bg),
             );
         }
-        self.renderer.render_grid(model, frame);
+        self.renderer.render_grid(model, frame)
     }
 
     /// Scroll-blit grid paint: shift the kept band per `BlitPlan::shifts`,
@@ -189,27 +199,35 @@ where
     /// fetch failed is the bug being fixed (it strands stale, misplaced pixels
     /// in the revealed strip). A fallback full repaint is intentionally NOT
     /// attempted here; a future frame reconciles once the bridge recovers via
-    /// the normal frame-kind dispatch, so a reader should not "upgrade" this
-    /// no-op without re-deriving why it is sufficient.
-    pub fn paint_grid_blit(&mut self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
+    /// the normal frame-kind dispatch, so a reader should not "upgrade" the
+    /// returned `BlitPaint::Held` without re-deriving why it is sufficient.
+    pub fn paint_grid_blit(
+        &mut self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        plan: &BlitPlan,
+    ) -> BlitPaint {
         if !self.renderer.prefetch_blit_strips(model, frame, plan) {
-            return;
+            return BlitPaint::Held;
         }
         for s in &plan.shifts {
             self.renderer.painter_blit(s.src, s.dst);
         }
         self.renderer.render_grid_blit(model, frame, plan);
+        BlitPaint::Painted
     }
 
     /// Damage grid paint: prior pixels stay; only the damaged full-width
     /// row bands refetch and repaint. No full-canvas bg fill by design.
+    ///
+    /// Returns the held-pane mask from `render_grid_damage` — see its doc.
     pub fn paint_grid_damage(
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome,
         spans: &[RowSpan],
-    ) {
-        self.renderer.render_grid_damage(model, frame, spans);
+    ) -> PaneRegionMask {
+        self.renderer.render_grid_damage(model, frame, spans)
     }
 
     pub fn invalidate_paint_cache(&mut self) {

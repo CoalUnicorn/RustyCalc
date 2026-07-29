@@ -55,7 +55,6 @@ await Promise.all([initIronCanvas(), initIronCalc()]);
 const canvas = IronCanvas.create(gridCanvasEl, overlayCanvasEl);
 canvas.setModel(model);
 canvas.resize(800, 400, window.devicePixelRatio || 1);
-canvas.requestRepaint();
 
 const loop = () => { canvas.paintIfDirty(); requestAnimationFrame(loop); };
 requestAnimationFrame(loop);
@@ -86,7 +85,7 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 | Method | Description |
 | ------ | ----------- |
 | `IronCanvas.create(gridCanvas, overlayCanvas)` | Construct over two stacked canvases. Returns `IronCanvas` or throws. |
-| `canvas.resize(css_w, css_h, dpr)` | Resize both layers. Call whenever the element's CSS size or DPR changes. |
+| `canvas.resize(css_w, css_h, dpr)` | Resize both layers. Call whenever the element's CSS size or DPR changes; a no-op if both are unchanged from the last call. A real change forces a full repaint on the next `paintIfDirty` — no separate `requestRepaint()` call needed. |
 | `canvas.dispose()` | Release the canvas. Call when unmounting. |
 
 #### Model
@@ -106,7 +105,7 @@ from your rAF loop; it skips silently when nothing changed.
 | ------ | ----------- |
 | `canvas.requestRepaint()` | Force a full grid + overlay repaint on the next `paintIfDirty`. Use after structural changes (sheet switch, freeze). Does not raise `CONTENT` — use `markContentDirty` when cell values changed. |
 | `canvas.markContentDirty()` | Signal that cell values have changed. Grid refetches all panes on the next `paintIfDirty`. |
-| `canvas.paintIfDirty()` | Drive the paint loop. Call from `requestAnimationFrame`. |
+| `canvas.paintIfDirty()` | Drive the paint loop. Call from `requestAnimationFrame`. Returns a `JsPaintResult`: `Idle` (nothing to do), `Painted` (committed), `Retry` (an attempt was held back — call again next frame with no new signal), or `Playback` (a recording is replaying). Safe to ignore in a simple permanent loop. |
 
 #### Theme
 
@@ -244,7 +243,7 @@ Selection, autofill preview, clipboard ants, point-mode, and formula-ref outline
 
 `Chrome` has two construction paths. `Chrome::next(prev, model, canvas, theme, path)` handles `FramePath::Fresh` and `FramePath::SlotsReuse`; the pure-scroll fast path is `Chrome::next_blit(.., &BlitPlan) -> BlitOutcome`. The resulting `Chrome` is the single source of truth for hit-test geometry.
 
-`paint_if_dirty` (on `Orchestrator`; `IronCanvas::paintIfDirty` delegates to it) drains typed dirty signals from both layers and dispatches to one of four regimes in cheapness order. `Overlay` repaints the overlay only and skips the grid rebuild. `Viewport` runs the scroll blit. `SlotsReuse` keeps the viewport stable and refetches only the masked panes. `Fresh` is the full rebuild.
+`paint_if_dirty` (on `Orchestrator`; `IronCanvas::paintIfDirty` delegates to it) drains typed dirty signals from both layers and dispatches to one of five regimes in cheapness order. `Overlay` repaints the overlay only and skips the grid rebuild. `Viewport` runs the scroll blit. `Damage` repaints only explicitly damaged row bands while preserving slot geometry. `SlotsReuse` keeps the viewport stable and refetches only the masked panes. `Fresh` is the full rebuild.
 
 ### Pane pipeline and theme
 
@@ -272,10 +271,10 @@ Replay an `.icr` by opening [`web-test/recording-viewer.html`](web-test/recordin
 
 `RecorderPainter` (in `iron-canvas-recorder`) is the testing entry point.
 Renderer tests construct one, drive a render pass, and assert against the
-resulting `Vec<DrawOp>`. The four-regime integration test in
+resulting `Vec<DrawOp>`. The five-regime integration test in
 `crates/iron-canvas-core/tests/orchestrator_regimes.rs` drives
-`Orchestrator<MemSurface>` through `Fresh` / `SlotsReuse` / `Viewport` /
-`Overlay` and asserts the expected op log for each.
+`Orchestrator<MemSurface>` through `Fresh` / `SlotsReuse` / `Damage` /
+`Viewport` / `Overlay` and asserts the expected op log for each.
 
 ```
 cargo test --workspace

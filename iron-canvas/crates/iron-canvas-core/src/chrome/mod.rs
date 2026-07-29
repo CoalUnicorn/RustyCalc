@@ -116,7 +116,7 @@ impl ActiveCellSnapshot {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Chrome {
     pub sheet: u32,
     pub pane_set: PaneSet,

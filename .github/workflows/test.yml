@@ -86,6 +86,15 @@ jobs:
           CHROMEDRIVER: /usr/bin/chromedriver
         run: cargo test --target wasm32-unknown-unknown -p iron-canvas-web -p iron-canvas-datagrid-web --locked
 
+      # dev-tools is off by default, so the playback/recording tests need
+      # their own feature-enabled invocation, separate from the step above.
+      - name: cargo test --target wasm32-unknown-unknown (browser, dev-tools playback)
+        working-directory: RustyCalc/iron-canvas
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+          CHROMEDRIVER: /usr/bin/chromedriver
+        run: cargo test --target wasm32-unknown-unknown -p iron-canvas-web --features dev-tools --test playback_wasm --locked
+
   # Feature-powerset check via cargo-hack.
   # Catches feature-wiring bugs like `recorder` -> `dev-tools` renames
   # where a forwarded feature stops resolving.

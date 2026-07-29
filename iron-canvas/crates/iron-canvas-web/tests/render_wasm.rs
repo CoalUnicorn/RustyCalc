@@ -4,7 +4,7 @@
 //! bug where `resize()` rounded `dpr` before forwarding it to
 //! `WebSurface::resize`, silently mapping e.g. 1.25 -> 1 and 1.5 -> 2.
 
-use iron_canvas_web::{CanvasSize, IronCanvas};
+use iron_canvas_web::{CanvasSize, IronCanvas, JsPaintResult};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 use web_sys::HtmlCanvasElement;
@@ -12,21 +12,28 @@ use web_sys::HtmlCanvasElement;
 wasm_bindgen_test_configure!(run_in_browser);
 
 fn make_canvas() -> HtmlCanvasElement {
-    web_sys::window()
-        .expect("browser window")
-        .document()
-        .expect("document")
-        .create_element("canvas")
-        .expect("create canvas element")
-        .dyn_into::<HtmlCanvasElement>()
-        .expect("element is a canvas")
+    let Some(window) = web_sys::window() else {
+        panic!("browser window");
+    };
+    let Some(document) = window.document() else {
+        panic!("document");
+    };
+    let Ok(element) = document.create_element("canvas") else {
+        panic!("create canvas element");
+    };
+    let Ok(canvas) = element.dyn_into::<HtmlCanvasElement>() else {
+        panic!("element is a canvas");
+    };
+    canvas
 }
 
 #[wasm_bindgen_test]
 fn fractional_dpr_reaches_canvas_backing_store() {
     let grid = make_canvas();
     let overlay = make_canvas();
-    let mut canvas = IronCanvas::create(grid.clone(), overlay.clone()).expect("create IronCanvas");
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay.clone()) else {
+        panic!("create IronCanvas");
+    };
 
     canvas.resize(300.0, 200.0, 1.25);
 
@@ -59,13 +66,18 @@ fn model_with_methods(methods: &[(&str, &js_sys::Function)]) -> JsBackedModel {
     let view = js_sys::Function::new_no_args(
         "return { sheet: 0, row: 1, column: 1, range: [1, 1, 1, 1], top_row: 1, left_column: 1 };",
     );
-    js_sys::Reflect::set(&obj, &JsValue::from_str("getSelectedView"), &view)
-        .expect("set getSelectedView on plain object");
+    let Ok(_) = js_sys::Reflect::set(&obj, &JsValue::from_str("getSelectedView"), &view) else {
+        panic!("set getSelectedView on plain object");
+    };
     for (name, f) in methods {
-        js_sys::Reflect::set(&obj, &JsValue::from_str(name), f)
-            .expect("set model method on plain object");
+        let Ok(_) = js_sys::Reflect::set(&obj, &JsValue::from_str(name), f) else {
+            panic!("set model method on plain object");
+        };
     }
-    JsBackedModel::try_from_js_value(obj.into()).expect("object passes the setModel duck-test")
+    let Ok(model) = JsBackedModel::try_from_js_value(obj.into()) else {
+        panic!("object passes the setModel duck-test");
+    };
+    model
 }
 
 #[wasm_bindgen_test]
@@ -107,7 +119,7 @@ fn header_visibility_reads_supplied_false() {
 // ==============================================================================
 
 use ironcalc_base::types as ic;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 use wasm_bindgen::closure::Closure;
@@ -151,7 +163,15 @@ fn plain_fixture_store() -> FixtureStore {
 }
 
 fn set_prop(obj: &js_sys::Object, name: &str, f: &js_sys::Function) {
-    js_sys::Reflect::set(obj, &JsValue::from_str(name), f).expect("set fixture model method");
+    let Ok(_) = js_sys::Reflect::set(obj, &JsValue::from_str(name), f) else {
+        panic!("set fixture model method");
+    };
+}
+
+fn set_value_prop(obj: &js_sys::Object, name: &str, value: &JsValue) {
+    let Ok(_) = js_sys::Reflect::set(obj, &JsValue::from_str(name), value) else {
+        panic!("set fixture model value");
+    };
 }
 
 /// Build a duck-typed IronCalc model handle over `store`. Selection is
@@ -203,7 +223,10 @@ fn make_fixture_model(store: FixtureStore) -> JsValue {
             },
             ..ic::Style::default()
         };
-        serde_wasm_bindgen::to_value(&style).expect("fixture Style always serializes")
+        let Ok(value) = serde_wasm_bindgen::to_value(&style) else {
+            panic!("fixture Style always serializes");
+        };
+        value
     }) as Box<dyn Fn(u32, i32, i32) -> JsValue>);
     set_prop(&obj, "getCellStyle", get_style.as_ref().unchecked_ref());
     get_style.forget();
@@ -232,6 +255,82 @@ fn make_fixture_model(store: FixtureStore) -> JsValue {
     obj.into()
 }
 
+struct ScrollFailureControls {
+    top_row: Rc<Cell<i32>>,
+    fail_from_row: Rc<Cell<Option<i32>>>,
+}
+
+/// Build the same fixture with a live scroll origin and a controllable invalid
+/// style payload from a chosen row onward. Keeping the active cell outside
+/// those rows lets `screen_for_blit` approve the Viewport plan; decoding then
+/// yields `BridgeFailed` during revealed-strip preflight, where the transaction
+/// must hold.
+fn make_scroll_failure_fixture_model(
+    store: FixtureStore,
+    top_row: i32,
+) -> (JsValue, ScrollFailureControls) {
+    let model = make_fixture_model(store);
+    let obj: js_sys::Object = model.unchecked_into();
+
+    let top_row = Rc::new(Cell::new(top_row));
+    let view_top_row = Rc::clone(&top_row);
+    let get_view = Closure::wrap(Box::new(move || -> JsValue {
+        let view = js_sys::Object::new();
+        set_value_prop(&view, "sheet", &JsValue::from_f64(0.0));
+        set_value_prop(&view, "row", &JsValue::from_f64(5.0));
+        set_value_prop(&view, "column", &JsValue::from_f64(1.0));
+        let range = js_sys::Array::new();
+        for value in [5.0, 1.0, 5.0, 1.0] {
+            range.push(&JsValue::from_f64(value));
+        }
+        set_value_prop(&view, "range", &range.into());
+        set_value_prop(
+            &view,
+            "top_row",
+            &JsValue::from_f64(f64::from(view_top_row.get())),
+        );
+        set_value_prop(&view, "left_column", &JsValue::from_f64(1.0));
+        view.into()
+    }) as Box<dyn Fn() -> JsValue>);
+    set_prop(&obj, "getSelectedView", get_view.as_ref().unchecked_ref());
+    get_view.forget();
+    // The blit overlap probe requires an explicit row-height accessor; the
+    // Fresh builder's default-height fallback is intentionally not used there.
+    set_prop(
+        &obj,
+        "getRowHeight",
+        &js_sys::Function::new_no_args("return 20;"),
+    );
+
+    let fail_from_row = Rc::new(Cell::new(None));
+    let style_fail_from_row = Rc::clone(&fail_from_row);
+    let get_style = Closure::wrap(
+        Box::new(move |_sheet: u32, row: i32, _col: i32| -> JsValue {
+            if style_fail_from_row
+                .get()
+                .is_some_and(|first_failed| row >= first_failed)
+            {
+                JsValue::NULL
+            } else {
+                let Ok(value) = serde_wasm_bindgen::to_value(&ic::Style::default()) else {
+                    panic!("default fixture Style always serializes");
+                };
+                value
+            }
+        }) as Box<dyn Fn(u32, i32, i32) -> JsValue>,
+    );
+    set_prop(&obj, "getCellStyle", get_style.as_ref().unchecked_ref());
+    get_style.forget();
+
+    (
+        obj.into(),
+        ScrollFailureControls {
+            top_row,
+            fail_from_row,
+        },
+    )
+}
+
 /// Build + resize a fresh `IronCanvas` over `store`. All three scenarios
 /// below share this so canvas size, DPR, and model wiring never
 /// accidentally diverge between the "partial" and "forced-fresh" side of
@@ -239,10 +338,12 @@ fn make_fixture_model(store: FixtureStore) -> JsValue {
 fn canvas_over(store: FixtureStore) -> (IronCanvas, HtmlCanvasElement) {
     let grid = make_canvas();
     let overlay = make_canvas();
-    let mut canvas = IronCanvas::create(grid.clone(), overlay).expect("create IronCanvas");
-    canvas
-        .setModel(make_fixture_model(store))
-        .expect("fixture model passes the duck test");
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
+        panic!("create IronCanvas");
+    };
+    let Ok(()) = canvas.setModel(make_fixture_model(store)) else {
+        panic!("fixture model passes the duck test");
+    };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
     (canvas, grid)
 }
@@ -252,16 +353,98 @@ fn canvas_over(store: FixtureStore) -> (IronCanvas, HtmlCanvasElement) {
 /// painted into (`getContext("2d")` is idempotent — this doesn't disturb
 /// the live painter's own handle on the same canvas).
 fn grid_pixels(canvas: &HtmlCanvasElement) -> Vec<u8> {
-    let ctx = canvas
-        .get_context("2d")
-        .expect("getContext must not throw")
-        .expect("2d context must exist")
-        .dyn_into::<web_sys::CanvasRenderingContext2d>()
-        .expect("context is CanvasRenderingContext2d");
-    ctx.get_image_data(0.0, 0.0, canvas.width() as f64, canvas.height() as f64)
-        .expect("get_image_data must succeed on an opaque, same-origin canvas")
-        .data()
-        .0
+    let Ok(context_opt) = canvas.get_context("2d") else {
+        panic!("getContext must not throw");
+    };
+    let Some(context_obj) = context_opt else {
+        panic!("2d context must exist");
+    };
+    let Ok(ctx) = context_obj.dyn_into::<web_sys::CanvasRenderingContext2d>() else {
+        panic!("context is CanvasRenderingContext2d");
+    };
+    let Ok(image_data) =
+        ctx.get_image_data(0.0, 0.0, canvas.width() as f64, canvas.height() as f64)
+    else {
+        panic!("get_image_data must succeed on an opaque, same-origin canvas");
+    };
+    image_data.data().0
+}
+
+/// A failed Viewport strip fetch is transactional: the visible front canvas
+/// and query geometry stay at the prior committed frame, the retained work
+/// succeeds without another invalidation after the bridge recovers, and the
+/// recovered raster matches a forced-fresh render of the same final viewport.
+#[wasm_bindgen_test]
+fn held_viewport_recovers_byte_identical_to_forced_fresh() {
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
+        panic!("create IronCanvas");
+    };
+    let (model, controls) = make_scroll_failure_fixture_model(plain_fixture_store(), 1);
+    let Ok(()) = canvas.setModel(model) else {
+        panic!("scroll-failure fixture model passes the duck test");
+    };
+    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+
+    let baseline_pixels = grid_pixels(&grid);
+    let Some(baseline_a1) = canvas.cell_rect(1, 1) else {
+        panic!("A1 is visible in the baseline viewport");
+    };
+    let Some(revealed_row) = (2..=FIXTURE_ROWS + 2).find(|row| canvas.cell_rect(*row, 1).is_none())
+    else {
+        panic!("fixture has an off-screen row to reveal");
+    };
+
+    controls.top_row.set(2);
+    controls.fail_from_row.set(Some(revealed_row));
+    canvas.request_overlay_repaint();
+
+    assert_eq!(
+        canvas.paint_if_dirty(),
+        JsPaintResult::Retry,
+        "the revealed-row bridge failure must hold the Viewport transaction"
+    );
+    assert_eq!(
+        grid_pixels(&grid),
+        baseline_pixels,
+        "a held Viewport attempt must not present partial back-buffer pixels"
+    );
+    assert_eq!(
+        canvas.cell_rect(1, 1),
+        Some(baseline_a1),
+        "queries must continue to read the last committed frame while held"
+    );
+
+    controls.fail_from_row.set(None);
+    assert_eq!(
+        canvas.paint_if_dirty(),
+        JsPaintResult::Painted,
+        "retained Viewport work must commit after recovery without a new signal"
+    );
+    assert!(
+        canvas.cell_rect(1, 1).is_none(),
+        "A1 must be off-screen after the recovered scroll commits"
+    );
+
+    let fresh_grid = make_canvas();
+    let fresh_overlay = make_canvas();
+    let Ok(mut fresh_canvas) = IronCanvas::create(fresh_grid.clone(), fresh_overlay) else {
+        panic!("create forced-fresh IronCanvas");
+    };
+    let (fresh_model, _) = make_scroll_failure_fixture_model(plain_fixture_store(), 2);
+    let Ok(()) = fresh_canvas.setModel(fresh_model) else {
+        panic!("forced-fresh fixture model passes the duck test");
+    };
+    fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    assert_eq!(fresh_canvas.paint_if_dirty(), JsPaintResult::Painted);
+
+    assert_eq!(
+        grid_pixels(&grid),
+        grid_pixels(&fresh_grid),
+        "recovered Viewport raster must be byte-identical to forced fresh"
+    );
 }
 
 /// Acceptance criterion 1: a border-free single-cell value edit takes the
@@ -275,16 +458,24 @@ fn partial_repaint_matches_forced_fresh_for_border_free_change() {
     let (mut canvas, grid) = canvas_over(Rc::clone(&store));
     canvas.paint_if_dirty(); // baseline
 
-    store.borrow_mut().get_mut(&(10, 2)).expect("seeded").value = "changed-10-2".to_string();
+    {
+        let mut cells = store.borrow_mut();
+        let Some(cell) = cells.get_mut(&(10, 2)) else {
+            panic!("seeded");
+        };
+        cell.value = "changed-10-2".to_string();
+    }
     canvas.mark_content_dirty();
     canvas.paint_if_dirty(); // partial repaint
 
     let fresh_store = plain_fixture_store();
-    fresh_store
-        .borrow_mut()
-        .get_mut(&(10, 2))
-        .expect("seeded")
-        .value = "changed-10-2".to_string();
+    {
+        let mut cells = fresh_store.borrow_mut();
+        let Some(cell) = cells.get_mut(&(10, 2)) else {
+            panic!("seeded");
+        };
+        cell.value = "changed-10-2".to_string();
+    }
     let (mut fresh_canvas, fresh_grid) = canvas_over(fresh_store);
     fresh_canvas.paint_if_dirty(); // single Fresh paint of the final state
 
@@ -305,11 +496,13 @@ fn partial_repaint_matches_forced_fresh_for_border_free_change() {
 fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() {
     let build_store = || {
         let store = plain_fixture_store();
-        store
-            .borrow_mut()
-            .get_mut(&(9, 1))
-            .expect("seeded")
-            .border_bottom = true;
+        {
+            let mut cells = store.borrow_mut();
+            let Some(cell) = cells.get_mut(&(9, 1)) else {
+                panic!("seeded");
+            };
+            cell.border_bottom = true;
+        }
         store
     };
 
@@ -317,16 +510,24 @@ fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() 
     let (mut canvas, grid) = canvas_over(Rc::clone(&store));
     canvas.paint_if_dirty(); // baseline (row 9's bottom border already present)
 
-    store.borrow_mut().get_mut(&(10, 2)).expect("seeded").value = "changed".to_string();
+    {
+        let mut cells = store.borrow_mut();
+        let Some(cell) = cells.get_mut(&(10, 2)) else {
+            panic!("seeded");
+        };
+        cell.value = "changed".to_string();
+    }
     canvas.mark_content_dirty();
     canvas.paint_if_dirty(); // must fall back to Full — row 9 owns the shared edge
 
     let fresh_store = build_store();
-    fresh_store
-        .borrow_mut()
-        .get_mut(&(10, 2))
-        .expect("seeded")
-        .value = "changed".to_string();
+    {
+        let mut cells = fresh_store.borrow_mut();
+        let Some(cell) = cells.get_mut(&(10, 2)) else {
+            panic!("seeded");
+        };
+        cell.value = "changed".to_string();
+    }
     let (mut fresh_canvas, fresh_grid) = canvas_over(fresh_store);
     fresh_canvas.paint_if_dirty();
 
@@ -348,19 +549,23 @@ fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() 
 #[wasm_bindgen_test]
 fn partial_repaint_matches_forced_fresh_when_changed_rows_own_border_is_removed() {
     let store = plain_fixture_store();
-    store
-        .borrow_mut()
-        .get_mut(&(10, 1))
-        .expect("seeded")
-        .border_bottom = true;
+    {
+        let mut cells = store.borrow_mut();
+        let Some(cell) = cells.get_mut(&(10, 1)) else {
+            panic!("seeded");
+        };
+        cell.border_bottom = true;
+    }
     let (mut canvas, grid) = canvas_over(Rc::clone(&store));
     canvas.paint_if_dirty(); // baseline (row 10 has a bottom border)
 
-    store
-        .borrow_mut()
-        .get_mut(&(10, 1))
-        .expect("seeded")
-        .border_bottom = false;
+    {
+        let mut cells = store.borrow_mut();
+        let Some(cell) = cells.get_mut(&(10, 1)) else {
+            panic!("seeded");
+        };
+        cell.border_bottom = false;
+    }
     canvas.mark_content_dirty();
     canvas.paint_if_dirty(); // must fall back to Full and erase the stroke
 
@@ -373,5 +578,101 @@ fn partial_repaint_matches_forced_fresh_when_changed_rows_own_border_is_removed(
         grid_pixels(&fresh_grid),
         "removing the changed row's own border must fall back to Full and raster identically \
          to forced-fresh — a stale stroke left behind would be a border-erasure bug"
+    );
+}
+
+// ==============================================================================
+// Task 4 Step 6 (deferred): `Orchestrator::resize` is self-invalidating — a
+// real size or DPR change alone must force the next `paintIfDirty` to Fresh,
+// with no follow-up `requestRepaint()` needed. Proven the same way as Task 6
+// above: raster bytes after the self-invalidating path must be identical to
+// a second canvas painting the same final size/DPR fresh in one shot.
+// ==============================================================================
+
+/// Acceptance criterion: a full resize (both CSS size and DPR change)
+/// followed by a bare `paintIfDirty()` — no `requestRepaint()` — must
+/// raster identically to a canvas built directly at the new size/DPR.
+#[wasm_bindgen_test]
+fn resize_self_invalidates_without_explicit_repaint() {
+    const OLD_W: f64 = 300.0;
+    const OLD_H: f64 = 250.0;
+    const OLD_DPR: f64 = 1.0;
+    const NEW_W: f64 = 450.0;
+    const NEW_H: f64 = 320.0;
+    const NEW_DPR: f64 = 1.5;
+
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
+        panic!("create IronCanvas");
+    };
+    let Ok(()) = canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+        panic!("fixture model passes the duck test");
+    };
+    canvas.resize(OLD_W, OLD_H, OLD_DPR);
+    canvas.paint_if_dirty(); // baseline Fresh paint at the old size
+
+    canvas.resize(NEW_W, NEW_H, NEW_DPR);
+    canvas.paint_if_dirty(); // bare paintIfDirty — no requestRepaint()
+
+    let fresh_grid = make_canvas();
+    let fresh_overlay = make_canvas();
+    let Ok(mut fresh_canvas) = IronCanvas::create(fresh_grid.clone(), fresh_overlay) else {
+        panic!("create IronCanvas");
+    };
+    let Ok(()) = fresh_canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+        panic!("fixture model passes the duck test");
+    };
+    fresh_canvas.resize(NEW_W, NEW_H, NEW_DPR);
+    fresh_canvas.paint_if_dirty(); // single Fresh paint straight at the new size/DPR
+
+    assert_eq!(
+        grid_pixels(&grid),
+        grid_pixels(&fresh_grid),
+        "resize must self-invalidate so a bare paintIfDirty() after it matches a forced-fresh \
+         render at the new size/DPR, with no requestRepaint() needed"
+    );
+}
+
+/// Acceptance criterion: a DPR-only resize (CSS size unchanged) followed
+/// by a bare `paintIfDirty()` must raster identically to a canvas built
+/// directly at the new DPR.
+#[wasm_bindgen_test]
+fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
+    const W: f64 = 300.0;
+    const H: f64 = 250.0;
+    const OLD_DPR: f64 = 1.0;
+    const NEW_DPR: f64 = 2.0;
+
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
+        panic!("create IronCanvas");
+    };
+    let Ok(()) = canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+        panic!("fixture model passes the duck test");
+    };
+    canvas.resize(W, H, OLD_DPR);
+    canvas.paint_if_dirty(); // baseline Fresh paint at the old DPR
+
+    canvas.resize(W, H, NEW_DPR); // CSS size unchanged, DPR-only change
+    canvas.paint_if_dirty(); // bare paintIfDirty — no requestRepaint()
+
+    let fresh_grid = make_canvas();
+    let fresh_overlay = make_canvas();
+    let Ok(mut fresh_canvas) = IronCanvas::create(fresh_grid.clone(), fresh_overlay) else {
+        panic!("create IronCanvas");
+    };
+    let Ok(()) = fresh_canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+        panic!("fixture model passes the duck test");
+    };
+    fresh_canvas.resize(W, H, NEW_DPR);
+    fresh_canvas.paint_if_dirty(); // single Fresh paint straight at the new DPR
+
+    assert_eq!(
+        grid_pixels(&grid),
+        grid_pixels(&fresh_grid),
+        "a DPR-only resize must self-invalidate so a bare paintIfDirty() after it matches a \
+         forced-fresh render at the new DPR, with no requestRepaint() needed"
     );
 }

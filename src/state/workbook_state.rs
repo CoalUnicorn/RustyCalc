@@ -148,8 +148,8 @@ impl WorkbookState {
     /// drawers are non-modal and resolve their target lazily, so a rule left
     /// mid-edit would Save into the new workbook, and an armed range-capture or
     /// the old workbook's cameras would point at sheets that no longer exist
-    /// (#22). `DocumentReset` can't drive this — row/col ops and resize emit it
-    /// too and must not wipe open drawers.
+    /// (#22). `DocumentReset` can't drive this — row/col ops emit it too and
+    /// must not wipe open drawers.
     pub(crate) fn reset_view_state(&self) {
         self.editing_cell.set(None);
         self.drag.set(DragState::Idle);

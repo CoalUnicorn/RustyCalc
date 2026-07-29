@@ -54,6 +54,15 @@ pub struct TestModel {
     /// `Fetched::BridgeFailed` — simulating a JS-bridge throw so tests can
     /// exercise the active-cell repaint's atomic-skip path.
     value_bridge_fail: Cell<bool>,
+    /// Adversarial contract knob: the four bulk `*_in` accessors fill their
+    /// output with `Fetched::BridgeFailed` while single accessors stay
+    /// healthy. Not a `JsBackedModel` simulation (that adapter degrades
+    /// bulk->scalar); it pins the core hold contract for any CanvasModel.
+    bulk_bridge_fail: Cell<bool>,
+    /// Row-scoped variant: bulk fetches fail only when the requested
+    /// range's r1 is >= this row. Lets a multi-pane test fail the scroll
+    /// panes while frozen panes fetch cleanly.
+    bulk_bridge_fail_from: Cell<Option<i32>>,
     /// Counts calls to any of the four bulk `*_in` accessors. Task 4's
     /// row-band repaint must reuse the buffers `render_pane` already
     /// bulk-fetched once this frame — this counter is the evidence a test
@@ -93,6 +102,8 @@ impl Default for TestModel {
             show_row_headers: Cell::new(true),
             show_col_headers: Cell::new(true),
             value_bridge_fail: Cell::new(false),
+            bulk_bridge_fail: Cell::new(false),
+            bulk_bridge_fail_from: Cell::new(None),
             bulk_fetch_calls: Cell::new(0),
         }
     }
@@ -246,6 +257,19 @@ impl TestModel {
     pub fn set_value_bridge_fail(&self, fail: bool) {
         self.value_bridge_fail.set(fail);
     }
+    pub fn set_bulk_bridge_fail(&self, fail: bool) {
+        self.bulk_bridge_fail.set(fail);
+    }
+    pub fn set_bulk_bridge_fail_from(&self, row: Option<i32>) {
+        self.bulk_bridge_fail_from.set(row);
+    }
+    fn bulk_fails_for(&self, range: RCRange) -> bool {
+        self.bulk_bridge_fail.get()
+            || self
+                .bulk_bridge_fail_from
+                .get()
+                .is_some_and(|from| range.r1 >= from)
+    }
     pub fn set_sheet(&self, sheet: u32) {
         self.sheet.set(sheet);
     }
@@ -358,6 +382,15 @@ impl CellContentQuery for TestModel {
     // default impl for each of these four methods.
     fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
         self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
+        if self.bulk_fails_for(range) {
+            out.clear();
+            for _ in range.r1..=range.r2 {
+                for _ in range.c1..=range.c2 {
+                    out.push(Fetched::BridgeFailed);
+                }
+            }
+            return;
+        }
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
@@ -372,6 +405,15 @@ impl CellContentQuery for TestModel {
         out: &mut Vec<Fetched<String>>,
     ) {
         self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
+        if self.bulk_fails_for(range) {
+            out.clear();
+            for _ in range.r1..=range.r2 {
+                for _ in range.c1..=range.c2 {
+                    out.push(Fetched::BridgeFailed);
+                }
+            }
+            return;
+        }
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
@@ -381,6 +423,15 @@ impl CellContentQuery for TestModel {
     }
     fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
         self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
+        if self.bulk_fails_for(range) {
+            out.clear();
+            for _ in range.r1..=range.r2 {
+                for _ in range.c1..=range.c2 {
+                    out.push(Fetched::BridgeFailed);
+                }
+            }
+            return;
+        }
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
@@ -395,6 +446,15 @@ impl CellContentQuery for TestModel {
         out: &mut Vec<Fetched<CellDecoration>>,
     ) {
         self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
+        if self.bulk_fails_for(range) {
+            out.clear();
+            for _ in range.r1..=range.r2 {
+                for _ in range.c1..=range.c2 {
+                    out.push(Fetched::BridgeFailed);
+                }
+            }
+            return;
+        }
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {

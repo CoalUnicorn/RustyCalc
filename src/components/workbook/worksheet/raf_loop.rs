@@ -23,7 +23,7 @@ use crate::coord::SheetRange;
 use crate::input::mouse::CanvasHandle;
 use crate::state::{ModelStore, Split};
 use iron_canvas_core::*;
-use iron_canvas_web::IronCanvas;
+use iron_canvas_web::{IronCanvas, JsPaintResult};
 
 use super::ClipboardDraw;
 use super::adapter::WorksheetModelAdapter;
@@ -187,7 +187,7 @@ pub(super) fn install_raf_loop(
         let trace_wanted = app
             .as_ref()
             .is_some_and(|a| a.show_perf_panel.get_untracked());
-        let mut frame_trace = None;
+        let mut paint_result = JsPaintResult::Idle;
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
                 if theme_dirty.get_value() {
@@ -197,14 +197,21 @@ pub(super) fn install_raf_loop(
                     }
                     theme_dirty.set_value(false);
                 }
-                ic.paint_if_dirty();
-                if trace_wanted {
-                    frame_trace = Some(ic.frame_trace());
-                }
+                paint_result = ic.paint_if_dirty();
             }
         });
         #[cfg(feature = "dev-tools")]
         web_sys::console::time_end_with_label("render");
+
+        // Idle touches no diagnostic; Painted counts + times; Retry publishes
+        // the held-pane trace without counting a frame and forces the loop to
+        // stay armed; Playback (dev-tools short-circuit) leaves every
+        // diagnostic untouched. See `scheduling_after` below.
+        let action = scheduling_after(paint_result, playing);
+        let mut frame_trace = None;
+        if trace_wanted && action.publish_trace {
+            frame_trace = canvas_handle.with_value(|slot| slot.as_ref().map(|ic| ic.frame_trace()));
+        }
 
         // Sync the *scrollable pane* extent into the model — the budget
         // ironcalc's on_arrow_* / on_page_* compare accumulated row heights
@@ -232,8 +239,10 @@ pub(super) fn install_raf_loop(
         // Record paint duration for the PerfPanel. Skipped until the first
         // cell commit has happened so the panel stays on its placeholder
         // ("commit a cell to measure") and we don't spam the signal on
-        // every scroll / resize / overlay tick.
-        if let Some(app) = &app
+        // every scroll / resize / overlay tick — and skipped on a tick that
+        // didn't commit or retry a paint (Idle / Playback).
+        if action.update_timing
+            && let Some(app) = &app
             && app.perf.commit_start.get_untracked().is_some()
         {
             app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
@@ -243,19 +252,23 @@ pub(super) fn install_raf_loop(
         // never commits a cell, and the post-blit repaint is exactly what this
         // readout exists to catch.
         //
-        // Written on every painted frame, not only on change, and prefixed with
-        // a frame counter: an unchanging string is otherwise indistinguishable
-        // from a stale panel, and "which regime, every single frame" is exactly
-        // the question being asked.
+        // Written on every painted or retried frame, not only on change, and
+        // prefixed with a frame counter: an unchanging string is otherwise
+        // indistinguishable from a stale panel, and "which regime, every
+        // single frame" is exactly the question being asked. A held Retry
+        // publishes at the same counter value rather than a new one — it
+        // names the attempt, not a committed frame.
         if let Some(app) = &app
             && let Some(trace) = frame_trace
         {
-            let n = painted_frames.get_value() + 1;
-            painted_frames.set_value(n);
+            if action.count_frame {
+                painted_frames.set_value(painted_frames.get_value() + 1);
+            }
+            let n = painted_frames.get_value();
             app.perf.frame_trace.set(Some(format!("#{n} {trace}")));
         }
 
-        playing
+        action.keep_alive
     };
 
     let poke = use_one_shot_raf(paint);
@@ -278,4 +291,113 @@ pub(super) fn install_raf_loop(
     );
 
     poke
+}
+
+/// What one rAF tick does with `paint_if_dirty`'s outcome, decided once so
+/// the four call sites in `install_raf_loop`'s `paint` closure don't each
+/// re-derive "which variants publish / count / keep alive".
+struct SchedulerAction {
+    publish_trace: bool,
+    count_frame: bool,
+    update_timing: bool,
+    keep_alive: bool,
+}
+
+/// Pure outcome policy. `playback_active` is the same
+/// `playing` bool the dev-tools playback tick already computed this frame —
+/// `Idle` and `Playback` simply hand it back unchanged; `Retry` forces it to
+/// `true` so the one-shot loop stays armed until the held attempt commits.
+/// No external bridge-recovery signal exists to wake a paused loop, so a
+/// `Retry` must remain live even when the failure lasts for many frames.
+fn scheduling_after(result: JsPaintResult, playback_active: bool) -> SchedulerAction {
+    match result {
+        JsPaintResult::Idle => SchedulerAction {
+            publish_trace: false,
+            count_frame: false,
+            update_timing: false,
+            keep_alive: playback_active,
+        },
+        JsPaintResult::Painted => SchedulerAction {
+            publish_trace: true,
+            count_frame: true,
+            update_timing: true,
+            keep_alive: playback_active,
+        },
+        JsPaintResult::Retry => SchedulerAction {
+            publish_trace: true,
+            count_frame: false,
+            update_timing: false,
+            keep_alive: true,
+        },
+        JsPaintResult::Playback => SchedulerAction {
+            publish_trace: false,
+            count_frame: false,
+            update_timing: false,
+            keep_alive: playback_active,
+        },
+    }
+}
+
+#[cfg(test)]
+mod scheduling_after_tests {
+    use super::*;
+
+    #[test]
+    fn idle_touches_no_diagnostic_and_preserves_keep_alive() {
+        let action = scheduling_after(JsPaintResult::Idle, false);
+        assert!(!action.publish_trace);
+        assert!(!action.count_frame);
+        assert!(!action.update_timing);
+        assert!(!action.keep_alive);
+
+        let action = scheduling_after(JsPaintResult::Idle, true);
+        assert!(
+            action.keep_alive,
+            "idle must not clear an already-active playback tick"
+        );
+    }
+
+    #[test]
+    fn painted_publishes_counts_and_times() {
+        let action = scheduling_after(JsPaintResult::Painted, false);
+        assert!(action.publish_trace);
+        assert!(action.count_frame);
+        assert!(action.update_timing);
+        assert!(!action.keep_alive);
+    }
+
+    #[test]
+    fn retry_publishes_without_counting_and_forces_keep_alive() {
+        let action = scheduling_after(JsPaintResult::Retry, false);
+        assert!(action.publish_trace);
+        assert!(!action.count_frame);
+        assert!(!action.update_timing);
+        assert!(action.keep_alive, "a held attempt must keep the loop armed");
+    }
+
+    #[test]
+    fn playback_leaves_every_diagnostic_untouched() {
+        let action = scheduling_after(JsPaintResult::Playback, true);
+        assert!(!action.publish_trace);
+        assert!(!action.count_frame);
+        assert!(!action.update_timing);
+        assert!(
+            action.keep_alive,
+            "playback keep-alive is driven by the tick, not this policy"
+        );
+    }
+
+    #[test]
+    fn retry_remains_live_until_a_later_attempt_commits() {
+        for attempt in 1..=1_000 {
+            let action = scheduling_after(JsPaintResult::Retry, false);
+            assert!(action.keep_alive, "retry attempt {attempt} paused the loop");
+        }
+
+        let committed = scheduling_after(JsPaintResult::Painted, false);
+        assert!(
+            !committed.keep_alive,
+            "a committed paint may let an otherwise-idle loop pause"
+        );
+    }
 }

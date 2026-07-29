@@ -69,7 +69,16 @@ impl<P: Painter> RendererCore<P> {
     /// across all -> explicit across all -> A.right strokes last on the
     /// shared edge). Text remains the final pass so overflow is never
     /// clipped by a neighbour's bg.
-    pub fn render_pane(&self, model: &dyn CellContentQuery, pane: PaneRegion, frame: &Chrome) {
+    ///
+    /// Returns `true` when a transient bridge failure held this pane's prior
+    /// pixels instead of painting (see the `reuses_slots` preflight below);
+    /// `false` on every other exit, including the empty-pane early return.
+    pub fn render_pane(
+        &self,
+        model: &dyn CellContentQuery,
+        pane: PaneRegion,
+        frame: &Chrome,
+    ) -> bool {
         let pane_buf = self.pane_cache.pane(pane);
 
         let Some(range) = pane.range(frame) else {
@@ -79,7 +88,7 @@ impl<P: Painter> RendererCore<P> {
             // for a real range, and range-in-digest means it can't collide
             // with whatever stale tree sits in `painted`.
             pane_buf.range.set(None);
-            return;
+            return false;
         };
 
         let theme = &frame.theme;
@@ -162,7 +171,7 @@ impl<P: Painter> RendererCore<P> {
             // run of consecutive failures leaves it exactly as the last
             // successful paint left it.
             self.trace_pane(pane, PaneVerdict::Held);
-            return;
+            return true;
         }
 
         // Fingerprint paint-skip: same content as the previous frame
@@ -203,7 +212,7 @@ impl<P: Painter> RendererCore<P> {
                 pane_cell_types,
                 pane_decorations,
             );
-            return;
+            return false;
         }
 
         // A `SlotsReuse` frame diffs this frame's freshly rebuilt `scratch`
@@ -269,6 +278,7 @@ impl<P: Painter> RendererCore<P> {
                 );
             }
         }
+        false
     }
 
     /// Shared paint tail for `render_pane`, `render_pane_strip`, and the
@@ -736,26 +746,32 @@ impl<P: Painter> RendererCore<P> {
     /// bands in `spans`, via the same strip machinery the blit path uses.
     /// Kept rows keep their pixels; each band fetch splices into the pane
     /// buffers and zeroes the pane fingerprint (`render_pane_strip`).
+    ///
+    /// Returns `true` when this pane's work was held rather than committed:
+    /// either the range-mismatch demotion forwards `render_pane`'s own
+    /// verdict, or a span's strip fetch failed. A held span stops the loop
+    /// immediately — the retry re-runs the pane's original spans, so there
+    /// is no benefit to splicing past a hold, only risk of a second failure
+    /// mid-pane.
     pub fn render_pane_damage(
         &self,
         model: &dyn CellContentQuery,
         frame: &Chrome,
         pane: PaneRegion,
         spans: &[RowSpan],
-    ) {
+    ) -> bool {
         let pane_buf = self.pane_cache.pane(pane);
         let Some(range) = pane.range(frame) else {
             // Same empty-pane rationale as `render_pane`'s early return.
             pane_buf.range.set(None);
-            return;
+            return false;
         };
         // `splice_strip_into` indexes the cached pane buffers; they are
         // only aligned when the cached range matches this frame's. A
         // mismatch (e.g. partial post-blit buffers) demotes the pane to
         // the full walk instead of splicing at wrong indices.
         if pane_buf.range.get() != Some(range) {
-            self.render_pane(model, pane, frame);
-            return;
+            return self.render_pane(model, pane, frame);
         }
         for span in spans {
             let r1 = span.r1.max(range.r1);
@@ -769,8 +785,11 @@ impl<P: Painter> RendererCore<P> {
                 r2,
                 c2: range.c2,
             };
-            self.render_pane_strip(model, pane, range, frame, band);
+            if self.render_pane_strip(model, pane, range, frame, band) {
+                return true;
+            }
         }
+        false
     }
 
     /// Stage 3.3 strip path (combined fetch + paint): the freshly-revealed
@@ -794,6 +813,9 @@ impl<P: Painter> RendererCore<P> {
     /// preflight for the full-pane fetch. On rejection the pane's cached
     /// buffers, on-screen pixels, and `range` are left exactly as they were;
     /// only the `FrameCache` scratch vecs are parked back for reuse next frame.
+    ///
+    /// Returns `true` exactly on the held (bridge-failure) branch below;
+    /// `false` once the strip actually paints.
     fn render_pane_strip(
         &self,
         model: &dyn CellContentQuery,
@@ -801,7 +823,7 @@ impl<P: Painter> RendererCore<P> {
         range: RCRange,
         frame: &Chrome,
         strip: RCRange,
-    ) {
+    ) -> bool {
         // Strip-fetch scratch reused from `FrameCache` (take/set rhythm),
         // not `Vec::new()` per frame — `paint_strip_from_fetched` drains
         // these into the pane buffers and hands them back for parking. The
@@ -832,7 +854,7 @@ impl<P: Painter> RendererCore<P> {
             self.frame_cache.strip_cell_types.set(strip_cell_types);
             self.frame_cache.strip_decorations.set(strip_decorations);
             self.trace_pane(pane, PaneVerdict::Held);
-            return;
+            return true;
         }
         self.trace_pane(pane, PaneVerdict::Strip);
 
@@ -851,6 +873,7 @@ impl<P: Painter> RendererCore<P> {
         self.frame_cache.strip_values.set(strip_values);
         self.frame_cache.strip_cell_types.set(strip_cell_types);
         self.frame_cache.strip_decorations.set(strip_decorations);
+        false
     }
 
     /// Paint tail shared by `render_pane_strip` (combined fetch) and

@@ -8,7 +8,7 @@ use iron_canvas_canvas2d::{CanvasPainter, WebSurface};
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
-use iron_canvas_core::{CanvasModel, Orchestrator};
+use iron_canvas_core::{CanvasModel, Orchestrator, PaintResult};
 use iron_canvas_datagrid::{DataGrid, DataGridModel};
 use leptos::prelude::window;
 use wasm_bindgen::JsValue;
@@ -53,8 +53,6 @@ impl CameraCanvas {
 
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
         self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr);
-        // alpha:false backing store reallocates to opaque black; force Fresh.
-        self.orch.request_repaint();
     }
 
     /// Scroll and return the clamped anchors, so callers can persist the
@@ -107,14 +105,13 @@ impl CameraCanvas {
         }
     }
 
-    pub fn paint_if_dirty(&mut self) {
-        self.orch.paint_if_dirty();
+    pub fn paint_if_dirty(&mut self) -> PaintResult {
+        self.orch.paint_if_dirty()
     }
 
     /// See `IronCanvas::fontsChanged` — clear text-measure memos after
-    /// `document.fonts` finishes loading, then repaint. The camera rAF
-    /// loop calls `paint_if_dirty` unconditionally, so marking dirty is
-    /// enough — no render gate to poke.
+    /// `document.fonts` finishes loading, then mark the content dirty. The
+    /// loading listener also pokes the one-shot camera scheduler.
     pub fn fonts_changed(&mut self) {
         self.grid_painter.clear_measure_cache();
         self.overlay_painter.clear_measure_cache();

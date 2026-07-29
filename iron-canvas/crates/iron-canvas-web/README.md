@@ -15,6 +15,9 @@ The primary shippable artifact for spreadsheet consumers: RustyCalc's Leptos fro
 - `IronCanvas` (`#[wasm_bindgen]`) — JS API:
   - **lifecycle**: `create`, `setModel`, `resize`, `dispose`
   - **paint**: `requestRepaint`, `markContentDirty`, `markRowsDamaged`, `paintIfDirty`
+    (returns `JsPaintResult`: `Idle` / `Painted` / `Retry` / `Playback` —
+    `Retry` means an attempt was held back and the caller should call again
+    next frame with no new signal)
   - **theme**: `set_theme_name`, `setThemeFromElement`, `themeChanged`
   - **export**: `exportSvg`; `exportPdf` with feature `pdf`
   - **queries**: `hitTest`, `cellRect`, `resizeHandleAt`, `autofillHandlePos`

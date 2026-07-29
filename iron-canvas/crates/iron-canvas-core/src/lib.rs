@@ -21,7 +21,7 @@ pub mod theme;
 pub mod types;
 
 pub use orchestrator::{
-    FrameOutcome, FrameTrace, Orchestrator, PaintRegime, PaintRegimeTag, PaneVerdict,
+    FrameOutcome, FrameTrace, Orchestrator, PaintRegime, PaintRegimeTag, PaintResult, PaneVerdict,
 };
 
 pub use renderer::blit_work::{BlitPaneWork, widen_blit_strip_to_pixel_clip};

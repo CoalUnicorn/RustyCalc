@@ -9,11 +9,13 @@
 mod common;
 
 use iron_canvas_core::CanvasModel;
+use iron_canvas_core::CanvasSize;
 use iron_canvas_core::chrome::{
     ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, PaneRegion, PaneRegionMask,
 };
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
+use iron_canvas_core::signal::RowSpan;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
     BlitPaneWork, PaneBlitAddressWork, PaneShiftPrep, PaneVerdict, widen_blit_strip_to_pixel_clip,
@@ -609,6 +611,192 @@ fn unshiftable_pane_on_a_blit_frame_fetches_once_not_twice() {
     );
 }
 
+/// SESSION.md 2026-07-24's missing fixture: `unshiftable_pane_is_safe`
+/// (`renderer/cell/mod.rs:648`) bridge-validates a pane's full range before
+/// letting the frame proceed when that pane couldn't stage a strip — but no
+/// test exercised the FAILING half of that validation. Distinct from
+/// `unshiftable_pane_on_a_blit_frame_fetches_once_not_twice` above (a healthy
+/// cold-cache demotion, already pinned): this is the same cold-cache
+/// classification with a bridge failure on the pane's own validating fetch,
+/// which must hold the WHOLE frame atomically (no shift, no paint) — mirrors
+/// `blit_preflight_bridge_failure_aborts_frame_without_shifting`'s contract,
+/// but for the cold-cache door rather than the revealed-strip door.
+#[test]
+fn cold_cache_bridge_failure_holds_the_whole_blit_frame() {
+    let m = TestModel::synthetic_grid();
+    m.set_data_until(30); // Real content, so a stray paint would be visible.
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let canvas = canvas();
+
+    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(&m, &frame0);
+
+    m.set_top_row(2);
+    let Some(plan) = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m)) else {
+        panic!("single-row scroll must qualify for blit");
+    };
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    else {
+        panic!("single-row scroll must blit in place");
+    };
+
+    // Cold cache: force BottomRight into `MissingCache` instead of `Shifted`,
+    // so the preflight routes it through `unshiftable_pane_is_safe` rather
+    // than the strip path.
+    core.pane_cache.invalidate(PaneRegionMask::ALL);
+    let range_before = core.pane_cache.pane(PaneRegion::BottomRight).range.get();
+    assert_eq!(range_before, None, "invalidate must clear the cached range");
+
+    // Bulk knob, not the values-only flag: `unshiftable_pane_is_safe` fetches
+    // all four accessors, and any one BridgeFailed must fail the validation.
+    m.set_bulk_bridge_fail(true);
+
+    let baseline_ops = core.painter().ops().len();
+
+    let proceeded = core.prefetch_blit_strips(&m, &frame1, &plan);
+    if proceeded {
+        issue_blits(core.painter(), &plan);
+        core.render_grid_blit(&m, &frame1, &plan);
+    }
+
+    assert!(
+        !proceeded,
+        "a failing validation fetch on a cold-cache (unshiftable) pane must \
+         abort the whole frame — the second door of the preflight"
+    );
+
+    let new_ops: Vec<DrawOp> = core
+        .painter()
+        .ops()
+        .iter()
+        .skip(baseline_ops)
+        .cloned()
+        .collect();
+    assert!(
+        new_ops.is_empty(),
+        "an aborted blit frame must be a complete no-op for the grid layer, got: {new_ops:#?}"
+    );
+    assert_eq!(
+        core.pane_cache.pane(PaneRegion::BottomRight).range.get(),
+        range_before,
+        "an aborted blit frame must leave the pane's cached range exactly as it was"
+    );
+}
+
+/// Review finding 7's other uncovered door: a pane demoted for
+/// `IncompatibleRange` (SESSION.md 2026-07-25's 55 ms scroll spike —
+/// `shift_is_safe` rejects a row scroll whose visible row count changed)
+/// must repaint `Full`, never fingerprint-`Skip`/`Rows` over pixels that
+/// were never actually blitted into place.
+///
+/// Geometry: `screen_for_blit`/`next_blit` gate on `canvas == self.canvas_size`
+/// (`chrome/mod.rs:431`), and `rebuild_axis_slots`'s trim/top-up contract
+/// (`chrome/blit_rebuild.rs`) provably preserves row COUNT across any single
+/// in-bounds shift as long as the SAME canvas height is used throughout: the
+/// scroll band starts at `origin_y = HEADER_ROW_HEIGHT + CELL_AREA_INSET`
+/// (29 px, `chrome/mod.rs` Phase B) and `fill_axis` always ends on the first
+/// slot whose start reaches `max_cursor` (the canvas height), so a 1-row
+/// forward scroll always drops exactly one leading slot and tops up exactly
+/// one trailing slot — verified both by hand and empirically (a
+/// `temp_negative_control` variant of this test, run once during
+/// development and removed, held the SAME canvas throughout and landed on
+/// the ordinary `Strip` verdict with `blit_fallback: None`). So a stable
+/// canvas can't reach `IncompatibleRange` this way; the real trigger is the
+/// one `pane_cache.rs`'s own doc comment on `PaneShiftPrep` already names:
+/// "a frame before a canvas resize". Reproduced directly as that: the pane
+/// cache is seeded by an earlier `render_grid` at (600, 590) — 20 px rows
+/// don't divide `590 - 29 = 561` evenly (28.05 rows), so `fill_axis`'s
+/// ceiling rule lands on row 29 as the last (1 px) partially-visible row and
+/// row 30 as the fully off-canvas overflow slot, giving `BottomRight` the
+/// range (1, 30) — while the scroll/blit sequence under test runs entirely
+/// at the OTHER, internally self-consistent canvas (600, 400), giving
+/// `BottomRight` the range (2, 21) after the 1-row scroll. (1,30) spans 29
+/// rows; (2,21) spans 19 — the mismatched counts are exactly the
+/// stale-cache-across-a-resize case `shift_is_safe` exists to catch. Neither
+/// half is geometrically wrong on its own; both were confirmed via the
+/// `PaneRegion::range` values printed during development.
+#[test]
+fn incompatible_range_demotion_repaints_full_not_skip_or_rows() {
+    let m = TestModel::synthetic_grid();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+
+    // Seed the pane cache from a canvas height that leaves BottomRight's last
+    // row only partially visible (590 px canvas, 20 px rows, 29 px header
+    // origin: row 29 spans 589..609, clipped to 1 px inside the 590 px
+    // canvas) — `fill_axis`'s ceiling rule still carries one further row
+    // past that (row 30, fully off-canvas), giving a cached range (1, 30)
+    // whose row count (29) differs from the live_canvas sequence below.
+    let stale_canvas = CanvasSize { w: 600.0, h: 590.0 };
+    let stale_frame = Chrome::next(None, &m, stale_canvas, &theme, FramePath::Fresh);
+    core.render_grid(&m, &stale_frame);
+    let stale_range = core.pane_cache.pane(PaneRegion::BottomRight).range.get();
+    assert_eq!(
+        stale_range,
+        Some(iron_canvas_core::RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 30,
+            c2: 9
+        }),
+        "the 590px-canvas seed must land on the derived (1,30) range (29 \
+         rows) — if this drifts, the geometry comment above is stale"
+    );
+
+    // The scroll/blit sequence itself is entirely at `canvas()` (600x400,
+    // evenly divisible by the 20 px rows) — internally consistent, so it
+    // blits cleanly on its own; the SAME `core` (and so the SAME pane cache,
+    // still holding the 590-shaped range above) is reused across both.
+    let live_canvas = canvas();
+    let frame0 = Chrome::next(None, &m, live_canvas, &theme, FramePath::Fresh);
+
+    m.set_top_row(2);
+    let Some(plan) = frame0.screen_for_blit(&m, live_canvas, &theme, &snap(&m)) else {
+        panic!("uniform single-row scroll must qualify for blit");
+    };
+    let BlitOutcome::Blitted(frame1) =
+        Chrome::next_blit(Some(frame0), &m, live_canvas, &theme, &plan)
+    else {
+        panic!("single-row scroll must blit in place");
+    };
+    assert_eq!(
+        PaneRegion::BottomRight.range(&frame1),
+        Some(iron_canvas_core::RCRange {
+            r1: 2,
+            c1: 1,
+            r2: 21,
+            c2: 9
+        }),
+        "the 400px-canvas 1-row scroll must land on the derived (2,21) range \
+         (19 rows) — the mismatch against the (1,30)/29-row seed above is the \
+         IncompatibleRange trigger this test exercises"
+    );
+
+    core.reset_trace();
+    let proceeded = core.prefetch_blit_strips(&m, &frame1, &plan);
+    assert!(proceeded, "a healthy bridge must not abort the frame");
+
+    issue_blits(core.painter(), &plan);
+    core.render_grid_blit(&m, &frame1, &plan);
+
+    let trace = core.trace();
+    assert!(
+        matches!(
+            trace.panes[PaneRegion::BottomRight as usize],
+            Some(PaneVerdict::Full)
+        ),
+        "an IncompatibleRange-demoted pane must repaint Full, got {:?}",
+        trace.panes[PaneRegion::BottomRight as usize]
+    );
+    assert!(
+        trace
+            .blit_fallback
+            .is_some_and(|fb| fb.pane == PaneRegion::BottomRight && !fb.cold_cache),
+        "the fallback must be attributed to range incompatibility, not a cold cache"
+    );
+}
+
 /// Fix B regression (blit atomicity): a `BridgeFailed` fetch on the revealed
 /// strip must abort the WHOLE blit frame BEFORE any pixel is shifted, not
 /// shift the kept band and only then discover the fetch failed (which strands
@@ -1160,4 +1348,119 @@ fn prepare_shift_rotates_column_buffers() {
         "column rotation must be bit-identical to try_shift"
     );
     assert_eq!(pane.range.get(), Some(prev));
+}
+
+// ============================================================================
+// Task 2 — `render_pane_damage`'s range-mismatch demotion
+//
+// The orchestrator's public setters cannot manufacture a genuine
+// `pane_buf.range` mismatch: the `Damage` regime only dispatches while
+// `pending_damage` holds `Rows{..}`, and that state can only become fresh
+// again after a fully successful prior paint — which itself re-populates
+// every touched pane's cached range in lockstep with the frame it just
+// built. Driven directly here instead: a virgin `RendererCore` has never
+// set `pane_buf.range` at all, so the very first `render_pane_damage` call
+// sees a guaranteed mismatch against the pane's real (`Some`) range and
+// takes the demotion branch — proving it forwards `render_pane`'s bool
+// rather than swallowing it.
+// ============================================================================
+
+#[test]
+fn damage_range_mismatch_demotes_to_render_pane_and_forwards_its_hold() {
+    let m = TestModel::synthetic_grid();
+    m.set_bulk_bridge_fail(true);
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let mut frame = Chrome::next(None, &m, canvas(), &theme, FramePath::Fresh);
+    // `reuses_slots()` gates `render_pane`'s hold branch — without this the
+    // demoted `render_pane` would paint blanks instead of holding.
+    frame.kind = FrameKindTag::SlotsReused;
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+
+    let held = core.render_pane_damage(
+        &m,
+        &frame,
+        PaneRegion::BottomRight,
+        &[RowSpan { r1: 1, r2: 1 }],
+    );
+    assert!(
+        held,
+        "a range mismatch must demote to render_pane and forward its Held bool"
+    );
+    assert!(
+        core.painter().ops().is_empty(),
+        "a held demotion must paint nothing"
+    );
+
+    m.set_bulk_bridge_fail(false);
+    let held = core.render_pane_damage(
+        &m,
+        &frame,
+        PaneRegion::BottomRight,
+        &[RowSpan { r1: 1, r2: 1 }],
+    );
+    assert!(
+        !held,
+        "once the bridge recovers, the demoted render_pane must paint and report not-held"
+    );
+    assert!(!core.painter().ops().is_empty());
+}
+
+// ============================================================================
+// Review finding: `render_pane_damage`'s span loop must stop at the FIRST
+// held span within one pane and never attempt a later sibling span. The
+// orchestrator-level "multi span" test in `held_frame.rs` only ever routes
+// each span to a DIFFERENT pane (its frozen-row seam lines up with its fail
+// threshold), so within any one pane's call the sibling span always has an
+// empty row intersection and is skipped via the `r1 > r2` guard before ever
+// reaching `render_pane_strip` — it re-proves the cross-pane OR-fold, not
+// this intra-pane early return. Pinned directly here: one pane, two REAL
+// spans, ordered failing-then-healthy.
+// ============================================================================
+
+#[test]
+fn render_pane_damage_stops_at_first_held_span_in_one_pane() {
+    let m = TestModel::synthetic_grid().with_data_until(10);
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let frame = Chrome::next(None, &m, canvas(), &theme, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+
+    // Prime BottomRight's cached range via an ordinary Fresh paint so the
+    // damage call below takes the span loop, not the range-mismatch
+    // demotion the sibling test above already covers.
+    core.render_grid(&m, &frame);
+
+    m.set_bulk_bridge_fail_from(Some(5));
+    m.reset_bulk_fetch_calls();
+    let ops_before = core.painter().ops().len();
+
+    // Failing span (r1=5) ordered FIRST, healthy span (r1=3) SECOND: the
+    // loop must stop at the first hold and never reach the second span.
+    let held = core.render_pane_damage(
+        &m,
+        &frame,
+        PaneRegion::BottomRight,
+        &[RowSpan { r1: 5, r2: 5 }, RowSpan { r1: 3, r2: 3 }],
+    );
+
+    assert!(held, "a held first span must mark the whole pane call held");
+    assert_eq!(
+        m.bulk_fetch_calls(),
+        4,
+        "exactly one strip fetch (the four bulk accessors) — the healthy \
+         second span must never be fetched once the loop holds on the first"
+    );
+    let new_ops: Vec<DrawOp> = core
+        .painter()
+        .ops()
+        .iter()
+        .skip(ops_before)
+        .cloned()
+        .collect();
+    assert!(
+        !new_ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::FillText { text, .. } if text == "R3")),
+        "the second (healthy) span's row must never paint once the loop \
+         holds on the first — got {new_ops:#?}"
+    );
 }

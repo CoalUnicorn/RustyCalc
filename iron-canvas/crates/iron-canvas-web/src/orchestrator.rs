@@ -14,6 +14,7 @@ use crate::wasm::JsBackedModel;
 use iron_canvas_canvas2d::{CanvasPainter, WebSurface};
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
+use iron_canvas_core::PaintResult;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
@@ -103,6 +104,21 @@ enum CanvasMode {
     Playback(PlaybackSession),
 }
 
+/// Wire result of one `paintIfDirty()` call. Mirrors
+/// `iron_canvas_core::PaintResult` plus the dev-tools playback
+/// short-circuit, which never reaches the core orchestrator at all. C-style
+/// enum — no per-frame `String`/data allocation, and the match in
+/// `paint_if_dirty` stays exhaustive against both sources.
+#[wasm_bindgen]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum JsPaintResult {
+    Idle,
+    Painted,
+    Retry,
+    /// Dev-tools playback short-circuit: no core paint ran this tick.
+    Playback,
+}
+
 #[wasm_bindgen]
 pub struct IronCanvas {
     orch: Orchestrator<FacadeSurface>,
@@ -126,6 +142,8 @@ pub struct IronCanvas {
     // to `1` because some entry paths (the test surface) call `startRecording`
     // before any `resize`, and a DPR of `0` in the recording header would
     // round-trip through playback nonsensically. Only read under `dev-tools`.
+    // Separate from core `Orchestrator`'s own private `last_dpr`, which only
+    // gates that struct's `resize` dedup check and isn't exposed to us.
     #[cfg_attr(not(feature = "dev-tools"), allow(dead_code))]
     last_dpr: f64,
     #[cfg(feature = "dev-tools")]
@@ -222,11 +240,15 @@ impl IronCanvas {
     /// (`dev-tools` feature only), brackets the paint with `begin_frame` /
     /// `end_frame` on both surfaces and pushes a `Frame` whenever at
     /// least one layer emitted ops. Idle rAF ticks are dropped.
+    ///
+    /// Returns the outcome so the host's rAF loop can decide whether to keep
+    /// itself armed (`Retry`) and whether this tick is worth attributing
+    /// diagnostics to — see `JsPaintResult`.
     #[wasm_bindgen(js_name = "paintIfDirty")]
-    pub fn paint_if_dirty(&mut self) {
+    pub fn paint_if_dirty(&mut self) -> JsPaintResult {
         #[cfg(feature = "dev-tools")]
         if matches!(self.mode, CanvasMode::Playback(_)) {
-            return;
+            return JsPaintResult::Playback;
         }
         #[cfg(feature = "dev-tools")]
         let recording_active = matches!(self.mode, CanvasMode::Recording(_));
@@ -236,12 +258,18 @@ impl IronCanvas {
             self.orch.overlay_surface().begin_frame();
         }
 
-        self.orch.paint_if_dirty();
+        let result = match self.orch.paint_if_dirty() {
+            PaintResult::Idle => JsPaintResult::Idle,
+            PaintResult::Painted => JsPaintResult::Painted,
+            PaintResult::Retry => JsPaintResult::Retry,
+        };
 
         #[cfg(feature = "dev-tools")]
         if recording_active {
             self.capture_frame();
         }
+
+        result
     }
 
     /// One-line attribution for the last painted frame: regime, per-pane
@@ -934,6 +962,7 @@ impl IronCanvas {
 
         self.last_dpr = session.live_dpr;
         self.orch.resize(session.live_size, session.live_dpr);
+        // Kept: playback bypasses last_frame, so resize's self-invalidation alone can't cover this.
         self.orch.request_repaint();
     }
 
@@ -1010,7 +1039,8 @@ impl IronCanvas {
 
         let grid = self.orch.grid_surface().painter();
         let overlay = self.orch.overlay_surface().painter();
-        replay_through(grid, overlay, &session.recording, clamped);
+        let present_grid = || self.orch.grid_surface().present();
+        replay_through(grid, overlay, &session.recording, clamped, &present_grid);
         Ok(())
     }
 }

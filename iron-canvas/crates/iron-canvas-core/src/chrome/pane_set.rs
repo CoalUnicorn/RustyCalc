@@ -19,7 +19,7 @@ const APPROX_DIGIT_WIDTH_PX: i32 = 8;
 /// Padding either side of the row-label inside the header strip.
 const HEADER_LABEL_PAD_PX: i32 = 4;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PaneSet {
     pub rows: AxisSlots<RowSlot>,
     pub cols: AxisSlots<ColSlot>,
