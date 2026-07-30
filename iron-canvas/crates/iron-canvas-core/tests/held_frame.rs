@@ -9,11 +9,11 @@ mod common;
 
 use std::rc::Rc;
 
+use iron_canvas_core::RowSpan;
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::GroupClass;
-use iron_canvas_core::signal::RowSpan;
-use iron_canvas_core::{Orchestrator, PaintRegimeTag, PaintResult};
+use iron_canvas_core::{Orchestrator, PaintRegimeTag, PaintResult, WorkFlags};
 use iron_canvas_recorder::{DrawOp, MemSurface};
 
 use common::TestModel;
@@ -183,9 +183,88 @@ fn held_damage_strip_retains_row_spans_and_retries() {
     stub.set_bulk_bridge_fail(false);
     let result = orch.paint_if_dirty();
     assert_eq!(result, PaintResult::Painted);
+    // The retry must still dispatch Damage: the regime requeues the original
+    // sheet + row spans, not the held pane mask. Requeueing panes instead
+    // would land the recovery on SlotsReuse and pay for a whole-pane walk
+    // where a clipped band was already known to be sufficient.
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Damage),
+        "a held Damage strip must retry as Damage, with its bands intact"
+    );
     assert!(
         grid_text_ops_containing(&orch, "edited") > 0,
         "recovered damage paint must repaint the band"
+    );
+}
+
+/// Whole-frame viewport hold: nothing was committed, so the ENTIRE attempt
+/// is requeued — including the view and overlay marks, which never painted.
+/// The pane-local partial-commit arms drop their overlay mark on retry
+/// (that overlay did paint and present); the viewport arm must not, or a
+/// recovered scroll would shift the grid with the selection rectangle left
+/// at its pre-scroll pixel position.
+#[test]
+fn viewport_hold_requeues_view_and_overlay_work() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(60)
+            .with_active(5, 2),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh baseline.
+
+    stub.set_top_row(2);
+    stub.set_bulk_bridge_fail(true);
+    orch.view_changed(); // view + overlay, atomically
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+
+    // Recover. No new host notification — the requeued work alone drives it.
+    stub.set_bulk_bridge_fail(false);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+    assert!(
+        orch.last_work_flags()
+            .contains(WorkFlags::VIEW | WorkFlags::OVERLAY),
+        "a whole-frame hold must requeue both marks; got {:?}",
+        orch.last_work_flags()
+    );
+}
+
+/// The retry requeue merges into the pending value rather than assigning to
+/// it, so a producer that marks new work between the hold and the retry
+/// cannot displace the retained scope — and is not displaced by it either.
+/// Both edits must survive into the recovery frame.
+#[test]
+fn work_marked_after_a_retry_merges_with_the_retained_scope() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen_rows(2),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    // Bottom band fails, so its pane holds and is requeued.
+    stub.set_cell(6, 3, "held-edit");
+    stub.set_bulk_bridge_fail_from(Some(3));
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    assert_eq!(grid_text_ops_containing(&orch, "held-edit"), 0);
+
+    // A fresh edit lands in the healthy frozen band before the retry tick.
+    stub.set_bulk_bridge_fail_from(None);
+    stub.set_cell(1, 3, "late-edit");
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert!(
+        grid_text_ops_containing(&orch, "held-edit") > 0,
+        "the retained held-pane scope must survive the newly marked work"
+    );
+    assert!(
+        grid_text_ops_containing(&orch, "late-edit") > 0,
+        "the newly marked work must be serviced in the same frame"
     );
 }
 
@@ -239,7 +318,12 @@ fn held_damage_span_in_one_pane_survives_healthy_sibling_pane() {
 
 /// Review finding 3: pane-local partial commit, pinned on a frozen-pane
 /// fixture — successful panes present and the frame advances; held panes
-/// are named in the trace and retried.
+/// are named in the trace and retried. The bulk-fetch-count comparison at
+/// the end additionally pins that the retry narrows to *only* the held
+/// (bottom) pane: both panes render "top-edit" identically whether the
+/// requeue is scoped to `held` or widened to `PaneRegionMask::ALL`, so the
+/// text-op assertions above cannot tell those two apart — only the fetch
+/// count, taken on the recovery frame, can.
 #[test]
 fn partial_commit_paints_healthy_panes_and_retries_held_panes() {
     let stub = Rc::new(
@@ -256,8 +340,14 @@ fn partial_commit_paints_healthy_panes_and_retries_held_panes() {
     stub.set_bulk_bridge_fail_from(Some(3));
     orch.mark_content_dirty(PaneRegionMask::ALL);
 
+    stub.reset_bulk_fetch_calls();
     let result = orch.paint_if_dirty();
     assert_eq!(result, PaintResult::Retry);
+    let whole_mask_calls = stub.bulk_fetch_calls();
+    assert!(
+        whole_mask_calls > 0,
+        "sanity: the initial mask=ALL attempt must bulk-fetch both panes"
+    );
     assert!(
         orch.grid_surface().presents() > presents_before,
         "partial commit presents the painted panes"
@@ -270,8 +360,23 @@ fn partial_commit_paints_healthy_panes_and_retries_held_panes() {
     );
 
     stub.set_bulk_bridge_fail_from(None);
+    stub.reset_bulk_fetch_calls();
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
     assert!(grid_text_ops_containing(&orch, "bottom-edit") > 0);
+    // The discriminating assertion: the retry must requeue a proper subset
+    // of the original mask=ALL attempt (the held bottom pane only), so its
+    // cache-invalidate-driven refetch costs strictly less than repeating
+    // the whole mask. A requeue that regressed to `PaneRegionMask::ALL`
+    // would re-invalidate the healthy top pane's cache too and cost
+    // exactly `whole_mask_calls` again — this bound catches that, where
+    // the grid-text/rect assertions above do not.
+    assert!(
+        stub.bulk_fetch_calls() < whole_mask_calls,
+        "recovery must re-fetch only the held pane; got {} bulk fetch calls \
+         on recovery vs {whole_mask_calls} on the original mask=ALL attempt \
+         — a requeue widened back to PaneRegionMask::ALL would cost the same",
+        stub.bulk_fetch_calls()
+    );
 }
 
 /// Scenario lifted from `blit_fallback.rs`'s
@@ -358,6 +463,11 @@ fn dpr_only_resize_causes_a_fresh_repaint() {
         "a DPR change redraws at the new scale"
     );
     assert!(grid_ops_len(&orch) > grid_ops);
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Fresh),
+        "a DPR-only resize self-invalidates to Fresh, same as a size change"
+    );
 }
 
 /// Composes Task 4 (resize self-invalidation) with Task 1 (viewport-hold
@@ -495,7 +605,7 @@ fn commit_then_move_batch_paints_fresh_without_blit() {
     stub.set_top_row(2); // scroll_into_view landed before this tick's paint
     orch.mark_rows_damaged(0, RowSpan { r1: 29, r2: 29 }); // CellChanged
     orch.mark_content_dirty(PaneRegionMask::ALL); // CalculationUpdated
-    orch.request_overlay_repaint(); // SelectionChanged
+    orch.view_changed(); // SelectionChanged
 
     let result = orch.paint_if_dirty();
 
@@ -504,6 +614,13 @@ fn commit_then_move_batch_paints_fresh_without_blit() {
         orch.last_regime(),
         Some(PaintRegimeTag::Fresh),
         "content + view change in one tick must not blit (stale-content rule)"
+    );
+    assert!(
+        orch.last_work_flags().contains(WorkFlags::VIEW),
+        "this batch must carry the real Stage 2 VIEW mark, not just an \
+         overlay wake, or Fresh here proves nothing about view dispatch; \
+         got {:?}",
+        orch.last_work_flags()
     );
     let new_ops: Vec<DrawOp> = orch.grid_surface().recorder().ops()[grid_ops..].to_vec();
     assert!(

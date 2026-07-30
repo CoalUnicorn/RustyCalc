@@ -147,14 +147,31 @@ pub(super) fn install_raf_loop(
         let legal =
             canvas_handle.with_value(|slot| slot.as_ref().and_then(|ic| ic.legal_scroll_origin()));
         if let Some((top, left)) = legal {
+            let mut wrote = false;
             model.update_value(|m| {
                 let view = m.get_selected_view();
-                if (view.top_row, view.left_column) != (top, left)
-                    && let Err(e) = m.set_top_left_visible_cell(top, left)
-                {
-                    web_sys::console::warn_1(&format!("[rustycalc nav] origin sync: {e}").into());
+                if (view.top_row, view.left_column) != (top, left) {
+                    match m.set_top_left_visible_cell(top, left) {
+                        Ok(()) => wrote = true,
+                        Err(e) => {
+                            web_sys::console::warn_1(
+                                &format!("[rustycalc nav] origin sync: {e}").into(),
+                            );
+                        }
+                    }
                 }
             });
+            // Notify view_changed only for the actual write, independent of
+            // whatever upstream event (or none at all) triggered this tick —
+            // the freeze clamp can fire on any frame the renderer detects an
+            // illegal origin, not only in response to a navigation event.
+            if wrote {
+                canvas_handle.update_value(|slot| {
+                    if let Some(ic) = slot.as_mut() {
+                        ic.view_changed();
+                    }
+                });
+            }
         }
 
         // A navigation asked for the active cell to be brought into view. Only
@@ -169,13 +186,26 @@ pub(super) fn install_raf_loop(
             let target = canvas_handle
                 .with_value(|slot| slot.as_ref().and_then(|ic| ic.scroll_to_show(row, column)));
             if let Some((top, left)) = target {
-                model.update_value(|m| {
-                    if let Err(e) = m.set_top_left_visible_cell(top, left) {
+                // `scroll_to_show` already returns `None` when the target
+                // matches the current origin (see its core doc), so `Some`
+                // here always names a real, different origin — the write
+                // below either lands it or logs why it couldn't.
+                let mut wrote = false;
+                model.update_value(|m| match m.set_top_left_visible_cell(top, left) {
+                    Ok(()) => wrote = true,
+                    Err(e) => {
                         web_sys::console::warn_1(
                             &format!("[rustycalc nav] scroll into view: {e}").into(),
                         );
                     }
                 });
+                if wrote {
+                    canvas_handle.update_value(|slot| {
+                        if let Some(ic) = slot.as_mut() {
+                            ic.view_changed();
+                        }
+                    });
+                }
             }
         }
 

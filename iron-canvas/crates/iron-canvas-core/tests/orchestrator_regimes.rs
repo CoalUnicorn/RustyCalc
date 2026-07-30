@@ -17,6 +17,7 @@ mod common;
 
 use std::rc::Rc;
 
+use iron_canvas_core::RowSpan;
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::constants::{
@@ -24,12 +25,11 @@ use iron_canvas_core::geometry::constants::{
     HEADER_ROW_HEIGHT,
 };
 use iron_canvas_core::painter::GroupClass;
-use iron_canvas_core::signal::RowSpan;
-use iron_canvas_core::types::coord::AutofillTarget;
+use iron_canvas_core::types::coord::{AutofillTarget, RCRange, SheetArea};
 use iron_canvas_core::{CanvasTheme, Orchestrator};
 use iron_canvas_core::{PixelRect, Point};
 
-use iron_canvas_core::PaintRegimeTag;
+use iron_canvas_core::{PaintRegimeTag, PaintResult, WorkFlags};
 use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
 use iron_canvas_recorder::{DrawOp, MemSurface, RecorderPainter, RecordingSurface, replay};
 
@@ -53,6 +53,14 @@ fn grid_ops_since(orch: &Orchestrator<MemSurface>, cursor: usize) -> Vec<DrawOp>
 }
 fn overlay_ops_since(orch: &Orchestrator<MemSurface>, cursor: usize) -> Vec<DrawOp> {
     orch.overlay_surface().recorder().ops()[cursor..].to_vec()
+}
+fn grid_text_ops_containing(orch: &Orchestrator<MemSurface>, needle: &str) -> usize {
+    orch.grid_surface()
+        .recorder()
+        .ops()
+        .iter()
+        .filter(|op| matches!(op, DrawOp::FillText { text, .. } if text.contains(needle)))
+        .count()
 }
 
 #[test]
@@ -329,7 +337,9 @@ fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>>
 }
 
 /// Bracket a paint with begin_frame/end_frame on both surfaces and
-/// return (grid_ops, overlay_ops, regime, signals_bits).
+/// return (grid_ops, overlay_ops, regime, work_bits). The `.icr` v3
+/// `signals: u8` field is fed from `WorkFlags::bits()`, whose layout is
+/// pinned to the `GridSignals` word it replaced.
 fn paint_and_capture(
     orch: &mut Orchestrator<RecordingSurface<MemSurface>>,
 ) -> (Vec<DrawOp>, Vec<DrawOp>, Option<PaintRegimeTag>, u8) {
@@ -342,7 +352,7 @@ fn paint_and_capture(
         grid_ops,
         overlay_ops,
         orch.last_regime(),
-        orch.last_signals().bits(),
+        orch.last_work_flags().bits(),
     )
 }
 
@@ -811,4 +821,350 @@ fn scroll_pane_rect_collapses_to_zero_when_frozen_bands_exceed_the_canvas() {
     };
     assert_eq!((rect.width, rect.height), (0, 0));
     assert!(rect.top_left.x > 800 && rect.top_left.y > 600);
+}
+
+// ─── Stage 2: dispatch over one `PendingWork` value ───
+//
+// Every assertion below drives the real `paint_if_dirty` entry point and
+// reads the regime back through `last_regime()` / `last_work_flags()` / the
+// recorded op stream. None of them inspect `PendingWork` directly — the
+// point is to pin the *dispatch* the work algebra produces, which is what a
+// regression would actually break.
+
+/// Overlay setters value-compare before marking. A setter re-called with the
+/// value it already holds must queue nothing at all, or every idle rAF tick
+/// that re-pushes an unchanged reactive memo would repaint the overlay.
+#[test]
+fn unchanged_overlay_setters_queue_no_work() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh — primes last_frame.
+
+    orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+
+    // Same autofill target, and the three others at their existing default.
+    orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
+    orch.set_clipboard(None);
+    orch.set_point_range(None);
+    orch.set_formula_refs(Vec::new());
+
+    assert_eq!(
+        orch.paint_if_dirty(),
+        PaintResult::Idle,
+        "no overlay value changed, so nothing may be queued"
+    );
+}
+
+/// The mirror of the test above: each overlay setter that *does* change
+/// state dispatches the cheapest arm, never a grid repaint.
+#[test]
+fn changed_overlay_setters_dispatch_overlay() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh.
+
+    // Each setter is checked in its own paint, so a later one cannot mask an
+    // earlier one that queued nothing.
+    let expect_overlay_only = |orch: &mut Orchestrator<MemSurface>, name: &str| {
+        let grid_before = grid_ops_len(orch);
+        assert_eq!(orch.paint_if_dirty(), PaintResult::Painted, "{name}");
+        assert_eq!(
+            orch.last_regime(),
+            Some(PaintRegimeTag::Overlay),
+            "{name} must dispatch Overlay"
+        );
+        assert!(
+            grid_ops_since(orch, grid_before).is_empty(),
+            "{name} must not touch the grid surface"
+        );
+    };
+
+    orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
+    expect_overlay_only(&mut orch, "set_extend_to");
+
+    orch.set_clipboard(Some(SheetArea {
+        sheet: 0,
+        range: RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        },
+    }));
+    expect_overlay_only(&mut orch, "set_clipboard");
+
+    orch.set_point_range(Some(RCRange {
+        r1: 3,
+        c1: 1,
+        r2: 3,
+        c2: 4,
+    }));
+    expect_overlay_only(&mut orch, "set_point_range");
+
+    orch.request_overlay_repaint();
+    expect_overlay_only(&mut orch, "request_overlay_repaint");
+}
+
+/// `request_repaint` escalates to `Fresh` but must PRESERVE content work
+/// already queued in the same tick rather than clearing it, so the attempt
+/// that reaches `decide` still declares itself content-carrying.
+///
+/// The `CONTENT` flag is the discriminating assertion here: today's `Fresh`
+/// re-reads every pane unconditionally, so a cleared content mark paints
+/// the same pixels and no output-level assertion can see the difference.
+/// It becomes load-bearing the moment `Fresh` learns to adopt a
+/// range-matched buffer — which is exactly why the mark must not be
+/// dropped now.
+#[test]
+fn content_then_request_repaint_is_fresh_and_keeps_the_content_mark() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh — primes last_frame and the pane cache.
+
+    stub.set_cell(2, 1, "edited");
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.request_repaint();
+
+    stub.reset_bulk_fetch_calls();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    assert!(
+        orch.last_work_flags()
+            .contains(WorkFlags::CONTENT | WorkFlags::GEOMETRY),
+        "request_repaint must ADD geometry work, not replace the queued \
+         content work; got {:?}",
+        orch.last_work_flags()
+    );
+    assert!(
+        stub.bulk_fetch_calls() > 0,
+        "the escalated frame must still read pane content from the model"
+    );
+    assert!(
+        grid_text_ops_containing(&orch, "edited") > 0,
+        "the edit queued before request_repaint must still reach the screen"
+    );
+}
+
+/// `set_model` replaces model identity, so it discards work belonging to the
+/// old model and installs the worst-case value. Repeating it must keep
+/// forcing `Fresh` — there is no `Rc::ptr_eq` dedupe (current contract).
+#[test]
+fn repeated_set_model_still_forces_fresh() {
+    let stub_a = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub_a));
+    orch.paint_if_dirty();
+
+    for _ in 0..2 {
+        orch.set_model(Rc::new(TestModel::synthetic_grid()));
+        assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+        assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    }
+}
+
+/// THE dispatch hazard this stage had to get right.
+///
+/// An arrow-key move to a cell already on screen changes no scroll, freeze,
+/// sheet, size or cell value — only the view. `decide` runs the geometric
+/// `screen_for_blit` probe first, gets `None` (no pixels move), and must
+/// then let `Overlay` match *while ignoring the view mark*.
+///
+/// Expressing `Overlay`'s guard as the mechanical port of the old
+/// `!signals.grid_dirty()` — whose bit group already covered the then-dead
+/// `VIEWPORT` bit — would make this row of the dispatch matrix unreachable
+/// and turn the single most common interaction in the app into a full-grid
+/// repaint. That regression is silent in every other test; this is the one
+/// that fails.
+#[test]
+fn visible_selection_navigation_dispatches_overlay() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh — primes last_frame.
+
+    stub.set_active(6, 2); // still well inside the painted viewport
+    orch.view_changed();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Overlay),
+        "view work with no pixel shift on a reusable frame must fall back to \
+         Overlay; anything else means the Overlay guard is excluding `view`"
+    );
+    assert!(
+        orch.last_work_flags().contains(WorkFlags::VIEW),
+        "the attempt really did carry view work — the Overlay verdict is the \
+         fallback, not a missing mark"
+    );
+}
+
+/// Companion to the test above, stated as the cost that actually matters: a
+/// selection move inside the viewport must emit zero new grid operations.
+#[test]
+fn view_only_navigation_without_a_shift_emits_no_grid_ops() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let grid_before = grid_ops_len(&orch);
+    let overlay_before = overlay_ops_len(&orch);
+
+    stub.set_active(6, 2);
+    orch.view_changed();
+    orch.paint_if_dirty();
+
+    assert!(
+        grid_ops_since(&orch, grid_before).is_empty(),
+        "in-viewport navigation must not repaint the grid; got {:?}",
+        grid_ops_since(&orch, grid_before)
+    );
+    assert!(
+        !overlay_ops_since(&orch, overlay_before).is_empty(),
+        "...but it must move the selection rectangle on the overlay"
+    );
+}
+
+/// The other view row: when the movement *does* shift pixels, the geometric
+/// probe claims it and `Viewport` blits the kept band.
+#[test]
+fn real_scroll_view_change_dispatches_viewport() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let grid_before = grid_ops_len(&orch);
+    stub.set_top_row(2);
+    orch.view_changed();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+    assert!(
+        grid_ops_since(&orch, grid_before)
+            .iter()
+            .any(|op| matches!(op, DrawOp::Blit { .. })),
+        "a real shift must blit the kept band"
+    );
+}
+
+/// `decide`'s `Viewport` probe carries an explicit `!work.has_geometry()`
+/// guard. It has no reachable failure through public API today: every
+/// current geometry producer (`resize` here) already drops `last_frame`
+/// before `decide` runs, which excludes the probe on its own. This pins the
+/// externally observable contract instead of the guard specifically —
+/// geometry work concurrent with a real shift must still land on `Fresh`,
+/// never `Viewport` — so it keeps failing the moment a future geometry
+/// producer stops tripping last_frame/size/theme independently.
+#[test]
+fn geometry_plus_real_scroll_never_dispatches_viewport() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    stub.set_top_row(2); // the same real shift real_scroll_view_change_dispatches_viewport uses
+    orch.resize(CanvasSize { w: 900.0, h: 600.0 }, 1.0); // marks geometry
+    orch.view_changed();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Fresh),
+        "geometry work concurrent with a real shift must dispatch Fresh, \
+         never Viewport"
+    );
+    assert!(
+        orch.last_work_flags()
+            .contains(WorkFlags::GEOMETRY | WorkFlags::VIEW),
+        "the attempt really did carry both geometry and view work; got {:?}",
+        orch.last_work_flags()
+    );
+}
+
+/// Row work whose sheet tag doesn't match the painted frame can't clip to
+/// bands, so it falls back to `SlotsReuse` — and the fallback mask must be
+/// `ALL`, never a mask derived from where the spans happen to intersect the
+/// visible panes. Proven by editing both a frozen-band and a scroll-band
+/// cell: a narrowed mask would leave one of them unfetched and unpainted.
+#[test]
+fn row_work_ineligible_for_damage_falls_back_to_all_panes() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen_rows(2),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    stub.set_cell(1, 3, "frozen-edit"); // top band
+    stub.set_cell(6, 3, "scroll-edit"); // bottom band
+    // Rows recorded against a sheet that is not the one on screen: `Damage`
+    // is ineligible, but the content work is still real.
+    orch.mark_rows_damaged(7, RowSpan { r1: 1, r2: 1 });
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    assert!(
+        grid_text_ops_containing(&orch, "frozen-edit") > 0,
+        "SlotsReuse(ALL) must refetch the frozen-band panes"
+    );
+    assert!(
+        grid_text_ops_containing(&orch, "scroll-edit") > 0,
+        "SlotsReuse(ALL) must refetch the scroll-band panes"
+    );
+}
+
+/// A sheet switch is a view change whose scroll, freeze and canvas size are
+/// all identical — exactly the shape that the cheap arms would happily
+/// reuse. It must reach `Fresh` and re-read the model, because pane buffers
+/// are keyed on row/column range with no sheet identity: reusing the frame
+/// would keep sheet 0's values on screen under sheet 1's header.
+///
+/// The fetch-count assertion discriminates against the real failure mode
+/// (`Overlay` or `SlotsReuse` silently claiming the switch, which reads
+/// nothing / reads under the old frame). It does not isolate
+/// `paint_fresh_regime`'s pane-cache invalidation, which is unobservable
+/// today — see the note on that method.
+#[test]
+fn active_sheet_view_change_is_fresh_and_refetches_pane_content() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh on sheet 0 — fills the pane cache.
+
+    stub.set_sheet(1); // identical visible coordinates
+    orch.view_changed();
+    stub.reset_bulk_fetch_calls();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Fresh),
+        "a sheet switch invalidates the frame outright"
+    );
+    assert!(
+        stub.bulk_fetch_calls() > 0,
+        "the new sheet's pane content must be read from the model, not \
+         carried over from the previous sheet's frame"
+    );
+}
+
+/// Commit-then-move (Enter/Tab): the one real dual-effect producer. Stage 2
+/// keeps it conservative — content plus view is always `Fresh`, never a blit
+/// over changed values and never a band-clipped `Damage`.
+#[test]
+fn content_plus_view_is_fresh() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_active(5, 1));
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    stub.set_cell(5, 1, "typed");
+    stub.set_active(6, 1);
+    orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
+    orch.view_changed();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Fresh),
+        "content + view must not clip to bands or blit"
+    );
+    assert!(grid_text_ops_containing(&orch, "typed") > 0);
 }

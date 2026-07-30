@@ -7,33 +7,46 @@ these optimizations maintainable. Frame construction, slot vecs, and the
 query API are covered in `ARCHITECTURE.md`; this doc is about the
 *decision machinery* on top of them.
 
-Sources of truth: `orchestrator.rs` (dispatch), `signal.rs` (dirty inputs),
-`renderer/cell/mod.rs` + `renderer/cell/fingerprint.rs` (data compare),
-`renderer/cache/pane_cache.rs` (cross-frame buffers),
+Sources of truth: `orchestrator.rs` (dispatch), `pending_work.rs` (queued
+work), `renderer/cell/mod.rs` + `renderer/cell/fingerprint.rs` (data
+compare), `renderer/cache/pane_cache.rs` (cross-frame buffers),
 `iron-canvas-canvas2d/src/web_surface.rs` (double buffering).
 
 ---
 
 ## 1. The cost ladder — five regimes
 
-Every rAF tick calls `Orchestrator::paint_if_dirty`. It drains the typed
-dirty bits (`GridSignals`: `CONTENT | STRUCTURAL | OVERLAY`, plus a
-reserved `VIEWPORT`) from both layers and runs `decide()`, a cascade
-ordered cheapest-first. The first arm whose preconditions hold wins:
+Every rAF tick calls `Orchestrator::paint_if_dirty`. It takes the single
+queued `PendingWork` value (`self.pending`, via one `mem::take` — no
+layer holds dirty state of its own) and runs `decide()`, a cascade
+ordered cheapest-first. `PendingWork` tracks four categories — geometry
+rebuild, view movement, content damage (rows or panes), overlay repaint
+— and the diagnostic `WorkFlags` bitflags project them as
+`VIEW | CONTENT | GEOMETRY | OVERLAY` for tracing and recording. The
+first arm whose preconditions hold wins:
 
 | Regime       | Grid pixels touched                     | Model data fetched            | When |
 |--------------|------------------------------------------|-------------------------------|------|
 | `Overlay`    | none — grid canvas untouched             | none (overlay state only)     | selection move, autofill drag, marching ants |
 | `Viewport`   | one revealed strip per shifted pane      | strip cells only              | scroll/arrow-key viewport shift, no content change |
-| `Damage`     | named full-width row bands               | band cells only               | content change whose rows are all known (`CellDamage::Rows`) |
+| `Damage`     | named full-width row bands               | band cells only               | content change whose rows are all known (`ContentWork::Rows`) |
 | `SlotsReuse` | changed row bands within changed panes (fingerprint tree + row-damage plan) | full bulk refetch, masked panes | content change, rows unknown; viewport otherwise reusable |
-| `Fresh`      | everything                               | everything                    | first paint, resize, sheet/freeze change, theme swap, `request_repaint` |
+| `Fresh`      | everything                               | everything                    | first paint, resize, sheet/freeze change, theme swap, `request_repaint`, or content + view together |
+
+`decide()` actually probes `Viewport` *before* `Overlay` (see
+`ARCHITECTURE.md`'s "`decide()` — the regime cascade" for the exact
+guard order) — a view-only attempt that turns out to be a real pixel
+shift needs `Viewport`; a view-only attempt that stays inside the
+painted frame (ordinary arrow-key selection) falls through to `Overlay`
+instead. `view_changed()` / `viewChanged()` marks *intent* only; whether
+that intent becomes a blit, an overlay-only repaint, or a full rebuild is
+this geometric verdict, never the caller's choice.
 
 Two properties make the cascade safe rather than optimistic:
 
 - **`decide()` is pure over `&self`** — it classifies; the five
   `paint_*_regime` methods own all mutation. You can read the whole
-  policy in one 60-line function without chasing side effects.
+  policy in one function without chasing side effects.
 - **The verdict is a value** (`PaintRegime`, `#[must_use]`), and the
   dispatch `match` is exhaustive. Adding a regime breaks the build at
   the dispatch site by design.
@@ -44,12 +57,14 @@ Two properties make the cascade safe rather than optimistic:
   than committed: a whole-frame rollback on `Viewport` (the pre-attempt
   `Chrome` is restored via `Clone`, nothing presents) or a pane-local
   partial commit on `Damage` / `SlotsReuse` / `Fresh` (painted panes
-  present; the failed scope is folded back into `pending_content` —
-  and `pending_damage` for `Damage` — for the next tick). Either way
-  the drained `GridSignals` are re-raised before returning, so the
+  present; the failed scope is folded back into `self.pending` — as
+  `ContentWork::Rows` for `Damage`, `ContentWork::Panes` for
+  `SlotsReuse` / `Fresh` — for the next tick). Either way the held
+  scope is merged back into `self.pending` before returning, so the
   caller can just call `paint_if_dirty` again next tick with no new
-  external signal — see `iron-canvas/ARCHITECTURE.md`'s "Paint/query
-  coherence" section for the per-regime detail.
+  external input needed — see `iron-canvas/ARCHITECTURE.md`'s
+  "Paint/query coherence" and "Retry contract" sections for the
+  per-regime detail.
 
 Validity of the previous frame is itself a typed verdict
 (`FrameValidity::{SlotsReuse, Rebuild}` from `is_still_valid`, which
@@ -101,14 +116,14 @@ Trace for typing `42` into `B3` + Enter, RustyCalc consumer as wired now
 2  RustyCalc event bus: ContentEvent::CellChanged { address, .. }
    (+ CalculationUpdated { affected_sheets } if dependents recalced)
 3  subscribe effect: has_content → ic.mark_content_dirty()   ← UN-ROWED
-   (+ has_nav from the Enter → request_overlay_repaint())
-4  Engine: pending_content = PaneRegionMask::ALL,
-           pending_damage.poison() → CellDamage::Exceeded,
-           raise CONTENT
+   (+ has_nav from the Enter → view_changed())
+4  Engine: PendingWork::mark_panes(PaneRegionMask::ALL) →
+           content = ContentWork::Panes(ALL)
 5  rAF → paint_if_dirty → decide():
-     CONTENT set → Overlay arm out, Viewport arm out
-     pending_damage is Exceeded → Damage arm out
-     frame still valid → SlotsReuse { mask: ALL }
+     work.has_content() → Viewport probe skipped, Overlay arm excluded
+     content is Panes(ALL), not Rows → Damage arm's sheet-match guard
+     never even applies (no Rows to match)
+     frame still valid (reusable) → SlotsReuse { mask: ALL }
 6  paint_slots_reuse_regime:
      PaneCache::invalidate(ALL) + invalidate_paint_cache()
      Chrome::next reuses prev slot vecs (no geometry walk)
@@ -149,7 +164,7 @@ The engine deliberately layers three mechanisms, coarse-to-fine:
    decides the paint. On a mismatch, `plan_pane_repaint` walks the two
    trees row-for-row and narrows the repaint to just the changed row
    bands (merged, capped at `MAX_DAMAGE_SPANS` via the same
-   `CellDamage::add_rows` logic the Damage regime uses) — unless any
+   `ContentWork::normalize_rows` logic the Damage regime uses) — unless any
    changed span's internal top/bottom boundary carries explicit-border
    risk in either tree, in which case it falls back to a whole-pane
    repaint (see below). Hints make things *fast*; the fingerprint tree
@@ -174,7 +189,7 @@ written at the type, which is where the next maintainer will look.
 
 ### Why the repaint unit is a full-width row band, not a cell
 
-Two independent reasons, both documented on `CellDamage` itself (the
+Two independent reasons, both documented on `ContentWork` itself (the
 right home: the constraint explains the type's shape):
 
 - Cell text paints last and **unclipped** — it may overflow horizontally
@@ -207,16 +222,17 @@ either way.
 ### The wired-but-unfed fast path
 
 `markRowsDamaged(sheet, r1, r2)` exists on the wasm facade and the
-whole engine path behind it works (`CellDamage::Rows` → `Damage` regime
+whole engine path behind it works (`ContentWork::Rows` → `Damage` regime
 → `render_pane_damage` → band strips). **RustyCalc does call it** —
 `subscribe.rs`'s content-event match routes `ContentEvent::CellChanged`
-(`subscribe.rs:101`) and `RangeChanged` (`subscribe.rs:104`) through
-`mark_rows_damaged`. In the common case the win doesn't land, though:
+and `RangeChanged` through `mark_rows_damaged`. In the common case the
+win doesn't land, though:
 a cell edit's batch almost always also carries
 `ContentEvent::CalculationUpdated` (recalculated dependents), which is
-un-rowed and calls `mark_content_dirty()` — poisoning row info
-(`CellDamage::Exceeded`) and landing the paint in `SlotsReuse { ALL }`
-instead of `Damage`.
+un-rowed and calls `mark_content_dirty()` — collapsing the queued
+content work to `ContentWork::Panes(ALL)` (row precision, once lost to
+an unscoped raise, never comes back within one attempt) and landing the
+paint in `SlotsReuse { ALL }` instead of `Damage`.
 
 What wiring it would take, and what it would buy:
 
@@ -228,10 +244,10 @@ What wiring it would take, and what it would buy:
   bridge surfaces a changed-cells diff. Until then, mixed batches
   correctly degrade: one un-rowed raise poisons the whole batch to the
   `SlotsReuse` path — conservative, never wrong.
-- Degradation is built into `CellDamage`: >8 disjoint bands
-  (`MAX_DAMAGE_SPANS`), a second sheet, or any un-rowed raise →
-  `Exceeded` → pane-mask path. The fine path can only ever *win*; it can
-  never paint less than correctness requires.
+- Degradation is built into `ContentWork::merge`: >8 disjoint bands
+  (`MAX_DAMAGE_SPANS`), a second sheet, or any un-rowed raise all
+  collapse to `Panes(ALL)` → pane-mask path. The fine path can only ever
+  *win*; it can never paint less than correctness requires.
 
 ---
 
@@ -304,15 +320,19 @@ optimization should follow. They are what makes a five-regime pipeline
 reviewable by a human.
 
 **1. Disjoint change classes get disjoint inputs, never one dirty bit.**
-Viewport shift (geometric diff), content change (`CONTENT` +
-`pending_content` mask), row damage (`CellDamage`), overlay state, and
-structure are five separate inputs. The historical bug class here was
-dispatching blit and content through one flag. If two kinds of change
-need different repaint strategies, they must arrive as different data.
+Geometry rebuild (`GeometryWork`), view movement (`view: bool`), content
+change (`ContentWork` — named rows or a pane mask, one sum type so row
+precision and whole-pane precision share a single field instead of two),
+and overlay state (`overlay: bool`) are four separate fields on one
+`PendingWork` value. Viewport shift itself is not a fifth stored input —
+it is *derived* geometrically from view movement by `screen_for_blit`,
+never a bit of its own. The historical bug class here was dispatching
+blit and content through one flag. If two kinds of change need different
+repaint strategies, they must arrive as different data.
 
 **2. Decisions are values; effects live in named arms.**
 `PaintRegime`, `FrameValidity`, `BlitOutcome`, `PaneShiftPrep`,
-`CellDamage` — every branch point returns a `#[must_use]` enum whose
+`ContentWork` — every branch point returns a `#[must_use]` enum whose
 variants *name the outcome*, then an exhaustive `match` runs exactly one
 arm. Nobody has to reconstruct "what will happen" from boolean soup;
 the compiler polices completeness when a variant is added. When you add
@@ -326,15 +346,16 @@ correctness — the only sustainable contract when hint call sites live
 in another crate (or another language).
 
 **4. Every fast path names its own escape hatch.**
-Damage falls back to SlotsReuse (`CellDamage::Exceeded`), blit falls
-back to Fresh (`FreshFallback`), a mismatched pane range falls back to
-the full pane walk. Fallback is the ordinary slow path — never a
-special recovery mode — and the *reason* for falling back is an enum
-variant you can log, test, and grep.
+Damage falls back to SlotsReuse (`ContentWork` collapsing to
+`Panes(ALL)`), blit falls back to Fresh (`FreshFallback`), a mismatched
+pane range falls back to the full pane walk. Fallback is the ordinary
+slow path — never a special recovery mode — and the *reason* for
+falling back is an enum variant (or, for `ContentWork`, a merge-table
+outcome) you can log, test, and grep.
 
 **5. Invariants live on the type or function that owns them.**
 "Full-width bands because text overflows, and because rows can share
-border ownership" is documented on `CellDamage`. "A successful strip
+border ownership" is documented on `ContentWork`. "A successful strip
 paint invalidates the painted-pixel tree" is enforced inside
 `render_pane_strip`. The row-damage planner's border-safety rule sits on
 `plan_pane_repaint`/`span_has_unsafe_border`. The fingerprint's
@@ -357,7 +378,7 @@ parallel copy of an existing pass, the design is wrong; find the seam
 (here: `render_pane_strip`) and feed it a different range.
 
 **8. Observability is part of the pipeline.**
-`last_regime`/`last_signals` stamp every paint; the recorder captures
+`last_regime`/`last_work_flags` stamp every paint; the recorder captures
 per-frame op logs attributed to a regime. An optimization you cannot
 attribute frames to is one you cannot verify or bisect.
 

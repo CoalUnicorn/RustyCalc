@@ -13,9 +13,9 @@ pub mod layer;
 pub mod model_adapter;
 mod orchestrator;
 pub mod painter;
+mod pending_work;
 mod render_overlays;
 pub mod renderer;
-pub mod signal;
 mod style;
 pub mod theme;
 pub mod types;
@@ -41,6 +41,7 @@ pub use geometry::{
     utils::col_name,
 };
 pub use model_adapter::{CanvasModel, CanvasView, CellContentQuery};
+pub use pending_work::{RowSpan, WorkFlags};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
     FontStyle, HAlign, IconSpec, RatingSpec, VAlign,

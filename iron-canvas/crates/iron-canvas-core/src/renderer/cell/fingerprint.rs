@@ -26,8 +26,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use crate::orchestrator::PaneVerdict;
+use crate::pending_work::{ContentWork, PendingWork, RowSpan};
 use crate::renderer::cf_types::parse_hex_color;
-use crate::signal::{CellDamage, RowSpan};
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
 
 use crate::types::coord::RCRange;
@@ -425,7 +425,7 @@ pub(crate) enum RepaintPlan {
     /// The two trees are content-identical; no pixels need repainting.
     Skip,
     /// Repaint exactly these merged, disjoint row bands (full pane width —
-    /// see `signal::CellDamage`'s doc for why bands, not cell rectangles).
+    /// see `ContentWork`'s doc for why bands, not cell rectangles).
     Rows(Vec<RowSpan>),
     /// Repaint the whole pane — either the merged spans exceeded the cap,
     /// the two trees don't share a range, or a span's internal boundary
@@ -452,7 +452,7 @@ impl From<&RepaintPlan> for PaneVerdict {
     }
 }
 
-/// The `CellDamage` instance this planner feeds is scoped to a single
+/// The `PendingWork` instance this planner feeds is scoped to a single
 /// pane's single-frame comparison and immediately discarded once the
 /// merged spans are read back out — its `sheet` tag never escapes this
 /// function, so any constant works.
@@ -464,10 +464,10 @@ const PANE_LOCAL_SHEET: u32 = 0;
 /// Skips the row/cell walk entirely on an equal whole-pane digest (the common
 /// no-op case `render_pane` already optimizes for). Otherwise walks both
 /// trees' rows in lockstep, feeds every differing row index into a
-/// pane-local `CellDamage` (reusing its adjacent-merge and `MAX_DAMAGE_SPANS`
-/// cap — not reimplemented here), then rejects the merged spans in favour of
-/// `Full` if any span's internal top/bottom boundary carries old or new
-/// explicit-border risk (see `span_has_unsafe_border`).
+/// pane-local `PendingWork` (reusing `ContentWork`'s adjacent-merge and
+/// `MAX_DAMAGE_SPANS` cap — not reimplemented here), then rejects the merged
+/// spans in favour of `Full` if any span's internal top/bottom boundary
+/// carries old or new explicit-border risk (see `span_has_unsafe_border`).
 pub(crate) fn plan_pane_repaint(
     painted: &PaneFingerprint,
     scratch: &PaneFingerprint,
@@ -485,13 +485,13 @@ pub(crate) fn plan_pane_repaint(
     }
 
     let range = scratch.range;
-    let mut damage = CellDamage::default();
+    let mut damage = PendingWork::default();
     for (row_offset, (painted_row, scratch_row)) in
         painted.rows.iter().zip(scratch.rows.iter()).enumerate()
     {
         if painted_row.digest != scratch_row.digest {
             let model_row = range.r1 + row_offset as i32;
-            damage.add_rows(
+            damage.mark_rows(
                 PANE_LOCAL_SHEET,
                 RowSpan {
                     r1: model_row,
@@ -501,14 +501,16 @@ pub(crate) fn plan_pane_repaint(
         }
     }
 
-    let spans = match damage {
+    let spans = match damage.content() {
         // Unreachable in practice: the whole-pane digest already proved a
         // difference above, so at least one row must differ too (barring a
         // `DefaultHasher` collision). Skip is the safe reading of "no rows
         // to repaint" regardless.
-        CellDamage::Clean => return RepaintPlan::Skip,
-        CellDamage::Exceeded => return RepaintPlan::Full,
-        CellDamage::Rows { spans, .. } => spans,
+        ContentWork::Clean => return RepaintPlan::Skip,
+        // Only reachable via the span-count cap here — a single sheet tag
+        // and row-only marks can degrade no other way.
+        ContentWork::Panes(_) => return RepaintPlan::Full,
+        ContentWork::Rows { spans, .. } => spans,
     };
 
     if spans
@@ -518,7 +520,7 @@ pub(crate) fn plan_pane_repaint(
         return RepaintPlan::Full;
     }
 
-    RepaintPlan::Rows(spans)
+    RepaintPlan::Rows(spans.clone())
 }
 
 /// True when `span`'s internal top or bottom boundary (i.e. NOT the pane's

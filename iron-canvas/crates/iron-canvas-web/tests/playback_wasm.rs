@@ -103,6 +103,16 @@ fn make_scroll_fixture_model(top_row: Rc<Cell<i32>>) -> JsValue {
     set_prop(&obj, "getSelectedView", get_view.as_ref().unchecked_ref());
     get_view.forget();
 
+    // Most engine call sites read the sheet via this standalone accessor
+    // rather than `getSelectedView`'s embedded `sheet` field; this fixture
+    // pins sheet 0, so a missing accessor here silently throws and falls
+    // back to 0 without ever failing a test.
+    set_prop(
+        &obj,
+        "getSelectedSheet",
+        &js_sys::Function::new_no_args("return 0;"),
+    );
+
     // Required for the blit *probe* specifically: `overlaps_match` compares
     // this directly (no default-height fallback, unlike the Fresh build
     // path) to verify the kept band's rows still match after a scroll.
@@ -216,9 +226,10 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     };
 
     top_row.set(2); // scroll by one row
-    // No JS setter raises the VIEWPORT signal — `decide` detects a scroll
-    // geometrically via `screen_for_blit`; this call just wakes dispatch.
-    canvas.request_overlay_repaint_js();
+    // `view_changed()` declares the navigation intent; `decide` still
+    // detects the actual scroll geometrically via `screen_for_blit` and
+    // picks the Viewport (blit) regime — this call only wakes dispatch.
+    canvas.view_changed_js();
     canvas.paint_if_dirty(); // must land the Viewport (blit) regime
 
     let Ok(bytes_arr) = canvas.stop_recording() else {

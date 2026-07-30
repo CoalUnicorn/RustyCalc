@@ -63,7 +63,7 @@ impl CameraCanvas {
             g.scroll_by(d_rows, d_cols);
             g.scroll_anchors()
         });
-        self.orch.request_repaint();
+        self.orch.view_changed();
         anchors
     }
 
@@ -72,7 +72,7 @@ impl CameraCanvas {
     pub fn set_scroll(&mut self, top_row: i32, left_col: i32) {
         self.model
             .borrow_mut_with(|g| g.set_scroll(top_row, left_col));
-        self.orch.request_repaint();
+        self.orch.view_changed();
     }
 
     /// Current 1-based scroll anchors `(top_row, left_col)` — the live viewport,
@@ -101,7 +101,6 @@ impl CameraCanvas {
         if let Some(el) = window().document().and_then(|d| d.document_element()) {
             self.orch
                 .set_theme(iron_canvas_canvas2d::theme_from_element::from_element(&el));
-            self.orch.request_repaint();
         }
     }
 

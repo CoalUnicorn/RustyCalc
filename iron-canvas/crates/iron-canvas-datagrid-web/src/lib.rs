@@ -75,9 +75,11 @@ impl DataGridCanvas {
 
     #[wasm_bindgen(js_name = "setThemeFromElement")]
     pub fn set_theme_from_element(&mut self, el: &web_sys::Element) {
+        // `set_theme` value-compares and, on change, marks geometry + overlay
+        // itself; `is_still_valid` rejects a theme-mismatched frame, so no
+        // separate `request_repaint` is needed to force the next Fresh paint.
         self.orch
             .set_theme(iron_canvas_canvas2d::theme_from_element::from_element(el));
-        self.orch.request_repaint();
     }
 
     #[wasm_bindgen(js_name = "setThemeName")]
@@ -86,8 +88,7 @@ impl DataGridCanvas {
             "dark" => CanvasTheme::dark(),
             _ => CanvasTheme::light(),
         };
-        self.orch.set_theme(theme);
-        self.orch.request_repaint();
+        self.orch.set_theme(theme); // see set_theme_from_element: self-sufficient
     }
 
     /// See `IronCanvas::fontsChanged` — same contract: clear text-measure
@@ -131,13 +132,13 @@ impl DataGridCanvas {
     pub fn set_scroll(&mut self, top_row: i32, left_col: i32) {
         self.model
             .borrow_mut_with(|g| g.set_scroll(top_row + 1, left_col + 1)); // 0->1 based
-        self.orch.request_repaint();
+        self.orch.view_changed();
     }
 
     #[wasm_bindgen(js_name = "scrollBy")]
     pub fn scroll_by(&mut self, d_rows: i32, d_cols: i32) {
         self.model.borrow_mut_with(|g| g.scroll_by(d_rows, d_cols)); // delta, no offset
-        self.orch.request_repaint();
+        self.orch.view_changed();
     }
 
     // D.2 Selection + hit-test
@@ -210,14 +211,12 @@ impl DataGridCanvas {
         };
         self.model.borrow_mut_with(|g| g.sort_by(col as usize, dir));
         self.orch.mark_content_dirty(PaneRegionMask::ALL);
-        self.orch.request_repaint();
     }
 
     #[wasm_bindgen(js_name = "clearSort")]
     pub fn clear_sort(&mut self) {
         self.model.borrow_mut_with(|g| g.clear_sort());
         self.orch.mark_content_dirty(PaneRegionMask::ALL);
-        self.orch.request_repaint();
     }
 
     #[wasm_bindgen(js_name = "currentSort")]
@@ -241,7 +240,6 @@ impl DataGridCanvas {
         self.model
             .borrow_mut_with(|g| g.set_cell(row as usize, col as usize, value)); // model set_cell is 0-based
         self.orch.mark_content_dirty(PaneRegionMask::ALL);
-        self.orch.request_repaint();
     }
 
     #[wasm_bindgen(js_name = "appendRows")]

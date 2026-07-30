@@ -31,11 +31,11 @@ use crate::CellContentQuery;
 use crate::chrome::{BlitPlan, Chrome, FrameKindTag, PaneRegion};
 use crate::orchestrator::PaneVerdict;
 use crate::painter::{PaintColor, Painter};
+use crate::pending_work::RowSpan;
 use crate::renderer::RendererCore;
 use crate::renderer::blit_work::{BlitPaneWork, widen_blit_strip_to_pixel_clip};
 use crate::renderer::cache::PaneShiftPrep;
 use crate::renderer::cf_types::CfDecorationPaint;
-use crate::signal::RowSpan;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 

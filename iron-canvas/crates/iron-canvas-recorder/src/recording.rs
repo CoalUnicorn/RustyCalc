@@ -41,7 +41,7 @@
 //! | `frame_idx`     | `u32`                                 | Monotonic index; `0` for the first captured frame.                                     |
 //! | `t_ms`          | `u64`                                 | Milliseconds since `started_at_unix_ms`.                                               |
 //! | `regime`        | `PaintRegimeTag`                      | Which dispatch arm painted this frame: `fresh` / `slots_reuse` / `viewport` / `overlay` / `damage`.|
-//! | `signals`       | `u8`                                  | `GridSignals::bits()` — VIEWPORT(1) \| CONTENT(2) \| STRUCTURAL(4) \| OVERLAY(8).      |
+//! | `signals`       | `u8`                                  | `WorkFlags::bits()` — VIEW(1) \| CONTENT(2) \| GEOMETRY(4) \| OVERLAY(8). Same byte layout the engine's pre-Stage-2 `GridSignals` used (`VIEWPORT`/`CONTENT`/`STRUCTURAL`/`OVERLAY`); see the compatibility rule below. |
 //! | `grid_ops`      | `Vec<DrawOp>`                         | Ops captured from the grid surface for this frame. May be empty for `overlay`.        |
 //! | `overlay_ops`   | `Vec<DrawOp>`                         | Ops captured from the overlay surface for this frame.                                  |
 //!
@@ -59,6 +59,29 @@
 //! - `DrawOp` variants: additive only within a schema version. Adding
 //!   a new variant is a breaking change (older readers don't recognize
 //!   it) — bump the schema.
+//! - `signals`: the engine's internal dirty-tracking type was rebuilt
+//!   (`PendingWork`/`ContentWork`/`GeometryWork` replaced the old
+//!   `GridSignals`/`CellDamage`/`PaintGate`), but the wire byte did not
+//!   change shape. `WorkFlags` — the diagnostic projection the new engine
+//!   stamps into this field — keeps `GridSignals`' exact bit positions:
+//!   `VIEW`/`CONTENT`/`GEOMETRY`/`OVERLAY` sit at `0b0001`/`0b0010`/
+//!   `0b0100`/`0b1000`, the same values `GridSignals` used under the names
+//!   `VIEWPORT`/`CONTENT`/`STRUCTURAL`/`OVERLAY`. A recording captured
+//!   before this change and one captured after decode identically: bit 4
+//!   (`STRUCTURAL`, now `GEOMETRY`) still means "this frame rebuilt
+//!   geometry" either way. Bit 1 (`VIEWPORT`, now `VIEW`) was reserved and
+//!   had no producer in any prior build, so no existing recording has it
+//!   set — old files with bit 1 clear still mean exactly what they meant.
+//!   From this change onward the bit is live: it records real view intent
+//!   (scroll/selection/active-cell/sheet movement), so bit 1 gains meaning
+//!   only going forward, never retroactively.
+//!
+//!   This is wire compatibility, not diagnostic-value compatibility: `set_model`
+//!   now installs content-all instead of leaving it clear, and `request_repaint`
+//!   now preserves content already queued in the tick instead of clearing it, so
+//!   an equivalent host call sequence replayed on the old and new engine can
+//!   stamp a different `signals` byte for the same tick even though every bit's
+//!   meaning and the file's decodability are unchanged.
 //!
 //! # See also
 //!
@@ -79,7 +102,7 @@ use crate::DrawOp;
 pub const ICR_SCHEMA_VERSION: u32 = 3;
 
 /// Per-paint-tick capture. Built by the host (e.g. `IronCanvas::paintIfDirty`
-/// wrapper) by reading `Orchestrator::last_regime()` + `last_signals()`
+/// wrapper) by reading `Orchestrator::last_regime()` + `last_work_flags()`
 /// and draining `RecordingSurface::end_frame()` for both layers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frame {
@@ -87,9 +110,14 @@ pub struct Frame {
     /// Milliseconds since `IcrHeader::started_at_unix_ms`.
     pub t_ms: u64,
     pub regime: PaintRegimeTag,
-    /// `GridSignals::bits()` from `Orchestrator::last_signals` — the
-    /// dirty bits the engine acted on for this frame. The bit layout is
-    /// the engine's `GridSignals` (`VIEWPORT|CONTENT|STRUCTURAL|OVERLAY`).
+    /// `WorkFlags::bits()` from `Orchestrator::last_work_flags` — a
+    /// diagnostic projection of the `PendingWork` the engine acted on for
+    /// this frame, never queued state itself. Bit layout: `VIEW(1) |
+    /// CONTENT(2) | GEOMETRY(4) | OVERLAY(8)` — the same positions the
+    /// pre-Stage-2 `GridSignals` used under the names `VIEWPORT | CONTENT |
+    /// STRUCTURAL | OVERLAY`. See the module-level compatibility note above:
+    /// old and new recordings decode identically, and bit 1 (reserved, never
+    /// set pre-Stage-2) now records real view intent going forward.
     pub signals: u8,
     pub grid_ops: Vec<DrawOp>,
     pub overlay_ops: Vec<DrawOp>,
@@ -278,7 +306,7 @@ mod tests {
             frame_idx: 0,
             t_ms: 0,
             regime: PaintRegimeTag::Fresh,
-            signals: 0b0100, // STRUCTURAL
+            signals: 0b0100, // GEOMETRY (was STRUCTURAL)
             grid_ops: vec![DrawOp::RectFill {
                 rect: pix(0, 0, 10, 10),
                 color: "#fff".into(),

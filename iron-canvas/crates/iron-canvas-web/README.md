@@ -4,7 +4,7 @@ The `#[wasm_bindgen]` facade for IronCalc spreadsheets — the full spreadsheet 
 
 ## What it does
 
-Exposes `IronCanvas` to JavaScript: bind it to an IronCalc-compatible model handle and a pair of canvases, and it renders a live spreadsheet with selection, marching ants, formula-reference overlays, autofill handles, and frozen panes. It owns the repaint lifecycle (`requestRepaint` / `markContentDirty` / `markRowsDamaged` / `paintIfDirty`), always supports SVG export, and exposes PDF export when built with its `pdf` feature.
+Exposes `IronCanvas` to JavaScript: bind it to an IronCalc-compatible model handle and a pair of canvases, and it renders a live spreadsheet with selection, marching ants, formula-reference overlays, autofill handles, and frozen panes. It owns the repaint lifecycle (`requestRepaint` / `markContentDirty` / `markRowsDamaged` / `viewChanged` / `paintIfDirty`), always supports SVG export, and exposes PDF export when built with its `pdf` feature.
 
 ## Crate role
 
@@ -14,14 +14,14 @@ The primary shippable artifact for spreadsheet consumers: RustyCalc's Leptos fro
 
 - `IronCanvas` (`#[wasm_bindgen]`) — JS API:
   - **lifecycle**: `create`, `setModel`, `resize`, `dispose`
-  - **paint**: `requestRepaint`, `markContentDirty`, `markRowsDamaged`, `paintIfDirty`
+  - **paint**: `requestRepaint`, `markContentDirty`, `markRowsDamaged`, `viewChanged`, `paintIfDirty`
     (returns `JsPaintResult`: `Idle` / `Painted` / `Retry` / `Playback` —
     `Retry` means an attempt was held back and the caller should call again
     next frame with no new signal)
   - **theme**: `set_theme_name`, `setThemeFromElement`, `themeChanged`
   - **export**: `exportSvg`; `exportPdf` with feature `pdf`
   - **queries**: `hitTest`, `cellRect`, `resizeHandleAt`, `autofillHandlePos`
-- Rust-only overlay/hit-test API: `set_extend_to`, `set_clipboard`, `set_point_range`, `set_formula_refs`, `set_overlays`, `hit_test`, `cell_rect`, `resize_handle_at`, `autofill_handle`, `canvas_size`
+- Rust-only overlay/hit-test API: `set_extend_to`, `set_clipboard`, `set_point_range`, `set_formula_refs`, `set_overlays`, `view_changed`, `hit_test`, `cell_rect`, `resize_handle_at`, `autofill_handle`, `canvas_size`
 
 ## Dependencies
 

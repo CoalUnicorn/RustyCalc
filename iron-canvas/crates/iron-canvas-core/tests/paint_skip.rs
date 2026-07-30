@@ -16,9 +16,9 @@
 
 mod common;
 
+use iron_canvas_core::RowSpan;
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegion};
 use iron_canvas_core::renderer::RendererCore;
-use iron_canvas_core::signal::RowSpan;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
     Border, BorderItem, BorderStyle, CellDecoration, CellStyle, DataBarSpec, RCRange,
@@ -239,7 +239,7 @@ fn row_band_repaint_avoids_second_model_fetch_across_two_spans() {
         .range(&frame)
         .expect("BottomRight must have a range on this canvas");
     let row_a = pane_range.r1 + 1;
-    // Gap of 2 rows between the changed rows so `CellDamage::add_rows`
+    // Gap of 2 rows between the changed rows so `ContentWork`'s row merge
     // cannot merge them into a single span — this must stay TWO bands.
     let row_b = pane_range.r1 + 4;
     assert!(

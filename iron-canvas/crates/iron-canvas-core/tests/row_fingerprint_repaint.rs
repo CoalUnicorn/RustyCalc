@@ -13,9 +13,9 @@
 mod common;
 
 use iron_canvas_core::RCRange;
+use iron_canvas_core::RowSpan;
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegion, PaneRegionMask};
 use iron_canvas_core::renderer::RendererCore;
-use iron_canvas_core::signal::RowSpan;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 

@@ -18,9 +18,6 @@ pub mod wasm;
 #[cfg(target_arch = "wasm32")]
 mod wire;
 
-#[cfg(test)]
-mod test;
-
 pub use iron_canvas_canvas2d::{CanvasPainter, WebSurface, theme_from_element};
 pub use iron_canvas_core::geometry::utils::col_name;
 pub use iron_canvas_core::{
@@ -29,6 +26,6 @@ pub use iron_canvas_core::{
     FormulaRefKind, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, HEADER_SEPARATOR_WIDTH, HitTest,
     LAST_COLUMN, LAST_ROW, Line, PixelRect, Point, RCRange, RectCorner, RefZone, RenderOverlays,
     ResizeTarget, SheetArea, Side, Span, ThemeVariables, chrome, decoration, geometry,
-    model_adapter, painter, renderer, signal, theme, types,
+    model_adapter, painter, renderer, theme, types,
 };
 pub use orchestrator::{IronCanvas, JsPaintResult};

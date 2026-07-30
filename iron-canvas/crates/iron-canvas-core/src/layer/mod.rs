@@ -4,12 +4,14 @@
 //! in-memory recorder). One Surface owns one backing store + the painter
 //! that draws into it; the renderer borrows the painter via `painter()`.
 //!
-//! `LayerBase<S, R>` stacks a `PaintGate` (typed `GridSignals` dirty bits)
-//! over a Surface + a layer-specific renderer. Layer-specific paint methods
-//! live on the renderer wrappers (`GridRenderer<P>` / `OverlayRenderer<P>`),
-//! reached through `LayerBase::renderer`.
+//! `LayerBase<S, R>` pairs a Surface with a layer-specific renderer and owns
+//! the surface, resize, present, cache invalidation, and paint execution —
+//! and nothing else. It holds no dirty state: all paint work is queued on
+//! `Orchestrator`'s single `PendingWork` value, which decides regimes
+//! globally rather than per layer. Layer-specific paint methods live on the
+//! renderer wrappers (`GridRenderer<P>` / `OverlayRenderer<P>`), reached
+//! through `LayerBase::renderer`.
 
-use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::CanvasModel;
@@ -19,8 +21,8 @@ use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::painter::{BlitPainter, GroupClass, PaintColor, Painter};
+use crate::pending_work::RowSpan;
 use crate::renderer::{GridRenderer, LayerOps, OverlayRenderer};
-use crate::signal::{GridSignals, RowSpan};
 
 /// Drawing target abstraction. Production wasm holds one Surface per
 /// `<canvas>` (grid + overlay); a Cairo backend would hold one per
@@ -54,53 +56,10 @@ pub trait Surface {
     /// shared input; each backend resizes only what it owns.
     fn resize(&mut self, css: CanvasSize, dpr: f64);
 
-    /// Flush the rendered frame. Canvas-2D auto-presents (no-op);
-    /// Cairo / off-screen image backends flush here.
+    /// Flush the rendered frame. Backends without a back buffer no-op
+    /// this; `WebSurface`'s grid surface flips its back buffer onto the
+    /// visible canvas here — Canvas-2D presentation is not a no-op.
     fn present(&self);
-}
-
-pub struct PaintGate {
-    signals: Cell<GridSignals>,
-    paint_count: Cell<u32>,
-}
-
-impl PaintGate {
-    pub fn new() -> Self {
-        Self {
-            signals: Cell::new(GridSignals::EMPTY),
-            paint_count: Cell::new(0),
-        }
-    }
-
-    pub fn raise(&self, sig: GridSignals) {
-        self.signals.set(self.signals.get() | sig);
-    }
-
-    pub fn drain(&self) -> GridSignals {
-        let drained = self.signals.replace(GridSignals::EMPTY);
-        if !drained.is_empty() {
-            self.paint_count.set(self.paint_count.get() + 1);
-        }
-        drained
-    }
-
-    pub fn should_paint(&self) -> bool {
-        !self.drain().is_empty()
-    }
-
-    /// Non-empty-drain tick. Cross-crate test surface; production must not
-    /// branch on it. `cfg(test)` doesn't cross crate boundaries, so the
-    /// accessor stays callable for tests in sibling crates.
-    #[doc(hidden)]
-    pub fn paint_count(&self) -> u32 {
-        self.paint_count.get()
-    }
-}
-
-impl Default for PaintGate {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 pub struct LayerBase<S, R>
@@ -109,7 +68,6 @@ where
     R: LayerOps<Painter = S::P>,
 {
     pub(crate) surface: S,
-    gate: PaintGate,
     pub(crate) renderer: R,
 }
 
@@ -119,19 +77,7 @@ where
     R: LayerOps<Painter = S::P>,
 {
     pub fn new(surface: S, renderer: R) -> Self {
-        Self {
-            surface,
-            gate: PaintGate::new(),
-            renderer,
-        }
-    }
-
-    pub fn raise(&self, sig: GridSignals) {
-        self.gate.raise(sig);
-    }
-
-    pub fn drain_signals(&self) -> GridSignals {
-        self.gate.drain()
+        Self { surface, renderer }
     }
 
     pub fn resize(&mut self, css: CanvasSize, dpr: f64) {

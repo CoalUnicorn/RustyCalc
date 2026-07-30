@@ -66,7 +66,7 @@ fn scroll_changes_top_painted_row() {
 
     // setScroll(2, 0) -> 0-based JS, model is 1-based so top_row becomes 3.
     model.borrow_mut_with(|g| g.set_scroll(2 + 1, 0 + 1));
-    orch.request_repaint();
+    orch.view_changed();
     orch.paint_if_dirty();
 
     let texts = grid_texts(&orch);
@@ -113,7 +113,6 @@ fn sort_orders_first_painted_data_row() {
 
     model.borrow_mut_with(|g| g.sort_by(0, SortDirection::Ascending));
     orch.mark_content_dirty(PaneRegionMask::ALL);
-    orch.request_repaint();
     orch.paint_if_dirty();
 
     // First data value among the name column should be alphabetically first.

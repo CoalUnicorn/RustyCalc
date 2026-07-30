@@ -6,15 +6,19 @@
 //! `Rc<dyn CanvasModel>`, so the struct carries one type parameter (the
 //! `Surface`), not two.
 //!
-//! `paint_if_dirty` drains both layers' typed `GridSignals` and picks one
-//! of five `PaintRegime` arms via `decide` (cheapness-ordered). The Fresh,
-//! SlotsReuse, and Damage arms rebuild via a `Chrome::next(.., FramePath::*)`
-//! walk through the matching `LayerBase` paint method; the Viewport arm goes
-//! through `Chrome::next_blit`; the Overlay arm reuses
-//! `last_frame` directly and repaints only the overlay. The query API
-//! (`hit_test`, `cell_rect`,
-//! `resize_handle_at`, `autofill_handle`) reads `last_frame`, so hits
-//! agree with painted pixels by construction.
+//! `paint_if_dirty` takes the single queued `PendingWork` value and picks
+//! one of five `PaintRegime` arms via `decide` (cheapness-ordered). The
+//! Fresh, SlotsReuse, and Damage arms rebuild via a
+//! `Chrome::next(.., FramePath::*)` walk through the matching `LayerBase`
+//! paint method; the Viewport arm goes through `Chrome::next_blit`; the
+//! Overlay arm reuses `last_frame` directly and repaints only the overlay.
+//! The query API (`hit_test`, `cell_rect`, `resize_handle_at`,
+//! `autofill_handle`) reads `last_frame`, so hits agree with painted pixels
+//! by construction.
+//!
+//! Work ownership is entirely here: every setter marks intent on
+//! `self.pending`, and a paint attempt consumes it with one
+//! `mem::take`. Layers hold no dirty state.
 
 use std::fmt;
 use std::rc::Rc;
@@ -31,16 +35,19 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::layer::{BlitPaint, LayerBase, Surface};
 use crate::painter::BlitPainter;
+use crate::pending_work::{ContentWork, PendingWork, RowSpan, WorkFlags};
 use crate::render_overlays::RenderOverlays;
 use crate::renderer::{GridRenderer, OverlayRenderer};
-use crate::signal::{CellDamage, GridSignals, RowSpan};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
 
 /// Named verdict of `paint_if_dirty`'s dispatch. Each variant aligns 1:1
-/// with a `paint_*` method; the regime carries everything that method
-/// needs (mask, dirty bits) so `paint_if_dirty` is pure pattern-destructure.
+/// with a `paint_*` method and carries only what `decide` *derived* — the
+/// blit plan, the damaged bands, the stale-pane mask. The attempted
+/// `PendingWork` travels to the arms alongside the regime rather than being
+/// copied into every variant, so a regime never restates facts the work
+/// value already holds.
 /// Variants align with `FramePath`: `SlotsReuse` and `Fresh` here map to
 /// `FramePath::SlotsReuse` and `FramePath::Fresh` inside `Chrome::next`.
 #[must_use = "PaintRegime is the paint dispatch verdict; dropping it means the chosen paint_* method never runs"]
@@ -51,20 +58,18 @@ pub enum PaintRegime {
     /// full-width bands per pane via the blit strip machinery.
     Damage {
         spans: Vec<RowSpan>,
-        signals: GridSignals,
     },
     SlotsReuse {
         mask: PaneRegionMask,
-        signals: GridSignals,
     },
-    Fresh(GridSignals),
+    Fresh,
 }
 
 /// Data-free public mirror of `PaintRegime`. Stamped by `paint_if_dirty`
 /// into `Orchestrator.last_regime` so out-of-engine consumers (the
 /// recording pipeline) can attribute each captured frame to a regime
 /// without seeing the regime's inner data (`BlitPlan`, `PaneRegionMask`,
-/// `GridSignals`). Serializes with snake_case variant names to match the
+/// row spans). Serializes with snake_case variant names to match the
 /// `.icr` JSON-lines schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,7 +88,7 @@ impl From<&PaintRegime> for PaintRegimeTag {
             PaintRegime::Overlay => PaintRegimeTag::Overlay,
             PaintRegime::Viewport(_) => PaintRegimeTag::Viewport,
             PaintRegime::SlotsReuse { .. } => PaintRegimeTag::SlotsReuse,
-            PaintRegime::Fresh(_) => PaintRegimeTag::Fresh,
+            PaintRegime::Fresh => PaintRegimeTag::Fresh,
             PaintRegime::Damage { .. } => PaintRegimeTag::Damage,
         }
     }
@@ -210,11 +215,12 @@ pub struct FrameTrace {
     /// selection and the arm's actual work diverge, and this field names the
     /// latter. `None` before the first paint, alongside `regime`.
     pub effective: Option<PaintRegimeTag>,
-    /// The signal word `decide` acted on. Included because the regime alone
-    /// cannot explain itself: `SlotsReuse` is the fallthrough arm, so seeing it
-    /// tells you which arms were *rejected* only once you know which bits were
-    /// raised.
-    pub signals: GridSignals,
+    /// Diagnostic projection of the `PendingWork` snapshot `decide` acted
+    /// on. Included because the regime alone cannot explain itself:
+    /// `SlotsReuse` is the fallthrough arm, so seeing it tells you which
+    /// arms were *rejected* only once you know which categories carried
+    /// work.
+    pub work: WorkFlags,
     /// Indexed by `PaneRegion as usize`. `None` = pane not visited this frame.
     pub panes: [Option<PaneVerdict>; 4],
     pub outcome: FrameOutcome,
@@ -236,7 +242,7 @@ impl fmt::Display for FrameTrace {
             Some(r) => write!(f, "{r:?}")?,
             None => f.write_str("-")?,
         }
-        write!(f, "[{:?}]", self.signals)?;
+        write!(f, "[{:?}]", self.work)?;
         for (i, name) in ["tl", "tr", "bl", "br"].iter().enumerate() {
             match self.panes.get(i).copied().flatten() {
                 Some(v) => write!(f, " {name}:{v}")?,
@@ -284,15 +290,13 @@ where
     /// `iron-canvas-web`, which keeps an independent copy for the
     /// recording/playback pipeline.
     last_dpr: Option<f64>,
-    /// Typed cell-content-changed signal accumulated since the last paint.
-    /// Bits name the panes whose cached buffers are stale and must refetch.
-    /// `decide` routes a non-empty mask through the SlotsReuse arm when
-    /// the viewport is otherwise reusable. Reset to `EMPTY` at the end of
-    /// every `paint_if_dirty`.
-    pending_content: PaneRegionMask,
-    /// Row-band damage paired with `pending_content`. `CellDamage::Rows`
-    /// only when every CONTENT raise since the last paint named its rows.
-    pending_damage: CellDamage,
+    /// Everything queued for the next paint attempt: geometry rebuild, view
+    /// movement, content damage, overlay repaint. The single owner of paint
+    /// work — layers hold none. Every setter marks intent here; a paint
+    /// attempt consumes it with one `mem::take`, so successful consumption
+    /// needs no end-of-paint clearing assignment. Only a regime's own retry
+    /// rule merges work back in.
+    pending: PendingWork,
     /// Last regime `paint_if_dirty` dispatched. Stamped after `decide`,
     /// read by the recording pipeline via `last_regime()`. `None` before
     /// the first paint. Plain field — `paint_if_dirty` already holds
@@ -303,9 +307,9 @@ where
     /// value at dispatch; `paint_viewport_regime`'s `FreshFallback` arm is
     /// the only site that overwrites it afterward.
     last_effective: Option<PaintRegimeTag>,
-    /// `GridSignals` drained by the last `paint_if_dirty`. Empty before
-    /// the first paint.
-    last_signals: GridSignals,
+    /// Diagnostic projection of the work the last `paint_if_dirty` took.
+    /// Empty before the first paint.
+    last_work_flags: WorkFlags,
     /// Per-pane attribution for the last `paint_if_dirty`. Collected by the
     /// grid renderer during paint, stamped here after dispatch.
     last_trace: FrameTrace,
@@ -328,11 +332,10 @@ where
             last_frame: None,
             size: CanvasSize { w: 0.0, h: 0.0 },
             last_dpr: None,
-            pending_content: PaneRegionMask::EMPTY,
-            pending_damage: CellDamage::Clean,
+            pending: PendingWork::default(),
             last_regime: None,
             last_effective: None,
-            last_signals: GridSignals::empty(),
+            last_work_flags: WorkFlags::empty(),
             last_trace: FrameTrace::default(),
         }
     }
@@ -349,10 +352,10 @@ where
         self.last_regime
     }
 
-    /// `GridSignals` word the last `paint_if_dirty` acted upon. Empty
-    /// before the first paint.
-    pub fn last_signals(&self) -> GridSignals {
-        self.last_signals
+    /// Diagnostic projection of the work the last `paint_if_dirty` acted
+    /// upon. Empty before the first paint.
+    pub fn last_work_flags(&self) -> WorkFlags {
+        self.last_work_flags
     }
 
     /// Resize both layers in one call. No public per-layer resize, so
@@ -370,56 +373,58 @@ where
         // A backing-store resize may clear both canvases (Canvas2D), so
         // geometry invalidation must be atomic with the resize itself.
         self.last_frame = None;
-        self.grid
-            .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
-        self.overlay.raise(GridSignals::OVERLAY);
+        self.pending.mark_geometry();
+        self.pending.mark_overlay();
     }
 
     /// Conservative repaint blanket. Drops `last_frame` so the next
     /// `paint_if_dirty` falls to `Fresh` — the cheaper `SlotsReuse` /
-    /// `Viewport` arms gate on `last_frame.is_some()`. Raises
-    /// `STRUCTURAL | OVERLAY` — explicitly *not* `CONTENT`, which is
-    /// reserved for real cell-value changes via `mark_content_dirty`.
+    /// `Viewport` arms gate on `last_frame.is_some()`. Adds geometry plus
+    /// overlay work; it never *adds* content work, which is reserved for
+    /// real cell-value changes via `mark_content_dirty`.
+    ///
+    /// Content and view work already queued is preserved rather than
+    /// cleared. Dropping it here would strand an edit that arrived earlier
+    /// in the same tick: the escalated `Fresh` frame would rebuild geometry
+    /// but skip the pane-cache invalidation that only content work
+    /// triggers, and repaint the stale cached values.
     pub fn request_repaint(&mut self) {
         self.last_frame = None;
-        self.pending_content = PaneRegionMask::EMPTY;
-        self.pending_damage = CellDamage::Clean;
-        self.grid
-            .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
-        self.overlay.raise(GridSignals::OVERLAY);
+        self.pending.mark_geometry();
+        self.pending.mark_overlay();
     }
 
     /// Bulk-push every overlay primitive in one comparison. The per-field
-    /// setters each raise OVERLAY independently; folding them into one
+    /// setters each mark overlay work independently; folding them into one
     /// pass lets the Leptos host's per-frame reactive memo cost a single
-    /// raise instead of four.
+    /// mark instead of four.
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
         if self.decos.set_overlays(overlays) {
-            self.overlay.raise(GridSignals::OVERLAY);
+            self.pending.mark_overlay();
         }
     }
 
     pub fn set_extend_to(&mut self, target: Option<AutofillTarget>) {
         if self.decos.set_extend_to(target) {
-            self.overlay.raise(GridSignals::OVERLAY);
+            self.pending.mark_overlay();
         }
     }
 
     pub fn set_clipboard(&mut self, area: Option<SheetArea>) {
         if self.decos.set_clipboard(area) {
-            self.overlay.raise(GridSignals::OVERLAY);
+            self.pending.mark_overlay();
         }
     }
 
     pub fn set_point_range(&mut self, range: Option<RCRange>) {
         if self.decos.set_point_range(range) {
-            self.overlay.raise(GridSignals::OVERLAY);
+            self.pending.mark_overlay();
         }
     }
 
     pub fn set_formula_refs(&mut self, refs: Vec<FormulaRef>) {
         if self.decos.set_formula_refs(refs) {
-            self.overlay.raise(GridSignals::OVERLAY);
+            self.pending.mark_overlay();
         }
     }
 
@@ -434,18 +439,18 @@ where
     /// built-in setters, nothing here compares state for you.
     pub fn add_decoration(&mut self, layer: Rc<dyn Layer>) -> DecorationId {
         let id = self.decos.add_custom(layer);
-        self.overlay.raise(GridSignals::OVERLAY);
+        self.pending.mark_overlay();
         id
     }
 
     /// Remove a custom decoration. Removal is explicit — a layer whose
     /// consumer handle was dropped still participates in the paint and hit
-    /// loops (as a no-op) until removed here. Raises `OVERLAY` only when
+    /// loops (as a no-op) until removed here. Marks overlay work only when
     /// the id was found, so a stale-id call cannot trigger a repaint.
     pub fn remove_decoration(&mut self, id: DecorationId) -> bool {
         let removed = self.decos.remove_custom(id);
         if removed {
-            self.overlay.raise(GridSignals::OVERLAY);
+            self.pending.mark_overlay();
         }
         removed
     }
@@ -461,10 +466,8 @@ where
         if theme != *self.theme {
             self.theme = Rc::new(theme);
             self.grid.invalidate_paint_cache();
-            self.grid
-                .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
-            self.overlay
-                .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
+            self.pending.mark_geometry();
+            self.pending.mark_overlay();
         }
     }
 
@@ -482,11 +485,15 @@ where
         // with the same scroll/sheet/freeze/size would otherwise reuse the
         // prev pane_set (stale row heights / column widths).
         self.last_frame = None;
-        self.pending_content = PaneRegionMask::EMPTY;
-        self.pending_damage = CellDamage::Clean;
-        self.grid
-            .raise(GridSignals::STRUCTURAL | GridSignals::OVERLAY);
-        self.overlay.raise(GridSignals::OVERLAY);
+        // The one setter that *discards* queued work instead of adding to
+        // it: rows and pane masks recorded against the outgoing model name
+        // nothing in the incoming one. Replaced wholesale by the
+        // worst-case value, which subsumes anything the old work could
+        // have asked for.
+        self.pending = PendingWork::default();
+        self.pending.mark_geometry();
+        self.pending.mark_panes(PaneRegionMask::ALL);
+        self.pending.mark_overlay();
     }
 
     /// Mark the overlay dirty. Selection, autofill, formula-ref, and
@@ -494,7 +501,7 @@ where
     /// freeze / sheet / size change is owned by `paint_if_dirty` via
     /// `is_still_valid`, not duplicated at the callsite.
     pub fn request_overlay_repaint(&mut self) {
-        self.overlay.raise(GridSignals::OVERLAY);
+        self.pending.mark_overlay();
     }
 
     /// Typed cell-content-changed signal. Marks the named panes' cached
@@ -503,18 +510,32 @@ where
     /// fixes the recalc bug where a formula dependent on an edited
     /// cell silently kept painting the stale cached value.
     pub fn mark_content_dirty(&mut self, mask: PaneRegionMask) {
-        self.pending_damage.poison();
-        self.pending_content |= mask;
-        self.grid.raise(GridSignals::CONTENT);
+        self.pending.mark_panes(mask);
     }
 
     /// Row-scoped `mark_content_dirty`: also names the damaged rows so
-    /// `decide` can clip the repaint to full-width bands. Degrades to the
-    /// pane-mask path whenever row info is incomplete (see `CellDamage`).
+    /// `decide` can clip the repaint to full-width bands. All escalation
+    /// (cross-sheet rows, span-count cap, meeting unscoped pane work)
+    /// belongs to `ContentWork`'s merge table, not to this callsite.
+    ///
+    /// No pane mask is recorded alongside the rows: row precision chooses
+    /// the `Damage` strategy, it does not narrow the affected pane set, and
+    /// every consumer that needs a mask from `Rows` reads `ALL`.
     pub fn mark_rows_damaged(&mut self, sheet: u32, span: RowSpan) {
-        self.pending_damage.add_rows(sheet, span);
-        self.pending_content |= PaneRegionMask::ALL;
-        self.grid.raise(GridSignals::CONTENT);
+        self.pending.mark_rows(sheet, span);
+    }
+
+    /// The view moved: scroll, selection, active cell, or sheet. Marks view
+    /// plus overlay atomically — a view change always repositions overlay
+    /// primitives, and splitting the two would let a caller queue movement
+    /// that never repaints the selection rectangle.
+    ///
+    /// Intent only. Whether the movement shifts pixels (`Viewport`), stays
+    /// inside the painted frame (`Overlay`), or needs a rebuild (`Fresh`) is
+    /// `decide`'s geometric verdict, not the caller's.
+    pub fn view_changed(&mut self) {
+        self.pending.mark_view();
+        self.pending.mark_overlay();
     }
 
     pub fn canvas_size(&self) -> CanvasSize {
@@ -718,16 +739,16 @@ where
     /// `Fresh`. The `match` is exhaustive — adding a regime breaks the
     /// build here by design.
     pub fn paint_if_dirty(&mut self) -> PaintResult {
-        // Model-absent -> return *before* draining. Draining a CONTENT bit
-        // raised before the first model push would lose its paired
-        // `pending_content` / `pending_damage` state, breaking the
-        // `pending_content ⟺ CONTENT` invariant the next real paint relies on.
+        // Model-absent -> return *before* taking. Work queued before the
+        // first model push describes cells nothing can paint yet; taking it
+        // here would drop it silently and leave the first real frame
+        // painting stale values.
         if self.model.is_none() {
             return PaintResult::Idle;
         }
-        let signals = self.grid.drain_signals() | self.overlay.drain_signals();
-        if signals.is_empty() {
-            // Nothing drained, model never taken — nothing to restore.
+        let work = std::mem::take(&mut self.pending);
+        if work.is_empty() {
+            // Nothing taken, model never taken — nothing to restore.
             return PaintResult::Idle;
         }
         // Lift the model out so the paint methods can take `&mut self`
@@ -738,77 +759,113 @@ where
         };
 
         let model_dyn: &dyn CanvasModel = model.as_ref();
-        let regime = self.decide(signals, model_dyn);
+        let regime = self.decide(&work, model_dyn);
         self.last_regime = Some(PaintRegimeTag::from(&regime));
         self.last_effective = self.last_regime;
-        self.last_signals = signals;
+        self.last_work_flags = work.flags();
         // Clear before dispatch so the trace describes this frame only. An
         // `Overlay` regime legitimately leaves every pane `None` — it never
         // calls a grid pane renderer.
         self.grid.renderer.reset_trace();
+        // Taking `work` above already consumed it: an arm that commits does
+        // nothing further, and only an arm that *holds* merges its own
+        // narrowed retry scope back into `self.pending`.
         let result = match regime {
             PaintRegime::Overlay => self.paint_overlay_regime(model_dyn),
-            PaintRegime::Viewport(plan) => self.paint_viewport_regime(model_dyn, plan),
-            PaintRegime::SlotsReuse { mask, signals } => {
-                self.paint_slots_reuse_regime(model_dyn, mask, signals)
+            PaintRegime::Viewport(plan) => self.paint_viewport_regime(model_dyn, plan, &work),
+            PaintRegime::SlotsReuse { mask } => {
+                self.paint_slots_reuse_regime(model_dyn, mask, &work)
             }
-            PaintRegime::Fresh(signals) => self.paint_fresh_regime(model_dyn, signals),
-            PaintRegime::Damage { spans, signals } => {
-                self.paint_damage_regime(model_dyn, spans, signals)
-            }
+            PaintRegime::Fresh => self.paint_fresh_regime(model_dyn, &work),
+            PaintRegime::Damage { spans } => self.paint_damage_regime(model_dyn, spans, &work),
         };
-        if result == PaintResult::Retry {
-            // Retained work: re-raise the drained word so the next tick
-            // re-enters dispatch without any new external signal. The arm
-            // owns `pending_content` / `pending_damage` on this path.
-            self.grid.raise(signals);
-        } else {
-            self.pending_content = PaneRegionMask::EMPTY;
-            self.pending_damage = CellDamage::Clean;
-        }
 
         self.last_trace = self.grid.renderer.trace();
         self.last_trace.regime = self.last_regime;
         self.last_trace.effective = self.last_effective;
-        self.last_trace.signals = signals;
+        self.last_trace.work = self.last_work_flags;
 
         // Single restore site.
         self.model = Some(model);
         result
     }
 
-    /// Classify which paint regime to run for the current state. Pure over
-    /// `&self`; arm methods own the mutation. The signal bits are consumed
-    /// by the caller via `drain_signals`, so we take them as a parameter
-    /// rather than re-reading the take-and-clear gate.
-    fn decide(&self, sig: GridSignals, model: &dyn CanvasModel) -> PaintRegime {
-        let content_dirty = sig.contains(GridSignals::CONTENT);
+    /// Retry requeue for a pane-local partial commit (`SlotsReuse`,
+    /// `Fresh`): only the held panes' content comes back. Overlay work is
+    /// deliberately not requeued — the overlay already painted and
+    /// presented on this frame, so re-marking it would repaint identical
+    /// pixels every tick until the bridge recovers.
+    ///
+    /// Merges rather than assigns: a producer may have queued new work
+    /// while this paint ran, and assignment would silently drop it.
+    fn requeue_held_panes(&mut self, held: PaneRegionMask) {
+        let mut retry = PendingWork::default();
+        retry.mark_panes(held);
+        self.pending.merge(retry);
+    }
+
+    /// Retry requeue for a held `Damage` strip: the original sheet and row
+    /// spans, so the next attempt keeps the band clipping instead of
+    /// escalating to a whole-pane walk. Same merge-not-assign rule as
+    /// [`Self::requeue_held_panes`].
+    fn requeue_held_rows(&mut self, sheet: u32, spans: &[RowSpan]) {
+        let mut retry = PendingWork::default();
+        for span in spans {
+            retry.mark_rows(sheet, *span);
+        }
+        self.pending.merge(retry);
+    }
+
+    /// Classify which paint regime to run for the attempted work. Pure over
+    /// `&self`; arm methods own the mutation. The work value is already
+    /// taken by the caller, so it arrives by reference rather than being
+    /// re-read from `self.pending`.
+    ///
+    /// Implements the Stage 2 dispatch matrix, cheapest arm first:
+    ///
+    /// | attempted work and live delta | regime |
+    /// | --- | --- |
+    /// | overlay only, reusable frame | `Overlay` |
+    /// | view only, real safe shift | `Viewport` |
+    /// | view only, no pixel shift, reusable frame | `Overlay` |
+    /// | view changes sheet or otherwise requires rebuild | `Fresh` |
+    /// | compatible row content, reusable frame | `Damage` |
+    /// | pane content, reusable frame | `SlotsReuse` |
+    /// | geometry, invalid frame, or no prior frame | `Fresh` |
+    /// | content plus view | `Fresh` |
+    fn decide(&self, work: &PendingWork, model: &dyn CanvasModel) -> PaintRegime {
         let validity = self
             .last_frame
             .as_ref()
             .map_or(FrameValidity::Rebuild, |f| {
                 f.is_still_valid(model, self.size, &self.theme)
             });
+        let reusable = matches!(validity, FrameValidity::SlotsReuse) && self.last_frame.is_some();
 
-        if !sig.grid_dirty()
-            && sig.overlay_dirty()
-            && matches!(validity, FrameValidity::SlotsReuse)
-            && self.last_frame.is_some()
-        {
-            return PaintRegime::Overlay;
-        }
-
-        // Blit detection is geometric: `screen_for_blit` diffs `last_frame`'s
-        // scroll/freeze/sheet/size against the model and returns a plan
-        // only on a real viewport shift. Gated on CONTENT (a blit on
-        // stale content propagates wrong pixels — the recalc bug) but
-        // not on a typed VIEWPORT signal: no JS-facing setter raises
-        // VIEWPORT today, so requiring it would dead-code this arm.
+        // Geometric viewport probe, attempted BEFORE the overlay arm.
+        // `screen_for_blit` diffs `last_frame`'s scroll/freeze/sheet/size
+        // against the model and returns a plan only on a real, safe shift,
+        // so a view request that moves no pixels costs one comparison and
+        // falls through. Running it ahead of `Overlay` is what keeps the
+        // matrix's two view rows distinguishable at all.
+        //
+        // Content and geometry both bar the probe. Content: blitting stale
+        // pixels over changed values is the recalc bug. Geometry: every
+        // current geometry producer either drops `last_frame` or changes a
+        // value `screen_for_blit` itself rejects on (size, theme), so this
+        // guard is redundant with that distributed proof today — it is here
+        // so a future geometry producer that doesn't happen to trip one of
+        // those paths can't silently make `Viewport` eligible. Nothing else
+        // bars the probe: an overlay-only wake still probes, because this
+        // is also the renderer's own correctness fallback for a host that
+        // moved the view without saying so.
+        //
         // Blit needs the previous frame's active-cell snapshot to re-hash
-        // against live state and reject the fast-path on a content change.
+        // against live state and reject the fast path on a content change.
         // Without a live selection there is nothing to re-hash, so the
-        // blit attempt is skipped entirely and dispatch falls through.
-        if !content_dirty
+        // attempt is skipped entirely and dispatch falls through.
+        if !work.has_content()
+            && !work.has_geometry()
             && let Some(active) = self.decos.selection().active_cell.as_ref()
             && let Some(frame) = self.last_frame.as_ref()
             && let Some(plan) = frame.screen_for_blit(model, self.size, &self.theme, active)
@@ -816,33 +873,63 @@ where
             return PaintRegime::Viewport(plan);
         }
 
-        // Damage fast path: viewport reusable, every CONTENT raise named its
+        // Overlay: cheapest arm, reuses `last_frame` and repaints only the
+        // overlay layer.
+        //
+        // The guard deliberately ignores `view`. The probe above already
+        // claimed every attempt whose pixels actually move, so a view mark
+        // surviving to here means the movement stayed inside the committed
+        // frame — ordinary arrow-key selection, the single most common
+        // interaction in the app. Adding `!work.has_view()` here (the
+        // mechanical port of the old `!sig.grid_dirty()`, whose bit group
+        // covered the then-dead VIEWPORT bit) would make the matrix's
+        // "view only, no pixel shift, reusable frame -> Overlay" row
+        // unreachable and turn every arrow key into a full-grid repaint.
+        // Only content and geometry exclude this fallback.
+        if (work.has_overlay() || work.has_view())
+            && !work.has_content()
+            && !work.has_geometry()
+            && reusable
+        {
+            return PaintRegime::Overlay;
+        }
+
+        // Damage fast path: viewport reusable, every content mark named its
         // rows, and they were recorded against the sheet still on screen.
-        // STRUCTURAL bars the arm — band-clipping must not paper over a
+        // Geometry bars the arm — band-clipping must not paper over a
         // geometry/theme change that happens to keep SlotsReuse validity.
-        if content_dirty
-            && !sig.contains(GridSignals::STRUCTURAL)
-            && matches!(validity, FrameValidity::SlotsReuse)
+        // So does view: a movement reaching this far needs more than the
+        // named bands re-derived (the matrix's content-plus-view row).
+        if !work.has_geometry()
+            && !work.has_view()
+            && reusable
             && let Some(frame) = self.last_frame.as_ref()
-            && let CellDamage::Rows { sheet, spans } = &self.pending_damage
+            && let ContentWork::Rows { sheet, spans } = work.content()
             && *sheet == frame.sheet
         {
             return PaintRegime::Damage {
                 spans: spans.clone(),
-                signals: sig,
             };
         }
 
-        if matches!(validity, FrameValidity::SlotsReuse) && self.last_frame.is_some() {
-            let mask = if content_dirty && !self.pending_content.is_empty() {
-                self.pending_content
-            } else {
-                PaneRegionMask::ALL
+        if !work.has_geometry() && !work.has_view() && reusable {
+            let mask = match work.content() {
+                ContentWork::Panes(mask) => *mask,
+                // Rows imply the whole grid whenever a pane mask is needed:
+                // row precision picks the `Damage` strategy, it never
+                // narrows the pane set. Reaching here means `Damage` was
+                // ineligible, so the fallback must stay whole-grid rather
+                // than intersect the spans with what happens to be visible.
+                ContentWork::Rows { .. } => PaneRegionMask::ALL,
+                // Overlay-only work on a reusable frame is claimed by the
+                // `Overlay` arm above; anything landing here without
+                // content is a conservative whole-grid refresh.
+                ContentWork::Clean => PaneRegionMask::ALL,
             };
-            return PaintRegime::SlotsReuse { mask, signals: sig };
+            return PaintRegime::SlotsReuse { mask };
         }
 
-        PaintRegime::Fresh(sig)
+        PaintRegime::Fresh
     }
 
     /// Overlay-only fast path. Triggered by autofill drag, clipboard state
@@ -875,7 +962,12 @@ where
     /// *is* the dispatch — the `FreshFallback` arm takes the full repaint with
     /// cache invalidation, instead of a `paint_grid_blit` that would carry
     /// stale per-pane caches against the freshly rebuilt slot vecs.
-    fn paint_viewport_regime(&mut self, model: &dyn CanvasModel, plan: BlitPlan) -> PaintResult {
+    fn paint_viewport_regime(
+        &mut self,
+        model: &dyn CanvasModel,
+        plan: BlitPlan,
+        work: &PendingWork,
+    ) -> PaintResult {
         let Some(prev) = self.last_frame.take() else {
             return PaintResult::Idle;
         };
@@ -891,6 +983,11 @@ where
                     BlitPaint::Held
                 ) {
                     self.last_frame = Some(restore);
+                    // Whole-frame hold: the preflight aborted before a
+                    // pixel shifted, so nothing at all was committed and
+                    // the entire attempt must come back — including the
+                    // overlay mark, which never painted on this frame.
+                    self.pending.merge(work.clone());
                     return PaintResult::Retry;
                 }
                 frame
@@ -931,7 +1028,7 @@ where
         &mut self,
         model: &dyn CanvasModel,
         spans: Vec<RowSpan>,
-        signals: GridSignals,
+        work: &PendingWork,
     ) -> PaintResult {
         let Some(prev) = self.last_frame.take() else {
             return PaintResult::Idle;
@@ -949,9 +1046,9 @@ where
         let held = self.grid.paint_grid_damage(model, &frame, &spans);
         self.grid.present();
         self.decos.refresh_overlay_state(model);
-        // CONTENT is implied in this arm, so the active-cell-repaint hook
-        // fires unconditionally — same reasoning as the SlotsReuse arm.
-        if signals.overlay_dirty() || self.decos.active_cell_repaint().is_some() {
+        // Content work is implied in this arm, so the active-cell-repaint
+        // hook fires unconditionally — same reasoning as the SlotsReuse arm.
+        if work.has_overlay() || self.decos.active_cell_repaint().is_some() {
             self.overlay.paint_overlay_layer(
                 model,
                 &frame,
@@ -963,11 +1060,12 @@ where
         }
         self.last_frame = Some(frame);
         if !held.is_empty() {
-            self.pending_content = held;
-            self.pending_damage = CellDamage::Rows {
-                sheet: frame_sheet,
-                spans: spans.clone(),
-            };
+            // Pane-local partial commit: the healthy bands painted and
+            // presented, so only the original row scope returns. Requeued
+            // as rows, not as the held pane mask — keeping the bands is
+            // what lets the retry stay clipped instead of escalating to a
+            // whole-pane walk.
+            self.requeue_held_rows(frame_sheet, &spans);
             return PaintResult::Retry;
         }
         PaintResult::Painted
@@ -983,7 +1081,7 @@ where
         &mut self,
         model: &dyn CanvasModel,
         mask: PaneRegionMask,
-        signals: GridSignals,
+        work: &PendingWork,
     ) -> PaintResult {
         let Some(prev) = self.last_frame.take() else {
             return PaintResult::Idle;
@@ -1002,17 +1100,17 @@ where
         let held = self.grid.paint_grid(model, &frame);
         self.grid.present();
         // Refresh the selection snapshot unconditionally: even on a
-        // CONTENT-only signal the grid just repainted with new values,
+        // content-only attempt the grid just repainted with new values,
         // so the next paint's `screen_for_blit` must compare against
         // the post-edit hash.
         self.decos.refresh_overlay_state(model);
         // Active-cell-repaint hook paints model-derived pixels on the
-        // overlay — so CONTENT implies OVERLAY when an active cell exists.
-        // Without this, DEL on the active cell clears the model but the
-        // overlay still shows the old value on top of the grid.
-        let must_paint_overlay = signals.overlay_dirty()
-            || (signals.contains(GridSignals::CONTENT)
-                && self.decos.active_cell_repaint().is_some());
+        // overlay — so content work implies overlay work when an active
+        // cell exists. Without this, DEL on the active cell clears the
+        // model but the overlay still shows the old value on top of the
+        // grid.
+        let must_paint_overlay = work.has_overlay()
+            || (work.has_content() && self.decos.active_cell_repaint().is_some());
         if must_paint_overlay {
             self.overlay.paint_overlay_layer(
                 model,
@@ -1027,7 +1125,7 @@ where
         if !held.is_empty() {
             // Pane-local partial commit (see plan contract): painted panes
             // presented; held panes keep prior pixels. Retain failed scope.
-            self.pending_content = held;
+            self.requeue_held_panes(held);
             return PaintResult::Retry;
         }
         PaintResult::Painted
@@ -1036,23 +1134,33 @@ where
     /// Full grid repaint. Slot vecs walked fresh from the model; the new
     /// vecs make any cross-frame fingerprint compare meaningless, so every
     /// pane repaints. Selected when slot vecs diverged or no prior frame.
-    /// The `CONTENT` bit gates `PaneCache` invalidation: a content edit
-    /// escalated to Fresh (e.g. via concurrent scroll) means the cache's
-    /// range-matched buffers may now be stale against the new slot vecs.
-    fn paint_fresh_regime(&mut self, model: &dyn CanvasModel, signals: GridSignals) -> PaintResult {
+    ///
+    /// Content work gates `PaneCache` invalidation: an edit escalated to
+    /// Fresh (e.g. via a concurrent scroll) means the cache's range-matched
+    /// buffers may now be stale against the new slot vecs. View work gates
+    /// it for a distinct reason — pane-buffer ranges carry row/column
+    /// coordinates but no sheet identity, so a view change that lands here
+    /// because it switched the active sheet must not let a cached range be
+    /// treated as describing the new sheet.
+    ///
+    /// Both clauses are belt-and-braces against the *cache*, not the fetch:
+    /// `render_pane` bulk-fetches unconditionally on a non-slots-reuse
+    /// frame, so neither clause changes what this frame reads from the
+    /// model today. They exist so the invariant holds if a future stage
+    /// teaches the Fresh path to adopt a range-matched buffer.
+    fn paint_fresh_regime(&mut self, model: &dyn CanvasModel, work: &PendingWork) -> PaintResult {
         let prev = self.last_frame.take();
         let frame = Chrome::next(prev, model, self.size, &self.theme, FramePath::Fresh);
 
-        if signals.contains(GridSignals::CONTENT) {
+        if work.has_content() || work.has_view() {
             self.grid.invalidate_pane_cache(PaneRegionMask::ALL);
         }
         self.grid.invalidate_paint_cache();
         let held = self.grid.paint_grid(model, &frame);
         self.grid.present();
         self.decos.refresh_overlay_state(model);
-        let must_paint_overlay = signals.overlay_dirty()
-            || (signals.contains(GridSignals::CONTENT)
-                && self.decos.active_cell_repaint().is_some());
+        let must_paint_overlay = work.has_overlay()
+            || (work.has_content() && self.decos.active_cell_repaint().is_some());
         if must_paint_overlay {
             self.overlay.paint_overlay_layer(
                 model,
@@ -1065,7 +1173,7 @@ where
         }
         self.last_frame = Some(frame);
         if !held.is_empty() {
-            self.pending_content = held;
+            self.requeue_held_panes(held);
             return PaintResult::Retry;
         }
         PaintResult::Painted

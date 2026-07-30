@@ -222,14 +222,15 @@ impl IronCanvas {
     /// can clip the repaint to those bands (typing, single-cell edit,
     /// recalc diff). Degrades to the full content path automatically when
     /// damage info is incomplete. Rows are inclusive, order-insensitive
-    /// (`CellDamage::add_rows` normalizes reversed spans), in the same row
-    /// coordinates the model bridge uses; rows outside the viewport
-    /// intersect to nothing at paint time and cost nothing.
+    /// (`PendingWork::mark_rows` normalizes reversed spans via
+    /// `RowSpan::normalized`), in the same row coordinates the model bridge
+    /// uses; rows outside the viewport intersect to nothing at paint time
+    /// and cost nothing.
     #[wasm_bindgen(js_name = "markRowsDamaged")]
     pub fn mark_rows_damaged(&mut self, sheet: u32, row_start: i32, row_end: i32) {
         self.orch.mark_rows_damaged(
             sheet,
-            iron_canvas_core::signal::RowSpan {
+            iron_canvas_core::RowSpan {
                 r1: row_start,
                 r2: row_end,
             },
@@ -549,6 +550,16 @@ impl IronCanvas {
         self.orch.request_overlay_repaint();
     }
 
+    /// The view moved: scroll, selection, active cell, or sheet. Marks view
+    /// plus overlay atomically — see `Orchestrator::view_changed`. Intent
+    /// only: whether the movement shifts pixels, stays inside the painted
+    /// frame, or needs a rebuild is the next `paintIfDirty`'s geometric
+    /// verdict, not the caller's.
+    #[wasm_bindgen(js_name = "viewChanged")]
+    pub fn view_changed_js(&mut self) {
+        self.orch.view_changed();
+    }
+
     /// Autofill drag target. Pass `null` to clear (drag ended / cancelled).
     #[wasm_bindgen(js_name = "setExtendTo")]
     pub fn set_extend_to_js(&mut self, target: JsValue) -> Result<(), JsError> {
@@ -715,6 +726,15 @@ impl IronCanvas {
         self.orch.request_overlay_repaint();
     }
 
+    /// The view moved: scroll, selection, active cell, or sheet. Marks view
+    /// plus overlay atomically — see `Orchestrator::view_changed`. Intent
+    /// only: whether the movement shifts pixels, stays inside the painted
+    /// frame, or needs a rebuild is the next `paint_if_dirty`'s geometric
+    /// verdict, not the caller's.
+    pub fn view_changed(&mut self) {
+        self.orch.view_changed();
+    }
+
     /// Drain the per-frame op buffers, push a `Frame` (skipping empty
     /// ones), update the running cap estimate, fire soft-warn / hard-cap
     /// side effects.
@@ -730,7 +750,7 @@ impl IronCanvas {
             return;
         }
         let regime = self.orch.last_regime().unwrap_or(PaintRegimeTag::Fresh);
-        let signals = self.orch.last_signals().bits();
+        let signals = self.orch.last_work_flags().bits();
         let CanvasMode::Recording(state) = &mut self.mode else {
             return;
         };

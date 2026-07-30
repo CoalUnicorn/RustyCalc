@@ -263,7 +263,7 @@
                         if (idx === active) btn.classList.add("active");
                         btn.addEventListener("click", () => {
                             model.setSelectedSheet(idx);
-                            canvas.requestRepaint();
+                            canvas.viewChanged();
                             renderTabs();
                         });
                         tabsEl.appendChild(btn);

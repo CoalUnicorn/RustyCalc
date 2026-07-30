@@ -15,7 +15,7 @@ The shippable artifact for non-spreadsheet consumers. Composes `datagrid` (data)
 - `DataGridCanvas` (`#[wasm_bindgen]`) — the whole JS API:
   - **data**: `setData`, `setCell`, `appendRows`
   - **layout**: `resize`, `setFrozenHeader`, `setColumnWidth`, `resizeHandleAt`
-  - **scroll**: `setScroll`, `scrollBy`
+  - **scroll**: `setScroll`, `scrollBy` (both mark view movement via the core `view_changed()` API internally)
   - **selection / hit-test**: `hitTest`, `selectCell`, `setSelection`
   - **custom overlay**: `setHover`
   - **sort**: `sortByColumn`, `clearSort`, `currentSort`

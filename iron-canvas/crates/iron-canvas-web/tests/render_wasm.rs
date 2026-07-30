@@ -69,6 +69,15 @@ fn model_with_methods(methods: &[(&str, &js_sys::Function)]) -> JsBackedModel {
     let Ok(_) = js_sys::Reflect::set(&obj, &JsValue::from_str("getSelectedView"), &view) else {
         panic!("set getSelectedView on plain object");
     };
+    // Most engine call sites read the sheet via this standalone accessor
+    // rather than `getSelectedView`'s embedded `sheet` field; every fixture
+    // in this file pins sheet 0, so a missing accessor here silently throws
+    // and falls back to 0 without ever failing a test.
+    let get_sheet = js_sys::Function::new_no_args("return 0;");
+    let Ok(_) = js_sys::Reflect::set(&obj, &JsValue::from_str("getSelectedSheet"), &get_sheet)
+    else {
+        panic!("set getSelectedSheet on plain object");
+    };
     for (name, f) in methods {
         let Ok(_) = js_sys::Reflect::set(&obj, &JsValue::from_str(name), f) else {
             panic!("set model method on plain object");
@@ -186,6 +195,15 @@ fn make_fixture_model(store: FixtureStore) -> JsValue {
         "return { sheet: 0, row: 1, column: 1, range: [1, 1, 1, 1], top_row: 1, left_column: 1 };",
     );
     set_prop(&obj, "getSelectedView", &view);
+    // Most engine call sites read the sheet via this standalone accessor
+    // rather than `getSelectedView`'s embedded `sheet` field; this fixture
+    // pins sheet 0, so a missing accessor here silently throws and falls
+    // back to 0 without ever failing a test.
+    set_prop(
+        &obj,
+        "getSelectedSheet",
+        &js_sys::Function::new_no_args("return 0;"),
+    );
     set_prop(
         &obj,
         "getFrozenRowsCount",
@@ -399,7 +417,7 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
 
     controls.top_row.set(2);
     controls.fail_from_row.set(Some(revealed_row));
-    canvas.request_overlay_repaint();
+    canvas.view_changed();
 
     assert_eq!(
         canvas.paint_if_dirty(),
@@ -674,5 +692,162 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
         grid_pixels(&fresh_grid),
         "a DPR-only resize must self-invalidate so a bare paintIfDirty() after it matches a \
          forced-fresh render at the new DPR, with no requestRepaint() needed"
+    );
+}
+
+// ==============================================================================
+// Task 3 (Stage 2): the `view_changed()` / `viewChanged()` API and its
+// dispatch-matrix guarantees — a navigation-only notification still wakes a
+// paint, a no-shift notification never touches grid pixels, and a sheet
+// switch at identical coordinates can't reuse the wrong sheet's cached text.
+// ==============================================================================
+
+/// Acceptance criterion: `view_changed()` alone — no scroll, no content
+/// change — still wakes `paint_if_dirty()` (proving navigation-only intent
+/// reaches a paint attempt instead of going `Idle`), and because nothing
+/// actually shifted on screen the dispatch matrix's `Overlay` fallback
+/// applies: the GRID canvas's pixels must be untouched. Only the overlay
+/// layer (selection rectangle, etc.) may have repainted.
+#[wasm_bindgen_test]
+fn view_changed_wakes_a_paint_without_shifting_grid_pixels() {
+    let (mut canvas, grid) = canvas_over(plain_fixture_store());
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted); // baseline
+    let baseline_pixels = grid_pixels(&grid);
+
+    canvas.view_changed();
+    assert_eq!(
+        canvas.paint_if_dirty(),
+        JsPaintResult::Painted,
+        "view_changed() alone must wake the next paint_if_dirty(), not go Idle"
+    );
+    assert_eq!(
+        grid_pixels(&grid),
+        baseline_pixels,
+        "a view notification with no pixel shift must not repaint the grid layer"
+    );
+}
+
+/// Duck-typed model whose active sheet is driven by a shared `Cell` and
+/// whose formatted value is a pure function of `(sheet, row, col)` — the
+/// same (row, col) coordinates resolve to a DIFFERENT string per sheet.
+/// Every other fixture in this file pins `sheet: 0` throughout; this is the
+/// one axis that needs to vary to prove pane buffers don't survive a sheet
+/// switch at identical visible coordinates.
+fn make_active_sheet_fixture_model(active_sheet: Rc<Cell<u32>>) -> JsValue {
+    let obj = js_sys::Object::new();
+
+    let view_sheet = Rc::clone(&active_sheet);
+    let get_view = Closure::wrap(Box::new(move || -> JsValue {
+        let view = js_sys::Object::new();
+        set_value_prop(&view, "sheet", &JsValue::from(view_sheet.get()));
+        set_value_prop(&view, "row", &JsValue::from(1i32));
+        set_value_prop(&view, "column", &JsValue::from(1i32));
+        let range = js_sys::Array::new();
+        for value in [1i32, 1, 1, 1] {
+            range.push(&JsValue::from(value));
+        }
+        set_value_prop(&view, "range", &range.into());
+        set_value_prop(&view, "top_row", &JsValue::from(1i32));
+        set_value_prop(&view, "left_column", &JsValue::from(1i32));
+        view.into()
+    }) as Box<dyn Fn() -> JsValue>);
+    set_prop(&obj, "getSelectedView", get_view.as_ref().unchecked_ref());
+    get_view.forget();
+
+    // `getSelectedView`'s embedded `sheet` field is not the same call the
+    // engine uses everywhere else: chrome building, selection decoration,
+    // autofit, slot geometry, and the renderer all call the standalone
+    // `getSelectedSheet()` accessor directly. Every other fixture in this
+    // file pins sheet 0 throughout, so an unimplemented `getSelectedSheet`
+    // silently throwing-and-defaulting to 0 was never observable before
+    // this fixture — here it must track the same `active_sheet` cell.
+    let selected_sheet = Rc::clone(&active_sheet);
+    let get_sheet =
+        Closure::wrap(Box::new(move || -> u32 { selected_sheet.get() }) as Box<dyn Fn() -> u32>);
+    set_prop(&obj, "getSelectedSheet", get_sheet.as_ref().unchecked_ref());
+    get_sheet.forget();
+
+    set_prop(
+        &obj,
+        "getFrozenRowsCount",
+        &js_sys::Function::new_no_args("return 0;"),
+    );
+    set_prop(
+        &obj,
+        "getFrozenColumnsCount",
+        &js_sys::Function::new_no_args("return 0;"),
+    );
+    set_prop(
+        &obj,
+        "getShowGridLines",
+        &js_sys::Function::new_no_args("return true;"),
+    );
+
+    let get_style = Closure::wrap(Box::new(|_sheet: u32, _row: i32, _col: i32| -> JsValue {
+        let Ok(value) = serde_wasm_bindgen::to_value(&ic::Style::default()) else {
+            panic!("default fixture Style always serializes");
+        };
+        value
+    }) as Box<dyn Fn(u32, i32, i32) -> JsValue>);
+    set_prop(&obj, "getCellStyle", get_style.as_ref().unchecked_ref());
+    get_style.forget();
+
+    let get_type = Closure::wrap(Box::new(|_sheet: u32, _row: i32, _col: i32| -> i32 {
+        ic::CellType::Text as i32
+    }) as Box<dyn Fn(u32, i32, i32) -> i32>);
+    set_prop(&obj, "getCellType", get_type.as_ref().unchecked_ref());
+    get_type.forget();
+
+    // Pure function of the live (sheet, row, col) the bridge passes on every
+    // call — no shared store needed, since the engine always queries with
+    // whichever sheet is currently active.
+    let get_value = Closure::wrap(Box::new(|sheet: u32, row: i32, col: i32| -> String {
+        format!("sheet{sheet}-r{row}c{col}")
+    }) as Box<dyn Fn(u32, i32, i32) -> String>);
+    set_prop(
+        &obj,
+        "getFormattedCellValue",
+        get_value.as_ref().unchecked_ref(),
+    );
+    get_value.forget();
+
+    obj.into()
+}
+
+/// Regression test for the Stage 2 global constraint: "pane-buffer ranges
+/// do not carry sheet identity, so an active-sheet change with identical
+/// coordinates must not reuse the prior sheet's values." Both sheets show
+/// the exact same visible (row, col) window — only the active-sheet id
+/// differs — so a cache keyed on screen position alone (not sheet) would
+/// silently keep painting sheet 0's text after switching to sheet 1.
+#[wasm_bindgen_test]
+fn active_sheet_change_repaints_new_sheets_values_at_identical_coordinates() {
+    let active_sheet = Rc::new(Cell::new(0u32));
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
+        panic!("create IronCanvas");
+    };
+    let Ok(()) = canvas.setModel(make_active_sheet_fixture_model(Rc::clone(&active_sheet))) else {
+        panic!("active-sheet fixture model passes the duck test");
+    };
+    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted); // sheet 0 baseline
+    let sheet0_pixels = grid_pixels(&grid);
+
+    active_sheet.set(1);
+    canvas.view_changed(); // sheet switch: view changed, same coordinates
+    assert_eq!(
+        canvas.paint_if_dirty(),
+        JsPaintResult::Painted,
+        "an active-sheet change must reach a paint"
+    );
+    let sheet1_pixels = grid_pixels(&grid);
+
+    assert_ne!(
+        sheet1_pixels, sheet0_pixels,
+        "identical visible coordinates on a different sheet must repaint with that sheet's \
+         own values — a stale pane buffer keyed only on screen position would silently keep \
+         painting sheet 0's text"
     );
 }

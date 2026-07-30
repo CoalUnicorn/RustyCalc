@@ -10,12 +10,12 @@ mod common;
 
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::CanvasSize;
+use iron_canvas_core::RowSpan;
 use iron_canvas_core::chrome::{
     ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, PaneRegion, PaneRegionMask,
 };
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
-use iron_canvas_core::signal::RowSpan;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
     BlitPaneWork, PaneBlitAddressWork, PaneShiftPrep, PaneVerdict, widen_blit_strip_to_pixel_clip,
@@ -1355,8 +1355,9 @@ fn prepare_shift_rotates_column_buffers() {
 //
 // The orchestrator's public setters cannot manufacture a genuine
 // `pane_buf.range` mismatch: the `Damage` regime only dispatches while
-// `pending_damage` holds `Rows{..}`, and that state can only become fresh
-// again after a fully successful prior paint — which itself re-populates
+// the pending content holds `ContentWork::Rows{..}`, and that state can
+// only become fresh again after a fully successful prior paint — which
+// itself re-populates
 // every touched pane's cached range in lockstep with the frame it just
 // built. Driven directly here instead: a virgin `RendererCore` has never
 // set `pane_buf.range` at all, so the very first `render_pane_damage` call

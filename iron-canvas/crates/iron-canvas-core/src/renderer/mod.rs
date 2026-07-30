@@ -4,17 +4,18 @@
 //!
 //! `Orchestrator<S>` (in [`crate::orchestrator`]) owns two
 //! [`LayerBase<S, R>`](crate::layer::LayerBase) values: one for the grid,
-//! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::layer::Surface),
-//! a [`PaintGate`](crate::layer::PaintGate), and a layer-specific renderer
-//! wrapping [`RendererCore`]. In the wasm build the surface is
+//! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::layer::Surface)
+//! and a layer-specific renderer wrapping [`RendererCore`] — and no dirty
+//! state of its own. In the wasm build the surface is
 //! `iron_canvas_canvas2d::WebSurface`; the grid context uses `alpha: false`
 //! (opaque, skips alpha compositing) and the overlay uses
 //! `alpha: true, desynchronized: true`. The renderer is long-lived per
 //! layer, so the painter's cached fill/stroke/font/line-width state
 //! survives across frames.
 //!
-//! State pushes from the host mark layers dirty. `Orchestrator::paint_if_dirty`
-//! drives each dirty layer through its `LayerBase` paint method:
+//! State pushes from the host mark work on `Orchestrator`'s single pending
+//! value. `Orchestrator::paint_if_dirty` picks a regime from it and drives
+//! the layers that regime paints through their `LayerBase` paint method:
 //! `paint_grid` / `paint_grid_blit` for the grid, `paint_overlay_layer`
 //! for the overlay. The grid path calls into [`RendererCore::render_grid`];
 //! the overlay path iterates the [`Layer`](crate::decoration::Layer)
@@ -23,7 +24,7 @@
 //!
 //! # Render pipeline
 //!
-//! Two paint entry points, each driven by `paint_if_dirty` per dirty layer:
+//! Two paint entry points, each driven by `paint_if_dirty` per regime:
 //!
 //! - [`RendererCore::render_grid`] paints cells (four frozen-pane
 //!   quadrants, each running five cell sub-passes: bg, then CF decoration,
@@ -76,9 +77,9 @@ use crate::CanvasModel;
 pub use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome, PaneRegionMask};
 use crate::geometry::prim::Axis;
+use crate::pending_work::RowSpan;
 use crate::renderer::blit_work::widen_blit_strip_to_pixel_clip;
 use crate::renderer::cache::{FrameCache, PaneCache, PaneShiftPrep};
-use crate::signal::RowSpan;
 pub use cache::ColorIntern;
 pub use cache::FontIntern;
 
