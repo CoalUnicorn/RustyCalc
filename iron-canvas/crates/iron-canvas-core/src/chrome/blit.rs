@@ -1,21 +1,22 @@
 //! Single-axis scroll blit fast-path: detection, plan construction, and
 //! Chrome reuse around a `Painter::blit` shift.
 //!
-//! `Chrome::screen_for_blit` (mod.rs) screens the disqualifiers (sheet / freeze /
-//! canvas / theme / active-cell mismatch, two-axis scroll); on a viable
-//! scroll it delegates to `try_blit_rows` / `try_blit_cols` here, which
-//! return a `BlitPlan` if the geometry checks out. The orchestrator then
-//! calls `Chrome::next_blit(.., &plan)`, which routes through
-//! `try_blit_reuse` to construct the next frame in place — kept band
-//! carries forward, only the strip hits the model.
+//! `Chrome::classify` (mod.rs) screens the disqualifiers (sheet / freeze /
+//! canvas / DPR / theme / model generation / headers / active-cell mismatch,
+//! two-axis scroll); on a viable single-axis scroll it delegates to
+//! `try_blit_rows` / `try_blit_cols` here, which return a `BlitPlan` if the
+//! geometry checks out. The orchestrator then calls `Chrome::next_blit(..,
+//! &plan)`, which routes through `try_blit_reuse` to construct the next
+//! frame in place — kept band carries forward, only the strip hits the
+//! model.
 
 use std::rc::Rc;
 
+use crate::CanvasModel;
+use crate::frame_plan::FrameInputs;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::geometry::slot::{AxisSlots, RowSlot, scroll_first};
-use crate::theme::CanvasTheme;
-use crate::{CanvasModel, CanvasSize};
 
 use super::blit_rebuild::ShiftDir;
 use super::{Chrome, FrameKindTag, PaneRegion, PaneRegionMask, PaneSet, measure_row_header_width};
@@ -207,15 +208,18 @@ pub enum FramePath {
     /// `prev = None` is the first-frame path.
     Fresh,
     /// Reuse prev's slot vecs verbatim; refresh per-frame state only
-    /// (theme). `stale_panes` is caller-supplied so a `SlotsReuse`
-    /// following a blit doesn't inherit the blit's narrow strip mask and
-    /// silently skip a content repaint. Requires `prev = Some`.
-    SlotsReuse { stale_panes: PaneRegionMask },
+    /// (theme). Carries no pane mask: which panes need repainting is the
+    /// caller's `GridWork` verdict, threaded straight into `render_grid` as
+    /// an explicit parameter instead of living on the constructed `Chrome` —
+    /// so a `SlotsReuse` following a blit can never inherit the blit's
+    /// narrow shift mask by way of stale `Chrome` state. Requires
+    /// `prev = Some`.
+    SlotsReuse,
 }
 
 // Scroll-blit helpers
 //
-// `screen_for_blit` already disqualified anything that isn't a pure single-axis
+// `Chrome::classify` already disqualified anything that isn't a pure single-axis
 // scroll. These helpers compute the canvas-pixel src/dst/strip rects and
 // verify the kept band's row heights (col widths) match what the model
 // still reports — that is the final qualification that the shifted pixels
@@ -250,13 +254,18 @@ fn blit_row_header_thickness(scroll_rows: &[RowSlot], frozen_rows_count: i32, ne
 pub(super) fn try_blit_reuse(
     mut prev: Chrome,
     model: &dyn CanvasModel,
-    canvas: CanvasSize,
-    theme: &Rc<CanvasTheme>,
+    inputs: &FrameInputs,
     plan: &BlitPlan,
 ) -> Result<Chrome, Chrome> {
-    let Some(view) = model.get_selected_view() else {
-        return Err(prev);
-    };
+    // `inputs.view()` is this attempt's one already-validated read (see
+    // `Chrome::build`'s comment) — no `None`/fallback branch needed here.
+    let view = inputs.view();
+    let canvas = inputs.size();
+    // `prev.sheet` is the committed sheet this frame is reused against — used
+    // both for the scroll-axis rebuild below and the header-label resolution
+    // further down, so it is read once here rather than twice. `Chrome::classify`
+    // already proved `inputs.sheet() == prev.sheet` before producing `plan`.
+    let sheet = prev.sheet;
     let frozen_rows_count = prev.pane_set.rows.frozen_count();
     let frozen_cols_count = prev.pane_set.cols.frozen_count();
     let new_top = scroll_first(frozen_rows_count, view.top_row);
@@ -276,7 +285,7 @@ pub(super) fn try_blit_reuse(
         Axis::Row => {
             let rows = match prev
                 .pane_set
-                .rebuild_rows_for_row_scroll(model, new_top, canvas)
+                .rebuild_rows_for_row_scroll(model, sheet, new_top, canvas)
             {
                 Some(rows) => rows,
                 None => return Err(prev),
@@ -291,7 +300,7 @@ pub(super) fn try_blit_reuse(
         Axis::Column => {
             let cols = match prev
                 .pane_set
-                .rebuild_cols_for_col_scroll(model, new_left, canvas)
+                .rebuild_cols_for_col_scroll(model, sheet, new_left, canvas)
             {
                 Some(cols) => cols,
                 None => return Err(prev),
@@ -311,7 +320,6 @@ pub(super) fn try_blit_reuse(
     // The scroll-axis vec changed under the blit, so its labels must be
     // re-resolved; rebuilding both keeps the parallel-vec invariant trivially
     // correct. Shares resolution with Chrome::build via PaneSet::resolve_*.
-    let sheet = prev.sheet;
     let row_header_labels =
         PaneSet::resolve_row_labels(model, sheet, &prev.pane_set.rows.frozen, &scroll_rows);
     let col_header_labels =
@@ -336,14 +344,14 @@ pub(super) fn try_blit_reuse(
         col_header_labels,
     };
 
-    // The panes named in `plan.shift_panes()` route through
+    // `plan.shift_panes()` names the panes `render_grid_blit` visits — the
+    // orchestrator threads it straight from the `BlitPlan` it already holds,
+    // so `Chrome` itself needs no pane-scope field. Those panes route through
     // `render_pane_blit` -> `render_pane_strip`, which invalidates its own
     // pane's painted-fingerprint tree unconditionally on every strip paint
     // (`PaneCache`, not `Chrome`, owns that state — see `pane_cache.rs`).
     // Untouched panes keep their painted tree and short-circuit on the
     // next frame's compare via a digest match.
-    let stale = plan.shift_panes();
-
     Ok(Chrome {
         sheet: prev.sheet,
         pane_set,
@@ -351,9 +359,12 @@ pub(super) fn try_blit_reuse(
         col_header_thickness: prev.col_header_thickness,
         cell_origin: prev.cell_origin,
         canvas_size: canvas,
-        theme: Rc::clone(theme),
+        theme: Rc::clone(inputs.theme()),
+        dpr: inputs.dpr(),
+        model_generation: inputs.model_generation(),
+        show_row_headers: inputs.show_row_headers(),
+        show_col_headers: inputs.show_col_headers(),
         kind: FrameKindTag::Blitted,
-        stale_panes: stale,
     })
 }
 

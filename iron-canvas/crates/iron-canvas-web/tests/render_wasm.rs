@@ -59,8 +59,9 @@ use iron_canvas_web::CanvasModel;
 use iron_canvas_web::wasm::JsBackedModel;
 use wasm_bindgen::JsValue;
 
-/// Minimal duck-typed model handle: `try_from_js_value` only requires
-/// `getSelectedView`; extra methods are supplied per test.
+/// Minimal duck-typed model handle: `try_from_js_value` requires
+/// `getSelectedView`, `getSelectedSheet`, `getFrozenRowsCount`, and
+/// `getFrozenColumnsCount`; extra methods are supplied per test.
 fn model_with_methods(methods: &[(&str, &js_sys::Function)]) -> JsBackedModel {
     let obj = js_sys::Object::new();
     let view = js_sys::Function::new_no_args(
@@ -77,6 +78,25 @@ fn model_with_methods(methods: &[(&str, &js_sys::Function)]) -> JsBackedModel {
     let Ok(_) = js_sys::Reflect::set(&obj, &JsValue::from_str("getSelectedSheet"), &get_sheet)
     else {
         panic!("set getSelectedSheet on plain object");
+    };
+    // `try_from_js_value` requires these two structurally alongside
+    // `getSelectedSheet`/`getSelectedView` (Stage 3 Task 1) — every fixture
+    // in this file is unfrozen, so both return `0`.
+    let get_frozen_rows = js_sys::Function::new_no_args("return 0;");
+    let Ok(_) = js_sys::Reflect::set(
+        &obj,
+        &JsValue::from_str("getFrozenRowsCount"),
+        &get_frozen_rows,
+    ) else {
+        panic!("set getFrozenRowsCount on plain object");
+    };
+    let get_frozen_cols = js_sys::Function::new_no_args("return 0;");
+    let Ok(_) = js_sys::Reflect::set(
+        &obj,
+        &JsValue::from_str("getFrozenColumnsCount"),
+        &get_frozen_cols,
+    ) else {
+        panic!("set getFrozenColumnsCount on plain object");
     };
     for (name, f) in methods {
         let Ok(_) = js_sys::Reflect::set(&obj, &JsValue::from_str(name), f) else {
@@ -280,7 +300,7 @@ struct ScrollFailureControls {
 
 /// Build the same fixture with a live scroll origin and a controllable invalid
 /// style payload from a chosen row onward. Keeping the active cell outside
-/// those rows lets `screen_for_blit` approve the Viewport plan; decoding then
+/// those rows lets `Chrome::classify` approve the Viewport plan; decoding then
 /// yields `BridgeFailed` during revealed-strip preflight, where the transaction
 /// must hold.
 fn make_scroll_failure_fixture_model(
@@ -849,5 +869,82 @@ fn active_sheet_change_repaints_new_sheets_values_at_identical_coordinates() {
         "identical visible coordinates on a different sheet must repaint with that sheet's \
          own values — a stale pane buffer keyed only on screen position would silently keep \
          painting sheet 0's text"
+    );
+}
+
+// ==============================================================================
+// Stage 3 Task 1: `FrameInputs::capture` failure holds the whole paint
+// attempt (no ops, `Retry`); the recovered attempt paints on the very next
+// `paintIfDirty()` alone, with no further host signal — the retry contract
+// merges the original queued work back into `pending` rather than requiring
+// the host to re-raise it.
+// ==============================================================================
+
+/// Build the plain fixture model, then replace `getSelectedSheet` with a
+/// genuine JS closure (via `eval`, not a Rust `Closure`, so the throw is
+/// unambiguous JS-runtime behavior rather than relying on wasm-bindgen's
+/// `Result`-return glue) that throws exactly once and returns `0` on every
+/// call after.
+fn make_sheet_throws_once_fixture_model(store: FixtureStore) -> JsValue {
+    let model = make_fixture_model(store);
+    let obj: js_sys::Object = model.unchecked_into();
+
+    let throws_once_factory = "\
+        (function () { \
+            var thrown = false; \
+            return function () { \
+                if (thrown) { return 0; } \
+                thrown = true; \
+                throw new Error('simulated getSelectedSheet bridge failure (throws once)'); \
+            }; \
+        })()";
+    let Ok(get_sheet) = js_sys::eval(throws_once_factory) else {
+        panic!("eval must build the throws-once getSelectedSheet closure");
+    };
+    let get_sheet: js_sys::Function = get_sheet.unchecked_into();
+    set_prop(&obj, "getSelectedSheet", &get_sheet);
+
+    obj.into()
+}
+
+#[wasm_bindgen_test]
+fn selected_sheet_bridge_failure_holds_then_recovers_without_another_signal() {
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
+        panic!("create IronCanvas");
+    };
+    let Ok(()) = canvas.setModel(make_sheet_throws_once_fixture_model(plain_fixture_store()))
+    else {
+        panic!("sheet-throws-once fixture model passes the duck test");
+    };
+    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+
+    assert_eq!(
+        canvas.paint_if_dirty(),
+        JsPaintResult::Retry,
+        "a getSelectedSheet throw during capture must hold the first paint attempt"
+    );
+    assert!(
+        grid_pixels(&grid).iter().all(|&b| b == 0),
+        "a held capture-failure attempt must emit no grid ops at all — the backing store \
+         stays exactly as `resize` left it"
+    );
+    assert!(
+        canvas.cell_rect(1, 1).is_none(),
+        "no committed frame exists yet, so query geometry must still answer None"
+    );
+
+    // No `view_changed()` / `markContentDirty()` / `requestRepaint()` call
+    // here: the retry contract merges the original queued work back into
+    // `pending`, so the very next `paintIfDirty()` alone must recover.
+    assert_eq!(
+        canvas.paint_if_dirty(),
+        JsPaintResult::Painted,
+        "the recovered attempt must paint without another invalidation call"
+    );
+    assert!(
+        !grid_pixels(&grid).iter().all(|&b| b == 0),
+        "the recovered paint must actually draw the grid"
     );
 }

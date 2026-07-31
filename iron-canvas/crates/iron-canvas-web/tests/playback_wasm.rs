@@ -226,9 +226,9 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     };
 
     top_row.set(2); // scroll by one row
-    // `view_changed()` declares the navigation intent; `decide` still
-    // detects the actual scroll geometrically via `screen_for_blit` and
-    // picks the Viewport (blit) regime — this call only wakes dispatch.
+    // `view_changed()` declares the navigation intent; `Chrome::classify`
+    // still detects the actual scroll geometrically, then `plan_frame` picks
+    // the Viewport (blit) regime — this call only wakes dispatch.
     canvas.view_changed_js();
     canvas.paint_if_dirty(); // must land the Viewport (blit) regime
 

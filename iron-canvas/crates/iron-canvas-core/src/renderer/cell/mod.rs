@@ -496,7 +496,7 @@ impl<P: Painter> RendererCore<P> {
         // Clear readiness left over from a prior frame so a stale slot can
         // never feed this frame's paint.
         self.clear_blit_stage_readiness();
-        for pane in frame.stale_panes.regions() {
+        for pane in plan.shift_panes().regions() {
             let Some(work) = self.plan_preflight_strip(frame, plan, pane) else {
                 // Not shift-and-strippable, so `render_grid_blit` hands this
                 // pane to the full `render_pane` — but only AFTER
@@ -622,9 +622,10 @@ impl<P: Painter> RendererCore<P> {
         ))
     }
 
-    /// Decide whether the frame may still proceed given a `stale_panes` pane
-    /// the preflight could not stage a strip for. `true` = keep going, `false`
-    /// = abandon the whole frame (no shift, no paint).
+    /// Decide whether the frame may still proceed given a pane the blit
+    /// needs to shift (named by `plan.shift_panes()`) that the preflight
+    /// could not stage a strip for. `true` = keep going, `false` = abandon
+    /// the whole frame (no shift, no paint).
     ///
     /// Why this needs deciding at all: `paint_grid_blit` shifts pixels for
     /// every rect in `plan.shifts` — including this pane's — and only then does

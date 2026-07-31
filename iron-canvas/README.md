@@ -248,9 +248,52 @@ Selection, autofill preview, clipboard ants, point-mode, and formula-ref outline
 
 ### Per-frame snapshot and dispatch
 
-`Chrome` has two construction paths. `Chrome::next(prev, model, canvas, theme, path)` handles `FramePath::Fresh` and `FramePath::SlotsReuse`; the pure-scroll fast path is `Chrome::next_blit(.., &BlitPlan) -> BlitOutcome`. The resulting `Chrome` is the single source of truth for hit-test geometry.
+`Chrome` is committed frame geometry — canvas size, DPR, theme, model
+generation, sheet, pane slot vecs, header thicknesses — and nothing
+else. It does not carry pending paint scope (no pane mask, no row
+spans): that scope is decided fresh every attempt and passed explicitly
+into the painting call, never read back off `Chrome`. It has two
+construction paths: `Chrome::next(prev, model, inputs, path)` — where
+`inputs: &FrameInputs` is the captured snapshot below — handles
+`FramePath::Fresh` and `FramePath::SlotsReuse`; the pure-scroll fast
+path is `Chrome::next_blit(.., &BlitPlan) -> BlitOutcome`. The resulting
+`Chrome` is the single source of truth for hit-test geometry.
 
-`paint_if_dirty` (on `Orchestrator`; `IronCanvas::paintIfDirty` delegates to it) takes the single queued `PendingWork` value (`self.pending`, via one `mem::take`) and dispatches to one of five regimes in cheapness order. `Overlay` repaints the overlay only and skips the grid rebuild. `Viewport` runs the scroll blit. `Damage` repaints only explicitly damaged row bands while preserving slot geometry. `SlotsReuse` keeps the viewport stable and refetches only the masked panes. `Fresh` is the full rebuild — the only arm reached when content and view work are both queued together (e.g. commit-then-move on Enter/Tab). A held attempt (`PaintResult::Retry`) merges its failed scope back into `self.pending` — see `ARCHITECTURE.md`'s "Retry contract" for which regime retries which way.
+`paint_if_dirty` (on `Orchestrator`; `IronCanvas::paintIfDirty`
+delegates to it) takes the single queued `PendingWork` value
+(`self.pending`, via one `mem::take`) and runs it through
+`PendingWork -> FrameInputs -> FrameDelta -> FramePlan` before any of
+the five regimes execute:
+
+1. `FrameInputs::capture` reads every scalar the frame needs (selected
+   sheet, selected view, frozen counts, header visibility, selection
+   visibility) exactly once. `CanvasModel::get_selected_sheet()` returns
+   `Option<u32>` — a JS-bridge failure is `None`, never a silent `0` —
+   and every other scalar read here is equally fallible except
+   selection visibility (`get_show_selection`, default `true`,
+   infallible by design). Any failure holds the whole attempt: the
+   taken `PendingWork` merges back into `self.pending` unmodified,
+   nothing paints or presents, and `paint_if_dirty` returns
+   `PaintResult::Retry`. There is no synthetic-default fallback.
+2. `Chrome::classify(prev, model, &inputs, active_cell)` compares the
+   captured inputs against the committed `Chrome` and returns one
+   `FrameDelta`: `Stable`, `Scroll(BlitPlan)`, or
+   `Rebuild(RebuildReason)`.
+3. `plan_frame` turns the taken `PendingWork` plus the `FrameDelta`
+   into one `FramePlan`, whose `grid: GridWork` field dispatches to one
+   of five regimes in cheapness order. `Overlay` repaints the overlay
+   only and skips the grid rebuild. `Viewport` runs the scroll blit.
+   `Damage` repaints only explicitly damaged row bands while preserving
+   slot geometry. `SlotsReuse` keeps the viewport stable and refetches
+   only the masked panes. `Fresh` is the full rebuild — the only arm
+   reached when content and view work are both queued together (e.g.
+   commit-then-move on Enter/Tab).
+
+A held attempt (`PaintResult::Retry`) merges its failed scope back into
+`self.pending` — either the whole attempt (a capture failure, above) or
+a per-regime partial scope — so the caller can just call
+`paint_if_dirty` again next tick with no new external input needed. See
+`docs/rendering-and-damage.md` for the full decision-machinery writeup.
 
 ### Pane pipeline and theme
 

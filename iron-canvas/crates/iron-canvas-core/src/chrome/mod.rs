@@ -12,7 +12,7 @@
 //! and both axis walks must finish before E assembles the shared `cell_origin`.
 //!
 //! ```text
-//! A  frozen counts   model.get_frozen_{rows,columns}_count(sheet)
+//! A  frozen counts   inputs.frozen_rows() / inputs.frozen_cols()
 //! B  row walk        PaneSet::with_recycled(recycled).fill_rows(..)
 //! C  measure r.h.t.  row_header_thickness = measure_row_header_width(last_visible_row)
 //! D  col walk        pane_set.fill_cols(..)   // origin_x = row_header_thickness + CELL_AREA_INSET
@@ -20,14 +20,17 @@
 //! ```
 //!
 //! `SlotsReuse` skips the walk: it keeps the previous slot vecs and refreshes
-//! only per-frame state. `Chrome::is_still_valid` decides between the two
-//! by comparing the previous frame's `sheet`, `canvas_size`, frozen counts, and
-//! `scroll_first` against the current signals; any divergence forces `Fresh`.
+//! only per-frame state. `Chrome::classify` decides between `Stable` (skip
+//! the walk entirely), `Scroll` (blit fast-path), and `Rebuild` (full
+//! `Fresh` walk) by comparing the previous frame's committed geometry
+//! metadata against the newly captured `FrameInputs`; any hard-break
+//! divergence — or a scroll with no safe kept overlap — forces `Rebuild`.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
+use crate::frame_plan::{FrameDelta, FrameInputs, RebuildReason};
 use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
     pixel_rect::PixelRect,
@@ -36,7 +39,7 @@ use crate::geometry::{
 };
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
-use crate::{CanvasModel, CanvasSize, CanvasView, RCRange};
+use crate::{CanvasModel, CanvasSize, RCRange};
 
 mod blit;
 mod blit_rebuild;
@@ -59,8 +62,8 @@ pub use recycled_slots::RecycledSlots;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CellValueHash(u64);
 
-/// Snapshot of the active cell at paint time. `screen_for_blit` re-hashes the
-/// live model's value at the stored coords; a mismatch means the cell
+/// Snapshot of the active cell at paint time. `Chrome::classify` re-hashes
+/// the live model's value at the stored coords; a mismatch means the cell
 /// was edited since this `Chrome` was painted, and the blit's kept band
 /// would carry stale pixels. Catches the canonical edit-then-scroll case
 /// without requiring the consumer to call `markContentDirty`.
@@ -126,7 +129,7 @@ pub struct Chrome {
     /// Top-left of the cell area; single source of truth for hit-test
     /// and viewport math.
     pub cell_origin: Point,
-    /// Canvas size at build time. `is_still_valid` reads this to detect
+    /// Canvas size at build time. `Chrome::classify` reads this to detect
     /// a resize.
     pub canvas_size: CanvasSize,
     /// Theme this frame was painted with. The renderer reads `frame.theme`
@@ -137,31 +140,24 @@ pub struct Chrome {
     /// every color `String` — `Chrome` is rebuilt on every Fresh/SlotsReuse/
     /// Blit frame (B-1).
     pub theme: Rc<CanvasTheme>,
+    /// Device pixel ratio this frame was captured with. Committed geometry
+    /// metadata, not a live orchestrator read — lets `Chrome::classify`
+    /// detect a DPR change by comparing committed frames only.
+    pub dpr: f64,
+    /// `Orchestrator::model_generation` at capture time. Committed so
+    /// `Chrome::classify` can detect a `set_model` replacement without
+    /// comparing trait-object pointers.
+    pub model_generation: u64,
+    /// Row/column header visibility captured with this frame. Both already
+    /// determine `row_header_thickness`/`col_header_thickness` at build
+    /// time; committing the source booleans too keeps them available to
+    /// `Chrome::classify` without re-deriving them from thickness alone.
+    pub show_row_headers: bool,
+    pub show_col_headers: bool,
     /// Which constructor produced this frame. Renderer diagnostics and
     /// paint-skip gating read it; `FrameKindTag::reuses_slots()` is the
     /// "slot vecs inherited from prev" predicate.
     pub kind: FrameKindTag,
-    /// Which panes `render_grid` must paint this frame. `FramePath::Fresh`
-    /// sets this to `ALL`; the blit path (`try_blit_reuse`) narrows it to the
-    /// panes the `BlitPlan` shifts (cross-axis panes left intact are excluded);
-    /// `FramePath::SlotsReuse { stale_panes }` takes it from the caller so
-    /// it never inherits a prior `Blitted` frame's narrow mask.
-    pub stale_panes: PaneRegionMask,
-}
-
-/// Outcome of comparing a cached `Chrome` against the live model.
-/// Per-pane skipping happens later inside `render_pane` via the
-/// fingerprint compare; this verdict only gates slot-vec reuse.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[must_use = "FrameValidity gates slot-vec reuse; dropping the verdict will force a wrong dispatch later"]
-pub enum FrameValidity {
-    /// Slot vecs match the live model. Caller may reuse `last_frame`
-    /// directly; `render_pane` will fingerprint-skip per pane.
-    SlotsReuse,
-    /// Slot vecs diverged (scroll / freeze / sheet / canvas size).
-    /// Caller must call `Chrome::next` with `FramePath::Fresh` for a
-    /// full rebuild.
-    Rebuild,
 }
 
 /// Outcome of [`Chrome::next_blit`]. The blit construction has exactly two
@@ -188,9 +184,11 @@ impl Chrome {
     ///   * `Fresh` — full rebuild. `prev = Some` recycles slot Vec
     ///     allocations; `None` is the first-frame path. See the
     ///     [module docs](crate::chrome) for build phases A-E.
-    ///   * `SlotsReuse` — prev's slot vecs survive verbatim; only
-    ///     per-frame state (theme) is refreshed. Caller refreshes overlay
-    ///     state separately (`SelectionLayer::refresh` in the orchestrator).
+    ///   * `SlotsReuse` — prev's slot vecs and header labels survive
+    ///     verbatim; only the captured per-attempt scalars (theme, dpr,
+    ///     model generation, header visibility) are refreshed. Caller
+    ///     refreshes overlay state separately (`SelectionLayer::refresh` in
+    ///     the orchestrator).
     ///
     /// `SlotsReuse` requires `prev = Some`; `None` falls through to `Fresh`
     /// defensively. The orchestrator proves `prev.is_some()` before selecting
@@ -198,8 +196,7 @@ impl Chrome {
     pub fn next(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
-        canvas: CanvasSize,
-        theme: &Rc<CanvasTheme>,
+        inputs: &FrameInputs,
         path: FramePath,
     ) -> Self {
         match path {
@@ -208,15 +205,25 @@ impl Chrome {
                     Some(c) => RecycledSlots::from_pane_set(c.pane_set),
                     None => RecycledSlots::default(),
                 };
-                Self::build(model, canvas, theme, recycled)
+                Self::build(model, inputs, recycled)
             }
-            FramePath::SlotsReuse { stale_panes } => {
+            FramePath::SlotsReuse => {
                 let Some(mut prev) = prev else {
-                    return Self::next(None, model, canvas, theme, FramePath::Fresh);
+                    return Self::next(None, model, inputs, FramePath::Fresh);
                 };
-                prev.theme = Rc::clone(theme);
+                // Slot vecs and header labels survive verbatim; every other
+                // per-attempt scalar still refreshes from the newly captured
+                // inputs so committed Chrome never lags behind the frame it
+                // was actually built for. Which panes actually need
+                // repainting is the caller's `GridWork` verdict — threaded
+                // straight into `render_grid` as an explicit parameter, not
+                // stored here.
+                prev.theme = Rc::clone(inputs.theme());
+                prev.dpr = inputs.dpr();
+                prev.model_generation = inputs.model_generation();
+                prev.show_row_headers = inputs.show_row_headers();
+                prev.show_col_headers = inputs.show_col_headers();
                 prev.kind = FrameKindTag::SlotsReused;
-                prev.stale_panes = stale_panes;
                 prev
             }
         }
@@ -225,8 +232,8 @@ impl Chrome {
     /// Build the next-frame `Chrome` for the blit fast-path, returning a typed
     /// [`BlitOutcome`] rather than a `Chrome` with an open `FrameKindTag`.
     ///
-    /// Qualification passed (`screen_for_blit` returned a plan), but in-place
-    /// reuse may still reject — e.g. the row-header digit boundary at 99 -> 100,
+    /// Qualification passed (`Chrome::classify` returned `FrameDelta::Scroll`),
+    /// but in-place reuse may still reject — e.g. the row-header digit boundary at 99 -> 100,
     /// where `row_header_thickness` widens and the cross-axis cell-area origin
     /// shifts. `try_blit_reuse` hands `prev` back (`Err`) on reject, and we
     /// rebuild `Fresh`. The two results map straight to the two `BlitOutcome`
@@ -235,70 +242,46 @@ impl Chrome {
     pub fn next_blit(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
-        canvas: CanvasSize,
-        theme: &Rc<CanvasTheme>,
+        inputs: &FrameInputs,
         plan: &BlitPlan,
     ) -> BlitOutcome {
         let Some(prev) = prev else {
-            return BlitOutcome::FreshFallback(Self::next(
-                None,
-                model,
-                canvas,
-                theme,
-                FramePath::Fresh,
-            ));
+            return BlitOutcome::FreshFallback(Self::next(None, model, inputs, FramePath::Fresh));
         };
-        match blit::try_blit_reuse(prev, model, canvas, theme, plan) {
+        match blit::try_blit_reuse(prev, model, inputs, plan) {
             Ok(frame) => BlitOutcome::Blitted(frame),
-            Err(prev) => BlitOutcome::FreshFallback(Self::next(
-                Some(prev),
-                model,
-                canvas,
-                theme,
-                FramePath::Fresh,
-            )),
+            Err(prev) => {
+                BlitOutcome::FreshFallback(Self::next(Some(prev), model, inputs, FramePath::Fresh))
+            }
         }
     }
 
-    fn build(
-        model: &dyn CanvasModel,
-        canvas: CanvasSize,
-        theme: &Rc<CanvasTheme>,
-        recycled: RecycledSlots,
-    ) -> Self {
-        // None -> JS bridge transient (threw or shape malformed). Fall through
-        // with the fresh-model default so the frame still builds; next animation
-        // frame re-queries.
-        let view = model.get_selected_view().unwrap_or(CanvasView {
-            sheet: 0,
-            row: 1,
-            column: 1,
-            selection: RCRange {
-                r1: 1,
-                c1: 1,
-                r2: 1,
-                c2: 1,
-            },
-            top_row: 1,
-            left_column: 1,
-        });
-        let sheet = model.get_selected_sheet();
+    fn build(model: &dyn CanvasModel, inputs: &FrameInputs, recycled: RecycledSlots) -> Self {
+        // `inputs` is a `FrameInputs::capture` snapshot: sheet, view, freeze
+        // counts, and header visibility already read exactly once and
+        // validated (a bridge failure on any of them holds the whole paint
+        // attempt before `Chrome::build` is ever called — see
+        // `Orchestrator::paint_if_dirty`). No fallback default is needed or
+        // read here.
+        let view = inputs.view();
+        let sheet = inputs.sheet();
 
         // Visibility is modelled as thickness 0. CELL_AREA_INSET only reserves
         // the 1-px chrome border that draw_corner_box strokes; a hidden strip
         // paints no such border, so its thickness AND inset collapse to 0 and
         // cells reclaim the full edge (cell_origin follows from origin_x/_y).
-        let show_row = model.get_show_row_headers(sheet).unwrap_or(true);
-        let show_col = model.get_show_col_headers(sheet).unwrap_or(true);
+        let show_row = inputs.show_row_headers();
+        let show_col = inputs.show_col_headers();
 
-        // Phase A — frozen counts only.
-        let frozen_row_count = model.get_frozen_rows_count(sheet).unwrap_or(0);
-        let frozen_col_count = model.get_frozen_columns_count(sheet).unwrap_or(0);
+        // Phase A — frozen counts, already captured.
+        let frozen_row_count = inputs.frozen_rows();
+        let frozen_col_count = inputs.frozen_cols();
 
         let mut pane_set = PaneSet::with_recycled(recycled);
 
         // Phase B — row walk, bounded by the model's grid (Excel's
         // LAST_ROW/LAST_COLUMN by default; finite models override).
+        let canvas = inputs.size();
         let last_row = model.last_row(sheet);
         let last_column = model.last_column(sheet);
         let origin_y = if show_col {
@@ -308,6 +291,7 @@ impl Chrome {
         };
         pane_set.fill_rows(
             model,
+            sheet,
             frozen_row_count,
             origin_y,
             view.top_row,
@@ -336,6 +320,7 @@ impl Chrome {
         };
         pane_set.fill_cols(
             model,
+            sheet,
             frozen_col_count,
             origin_x,
             view.left_column,
@@ -365,102 +350,138 @@ impl Chrome {
             col_header_thickness,
             cell_origin,
             canvas_size: canvas,
-            theme: Rc::clone(theme),
+            theme: Rc::clone(inputs.theme()),
+            dpr: inputs.dpr(),
+            model_generation: inputs.model_generation(),
+            show_row_headers: show_row,
+            show_col_headers: show_col,
             kind: FrameKindTag::Fresh,
-            // Full repaint by default. `try_blit_reuse` (via `Chrome::next_blit`)
-            // overrides this when scroll-blit narrows the work.
-            stale_panes: PaneRegionMask::ALL,
         }
     }
 
-    /// Verdict on the cached frame's slot-vec inputs against the live
-    /// model. Per-pane content skipping happens later (inside
-    /// `render_pane`) via the fingerprint compare; this method only
-    /// decides whether the slot vecs themselves can be reused.
-    pub fn is_still_valid(
-        &self,
-        model: &dyn CanvasModel,
-        size: CanvasSize,
-        theme: &Rc<CanvasTheme>,
-    ) -> FrameValidity {
-        // Theme is frame-wide: a palette change makes every cached pixel stale,
-        // so reuse is invalid. Checked here (symmetric with `screen_for_blit`)
-        // rather than out-of-band in `set_theme`, so theme-safety is a property
-        // of the validity verdict, not of setter discipline.
-        if size != self.canvas_size || theme != &self.theme {
-            return FrameValidity::Rebuild;
-        }
-        let Some(view) = model.get_selected_view() else {
-            return FrameValidity::Rebuild;
-        };
-        let sheet = model.get_selected_sheet();
-        let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
-        let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        let want_top = scroll_first(frozen_rows, view.top_row);
-        let want_left = scroll_first(frozen_cols, view.left_column);
-        if self.pane_set.top_row() != want_top || self.pane_set.left_column() != want_left {
-            return FrameValidity::Rebuild;
-        }
-        if frozen_rows == self.pane_set.rows.frozen_count()
-            && frozen_cols == self.pane_set.cols.frozen_count()
-            && sheet == self.sheet
-        {
-            FrameValidity::SlotsReuse
-        } else {
-            FrameValidity::Rebuild
-        }
-    }
-
-    /// Decide whether the live model represents a pure single-axis
-    /// scroll over `self`. On success returns the geometric plan for a
-    /// `Painter::blit` shift of the kept band plus the strip to repaint;
-    /// on any other change (sheet, freeze, theme, canvas size, two-axis
-    /// scroll, overlap row-height change, scroll past viewport) returns
-    /// `None` and the caller falls through to `Chrome::next` with
-    /// `FramePath::Fresh` for a full rebuild.
+    /// The one classifier that replaces the former split verdict
+    /// (`FrameValidity` from `is_still_valid`, `Option<BlitPlan>` from
+    /// `screen_for_blit`) with a single three-way [`FrameDelta`].
+    /// `Chrome::next`/`Chrome::next_blit`'s own dispatch is unchanged; the
+    /// orchestrator passes this verdict through `plan_frame` to the regime
+    /// executor.
     ///
-    /// `self` is the *previous* frame's snapshot — the model arg supplies
-    /// the live state to compare against.
-    pub fn screen_for_blit(
-        &self,
+    /// `prev = None` (no committed frame — right after a `resize`, or
+    /// before the first paint) is itself the first ordered comparison, not
+    /// a caller precondition. Every later comparison assumes a committed
+    /// frame to compare against, in this fixed order (stable so a given
+    /// divergence always reports under the same `RebuildReason`, even when
+    /// several fields changed in the same tick):
+    ///
+    /// 1. no committed frame -> `NoCommittedFrame`
+    /// 2. canvas size -> `Size`
+    /// 3. DPR -> `Dpr`
+    /// 4. theme -> `Theme`
+    /// 5. model generation -> `Model`
+    /// 6. sheet -> `Sheet`
+    /// 7. frozen row/column counts -> `Freeze`
+    /// 8. header visibility -> `Headers`
+    /// 9. effective top/left scroll origin (see below)
+    ///
+    /// Steps 1-8 are hard breaks — any divergence rebuilds outright, the
+    /// same theme/canvas-size/sheet/freeze rejections `is_still_valid` and
+    /// `screen_for_blit` used to duplicate across two functions, plus the
+    /// DPR/model-generation/header comparisons neither of them made.
+    ///
+    /// Step 9 is not itself a hard break; it forks the geometric scroll
+    /// question:
+    ///
+    /// - neither axis moved -> `Stable` (slot vecs, and everything painted
+    ///   from them, are reusable as-is);
+    /// - both axes moved -> `Rebuild(TwoAxisScroll)` (no single blit shift
+    ///   expresses a diagonal scroll);
+    /// - exactly one axis moved:
+    ///   - no committed active-cell snapshot to re-hash against ->
+    ///     `Rebuild(MissingActiveSnapshot)`;
+    ///   - the snapshot's value no longer matches the live model
+    ///     (edit-then-scroll), or either read is unknown (`BridgeFailed`) ->
+    ///     `Rebuild(ActiveCellChangedOrUnknown)`;
+    ///   - the axis-specific overlap probe finds a safe kept band ->
+    ///     `Scroll(plan)`;
+    ///   - otherwise -> `Rebuild(IncompatibleScrollOverlap)`.
+    ///
+    /// Reads `model` only for the two checks that were always live-model
+    /// reads, never part of `FrameInputs`: the active-cell re-hash and the
+    /// overlap probe's row-height/col-width lookups. Never builds a
+    /// `Chrome`, mutates cache state, calls a painter, or fetches pane
+    /// content — qualification only. Construction (and its own independent
+    /// reject, e.g. the row-header digit boundary) stays in
+    /// `Chrome::next_blit`.
+    pub fn classify(
+        prev: Option<&Chrome>,
         model: &dyn CanvasModel,
-        canvas: CanvasSize,
-        theme: &Rc<CanvasTheme>,
-        active_cell: &ActiveCellSnapshot,
-    ) -> Option<BlitPlan> {
-        if canvas != self.canvas_size || theme != &self.theme {
-            return None;
+        inputs: &FrameInputs,
+        active_cell: Option<&ActiveCellSnapshot>,
+    ) -> FrameDelta {
+        let Some(prev) = prev else {
+            return FrameDelta::Rebuild(RebuildReason::NoCommittedFrame);
+        };
+        if inputs.size() != prev.canvas_size {
+            return FrameDelta::Rebuild(RebuildReason::Size);
         }
-        let sheet = model.get_selected_sheet();
-        if sheet != self.sheet {
-            return None;
+        if inputs.dpr() != prev.dpr {
+            return FrameDelta::Rebuild(RebuildReason::Dpr);
         }
-        let frozen_rows = model.get_frozen_rows_count(sheet).unwrap_or(0);
-        let frozen_cols = model.get_frozen_columns_count(sheet).unwrap_or(0);
-        if frozen_rows != self.pane_set.rows.frozen_count()
-            || frozen_cols != self.pane_set.cols.frozen_count()
+        if inputs.theme() != &prev.theme {
+            return FrameDelta::Rebuild(RebuildReason::Theme);
+        }
+        if inputs.model_generation() != prev.model_generation {
+            return FrameDelta::Rebuild(RebuildReason::Model);
+        }
+        let sheet = inputs.sheet();
+        if sheet != prev.sheet {
+            return FrameDelta::Rebuild(RebuildReason::Sheet);
+        }
+        let frozen_rows = inputs.frozen_rows();
+        let frozen_cols = inputs.frozen_cols();
+        if frozen_rows != prev.pane_set.rows.frozen_count()
+            || frozen_cols != prev.pane_set.cols.frozen_count()
         {
-            return None;
+            return FrameDelta::Rebuild(RebuildReason::Freeze);
         }
-        let view = model.get_selected_view()?;
+        if inputs.show_row_headers() != prev.show_row_headers
+            || inputs.show_col_headers() != prev.show_col_headers
+        {
+            return FrameDelta::Rebuild(RebuildReason::Headers);
+        }
+
+        let view = inputs.view();
         let new_top = scroll_first(frozen_rows, view.top_row);
         let new_left = scroll_first(frozen_cols, view.left_column);
-        let old_top = self.pane_set.top_row();
-        let old_left = self.pane_set.left_column();
-        // Defensive content check: if the cell we painted as active no
-        // longer matches the live model, the blit's kept band would
-        // shift pre-edit pixels (canonical edit-then-scroll bug when
-        // consumer missed `markContentDirty`). Snapshot is sourced from
-        // `SelectionLayer` by the orchestrator.
-        if !active_cell.matches(model, sheet) {
-            return None;
-        }
-        match (new_top != old_top, new_left != old_left) {
-            (true, false) => blit::try_blit_rows(self, model, sheet, new_top),
-            (false, true) => blit::try_blit_cols(self, model, sheet, new_left),
-            // (false, false): caller already filtered no-op scrolls.
-            // (true, true): two-axis scroll has no single-shift plan.
-            (false, false) | (true, true) => None,
+        let top_changed = new_top != prev.pane_set.top_row();
+        let left_changed = new_left != prev.pane_set.left_column();
+
+        match (top_changed, left_changed) {
+            (false, false) => FrameDelta::Stable,
+            (true, true) => FrameDelta::Rebuild(RebuildReason::TwoAxisScroll),
+            _ => {
+                // Defensive content check: if the cell painted as active no
+                // longer matches the live model, the blit's kept band would
+                // shift pre-edit pixels (canonical edit-then-scroll bug when
+                // the consumer missed `markContentDirty`). An absent snapshot
+                // (nothing captured yet this attempt) can't be re-hashed at
+                // all, so it gets its own, more specific reason.
+                let Some(active) = active_cell else {
+                    return FrameDelta::Rebuild(RebuildReason::MissingActiveSnapshot);
+                };
+                if !active.matches(model, sheet) {
+                    return FrameDelta::Rebuild(RebuildReason::ActiveCellChangedOrUnknown);
+                }
+                let plan = if top_changed {
+                    blit::try_blit_rows(prev, model, sheet, new_top)
+                } else {
+                    blit::try_blit_cols(prev, model, sheet, new_left)
+                };
+                match plan {
+                    Some(plan) => FrameDelta::Scroll(plan),
+                    None => FrameDelta::Rebuild(RebuildReason::IncompatibleScrollOverlap),
+                }
+            }
         }
     }
 

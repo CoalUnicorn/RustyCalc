@@ -12,24 +12,44 @@ use iron_canvas_core::CanvasModel;
 use iron_canvas_core::CanvasSize;
 use iron_canvas_core::RowSpan;
 use iron_canvas_core::chrome::{
-    ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, PaneRegion, PaneRegionMask,
+    ActiveCellSnapshot, BlitOutcome, BlitPlan, Chrome, FrameKindTag, FramePath, PaneRegion,
+    PaneRegionMask,
 };
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
-    BlitPaneWork, PaneBlitAddressWork, PaneShiftPrep, PaneVerdict, widen_blit_strip_to_pixel_clip,
+    BlitPaneWork, FrameDelta, FrameInputs, PaneBlitAddressWork, PaneShiftPrep, PaneVerdict,
+    RebuildReason, widen_blit_strip_to_pixel_clip,
 };
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{TestModel, canvas_default as canvas};
+use common::{TestModel, canvas_default as canvas, test_inputs};
 
-/// Capture an `ActiveCellSnapshot` from the model's view. After B2
-/// `screen_for_blit` takes the snapshot as a parameter; tests source it
-/// here instead of reading it off `Chrome`.
+/// Capture an `ActiveCellSnapshot` from the model's view. `Chrome::classify`
+/// takes the snapshot as a parameter; tests source it here instead of
+/// reading it off `Chrome`.
 fn snap(m: &TestModel) -> ActiveCellSnapshot {
     let view = m.get_selected_view().expect("scroll model has view");
-    ActiveCellSnapshot::capture(m, m.get_selected_sheet(), view.row, view.column)
+    ActiveCellSnapshot::capture(m, view.sheet, view.row, view.column)
+}
+
+/// Classify `prev` against `m`'s live state via the captured `inputs` and
+/// `m`'s current active-cell snapshot, panicking with `msg` unless the
+/// delta actually qualifies for a scroll-blit. Every test below drives the
+/// same qualify-then-blit sequence `Chrome::classify` (qualification) +
+/// `Chrome::next_blit` (construction) replaced `screen_for_blit` +
+/// `next_blit` with.
+fn qualify_scroll(
+    prev: &Chrome,
+    m: &TestModel,
+    inputs: &FrameInputs,
+    msg: &'static str,
+) -> BlitPlan {
+    match Chrome::classify(Some(prev), m, inputs, Some(&snap(m))) {
+        FrameDelta::Scroll(plan) => plan,
+        _ => panic!("{msg}"),
+    }
 }
 
 fn count_blits(ops: &[DrawOp]) -> usize {
@@ -57,29 +77,28 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     let canvas = canvas();
 
     // Frame 0 at top_row=1.
-    let frame0 = Chrome::next(
-        None,
-        &m,
-        canvas,
-        &theme,
-        iron_canvas_core::chrome::FramePath::Fresh,
-    );
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     let baseline_ops = core.painter().ops().len();
 
     // Scroll by 1 row -> top_row=2.
     m.set_top_row(2);
 
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("single-row scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs,
+        "single-row scroll must qualify for blit",
+    );
 
     // Simulate the orchestrator's blit fast-path on the same core so
     // the pane cache state carries across frames.
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
     issue_blits(core.painter(), &plan);
@@ -125,21 +144,20 @@ fn scroll_past_viewport_disqualifies_blit() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(
-        None,
-        &m,
-        canvas,
-        &theme,
-        iron_canvas_core::chrome::FramePath::Fresh,
-    );
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
 
     // Canvas is 400 px tall, rows are 20 px -> ~20 visible rows. Scroll
-    // by 100 rows -> no overlap with prev viewport -> screen_for_blit must bail.
+    // by 100 rows -> no overlap with prev viewport -> classify must reject it.
     m.set_top_row(101);
 
-    let plan = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m));
+    let inputs = test_inputs(&m, canvas, &theme);
+    let delta = Chrome::classify(Some(&frame0), &m, &inputs, Some(&snap(&m)));
     assert!(
-        plan.is_none(),
+        matches!(
+            delta,
+            FrameDelta::Rebuild(RebuildReason::IncompatibleScrollOverlap)
+        ),
         "scroll past viewport extent must not qualify for blit",
     );
 }
@@ -150,26 +168,25 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(
-        None,
-        &m,
-        canvas,
-        &theme,
-        iron_canvas_core::chrome::FramePath::Fresh,
-    );
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
     let baseline_ops = core.painter().ops().len();
 
     // Pure horizontal scroll by 1 column.
     m.set_left_column(2);
 
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("single-column scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs,
+        "single-column scroll must qualify for blit",
+    );
 
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
     issue_blits(core.painter(), &plan);
@@ -205,25 +222,24 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(
-        None,
-        &m,
-        canvas,
-        &theme,
-        iron_canvas_core::chrome::FramePath::Fresh,
-    );
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     let baseline_ops: Vec<DrawOp> = core.painter().ops().iter().cloned().collect();
     let baseline_rect_fills = count_rect_fills(&baseline_ops);
 
     m.set_top_row(2);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("single-row scroll must qualify for blit");
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs,
+        "single-row scroll must qualify for blit",
+    );
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
     issue_blits(core.painter(), &plan);
@@ -259,19 +275,21 @@ fn scroll_by_one_row_paints_only_strip_cells() {
 /// Regression for the edit-then-scroll bug: typing into a cell and
 /// pressing Enter scrolls by one row. If the consumer forgets to call
 /// `markContentDirty`, the CONTENT-veto in `decide()` doesn't fire, so
-/// the geometric `screen_for_blit` would otherwise succeed and the blit's kept
-/// band would shift pre-edit pixels (the just-edited cell renders blank).
-/// The defensive content check inside `screen_for_blit` must catch this by
-/// re-hashing the prev frame's active-cell value against the live model.
+/// the geometric scroll-origin fork in `Chrome::classify` would otherwise
+/// succeed and the blit's kept band would shift pre-edit pixels (the
+/// just-edited cell renders blank). The defensive content check inside
+/// `Chrome::classify` must catch this by re-hashing the prev frame's
+/// active-cell value against the live model.
 #[test]
 fn active_cell_value_change_disqualifies_blit() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
     // Frame 0 paints with row 1 ("R1" coords) returning "".
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     // Snapshot captured at paint time, as SelectionLayer would. The
-    // defensive check in `screen_for_blit` compares this snapshot
+    // defensive check in `Chrome::classify` compares this snapshot
     // against the live model on the *next* blit attempt.
     let active_at_paint = snap(&m);
 
@@ -280,9 +298,13 @@ fn active_cell_value_change_disqualifies_blit() {
     m.set_data_until(5);
     m.set_top_row(2);
 
-    let plan = frame0.screen_for_blit(&m, canvas, &theme, &active_at_paint);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let delta = Chrome::classify(Some(&frame0), &m, &inputs, Some(&active_at_paint));
     assert!(
-        plan.is_none(),
+        matches!(
+            delta,
+            FrameDelta::Rebuild(RebuildReason::ActiveCellChangedOrUnknown)
+        ),
         "edit-then-scroll must disqualify the blit when the active cell value changed",
     );
 }
@@ -296,22 +318,24 @@ fn active_cell_value_unchanged_allows_blit() {
     m.set_data_until(20); // row 1's value is "R1" in both frames.
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
 
     m.set_top_row(2);
 
-    let plan = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m));
+    let inputs = test_inputs(&m, canvas, &theme);
+    let delta = Chrome::classify(Some(&frame0), &m, &inputs, Some(&snap(&m)));
     assert!(
-        plan.is_some(),
+        matches!(delta, FrameDelta::Scroll(_)),
         "pure scroll with unchanged active-cell value must qualify for the blit",
     );
 }
 
 /// Task 5, acceptance criterion 4 (row-axis half): `render_grid_blit` only
-/// visits `frame.stale_panes` (== `plan.shift_panes()`), so a pure row
-/// scroll must never touch the frozen row band's panes at all — proven
-/// directly via the public `PaneBuffers::range` field staying byte-identical
-/// to what the priming Fresh paint set, not just "no ops observed."
+/// visits `plan.shift_panes()`, so a pure row scroll must never touch the
+/// frozen row band's panes at all — proven directly via the public
+/// `PaneBuffers::range` field staying byte-identical to what the priming
+/// Fresh paint set, not just "no ops observed."
 #[test]
 fn row_scroll_leaves_frozen_row_band_panes_untouched() {
     // Frozen rows only (mirrors `col_scroll_with_frozen_rows_includes_top_right_work`'s
@@ -321,9 +345,10 @@ fn row_scroll_leaves_frozen_row_band_panes_untouched() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     let top_right_before = core.pane_cache.pane(PaneRegion::TopRight).range.get();
     assert!(
@@ -336,17 +361,16 @@ fn row_scroll_leaves_frozen_row_band_panes_untouched() {
     // (frame0's own starting point), which would be a no-op scroll. top_row=4
     // is the first value that actually shifts the scroll band.
     m.set_top_row(4);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("row scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(&frame0, &m, &inputs, "row scroll must qualify for blit");
     assert!(plan.shift_panes().contains_region(PaneRegion::BottomRight));
     assert!(
         !plan.shift_panes().contains_region(PaneRegion::TopRight),
         "a row-axis scroll must not shift the frozen row band"
     );
 
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("row scroll must blit in place");
     };
     issue_blits(core.painter(), &plan);
@@ -376,9 +400,10 @@ fn column_scroll_leaves_frozen_column_band_panes_untouched() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     let bottom_left_before = core.pane_cache.pane(PaneRegion::BottomLeft).range.get();
     assert!(
@@ -388,17 +413,16 @@ fn column_scroll_leaves_frozen_column_band_panes_untouched() {
 
     // Mirror of the row-axis test's `scroll_first` clamping note, on columns.
     m.set_left_column(4);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("column scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(&frame0, &m, &inputs, "column scroll must qualify for blit");
     assert!(plan.shift_panes().contains_region(PaneRegion::BottomRight));
     assert!(
         !plan.shift_panes().contains_region(PaneRegion::BottomLeft),
         "a column-axis scroll must not shift the frozen column band"
     );
 
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("column scroll must blit in place");
     };
     issue_blits(core.painter(), &plan);
@@ -431,16 +455,16 @@ fn row_scroll_shifted_pane_reseeds_and_skips_on_next_unchanged_paint() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     m.set_top_row(2);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("row scroll must qualify for blit");
-    let BlitOutcome::Blitted(mut frame1) =
-        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(&frame0, &m, &inputs, "row scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(mut frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan)
     else {
         panic!("row scroll must blit in place");
     };
@@ -491,16 +515,16 @@ fn frame_trace_names_the_post_blit_slots_reuse_paint_as_full() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     m.set_top_row(2);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("row scroll must qualify for blit");
-    let BlitOutcome::Blitted(mut frame1) =
-        Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(&frame0, &m, &inputs, "row scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(mut frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan)
     else {
         panic!("row scroll must blit in place");
     };
@@ -560,16 +584,16 @@ fn unshiftable_pane_on_a_blit_frame_fetches_once_not_twice() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     m.set_top_row(2);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("row scroll must qualify for blit");
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(&frame0, &m, &inputs, "row scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("row scroll must blit in place");
     };
 
@@ -628,16 +652,21 @@ fn cold_cache_bridge_failure_holds_the_whole_blit_frame() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     m.set_top_row(2);
-    let Some(plan) = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m)) else {
-        panic!("single-row scroll must qualify for blit");
-    };
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs,
+        "single-row scroll must qualify for blit",
+    );
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
 
@@ -690,7 +719,7 @@ fn cold_cache_bridge_failure_holds_the_whole_blit_frame() {
 /// must repaint `Full`, never fingerprint-`Skip`/`Rows` over pixels that
 /// were never actually blitted into place.
 ///
-/// Geometry: `screen_for_blit`/`next_blit` gate on `canvas == self.canvas_size`
+/// Geometry: `Chrome::classify`/`next_blit` gate on `canvas == self.canvas_size`
 /// (`chrome/mod.rs:431`), and `rebuild_axis_slots`'s trim/top-up contract
 /// (`chrome/blit_rebuild.rs`) provably preserves row COUNT across any single
 /// in-bounds shift as long as the SAME canvas height is used throughout: the
@@ -729,8 +758,9 @@ fn incompatible_range_demotion_repaints_full_not_skip_or_rows() {
     // past that (row 30, fully off-canvas), giving a cached range (1, 30)
     // whose row count (29) differs from the live_canvas sequence below.
     let stale_canvas = CanvasSize { w: 600.0, h: 590.0 };
-    let stale_frame = Chrome::next(None, &m, stale_canvas, &theme, FramePath::Fresh);
-    core.render_grid(&m, &stale_frame);
+    let stale_inputs = test_inputs(&m, stale_canvas, &theme);
+    let stale_frame = Chrome::next(None, &m, &stale_inputs, FramePath::Fresh);
+    core.render_grid(&m, &stale_frame, PaneRegionMask::ALL);
     let stale_range = core.pane_cache.pane(PaneRegion::BottomRight).range.get();
     assert_eq!(
         stale_range,
@@ -749,15 +779,19 @@ fn incompatible_range_demotion_repaints_full_not_skip_or_rows() {
     // blits cleanly on its own; the SAME `core` (and so the SAME pane cache,
     // still holding the 590-shaped range above) is reused across both.
     let live_canvas = canvas();
-    let frame0 = Chrome::next(None, &m, live_canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, live_canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
 
     m.set_top_row(2);
-    let Some(plan) = frame0.screen_for_blit(&m, live_canvas, &theme, &snap(&m)) else {
-        panic!("uniform single-row scroll must qualify for blit");
-    };
-    let BlitOutcome::Blitted(frame1) =
-        Chrome::next_blit(Some(frame0), &m, live_canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, live_canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs,
+        "uniform single-row scroll must qualify for blit",
+    );
+    let inputs = test_inputs(&m, live_canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
     assert_eq!(
@@ -810,9 +844,10 @@ fn blit_preflight_bridge_failure_aborts_frame_without_shifting() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
 
     let range_before = core.pane_cache.pane(PaneRegion::BottomRight).range.get();
     assert!(
@@ -821,11 +856,15 @@ fn blit_preflight_bridge_failure_aborts_frame_without_shifting() {
     );
 
     m.set_top_row(2);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("single-row scroll must qualify for blit");
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs,
+        "single-row scroll must qualify for blit",
+    );
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
 
@@ -886,17 +925,22 @@ fn overlap_row_height_change_disqualifies_blit() {
     let canvas = canvas();
 
     // Frame 0 sees row 5 at the default 20 px height.
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
 
     // Resize row 5 between frames AND scroll. Row 5 sits inside the
-    // overlap band of a 1-row scroll, so `screen_for_blit`'s row-height guard
-    // must fire and the fast-path must bail to a full repaint.
+    // overlap band of a 1-row scroll, so `Chrome::classify`'s overlap probe
+    // must fail and the fast-path must bail to a full repaint.
     m.set_row_height(5, 40.0);
     m.set_top_row(2);
 
-    let plan = frame0.screen_for_blit(&m, canvas, &theme, &snap(&m));
+    let inputs = test_inputs(&m, canvas, &theme);
+    let delta = Chrome::classify(Some(&frame0), &m, &inputs, Some(&snap(&m)));
     assert!(
-        plan.is_none(),
+        matches!(
+            delta,
+            FrameDelta::Rebuild(RebuildReason::IncompatibleScrollOverlap)
+        ),
         "row-height mutation inside the kept band must disqualify the blit",
     );
 }
@@ -920,18 +964,23 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
     let baseline_ops = core.painter().ops().len();
 
     m.set_top_row(2);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("single-row scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs,
+        "single-row scroll must qualify for blit",
+    );
 
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
     issue_blits(core.painter(), &plan);
@@ -973,18 +1022,18 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
     let baseline_ops = core.painter().ops().len();
 
     m.set_top_row(6);
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("5-row scroll must qualify for blit");
+    let inputs = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(&frame0, &m, &inputs, "5-row scroll must qualify for blit");
 
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(&m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
     issue_blits(core.painter(), &plan);
@@ -1075,16 +1124,21 @@ fn primed_blit(
 ) {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
-    let frame0 = Chrome::next(None, m, canvas, &theme, FramePath::Fresh);
+    let inputs = test_inputs(m, canvas, &theme);
+    let frame0 = Chrome::next(None, m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(m, &frame0);
+    core.render_grid(m, &frame0, PaneRegionMask::ALL);
 
     scroll(m);
-    let plan = frame0
-        .screen_for_blit(m, canvas, &theme, &snap(m))
-        .expect("single-axis scroll must qualify for blit");
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), m, canvas, &theme, &plan)
-    else {
+    let inputs = test_inputs(m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        m,
+        &inputs,
+        "single-axis scroll must qualify for blit",
+    );
+    let inputs = test_inputs(m, canvas, &theme);
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), m, &inputs, &plan) else {
         panic!("single-axis scroll must blit in place");
     };
     (core, frame1, plan)
@@ -1371,7 +1425,8 @@ fn damage_range_mismatch_demotes_to_render_pane_and_forwards_its_hold() {
     let m = TestModel::synthetic_grid();
     m.set_bulk_bridge_fail(true);
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     // `reuses_slots()` gates `render_pane`'s hold branch — without this the
     // demoted `render_pane` would paint blanks instead of holding.
     frame.kind = FrameKindTag::SlotsReused;
@@ -1422,13 +1477,14 @@ fn damage_range_mismatch_demotes_to_render_pane_and_forwards_its_hold() {
 fn render_pane_damage_stops_at_first_held_span_in_one_pane() {
     let m = TestModel::synthetic_grid().with_data_until(10);
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let frame = Chrome::next(None, &m, canvas(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas(), &theme);
+    let frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     // Prime BottomRight's cached range via an ordinary Fresh paint so the
     // damage call below takes the span loop, not the range-mismatch
     // demotion the sibling test above already covers.
-    core.render_grid(&m, &frame);
+    core.render_grid(&m, &frame, PaneRegionMask::ALL);
 
     m.set_bulk_bridge_fail_from(Some(5));
     m.reset_bulk_fetch_calls();

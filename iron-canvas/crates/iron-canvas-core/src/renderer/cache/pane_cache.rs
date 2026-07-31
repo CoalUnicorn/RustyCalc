@@ -335,7 +335,7 @@ fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
 /// freshly-revealed slots as `fill` (the caller's placeholder) for the
 /// strip-fetch to overwrite.
 ///
-/// Invariants (caller-enforced; `screen_for_blit` already guarantees these):
+/// Invariants (caller-enforced; `Chrome::classify` already guarantees these):
 /// - `prev_range` and `new_range` differ on exactly the `axis` given.
 /// - The orthogonal axis has identical first/last indices on both ranges.
 /// - `|delta|` along `axis` is strictly less than the visible extent on

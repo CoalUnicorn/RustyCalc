@@ -14,7 +14,7 @@ use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{TestModel, canvas_default};
+use common::{TestModel, canvas_default, test_inputs};
 
 // A data bar paints as a `RectFill` in its own distinctive color; cell
 // backgrounds always use the theme color, so matching on the bar color
@@ -73,7 +73,10 @@ fn bulk_method_places_decoration_at_correct_index() {
 use iron_canvas_core::CanvasModel;
 trait CanvasModelExt: CanvasModel {
     fn decorations(&self, range: RCRange, out: &mut Vec<Fetched<CellDecoration>>) {
-        self.get_cell_decorations_in(self.get_selected_sheet(), range, out);
+        let sheet = self
+            .get_selected_sheet()
+            .expect("test model always has a selected sheet");
+        self.get_cell_decorations_in(sheet, range, out);
     }
 }
 impl<T: CanvasModel> CanvasModelExt for T {}
@@ -94,7 +97,8 @@ fn decoration_reaches_painter_and_skip_is_stable() {
     );
 
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&model, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
 
     // Painted-fingerprint state lives on `PaneCache` (on `RendererCore`),
     // not `Chrome` — so the same `core` must paint both frames for the

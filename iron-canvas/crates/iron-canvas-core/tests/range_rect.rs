@@ -10,11 +10,12 @@ use iron_canvas_core::RCRange;
 use iron_canvas_core::chrome::{Chrome, FramePath};
 use iron_canvas_core::theme::CanvasTheme;
 
-use common::{TestModel, canvas_default};
+use common::{TestModel, canvas_default, test_inputs};
 
 fn fresh(model: &TestModel) -> Chrome {
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh)
+    let inputs = test_inputs(model, canvas_default(), &theme);
+    Chrome::next(None, model, &inputs, FramePath::Fresh)
 }
 
 // ─── range_intersects_fold (via range_rect == None) ──────────────────────

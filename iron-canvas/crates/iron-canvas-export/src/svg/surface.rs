@@ -33,7 +33,7 @@ impl SvgSurface {
     ///
     /// Spins a throwaway `Orchestrator` over a grid + overlay
     /// `SvgSurface`, pushes `theme` and `model`, and paints a single
-    /// `PaintRegime::Fresh` frame. Overlays (selection, marching ants,
+    /// Fresh-regime frame. Overlays (selection, marching ants,
     /// autofill handle, formula refs) are intentionally discarded: the
     /// active-cell repaint hook draws through the *overlay* surface,
     /// which is dropped here — only the grid surface's cell / border /

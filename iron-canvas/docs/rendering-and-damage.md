@@ -7,10 +7,12 @@ these optimizations maintainable. Frame construction, slot vecs, and the
 query API are covered in `ARCHITECTURE.md`; this doc is about the
 *decision machinery* on top of them.
 
-Sources of truth: `orchestrator.rs` (dispatch), `pending_work.rs` (queued
-work), `renderer/cell/mod.rs` + `renderer/cell/fingerprint.rs` (data
-compare), `renderer/cache/pane_cache.rs` (cross-frame buffers),
-`iron-canvas-canvas2d/src/web_surface.rs` (double buffering).
+Sources of truth: `frame_plan.rs` (`FrameInputs` capture, `FrameDelta`),
+`chrome/mod.rs` (`Chrome::classify`), `orchestrator.rs` (`plan_frame` +
+dispatch), `pending_work.rs` (queued work), `renderer/cell/mod.rs` +
+`renderer/cell/fingerprint.rs` (data compare), `renderer/cache/pane_cache.rs`
+(cross-frame buffers), `iron-canvas-canvas2d/src/web_surface.rs` (double
+buffering).
 
 ---
 
@@ -18,12 +20,37 @@ compare), `renderer/cache/pane_cache.rs` (cross-frame buffers),
 
 Every rAF tick calls `Orchestrator::paint_if_dirty`. It takes the single
 queued `PendingWork` value (`self.pending`, via one `mem::take` — no
-layer holds dirty state of its own) and runs `decide()`, a cascade
-ordered cheapest-first. `PendingWork` tracks four categories — geometry
-rebuild, view movement, content damage (rows or panes), overlay repaint
-— and the diagnostic `WorkFlags` bitflags project them as
-`VIEW | CONTENT | GEOMETRY | OVERLAY` for tracing and recording. The
-first arm whose preconditions hold wins:
+layer holds dirty state of its own), then runs it through a three-stage
+pipeline: `PendingWork -> FrameInputs -> FrameDelta -> FramePlan`.
+
+1. **`FrameInputs::capture`** reads every scalar the frame needs —
+   selected sheet, selected view, frozen row/column counts, header
+   visibility, selection visibility — exactly once, before any geometry
+   walk or paint runs. A failure here holds the *entire* attempt (see
+   "Capture-failure hold" below) instead of falling back to a synthetic
+   default.
+2. **`Chrome::classify(prev, model, inputs, active_cell)`** compares the
+   captured inputs against the previously committed `Chrome` — itself
+   nothing more than committed geometry plus the classifier-relevant
+   metadata (canvas size, DPR, theme, model generation, sheet, frozen
+   counts, header visibility, effective scroll origin); it carries no
+   pending paint scope of its own. `classify` returns one `FrameDelta`:
+   `Stable` (nothing moved), `Scroll(BlitPlan)` (a geometrically safe
+   single-axis shift), or `Rebuild(RebuildReason)` (a named hard break).
+3. **`plan_frame(work, delta, sheet, show_selection)`** is a pure
+   function turning the taken `PendingWork` plus the `FrameDelta` into
+   one closed `FramePlan { selected_strategy, grid, overlay, consumes,
+   rebuild_reason }`. `grid: GridWork` — `None | Fresh | Panes(mask) |
+   Rows{sheet,spans} | Blit(plan)` — carries the pane scope explicitly
+   into the executor it dispatches to; `Chrome` itself is never
+   consulted for which panes need repainting.
+
+`PendingWork` tracks four categories — geometry rebuild, view movement,
+content damage (rows or panes), overlay repaint — and the diagnostic
+`WorkFlags` bitflags project them as `VIEW | CONTENT | GEOMETRY |
+OVERLAY` for tracing and recording. `plan_frame`'s table is ordered
+cheapest-first, and `selected_strategy: PaintRegimeTag` — the same
+five-variant tag recorded to `.icr` files — names the arm that wins:
 
 | Regime       | Grid pixels touched                     | Model data fetched            | When |
 |--------------|------------------------------------------|-------------------------------|------|
@@ -33,44 +60,77 @@ first arm whose preconditions hold wins:
 | `SlotsReuse` | changed row bands within changed panes (fingerprint tree + row-damage plan) | full bulk refetch, masked panes | content change, rows unknown; viewport otherwise reusable |
 | `Fresh`      | everything                               | everything                    | first paint, resize, sheet/freeze change, theme swap, `request_repaint`, or content + view together |
 
-`decide()` actually probes `Viewport` *before* `Overlay` (see
-`ARCHITECTURE.md`'s "`decide()` — the regime cascade" for the exact
-guard order) — a view-only attempt that turns out to be a real pixel
-shift needs `Viewport`; a view-only attempt that stays inside the
+`plan_frame` actually probes the geometric scroll delta *before* falling
+back to `Overlay` — a view-only attempt that turns out to be a real
+pixel shift lands `Viewport`; a view-only attempt that stays inside the
 painted frame (ordinary arrow-key selection) falls through to `Overlay`
 instead. `view_changed()` / `viewChanged()` marks *intent* only; whether
 that intent becomes a blit, an overlay-only repaint, or a full rebuild is
-this geometric verdict, never the caller's choice.
+`Chrome::classify`'s geometric verdict, never the caller's choice.
 
-Two properties make the cascade safe rather than optimistic:
+Three properties make the pipeline safe rather than optimistic:
 
-- **`decide()` is pure over `&self`** — it classifies; the five
-  `paint_*_regime` methods own all mutation. You can read the whole
-  policy in one function without chasing side effects.
-- **The verdict is a value** (`PaintRegime`, `#[must_use]`), and the
-  dispatch `match` is exhaustive. Adding a regime breaks the build at
-  the dispatch site by design.
+- **Classification and planning are pure.** `Chrome::classify` only
+  reads (`prev`, the model, captured inputs, the active-cell snapshot);
+  `plan_frame` is a free function over owned values. Neither builds a
+  `Chrome`, mutates cache state, invalidates a cache, or calls a
+  painter — the five `paint_*_regime` methods own all mutation, driven
+  by the plan they're handed. You can read the whole policy in two
+  functions without chasing side effects.
+- **The decision is a value, twice over.** `Chrome::classify` returns
+  `FrameDelta` (`#[must_use]` by construction — every variant is
+  matched exhaustively); `plan_frame` returns `FramePlan`, whose
+  `grid: GridWork` field `paint_if_dirty` matches on to dispatch.
+  Adding a `GridWork` variant breaks the build at the dispatch site by
+  design.
 - **The outcome is a value too** — `paint_if_dirty` returns
   `PaintResult::{Idle, Painted, Retry}` (deliberately not
   `#[must_use]`: a permanent polling loop that ignores it still
   behaves correctly). `Retry` means an attempt was held back rather
-  than committed: a whole-frame rollback on `Viewport` (the pre-attempt
-  `Chrome` is restored via `Clone`, nothing presents) or a pane-local
+  than committed: before any regime ever ran (a capture failure — see
+  below), a whole-frame rollback on `Viewport` (the pre-attempt
+  `Chrome` is restored via `Clone`, nothing presents), or a pane-local
   partial commit on `Damage` / `SlotsReuse` / `Fresh` (painted panes
   present; the failed scope is folded back into `self.pending` — as
   `ContentWork::Rows` for `Damage`, `ContentWork::Panes` for
   `SlotsReuse` / `Fresh` — for the next tick). Either way the held
   scope is merged back into `self.pending` before returning, so the
   caller can just call `paint_if_dirty` again next tick with no new
-  external input needed — see `iron-canvas/ARCHITECTURE.md`'s
-  "Paint/query coherence" and "Retry contract" sections for the
-  per-regime detail.
+  external input needed.
 
-Validity of the previous frame is itself a typed verdict
-(`FrameValidity::{SlotsReuse, Rebuild}` from `is_still_valid`, which
-compares scroll/sheet/freeze/size/theme against the live model), and the
-scroll fast path is another (`screen_for_blit -> Option<BlitPlan>`,
-geometric diff — no signal bit needed).
+### Capture-failure hold
+
+`FrameInputs::capture` reads, in fixed order: selected sheet, selected
+view (asserted to agree with the sheet), frozen row count, frozen
+column count, row-header visibility, column-header visibility. Each is
+an `Option`-returning `CanvasModel` accessor — including
+`get_selected_sheet() -> Option<u32>`, changed from a bare `u32` so a
+JS-bridge throw is observable as `None` instead of silently defaulting
+to sheet `0`. Selection visibility (`CanvasModel::get_show_selection`,
+default `true`) is captured too but is infallible by design, so it can
+never itself hold an attempt — it exists so a deliberately
+selection-less host (`show_selection(false)`) is distinguishable from a
+genuine bridge failure on `get_selected_view()`.
+
+Any one of the fallible reads failing holds the *entire* taken
+`PendingWork` — merged back into `self.pending` verbatim — before
+`Chrome::classify`, `plan_frame`, any `Chrome` mutation, cache
+invalidation, paint, or presentation runs: neither surface presents, no
+painter operation is emitted, and `last_frame` plus decoration snapshots
+are left untouched. The attempt is stamped
+`FrameOutcome::HeldOnInputFailure(FrameInputFailure)` — naming which
+read failed (`SelectedSheet`, `SelectedView`, `SheetMismatch`,
+`FrozenRows`, `FrozenColumns`, `RowHeaderVisibility`,
+`ColumnHeaderVisibility`) — and `paint_if_dirty` returns
+`PaintResult::Retry`. Before this existed, a failed scalar read fell
+back to a synthetic default (sheet `0`, an all-A1 view) and painted
+anyway, against fabricated state; capture makes that failure observable
+instead.
+
+The scroll fast path is a second typed verdict living inside
+`FrameDelta` itself (`Scroll(BlitPlan)`, a geometric diff against the
+committed frame — no signal bit needed) rather than a separate
+function.
 
 ---
 
@@ -108,22 +168,26 @@ also read the *front* canvas as the source of kept-band pixels.
 
 ## 3. What rerenders when you edit a cell (today)
 
-Trace for typing `42` into `B3` + Enter, RustyCalc consumer as wired now
-(`src/components/workbook/worksheet/subscribe.rs`):
+Trace for typing `42` into `B3`, committed without moving the selection
+(e.g. via the formula bar's confirm button — pressing Enter also fires
+`view_changed()` from the resulting navigation, which forces `Fresh`
+instead: content plus view always plans `Fresh`, never a blit or a
+band-clipped `Damage`, per `plan_frame`'s table). RustyCalc consumer as
+wired now (`src/components/workbook/worksheet/subscribe.rs`):
 
 ```
 1  IronCalc: set_user_input → recalc
 2  RustyCalc event bus: ContentEvent::CellChanged { address, .. }
    (+ CalculationUpdated { affected_sheets } if dependents recalced)
 3  subscribe effect: has_content → ic.mark_content_dirty()   ← UN-ROWED
-   (+ has_nav from the Enter → view_changed())
 4  Engine: PendingWork::mark_panes(PaneRegionMask::ALL) →
            content = ContentWork::Panes(ALL)
-5  rAF → paint_if_dirty → decide():
-     work.has_content() → Viewport probe skipped, Overlay arm excluded
-     content is Panes(ALL), not Rows → Damage arm's sheet-match guard
-     never even applies (no Rows to match)
-     frame still valid (reusable) → SlotsReuse { mask: ALL }
+5  rAF → paint_if_dirty:
+     FrameInputs::capture — sheet/view/freeze/headers all read clean
+     Chrome::classify → Stable (no geometry or scroll change)
+     plan_frame(work, Stable, ..): content is Panes(ALL), not Rows, so
+     Damage's sheet-match arm never applies (no Rows to match) →
+     SlotsReuse / GridWork::Panes(ALL)
 6  paint_slots_reuse_regime:
      PaneCache::invalidate(ALL) + invalidate_paint_cache()
      Chrome::next reuses prev slot vecs (no geometry walk)
@@ -300,16 +364,27 @@ no fingerprint commit) instead of flashing blank.
 
 ## 5. Blit (viewport shift) — the short version
 
-Covered in depth in `ARCHITECTURE.md`; the shape that matters here:
-`screen_for_blit` detects the shift geometrically (no signal), is gated
-on `!CONTENT` (blitting stale pixels was the recalc-bug class), and
-re-hashes the active cell before trusting the fast path.
-`Chrome::next_blit` returns a two-variant `BlitOutcome` — `Blitted`
-(shift kept band, strip-paint the reveal) or `FreshFallback` (demote to
-full repaint *with* cache invalidation). Per pane, `prepare_shift`
-returns `PaneShiftPrep::{Shifted, MissingCache, IncompatibleRange}` —
-the reason a pane can't blit is a named variant, and the fallback is
-always the ordinary full-pane walk.
+`Chrome::classify` detects the shift geometrically — comparing the
+captured view's effective scroll origin against the committed frame's,
+no signal bit involved — and re-hashes the active cell before trusting
+the fast path: a missing or mismatched active-cell snapshot rejects it
+outright (`Rebuild(MissingActiveSnapshot)` /
+`Rebuild(ActiveCellChangedOrUnknown)`), and a two-axis move is never a
+single blit (`Rebuild(TwoAxisScroll)`). Producing
+`FrameDelta::Scroll(plan)` is necessary but not sufficient: `plan_frame`
+only selects it when the attempt carries no content or geometry work —
+blitting stale pixels over changed values is the recalc-bug class this
+guards against, and since every current geometry producer already
+forces a `Chrome::classify` hard break, this is a defensive second gate
+for a future producer that doesn't happen to trip one.
+
+Once selected, `Chrome::next_blit` returns a two-variant `BlitOutcome`
+— `Blitted` (shift kept band, strip-paint the reveal) or `FreshFallback`
+(demote to full repaint *with* cache invalidation — e.g. the row-header
+digit boundary widening past what the kept band assumed). Per pane,
+`prepare_shift` returns `PaneShiftPrep::{Shifted, MissingCache,
+IncompatibleRange}` — the reason a pane can't blit is a named variant,
+and the fallback is always the ordinary full-pane walk.
 
 ---
 
@@ -325,13 +400,13 @@ change (`ContentWork` — named rows or a pane mask, one sum type so row
 precision and whole-pane precision share a single field instead of two),
 and overlay state (`overlay: bool`) are four separate fields on one
 `PendingWork` value. Viewport shift itself is not a fifth stored input —
-it is *derived* geometrically from view movement by `screen_for_blit`,
+it is *derived* geometrically from view movement by `Chrome::classify`,
 never a bit of its own. The historical bug class here was dispatching
 blit and content through one flag. If two kinds of change need different
 repaint strategies, they must arrive as different data.
 
 **2. Decisions are values; effects live in named arms.**
-`PaintRegime`, `FrameValidity`, `BlitOutcome`, `PaneShiftPrep`,
+`FrameDelta`, `GridWork`, `OverlayWork`, `BlitOutcome`, `PaneShiftPrep`,
 `ContentWork` — every branch point returns a `#[must_use]` enum whose
 variants *name the outcome*, then an exhaustive `match` runs exactly one
 arm. Nobody has to reconstruct "what will happen" from boolean soup;

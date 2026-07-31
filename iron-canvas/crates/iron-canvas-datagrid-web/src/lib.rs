@@ -76,7 +76,7 @@ impl DataGridCanvas {
     #[wasm_bindgen(js_name = "setThemeFromElement")]
     pub fn set_theme_from_element(&mut self, el: &web_sys::Element) {
         // `set_theme` value-compares and, on change, marks geometry + overlay
-        // itself; `is_still_valid` rejects a theme-mismatched frame, so no
+        // itself; `Chrome::classify` rejects a theme-mismatched frame, so no
         // separate `request_repaint` is needed to force the next Fresh paint.
         self.orch
             .set_theme(iron_canvas_canvas2d::theme_from_element::from_element(el));

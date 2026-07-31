@@ -17,10 +17,14 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 
 use iron_canvas_core::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
+use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, CellContentQuery, RCRange};
-use iron_canvas_core::{CellDecoration, CellKind, CellStyle, Fetched};
+use iron_canvas_core::{
+    CellDecoration, CellKind, CellStyle, Fetched, FrameInputFailure, FrameInputs,
+};
 
 pub struct TestModel {
     sheet: Cell<u32>,
@@ -69,6 +73,13 @@ pub struct TestModel {
     /// can check that N row spans painted from those buffers cost zero
     /// additional model queries, rather than trusting "it looks right".
     bulk_fetch_calls: Cell<u32>,
+    /// Stage 3 `FrameInputs::capture` failure simulation: when set, the
+    /// named scalar accessor returns `None` — except `SheetMismatch`, which
+    /// leaves every accessor succeeding but makes `get_selected_view`'s
+    /// returned `sheet` diverge from `get_selected_sheet()`'s. One knob
+    /// (not per-accessor) since the table tests exercise one failure at a
+    /// time.
+    capture_fail: Cell<Option<FrameInputFailure>>,
 }
 
 impl Default for TestModel {
@@ -105,6 +116,7 @@ impl Default for TestModel {
             bulk_bridge_fail: Cell::new(false),
             bulk_bridge_fail_from: Cell::new(None),
             bulk_fetch_calls: Cell::new(0),
+            capture_fail: Cell::new(None),
         }
     }
 }
@@ -206,6 +218,12 @@ impl TestModel {
         self.show_col_headers.set(false);
         self
     }
+    /// Make `FrameInputs::capture` fail at exactly the named step — see the
+    /// field doc for the `SheetMismatch` special case.
+    pub fn with_capture_fail(self, which: FrameInputFailure) -> Self {
+        self.capture_fail.set(Some(which));
+        self
+    }
 
     pub fn set_top_row(&self, r: i32) {
         self.top_row.set(r);
@@ -289,12 +307,26 @@ impl TestModel {
 }
 
 impl CanvasModel for TestModel {
-    fn get_selected_sheet(&self) -> u32 {
-        self.sheet.get()
+    fn get_selected_sheet(&self) -> Option<u32> {
+        if self.capture_fail.get() == Some(FrameInputFailure::SelectedSheet) {
+            return None;
+        }
+        Some(self.sheet.get())
     }
     fn get_selected_view(&self) -> Option<CanvasView> {
+        if self.capture_fail.get() == Some(FrameInputFailure::SelectedView) {
+            return None;
+        }
+        // `SheetMismatch`: every accessor still succeeds, but the view's
+        // embedded sheet diverges from what `get_selected_sheet` reports —
+        // the one failure mode that isn't a bare `None`.
+        let sheet = if self.capture_fail.get() == Some(FrameInputFailure::SheetMismatch) {
+            self.sheet.get().wrapping_add(1)
+        } else {
+            self.sheet.get()
+        };
         Some(CanvasView {
-            sheet: self.sheet.get(),
+            sheet,
             row: self.active_row.get(),
             column: self.active_col.get(),
             selection: self.selection.get(),
@@ -303,9 +335,15 @@ impl CanvasModel for TestModel {
         })
     }
     fn get_frozen_rows_count(&self, _: u32) -> Option<i32> {
+        if self.capture_fail.get() == Some(FrameInputFailure::FrozenRows) {
+            return None;
+        }
         Some(self.frozen_rows.get())
     }
     fn get_frozen_columns_count(&self, _: u32) -> Option<i32> {
+        if self.capture_fail.get() == Some(FrameInputFailure::FrozenColumns) {
+            return None;
+        }
         Some(self.frozen_cols.get())
     }
     fn get_row_height(&self, _: u32, row: i32) -> Option<f64> {
@@ -336,9 +374,15 @@ impl CanvasModel for TestModel {
         self.last_column.get()
     }
     fn get_show_row_headers(&self, _: u32) -> Option<bool> {
+        if self.capture_fail.get() == Some(FrameInputFailure::RowHeaderVisibility) {
+            return None;
+        }
         Some(self.show_row_headers.get())
     }
     fn get_show_col_headers(&self, _: u32) -> Option<bool> {
+        if self.capture_fail.get() == Some(FrameInputFailure::ColumnHeaderVisibility) {
+            return None;
+        }
         Some(self.show_col_headers.get())
     }
     fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
@@ -473,4 +517,27 @@ pub fn canvas_large() -> CanvasSize {
         w: 1000.0,
         h: 800.0,
     }
+}
+
+/// Shared direct-Chrome test capture: every low-level `Chrome`/decoration
+/// integration test needs a `FrameInputs` snapshot to hand to
+/// `Chrome::next`/`next_blit`/`classify`, but none of them are
+/// exercising DPR or model-identity behavior — so this helper fixes DPR at
+/// `1.0` and model generation at `0` (matching every test's implicit
+/// single-frame assumption) rather than reproducing that default snapshot
+/// inline in every test. Panics on capture failure: a test that wants to
+/// exercise a failed capture calls `FrameInputs::capture` directly instead
+/// (see `frame_inputs.rs`).
+///
+/// Captures live, so calling this again after mutating `model` (e.g.
+/// `model.set_top_row(..)`) captures the model's new state — the same
+/// "read the model now" semantics the old direct model-reading
+/// `Chrome::next(.., canvas, &theme, ..)` signature had.
+pub fn test_inputs(
+    model: &dyn CanvasModel,
+    canvas: CanvasSize,
+    theme: &Rc<CanvasTheme>,
+) -> FrameInputs {
+    FrameInputs::capture(model, canvas, 1.0, Rc::clone(theme), 0)
+        .expect("test model must capture FrameInputs successfully")
 }

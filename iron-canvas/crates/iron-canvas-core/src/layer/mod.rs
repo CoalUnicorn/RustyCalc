@@ -124,15 +124,24 @@ where
     /// the frame's slot vecs are fresh; SlotsReuse paths preserve last
     /// frame's pixels so per-pane fingerprint-skip wins are preserved.
     ///
+    /// `mask` is the pane scope the caller's `GridWork` planned — `ALL` for
+    /// `Fresh`, the narrowed set for `Panes(mask)` — passed straight through
+    /// to `render_grid`.
+    ///
     /// Returns the held-pane mask from `render_grid` — see its doc.
-    pub fn paint_grid(&mut self, model: &dyn CanvasModel, frame: &Chrome) -> PaneRegionMask {
+    pub fn paint_grid(
+        &mut self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        mask: PaneRegionMask,
+    ) -> PaneRegionMask {
         if !frame.kind.reuses_slots() {
             self.surface.painter().rect_fill(
                 full_canvas_rect(frame.canvas_size),
                 PaintColor::from_theme_str(&frame.theme.cell_bg),
             );
         }
-        self.renderer.render_grid(model, frame)
+        self.renderer.render_grid(model, frame, mask)
     }
 
     /// Scroll-blit grid paint: shift the kept band per `BlitPlan::shifts`,

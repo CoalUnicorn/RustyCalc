@@ -19,7 +19,7 @@ use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{TestModel, canvas_default};
+use common::{TestModel, canvas_default, test_inputs};
 
 fn promote_to_slots_reuse(frame: &mut Chrome) {
     frame.kind = FrameKindTag::SlotsReused;
@@ -29,7 +29,8 @@ fn promote_to_slots_reuse(frame: &mut Chrome) {
 fn render_pane_repaint_dispatches_a_row_span_plan_to_a_scoped_band_paint() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomRight, &frame);
@@ -89,7 +90,8 @@ fn render_pane_repaint_full_and_skip_paths_are_unchanged_by_the_new_dispatch() {
     // (never row-banded).
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     // Fresh-frame first paint: always the unconditional full walk, on a
@@ -129,7 +131,8 @@ fn render_pane_repaint_full_and_skip_paths_are_unchanged_by_the_new_dispatch() {
 fn lifecycle_buffer_range_invalidate_keeps_painted_tree() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomRight, &frame); // primes range + painted tree
@@ -175,7 +178,8 @@ fn lifecycle_buffer_range_invalidate_keeps_painted_tree() {
 fn lifecycle_bridge_failed_damage_strip_is_atomic() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomRight, &frame);
@@ -227,7 +231,8 @@ fn lifecycle_bridge_failed_damage_strip_is_atomic() {
 fn lifecycle_damage_strip_scopes_to_intersected_pane_and_reseeds_on_next_paint() {
     let m = TestModel::synthetic_grid().with_frozen_rows(2);
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::TopRight, &frame);

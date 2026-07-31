@@ -21,12 +21,12 @@
 use std::rc::Rc;
 
 use crate::CanvasModel;
+use crate::model_adapter::CanvasView;
 use crate::render_overlays::RenderOverlays;
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 
 use super::{
-    AutofillLayer, ClipboardLayer, FormulaRefsLayer, Layer, PointModeLayer, RepaintActiveCell,
-    SelectionLayer,
+    AutofillLayer, ClipboardLayer, FormulaRefsLayer, Layer, PointModeLayer, SelectionLayer,
 };
 
 /// Handle for a consumer-installed overlay decoration. Returned by
@@ -51,14 +51,6 @@ pub(crate) struct Decorations {
 impl Decorations {
     pub(crate) fn selection(&self) -> &SelectionLayer {
         &self.selection
-    }
-
-    /// Active-cell repaint coords, fired between the selection fill and
-    /// stroke phases. Exposed so the orchestrator can gate
-    /// `CONTENT -> OVERLAY` (a DEL on the active cell) without reaching past
-    /// the group into the selection field.
-    pub(crate) fn active_cell_repaint(&self) -> Option<RepaintActiveCell> {
-        self.selection.active_cell_repaint()
     }
 
     /// Back-to-front paint order for `LayerBase::paint_overlay_layer`.
@@ -106,13 +98,19 @@ impl Decorations {
         &self.custom
     }
 
-    /// Refresh selection from the live model, then mirror its rectangle
-    /// into the autofill preview so the drag band stays paint-coherent
-    /// with the painted selection instead of chasing the model. The Overlay
-    /// arm calls this first; the grid-painting arms call it after the grid
-    /// paint, before the overlay paint.
-    pub(crate) fn refresh_overlay_state(&mut self, model: &dyn CanvasModel) {
-        self.selection.refresh(model);
+    /// Refresh selection from the paint attempt's captured inputs, then
+    /// mirror its rectangle into the autofill preview so the drag band
+    /// stays paint-coherent with the painted selection instead of chasing
+    /// the model. The Overlay arm calls this first; the grid-painting arms
+    /// call it after the grid paint, before the overlay paint.
+    pub(crate) fn refresh_overlay_state(
+        &mut self,
+        model: &dyn CanvasModel,
+        sheet: u32,
+        view: &CanvasView,
+        show_selection: bool,
+    ) {
+        self.selection.refresh(model, sheet, view, show_selection);
         self.autofill.selection_range = self.selection.selection_range.unwrap_or_default();
     }
 

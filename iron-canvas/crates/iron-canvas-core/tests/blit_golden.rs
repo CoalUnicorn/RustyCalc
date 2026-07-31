@@ -11,17 +11,20 @@ mod common;
 use std::path::PathBuf;
 
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
+use iron_canvas_core::FrameDelta;
+use iron_canvas_core::chrome::{
+    ActiveCellSnapshot, BlitOutcome, Chrome, FramePath, PaneRegionMask,
+};
 use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{TestModel, canvas_default as canvas};
+use common::{TestModel, canvas_default as canvas, test_inputs};
 
 fn snap(m: &TestModel) -> ActiveCellSnapshot {
     let view = m.get_selected_view().expect("scroll model has view");
-    ActiveCellSnapshot::capture(m, m.get_selected_sheet(), view.row, view.column)
+    ActiveCellSnapshot::capture(m, view.sheet, view.row, view.column)
 }
 
 fn issue_blits<P: BlitPainter>(painter: &P, plan: &iron_canvas_core::chrome::BlitPlan) {
@@ -36,19 +39,21 @@ fn capture_scroll_ops(apply_scroll: impl FnOnce(&TestModel)) -> Vec<DrawOp> {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs0, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0);
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
     let baseline_ops = core.painter().ops().len();
 
     apply_scroll(&m);
 
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("single-axis scroll must qualify for blit");
-
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let inputs1 = test_inputs(&m, canvas, &theme);
+    let FrameDelta::Scroll(plan) = Chrome::classify(Some(&frame0), &m, &inputs1, Some(&snap(&m)))
     else {
+        panic!("single-axis scroll must qualify for blit");
+    };
+
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs1, &plan) else {
         panic!("single-axis scroll must blit in place");
     };
     issue_blits(core.painter(), &plan);

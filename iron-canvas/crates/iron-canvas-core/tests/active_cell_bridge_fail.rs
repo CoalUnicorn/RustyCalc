@@ -20,11 +20,12 @@ use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::RecorderPainter;
 
-use common::{TestModel, canvas_default};
+use common::{TestModel, canvas_default, test_inputs};
 
 fn fresh_frame(model: &TestModel) -> Chrome {
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    Chrome::next(None, model, canvas_default(), &theme, FramePath::Fresh)
+    let inputs = test_inputs(model, canvas_default(), &theme);
+    Chrome::next(None, model, &inputs, FramePath::Fresh)
 }
 
 #[test]

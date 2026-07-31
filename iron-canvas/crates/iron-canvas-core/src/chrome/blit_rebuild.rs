@@ -1,7 +1,8 @@
 //! Single-axis blit machinery: qualification probes (kept-band extent
 //! verification + strip-size compute) and slot-Vec rebuilds for the
-//! scrolled axis. `Chrome::screen_for_blit` calls the probes;
-//! `Chrome::next_blit` (via `try_blit_reuse`) calls the rebuilds.
+//! scrolled axis. `Chrome::classify` (via `try_blit_rows`/`try_blit_cols`
+//! in `blit.rs`) calls the probes; `Chrome::next_blit` (via
+//! `try_blit_reuse`) calls the rebuilds.
 //!
 //! Lives next to `chrome/blit.rs`. Splits off `chrome/pane_set.rs` so
 //! the latter only carries pure-axis geometry.
@@ -188,6 +189,7 @@ impl PaneSet {
     pub fn rebuild_rows_for_row_scroll(
         &self,
         model: &dyn CanvasModel,
+        sheet: u32,
         new_top: i32,
         canvas: CanvasSize,
     ) -> Option<Vec<RowSlot>> {
@@ -200,13 +202,14 @@ impl PaneSet {
             // !content_dirty, so the model's bound cannot have moved
             // since prev was built — both rebuild paths agree.
             self.rows.last_id,
-            |r| row_height(model, r),
+            |r| row_height(model, sheet, r),
         )
     }
 
     pub fn rebuild_cols_for_col_scroll(
         &self,
         model: &dyn CanvasModel,
+        sheet: u32,
         new_left: i32,
         canvas: CanvasSize,
     ) -> Option<Vec<ColSlot>> {
@@ -216,7 +219,7 @@ impl PaneSet {
             canvas.w.ceil() as i32,
             new_left,
             self.cols.last_id,
-            |c| col_width(model, c),
+            |c| col_width(model, sheet, c),
         )
     }
 }

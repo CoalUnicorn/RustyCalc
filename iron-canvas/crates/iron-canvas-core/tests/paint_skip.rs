@@ -25,7 +25,7 @@ use iron_canvas_core::{
 };
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{TestModel, canvas_default, canvas_large};
+use common::{TestModel, canvas_default, canvas_large, test_inputs};
 
 /// Mirrors the orchestrator's `SlotsReuse` branch: just flip the kind tag
 /// so the next `render_pane` call on the SAME `RendererCore` hits the
@@ -40,7 +40,8 @@ fn promote_to_slots_reuse(frame: &mut Chrome) {
 fn render_pane_skips_on_idempotent_repaint() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     // First paint runs through the full 4-pass walk; the kind is Fresh, so
@@ -73,7 +74,8 @@ fn render_pane_skip_is_scoped_to_changed_pane() {
     // must leave the other pane's fingerprint untouched.
     let m = TestModel::synthetic_grid().with_frozen_cols(2);
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomLeft, &frame);
@@ -103,7 +105,8 @@ fn slots_reuse_holds_prior_pane_through_two_consecutive_bridge_failures() {
     let m = TestModel::synthetic_grid();
     m.set_cell(1, 1, "still here");
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let painter = std::rc::Rc::new(RecorderPainter::new());
     let core = RendererCore::for_layer(std::rc::Rc::clone(&painter));
 
@@ -186,7 +189,8 @@ fn all_rect_fills_within(
 fn row_band_repaint_paints_only_the_changed_row_band() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomRight, &frame);
@@ -229,7 +233,8 @@ fn row_band_repaint_paints_only_the_changed_row_band() {
 fn row_band_repaint_avoids_second_model_fetch_across_two_spans() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomRight, &frame);
@@ -301,7 +306,8 @@ fn row_band_repaint_avoids_second_model_fetch_across_two_spans() {
 fn row_band_repaint_wires_decoration_only_change_to_its_row() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomRight, &frame);
@@ -353,7 +359,8 @@ fn row_band_repaint_wires_decoration_only_change_to_its_row() {
 fn row_band_repaint_falls_back_to_full_on_border_unsafe_change() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomRight, &frame);
@@ -414,7 +421,8 @@ fn row_band_repaint_falls_back_to_full_on_border_removed_unsafe_change() {
     // `planning_old_top_border_at_internal_boundary_selects_full_repaint`).
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     let pane_range = PaneRegion::BottomRight
@@ -472,7 +480,8 @@ fn row_band_repaint_falls_back_to_full_when_spans_exceed_cap() {
     // A taller canvas so nine spread-out rows (gap 3, per
     // `row_fingerprint_repaint.rs`'s equivalent planner-level test) all
     // fit inside one pane's visible range.
-    let mut frame = Chrome::next(None, &m, canvas_large(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_large(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     core.render_pane(&m, PaneRegion::BottomRight, &frame);
@@ -524,7 +533,8 @@ fn row_band_repaint_never_painted_pane_under_slots_reuse_forces_full_repaint() {
     // rather than attempting a row-level walk against a tree with zero rows.
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     promote_to_slots_reuse(&mut frame);
@@ -562,7 +572,8 @@ fn strip_paint_then_unchanged_slots_reuse_frame_skips() {
     // recorder's draw-op count.
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &m, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
 
     // Prime the pane: a normal Fresh paint commits the `painted` tree.

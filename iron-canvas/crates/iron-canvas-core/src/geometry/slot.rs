@@ -117,7 +117,7 @@ pub fn fill_axis<S: AxisSlot>(
 /// (the id immediately past the frozen band) and the viewport's scrolled-to
 /// id. Encodes the "scroll band starts where frozen ends or where the user
 /// scrolled to, whichever is further" invariant — used by both `fill_axis`
-/// callers and `Chrome::is_still_valid`.
+/// callers and `Chrome::classify`.
 #[inline]
 pub fn scroll_first(frozen_count: i32, view_first: i32) -> i32 {
     (frozen_count + 1).max(view_first)
@@ -311,16 +311,20 @@ impl<S: AxisSlot> AxisSlots<S> {
     }
 }
 
-pub fn row_height(model: &dyn CanvasModel, row: i32) -> i32 {
-    let sheet = model.get_selected_sheet();
+/// `sheet` is the caller's already-captured/committed sheet — this never
+/// re-reads `CanvasModel::get_selected_sheet()` itself, so a slot walk over
+/// many rows costs one sheet read total, not one per row (see
+/// `PaneSet::fill_rows`, `Chrome`'s blit rebuild, and `Orchestrator::scroll_to_show`,
+/// every one of which now supplies it explicitly).
+pub fn row_height(model: &dyn CanvasModel, sheet: u32, row: i32) -> i32 {
     model
         .get_row_height(sheet, row)
         .unwrap_or(DEFAULT_ROW_HEIGHT)
         .round() as i32
 }
 
-pub fn col_width(model: &dyn CanvasModel, col: i32) -> i32 {
-    let sheet = model.get_selected_sheet();
+/// Column mirror of [`row_height`]; same explicit-`sheet` rationale.
+pub fn col_width(model: &dyn CanvasModel, sheet: u32, col: i32) -> i32 {
     model
         .get_column_width(sheet, col)
         .unwrap_or(DEFAULT_COL_WIDTH)

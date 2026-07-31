@@ -230,21 +230,37 @@ impl JsBackedModel {
     }
 
     /// Adopt a raw JS handle as an opaque `IronCalcModelHandle`. Validates
-    /// structurally (one duck-tested method) rather than by `instanceof`,
+    /// structurally (duck-tested methods) rather than by `instanceof`,
     /// because the handle is module-agnostic — a host may bundle the
     /// IronCalc wasm under any path. Returns a `JsError` (not a bare
     /// `JsValue`) so the JS-side catch sees a real `Error` with a useful
     /// `.message` instead of an opaque `[object Object]`.
+    ///
+    /// Requires the four mandatory frame-capture methods —
+    /// `getSelectedView`, `getSelectedSheet`, `getFrozenRowsCount`,
+    /// `getFrozenColumnsCount` — every one of which `FrameInputs::capture`
+    /// reads on every paint attempt. Rejecting a permanently incomplete
+    /// handle here is better than arming an endless capture-failure Retry
+    /// loop. Header-visibility methods stay optional: their static absence
+    /// means "assume visible" (`Some(true)`), a genuinely different case
+    /// from a throw on a present method.
     pub fn try_from_js_value(value: JsValue) -> Result<Self, JsError> {
-        let probe = JsValue::from_str("getSelectedView");
-        let has = js_sys::Reflect::has(&value, &probe).map_err(|_| {
-            JsError::new("setModel: argument is not an object (expected an IronCalc Model)")
-        })?;
-        if !has {
-            return Err(JsError::new(
-                "setModel: handle missing required method 'getSelectedView' \
-                 — expected an IronCalc Model",
-            ));
+        for method in [
+            "getSelectedView",
+            "getSelectedSheet",
+            "getFrozenRowsCount",
+            "getFrozenColumnsCount",
+        ] {
+            let probe = JsValue::from_str(method);
+            let has = js_sys::Reflect::has(&value, &probe).map_err(|_| {
+                JsError::new("setModel: argument is not an object (expected an IronCalc Model)")
+            })?;
+            if !has {
+                return Err(JsError::new(&format!(
+                    "setModel: handle missing required method '{method}' \
+                     — expected an IronCalc Model"
+                )));
+            }
         }
         Ok(Self::new(value.unchecked_into()))
     }
@@ -317,9 +333,13 @@ impl JsBackedModel {
 }
 
 impl CanvasModel for JsBackedModel {
-    fn get_selected_sheet(&self) -> u32 {
+    /// Propagates a JS throw as `None` rather than defaulting to sheet `0`
+    /// — the old silent-default made a genuine bridge failure
+    /// indistinguishable from "sheet 0 is selected," which is exactly what
+    /// `FrameInputs::capture` needs to tell apart so it can hold the
+    /// attempt instead of painting the wrong sheet.
+    fn get_selected_sheet(&self) -> Option<u32> {
         self.note_throw("getSelectedSheet", self.handle.get_selected_sheet())
-            .unwrap_or(0)
     }
 
     fn get_selected_view(&self) -> Option<CanvasView> {

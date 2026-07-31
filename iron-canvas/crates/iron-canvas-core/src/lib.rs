@@ -8,6 +8,7 @@
 pub mod autofit;
 pub mod chrome;
 pub mod decoration;
+mod frame_plan;
 pub mod geometry;
 pub mod layer;
 pub mod model_adapter;
@@ -20,8 +21,9 @@ mod style;
 pub mod theme;
 pub mod types;
 
+pub use frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
 pub use orchestrator::{
-    FrameOutcome, FrameTrace, Orchestrator, PaintRegime, PaintRegimeTag, PaintResult, PaneVerdict,
+    FrameOutcome, FrameTrace, Orchestrator, PaintRegimeTag, PaintResult, PaneVerdict,
 };
 
 pub use renderer::blit_work::{BlitPaneWork, widen_blit_strip_to_pixel_clip};

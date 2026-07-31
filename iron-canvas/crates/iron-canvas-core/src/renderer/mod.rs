@@ -257,18 +257,27 @@ impl<P: Painter> RendererCore<P> {
     /// **not** clear the canvas — caller owns the clear so layer-owned
     /// renderers can paint a background fill instead.
     ///
+    /// `mask` is the pane scope the caller's `GridWork` planned — `ALL` for
+    /// a `Fresh` plan, the narrowed set for a `Panes(mask)` plan. An
+    /// explicit parameter rather than a `Chrome`-carried field, so
+    /// consecutive calls against the same `Chrome` value can never leak one
+    /// call's scope into the next.
+    ///
     /// Returns the mask of panes whose content work was held (see
     /// `render_pane`) — `EMPTY` when every visited pane painted or skipped
     /// cleanly.
-    pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> PaneRegionMask {
+    pub fn render_grid(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        mask: PaneRegionMask,
+    ) -> PaneRegionMask {
         self.painter.begin_group(GroupClass::Grid);
-        self.cache_show_grid(model);
+        self.cache_show_grid(model, frame.sheet);
 
-        // `frame.stale_panes` is `ALL` on Fresh; narrower on SlotsReuse —
-        // either way each region listed needs its 5-pass walk.
         let mut held = PaneRegionMask::EMPTY;
         self.painter.begin_group(GroupClass::Cells);
-        for pane in frame.stale_panes.regions() {
+        for pane in mask.regions() {
             if self.render_pane(model, pane, frame) {
                 held = held.with(pane);
             }
@@ -304,15 +313,17 @@ impl<P: Painter> RendererCore<P> {
     /// to a full `render_pane` repaint. Only the scroll-axis header strip is
     /// refreshed (the cross-axis header is unchanged).
     ///
-    /// On a blit frame `frame.stale_panes == plan.shift_panes()`
-    /// (`next_blit` seeds `stale_panes` from `shift_panes`), so one loop over
-    /// the stale panes covers exactly the shifted set.
+    /// Visits exactly `plan.shift_panes()` — the panes whose cached
+    /// pane-buffer data actually shifted along `plan.axis` (cross-axis panes
+    /// left intact are excluded). Read straight from the `BlitPlan` the
+    /// caller already holds rather than a `Chrome`-carried mask, so this
+    /// frame's scope can never be confused with a different call's.
     pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {
         self.painter.begin_group(GroupClass::Grid);
-        self.cache_show_grid(model);
+        self.cache_show_grid(model, frame.sheet);
 
         self.painter.begin_group(GroupClass::Cells);
-        for pane in frame.stale_panes.regions() {
+        for pane in plan.shift_panes().regions() {
             let Some(new_range) = pane.range(frame) else {
                 // Never-cached / empty live range: nothing to shift, full fetch.
                 self.pane_cache.pane(pane).range.set(None);
@@ -394,7 +405,7 @@ impl<P: Painter> RendererCore<P> {
         spans: &[RowSpan],
     ) -> PaneRegionMask {
         self.painter.begin_group(GroupClass::Grid);
-        self.cache_show_grid(model);
+        self.cache_show_grid(model, frame.sheet);
 
         let mut held = PaneRegionMask::EMPTY;
         self.painter.begin_group(GroupClass::Cells);
@@ -439,8 +450,13 @@ impl<P: Painter> RendererCore<P> {
     /// Cache the per-sheet grid-line toggle once for this frame so the
     /// hot per-cell `paint_borders_grid` walk doesn't re-enter the model.
     /// Falls back to "show" on model failure, matching Excel's default-on.
-    fn cache_show_grid(&self, model: &dyn CanvasModel) {
-        let sheet = model.get_selected_sheet();
+    ///
+    /// `sheet` is the committed frame's own sheet (`frame.sheet`), not
+    /// another `CanvasModel::get_selected_sheet()` read — the gridline
+    /// lookup runs once per grid execution and must agree with the geometry
+    /// it is painting over, not with whatever the live model reports this
+    /// instant.
+    fn cache_show_grid(&self, model: &dyn CanvasModel, sheet: u32) {
         self.frame_cache
             .show_grid
             .set(model.get_show_grid_lines(sheet).unwrap_or(true));
@@ -470,8 +486,13 @@ pub struct GridRenderer<P: Painter> {
 }
 
 impl<P: Painter> GridRenderer<P> {
-    pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> PaneRegionMask {
-        self.core.render_grid(model, frame)
+    pub fn render_grid(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        mask: PaneRegionMask,
+    ) -> PaneRegionMask {
+        self.core.render_grid(model, frame, mask)
     }
 
     pub fn render_grid_blit(&self, model: &dyn CanvasModel, frame: &Chrome, plan: &BlitPlan) {

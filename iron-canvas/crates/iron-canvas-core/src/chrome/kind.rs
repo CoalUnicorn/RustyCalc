@@ -2,7 +2,7 @@
 //! `FramePath` arm, or `Chrome::next_blit`) produced this frame.
 //! Diagnostics and `PaneCache`'s per-pane painted-fingerprint gating
 //! (`render_pane`, via `reuses_slots()`) read it; orchestrator `paint_*`
-//! arms dispatch on `PaintRegime` upstream so they never need to match on
+//! arms dispatch on `GridWork` upstream so they never need to match on
 //! this tag.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

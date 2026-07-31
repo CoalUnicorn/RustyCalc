@@ -12,7 +12,7 @@ The foundation. Every other crate in the workspace depends on `iron-canvas-core`
 
 ## Key exports
 
-- `Orchestrator`, `PaintRegime`, `PaintRegimeTag`: frame dispatch and the blit-vs-repaint decision
+- `Orchestrator`, `PaintRegimeTag`: frame dispatch and the blit-vs-repaint decision
 - `Chrome` (module): read-only per-frame geometry/state snapshot
 - `Painter` (trait, in `painter`): the drawing surface backends implement
 - `CanvasModel`, `CanvasView`, `CellContentQuery`: the read-only data adapter traits

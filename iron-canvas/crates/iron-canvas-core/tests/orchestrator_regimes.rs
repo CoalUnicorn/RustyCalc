@@ -1,9 +1,9 @@
 //! `Orchestrator<MemSurface>` five-regime integration test.
 //!
-//! Drives all five `PaintRegime` arms (`Fresh`, `SlotsReuse`, `Damage`,
-//! `Viewport`, `Overlay`) through the same dispatch entry point a browser
-//! would use, and asserts the captured `DrawOp` log matches each regime's
-//! contract:
+//! Drives all five strategies a `FramePlan` can select (`Fresh`,
+//! `SlotsReuse`, `Damage`, `Viewport`, `Overlay`) through the same dispatch
+//! entry point a browser would use, and asserts the captured `DrawOp` log
+//! matches each regime's contract:
 //!
 //! - `Fresh`: full-canvas fill on the grid surface.
 //! - `SlotsReuse`: no full-canvas fill (prior pixels are reused).
@@ -101,11 +101,11 @@ fn slots_reuse_regime_skips_full_canvas_fill() {
 
     let grid_before = grid_ops_len(&orch);
 
-    // A content-dirty signal keeps the viewport stable -> validity =
-    // SlotsReuse. The decide cascade routes here because CONTENT blocks
-    // the Viewport arm (blit on stale content is the recalc bug) and
-    // validity stays SlotsReuse. Theme swaps no longer reach this regime
-    // — they invalidate the paint cache and force Fresh.
+    // A content-dirty signal keeps the viewport stable -> plan_frame plans
+    // SlotsReuse. CONTENT blocks the Viewport arm (blit on stale content is
+    // the recalc bug), and reaching this far with no geometry/view work
+    // selects SlotsReuse. Theme swaps no longer reach this regime — they
+    // invalidate the paint cache and force Fresh.
     orch.mark_content_dirty(PaneRegionMask::ALL);
     orch.paint_if_dirty();
 
@@ -131,8 +131,9 @@ fn viewport_regime_emits_blit_op() {
 
     // Scroll one row. No content change. Raise OVERLAY (the only typed
     // signal we have for "something happened") so paint_if_dirty doesn't
-    // bail empty — last_frame stays populated, decide() catches the
-    // viewport shift via screen_for_blit and routes to Viewport.
+    // bail empty — last_frame stays populated, Chrome::classify catches the
+    // viewport shift as FrameDelta::Scroll, and plan_frame routes it to
+    // Viewport.
     stub.set_top_row(2);
     orch.request_overlay_repaint();
     orch.paint_if_dirty();
@@ -157,7 +158,7 @@ fn overlay_regime_leaves_grid_untouched() {
     let overlay_before = overlay_ops_len(&orch);
 
     // Autofill drag: raises OVERLAY only, no grid signal. Viewport
-    // unchanged -> validity = SlotsReuse. decide() picks Overlay.
+    // unchanged -> FrameDelta::Stable, and plan_frame picks Overlay.
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
     orch.paint_if_dirty();
 
@@ -205,7 +206,7 @@ fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
     let grid_before = grid_ops_len(&orch);
 
     // mark_content_dirty(ALL) raises CONTENT — viewport stays valid so
-    // decide() picks SlotsReuse with mask = ALL.
+    // plan_frame picks SlotsReuse with mask = ALL.
     orch.mark_content_dirty(PaneRegionMask::ALL);
     orch.paint_if_dirty();
 
@@ -230,9 +231,11 @@ fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
 /// repaints the grid (correctly empty) but leaves the overlay's stale
 /// active-cell pixels (the old value) on screen.
 ///
-/// The fix lives in the `must_paint_overlay` predicate at the tail of
-/// `paint_slots_reuse_regime`: `signals.overlay_dirty() || (CONTENT &&
-/// selection.active_cell_repaint().is_some())`.
+/// The fix lives in `plan_frame`'s `OverlayWork` calculation: row/pane
+/// content work paints the overlay when overlay work is marked, or when
+/// captured selection visibility is true (content then implies an
+/// active-cell repaint) — `paint_slots_reuse_regime` just reads
+/// `plan.overlay` rather than re-deriving it.
 #[test]
 fn content_dirty_with_active_cell_repaints_overlay() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(1, 1));
@@ -242,8 +245,9 @@ fn content_dirty_with_active_cell_repaints_overlay() {
     let overlay_before = overlay_ops_len(&orch);
 
     // DEL on the active cell: model value gone, only CONTENT raised
-    // (no OVERLAY bit). Pre-fix, `if signals.overlay_dirty()` short-
-    // circuited and the overlay's stale active-cell pixels stayed put.
+    // (no OVERLAY mark). Pre-fix, gating solely on an explicit overlay
+    // mark short-circuited and the overlay's stale active-cell pixels
+    // stayed put.
     stub.set_cell(1, 1, "");
     orch.mark_content_dirty(PaneRegionMask::ALL);
     orch.paint_if_dirty();
@@ -265,20 +269,22 @@ fn content_dirty_with_active_cell_repaints_overlay() {
 }
 
 /// Regression for the workbook-switch stale-paint bug: `set_model` must
-/// drop `last_frame` and raise `STRUCTURAL | OVERLAY` so the next paint
-/// runs Fresh and clears both layers. Without this, swapping the
-/// orchestrator's model in place (RustyCalc workbook switch, driven by
-/// the `current_uuid` Effect in `worksheet.rs`) keeps the prior workbook's
-/// chrome / pane geometry / cached pane buffers — and `decide()` routes
-/// against the wrong `last_frame` to a stale SlotsReuse or Overlay paint
-/// that never repaints the grid.
+/// mark geometry (plus panes(ALL) and overlay) so the next paint plans
+/// `Fresh` and clears both layers — `plan_frame`'s "any geometry work
+/// forces Fresh" rule guarantees this regardless of what `Chrome::classify`
+/// would otherwise report (independently, the changed `model_generation`
+/// also hard-breaks `Chrome::classify` to `Rebuild(Model)`). Without the
+/// geometry mark, swapping the orchestrator's model in place (RustyCalc
+/// workbook switch, driven by the `current_uuid` Effect in `worksheet.rs`)
+/// could plan a stale SlotsReuse or Overlay paint that never repaints the
+/// grid, keeping the prior workbook's chrome / pane geometry / cached pane
+/// buffers on screen.
 ///
 /// Tests the contract via the public `last_regime` accessor instead of
-/// reaching into private fields: Fresh after `set_model` is exactly the
-/// behavior the dropped `last_frame` + raised signals are supposed to
-/// produce.
+/// reaching into private fields: `Fresh` after `set_model` is exactly the
+/// behavior the geometry mark is supposed to produce.
 #[test]
-fn set_model_drops_last_frame_and_forces_fresh() {
+fn set_model_marks_geometry_and_forces_fresh() {
     let stub_a = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub_a));
     orch.paint_if_dirty(); // Fresh — primes last_frame.
@@ -296,7 +302,7 @@ fn set_model_drops_last_frame_and_forces_fresh() {
     assert_eq!(
         orch.last_regime(),
         Some(PaintRegimeTag::Fresh),
-        "set_model must drop last_frame so the next paint takes Fresh; \
+        "set_model must mark geometry work so the next paint takes Fresh; \
          got {:?} — the workbook-switch stale-paint bug is back",
         orch.last_regime(),
     );
@@ -305,7 +311,7 @@ fn set_model_drops_last_frame_and_forces_fresh() {
     let new_overlay_ops = overlay_ops_since(&orch, overlay_before);
     assert!(
         !new_grid_ops.is_empty(),
-        "set_model must raise STRUCTURAL so Fresh repaints the grid"
+        "set_model must raise GEOMETRY so Fresh repaints the grid"
     );
     assert!(
         !new_overlay_ops.is_empty(),
@@ -387,10 +393,10 @@ fn last_regime_fresh_after_initial_paint() {
 #[test]
 fn last_regime_fresh_after_theme_swap() {
     // Theme is frame-wide: a palette change makes the cached frame's
-    // pixels stale. `is_still_valid` rejects the theme-mismatched frame
-    // (and `set_theme` invalidates the content-keyed paint cache), so the
-    // next paint takes the Fresh arm; SlotsReuse would repaint stale-color
-    // cells under fresh chrome.
+    // pixels stale. `Chrome::classify` rejects the theme-mismatched frame
+    // with `Rebuild(Theme)` (and `set_theme` invalidates the content-keyed
+    // paint cache), so the next paint takes the Fresh arm; SlotsReuse would
+    // repaint stale-color cells under fresh chrome.
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
@@ -965,16 +971,16 @@ fn repeated_set_model_still_forces_fresh() {
 /// THE dispatch hazard this stage had to get right.
 ///
 /// An arrow-key move to a cell already on screen changes no scroll, freeze,
-/// sheet, size or cell value — only the view. `decide` runs the geometric
-/// `screen_for_blit` probe first, gets `None` (no pixels move), and must
-/// then let `Overlay` match *while ignoring the view mark*.
+/// sheet, size or cell value — only the view. `Chrome::classify` reports
+/// `FrameDelta::Stable` (no pixels move), and `plan_frame` must then let
+/// `Overlay` match *while ignoring the view mark*.
 ///
-/// Expressing `Overlay`'s guard as the mechanical port of the old
-/// `!signals.grid_dirty()` — whose bit group already covered the then-dead
-/// `VIEWPORT` bit — would make this row of the dispatch matrix unreachable
-/// and turn the single most common interaction in the app into a full-grid
-/// repaint. That regression is silent in every other test; this is the one
-/// that fails.
+/// Expressing `Overlay`'s guard as `!work.has_view()` — the mechanical port
+/// of the old `!signals.grid_dirty()`, whose bit group already covered the
+/// then-dead `VIEWPORT` bit — would make this row of the planner table
+/// unreachable and turn the single most common interaction in the app into
+/// a full-grid repaint. That regression is silent in every other test; this
+/// is the one that fails.
 #[test]
 fn visible_selection_navigation_dispatches_overlay() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(5, 2));

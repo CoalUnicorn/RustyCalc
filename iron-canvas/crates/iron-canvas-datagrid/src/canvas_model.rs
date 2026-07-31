@@ -3,13 +3,15 @@ use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched};
 
 impl CanvasModel for DataGrid {
-    fn get_selected_sheet(&self) -> u32 {
-        0
+    fn get_selected_sheet(&self) -> Option<u32> {
+        Some(0)
     }
+    /// Always returns a real view, regardless of `show_selection_enabled()`.
+    /// Selection visibility is signalled separately via `get_show_selection`
+    /// — overloading `None` here would make `FrameInputs::capture` hold a
+    /// deliberately selection-less grid forever (see `get_show_selection`'s
+    /// doc on `CanvasModel`).
     fn get_selected_view(&self) -> Option<CanvasView> {
-        if !self.show_selection_enabled() {
-            return None;
-        }
         let [r1, c1, r2, c2] = self.selection_raw();
         Some(CanvasView {
             sheet: 0,
@@ -19,6 +21,9 @@ impl CanvasModel for DataGrid {
             top_row: self.top_row_raw(),
             left_column: self.left_col_raw(),
         })
+    }
+    fn get_show_selection(&self) -> bool {
+        self.show_selection_enabled()
     }
     fn get_frozen_rows_count(&self, _s: u32) -> Option<i32> {
         Some(if self.frozen_header_enabled() { 1 } else { 0 })

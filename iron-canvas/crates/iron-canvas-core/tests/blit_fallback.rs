@@ -1,21 +1,22 @@
-//! `Chrome::next_blit` fallback: `screen_for_blit` qualifies
-//! but `try_blit_reuse` rejects in-place reuse — today this fires only at
-//! a row-header digit boundary, when the new last-visible row gains a
-//! digit and `row_header_thickness` widens. The dispatch must hand back
-//! a `Fresh` frame rather than a malformed `Blitted` one, otherwise
-//! `paint_viewport_regime` would skip the full grid rebuild.
+//! `Chrome::next_blit` fallback: `Chrome::classify` qualifies (returns
+//! `FrameDelta::Scroll`) but `try_blit_reuse` rejects in-place reuse — today
+//! this fires only at a row-header digit boundary, when the new
+//! last-visible row gains a digit and `row_header_thickness` widens. The
+//! dispatch must hand back a `Fresh` frame rather than a malformed
+//! `Blitted` one, otherwise `paint_viewport_regime` would skip the full
+//! grid rebuild.
 
 mod common;
 
 use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{CanvasModel, CanvasSize};
+use iron_canvas_core::{CanvasModel, CanvasSize, FrameDelta, RebuildReason};
 
-use common::TestModel;
+use common::{TestModel, test_inputs};
 
 fn snap(m: &TestModel) -> ActiveCellSnapshot {
     let view = m.get_selected_view().expect("view");
-    ActiveCellSnapshot::capture(m, m.get_selected_sheet(), view.row, view.column)
+    ActiveCellSnapshot::capture(m, view.sheet, view.row, view.column)
 }
 
 #[test]
@@ -32,7 +33,8 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
         .with_top_row(980)
         .with_active(980, 1);
 
-    let prev = Chrome::next(None, &model, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&model, canvas, &theme);
+    let prev = Chrome::next(None, &model, &inputs0, FramePath::Fresh);
     let prev_row_header = prev.row_header_thickness;
     let last_at_prev = prev
         .pane_set
@@ -54,18 +56,21 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
     // new_row_header` rather than on absolute pixel values.
     model.set_top_row(981);
     let active = snap(&model);
+    let inputs1 = test_inputs(&model, canvas, &theme);
 
-    let plan = prev
-        .screen_for_blit(&model, canvas, &theme, &active)
-        .expect("single-row scroll must qualify geometrically");
+    let FrameDelta::Scroll(plan) = Chrome::classify(Some(&prev), &model, &inputs1, Some(&active))
+    else {
+        panic!("single-row scroll must qualify geometrically");
+    };
 
-    let outcome = Chrome::next_blit(Some(prev), &model, canvas, &theme, &plan);
+    let outcome = Chrome::next_blit(Some(prev), &model, &inputs1, &plan);
 
     // The whole point of the fallback: if try_blit_reuse rejected, the outcome
-    // must be `FreshFallback` (Fresh-built frame, clean stale_panes = ALL) so
-    // paint_viewport_regime invalidates the cache. The `BlitOutcome` type now
-    // makes "Fresh or Blitted, never anything else" structural — the else
-    // branch needs no assertion.
+    // must be `FreshFallback` (a Fresh-built frame) so paint_viewport_regime
+    // invalidates the cache and repaints every pane (the explicit
+    // `PaneRegionMask::ALL` it passes to `paint_grid`). The `BlitOutcome`
+    // type now makes "Fresh or Blitted, never anything else" structural —
+    // the else branch needs no assertion.
     let is_fallback = matches!(outcome, BlitOutcome::FreshFallback(_));
     let next_row_header = match &outcome {
         BlitOutcome::Blitted(f) | BlitOutcome::FreshFallback(f) => f.row_header_thickness,
@@ -90,17 +95,19 @@ fn blit_inside_stable_digit_band_keeps_blitted_kind() {
         .with_top_row(10)
         .with_active(10, 1);
 
-    let prev = Chrome::next(None, &model, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&model, canvas, &theme);
+    let prev = Chrome::next(None, &model, &inputs0, FramePath::Fresh);
     let prev_row_header = prev.row_header_thickness;
 
     model.set_top_row(11);
     let active = snap(&model);
+    let inputs1 = test_inputs(&model, canvas, &theme);
 
-    let plan = prev
-        .screen_for_blit(&model, canvas, &theme, &active)
-        .expect("single-row scroll must qualify");
-    let BlitOutcome::Blitted(next) = Chrome::next_blit(Some(prev), &model, canvas, &theme, &plan)
+    let FrameDelta::Scroll(plan) = Chrome::classify(Some(&prev), &model, &inputs1, Some(&active))
     else {
+        panic!("single-row scroll must qualify");
+    };
+    let BlitOutcome::Blitted(next) = Chrome::next_blit(Some(prev), &model, &inputs1, &plan) else {
         panic!("in-band scroll must reuse in place (Blitted)");
     };
 
@@ -124,13 +131,20 @@ fn bridge_failed_active_cell_rejects_blit() {
         .with_active(10, 1);
     model.set_cell(10, 1, "hello");
 
-    let prev = Chrome::next(None, &model, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&model, canvas, &theme);
+    let prev = Chrome::next(None, &model, &inputs0, FramePath::Fresh);
     model.set_top_row(11);
+    // `value_bridge_fail` and cell edits below affect only the active-cell
+    // value hash, not any scalar `FrameInputs` reads — one capture after the
+    // scroll covers all three calls below.
+    let inputs1 = test_inputs(&model, canvas, &theme);
 
     // Control: known, unchanged value -> single-row scroll qualifies.
     assert!(
-        prev.screen_for_blit(&model, canvas, &theme, &snap(&model))
-            .is_some(),
+        matches!(
+            Chrome::classify(Some(&prev), &model, &inputs1, Some(&snap(&model))),
+            FrameDelta::Scroll(_)
+        ),
         "known unchanged active cell must qualify for blit"
     );
 
@@ -139,8 +153,10 @@ fn bridge_failed_active_cell_rejects_blit() {
     let known = snap(&model);
     model.set_value_bridge_fail(true);
     assert!(
-        prev.screen_for_blit(&model, canvas, &theme, &known)
-            .is_none(),
+        matches!(
+            Chrome::classify(Some(&prev), &model, &inputs1, Some(&known)),
+            FrameDelta::Rebuild(RebuildReason::ActiveCellChangedOrUnknown)
+        ),
         "BridgeFailed at compare time must reject the blit"
     );
 
@@ -149,8 +165,10 @@ fn bridge_failed_active_cell_rejects_blit() {
     let poisoned = snap(&model);
     model.set_value_bridge_fail(false);
     assert!(
-        prev.screen_for_blit(&model, canvas, &theme, &poisoned)
-            .is_none(),
+        matches!(
+            Chrome::classify(Some(&prev), &model, &inputs1, Some(&poisoned)),
+            FrameDelta::Rebuild(RebuildReason::ActiveCellChangedOrUnknown)
+        ),
         "BridgeFailed at capture time must reject the blit"
     );
 }

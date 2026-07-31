@@ -139,7 +139,10 @@ pub trait CellContentQuery {
 /// `get_*_header_text` overrides use `None` for "no override, fall back to the
 /// default."
 pub trait CanvasModel: CellContentQuery {
-    fn get_selected_sheet(&self) -> u32;
+    /// `None` signals a transient JS-bridge failure: the bridge call threw
+    /// or the returned shape didn't deserialize. `FrameInputs::capture`
+    /// holds the paint attempt rather than substituting sheet `0`.
+    fn get_selected_sheet(&self) -> Option<u32>;
     /// `None` signals a transient JS-bridge failure: the bridge call threw
     /// or the returned shape didn't deserialize. The next animation frame
     /// will re-query.
@@ -149,6 +152,22 @@ pub trait CanvasModel: CellContentQuery {
     fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
     fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+
+    /// Whether the selection (fill, stroke, autofill handle, active-cell
+    /// overlay repaint, header highlights) should paint at all. Infallible
+    /// and default-`true` — unlike the other accessors here, there is no
+    /// "transient bridge failure" reading for this one, so it cannot itself
+    /// hold a paint attempt.
+    ///
+    /// Exists so a deliberately selection-less host (the data-grid adapter
+    /// with `show_selection(false)`) can signal that *without* overloading
+    /// `get_selected_view() -> None`, which `FrameInputs::capture` treats as
+    /// an unconditional hold — a selection-less grid would otherwise retry
+    /// forever. The data-grid adapter overrides this and still returns a
+    /// real `CanvasView` from `get_selected_view()`.
+    fn get_show_selection(&self) -> bool {
+        true
+    }
 
     /// Last addressable row of `sheet`, 1-based inclusive. The slot walks,
     /// the blit-path rebuilds, and the autofill-handle guard clamp here.
@@ -227,13 +246,14 @@ impl<T: CellContentQuery + ?Sized> CellContentQuery for Rc<T> {
 
 impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
     forward_methods! {
-        fn get_selected_sheet(&self) -> u32;
+        fn get_selected_sheet(&self) -> Option<u32>;
         fn get_selected_view(&self) -> Option<CanvasView>;
         fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
         fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
         fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
         fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
         fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+        fn get_show_selection(&self) -> bool;
         fn last_row(&self, sheet: u32) -> i32;
         fn last_column(&self, sheet: u32) -> i32;
         fn get_show_row_headers(&self, sheet: u32) -> Option<bool>;

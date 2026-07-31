@@ -56,10 +56,13 @@ impl PaneRegion {
 }
 
 bitflags::bitflags! {
-    /// Bitset over `PaneRegion`. `Chrome.stale_panes` carries one of these
-    /// to tell `render_grid` which quadrants still need painting. Bit
-    /// positions are pinned to `PaneRegion as u8` so `with(region)` /
-    /// `regions()` can map between enum and bit by left-shift.
+    /// Bitset over `PaneRegion`. The orchestrator's `GridWork` carries one
+    /// of these (or a `BlitPlan` yielding one via `shift_panes()`) and
+    /// threads it into `render_grid` as an explicit parameter to tell it
+    /// which quadrants still need painting — `Chrome` itself carries no
+    /// pane-scope field. Bit positions are pinned to `PaneRegion as u8` so
+    /// `with(region)` / `regions()` can map between enum and bit by
+    /// left-shift.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct PaneRegionMask: u8 {
         const TOP_LEFT     = 1 << PaneRegion::TopLeft as u8;

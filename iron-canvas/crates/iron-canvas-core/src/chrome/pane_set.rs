@@ -97,9 +97,15 @@ impl PaneSet {
     /// [`chrome`](crate::chrome) module docs).
     /// Runs before the row-label measurement, so it does not depend on
     /// `row_header_thickness`.
+    ///
+    /// `sheet` is the caller's already-captured sheet, threaded into the
+    /// per-row `measure` closure so the walk reads it once instead of once
+    /// per row (`row_height`'s doc).
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_rows(
         &mut self,
         model: &dyn CanvasModel,
+        sheet: u32,
         frozen_count: i32,
         origin_y: i32,
         view_top_row: i32,
@@ -113,16 +119,18 @@ impl PaneSet {
             view_top_row,
             last_row,
             canvas_h.ceil() as i32,
-            row_height,
+            |model, row| row_height(model, sheet, row),
         );
     }
 
     /// Column-axis mirror of `fill_rows`. Runs as Phase D, using the
     /// cell-area X origin that already folds in the measured
     /// `row_header_thickness`.
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_cols(
         &mut self,
         model: &dyn CanvasModel,
+        sheet: u32,
         frozen_count: i32,
         origin_x: i32,
         view_left_column: i32,
@@ -136,7 +144,7 @@ impl PaneSet {
             view_left_column,
             last_column,
             canvas_w.ceil() as i32,
-            col_width,
+            |model, col| col_width(model, sheet, col),
         );
     }
 
