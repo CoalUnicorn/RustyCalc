@@ -5,15 +5,21 @@
 //! for its [`crate::chrome::PaneRegion`], together with the `RCRange` the
 //! fetch covered. `render_pane` skips the model refetch when the cached
 //! `range` still matches the live pane range. Under a blit fast-path the
-//! caller calls [`PaneBuffers::prepare_shift`] first, rotating the buffers in
-//! place so the kept band survives and only the revealed strip needs a
-//! refetch.
+//! caller first classifies the shift via [`PaneBuffers::classify_shift`] (pure
+//! — decides `Shifted`/`MissingCache`/`IncompatibleRange` without touching the
+//! buffers), fetches the revealed strip, and only once that fetch is
+//! confirmed clean calls [`PaneBuffers::apply_shift`] to rotate the buffers in
+//! place so the kept band survives and the strip fetch splices into the
+//! freshly revealed slots.
 
 use std::cell::{Cell, RefCell};
 
 use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
-use crate::renderer::cell::fingerprint::{PaneFingerprint, rebuild_pane_fingerprint_in_place};
+use crate::renderer::cell::fingerprint::{
+    PaneFingerprint, RepaintPlan, plan_pane_repaint, rebuild_pane_fingerprint_in_place,
+};
+use crate::renderer::prepared::FetchedCells;
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
@@ -28,10 +34,12 @@ use crate::types::fetched::Fetched;
 /// `painted.range != scratch.range -> Full` right after its digest compare.
 /// A scroll always changes the live range, so a tree left over from before a
 /// scroll can never digest-equal (nor range-equal) a freshly rebuilt tree for
-/// the new range — the compare already forces a full repaint. A partial strip
-/// paint (`render_pane_strip`) simply doesn't `commit`, so `painted` keeps
-/// last full paint's range/digest; the next frame's compare against that
-/// naturally decides Skip or repaint on its own merits.
+/// the new range — the compare already forces a full repaint. A splice-kind
+/// pane-cache commit (a Damage strip or a blit's revealed strip) simply
+/// doesn't `commit` into this tree — see `install_pane_cache_commit`'s
+/// `PaneCacheCommit::Splice` arm — so `painted` keeps last full paint's
+/// range/digest; the next frame's compare against that naturally decides
+/// Skip or repaint on its own merits.
 ///
 /// Ownership lives here (renderer-lifetime, on `RendererCore` via
 /// `PaneCache`) rather than on `Chrome` (rebuilt every `Fresh`/`SlotsReuse`/
@@ -40,13 +48,15 @@ use crate::types::fetched::Fetched;
 ///
 /// Two persistent slots, not one: comparing "what did we last paint" against
 /// "what would we paint now" needs both trees alive at once, and the *next*
-/// frame needs a warm `Vec`-backed target to rebuild into without
-/// reallocating. `painted` is last frame's committed tree; `scratch` is
-/// rebuilt in place every frame via [`rebuild_pane_fingerprint_in_place`]
-/// (reusing whatever capacity is already there) and then, on a successful
-/// skip or paint, traded for `painted` via `mem::swap` — zero allocation,
-/// zero clone. The tree that's now stale becomes next frame's `scratch`
-/// target.
+/// preparation needs a warm `Vec`-backed target to rebuild into without
+/// reallocating. `painted` is the last-committed tree; `scratch` is a
+/// non-semantic capacity pool only — never itself compared against
+/// `painted` while both are live in persistent state (see
+/// [`Self::build_candidate`]'s doc). On a successful [`Self::install`] the
+/// now-stale `painted` tree becomes the next preparation's warm `scratch`
+/// target; the tree that was just installed *is* the value a caller of
+/// [`Self::build_candidate`] built and owned across the whole prepare step,
+/// never parked here mid-attempt.
 #[derive(Default)]
 pub(crate) struct PaneFingerprintState {
     painted: RefCell<PaneFingerprint>,
@@ -54,19 +64,25 @@ pub(crate) struct PaneFingerprintState {
 }
 
 impl PaneFingerprintState {
-    /// Rebuild `scratch` in place from this frame's freshly bulk-fetched
-    /// buffers (reusing its warm `Vec` capacity from whatever was last
-    /// painted or scratched here). The caller then diffs `scratch` against
-    /// `painted` via [`Self::with_trees`] + `plan_pane_repaint`, whose first
-    /// line is the whole-pane digest-equal Skip fast path.
-    pub(crate) fn rebuild_scratch(
+    /// Build a candidate tree from this frame's freshly bulk-fetched
+    /// buffers as an OWNED value: rebuilds in place into `scratch` (reusing
+    /// whatever warm `Vec` capacity is parked there via
+    /// [`rebuild_pane_fingerprint_in_place`]), then `mem::take`s it out,
+    /// leaving `scratch` at `Default` again. The candidate belongs to the
+    /// caller from this point on — a preparation that builds one and then
+    /// abandons it (a held pane) never left `scratch` holding
+    /// attempt-specific data for a later frame to misread; `scratch` was
+    /// never anything but capacity to begin with, and it gets refilled with
+    /// real capacity the moment this or a sibling pane's next
+    /// [`Self::install`] runs.
+    pub(crate) fn build_candidate(
         &self,
         styles: &[Fetched<CellStyle>],
         values: &[Fetched<String>],
         cell_types: &[Fetched<CellKind>],
         decorations: &[Fetched<CellDecoration>],
         range: RCRange,
-    ) {
+    ) -> PaneFingerprint {
         let mut scratch = self.scratch.borrow_mut();
         rebuild_pane_fingerprint_in_place(
             &mut scratch,
@@ -76,42 +92,49 @@ impl PaneFingerprintState {
             decorations,
             range,
         );
+        std::mem::take(&mut *scratch)
     }
 
-    /// Commit the just-rebuilt `scratch` tree as the pane's newly painted
-    /// state via `mem::swap` — no allocation, no clone. Must be called
-    /// exactly once per successful `render_pane` outcome (skip or full
-    /// paint), and never on a preflight failure (see `render_pane`).
-    pub(crate) fn commit(&self) {
-        std::mem::swap(
-            &mut *self.painted.borrow_mut(),
-            &mut *self.scratch.borrow_mut(),
-        );
+    /// Compare an already-built candidate against the last-committed
+    /// `painted` tree — the whole-pane digest-equal Skip fast path lives in
+    /// `plan_pane_repaint`'s first line. Read-only: does not touch
+    /// `painted` or `scratch`.
+    pub(crate) fn compare_to_painted(&self, candidate: &PaneFingerprint) -> RepaintPlan {
+        plan_pane_repaint(&self.painted.borrow(), candidate)
     }
 
-    /// Borrow both trees at once for a row/cell-level comparison (e.g.
-    /// `fingerprint::plan_pane_repaint`), which needs both the whole-pane
-    /// digest and the per-row digests to decide Skip / Rows / Full.
-    ///
-    /// A closure, not a `(Ref<PaneFingerprint>, Ref<PaneFingerprint>)` pair,
-    /// so both `RefCell` borrows are guaranteed to end together at the end
-    /// of one call, matching the borrow discipline `rebuild_scratch` and
-    /// `commit` already use elsewhere in this file — a caller holding one
-    /// borrow past the other's drop is exactly the hazard a `Ref` pair
-    /// returned by value would invite.
-    pub(crate) fn with_trees<R>(
-        &self,
-        f: impl FnOnce(&PaneFingerprint, &PaneFingerprint) -> R,
-    ) -> R {
-        f(&self.painted.borrow(), &self.scratch.borrow())
+    /// Commit: install `candidate` as the pane's newly painted state,
+    /// parking the now-stale evicted tree into `scratch` so its `Vec`
+    /// capacity stays warm for the next [`Self::build_candidate`] call —
+    /// zero allocation, zero clone. Must be called at most once per
+    /// successful pane commit, and never on a held/failed preparation (see
+    /// `RendererCore::install_pane_cache_commit`, the only caller).
+    pub(crate) fn install(&self, candidate: PaneFingerprint) {
+        let old = std::mem::replace(&mut *self.painted.borrow_mut(), candidate);
+        *self.scratch.borrow_mut() = old;
+    }
+
+    /// Abort-only: return an uncommitted candidate to the warm scratch slot.
+    /// The candidate was never installed, so this changes no painted state.
+    pub(crate) fn recycle_candidate(&self, candidate: PaneFingerprint) {
+        *self.scratch.borrow_mut() = candidate;
+    }
+
+    #[cfg(feature = "surface-introspection")]
+    fn scratch_capacities(&self) -> (usize, usize) {
+        let scratch = self.scratch.borrow();
+        (
+            scratch.rows.capacity(),
+            scratch.rows.iter().map(|row| row.cells.capacity()).sum(),
+        )
     }
 }
 
 /// Per-pane buffers that survive across frames. Holds the most recent
 /// bulk-fetch output for one `PaneRegion`, plus the `RCRange` they were
-/// fetched for. `render_pane` reads `range` to decide whether the cached
-/// buffers are still valid for the live frame: if `frame.kind.reuses_slots()`
-/// and the live pane range equals the cached range, no fetch is needed.
+/// fetched for. Full-pane preparation always refetches targeted panes; the
+/// range tells Damage and Viewport whether those committed buffers can be
+/// spliced or shifted safely.
 ///
 /// Each field stays `Cell`-wrapped so `render_pane` can `take` for
 /// mutation and `set` back at the end of the call (same rhythm the
@@ -130,9 +153,69 @@ pub struct PaneBuffers {
     /// [`PaneFingerprintState`]'s doc for how a stale tree self-disqualifies
     /// via its baked-in range, needing no separate validity marker.
     pub(crate) fingerprint: PaneFingerprintState,
+    /// Spare [`FetchedCells`] capacity for the next full-pane preparation
+    /// attempt (`RendererCore::prepare_full_pane`). Preparation takes this
+    /// — never the four committed fields above — as its fetch target, so a
+    /// failed preparation has nothing of the committed cache to undo: it
+    /// parks its failed fetch back here untouched; a successful commit
+    /// parks the evicted old committed cells here instead (see
+    /// [`Self::install_cells`]). Either way `styles`/`values`/`cell_types`/
+    /// `decorations`/`range` above change only inside
+    /// `RendererCore::commit_pane_cache`.
+    prepare_scratch: Cell<FetchedCells>,
 }
 
-/// Typed outcome of [`PaneBuffers::prepare_shift`]. Replaces the old
+impl PaneBuffers {
+    #[cfg(feature = "surface-introspection")]
+    pub fn preparation_scratch_capacities(&self) -> ((usize, usize, usize, usize), (usize, usize)) {
+        let cells = self.prepare_scratch.take();
+        let cell_capacities = cells.capacities();
+        self.prepare_scratch.set(cells);
+        (cell_capacities, self.fingerprint.scratch_capacities())
+    }
+
+    /// Pure: hand back whatever spare [`FetchedCells`] capacity is parked
+    /// for reuse, WITHOUT touching the four committed content fields.
+    pub(crate) fn take_prepare_scratch(&self) -> FetchedCells {
+        self.prepare_scratch.take()
+    }
+
+    /// Park capacity for the next preparation attempt. Called both on a
+    /// failed preparation (the just-fetched, now-discarded cells) and on a
+    /// successful commit (the evicted old committed cells) — either way the
+    /// four committed content fields are untouched by this call.
+    pub(crate) fn park_prepare_scratch(&self, cells: FetchedCells) {
+        self.prepare_scratch.set(cells);
+    }
+
+    /// Commit-only: swap `cells` in as the new committed content, returning
+    /// the evicted old committed content so the caller can park it as the
+    /// next attempt's scratch (see [`Self::park_prepare_scratch`]).
+    pub(crate) fn install_cells(&self, cells: FetchedCells) -> FetchedCells {
+        let (styles, values, cell_types, decorations) = cells.into_parts();
+        FetchedCells::from_parts(
+            self.styles.replace(styles),
+            self.values.replace(values),
+            self.cell_types.replace(cell_types),
+            self.decorations.replace(decorations),
+        )
+    }
+
+    /// Commit-only: set the committed content directly, no swap, no old
+    /// value returned. Used by a Damage/Splice commit, whose buffers
+    /// already ARE this pane's own committed buffers (taken once, spliced
+    /// in place, and handed back) — there is no foreign "old" value to
+    /// evict.
+    pub(crate) fn set_cells(&self, cells: FetchedCells) {
+        let (styles, values, cell_types, decorations) = cells.into_parts();
+        self.styles.set(styles);
+        self.values.set(values);
+        self.cell_types.set(cell_types);
+        self.decorations.set(decorations);
+    }
+}
+
+/// Typed outcome of [`PaneBuffers::classify_shift`]. Replaces the old
 /// `bool` so the dispatch site can decide strip-paint vs full-fetch once,
 /// from a named reason, instead of dropping the bool and re-deriving the
 /// decision downstream.
@@ -155,25 +238,14 @@ pub enum PaneShiftPrep {
 }
 
 impl PaneBuffers {
-    /// Rotate `styles` / `values` / `cell_types` in place from the cached
-    /// `prev_range` into `new_range` along `axis`, returning a typed
-    /// [`PaneShiftPrep`] explaining what happened. On `Shifted` the buffers
-    /// have been rotated so the kept band survives and the revealed strip
-    /// carries placeholders; on `IncompatibleRange` the cache is cleared
-    /// (`range` set to `None`) so the caller's full fetch reads fresh.
-    ///
-    /// `range` is intentionally left at `prev_range` on `Shifted` — the
-    /// shifted buffers hold `new_range` data, but the cache metadata stays
-    /// `prev_range` until the strip paint succeeds and commits the range.
-    /// Bumping it here would trip `render_pane`'s range-equality early-exit
-    /// and skip the strip paint entirely.
-    /// Pure classification half of [`Self::prepare_shift`]: reports which
-    /// [`PaneShiftPrep`] variant this pane/range/axis is, WITHOUT rotating the
-    /// buffers or clearing the cached `range`. The blit preflight
-    /// (`RendererCore::prefetch_blit_strips`) uses this to compute a shifted
-    /// pane's revealed strip and fetch it *before* any pixel is shifted or any
-    /// cache mutated — so a strip fetch that fails leaves the pane untouched.
-    /// The actual rotation is deferred to `prepare_shift` on the paint pass.
+    /// Pure classification: reports which [`PaneShiftPrep`] variant this
+    /// pane/range/axis is, WITHOUT rotating the buffers or clearing the
+    /// cached `range` either way. Stage 4's blit preparation
+    /// (`RendererCore::prepare_blit`) uses this to decide, per pane, whether
+    /// to fetch a revealed strip or fall back to a full-pane fetch — *before*
+    /// any pixel is shifted or any cache mutated, so a fetch that fails
+    /// leaves the pane untouched. The actual rotation is deferred to
+    /// [`Self::apply_shift`], called only once that fetch is confirmed clean.
     pub fn classify_shift(&self, new_range: RCRange, axis: Axis) -> PaneShiftPrep {
         let Some(prev_range) = self.range.get() else {
             return PaneShiftPrep::MissingCache;
@@ -190,28 +262,22 @@ impl PaneBuffers {
         }
     }
 
-    pub fn prepare_shift(&self, new_range: RCRange, axis: Axis) -> PaneShiftPrep {
-        let prev_range = match self.classify_shift(new_range, axis) {
-            PaneShiftPrep::MissingCache => return PaneShiftPrep::MissingCache,
-            PaneShiftPrep::IncompatibleRange {
-                prev_range,
-                new_range,
-            } => {
-                self.range.set(None);
-                return PaneShiftPrep::IncompatibleRange {
-                    prev_range,
-                    new_range,
-                };
-            }
-            PaneShiftPrep::Shifted { prev_range, .. } => prev_range,
-        };
+    /// Execution-only: rotate `styles` / `values` / `cell_types` /
+    /// `decorations` in place from `prev_range` into `new_range` along
+    /// `axis`, so the kept band survives and the revealed strip carries
+    /// placeholders (`Fetched::Absent`) for the caller's already-fetched
+    /// strip to splice into. Never call this during preparation — only after
+    /// [`Self::classify_shift`] returned `Shifted` for these exact ranges AND
+    /// the revealed strip's fetch is already confirmed clean (see
+    /// `renderer::prepared`'s module doc for why preparation must never
+    /// mutate committed buffers). Does not touch `range` — committing it to
+    /// `new_range` is the caller's separate, later step, alongside installing
+    /// the spliced buffers (see `RendererCore::commit_pane_cache`).
+    pub fn apply_shift(&self, prev_range: RCRange, new_range: RCRange, axis: Axis) {
         let mut styles = self.styles.take();
         let mut values = self.values.take();
         let mut cell_types = self.cell_types.take();
         let mut decorations = self.decorations.take();
-        // Revealed strip slots are placeholders the strip-fetch overwrites this
-        // same frame — `Fetched::Absent` for all four buffers (nothing fetched
-        // yet).
         apply_blit_shift(&mut styles, prev_range, new_range, axis, Fetched::Absent);
         apply_blit_shift(&mut values, prev_range, new_range, axis, Fetched::Absent);
         apply_blit_shift(
@@ -232,10 +298,6 @@ impl PaneBuffers {
         self.values.set(values);
         self.cell_types.set(cell_types);
         self.decorations.set(decorations);
-        PaneShiftPrep::Shifted {
-            prev_range,
-            new_range,
-        }
     }
 }
 
@@ -268,11 +330,11 @@ impl PaneCache {
     }
 
     /// Build address-space blit work from a `Shifted` [`PaneShiftPrep`]: the
-    /// prep already proved compatibility (its `Shifted` vs `IncompatibleRange`
-    /// split *is* the [`shift_is_safe`] predicate, single-sourced), so this
-    /// only computes the base revealed strip. `axis` flows from `BlitPlan`,
-    /// never re-inferred. Returns `None` only on the defensive zero-delta
-    /// case `compute_strip` rejects.
+    /// classification already proved compatibility (its `Shifted` vs
+    /// `IncompatibleRange` split *is* the [`shift_is_safe`] predicate,
+    /// single-sourced), so this only computes the base revealed strip. `axis`
+    /// flows from `BlitPlan`, never re-inferred. Returns `None` only on the
+    /// defensive zero-delta case `compute_strip` rejects.
     pub fn plan_blit_pane(
         &self,
         prev_range: RCRange,
@@ -316,8 +378,8 @@ impl PaneCache {
 /// mismatched dimensions.
 ///
 /// Single source of the compatibility predicate: called only from
-/// [`PaneBuffers::prepare_shift`], whose `Shifted` vs `IncompatibleRange`
-/// split *is* this invariant. `plan_blit_pane` reads `prepare_shift`'s
+/// [`PaneBuffers::classify_shift`], whose `Shifted` vs `IncompatibleRange`
+/// split *is* this invariant. `plan_blit_pane` reads `classify_shift`'s
 /// `Shifted` result rather than re-testing.
 fn shift_is_safe(prev: RCRange, new: RCRange, axis: Axis) -> bool {
     match axis {
@@ -417,7 +479,7 @@ fn apply_blit_shift<E: Clone>(
 
 /// Slice of `new` lying outside `prev` along the scroll axis. Returns
 /// `None` if the ranges are identical along `axis` (delta == 0), or if a
-/// direct caller bypassed [`PaneBuffers::prepare_shift`] and handed us
+/// direct caller bypassed [`PaneBuffers::classify_shift`] and handed us
 /// non-overlapping ranges. Valid blit callers prove overlap before this point.
 fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
     match axis {
@@ -425,7 +487,7 @@ fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
             if new.r2 < prev.r1 || new.r1 > prev.r2 {
                 debug_assert!(
                     ranges_overlap(prev.r1, prev.r2, new.r1, new.r2),
-                    "compute_strip requires overlapping ranges from prepare_shift"
+                    "compute_strip requires overlapping ranges from classify_shift"
                 );
                 return None;
             }
@@ -455,7 +517,7 @@ fn compute_strip(prev: RCRange, new: RCRange, axis: Axis) -> Option<RCRange> {
             if new.c2 < prev.c1 || new.c1 > prev.c2 {
                 debug_assert!(
                     ranges_overlap(prev.c1, prev.c2, new.c1, new.c2),
-                    "compute_strip requires overlapping ranges from prepare_shift"
+                    "compute_strip requires overlapping ranges from classify_shift"
                 );
                 return None;
             }

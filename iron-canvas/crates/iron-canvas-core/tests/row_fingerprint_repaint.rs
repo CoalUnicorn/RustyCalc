@@ -301,3 +301,86 @@ fn lifecycle_damage_strip_scopes_to_intersected_pane_and_reseeds_on_next_paint()
         "once reseeded, an unchanged repaint must Skip again"
     );
 }
+
+// ==============================================================================
+// Stage 4 pin (Task 1, bullet 4): SlotsReuse's partial commit, expressed
+// directly in `PaneCache` terms rather than the model's bulk-fetch-count
+// proxy `held_frame.rs`'s Orchestrator-level
+// `partial_commit_paints_healthy_panes_and_retries_held_panes` already uses.
+// GREEN today — Stage 3 already isolates a pane's cache invalidation from
+// its siblings correctly; this is the property Stage 4 must keep.
+// ==============================================================================
+
+#[test]
+fn slots_reuse_partial_commit_preserves_healthy_pane_range_and_narrows_retry_to_failed_pane() {
+    let m = TestModel::synthetic_grid().with_frozen_rows(2);
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+
+    core.render_grid(&m, &frame, PaneRegionMask::ALL); // primes TopRight + BottomRight.
+    let healthy_range = core.pane_cache.pane(PaneRegion::TopRight).range.get();
+    assert!(
+        healthy_range.is_some(),
+        "TopRight must be primed by the Fresh paint"
+    );
+    // `render_pane`'s bridge-failure hold branch only fires under
+    // `frame.kind.reuses_slots()` — a Fresh-kind frame always takes the
+    // unconditional full repaint (see its own doc comment). Promote to
+    // `SlotsReused` so the second `render_grid` call below actually
+    // exercises the SlotsReuse content-dirty dispatch this test targets,
+    // exactly as `paint_slots_reuse_regime` builds its own candidate via
+    // `Chrome::next(.., FramePath::SlotsReuse)`.
+    promote_to_slots_reuse(&mut frame);
+
+    m.set_cell(1, 1, "top-edit");
+    m.set_cell(6, 1, "bottom-edit");
+    m.set_bulk_bridge_fail_from(Some(3)); // fails BottomRight's fetch only.
+
+    // Mirrors `paint_slots_reuse_regime`'s own
+    // `invalidate_pane_cache(mask)` + `paint_grid(.., mask)` sequence.
+    core.pane_cache.invalidate(PaneRegionMask::ALL);
+    let held = core.render_grid(&m, &frame, PaneRegionMask::ALL);
+
+    assert_eq!(
+        held,
+        PaneRegionMask::BOTTOM_RIGHT,
+        "only the scroll-band pane's fetch must fail"
+    );
+    assert_eq!(
+        core.pane_cache.pane(PaneRegion::TopRight).range.get(),
+        healthy_range,
+        "the healthy pane's cached range must be untouched by the sibling's failure"
+    );
+    assert_eq!(
+        core.pane_cache.pane(PaneRegion::BottomRight).range.get(),
+        None,
+        "the failed pane's range stays invalidated until its own retry succeeds"
+    );
+
+    // Retry: mirrors `Orchestrator::requeue_held_panes` — only the held
+    // mask is invalidated and repainted, never the healthy sibling.
+    m.set_bulk_bridge_fail_from(None);
+    core.pane_cache.invalidate(held);
+    let held_again = core.render_grid(&m, &frame, held);
+
+    assert_eq!(
+        held_again,
+        PaneRegionMask::EMPTY,
+        "the narrowed retry must succeed"
+    );
+    assert_eq!(
+        core.pane_cache.pane(PaneRegion::TopRight).range.get(),
+        healthy_range,
+        "the narrowed retry must never have touched the healthy pane's range"
+    );
+    assert!(
+        core.pane_cache
+            .pane(PaneRegion::BottomRight)
+            .range
+            .get()
+            .is_some(),
+        "the retried pane must be freshly re-cached after its recovery"
+    );
+}

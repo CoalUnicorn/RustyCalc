@@ -8,9 +8,14 @@
 
 mod common;
 
+use std::rc::Rc;
+
 use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{CanvasModel, CanvasSize, FrameDelta, RebuildReason};
+use iron_canvas_core::{
+    CanvasModel, CanvasSize, FrameDelta, Orchestrator, PaintRegimeTag, PaintResult, RebuildReason,
+};
+use iron_canvas_recorder::MemSurface;
 
 use common::{TestModel, test_inputs};
 
@@ -170,5 +175,182 @@ fn bridge_failed_active_cell_rejects_blit() {
             FrameDelta::Rebuild(RebuildReason::ActiveCellChangedOrUnknown)
         ),
         "BridgeFailed at capture time must reject the blit"
+    );
+}
+
+// ==============================================================================
+// Stage 4 pin (Task 1, bullet 2): the row-header digit-boundary scenario
+// above proves `Chrome::next_blit` demotes to `BlitOutcome::FreshFallback`
+// when in-place reuse is rejected. Driven through the real `Orchestrator`
+// dispatch (not the raw `Chrome::classify`/`next_blit` calls the rest of
+// this file uses) with a bulk bridge failure added, this proves
+// `paint_viewport_regime`'s `FreshFallback` arm must hold atomically —
+// selected Viewport, effective Fresh fallback — exactly like an ordinary
+// Fresh attempt, per the Resolved Failure Policy table.
+// ==============================================================================
+
+fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface> {
+    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
+    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
+    orch.set_model(model);
+    orch
+}
+
+fn grid_ops_len(orch: &Orchestrator<MemSurface>) -> usize {
+    orch.grid_surface().recorder().ops().len()
+}
+
+/// RED against d8aed9c, for a compound reason: `paint_viewport_regime`'s
+/// `FreshFallback` arm calls `self.grid.paint_grid(model, &frame,
+/// PaneRegionMask::ALL)` and never binds — let alone checks — its returned
+/// held-pane mask, so a bulk bridge failure here is silently dropped even
+/// before considering the second issue: the `frame` a `FreshFallback` builds
+/// is `FramePath::Fresh` construction (same as an ordinary Fresh rebuild —
+/// see `held_frame.rs`'s section doc for why that gates off `render_pane`'s
+/// bridge-hold branch entirely, which is also why the ordinary Fresh regime
+/// does not return `Retry` here either). Either gap alone is enough for this
+/// test to fail: the function falls through to `self.grid.present()`,
+/// commits `self.last_frame = Some(frame)`, and returns
+/// `PaintResult::Painted` exactly as if every pane had painted cleanly.
+#[test]
+fn held_fresh_fallback_at_row_header_digit_boundary_holds_atomically() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(980)
+            .with_active(980, 1),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh baseline at top_row=980 (last visible row 999, 3 digits).
+
+    let rect_before = orch.cell_rect(980, 1);
+    assert!(
+        rect_before.is_some(),
+        "row 980 visible in the baseline frame"
+    );
+    let grid_ops = grid_ops_len(&orch);
+    let grid_presents = orch.grid_surface().presents();
+
+    stub.set_top_row(981); // last visible row becomes 1000 (4 digits) -> FreshFallback.
+    stub.set_bulk_bridge_fail(true);
+    orch.request_overlay_repaint(); // wakes dispatch without a view/content mark (nav semantics).
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(
+        result,
+        PaintResult::Retry,
+        "a FreshFallback must hold atomically on a bulk bridge failure, the \
+         same as an ordinary Fresh attempt — got {result:?}"
+    );
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Viewport),
+        "planning still selects Viewport; only the execution demotes"
+    );
+    assert_eq!(
+        orch.last_trace().effective,
+        None,
+        "a held FreshFallback names no effective strategy"
+    );
+    assert_eq!(
+        grid_ops_len(&orch),
+        grid_ops,
+        "held FreshFallback: zero new grid ops"
+    );
+    assert_eq!(
+        orch.grid_surface().presents(),
+        grid_presents,
+        "held FreshFallback: no grid present"
+    );
+    assert_eq!(
+        orch.cell_rect(980, 1),
+        rect_before,
+        "held FreshFallback: query geometry must not advance to the failed \
+         candidate's geometry"
+    );
+}
+
+// ==============================================================================
+// Task 3: `PreparedBlitFrame`/`BlitRollback` field coverage. The Viewport
+// `held_*` fixtures in held_frame.rs (`held_viewport_presents_nothing_and_keeps_query_geometry`,
+// `held_viewport_retries_after_bridge_recovery`) already prove the held-then-
+// restored round trip GREEN end to end, but their model has no frozen rows
+// or columns — `frozen_count` is 0 on both axes there, so
+// `PreparedBlitFrame::rollback` only ever moves empty Vecs back for the
+// frozen bands, and the row scroll's cross-axis Vec (`cols.scroll`) is the
+// only non-trivial one exercised. The test below adds frozen columns, so a
+// row scroll also exercises a non-empty `cols.frozen` — a wrong or omitted
+// move in `BlitRollback`/`PaneSet::swap_scroll_axis` would show up as a
+// wrong `cell_rect` for the frozen-column cell, not just the scrolled one.
+// ==============================================================================
+
+/// GREEN: proves the reversible candidate construction restores frozen AND
+/// cross-axis geometry correctly on a held-then-recovered row scroll, not
+/// just the scrolled band the unfrozen `held_frame.rs` fixtures cover.
+#[test]
+fn held_viewport_blit_with_frozen_cols_restores_and_recovers() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(60)
+            .with_frozen_cols(2)
+            .with_active(5, 5),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh baseline.
+
+    // Frozen-column cell (col 1): a row scroll never shifts BottomLeft's
+    // own pixels, but a rollback that dropped or corrupted
+    // `pane_set.cols.frozen` would still show up here — `cell_rect` reads
+    // the frozen band's slot Vec directly, independent of anything actually
+    // being repainted.
+    let frozen_rect_before = orch.cell_rect(3, 1);
+    assert!(
+        frozen_rect_before.is_some(),
+        "frozen-column cell visible in baseline"
+    );
+    // Scroll-band cell (col 5): mirrors the existing unfrozen coverage.
+    let scroll_rect_before = orch.cell_rect(3, 5);
+    assert!(
+        scroll_rect_before.is_some(),
+        "scroll-band cell visible in baseline"
+    );
+
+    // Same wake pattern as held_frame.rs's `scroll_then_fail`: scroll the
+    // model, wake with OVERLAY (nav semantics), let `decide()` discover the
+    // shift geometrically.
+    stub.set_top_row(2);
+    stub.set_bulk_bridge_fail(true);
+    orch.request_overlay_repaint();
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(result, PaintResult::Retry, "held blit must retry");
+    assert_eq!(
+        orch.cell_rect(3, 1),
+        frozen_rect_before,
+        "held: frozen-column geometry must roll back untouched"
+    );
+    assert_eq!(
+        orch.cell_rect(3, 5),
+        scroll_rect_before,
+        "held: scroll-band geometry must roll back to the committed frame"
+    );
+
+    // Recover — no new external raise, the retained work alone drives it.
+    // Column 1 sits in BottomLeft (frozen cols x *scrolled* rows): a row
+    // scroll legitimately moves its Y position once committed, same as any
+    // scroll-band cell — only its X position is actually frozen. Asserting
+    // the whole rect unchanged here would be the wrong invariant; X alone
+    // is the frozen-column property this test cares about.
+    stub.set_bulk_bridge_fail(false);
+    let result = orch.paint_if_dirty();
+    assert_eq!(result, PaintResult::Painted, "recovery must commit");
+    let frozen_rect_after = orch.cell_rect(3, 1);
+    assert!(
+        frozen_rect_after.is_some(),
+        "recovered frame: frozen-column cell must still be visible"
+    );
+    assert_eq!(
+        frozen_rect_after.map(|r| r.top_left.x),
+        frozen_rect_before.map(|r| r.top_left.x),
+        "recovered frame: frozen-column X position is unaffected by a row scroll"
     );
 }

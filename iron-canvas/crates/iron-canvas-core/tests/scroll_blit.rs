@@ -15,7 +15,6 @@ use iron_canvas_core::chrome::{
     ActiveCellSnapshot, BlitOutcome, BlitPlan, Chrome, FrameKindTag, FramePath, PaneRegion,
     PaneRegionMask,
 };
-use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
@@ -58,12 +57,6 @@ fn count_blits(ops: &[DrawOp]) -> usize {
         .count()
 }
 
-fn issue_blits<P: BlitPainter>(painter: &P, plan: &iron_canvas_core::chrome::BlitPlan) {
-    for s in &plan.shifts {
-        painter.blit(s.src, s.dst);
-    }
-}
-
 fn count_rect_fills(ops: &[DrawOp]) -> usize {
     ops.iter()
         .filter(|op| matches!(op, DrawOp::RectFill { .. }))
@@ -101,7 +94,6 @@ fn scroll_by_one_row_emits_exactly_one_blit_op() {
     let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     let blit_phase_ops: Vec<DrawOp> = core
@@ -189,7 +181,6 @@ fn scroll_by_one_column_emits_exactly_one_blit_op() {
     let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     let blit_phase_ops: Vec<DrawOp> = core
@@ -242,7 +233,6 @@ fn scroll_by_one_row_paints_only_strip_cells() {
     let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     let blit_phase_ops: Vec<DrawOp> = core
@@ -373,7 +363,6 @@ fn row_scroll_leaves_frozen_row_band_panes_untouched() {
     let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("row scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     assert_eq!(
@@ -425,7 +414,6 @@ fn column_scroll_leaves_frozen_column_band_panes_untouched() {
     let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("column scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     assert_eq!(
@@ -468,7 +456,6 @@ fn row_scroll_shifted_pane_reseeds_and_skips_on_next_unchanged_paint() {
     else {
         panic!("row scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     // A strip splice never commits into the painted tree — the scroll
@@ -530,8 +517,6 @@ fn frame_trace_names_the_post_blit_slots_reuse_paint_as_full() {
     };
 
     core.reset_trace();
-    core.prefetch_blit_strips(&m, &frame1, &plan);
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
     let blit_trace = core.trace();
     assert_eq!(
@@ -603,23 +588,21 @@ fn unshiftable_pane_on_a_blit_frame_fetches_once_not_twice() {
     core.pane_cache.invalidate(PaneRegionMask::ALL);
 
     core.reset_trace();
-    assert!(
-        core.prefetch_blit_strips(&m, &frame1, &plan),
-        "a healthy bridge must not abort the frame"
-    );
-    let after_preflight = core.trace().fetched_cell_slots;
-    assert!(
-        after_preflight > 0,
-        "the preflight validates the unshiftable pane's whole range"
-    );
+    let held = core.render_grid_blit(&m, &frame1, &plan);
+    assert!(!held, "a healthy bridge must not abort the frame");
 
-    issue_blits(core.painter(), &plan);
-    core.render_grid_blit(&m, &frame1, &plan);
+    // `prepare_blit`'s fallback arm calls `prepare_full_pane` exactly once
+    // for this pane — a single bulk-fetch round over its whole range, never a
+    // safety fetch followed by a second `render_pane`-style refetch.
+    let range = PaneRegion::BottomRight
+        .range(&frame1)
+        .expect("BottomRight has a live range on this canvas");
+    let expected_single_fetch = range.height() as usize * range.width() as usize * 4;
 
     let trace = core.trace();
     assert_eq!(
-        trace.fetched_cell_slots, after_preflight,
-        "the fallback render_pane must adopt the preflight's validated fetch, \
+        trace.fetched_cell_slots, expected_single_fetch,
+        "the unshiftable pane's full-range fallback must fetch exactly once, \
          not cross the bridge a second time for the same cells"
     );
     assert_eq!(
@@ -683,16 +666,12 @@ fn cold_cache_bridge_failure_holds_the_whole_blit_frame() {
 
     let baseline_ops = core.painter().ops().len();
 
-    let proceeded = core.prefetch_blit_strips(&m, &frame1, &plan);
-    if proceeded {
-        issue_blits(core.painter(), &plan);
-        core.render_grid_blit(&m, &frame1, &plan);
-    }
+    let held = core.render_grid_blit(&m, &frame1, &plan);
 
     assert!(
-        !proceeded,
+        held,
         "a failing validation fetch on a cold-cache (unshiftable) pane must \
-         abort the whole frame — the second door of the preflight"
+         abort the whole frame — the second door of preparation"
     );
 
     let new_ops: Vec<DrawOp> = core
@@ -808,11 +787,8 @@ fn incompatible_range_demotion_repaints_full_not_skip_or_rows() {
     );
 
     core.reset_trace();
-    let proceeded = core.prefetch_blit_strips(&m, &frame1, &plan);
-    assert!(proceeded, "a healthy bridge must not abort the frame");
-
-    issue_blits(core.painter(), &plan);
-    core.render_grid_blit(&m, &frame1, &plan);
+    let held = core.render_grid_blit(&m, &frame1, &plan);
+    assert!(!held, "a healthy bridge must not abort the frame");
 
     let trace = core.trace();
     assert!(
@@ -835,8 +811,9 @@ fn incompatible_range_demotion_repaints_full_not_skip_or_rows() {
 /// strip must abort the WHOLE blit frame BEFORE any pixel is shifted, not
 /// shift the kept band and only then discover the fetch failed (which strands
 /// stale, now-misplaced pixels in the revealed strip with nothing to repaint
-/// them). Drives the real gated sequence `LayerBase::paint_grid_blit` runs:
-/// `prefetch_blit_strips` first, and shift + paint only if it returns true.
+/// them). Drives the real gated sequence `RendererCore::render_grid_blit` runs
+/// internally: every pane prepared and bridge-validated first, and pixels
+/// shift only once every fetch is confirmed clean.
 #[test]
 fn blit_preflight_bridge_failure_aborts_frame_without_shifting() {
     let m = TestModel::synthetic_grid();
@@ -875,15 +852,10 @@ fn blit_preflight_bridge_failure_aborts_frame_without_shifting() {
 
     let baseline_ops = core.painter().ops().len();
 
-    // Mirror `LayerBase::paint_grid_blit`'s gated sequence exactly.
-    let proceeded = core.prefetch_blit_strips(&m, &frame1, &plan);
-    if proceeded {
-        issue_blits(core.painter(), &plan);
-        core.render_grid_blit(&m, &frame1, &plan);
-    }
+    let held = core.render_grid_blit(&m, &frame1, &plan);
 
     assert!(
-        !proceeded,
+        held,
         "a BridgeFailed fetch on the revealed strip must abort the blit frame"
     );
 
@@ -909,8 +881,8 @@ fn blit_preflight_bridge_failure_aborts_frame_without_shifting() {
         "an aborted blit frame must be a complete no-op for the grid layer, got: {new_ops:#?}"
     );
 
-    // Cache untouched: the deferred `prepare_shift` never ran, so the pane's
-    // buffers weren't rotated and its cached range wasn't advanced.
+    // Cache untouched: the deferred `PaneBuffers::apply_shift` never ran, so
+    // the pane's buffers weren't rotated and its cached range wasn't advanced.
     assert_eq!(
         core.pane_cache.pane(PaneRegion::BottomRight).range.get(),
         range_before,
@@ -983,7 +955,6 @@ fn scroll_blit_does_not_smear_last_data_row_into_strip() {
     let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     let post_scroll_ops: Vec<DrawOp> = core
@@ -1036,7 +1007,6 @@ fn scroll_blit_does_not_smear_when_data_ends_at_initial_last_visible_row() {
     let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan) else {
         panic!("single-row scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     let post_scroll_ops: Vec<DrawOp> = core
@@ -1101,7 +1071,7 @@ fn build_pane_work(
     } = core
         .pane_cache
         .pane(pane)
-        .prepare_shift(new_range, plan.axis)
+        .classify_shift(new_range, plan.axis)
     else {
         return None;
     };
@@ -1265,12 +1235,14 @@ fn down_scroll_strip_includes_overflow_row() {
 // ============================================================================
 // Stage 2 — typed shift prep
 //
-// Drive `PaneBuffers::prepare_shift` directly against a hand-seeded
-// `PaneCache` so the typed result and the in-place buffer rotation can be
-// asserted in isolation from frame/pixel geometry. The rotation tests
-// capture the expected post-shift buffer contents explicitly (computed by
-// hand from `apply_blit_shift`'s contract) — bit-identical to what the old
-// `try_shift(..) == true` path produced.
+// Drive `PaneBuffers::classify_shift` (pure decision) and
+// `PaneBuffers::apply_shift` (execution-only rotation — Stage 4 split the old
+// combined `prepare_shift` in two, see that method's doc) directly against a
+// hand-seeded `PaneCache` so the typed result and the in-place buffer
+// rotation can be asserted in isolation from frame/pixel geometry. The
+// rotation tests capture the expected post-shift buffer contents explicitly
+// (computed by hand from `apply_blit_shift`'s contract) — bit-identical to
+// what the old `try_shift(..) == true` path produced.
 // ============================================================================
 
 use iron_canvas_core::geometry::prim::Axis;
@@ -1284,7 +1256,7 @@ fn val(s: &str) -> iron_canvas_core::Fetched<String> {
     iron_canvas_core::Fetched::Value(s.to_string())
 }
 
-/// `prepare_shift` rotates all four pane buffers in lockstep, so every buffer
+/// `apply_shift` rotates all four pane buffers in lockstep, so every buffer
 /// must enter at the prev range's slot count (`apply_blit_shift` debug-asserts
 /// it). The rotation tests only inspect `values`; seed the other three to the
 /// same length with placeholders so the shift is well-formed.
@@ -1298,17 +1270,17 @@ fn seed_sibling_buffers(pane: &iron_canvas_core::renderer::cache::PaneBuffers, l
 }
 
 #[test]
-fn prepare_shift_reports_missing_cache() {
+fn classify_shift_reports_missing_cache() {
     let cache = PaneCache::default();
     // No `range` seeded -> cache is empty.
     let prep = cache
         .pane(PaneRegion::BottomRight)
-        .prepare_shift(rng(2, 3, 1, 2), Axis::Row);
+        .classify_shift(rng(2, 3, 1, 2), Axis::Row);
     assert_eq!(prep, PaneShiftPrep::MissingCache);
 }
 
 #[test]
-fn prepare_shift_reports_incompatible_range() {
+fn classify_shift_reports_incompatible_range() {
     let cache = PaneCache::default();
     let pane = cache.pane(PaneRegion::BottomRight);
     let prev = rng(1, 2, 1, 2);
@@ -1316,7 +1288,7 @@ fn prepare_shift_reports_incompatible_range() {
 
     // Row scroll but the orthogonal (column) extent changed -> incompatible.
     let new = rng(2, 3, 1, 5);
-    let prep = pane.prepare_shift(new, Axis::Row);
+    let prep = pane.classify_shift(new, Axis::Row);
     assert_eq!(
         prep,
         PaneShiftPrep::IncompatibleRange {
@@ -1324,12 +1296,15 @@ fn prepare_shift_reports_incompatible_range() {
             new_range: new,
         },
     );
-    // Incompatible prep clears the cache so the fallback fetches fresh.
-    assert_eq!(pane.range.get(), None);
+    // Pure: classification alone must never clear (or otherwise touch) the
+    // cached range — that decision belongs to whichever caller consumes
+    // `IncompatibleRange` (a full-pane fallback fetch, which only ever
+    // overwrites `range` at commit time).
+    assert_eq!(pane.range.get(), Some(prev));
 }
 
 #[test]
-fn prepare_shift_rotates_row_buffers() {
+fn apply_shift_rotates_row_buffers() {
     let cache = PaneCache::default();
     let pane = cache.pane(PaneRegion::BottomRight);
     let prev = rng(1, 2, 1, 2);
@@ -1342,14 +1317,18 @@ fn prepare_shift_rotates_row_buffers() {
     // Scroll down by one row: delta = +1, shift = 1 row × 2 cols = 2.
     // rotate_left(2) -> [c,d,a,b]; fill the trailing strip (last 2) -> Absent.
     let new = rng(2, 3, 1, 2);
-    let prep = pane.prepare_shift(new, Axis::Row);
+    // Classification confirms this is a legal `Shifted` rotation before it
+    // runs — mirrors production's prepare (classify_shift) -> execute
+    // (apply_shift, only once the revealed strip's fetch is already clean).
     assert_eq!(
-        prep,
+        pane.classify_shift(new, Axis::Row),
         PaneShiftPrep::Shifted {
             prev_range: prev,
             new_range: new,
         },
     );
+
+    pane.apply_shift(prev, new, Axis::Row);
 
     let expected = vec![
         val("c"),
@@ -1363,12 +1342,14 @@ fn prepare_shift_rotates_row_buffers() {
         "row rotation must be bit-identical to try_shift"
     );
 
-    // Deliberate staleness: `range` stays `prev` until the strip paint commits.
+    // `apply_shift` rotates buffers only; committing `range` to `new` is
+    // execution's separate, later step (via `RendererCore::commit_pane_cache`),
+    // never `apply_shift`'s own job.
     assert_eq!(pane.range.get(), Some(prev));
 }
 
 #[test]
-fn prepare_shift_rotates_column_buffers() {
+fn apply_shift_rotates_column_buffers() {
     let cache = PaneCache::default();
     let pane = cache.pane(PaneRegion::BottomRight);
     let prev = rng(1, 2, 1, 2);
@@ -1381,14 +1362,15 @@ fn prepare_shift_rotates_column_buffers() {
     // Scroll right by one column: delta = +1, each row rotate_left(1), fill
     // the trailing column with Absent -> rows [b,Absent] / [d,Absent].
     let new = rng(1, 2, 2, 3);
-    let prep = pane.prepare_shift(new, Axis::Column);
     assert_eq!(
-        prep,
+        pane.classify_shift(new, Axis::Column),
         PaneShiftPrep::Shifted {
             prev_range: prev,
             new_range: new,
         },
     );
+
+    pane.apply_shift(prev, new, Axis::Column);
 
     let expected = vec![
         val("b"),
@@ -1519,5 +1501,92 @@ fn render_pane_damage_stops_at_first_held_span_in_one_pane() {
             .any(|op| matches!(op, DrawOp::FillText { text, .. } if text == "R3")),
         "the second (healthy) span's row must never paint once the loop \
          holds on the first — got {new_ops:#?}"
+    );
+}
+
+// ==============================================================================
+// Stage 4 pin (Task 1, bullet 7): the mirror image of
+// `render_pane_damage_stops_at_first_held_span_in_one_pane` above — there,
+// the FIRST span fails and the loop stops before ever reaching the second.
+// Here the FIRST span's fetch would succeed on its own, and the SECOND
+// (same pane) fails. Stage 4 requires every intersecting strip in one pane
+// to be prepared atomically before any of them paints, so a failure
+// anywhere in the pane must leave the whole pane exactly as it was —
+// including the span that, looked at alone, was fine.
+// ==============================================================================
+
+/// RED against d8aed9c: `render_pane_damage`'s loop calls `render_pane_strip`
+/// once PER span, and each call splices its fetch into the cached pane
+/// buffers and paints immediately on success — there is no pane-wide
+/// preparation step before any span commits. So the first span's ops and
+/// cache splice land before the second span's failure is ever discovered.
+#[test]
+fn render_pane_damage_prepares_whole_pane_atomically_before_painting_any_span() {
+    let m = TestModel::synthetic_grid().with_data_until(10);
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let inputs = test_inputs(&m, canvas(), &theme);
+    let frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+
+    // Prime BottomRight's cached range via an ordinary Fresh paint so the
+    // damage call below takes the span loop, not the range-mismatch
+    // demotion `damage_range_mismatch_demotes_to_render_pane_and_forwards_its_hold`
+    // already covers.
+    core.render_grid(&m, &frame, PaneRegionMask::ALL);
+
+    m.set_cell(3, 1, "span-a");
+    m.set_cell(7, 1, "span-b");
+    m.set_bulk_bridge_fail_from(Some(5)); // span-a's row (3) fetches OK; span-b's (7) fails.
+
+    let values_before = core.pane_cache.pane(PaneRegion::BottomRight).values.take();
+    core.pane_cache
+        .pane(PaneRegion::BottomRight)
+        .values
+        .set(values_before.clone());
+    let ops_before = core.painter().ops().len();
+
+    let held = core.render_pane_damage(
+        &m,
+        &frame,
+        PaneRegion::BottomRight,
+        &[RowSpan { r1: 3, r2: 3 }, RowSpan { r1: 7, r2: 7 }],
+    );
+
+    assert!(
+        held,
+        "the second span's failure must mark the whole call held"
+    );
+    let new_ops: Vec<DrawOp> = core
+        .painter()
+        .ops()
+        .iter()
+        .skip(ops_before)
+        .cloned()
+        .collect();
+    assert!(
+        new_ops.is_empty(),
+        "the first (healthy) span must not paint once a later span in the \
+         same pane fails — atomic per-pane preparation; got {new_ops:#?}"
+    );
+    let values_after = core.pane_cache.pane(PaneRegion::BottomRight).values.take();
+    core.pane_cache
+        .pane(PaneRegion::BottomRight)
+        .values
+        .set(values_after.clone());
+    assert_eq!(
+        values_after, values_before,
+        "the first span's fetch must not be spliced into the cached pane \
+         buffers once a later span in the same pane fails"
+    );
+    let recycled = core.strip_scratch_capacities();
+    assert!(
+        recycled.len() >= 2,
+        "both the successful first strip and failing second strip must return to the pool: {recycled:?}"
+    );
+    assert!(
+        recycled
+            .iter()
+            .all(|caps| caps.0 > 0 && caps.1 > 0 && caps.2 > 0 && caps.3 > 0),
+        "every aborted strip bundle must retain all four channel capacities: {recycled:?}"
     );
 }

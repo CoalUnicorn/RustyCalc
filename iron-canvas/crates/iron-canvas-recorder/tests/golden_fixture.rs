@@ -29,7 +29,9 @@ use iron_canvas_core::painter::{GroupClass, TextAlign, TextBaseline};
 use iron_canvas_core::theme::CanvasTheme;
 
 use iron_canvas_recorder::DrawOp;
-use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
+use iron_canvas_recorder::recording::{
+    Frame, ICR_SCHEMA_VERSION, IcrHeader, Recording, ThemeSnapshot,
+};
 
 const FIXTURE_PATH: &str = "tests/fixtures/fresh_paint.icr";
 const OVERLAY_FIXTURE_PATH: &str = "tests/fixtures/overlay_paint.icr";
@@ -392,6 +394,59 @@ fn fresh_frame_has_grid_sections() {
         assert!(
             variants.contains(required),
             "grid_ops missing BeginGroup({required:?}); present: {variants:?}",
+        );
+    }
+}
+
+#[test]
+fn schema_version_is_pinned_at_3() {
+    // Stage 4 (the transactional prepare/execute/finish rework) is an
+    // internal orchestrator change, not a wire-format one — it explicitly
+    // does not touch `.icr` schema version, field names, strategy strings,
+    // or fixtures. Pin the value directly so an accidental bump fails here
+    // with a clear message instead of surfacing only as an opaque byte-diff
+    // against the fixtures above.
+    assert_eq!(ICR_SCHEMA_VERSION, 3);
+}
+
+#[test]
+fn paint_regime_tag_serializes_to_documented_snake_case() {
+    // Both fixtures above only ever exercise `PaintRegimeTag::Fresh` (see
+    // `build_fixture`/`build_overlay_fixture`), so byte-identity against
+    // disk never actually pins the other four regimes' wire spelling.
+    // Stage 4's global constraints name the exact set — `overlay`,
+    // `viewport`, `slots_reuse`, `fresh`, `damage` — so sweep every variant
+    // through the real `Recording::serialize()` encoder (not `serde_json`
+    // directly) rather than trusting a parallel assumption about it. This
+    // builds an in-memory `Recording`, never touching the on-disk fixtures.
+    for (regime, expected) in [
+        (PaintRegimeTag::Overlay, "overlay"),
+        (PaintRegimeTag::Viewport, "viewport"),
+        (PaintRegimeTag::SlotsReuse, "slots_reuse"),
+        (PaintRegimeTag::Fresh, "fresh"),
+        (PaintRegimeTag::Damage, "damage"),
+    ] {
+        let header = IcrHeader::new(
+            10.0,
+            10.0,
+            1.0,
+            ThemeSnapshot::from(&CanvasTheme::light()),
+            0,
+        );
+        let mut rec = Recording::new(header);
+        rec.push_frame(Frame {
+            frame_idx: 0,
+            t_ms: 0,
+            regime,
+            signals: 0,
+            grid_ops: vec![DrawOp::InvalidateCache],
+            overlay_ops: Vec::new(),
+        });
+        let bytes = rec.serialize().expect("serialize");
+        let json = String::from_utf8(bytes).expect(".icr bytes are valid UTF-8");
+        assert!(
+            json.contains(&format!("\"regime\":\"{expected}\"")),
+            "PaintRegimeTag::{regime:?} must serialize as {expected:?}; got {json}"
         );
     }
 }

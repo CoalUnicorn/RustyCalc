@@ -485,6 +485,150 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     );
 }
 
+struct FreshFailureControls {
+    fail: Rc<Cell<bool>>,
+}
+
+/// Build the shared fixture with a controllable style-fetch failure. Unlike
+/// `make_scroll_failure_fixture_model`, no scroll/top-row bookkeeping is
+/// needed: with no committed `Chrome` yet, the very first `paint_if_dirty()`
+/// on a resized canvas is necessarily a Fresh attempt (`GridWork::Fresh`),
+/// so failing every cell's style fetch while `fail` is set strikes Fresh's
+/// own bulk per-pane prepare directly — not `FrameInputs::capture` (already
+/// covered by
+/// `selected_sheet_bridge_failure_holds_then_recovers_without_another_signal`)
+/// and not a Viewport strip reveal (covered above). `getCellStyle` returning
+/// `null` is the same decode-failure mechanism
+/// `make_scroll_failure_fixture_model` uses: `serde_wasm_bindgen` cannot
+/// decode `null` into `Style`, so `JsBackedModel::get_cell_style` reports
+/// `Fetched::BridgeFailed`.
+fn make_fresh_failure_fixture_model(store: FixtureStore) -> (JsValue, FreshFailureControls) {
+    let model = make_fixture_model(store);
+    let obj: js_sys::Object = model.unchecked_into();
+
+    let fail = Rc::new(Cell::new(false));
+    let style_fail = Rc::clone(&fail);
+    let get_style = Closure::wrap(
+        Box::new(move |_sheet: u32, _row: i32, _col: i32| -> JsValue {
+            if style_fail.get() {
+                JsValue::NULL
+            } else {
+                let Ok(value) = serde_wasm_bindgen::to_value(&ic::Style::default()) else {
+                    panic!("default fixture Style always serializes");
+                };
+                value
+            }
+        }) as Box<dyn Fn(u32, i32, i32) -> JsValue>,
+    );
+    set_prop(&obj, "getCellStyle", get_style.as_ref().unchecked_ref());
+    get_style.forget();
+
+    (obj.into(), FreshFailureControls { fail })
+}
+
+/// A failed Fresh bulk-cell fetch is transactional. With no committed
+/// `Chrome` yet, the very first paint attempt is necessarily Fresh
+/// (`GridWork::Fresh`); `paint_fresh_regime` prepares every pane (via
+/// `build_and_paint_fresh` -> `paint_grid_fresh`) before touching the
+/// painter at all, so a bulk style-fetch failure there must leave the front
+/// canvas exactly as `resize` left it, answer no committed query geometry,
+/// and recover on the very next `paint_if_dirty()` — no `view_changed()` /
+/// `markContentDirty()` / `requestRepaint()` call needed — landing
+/// byte-identical to a second canvas that painted the same healthy final
+/// state fresh in one shot.
+#[wasm_bindgen_test]
+fn held_fresh_recovers_byte_identical_to_forced_fresh() {
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
+        panic!("create IronCanvas");
+    };
+    let (model, controls) = make_fresh_failure_fixture_model(plain_fixture_store());
+    let Ok(()) = canvas.setModel(model) else {
+        panic!("fresh-failure fixture model passes the duck test");
+    };
+    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+
+    controls.fail.set(true);
+    assert_eq!(
+        canvas.paint_if_dirty(),
+        JsPaintResult::Retry,
+        "a bulk style-fetch failure during the first (Fresh) attempt must hold, not commit"
+    );
+    assert!(
+        grid_pixels(&grid).iter().all(|&b| b == 0),
+        "a held Fresh attempt must emit no grid ops and present nothing — the backing store \
+         stays exactly as `resize` left it"
+    );
+    assert!(
+        canvas.cell_rect(1, 1).is_none(),
+        "no committed frame exists yet, so query geometry must still answer None while held"
+    );
+
+    // No `view_changed()` / `markContentDirty()` / `requestRepaint()` call
+    // here: a held Fresh attempt leaves `last_frame` untouched and the
+    // retry contract merges the complete consumed work back into `pending`
+    // (see `paint_fresh_regime`), so the very next `paintIfDirty()` alone
+    // must recover.
+    controls.fail.set(false);
+    assert_eq!(
+        canvas.paint_if_dirty(),
+        JsPaintResult::Painted,
+        "the recovered attempt must paint without another invalidation call"
+    );
+    assert!(
+        canvas.cell_rect(1, 1).is_some(),
+        "A1 must be on screen once the recovered Fresh attempt commits"
+    );
+
+    let fresh_grid = make_canvas();
+    let fresh_overlay = make_canvas();
+    let Ok(mut fresh_canvas) = IronCanvas::create(fresh_grid.clone(), fresh_overlay) else {
+        panic!("create forced-fresh IronCanvas");
+    };
+    let Ok(()) = fresh_canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+        panic!("forced-fresh fixture model passes the duck test");
+    };
+    fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    assert_eq!(fresh_canvas.paint_if_dirty(), JsPaintResult::Painted);
+
+    assert_eq!(
+        grid_pixels(&grid),
+        grid_pixels(&fresh_grid),
+        "recovered Fresh raster must be byte-identical to a forced-fresh render of the same \
+         healthy final state"
+    );
+}
+
+// ==============================================================================
+// Stage 4 Task 6: no browser-level gate for selected-Viewport/effective-
+// FreshFallback bulk-bridge failure at a row-header digit boundary.
+//
+// `crates/iron-canvas-core/tests/blit_fallback.rs`'s
+// `held_fresh_fallback_at_row_header_digit_boundary_holds_atomically`
+// already proves this exact scenario end to end — `top_row` moved from 980
+// to 981 so the last visible row crosses 999 -> 1000 (3 -> 4 header digits),
+// which rejects in-place blit reuse (`Chrome::next_blit` returns
+// `BlitOutcome::FreshFallback`), and a bulk bridge failure on that demoted
+// Fresh candidate holds atomically: zero new grid ops, zero presents, and
+// query geometry pinned to the pre-attempt frame — with `last_regime`
+// staying `Viewport` while `last_trace().effective` reads `None`.
+//
+// Reproducing that fixture through this file's duck-typed JS harness would
+// need a synthetic ~1000-row model plus pixel-exact control over where the
+// real (not stubbed) Canvas2D `measureText`-based row-header width actually
+// widens — extra fixture surface bought for no new coverage: `FreshFallback`
+// converges on the exact same `build_and_paint_fresh` prepare-then-decide
+// tail and the same `finish_attempt` completion boundary that
+// `held_fresh_recovers_byte_identical_to_forced_fresh` (above) and
+// `held_viewport_recovers_byte_identical_to_forced_fresh` already drive
+// through the real `WebSurface`/`CanvasPainter` stack. A browser `ImageData`
+// comparison here would only vary the dispatch *entry path* (arrival via
+// blit demotion instead of direct `GridWork::Fresh` selection) — exactly
+// the part the native recorder-backed test already isolates, and with
+// strictly stronger assertions (op *counts*, not just unchanged pixels).
+// ==============================================================================
+
 /// Acceptance criterion 1: a border-free single-cell value edit takes the
 /// `RepaintPlan::Rows` path (proven natively by
 /// `row_band_repaint_paints_only_the_changed_row_band` in

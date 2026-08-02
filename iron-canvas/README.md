@@ -256,14 +256,17 @@ into the painting call, never read back off `Chrome`. It has two
 construction paths: `Chrome::next(prev, model, inputs, path)` — where
 `inputs: &FrameInputs` is the captured snapshot below — handles
 `FramePath::Fresh` and `FramePath::SlotsReuse`; the pure-scroll fast
-path is `Chrome::next_blit(.., &BlitPlan) -> BlitOutcome`. The resulting
-`Chrome` is the single source of truth for hit-test geometry.
+path is `Chrome::next_blit(.., &BlitPlan) -> BlitOutcome`, or, on the
+live orchestrator dispatch path, the reversible `Chrome::prepare_blit`,
+which builds the identical candidate but holds it open until the strip
+fetch confirms clean. The resulting `Chrome` is the single source of
+truth for hit-test geometry.
 
 `paint_if_dirty` (on `Orchestrator`; `IronCanvas::paintIfDirty`
 delegates to it) takes the single queued `PendingWork` value
 (`self.pending`, via one `mem::take`) and runs it through
-`PendingWork -> FrameInputs -> FrameDelta -> FramePlan` before any of
-the five regimes execute:
+`PendingWork -> FrameInputs -> FrameDelta -> FramePlan -> prepare ->
+execute -> finish` before a paint attempt is complete:
 
 1. `FrameInputs::capture` reads every scalar the frame needs (selected
    sheet, selected view, frozen counts, header visibility, selection
@@ -288,12 +291,26 @@ the five regimes execute:
    only the masked panes. `Fresh` is the full rebuild — the only arm
    reached when content and view work are both queued together (e.g.
    commit-then-move on Enter/Tab).
+4. The dispatched regime *prepares* its scope — every bulk bridge read,
+   classified against the pane cache's committed state — without
+   installing any of it, then *executes*: paints the prepared scope and
+   returns an owned aggregate cache commit in `PaintOutcome`.
+   `Orchestrator::finish_attempt` is the single completion boundary that
+   installs the aggregate, advances or preserves `last_frame`, and presents
+   whichever layers painted — a bridge failure during prepare can therefore
+   never partially apply.
+   `Fresh` and `Viewport` hold the whole attempt atomically; `SlotsReuse`
+   and `Damage` may commit the healthy panes/rows and hold only the
+   failed scope.
 
-A held attempt (`PaintResult::Retry`) merges its failed scope back into
-`self.pending` — either the whole attempt (a capture failure, above) or
-a per-regime partial scope — so the caller can just call
-`paint_if_dirty` again next tick with no new external input needed. See
-`docs/rendering-and-damage.md` for the full decision-machinery writeup.
+A held or partial attempt (`PaintResult::Retry`) merges its failed scope
+back into `self.pending` — the whole attempt (a capture failure, or an
+atomic `Fresh`/`Viewport` hold) or a narrower per-regime scope
+(`SlotsReuse`'s failed pane mask, `Damage`'s original row spans) — so
+the caller can just call `paint_if_dirty` again next tick with no new
+external input needed. See `docs/rendering-and-damage.md` for the full
+decision-machinery writeup, including the exact per-regime failure
+policy table.
 
 ### Pane pipeline and theme
 

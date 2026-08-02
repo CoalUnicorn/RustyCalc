@@ -611,3 +611,95 @@ fn strip_paint_then_unchanged_slots_reuse_frame_skips() {
          digest-equal fast path, not repaint"
     );
 }
+
+// ==============================================================================
+// Stage 4 pin (Task 1, bullet 5): Damage's cross-pane partial commit —
+// GREEN today. Pins that a pane's reseed-then-skip cycle
+// (`row_fingerprint_repaint.rs`'s `lifecycle_damage_strip_scopes_to_
+// intersected_pane_and_reseeds_on_next_paint` proves it for one pane alone)
+// is not disturbed by a SIBLING pane failing in the very same Damage
+// dispatch, and that the failed sibling goes through the identical cycle
+// once its own bridge heals.
+// ==============================================================================
+
+#[test]
+fn damage_partial_commit_lets_healthy_pane_reseed_while_sibling_pane_holds() {
+    let m = TestModel::synthetic_grid().with_frozen_rows(2);
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+
+    core.render_pane(&m, PaneRegion::TopRight, &frame);
+    core.render_pane(&m, PaneRegion::BottomRight, &frame);
+    promote_to_slots_reuse(&mut frame);
+
+    let top_range = PaneRegion::TopRight
+        .range(&frame)
+        .expect("TopRight must have a range with frozen rows");
+    let bottom_range = PaneRegion::BottomRight
+        .range(&frame)
+        .expect("BottomRight must have a range");
+    assert!(
+        bottom_range.r1 > top_range.r2,
+        "fixture needs TopRight and BottomRight to cover disjoint rows"
+    );
+
+    let bottom_row = bottom_range.r1 + 1;
+    m.set_cell(top_range.r1, top_range.c1, "top-edit");
+    m.set_cell(bottom_row, bottom_range.c1, "bottom-edit");
+    m.set_bulk_bridge_fail_from(Some(bottom_range.r1)); // only the scroll band fails.
+
+    let top_span = RowSpan {
+        r1: top_range.r1,
+        r2: top_range.r1,
+    };
+    let bottom_span = RowSpan {
+        r1: bottom_row,
+        r2: bottom_row,
+    };
+
+    let top_held = core.render_pane_damage(&m, &frame, PaneRegion::TopRight, &[top_span]);
+    let bottom_held = core.render_pane_damage(&m, &frame, PaneRegion::BottomRight, &[bottom_span]);
+    assert!(!top_held, "the healthy pane's span must commit");
+    assert!(bottom_held, "the sibling pane's span must hold");
+
+    // TopRight's strip changed its buffers but never committed the painted
+    // tree (`render_pane_strip` never calls `.commit()`), so the very next
+    // paint must find a real mismatch and reseed for real — undisturbed by
+    // the sibling's concurrent failure.
+    let reseed_ops_before = core.painter().ops().len();
+    core.render_pane(&m, PaneRegion::TopRight, &frame);
+    assert!(
+        core.painter().ops().len() > reseed_ops_before,
+        "the healthy pane's first paint after its strip must reseed with a real repaint"
+    );
+    let idempotent_ops_before = core.painter().ops().len();
+    core.render_pane(&m, PaneRegion::TopRight, &frame);
+    assert_eq!(
+        core.painter().ops().len(),
+        idempotent_ops_before,
+        "once reseeded, the healthy pane must Skip again, regardless of the sibling's hold"
+    );
+
+    // BottomRight recovers once its own bridge heals, and goes through the
+    // exact same reseed-then-skip cycle.
+    m.set_bulk_bridge_fail_from(None);
+    let recovered_held =
+        core.render_pane_damage(&m, &frame, PaneRegion::BottomRight, &[bottom_span]);
+    assert!(!recovered_held, "the recovered span must commit");
+
+    let reseed_ops_before = core.painter().ops().len();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame);
+    assert!(
+        core.painter().ops().len() > reseed_ops_before,
+        "the recovered pane's first paint after its strip must reseed with a real repaint"
+    );
+    let idempotent_ops_before = core.painter().ops().len();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame);
+    assert_eq!(
+        core.painter().ops().len(),
+        idempotent_ops_before,
+        "once reseeded, the recovered pane must Skip again"
+    );
+}

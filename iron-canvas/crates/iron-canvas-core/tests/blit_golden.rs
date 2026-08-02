@@ -15,7 +15,6 @@ use iron_canvas_core::FrameDelta;
 use iron_canvas_core::chrome::{
     ActiveCellSnapshot, BlitOutcome, Chrome, FramePath, PaneRegionMask,
 };
-use iron_canvas_core::painter::BlitPainter;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
@@ -25,12 +24,6 @@ use common::{TestModel, canvas_default as canvas, test_inputs};
 fn snap(m: &TestModel) -> ActiveCellSnapshot {
     let view = m.get_selected_view().expect("scroll model has view");
     ActiveCellSnapshot::capture(m, view.sheet, view.row, view.column)
-}
-
-fn issue_blits<P: BlitPainter>(painter: &P, plan: &iron_canvas_core::chrome::BlitPlan) {
-    for s in &plan.shifts {
-        painter.blit(s.src, s.dst);
-    }
 }
 
 /// Capture the draw ops emitted by a single-axis scroll-blit on a fresh model.
@@ -56,7 +49,6 @@ fn capture_scroll_ops(apply_scroll: impl FnOnce(&TestModel)) -> Vec<DrawOp> {
     let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs1, &plan) else {
         panic!("single-axis scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     core.painter()

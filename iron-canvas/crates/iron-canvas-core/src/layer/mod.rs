@@ -22,7 +22,9 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::painter::{BlitPainter, GroupClass, PaintColor, Painter};
 use crate::pending_work::RowSpan;
-use crate::renderer::{GridRenderer, LayerOps, OverlayRenderer};
+use crate::renderer::{
+    GridRenderer, LayerOps, OverlayRenderer, PreparedCacheCommit, PreparedGridPaint,
+};
 
 /// Drawing target abstraction. Production wasm holds one Surface per
 /// `<canvas>` (grid + overlay); a Cairo backend would hold one per
@@ -106,8 +108,8 @@ fn full_canvas_rect(size: CanvasSize) -> PixelRect {
 /// Outcome of the blit grid paint. `Held` = the preflight aborted before
 /// any pixel shifted; the caller must not present or commit the frame.
 #[must_use]
-pub enum BlitPaint {
-    Painted,
+pub(crate) enum BlitPaint {
+    Painted(PreparedCacheCommit),
     Held,
 }
 
@@ -120,69 +122,88 @@ where
     S: Surface,
     S::P: BlitPainter,
 {
-    /// Full grid paint (Fresh / SlotsReuse). Fills the canvas bg only when
-    /// the frame's slot vecs are fresh; SlotsReuse paths preserve last
-    /// frame's pixels so per-pane fingerprint-skip wins are preserved.
+    /// SlotsReuse grid paint: prior frame's pixels stay, so per-pane
+    /// fingerprint-skip wins are preserved and no full-canvas bg fill runs.
+    /// Only ever called with a `SlotsReused`/`Blitted`-kind `frame` — see
+    /// [`Self::paint_grid_fresh`] for the atomic `Fresh` counterpart, which
+    /// cannot share this method's tolerant-per-pane shape (the bg fill
+    /// alone would already be an observable op on a would-be-held attempt).
     ///
-    /// `mask` is the pane scope the caller's `GridWork` planned — `ALL` for
-    /// `Fresh`, the narrowed set for `Panes(mask)` — passed straight through
-    /// to `render_grid`.
+    /// `mask` is the pane scope `GridWork::Panes` planned, passed straight
+    /// through to `render_grid`.
     ///
     /// Returns the held-pane mask from `render_grid` — see its doc.
-    pub fn paint_grid(
+    pub(crate) fn paint_grid(
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome,
         mask: PaneRegionMask,
-    ) -> PaneRegionMask {
-        if !frame.kind.reuses_slots() {
-            self.surface.painter().rect_fill(
-                full_canvas_rect(frame.canvas_size),
-                PaintColor::from_theme_str(&frame.theme.cell_bg),
-            );
-        }
-        self.renderer.render_grid(model, frame, mask)
+    ) -> PreparedGridPaint {
+        self.renderer.execute_grid(model, frame, mask)
     }
 
-    /// Scroll-blit grid paint: shift the kept band per `BlitPlan::shifts`,
-    /// then run `render_grid_blit` (which only repaints the revealed strip).
+    /// Fresh-frame atomic grid paint: prepares every pane in `mask` first —
+    /// bulk fetch and bridge-check only, zero painter interaction — and
+    /// only once every one is confirmed clean does anything reach the
+    /// painter at all, including the paint-cache invalidation and the
+    /// full-canvas background fill. Returns `true` (held) with the painter
+    /// completely untouched by this call on any pane's bridge failure —
+    /// not even a group bracket — `false` once the frame actually painted.
     ///
-    /// The preflight (`prefetch_blit_strips`) fetches and bridge-validates
-    /// every revealed strip BEFORE a single pixel is shifted. If any fetch
-    /// fails, the whole frame is abandoned as a no-op: no shift, no paint. This
-    /// is deliberate and minimal — shifting pixels and then discovering the
-    /// fetch failed is the bug being fixed (it strands stale, misplaced pixels
-    /// in the revealed strip). A fallback full repaint is intentionally NOT
-    /// attempted here; a future frame reconciles once the bridge recovers via
-    /// the normal frame-kind dispatch, so a reader should not "upgrade" the
-    /// returned `BlitPaint::Held` without re-deriving why it is sufficient.
-    pub fn paint_grid_blit(
+    /// Order on the healthy path (invalidate, then bg fill, then cells)
+    /// matches what the pre-Stage-4 unconditional call sequence produced,
+    /// so a clean Fresh paint's op stream is unchanged.
+    pub(crate) fn paint_grid_fresh(
+        &mut self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        mask: PaneRegionMask,
+    ) -> Option<PreparedCacheCommit> {
+        let prepared = self.renderer.prepare_fresh_panes(model, frame, mask)?;
+        self.renderer.invalidate_paint_cache();
+        self.surface.painter().rect_fill(
+            full_canvas_rect(frame.canvas_size),
+            PaintColor::from_theme_str(&frame.theme.cell_bg),
+        );
+        Some(self.renderer.execute_fresh_grid(model, frame, prepared))
+    }
+
+    /// Scroll-blit grid paint: `RendererCore::render_grid_blit` prepares
+    /// every shifted pane (fetching and bridge-validating each one BEFORE a
+    /// single pixel moves), shifts the kept band per `BlitPlan::shifts`, and
+    /// paints the revealed strip, all in that one call. If any required
+    /// pane's fetch fails, the whole frame is abandoned as a no-op: no
+    /// shift, no paint — the renderer never gets far enough to call
+    /// `Painter::blit`. This is deliberate and minimal — shifting pixels and
+    /// then discovering the fetch failed is the bug being fixed (it strands
+    /// stale, misplaced pixels in the revealed strip). A fallback full
+    /// repaint is intentionally NOT attempted here; a future frame
+    /// reconciles once the bridge recovers via the normal frame-kind
+    /// dispatch, so a reader should not "upgrade" the returned
+    /// `BlitPaint::Held` without re-deriving why it is sufficient.
+    pub(crate) fn paint_grid_blit(
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome,
         plan: &BlitPlan,
     ) -> BlitPaint {
-        if !self.renderer.prefetch_blit_strips(model, frame, plan) {
-            return BlitPaint::Held;
+        match self.renderer.execute_grid_blit(model, frame, plan) {
+            Some(cache_commit) => BlitPaint::Painted(cache_commit),
+            None => BlitPaint::Held,
         }
-        for s in &plan.shifts {
-            self.renderer.painter_blit(s.src, s.dst);
-        }
-        self.renderer.render_grid_blit(model, frame, plan);
-        BlitPaint::Painted
     }
 
     /// Damage grid paint: prior pixels stay; only the damaged full-width
     /// row bands refetch and repaint. No full-canvas bg fill by design.
     ///
     /// Returns the held-pane mask from `render_grid_damage` — see its doc.
-    pub fn paint_grid_damage(
+    pub(crate) fn paint_grid_damage(
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome,
         spans: &[RowSpan],
-    ) -> PaneRegionMask {
-        self.renderer.render_grid_damage(model, frame, spans)
+    ) -> PreparedGridPaint {
+        self.renderer.execute_grid_damage(model, frame, spans)
     }
 
     pub fn invalidate_paint_cache(&mut self) {
@@ -191,6 +212,10 @@ where
 
     pub fn invalidate_pane_cache(&self, mask: PaneRegionMask) {
         self.renderer.invalidate_pane_cache(mask);
+    }
+
+    pub(crate) fn commit_pane_cache(&self, commit: PreparedCacheCommit) {
+        self.renderer.commit_pane_cache(commit);
     }
 }
 

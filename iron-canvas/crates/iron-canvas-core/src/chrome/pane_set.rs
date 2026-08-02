@@ -30,6 +30,16 @@ pub struct PaneSet {
     pub col_header_labels: Vec<String>,
 }
 
+/// One axis's scroll-slot Vec, tagged with which axis it belongs to. A
+/// single-axis blit only ever rebuilds one of `rows.scroll`/`cols.scroll` —
+/// this lets [`PaneSet::swap_scroll_axis`] and `chrome::blit`'s
+/// `BlitRollback` carry "the other axis's Vec" without a caller having to
+/// track separately which field a bare `Vec` was meant for.
+pub(super) enum ScrollAxisSlots {
+    Row(Vec<RowSlot>),
+    Column(Vec<ColSlot>),
+}
+
 impl PaneSet {
     /// Fresh `PaneSet` reusing the previous frame's drained slot Vecs.
     /// Each axis's `frozen_offset` is filled in by `fill_rows` / `fill_cols`.
@@ -49,6 +59,45 @@ impl PaneSet {
             },
             row_header_labels: Vec::new(),
             col_header_labels: Vec::new(),
+        }
+    }
+
+    /// Move `self` apart and reassemble with `scroll`'s axis swapped in
+    /// alongside fresh header labels; the frozen bands and the *other*
+    /// axis's scroll Vec carry over unchanged, by move.
+    ///
+    /// Symmetric by construction, not just by intent: `chrome::blit`'s
+    /// `PreparedBlitFrame::rollback` is today's one caller, handing back
+    /// a blit candidate's `PaneSet` (whose cross-axis scroll Vec is already
+    /// `prev`'s original, untouched by the blit) plus the saved original
+    /// scroll-axis Vec and labels, and getting `prev`'s original `PaneSet`
+    /// back — no field cloned, only moved.
+    pub(super) fn swap_scroll_axis(
+        self,
+        scroll: ScrollAxisSlots,
+        row_header_labels: Vec<String>,
+        col_header_labels: Vec<String>,
+    ) -> PaneSet {
+        let PaneSet { rows, cols, .. } = self;
+        match scroll {
+            ScrollAxisSlots::Row(scroll_rows) => PaneSet {
+                rows: AxisSlots {
+                    scroll: scroll_rows,
+                    ..rows
+                },
+                cols,
+                row_header_labels,
+                col_header_labels,
+            },
+            ScrollAxisSlots::Column(scroll_cols) => PaneSet {
+                cols: AxisSlots {
+                    scroll: scroll_cols,
+                    ..cols
+                },
+                rows,
+                row_header_labels,
+                col_header_labels,
+            },
         }
     }
 

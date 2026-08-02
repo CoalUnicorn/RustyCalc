@@ -9,7 +9,9 @@ query API are covered in `ARCHITECTURE.md`; this doc is about the
 
 Sources of truth: `frame_plan.rs` (`FrameInputs` capture, `FrameDelta`),
 `chrome/mod.rs` (`Chrome::classify`), `orchestrator.rs` (`plan_frame` +
-dispatch), `pending_work.rs` (queued work), `renderer/cell/mod.rs` +
+dispatch + `finish_attempt`), `renderer/prepared.rs` (`FetchedCells`,
+`Prepared*` types — the prepare/execute transaction boundary),
+`pending_work.rs` (queued work), `renderer/cell/mod.rs` +
 `renderer/cell/fingerprint.rs` (data compare), `renderer/cache/pane_cache.rs`
 (cross-frame buffers), `iron-canvas-canvas2d/src/web_surface.rs` (double
 buffering).
@@ -20,8 +22,12 @@ buffering).
 
 Every rAF tick calls `Orchestrator::paint_if_dirty`. It takes the single
 queued `PendingWork` value (`self.pending`, via one `mem::take` — no
-layer holds dirty state of its own), then runs it through a three-stage
-pipeline: `PendingWork -> FrameInputs -> FrameDelta -> FramePlan`.
+layer holds dirty state of its own), then runs it through the full
+pipeline: `PendingWork -> FrameInputs -> FrameDelta -> FramePlan -> prepare
+-> execute -> finish`. The first three stages are pure planning (points
+1-3 below); `prepare`, `execute`, and the single `finish` completion
+boundary (point 4) are the transactional guarantee this document exists
+to explain.
 
 1. **`FrameInputs::capture`** reads every scalar the frame needs —
    selected sheet, selected view, frozen row/column counts, header
@@ -44,6 +50,21 @@ pipeline: `PendingWork -> FrameInputs -> FrameDelta -> FramePlan`.
    Rows{sheet,spans} | Blit(plan)` — carries the pane scope explicitly
    into the executor it dispatches to; `Chrome` itself is never
    consulted for which panes need repainting.
+4. **Prepare, execute, finish.** `FramePlan.grid` dispatches to one of
+   five `paint_*_regime` methods. Each one *prepares* its own scope —
+   every bulk bridge read (`FetchedCells::fetch_into`, in
+   `renderer/prepared.rs`) classified against the pane cache's
+   *committed* `painted` fingerprint tree — without writing any
+   committed cache/pixel/frame state, then *executes*: paints the
+   prepared healthy scope into the backing target and returns its owned
+   `PreparedCacheCommit`. Execution then reduces to one `PaintOutcome`
+   (`Committed` / `Partial` / `Held`); Committed and Partial carry only
+   healthy panes' cache entries, while Held carries none.
+   `Orchestrator::finish_attempt` is the single completion boundary
+   every outcome flows through — it installs that aggregate once, advances
+   or preserves `last_frame`, presents whichever layers actually painted,
+   merges retry work back into `self.pending`, and publishes the frame's
+   trace.
 
 `PendingWork` tracks four categories — geometry rebuild, view movement,
 content damage (rows or panes), overlay repaint — and the diagnostic
@@ -68,35 +89,65 @@ instead. `view_changed()` / `viewChanged()` marks *intent* only; whether
 that intent becomes a blit, an overlay-only repaint, or a full rebuild is
 `Chrome::classify`'s geometric verdict, never the caller's choice.
 
-Three properties make the pipeline safe rather than optimistic:
+Four properties make the pipeline safe rather than optimistic:
 
 - **Classification and planning are pure.** `Chrome::classify` only
   reads (`prev`, the model, captured inputs, the active-cell snapshot);
   `plan_frame` is a free function over owned values. Neither builds a
   `Chrome`, mutates cache state, invalidates a cache, or calls a
-  painter — the five `paint_*_regime` methods own all mutation, driven
-  by the plan they're handed. You can read the whole policy in two
-  functions without chasing side effects.
+  painter. You can read the whole policy in two functions without
+  chasing side effects.
+- **Preparation is the only fallible step, and it never mutates
+  committed state.** A `paint_*_regime` method's own bulk bridge reads
+  run against the model and the pane cache's committed `painted`
+  fingerprint tree, but may only write renderer-lifetime scratch
+  (`PaneBuffers::prepare_scratch`, `FrameCache::strip_scratch`) — never
+  `PaneBuffers`' content fields, `PaneBuffers::range`, or
+  `PaneFingerprintState::painted`. A failed preparation is therefore
+  always a safe no-op against everything a later frame's paint-skip or
+  blit-shift decision reads.
 - **The decision is a value, twice over.** `Chrome::classify` returns
   `FrameDelta` (`#[must_use]` by construction — every variant is
   matched exhaustively); `plan_frame` returns `FramePlan`, whose
   `grid: GridWork` field `paint_if_dirty` matches on to dispatch.
   Adding a `GridWork` variant breaks the build at the dispatch site by
   design.
-- **The outcome is a value too** — `paint_if_dirty` returns
-  `PaintResult::{Idle, Painted, Retry}` (deliberately not
-  `#[must_use]`: a permanent polling loop that ignores it still
-  behaves correctly). `Retry` means an attempt was held back rather
-  than committed: before any regime ever ran (a capture failure — see
-  below), a whole-frame rollback on `Viewport` (the pre-attempt
-  `Chrome` is restored via `Clone`, nothing presents), or a pane-local
-  partial commit on `Damage` / `SlotsReuse` / `Fresh` (painted panes
-  present; the failed scope is folded back into `self.pending` — as
-  `ContentWork::Rows` for `Damage`, `ContentWork::Panes` for
-  `SlotsReuse` / `Fresh` — for the next tick). Either way the held
-  scope is merged back into `self.pending` before returning, so the
-  caller can just call `paint_if_dirty` again next tick with no new
-  external input needed.
+- **Execution and completion are a value too.** Once preparation
+  succeeds, execution is infallible: it paints the prepared scope and
+  reduces to one `PaintOutcome`, never installing cache state,
+  advancing `last_frame`, presenting a surface, or touching
+  `self.pending` itself — `finish_attempt` is the one place that does.
+  `paint_if_dirty` returns the resulting `PaintResult::{Idle, Painted,
+  Retry}` (deliberately not `#[must_use]`: a permanent polling loop
+  that ignores it still behaves correctly). `Retry` means an attempt
+  was held back rather than committed, and how far back is resolved per
+  regime, not left to the caller to infer:
+
+  | Prepared work | On bridge failure | Retry scope |
+  | --- | --- | --- |
+  | `Overlay` (no bulk grid prepare) | not applicable | — |
+  | `Viewport`, or selected-`Viewport`/effective-`FreshFallback` | whole-frame **Held** — `prepared.rollback()` moves `prev`'s untouched slot/header vectors back out of the candidate; no `Chrome::clone` | complete consumed work |
+  | `Fresh` | whole-frame **Held** — `last_frame` is never taken (ordinary Fresh), or handed back exactly as `prepare_blit` returned it (`FreshFallback`) | complete consumed work |
+  | `SlotsReuse` | **Partial** if any target pane painted (healthy panes present; failed panes keep prior pixels), else whole-frame **Held** | failed pane mask only (complete consumed work on a total hold) |
+  | `Damage` | **Partial** if any intersected pane painted, else whole-frame **Held** | original sheet + row spans (complete consumed work on a total hold) |
+
+  `Fresh` and `FreshFallback` are whole-frame atomic on bridge
+  failure — never partial — because a Fresh candidate's geometry and
+  full-canvas background may not agree with the committed frame, so
+  preserving old pixels in just the failed panes would not be coherent
+  with the new `Chrome`. `SlotsReuse` and `Damage` may commit partially
+  because their geometry *is* the committed frame — planning already
+  proved it stable — so a healthy pane's pixels occupy exactly the
+  region a failed pane leaves untouched. Either way, the held or
+  partial scope is merged back into `self.pending` before
+  `finish_attempt` returns, so the caller can just call `paint_if_dirty`
+  again next tick with no new external input needed.
+
+This is the pipeline's actual, landed shape — not a plan. Consolidating
+the five pane-quadrant renderer scaffolds (`Grid`/`Cells`/`FrozenSep`/
+`Headers`/`Corner`) into one shared structure, and any fetch- or
+measurement-driven performance work, are explicitly out of scope here:
+future work, not described by this document.
 
 ### Capture-failure hold
 
@@ -234,9 +285,10 @@ The engine deliberately layers three mechanisms, coarse-to-fine:
    repaint (see below). Hints make things *fast*; the fingerprint tree
    keeps things *correct*, and the row-damage plan makes "correct" also
    *cheap* within a changed pane.
-3. **Strip repaint** (`render_pane_strip`): the surgical tool. Fetches
-   only a band, splices it into the cached pane buffers
-   (`splice_strip_into`), and clears + repaints only that band — it never
+3. **Strip repaint** (`splice_strip_into` + the shared `paint_cells_pass`
+   tail, called from `execute_blit_pane` and `execute_damage_pane`): the
+   surgical tool. Fetches only a band, splices it into the cached pane
+   buffers, and clears + repaints only that band — it never
    commits into the pane's painted-pixel tree (a partial buffer can't
    stand in for a whole-pane hash), so the tree stays whatever the last
    full/row-band paint left it until a later frame's comparison naturally
@@ -323,10 +375,19 @@ story:
 | Cache | Lifetime | Invalidation |
 |---|---|---|
 | `FrameCache` (text slots, wrap buf, strip-fetch scratch) | one paint call | wiped/refilled every walk — nothing to invalidate |
-| `PaneCache::PaneBuffers` (styles/values/types/decorations + last range, per pane) | cross-frame, renderer lifetime | `PaneCache::invalidate(mask)` drops the cached buffer `range` only, on content change; `prepare_shift` rotates the buffers in place on blit; a range mismatch self-detects (`render_pane_damage` demotes to full walk) |
+| `PaneCache::PaneBuffers` (styles/values/types/decorations + last range, per pane) | cross-frame, renderer lifetime | `PaneCache::invalidate(mask)` drops the cached buffer `range` only, on content change; `PaneBuffers::apply_shift` (called from `execute_blit`, after the strip fetch is already confirmed clean) rotates the buffers in place on blit; a range mismatch self-detects (`render_pane_damage` demotes to full walk) |
 | Intern tables (`FontIntern`, `ColNameIntern`, `ColorIntern`) | renderer lifetime | never — pure dedup, content-addressed |
 | `PaneFingerprintState` (per-pane `painted`/`scratch` `PaneFingerprint` tree pair, inside `PaneCache::PaneBuffers`) | cross-frame, renderer lifetime — **not** on `Chrome` | No separate invalidation marker: each tree's own `range` is folded into its `digest`, so a stale `painted` tree can only coincidentally digest-match a freshly rebuilt `scratch` tree if the range and full content are genuinely identical — in which case the on-screen pixels really are still correct, so `Skip` is the right answer regardless (see below). A successful skip or paint commits `scratch` → `painted` via `mem::swap` (zero allocation, zero clone); a strip paint does not commit — `painted` is left exactly as the last full/row-band paint left it |
 | `CanvasPainter` `SetterCache` (last fill/stroke/font/line-width) | painter lifetime | `invalidate_cache()` on theme change + DPR change |
+
+**Pane cache metadata never describes speculative state.** The renderer
+returns one owned `PreparedCacheCommit` containing only panes that actually
+executed. `Orchestrator::finish_attempt` applies it once through
+`RendererCore::install_pane_cache_commit`, before publishing/presenting the
+matching frame. A prepare step that hits a bridge failure touches only
+renderer-lifetime scratch; abort recycling returns every earlier prepared
+bundle and candidate tree to its originating scratch pool. Held therefore
+installs nothing, while Partial installs only healthy panes.
 
 **One staleness axis, not two.** `PaneCache::invalidate` (buffer range)
 says "the pane's *data* may be stale, refetch it" — a content-dirty
@@ -378,13 +439,24 @@ guards against, and since every current geometry producer already
 forces a `Chrome::classify` hard break, this is a defensive second gate
 for a future producer that doesn't happen to trip one.
 
-Once selected, `Chrome::next_blit` returns a two-variant `BlitOutcome`
-— `Blitted` (shift kept band, strip-paint the reveal) or `FreshFallback`
-(demote to full repaint *with* cache invalidation — e.g. the row-header
-digit boundary widening past what the kept band assumed). Per pane,
-`prepare_shift` returns `PaneShiftPrep::{Shifted, MissingCache,
-IncompatibleRange}` — the reason a pane can't blit is a named variant,
-and the fallback is always the ordinary full-pane walk.
+Once selected, the live orchestrator path is `Chrome::prepare_blit`,
+which builds the same in-place candidate `Chrome::next_blit` does (there
+is only one blit construction algorithm) but holds it open as a
+`PreparedBlitFrame` rather than committing immediately: `Ok(prepared)`
+is the shift-kept-band case (strip-paint the reveal), `Err(prev)` is the
+`FreshFallback` demotion — e.g. the row-header digit boundary widening
+past what the kept band assumed. `paint_viewport_regime` runs the strip
+prefetch *after* `prepare_blit` returns, against the candidate it
+already built; on a bridge failure there it calls `prepared.rollback()`,
+which moves `prev`'s untouched slot/header vectors back out of the
+discarded candidate — no `Chrome::clone` — reconstructing exactly the
+`Chrome` that was committed before the attempt. `Chrome::next_blit`
+itself stays public — used by direct geometry tests, returning the same
+two-variant `BlitOutcome` (`Blitted` / `FreshFallback`) and committing
+through the identical builder immediately, with no held-open candidate.
+Per pane, `PaneCache::classify_shift` returns `PaneShiftPrep::{Shifted,
+MissingCache, IncompatibleRange}` — the reason a pane can't blit is a
+named variant, and the fallback is always the ordinary full-pane walk.
 
 ---
 
@@ -431,8 +503,9 @@ outcome) you can log, test, and grep.
 **5. Invariants live on the type or function that owns them.**
 "Full-width bands because text overflows, and because rows can share
 border ownership" is documented on `ContentWork`. "A successful strip
-paint invalidates the painted-pixel tree" is enforced inside
-`render_pane_strip`. The row-damage planner's border-safety rule sits on
+paint never touches the painted-pixel tree" is enforced inside
+`install_pane_cache_commit`'s `PaneCacheCommit::Splice` arm. The
+row-damage planner's border-safety rule sits on
 `plan_pane_repaint`/`span_has_unsafe_border`. The fingerprint's
 hash-domain contract sits on `StyleDigest`. When the constraint and the
 code that must respect it are in one place, the optimization survives
@@ -448,9 +521,10 @@ cannot drift between paths.
 
 **7. One new capability = one new seam, reusing the existing machinery.**
 The Damage regime added *no* new paint machinery — it reuses the blit
-path's strip fetch/splice/paint. If a proposed optimization needs a
-parallel copy of an existing pass, the design is wrong; find the seam
-(here: `render_pane_strip`) and feed it a different range.
+path's strip fetch/splice/paint: `splice_strip_into` and the shared
+`paint_cells_pass` tail. If a proposed optimization needs a parallel copy
+of an existing pass, the design is wrong; find the seam (here:
+`splice_strip_into` / `paint_cells_pass`) and feed it a different range.
 
 **8. Observability is part of the pipeline.**
 `last_regime`/`last_work_flags` stamp every paint; the recorder captures

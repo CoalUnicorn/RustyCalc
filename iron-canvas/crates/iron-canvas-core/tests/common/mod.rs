@@ -54,6 +54,12 @@ pub struct TestModel {
     show_grid: Cell<bool>,
     show_row_headers: Cell<bool>,
     show_col_headers: Cell<bool>,
+    /// Overrides `CanvasModel::get_show_selection`'s default-`true`. Lets a
+    /// test isolate `PendingWork`'s own `overlay` bit from `plan_frame`'s
+    /// `content_overlay = work.has_overlay() || show_selection` OR-clause —
+    /// with the default `true`, that clause alone would mask whether the
+    /// `overlay` bit itself survived a retry/merge.
+    show_selection: Cell<bool>,
     /// When set, `get_formatted_cell_value` reports a transient
     /// `Fetched::BridgeFailed` — simulating a JS-bridge throw so tests can
     /// exercise the active-cell repaint's atomic-skip path.
@@ -112,6 +118,7 @@ impl Default for TestModel {
             show_grid: Cell::new(true),
             show_row_headers: Cell::new(true),
             show_col_headers: Cell::new(true),
+            show_selection: Cell::new(true),
             value_bridge_fail: Cell::new(false),
             bulk_bridge_fail: Cell::new(false),
             bulk_bridge_fail_from: Cell::new(None),
@@ -216,6 +223,10 @@ impl TestModel {
     }
     pub fn with_hidden_col_headers(self) -> Self {
         self.show_col_headers.set(false);
+        self
+    }
+    pub fn with_show_selection(self, b: bool) -> Self {
+        self.show_selection.set(b);
         self
     }
     /// Make `FrameInputs::capture` fail at exactly the named step — see the
@@ -384,6 +395,9 @@ impl CanvasModel for TestModel {
             return None;
         }
         Some(self.show_col_headers.get())
+    }
+    fn get_show_selection(&self) -> bool {
+        self.show_selection.get()
     }
     fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
         self.column_headers.borrow().get(&column).cloned()

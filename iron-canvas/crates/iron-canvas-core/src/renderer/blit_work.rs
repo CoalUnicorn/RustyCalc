@@ -13,7 +13,7 @@
 use crate::chrome::{BlitPlan, Chrome, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
-use crate::renderer::cache::PaneBlitAddressWork;
+use crate::renderer::cache::{PaneBlitAddressWork, PaneCache, PaneShiftPrep};
 use crate::types::coord::RCRange;
 
 /// One shifted pane's complete blit work for the renderer: the address-space
@@ -99,4 +99,43 @@ pub fn widen_blit_strip_to_pixel_clip(
         strip_range,
         pixel_clip,
     }
+}
+
+/// Classify `pane`'s cached range against `plan`'s live geometry and, only on
+/// a genuine `Shifted` result, widen it into the pane's complete
+/// [`BlitPaneWork`] — the one call [`crate::renderer::prepared::RendererCore::prepare_blit`]
+/// makes per `plan.shift_panes()` pane to decide the strip-vs-full-pane fork.
+///
+/// `None` covers every reason this pane cannot strip-paint this frame: never
+/// cached, an incompatible cached range (e.g. a canvas resize since the last
+/// fetch), or the defensive zero-delta/non-overlap guard inside
+/// [`PaneCache::plan_blit_pane`]. The caller routes all three uniformly to a
+/// full-pane fallback fetch without needing to know which one fired.
+///
+/// Pure: reads `pane_cache`/`frame`/`plan` only, via
+/// [`crate::renderer::cache::PaneBuffers::classify_shift`] — never rotates
+/// the pane's buffers or mutates its cached range. The actual rotation is
+/// execution's job, once the revealed strip's fetch is confirmed clean (see
+/// `renderer::prepared`'s module doc).
+pub(crate) fn shifted_pane_work(
+    pane_cache: &PaneCache,
+    frame: &Chrome,
+    plan: &BlitPlan,
+    pane: PaneRegion,
+) -> Option<BlitPaneWork> {
+    let new_range = pane.range(frame)?;
+    let PaneShiftPrep::Shifted {
+        prev_range,
+        new_range,
+    } = pane_cache.pane(pane).classify_shift(new_range, plan.axis)
+    else {
+        return None;
+    };
+    let address_work = pane_cache.plan_blit_pane(prev_range, new_range, plan.axis)?;
+    Some(widen_blit_strip_to_pixel_clip(
+        frame,
+        plan,
+        pane,
+        address_work,
+    ))
 }

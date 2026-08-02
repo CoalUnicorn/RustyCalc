@@ -17,8 +17,10 @@ use crate::frame_plan::FrameInputs;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::geometry::slot::{AxisSlots, RowSlot, scroll_first};
+use crate::theme::CanvasTheme;
 
 use super::blit_rebuild::ShiftDir;
+use super::pane_set::ScrollAxisSlots;
 use super::{Chrome, FrameKindTag, PaneRegion, PaneRegionMask, PaneSet, measure_row_header_width};
 
 /// One pane's contribution to a scroll-blit. A row-axis scroll emits a
@@ -236,6 +238,116 @@ fn blit_row_header_thickness(scroll_rows: &[RowSlot], frozen_rows_count: i32, ne
     measure_row_header_width(last_visible_row)
 }
 
+/// Reversible construction of a scroll-blit's next-frame `Chrome`. Wraps a
+/// successfully-built candidate together with the exact pieces of `prev`
+/// [`try_blit_reuse`] replaced to build it, so a caller that only learns
+/// about a failure *after* construction succeeded — `paint_grid_blit`'s
+/// strip-prefetch bridge check, run against the already-built candidate —
+/// can reconstruct `prev` by moving those pieces back out of `candidate`,
+/// rather than keeping a full clone of `prev` around "just in case".
+///
+/// `Chrome::next_blit` is the immediate-commit convenience wrapper most
+/// callers want (and the only shape `BlitOutcome`'s two variants need).
+/// `Chrome::prepare_blit` hands back this type instead, for the one caller
+/// (`Orchestrator::paint_viewport_regime`) that must hold the
+/// commit-or-rollback decision open until it knows whether the paint that
+/// follows actually succeeded.
+pub(crate) struct PreparedBlitFrame {
+    candidate: Chrome,
+    rollback: BlitRollback,
+}
+
+impl PreparedBlitFrame {
+    /// Borrow the candidate frame — e.g. to hand to `paint_grid_blit` before
+    /// deciding whether to commit or roll back.
+    pub(crate) fn frame(&self) -> &Chrome {
+        &self.candidate
+    }
+
+    pub(crate) fn commit(self) -> Chrome {
+        self.candidate
+    }
+
+    /// Reconstruct `prev` by moving the frozen bands and the untouched
+    /// cross-axis scroll Vec back out of `candidate` (via
+    /// [`PaneSet::swap_scroll_axis`]), and swapping in `rollback`'s saved
+    /// originals for every field `candidate` replaced instead of carrying
+    /// forward. No field is cloned: everything `candidate` owns either
+    /// becomes part of the reconstructed `Chrome` or is dropped in favor of
+    /// a `rollback` field that was itself moved — never cloned — out of
+    /// `prev` before `try_blit_reuse` built `candidate` in the first place.
+    pub(crate) fn rollback(self) -> Chrome {
+        let PreparedBlitFrame {
+            candidate,
+            rollback,
+        } = self;
+        let BlitRollback {
+            scroll,
+            row_header_labels,
+            col_header_labels,
+            theme,
+            dpr,
+            model_generation,
+            show_row_headers,
+            show_col_headers,
+            kind,
+        } = rollback;
+        // `theme`/`dpr`/`model_generation`/`show_row_headers`/
+        // `show_col_headers`/`kind` all came from `inputs`/`FrameKindTag::Blitted`
+        // when `candidate` was built, not from `prev` — dropped here in
+        // favor of `rollback`'s saved originals, bound above.
+        let Chrome {
+            sheet,
+            pane_set,
+            row_header_thickness,
+            col_header_thickness,
+            cell_origin,
+            canvas_size,
+            ..
+        } = candidate;
+        Chrome {
+            sheet,
+            pane_set: pane_set.swap_scroll_axis(scroll, row_header_labels, col_header_labels),
+            row_header_thickness,
+            col_header_thickness,
+            cell_origin,
+            canvas_size,
+            theme,
+            dpr,
+            model_generation,
+            show_row_headers,
+            show_col_headers,
+            kind,
+        }
+    }
+}
+
+/// The exact fields `try_blit_reuse` replaces when it builds `candidate`
+/// from `prev`, saved so [`PreparedBlitFrame::rollback`] can restore them
+/// without re-deriving anything from `inputs` or the model. `sheet`,
+/// `col_header_thickness`, `cell_origin`, `canvas_size`, and
+/// `row_header_thickness` are deliberately not here: `try_blit_reuse`
+/// always either copies them from `prev` unchanged or proves them equal to
+/// `prev`'s value — via its own row-header-thickness gate, or via
+/// `Chrome::classify`'s canvas-size/etc. hard breaks that must pass before
+/// `try_blit_reuse` is ever called — before `candidate` is built, so
+/// reading them back off `candidate` at rollback time is already exact;
+/// storing a second copy here would be redundant, not more correct.
+struct BlitRollback {
+    /// The scrolled axis's *original* slot Vec — the one value `prev` owned
+    /// that `candidate` does not carry forward at all (its replacement is
+    /// freshly rebuilt from the model, not moved).
+    scroll: ScrollAxisSlots,
+    row_header_labels: Vec<String>,
+    col_header_labels: Vec<String>,
+    theme: Rc<CanvasTheme>,
+    dpr: f64,
+    model_generation: u64,
+    show_row_headers: bool,
+    show_col_headers: bool,
+    kind: FrameKindTag,
+}
+
 /// Build the next-frame Chrome by reusing as much of `prev` as the blit
 /// plan guarantees is unchanged: the cross-axis slot Vec and both frozen
 /// Vecs are *moved* out of `prev` (their heap allocation transfers to the
@@ -247,16 +359,24 @@ fn blit_row_header_thickness(scroll_rows: &[RowSlot], frozen_rows_count: i32, ne
 /// across a digit boundary) or any model anomaly, so the caller can fall
 /// through to a full `Chrome::next`. Every `Err` return happens *before* the
 /// first move out of `prev`, so the returned `prev` is always whole.
-// `Chrome` is large and intentionally returned by value on *both* arms (the
-// zero-copy give-back); boxing the `Err` wouldn't shrink the equally-large
-// `Ok(Chrome)` and would add a heap alloc on the rare fallback.
+///
+/// On success, returns a [`PreparedBlitFrame`] rather than a bare `Chrome`:
+/// the caller may still need to reconstruct `prev` if a later step (the
+/// strip-prefetch bridge check, run against the returned candidate) fails —
+/// see that type's doc. Building `Ok`'s `BlitRollback` costs only moves and
+/// `Copy` reads out of fields of `prev` that `candidate` was already about
+/// to replace or abandon; nothing is cloned to make rollback possible.
+// `Chrome`/`PreparedBlitFrame` are large and intentionally returned by value
+// on both arms (the zero-copy give-back on `Err`); boxing either would add a
+// heap alloc to a path that must stay allocation-free on the steady-state
+// blit.
 #[allow(clippy::result_large_err)]
 pub(super) fn try_blit_reuse(
     mut prev: Chrome,
     model: &dyn CanvasModel,
     inputs: &FrameInputs,
     plan: &BlitPlan,
-) -> Result<Chrome, Chrome> {
+) -> Result<PreparedBlitFrame, Chrome> {
     // `inputs.view()` is this attempt's one already-validated read (see
     // `Chrome::build`'s comment) — no `None`/fallback branch needed here.
     let view = inputs.view();
@@ -272,16 +392,19 @@ pub(super) fn try_blit_reuse(
     let new_left = scroll_first(frozen_cols_count, view.left_column);
 
     // Rebuild the scrolled axis band, gate on row-header thickness, *then* move
-    // the unchanged cross-axis band out of `prev`. The gate runs before the
-    // first `mem::take`, so every `Err` below hands `prev` back whole — the
-    // invariant the caller's `Chrome::next` fallback relies on.
+    // anything out of `prev`. The gate runs before the first `mem::take`, so
+    // every `Err` below hands `prev` back whole — the invariant the caller's
+    // `Chrome::next` fallback (and, since Stage 4, `PreparedBlitFrame::rollback`)
+    // relies on.
     //
     // Thickness gates cross-axis reuse: if the new last visible row label grew
     // (e.g. row 99 -> 100), origin_x shifts and every col slot's `.left` is off,
     // so we fall back to a full rebuild. It reads the rebuilt rows band (row
     // scroll) or the still-unchanged cross-axis band (column scroll) — neither
-    // taken yet. Once it passes, the cross-axis Vec is moved, not cloned.
-    let (scroll_rows, scroll_cols, row_header_thickness) = match plan.axis {
+    // taken yet. Once it passes, `old_scroll` captures the scrolled axis's
+    // *original* Vec — its last read before `candidate`'s freshly rebuilt
+    // replacement takes over — and the cross-axis Vec is moved, not cloned.
+    let (scroll_rows, scroll_cols, row_header_thickness, old_scroll) = match plan.axis {
         Axis::Row => {
             let rows = match prev
                 .pane_set
@@ -294,8 +417,9 @@ pub(super) fn try_blit_reuse(
             if thickness != prev.row_header_thickness {
                 return Err(prev);
             }
+            let old = ScrollAxisSlots::Row(std::mem::take(&mut prev.pane_set.rows.scroll));
             let cols = std::mem::take(&mut prev.pane_set.cols.scroll);
-            (rows, cols, thickness)
+            (rows, cols, thickness, old)
         }
         Axis::Column => {
             let cols = match prev
@@ -312,8 +436,9 @@ pub(super) fn try_blit_reuse(
             if thickness != prev.row_header_thickness {
                 return Err(prev);
             }
+            let old = ScrollAxisSlots::Column(std::mem::take(&mut prev.pane_set.cols.scroll));
             let rows = std::mem::take(&mut prev.pane_set.rows.scroll);
-            (rows, cols, thickness)
+            (rows, cols, thickness, old)
         }
     };
 
@@ -324,6 +449,24 @@ pub(super) fn try_blit_reuse(
         PaneSet::resolve_row_labels(model, sheet, &prev.pane_set.rows.frozen, &scroll_rows);
     let col_header_labels =
         PaneSet::resolve_col_labels(model, sheet, &prev.pane_set.cols.frozen, &scroll_cols);
+
+    // Every reject is behind us — snapshot the per-attempt scalars
+    // `candidate` is about to refresh from `inputs` instead of from `prev`,
+    // plus `prev`'s original header-label Vecs (also about to be replaced),
+    // into `rollback`. Moves and `Copy` reads only: `theme` is `prev`'s
+    // original `Rc` handle, moved out (not `Rc::clone`d — `prev` has no
+    // further use for it); the rest are `Copy`.
+    let rollback = BlitRollback {
+        scroll: old_scroll,
+        row_header_labels: std::mem::take(&mut prev.pane_set.row_header_labels),
+        col_header_labels: std::mem::take(&mut prev.pane_set.col_header_labels),
+        theme: prev.theme,
+        dpr: prev.dpr,
+        model_generation: prev.model_generation,
+        show_row_headers: prev.show_row_headers,
+        show_col_headers: prev.show_col_headers,
+        kind: prev.kind,
+    };
 
     // Frozen bands are unchanged across a scroll, and their labels are now
     // resolved — move the Vecs out of `prev` (this is the last read of them).
@@ -347,12 +490,15 @@ pub(super) fn try_blit_reuse(
     // `plan.shift_panes()` names the panes `render_grid_blit` visits — the
     // orchestrator threads it straight from the `BlitPlan` it already holds,
     // so `Chrome` itself needs no pane-scope field. Those panes route through
-    // `render_pane_blit` -> `render_pane_strip`, which invalidates its own
-    // pane's painted-fingerprint tree unconditionally on every strip paint
-    // (`PaneCache`, not `Chrome`, owns that state — see `pane_cache.rs`).
-    // Untouched panes keep their painted tree and short-circuit on the
-    // next frame's compare via a digest match.
-    Ok(Chrome {
+    // `execute_blit` -> `execute_blit_pane`, whose strip paint never commits
+    // into its pane's painted-fingerprint tree — a splice leaves `painted`
+    // exactly as the last full/row-band paint left it (`PaneCache`, not
+    // `Chrome`, owns that state — see `pane_cache.rs`). A shifted pane's now-
+    // stale tree self-disqualifies on the next full-pane compare (its range
+    // no longer matches, via the range-in-digest property); an untouched
+    // pane's tree is still accurate and short-circuits that same compare via
+    // a digest match.
+    let candidate = Chrome {
         sheet: prev.sheet,
         pane_set,
         row_header_thickness,
@@ -365,6 +511,11 @@ pub(super) fn try_blit_reuse(
         show_row_headers: inputs.show_row_headers(),
         show_col_headers: inputs.show_col_headers(),
         kind: FrameKindTag::Blitted,
+    };
+
+    Ok(PreparedBlitFrame {
+        candidate,
+        rollback,
     })
 }
 

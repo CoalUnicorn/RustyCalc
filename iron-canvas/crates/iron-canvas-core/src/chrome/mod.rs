@@ -48,6 +48,7 @@ mod pane_region;
 mod pane_set;
 mod recycled_slots;
 
+pub(crate) use blit::PreparedBlitFrame;
 pub use blit::{BlitPlan, FramePath};
 pub use kind::FrameKindTag;
 pub use pane_region::{PaneRegion, PaneRegionMask};
@@ -229,6 +230,28 @@ impl Chrome {
         }
     }
 
+    /// Prepare the blit fast-path's next-frame candidate without committing:
+    /// `Ok(prepared)` on successful in-place reuse, `Err(prev)` — `prev`
+    /// handed back whole — on reject (see `try_blit_reuse`'s doc for both
+    /// cases). `Chrome::next_blit` is the immediate-commit wrapper built on
+    /// top of this for callers that don't need to hold the decision open;
+    /// `Orchestrator::paint_viewport_regime` calls this directly instead, so
+    /// it can call `PreparedBlitFrame::rollback` if the paint that follows a
+    /// successful `Ok` still fails a bulk bridge read. `pub(crate)`: an
+    /// execution detail of the render pipeline, not consumer-facing API.
+    // Same large-`Err` shape as `try_blit_reuse` (this just forwards to it) —
+    // see that function's own comment for why `Chrome` stays by-value here
+    // instead of boxed.
+    #[allow(clippy::result_large_err)]
+    pub(crate) fn prepare_blit(
+        prev: Chrome,
+        model: &dyn CanvasModel,
+        inputs: &FrameInputs,
+        plan: &BlitPlan,
+    ) -> Result<PreparedBlitFrame, Chrome> {
+        blit::try_blit_reuse(prev, model, inputs, plan)
+    }
+
     /// Build the next-frame `Chrome` for the blit fast-path, returning a typed
     /// [`BlitOutcome`] rather than a `Chrome` with an open `FrameKindTag`.
     ///
@@ -239,6 +262,11 @@ impl Chrome {
     /// rebuild `Fresh`. The two results map straight to the two `BlitOutcome`
     /// arms at the decision point, so no caller has to assert an impossible
     /// `SlotsReused` away.
+    ///
+    /// Implemented through [`Self::prepare_blit`] — the same internal
+    /// candidate builder `Orchestrator::paint_viewport_regime` uses — with an
+    /// immediate `.commit()`: there is no second blit construction algorithm,
+    /// only a second (non-atomic) way to consume the first one's result.
     pub fn next_blit(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
@@ -248,15 +276,28 @@ impl Chrome {
         let Some(prev) = prev else {
             return BlitOutcome::FreshFallback(Self::next(None, model, inputs, FramePath::Fresh));
         };
-        match blit::try_blit_reuse(prev, model, inputs, plan) {
-            Ok(frame) => BlitOutcome::Blitted(frame),
+        match Self::prepare_blit(prev, model, inputs, plan) {
+            Ok(prepared) => BlitOutcome::Blitted(prepared.commit()),
             Err(prev) => {
                 BlitOutcome::FreshFallback(Self::next(Some(prev), model, inputs, FramePath::Fresh))
             }
         }
     }
 
-    fn build(model: &dyn CanvasModel, inputs: &FrameInputs, recycled: RecycledSlots) -> Self {
+    /// Build a `FramePath::Fresh` candidate directly from a caller-supplied
+    /// `recycled` pool, bypassing `Chrome::next`'s `prev`-derived recycling.
+    /// `pub(crate)` so `Orchestrator::paint_fresh_regime` can build the
+    /// candidate from its own standing `spare_slots` pool without handing
+    /// `prev`'s ownership to this call at all — `prev` stays fully intact
+    /// (and, today, still committed in `self.last_frame`) for the whole
+    /// duration of the build, rather than being drained into a `RecycledSlots`
+    /// derived from it as the very first step. See `chrome::recycled_slots`'s
+    /// module doc for the pool's cross-attempt lifecycle.
+    pub(crate) fn build(
+        model: &dyn CanvasModel,
+        inputs: &FrameInputs,
+        recycled: RecycledSlots,
+    ) -> Self {
         // `inputs` is a `FrameInputs::capture` snapshot: sheet, view, freeze
         // counts, and header visibility already read exactly once and
         // validated (a bridge failure on any of them holds the whole paint

@@ -10,10 +10,10 @@ mod common;
 use std::rc::Rc;
 
 use iron_canvas_core::RowSpan;
-use iron_canvas_core::chrome::PaneRegionMask;
+use iron_canvas_core::chrome::{PaneRegion, PaneRegionMask};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::GroupClass;
-use iron_canvas_core::{Orchestrator, PaintRegimeTag, PaintResult, WorkFlags};
+use iron_canvas_core::{Orchestrator, PaintRegimeTag, PaintResult, PaneVerdict, WorkFlags};
 use iron_canvas_recorder::{DrawOp, MemSurface};
 
 use common::TestModel;
@@ -630,5 +630,496 @@ fn commit_then_move_batch_paints_fresh_without_blit() {
     assert!(
         grid_text_ops_containing(&orch, "typed") > 0,
         "the committed edit must be visible in the painted ops"
+    );
+}
+
+// ==============================================================================
+// Stage 4 pins (Task 1): atomic hold for Fresh / first-frame Fresh, and
+// all-target-panes-failed SlotsReuse/Damage.
+//
+// The tests below target the CURRENT Stage 3 (`d8aed9c`) code. Several are
+// EXPECTED to fail — for TWO distinct reasons discovered while writing them
+// (running the Fresh-path tests first, before assuming the shape of the
+// bug, is what surfaced the first one):
+//
+// 1. `render_pane`'s bridge-failure hold branch is gated behind
+//    `frame.kind.reuses_slots()` (`SlotsReused` / `Blitted` only) — see its
+//    own doc comment: "A Fresh frame has no prior valid pixels to partially
+//    preserve... so it always takes the unconditional full repaint". On a
+//    `FramePath::Fresh` candidate (`frame.kind == Fresh`, true for the very
+//    first paint AND for every later Fresh rebuild) that guard is never
+//    true, so a bulk bridge failure is not merely "handled non-atomically"
+//    — it is never detected at all. `render_pane` paints through with
+//    whatever the bridge returned (missing cells silently render blank) and
+//    reports `held = false`, i.e. success. This is a Stage 3 design choice,
+//    not an oversight (a Fresh frame was assumed to have "nothing to
+//    preserve"), and it is the reason `PaintResult::Retry` itself — not
+//    just the ops/presents/geometry assertions after it — fails on every
+//    Fresh-path test below.
+// 2. `paint_slots_reuse_regime` and `paint_damage_regime` (which DO build
+//    `SlotsReused`-kind frames, so `render_pane`'s hold branch fires
+//    correctly there) call `self.grid.present()` unconditionally — before
+//    ever inspecting the held-pane mask — and neither regime resets
+//    `last_effective` on a hold, so a fully held frame still reports its
+//    selected strategy as `effective`.
+//
+// Stage 4's prepare/commit split (Tasks 2-5) closes both gaps; each RED
+// test's doc note says exactly which line of today's code produces the
+// failure, so its eventual green run is not accidental.
+// ==============================================================================
+
+/// Bullet 1 (RED against d8aed9c): content+view work always selects Fresh
+/// (mirrors `content_with_fresh_repaints_the_active_cell_overlay`'s setup,
+/// see `plan_frame`'s "content plus view" row) and the scroll here moves row
+/// 1 off-frame — so a buggy commit of the failed candidate's geometry is
+/// observable as `cell_rect(1, 1)` flipping from `Some` to `None`, not just
+/// as a missing paint.
+///
+/// Today, EVERY assertion here fails, including `PaintResult::Retry` itself:
+/// `render_pane`'s bridge-hold branch never fires on a `Fresh`-kind
+/// candidate (reason 1 in the section doc above), so `held` comes back
+/// empty, `paint_fresh_regime` presents both layers and commits
+/// `self.last_frame = Some(frame)` unconditionally, and `paint_if_dirty`
+/// returns `Painted` — the pane actually paints through with the
+/// `BridgeFailed` cells silently rendered blank, not held.
+#[test]
+fn held_fresh_content_plus_view_holds_atomically() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_data_until(30));
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh baseline at top_row=1.
+
+    let rect_before = orch.cell_rect(1, 1);
+    assert!(rect_before.is_some(), "row 1 visible in the baseline frame");
+    let grid_ops = grid_ops_len(&orch);
+    let overlay_ops = overlay_ops_len(&orch);
+    let grid_presents = orch.grid_surface().presents();
+    let overlay_presents = orch.overlay_surface().presents();
+
+    stub.set_cell(5, 1, "edited");
+    stub.set_top_row(5); // moves row 1 off-frame in the candidate geometry.
+    stub.set_bulk_bridge_fail(true);
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.view_changed(); // content + view together always select Fresh.
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(
+        result,
+        PaintResult::Retry,
+        "a held Fresh attempt must ask for a retry"
+    );
+    assert_eq!(
+        grid_ops_len(&orch),
+        grid_ops,
+        "held Fresh: zero new grid ops"
+    );
+    assert_eq!(
+        overlay_ops_len(&orch),
+        overlay_ops,
+        "held Fresh: zero new overlay ops"
+    );
+    assert_eq!(
+        orch.grid_surface().presents(),
+        grid_presents,
+        "held Fresh: no grid present"
+    );
+    assert_eq!(
+        orch.overlay_surface().presents(),
+        overlay_presents,
+        "held Fresh: no overlay present"
+    );
+    assert_eq!(
+        orch.cell_rect(1, 1),
+        rect_before,
+        "held Fresh: query geometry must not advance to the failed candidate's geometry"
+    );
+}
+
+/// Bullet 1 recovery half, kept in its own test (rather than appended to
+/// `held_fresh_content_plus_view_holds_atomically`) per the project's
+/// one-assertion-focus-per-test convention. RED today for the same reason as
+/// its sibling above (reason 1 in the section doc): the very first
+/// `assert_eq!(.., PaintResult::Retry)` already fails, since today's code
+/// never holds a Fresh attempt at all. Kept as its own test anyway — once
+/// Stage 4 makes the hold real, this is what proves the *recovery* half of
+/// the contract independently of the hold-atomicity assertions above.
+#[test]
+fn held_fresh_content_plus_view_recovers_without_new_host_raise() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_data_until(30));
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    stub.set_cell(5, 1, "edited");
+    stub.set_top_row(5);
+    stub.set_bulk_bridge_fail(true);
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.view_changed();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+
+    // No new host raise — the retained work alone must drive recovery.
+    stub.set_bulk_bridge_fail(false);
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(result, PaintResult::Painted, "recovery must commit");
+    assert!(
+        orch.cell_rect(1, 1).is_none(),
+        "the committed scroll must take effect once recovery lands"
+    );
+    assert!(grid_text_ops_containing(&orch, "edited") > 0);
+}
+
+/// Bullet 3: the very first paint attempt (no committed `Chrome` at all)
+/// must hold atomically on a bulk bridge failure — no committed query
+/// geometry, no present on either layer, and a plain recovery once the
+/// bridge heals (see the companion recovery test below).
+///
+/// Stage 4's atomic Fresh path (`Orchestrator::build_and_paint_fresh` ->
+/// `LayerBase::paint_grid_fresh` -> `RendererCore::prepare_fresh_panes`)
+/// prepares every pane — bulk fetch and bridge-check only — before the
+/// painter is touched at all, so a first-frame hold reaches neither
+/// `present()` call and the grid surface gains no ops *from this attempt*.
+/// The baseline is snapshotted after `build()`, not compared against an
+/// absolute zero: `build`'s own `resize` call already emits a few ops onto
+/// the grid surface (a DPR transform plus a paint-cache invalidation) as
+/// part of allocating the backing store — legitimate initialization, not a
+/// paint attempt, and explicitly outside what Stage 4's atomicity contract
+/// covers (see the Stage 4 brief's own `rg` audit note: "initialization,
+/// resize/model-reset, and accessor code may still contain separate state
+/// writes where they are not completing a paint attempt"). Every sibling
+/// held-* test in this file already measures the same way; this one is the
+/// only one where "before" has to mean "right after `build()`" instead of
+/// "after an earlier successful paint".
+#[test]
+fn held_first_frame_fresh_holds_atomically() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_data_until(30));
+    stub.set_bulk_bridge_fail(true);
+    // No `paint_if_dirty` call before this one — `build` only queues
+    // geometry + panes(ALL) + overlay work via `resize`/`set_model`, so this
+    // is genuinely the first paint attempt.
+    let mut orch = build(Rc::clone(&stub));
+    let grid_ops = grid_ops_len(&orch);
+
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(
+        result,
+        PaintResult::Retry,
+        "a held first frame must retry, not silently stay Idle"
+    );
+    assert!(
+        orch.cell_rect(1, 1).is_none(),
+        "no committed Chrome/query geometry before the first successful paint"
+    );
+    assert_eq!(
+        orch.grid_surface().presents(),
+        0,
+        "a held first frame must not present the grid"
+    );
+    assert_eq!(
+        orch.overlay_surface().presents(),
+        0,
+        "a held first frame must not present the overlay"
+    );
+    assert_eq!(
+        grid_ops_len(&orch),
+        grid_ops,
+        "a held first frame must emit no grid ops of its own"
+    );
+}
+
+/// RED today for the same reason as `held_first_frame_fresh_holds_atomically`
+/// (its own `assert_eq!(.., PaintResult::Retry)` already fails) — kept as
+/// its own test so it independently pins the recovery contract once Stage 4
+/// makes the hold above real.
+#[test]
+fn held_first_frame_fresh_recovers_without_new_host_raise() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_data_until(30));
+    stub.set_bulk_bridge_fail(true);
+    let mut orch = build(Rc::clone(&stub));
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+
+    stub.set_bulk_bridge_fail(false);
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(
+        result,
+        PaintResult::Painted,
+        "recovery must commit normally"
+    );
+    assert!(orch.cell_rect(1, 1).is_some());
+}
+
+/// Bullet 6 (RED against d8aed9c): when EVERY targeted pane fails (not just
+/// some), the attempt is a true hold — `Held`, not `Partial` — and must
+/// present neither layer. Uses a frozen-row fixture so two real panes
+/// (TopRight + BottomRight) are in scope, and the unconditional
+/// `set_bulk_bridge_fail(true)` (not the row-scoped `_from` variant) fails
+/// both of them, not just one.
+///
+/// Today, `paint_slots_reuse_regime` calls `self.grid.present()`
+/// unconditionally (before checking `held`) and paints+presents the overlay
+/// whenever `OverlayWork::Paint` was planned, regardless of whether every
+/// pane held — so both counters advance even though nothing committed.
+/// `last_effective` is also never reset on a hold, so it keeps naming
+/// `SlotsReuse` instead of `None`.
+#[test]
+fn held_slots_reuse_all_panes_failed_is_held_not_partial() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen_rows(2),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh baseline: primes TopRight + BottomRight.
+
+    let grid_presents = orch.grid_surface().presents();
+    let overlay_presents = orch.overlay_surface().presents();
+
+    stub.set_cell(1, 1, "top-edit");
+    stub.set_cell(6, 1, "bottom-edit");
+    stub.set_bulk_bridge_fail(true); // unconditional: every pane's fetch fails.
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(result, PaintResult::Retry);
+    assert_eq!(
+        orch.grid_surface().presents(),
+        grid_presents,
+        "an all-failed attempt is Held, not Partial: it must not present the grid"
+    );
+    assert_eq!(
+        orch.overlay_surface().presents(),
+        overlay_presents,
+        "an all-failed attempt must not present the overlay either"
+    );
+    assert_eq!(
+        orch.last_trace().effective,
+        None,
+        "a fully held attempt names no effective strategy"
+    );
+}
+
+/// Fix-round regression (post Task 5 review): a full SlotsReuse hold must
+/// retry the COMPLETE consumed work, not a pane-mask reconstruction — the
+/// Resolved Failure Policy's "every target pane fails -> Held -> complete
+/// consumed work" row is explicit, and `retry_for_held_panes(mask)` only
+/// ever rebuilds the `content` field, silently dropping any `overlay` (or
+/// `view`) bit that rode along on the same `PendingWork`. A held attempt
+/// never runs the overlay refresh itself (see `finish_attempt`'s doc), so a
+/// dropped mark has no other chance to be serviced.
+///
+/// `with_show_selection(false)` is load-bearing, not incidental fixture
+/// noise: `plan_frame`'s `content_overlay = work.has_overlay() ||
+/// show_selection` would otherwise select `OverlayWork::Paint` on the
+/// recovery attempt from `show_selection` alone, regardless of whether the
+/// `overlay` bit itself actually survived the retry — masking the exact
+/// bug this test exists to catch. With `show_selection` held at `false`
+/// throughout, an overlay repaint on the recovery frame can only mean the
+/// mark was genuinely retried.
+#[test]
+fn held_slots_reuse_full_hold_retries_the_complete_consumed_work() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_show_selection(false),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh baseline.
+
+    stub.set_cell(1, 1, "edited");
+    stub.set_bulk_bridge_fail(true); // unconditional: every pane's fetch fails.
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.request_overlay_repaint(); // rides along with the content mark.
+
+    let result = orch.paint_if_dirty();
+    assert_eq!(
+        result,
+        PaintResult::Retry,
+        "an all-failed attempt must retry"
+    );
+
+    // Recover. No new host raise — the retained work alone must drive it.
+    stub.set_bulk_bridge_fail(false);
+    let overlay_before = overlay_ops_len(&orch);
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(result, PaintResult::Painted, "recovery must commit");
+    assert!(
+        overlay_ops_len(&orch) > overlay_before,
+        "the overlay mark raised alongside the failed content work must \
+         survive the full-hold retry and repaint on recovery — got no new \
+         overlay ops, meaning the mark was dropped"
+    );
+}
+
+/// Damage counterpart of `held_slots_reuse_all_panes_failed_is_held_not_partial`
+/// — same frozen-row fixture, both panes' own damaged row fails.
+///
+/// Today, `paint_damage_regime` has the identical unconditional
+/// present-then-check-held ordering (and the same never-reset
+/// `last_effective`) as the SlotsReuse arm above.
+#[test]
+fn held_damage_all_panes_failed_is_held_not_partial() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen_rows(2),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let grid_presents = orch.grid_surface().presents();
+    let overlay_presents = orch.overlay_surface().presents();
+
+    stub.set_cell(1, 1, "top-edit");
+    stub.set_cell(6, 1, "bottom-edit");
+    stub.set_bulk_bridge_fail(true);
+    orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 }); // TopRight's row.
+    orch.mark_rows_damaged(0, RowSpan { r1: 6, r2: 6 }); // BottomRight's row.
+
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(result, PaintResult::Retry);
+    assert_eq!(
+        orch.grid_surface().presents(),
+        grid_presents,
+        "an all-failed Damage attempt is Held, not Partial: it must not present the grid"
+    );
+    assert_eq!(
+        orch.overlay_surface().presents(),
+        overlay_presents,
+        "an all-failed Damage attempt must not present the overlay either"
+    );
+    assert_eq!(
+        orch.last_trace().effective,
+        None,
+        "a fully held Damage attempt names no effective strategy"
+    );
+}
+
+/// Fix-round regression (post Task 5 review): Damage counterpart of
+/// `held_slots_reuse_full_hold_retries_the_complete_consumed_work` — a full
+/// Damage hold must retry the complete consumed `work`, not just
+/// `retry_for_held_rows(sheet, &spans)`'s row-scope reconstruction, for the
+/// identical reason (a dropped `overlay` bit has no other chance to be
+/// serviced). Same `with_show_selection(false)` discriminator: without it,
+/// `show_selection` alone would force the recovery attempt's overlay to
+/// paint regardless of whether the retry actually carried the mark.
+#[test]
+fn held_damage_full_hold_retries_the_complete_consumed_work() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen_rows(2)
+            .with_show_selection(false),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh baseline.
+
+    stub.set_cell(1, 1, "top-edit");
+    stub.set_cell(6, 1, "bottom-edit");
+    stub.set_bulk_bridge_fail(true); // unconditional: both damaged rows fail.
+    orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 }); // TopRight's row.
+    orch.mark_rows_damaged(0, RowSpan { r1: 6, r2: 6 }); // BottomRight's row.
+    orch.request_overlay_repaint(); // rides along with the row damage.
+
+    let result = orch.paint_if_dirty();
+    assert_eq!(
+        result,
+        PaintResult::Retry,
+        "an all-failed Damage attempt must retry"
+    );
+
+    // Recover. No new host raise — the retained work alone must drive it.
+    stub.set_bulk_bridge_fail(false);
+    let overlay_before = overlay_ops_len(&orch);
+    let result = orch.paint_if_dirty();
+
+    assert_eq!(result, PaintResult::Painted, "recovery must commit");
+    assert_eq!(
+        orch.last_regime(),
+        Some(PaintRegimeTag::Damage),
+        "a held Damage strip must retry as Damage, with its bands intact"
+    );
+    assert!(
+        overlay_ops_len(&orch) > overlay_before,
+        "the overlay mark raised alongside the failed row damage must \
+         survive the full-hold retry and repaint on recovery — got no new \
+         overlay ops, meaning the mark was dropped"
+    );
+}
+
+/// Bullet 8 (RED against d8aed9c): a held Viewport attempt must name no
+/// effective strategy — nothing actually committed pixels. Reuses the
+/// `scroll_then_fail` fixture `held_viewport_presents_nothing_and_keeps_query_geometry`
+/// already proves holds atomically on every other axis; this test adds the
+/// one trace field that file doesn't check.
+///
+/// Today, `last_effective` is set to `Some(PaintRegimeTag::Viewport)` before
+/// dispatch and is only ever overwritten by the `FreshFallback` arm — the
+/// `Blitted`-then-`Held` early return in `paint_viewport_regime` never
+/// resets it, so it survives unchanged into `last_trace.effective`.
+#[test]
+fn held_viewport_trace_names_no_effective_strategy() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(60)
+            .with_active(5, 2),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let result = scroll_then_fail(&stub, &mut orch);
+    assert_eq!(result, PaintResult::Retry);
+
+    assert_eq!(
+        orch.last_trace().effective,
+        None,
+        "a held Viewport attempt names no effective strategy"
+    );
+}
+
+/// Bullet 8 (GREEN today): a partial commit's trace already names the held
+/// pane directly — `render_pane`'s bridge preflight stamps
+/// `PaneVerdict::Held` on exactly the pane whose fetch failed, independent
+/// of `Orchestrator`'s outcome-level bookkeeping. Confirms the per-pane
+/// vocabulary Stage 4 can keep building on, using the same frozen-pane
+/// fixture as `partial_commit_paints_healthy_panes_and_retries_held_panes`.
+#[test]
+fn partial_commit_trace_identifies_the_held_pane() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen_rows(2),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    stub.set_cell(1, 3, "top-edit"); // frozen band pane — healthy
+    stub.set_cell(6, 3, "bottom-edit"); // scroll band pane — fails
+    stub.set_bulk_bridge_fail_from(Some(3));
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+
+    let result = orch.paint_if_dirty();
+    assert_eq!(result, PaintResult::Retry);
+
+    let trace = orch.last_trace();
+    assert_eq!(
+        trace.panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Held),
+        "the failed pane's own verdict must name Held"
+    );
+    // A single safe-row edit in an already-primed pane is exactly the case
+    // `paint_skip.rs`'s `row_band_repaint_paints_only_the_changed_row_band`
+    // pins as the cheaper `Rows` plan, not `Full` — this assertion only
+    // needs "actually painted, not held", so it accepts either real verdict
+    // rather than assuming which one `plan_pane_repaint` picks.
+    assert!(
+        matches!(
+            trace.panes[PaneRegion::TopRight as usize],
+            Some(PaneVerdict::Full) | Some(PaneVerdict::Rows { .. })
+        ),
+        "the healthy pane must have actually painted, not held; got {:?}",
+        trace.panes[PaneRegion::TopRight as usize]
     );
 }
