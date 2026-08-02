@@ -314,7 +314,7 @@ policy table.
 
 ### Pane pipeline and theme
 
-`render_grid` paints the four pane quadrants (`top_left`, `top_right`, `bottom_left`, `bottom_right`), then frozen separators, then headers, then the corner box. Each pane runs five deferred sub-passes over one reused slot vec: background, conditional-formatting decoration, grid borders, explicit borders, then text. The sub-pass order is the contract — decorations stay below borders, explicit borders win over grid borders at shared edges, and text runs last so overflow is not clipped by a neighbour's background.
+`render_grid` paints the four pane quadrants (`top_left`, `top_right`, `bottom_left`, `bottom_right`), then frozen separators, then headers, then the corner box. That sequence is not per-regime: Fresh, SlotsReuse, Damage, and Viewport all run their own cell work inside one shared internal shell that brackets it, with a scroll blit narrowing the header repaint to the scrolled axis only. Each pane runs five deferred sub-passes over one reused slot vec: background, conditional-formatting decoration, grid borders, explicit borders, then text. The sub-pass order is the contract — decorations stay below borders, explicit borders win over grid borders at shared edges, and text runs last so overflow is not clipped by a neighbour's background.
 
 `CanvasTheme` fields are `Cow<'static, str>`. `light()` and `dark()` are built-in palettes (`Cow::Borrowed`, ptr-eq cache hit); host overrides via `ThemeVariables` are `Cow::Owned`. On wasm32, `setThemeFromElement` reads `--palette-*` off `getComputedStyle`.
 

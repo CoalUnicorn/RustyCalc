@@ -15,6 +15,7 @@ use iron_canvas_core::FrameDelta;
 use iron_canvas_core::chrome::{
     ActiveCellSnapshot, BlitOutcome, Chrome, FramePath, PaneRegionMask,
 };
+use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
@@ -91,4 +92,35 @@ fn blit_scroll_pixels_unchanged() {
 
     let col_ops = capture_scroll_ops(|m| m.set_left_column(2));
     assert_blessed("blit_col_scroll", &format!("{col_ops:#?}"));
+}
+
+/// Stage 5 pin (Task 1, bullet 7): `execute_grid_blit` shifts `plan.shifts`
+/// before it ever opens `BeginGroup(Grid)` — the prefix that must stay
+/// outside `execute_grid_shell`. Proven on both scroll axes so the pin isn't
+/// an artifact of one axis's shift ordering.
+#[test]
+fn blit_shifts_pixels_before_opening_the_grid_group() {
+    let assert_blit_precedes_grid = |ops: &[DrawOp], label: &str| {
+        let first_blit = ops.iter().position(|op| matches!(op, DrawOp::Blit { .. }));
+        let first_grid_group = ops.iter().position(
+            |op| matches!(op, DrawOp::BeginGroup { class } if *class == GroupClass::Grid),
+        );
+        let (Some(blit_idx), Some(grid_idx)) = (first_blit, first_grid_group) else {
+            panic!(
+                "{label}: a successful scroll-blit must emit both a Blit and \
+                 a Grid group; got {ops:#?}"
+            );
+        };
+        assert!(
+            blit_idx < grid_idx,
+            "{label}: the first Blit (index {blit_idx}) must precede \
+             BeginGroup(Grid) (index {grid_idx}); got {ops:#?}"
+        );
+    };
+
+    assert_blit_precedes_grid(&capture_scroll_ops(|m| m.set_top_row(2)), "row scroll");
+    assert_blit_precedes_grid(
+        &capture_scroll_ops(|m| m.set_left_column(2)),
+        "column scroll",
+    );
 }

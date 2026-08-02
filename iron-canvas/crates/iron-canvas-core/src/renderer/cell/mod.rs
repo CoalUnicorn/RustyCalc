@@ -21,7 +21,7 @@ pub mod text;
 
 pub use paint::{CellPaint, PaneCells};
 
-use crate::style::{CellDecoration, CellKind, CellStyle};
+use crate::style::CellKind;
 use crate::types::fetched::Fetched;
 
 use self::borders::BorderPaint;
@@ -34,7 +34,7 @@ use crate::pending_work::RowSpan;
 use crate::renderer::PaneExecution;
 use crate::renderer::RendererCore;
 use crate::renderer::cf_types::CfDecorationPaint;
-use crate::renderer::prepared::{PaneCacheCommit, PreparedPane};
+use crate::renderer::prepared::{FetchedCellsMut, PaneCacheCommit, PreparedPane};
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
@@ -129,25 +129,23 @@ impl<P: Painter> RendererCore<P> {
     /// Shared paint tail for every prepared-execution method in
     /// `renderer::prepared` (`execute_full_pane`, `execute_damage_pane`,
     /// `execute_blit_pane`): the five deferred passes (bg -> CF decoration ->
-    /// grid borders -> explicit borders -> text) over `cells`, reading from
-    /// the four bulk buffers *by mutable borrow* rather than by value, so a
-    /// multi-span/multi-strip caller can invoke this once per span against
-    /// the SAME four buffers without re-taking them from `pane_buf` or
-    /// parking them back in between — ownership and the take/park lifecycle
-    /// live entirely with the caller. Pass order is load-bearing — see the
-    /// doc on `render_pane` for why bg precedes borders precedes text.
-    /// `pub(super)` so `renderer::prepared`'s execute methods can call it
-    /// directly.
-    #[allow(clippy::too_many_arguments)]
+    /// grid borders -> explicit borders -> text) over `cells`, reading the
+    /// fetched channels *by mutable borrow* ([`FetchedCellsMut`]) rather
+    /// than by value, so a multi-span/multi-strip caller can invoke this
+    /// once per span against the SAME owned [`FetchedCells`] bundle without
+    /// re-taking it from `pane_buf` or parking it back in between —
+    /// ownership and the take/park lifecycle live entirely with the caller.
+    /// Pass order is load-bearing — see the doc on `render_pane` for why bg
+    /// precedes borders precedes text. `pub(super)` so `renderer::prepared`'s
+    /// execute methods can call it directly.
+    ///
+    /// [`FetchedCells`]: crate::renderer::prepared::FetchedCells
     pub(super) fn paint_cells_pass(
         &self,
         cells: PaneCells,
         range: RCRange,
         theme: &CanvasTheme,
-        pane_styles: &mut [Fetched<CellStyle>],
-        pane_values: &mut [Fetched<String>],
-        pane_cell_types: &mut [Fetched<CellKind>],
-        pane_decorations: &mut [Fetched<CellDecoration>],
+        fetched: FetchedCellsMut<'_>,
     ) {
         let cols_w = range.c2 - range.c1 + 1;
 
@@ -155,13 +153,14 @@ impl<P: Painter> RendererCore<P> {
         slots.clear();
         for slot in cells {
             let idx = ((slot.row - range.r1) * cols_w + (slot.col - range.c1)) as usize;
-            let Some(own_style) = pane_styles.get_mut(idx).and_then(Fetched::take_value) else {
+            let Some(own_style) = fetched.styles.get_mut(idx).and_then(Fetched::take_value) else {
                 continue;
             };
             // `own_style` already holds the dxf-merged CellStyle (the bridge folds
             // the CF overlay in get_cell_styles_in). The decoration rides the
             // same bulk buffer, indexed alongside styles/values/types.
-            let cf_decoration = pane_decorations
+            let cf_decoration = fetched
+                .decorations
                 .get_mut(idx)
                 .and_then(Fetched::take_value)
                 .map(|deco| CfDecorationPaint::from_cell_decoration(&deco));
@@ -199,10 +198,11 @@ impl<P: Painter> RendererCore<P> {
         let mut text_lines = self.frame_cache.text_lines.take();
         for p in &slots {
             let idx = ((p.row - range.r1) * cols_w + (p.col - range.c1)) as usize;
-            let Some(text) = pane_values.get_mut(idx).and_then(Fetched::take_value) else {
+            let Some(text) = fetched.values.get_mut(idx).and_then(Fetched::take_value) else {
                 continue;
             };
-            let cell_type = pane_cell_types
+            let cell_type = fetched
+                .cell_types
                 .get_mut(idx)
                 .and_then(Fetched::take_value)
                 .unwrap_or(CellKind::Text);

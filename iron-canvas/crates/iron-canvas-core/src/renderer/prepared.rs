@@ -166,6 +166,66 @@ impl FetchedCells {
         }
     }
 
+    /// Borrow all four channels at once for
+    /// [`RendererCore::paint_cells_pass`]. Their equal length is
+    /// established by construction — [`Self::fetch_into`] fills all four
+    /// from one range, [`Self::splice_strip_from`] splices all four — so it
+    /// is asserted once here, at the borrow boundary, rather than per cell
+    /// inside the paint walk.
+    pub(super) fn as_mut(&mut self) -> FetchedCellsMut<'_> {
+        debug_assert!(
+            self.styles.len() == self.values.len()
+                && self.styles.len() == self.cell_types.len()
+                && self.styles.len() == self.decorations.len(),
+            "the four channels address one row-major range and must stay equal-length"
+        );
+        FetchedCellsMut {
+            styles: &mut self.styles,
+            values: &mut self.values,
+            cell_types: &mut self.cell_types,
+            decorations: &mut self.decorations,
+        }
+    }
+
+    /// Splice `strip` into this bundle's matching slots, one channel at a
+    /// time in the fixed styles -> values -> cell types -> decorations
+    /// order. The row/column index arithmetic is the single generic
+    /// [`super::cell::splice_strip_into`], applied four times rather than
+    /// restated. `strip` is drained in place (each of its slots receives
+    /// the evicted pane value) and stays a valid, capacity-bearing bundle,
+    /// so its owner can park it straight back into scratch.
+    pub(super) fn splice_strip_from(
+        &mut self,
+        strip: &mut Self,
+        pane_range: RCRange,
+        strip_range: RCRange,
+    ) {
+        super::cell::splice_strip_into(
+            &mut self.styles,
+            &mut strip.styles,
+            pane_range,
+            strip_range,
+        );
+        super::cell::splice_strip_into(
+            &mut self.values,
+            &mut strip.values,
+            pane_range,
+            strip_range,
+        );
+        super::cell::splice_strip_into(
+            &mut self.cell_types,
+            &mut strip.cell_types,
+            pane_range,
+            strip_range,
+        );
+        super::cell::splice_strip_into(
+            &mut self.decorations,
+            &mut strip.decorations,
+            pane_range,
+            strip_range,
+        );
+    }
+
     /// True when any of the four channels reports a transient bridge
     /// failure. Computed unconditionally by every caller of
     /// [`Self::fetch_into`] — whether that fact goes on to HOLD a pane is a
@@ -178,6 +238,20 @@ impl FetchedCells {
             || super::cell::has_bridge_failure(&self.cell_types)
             || super::cell::has_bridge_failure(&self.decorations)
     }
+}
+
+/// [`FetchedCells`] borrowed, not consumed: the one argument the five-pass
+/// paint walk takes instead of four parallel mutable slices. Named as a
+/// bundle because all four channels describe the SAME row-major address
+/// space — the walk computes one index and reads every channel with it, so
+/// splitting them into separate parameters only creates opportunities to
+/// pair a pane's cells with the wrong sibling channel. Renderer-private and
+/// borrow-only: it never allocates, clones, or moves the owned `Vec`s.
+pub(super) struct FetchedCellsMut<'a> {
+    pub(super) styles: &'a mut [Fetched<CellStyle>],
+    pub(super) values: &'a mut [Fetched<String>],
+    pub(super) cell_types: &'a mut [Fetched<CellKind>],
+    pub(super) decorations: &'a mut [Fetched<CellDecoration>],
 }
 
 // ==============================================================================
@@ -485,7 +559,7 @@ impl<P: Painter> RendererCore<P> {
         let PreparedPane::Full {
             pane,
             range,
-            fetched,
+            mut fetched,
             repaint,
             cache_action,
         } = prepared
@@ -505,7 +579,6 @@ impl<P: Painter> RendererCore<P> {
 
         let theme = &frame.theme;
         let reuses_slots = frame.kind.reuses_slots();
-        let (mut styles, mut values, mut cell_types, mut decorations) = fetched.into_parts();
 
         match &repaint.plan {
             RepaintPlan::Skip => {}
@@ -525,10 +598,7 @@ impl<P: Painter> RendererCore<P> {
                         PaneCells::for_strip(&pane, frame, band),
                         range,
                         theme,
-                        &mut styles,
-                        &mut values,
-                        &mut cell_types,
-                        &mut decorations,
+                        fetched.as_mut(),
                     );
                 }
             }
@@ -537,22 +607,14 @@ impl<P: Painter> RendererCore<P> {
                     self.painter
                         .rect_fill(pane_rect, PaintColor::from_theme_str(&theme.cell_bg));
                 }
-                self.paint_cells_pass(
-                    PaneCells::new(&pane, frame),
-                    range,
-                    theme,
-                    &mut styles,
-                    &mut values,
-                    &mut cell_types,
-                    &mut decorations,
-                );
+                self.paint_cells_pass(PaneCells::new(&pane, frame), range, theme, fetched.as_mut());
             }
         }
 
         PaneCacheCommit::Replace {
             pane,
             range,
-            cells: FetchedCells::from_parts(styles, values, cell_types, decorations),
+            cells: fetched,
             fingerprint: repaint.candidate,
         }
     }
@@ -659,33 +721,15 @@ impl<P: Painter> RendererCore<P> {
 
         let theme = &frame.theme;
         let pane_buf = self.pane_cache.pane(pane);
-        let mut pane_styles = pane_buf.styles.take();
-        let mut pane_values = pane_buf.values.take();
-        let mut pane_cell_types = pane_buf.cell_types.take();
-        let mut pane_decorations = pane_buf.decorations.take();
+        let mut cells = pane_buf.take_cells();
 
         for strip in strips {
             let PreparedStrip {
                 range: strip_range,
-                fetched,
+                fetched: mut strip_cells,
             } = strip;
-            let (mut s_styles, mut s_values, mut s_cell_types, mut s_decorations) =
-                fetched.into_parts();
 
-            super::cell::splice_strip_into(&mut pane_styles, &mut s_styles, range, strip_range);
-            super::cell::splice_strip_into(&mut pane_values, &mut s_values, range, strip_range);
-            super::cell::splice_strip_into(
-                &mut pane_cell_types,
-                &mut s_cell_types,
-                range,
-                strip_range,
-            );
-            super::cell::splice_strip_into(
-                &mut pane_decorations,
-                &mut s_decorations,
-                range,
-                strip_range,
-            );
+            cells.splice_strip_from(&mut strip_cells, range, strip_range);
 
             if let Some(strip_rect) = frame.range_rect(strip_range) {
                 self.painter
@@ -695,32 +739,15 @@ impl<P: Painter> RendererCore<P> {
                 PaneCells::for_strip(&pane, frame, strip_range),
                 range,
                 theme,
-                &mut pane_styles,
-                &mut pane_values,
-                &mut pane_cell_types,
-                &mut pane_decorations,
+                cells.as_mut(),
             );
 
-            self.park_strip_scratch(FetchedCells::from_parts(
-                s_styles,
-                s_values,
-                s_cell_types,
-                s_decorations,
-            ));
+            self.park_strip_scratch(strip_cells);
         }
 
         self.trace_pane(pane, PaneVerdict::Strip);
 
-        PaneCacheCommit::Splice {
-            pane,
-            range,
-            cells: FetchedCells::from_parts(
-                pane_styles,
-                pane_values,
-                pane_cell_types,
-                pane_decorations,
-            ),
-        }
+        PaneCacheCommit::Splice { pane, range, cells }
     }
 
     /// Pure (with respect to committed state): classify and fetch every
@@ -866,7 +893,7 @@ impl<P: Painter> RendererCore<P> {
     fn execute_blit_pane(&self, frame: &Chrome, prepared: PreparedPane) -> PaneCacheCommit {
         let PreparedPane::Blit {
             work,
-            fetched,
+            fetched: mut strip_cells,
             cache_action,
         } = prepared
         else {
@@ -890,37 +917,9 @@ impl<P: Painter> RendererCore<P> {
         pane_buf.apply_shift(prev_range, new_range, axis);
 
         let theme = &frame.theme;
-        let mut pane_styles = pane_buf.styles.take();
-        let mut pane_values = pane_buf.values.take();
-        let mut pane_cell_types = pane_buf.cell_types.take();
-        let mut pane_decorations = pane_buf.decorations.take();
-        let (mut strip_styles, mut strip_values, mut strip_cell_types, mut strip_decorations) =
-            fetched.into_parts();
+        let mut cells = pane_buf.take_cells();
 
-        super::cell::splice_strip_into(
-            &mut pane_styles,
-            &mut strip_styles,
-            new_range,
-            work.strip_range,
-        );
-        super::cell::splice_strip_into(
-            &mut pane_values,
-            &mut strip_values,
-            new_range,
-            work.strip_range,
-        );
-        super::cell::splice_strip_into(
-            &mut pane_cell_types,
-            &mut strip_cell_types,
-            new_range,
-            work.strip_range,
-        );
-        super::cell::splice_strip_into(
-            &mut pane_decorations,
-            &mut strip_decorations,
-            new_range,
-            work.strip_range,
-        );
+        cells.splice_strip_from(&mut strip_cells, new_range, work.strip_range);
 
         if let Some(strip_rect) = frame.range_rect(work.strip_range) {
             self.painter
@@ -930,31 +929,18 @@ impl<P: Painter> RendererCore<P> {
             PaneCells::for_strip(&work.pane, frame, work.strip_range),
             new_range,
             theme,
-            &mut pane_styles,
-            &mut pane_values,
-            &mut pane_cell_types,
-            &mut pane_decorations,
+            cells.as_mut(),
         );
 
         // Park the drained (post-splice, placeholder-only) strip buffers as
         // this pane's next full-pane prepare_scratch — same capacity-reuse
         // rhythm as a Replace commit's evicted-old-cells park.
-        pane_buf.park_prepare_scratch(FetchedCells::from_parts(
-            strip_styles,
-            strip_values,
-            strip_cell_types,
-            strip_decorations,
-        ));
+        pane_buf.park_prepare_scratch(strip_cells);
 
         PaneCacheCommit::Splice {
             pane: work.pane,
             range: new_range,
-            cells: FetchedCells::from_parts(
-                pane_styles,
-                pane_values,
-                pane_cell_types,
-                pane_decorations,
-            ),
+            cells,
         }
     }
 
@@ -1103,6 +1089,102 @@ mod tests {
             retried.capacities(),
             warmed,
             "a retry that reuses the failed bundle must not grow any of the four Vecs"
+        );
+    }
+
+    fn cell_count(range: RCRange) -> usize {
+        ((range.r2 - range.r1 + 1) * (range.c2 - range.c1 + 1)) as usize
+    }
+
+    fn absent_bundle(len: usize) -> FetchedCells {
+        FetchedCells::from_parts(
+            vec![Fetched::Absent; len],
+            vec![Fetched::Absent; len],
+            vec![Fetched::Absent; len],
+            vec![Fetched::Absent; len],
+        )
+    }
+
+    fn value_bundle(len: usize) -> FetchedCells {
+        FetchedCells::from_parts(
+            vec![Fetched::Value(CellStyle::default()); len],
+            vec![Fetched::Value("x".to_string()); len],
+            vec![Fetched::Value(CellKind::Number); len],
+            vec![Fetched::Value(CellDecoration::Icon("star".to_string())); len],
+        )
+    }
+
+    fn value_positions<T>(items: &[Fetched<T>]) -> Vec<usize> {
+        items
+            .iter()
+            .enumerate()
+            .filter(|(_, slot)| matches!(slot, Fetched::Value(_)))
+            .map(|(idx, _)| idx)
+            .collect()
+    }
+
+    /// Splice an all-`Value` strip into an all-`Absent` pane bundle through
+    /// the real `splice_strip_from`, and report which pane slots each channel
+    /// received a value at. The markers are variant-level on purpose: the
+    /// property under test is that ONE index mapping reaches all four
+    /// channels, and re-deriving that mapping in the test would just
+    /// duplicate `splice_strip_into`. Also asserts the strip came back fully
+    /// drained, since its owner parks it straight into scratch.
+    fn spliced_value_positions(pane_range: RCRange, strip_range: RCRange) -> [Vec<usize>; 4] {
+        let mut pane = absent_bundle(cell_count(pane_range));
+        let mut strip = value_bundle(cell_count(strip_range));
+
+        pane.splice_strip_from(&mut strip, pane_range, strip_range);
+
+        assert!(
+            value_positions(strip.styles()).is_empty()
+                && value_positions(strip.values()).is_empty()
+                && value_positions(strip.cell_types()).is_empty()
+                && value_positions(strip.decorations()).is_empty(),
+            "every channel's strip slots must be drained into the pane, not copied"
+        );
+        [
+            value_positions(pane.styles()),
+            value_positions(pane.values()),
+            value_positions(pane.cell_types()),
+            value_positions(pane.decorations()),
+        ]
+    }
+
+    // Damage splices row bands; a blit splices whichever axis scrolled. Both
+    // go through the one bundle method, so a channel that drifted out of
+    // lockstep would land its cells at different slots than its siblings.
+    #[test]
+    fn splice_strip_from_maps_row_and_column_strips_identically_across_channels() {
+        let pane_range = RCRange {
+            r1: 10,
+            c1: 5,
+            r2: 12,
+            c2: 7,
+        };
+
+        let row_strip = RCRange {
+            r1: 11,
+            c1: 5,
+            r2: 11,
+            c2: 7,
+        };
+        assert_eq!(
+            spliced_value_positions(pane_range, row_strip),
+            [vec![3, 4, 5], vec![3, 4, 5], vec![3, 4, 5], vec![3, 4, 5]],
+            "a middle row band must land on the pane's second row in every channel"
+        );
+
+        let column_strip = RCRange {
+            r1: 10,
+            c1: 6,
+            r2: 12,
+            c2: 6,
+        };
+        assert_eq!(
+            spliced_value_positions(pane_range, column_strip),
+            [vec![1, 4, 7], vec![1, 4, 7], vec![1, 4, 7], vec![1, 4, 7]],
+            "a middle column band must land on the pane's second column in every channel"
         );
     }
 

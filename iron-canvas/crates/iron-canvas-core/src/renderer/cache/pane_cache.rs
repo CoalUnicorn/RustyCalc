@@ -188,6 +188,24 @@ impl PaneBuffers {
         self.prepare_scratch.set(cells);
     }
 
+    /// Execution-only: hand the four committed content fields out as one
+    /// [`FetchedCells`] bundle, leaving this pane's slots empty until the
+    /// caller hands the bundle back via [`Self::set_cells`] at the
+    /// completion boundary. Damage and Blit execution splice and paint
+    /// through the returned bundle, so they must call this only *after*
+    /// their preparation gate already proved every required fetch clean —
+    /// preparation itself takes [`Self::take_prepare_scratch`] instead,
+    /// which is exactly why a failed preparation has no committed state to
+    /// undo.
+    pub(crate) fn take_cells(&self) -> FetchedCells {
+        FetchedCells::from_parts(
+            self.styles.take(),
+            self.values.take(),
+            self.cell_types.take(),
+            self.decorations.take(),
+        )
+    }
+
     /// Commit-only: swap `cells` in as the new committed content, returning
     /// the evicted old committed content so the caller can park it as the
     /// next attempt's scratch (see [`Self::park_prepare_scratch`]).
@@ -551,6 +569,51 @@ fn ranges_overlap(prev_start: i32, prev_end: i32, new_start: i32, new_end: i32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // `take_cells` is the execution-side mirror of `set_cells`: Damage and
+    // Blit hand the committed channels out as one bundle, splice and paint
+    // through it, and hand the same bundle back at the completion boundary.
+    // Both halves have to move all four channels — a channel left behind in
+    // the pane would be spliced at one range and read at another.
+    #[test]
+    fn take_cells_round_trips_every_channel_through_set_cells() {
+        let buffers = PaneBuffers::default();
+        let committed = FetchedCells::from_parts(
+            vec![Fetched::Value(CellStyle::default()), Fetched::Absent],
+            vec![
+                Fetched::Value("a".to_string()),
+                Fetched::Value("b".to_string()),
+            ],
+            vec![Fetched::Value(CellKind::Number), Fetched::Absent],
+            vec![
+                Fetched::Value(CellDecoration::Icon("star".to_string())),
+                Fetched::Absent,
+            ],
+        );
+        buffers.set_cells(committed.clone());
+
+        let taken = buffers.take_cells();
+        assert_eq!(taken.styles(), committed.styles());
+        assert_eq!(taken.values(), committed.values());
+        assert_eq!(taken.cell_types(), committed.cell_types());
+        assert_eq!(taken.decorations(), committed.decorations());
+
+        let drained = buffers.take_cells();
+        assert!(
+            drained.styles().is_empty()
+                && drained.values().is_empty()
+                && drained.cell_types().is_empty()
+                && drained.decorations().is_empty(),
+            "take_cells must leave every committed channel empty, not just some"
+        );
+
+        buffers.set_cells(taken);
+        let reinstalled = buffers.take_cells();
+        assert_eq!(reinstalled.styles(), committed.styles());
+        assert_eq!(reinstalled.values(), committed.values());
+        assert_eq!(reinstalled.cell_types(), committed.cell_types());
+        assert_eq!(reinstalled.decorations(), committed.decorations());
+    }
 
     #[cfg_attr(
         debug_assertions,

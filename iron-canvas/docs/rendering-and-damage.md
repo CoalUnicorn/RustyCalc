@@ -143,11 +143,63 @@ Four properties make the pipeline safe rather than optimistic:
   `finish_attempt` returns, so the caller can just call `paint_if_dirty`
   again next tick with no new external input needed.
 
-This is the pipeline's actual, landed shape — not a plan. Consolidating
-the five pane-quadrant renderer scaffolds (`Grid`/`Cells`/`FrozenSep`/
-`Headers`/`Corner`) into one shared structure, and any fetch- or
-measurement-driven performance work, are explicitly out of scope here:
-future work, not described by this document.
+This is the pipeline's actual, landed shape — not a plan. The renderer
+scaffold each regime paints through is landed too (see "One grid shell,
+four strategies" below). What remains genuinely out of scope here is
+measurement-driven work — the duplicate cache invalidation and the
+unconditional per-pane bulk refetch §3 describes, and any fingerprint
+rework — because none of it should move without numbers behind it.
+
+### One grid shell, four strategies
+
+The four grid regimes differ in *which cells they paint*, not in how the
+frame is bracketed around them. That bracket lives once, in the private
+`execute_grid_shell` (`renderer/mod.rs`), and every grid execution —
+Fresh, SlotsReuse, Damage, Viewport — runs through it:
+
+```
+Begin Grid
+  cache_show_grid(frame.sheet)      once per execution, before any cell
+  Begin Cells
+    strategy-specific cell work     the callback, and nothing else
+  End Cells
+  Begin FrozenSep                   after cells: the divider must win its
+    draw_frozen_separators          pixels back from the frozen edge's
+  End FrozenSep                     grid stroke
+  Begin Headers
+    the strips GridHeaderScope selects
+  End Headers
+  Corner, only when both header thicknesses are positive
+End Grid
+```
+
+The callback owns the strategy and returns the strategy's own typed
+result straight back out — `PreparedGridPaint` for the tolerant
+SlotsReuse and Damage pane walks, `PreparedCacheCommit` for the
+infallible Fresh and Viewport ones. It is statically dispatched and
+allocation-free. Crucially it never returns early: a tolerant per-pane
+hold is *folded into* the callback's own result, so the groups opened
+here always close, on every path.
+
+What the shell deliberately does not own is each strategy's prefix, and
+that boundary is the atomicity guarantee from point 4 above restated in
+paint order. Fresh's whole-frame preparation, paint-cache invalidation,
+and full-canvas background fill all happen before shell entry; Viewport's
+`prepare_blit` and every one of `plan.shifts`' pixel moves do too. A held
+Fresh or held Viewport attempt therefore emits no painter operation at
+all — not even a group bracket — and a successful Viewport's first `Blit`
+always precedes `BeginGroup(Grid)`, so the repainted strips never land
+under pixels that are about to move.
+
+**Header repaint is the one chrome behaviour the shell parameterizes.**
+`GridHeaderScope` is a closed two-variant type: `Both` for Fresh,
+SlotsReuse, and Damage, and `Axis(plan.axis)` for Viewport, which shifted
+only the scroll-axis strip's pixels and so would be repainting untouched
+pixels if it redrew the cross-axis strip. Scope selects *content*, not
+structure: the Headers group opens on every successful grid execution
+regardless — as it always has, including when the selected strip's
+thickness is zero — so the op stream's shape stays regime-independent and
+the recorder's group nesting is comparable across regimes.
 
 ### Capture-failure hold
 
@@ -285,8 +337,10 @@ The engine deliberately layers three mechanisms, coarse-to-fine:
    repaint (see below). Hints make things *fast*; the fingerprint tree
    keeps things *correct*, and the row-damage plan makes "correct" also
    *cheap* within a changed pane.
-3. **Strip repaint** (`splice_strip_into` + the shared `paint_cells_pass`
-   tail, called from `execute_blit_pane` and `execute_damage_pane`): the
+3. **Strip repaint** (`FetchedCells::splice_strip_from` — the generic
+   `splice_strip_into` applied to each channel — plus the shared
+   `paint_cells_pass` tail, called from `execute_blit_pane` and
+   `execute_damage_pane`): the
    surgical tool. Fetches only a band, splices it into the cached pane
    buffers, and clears + repaints only that band — it never
    commits into the pane's painted-pixel tree (a partial buffer can't
@@ -420,6 +474,26 @@ buffers so a per-cell JS bridge failure is distinguishable from a
 legitimately blank cell: on slots-reuse frames a `BridgeFailed` fetch
 holds the previous pane atomically (old buffers parked back, no clear,
 no fingerprint commit) instead of flashing blank.
+
+**The four channels travel as one value.** Styles, values, cell types,
+and decorations describe a single row-major address space, so
+`FetchedCells` (`renderer/prepared.rs`) is what moves between the stages
+above: `fetch_into` fills one bundle, preparation carries it on
+`PreparedPane`, execution splices into it (`splice_strip_from`), takes a
+pane's committed content out of it (`PaneBuffers::take_cells`, execution
+only — preparation still takes `take_prepare_scratch`, which is why a
+failed preparation has no committed state to undo), hands it to the
+completion boundary inside `PaneCacheCommit`, and parks the drained strip
+back in scratch with its capacity intact. The paint walk is the one place
+that needs the channels apart, and it gets them by *borrowing*:
+`FetchedCells::as_mut` yields a `FetchedCellsMut<'_>` — the single
+argument `paint_cells_pass` takes — so a caller repainting several spans
+or strips reuses one owned bundle across all of them instead of taking
+and parking it per span. Nothing here changes what the pane cache
+*stores*: `PaneBuffers` keeps its four `Cell<Vec<_>>` content fields, and
+the fixed styles → values → cell types → decorations order still holds
+for bridge reads, splices, scratch recycling, cache commits, and repaint
+alike.
 
 ---
 

@@ -63,6 +63,54 @@ fn grid_text_ops_containing(orch: &Orchestrator<MemSurface>, needle: &str) -> us
         .count()
 }
 
+/// Stage 5 (Task 1): project a frame's op stream down to the sequence of
+/// `BeginGroup` classes belonging to the shared grid shell
+/// (`execute_grid_shell`'s eventual contract), dropping every other op and
+/// every overlay-only class. Order-preserving, so equality against
+/// `[Grid, Cells, FrozenSep, Headers, Corner]` pins both membership and
+/// sequence in one assertion.
+fn grid_shell_group_sequence(ops: &[DrawOp]) -> Vec<GroupClass> {
+    const RELEVANT: [GroupClass; 5] = [
+        GroupClass::Grid,
+        GroupClass::Cells,
+        GroupClass::FrozenSep,
+        GroupClass::Headers,
+        GroupClass::Corner,
+    ];
+    ops.iter()
+        .filter_map(|op| match op {
+            DrawOp::BeginGroup { class } if RELEVANT.contains(class) => Some(*class),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Text drawn by every header cell (`draw_header_cell`) in the grid's op
+/// stream, in emission order.
+fn grid_fill_text_values(ops: &[DrawOp]) -> Vec<&str> {
+    ops.iter()
+        .filter_map(|op| match op {
+            DrawOp::FillText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Default row-header labels (`PaneSet::resolve_row_labels`) are plain
+/// decimal row numbers unless a model overrides them — `TestModel` never
+/// does, so this distinguishes row-header text from column-header text
+/// (letters) and from cell content (empty on the unpopulated `synthetic_grid`
+/// fixture) without reaching into the private `Axis`/`GridHeaderScope` types.
+fn is_row_label(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Default column-header labels (`PaneSet::resolve_col_labels`) are
+/// Excel-style letters (A, B, ..., AA, ...) unless a model overrides them.
+fn is_col_label(text: &str) -> bool {
+    !text.is_empty() && text.chars().all(|c| c.is_ascii_alphabetic())
+}
+
 #[test]
 fn fresh_regime_emits_canvas_fill_and_overlay_clear() {
     let stub = Rc::new(TestModel::synthetic_grid());
@@ -145,6 +193,125 @@ fn viewport_regime_emits_blit_op() {
             .any(|op| matches!(op, DrawOp::Blit { .. })),
         "Viewport regime must emit at least one DrawOp::Blit; got {:?}",
         new_grid_ops
+    );
+}
+
+/// Stage 5 pin (Task 1, bullets 2+3): the four grid-painting regimes must
+/// share one outer scaffold — `Grid, Cells, FrozenSep, Headers, Corner`, in
+/// that order, with every `BeginGroup` balanced by an `EndGroup` — before
+/// `execute_grid_shell` consolidates their four independent copies of it.
+/// Drives all four through one `Orchestrator` in sequence so each assertion
+/// exercises the exact production dispatch path a browser would use.
+#[test]
+fn fresh_slots_reuse_damage_viewport_share_the_grid_shell_group_order() {
+    let expected = vec![
+        GroupClass::Grid,
+        GroupClass::Cells,
+        GroupClass::FrozenSep,
+        GroupClass::Headers,
+        GroupClass::Corner,
+    ];
+    let assert_shell = |ops: &[DrawOp], label: &str| {
+        assert_eq!(
+            grid_shell_group_sequence(ops),
+            expected,
+            "{label} must open the shared Grid/Cells/FrozenSep/Headers/Corner \
+             groups in that order; got {ops:#?}"
+        );
+        let begins = ops
+            .iter()
+            .filter(|op| matches!(op, DrawOp::BeginGroup { .. }))
+            .count();
+        let ends = ops
+            .iter()
+            .filter(|op| matches!(op, DrawOp::EndGroup))
+            .count();
+        assert_eq!(
+            begins, ends,
+            "{label} must balance every BeginGroup with an EndGroup"
+        );
+    };
+
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+
+    let before = grid_ops_len(&orch);
+    orch.paint_if_dirty();
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    assert_shell(&grid_ops_since(&orch, before), "Fresh");
+
+    let before = grid_ops_len(&orch);
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.paint_if_dirty();
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    assert_shell(&grid_ops_since(&orch, before), "SlotsReuse");
+
+    let before = grid_ops_len(&orch);
+    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.paint_if_dirty();
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Damage));
+    assert_shell(&grid_ops_since(&orch, before), "Damage");
+
+    let before = grid_ops_len(&orch);
+    stub.set_top_row(2);
+    orch.request_overlay_repaint();
+    orch.paint_if_dirty();
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+    assert_shell(&grid_ops_since(&orch, before), "Viewport");
+}
+
+/// Stage 5 pin (Task 1, bullet 5): a row scroll's `Viewport` frame repaints
+/// only the row-header strip — the plan's `GridHeaderScope::Axis(Row)` — so
+/// its new ops must contain row-header content and must NOT contain any
+/// column-header content, even though the `Headers` group still opens (see
+/// `fresh_slots_reuse_damage_viewport_share_the_grid_shell_group_order`).
+/// Asserted against the observable op stream, not the private enum.
+#[test]
+fn viewport_row_scroll_repaints_row_headers_but_not_column_headers() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh.
+
+    let before = grid_ops_len(&orch);
+    stub.set_top_row(2);
+    orch.request_overlay_repaint();
+    orch.paint_if_dirty();
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+
+    let new_ops = grid_ops_since(&orch, before);
+    let texts = grid_fill_text_values(&new_ops);
+    assert!(
+        texts.iter().any(|t| is_row_label(t)),
+        "a row scroll must repaint row-header labels; got {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| is_col_label(t)),
+        "a row scroll must NOT repaint column-header labels; got {texts:?}"
+    );
+}
+
+/// Mirror of the row-scroll pin above, for the column axis.
+#[test]
+fn viewport_column_scroll_repaints_column_headers_but_not_row_headers() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh.
+
+    let before = grid_ops_len(&orch);
+    stub.set_left_column(2);
+    orch.request_overlay_repaint();
+    orch.paint_if_dirty();
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+
+    let new_ops = grid_ops_since(&orch, before);
+    let texts = grid_fill_text_values(&new_ops);
+    assert!(
+        texts.iter().any(|t| is_col_label(t)),
+        "a column scroll must repaint column-header labels; got {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|t| is_row_label(t)),
+        "a column scroll must NOT repaint row-header labels; got {texts:?}"
     );
 }
 
@@ -604,6 +771,22 @@ fn damage_regime_repaints_chrome_like_other_grid_regimes() {
             "damage paint must emit the {class:?} group like every grid regime"
         );
     }
+
+    // Order, not just presence: cells must open (and the frozen separator's
+    // pixels must win back the band's re-stroked grid lines) strictly before
+    // headers/corner, matching every other grid regime's shell order.
+    assert_eq!(
+        grid_shell_group_sequence(&ops),
+        vec![
+            GroupClass::Grid,
+            GroupClass::Cells,
+            GroupClass::FrozenSep,
+            GroupClass::Headers,
+            GroupClass::Corner,
+        ],
+        "damage paint's chrome groups must open Grid, Cells, FrozenSep, \
+         Headers, Corner in that order; got {ops:#?}"
+    );
 }
 
 #[test]

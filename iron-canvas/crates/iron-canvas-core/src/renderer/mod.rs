@@ -102,6 +102,27 @@ pub(crate) struct PreparedGridPaint {
     pub(crate) cache_commit: PreparedCacheCommit,
 }
 
+/// Which header strips a grid execution repaints. A scroll blit shifts only
+/// the scroll-axis strip's pixels, so repainting the cross-axis strip would
+/// be work the frame never invalidated.
+#[derive(Clone, Copy)]
+enum GridHeaderScope {
+    Both,
+    Axis(Axis),
+}
+
+impl GridHeaderScope {
+    fn paints(self, axis: Axis) -> bool {
+        match (self, axis) {
+            (Self::Both, Axis::Row)
+            | (Self::Both, Axis::Column)
+            | (Self::Axis(Axis::Row), Axis::Row)
+            | (Self::Axis(Axis::Column), Axis::Column) => true,
+            (Self::Axis(Axis::Row), Axis::Column) | (Self::Axis(Axis::Column), Axis::Row) => false,
+        }
+    }
+}
+
 /// Shared renderer core. Holds the painter `P`, dpr, the per-frame
 /// `FrameCache`, and the renderer-lifetime intern tables (font, column
 /// labels, per-cell color overrides). The two layer wrappers
@@ -268,25 +289,28 @@ impl<P: Painter> RendererCore<P> {
         held
     }
 
-    pub(crate) fn execute_grid(
+    /// The grid group sequence every strategy shares:
+    /// `Grid -> Cells -> FrozenSep -> Headers -> Corner`. Only the work
+    /// inside Cells differs between SlotsReuse, Damage, Fresh and Viewport,
+    /// so `execute_cells` owns that and nothing else; its typed result
+    /// passes straight back out.
+    ///
+    /// `execute_cells` runs on the infallible half of every strategy: a
+    /// tolerant per-pane hold is folded into the callback's own result, never
+    /// returned early through the shell, so the groups opened here always
+    /// close.
+    fn execute_grid_shell<T>(
         &self,
         model: &dyn CanvasModel,
         frame: &Chrome,
-        mask: PaneRegionMask,
-    ) -> PreparedGridPaint {
+        headers: GridHeaderScope,
+        execute_cells: impl FnOnce() -> T,
+    ) -> T {
         self.painter.begin_group(GroupClass::Grid);
         self.cache_show_grid(model, frame.sheet);
 
-        let mut held = PaneRegionMask::EMPTY;
-        let mut cache_commit = PreparedCacheCommit::with_capacity(mask.regions().count());
         self.painter.begin_group(GroupClass::Cells);
-        for pane in mask.regions() {
-            match self.execute_pane(model, pane, frame) {
-                PaneExecution::Held => held = held.with(pane),
-                PaneExecution::Untouched => {}
-                PaneExecution::Committed(commit) => cache_commit.push(commit),
-            }
-        }
+        let cells = execute_cells();
         self.painter.end_group();
 
         // Frozen separators paint AFTER cells so the thick divider wins
@@ -296,18 +320,41 @@ impl<P: Painter> RendererCore<P> {
         self.painter.end_group();
 
         self.painter.begin_group(GroupClass::Headers);
-        if frame.row_header_thickness > 0 {
-            self.render_headers_base(Axis::Row, frame);
-        }
-        if frame.col_header_thickness > 0 {
-            self.render_headers_base(Axis::Column, frame);
+        for axis in [Axis::Row, Axis::Column] {
+            let thickness = match axis {
+                Axis::Row => frame.row_header_thickness,
+                Axis::Column => frame.col_header_thickness,
+            };
+            if headers.paints(axis) && thickness > 0 {
+                self.render_headers_base(axis, frame);
+            }
         }
         self.painter.end_group();
 
         self.draw_corner_box_if_needed(frame);
 
         self.painter.end_group();
-        PreparedGridPaint { held, cache_commit }
+        cells
+    }
+
+    pub(crate) fn execute_grid(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        mask: PaneRegionMask,
+    ) -> PreparedGridPaint {
+        self.execute_grid_shell(model, frame, GridHeaderScope::Both, || {
+            let mut held = PaneRegionMask::EMPTY;
+            let mut cache_commit = PreparedCacheCommit::with_capacity(mask.regions().count());
+            for pane in mask.regions() {
+                match self.execute_pane(model, pane, frame) {
+                    PaneExecution::Held => held = held.with(pane),
+                    PaneExecution::Untouched => {}
+                    PaneExecution::Committed(commit) => cache_commit.push(commit),
+                }
+            }
+            PreparedGridPaint { held, cache_commit }
+        })
     }
 
     /// Pure: prepare every pane in `mask` for a `Fresh`-kind frame — bulk
@@ -370,16 +417,16 @@ impl<P: Painter> RendererCore<P> {
         Some(prepared)
     }
 
-    /// Infallible: paint every pane in `prepared` plus the full chrome tail
-    /// (frozen separators, both header strips, corner box) — the execution
-    /// half of the Fresh atomic path, reachable only once
-    /// [`Self::prepare_fresh_panes`] has confirmed every pane clean. Mirrors
-    /// [`Self::render_grid`]'s group sequence exactly, so the op stream on a
-    /// clean paint is unchanged; unlike `render_grid`, there is no held-pane
-    /// loop here at all — a bundle reaching this call is already known
-    /// entirely healthy, matching [`Self::execute_blit`]'s
-    /// prepare-then-execute shape (see `renderer::prepared`). The returned
-    /// aggregate is installed only by the caller's completion boundary.
+    /// Infallible: paint every pane in `prepared` inside the shared
+    /// [`Self::execute_grid_shell`] sequence — the execution half of the Fresh
+    /// atomic path, reachable only once [`Self::prepare_fresh_panes`] has
+    /// confirmed every pane clean. Sharing the shell is what keeps the op
+    /// stream on a clean paint identical to `render_grid`'s; unlike
+    /// `render_grid`, there is no held-pane loop in the callback at all — a
+    /// bundle reaching this call is already known entirely healthy, matching
+    /// [`Self::execute_blit`]'s prepare-then-execute shape (see
+    /// `renderer::prepared`). The returned aggregate is installed only by the
+    /// caller's completion boundary.
     ///
     /// `pub(crate)`, matching [`Self::prepare_fresh_panes`]'s own reasoning.
     pub(crate) fn execute_fresh_grid(
@@ -388,51 +435,31 @@ impl<P: Painter> RendererCore<P> {
         frame: &Chrome,
         prepared: Vec<PreparedPane>,
     ) -> PreparedCacheCommit {
-        self.painter.begin_group(GroupClass::Grid);
-        self.cache_show_grid(model, frame.sheet);
-
-        let mut cache_commit = PreparedCacheCommit::with_capacity(prepared.len());
-        self.painter.begin_group(GroupClass::Cells);
-        for pane_prepared in prepared {
-            let region = pane_prepared.region();
-            let verdict = match &pane_prepared {
-                PreparedPane::Full { repaint, .. } => Some(PaneVerdict::from(&repaint.plan)),
-                PreparedPane::Empty { .. } => None,
-                PreparedPane::Damage { .. } | PreparedPane::Blit { .. } => {
-                    unreachable!("prepare_fresh_panes only ever prepares Empty/Full panes")
+        self.execute_grid_shell(model, frame, GridHeaderScope::Both, || {
+            let mut cache_commit = PreparedCacheCommit::with_capacity(prepared.len());
+            for pane_prepared in prepared {
+                let region = pane_prepared.region();
+                let verdict = match &pane_prepared {
+                    PreparedPane::Full { repaint, .. } => Some(PaneVerdict::from(&repaint.plan)),
+                    PreparedPane::Empty { .. } => None,
+                    PreparedPane::Damage { .. } | PreparedPane::Blit { .. } => {
+                        unreachable!("prepare_fresh_panes only ever prepares Empty/Full panes")
+                    }
+                };
+                let commit = match pane_prepared {
+                    PreparedPane::Empty { pane, .. } => PaneCacheCommit::Empty { pane },
+                    PreparedPane::Full { .. } => self.execute_full_pane(frame, pane_prepared),
+                    PreparedPane::Damage { .. } | PreparedPane::Blit { .. } => {
+                        unreachable!("prepare_fresh_panes only ever prepares Empty/Full panes")
+                    }
+                };
+                if let Some(v) = verdict {
+                    self.trace_pane(region, v);
                 }
-            };
-            let commit = match pane_prepared {
-                PreparedPane::Empty { pane, .. } => PaneCacheCommit::Empty { pane },
-                PreparedPane::Full { .. } => self.execute_full_pane(frame, pane_prepared),
-                PreparedPane::Damage { .. } | PreparedPane::Blit { .. } => {
-                    unreachable!("prepare_fresh_panes only ever prepares Empty/Full panes")
-                }
-            };
-            if let Some(v) = verdict {
-                self.trace_pane(region, v);
+                cache_commit.push(commit);
             }
-            cache_commit.push(commit);
-        }
-        self.painter.end_group();
-
-        self.painter.begin_group(GroupClass::FrozenSep);
-        self.draw_frozen_separators(frame);
-        self.painter.end_group();
-
-        self.painter.begin_group(GroupClass::Headers);
-        if frame.row_header_thickness > 0 {
-            self.render_headers_base(Axis::Row, frame);
-        }
-        if frame.col_header_thickness > 0 {
-            self.render_headers_base(Axis::Column, frame);
-        }
-        self.painter.end_group();
-
-        self.draw_corner_box_if_needed(frame);
-
-        self.painter.end_group();
-        cache_commit
+            cache_commit
+        })
     }
 
     /// Combined prepare+execute for a `Fresh`-kind frame's cell/chrome
@@ -469,10 +496,11 @@ impl<P: Painter> RendererCore<P> {
     }
 
     /// Damage variant: prior pixels stay; only the damaged full-width row
-    /// bands per pane refetch + repaint. Same outer sequence as
-    /// `render_grid` — cells, then frozen separators (they must win pixels
-    /// back from the band's re-stroked grid lines at the freeze boundary),
-    /// then headers and corner, all inside the Grid group.
+    /// bands per pane refetch + repaint. The outer sequence is not restated
+    /// here — it is the shared [`Self::execute_grid_shell`] `render_grid`
+    /// also runs through, which is what guarantees the frozen separators
+    /// still paint after the cells (winning their pixels back from the
+    /// band's re-stroked grid lines at the freeze boundary).
     ///
     /// Returns the mask of panes whose damage work was held — see
     /// `render_grid`'s doc for the same contract on the SlotsReuse path.
@@ -494,44 +522,22 @@ impl<P: Painter> RendererCore<P> {
         frame: &Chrome,
         spans: &[RowSpan],
     ) -> PreparedGridPaint {
-        self.painter.begin_group(GroupClass::Grid);
-        self.cache_show_grid(model, frame.sheet);
-
-        let mut held = PaneRegionMask::EMPTY;
-        let mut cache_commit = PreparedCacheCommit::with_capacity(4);
-        self.painter.begin_group(GroupClass::Cells);
-        for pane in PaneRegionMask::ALL.regions() {
-            match self.execute_pane_damage(model, frame, pane, spans) {
-                PaneExecution::Held => held = held.with(pane),
-                PaneExecution::Untouched => {}
-                PaneExecution::Committed(commit) => cache_commit.push(commit),
+        self.execute_grid_shell(model, frame, GridHeaderScope::Both, || {
+            let mut held = PaneRegionMask::EMPTY;
+            let mut cache_commit = PreparedCacheCommit::with_capacity(4);
+            for pane in PaneRegionMask::ALL.regions() {
+                match self.execute_pane_damage(model, frame, pane, spans) {
+                    PaneExecution::Held => held = held.with(pane),
+                    PaneExecution::Untouched => {}
+                    PaneExecution::Committed(commit) => cache_commit.push(commit),
+                }
             }
-        }
-        self.painter.end_group();
-
-        self.painter.begin_group(GroupClass::FrozenSep);
-        self.draw_frozen_separators(frame);
-        self.painter.end_group();
-
-        self.painter.begin_group(GroupClass::Headers);
-        if frame.row_header_thickness > 0 {
-            self.render_headers_base(Axis::Row, frame);
-        }
-        if frame.col_header_thickness > 0 {
-            self.render_headers_base(Axis::Column, frame);
-        }
-        self.painter.end_group();
-
-        self.draw_corner_box_if_needed(frame);
-
-        self.painter.end_group();
-        PreparedGridPaint { held, cache_commit }
+            PreparedGridPaint { held, cache_commit }
+        })
     }
 
     /// Paint the header corner box, gated for *correctness*: at thickness 0 it
-    /// would still stroke 0.5px border lines spanning the full canvas. Shared
-    /// by `render_grid` and `render_grid_blit` (the one block identical between
-    /// them — the header strips differ, full vs scroll-axis only).
+    /// would still stroke 0.5px border lines spanning the full canvas.
     fn draw_corner_box_if_needed(&self, frame: &Chrome) {
         if frame.row_header_thickness > 0 && frame.col_header_thickness > 0 {
             self.painter.begin_group(GroupClass::Corner);
@@ -571,11 +577,12 @@ impl<P: BlitPainter> RendererCore<P> {
     /// run this same loop before calling this function; it is now internal,
     /// so a caller can never shift pixels ahead of the prepare check), then
     /// paints each prepared pane's strip/full-pane work
-    /// ([`Self::execute_blit`]), then the frozen separators, the scroll-axis
-    /// header strip only (the cross-axis header is unchanged), and the
-    /// corner box — the same outer sequence `render_grid` uses, minus the
-    /// panes the blit never visits (cross-axis panes left intact are
-    /// excluded from `plan.shift_panes()`).
+    /// ([`Self::execute_blit`]) inside the shared
+    /// [`Self::execute_grid_shell`] sequence, narrowed to the scroll-axis
+    /// header strip only (the cross-axis header is unchanged) — the same
+    /// outer sequence `render_grid` uses, minus the panes the blit never
+    /// visits (cross-axis panes left intact are excluded from
+    /// `plan.shift_panes()`).
     pub fn render_grid_blit(
         &self,
         model: &dyn CanvasModel,
@@ -597,36 +604,17 @@ impl<P: BlitPainter> RendererCore<P> {
     ) -> Option<PreparedCacheCommit> {
         let prepared = self.prepare_blit(model, frame, plan)?;
 
+        // The shifts stay ahead of the shell: a held attempt must move zero
+        // pixels, and a successful one must move them all before the first
+        // group opens, or the repainted strips would land under stale pixels.
         for s in &plan.shifts {
             self.painter.blit(s.src, s.dst);
         }
 
-        self.painter.begin_group(GroupClass::Grid);
-        self.cache_show_grid(model, frame.sheet);
-
-        self.painter.begin_group(GroupClass::Cells);
-        let cache_commit = self.execute_blit(frame, prepared);
-        self.painter.end_group();
-
-        self.painter.begin_group(GroupClass::FrozenSep);
-        self.draw_frozen_separators(frame);
-        self.painter.end_group();
-
-        // Only the scroll-axis header strip shifted; the cross-axis
-        // strip's pixels are unchanged.
-        self.painter.begin_group(GroupClass::Headers);
-        let axis_thickness = match plan.axis {
-            Axis::Row => frame.row_header_thickness,
-            Axis::Column => frame.col_header_thickness,
-        };
-        if axis_thickness > 0 {
-            self.render_headers_base(plan.axis, frame);
-        }
-        self.painter.end_group();
-
-        self.draw_corner_box_if_needed(frame);
-
-        self.painter.end_group();
+        let cache_commit =
+            self.execute_grid_shell(model, frame, GridHeaderScope::Axis(plan.axis), || {
+                self.execute_blit(frame, prepared)
+            });
         Some(cache_commit)
     }
 }
