@@ -427,18 +427,18 @@ fn column_scroll_leaves_frozen_column_band_panes_untouched() {
     );
 }
 
-/// Task 5, acceptance criterion 5, via the blit path specifically. The only
-/// existing reseed test (`row_fingerprint_repaint.rs`'s
-/// `lifecycle_damage_strip_scopes_to_intersected_pane_and_reseeds_on_next_paint`)
-/// drives `render_pane_damage`; `render_pane_blit` shares `render_pane_
-/// strip`'s body but that sharing was inferred, not demonstrated, for the
-/// blit caller. Proven here directly: after a row scroll shifts
-/// `BottomRight` (invalidating its painted tree via the strip splice), the
-/// very next paint with unchanged content must find a real mismatch and
-/// reseed a fresh tree — and the paint after THAT must Skip, proving the
-/// reseed actually committed.
+/// Stage 6 Task 6, through draw-op counts: a row blit whose history was
+/// `Exact` commits a complete rotated tree for the pane's NEW range, so the
+/// very next paint with unchanged content finds a real match and skips — no
+/// reseeding repaint in between. Before Stage 6 the strip splice left the
+/// pane's painted tree describing the pre-scroll range, and the range baked
+/// into every pane digest turned that into an unconditional whole-pane
+/// repaint; that repaint is the cost this rotation removes.
+///
+/// The second call pins that the Skip is repeatable, i.e. the first Skip
+/// really did leave a valid installed tree rather than getting lucky once.
 #[test]
-fn row_scroll_shifted_pane_reseeds_and_skips_on_next_unchanged_paint() {
+fn row_scroll_shifted_pane_keeps_exact_history_and_skips_on_next_unchanged_paint() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
@@ -458,24 +458,19 @@ fn row_scroll_shifted_pane_reseeds_and_skips_on_next_unchanged_paint() {
     };
     core.render_grid_blit(&m, &frame1, &plan);
 
-    // A strip splice never commits into the painted tree — the scroll
-    // changed the pane's live range, and range is baked into the digest, so
-    // the reseed below is forced by the range mismatch itself. The
-    // reseed→repaint→skip sequence proves that end to end through public
-    // draw-op behaviour.
-
     // Promote to a plain SlotsReuse frame at the SAME geometry (content
     // unchanged since the blit) to drive `render_pane`'s own mismatch/skip
     // dispatch directly, mirroring `row_fingerprint_repaint.rs`'s
     // `promote_to_slots_reuse` helper.
     frame1.kind = FrameKindTag::SlotsReused;
 
-    let reseed_ops_before = core.painter().ops().len();
+    let first_ops_before = core.painter().ops().len();
     core.render_pane(&m, PaneRegion::BottomRight, &frame1);
-    assert!(
-        core.painter().ops().len() > reseed_ops_before,
-        "the first paint after a shifted pane's strip must reseed the tree \
-         with a real repaint, not spuriously Skip"
+    assert_eq!(
+        core.painter().ops().len(),
+        first_ops_before,
+        "a truthful row blit installs a complete tree for the new range — the \
+         next unchanged paint must skip, not repaint the whole pane to reseed"
     );
 
     let idempotent_ops_before = core.painter().ops().len();
@@ -483,21 +478,21 @@ fn row_scroll_shifted_pane_reseeds_and_skips_on_next_unchanged_paint() {
     assert_eq!(
         core.painter().ops().len(),
         idempotent_ops_before,
-        "once reseeded via the blit path, an unchanged repaint must Skip again"
+        "the installed tree must stay valid — a second unchanged repaint skips too"
     );
 }
 
-/// Stage 1 of `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md`,
-/// in machine-checkable form: the design's whole premise is that the first
-/// `SlotsReuse` paint after a blit reports `Full` even though nothing changed,
-/// because the strip path never committed the tree and `plan_pane_repaint`
-/// treats the resulting range mismatch as unconditionally `Full`.
+/// The spike named in Stage 1 of
+/// `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md` — the
+/// first `SlotsReuse` paint after a blit reporting `Full` despite unchanged
+/// content — closed by Stage 6's row rotation, and named in the trace's own
+/// vocabulary so a regression says *which* verdict came back rather than just
+/// "more ops".
 ///
-/// The sibling test above proves the same thing through draw-op counts. This
-/// one names it, so if a later change makes the post-blit paint cheap, the
-/// trace says which verdict replaced `Full` instead of just "fewer ops".
+/// Invariant I1 still holds either way: a `Skip` verdict removes the painter
+/// walk, never the model round-trip, so `fetched_cell_slots` stays positive.
 #[test]
-fn frame_trace_names_the_post_blit_slots_reuse_paint_as_full() {
+fn frame_trace_names_the_post_blit_slots_reuse_paint_as_skip() {
     let m = TestModel::synthetic_grid();
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
@@ -535,21 +530,138 @@ fn frame_trace_names_the_post_blit_slots_reuse_paint_as_full() {
     core.render_pane(&m, PaneRegion::BottomRight, &frame1);
     assert_eq!(
         core.trace().panes[PaneRegion::BottomRight as usize],
-        Some(PaneVerdict::Full),
-        "the first post-blit SlotsReuse paint repaints the whole pane despite \
-         unchanged content — the spike this design targets"
+        Some(PaneVerdict::Skip),
+        "the first post-blit SlotsReuse paint must skip: the blit committed a \
+         complete rotated tree for the pane's new range"
     );
+    assert!(
+        core.trace().fetched_cell_slots > 0,
+        "invariant I1: even a Skip pays the full four-accessor round-trip"
+    );
+}
+
+/// Prime `core` with a Fresh paint, scroll one axis, and blit. Returns the
+/// blitted `Chrome` already promoted to `SlotsReused`, so the caller can drive
+/// `render_pane`'s own post-blit dispatch at the same geometry — the sequence
+/// every Stage 6 truth test below starts from.
+fn blit_scroll(
+    m: &TestModel,
+    core: &RendererCore<RecorderPainter>,
+    prev: Chrome,
+    axis_msg: &'static str,
+) -> Chrome {
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let inputs = test_inputs(m, canvas(), &theme);
+    let plan = qualify_scroll(&prev, m, &inputs, axis_msg);
+    let inputs = test_inputs(m, canvas(), &theme);
+    let BlitOutcome::Blitted(mut blitted) = Chrome::next_blit(Some(prev), m, &inputs, &plan) else {
+        panic!("{axis_msg}");
+    };
+    core.render_grid_blit(m, &blitted, &plan);
+    blitted.kind = FrameKindTag::SlotsReused;
+    blitted
+}
+
+/// Prime a Fresh baseline and return its `Chrome`, ready to scroll from.
+fn fresh_baseline(m: &TestModel, core: &RendererCore<RecorderPainter>) -> Chrome {
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let inputs = test_inputs(m, canvas(), &theme);
+    let frame = Chrome::next(None, m, &inputs, FramePath::Fresh);
+    core.render_grid(m, &frame, PaneRegionMask::ALL);
+    frame
+}
+
+/// Stage 6 Task 6, the interaction the rotation exists for: scroll, then edit
+/// a row that survived the scroll. The rotated tree describes the pane's new
+/// range exactly, so the one changed row is a genuine row-level mismatch and
+/// the planner scopes the repaint to its band — where a stale post-blit tree
+/// could only report a whole-pane range mismatch.
+///
+/// The edited row is deliberately borderless (the fixture sets no explicit
+/// border anywhere): `plan_pane_repaint`'s border fallback is a separate,
+/// unchanged safety rule and is not what this test measures.
+#[test]
+fn borderless_overlapping_row_edit_after_a_row_blit_replans_as_rows() {
+    let m = TestModel::synthetic_grid();
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    let frame0 = fresh_baseline(&m, &core);
+
+    m.set_top_row(2);
+    let frame1 = blit_scroll(&m, &core, frame0, "row scroll must blit in place");
+
+    let range = PaneRegion::BottomRight
+        .range(&frame1)
+        .expect("BottomRight has a live range after the scroll");
+    // Two rows in from the top of the new range: inside the kept band, well
+    // clear of the revealed strip at the bottom.
+    let edited_row = range.r1 + 2;
+    m.set_cell(edited_row, range.c1, "edited-after-scroll");
+
+    core.reset_trace();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame1);
+    assert!(
+        matches!(
+            core.trace().panes[PaneRegion::BottomRight as usize],
+            Some(PaneVerdict::Rows { .. })
+        ),
+        "an overlapping-row edit after a truthful row blit must replan as a \
+         row band, got {:?}",
+        core.trace().panes[PaneRegion::BottomRight as usize]
+    );
+}
+
+/// The column-axis control. Stage 6 limits rotation to the row axis, so a
+/// column blit commits `MarkStale` and the next `SlotsReuse` paint stays the
+/// conservative whole-pane repaint it has always been. This is unchanged
+/// behaviour; it is pinned here so a later column-axis experiment has to
+/// change a test that names the reason.
+#[test]
+fn column_blit_leaves_the_next_slots_reuse_paint_full() {
+    let m = TestModel::synthetic_grid();
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    let frame0 = fresh_baseline(&m, &core);
+
+    m.set_left_column(4);
+    let frame1 = blit_scroll(&m, &core, frame0, "column scroll must blit in place");
 
     core.reset_trace();
     core.render_pane(&m, PaneRegion::BottomRight, &frame1);
     assert_eq!(
         core.trace().panes[PaneRegion::BottomRight as usize],
-        Some(PaneVerdict::Skip),
-        "once reseeded, an unchanged repaint skips"
+        Some(PaneVerdict::Full),
+        "a column blit never certifies its tree — the next paint repaints"
     );
-    assert!(
-        core.trace().fetched_cell_slots > 0,
-        "invariant I1: even a Skip pays the full four-accessor round-trip"
+}
+
+/// The healing half of the previous test, and Task 6's last trace bullet: a
+/// whole-pane `Replace` — even the conservative repaint a stale shift forced —
+/// installs a complete candidate and restores `Exact`, which is what makes the
+/// NEXT eligible row blit rotatable again. Staleness is a one-frame cost, not
+/// a pane that can never rotate again.
+#[test]
+fn whole_pane_replace_after_a_column_blit_restores_rotatable_history() {
+    let m = TestModel::synthetic_grid();
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    let frame0 = fresh_baseline(&m, &core);
+
+    m.set_left_column(4);
+    let mut frame1 = blit_scroll(&m, &core, frame0, "column scroll must blit in place");
+
+    // The healing repaint: a full `Replace` commit over the post-column-blit
+    // range, which reseeds the tree AND its truth.
+    core.render_pane(&m, PaneRegion::BottomRight, &frame1);
+
+    frame1.kind = FrameKindTag::Blitted;
+    m.set_top_row(2);
+    let frame2 = blit_scroll(&m, &core, frame1, "row scroll must blit in place");
+
+    core.reset_trace();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame2);
+    assert_eq!(
+        core.trace().panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Skip),
+        "a row blit whose history was reseeded by a whole-pane repaint must \
+         rotate — staleness must not be sticky"
     );
 }
 

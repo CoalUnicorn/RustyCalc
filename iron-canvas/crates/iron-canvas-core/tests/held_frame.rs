@@ -135,6 +135,53 @@ fn held_viewport_retries_after_bridge_recovery() {
     );
 }
 
+/// Stage 6 Task 6, acceptance criteria 2 and 3 through the real orchestrator:
+/// a held Viewport attempt installs no fingerprint state, and the retry that
+/// actually commits installs history exact enough for the next unchanged
+/// content notification to skip the cell painter entirely.
+///
+/// Both halves matter and they check each other. A held attempt that leaked a
+/// candidate would have installed a tree for a range whose pixels never
+/// shifted; the retry's own shift then reads a `prev_range` that tree does not
+/// describe, refuses to rotate, and the final verdict degrades from `Skip` to
+/// `Full`. So the `Skip` below is only reachable if the hold installed nothing
+/// AND the commit installed everything.
+#[test]
+fn held_viewport_installs_no_fingerprint_and_its_retry_commits_exact_history() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(60)
+            .with_active(5, 2),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty(); // Fresh baseline: exact history for the pre-scroll range.
+
+    assert_eq!(scroll_then_fail(&stub, &mut orch), PaintResult::Retry);
+
+    stub.set_bulk_bridge_fail(false);
+    assert_eq!(
+        orch.paint_if_dirty(),
+        PaintResult::Painted,
+        "the retained viewport work must repaint once the bridge recovers"
+    );
+    assert_eq!(
+        orch.last_trace().effective,
+        Some(PaintRegimeTag::Viewport),
+        "the recovery must actually blit — otherwise this test proves nothing \
+         about the shift's fingerprint commit"
+    );
+
+    // Nothing changed since that blit; a truthful rotated tree makes this a
+    // pure fingerprint skip.
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(
+        orch.last_trace().panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Skip),
+        "the committed blit's rotated tree must describe the pane exactly"
+    );
+}
+
 #[test]
 fn held_slots_reuse_retains_content_scope_and_retries() {
     let stub = Rc::new(TestModel::synthetic_grid().with_data_until(30));

@@ -1,21 +1,25 @@
-//! Pane -> row -> cell content fingerprint tree for the paint-skip
-//! optimization.
+//! Pane -> row content fingerprint tree for the paint-skip optimization.
 //!
 //! `build_pane_fingerprint` walks the bulk-fetched buffers (`pane_styles`,
 //! `pane_values`, `pane_cell_types`, `pane_decorations`) once and produces a
-//! fresh `PaneFingerprint`: a whole-pane digest, with a `RowFingerprint`
-//! per row and a `CellFingerprint` per cell nested beneath it.
+//! fresh `PaneFingerprint`: a whole-pane digest with a `RowFingerprint` per
+//! row. Every cell still gets its own `cell_digest`, folded into its row's
+//! hasher as it is computed — the tree just doesn't *retain* the per-cell
+//! value afterwards, because nothing ever read it back (Stage 6, Gate B).
 //! `rebuild_pane_fingerprint_in_place` computes the identical tree but
-//! writes it into an existing `PaneFingerprint`, reusing its outer `rows`
-//! Vec and every row's `cells` Vec rather than allocating fresh ones each
-//! call — the hot path (`PaneCache`'s per-pane `PaneFingerprintState`,
-//! not `Chrome`, via its persistent `scratch` slot) uses this every frame so
-//! the common no-op "skip" case never reallocates the tree. `plan_pane_repaint`
-//! is what dispatches on the finished tree: it compares the pane-level
-//! `digest` first — equal, and the 5-pass walk is skipped entirely — then
-//! falls to comparing row digests to decide between a row-band repaint and a
-//! whole-pane repaint. `render_pane` calls it via
-//! `PaneFingerprintState::with_trees` on every slots-reuse frame.
+//! writes it into an existing `PaneFingerprint`, reusing its `rows` Vec
+//! rather than allocating a fresh one each call — the hot path (`PaneCache`'s
+//! per-pane `PaneFingerprintState`, not `Chrome`, via its persistent
+//! `scratch` slot) uses this every frame so the common no-op "skip" case
+//! never reallocates the tree. `plan_pane_repaint` is what dispatches on the
+//! finished tree: it compares the pane-level `digest` first — equal, and the
+//! 5-pass walk is skipped entirely — then falls to comparing row digests to
+//! decide between a row-band repaint and a whole-pane repaint. `render_pane`
+//! calls it via `PaneFingerprintState::with_trees` on every slots-reuse frame.
+//! `rotate_pane_fingerprint_in_place` is the third builder: it derives the
+//! same complete tree for a row-scrolled pane out of a truthful prior tree
+//! plus the blit's revealed strip, without a full-pane fetch (Stage 6,
+//! Gate C).
 //!
 //! Hash domain — the set of inputs that determine painted pixels.
 //! Anything that affects paint MUST be included; anything that doesn't
@@ -28,43 +32,23 @@ use std::hash::{Hash, Hasher};
 use crate::orchestrator::PaneVerdict;
 use crate::pending_work::{ContentWork, PendingWork, RowSpan};
 use crate::renderer::cf_types::parse_hex_color;
+use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
 
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
 
-/// One cell's fingerprint leaf: just the `u64` digest over every
-/// paint-relevant input at that address (style, formatted value, cell kind,
-/// and CF decoration semantics) — including the cell's row/col, which fold
-/// into the digest itself (see `cell_digest`) so two cells with identical
-/// content at different addresses still digest distinctly. Coordinates are
-/// NOT stored as fields: a leaf's `(row, col)` is always derivable from
-/// `PaneFingerprint.range` plus its position in the nested
-/// `rows[_].cells[_]` vectors, so storing them again here would be a
-/// redundant, driftable copy.
-///
-/// Production repaint planning never reads this level — `plan_pane_repaint`
-/// only compares row and pane digests. Its only reader is
-/// `diff_changed_cells`, used today by this crate's own integration tests to
-/// assert exact changed-cell coordinates rather than the full set of cells
-/// in a changed row.
-///
-/// Measured cost for a 50x20 (1,000-cell) pane, the representative visible
-/// viewport size: roughly 16 KiB — two retained `u64` leaves per cell
-/// (painted + scratch trees), excluding row-vector overhead and spare
-/// capacity — and about 1.37 ms/call (~1370 us) to build one tree from
-/// scratch (debug build; see `bench_build_pane_fingerprint_for_a_realistic_pane_size`,
-/// which prints the current number with `--nocapture`). That per-call cost
-/// includes one `DefaultHasher` per cell, on top of the row and pane
-/// hashers a pane->row-only tree would still need.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct CellFingerprint(pub u64);
-
-/// One row's fingerprint: the folded digest of every cell leaf in the row
+/// One row's fingerprint: the folded digest of every cell digest in the row
 /// (which itself folds in the row index — see `build_pane_fingerprint`),
 /// plus the single boolean a later row-band repaint plan needs —
 /// `has_any_explicit_border`: whether ANY cell in the row carries an explicit
 /// border rule on ANY of its four edges.
+///
+/// This is the finest granularity the tree retains. Per-cell digests are
+/// computed and folded in, never stored: Stage 6's Gate B measured that no
+/// production reader existed for them and that dropping the retained leaves
+/// saves 16-29 bytes per visible cell across the two warm trees at no build
+/// cost (`docs/performance/2026-08-02-stage-6-render-costs.md`).
 ///
 /// Direction-agnostic on purpose. `paint_border` extends every stroke by
 /// `width_px / 2` along the stroke's OWN axis so perpendicular borders close
@@ -83,7 +67,6 @@ pub(crate) struct CellFingerprint(pub u64);
 pub(crate) struct RowFingerprint {
     pub digest: u64,
     pub has_any_explicit_border: bool,
-    pub cells: Vec<CellFingerprint>,
 }
 
 /// The whole-pane fingerprint tree: the address-space `range` it was built
@@ -105,10 +88,10 @@ pub(crate) struct PaneFingerprint {
     pub rows: Vec<RowFingerprint>,
 }
 
-/// Build the pane -> row -> cell fingerprint tree for one pane in a single
-/// pass over `range`: each cell's digest folds into its row's hasher, and
-/// each row's finished digest folds into the pane's hasher. Same range +
-/// same buffers -> same tree (modulo `DefaultHasher` collision).
+/// Build the pane -> row fingerprint tree for one pane in a single pass over
+/// `range`: each cell's digest folds into its row's hasher, and each row's
+/// finished digest folds into the pane's hasher. Same range + same buffers ->
+/// same tree (modulo `DefaultHasher` collision).
 ///
 /// The four buffers must be dense, row-major over `range` — the same layout
 /// `get_cell_styles_in` / `get_cell_decorations_in` / etc. produce — so
@@ -129,81 +112,112 @@ pub(crate) fn build_pane_fingerprint(
     decorations: &[Fetched<CellDecoration>],
     range: RCRange,
 ) -> PaneFingerprint {
-    let cols = (range.c2 - range.c1 + 1).max(0) as usize;
+    let row_count = (range.r2 - range.r1 + 1).max(0) as usize;
+    let mut rows = Vec::with_capacity(row_count);
+    for row in range.rows() {
+        rows.push(fingerprint_dense_row(
+            row,
+            styles,
+            values,
+            cell_types,
+            decorations,
+            range,
+        ));
+    }
 
+    PaneFingerprint {
+        digest: fold_pane_digest(range, &rows),
+        range,
+        rows,
+    }
+}
+
+/// Fingerprint the single model `row` out of dense, row-major buffers laid
+/// out over `range` — the one place a row digest and its border flag are
+/// ever computed. Both whole-pane builders and the row-shift rotation share
+/// it, so "the candidate a rotation produces equals a full rebuild" holds by
+/// construction rather than by two loops being kept in sync by hand.
+///
+/// `row` must lie inside `range`, and the four buffers must be dense over
+/// `range` (`idx = (row - r1) * cols + (col - c1)`). The caller decides which
+/// buffers those are: a full-pane fetch addresses the whole pane, a blit's
+/// revealed strip addresses only the strip — a row's digest depends on its
+/// own model address and content, never on which buffer it was read from.
+fn fingerprint_dense_row(
+    row: i32,
+    styles: &[Fetched<CellStyle>],
+    values: &[Fetched<String>],
+    cell_types: &[Fetched<CellKind>],
+    decorations: &[Fetched<CellDecoration>],
+    range: RCRange,
+) -> RowFingerprint {
+    let cols = (range.c2 - range.c1 + 1).max(0) as usize;
+    let base = (row - range.r1).max(0) as usize * cols;
+
+    let mut row_hasher = DefaultHasher::new();
+    row_hasher.write_i32(row);
+
+    let mut has_any_explicit_border = false;
+
+    for (col_offset, col) in range.columns().enumerate() {
+        let idx = base + col_offset;
+        let style = &styles[idx];
+        let value = &values[idx];
+        let cell_type = &cell_types[idx];
+        let decoration = &decorations[idx];
+
+        // Record the row's explicit border state while we're already
+        // walking every cell's style — no second pass needed. Any edge
+        // counts: a vertical (left/right) border bleeds into the adjacent
+        // row via the stroke's corner extension just as a horizontal one
+        // does (see `RowFingerprint`'s doc).
+        if let Fetched::Value(s) = style {
+            has_any_explicit_border |= s.border.left.is_some()
+                || s.border.right.is_some()
+                || s.border.top.is_some()
+                || s.border.bottom.is_some();
+        }
+
+        cell_digest(row, col, style, value, cell_type, decoration).hash(&mut row_hasher);
+    }
+
+    RowFingerprint {
+        digest: row_hasher.finish(),
+        has_any_explicit_border,
+    }
+}
+
+/// Fold a pane's address-space `range` and its finished row digests into the
+/// whole-pane digest. Range first, then every row digest in row order — the
+/// order is part of the hash, so this is the single definition of it.
+fn fold_pane_digest(range: RCRange, rows: &[RowFingerprint]) -> u64 {
     let mut pane_hasher = DefaultHasher::new();
     pane_hasher.write_i32(range.r1);
     pane_hasher.write_i32(range.c1);
     pane_hasher.write_i32(range.r2);
     pane_hasher.write_i32(range.c2);
-
-    let row_count = (range.r2 - range.r1 + 1).max(0) as usize;
-    let mut rows = Vec::with_capacity(row_count);
-
-    for (row_offset, row) in range.rows().enumerate() {
-        let mut row_hasher = DefaultHasher::new();
-        row_hasher.write_i32(row);
-
-        let mut has_any_explicit_border = false;
-        let mut cells = Vec::with_capacity(cols);
-
-        for (col_offset, col) in range.columns().enumerate() {
-            let idx = row_offset * cols + col_offset;
-            let style = &styles[idx];
-            let value = &values[idx];
-            let cell_type = &cell_types[idx];
-            let decoration = &decorations[idx];
-
-            // Record the row's explicit border state while we're already
-            // walking every cell's style — no second pass needed. Any edge
-            // counts: a vertical (left/right) border bleeds into the adjacent
-            // row via the stroke's corner extension just as a horizontal one
-            // does (see `RowFingerprint`'s doc).
-            if let Fetched::Value(s) = style {
-                has_any_explicit_border |= s.border.left.is_some()
-                    || s.border.right.is_some()
-                    || s.border.top.is_some()
-                    || s.border.bottom.is_some();
-            }
-
-            let digest = cell_digest(row, col, style, value, cell_type, decoration);
-            digest.hash(&mut row_hasher);
-            cells.push(CellFingerprint(digest));
-        }
-
-        let row_digest = row_hasher.finish();
-        row_digest.hash(&mut pane_hasher);
-        rows.push(RowFingerprint {
-            digest: row_digest,
-            has_any_explicit_border,
-            cells,
-        });
+    for row in rows {
+        row.digest.hash(&mut pane_hasher);
     }
-
-    PaneFingerprint {
-        range,
-        digest: pane_hasher.finish(),
-        rows,
-    }
+    pane_hasher.finish()
 }
 
 /// In-place twin of [`build_pane_fingerprint`]: identical hashing (every
 /// digest `target` ends up with is byte-for-byte what `build_pane_fingerprint`
 /// would produce for the same inputs — see the equivalence test below), but
 /// writes into `target` instead of returning a fresh tree, reusing its
-/// outer `rows` Vec and each row's `cells` Vec rather than allocating new
-/// ones. This is the "keep both trees' vector allocations warm" mechanism:
-/// called every frame against the persistent `scratch` slot, a same-size
-/// pane never triggers a single `Vec` allocation after its first paint.
+/// `rows` Vec rather than allocating a new one. This is the "keep both
+/// trees' vector allocations warm" mechanism: called every frame against the
+/// persistent `scratch` slot, a same-size pane never triggers a single `Vec`
+/// allocation after its first paint.
 ///
 /// Row-count changes resize `target.rows` in place rather than replacing
-/// the Vec: `truncate` drops any excess rows (and their `cells` Vecs) when
-/// the pane shrank; bare zero-valued `RowFingerprint`s are pushed when it
-/// grew, then filled by the same per-row loop as every other row this call
-/// (so a grown pane allocates only the newly-needed capacity, not a full
-/// fresh tree). Each surviving row's `cells` Vec is `clear()`-ed (not
-/// replaced) before being refilled, so its capacity survives a column-count
-/// change the same way.
+/// the Vec: `truncate` drops any excess rows when the pane shrank; bare
+/// zero-valued `RowFingerprint`s are pushed when it grew, then filled by the
+/// same per-row loop as every other row this call (so a grown pane allocates
+/// only the newly-needed capacity, not a full fresh tree). A column-count
+/// change costs nothing at all now that rows are fixed-size: only the folded
+/// digest they carry differs.
 pub(crate) fn rebuild_pane_fingerprint_in_place(
     target: &mut PaneFingerprint,
     styles: &[Fetched<CellStyle>],
@@ -212,15 +226,23 @@ pub(crate) fn rebuild_pane_fingerprint_in_place(
     decorations: &[Fetched<CellDecoration>],
     range: RCRange,
 ) {
-    let cols = (range.c2 - range.c1 + 1).max(0) as usize;
+    resize_rows(target, (range.r2 - range.r1 + 1).max(0) as usize);
 
-    let mut pane_hasher = DefaultHasher::new();
-    pane_hasher.write_i32(range.r1);
-    pane_hasher.write_i32(range.c1);
-    pane_hasher.write_i32(range.r2);
-    pane_hasher.write_i32(range.c2);
+    for (row_offset, row) in range.rows().enumerate() {
+        target.rows[row_offset] =
+            fingerprint_dense_row(row, styles, values, cell_types, decorations, range);
+    }
 
-    let row_count = (range.r2 - range.r1 + 1).max(0) as usize;
+    target.range = range;
+    target.digest = fold_pane_digest(range, &target.rows);
+}
+
+/// Resize `target.rows` to `row_count` in place, reusing the Vec: `truncate`
+/// drops any excess rows when the pane shrank, bare zero-valued rows are
+/// pushed when it grew. Every entry is overwritten by the caller's own
+/// per-row loop before it is read, so the pushed placeholders never reach a
+/// digest.
+fn resize_rows(target: &mut PaneFingerprint, row_count: usize) {
     if target.rows.len() > row_count {
         target.rows.truncate(row_count);
     } else {
@@ -228,58 +250,183 @@ pub(crate) fn rebuild_pane_fingerprint_in_place(
             target.rows.push(RowFingerprint {
                 digest: 0,
                 has_any_explicit_border: false,
-                cells: Vec::new(),
             });
         }
     }
+}
 
-    for (row_offset, row) in range.rows().enumerate() {
-        let mut row_hasher = DefaultHasher::new();
-        row_hasher.write_i32(row);
+// ==============================================================================
+// Row-axis rotation — deriving a complete candidate without a full-pane fetch
+// ==============================================================================
+//
+// A row scroll moves whole rows of pixels; the model rows that survived the
+// shift kept their address, their content and therefore their digest. So a
+// pane whose retained tree is *provably* truthful for `prev_range` can carry
+// those overlapping rows across into `new_range` and only fingerprint the
+// rows the blit actually revealed, from the strip the blit already fetched.
+//
+// Two separate facts have to hold before that is sound, and only one of them
+// is geometry:
+//
+// 1. the history must be exact — a `Splice`-kind commit (Damage, or a strip
+//    that changed pixels) leaves the painted tree's range untouched, so range
+//    equality alone proves nothing. That check is the caller's
+//    (`PaneFingerprintState::build_row_shift_candidate` gates on
+//    `FingerprintTruth::Exact`);
+// 2. the shape must rotate — same columns, same row extent, non-empty
+//    overlap, and a strip that names every row the overlap cannot supply.
+//    That is this module's half, below.
+//
+// Column-axis rotation is deliberately absent (Stage 6 requirement 8): a
+// horizontal shift changes which columns every row contains, so no row digest
+// survives it.
 
-        let mut has_any_explicit_border = false;
+/// Why a row-shift candidate could not be derived. Every rejection is named
+/// rather than collapsed into `None`, so the caller (and Stage 6's tests) can
+/// tell a column-axis request apart from stale history apart from a strip
+/// that didn't cover what it had to.
+///
+/// Every variant means the same thing operationally — no candidate, fall back
+/// — but a single unnamed "no" would make an incomplete strip look like a
+/// deliberate policy decision in a trace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowShiftIneligible {
+    /// The retained tree is not known to describe the pixels it claims to
+    /// (`FingerprintTruth::Stale`) — including the never-painted default.
+    StaleHistory,
+    /// The retained tree does not describe `prev_range`, so its rows cannot
+    /// be addressed against the shift the caller is performing.
+    PriorRangeMismatch,
+    /// The two ranges disagree on the orthogonal (column) axis.
+    ColumnBounds,
+    /// The two ranges disagree on the scroll axis' inclusive extent.
+    RowExtent,
+    /// The two ranges share no model row, so nothing survives to rotate.
+    EmptyOverlap,
+    /// The strip does not span the full pane width, its channels are not
+    /// dense over `strip_range`, or some new row is named by neither the
+    /// strip nor the overlap.
+    IncompleteStrip,
+    /// A column-axis shift was requested. Rotation is row-axis only.
+    ColumnAxis,
+}
 
-        let row_entry = &mut target.rows[row_offset];
-        // Reuse the row's warm `cells` capacity — `clear()` drops the old
-        // leaves without shrinking the backing allocation; the pushes below
-        // refill it, only growing if this row's column count increased.
-        row_entry.cells.clear();
+/// Outcome of deriving a row-shift candidate: either a complete tree for the
+/// new range, owned by the caller, or a named reason there isn't one.
+///
+/// `Rotated` is a *complete* candidate — every row of `new_range`, the
+/// recomputed pane digest, the new range — indistinguishable from what a
+/// full-pane rebuild over the post-shift buffers would produce. It is not a
+/// patch a later step has to finish.
+#[derive(Debug, PartialEq)]
+pub(crate) enum RowShiftFingerprint {
+    Rotated(PaneFingerprint),
+    Ineligible(RowShiftIneligible),
+}
 
-        for (col_offset, col) in range.columns().enumerate() {
-            let idx = row_offset * cols + col_offset;
-            let style = &styles[idx];
-            let value = &values[idx];
-            let cell_type = &cell_types[idx];
-            let decoration = &decorations[idx];
+/// Derive `prior`'s tree rotated onto `new_range` into `target`: overlapping
+/// model rows are carried across from `prior` unchanged (same address, same
+/// content, same digest), every row the widened `strip_range` names is
+/// fingerprinted fresh from the already-fetched `strip`, and the whole-pane
+/// digest is recomputed for `new_range`.
+///
+/// The widened strip wins over the overlap wherever the two meet. A blit
+/// widens its revealed strip to the pixel clip, so the strip can reach one
+/// row back into the kept band; those rows are repainted from the strip's
+/// values, so the strip — not the older history — is what the pixels will
+/// show.
+///
+/// `prior` and `target` must be different trees. Nothing is written to
+/// `target` unless the whole shape validates first, so a rejected rotation
+/// leaves the caller's scratch slot exactly as warm (and exactly as
+/// meaningless) as it found it.
+///
+/// This function knows nothing about truth: it is pure geometry over two
+/// trees and a strip. `PaneFingerprintState::build_row_shift_candidate` is
+/// what refuses to call it on history that isn't `Exact`.
+pub(crate) fn rotate_pane_fingerprint_in_place(
+    target: &mut PaneFingerprint,
+    prior: &PaneFingerprint,
+    new_range: RCRange,
+    strip: &FetchedCells,
+    strip_range: RCRange,
+) -> Result<(), RowShiftIneligible> {
+    let prev_range = prior.range;
 
-            if let Fetched::Value(s) = style {
-                has_any_explicit_border |= s.border.left.is_some()
-                    || s.border.right.is_some()
-                    || s.border.top.is_some()
-                    || s.border.bottom.is_some();
-            }
-
-            let digest = cell_digest(row, col, style, value, cell_type, decoration);
-            digest.hash(&mut row_hasher);
-            row_entry.cells.push(CellFingerprint(digest));
-        }
-
-        let row_digest = row_hasher.finish();
-        row_digest.hash(&mut pane_hasher);
-        row_entry.digest = row_digest;
-        row_entry.has_any_explicit_border = has_any_explicit_border;
+    // Same compatibility discipline `shift_is_safe` applies to the buffers
+    // themselves: identical orthogonal bounds, equal inclusive extent on the
+    // scroll axis. A row-shift candidate must not be derivable for a shape
+    // the blit itself would refuse to rotate.
+    if prev_range.c1 != new_range.c1 || prev_range.c2 != new_range.c2 {
+        return Err(RowShiftIneligible::ColumnBounds);
+    }
+    if (new_range.r2 - new_range.r1) != (prev_range.r2 - prev_range.r1) {
+        return Err(RowShiftIneligible::RowExtent);
     }
 
-    target.range = range;
-    target.digest = pane_hasher.finish();
+    let prev_row_count = (prev_range.r2 - prev_range.r1 + 1).max(0) as usize;
+    if prior.rows.len() != prev_row_count {
+        return Err(RowShiftIneligible::PriorRangeMismatch);
+    }
+
+    let overlap_r1 = prev_range.r1.max(new_range.r1);
+    let overlap_r2 = prev_range.r2.min(new_range.r2);
+    if overlap_r1 > overlap_r2 {
+        return Err(RowShiftIneligible::EmptyOverlap);
+    }
+
+    // The strip has to be usable as a full-pane-width dense buffer: same
+    // columns as the pane, and all four channels dense over `strip_range`.
+    if strip_range.c1 != new_range.c1 || strip_range.c2 != new_range.c2 {
+        return Err(RowShiftIneligible::IncompleteStrip);
+    }
+    let strip_rows = (strip_range.r2 - strip_range.r1 + 1).max(0) as usize;
+    let strip_cols = (strip_range.c2 - strip_range.c1 + 1).max(0) as usize;
+    let strip_len = strip_rows * strip_cols;
+    if strip.styles().len() != strip_len
+        || strip.values().len() != strip_len
+        || strip.cell_types().len() != strip_len
+        || strip.decorations().len() != strip_len
+    {
+        return Err(RowShiftIneligible::IncompleteStrip);
+    }
+
+    let from_strip = |row: i32| strip_rows > 0 && row >= strip_range.r1 && row <= strip_range.r2;
+    let from_overlap = |row: i32| row >= overlap_r1 && row <= overlap_r2;
+    if !new_range
+        .rows()
+        .all(|row| from_strip(row) || from_overlap(row))
+    {
+        return Err(RowShiftIneligible::IncompleteStrip);
+    }
+
+    resize_rows(target, (new_range.r2 - new_range.r1 + 1).max(0) as usize);
+    for (row_offset, row) in new_range.rows().enumerate() {
+        target.rows[row_offset] = if from_strip(row) {
+            fingerprint_dense_row(
+                row,
+                strip.styles(),
+                strip.values(),
+                strip.cell_types(),
+                strip.decorations(),
+                strip_range,
+            )
+        } else {
+            prior.rows[(row - prev_range.r1) as usize].clone()
+        };
+    }
+
+    target.range = new_range;
+    target.digest = fold_pane_digest(new_range, &target.rows);
+    Ok(())
 }
 
 /// Fold one cell's row + col + style + formatted value + cell kind +
-/// decoration into a single `u64`. The address is folded in here (rather
-/// than stored on `CellFingerprint`) so two cells with identical content at
-/// different addresses still produce distinct digests — without a
-/// redundant, driftable `(row, col)` copy sitting next to the tree's own
-/// nested-position addressing. `Absent` and `BridgeFailed` all hash as the
+/// decoration into a single `u64`. The result is folded into the row hasher
+/// and dropped — no caller retains it. The address is folded in here so two
+/// cells with identical content at different addresses still produce
+/// distinct digests, which is what makes a row's folded digest sensitive to
+/// *which* column changed. `Absent` and `BridgeFailed` all hash as the
 /// empty tag `0` per input — they paint identically *within a single
 /// frame's walk* (nothing drawn), so the digest cannot tell them apart and
 /// the skip stays behaviour-preserving. The hold-on-`BridgeFailed` decision
@@ -579,41 +726,6 @@ fn span_has_unsafe_border(
     false
 }
 
-/// Test/diagnostic-only: the exact `(row, col)` coordinates whose cell leaf
-/// differs between `painted` and `scratch`. NOT used to shape
-/// `plan_pane_repaint`'s decision — row bands remain the only repaint unit
-/// it ever returns; this exists purely so a test can assert "A1 and B2
-/// changed" without asserting the full Cartesian product of every touched
-/// row's cells. Returns empty when the two trees don't share a range (there
-/// is no meaningful per-cell correspondence to report).
-#[allow(dead_code)] // Unused outside this module's own unit tests today.
-pub(crate) fn diff_changed_cells(
-    painted: &PaneFingerprint,
-    scratch: &PaneFingerprint,
-) -> Vec<(i32, i32)> {
-    if painted.range != scratch.range {
-        return Vec::new();
-    }
-    let range = scratch.range;
-    let mut changed = Vec::new();
-    for (row_offset, (painted_row, scratch_row)) in
-        painted.rows.iter().zip(scratch.rows.iter()).enumerate()
-    {
-        let model_row = range.r1 + row_offset as i32;
-        for (col_offset, (painted_cell, scratch_cell)) in painted_row
-            .cells
-            .iter()
-            .zip(scratch_row.cells.iter())
-            .enumerate()
-        {
-            if painted_cell.0 != scratch_cell.0 {
-                changed.push((model_row, range.c1 + col_offset as i32));
-            }
-        }
-    }
-    changed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,11 +779,25 @@ mod tests {
         assert_eq!(a, b, "identical buffers must build identical trees");
     }
 
-    // Acceptance 2: changing one cell's value changes exactly that cell
-    // leaf, its row digest, and the pane digest — every other cell leaf and
-    // the untouched row's digest stay put.
+    /// Model rows whose digest differs between two trees over the same range.
+    /// Rows are the finest unit the tree retains, so this is the finest
+    /// granularity a test can assert on.
+    fn changed_rows(before: &PaneFingerprint, after: &PaneFingerprint) -> Vec<i32> {
+        assert_eq!(before.range, after.range, "comparable trees share a range");
+        before
+            .rows
+            .iter()
+            .zip(after.rows.iter())
+            .enumerate()
+            .filter(|(_, (b, a))| b.digest != a.digest)
+            .map(|(row_offset, _)| before.range.r1 + row_offset as i32)
+            .collect()
+    }
+
+    // Acceptance 2: changing one cell's value changes exactly that cell's row
+    // digest and the pane digest — every other row's digest stays put.
     #[test]
-    fn changing_one_value_changes_exactly_one_cell_leaf_its_row_and_pane_digest() {
+    fn changing_one_value_changes_exactly_its_row_and_the_pane_digest() {
         let range = range_2x2();
         let (styles, values, cell_types, decorations) =
             dense_buffers_with_value_at((1, 1), "before");
@@ -682,36 +808,18 @@ mod tests {
         let after = build_pane_fingerprint(&styles2, &values2, &cell_types2, &decorations2, range);
 
         assert_ne!(before.digest, after.digest, "pane digest must change");
-
-        let mut changed_cells = 0;
-        for (row_idx, (row_before, row_after)) in
-            before.rows.iter().zip(after.rows.iter()).enumerate()
-        {
-            // Model row is derived from position, not stored — `range.r1 +
-            // row_idx` is the coordinate a caller would report for this row.
-            let model_row = range.r1 + row_idx as i32;
-            let row_changed = row_before.digest != row_after.digest;
-            for (cell_before, cell_after) in row_before.cells.iter().zip(row_after.cells.iter()) {
-                if cell_before.0 != cell_after.0 {
-                    changed_cells += 1;
-                    assert!(
-                        row_changed,
-                        "a cell leaf changed but its row digest did not: row {model_row}"
-                    );
-                } else if !row_changed {
-                    // Untouched row: every cell leaf in it must also match.
-                    assert_eq!(cell_before.0, cell_after.0);
-                }
-            }
-        }
-        assert_eq!(changed_cells, 1, "exactly one cell leaf must change");
+        assert_eq!(
+            changed_rows(&before, &after),
+            vec![1],
+            "exactly the edited cell's row must change"
+        );
     }
 
     // Changing style, kind, or decoration (independently) must each change
-    // exactly the touched cell leaf too — value isn't the only signal that
-    // must participate.
+    // exactly the touched cell's row too — value isn't the only signal that
+    // must participate in the hash domain.
     #[test]
-    fn changing_style_changes_the_cell_leaf() {
+    fn changing_style_changes_its_row_digest() {
         let range = range_2x2();
         let (styles, values, cell_types, decorations) = dense_buffers_with_value_at((1, 1), "same");
         let before = build_pane_fingerprint(&styles, &values, &cell_types, &decorations, range);
@@ -727,12 +835,11 @@ mod tests {
         let after = build_pane_fingerprint(&styles2, &values, &cell_types, &decorations, range);
 
         assert_ne!(before.digest, after.digest);
-        assert_eq!(before.rows[0].cells[1].0, after.rows[0].cells[1].0);
-        assert_ne!(before.rows[0].cells[0].0, after.rows[0].cells[0].0);
+        assert_eq!(changed_rows(&before, &after), vec![1]);
     }
 
     #[test]
-    fn changing_cell_kind_changes_the_cell_leaf() {
+    fn changing_cell_kind_changes_its_row_digest() {
         let range = range_2x2();
         let (styles, values, cell_types, decorations) = dense_buffers_with_value_at((1, 1), "same");
         let before = build_pane_fingerprint(&styles, &values, &cell_types, &decorations, range);
@@ -742,11 +849,11 @@ mod tests {
         let after = build_pane_fingerprint(&styles, &values, &cell_types2, &decorations, range);
 
         assert_ne!(before.digest, after.digest);
-        assert_ne!(before.rows[0].cells[0].0, after.rows[0].cells[0].0);
+        assert_eq!(changed_rows(&before, &after), vec![1]);
     }
 
     #[test]
-    fn changing_painted_decoration_changes_the_cell_leaf() {
+    fn changing_painted_decoration_changes_its_row_digest() {
         let range = range_2x2();
         let (styles, values, cell_types, decorations) = dense_buffers_with_value_at((1, 1), "same");
         let before = build_pane_fingerprint(&styles, &values, &cell_types, &decorations, range);
@@ -759,13 +866,13 @@ mod tests {
         let after = build_pane_fingerprint(&styles, &values, &cell_types, &decorations2, range);
 
         assert_ne!(before.digest, after.digest);
-        assert_ne!(before.rows[0].cells[0].0, after.rows[0].cells[0].0);
+        assert_eq!(changed_rows(&before, &after), vec![1]);
     }
 
-    // Acceptance 3: A1 + B2 changes (two different rows) report exactly
-    // two cell leaves, one per row.
+    // Acceptance 3: A1 + B2 changes (two different rows) change exactly those
+    // two rows' digests.
     #[test]
-    fn two_cells_in_different_rows_report_exactly_two_cell_leaves() {
+    fn two_cells_in_different_rows_change_exactly_two_row_digests() {
         let range = range_2x2();
         let styles = vec![Fetched::Value(CellStyle::default()); 4];
         let cell_types = vec![Fetched::Value(CellKind::Text); 4];
@@ -786,20 +893,11 @@ mod tests {
         let after =
             build_pane_fingerprint(&styles, &values_after, &cell_types, &decorations, range);
 
-        let mut changed_cells = 0;
-        for (row_before, row_after) in before.rows.iter().zip(after.rows.iter()) {
-            for (cell_before, cell_after) in row_before.cells.iter().zip(row_after.cells.iter()) {
-                if cell_before.0 != cell_after.0 {
-                    changed_cells += 1;
-                }
-            }
-        }
         assert_eq!(
-            changed_cells, 2,
-            "A1 + B2 must report exactly two cell leaves"
+            changed_rows(&before, &after),
+            vec![1, 2],
+            "A1 + B2 must change exactly their own two rows"
         );
-        assert_ne!(before.rows[0].digest, after.rows[0].digest, "row 1 changed");
-        assert_ne!(before.rows[1].digest, after.rows[1].digest, "row 2 changed");
     }
 
     // Acceptance 4: hidden/zero-size addresses retain their dense indices —
@@ -821,17 +919,28 @@ mod tests {
 
         let tree = build_pane_fingerprint(&styles, &values, &cell_types, &decorations, range);
 
-        // Coordinates aren't stored on the leaves (derived from `range` +
-        // position instead), so "dense indices retained" means the nested
-        // vector lengths match the range dimensions exactly, for every row —
-        // hidden/zero-size or not, nothing is skipped or coalesced.
         assert_eq!(
             tree.rows.len(),
             3,
             "one row entry per model row, hidden or not"
         );
-        for row in &tree.rows {
-            assert_eq!(row.cells.len(), 2, "one cell entry per model column");
+
+        // Columns are folded, not retained, so "dense indices retained" means
+        // every dense column slot still reaches its row's hasher — nothing is
+        // skipped or coalesced. Walk every slot in the buffer and confirm each
+        // one moves exactly the row it belongs to.
+        for (row_offset, row) in range.rows().enumerate() {
+            for col_offset in 0..2 {
+                let mut touched = values.clone();
+                touched[row_offset * 2 + col_offset] = Fetched::Value("touched".to_string());
+                let after =
+                    build_pane_fingerprint(&styles, &touched, &cell_types, &decorations, range);
+                assert_eq!(
+                    changed_rows(&tree, &after),
+                    vec![row],
+                    "dense slot ({row_offset}, {col_offset}) must move exactly its own row"
+                );
+            }
         }
     }
 
@@ -1113,11 +1222,11 @@ mod tests {
     }
 
     // The property this function exists for: a same-size rebuild must not
-    // reallocate the outer `rows` Vec or any row's `cells` Vec. Capacity
-    // staying put is a concrete, checkable proxy for "no allocation
-    // happened" without an allocation-counting harness.
+    // reallocate the `rows` Vec. Capacity staying put is a concrete, checkable
+    // proxy for "no allocation happened" without an allocation-counting
+    // harness.
     #[test]
-    fn rebuild_in_place_keeps_row_and_cell_vec_capacities_warm() {
+    fn rebuild_in_place_keeps_row_vec_capacity_warm() {
         let range = range_2x2();
         let (styles, values, cell_types, decorations) =
             dense_buffers_with_value_at((1, 1), "before");
@@ -1132,8 +1241,6 @@ mod tests {
             range,
         );
         let rows_capacity_after_first = tree.rows.capacity();
-        let cell_capacities_after_first: Vec<usize> =
-            tree.rows.iter().map(|r| r.cells.capacity()).collect();
 
         let (styles2, values2, cell_types2, decorations2) =
             dense_buffers_with_value_at((1, 1), "after");
@@ -1149,16 +1256,9 @@ mod tests {
         assert_eq!(
             tree.rows.capacity(),
             rows_capacity_after_first,
-            "outer rows Vec must not reallocate on a same-size rebuild"
+            "rows Vec must not reallocate on a same-size rebuild"
         );
-        for (row, expected_cap) in tree.rows.iter().zip(cell_capacities_after_first.iter()) {
-            assert_eq!(
-                row.cells.capacity(),
-                *expected_cap,
-                "row cells Vec must not reallocate on a same-size rebuild"
-            );
-        }
-        // Capacities staying warm must not come at the cost of correctness.
+        // Capacity staying warm must not come at the cost of correctness.
         let expected =
             build_pane_fingerprint(&styles2, &values2, &cell_types2, &decorations2, range);
         assert_eq!(tree, expected, "rebuilt content must still be correct");
@@ -1227,8 +1327,8 @@ mod tests {
     }
 
     // ==========================================================================
-    // `plan_pane_repaint` / `diff_changed_cells` planner tests. Pure functions
-    // of two already-built trees, with no `Chrome`/`RendererCore` involvement.
+    // `plan_pane_repaint` planner tests. A pure function of two already-built
+    // trees, with no `Chrome`/`RendererCore` involvement.
     // ==========================================================================
 
     fn single_col_range(r1: i32, r2: i32) -> RCRange {
@@ -1527,35 +1627,12 @@ mod tests {
         assert_eq!(plan_pane_repaint(&painted, &scratch), RepaintPlan::Skip);
     }
 
-    // Diagnostic-only cell-level compare: reports the exact (row, col)
-    // coordinates that changed, without asserting the Cartesian product of
-    // the two touched rows' cells.
-    #[test]
-    fn planning_diff_changed_cells_reports_exact_coordinates() {
-        let range = range_2x2();
-        let painted_buf = plain_buffers(range);
-        let painted = build(&painted_buf, range);
-
-        let mut scratch_buf = plain_buffers(range);
-        set_value(&mut scratch_buf.1, range, 1, 1, "a1-changed");
-        set_value(&mut scratch_buf.1, range, 2, 2, "b2-changed");
-        let scratch = build(&scratch_buf, range);
-
-        let mut changed = diff_changed_cells(&painted, &scratch);
-        changed.sort();
-        assert_eq!(
-            changed,
-            vec![(1, 1), (2, 2)],
-            "must report exactly A1 and B2, not their cross product"
-        );
-    }
-
     // ==========================================================================
-    // Fix G: cell-level fingerprint cost measurement — see the doc on
-    // `CellFingerprint` for what this number is weighed against. Smoke
-    // measurement, not a perf gate: no hard timing assertion, since that
-    // would make CI flaky on a slower runner. Run with `--nocapture` to see
-    // the printed per-call average.
+    // Fix G: fingerprint construction cost — the per-call number Stage 6's
+    // report weighs the tree's shape against. Smoke measurement, not a perf
+    // gate: no hard timing assertion, since that would make CI flaky on a
+    // slower runner. Run with `--nocapture` to see the printed per-call
+    // average.
     // ==========================================================================
     #[test]
     fn bench_build_pane_fingerprint_for_a_realistic_pane_size() {
@@ -1583,6 +1660,920 @@ mod tests {
             "build_pane_fingerprint: {per_call_us:.2} us/call over {REPS} reps \
              ({ROWS}x{COLS} = {} cells)",
             ROWS * COLS
+        );
+    }
+
+    // ==========================================================================
+    // Stage 6, Task 4: the retained-leaf reference shape.
+    //
+    // `LeafPane` is the fingerprint tree exactly as production carried it
+    // *before* Stage 6 collapsed it to pane -> row: a `u64` leaf retained per
+    // cell, folded into the row hasher, folded into the pane hasher. Production
+    // no longer stores leaves; this reference does, so the collapse is
+    // provable rather than asserted. The same equivalence test passes against
+    // the leaf-retaining production tree before the change and against the
+    // row-only tree after it, which is what "the hash domain did not move"
+    // means operationally.
+    //
+    // It stays inside this private module's own test scope — no Cargo feature,
+    // no `pub` test hook, nothing outside this file can see it.
+    // ==========================================================================
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct LeafRow {
+        digest: u64,
+        has_any_explicit_border: bool,
+        cells: Vec<u64>,
+    }
+
+    #[derive(Debug, Clone, Default, PartialEq)]
+    struct LeafPane {
+        range: RCRange,
+        digest: u64,
+        rows: Vec<LeafRow>,
+    }
+
+    /// Faithful copy of the pre-collapse `rebuild_pane_fingerprint_in_place`,
+    /// leaf `Vec` and all. In-place like its production twin so the Stage 6
+    /// A/B stays an apples-to-apples comparison of two warm builders.
+    fn rebuild_leaf_reference_in_place(
+        target: &mut LeafPane,
+        styles: &[Fetched<CellStyle>],
+        values: &[Fetched<String>],
+        cell_types: &[Fetched<CellKind>],
+        decorations: &[Fetched<CellDecoration>],
+        range: RCRange,
+    ) {
+        let cols = (range.c2 - range.c1 + 1).max(0) as usize;
+
+        let mut pane_hasher = DefaultHasher::new();
+        pane_hasher.write_i32(range.r1);
+        pane_hasher.write_i32(range.c1);
+        pane_hasher.write_i32(range.r2);
+        pane_hasher.write_i32(range.c2);
+
+        let row_count = (range.r2 - range.r1 + 1).max(0) as usize;
+        if target.rows.len() > row_count {
+            target.rows.truncate(row_count);
+        } else {
+            while target.rows.len() < row_count {
+                target.rows.push(LeafRow {
+                    digest: 0,
+                    has_any_explicit_border: false,
+                    cells: Vec::new(),
+                });
+            }
+        }
+
+        for (row_offset, row) in range.rows().enumerate() {
+            let mut row_hasher = DefaultHasher::new();
+            row_hasher.write_i32(row);
+
+            let mut has_any_explicit_border = false;
+
+            let row_entry = &mut target.rows[row_offset];
+            row_entry.cells.clear();
+
+            for (col_offset, col) in range.columns().enumerate() {
+                let idx = row_offset * cols + col_offset;
+                let style = &styles[idx];
+                let value = &values[idx];
+                let cell_type = &cell_types[idx];
+                let decoration = &decorations[idx];
+
+                if let Fetched::Value(s) = style {
+                    has_any_explicit_border |= s.border.left.is_some()
+                        || s.border.right.is_some()
+                        || s.border.top.is_some()
+                        || s.border.bottom.is_some();
+                }
+
+                let digest = cell_digest(row, col, style, value, cell_type, decoration);
+                digest.hash(&mut row_hasher);
+                row_entry.cells.push(digest);
+            }
+
+            let row_digest = row_hasher.finish();
+            row_digest.hash(&mut pane_hasher);
+            row_entry.digest = row_digest;
+            row_entry.has_any_explicit_border = has_any_explicit_border;
+        }
+
+        target.range = range;
+        target.digest = pane_hasher.finish();
+    }
+
+    fn leaf_retained_bytes(tree: &LeafPane) -> usize {
+        let rows = tree.rows.capacity() * std::mem::size_of::<LeafRow>();
+        let leaves: usize = tree
+            .rows
+            .iter()
+            .map(|row| row.cells.capacity() * std::mem::size_of::<u64>())
+            .sum();
+        rows + leaves
+    }
+
+    /// Explicit borders every fifth row — the "bordered" corpus.
+    fn bordered_buffers(range: RCRange) -> DenseBuffers {
+        let (mut styles, values, cell_types, decorations) = plain_buffers(range);
+        for (row_offset, row) in range.rows().enumerate() {
+            for col_offset in 0..range.columns().count() {
+                let i = row_offset * (range.c2 - range.c1 + 1).max(0) as usize + col_offset;
+                if row % 5 == 0 {
+                    styles[i] = Fetched::Value(CellStyle {
+                        border: Border {
+                            bottom: Some(BorderItem {
+                                style: BorderStyle::Thin,
+                                color: None,
+                            }),
+                            ..Border::default()
+                        },
+                        ..CellStyle::default()
+                    });
+                }
+            }
+        }
+        (styles, values, cell_types, decorations)
+    }
+
+    /// CF data bars every fourth column — the "decorated" corpus.
+    fn decorated_buffers(range: RCRange) -> DenseBuffers {
+        let (styles, values, cell_types, mut decorations) = plain_buffers(range);
+        for (row_offset, row) in range.rows().enumerate() {
+            for (col_offset, col) in range.columns().enumerate() {
+                let i = row_offset * (range.c2 - range.c1 + 1).max(0) as usize + col_offset;
+                if col % 4 == 0 {
+                    decorations[i] = Fetched::Value(CellDecoration::DataBar(DataBarSpec {
+                        fraction: f64::from(row % 10) / 10.0,
+                        color: "#3366cc".to_string(),
+                    }));
+                }
+            }
+        }
+        (styles, values, cell_types, decorations)
+    }
+
+    /// Bordered and decorated at once — the styled half of Stage 6's workload
+    /// matrix, so the measurement is not taken only over trivially cheap
+    /// default styles.
+    fn styled_buffers(range: RCRange) -> DenseBuffers {
+        let (styles, values, cell_types, _) = bordered_buffers(range);
+        let (_, _, _, decorations) = decorated_buffers(range);
+        (styles, values, cell_types, decorations)
+    }
+
+    /// Both production builders must fold the given buffers to exactly the
+    /// digests the retained-leaf reference produces: same pane digest, same
+    /// per-row digests, same per-row border flags, same range.
+    fn assert_matches_leaf_reference(name: &str, buffers: &DenseBuffers, range: RCRange) {
+        let (styles, values, cell_types, decorations) = buffers;
+        let cols = (range.c2 - range.c1 + 1).max(0) as usize;
+
+        let mut reference = LeafPane::default();
+        rebuild_leaf_reference_in_place(
+            &mut reference,
+            styles,
+            values,
+            cell_types,
+            decorations,
+            range,
+        );
+        // Guard against a degenerate reference silently agreeing with anything:
+        // it must actually retain one leaf per model column.
+        for row in &reference.rows {
+            assert_eq!(
+                row.cells.len(),
+                cols,
+                "{name}: the reference must retain one leaf per model column"
+            );
+        }
+
+        let fresh = build_pane_fingerprint(styles, values, cell_types, decorations, range);
+        let mut rebuilt = PaneFingerprint::default();
+        rebuild_pane_fingerprint_in_place(
+            &mut rebuilt,
+            styles,
+            values,
+            cell_types,
+            decorations,
+            range,
+        );
+
+        for (builder, produced) in [("build", &fresh), ("rebuild_in_place", &rebuilt)] {
+            assert_eq!(produced.range, reference.range, "{name}/{builder}: range");
+            assert_eq!(
+                produced.digest, reference.digest,
+                "{name}/{builder}: pane digest must equal the retained-leaf shape's"
+            );
+            assert_eq!(
+                produced.rows.len(),
+                reference.rows.len(),
+                "{name}/{builder}: one entry per model row"
+            );
+            for (i, (row, reference_row)) in
+                produced.rows.iter().zip(reference.rows.iter()).enumerate()
+            {
+                assert_eq!(
+                    row.digest, reference_row.digest,
+                    "{name}/{builder}: row {i} digest must equal the retained-leaf shape's"
+                );
+                assert_eq!(
+                    row.has_any_explicit_border, reference_row.has_any_explicit_border,
+                    "{name}/{builder}: row {i} border flag must equal the retained-leaf shape's"
+                );
+            }
+        }
+    }
+
+    // Acceptance criterion 1 of Stage 6 Task 4, and the reason the collapse is
+    // safe: plain, bordered, decorated and both-at-once buffers all fold to the
+    // same row and pane digests with or without retained cell leaves.
+    #[test]
+    fn row_and_pane_digests_match_the_retained_leaf_shape() {
+        let range = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 12,
+            c2: 8,
+        };
+        assert_matches_leaf_reference("plain", &plain_buffers(range), range);
+        assert_matches_leaf_reference("bordered", &bordered_buffers(range), range);
+        assert_matches_leaf_reference("decorated", &decorated_buffers(range), range);
+        assert_matches_leaf_reference("styled", &styled_buffers(range), range);
+    }
+
+    fn median(mut samples: Vec<f64>) -> f64 {
+        samples.sort_by(|a, b| a.total_cmp(b));
+        match samples.len() {
+            0 => 0.0,
+            n if n % 2 == 1 => samples[n / 2],
+            n => f64::midpoint(samples[n / 2 - 1], samples[n / 2]),
+        }
+    }
+
+    fn row_only_retained_bytes(tree: &PaneFingerprint) -> usize {
+        tree.rows.capacity() * std::mem::size_of::<RowFingerprint>()
+    }
+
+    /// Stage 6 Gate B evidence, retained after Task 4 as the regression guard
+    /// that the shape stayed collapsed: it re-derives, on demand, the
+    /// retained-bytes and build-cost gap between the pre-collapse leaf shape
+    /// (the local reference) and the production row-only tree. Ignored: it is a
+    /// release-mode measurement whose numbers belong in
+    /// `docs/performance/2026-08-02-stage-6-render-costs.md`, not a CI
+    /// assertion — a timing gate here would fail on a slow runner. The
+    /// digest-equivalence half of Gate B is *not* ignored; it lives in
+    /// `row_and_pane_digests_match_the_retained_leaf_shape`.
+    ///
+    /// Protocol, per the plan: both targets are warmed to their final
+    /// capacities before the clock starts, samples are batched (so
+    /// `Instant::now` resolution is not the thing being measured), `black_box`
+    /// defeats the optimizer, and the A/B order alternates per sample so
+    /// thermal drift cannot systematically favour whichever ran first.
+    #[test]
+    #[ignore = "Stage 6 manual measurement probe: retained-leaf reference vs production row-only fingerprint build; run with --release --ignored --nocapture --test-threads=1"]
+    fn stage6_compare_fingerprint_shapes() {
+        const WARMUP_REPS: u32 = 200;
+        const BATCH: u32 = 25;
+        const SAMPLES: usize = 41;
+
+        let workloads: [(&str, RCRange, DenseBuffers); 4] = [
+            (
+                "prod29x21-plain",
+                RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 29,
+                    c2: 21,
+                },
+                plain_buffers(RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 29,
+                    c2: 21,
+                }),
+            ),
+            (
+                "prod29x21-styled",
+                RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 29,
+                    c2: 21,
+                },
+                styled_buffers(RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 29,
+                    c2: 21,
+                }),
+            ),
+            (
+                "stress50x20-plain",
+                RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 50,
+                    c2: 20,
+                },
+                plain_buffers(RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 50,
+                    c2: 20,
+                }),
+            ),
+            (
+                "stress50x20-styled",
+                RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 50,
+                    c2: 20,
+                },
+                styled_buffers(RCRange {
+                    r1: 1,
+                    c1: 1,
+                    r2: 50,
+                    c2: 20,
+                }),
+            ),
+        ];
+
+        println!("# stage6-fingerprint-shapes v1");
+        for (name, range, buffers) in &workloads {
+            let (styles, values, cell_types, decorations) = buffers;
+            let cells = (range.r2 - range.r1 + 1) as usize * (range.c2 - range.c1 + 1) as usize;
+
+            let mut full = LeafPane::default();
+            let mut row_only = PaneFingerprint::default();
+
+            // Warm-up doubles as the equivalence check: an A/B between two
+            // builders that disagree measures nothing.
+            for _ in 0..WARMUP_REPS {
+                rebuild_leaf_reference_in_place(
+                    &mut full,
+                    styles,
+                    values,
+                    cell_types,
+                    decorations,
+                    *range,
+                );
+                rebuild_pane_fingerprint_in_place(
+                    &mut row_only,
+                    styles,
+                    values,
+                    cell_types,
+                    decorations,
+                    *range,
+                );
+                std::hint::black_box((&full, &row_only));
+            }
+            assert_eq!(
+                full.digest, row_only.digest,
+                "{name}: the row-only twin must fold to the same pane digest"
+            );
+            assert_eq!(
+                full.rows.len(),
+                row_only.rows.len(),
+                "{name}: both shapes must retain one entry per row"
+            );
+            for (i, (a, b)) in full.rows.iter().zip(row_only.rows.iter()).enumerate() {
+                assert_eq!(a.digest, b.digest, "{name}: row {i} digest must match");
+                assert_eq!(
+                    a.has_any_explicit_border, b.has_any_explicit_border,
+                    "{name}: row {i} border flag must match"
+                );
+            }
+
+            let mut full_us = Vec::with_capacity(SAMPLES);
+            let mut row_only_us = Vec::with_capacity(SAMPLES);
+            for sample in 0..SAMPLES {
+                let mut time_full = || {
+                    let start = std::time::Instant::now();
+                    for _ in 0..BATCH {
+                        rebuild_leaf_reference_in_place(
+                            &mut full,
+                            styles,
+                            values,
+                            cell_types,
+                            decorations,
+                            *range,
+                        );
+                        std::hint::black_box(&full);
+                    }
+                    start.elapsed().as_secs_f64() * 1_000_000.0 / f64::from(BATCH)
+                };
+                let mut time_row_only = || {
+                    let start = std::time::Instant::now();
+                    for _ in 0..BATCH {
+                        rebuild_pane_fingerprint_in_place(
+                            &mut row_only,
+                            styles,
+                            values,
+                            cell_types,
+                            decorations,
+                            *range,
+                        );
+                        std::hint::black_box(&row_only);
+                    }
+                    start.elapsed().as_secs_f64() * 1_000_000.0 / f64::from(BATCH)
+                };
+                // Alternate which shape runs first: thermal drift and cache
+                // residency then bias both halves equally.
+                if sample % 2 == 0 {
+                    full_us.push(time_full());
+                    row_only_us.push(time_row_only());
+                } else {
+                    row_only_us.push(time_row_only());
+                    full_us.push(time_full());
+                }
+            }
+
+            let full_median = median(full_us.clone());
+            let row_only_median = median(row_only_us.clone());
+            let delta_pct = if full_median > 0.0 {
+                (row_only_median - full_median) / full_median * 100.0
+            } else {
+                0.0
+            };
+
+            let full_bytes = leaf_retained_bytes(&full);
+            let row_only_bytes = row_only_retained_bytes(&row_only);
+            let leaf_cap: usize = full.rows.iter().map(|row| row.cells.capacity()).sum();
+            // Two warm trees per pane (`painted` + `scratch`), which is the unit
+            // Gate B's "16 fewer bytes per visible cell" threshold is stated in.
+            let saved_per_cell_two_trees =
+                2.0 * (full_bytes as f64 - row_only_bytes as f64) / cells as f64;
+
+            println!(
+                "stage6-fingerprint {name} cells={cells} \
+                 full_leaf_median_us={full_median:.3} row_only_median_us={row_only_median:.3} \
+                 row_only_delta_pct={delta_pct:+.2} samples={SAMPLES} batch={BATCH}"
+            );
+            println!(
+                "stage6-fingerprint {name} full_leaf_min_us={:.3} full_leaf_max_us={:.3} \
+                 row_only_min_us={:.3} row_only_max_us={:.3}",
+                full_us.iter().copied().fold(f64::INFINITY, f64::min),
+                full_us.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                row_only_us.iter().copied().fold(f64::INFINITY, f64::min),
+                row_only_us
+                    .iter()
+                    .copied()
+                    .fold(f64::NEG_INFINITY, f64::max),
+            );
+            println!(
+                "stage6-fingerprint {name} full_leaf_rows_cap={} full_leaf_cells_cap={leaf_cap} \
+                 full_leaf_bytes={full_bytes} row_only_rows_cap={} row_only_bytes={row_only_bytes} \
+                 saved_bytes_per_cell_two_trees={saved_per_cell_two_trees:.2}",
+                full.rows.capacity(),
+                row_only.rows.capacity(),
+            );
+        }
+    }
+
+    // ==========================================================================
+    // Stage 6, Task 5: row-axis rotation.
+    //
+    // Nothing in production calls the rotation path yet — Task 6 wires it into
+    // blit preparation. These tests are its only callers, and they hold it to
+    // one standard throughout: a rotated candidate must be *indistinguishable*
+    // from the tree a full-pane rebuild over the post-shift buffers would
+    // produce. `PaneFingerprint`'s `PartialEq` covers exactly what that means
+    // — range, whole-pane digest, every row digest, every row border flag — so
+    // a single `assert_eq!` on the whole tree is the strongest available
+    // assertion, not a loose one.
+    // ==========================================================================
+
+    use crate::geometry::prim::Axis;
+    use crate::renderer::cache::PaneBuffers;
+
+    fn rows_1_to(r1: i32, r2: i32) -> RCRange {
+        RCRange {
+            r1,
+            c1: 1,
+            r2,
+            c2: 4,
+        }
+    }
+
+    /// A pane whose painted tree is `Exact` for `range` — the state a healthy
+    /// whole-pane commit leaves behind, and the only state rotation accepts.
+    fn pane_with_exact_history(buffers: &DenseBuffers, range: RCRange) -> PaneBuffers {
+        let pane = PaneBuffers::default();
+        pane.fingerprint.install(build(buffers, range));
+        pane
+    }
+
+    fn strip_from(buffers: DenseBuffers) -> FetchedCells {
+        let (styles, values, cell_types, decorations) = buffers;
+        FetchedCells::from_parts(styles, values, cell_types, decorations)
+    }
+
+    // Acceptance 1 (down): rows 1..=10 scrolled to 4..=13. The revealed strip
+    // is what `compute_strip` produces for a downward row scroll — from the
+    // old overflow row (`prev.r2`, whose pixels were off-canvas) to the new
+    // last row.
+    #[test]
+    fn stage6_row_shift_down_candidate_matches_a_full_rebuild() {
+        let prev_range = rows_1_to(1, 10);
+        let new_range = rows_1_to(4, 13);
+        let strip_range = rows_1_to(10, 13);
+
+        let pane = pane_with_exact_history(&plain_buffers(prev_range), prev_range);
+        let strip = strip_from(plain_buffers(strip_range));
+
+        let candidate = pane.fingerprint.build_row_shift_candidate(
+            prev_range,
+            new_range,
+            Axis::Row,
+            &strip,
+            strip_range,
+        );
+
+        assert_eq!(
+            candidate,
+            RowShiftFingerprint::Rotated(build(&plain_buffers(new_range), new_range)),
+            "a downward rotation must be indistinguishable from a full rebuild"
+        );
+    }
+
+    // Acceptance 1 (up): the mirror case. The strip is the band above the old
+    // first row.
+    #[test]
+    fn stage6_row_shift_up_candidate_matches_a_full_rebuild() {
+        let prev_range = rows_1_to(4, 13);
+        let new_range = rows_1_to(1, 10);
+        let strip_range = rows_1_to(1, 3);
+
+        let pane = pane_with_exact_history(&plain_buffers(prev_range), prev_range);
+        let strip = strip_from(plain_buffers(strip_range));
+
+        let candidate = pane.fingerprint.build_row_shift_candidate(
+            prev_range,
+            new_range,
+            Axis::Row,
+            &strip,
+            strip_range,
+        );
+
+        assert_eq!(
+            candidate,
+            RowShiftFingerprint::Rotated(build(&plain_buffers(new_range), new_range)),
+            "an upward rotation must be indistinguishable from a full rebuild"
+        );
+    }
+
+    // Acceptance 3: revealed rows are fingerprinted from the strip the blit
+    // already fetched — the values a painter drain would later consume — not
+    // from anything the prior tree knew. Both halves of a row's fingerprint
+    // have to come from there: its digest (an edited value) and its border
+    // flag (a border that exists only in the revealed band).
+    #[test]
+    fn stage6_revealed_rows_are_fingerprinted_from_the_prepared_strip() {
+        let prev_range = rows_1_to(1, 10);
+        let new_range = rows_1_to(4, 13);
+        let strip_range = rows_1_to(10, 13);
+
+        let pane = pane_with_exact_history(&plain_buffers(prev_range), prev_range);
+
+        let mut strip_buffers = plain_buffers(strip_range);
+        set_value(&mut strip_buffers.1, strip_range, 13, 2, "revealed-edit");
+        set_bottom_border(&mut strip_buffers.0, strip_range, 12, 3, true);
+        let strip = strip_from(strip_buffers);
+
+        let mut expected_buffers = plain_buffers(new_range);
+        set_value(&mut expected_buffers.1, new_range, 13, 2, "revealed-edit");
+        set_bottom_border(&mut expected_buffers.0, new_range, 12, 3, true);
+        let expected = build(&expected_buffers, new_range);
+
+        let candidate = pane.fingerprint.build_row_shift_candidate(
+            prev_range,
+            new_range,
+            Axis::Row,
+            &strip,
+            strip_range,
+        );
+
+        assert_eq!(
+            candidate,
+            RowShiftFingerprint::Rotated(expected),
+            "revealed rows must carry the strip's values and border flags"
+        );
+    }
+
+    // A blit widens its revealed strip to the pixel clip, so the strip can
+    // reach back over a row that also survived the shift. Those pixels are
+    // repainted from the strip, so the strip — not the older history — is what
+    // the candidate must describe.
+    #[test]
+    fn stage6_widened_strip_rows_override_carried_history() {
+        let prev_range = rows_1_to(1, 10);
+        let new_range = rows_1_to(4, 13);
+        // Row 9 lies in BOTH the surviving overlap (4..=10) and the widened
+        // strip (9..=13).
+        let strip_range = rows_1_to(9, 13);
+
+        let pane = pane_with_exact_history(&plain_buffers(prev_range), prev_range);
+
+        let mut strip_buffers = plain_buffers(strip_range);
+        set_value(
+            &mut strip_buffers.1,
+            strip_range,
+            9,
+            2,
+            "repainted-from-strip",
+        );
+        let strip = strip_from(strip_buffers);
+
+        let mut expected_buffers = plain_buffers(new_range);
+        set_value(
+            &mut expected_buffers.1,
+            new_range,
+            9,
+            2,
+            "repainted-from-strip",
+        );
+
+        let candidate = pane.fingerprint.build_row_shift_candidate(
+            prev_range,
+            new_range,
+            Axis::Row,
+            &strip,
+            strip_range,
+        );
+
+        assert_eq!(
+            candidate,
+            RowShiftFingerprint::Rotated(build(&expected_buffers, new_range)),
+            "a widened strip row must win over the history it overlaps"
+        );
+        assert_ne!(
+            candidate,
+            RowShiftFingerprint::Rotated(build(&plain_buffers(new_range), new_range)),
+            "the guard: carrying row 9's old history across would produce a different tree"
+        );
+    }
+
+    // Acceptance 2: a Damage strip changes pixels without changing the painted
+    // tree's range, so range equality proves nothing. Only the truth state
+    // does — and it is checked before the range is even looked at.
+    #[test]
+    fn stage6_stale_history_is_rejected_even_when_its_range_matches() {
+        let prev_range = rows_1_to(1, 10);
+        let new_range = rows_1_to(4, 13);
+        let strip_range = rows_1_to(10, 13);
+        let strip = strip_from(plain_buffers(strip_range));
+
+        let pane = pane_with_exact_history(&plain_buffers(prev_range), prev_range);
+        // Exactly what a Damage/strip commit will do from Task 6 on: the tree
+        // stays, its claim to describe the pixels does not.
+        pane.fingerprint.mark_stale();
+
+        assert_eq!(
+            pane.fingerprint.build_row_shift_candidate(
+                prev_range,
+                new_range,
+                Axis::Row,
+                &strip,
+                strip_range,
+            ),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::StaleHistory),
+            "a same-range but unproven tree must not be rotated"
+        );
+
+        // The never-painted default is Stale for the same reason, and is
+        // refused before its (default) range is consulted.
+        let fresh = PaneBuffers::default();
+        assert_eq!(
+            fresh.fingerprint.build_row_shift_candidate(
+                RCRange::default(),
+                new_range,
+                Axis::Row,
+                &strip,
+                strip_range,
+            ),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::StaleHistory),
+            "an unpainted tree is never rotatable"
+        );
+    }
+
+    // Acceptance 4, column axis: rotation is row-only by design. A horizontal
+    // shift changes which columns each row spans, so no row digest survives.
+    #[test]
+    fn stage6_column_axis_request_returns_no_update() {
+        let prev_range = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 10,
+            c2: 4,
+        };
+        let new_range = RCRange {
+            r1: 1,
+            c1: 3,
+            r2: 10,
+            c2: 6,
+        };
+        let strip_range = RCRange {
+            r1: 1,
+            c1: 5,
+            r2: 10,
+            c2: 6,
+        };
+
+        let pane = pane_with_exact_history(&plain_buffers(prev_range), prev_range);
+        let strip = strip_from(plain_buffers(strip_range));
+
+        assert_eq!(
+            pane.fingerprint.build_row_shift_candidate(
+                prev_range,
+                new_range,
+                Axis::Column,
+                &strip,
+                strip_range,
+            ),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::ColumnAxis),
+            "a column-axis shift must return the explicit no-update result"
+        );
+    }
+
+    // Acceptance 4, incompatible shapes. The column-bounds and row-extent
+    // rejections deliberately mirror `shift_is_safe`'s own discipline: a
+    // candidate must not be derivable for a shape the buffer rotation itself
+    // would refuse.
+    #[test]
+    fn stage6_incompatible_row_shapes_return_a_named_no_update() {
+        let prev_range = rows_1_to(1, 10);
+        let pane = pane_with_exact_history(&plain_buffers(prev_range), prev_range);
+
+        let reject = |prev: RCRange, new: RCRange, strip_range: RCRange| {
+            let strip = strip_from(plain_buffers(strip_range));
+            pane.fingerprint
+                .build_row_shift_candidate(prev, new, Axis::Row, &strip, strip_range)
+        };
+
+        // The painted tree describes a different range than the shift claims.
+        assert_eq!(
+            reject(rows_1_to(2, 11), rows_1_to(5, 14), rows_1_to(11, 14)),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::PriorRangeMismatch)
+        );
+
+        // Orthogonal axis moved.
+        assert_eq!(
+            reject(
+                prev_range,
+                RCRange {
+                    r1: 4,
+                    c1: 2,
+                    r2: 13,
+                    c2: 5,
+                },
+                RCRange {
+                    r1: 10,
+                    c1: 2,
+                    r2: 13,
+                    c2: 5,
+                },
+            ),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::ColumnBounds)
+        );
+
+        // Scroll-axis extent changed by one — the partially-visible edge row
+        // case `PaneShiftPrep::IncompatibleRange` already falls back on.
+        assert_eq!(
+            reject(prev_range, rows_1_to(4, 14), rows_1_to(10, 14)),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::RowExtent)
+        );
+
+        // Equal extent, but the ranges share no model row: nothing to rotate.
+        assert_eq!(
+            reject(prev_range, rows_1_to(21, 30), rows_1_to(21, 30)),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::EmptyOverlap)
+        );
+    }
+
+    // Acceptance 4, incomplete strip: a strip that cannot supply every row the
+    // overlap doesn't is not a rotation input, and neither is one that is not
+    // dense over the range it claims.
+    #[test]
+    fn stage6_incomplete_strip_coverage_returns_no_update() {
+        let prev_range = rows_1_to(1, 10);
+        let new_range = rows_1_to(4, 13);
+        let pane = pane_with_exact_history(&plain_buffers(prev_range), prev_range);
+
+        let candidate = |strip: &FetchedCells, strip_range: RCRange| {
+            pane.fingerprint.build_row_shift_candidate(
+                prev_range,
+                new_range,
+                Axis::Row,
+                strip,
+                strip_range,
+            )
+        };
+
+        // Rows 11..=13 are revealed; a strip starting at 12 leaves row 11
+        // described by neither source.
+        let short_range = rows_1_to(12, 13);
+        assert_eq!(
+            candidate(&strip_from(plain_buffers(short_range)), short_range),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::IncompleteStrip),
+            "a strip that skips a revealed row must be refused"
+        );
+
+        // A strip narrower than the pane cannot be read as a full-width dense
+        // row buffer.
+        let narrow_range = RCRange {
+            r1: 10,
+            c1: 1,
+            r2: 13,
+            c2: 3,
+        };
+        assert_eq!(
+            candidate(&strip_from(plain_buffers(narrow_range)), narrow_range),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::IncompleteStrip),
+            "a strip narrower than the pane must be refused"
+        );
+
+        // A channel that is not dense over `strip_range` — a fetch that was
+        // never completed — must be refused rather than indexed into.
+        let strip_range = rows_1_to(10, 13);
+        let (styles, mut values, cell_types, decorations) = plain_buffers(strip_range);
+        values.truncate(values.len() - 1);
+        assert_eq!(
+            candidate(
+                &FetchedCells::from_parts(styles, values, cell_types, decorations),
+                strip_range,
+            ),
+            RowShiftFingerprint::Ineligible(RowShiftIneligible::IncompleteStrip),
+            "a short channel must be refused, not indexed past"
+        );
+    }
+
+    // Acceptance 5: building a candidate is side-effect-free with respect to
+    // everything semantic. The painted tree still answers comparisons the same
+    // way afterwards, and the truth state is still `Exact` — proven by the
+    // fact that a second, identical request is still eligible.
+    #[test]
+    fn stage6_candidate_building_leaves_painted_and_truth_untouched() {
+        let prev_range = rows_1_to(1, 10);
+        let new_range = rows_1_to(4, 13);
+        let strip_range = rows_1_to(10, 13);
+
+        let prev_buffers = plain_buffers(prev_range);
+        let pane = pane_with_exact_history(&prev_buffers, prev_range);
+        let strip = strip_from(plain_buffers(strip_range));
+
+        let first = pane.fingerprint.build_row_shift_candidate(
+            prev_range,
+            new_range,
+            Axis::Row,
+            &strip,
+            strip_range,
+        );
+
+        assert_eq!(
+            pane.fingerprint
+                .compare_to_painted(&build(&prev_buffers, prev_range)),
+            RepaintPlan::Skip,
+            "the painted tree must still describe the pane it did before"
+        );
+        assert_eq!(
+            pane.fingerprint.build_row_shift_candidate(
+                prev_range,
+                new_range,
+                Axis::Row,
+                &strip,
+                strip_range,
+            ),
+            first,
+            "truth must still be Exact, and the same inputs must still rotate"
+        );
+
+        // A rejected rotation must not disturb the scratch slot either: the
+        // next valid request still produces the identical candidate.
+        let column_shifted = RCRange {
+            r1: 4,
+            c1: 2,
+            r2: 13,
+            c2: 5,
+        };
+        let _ = pane.fingerprint.build_row_shift_candidate(
+            prev_range,
+            column_shifted,
+            Axis::Row,
+            &strip,
+            strip_range,
+        );
+        assert_eq!(
+            pane.fingerprint.build_row_shift_candidate(
+                prev_range,
+                new_range,
+                Axis::Row,
+                &strip,
+                strip_range,
+            ),
+            first,
+            "a rejected rotation must leave the scratch slot usable"
         );
     }
 }

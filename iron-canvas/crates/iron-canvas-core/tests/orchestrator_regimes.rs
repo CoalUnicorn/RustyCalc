@@ -63,6 +63,41 @@ fn grid_text_ops_containing(orch: &Orchestrator<MemSurface>, needle: &str) -> us
         .count()
 }
 
+/// Occurrences of a fieldless `DrawOp` (Stage 6 counts `InvalidateCache`
+/// and `ResetTextDefaults` this way).
+fn count_op(ops: &[DrawOp], needle: &DrawOp) -> usize {
+    ops.iter().filter(|op| *op == needle).count()
+}
+
+/// Index of the first op that puts pixels on the surface. Painter *state*
+/// ops (cache/text-default resets, DPR transform), group brackets and clip
+/// pushes are transparent here — Gate A's claim is about ordering against
+/// drawing, not against bookkeeping.
+fn first_draw_index(ops: &[DrawOp]) -> Option<usize> {
+    ops.iter().position(|op| {
+        !matches!(
+            op,
+            DrawOp::InvalidateCache
+                | DrawOp::ResetTextDefaults
+                | DrawOp::ApplyDprTransform { .. }
+                | DrawOp::BeginGroup { .. }
+                | DrawOp::EndGroup
+                | DrawOp::PushClip { .. }
+                | DrawOp::PopClip
+        )
+    })
+}
+
+/// Color of a Fresh frame's full-canvas background fill — the first draw
+/// `Layer::paint_grid_fresh` emits, and the cheapest native proof that the
+/// frame painted the palette that was pushed.
+fn background_fill_color(ops: &[DrawOp]) -> Option<&str> {
+    match ops.get(first_draw_index(ops)?) {
+        Some(DrawOp::RectFill { color, .. }) => Some(color.as_str()),
+        _ => None,
+    }
+}
+
 /// Stage 5 (Task 1): project a frame's op stream down to the sequence of
 /// `BeginGroup` classes belonging to the shared grid shell
 /// (`execute_grid_shell`'s eventual contract), dropping every other op and
@@ -561,9 +596,8 @@ fn last_regime_fresh_after_initial_paint() {
 fn last_regime_fresh_after_theme_swap() {
     // Theme is frame-wide: a palette change makes the cached frame's
     // pixels stale. `Chrome::classify` rejects the theme-mismatched frame
-    // with `Rebuild(Theme)` (and `set_theme` invalidates the content-keyed
-    // paint cache), so the next paint takes the Fresh arm; SlotsReuse would
-    // repaint stale-color cells under fresh chrome.
+    // with `Rebuild(Theme)`, so the next paint takes the Fresh arm;
+    // SlotsReuse would repaint stale-color cells under fresh chrome.
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
@@ -573,6 +607,111 @@ fn last_regime_fresh_after_theme_swap() {
 
     assert_eq!(regime, Some(PaintRegimeTag::Fresh));
     assert!(!grid_ops.is_empty());
+}
+
+/// Stage 6, Gate A: `set_theme` no longer invalidates the grid painter
+/// eagerly, so the healthy Fresh prologue is the *only* source of the
+/// invalidate/reset pair.
+///
+/// The capture window opens before `set_theme`, not before `paint_if_dirty`
+/// — an eager invalidation happens outside a `begin_frame`/`end_frame`
+/// bracket that starts at the paint, which is exactly how the Stage 6 probe
+/// first under-counted the pair.
+#[test]
+fn theme_change_emits_exactly_one_invalidation_pair_before_the_first_draw() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build_rec(Rc::clone(&stub));
+    paint_and_capture(&mut orch); // Fresh.
+
+    let dark = CanvasTheme::dark();
+    let dark_bg = dark.cell_bg.clone().into_owned();
+
+    orch.grid_surface().begin_frame();
+    orch.set_theme(dark);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let grid_ops = orch.grid_surface().end_frame();
+
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    assert_eq!(
+        count_op(&grid_ops, &DrawOp::InvalidateCache),
+        1,
+        "a theme change plus its Fresh paint must invalidate the grid painter once, not twice",
+    );
+    assert_eq!(
+        count_op(&grid_ops, &DrawOp::ResetTextDefaults),
+        1,
+        "the text-default reset is paired with the invalidation and must not double either",
+    );
+    assert_eq!(
+        first_draw_index(&grid_ops),
+        Some(2),
+        "the surviving pair must still lead the frame: [InvalidateCache, ResetTextDefaults, bg fill, ..]",
+    );
+    assert_eq!(
+        background_fill_color(&grid_ops),
+        Some(dark_bg.as_str()),
+        "the frame's first draw must fill with the newly pushed palette",
+    );
+}
+
+/// Stage 6, Gate A, second half: a theme Fresh held by a bridge failure
+/// during preparation must leave the painter completely untouched — with
+/// the eager call gone there is no invalidation to strand ahead of a frame
+/// that never paints — and its healthy retry supplies one pair and the new
+/// palette.
+#[test]
+fn held_theme_fresh_emits_no_painter_op_and_its_retry_emits_one_pair() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build_rec(Rc::clone(&stub));
+    paint_and_capture(&mut orch); // Fresh.
+
+    let dark = CanvasTheme::dark();
+    let dark_bg = dark.cell_bg.clone().into_owned();
+
+    stub.set_bulk_bridge_fail(true);
+    orch.grid_surface().begin_frame();
+    orch.set_theme(dark);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    let held_ops = orch.grid_surface().end_frame();
+
+    assert!(
+        held_ops.is_empty(),
+        "a held theme Fresh must emit no grid painter op at all, got {held_ops:?}",
+    );
+
+    stub.set_bulk_bridge_fail(false);
+    orch.grid_surface().begin_frame();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let retry_ops = orch.grid_surface().end_frame();
+
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    assert_eq!(count_op(&retry_ops, &DrawOp::InvalidateCache), 1);
+    assert_eq!(count_op(&retry_ops, &DrawOp::ResetTextDefaults), 1);
+    assert_eq!(first_draw_index(&retry_ops), Some(2));
+    assert_eq!(
+        background_fill_color(&retry_ops),
+        Some(dark_bg.as_str()),
+        "the retry must paint the theme the held attempt was pushed with",
+    );
+}
+
+/// Stage 6, Gate A: the `theme != *self.theme` guard still swallows an
+/// equal re-push, so no invalidation, no work, no frame.
+#[test]
+fn reapplying_an_equal_theme_stays_idle() {
+    let stub = Rc::new(TestModel::synthetic_grid());
+    let mut orch = build_rec(Rc::clone(&stub));
+    paint_and_capture(&mut orch); // Fresh.
+
+    orch.grid_surface().begin_frame();
+    orch.set_theme(CanvasTheme::light()); // The theme `Orchestrator::new` starts with.
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Idle);
+    let grid_ops = orch.grid_surface().end_frame();
+
+    assert!(
+        grid_ops.is_empty(),
+        "an equal theme must not reach the painter, got {grid_ops:?}",
+    );
 }
 
 #[test]

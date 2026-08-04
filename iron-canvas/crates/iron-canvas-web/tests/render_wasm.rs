@@ -159,15 +159,30 @@ const FIXTURE_CANVAS_W: f64 = 400.0;
 const FIXTURE_CANVAS_H: f64 = 400.0;
 const FIXTURE_DPR: f64 = 1.0;
 
-/// One fixture cell's editable state: formatted text plus independent
-/// top/bottom border flags, both of which feed
-/// `RowFingerprint::has_any_explicit_border` — the single flag
-/// `plan_pane_repaint`'s border-safety check reads.
+/// One fixture cell's editable state: formatted text, independent top/bottom
+/// border flags — both of which feed `RowFingerprint::has_any_explicit_border`,
+/// the single flag `plan_pane_repaint`'s border-safety check reads — plus the
+/// two channels Stage 6 Task 7's offset raster cases need.
+///
+/// `border_left` is a *vertical* edge whose weight is chosen per cell, because
+/// Task 7's border case is specifically a medium/thick stroke: a thin stroke
+/// stays inside its own cell rect, while a medium or thick one is drawn wide
+/// enough to bleed into the neighbouring row's pixels, which is exactly the
+/// stale-stroke risk a retained blit band must not hide.
+///
+/// `fill` is the conditional-format channel *as the browser host expresses it*.
+/// `JsBackedModel` has no `getCellDecorations` accessor at all — its
+/// `get_cell_style` doc states the JS `getCellStyle` extern must return the
+/// **dxf-merged** style — so a CF change reaches this renderer as a changed
+/// fill colour, never as a `CellDecoration`. Driving CF through `fill` is
+/// therefore the faithful browser analogue, not a simplification of one.
 #[derive(Clone, Default)]
 struct FixtureCell {
     value: String,
     border_top: bool,
     border_bottom: bool,
+    border_left: Option<ic::BorderStyle>,
+    fill: Option<String>,
 }
 
 type FixtureStore = Rc<RefCell<HashMap<(i32, i32), FixtureCell>>>;
@@ -182,8 +197,7 @@ fn plain_fixture_store() -> FixtureStore {
                 (row, col),
                 FixtureCell {
                     value: format!("r{row}c{col}"),
-                    border_top: false,
-                    border_bottom: false,
+                    ..FixtureCell::default()
                 },
             );
         }
@@ -257,7 +271,17 @@ fn make_fixture_model(store: FixtureStore) -> JsValue {
                     style: ic::BorderStyle::Thin,
                     color: ic::Color::None,
                 }),
+                left: cell.border_left.map(|style| ic::BorderItem {
+                    style,
+                    color: ic::Color::None,
+                }),
                 ..ic::Border::default()
+            },
+            fill: ic::Fill {
+                color: match &cell.fill {
+                    Some(rgb) => ic::Color::Rgb(rgb.clone()),
+                    None => ic::Color::None,
+                },
             },
             ..ic::Style::default()
         };
@@ -1091,4 +1115,1021 @@ fn selected_sheet_bridge_failure_holds_then_recovers_without_another_signal() {
         !grid_pixels(&grid).iter().all(|&b| b == 0),
         "the recovered paint must actually draw the grid"
     );
+}
+
+// ==============================================================================
+// Stage 6, Task 1: ignored browser timing probes (W4-W8).
+//
+// End-to-end elapsed time through the real `WebSurface`/Canvas2D stack is the
+// one quantity neither the native traffic matrix
+// (`iron-canvas-core/tests/stage6_measurements.rs`) nor the private fingerprint
+// A/B can supply. These probes measure it and print machine-copyable JSON for
+// `docs/performance/2026-08-02-stage-6-render-costs.md`.
+//
+// Every one of them is `#[ignore]`d: a timing number is evidence for a human
+// review, never a CI gate — asserting on it would fail on a slow or loaded
+// runner and tell us nothing about correctness. The normal browser suite
+// compiles them and skips them. Task 2 runs them explicitly:
+//
+//   cargo test --release --target wasm32-unknown-unknown -p iron-canvas-web \
+//     --test render_wasm stage6_perf -- --ignored --nocapture
+//
+// One test per workload, deliberately: the browser runner applies its timeout
+// per test, and a single test carrying the whole matrix would spend it.
+// ==============================================================================
+
+/// Warm-up iterations discarded before the clock matters, per the Stage 6
+/// protocol.
+const STAGE6_WARMUP: usize = 20;
+/// Measured pairs per workload. The plan's floor is 100.
+const STAGE6_PAIRS: usize = 100;
+/// Height of the one oversized row W7 uses to change the scroll-axis extent by
+/// one; every other row keeps the fixture's uniform `STAGE6_ROW_H`.
+const STAGE6_TALL_ROW_H: f64 = 45.0;
+
+// ------------------------------------------------------------------------------
+// Production-shaped pane geometry.
+//
+// These probes deliberately do NOT reuse `FIXTURE_CANVAS_W/H/DPR`: that 400x400
+// fixture shows a 20 x 7 / 140-cell pane, roughly a quarter of the pane the
+// native traffic matrix measures, and Gate C's threshold is stated against the
+// production shape. The constants below reproduce
+// `stage6_measurements.rs`'s `Shape::production_plain()` exactly — same 29 x 21
+// slot count, same 20 px rows, same 80 px columns — so a browser millisecond and
+// a native op count describe the same frame. Every other test in this file keeps
+// the shared 400x400 constants untouched.
+// ------------------------------------------------------------------------------
+
+/// Rows the Stage 6 pane shows, matching `Shape::rows()` for `Production`.
+const STAGE6_ROWS: i32 = 29;
+/// Columns the Stage 6 pane shows, matching `Shape::cols()` for `Production`.
+const STAGE6_COLS: i32 = 21;
+/// Uniform row height, matching the native probe's `ROW_H`.
+const STAGE6_ROW_H: f64 = 20.0;
+/// Uniform column width, matching the native probe's `COL_W`. The fixture model
+/// must publish this explicitly: without a `getColumnWidth` accessor the
+/// renderer falls back to `DEFAULT_COL_WIDTH` (64 px) and the same canvas would
+/// show a different column count.
+const STAGE6_COL_W: f64 = 80.0;
+
+/// Canvas that shows exactly `STAGE6_ROWS` x `STAGE6_COLS` slots: a header plus
+/// a slot run one slot short on each axis, because the visible range always
+/// admits the trailing slot whose origin lands on the canvas edge.
+///
+/// Width: 30 px row-header + 20 x 80 px = 1630.
+///
+/// Note the absence of a `CELL_AREA_INSET` term, which the native probe's
+/// equivalent formula carries. The two paths disagree about it by 3 px, and the
+/// achieved slot count — asserted by `stage6_assert_full_pane` — is the
+/// authority, exactly as `fetch_ranges` is on the native side. Each dimension
+/// has a full slot of tolerance either way, so this is a convention difference,
+/// not a knife edge.
+const STAGE6_CANVAS_W: f64 = 1630.0;
+/// Height: 28 px column-header + 28 x 20 px = 588.
+const STAGE6_CANVAS_H: f64 = 588.0;
+/// DPR 1.0, as in the native matrix, so backing-store scaling is not a variable.
+const STAGE6_DPR: f64 = 1.0;
+
+/// `fetched_cell_slots` for one full-pane fetch: four bulk content accessors
+/// over 29 x 21 = 609 logical cells. The native matrix reports the same 2,436
+/// for every prod29x21 full-pane row.
+const STAGE6_FULL_PANE_SLOTS: i32 = 4 * STAGE6_ROWS * STAGE6_COLS;
+
+/// Plain "rNcM" text over the whole Stage 6 pane, one row and one column deeper
+/// than the pane shows so a single-step scroll on either axis reveals a
+/// populated slot rather than a blank one. `plain_fixture_store`'s 20 x 5 grid
+/// would leave five sixths of a production-shaped pane empty and understate
+/// every painter cost measured here.
+fn stage6_fixture_store() -> FixtureStore {
+    let mut cells = HashMap::new();
+    for row in 1..=STAGE6_ROWS + 1 {
+        for col in 1..=STAGE6_COLS + 1 {
+            cells.insert(
+                (row, col),
+                FixtureCell {
+                    value: format!("r{row}c{col}"),
+                    ..FixtureCell::default()
+                },
+            );
+        }
+    }
+    Rc::new(RefCell::new(cells))
+}
+
+/// Fail loudly when a frame that should have covered the whole production-shaped
+/// pane did not. Geometry drift — a moved constant, a `getColumnWidth` accessor
+/// that stopped being read, a default height sneaking back in — would silently
+/// retune every timing number these probes emit, so the achieved shape is
+/// checked rather than assumed.
+fn stage6_assert_full_pane(trace: &str, phase: &str) {
+    let expected = format!("fetched={STAGE6_FULL_PANE_SLOTS}");
+    assert!(
+        trace.ends_with(&expected),
+        "Stage 6 {phase} must fetch the production-shaped pane \
+         ({STAGE6_FULL_PANE_SLOTS} logical slots = 4 accessors x {rows} x {cols} cells), \
+         but its frame trace was `{trace}`",
+        rows = STAGE6_ROWS,
+        cols = STAGE6_COLS,
+    );
+}
+
+/// `performance.now()` reached through `js_sys::Reflect` rather than
+/// `web_sys::Window::performance`, which would need a `web-sys` feature this
+/// crate does not enable.
+struct PerfClock {
+    perf: JsValue,
+    now: js_sys::Function,
+}
+
+impl PerfClock {
+    fn new() -> Self {
+        let global = js_sys::global();
+        let Ok(perf) = js_sys::Reflect::get(&global, &JsValue::from_str("performance")) else {
+            panic!("the browser test runner must expose a global `performance` object");
+        };
+        let Ok(now) = js_sys::Reflect::get(&perf, &JsValue::from_str("now")) else {
+            panic!("`performance.now` must exist");
+        };
+        Self {
+            perf,
+            now: now.unchecked_into(),
+        }
+    }
+
+    fn now_ms(&self) -> f64 {
+        let Ok(value) = self.now.call0(&self.perf) else {
+            panic!("`performance.now()` must not throw");
+        };
+        let Some(ms) = value.as_f64() else {
+            panic!("`performance.now()` must return a number");
+        };
+        ms
+    }
+}
+
+/// Build the plain fixture with a live scroll origin and, optionally, one
+/// oversized row. Unlike `make_scroll_failure_fixture_model` this keeps the
+/// real store-backed style/value accessors — nothing here simulates a bridge
+/// failure; these probes measure the healthy path only.
+fn make_scrollable_fixture_model(
+    store: FixtureStore,
+    top_row: Rc<Cell<i32>>,
+    left_column: Rc<Cell<i32>>,
+    tall_row: Option<i32>,
+) -> JsValue {
+    let model = make_fixture_model(store);
+    let obj: js_sys::Object = model.unchecked_into();
+
+    let view_top_row = Rc::clone(&top_row);
+    let view_left_column = Rc::clone(&left_column);
+    let get_view = Closure::wrap(Box::new(move || -> JsValue {
+        let view = js_sys::Object::new();
+        set_value_prop(&view, "sheet", &JsValue::from_f64(0.0));
+        // The active cell stays inside the viewport across every scroll these
+        // probes perform, so `Chrome::classify` keeps approving the blit.
+        set_value_prop(&view, "row", &JsValue::from_f64(5.0));
+        set_value_prop(&view, "column", &JsValue::from_f64(3.0));
+        let range = js_sys::Array::new();
+        for value in [5.0, 3.0, 5.0, 3.0] {
+            range.push(&JsValue::from_f64(value));
+        }
+        set_value_prop(&view, "range", &range.into());
+        set_value_prop(
+            &view,
+            "top_row",
+            &JsValue::from_f64(f64::from(view_top_row.get())),
+        );
+        set_value_prop(
+            &view,
+            "left_column",
+            &JsValue::from_f64(f64::from(view_left_column.get())),
+        );
+        view.into()
+    }) as Box<dyn Fn() -> JsValue>);
+    set_prop(&obj, "getSelectedView", get_view.as_ref().unchecked_ref());
+    get_view.forget();
+
+    // An explicit row-height accessor is required for the blit overlap probe;
+    // the Fresh builder's default-height fallback is not used there.
+    let get_row_height = Closure::wrap(Box::new(move |_sheet: u32, row: i32| -> f64 {
+        if tall_row == Some(row) {
+            STAGE6_TALL_ROW_H
+        } else {
+            STAGE6_ROW_H
+        }
+    }) as Box<dyn Fn(u32, i32) -> f64>);
+    set_prop(
+        &obj,
+        "getRowHeight",
+        get_row_height.as_ref().unchecked_ref(),
+    );
+    get_row_height.forget();
+
+    // Without this the renderer falls back to `DEFAULT_COL_WIDTH`, and the
+    // Stage 6 canvas would show 26 columns instead of the native matrix's 21.
+    let get_column_width =
+        Closure::wrap(
+            Box::new(move |_sheet: u32, _col: i32| -> f64 { STAGE6_COL_W })
+                as Box<dyn Fn(u32, i32) -> f64>,
+        );
+    set_prop(
+        &obj,
+        "getColumnWidth",
+        get_column_width.as_ref().unchecked_ref(),
+    );
+    get_column_width.forget();
+
+    obj.into()
+}
+
+/// Build, size and cold-Fresh-paint one Stage 6 canvas over a caller-supplied
+/// store and scroll origin, returning the grid element so raster cases can read
+/// its `ImageData`. Both sides of every offset raster comparison come through
+/// here, so canvas size, DPR, column width and model wiring can never diverge
+/// between the retained-pixel path and its forced-Fresh reference.
+fn stage6_canvas_over(
+    store: FixtureStore,
+    top_row: Rc<Cell<i32>>,
+    left_column: Rc<Cell<i32>>,
+    tall_row: Option<i32>,
+) -> (IronCanvas, HtmlCanvasElement) {
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
+        panic!("create IronCanvas");
+    };
+    let model = make_scrollable_fixture_model(store, top_row, left_column, tall_row);
+    let Ok(()) = canvas.setModel(model) else {
+        panic!("scrollable fixture model passes the duck test");
+    };
+    canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    // The cold Fresh covers the whole pane, so it is the cheapest place to
+    // prove the geometry before any sample or pixel is taken. A tall row
+    // deliberately costs the pane one row, so it is exempt.
+    if tall_row.is_none() {
+        stage6_assert_full_pane(&canvas.frame_trace(), "cold Fresh");
+    }
+    (canvas, grid)
+}
+
+/// A canvas driven by a scrollable fixture, returned alongside the shared
+/// store and the live scroll origin the probes mutate.
+fn stage6_scrollable_canvas(tall_row: Option<i32>) -> (IronCanvas, FixtureStore, Rc<Cell<i32>>) {
+    let store = stage6_fixture_store();
+    let top_row = Rc::new(Cell::new(1));
+    let (canvas, _grid) = stage6_canvas_over(
+        Rc::clone(&store),
+        Rc::clone(&top_row),
+        Rc::new(Cell::new(1)),
+        tall_row,
+    );
+    (canvas, store, top_row)
+}
+
+/// Move the scroll origin and paint, without timing — the setup half of every
+/// measured pair.
+fn stage6_scroll_to(canvas: &mut IronCanvas, top_row: &Rc<Cell<i32>>, row: i32) {
+    top_row.set(row);
+    canvas.view_changed_js();
+    canvas.paint_if_dirty();
+}
+
+/// Time one `paintIfDirty()` in milliseconds. Asserts the attempt actually
+/// painted: a held or idle attempt would contribute a meaningless sample.
+fn stage6_timed_paint(canvas: &mut IronCanvas, clock: &PerfClock) -> f64 {
+    let start = clock.now_ms();
+    let result = canvas.paint_if_dirty();
+    let elapsed = clock.now_ms() - start;
+    assert_eq!(
+        result,
+        JsPaintResult::Painted,
+        "a timed Stage 6 paint must commit — a held or idle attempt is not a sample"
+    );
+    elapsed
+}
+
+fn stage6_percentile(sorted: &[f64], fraction: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    let last = sorted.len() - 1;
+    let rank = (fraction * last as f64).round() as usize;
+    sorted[rank.min(last)]
+}
+
+/// `console.log` reached through the global object, the same way `PerfClock`
+/// reaches `performance.now` and for the same reason: no `web-sys` feature has
+/// to be enabled for a test-only diagnostic. `println!` cannot be used —
+/// `stdout` is a discard sink on `wasm32-unknown-unknown`, and the runner's
+/// `--nocapture` uncaptures `console.*()` only.
+fn stage6_console_line(line: &str) {
+    let global = js_sys::global();
+    let Ok(console) = js_sys::Reflect::get(&global, &JsValue::from_str("console")) else {
+        panic!("the browser test runner must expose a global `console` object");
+    };
+    let Ok(log) = js_sys::Reflect::get(&console, &JsValue::from_str("log")) else {
+        panic!("`console.log` must exist");
+    };
+    let log: js_sys::Function = log.unchecked_into();
+    let Ok(_) = log.call1(&console, &JsValue::from_str(line)) else {
+        panic!("`console.log()` must not throw");
+    };
+}
+
+/// One JSON object per workload phase, on its own line: median, p95 and the
+/// raw sample vector, plus the `frameTrace` string of the last measured frame
+/// so the report can confirm which path was actually timed.
+fn stage6_emit(workload: &str, phase: &str, trace: &str, samples: &[f64]) {
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let median = if sorted.len() % 2 == 1 {
+        stage6_percentile(&sorted, 0.5)
+    } else {
+        f64::midpoint(sorted[sorted.len() / 2 - 1], sorted[sorted.len() / 2])
+    };
+    let raw: Vec<String> = samples.iter().map(|ms| format!("{ms:.4}")).collect();
+    let line = format!(
+        "{{\"probe\":\"stage6-browser\",\"workload\":\"{workload}\",\"phase\":\"{phase}\",\
+\"n\":{n},\"median_ms\":{median:.4},\"p95_ms\":{p95:.4},\"min_ms\":{min:.4},\"max_ms\":{max:.4},\
+\"trace\":\"{trace}\",\"samples_ms\":[{samples_json}]}}",
+        n = samples.len(),
+        p95 = stage6_percentile(&sorted, 0.95),
+        min = sorted.first().copied().unwrap_or(0.0),
+        max = sorted.last().copied().unwrap_or(0.0),
+        samples_json = raw.join(",")
+    );
+    stage6_console_line(&line);
+}
+
+/// W4 — the qualifying one-axis row scroll, the Viewport strip baseline.
+/// Alternates direction so each pair returns the fixture to its origin without
+/// rebuilding the canvas.
+#[wasm_bindgen_test]
+#[ignore = "Stage 6 manual browser timing probe; run with --release --ignored --nocapture"]
+fn stage6_perf_w4_row_scroll() {
+    let clock = PerfClock::new();
+    let (mut canvas, _store, top_row) = stage6_scrollable_canvas(None);
+
+    for _ in 0..STAGE6_WARMUP {
+        stage6_scroll_to(&mut canvas, &top_row, 2);
+        stage6_scroll_to(&mut canvas, &top_row, 1);
+    }
+
+    let mut down = Vec::with_capacity(STAGE6_PAIRS);
+    let mut up = Vec::with_capacity(STAGE6_PAIRS);
+    for _ in 0..STAGE6_PAIRS {
+        top_row.set(2);
+        canvas.view_changed_js();
+        down.push(stage6_timed_paint(&mut canvas, &clock));
+        top_row.set(1);
+        canvas.view_changed_js();
+        up.push(stage6_timed_paint(&mut canvas, &clock));
+    }
+    let trace = canvas.frame_trace();
+
+    stage6_emit("W4", "scroll_down", &trace, &down);
+    stage6_emit("W4", "scroll_up", &trace, &up);
+}
+
+/// A row well inside the Stage 6 pane at every scroll origin these probes use,
+/// carrying no border in any fixture — the Damage strip that forces
+/// `PreparedFingerprintUpdate::MarkStale` in W5's stale half, and the healing
+/// case's damaged row.
+const STAGE6_DAMAGE_ROW: i32 = 12;
+
+/// W5's **stale half** — one timed sample of the post-blit content check a user
+/// gets when the row blit could *not* carry its fingerprint history forward.
+///
+/// The staleness is produced by production behaviour, not by a harness switch:
+/// a Damage strip commits `PreparedFingerprintUpdate::MarkStale` unconditionally
+/// (a repainted band is never proof that a medium/thick stroke stopped bleeding
+/// outside it), so the row blit that follows finds `FingerprintTruth::Stale`,
+/// `build_row_shift_candidate` refuses to rotate, and the retained tree keeps
+/// describing the pre-scroll range. The unchanged-content notification then
+/// compares a new-range candidate against an old-range tree, misses, and pays
+/// the full five-pass cell walk. That is exactly the frame every post-blit
+/// content check cost before Tasks 5-7 — and still costs today whenever a
+/// Damage strip precedes the scroll.
+fn stage6_w5_stale_half(
+    canvas: &mut IronCanvas,
+    top_row: &Rc<Cell<i32>>,
+    away: i32,
+    clock: &PerfClock,
+) -> (f64, String) {
+    canvas.mark_rows_damaged(0, STAGE6_DAMAGE_ROW, STAGE6_DAMAGE_ROW);
+    canvas.paint_if_dirty();
+    stage6_scroll_to(canvas, top_row, away);
+    canvas.mark_content_dirty();
+    let elapsed = stage6_timed_paint(canvas, clock);
+    (elapsed, canvas.frame_trace())
+}
+
+/// W5's **rotated half** — one timed sample of the same post-blit content check
+/// when the row blit *could* carry its history forward: the preceding frames
+/// left `FingerprintTruth::Exact`, `build_row_shift_candidate` rotated the
+/// overlapping rows into the new range and rebuilt the revealed strip from the
+/// values the strip painter was about to consume, and the blit installed that
+/// tree. The unchanged-content notification now matches and skips the cell
+/// painter.
+///
+/// Every non-painter phase is identical to the stale half — same SlotsReuse
+/// regime, same whole-pane fetch, same candidate build, same shell, headers and
+/// presentation — so the paired difference is the five-pass cell walk and
+/// nothing else.
+fn stage6_w5_rotated_half(
+    canvas: &mut IronCanvas,
+    top_row: &Rc<Cell<i32>>,
+    away: i32,
+    clock: &PerfClock,
+) -> (f64, String) {
+    stage6_scroll_to(canvas, top_row, away);
+    canvas.mark_content_dirty();
+    let elapsed = stage6_timed_paint(canvas, clock);
+    (elapsed, canvas.frame_trace())
+}
+
+/// W5 — the phase-attribution control, re-shaped for Task 7.
+///
+/// Task 2 measured the pair as "post-blit Full, then the Skip its reseed
+/// enabled", because before Task 6 a blit *always* left the tree stale and the
+/// first content check was always the reseeding Full. Task 6 removed that
+/// reseed frame: a qualifying row blit now installs `Exact` history directly,
+/// so both halves of the old sequence Skip and there is no within-run Full left
+/// to attribute against.
+///
+/// The pair below restores the control by naming the two states explicitly —
+/// rotation unavailable versus rotation applied — and forces the unavailable
+/// side with the one production mechanism that legitimately produces it
+/// (`Damage` marks history stale). The measured quantity is unchanged: the
+/// median paired difference between an identically-fetched SlotsReuse frame
+/// that walks the pane and one that does not.
+#[wasm_bindgen_test]
+#[ignore = "Stage 6 manual browser timing probe; run with --release --ignored --nocapture"]
+fn stage6_perf_w5_post_blit_full_then_skip() {
+    let clock = PerfClock::new();
+    let (mut canvas, _store, top_row) = stage6_scrollable_canvas(None);
+
+    for pair in 0..STAGE6_WARMUP {
+        let home = 1 + i32::from(pair % 2 == 1);
+        stage6_scroll_to(&mut canvas, &top_row, home);
+        let _ = stage6_w5_stale_half(&mut canvas, &top_row, home + 1, &clock);
+        stage6_scroll_to(&mut canvas, &top_row, home);
+        let _ = stage6_w5_rotated_half(&mut canvas, &top_row, home + 1, &clock);
+        stage6_scroll_to(&mut canvas, &top_row, home);
+    }
+
+    let mut full = Vec::with_capacity(STAGE6_PAIRS);
+    let mut skip = Vec::with_capacity(STAGE6_PAIRS);
+    let mut full_trace = String::new();
+    let mut skip_trace = String::new();
+    for pair in 0..STAGE6_PAIRS {
+        // Two independent alternations, at different periods: which half is
+        // timed first (so ordering cannot bias one side), and which absolute
+        // row range the pair scrolls over (so the shift is a real one every
+        // time rather than a no-op re-request of the current origin).
+        let stale_first = pair % 2 == 0;
+        let home = 1 + i32::from((pair / 2) % 2 == 1);
+        let away = home + 1;
+        stage6_scroll_to(&mut canvas, &top_row, home);
+
+        let mut run_stale = |canvas: &mut IronCanvas, top_row: &Rc<Cell<i32>>| {
+            let (ms, trace) = stage6_w5_stale_half(canvas, top_row, away, &clock);
+            full.push(ms);
+            full_trace = trace;
+        };
+        let mut run_rotated = |canvas: &mut IronCanvas, top_row: &Rc<Cell<i32>>| {
+            let (ms, trace) = stage6_w5_rotated_half(canvas, top_row, away, &clock);
+            skip.push(ms);
+            skip_trace = trace;
+        };
+
+        if stale_first {
+            run_stale(&mut canvas, &top_row);
+            stage6_scroll_to(&mut canvas, &top_row, home);
+            run_rotated(&mut canvas, &top_row);
+        } else {
+            run_rotated(&mut canvas, &top_row);
+            stage6_scroll_to(&mut canvas, &top_row, home);
+            run_stale(&mut canvas, &top_row);
+        }
+        stage6_scroll_to(&mut canvas, &top_row, home);
+    }
+
+    // Gate C is decided on this pair, and the rule names the production shape.
+    // Both halves must have fetched the identical full pane, or the delta below
+    // is not the quantity the gate asks about.
+    stage6_assert_full_pane(&full_trace, "W5 post_blit_full");
+    stage6_assert_full_pane(&skip_trace, "W5 post_blit_skip");
+    // And they must have reached the two verdicts the pair is named for: a
+    // silently-Skipping "full" half would report a saving of zero and a
+    // silently-Full "skip" half would report the whole frame.
+    assert!(
+        full_trace.contains("br:FULL"),
+        "W5's stale half must walk the pane; trace was `{full_trace}`"
+    );
+    assert!(
+        skip_trace.contains("br:skip"),
+        "W5's rotated half must skip the cell painter; trace was `{skip_trace}`"
+    );
+
+    stage6_emit("W5", "post_blit_full", &full_trace, &full);
+    stage6_emit("W5", "post_blit_skip", &skip_trace, &skip);
+}
+
+/// W6 — the real post-scroll edit path: a qualifying row blit followed by a
+/// borderless overlapping-row edit. Row 10 carries no border in either
+/// direction of the scroll, and its value changes every iteration so the edit
+/// is always a genuine content change.
+#[wasm_bindgen_test]
+#[ignore = "Stage 6 manual browser timing probe; run with --release --ignored --nocapture"]
+fn stage6_perf_w6_post_blit_borderless_edit() {
+    const EDITED_ROW: i32 = 10;
+    const EDITED_COL: i32 = 2;
+
+    let clock = PerfClock::new();
+    let (mut canvas, store, top_row) = stage6_scrollable_canvas(None);
+
+    let edit = |generation: usize| {
+        let mut cells = store.borrow_mut();
+        let Some(cell) = cells.get_mut(&(EDITED_ROW, EDITED_COL)) else {
+            panic!("the fixture seeds every cell in range");
+        };
+        cell.value = format!("edit-{generation}");
+    };
+
+    for generation in 0..STAGE6_WARMUP {
+        stage6_scroll_to(&mut canvas, &top_row, 2);
+        edit(generation);
+        canvas.mark_content_dirty();
+        canvas.paint_if_dirty();
+        stage6_scroll_to(&mut canvas, &top_row, 1);
+    }
+
+    let mut samples = Vec::with_capacity(STAGE6_PAIRS);
+    let mut trace = String::new();
+    for pair in 0..STAGE6_PAIRS {
+        let scrolled = if pair % 2 == 0 { 2 } else { 1 };
+        let back = if pair % 2 == 0 { 1 } else { 2 };
+        stage6_scroll_to(&mut canvas, &top_row, scrolled);
+
+        edit(STAGE6_WARMUP + pair);
+        canvas.mark_content_dirty();
+        samples.push(stage6_timed_paint(&mut canvas, &clock));
+        // Captured here, before the untimed cleanup scroll below can
+        // overwrite it with `Viewport ... br:strip` — the trace must belong
+        // to the timed paint it is emitted alongside.
+        trace = canvas.frame_trace();
+
+        stage6_scroll_to(&mut canvas, &top_row, back);
+    }
+
+    assert!(
+        trace.contains("SlotsReuse"),
+        "W6's timed paint must be the qualifying row-blit content check; trace was `{trace}`"
+    );
+    assert!(
+        trace.contains("br:rows"),
+        "W6's timed paint must reach the rotated row-only painter path; trace was `{trace}`"
+    );
+
+    stage6_emit("W6", "post_blit_edit", &trace, &samples);
+}
+
+/// W7 — the `IncompatibleRange` full fallback. Row 1 is taller than the rest,
+/// so scrolling it out of view frees enough pixels for one extra row: the
+/// scroll-axis extent changes by one and `shift_is_safe` rejects the shift,
+/// costing a whole-pane fetch and paint on a frame that planned a strip.
+#[wasm_bindgen_test]
+#[ignore = "Stage 6 manual browser timing probe; run with --release --ignored --nocapture"]
+fn stage6_perf_w7_incompatible_range_scroll() {
+    let clock = PerfClock::new();
+    let (mut canvas, _store, top_row) = stage6_scrollable_canvas(Some(1));
+
+    for _ in 0..STAGE6_WARMUP {
+        stage6_scroll_to(&mut canvas, &top_row, 2);
+        stage6_scroll_to(&mut canvas, &top_row, 1);
+    }
+
+    let mut samples = Vec::with_capacity(STAGE6_PAIRS);
+    for _ in 0..STAGE6_PAIRS {
+        top_row.set(2);
+        canvas.view_changed_js();
+        samples.push(stage6_timed_paint(&mut canvas, &clock));
+        stage6_scroll_to(&mut canvas, &top_row, 1);
+    }
+    let trace = canvas.frame_trace();
+
+    stage6_emit("W7", "edge_row_extent", &trace, &samples);
+}
+
+/// W8 — theme change then Fresh. Both directions are timed because the
+/// duplicate-invalidation hypothesis applied to either palette. Task 3
+/// settled it: `set_theme`'s eager grid invalidation is gone and the healthy
+/// Fresh prologue is the sole source of the pair, so this probe now
+/// re-measures a one-pair frame.
+#[wasm_bindgen_test]
+#[ignore = "Stage 6 manual browser timing probe; run with --release --ignored --nocapture"]
+fn stage6_perf_w8_theme_change_fresh() {
+    let clock = PerfClock::new();
+    let (mut canvas, _store, _top_row) = stage6_scrollable_canvas(None);
+
+    for _ in 0..STAGE6_WARMUP {
+        canvas.set_theme_name("dark");
+        canvas.paint_if_dirty();
+        canvas.set_theme_name("light");
+        canvas.paint_if_dirty();
+    }
+
+    let mut to_dark = Vec::with_capacity(STAGE6_PAIRS);
+    let mut to_light = Vec::with_capacity(STAGE6_PAIRS);
+    for _ in 0..STAGE6_PAIRS {
+        canvas.set_theme_name("dark");
+        to_dark.push(stage6_timed_paint(&mut canvas, &clock));
+        canvas.set_theme_name("light");
+        to_light.push(stage6_timed_paint(&mut canvas, &clock));
+    }
+    let trace = canvas.frame_trace();
+
+    stage6_emit("W8", "theme_to_dark", &trace, &to_dark);
+    stage6_emit("W8", "theme_to_light", &trace, &to_light);
+}
+
+// ==============================================================================
+// Stage 6, Task 7: offset raster gates for row-axis fingerprint rotation.
+//
+// Tasks 5 and 6 taught a qualifying row blit to carry its fingerprint history
+// across the shift instead of abandoning it. Everything that path saves, it
+// saves by NOT repainting pixels — so a native operation log can only ever show
+// that fewer draws happened, never that the surviving pixels were right. These
+// six cases close that gap the only way it can be closed: drive one canvas
+// through the real interaction, then compare its raw Canvas2D `ImageData`
+// against a second, independent canvas that paints the SAME final state in one
+// forced-Fresh shot.
+//
+// Unlike the `stage6_perf_*` probes above, these are ordinary browser tests: a
+// stale pixel is a correctness failure and belongs in CI, while a millisecond
+// is evidence for a human. They share the perf probes' production-shaped
+// geometry so a raster failure and a timing number describe the same frame.
+// ==============================================================================
+
+/// Every raster case below scrolls by exactly one row, which reveals this row
+/// at the bottom of the pane: the pane's last visible row after a `top_row`
+/// 1 -> 2 step. The store seeds one row past `STAGE6_ROWS` precisely so this row
+/// carries real content.
+const STAGE6_REVEALED_ROW: i32 = STAGE6_ROWS + 1;
+/// A column inside the pane at both `left_column` origins these cases use, and
+/// clear of the pinned active cell at column 3.
+const STAGE6_EDIT_COL: i32 = 5;
+
+/// Paint `store` at `(top_row, left_column)` on a fresh canvas in one shot and
+/// return its raw grid bytes — the reference every retained-pixel path is
+/// measured against. A brand-new `IronCanvas` has no cached buffers, no painted
+/// fingerprint tree and no prior pixels, so its first paint is unconditionally
+/// a whole-pane Fresh: nothing it produces can be inherited from an earlier
+/// frame.
+fn stage6_forced_fresh_pixels(store: FixtureStore, top_row: i32, left_column: i32) -> Vec<u8> {
+    let (_canvas, grid) = stage6_canvas_over(
+        store,
+        Rc::new(Cell::new(top_row)),
+        Rc::new(Cell::new(left_column)),
+        None,
+    );
+    grid_pixels(&grid)
+}
+
+/// Move the horizontal scroll origin and paint — `stage6_scroll_to`'s
+/// column-axis twin, used only by the column-blit control.
+fn stage6_scroll_columns_to(canvas: &mut IronCanvas, left_column: &Rc<Cell<i32>>, column: i32) {
+    left_column.set(column);
+    canvas.view_changed_js();
+    canvas.paint_if_dirty();
+}
+
+/// Build a Stage 6 canvas at the origin every raster case starts from, plus the
+/// mutable store and both scroll origins.
+fn stage6_raster_canvas(
+    store: FixtureStore,
+) -> (IronCanvas, HtmlCanvasElement, Rc<Cell<i32>>, Rc<Cell<i32>>) {
+    let top_row = Rc::new(Cell::new(1));
+    let left_column = Rc::new(Cell::new(1));
+    let (canvas, grid) =
+        stage6_canvas_over(store, Rc::clone(&top_row), Rc::clone(&left_column), None);
+    (canvas, grid, top_row, left_column)
+}
+
+fn stage6_set_value(store: &FixtureStore, row: i32, col: i32, value: &str) {
+    let mut cells = store.borrow_mut();
+    let Some(cell) = cells.get_mut(&(row, col)) else {
+        panic!("the Stage 6 fixture seeds every cell in and one step past the pane");
+    };
+    cell.value = value.to_string();
+}
+
+fn stage6_set_left_border(
+    store: &FixtureStore,
+    row: i32,
+    col: i32,
+    style: Option<ic::BorderStyle>,
+) {
+    let mut cells = store.borrow_mut();
+    let Some(cell) = cells.get_mut(&(row, col)) else {
+        panic!("the Stage 6 fixture seeds every cell in and one step past the pane");
+    };
+    cell.border_left = style;
+}
+
+fn stage6_set_fill(store: &FixtureStore, row: i32, col: i32, fill: Option<&str>) {
+    let mut cells = store.borrow_mut();
+    let Some(cell) = cells.get_mut(&(row, col)) else {
+        panic!("the Stage 6 fixture seeds every cell in and one step past the pane");
+    };
+    cell.fill = fill.map(str::to_string);
+}
+
+/// Every byte offset at which `actual` and `expected` disagree.
+fn stage6_pixel_diff(actual: &[u8], expected: &[u8]) -> Vec<usize> {
+    actual
+        .iter()
+        .zip(expected.iter())
+        .enumerate()
+        .filter(|(_, (got, want))| got != want)
+        .map(|(offset, _)| offset)
+        .collect()
+}
+
+/// The byte offsets at which a canvas that has simply painted *twice* differs
+/// from one that painted once, over identical content at identical geometry.
+///
+/// This is not zero, and it is not a Stage 6 defect. Two pixels on the seam row
+/// between the column header and the cell area — `(407, 28)` and `(1222, 28)`
+/// at this canvas size — read 226 instead of 232 after any second paint,
+/// including a plain `RepaintPlan::Skip` that draws nothing at all in the cell
+/// area. The header band is repainted every frame while the cell area
+/// deliberately is not cleared, so the antialiased tail of a header stroke
+/// composites onto its own previous output. It is reproduced here rather than
+/// hard-coded because a hard-coded coordinate would silently stop describing
+/// the artefact the day the header geometry moves.
+///
+/// The gate below therefore does not weaken to "close enough": it requires the
+/// retained-pixel path to differ from forced Fresh in a SUBSET of exactly these
+/// offsets and nowhere else. A stale stroke, an unshifted band or a missed
+/// strip row all land outside the set and fail. (A subset rather than an equal
+/// set because a conservative whole-pane repaint clears the cell background
+/// first, which erases the seam pixel and matches forced Fresh exactly.)
+fn stage6_repaint_seam(
+    store: FixtureStore,
+    top_row: i32,
+    left_column: i32,
+    fresh: &[u8],
+) -> Vec<usize> {
+    let (mut canvas, grid) = stage6_canvas_over(
+        store,
+        Rc::new(Cell::new(top_row)),
+        Rc::new(Cell::new(left_column)),
+        None,
+    );
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(
+        &canvas.frame_trace(),
+        "br:skip",
+        "repaint-seam control (unchanged content must skip)",
+    );
+    stage6_pixel_diff(&grid_pixels(&grid), fresh)
+}
+
+/// The offset raster gate: `grid`'s current pixels against a forced-Fresh
+/// render of `store` at `(top_row, left_column)`.
+///
+/// `store` is the scenario's own live store, so the reference paints the
+/// scenario's FINAL state — the comparison is "did the retained path arrive
+/// where a from-scratch paint would have", not "did it change anything".
+fn stage6_assert_matches_forced_fresh(
+    grid: &HtmlCanvasElement,
+    store: &FixtureStore,
+    top_row: i32,
+    left_column: i32,
+    case: &str,
+) {
+    let fresh = stage6_forced_fresh_pixels(Rc::clone(store), top_row, left_column);
+    let actual = grid_pixels(grid);
+    assert_eq!(
+        actual.len(),
+        fresh.len(),
+        "Stage 6 raster case `{case}`: both canvases must have identical backing stores"
+    );
+
+    let seam = stage6_repaint_seam(Rc::clone(store), top_row, left_column, &fresh);
+    let diff = stage6_pixel_diff(&actual, &fresh);
+    let stale: Vec<usize> = diff
+        .iter()
+        .copied()
+        .filter(|offset| !seam.contains(offset))
+        .collect();
+    if stale.is_empty() {
+        return;
+    }
+
+    // `assert_eq!` on the two ~3.8 MB byte vectors cannot be used to report
+    // this: the failure message alone exceeds the browser runner's 10 MB
+    // response limit and aborts the whole suite with a transport error instead
+    // of naming the case. The comparison is still every byte; only the
+    // diagnosis is summarised, in the pixel coordinates a stale-stroke or
+    // unshifted-band bug is actually identified by.
+    let width = STAGE6_CANVAS_W as usize;
+    let sample: Vec<String> = stale
+        .iter()
+        .take(8)
+        .map(|&offset| {
+            let pixel = offset / 4;
+            format!(
+                "({x},{y})ch{ch} got {got} want {want}",
+                x = pixel % width,
+                y = pixel / width,
+                ch = offset % 4,
+                got = actual[offset],
+                want = fresh[offset],
+            )
+        })
+        .collect();
+    panic!(
+        "Stage 6 raster case `{case}` left {n} byte(s) that forced Fresh does not have, \
+         beyond the {seam_n}-byte header-seam control: {sample}",
+        n = stale.len(),
+        seam_n = seam.len(),
+        sample = sample.join("; "),
+    );
+}
+
+fn stage6_assert_verdict(trace: &str, expected: &str, case: &str) {
+    assert!(
+        trace.contains(expected),
+        "Stage 6 raster case `{case}` must reach `{expected}`, but its frame trace was `{trace}`"
+    );
+}
+
+/// Case 1 — a qualifying row blit followed by an unchanged-content
+/// notification. Rotation makes this the first frame in the project's history
+/// that can answer "nothing changed" *immediately* after a scroll; the pixels
+/// it keeps are the ones the blit shifted plus the strip it painted, and they
+/// must equal a forced-Fresh render of the post-scroll viewport exactly.
+#[wasm_bindgen_test]
+fn stage6_post_blit_unchanged_content_skips_and_matches_forced_fresh() {
+    let store = stage6_fixture_store();
+    let (mut canvas, grid, top_row, _left_column) = stage6_raster_canvas(Rc::clone(&store));
+
+    stage6_scroll_to(&mut canvas, &top_row, 2);
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(
+        &canvas.frame_trace(),
+        "br:skip",
+        "post-blit unchanged content",
+    );
+
+    stage6_assert_matches_forced_fresh(&grid, &store, 2, 1, "post-blit unchanged content");
+}
+
+/// Case 2 — a qualifying row blit followed by a borderless overlapping-row
+/// edit. Before rotation this frame could only be a range-mismatch `Full`;
+/// with rotation the planner can name the one changed row. The narrow band it
+/// repaints must reconstruct the same raster the whole-pane path would have.
+#[wasm_bindgen_test]
+fn stage6_post_blit_borderless_edit_repaints_rows_and_matches_forced_fresh() {
+    const EDITED_ROW: i32 = 12;
+
+    let store = stage6_fixture_store();
+    let (mut canvas, grid, top_row, _left_column) = stage6_raster_canvas(Rc::clone(&store));
+
+    stage6_scroll_to(&mut canvas, &top_row, 2);
+    stage6_set_value(&store, EDITED_ROW, STAGE6_EDIT_COL, "post-blit-edit");
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(
+        &canvas.frame_trace(),
+        "br:rows",
+        "post-blit borderless edit",
+    );
+
+    stage6_assert_matches_forced_fresh(&grid, &store, 2, 1, "post-blit borderless edit");
+}
+
+/// Case 3 — the border case the whole truth machinery exists for. A MEDIUM
+/// vertical border lives on the row the scroll reveals, so it is painted by the
+/// blit's own strip; the next frame removes it. A medium stroke is drawn wider
+/// than a thin one and does not stay inside its cell rect, so clearing only the
+/// changed row's band would leave a stale stub above it. The planner must
+/// therefore refuse the narrow band, and whole-canvas byte equality against
+/// forced Fresh is what proves no stub survived anywhere — including the rows
+/// the blit merely shifted and never repainted.
+#[wasm_bindgen_test]
+fn stage6_post_blit_revealed_row_border_removal_is_border_safe_against_forced_fresh() {
+    let store = stage6_fixture_store();
+    stage6_set_left_border(
+        &store,
+        STAGE6_REVEALED_ROW,
+        STAGE6_EDIT_COL,
+        Some(ic::BorderStyle::Medium),
+    );
+    let (mut canvas, grid, top_row, _left_column) = stage6_raster_canvas(Rc::clone(&store));
+
+    // The blit reveals the bordered row and its strip paints the stroke.
+    stage6_scroll_to(&mut canvas, &top_row, 2);
+
+    stage6_set_left_border(&store, STAGE6_REVEALED_ROW, STAGE6_EDIT_COL, None);
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(
+        &canvas.frame_trace(),
+        "br:FULL",
+        "revealed-row medium border removal",
+    );
+
+    stage6_assert_matches_forced_fresh(&grid, &store, 2, 1, "revealed-row medium border removal");
+}
+
+/// Case 4 — a conditional-format change on a row the blit revealed. The browser
+/// host expresses CF as a dxf-MERGED style (see `FixtureCell::fill`), so this
+/// removes a CF fill rather than a `CellDecoration`: `JsBackedModel` has no
+/// decoration accessor, and inventing one here would test a channel the browser
+/// host does not have. The fill covers the whole cell rect, so a missed repaint
+/// is a large, unmistakable pixel difference.
+#[wasm_bindgen_test]
+fn stage6_post_blit_revealed_row_cf_change_matches_forced_fresh() {
+    let store = stage6_fixture_store();
+    stage6_set_fill(
+        &store,
+        STAGE6_REVEALED_ROW,
+        STAGE6_EDIT_COL,
+        Some("#FFCC00"),
+    );
+    let (mut canvas, grid, top_row, _left_column) = stage6_raster_canvas(Rc::clone(&store));
+
+    stage6_scroll_to(&mut canvas, &top_row, 2);
+
+    stage6_set_fill(&store, STAGE6_REVEALED_ROW, STAGE6_EDIT_COL, None);
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let trace = canvas.frame_trace();
+    assert!(
+        !trace.contains("br:skip"),
+        "a CF fill that disappeared from a revealed row must repaint something; trace was `{trace}`"
+    );
+
+    stage6_assert_matches_forced_fresh(&grid, &store, 2, 1, "revealed-row CF fill removal");
+}
+
+/// Case 5 — the healing path, and the same sequence the redesigned W5 stale
+/// half times. A Damage strip commits `MarkStale`, so the row blit after it
+/// cannot rotate; the retained tree still describes the pre-scroll range, and
+/// the following edit therefore takes the conservative whole-pane repaint that
+/// reseeds it. This is the case that must stay conservative: the assertion is
+/// that it does, and that the frame it produces is raster-correct.
+#[wasm_bindgen_test]
+fn stage6_damage_then_blit_then_edit_heals_and_matches_forced_fresh() {
+    const EDITED_ROW: i32 = 14;
+
+    let store = stage6_fixture_store();
+    let (mut canvas, grid, top_row, _left_column) = stage6_raster_canvas(Rc::clone(&store));
+
+    canvas.mark_rows_damaged(0, STAGE6_DAMAGE_ROW, STAGE6_DAMAGE_ROW);
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "br:strip", "Damage strip");
+
+    stage6_scroll_to(&mut canvas, &top_row, 2);
+
+    stage6_set_value(&store, EDITED_ROW, STAGE6_EDIT_COL, "healed");
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(
+        &canvas.frame_trace(),
+        "br:FULL",
+        "Damage-then-blit-then-edit",
+    );
+
+    stage6_assert_matches_forced_fresh(&grid, &store, 2, 1, "Damage-then-blit-then-edit healing");
+}
+
+/// Case 6 — the column-axis control. Stage 6 limits rotation to the row axis,
+/// so a column blit must still mark history stale and leave the next content
+/// frame conservative. Asserting the conservative verdict here is what would
+/// catch a future rotation quietly widening to the column axis without its own
+/// geometry and raster design.
+#[wasm_bindgen_test]
+fn stage6_column_blit_stays_conservative_and_matches_forced_fresh() {
+    const EDITED_ROW: i32 = 12;
+
+    let store = stage6_fixture_store();
+    let (mut canvas, grid, _top_row, left_column) = stage6_raster_canvas(Rc::clone(&store));
+
+    stage6_scroll_columns_to(&mut canvas, &left_column, 2);
+    stage6_assert_verdict(&canvas.frame_trace(), "br:strip", "column blit");
+
+    stage6_set_value(&store, EDITED_ROW, STAGE6_EDIT_COL, "post-column-blit-edit");
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "br:FULL", "post-column-blit edit");
+
+    stage6_assert_matches_forced_fresh(&grid, &store, 1, 2, "post-column-blit edit");
 }

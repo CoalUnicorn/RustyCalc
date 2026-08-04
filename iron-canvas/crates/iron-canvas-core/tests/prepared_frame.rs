@@ -234,14 +234,17 @@ fn late_fresh_pane_failure_recycles_every_prepared_capacity() {
     );
 
     for pane in [PaneRegion::TopRight, PaneRegion::BottomRight] {
-        let (cells, fingerprint) = core.pane_cache.pane(pane).preparation_scratch_capacities();
+        let pane_buf = core.pane_cache.pane(pane);
+        let (cells, _) = pane_buf.preparation_scratch_capacities();
         assert!(
             cells.0 > 0 && cells.1 > 0 && cells.2 > 0 && cells.3 > 0,
             "{pane:?} must return every fetched channel's capacity on abort: {cells:?}"
         );
+        let fingerprint_rows = pane_buf.fingerprint_row_scratch_capacity();
         assert!(
-            fingerprint.0 > 0 && fingerprint.1 > 0,
-            "{pane:?} must return its candidate fingerprint capacity on abort: {fingerprint:?}"
+            fingerprint_rows > 0,
+            "{pane:?} must return its candidate fingerprint row capacity on abort: \
+             {fingerprint_rows}"
         );
     }
 }

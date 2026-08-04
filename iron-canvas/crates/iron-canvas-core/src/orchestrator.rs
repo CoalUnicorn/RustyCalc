@@ -852,16 +852,23 @@ where
     }
 
     /// Push a theme. Value-compares against `self.theme` and, on change,
-    /// invalidates the renderer paint cache and marks both layers dirty.
-    /// `Chrome::classify` rejects a theme-mismatched frame itself, so the
-    /// next paint reaches `Fresh` through the classifier's verdict — no
-    /// out-of-band `last_frame` drop needed here. The paint-cache invalidation stays: the
-    /// per-cell fingerprint cache is keyed on content, not palette, so even a
-    /// Fresh rebuild would fingerprint-skip stale-color cells without it.
+    /// marks both layers dirty. `Chrome::classify` rejects a theme-mismatched
+    /// frame itself, so the next paint reaches `Fresh` through the
+    /// classifier's verdict — no out-of-band `last_frame` drop needed here.
+    ///
+    /// Deliberately does *not* invalidate the grid paint cache (Stage 6,
+    /// Gate A): since the only route out of that classifier rejection is a
+    /// `Fresh` walk, and `Layer::paint_grid_fresh` invalidates after its
+    /// panes prepare and before its first draw, an eager call here is a
+    /// second, redundant painter state transition. Leaving it out also stops
+    /// a *held* theme Fresh from touching the painter at all. Cell repaint
+    /// coverage does not depend on it either way: `invalidate_paint_cache`
+    /// only resets painter ctx state, and a Fresh candidate forces
+    /// `RepaintPlan::Full` without consulting the content-keyed fingerprint
+    /// tree (`build_prepared_full_pane`).
     pub fn set_theme(&mut self, theme: CanvasTheme) {
         if theme != *self.theme {
             self.theme = Rc::new(theme);
-            self.grid.invalidate_paint_cache();
             self.pending.mark_geometry();
             self.pending.mark_overlay();
         }

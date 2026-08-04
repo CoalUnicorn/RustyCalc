@@ -1,8 +1,8 @@
 //! `render_pane` live-dispatch and pane-lifecycle integration tests for the
-//! pane->row->cell fingerprint repaint system.
+//! pane->row fingerprint repaint system.
 //!
-//! Pure planner/tree tests against `plan_pane_repaint` / `build_pane_fingerprint`
-//! / `diff_changed_cells` live in `fingerprint.rs`'s own `#[cfg(test)] mod
+//! Pure planner/tree tests against `plan_pane_repaint` /
+//! `build_pane_fingerprint` live in `fingerprint.rs`'s own `#[cfg(test)] mod
 //! tests` — those types are `pub(crate)`, so only visible there. This file
 //! covers what can only be observed through PUBLIC behavior:
 //! `RendererCore::render_pane` / `render_pane_damage`'s actual paint
@@ -12,17 +12,32 @@
 
 mod common;
 
-use iron_canvas_core::RCRange;
-use iron_canvas_core::RowSpan;
-use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegion, PaneRegionMask};
+use iron_canvas_core::chrome::{
+    ActiveCellSnapshot, BlitOutcome, BlitPlan, Chrome, FrameKindTag, FramePath, PaneRegion,
+    PaneRegionMask,
+};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
+use iron_canvas_core::{CanvasModel, FrameDelta, FrameInputs, PaneVerdict, RCRange, RowSpan};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
 
 fn promote_to_slots_reuse(frame: &mut Chrome) {
     frame.kind = FrameKindTag::SlotsReused;
+}
+
+/// Same qualify-then-blit pair `scroll_blit.rs` drives its own fixtures with
+/// (each integration test file owns its copy, as `blit_fallback.rs` and
+/// `blit_golden.rs` already do) — needed here because Damage's effect on
+/// fingerprint *truth* is only observable through a later shift's eligibility.
+fn qualify_scroll(prev: &Chrome, m: &TestModel, inputs: &FrameInputs) -> BlitPlan {
+    let view = m.get_selected_view().expect("scroll model has view");
+    let snap = ActiveCellSnapshot::capture(m, view.sheet, view.row, view.column);
+    match Chrome::classify(Some(prev), m, inputs, Some(&snap)) {
+        FrameDelta::Scroll(plan) => plan,
+        _ => panic!("row scroll must qualify for blit"),
+    }
 }
 
 #[test]
@@ -299,6 +314,72 @@ fn lifecycle_damage_strip_scopes_to_intersected_pane_and_reseeds_on_next_paint()
         core.painter().ops().len(),
         idempotent_ops_before,
         "once reseeded, an unchanged repaint must Skip again"
+    );
+}
+
+/// Stage 6 Task 6: a Damage strip must mark the pane's fingerprint history
+/// stale, so a row blit that follows it immediately cannot carry that history
+/// forward — even though every geometric precondition for rotation is met.
+///
+/// This is the case range equality alone cannot catch, and the whole reason a
+/// separate truth state exists: Damage repaints a band *without* changing the
+/// pane's range, so the retained tree still describes `prev_range` exactly
+/// when the next shift asks. `scroll_blit.rs`'s
+/// `frame_trace_names_the_post_blit_slots_reuse_paint_as_skip` runs the same
+/// scroll on an undamaged pane and gets `Skip`; the only difference here is
+/// the Damage strip in between, and the verdict must fall back to the
+/// conservative whole-pane repaint that reseeds a proven tree.
+///
+/// Damage never installs a tree of its own, however truthful its band looks:
+/// removing a medium or thick border can leave bleed *outside* the cleared
+/// band, which no candidate built from the band's cells would describe.
+#[test]
+fn damage_marks_history_stale_so_the_next_row_blit_cannot_rotate() {
+    let m = TestModel::synthetic_grid();
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let mut frame0 = Chrome::next(None, &m, &inputs, FramePath::Fresh);
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+
+    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
+    promote_to_slots_reuse(&mut frame0);
+
+    let range = PaneRegion::BottomRight
+        .range(&frame0)
+        .expect("BottomRight must have a range on this canvas");
+    let damaged_row = range.r1 + 1;
+    m.set_cell(damaged_row, range.c1, "damaged");
+    core.render_pane_damage(
+        &m,
+        &frame0,
+        PaneRegion::BottomRight,
+        &[RowSpan {
+            r1: damaged_row,
+            r2: damaged_row,
+        }],
+    );
+
+    // A row scroll small enough that the damaged row survives into the new
+    // range — so the tree the rotation would have carried forward is exactly
+    // the one the Damage band invalidated.
+    m.set_top_row(range.r1 + 1);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let plan = qualify_scroll(&frame0, &m, &inputs);
+    let inputs = test_inputs(&m, canvas_default(), &theme);
+    let BlitOutcome::Blitted(mut frame1) = Chrome::next_blit(Some(frame0), &m, &inputs, &plan)
+    else {
+        panic!("row scroll must blit in place");
+    };
+    core.render_grid_blit(&m, &frame1, &plan);
+    promote_to_slots_reuse(&mut frame1);
+
+    core.reset_trace();
+    core.render_pane(&m, PaneRegion::BottomRight, &frame1);
+    assert_eq!(
+        core.trace().panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Full),
+        "a row blit over Damage-stale history must not rotate — the next paint \
+         reseeds the whole pane"
     );
 }
 

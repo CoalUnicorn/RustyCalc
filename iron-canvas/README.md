@@ -246,6 +246,24 @@ The `Painter` trait is unsealed; adapter crates implement it. Renderer code does
 
 Selection, autofill preview, clipboard ants, point-mode, and formula-ref outlines each implement the `Layer` trait in `crates/iron-canvas-core/src/decoration/`. `LayerBase::paint_overlay_layer` walks the built-ins in fixed z-order, followed by consumer layers registered through `Orchestrator::add_decoration`.
 
+### Ownership
+
+Nine decisions, each owned by exactly one place. Reach for this table
+before reading source: it answers "who decides this" so you don't have
+to reconstruct it from call sites.
+
+| State/decision | Owner | Invariant |
+| --- | --- | --- |
+| queued intent | `Orchestrator::pending: PendingWork` | one mergeable value, taken once per attempt via `mem::take` |
+| captured scalar inputs | `FrameInputs::capture` | fallible values read once before geometry/paint; any failure holds the whole attempt |
+| committed geometry | `Orchestrator::last_frame: Option<Chrome>` | queries see only a presented/committed frame, never a candidate |
+| geometric verdict | `Chrome::classify` | one `Stable`/`Scroll`/`Rebuild` result per attempt |
+| planned grid/overlay work | `FramePlan` | scope (`GridWork`, pane mask, row spans) is explicit and passed in, never read back off `Chrome` |
+| prepared model data | renderer-owned `Prepared*` values | failed preparation writes only renderer-lifetime scratch, never committed state |
+| committed pane/fingerprint cache | `PaneCache` / `PaneFingerprintState` | metadata describes only pixels that actually painted |
+| completion/retry/presentation | `Orchestrator::finish_attempt` | one boundary installs cache, advances `last_frame`, presents, and merges retry |
+| drawing backend state | `Surface` and `Painter` | renderer stays backend-neutral; no `CanvasRenderingContext2d` outside the backend crate |
+
 ### Per-frame snapshot and dispatch
 
 `Chrome` is committed frame geometry — canvas size, DPR, theme, model
@@ -288,9 +306,16 @@ execute -> finish` before a paint attempt is complete:
    only and skips the grid rebuild. `Viewport` runs the scroll blit.
    `Damage` repaints only explicitly damaged row bands while preserving
    slot geometry. `SlotsReuse` keeps the viewport stable and refetches
-   only the masked panes. `Fresh` is the full rebuild — the only arm
-   reached when content and view work are both queued together (e.g.
-   commit-then-move on Enter/Tab).
+   only the masked panes — but `Panes(mask)` here is *candidate* fetch
+   scope, not the repaint verdict: each fetched pane's own fingerprint
+   tree still decides `Skip`, `Rows`, or `Full` independently against
+   what is actually on screen (`docs/rendering-and-damage.md` §1, §3).
+   `Fresh` is the full rebuild — the only arm reached when content and
+   view work are both queued together (e.g. commit-then-move on
+   Enter/Tab). That combined case still always plans `Fresh` today, even
+   when the geometric delta is `Stable`; reusing `SlotsReuse`/`Damage`
+   for a stable content+view attempt is a deferred follow-up, not
+   current behavior.
 4. The dispatched regime *prepares* its scope — every bulk bridge read,
    classified against the pane cache's committed state — without
    installing any of it, then *executes*: paints the prepared scope and
@@ -311,6 +336,11 @@ the caller can just call `paint_if_dirty` again next tick with no new
 external input needed. See `docs/rendering-and-damage.md` for the full
 decision-machinery writeup, including the exact per-regime failure
 policy table.
+
+No paired Canvas2D runtime exists yet: `WebSurface`/`CanvasPainter`
+pairs (grid + overlay) are still constructed and owned separately by
+each facade — `IronCanvas`, `DataGridCanvas` — rather than by one
+shared lifecycle object.
 
 ### Pane pipeline and theme
 
@@ -346,6 +376,13 @@ resulting `Vec<DrawOp>`. The five-regime integration test in
 ```
 cargo test --workspace
 ```
+
+## Further reading
+
+| Reader need | Target |
+| --- | --- |
+| exact planner/cache/retry behavior | [`docs/rendering-and-damage.md`](docs/rendering-and-damage.md) |
+| transactional rationale and migration record | [`docs/designs/2026-07-27-transactional-render-pipeline.md`](docs/designs/2026-07-27-transactional-render-pipeline.md) |
 
 ## Status
 

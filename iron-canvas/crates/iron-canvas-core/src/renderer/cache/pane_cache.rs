@@ -17,7 +17,8 @@ use std::cell::{Cell, RefCell};
 use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
 use crate::renderer::cell::fingerprint::{
-    PaneFingerprint, RepaintPlan, plan_pane_repaint, rebuild_pane_fingerprint_in_place,
+    PaneFingerprint, RepaintPlan, RowShiftFingerprint, RowShiftIneligible, plan_pane_repaint,
+    rebuild_pane_fingerprint_in_place, rotate_pane_fingerprint_in_place,
 };
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{CellDecoration, CellKind, CellStyle};
@@ -27,19 +28,30 @@ use crate::types::fetched::Fetched;
 /// One pane's painted-pixel fingerprint state, a sibling of
 /// [`PaneBuffers`]'s model-buffer cache (`range`).
 ///
-/// A stale painted tree is *self-disqualifying* — no separate "is this tree
-/// valid" marker is needed. The pane's address-space `range` is folded into
-/// `PaneFingerprint.digest` itself (`build_pane_fingerprint` hashes
-/// `range.r1/c1/r2/c2` before any row), and `plan_pane_repaint` gates on
-/// `painted.range != scratch.range -> Full` right after its digest compare.
-/// A scroll always changes the live range, so a tree left over from before a
-/// scroll can never digest-equal (nor range-equal) a freshly rebuilt tree for
-/// the new range — the compare already forces a full repaint. A splice-kind
-/// pane-cache commit (a Damage strip or a blit's revealed strip) simply
-/// doesn't `commit` into this tree — see `install_pane_cache_commit`'s
-/// `PaneCacheCommit::Splice` arm — so `painted` keeps last full paint's
-/// range/digest; the next frame's compare against that naturally decides
-/// Skip or repaint on its own merits.
+/// For the whole-pane comparison, a stale painted tree is
+/// *self-disqualifying* — it needs no marker to be safe. The pane's
+/// address-space `range` is folded into `PaneFingerprint.digest` itself
+/// (`build_pane_fingerprint` hashes `range.r1/c1/r2/c2` before any row), and
+/// `plan_pane_repaint` gates on `painted.range != scratch.range -> Full`
+/// right after its digest compare. A splice-kind pane-cache commit that
+/// cannot prove a complete post-strip tree (a Damage band, an emptied pane, a
+/// column or ineligible row shift) therefore leaves `painted` holding the last
+/// proven paint's range/digest and only marks it [`FingerprintTruth::Stale`];
+/// the next frame's whole-pane compare against that tree naturally decides
+/// Skip or repaint on its own merits. That conservative comparison is exactly
+/// what heals a pane whose history no longer describes its pixels, and
+/// [`Self::compare_to_painted`] therefore reads the tree regardless of
+/// [`FingerprintTruth`].
+///
+/// [`Self::build_row_shift_candidate`] is the one operation that cannot rely
+/// on that self-disqualification, which is why `truth` exists. It wants to
+/// *carry history forward* rather than compare against it, and range equality
+/// alone cannot prove history is carryable: a Damage strip changes pixels
+/// while leaving the painted tree's range untouched. `truth` is the closed
+/// answer to "does this tree still describe the pixels and committed buffers
+/// it claims to" — `Stale` by default (an unpainted tree is never rotatable),
+/// `Exact` only after an [`Self::install`] of a complete candidate, back to
+/// `Stale` on any [`Self::mark_stale`] strip commit.
 ///
 /// Ownership lives here (renderer-lifetime, on `RendererCore` via
 /// `PaneCache`) rather than on `Chrome` (rebuilt every `Fresh`/`SlotsReuse`/
@@ -61,6 +73,27 @@ use crate::types::fetched::Fetched;
 pub(crate) struct PaneFingerprintState {
     painted: RefCell<PaneFingerprint>,
     scratch: RefCell<PaneFingerprint>,
+    truth: Cell<FingerprintTruth>,
+}
+
+/// Whether a pane's retained `painted` tree still describes the pixels and
+/// committed buffers it claims to describe.
+///
+/// Closed and two-valued on purpose: the only question any caller may ask is
+/// "may I treat this history as fact?", and `Stale` is the answer that costs
+/// nothing but a repaint. A `bool` would invite a third reading ("unset");
+/// an `Option<PaneFingerprint>` would conflate "no history" with "history I
+/// can still usefully compare against", which is precisely the comparison
+/// that heals a stale pane.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum FingerprintTruth {
+    /// The tree was built from, and installed alongside, the exact buffers
+    /// that were painted.
+    Exact,
+    /// The tree may describe pre-strip pixels. Safe to compare against,
+    /// never safe to carry forward.
+    #[default]
+    Stale,
 }
 
 impl PaneFingerprintState {
@@ -109,9 +142,78 @@ impl PaneFingerprintState {
     /// zero allocation, zero clone. Must be called at most once per
     /// successful pane commit, and never on a held/failed preparation (see
     /// `RendererCore::install_pane_cache_commit`, the only caller).
+    ///
+    /// Installing a complete candidate alongside the cells it was built from
+    /// is what makes history `Exact` — including a `Skip`/`Rows` verdict,
+    /// whose candidate describes the pane just as completely as a `Full`
+    /// one's does.
     pub(crate) fn install(&self, candidate: PaneFingerprint) {
         let old = std::mem::replace(&mut *self.painted.borrow_mut(), candidate);
         *self.scratch.borrow_mut() = old;
+        self.truth.set(FingerprintTruth::Exact);
+    }
+
+    /// Commit: record that the painted tree may no longer describe the
+    /// pane's pixels, without discarding it — the next whole-pane comparison
+    /// still reads it, and that comparison is what schedules the healing
+    /// repaint. For a strip commit that changed pixels the tree did not
+    /// witness (a Damage band, an emptied pane), and for any shift this
+    /// stage refuses to rotate.
+    pub(crate) fn mark_stale(&self) {
+        self.truth.set(FingerprintTruth::Stale);
+    }
+
+    /// Derive a complete candidate for a row-scrolled pane from history
+    /// instead of a full-pane fetch: rows that survived the shift are carried
+    /// across from the painted tree, rows the widened `strip_range` names are
+    /// fingerprinted from `strip` — the values the blit already fetched and
+    /// is about to paint, read here *before* the painter drains them.
+    ///
+    /// Read-only with respect to everything semantic. `painted` and `truth`
+    /// are only read; the candidate is assembled in the non-semantic
+    /// `scratch` slot (for its warm `Vec` capacity, exactly like
+    /// [`Self::build_candidate`]) and then taken out as an owned value, so
+    /// an attempt that is later held leaves nothing of itself behind. A
+    /// rejected rotation writes nothing at all.
+    ///
+    /// `prev_range` is the caller's own view of what the pane cached, taken
+    /// from the same `PaneShiftPrep::Shifted` that authorized the blit; a
+    /// painted tree describing anything else is not the history of this
+    /// shift and is refused rather than reinterpreted.
+    pub(crate) fn build_row_shift_candidate(
+        &self,
+        prev_range: RCRange,
+        new_range: RCRange,
+        axis: Axis,
+        strip: &FetchedCells,
+        strip_range: RCRange,
+    ) -> RowShiftFingerprint {
+        // Column-axis rotation is out of scope by design, not by omission: a
+        // horizontal shift changes which columns each row spans, so no row
+        // digest survives it.
+        if let Axis::Column = axis {
+            return RowShiftFingerprint::Ineligible(RowShiftIneligible::ColumnAxis);
+        }
+        if let FingerprintTruth::Stale = self.truth.get() {
+            return RowShiftFingerprint::Ineligible(RowShiftIneligible::StaleHistory);
+        }
+
+        let painted = self.painted.borrow();
+        if painted.range != prev_range {
+            return RowShiftFingerprint::Ineligible(RowShiftIneligible::PriorRangeMismatch);
+        }
+
+        let mut scratch = self.scratch.borrow_mut();
+        match rotate_pane_fingerprint_in_place(
+            &mut scratch,
+            &painted,
+            new_range,
+            strip,
+            strip_range,
+        ) {
+            Ok(()) => RowShiftFingerprint::Rotated(std::mem::take(&mut scratch)),
+            Err(reason) => RowShiftFingerprint::Ineligible(reason),
+        }
     }
 
     /// Abort-only: return an uncommitted candidate to the warm scratch slot.
@@ -120,13 +222,21 @@ impl PaneFingerprintState {
         *self.scratch.borrow_mut() = candidate;
     }
 
+    /// Test-only: the warm scratch tree's retained row capacity. Rows are the
+    /// finest unit the tree stores, so one number describes all of it.
+    #[cfg(feature = "surface-introspection")]
+    fn scratch_row_capacity(&self) -> usize {
+        self.scratch.borrow().rows.capacity()
+    }
+
+    /// Test-only, pre-Stage-6 shape preserved for API compatibility: `(row
+    /// capacity, cell capacity)`. The cell leaf no longer exists (Stage 6
+    /// collapsed `pane -> row -> cell` to `pane -> row`), so the second slot
+    /// is always `0`; callers that want just the row number should use
+    /// [`Self::scratch_row_capacity`] via [`PaneBuffers::fingerprint_row_scratch_capacity`].
     #[cfg(feature = "surface-introspection")]
     fn scratch_capacities(&self) -> (usize, usize) {
-        let scratch = self.scratch.borrow();
-        (
-            scratch.rows.capacity(),
-            scratch.rows.iter().map(|row| row.cells.capacity()).sum(),
-        )
+        (self.scratch_row_capacity(), 0)
     }
 }
 
@@ -149,9 +259,12 @@ pub struct PaneBuffers {
     /// when this pane has never been painted, or was last seen empty
     /// (e.g. unfrozen-axis pane on a sheet without freezes).
     pub range: Cell<Option<RCRange>>,
-    /// The pane's last-committed painted-pixel fingerprint tree. See
-    /// [`PaneFingerprintState`]'s doc for how a stale tree self-disqualifies
-    /// via its baked-in range, needing no separate validity marker.
+    /// The pane's last-committed painted-pixel fingerprint tree, plus whether
+    /// that tree may be carried forward. See [`PaneFingerprintState`]'s doc
+    /// for why comparison needs no validity marker (a stale tree
+    /// self-disqualifies via its baked-in range) while
+    /// [`PaneFingerprintState::build_row_shift_candidate`] does, and gets one
+    /// in [`FingerprintTruth`].
     pub(crate) fingerprint: PaneFingerprintState,
     /// Spare [`FetchedCells`] capacity for the next full-pane preparation
     /// attempt (`RendererCore::prepare_full_pane`). Preparation takes this
@@ -166,12 +279,23 @@ pub struct PaneBuffers {
 }
 
 impl PaneBuffers {
+    /// Pre-Stage-6 shape preserved for API compatibility. The second tuple's
+    /// cell-leaf slot is always `0` now that `CellFingerprint` is gone; use
+    /// [`Self::fingerprint_row_scratch_capacity`] for the row number alone.
     #[cfg(feature = "surface-introspection")]
     pub fn preparation_scratch_capacities(&self) -> ((usize, usize, usize, usize), (usize, usize)) {
         let cells = self.prepare_scratch.take();
         let cell_capacities = cells.capacities();
         self.prepare_scratch.set(cells);
         (cell_capacities, self.fingerprint.scratch_capacities())
+    }
+
+    /// Test-only: the warm fingerprint scratch tree's retained row capacity,
+    /// added alongside [`Self::preparation_scratch_capacities`] (Stage 6)
+    /// since that method's fixed shape has no room for a single clean number.
+    #[cfg(feature = "surface-introspection")]
+    pub fn fingerprint_row_scratch_capacity(&self) -> usize {
+        self.fingerprint.scratch_row_capacity()
     }
 
     /// Pure: hand back whatever spare [`FetchedCells`] capacity is parked

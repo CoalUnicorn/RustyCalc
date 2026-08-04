@@ -50,6 +50,18 @@
 //! rotation itself (`PaneBuffers::apply_shift`) only ever runs here, after
 //! every pane's strip fetch is already confirmed clean, and the final range
 //! metadata is not installed until the completion boundary.
+//!
+//! # Strip fingerprint truth
+//!
+//! A strip commit also carries a `PreparedFingerprintUpdate`: an eligible
+//! row blit derives a complete post-shift tree during preparation (from
+//! history it proved `Exact`, plus the strip it is about to paint) and commits
+//! `Install`; Damage, column blits, ineligible row shifts, and emptied panes
+//! commit `MarkStale`. Like every other prepared value, the update is only
+//! *built* during preparation — an attempt that never reaches
+//! [`RendererCore::install_pane_cache_commit`] recycles its candidate as plain
+//! capacity and leaves the retained tree and its truth exactly as it found
+//! them.
 
 use crate::CellContentQuery;
 use crate::chrome::{BlitPlan, Chrome, PaneRegion};
@@ -60,7 +72,7 @@ use crate::pending_work::RowSpan;
 use crate::renderer::RendererCore;
 use crate::renderer::blit_work::{self, BlitPaneWork};
 use crate::renderer::cell::PaneCells;
-use crate::renderer::cell::fingerprint::{PaneFingerprint, RepaintPlan};
+use crate::renderer::cell::fingerprint::{PaneFingerprint, RepaintPlan, RowShiftFingerprint};
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
@@ -289,6 +301,26 @@ pub(crate) enum PaneCacheAction {
     },
 }
 
+/// What a strip commit does to the pane's retained fingerprint tree.
+///
+/// A strip — a Damage band, or a blit's revealed band — repaints part of a
+/// pane without rebuilding the whole-pane tree, so that tree's relationship to
+/// the pixels afterwards is a *decision preparation makes*, never something a
+/// later reader may infer: either preparation proved a complete tree for the
+/// post-strip pane, or it did not. `Option<PaneFingerprint>` would spell those
+/// two answers `Some`/`None`, and `None` reads equally well as "nothing
+/// decided yet" — the one reading a commit must never carry.
+pub(crate) enum PreparedFingerprintUpdate {
+    /// Preparation derived a complete tree for the range this commit installs,
+    /// from history it proved `FingerprintTruth::Exact` plus the strip the
+    /// same commit is about to paint.
+    Install(PaneFingerprint),
+    /// The commit changes pixels the retained tree did not witness. The tree
+    /// stays readable — the next whole-pane comparison against it is what
+    /// schedules the healing repaint — but stops being carryable.
+    MarkStale,
+}
+
 /// One pane's confirmed-safe installation, produced by execution and
 /// consumed by [`RendererCore::commit_pane_cache`] — the only place a
 /// `PaneBuffers`/`PaneFingerprintState`'s persistent, cross-frame content
@@ -309,6 +341,7 @@ pub(crate) enum PaneCacheCommit {
         pane: PaneRegion,
         range: RCRange,
         cells: FetchedCells,
+        fingerprint: PreparedFingerprintUpdate,
     },
 }
 
@@ -381,12 +414,14 @@ pub(crate) enum PreparedPane {
         cache_action: PaneCacheAction,
     },
     /// One shifted pane's blit work: the widened strip/clip geometry, the
-    /// already-fetched and already-bridge-validated revealed strip, and the
+    /// already-fetched and already-bridge-validated revealed strip, the
     /// `Shift` cache action naming the rotation execution still owes this
-    /// pane's buffers. Built only by [`RendererCore::prepare_blit`].
+    /// pane's buffers, and the fingerprint policy this shift's shape and
+    /// history earned. Built only by [`RendererCore::prepare_blit`].
     Blit {
         work: BlitPaneWork,
         fetched: FetchedCells,
+        fingerprint: PreparedFingerprintUpdate,
         cache_action: PaneCacheAction,
     },
 }
@@ -457,10 +492,22 @@ impl<P: Painter> RendererCore<P> {
                     self.park_strip_scratch(strip.fetched);
                 }
             }
-            PreparedPane::Blit { work, fetched, .. } => {
-                self.pane_cache
-                    .pane(work.pane)
-                    .park_prepare_scratch(fetched);
+            PreparedPane::Blit {
+                work,
+                fetched,
+                fingerprint,
+                ..
+            } => {
+                let pane_buf = self.pane_cache.pane(work.pane);
+                pane_buf.park_prepare_scratch(fetched);
+                // A candidate this attempt never commits goes back to the warm
+                // scratch slot as capacity — the same abort rhythm a held
+                // full-pane preparation follows. `recycle_candidate` writes
+                // only that non-semantic slot, so nothing here can install the
+                // rotation the failed attempt was going to earn.
+                if let PreparedFingerprintUpdate::Install(candidate) = fingerprint {
+                    pane_buf.fingerprint.recycle_candidate(candidate);
+                }
             }
         }
     }
@@ -747,7 +794,18 @@ impl<P: Painter> RendererCore<P> {
 
         self.trace_pane(pane, PaneVerdict::Strip);
 
-        PaneCacheCommit::Splice { pane, range, cells }
+        PaneCacheCommit::Splice {
+            pane,
+            range,
+            cells,
+            // A Damage band is never proof of border-safe pixels: clearing and
+            // repainting a band cannot undo a medium/thick border that used to
+            // bleed *outside* it, so the pixels above and below the band may
+            // still show strokes no candidate would describe. Damage therefore
+            // has no `Install` case at all — the next whole-pane comparison
+            // against the retained tree is what heals it.
+            fingerprint: PreparedFingerprintUpdate::MarkStale,
+        }
     }
 
     /// Pure (with respect to committed state): classify and fetch every
@@ -795,6 +853,27 @@ impl<P: Painter> RendererCore<P> {
                         self.trace_frame_held(pane);
                         return None;
                     }
+                    // Built here, before `execute_blit` shifts a pixel and
+                    // before `paint_cells_pass` drains the strip's fetched
+                    // values — the rotation reads the same strip the painter
+                    // is about to consume, and the same painted tree this
+                    // attempt may still abandon.
+                    let fingerprint = match pane_buf.fingerprint.build_row_shift_candidate(
+                        work.prev_range,
+                        work.new_range,
+                        work.axis,
+                        &fetched,
+                        work.strip_range,
+                    ) {
+                        RowShiftFingerprint::Rotated(candidate) => {
+                            PreparedFingerprintUpdate::Install(candidate)
+                        }
+                        // Every rejection — a column-axis shift, history that
+                        // isn't `Exact`, a shape the rotation refuses — is the
+                        // same conservative answer: keep the tree comparable,
+                        // stop treating it as carryable.
+                        RowShiftFingerprint::Ineligible(_) => PreparedFingerprintUpdate::MarkStale,
+                    };
                     let cache_action = PaneCacheAction::Shift {
                         prev_range: work.prev_range,
                         new_range: work.new_range,
@@ -803,6 +882,7 @@ impl<P: Painter> RendererCore<P> {
                     panes.push(PreparedPane::Blit {
                         work,
                         fetched,
+                        fingerprint,
                         cache_action,
                     });
                 }
@@ -894,6 +974,7 @@ impl<P: Painter> RendererCore<P> {
         let PreparedPane::Blit {
             work,
             fetched: mut strip_cells,
+            fingerprint,
             cache_action,
         } = prepared
         else {
@@ -941,6 +1022,7 @@ impl<P: Painter> RendererCore<P> {
             pane: work.pane,
             range: new_range,
             cells,
+            fingerprint,
         }
     }
 
@@ -958,7 +1040,13 @@ impl<P: Painter> RendererCore<P> {
     pub(super) fn install_pane_cache_commit(&self, commit: PaneCacheCommit) {
         match commit {
             PaneCacheCommit::Empty { pane } => {
-                self.pane_cache.pane(pane).range.set(None);
+                let pane_buf = self.pane_cache.pane(pane);
+                pane_buf.range.set(None);
+                // Forgetting the buffer range without forgetting the tree: the
+                // tree still describes a real past paint and stays comparable,
+                // but a pane that just lost its range has no history any later
+                // shift may carry forward.
+                pane_buf.fingerprint.mark_stale();
             }
             PaneCacheCommit::Replace {
                 pane,
@@ -972,14 +1060,23 @@ impl<P: Painter> RendererCore<P> {
                 pane_buf.range.set(Some(range));
                 pane_buf.fingerprint.install(fingerprint);
             }
-            PaneCacheCommit::Splice { pane, range, cells } => {
+            PaneCacheCommit::Splice {
+                pane,
+                range,
+                cells,
+                fingerprint,
+            } => {
                 let pane_buf = self.pane_cache.pane(pane);
                 pane_buf.set_cells(cells);
                 pane_buf.range.set(Some(range));
-                // No fingerprint change — a strip splice never commits the
-                // painted tree (matches pre-Stage-4 `render_pane_strip`);
-                // range-in-digest means the next full-pane compare sees a
-                // real mismatch and reseeds for real.
+                // The one place a strip's fingerprint decision takes effect,
+                // alongside the very cells and range it describes.
+                match fingerprint {
+                    PreparedFingerprintUpdate::Install(candidate) => {
+                        pane_buf.fingerprint.install(candidate)
+                    }
+                    PreparedFingerprintUpdate::MarkStale => pane_buf.fingerprint.mark_stale(),
+                }
             }
         }
     }
