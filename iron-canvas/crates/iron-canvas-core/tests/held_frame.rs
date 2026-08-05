@@ -13,7 +13,9 @@ use iron_canvas_core::RowSpan;
 use iron_canvas_core::chrome::{PaneRegion, PaneRegionMask};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::GroupClass;
-use iron_canvas_core::{Orchestrator, PaintRegimeTag, PaintResult, PaneVerdict, WorkFlags};
+use iron_canvas_core::{
+    Orchestrator, PaintRegimeTag, PaintResult, PaneVerdict, PixelRect, Point, WorkFlags,
+};
 use iron_canvas_recorder::{DrawOp, MemSurface};
 
 use common::TestModel;
@@ -30,6 +32,27 @@ fn grid_ops_len(orch: &Orchestrator<MemSurface>) -> usize {
 }
 fn overlay_ops_len(orch: &Orchestrator<MemSurface>) -> usize {
     orch.overlay_surface().recorder().ops().len()
+}
+fn grid_ops_since(orch: &Orchestrator<MemSurface>, cursor: usize) -> Vec<DrawOp> {
+    orch.grid_surface().recorder().ops()[cursor..].to_vec()
+}
+
+fn expected_row_strip(orch: &Orchestrator<MemSurface>, row: i32) -> PixelRect {
+    let first = orch
+        .cell_rect(row, 1)
+        .expect("row-strip fixture must expose column 1");
+    let last = (1..=100)
+        .filter_map(|col| orch.cell_rect(row, col))
+        .next_back()
+        .expect("row-strip fixture must expose at least one column");
+    PixelRect {
+        top_left: Point {
+            x: first.top_left.x,
+            y: first.top_left.y,
+        },
+        width: last.top_left.x + last.width - first.top_left.x,
+        height: first.height,
+    }
 }
 
 fn grid_text_ops_containing(orch: &Orchestrator<MemSurface>, needle: &str) -> usize {
@@ -426,6 +449,167 @@ fn partial_commit_paints_healthy_panes_and_retries_held_panes() {
     );
 }
 
+#[test]
+fn stable_slots_reuse_partial_commit_drops_serviced_view_overlay_retry() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen_rows(2)
+            .with_active(1, 3)
+            .with_show_selection(false),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let grid_presents = orch.grid_surface().presents();
+    let overlay_presents = orch.overlay_surface().presents();
+    stub.set_cell(1, 3, "healthy-edit");
+    stub.set_cell(6, 3, "held-edit");
+    stub.set_active(2, 3);
+    stub.set_bulk_bridge_fail_from(Some(3));
+    orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 });
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.view_changed();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    let partial = orch.last_trace();
+    assert_eq!(partial.regime, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(partial.effective, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(
+        partial.work,
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
+    );
+    assert_eq!(
+        partial.panes[PaneRegion::TopRight as usize],
+        Some(PaneVerdict::Rows { spans: 1, rows: 1 })
+    );
+    assert_eq!(
+        partial.panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Held)
+    );
+    assert!(orch.grid_surface().presents() > grid_presents);
+    assert!(orch.overlay_surface().presents() > overlay_presents);
+    assert!(grid_text_ops_containing(&orch, "healthy-edit") > 0);
+    assert_eq!(grid_text_ops_containing(&orch, "held-edit"), 0);
+
+    stub.set_bulk_bridge_fail_from(None);
+    stub.reset_bulk_fetch_calls();
+    let overlay_ops = overlay_ops_len(&orch);
+    let overlay_presents = orch.overlay_surface().presents();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+
+    let recovery = orch.last_trace();
+    assert_eq!(recovery.regime, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(recovery.work, WorkFlags::CONTENT);
+    assert_eq!(
+        recovery.panes[PaneRegion::TopRight as usize],
+        None,
+        "the healthy pane must not be retried"
+    );
+    assert!(
+        matches!(
+            recovery.panes[PaneRegion::BottomRight as usize],
+            Some(PaneVerdict::Rows { .. }) | Some(PaneVerdict::Full)
+        ),
+        "only the failed pane should repaint; got {:?}",
+        recovery.panes
+    );
+    assert!(grid_text_ops_containing(&orch, "held-edit") > 0);
+    assert_eq!(
+        overlay_ops_len(&orch),
+        overlay_ops,
+        "serviced overlay work must not be retried"
+    );
+    assert_eq!(orch.overlay_surface().presents(), overlay_presents);
+}
+
+#[test]
+fn stable_damage_partial_commit_retries_original_rows_without_view_overlay() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen_rows(2)
+            .with_active(1, 3)
+            .with_show_selection(false),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let frozen_strip = expected_row_strip(&orch, 1);
+    let scroll_strip = expected_row_strip(&orch, 6);
+    let grid_presents = orch.grid_surface().presents();
+    let overlay_presents = orch.overlay_surface().presents();
+    stub.set_cell(1, 3, "healthy-row");
+    stub.set_cell(6, 3, "held-row");
+    stub.set_active(2, 3);
+    stub.set_bulk_bridge_fail_from(Some(3));
+    orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 });
+    orch.mark_rows_damaged(0, RowSpan { r1: 6, r2: 6 });
+    orch.view_changed();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    let partial = orch.last_trace();
+    assert_eq!(partial.regime, Some(PaintRegimeTag::Damage));
+    assert_eq!(partial.effective, Some(PaintRegimeTag::Damage));
+    assert_eq!(
+        partial.work,
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
+    );
+    assert_eq!(
+        partial.panes[PaneRegion::TopRight as usize],
+        Some(PaneVerdict::Strip)
+    );
+    assert_eq!(
+        partial.panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Held)
+    );
+    assert!(orch.grid_surface().presents() > grid_presents);
+    assert!(orch.overlay_surface().presents() > overlay_presents);
+
+    stub.set_bulk_bridge_fail_from(None);
+    let grid_ops = grid_ops_len(&orch);
+    let overlay_ops = overlay_ops_len(&orch);
+    let overlay_presents = orch.overlay_surface().presents();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+
+    let recovery = orch.last_trace();
+    assert_eq!(recovery.regime, Some(PaintRegimeTag::Damage));
+    assert_eq!(recovery.effective, Some(PaintRegimeTag::Damage));
+    assert_eq!(recovery.work, WorkFlags::CONTENT);
+    assert_eq!(
+        recovery.panes[PaneRegion::TopRight as usize],
+        Some(PaneVerdict::Strip),
+        "row-scoped retry deliberately revisits the healthy frozen pane"
+    );
+    assert_eq!(
+        recovery.panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Strip)
+    );
+    let recovery_ops = grid_ops_since(&orch, grid_ops);
+    for expected in [frozen_strip, scroll_strip] {
+        assert!(
+            recovery_ops
+                .iter()
+                .any(|op| matches!(op, DrawOp::RectFill { rect, .. } if *rect == expected)),
+            "recovery must repaint original strip {expected:?}; got {recovery_ops:#?}"
+        );
+    }
+    assert!(
+        recovery_ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::FillText { text, .. } if text == "healthy-row")),
+        "the healthy frozen span must be revisited on recovery"
+    );
+    assert!(
+        recovery_ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::FillText { text, .. } if text == "held-row")),
+        "the failed scroll span must paint on recovery"
+    );
+    assert_eq!(overlay_ops_len(&orch), overlay_ops);
+    assert_eq!(orch.overlay_surface().presents(), overlay_presents);
+}
+
 /// Scenario lifted from `blit_fallback.rs`'s
 /// `blit_fallback_at_row_header_digit_boundary_returns_fresh`: scrolling from
 /// top_row 980 to 981 grows the last visible row from 999 to 1000, widening
@@ -660,7 +844,7 @@ fn commit_then_move_batch_paints_fresh_without_blit() {
     assert_eq!(
         orch.last_regime(),
         Some(PaintRegimeTag::Fresh),
-        "content + view change in one tick must not blit (stale-content rule)"
+        "content plus a real scroll in one tick must stay Fresh and never blit"
     );
     assert!(
         orch.last_work_flags().contains(WorkFlags::VIEW),
@@ -715,12 +899,12 @@ fn commit_then_move_batch_paints_fresh_without_blit() {
 // failure, so its eventual green run is not accidental.
 // ==============================================================================
 
-/// Bullet 1 (RED against d8aed9c): content+view work always selects Fresh
-/// (mirrors `content_with_fresh_repaints_the_active_cell_overlay`'s setup,
-/// see `plan_frame`'s "content plus view" row) and the scroll here moves row
-/// 1 off-frame — so a buggy commit of the failed candidate's geometry is
-/// observable as `cell_rect(1, 1)` flipping from `Some` to `None`, not just
-/// as a missing paint.
+/// Bullet 1 (RED against d8aed9c): content plus the real scroll in this
+/// fixture selects Fresh, and the scroll moves row 1 off-frame — so a buggy
+/// commit of the failed candidate's geometry is observable as
+/// `cell_rect(1, 1)` flipping from `Some` to `None`, not just as a missing
+/// paint. Stable content-plus-view work may use Damage or SlotsReuse; the
+/// geometric scroll is the load-bearing Fresh discriminator here.
 ///
 /// Today, EVERY assertion here fails, including `PaintResult::Retry` itself:
 /// `render_pane`'s bridge-hold branch never fires on a `Fresh`-kind
@@ -746,7 +930,7 @@ fn held_fresh_content_plus_view_holds_atomically() {
     stub.set_top_row(5); // moves row 1 off-frame in the candidate geometry.
     stub.set_bulk_bridge_fail(true);
     orch.mark_content_dirty(PaneRegionMask::ALL);
-    orch.view_changed(); // content + view together always select Fresh.
+    orch.view_changed(); // content plus the real scroll above selects Fresh.
     let result = orch.paint_if_dirty();
 
     assert_eq!(
@@ -964,25 +1148,61 @@ fn held_slots_reuse_all_panes_failed_is_held_not_partial() {
 /// throughout, an overlay repaint on the recovery frame can only mean the
 /// mark was genuinely retried.
 #[test]
-fn held_slots_reuse_full_hold_retries_the_complete_consumed_work() {
+fn stable_slots_reuse_content_plus_view_full_hold_retries_complete_work() {
     let stub = Rc::new(
         TestModel::synthetic_grid()
             .with_data_until(30)
+            .with_frozen_rows(2)
+            .with_active(1, 3)
             .with_show_selection(false),
     );
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty(); // Fresh baseline.
 
-    stub.set_cell(1, 1, "edited");
+    let rect_before = orch.cell_rect(1, 1);
+    let grid_ops = grid_ops_len(&orch);
+    let overlay_ops = overlay_ops_len(&orch);
+    let grid_presents = orch.grid_surface().presents();
+    let overlay_presents = orch.overlay_surface().presents();
+
+    stub.set_cell(1, 3, "top-edit");
+    stub.set_cell(6, 3, "bottom-edit");
+    stub.set_active(2, 3);
     stub.set_bulk_bridge_fail(true); // unconditional: every pane's fetch fails.
+    orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 });
     orch.mark_content_dirty(PaneRegionMask::ALL);
-    orch.request_overlay_repaint(); // rides along with the content mark.
+    orch.view_changed();
 
     let result = orch.paint_if_dirty();
     assert_eq!(
         result,
         PaintResult::Retry,
         "an all-failed attempt must retry"
+    );
+    let held_trace = orch.last_trace();
+    assert_eq!(held_trace.regime, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(held_trace.effective, None);
+    assert_eq!(
+        held_trace.work,
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
+    );
+    assert!(
+        !grid_ops_since(&orch, grid_ops)
+            .iter()
+            .any(|op| matches!(op, DrawOp::Blit { .. })),
+        "stable held content must never blit"
+    );
+    assert_eq!(
+        overlay_ops_len(&orch),
+        overlay_ops,
+        "full hold paints no overlay ops"
+    );
+    assert_eq!(orch.grid_surface().presents(), grid_presents);
+    assert_eq!(orch.overlay_surface().presents(), overlay_presents);
+    assert_eq!(
+        orch.cell_rect(1, 1),
+        rect_before,
+        "held stable work must keep committed query geometry"
     );
 
     // Recover. No new host raise — the retained work alone must drive it.
@@ -991,11 +1211,19 @@ fn held_slots_reuse_full_hold_retries_the_complete_consumed_work() {
     let result = orch.paint_if_dirty();
 
     assert_eq!(result, PaintResult::Painted, "recovery must commit");
+    let recovery = orch.last_trace();
+    assert_eq!(recovery.regime, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(recovery.effective, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(
+        recovery.work,
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY,
+        "a full hold must retry the complete consumed work"
+    );
+    assert!(grid_text_ops_containing(&orch, "top-edit") > 0);
+    assert!(grid_text_ops_containing(&orch, "bottom-edit") > 0);
     assert!(
         overlay_ops_len(&orch) > overlay_before,
-        "the overlay mark raised alongside the failed content work must \
-         survive the full-hold retry and repaint on recovery — got no new \
-         overlay ops, meaning the mark was dropped"
+        "the moved overlay must commit on recovery"
     );
 }
 
@@ -1053,22 +1281,30 @@ fn held_damage_all_panes_failed_is_held_not_partial() {
 /// `show_selection` alone would force the recovery attempt's overlay to
 /// paint regardless of whether the retry actually carried the mark.
 #[test]
-fn held_damage_full_hold_retries_the_complete_consumed_work() {
+fn stable_damage_content_plus_view_full_hold_retries_rows_and_overlay() {
     let stub = Rc::new(
         TestModel::synthetic_grid()
             .with_data_until(30)
             .with_frozen_rows(2)
+            .with_active(1, 3)
             .with_show_selection(false),
     );
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty(); // Fresh baseline.
 
-    stub.set_cell(1, 1, "top-edit");
-    stub.set_cell(6, 1, "bottom-edit");
+    let rect_before = orch.cell_rect(1, 1);
+    let grid_ops = grid_ops_len(&orch);
+    let overlay_ops = overlay_ops_len(&orch);
+    let grid_presents = orch.grid_surface().presents();
+    let overlay_presents = orch.overlay_surface().presents();
+
+    stub.set_cell(1, 3, "top-edit");
+    stub.set_cell(6, 3, "bottom-edit");
+    stub.set_active(2, 3);
     stub.set_bulk_bridge_fail(true); // unconditional: both damaged rows fail.
     orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 }); // TopRight's row.
     orch.mark_rows_damaged(0, RowSpan { r1: 6, r2: 6 }); // BottomRight's row.
-    orch.request_overlay_repaint(); // rides along with the row damage.
+    orch.view_changed();
 
     let result = orch.paint_if_dirty();
     assert_eq!(
@@ -1076,6 +1312,22 @@ fn held_damage_full_hold_retries_the_complete_consumed_work() {
         PaintResult::Retry,
         "an all-failed Damage attempt must retry"
     );
+    let held_trace = orch.last_trace();
+    assert_eq!(held_trace.regime, Some(PaintRegimeTag::Damage));
+    assert_eq!(held_trace.effective, None);
+    assert_eq!(
+        held_trace.work,
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
+    );
+    assert!(
+        !grid_ops_since(&orch, grid_ops)
+            .iter()
+            .any(|op| matches!(op, DrawOp::Blit { .. }))
+    );
+    assert_eq!(overlay_ops_len(&orch), overlay_ops);
+    assert_eq!(orch.grid_surface().presents(), grid_presents);
+    assert_eq!(orch.overlay_surface().presents(), overlay_presents);
+    assert_eq!(orch.cell_rect(1, 1), rect_before);
 
     // Recover. No new host raise — the retained work alone must drive it.
     stub.set_bulk_bridge_fail(false);
@@ -1088,11 +1340,16 @@ fn held_damage_full_hold_retries_the_complete_consumed_work() {
         Some(PaintRegimeTag::Damage),
         "a held Damage strip must retry as Damage, with its bands intact"
     );
+    assert_eq!(
+        orch.last_work_flags(),
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY,
+        "full-hold recovery must retain the original rows and view/overlay work"
+    );
+    assert!(grid_text_ops_containing(&orch, "top-edit") > 0);
+    assert!(grid_text_ops_containing(&orch, "bottom-edit") > 0);
     assert!(
         overlay_ops_len(&orch) > overlay_before,
-        "the overlay mark raised alongside the failed row damage must \
-         survive the full-hold retry and repaint on recovery — got no new \
-         overlay ops, meaning the mark was dropped"
+        "the moved overlay must commit on recovery"
     );
 }
 

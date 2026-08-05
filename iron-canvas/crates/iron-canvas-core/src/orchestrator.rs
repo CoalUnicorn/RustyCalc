@@ -169,11 +169,10 @@ pub(crate) struct FramePlan {
 /// | overlay/view only, `Stable` | `Overlay` / `GridWork::None` |
 /// | overlay/view only, `Scroll(plan)` | `Viewport` / `GridWork::Blit(plan)` |
 /// | overlay/view only, `Rebuild` | `Fresh` / `GridWork::Fresh` |
-/// | row content only, `Stable`, sheet matches | `Damage` / `GridWork::Rows` |
-/// | row content only, `Stable`, sheet differs | `SlotsReuse` / `Panes(ALL)` |
-/// | row or pane content only, `Scroll`/`Rebuild` | `Fresh` / `GridWork::Fresh` |
-/// | pane content only, `Stable` | `SlotsReuse` / `GridWork::Panes(mask)` |
-/// | content plus view, any delta | `Fresh` / `GridWork::Fresh` |
+/// | row content, optional view, `Stable`, sheet matches | `Damage` / `GridWork::Rows` |
+/// | row content, optional view, `Stable`, sheet differs | `SlotsReuse` / `Panes(ALL)` |
+/// | pane content, optional view, `Stable` | `SlotsReuse` / `GridWork::Panes(mask)` |
+/// | row or pane content, optional view, `Scroll`/`Rebuild` | `Fresh` / `GridWork::Fresh` |
 /// | any geometry, any delta | `Fresh` / `GridWork::Fresh` |
 ///
 /// Rules that must remain explicit (Stage 3 global constraints has the
@@ -185,8 +184,8 @@ pub(crate) struct FramePlan {
 ///   `Viewport` when the live geometric delta is a safe scroll — this is
 ///   also the renderer's own correctness fallback for a host that moved the
 ///   view without calling `view_changed`;
-/// - content plus view always plans `Fresh`, never a blit over changed
-///   values or a band-clipped `Damage`;
+/// - stable content plus view uses `Damage` or `SlotsReuse`; content plus a
+///   real scroll or rebuild plans `Fresh`, never a blit over changed values;
 /// - `ContentWork::Rows` carries its original sheet into `GridWork::Rows`;
 /// - Rows imply `PaneRegionMask::ALL` whenever a mask is needed instead —
 ///   row precision picks `Damage`, it never narrows the pane set, so a
@@ -273,11 +272,10 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     // Damage fast path: viewport reusable, every content mark named its
     // rows, and they were recorded against the sheet still on screen.
     // Geometry bars the arm — band-clipping must not paper over a
-    // geometry/theme change that happens to keep SlotsReuse validity. So
-    // does view: a movement reaching this far needs more than the named
-    // bands re-derived (the content-plus-view row).
+    // geometry/theme change that happens to keep SlotsReuse validity. A
+    // stable view mark does not: `Chrome::classify` has already proved the
+    // committed geometry did not move, so only the named bands need paint.
     if !work.has_geometry()
-        && !work.has_view()
         && reusable
         && let ContentWork::Rows {
             sheet: rows_sheet,
@@ -299,7 +297,10 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         };
     }
 
-    if !work.has_geometry() && !work.has_view() && reusable {
+    // Stable pane-addressed content can likewise reuse the committed slots
+    // even when the host also marked view/overlay work. Content-free stable
+    // view work is owned by the earlier Overlay arm.
+    if work.has_content() && !work.has_geometry() && reusable {
         let mask = match work.content() {
             ContentWork::Panes(mask) => *mask,
             // Rows imply the whole grid whenever a mask is needed: row
@@ -308,9 +309,7 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
             // mismatch), so the fallback must stay whole-grid rather than
             // intersect the spans with what happens to be visible.
             ContentWork::Rows { .. } => PaneRegionMask::ALL,
-            // Overlay-only work on a reusable frame is claimed above;
-            // anything landing here without content is a conservative
-            // whole-grid refresh.
+            // Guarded out by `work.has_content()` above.
             ContentWork::Clean => PaneRegionMask::ALL,
         };
         return FramePlan {
@@ -322,9 +321,9 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         };
     }
 
-    // Fallback: geometry, content plus view, or a Rebuild delta that wasn't
-    // claimed above (row/pane content on a Rebuild also lands here — a
-    // rebuilt frame's pane buffers can't be range-matched against it).
+    // Fallback: geometry, content plus a real scroll, or a Rebuild delta that
+    // wasn't claimed above (row/pane content on a Rebuild also lands here —
+    // a rebuilt frame's pane buffers can't be range-matched against it).
     // Always paints the overlay — candidate geometry or model identity may
     // have changed under it.
     FramePlan {
@@ -2092,22 +2091,58 @@ mod frame_plan_tests {
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
-    // ── Category: content plus view — always Fresh, any delta ──
+    // ── Category: content plus view ──
 
     #[test]
-    fn content_plus_view_stable_selects_fresh() {
+    fn content_rows_plus_view_stable_selects_damage() {
         let work = work_with(|w| {
             w.mark_view();
-            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 1 });
+            w.mark_overlay();
+            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 3 });
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(
-            plan.selected_strategy,
-            PaintRegimeTag::Fresh,
-            "content plus view must never clip to bands or blit"
-        );
-        assert!(matches!(plan.grid, GridWork::Fresh));
+        assert_eq!(plan.selected_strategy, PaintRegimeTag::Damage);
+        let GridWork::Rows { sheet, spans } = plan.grid else {
+            panic!("expected GridWork::Rows");
+        };
+        assert_eq!(sheet, SHEET);
+        assert_eq!(spans, vec![RowSpan { r1: 1, r2: 3 }]);
+        assert_eq!(plan.overlay, OverlayWork::Paint);
+    }
+
+    #[test]
+    fn content_panes_plus_view_stable_selects_slots_reuse() {
+        let work = work_with(|w| {
+            w.mark_view();
+            w.mark_overlay();
+            w.mark_panes(PaneRegionMask::TOP_LEFT);
+        });
+        let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
+
+        assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
+        let GridWork::Panes(mask) = plan.grid else {
+            panic!("expected GridWork::Panes");
+        };
+        assert_eq!(mask, PaneRegionMask::TOP_LEFT);
+        assert_eq!(plan.overlay, OverlayWork::Paint);
+    }
+
+    #[test]
+    fn content_rows_wrong_sheet_plus_view_stable_selects_slots_reuse_all() {
+        let work = work_with(|w| {
+            w.mark_view();
+            w.mark_overlay();
+            w.mark_rows(OTHER_SHEET, RowSpan { r1: 1, r2: 3 });
+        });
+        let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
+
+        assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
+        let GridWork::Panes(mask) = plan.grid else {
+            panic!("expected GridWork::Panes");
+        };
+        assert_eq!(mask, PaneRegionMask::ALL);
+        assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 
     #[test]
@@ -2119,6 +2154,7 @@ mod frame_plan_tests {
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
         assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
     #[test]
@@ -2128,6 +2164,21 @@ mod frame_plan_tests {
             w.mark_rows(SHEET, RowSpan { r1: 1, r2: 1 });
         });
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
+
+        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert!(matches!(plan.grid, GridWork::Fresh));
+        assert_eq!(plan.rebuild_reason, Some(RebuildReason::Sheet));
+    }
+
+    #[test]
+    fn geometry_plus_content_view_stable_selects_fresh() {
+        let work = work_with(|w| {
+            w.mark_geometry();
+            w.mark_view();
+            w.mark_overlay();
+            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 1 });
+        });
+        let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
         assert!(matches!(plan.grid, GridWork::Fresh));
@@ -2205,10 +2256,12 @@ mod frame_plan_tests {
     fn slots_reuse_paints_overlay_when_overlay_marked_even_with_selection_hidden() {
         let work = work_with(|w| {
             w.mark_panes(PaneRegionMask::ALL);
+            w.mark_view();
             w.mark_overlay();
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
+        assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
         assert_eq!(
             plan.overlay,
             OverlayWork::Paint,

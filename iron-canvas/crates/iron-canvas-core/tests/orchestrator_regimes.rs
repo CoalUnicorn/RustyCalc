@@ -18,7 +18,7 @@ mod common;
 use std::rc::Rc;
 
 use iron_canvas_core::RowSpan;
-use iron_canvas_core::chrome::PaneRegionMask;
+use iron_canvas_core::chrome::{PaneRegion, PaneRegionMask};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::constants::{
     CELL_AREA_INSET, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
@@ -29,7 +29,7 @@ use iron_canvas_core::types::coord::{AutofillTarget, RCRange, SheetArea};
 use iron_canvas_core::{CanvasTheme, Orchestrator};
 use iron_canvas_core::{PixelRect, Point};
 
-use iron_canvas_core::{PaintRegimeTag, PaintResult, WorkFlags};
+use iron_canvas_core::{PaintRegimeTag, PaintResult, PaneVerdict, WorkFlags};
 use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
 use iron_canvas_recorder::{DrawOp, MemSurface, RecorderPainter, RecordingSurface, replay};
 
@@ -1474,14 +1474,31 @@ fn active_sheet_view_change_is_fresh_and_refetches_pane_content() {
     );
 }
 
-/// Commit-then-move (Enter/Tab): the one real dual-effect producer. Stage 2
-/// keeps it conservative — content plus view is always `Fresh`, never a blit
-/// over changed values and never a band-clipped `Damage`.
+/// Matching row damage can stay band-addressed when the active cell moves
+/// inside the committed viewport. `FrameDelta::Stable` proves the view mark
+/// did not move grid pixels, so Damage can paint the edited row and the
+/// overlay can move independently.
 #[test]
-fn content_plus_view_is_fresh() {
+fn stable_row_content_plus_view_dispatches_damage() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(5, 1));
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty();
+
+    let grid_before = grid_ops_len(&orch);
+    let overlay_before = overlay_ops_len(&orch);
+    let row_rect = orch.cell_rect(5, 1).expect("edited row must be visible");
+    let last_col_rect = (1..=100)
+        .filter_map(|col| orch.cell_rect(5, col))
+        .next_back()
+        .expect("the fixture must expose at least one column");
+    let expected_strip = PixelRect {
+        top_left: Point {
+            x: row_rect.top_left.x,
+            y: row_rect.top_left.y,
+        },
+        width: last_col_rect.top_left.x + last_col_rect.width - row_rect.top_left.x,
+        height: row_rect.height,
+    };
 
     stub.set_cell(5, 1, "typed");
     stub.set_active(6, 1);
@@ -1489,10 +1506,170 @@ fn content_plus_view_is_fresh() {
     orch.view_changed();
 
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let trace = orch.last_trace();
+    assert_eq!(trace.regime, Some(PaintRegimeTag::Damage));
+    assert_eq!(trace.effective, Some(PaintRegimeTag::Damage));
     assert_eq!(
-        orch.last_regime(),
-        Some(PaintRegimeTag::Fresh),
-        "content + view must not clip to bands or blit"
+        trace.work,
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
     );
-    assert!(grid_text_ops_containing(&orch, "typed") > 0);
+    let grid_ops = grid_ops_since(&orch, grid_before);
+    assert!(
+        grid_ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::RectFill { rect, .. } if *rect == expected_strip)),
+        "Damage must clear the exact edited-row strip {expected_strip:?}; got {grid_ops:#?}"
+    );
+    assert!(
+        grid_ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::FillText { text, .. } if text == "typed")),
+        "the edited text must be painted inside the Damage strip"
+    );
+    assert!(
+        !grid_ops.iter().any(|op| matches!(op, DrawOp::Blit { .. })),
+        "stable content plus view must not blit"
+    );
+    let expected_selection = orch
+        .cell_rect(6, 1)
+        .expect("moved active cell must remain visible")
+        .inset(1, 1);
+    assert!(
+        overlay_ops_since(&orch, overlay_before)
+            .iter()
+            .any(|op| matches!(op, DrawOp::RectStroke { rect, width, .. }
+                if *rect == expected_selection && *width == 2.0)),
+        "the overlay must move to the new active cell"
+    );
+}
+
+#[test]
+fn stable_commit_batch_selects_slots_reuse_and_moves_overlay() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen(2, 2)
+            .with_active(5, 5),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let grid_before = grid_ops_len(&orch);
+    let overlay_before = overlay_ops_len(&orch);
+    stub.set_cell(5, 5, "typed");
+    stub.set_active(6, 5);
+    orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.view_changed();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let trace = orch.last_trace();
+    assert_eq!(trace.regime, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(trace.effective, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(
+        trace.work,
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
+    );
+    assert_eq!(
+        trace.panes[PaneRegion::BottomRight as usize],
+        Some(PaneVerdict::Rows { spans: 1, rows: 1 })
+    );
+    for pane in [
+        PaneRegion::TopLeft,
+        PaneRegion::TopRight,
+        PaneRegion::BottomLeft,
+    ] {
+        assert_eq!(
+            trace.panes[pane as usize],
+            Some(PaneVerdict::Skip),
+            "unchanged {pane:?} pane must fingerprint-skip"
+        );
+    }
+
+    let grid_ops = grid_ops_since(&orch, grid_before);
+    assert!(
+        !grid_ops.iter().any(|op| matches!(op, DrawOp::Blit { .. })),
+        "stable commit batch must not blit"
+    );
+    assert!(
+        !grid_ops
+            .iter()
+            .any(|op| matches!(op, DrawOp::InvalidateCache)),
+        "SlotsReuse must not run Fresh-only cache invalidation"
+    );
+
+    let overlay_ops = overlay_ops_since(&orch, overlay_before);
+    for class in [
+        GroupClass::SelectionFill,
+        GroupClass::ActiveCellRepaint,
+        GroupClass::SelectionStroke,
+    ] {
+        assert_eq!(
+            overlay_ops
+                .iter()
+                .filter(|op| matches!(op, DrawOp::BeginGroup { class: actual } if *actual == class))
+                .count(),
+            1,
+            "the moved selection must emit {class:?} exactly once"
+        );
+    }
+    let expected_selection = orch
+        .cell_rect(6, 5)
+        .expect("moved active cell must remain visible")
+        .inset(1, 1);
+    assert_eq!(
+        overlay_ops
+            .iter()
+            .filter(|op| matches!(op, DrawOp::RectStroke { rect, width, .. }
+                if *rect == expected_selection && *width == 2.0))
+            .count(),
+        1,
+        "the overlay must stroke the new active cell exactly once"
+    );
+}
+
+#[test]
+fn stable_commit_with_hidden_selection_uses_slots_reuse_without_active_cell_repaint() {
+    let stub = Rc::new(
+        TestModel::synthetic_grid()
+            .with_data_until(30)
+            .with_frozen(2, 2)
+            .with_active(5, 5)
+            .with_show_selection(false),
+    );
+    let mut orch = build(Rc::clone(&stub));
+    orch.paint_if_dirty();
+
+    let grid_before = grid_ops_len(&orch);
+    let overlay_before = overlay_ops_len(&orch);
+    let overlay_presents = orch.overlay_surface().presents();
+    stub.set_cell(5, 5, "hidden-selection-edit");
+    stub.set_active(6, 5);
+    orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.view_changed();
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(
+        orch.last_work_flags(),
+        WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
+    );
+    assert!(
+        grid_ops_since(&orch, grid_before).iter().any(
+            |op| matches!(op, DrawOp::FillText { text, .. } if text == "hidden-selection-edit")
+        ),
+        "the committed content must reach the grid"
+    );
+    assert!(
+        orch.overlay_surface().presents() > overlay_presents,
+        "explicit view_changed overlay work must be serviced even when selection is hidden"
+    );
+    assert!(
+        !overlay_ops_since(&orch, overlay_before)
+            .iter()
+            .any(|op| matches!(op, DrawOp::BeginGroup { class }
+                if *class == GroupClass::ActiveCellRepaint)),
+        "hidden selection must suppress the active-cell repaint hook"
+    );
 }

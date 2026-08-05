@@ -4,7 +4,7 @@
 //! bug where `resize()` rounded `dpr` before forwarding it to
 //! `WebSurface::resize`, silently mapping e.g. 1.25 -> 1 and 1.5 -> 2.
 
-use iron_canvas_web::{CanvasSize, IronCanvas, JsPaintResult};
+use iron_canvas_web::{CanvasSize, CanvasView, IronCanvas, JsPaintResult, RCRange};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 use web_sys::HtmlCanvasElement;
@@ -55,8 +55,9 @@ fn fractional_dpr_reaches_canvas_backing_store() {
     );
 }
 
-use iron_canvas_web::CanvasModel;
+use iron_canvas_core::{CellDecoration, CellKind, CellStyle, Fetched};
 use iron_canvas_web::wasm::JsBackedModel;
+use iron_canvas_web::{CanvasModel, CellContentQuery};
 use wasm_bindgen::JsValue;
 
 /// Minimal duck-typed model handle: `try_from_js_value` requires
@@ -414,7 +415,7 @@ fn canvas_over(store: FixtureStore) -> (IronCanvas, HtmlCanvasElement) {
 /// through a `CanvasRenderingContext2d` on the same element `IronCanvas`
 /// painted into (`getContext("2d")` is idempotent — this doesn't disturb
 /// the live painter's own handle on the same canvas).
-fn grid_pixels(canvas: &HtmlCanvasElement) -> Vec<u8> {
+fn canvas_pixels(canvas: &HtmlCanvasElement) -> Vec<u8> {
     let Ok(context_opt) = canvas.get_context("2d") else {
         panic!("getContext must not throw");
     };
@@ -430,6 +431,10 @@ fn grid_pixels(canvas: &HtmlCanvasElement) -> Vec<u8> {
         panic!("get_image_data must succeed on an opaque, same-origin canvas");
     };
     image_data.data().0
+}
+
+fn grid_pixels(canvas: &HtmlCanvasElement) -> Vec<u8> {
+    canvas_pixels(canvas)
 }
 
 /// A failed Viewport strip fetch is transactional: the visible front canvas
@@ -1216,6 +1221,166 @@ fn stage6_fixture_store() -> FixtureStore {
     Rc::new(RefCell::new(cells))
 }
 
+#[derive(Clone)]
+struct StableViewFixture {
+    active_row: Rc<Cell<i32>>,
+    active_col: Rc<Cell<i32>>,
+    selection: Rc<Cell<[i32; 4]>>,
+    top_row: Rc<Cell<i32>>,
+    left_column: Rc<Cell<i32>>,
+    frozen_rows: Rc<Cell<i32>>,
+    frozen_cols: Rc<Cell<i32>>,
+    show_selection: Rc<Cell<bool>>,
+}
+
+impl StableViewFixture {
+    fn new(row: i32, col: i32) -> Self {
+        Self {
+            active_row: Rc::new(Cell::new(row)),
+            active_col: Rc::new(Cell::new(col)),
+            selection: Rc::new(Cell::new([row, col, row, col])),
+            top_row: Rc::new(Cell::new(1)),
+            left_column: Rc::new(Cell::new(1)),
+            frozen_rows: Rc::new(Cell::new(0)),
+            frozen_cols: Rc::new(Cell::new(0)),
+            show_selection: Rc::new(Cell::new(true)),
+        }
+    }
+
+    fn with_frozen(self, rows: i32, cols: i32) -> Self {
+        self.frozen_rows.set(rows);
+        self.frozen_cols.set(cols);
+        self
+    }
+
+    fn set_active(&self, row: i32, col: i32) {
+        self.active_row.set(row);
+        self.active_col.set(col);
+        self.selection.set([row, col, row, col]);
+    }
+
+    fn set_show_selection(&self, show: bool) {
+        self.show_selection.set(show);
+    }
+
+    fn snapshot(&self) -> CanvasView {
+        CanvasView {
+            sheet: 0,
+            row: self.active_row.get(),
+            column: self.active_col.get(),
+            selection: RCRange::from(self.selection.get()),
+            top_row: self.top_row.get(),
+            left_column: self.left_column.get(),
+        }
+    }
+}
+
+struct StableFixtureModel {
+    content: JsBackedModel,
+    view: StableViewFixture,
+}
+
+impl CellContentQuery for StableFixtureModel {
+    fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle> {
+        self.content.get_cell_style(sheet, row, column)
+    }
+
+    fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind> {
+        self.content.get_cell_type(sheet, row, column)
+    }
+
+    fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String> {
+        self.content.get_formatted_cell_value(sheet, row, column)
+    }
+
+    fn get_extended_cell_style(
+        &self,
+        sheet: u32,
+        row: i32,
+        column: i32,
+    ) -> Fetched<CellDecoration> {
+        self.content.get_extended_cell_style(sheet, row, column)
+    }
+
+    fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
+        self.content.get_cell_styles_in(sheet, range, out);
+    }
+
+    fn get_formatted_cell_values_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Fetched<String>>,
+    ) {
+        self.content.get_formatted_cell_values_in(sheet, range, out);
+    }
+
+    fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
+        self.content.get_cell_types_in(sheet, range, out);
+    }
+
+    fn get_cell_decorations_in(
+        &self,
+        sheet: u32,
+        range: RCRange,
+        out: &mut Vec<Fetched<CellDecoration>>,
+    ) {
+        self.content.get_cell_decorations_in(sheet, range, out);
+    }
+}
+
+impl CanvasModel for StableFixtureModel {
+    fn get_selected_sheet(&self) -> Option<u32> {
+        Some(0)
+    }
+
+    fn get_selected_view(&self) -> Option<CanvasView> {
+        Some(self.view.snapshot())
+    }
+
+    fn get_frozen_rows_count(&self, _sheet: u32) -> Option<i32> {
+        Some(self.view.frozen_rows.get())
+    }
+
+    fn get_frozen_columns_count(&self, _sheet: u32) -> Option<i32> {
+        Some(self.view.frozen_cols.get())
+    }
+
+    fn get_row_height(&self, _sheet: u32, _row: i32) -> Option<f64> {
+        Some(STAGE6_ROW_H)
+    }
+
+    fn get_column_width(&self, _sheet: u32, _column: i32) -> Option<f64> {
+        Some(STAGE6_COL_W)
+    }
+
+    fn get_show_grid_lines(&self, _sheet: u32) -> Option<bool> {
+        Some(true)
+    }
+
+    fn get_show_selection(&self) -> bool {
+        self.view.show_selection.get()
+    }
+}
+
+fn stable_canvas_over(
+    store: FixtureStore,
+    view: StableViewFixture,
+) -> (IronCanvas, HtmlCanvasElement, HtmlCanvasElement) {
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay.clone()) else {
+        panic!("create stable-view IronCanvas");
+    };
+    let Ok(content) = JsBackedModel::try_from_js_value(make_fixture_model(store)) else {
+        panic!("stable-view fixture content model passes the duck test");
+    };
+    canvas.set_model(Rc::new(StableFixtureModel { content, view }));
+    canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    (canvas, grid, overlay)
+}
+
 /// Fail loudly when a frame that should have covered the whole production-shaped
 /// pane did not. Geometry drift — a moved constant, a `getColumnWidth` accessor
 /// that stopped being read, a default height sneaking back in — would silently
@@ -1856,6 +2021,228 @@ fn stage6_pixel_diff(actual: &[u8], expected: &[u8]) -> Vec<usize> {
         .filter(|(_, (got, want))| got != want)
         .map(|(offset, _)| offset)
         .collect()
+}
+
+fn stable_forced_fresh_pixels(store: FixtureStore, view: StableViewFixture) -> (Vec<u8>, Vec<u8>) {
+    let (_canvas, grid, overlay) = stable_canvas_over(store, view);
+    (canvas_pixels(&grid), canvas_pixels(&overlay))
+}
+
+fn stable_second_paint_seam(
+    store: FixtureStore,
+    view: StableViewFixture,
+    fresh_grid: &[u8],
+) -> Vec<usize> {
+    let (mut canvas, grid, _overlay) = stable_canvas_over(store, view);
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_pixel_diff(&canvas_pixels(&grid), fresh_grid)
+}
+
+fn stable_pixel_failure(
+    case: &str,
+    layer: &str,
+    width: usize,
+    diff: &[usize],
+    actual: &[u8],
+    expected: &[u8],
+) -> ! {
+    let sample: Vec<String> = diff
+        .iter()
+        .take(8)
+        .map(|&offset| {
+            let pixel = offset / 4;
+            format!(
+                "({x},{y})ch{ch} got {got} want {want}",
+                x = pixel % width,
+                y = pixel / width,
+                ch = offset % 4,
+                got = actual[offset],
+                want = expected[offset],
+            )
+        })
+        .collect();
+    panic!(
+        "stable repaint case `{case}` left {n} unexpected {layer} byte(s): {sample}",
+        n = diff.len(),
+        sample = sample.join("; "),
+    );
+}
+
+fn stable_assert_matches_forced_fresh(
+    grid: &HtmlCanvasElement,
+    overlay: &HtmlCanvasElement,
+    store: &FixtureStore,
+    final_view: &StableViewFixture,
+    case: &str,
+) {
+    let (fresh_grid, fresh_overlay) =
+        stable_forced_fresh_pixels(Rc::clone(store), final_view.clone());
+    let actual_grid = canvas_pixels(grid);
+    let actual_overlay = canvas_pixels(overlay);
+    assert_eq!(actual_grid.len(), fresh_grid.len());
+    assert_eq!(actual_overlay.len(), fresh_overlay.len());
+
+    let seam =
+        stable_second_paint_seam(Rc::clone(store), final_view.clone(), fresh_grid.as_slice());
+    let unexpected_grid: Vec<usize> = stage6_pixel_diff(&actual_grid, &fresh_grid)
+        .into_iter()
+        .filter(|offset| !seam.contains(offset))
+        .collect();
+    if !unexpected_grid.is_empty() {
+        stable_pixel_failure(
+            case,
+            "grid",
+            grid.width() as usize,
+            &unexpected_grid,
+            &actual_grid,
+            &fresh_grid,
+        );
+    }
+
+    let overlay_diff = stage6_pixel_diff(&actual_overlay, &fresh_overlay);
+    if !overlay_diff.is_empty() {
+        stable_pixel_failure(
+            case,
+            "overlay",
+            overlay.width() as usize,
+            &overlay_diff,
+            &actual_overlay,
+            &fresh_overlay,
+        );
+    }
+}
+
+fn stable_assert_slots_reuse_trace(trace: &str, case: &str) {
+    assert!(
+        trace.starts_with("SlotsReuse[WorkFlags(VIEW | CONTENT | OVERLAY)]"),
+        "stable repaint case `{case}` must carry VIEW | CONTENT | OVERLAY through SlotsReuse; \
+         trace was `{trace}`"
+    );
+}
+
+#[wasm_bindgen_test]
+fn stable_plain_commit_and_selection_move_matches_forced_fresh() {
+    const CASE: &str = "stable plain commit and selection move";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(&store, 5, 3, "plain-commit");
+    view.set_active(6, 3);
+    canvas.mark_rows_damaged(0, 5, 5);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let trace = canvas.frame_trace();
+    stable_assert_slots_reuse_trace(&trace, CASE);
+    stage6_assert_verdict(&trace, "br:rows1/1", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn stable_multi_row_dependants_match_forced_fresh() {
+    const CASE: &str = "stable multi-row dependants";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(&store, 5, 3, "edited");
+    stage6_set_value(&store, 9, 5, "dependant");
+    view.set_active(6, 3);
+    canvas.mark_rows_damaged(0, 5, 5);
+    canvas.mark_rows_damaged(0, 9, 9);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let trace = canvas.frame_trace();
+    stable_assert_slots_reuse_trace(&trace, CASE);
+    stage6_assert_verdict(&trace, "br:rows2/2", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn stable_unchanged_recalc_skips_grid_and_moves_overlay() {
+    const CASE: &str = "stable unchanged recalc";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let trace = canvas.frame_trace();
+    stable_assert_slots_reuse_trace(&trace, CASE);
+    stage6_assert_verdict(&trace, "br:skip", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn stable_explicit_border_change_widens_to_full_and_matches_fresh() {
+    const CASE: &str = "stable explicit border removal";
+    let store = stage6_fixture_store();
+    stage6_set_left_border(&store, 5, 3, Some(ic::BorderStyle::Medium));
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_left_border(&store, 5, 3, None);
+    view.set_active(6, 3);
+    canvas.mark_rows_damaged(0, 5, 5);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let trace = canvas.frame_trace();
+    stable_assert_slots_reuse_trace(&trace, CASE);
+    stage6_assert_verdict(&trace, "br:FULL", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn stable_frozen_pane_commit_skips_unchanged_panes_and_matches_fresh() {
+    const CASE: &str = "stable frozen-pane commit";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 5).with_frozen(2, 2);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(&store, 5, 5, "frozen-pane-commit");
+    view.set_active(6, 5);
+    canvas.mark_rows_damaged(0, 5, 5);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let trace = canvas.frame_trace();
+    stable_assert_slots_reuse_trace(&trace, CASE);
+    for verdict in ["tl:skip", "tr:skip", "bl:skip", "br:rows1/1"] {
+        stage6_assert_verdict(&trace, verdict, CASE);
+    }
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn stable_hidden_selection_commit_matches_fresh() {
+    const CASE: &str = "stable hidden-selection commit";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(&store, 5, 3, "hidden-selection-commit");
+    view.set_active(6, 3);
+    view.set_show_selection(false);
+    canvas.mark_rows_damaged(0, 5, 5);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let trace = canvas.frame_trace();
+    stable_assert_slots_reuse_trace(&trace, CASE);
+    stage6_assert_verdict(&trace, "br:rows1/1", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
 
 /// The byte offsets at which a canvas that has simply painted *twice* differs

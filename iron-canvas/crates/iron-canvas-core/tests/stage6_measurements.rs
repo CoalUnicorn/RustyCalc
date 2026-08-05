@@ -430,7 +430,8 @@ enum Workload {
     W7,
     /// Theme change then Fresh: the duplicate-invalidation count.
     W8,
-    /// Content plus view in one attempt: today's conservative Fresh.
+    /// Content plus a real row scroll in one attempt: conservative Fresh.
+    /// W9 changes `top_row`, so it is not a stable-geometry commit sample.
     W9,
     /// Horizontal Viewport scroll: the column-axis control.
     W10,

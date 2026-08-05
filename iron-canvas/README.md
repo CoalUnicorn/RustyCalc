@@ -310,12 +310,11 @@ execute -> finish` before a paint attempt is complete:
    scope, not the repaint verdict: each fetched pane's own fingerprint
    tree still decides `Skip`, `Rows`, or `Full` independently against
    what is actually on screen (`docs/rendering-and-damage.md` §1, §3).
-   `Fresh` is the full rebuild — the only arm reached when content and
-   view work are both queued together (e.g. commit-then-move on
-   Enter/Tab). That combined case still always plans `Fresh` today, even
-   when the geometric delta is `Stable`; reusing `SlotsReuse`/`Damage`
-   for a stable content+view attempt is a deferred follow-up, not
-   current behavior.
+   `Fresh` is the full rebuild. Stable content plus view work can use
+   `Damage` (matching row scope) or `SlotsReuse` (pane candidate scope),
+   with the overlay painted in the same committed attempt. Content plus
+   a real `Scroll` or any `Rebuild` remains `Fresh`; changed content is
+   never blitted.
 4. The dispatched regime *prepares* its scope — every bulk bridge read,
    classified against the pane cache's committed state — without
    installing any of it, then *executes*: paints the prepared scope and
