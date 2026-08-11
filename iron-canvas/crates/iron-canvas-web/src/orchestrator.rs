@@ -31,11 +31,11 @@ use iron_canvas_export::pdf::PdfSurface;
 #[cfg(feature = "dev-tools")]
 use crate::playback::{PlayClock, PlaybackSession, replay_through};
 #[cfg(feature = "dev-tools")]
-use iron_canvas_core::PaintRegimeTag;
-#[cfg(feature = "dev-tools")]
 use iron_canvas_recorder::DrawOp;
 #[cfg(feature = "dev-tools")]
-use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
+use iron_canvas_recorder::recording::{
+    Frame, IcrHeader, RecordOrigin, RecordedPaintResult, Recording, ThemeSnapshot, TraceRecord,
+};
 #[cfg(feature = "dev-tools")]
 use iron_canvas_recorder::{RecordingFilter, RecordingSurface};
 
@@ -64,6 +64,8 @@ const SOFT_WARN_MS: u64 = 30_000;
 const HARD_CAP_BYTES: usize = 100 * 1024 * 1024;
 #[cfg(feature = "dev-tools")]
 const OP_BYTES_HEURISTIC: usize = 150;
+#[cfg(feature = "dev-tools")]
+const ATTEMPT_METADATA_BYTES_HEURISTIC: usize = 256;
 
 // Per-op byte estimate for the hard-cap heuristic. Fixed-shape variants
 // settle near `OP_BYTES_HEURISTIC` after JSON encoding; FillText and
@@ -239,8 +241,8 @@ impl IronCanvas {
 
     /// Paint whichever layers are dirty. When a recording is active
     /// (`dev-tools` feature only), brackets the paint with `begin_frame` /
-    /// `end_frame` on both surfaces and pushes a `Frame` whenever at
-    /// least one layer emitted ops. Idle rAF ticks are dropped.
+    /// `end_frame` on both surfaces and pushes an attempt for every non-idle
+    /// result, including zero-op holds. Idle rAF ticks are dropped.
     ///
     /// Returns the outcome so the host's rAF loop can decide whether to keep
     /// itself armed (`Retry`) and whether this tick is worth attributing
@@ -259,7 +261,8 @@ impl IronCanvas {
             self.orch.overlay_surface().begin_frame();
         }
 
-        let result = match self.orch.paint_if_dirty() {
+        let core_result = self.orch.paint_if_dirty();
+        let result = match core_result {
             PaintResult::Idle => JsPaintResult::Idle,
             PaintResult::Painted => JsPaintResult::Painted,
             PaintResult::Retry => JsPaintResult::Retry,
@@ -267,7 +270,7 @@ impl IronCanvas {
 
         #[cfg(feature = "dev-tools")]
         if recording_active {
-            self.capture_frame();
+            self.capture_frame(core_result, RecordOrigin::Live);
         }
 
         result
@@ -281,7 +284,27 @@ impl IronCanvas {
     /// `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md` targets.
     #[wasm_bindgen(js_name = "frameTrace")]
     pub fn frame_trace(&self) -> String {
+        #[cfg(feature = "dev-tools")]
+        if matches!(self.mode, CanvasMode::Playback(_)) {
+            return String::new();
+        }
         self.orch.last_trace().to_string()
+    }
+
+    /// Structured diagnostics for the currently displayed recorded attempt.
+    /// Returns `undefined` outside playback; live callers should use
+    /// `frameTrace()` for the allocation-free one-line core summary.
+    #[cfg(feature = "dev-tools")]
+    #[wasm_bindgen(js_name = "recordingCurrentAttempt")]
+    pub fn recording_current_attempt(&self) -> Result<JsValue, JsError> {
+        let CanvasMode::Playback(session) = &self.mode else {
+            return Ok(JsValue::UNDEFINED);
+        };
+        let Some(frame) = session.recording.frames.get(session.frame_idx as usize) else {
+            return Ok(JsValue::UNDEFINED);
+        };
+        serde_wasm_bindgen::to_value(frame)
+            .map_err(|e| JsError::new(&format!("recording attempt serialization failed: {e}")))
     }
 
     /// Start a paint-level recording. Errors if a recording is already
@@ -334,19 +357,17 @@ impl IronCanvas {
                 .set_skip_groups(filter.skip_groups);
             self.orch.overlay_surface().enable_recording();
         }
-        // Synchronously capture a full Fresh paint as frame 0 so the
-        // recording always opens with the whole canvas. Relying on the
+        // Synchronously request the recording baseline. Relying on the
         // host's next rAF tick is unsafe — that tick might be a narrow
-        // SlotsReuse (active-cell move, single-pane content edit) and
-        // frame 0 would be a tiny slice. `request_repaint` drops
-        // `last_frame`, which forces the next `paint_if_dirty` to take
-        // the Fresh arm; we drive it inline and call `capture_frame`
-        // ourselves so the recording's first entry is the snapshot.
+        // SlotsReuse (active-cell move, single-pane content edit). The
+        // attempt is marked as `forced_baseline`; if capture holds, it stays
+        // in the diagnostic timeline and a later committed Fresh establishes
+        // the replay anchor.
         self.orch.request_repaint();
         self.orch.grid_surface().begin_frame();
         self.orch.overlay_surface().begin_frame();
-        self.orch.paint_if_dirty();
-        self.capture_frame();
+        let result = self.orch.paint_if_dirty();
+        self.capture_frame(result, RecordOrigin::ForcedBaseline);
         Ok(())
     }
 
@@ -735,22 +756,21 @@ impl IronCanvas {
         self.orch.view_changed();
     }
 
-    /// Drain the per-frame op buffers, push a `Frame` (skipping empty
-    /// ones), update the running cap estimate, fire soft-warn / hard-cap
+    /// Drain the per-attempt op buffers, push a `Frame` for every non-idle
+    /// result (including zero-op holds), update the running cap estimate, fire
+    /// soft-warn / hard-cap
     /// side effects.
     ///
     /// Hard cap: flips `partial`, disables both painter-level forks, but
     /// keeps the `Recording` mode populated so `stopRecording` can still
     /// drain the partial bytes.
     #[cfg(feature = "dev-tools")]
-    fn capture_frame(&mut self) {
+    fn capture_frame(&mut self, result: PaintResult, origin: RecordOrigin) {
         let grid_ops = self.orch.grid_surface().end_frame();
         let overlay_ops = self.orch.overlay_surface().end_frame();
-        if grid_ops.is_empty() && overlay_ops.is_empty() {
+        if result == PaintResult::Idle {
             return;
         }
-        let regime = self.orch.last_regime().unwrap_or(PaintRegimeTag::Fresh);
-        let signals = self.orch.last_work_flags().bits();
         let CanvasMode::Recording(state) = &mut self.mode else {
             return;
         };
@@ -758,12 +778,18 @@ impl IronCanvas {
         let t_ms = (now - state.started_at_ms).max(0.0) as u64;
         let frame_idx = state.rec.frames.len() as u32;
         let frame_bytes: usize = grid_ops.iter().map(op_bytes).sum::<usize>()
-            + overlay_ops.iter().map(op_bytes).sum::<usize>();
+            + overlay_ops.iter().map(op_bytes).sum::<usize>()
+            + ATTEMPT_METADATA_BYTES_HEURISTIC;
         state.rec.push_frame(Frame {
             frame_idx,
             t_ms,
-            regime,
-            signals,
+            origin,
+            result: match result {
+                PaintResult::Painted => RecordedPaintResult::Painted,
+                PaintResult::Retry => RecordedPaintResult::Retry,
+                PaintResult::Idle => unreachable!("idle attempts are omitted above"),
+            },
+            trace: TraceRecord::from(self.orch.last_trace()),
             grid_ops,
             overlay_ops,
         });

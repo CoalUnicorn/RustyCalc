@@ -245,7 +245,7 @@ impl PendingWork {
 
 bitflags::bitflags! {
     /// Diagnostic projection of a `PendingWork` snapshot — never queued
-    /// state itself. Bit values are pinned to the `.icr` v3 `signals: u8`
+    /// state itself. Bit values are pinned to the recorder work-byte
     /// layout inherited from `GridSignals`; renumbering them would corrupt
     /// recorded fixtures.
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -420,7 +420,7 @@ mod tests {
         assert!(work.has_content());
     }
 
-    // Bit values are pinned to the `.icr` v3 `signals: u8` layout
+    // Bit values are pinned to the recorder work-byte layout
     // inherited from `GridSignals`; a silent renumber would corrupt
     // recorded fixtures.
     #[test]

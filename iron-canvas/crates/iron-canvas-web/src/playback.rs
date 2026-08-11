@@ -2,8 +2,8 @@
 //!
 //! Suspends the normal `paint_if_dirty` loop and replays recorded ops onto the
 //! live grid + overlay painters. Each seek walks from the most recent `Fresh`
-//! frame at or before the target — cumulative on the grid surface, per-frame
-//! on the overlay surface. Owned by `IronCanvas`; the orchestrator is unaware.
+//! frame at or before the target — cumulative on both grid and overlay
+//! surfaces. Owned by `IronCanvas`; the orchestrator is unaware.
 
 use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_core::geometry::CanvasSize;
@@ -83,24 +83,29 @@ impl PlaybackSession {
     }
 }
 
-/// Slice index of the most recent `Fresh` frame at or before `target`.
+/// Slice index of the most recent committed `Fresh` frame at or before `target`.
 ///
 /// `target` past the end is clamped to `frames.len() - 1` so callers can
 /// pass a raw user-supplied index without pre-clamping. Returns `None` on
 /// empty input, or on a malformed recording with no `Fresh` frame in range
-/// — the recorder synchronously emits `Fresh` as frame 0, so `None` should
-/// only fire on a corrupt `.icr`. Linear backward scan: regime is not
-/// monotonic, so binary search does not apply, and recordings tend to
-/// re-anchor frequently (resize / structural events), keeping the walk short.
+/// — a recording may begin with held diagnostic attempts, so `None` is a
+/// valid diagnostics-only prefix. A partial Fresh commit is still eligible:
+/// its committed panes and retry scope are represented by the trace, while
+/// the retained pixels of held panes remain part of the preceding visual
+/// state; the subsequent retry is the self-healing anchor. Linear backward
+/// scan: regime is not monotonic, so binary search does not apply, and
+/// recordings tend to re-anchor frequently (resize / structural events),
+/// keeping the walk short.
 pub fn find_fresh_anchor(frames: &[Frame], target: u32) -> Option<u32> {
     let last = frames.len().checked_sub(1)? as u32;
     let start = target.min(last);
-    (0..=start)
-        .rev()
-        .find(|&i| frames[i as usize].regime == PaintRegimeTag::Fresh)
+    (0..=start).rev().find(|&i| {
+        let trace = &frames[i as usize].trace;
+        trace.regime == Some(PaintRegimeTag::Fresh) && trace.committed_seq.is_some()
+    })
 }
 
-/// Replay cumulative grid state + per-frame overlay state for `target_idx`
+/// Replay cumulative grid and overlay state for `target_idx`
 /// onto the live painters.
 ///
 /// Generic over `Painter + BlitPainter` so it works against both the bare
@@ -140,9 +145,61 @@ pub fn replay_through<P>(
         present_grid();
     }
 
-    // Overlay: per-frame. The recorded ops include their own clear when
-    // the layer was repainted; if a frame's overlay_ops is empty, the
-    // overlay simply retains the previous content, matching live render.
+    // Overlay: cumulative from the same committed Fresh anchor. Empty ops
+    // preserve the prior overlay; replaying only the target frame would lose
+    // that state on backward seeks and grid-only attempts.
     overlay.invalidate_cache();
-    replay(overlay, &frames[target_idx as usize].overlay_ops);
+    for frame in &frames[anchor as usize..=target_idx as usize] {
+        if !frame.overlay_ops.is_empty() {
+            replay(overlay, &frame.overlay_ops);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iron_canvas_recorder::recording::{
+        RecordOrigin, RecordedPaintResult, TraceOutcome, TraceRecord,
+    };
+
+    fn attempt(regime: Option<PaintRegimeTag>, committed_seq: Option<u64>) -> Frame {
+        Frame {
+            frame_idx: 0,
+            t_ms: 0,
+            origin: RecordOrigin::Live,
+            result: RecordedPaintResult::Painted,
+            trace: TraceRecord {
+                attempt_seq: 1,
+                committed_seq,
+                regime,
+                effective: regime,
+                work: 0,
+                panes: [None; 4],
+                outcome: TraceOutcome::Painted,
+                blit_fallback: None,
+                fetched_cell_slots: 0,
+                fetched_cells: 0,
+                fetch_batches: 0,
+            },
+            grid_ops: Vec::new(),
+            overlay_ops: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn fresh_anchor_requires_a_committed_trace() {
+        let frames = vec![
+            attempt(Some(PaintRegimeTag::Fresh), None),
+            attempt(Some(PaintRegimeTag::Fresh), Some(2)),
+        ];
+        assert_eq!(find_fresh_anchor(&frames, 0), None);
+        assert_eq!(find_fresh_anchor(&frames, 1), Some(1));
+    }
+
+    #[test]
+    fn diagnostics_only_prefix_has_no_replay_anchor() {
+        let frames = vec![attempt(None, None)];
+        assert_eq!(find_fresh_anchor(&frames, 0), None);
+    }
 }

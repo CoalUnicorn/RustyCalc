@@ -7,8 +7,8 @@
       recorder) and replays ops through `icrReplayGridOps` /
       `icrReplayOverlayOps`, which delegate to the same Rust
       `iron_canvas_recorder::replay` driving `CanvasPainter`. The JS
-      side only owns cadence (cumulative grid from last Fresh anchor;
-      per-frame overlay); all op dispatch is Rust.
+      side only owns cadence (cumulative grid and overlay from the last
+      committed Fresh anchor); all op dispatch is Rust.
 
       Build the vendor bundle with:
         FEATURES=recorder make -C web-test build sync
@@ -126,6 +126,26 @@
             #panel .kv span:nth-child(odd) {
                 color: #888;
             }
+            #analysis {
+                white-space: normal;
+            }
+            #analysis .analysis-block {
+                margin: 4px 0 8px;
+            }
+            #analysis summary {
+                cursor: pointer;
+                color: #555;
+            }
+            #analysis pre {
+                max-height: 180px;
+                overflow: auto;
+                margin: 4px 0 0;
+                padding: 6px;
+                background: #f5f5f6;
+                border-radius: 3px;
+                white-space: pre-wrap;
+                word-break: break-word;
+            }
             #warn {
                 margin: 8px 0;
                 padding: 8px 12px;
@@ -191,12 +211,11 @@
             </section>
             <section>
                 <h2>Frame</h2>
-                <div class="kv" id="frameKv">
-                    <span>idx</span><span>–</span> <span>t_ms</span
-                    ><span>–</span> <span>regime</span><span>–</span>
-                    <span>signals</span><span>–</span> <span>grid_ops</span
-                    ><span>–</span> <span>overlay_ops</span><span>–</span>
-                </div>
+                <div class="kv" id="frameKv"></div>
+            </section>
+            <section>
+                <h2>Operation analysis</h2>
+                <div id="analysis">–</div>
             </section>
         </aside>
 
@@ -205,12 +224,17 @@
                 icrReplayGridOps,
                 icrReplayOverlayOps,
             } from "./vendor/iron-canvas/iron_canvas_web.js";
+            import {
+                diffOps,
+                findFreshAnchor,
+                summarizeOps,
+            } from "./recording-viewer.js";
 
             // ──────────────────────────────────────────────────────────────
             // Schema constants — pinned to the producer's
             // ICR_SCHEMA_VERSION. Bump in lockstep with the recorder crate.
             // ──────────────────────────────────────────────────────────────
-            const ICR_SCHEMA_VERSION = 3;
+            const ICR_SCHEMA_VERSION = 4;
             // The viewer build version is for the version-mismatch banner.
             // Edit by hand when shipping a new recorder release.
             const VIEWER_VERSION = "0.1.0-alpha.1";
@@ -386,34 +410,22 @@
             //   grid_ops from that frame forward through N. SlotsReuse /
             //   Viewport (blit) frames emit incremental ops that assume
             //   the previous grid pixels are still on screen.
-            // - Overlay canvas is *per-frame*. Each frame's overlay_ops
-            //   is self-contained (leading ClearRect, then the new layer).
+            // - Overlay canvas is cumulative from the same committed Fresh
+            //   anchor. Empty overlay_ops preserve the previous layer state.
             // ──────────────────────────────────────────────────────────────
             function replayThrough(targetIdx) {
                 if (!recording || recording.frames.length === 0) return;
                 const frames = recording.frames;
 
-                // Find the last Fresh frame at or before targetIdx — that's
-                // the cumulative grid replay's start anchor.
-                let startIdx = 0;
-                for (let i = targetIdx; i >= 0; i--) {
-                    if (frames[i].regime === "fresh") {
-                        startIdx = i;
-                        break;
-                    }
-                }
+                // Find the last committed Fresh frame at or before targetIdx.
+                // A held forced baseline is diagnostic-only and has no pixels
+                // from which incremental replay can safely proceed.
+                const startIdx = findFreshAnchor(frames, targetIdx);
 
                 // Reset to identity + clear; the replay's own
                 // ApplyDprTransform op will re-establish the DPR scale.
                 gridCtx.setTransform(1, 0, 0, 1, 0, 0);
                 gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
-                for (let i = startIdx; i <= targetIdx; i++) {
-                    icrReplayGridOps(
-                        gridCtx,
-                        JSON.stringify(frames[i].grid_ops),
-                    );
-                }
-
                 overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
                 overlayCtx.clearRect(
                     0,
@@ -421,10 +433,24 @@
                     overlayCanvas.width,
                     overlayCanvas.height,
                 );
-                icrReplayOverlayOps(
-                    overlayCtx,
-                    JSON.stringify(frames[targetIdx].overlay_ops),
-                );
+                if (startIdx === null) return;
+                for (let i = startIdx; i <= targetIdx; i++) {
+                    icrReplayGridOps(
+                        gridCtx,
+                        JSON.stringify(frames[i].grid_ops),
+                    );
+                }
+
+                // Overlay state is cumulative too: an empty overlay list
+                // means preserve the previously painted overlay.
+                for (let i = startIdx; i <= targetIdx; i++) {
+                    if (frames[i].overlay_ops.length) {
+                        icrReplayOverlayOps(
+                            overlayCtx,
+                            JSON.stringify(frames[i].overlay_ops),
+                        );
+                    }
+                }
             }
 
             // ──────────────────────────────────────────────────────────────
@@ -436,17 +462,72 @@
                 scrub.value = idx;
                 replayThrough(idx);
                 updateFrameKv(recording.frames[idx]);
+                updateAnalysis(recording.frames[idx], idx > 0 ? recording.frames[idx - 1] : null);
                 frameLabel.textContent = `${idx + 1} / ${recording.frames.length}`;
             }
 
             function updateFrameKv(f) {
                 const k = document.getElementById("frameKv");
-                k.children[1].textContent = f.frame_idx;
-                k.children[3].textContent = f.t_ms;
-                k.children[5].textContent = f.regime;
-                k.children[7].textContent = `0b${f.signals.toString(2).padStart(4, "0")}`;
-                k.children[9].textContent = f.grid_ops.length;
-                k.children[11].textContent = f.overlay_ops.length;
+                const trace = f.trace || {};
+                k.innerHTML = [
+                    ["idx", f.frame_idx],
+                    ["t_ms", f.t_ms],
+                    ["origin", f.origin],
+                    ["result", f.result],
+                    ["regime", trace.regime ?? "held"],
+                    ["effective", trace.effective ?? "–"],
+                    ["attempt", trace.attempt_seq ?? "–"],
+                    ["commit", trace.committed_seq ?? "–"],
+                    ["work", `0b${(trace.work ?? 0).toString(2).padStart(4, "0")}`],
+                    ["outcome", trace.outcome?.kind ?? "–"],
+                    ["fetch cells", trace.fetched_cells ?? 0],
+                    ["fetch batches", trace.fetch_batches ?? 0],
+                    ["grid ops", f.grid_ops.length],
+                    ["overlay ops", f.overlay_ops.length],
+                ]
+                    .map(([name, value]) => `<span>${escapeHtml(name)}</span><span>${escapeHtml(String(value))}</span>`)
+                    .join("");
+            }
+
+            function updateAnalysis(frame, previous) {
+                const root = document.getElementById("analysis");
+                const grid = summarizeOps(frame.grid_ops);
+                const overlay = summarizeOps(frame.overlay_ops);
+                const gridDiff = previous ? diffOps(previous.grid_ops, frame.grid_ops) : null;
+                const overlayDiff = previous ? diffOps(previous.overlay_ops, frame.overlay_ops) : null;
+                root.innerHTML =
+                    renderSummary("grid", grid) +
+                    renderSummary("overlay", overlay) +
+                    (gridDiff
+                        ? renderDiff("grid", gridDiff) + renderDiff("overlay", overlayDiff)
+                        : "<div>no previous attempt</div>");
+            }
+
+            function renderSummary(label, summary) {
+                const kinds = Object.entries(summary.kinds)
+                    .map(([kind, count]) => `${kind}:${count}`)
+                    .join(" · ") || "none";
+                const groups = Object.entries(summary.groups)
+                    .map(([group, count]) => `${group}:${count}`)
+                    .join(" · ") || "none";
+                return `<div class="analysis-block"><strong>${escapeHtml(label)}</strong> (${summary.total} ops)<br><span>kinds: ${escapeHtml(kinds)}</span><br><span>groups: ${escapeHtml(groups)}</span>${summary.unbalanced ? `<br><span>unbalanced groups: ${summary.unbalanced}</span>` : ""}</div>`;
+            }
+
+            function renderDiff(label, diff) {
+                const kinds = diff.kindDelta.length
+                    ? diff.kindDelta.map((d) => `${d.key}:${d.before}→${d.after}`).join(" · ")
+                    : "none";
+                const groups = diff.groupDelta.length
+                    ? diff.groupDelta.map((d) => `${d.key}:${d.before}→${d.after}`).join(" · ")
+                    : "none";
+                const exact = diff.firstDifferent === null
+                    ? "identical op stream"
+                    : `<details><summary>first difference at index ${diff.firstDifferent}</summary><pre>${escapeHtml(JSON.stringify({ before: diff.beforeFirst, after: diff.afterFirst }, null, 2))}</pre></details>`;
+                return `<div class="analysis-block"><strong>${escapeHtml(label)} op-stream diff (previous → current)</strong><br><span>${diff.beforeCount} → ${diff.afterCount} ops; changed:${diff.changed}, added:${diff.added}, removed:${diff.removed}</span><br><span>kinds: ${escapeHtml(kinds)}</span><br><span>groups: ${escapeHtml(groups)}</span>${exact}</div>`;
+            }
+
+            function escapeHtml(value) {
+                return value.replace(/[&<>"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[char]);
             }
 
             prevBtn.addEventListener("click", () => {

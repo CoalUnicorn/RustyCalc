@@ -30,7 +30,9 @@ use iron_canvas_core::{CanvasTheme, Orchestrator};
 use iron_canvas_core::{PixelRect, Point};
 
 use iron_canvas_core::{PaintRegimeTag, PaintResult, PaneVerdict, WorkFlags};
-use iron_canvas_recorder::recording::{Frame, IcrHeader, Recording, ThemeSnapshot};
+use iron_canvas_recorder::recording::{
+    Frame, IcrHeader, RecordOrigin, RecordedPaintResult, Recording, ThemeSnapshot, TraceRecord,
+};
 use iron_canvas_recorder::{DrawOp, MemSurface, RecorderPainter, RecordingSurface, replay};
 
 use common::TestModel;
@@ -545,7 +547,7 @@ fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>>
 }
 
 /// Bracket a paint with begin_frame/end_frame on both surfaces and
-/// return (grid_ops, overlay_ops, regime, work_bits). The `.icr` v3
+/// return (grid_ops, overlay_ops, regime, work_bits). The `.icr` attempt
 /// `signals: u8` field is fed from `WorkFlags::bits()`, whose layout is
 /// pinned to the `GridSignals` word it replaced.
 fn paint_and_capture(
@@ -752,18 +754,15 @@ fn recording_serde_round_trip_across_all_five_regimes() {
 
     let mut frames: Vec<Frame> = Vec::new();
     let mut push = |orch: &mut Orchestrator<RecordingSurface<MemSurface>>, t_ms: u64| {
-        let (grid_ops, overlay_ops, regime, signals) = paint_and_capture(orch);
-        // Skip idle frames so the recording matches the production
-        // paint_if_dirty drop-empty-frames behavior.
-        if grid_ops.is_empty() && overlay_ops.is_empty() {
-            return;
-        }
+        let (grid_ops, overlay_ops, _, _) = paint_and_capture(orch);
         let idx = frames.len() as u32;
+        let trace = TraceRecord::from(orch.last_trace());
         frames.push(Frame {
             frame_idx: idx,
             t_ms,
-            regime: regime.expect("regime must be stamped"),
-            signals,
+            origin: RecordOrigin::Live,
+            result: RecordedPaintResult::Painted,
+            trace,
             grid_ops,
             overlay_ops,
         });
@@ -789,7 +788,10 @@ fn recording_serde_round_trip_across_all_five_regimes() {
     push(&mut orch, 48); // Overlay
 
     assert_eq!(frames.len(), 5, "all five regimes should produce frames");
-    let regimes: Vec<_> = frames.iter().map(|f| f.regime).collect();
+    let regimes: Vec<_> = frames
+        .iter()
+        .map(|f| f.trace.regime.expect("regime must be stamped"))
+        .collect();
     assert_eq!(
         regimes,
         vec![

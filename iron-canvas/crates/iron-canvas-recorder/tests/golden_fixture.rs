@@ -30,11 +30,24 @@ use iron_canvas_core::theme::CanvasTheme;
 
 use iron_canvas_recorder::DrawOp;
 use iron_canvas_recorder::recording::{
-    Frame, ICR_SCHEMA_VERSION, IcrHeader, Recording, ThemeSnapshot,
+    Frame, ICR_SCHEMA_VERSION, IcrHeader, RecordOrigin, RecordedPaintResult, Recording,
+    ThemeSnapshot, TraceRecord,
 };
 
 const FIXTURE_PATH: &str = "tests/fixtures/fresh_paint.icr";
 const OVERLAY_FIXTURE_PATH: &str = "tests/fixtures/overlay_paint.icr";
+
+fn trace(regime: PaintRegimeTag, work: u8) -> TraceRecord {
+    let core_trace = iron_canvas_core::FrameTrace {
+        attempt_seq: 1,
+        committed_seq: Some(1),
+        regime: Some(regime),
+        effective: Some(regime),
+        work: iron_canvas_core::WorkFlags::from_bits_retain(work),
+        ..iron_canvas_core::FrameTrace::default()
+    };
+    TraceRecord::from(core_trace)
+}
 
 /// Builds a deterministic Recording covering one Fresh frame. The shape
 /// is hand-picked to exercise every `DrawOp` variant the viewer needs to
@@ -155,10 +168,9 @@ fn build_fixture() -> Recording {
     rec.push_frame(Frame {
         frame_idx: 0,
         t_ms: 0,
-        regime: PaintRegimeTag::Fresh,
-        // STRUCTURAL bit set — matches what a first-paint frame would
-        // record after a model push.
-        signals: 0b0100,
+        origin: RecordOrigin::Live,
+        result: RecordedPaintResult::Painted,
+        trace: trace(PaintRegimeTag::Fresh, 0b0100),
         grid_ops,
         overlay_ops,
     });
@@ -299,8 +311,9 @@ fn build_overlay_fixture() -> Recording {
     rec.push_frame(Frame {
         frame_idx: 0,
         t_ms: 0,
-        regime: PaintRegimeTag::Fresh,
-        signals: 0b1000, // OVERLAY bit
+        origin: RecordOrigin::Live,
+        result: RecordedPaintResult::Painted,
+        trace: trace(PaintRegimeTag::Fresh, 0b1000),
         grid_ops: Vec::new(),
         overlay_ops,
     });
@@ -399,14 +412,14 @@ fn fresh_frame_has_grid_sections() {
 }
 
 #[test]
-fn schema_version_is_pinned_at_3() {
+fn schema_version_is_pinned_at_4() {
     // Stage 4 (the transactional prepare/execute/finish rework) is an
     // internal orchestrator change, not a wire-format one — it explicitly
     // does not touch `.icr` schema version, field names, strategy strings,
     // or fixtures. Pin the value directly so an accidental bump fails here
     // with a clear message instead of surfacing only as an opaque byte-diff
     // against the fixtures above.
-    assert_eq!(ICR_SCHEMA_VERSION, 3);
+    assert_eq!(ICR_SCHEMA_VERSION, 4);
 }
 
 #[test]
@@ -437,8 +450,9 @@ fn paint_regime_tag_serializes_to_documented_snake_case() {
         rec.push_frame(Frame {
             frame_idx: 0,
             t_ms: 0,
-            regime,
-            signals: 0,
+            origin: RecordOrigin::Live,
+            result: RecordedPaintResult::Painted,
+            trace: trace(regime, 0),
             grid_ops: vec![DrawOp::InvalidateCache],
             overlay_ops: Vec::new(),
         });

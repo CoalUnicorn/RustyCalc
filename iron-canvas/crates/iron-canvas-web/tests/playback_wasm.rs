@@ -242,11 +242,11 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     let Ok(rec) = Recording::deserialize(&bytes) else {
         panic!("recording deserializes");
     };
-    let regimes: Vec<PaintRegimeTag> = rec.frames.iter().map(|f| f.regime).collect();
+    let regimes: Vec<PaintRegimeTag> = rec.frames.iter().filter_map(|f| f.trace.regime).collect();
     assert!(
         rec.frames
             .iter()
-            .any(|f| f.regime == PaintRegimeTag::Viewport
+            .any(|f| f.trace.regime == Some(PaintRegimeTag::Viewport)
                 && f.grid_ops
                     .iter()
                     .any(|op| matches!(op, DrawOp::Blit { .. }))),
