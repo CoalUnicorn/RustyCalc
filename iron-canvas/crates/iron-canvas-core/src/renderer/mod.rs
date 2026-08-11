@@ -209,13 +209,16 @@ impl<P: Painter> RendererCore<P> {
         self.trace.set(t);
     }
 
-    /// Charge one bulk-fetch round (all four accessors) over `range`. The
-    /// direct read on invariant I1: the model round-trip is unconditional, so
-    /// this rises with pane area no matter which verdict follows.
+    /// Charge one renderer bundle fetch over `range`. The legacy logical slot
+    /// total remains four channels for compatibility; the separate cell and
+    /// batch counters make the trace useful without pretending to know how
+    /// many host or adapter calls the model performed internally.
     fn trace_fetch(&self, range: RCRange) {
         let cells = range.height() as usize * range.width() as usize;
         let mut t = self.trace.get();
         t.fetched_cell_slots += cells * 4;
+        t.fetched_cells += cells;
+        t.fetch_batches += 1;
         self.trace.set(t);
     }
 }

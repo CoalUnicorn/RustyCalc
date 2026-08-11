@@ -236,6 +236,10 @@ impl TestModel {
         self
     }
 
+    pub fn set_capture_fail(&self, which: Option<FrameInputFailure>) {
+        self.capture_fail.set(which);
+    }
+
     pub fn set_top_row(&self, r: i32) {
         self.top_row.set(r);
     }

@@ -14,7 +14,8 @@ use iron_canvas_core::chrome::{PaneRegion, PaneRegionMask};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::{
-    Orchestrator, PaintRegimeTag, PaintResult, PaneVerdict, PixelRect, Point, WorkFlags,
+    FrameInputFailure, FrameOutcome, Orchestrator, PaintRegimeTag, PaintResult, PaneVerdict,
+    PixelRect, Point, WorkFlags,
 };
 use iron_canvas_recorder::{DrawOp, MemSurface};
 
@@ -62,6 +63,41 @@ fn grid_text_ops_containing(orch: &Orchestrator<MemSurface>, needle: &str) -> us
         .iter()
         .filter(|op| matches!(op, DrawOp::FillText { text, .. } if text.contains(needle)))
         .count()
+}
+
+/// A capture hold is published through the same completion boundary as every
+/// other attempt. Its renderer attribution must therefore start empty rather
+/// than reusing the previous frame's pane/fetch state.
+#[test]
+fn input_capture_hold_resets_renderer_trace_before_capture() {
+    let stub = Rc::new(TestModel::synthetic_grid().with_data_until(30));
+    let mut orch = build(Rc::clone(&stub));
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.last_trace().attempt_seq, 1);
+    assert_eq!(orch.last_trace().committed_seq, Some(1));
+    assert!(orch.last_trace().fetched_cells > 0);
+    assert!(orch.last_trace().fetch_batches > 0);
+
+    stub.set_cell(1, 1, "changed");
+    stub.set_capture_fail(Some(FrameInputFailure::SelectedSheet));
+    orch.mark_content_dirty(PaneRegionMask::ALL);
+
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+
+    let trace = orch.last_trace();
+    assert_eq!(trace.attempt_seq, 2);
+    assert_eq!(trace.committed_seq, None);
+    assert_eq!(trace.regime, None);
+    assert_eq!(trace.effective, None);
+    assert_eq!(trace.panes, [None; 4]);
+    assert_eq!(trace.fetched_cell_slots, 0);
+    assert_eq!(trace.fetched_cells, 0);
+    assert_eq!(trace.fetch_batches, 0);
+    assert_eq!(trace.blit_fallback, None);
+    assert!(matches!(
+        trace.outcome,
+        FrameOutcome::HeldOnInputFailure(FrameInputFailure::SelectedSheet)
+    ));
 }
 
 /// Drive the real dispatch into the Viewport regime with a bulk-only bridge
@@ -473,6 +509,8 @@ fn stable_slots_reuse_partial_commit_drops_serviced_view_overlay_retry() {
 
     assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
     let partial = orch.last_trace();
+    assert_eq!(partial.attempt_seq, 2);
+    assert_eq!(partial.committed_seq, Some(2));
     assert_eq!(partial.regime, Some(PaintRegimeTag::SlotsReuse));
     assert_eq!(partial.effective, Some(PaintRegimeTag::SlotsReuse));
     assert_eq!(

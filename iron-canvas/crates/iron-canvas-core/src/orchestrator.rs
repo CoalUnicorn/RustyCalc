@@ -459,15 +459,23 @@ pub struct BlitFallback {
 /// hypothesis in `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FrameTrace {
-    /// `None` before the first painted frame. `PaintRegimeTag` has no
-    /// `Default` on purpose — inventing one would name a regime that never ran.
+    /// Monotonically wrapping identifier for each non-idle paint attempt.
+    /// Capture holds receive an id too, so recorder diagnostics can correlate
+    /// a retry with the attempt that produced it.
+    pub attempt_seq: u64,
+    /// Identifier of the successful transaction committed by this attempt.
+    /// Holds leave this unset; partial commits still advance the sequence.
+    pub committed_seq: Option<u64>,
+    /// `None` before the first dispatch and on a capture hold. `PaintRegimeTag`
+    /// has no `Default` on purpose — inventing one would name a regime that
+    /// never ran.
     pub regime: Option<PaintRegimeTag>,
     /// The regime that actually painted pixels this frame. Equal to `regime`
     /// except when a `Viewport` blit rejected in-place reuse and fell
     /// through to a full repaint (`BlitOutcome::FreshFallback`) —
     /// `plan_frame`'s selection and the executor's actual work diverge, and
-    /// this field names the latter. `None` before the first paint, alongside
-    /// `regime`.
+    /// this field names the latter. `None` before the first paint and on a
+    /// capture hold, alongside `regime`.
     pub effective: Option<PaintRegimeTag>,
     /// Diagnostic projection of the `PendingWork` snapshot `plan_frame`
     /// acted on. Included because the regime alone cannot explain itself:
@@ -488,6 +496,14 @@ pub struct FrameTrace {
     /// pane is charged once — `render_pane` adopts the buffers the preflight
     /// already validated instead of refetching the same cells.
     pub fetched_cell_slots: usize,
+    /// Distinct addressed cells charged by the renderer's bundle fetches.
+    /// Unlike `fetched_cell_slots`, this does not encode the current number of
+    /// model channels.
+    pub fetched_cells: usize,
+    /// Number of renderer-owned bundle fetches represented by this trace.
+    /// This is not a host-call count; adapter internals may still perform
+    /// scalar reads behind one bundle request.
+    pub fetch_batches: usize,
 }
 
 impl fmt::Display for FrameTrace {
@@ -702,6 +718,10 @@ where
     /// Per-pane attribution for the last `paint_if_dirty`. Collected by the
     /// grid renderer during paint, stamped here after dispatch.
     last_trace: FrameTrace,
+    /// Sequence assigned to the current/last non-idle attempt.
+    attempt_seq: u64,
+    /// Sequence assigned to the last committed transaction.
+    commit_seq: u64,
 }
 
 impl<S> Orchestrator<S>
@@ -728,6 +748,8 @@ where
             last_effective: None,
             last_work_flags: WorkFlags::empty(),
             last_trace: FrameTrace::default(),
+            attempt_seq: 0,
+            commit_seq: 0,
         }
     }
 
@@ -1162,12 +1184,19 @@ where
             // Nothing taken, model never taken — nothing to restore.
             return PaintResult::Idle;
         }
+        self.attempt_seq = self.attempt_seq.wrapping_add(1);
         // Lift the model out so the paint methods can take `&mut self`
         // without overlapping the model borrow. The `is_none` guard above
         // makes the `else` unreachable, but `let-else` keeps it panic-free.
         let Some(model) = self.model.take() else {
             return PaintResult::Idle;
         };
+
+        // A capture failure still publishes a trace through `finish_attempt`.
+        // Clear renderer-owned attribution before any fallible model reads so
+        // a held attempt cannot inherit pane verdicts, fetch counts, or blit
+        // fallback details from the previously painted frame.
+        self.grid.renderer.reset_trace();
 
         let model_dyn: &dyn CanvasModel = model.as_ref();
 
@@ -1226,10 +1255,10 @@ where
         let plan = plan_frame(work, delta, inputs.sheet(), inputs.show_selection());
         let selected = plan.selected_strategy;
         let work_flags = plan.consumes.flags();
-        // Clear before dispatch so the trace `finish_attempt` reads back
-        // describes this frame only. An `Overlay` regime legitimately
-        // leaves every pane `None` — it never calls a grid pane renderer.
-        self.grid.renderer.reset_trace();
+        // The trace was reset before capture so both successful dispatch and
+        // the capture-failure path describe this attempt only. An `Overlay`
+        // regime legitimately leaves every pane `None` — it never calls a
+        // grid pane renderer.
         // `plan.consumes` is the attempt's taken `PendingWork`, owned by the
         // plan; moving it out here (rather than a second borrow of the
         // pre-take value) is what lets a held arm's `PaintOutcome` carry it
@@ -1404,6 +1433,16 @@ where
             self.pending.merge(retry);
         }
 
+        let committed_seq = if matches!(
+            frame_outcome,
+            FrameOutcome::Painted | FrameOutcome::PartialCommit(_)
+        ) {
+            self.commit_seq = self.commit_seq.wrapping_add(1);
+            Some(self.commit_seq)
+        } else {
+            None
+        };
+
         // 5. publish last_regime, last_effective, last_work_flags, and
         //    last_trace — built once here from plan metadata (`selected`/
         //    `work_flags`), the renderer's own prepared-fetch attribution
@@ -1413,6 +1452,8 @@ where
         self.last_effective = effective;
         self.last_work_flags = work_flags;
         let mut trace = self.grid.renderer.trace();
+        trace.attempt_seq = self.attempt_seq;
+        trace.committed_seq = committed_seq;
         trace.regime = selected;
         trace.effective = effective;
         trace.work = work_flags;
