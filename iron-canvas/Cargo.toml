@@ -9,7 +9,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-ironcalc_base = { version = "0.7.1", path = "../IronCalc/base" }
+ironcalc_base = { version = "0.8.3", path = "../IronCalc/base" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bitflags = "2.11.1"

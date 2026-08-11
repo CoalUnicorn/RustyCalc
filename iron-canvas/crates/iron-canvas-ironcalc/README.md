@@ -18,7 +18,7 @@ The data-source adapter that makes the renderer spreadsheet-aware. Sits between 
 ## Dependencies
 
 - `iron-canvas-core` — the `CanvasModel` trait and target types
-- `ironcalc_base` (v0.7.1) — the workbook engine being adapted
+- `ironcalc_base` (v0.8.3) — the workbook engine being adapted
 
 ## Relationship to sibling crates
 

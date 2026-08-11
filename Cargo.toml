@@ -9,8 +9,8 @@ readme = "README.md"
 
 [dependencies]
 leptos = { version = "0.8", features = ["csr"] }
-ironcalc_base = { version = "0.7.1", path = "IronCalc/base"  }
-ironcalc = { version = "0.7.1", path = "IronCalc/xlsx" }
+ironcalc_base = { version = "0.8.3", path = "IronCalc/base"  }
+ironcalc = { version = "0.8.3", path = "IronCalc/xlsx" }
 iron-canvas-web = { path = "iron-canvas/crates/iron-canvas-web" }
 iron-canvas-core = { path = "iron-canvas/crates/iron-canvas-core" }
 iron-canvas-ironcalc = { path = "iron-canvas/crates/iron-canvas-ironcalc" }
