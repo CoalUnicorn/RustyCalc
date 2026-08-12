@@ -115,7 +115,7 @@ pub(crate) fn build_pane_fingerprint(
     let row_count = (range.r2 - range.r1 + 1).max(0) as usize;
     let mut rows = Vec::with_capacity(row_count);
     for row in range.rows() {
-        rows.push(fingerprint_dense_row(
+        rows.push(fingerprint_dense_row_from_channels(
             row,
             styles,
             values,
@@ -132,18 +132,30 @@ pub(crate) fn build_pane_fingerprint(
     }
 }
 
-/// Fingerprint the single model `row` out of dense, row-major buffers laid
-/// out over `range` — the one place a row digest and its border flag are
-/// ever computed. Both whole-pane builders and the row-shift rotation share
-/// it, so "the candidate a rotation produces equals a full rebuild" holds by
-/// construction rather than by two loops being kept in sync by hand.
+/// Fingerprint the single model `row` out of the coherent fetched bundle's
+/// dense, row-major channels laid out over `range` — the one place a row
+/// digest and its border flag are ever computed. Both whole-pane builders and
+/// row-shift rotation share it, so "the candidate a rotation produces equals
+/// a full rebuild" holds by construction rather than by two loops being kept
+/// in sync by hand.
 ///
 /// `row` must lie inside `range`, and the four buffers must be dense over
 /// `range` (`idx = (row - r1) * cols + (col - c1)`). The caller decides which
 /// buffers those are: a full-pane fetch addresses the whole pane, a blit's
 /// revealed strip addresses only the strip — a row's digest depends on its
 /// own model address and content, never on which buffer it was read from.
-fn fingerprint_dense_row(
+fn fingerprint_dense_row(row: i32, cells: &FetchedCells, range: RCRange) -> RowFingerprint {
+    fingerprint_dense_row_from_channels(
+        row,
+        cells.styles(),
+        cells.values(),
+        cells.cell_types(),
+        cells.decorations(),
+        range,
+    )
+}
+
+fn fingerprint_dense_row_from_channels(
     row: i32,
     styles: &[Fetched<CellStyle>],
     values: &[Fetched<String>],
@@ -218,6 +230,7 @@ fn fold_pane_digest(range: RCRange, rows: &[RowFingerprint]) -> u64 {
 /// only the newly-needed capacity, not a full fresh tree). A column-count
 /// change costs nothing at all now that rows are fixed-size: only the folded
 /// digest they carry differs.
+#[allow(dead_code)] // The parallel-slice form remains a focused test helper.
 pub(crate) fn rebuild_pane_fingerprint_in_place(
     target: &mut PaneFingerprint,
     styles: &[Fetched<CellStyle>],
@@ -229,12 +242,44 @@ pub(crate) fn rebuild_pane_fingerprint_in_place(
     resize_rows(target, (range.r2 - range.r1 + 1).max(0) as usize);
 
     for (row_offset, row) in range.rows().enumerate() {
-        target.rows[row_offset] =
-            fingerprint_dense_row(row, styles, values, cell_types, decorations, range);
+        target.rows[row_offset] = fingerprint_dense_row_from_channels(
+            row,
+            styles,
+            values,
+            cell_types,
+            decorations,
+            range,
+        );
     }
 
     target.range = range;
     target.digest = fold_pane_digest(range, &target.rows);
+}
+
+/// In-place bundle-owned twin used by the renderer hot path. The legacy
+/// channel-parameter function above remains for focused fingerprint tests;
+/// all production callers pass the coherent fetched bundle through here.
+pub(crate) fn rebuild_pane_fingerprint_in_place_from_cells(
+    target: &mut PaneFingerprint,
+    cells: &FetchedCells,
+    range: RCRange,
+) {
+    resize_rows(target, (range.r2 - range.r1 + 1).max(0) as usize);
+
+    for (row_offset, row) in range.rows().enumerate() {
+        target.rows[row_offset] = fingerprint_dense_row_from_cells(cells, row, range);
+    }
+
+    target.range = range;
+    target.digest = fold_pane_digest(range, &target.rows);
+}
+
+fn fingerprint_dense_row_from_cells(
+    cells: &FetchedCells,
+    row: i32,
+    range: RCRange,
+) -> RowFingerprint {
+    fingerprint_dense_row(row, cells, range)
 }
 
 /// Resize `target.rows` to `row_count` in place, reusing the Vec: `truncate`
@@ -381,13 +426,7 @@ pub(crate) fn rotate_pane_fingerprint_in_place(
         return Err(RowShiftIneligible::IncompleteStrip);
     }
     let strip_rows = (strip_range.r2 - strip_range.r1 + 1).max(0) as usize;
-    let strip_cols = (strip_range.c2 - strip_range.c1 + 1).max(0) as usize;
-    let strip_len = strip_rows * strip_cols;
-    if strip.styles().len() != strip_len
-        || strip.values().len() != strip_len
-        || strip.cell_types().len() != strip_len
-        || strip.decorations().len() != strip_len
-    {
+    if !strip.is_dense_for(strip_range) {
         return Err(RowShiftIneligible::IncompleteStrip);
     }
 
@@ -403,14 +442,7 @@ pub(crate) fn rotate_pane_fingerprint_in_place(
     resize_rows(target, (new_range.r2 - new_range.r1 + 1).max(0) as usize);
     for (row_offset, row) in new_range.rows().enumerate() {
         target.rows[row_offset] = if from_strip(row) {
-            fingerprint_dense_row(
-                row,
-                strip.styles(),
-                strip.values(),
-                strip.cell_types(),
-                strip.decorations(),
-                strip_range,
-            )
+            fingerprint_dense_row_from_cells(strip, row, strip_range)
         } else {
             prior.rows[(row - prev_range.r1) as usize].clone()
         };

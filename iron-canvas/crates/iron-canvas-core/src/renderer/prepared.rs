@@ -97,6 +97,31 @@ pub(crate) struct FetchedCells {
 }
 
 impl FetchedCells {
+    /// Number of dense channels currently carried by one fetched cell
+    /// bundle. Keep this next to the fields so trace accounting cannot drift
+    /// when the bundle changes shape.
+    pub(crate) const CHANNEL_COUNT: usize = 4;
+
+    pub(crate) fn addressed_cells(range: RCRange) -> usize {
+        let rows = (range.r2 - range.r1 + 1).max(0) as usize;
+        let columns = (range.c2 - range.c1 + 1).max(0) as usize;
+        rows.saturating_mul(columns)
+    }
+
+    pub(crate) fn logical_channel_slots(range: RCRange) -> usize {
+        Self::addressed_cells(range).saturating_mul(Self::CHANNEL_COUNT)
+    }
+
+    /// Whether every channel is dense for the same address-space range.
+    /// Callers use this before indexing by one shared row-major offset.
+    pub(crate) fn is_dense_for(&self, range: RCRange) -> bool {
+        let expected = Self::addressed_cells(range);
+        self.styles.len() == expected
+            && self.values.len() == expected
+            && self.cell_types.len() == expected
+            && self.decorations.len() == expected
+    }
+
     #[cfg(any(test, feature = "surface-introspection"))]
     pub(super) fn capacities(&self) -> (usize, usize, usize, usize) {
         (
@@ -185,10 +210,19 @@ impl FetchedCells {
     /// is asserted once here, at the borrow boundary, rather than per cell
     /// inside the paint walk.
     pub(super) fn as_mut(&mut self) -> FetchedCellsMut<'_> {
-        debug_assert!(
-            self.styles.len() == self.values.len()
-                && self.styles.len() == self.cell_types.len()
-                && self.styles.len() == self.decorations.len(),
+        debug_assert_eq!(
+            self.styles.len(),
+            self.values.len(),
+            "the four channels address one row-major range and must stay equal-length"
+        );
+        debug_assert_eq!(
+            self.styles.len(),
+            self.cell_types.len(),
+            "the four channels address one row-major range and must stay equal-length"
+        );
+        debug_assert_eq!(
+            self.styles.len(),
+            self.decorations.len(),
             "the four channels address one row-major range and must stay equal-length"
         );
         FetchedCellsMut {
@@ -569,13 +603,7 @@ impl<P: Painter> RendererCore<P> {
         fetched: FetchedCells,
     ) -> PreparedPane {
         let pane_buf = self.pane_cache.pane(pane);
-        let candidate = pane_buf.fingerprint.build_candidate(
-            fetched.styles(),
-            fetched.values(),
-            fetched.cell_types(),
-            fetched.decorations(),
-            range,
-        );
+        let candidate = pane_buf.fingerprint.build_candidate(&fetched, range);
         let plan = if frame.kind.reuses_slots() {
             pane_buf.fingerprint.compare_to_painted(&candidate)
         } else {

@@ -47,6 +47,7 @@ mod common;
 
 use std::cell::RefCell;
 use std::fmt::Write as _;
+use std::mem::size_of;
 use std::rc::Rc;
 
 use iron_canvas_core::chrome::PaneRegionMask;
@@ -784,7 +785,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
 // ==============================================================================
 
 const CSV_HEADER: &str = "workload,phase,size,frozen,style,result,regime,effective,work,outcome,\
-tl,tr,bl,br,blit_fallback,fetched_slots,bulk_calls,observed_cells,fetch_ranges,\
+tl,tr,bl,br,blit_fallback,fetched_slots,fetched_cells,fetch_batches,bulk_calls,observed_cells,fetch_ranges,\
 fills,strokes,text,clips,blits,invalidations,text_resets,dpr_transforms,group_brackets,ops_total,\
 drawing_ops";
 
@@ -825,7 +826,7 @@ fn csv_row(row: &Row) -> String {
     let ops = sample.ops;
     format!(
         "{workload},{phase},{size},{frozen},{style},{result:?},{regime},{effective},{work},\
-{outcome},{tl},{tr},{bl},{br},{fallback},{fetched},{bulk_calls},{observed_cells},{ranges},\
+{outcome},{tl},{tr},{bl},{br},{fallback},{fetched},{fetched_cells},{fetch_batches},{bulk_calls},{observed_cells},{ranges},\
 {fills},{strokes},{text},{clips},{blits},{invalidations},{resets},{dpr},{groups},{total},{drawing}",
         size = shape.size_tag(),
         frozen = shape.frozen_tag(),
@@ -845,6 +846,8 @@ fn csv_row(row: &Row) -> String {
         br = verdict_tag(trace.panes[3]),
         fallback = fallback_tag(trace),
         fetched = trace.fetched_cell_slots,
+        fetched_cells = trace.fetched_cells,
+        fetch_batches = trace.fetch_batches,
         bulk_calls = sample.calls.len(),
         observed_cells = sample.observed_cells(),
         ranges = sample.fetch_ranges(),
@@ -877,6 +880,38 @@ fn stage6_emit_traffic_matrix_csv() {
             }
         }
     }
+}
+
+/// Print the current dense slot sizes alongside the traffic matrix. This is a
+/// baseline for the hyperlink-channel decision: it measures the existing
+/// four-channel payload without claiming that a future link representation is
+/// free or equivalent.
+#[test]
+#[ignore = "Stage 6 manual measurement probe: print current fetched-slot sizes"]
+fn stage6_emit_fetched_channel_slot_sizes() {
+    println!(
+        "fetched_channel_count=4 style_slot_bytes={} value_slot_bytes={} type_slot_bytes={} decoration_slot_bytes={}",
+        size_of::<Fetched<CellStyle>>(),
+        size_of::<Fetched<String>>(),
+        size_of::<Fetched<CellKind>>(),
+        size_of::<Fetched<CellDecoration>>(),
+    );
+}
+
+#[test]
+fn fresh_trace_reports_one_bundle_and_four_logical_slots_per_cell() {
+    let rows = run_workload(Workload::W0, Shape::production_plain());
+    assert_eq!(rows.len(), 1, "W0 must produce exactly one measured frame");
+    let sample = &rows[0].sample;
+
+    assert_eq!(sample.trace.fetch_batches, 1);
+    assert_eq!(sample.trace.fetched_cells, sample.calls[0].cells);
+    assert_eq!(sample.observed_cells(), sample.trace.fetched_cells * 4);
+    assert_eq!(
+        sample.trace.fetched_cell_slots,
+        sample.trace.fetched_cells * 4
+    );
+    assert_eq!(sample.calls.len(), 4);
 }
 
 /// Task 1's acceptance criterion 2, restated against the Task 7 pair: the two

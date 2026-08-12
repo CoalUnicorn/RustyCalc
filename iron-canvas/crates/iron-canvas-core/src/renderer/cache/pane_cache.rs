@@ -18,7 +18,7 @@ use crate::chrome::{PaneRegion, PaneRegionMask};
 use crate::geometry::prim::Axis;
 use crate::renderer::cell::fingerprint::{
     PaneFingerprint, RepaintPlan, RowShiftFingerprint, RowShiftIneligible, plan_pane_repaint,
-    rebuild_pane_fingerprint_in_place, rotate_pane_fingerprint_in_place,
+    rebuild_pane_fingerprint_in_place_from_cells, rotate_pane_fingerprint_in_place,
 };
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{CellDecoration, CellKind, CellStyle};
@@ -100,7 +100,7 @@ impl PaneFingerprintState {
     /// Build a candidate tree from this frame's freshly bulk-fetched
     /// buffers as an OWNED value: rebuilds in place into `scratch` (reusing
     /// whatever warm `Vec` capacity is parked there via
-    /// [`rebuild_pane_fingerprint_in_place`]), then `mem::take`s it out,
+    /// [`rebuild_pane_fingerprint_in_place_from_cells`]), then `mem::take`s it out,
     /// leaving `scratch` at `Default` again. The candidate belongs to the
     /// caller from this point on — a preparation that builds one and then
     /// abandons it (a held pane) never left `scratch` holding
@@ -108,23 +108,9 @@ impl PaneFingerprintState {
     /// never anything but capacity to begin with, and it gets refilled with
     /// real capacity the moment this or a sibling pane's next
     /// [`Self::install`] runs.
-    pub(crate) fn build_candidate(
-        &self,
-        styles: &[Fetched<CellStyle>],
-        values: &[Fetched<String>],
-        cell_types: &[Fetched<CellKind>],
-        decorations: &[Fetched<CellDecoration>],
-        range: RCRange,
-    ) -> PaneFingerprint {
+    pub(crate) fn build_candidate(&self, cells: &FetchedCells, range: RCRange) -> PaneFingerprint {
         let mut scratch = self.scratch.borrow_mut();
-        rebuild_pane_fingerprint_in_place(
-            &mut scratch,
-            styles,
-            values,
-            cell_types,
-            decorations,
-            range,
-        );
+        rebuild_pane_fingerprint_in_place_from_cells(&mut scratch, cells, range);
         std::mem::take(&mut *scratch)
     }
 

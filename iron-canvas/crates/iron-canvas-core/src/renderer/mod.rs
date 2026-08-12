@@ -210,14 +210,13 @@ impl<P: Painter> RendererCore<P> {
     }
 
     /// Charge one renderer bundle fetch over `range`. The legacy logical slot
-    /// total remains four channels for compatibility; the separate cell and
-    /// batch counters make the trace useful without pretending to know how
-    /// many host or adapter calls the model performed internally.
+    /// total remains a derived channel count for compatibility; the separate
+    /// cell and batch counters make the trace useful without pretending to
+    /// know how many host or adapter calls the model performed internally.
     fn trace_fetch(&self, range: RCRange) {
-        let cells = range.height() as usize * range.width() as usize;
         let mut t = self.trace.get();
-        t.fetched_cell_slots += cells * 4;
-        t.fetched_cells += cells;
+        t.fetched_cell_slots += FetchedCells::logical_channel_slots(range);
+        t.fetched_cells += FetchedCells::addressed_cells(range);
         t.fetch_batches += 1;
         self.trace.set(t);
     }
