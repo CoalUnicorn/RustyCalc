@@ -19,11 +19,10 @@
 
 use std::rc::Rc;
 
-use iron_canvas_canvas2d::{CanvasPainter, WebSurface};
+use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
 use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
-use iron_canvas_core::layer::Surface;
-use iron_canvas_core::{CanvasModel, CanvasTheme, Layer, Orchestrator};
+use iron_canvas_core::{CanvasModel, CanvasTheme, Layer};
 use iron_canvas_datagrid::SortDirection;
 use iron_canvas_export::SvgSurface;
 use wasm_bindgen::prelude::*;
@@ -37,13 +36,9 @@ use hover::HoverLayer;
 
 #[wasm_bindgen]
 pub struct DataGridCanvas {
-    orch: Orchestrator<WebSurface>,
+    runtime: Canvas2dRuntime<WebSurface>,
     model: Rc<DataGridModel>,
     hover: Rc<HoverLayer>,
-    // See IronCanvas: painter handles for fontsChanged, taken before the
-    // surfaces move into the orchestrator.
-    grid_painter: Rc<CanvasPainter>,
-    overlay_painter: Rc<CanvasPainter>,
 }
 
 #[wasm_bindgen]
@@ -54,20 +49,18 @@ impl DataGridCanvas {
         overlay_canvas: web_sys::HtmlCanvasElement,
     ) -> Result<DataGridCanvas, JsValue> {
         let model = Rc::new(DataGridModel::empty());
-        let grid_ws = WebSurface::grid(grid_canvas)?;
-        let overlay_ws = WebSurface::overlay(overlay_canvas)?;
-        let grid_painter = grid_ws.clone_painter();
-        let overlay_painter = overlay_ws.clone_painter();
-        let mut orch = Orchestrator::<WebSurface>::new(grid_ws, overlay_ws);
-        orch.set_model(Rc::clone(&model) as Rc<dyn CanvasModel>);
+        let mut runtime = Canvas2dRuntime::new(grid_canvas, overlay_canvas)?;
+        runtime
+            .orchestrator_mut()
+            .set_model(Rc::clone(&model) as Rc<dyn CanvasModel>);
         let hover = Rc::new(HoverLayer::default());
-        orch.add_decoration(Rc::clone(&hover) as Rc<dyn Layer>);
+        runtime
+            .orchestrator_mut()
+            .add_decoration(Rc::clone(&hover) as Rc<dyn Layer>);
         Ok(Self {
-            orch,
+            runtime,
             model,
             hover,
-            grid_painter,
-            overlay_painter,
         })
     }
 
@@ -78,7 +71,8 @@ impl DataGridCanvas {
         // `set_theme` value-compares and, on change, marks geometry + overlay
         // itself; `Chrome::classify` rejects a theme-mismatched frame, so no
         // separate `request_repaint` is needed to force the next Fresh paint.
-        self.orch
+        self.runtime
+            .orchestrator_mut()
             .set_theme(iron_canvas_canvas2d::theme_from_element::from_element(el));
     }
 
@@ -88,16 +82,14 @@ impl DataGridCanvas {
             "dark" => CanvasTheme::dark(),
             _ => CanvasTheme::light(),
         };
-        self.orch.set_theme(theme); // see set_theme_from_element: self-sufficient
+        self.runtime.orchestrator_mut().set_theme(theme); // see set_theme_from_element: self-sufficient
     }
 
     /// See `IronCanvas::fontsChanged` — same contract: clear text-measure
     /// memos after `document.fonts` finishes loading, then repaint.
     #[wasm_bindgen(js_name = "fontsChanged")]
     pub fn fonts_changed(&mut self) {
-        self.grid_painter.clear_measure_cache();
-        self.overlay_painter.clear_measure_cache();
-        self.orch.mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.fonts_changed();
     }
 
     // E.2 Optional frozen header row (default OFF)
@@ -105,25 +97,27 @@ impl DataGridCanvas {
     #[wasm_bindgen(js_name = "setFrozenHeader")]
     pub fn set_frozen_header(&mut self, on: bool) {
         self.model.borrow_mut_with(|g| g.set_frozen_header(on));
-        self.orch.request_repaint(); // freeze count is structural geometry
+        self.runtime.orchestrator_mut().request_repaint(); // freeze count is structural geometry
     }
 
     #[wasm_bindgen(js_name = "setData")]
     pub fn set_data(&mut self, data: JsValue) -> Result<(), JsValue> {
         let wire: wire::GridDataWire = serde_wasm_bindgen::from_value(data)?;
         self.model.replace(wire.into_model());
-        self.orch.mark_content_dirty(PaneRegionMask::ALL);
-        self.orch.request_repaint();
+        self.runtime
+            .orchestrator_mut()
+            .mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().request_repaint();
         Ok(())
     }
 
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr);
+        self.runtime.resize(CanvasSize { w: css_w, h: css_h }, dpr);
     }
 
     #[wasm_bindgen(js_name = "paintIfDirty")]
     pub fn paint_if_dirty(&mut self) {
-        self.orch.paint_if_dirty();
+        self.runtime.orchestrator_mut().paint_if_dirty();
     }
 
     // D.1 Scrolling
@@ -132,20 +126,20 @@ impl DataGridCanvas {
     pub fn set_scroll(&mut self, top_row: i32, left_col: i32) {
         self.model
             .borrow_mut_with(|g| g.set_scroll(top_row + 1, left_col + 1)); // 0->1 based
-        self.orch.view_changed();
+        self.runtime.orchestrator_mut().view_changed();
     }
 
     #[wasm_bindgen(js_name = "scrollBy")]
     pub fn scroll_by(&mut self, d_rows: i32, d_cols: i32) {
         self.model.borrow_mut_with(|g| g.scroll_by(d_rows, d_cols)); // delta, no offset
-        self.orch.view_changed();
+        self.runtime.orchestrator_mut().view_changed();
     }
 
     // D.2 Selection + hit-test
 
     #[wasm_bindgen(js_name = "hitTest")]
     pub fn hit_test(&self, x: f64, y: f64) -> Result<JsValue, JsValue> {
-        let wire = wire::HitTestWire::from(self.orch.hit_test(x, y));
+        let wire = wire::HitTestWire::from(self.runtime.orchestrator().hit_test(x, y));
         Ok(serde_wasm_bindgen::to_value(&wire)?)
     }
 
@@ -155,14 +149,14 @@ impl DataGridCanvas {
             g.set_active(row + 1, col + 1);
             g.set_selection(row + 1, col + 1, row + 1, col + 1);
         });
-        self.orch.request_overlay_repaint();
+        self.runtime.orchestrator_mut().request_overlay_repaint();
     }
 
     #[wasm_bindgen(js_name = "setSelection")]
     pub fn set_selection(&mut self, r1: i32, c1: i32, r2: i32, c2: i32) {
         self.model
             .borrow_mut_with(|g| g.set_selection(r1 + 1, c1 + 1, r2 + 1, c2 + 1));
-        self.orch.request_overlay_repaint();
+        self.runtime.orchestrator_mut().request_overlay_repaint();
     }
 
     /// Hover-highlight a cell (0-based); any negative coordinate clears.
@@ -171,7 +165,7 @@ impl DataGridCanvas {
     #[wasm_bindgen(js_name = "setHover")]
     pub fn set_hover(&mut self, row: i32, col: i32) {
         if self.hover.set_cell(HoverLayer::cell_from_js(row, col)) {
-            self.orch.request_overlay_repaint();
+            self.runtime.orchestrator_mut().request_overlay_repaint();
         }
     }
 
@@ -179,7 +173,7 @@ impl DataGridCanvas {
 
     #[wasm_bindgen(js_name = "resizeHandleAt")]
     pub fn resize_handle_at(&self, x: f64, y: f64, tol: f64) -> Result<JsValue, JsValue> {
-        match self.orch.resize_handle_at(x, y, tol) {
+        match self.runtime.orchestrator().resize_handle_at(x, y, tol) {
             Some(t) => Ok(serde_wasm_bindgen::to_value(
                 &wire::ResizeTargetWire::from(t),
             )?),
@@ -194,7 +188,7 @@ impl DataGridCanvas {
         }
         self.model
             .borrow_mut_with(|g| g.set_column_width(col as usize, width));
-        self.orch.request_repaint(); // geometry changed -> Fresh rebuild
+        self.runtime.orchestrator_mut().request_repaint(); // geometry changed -> Fresh rebuild
     }
 
     // D.4 Sort
@@ -210,13 +204,17 @@ impl DataGridCanvas {
             SortDirection::Descending
         };
         self.model.borrow_mut_with(|g| g.sort_by(col as usize, dir));
-        self.orch.mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime
+            .orchestrator_mut()
+            .mark_content_dirty(PaneRegionMask::ALL);
     }
 
     #[wasm_bindgen(js_name = "clearSort")]
     pub fn clear_sort(&mut self) {
         self.model.borrow_mut_with(|g| g.clear_sort());
-        self.orch.mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime
+            .orchestrator_mut()
+            .mark_content_dirty(PaneRegionMask::ALL);
     }
 
     #[wasm_bindgen(js_name = "currentSort")]
@@ -239,7 +237,9 @@ impl DataGridCanvas {
         }
         self.model
             .borrow_mut_with(|g| g.set_cell(row as usize, col as usize, value)); // model set_cell is 0-based
-        self.orch.mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime
+            .orchestrator_mut()
+            .mark_content_dirty(PaneRegionMask::ALL);
     }
 
     #[wasm_bindgen(js_name = "appendRows")]
@@ -250,8 +250,10 @@ impl DataGridCanvas {
                 g.append_row(r);
             }
         });
-        self.orch.mark_content_dirty(PaneRegionMask::ALL);
-        self.orch.request_repaint();
+        self.runtime
+            .orchestrator_mut()
+            .mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().request_repaint();
         Ok(())
     }
 
@@ -261,7 +263,7 @@ impl DataGridCanvas {
         // drives its own throwaway orchestrator — `self` is never mutated.
         SvgSurface::render(
             Rc::clone(&self.model) as Rc<dyn CanvasModel>,
-            self.orch.theme(),
+            self.runtime.orchestrator().theme(),
             CanvasSize { w: css_w, h: css_h },
         )
     }

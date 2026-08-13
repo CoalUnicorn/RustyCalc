@@ -54,6 +54,16 @@ fn fractional_dpr_reaches_canvas_backing_store() {
         expect_h,
         "grid backing height must use unrounded DPR"
     );
+    assert_eq!(
+        overlay.width(),
+        expect_w,
+        "overlay backing width must use unrounded DPR"
+    );
+    assert_eq!(
+        overlay.height(),
+        expect_h,
+        "overlay backing height must use unrounded DPR"
+    );
 }
 
 #[wasm_bindgen_test]

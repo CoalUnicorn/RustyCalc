@@ -1,8 +1,9 @@
 //! Wasm-bound facade for the iron-canvas grid renderer.
 //!
 //! The pure-Rust application and domain layers live in `iron-canvas-core`;
-//! the Canvas2D `Painter` impl, `WebSurface` adapter, and CSS-var theme
-//! bridge live in `iron-canvas-canvas2d` (re-exported below). This crate
+//! the Canvas2D `Painter` impl, `WebSurface` adapter, paired runtime, and
+//! CSS-var theme bridge live in `iron-canvas-canvas2d` (re-exported below).
+//! This crate
 //! owns the `wasm-bindgen` `IronCanvas` handle, the JS-bridged
 //! `JsBackedModel`, and the dev-tools recording / playback glue.
 //!
@@ -18,7 +19,7 @@ pub mod wasm;
 #[cfg(target_arch = "wasm32")]
 mod wire;
 
-pub use iron_canvas_canvas2d::{CanvasPainter, WebSurface, theme_from_element};
+pub use iron_canvas_canvas2d::{Canvas2dRuntime, CanvasPainter, WebSurface, theme_from_element};
 pub use iron_canvas_core::geometry::utils::col_name;
 pub use iron_canvas_core::{
     AUTOFILL_HANDLE_PX, AutofillTarget, CanvasModel, CanvasSize, CanvasTheme, CanvasView,

@@ -1,7 +1,7 @@
 //! Web-side facade. The frame dispatch + state aggregator now lives in
 //! `iron_canvas_core::Orchestrator`; this struct holds the `wasm-bindgen`
-//! handle, builds two `WebSurface`s, and delegates every setter / query /
-//! paint call to the core orchestrator.
+//! handle and delegates facade setters, queries, recording, and playback to
+//! the shared Canvas2D runtime/core orchestrator.
 
 use std::rc::Rc;
 
@@ -11,16 +11,13 @@ use web_sys::HtmlCanvasElement;
 use crate::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::wasm::JsBackedModel;
-use iron_canvas_canvas2d::{CanvasPainter, WebSurface};
+use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::Orchestrator;
 use iron_canvas_core::PaintResult;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
-// `Surface` is needed in all builds for `clone_painter` at construction
-// (fontsChanged handles); dev-tools additionally uses it for the
-// recording path (`grid_surface().painter()`).
+#[cfg(feature = "dev-tools")]
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
@@ -123,7 +120,7 @@ pub enum JsPaintResult {
 
 #[wasm_bindgen]
 pub struct IronCanvas {
-    orch: Orchestrator<FacadeSurface>,
+    runtime: Canvas2dRuntime<FacadeSurface>,
     // Cached so SVG export can re-push the live model into a throwaway
     // orchestrator. Updated alongside every `set_model` / `setModel`.
     model: Option<Rc<dyn CanvasModel>>,
@@ -132,22 +129,6 @@ pub struct IronCanvas {
     // which the type-erased `Rc<dyn CanvasModel>` can't reach. `None` for
     // Rust-level models, whose theme handling lives host-side.
     js_model: Option<Rc<JsBackedModel>>,
-    // Painter handles taken at construction, before the surfaces move into
-    // the core orchestrator (and before the dev-tools RecordingSurface wrap,
-    // which shares the same inner painter). `fontsChanged` clears the
-    // Canvas2D text-measure memos through these without routing a font
-    // concept through core.
-    grid_painter: Rc<CanvasPainter>,
-    overlay_painter: Rc<CanvasPainter>,
-    // Live DPR — the engine doesn't retain it across `resize` calls, and
-    // both the recording header and playback restore need it. Initialized
-    // to `1` because some entry paths (the test surface) call `startRecording`
-    // before any `resize`, and a DPR of `0` in the recording header would
-    // round-trip through playback nonsensically. Only read under `dev-tools`.
-    // Separate from core `Orchestrator`'s own private `last_dpr`, which only
-    // gates that struct's `resize` dedup check and isn't exposed to us.
-    #[cfg_attr(not(feature = "dev-tools"), allow(dead_code))]
-    last_dpr: f64,
     #[cfg(feature = "dev-tools")]
     mode: CanvasMode,
 }
@@ -161,19 +142,11 @@ impl IronCanvas {
         grid_canvas: HtmlCanvasElement,
         overlay_canvas: HtmlCanvasElement,
     ) -> Result<IronCanvas, JsValue> {
-        let grid_ws = WebSurface::grid(grid_canvas)?;
-        let overlay_ws = WebSurface::overlay(overlay_canvas)?;
-        let grid_painter = grid_ws.clone_painter();
-        let overlay_painter = overlay_ws.clone_painter();
-        let grid = wrap_surface(grid_ws);
-        let overlay = wrap_surface(overlay_ws);
+        let runtime = Canvas2dRuntime::new_with_wrapper(grid_canvas, overlay_canvas, wrap_surface)?;
         Ok(IronCanvas {
-            orch: Orchestrator::<FacadeSurface>::new(grid, overlay),
+            runtime,
             model: None,
             js_model: None,
-            grid_painter,
-            overlay_painter,
-            last_dpr: 1.0,
             #[cfg(feature = "dev-tools")]
             mode: CanvasMode::Live,
         })
@@ -189,8 +162,7 @@ impl IronCanvas {
 
     /// Resize both layers in one call.
     pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.last_dpr = dpr;
-        self.orch.resize(CanvasSize { w: css_w, h: css_h }, dpr);
+        self.runtime.resize(CanvasSize { w: css_w, h: css_h }, dpr);
     }
 
     /// Push a theme by name. Only `"dark"` is recognized; every other
@@ -202,21 +174,22 @@ impl IronCanvas {
         } else {
             CanvasTheme::light()
         };
-        self.orch.set_theme(theme);
+        self.runtime.orchestrator_mut().set_theme(theme);
         self.restamp_recording_theme();
     }
 
     /// Conservative repaint blanket — see `Orchestrator::request_repaint`.
     #[wasm_bindgen(js_name = "requestRepaint")]
     pub fn request_repaint(&mut self) {
-        self.orch.request_repaint();
+        self.runtime.orchestrator_mut().request_repaint();
     }
 
     /// JS-facing cell-content-changed signal — marks all four pane
     /// quadrants. Pane-granular masks stay Rust-internal.
     #[wasm_bindgen(js_name = "markContentDirty")]
     pub fn mark_content_dirty(&mut self) {
-        self.orch
+        self.runtime
+            .orchestrator_mut()
             .mark_content_dirty(iron_canvas_core::chrome::PaneRegionMask::ALL);
     }
 
@@ -230,7 +203,7 @@ impl IronCanvas {
     /// and cost nothing.
     #[wasm_bindgen(js_name = "markRowsDamaged")]
     pub fn mark_rows_damaged(&mut self, sheet: u32, row_start: i32, row_end: i32) {
-        self.orch.mark_rows_damaged(
+        self.runtime.orchestrator_mut().mark_rows_damaged(
             sheet,
             iron_canvas_core::RowSpan {
                 r1: row_start,
@@ -257,11 +230,11 @@ impl IronCanvas {
         let recording_active = matches!(self.mode, CanvasMode::Recording(_));
         #[cfg(feature = "dev-tools")]
         if recording_active {
-            self.orch.grid_surface().begin_frame();
-            self.orch.overlay_surface().begin_frame();
+            self.runtime.orchestrator().grid_surface().begin_frame();
+            self.runtime.orchestrator().overlay_surface().begin_frame();
         }
 
-        let core_result = self.orch.paint_if_dirty();
+        let core_result = self.runtime.orchestrator_mut().paint_if_dirty();
         let result = match core_result {
             PaintResult::Idle => JsPaintResult::Idle,
             PaintResult::Painted => JsPaintResult::Painted,
@@ -288,7 +261,7 @@ impl IronCanvas {
         if matches!(self.mode, CanvasMode::Playback(_)) {
             return String::new();
         }
-        self.orch.last_trace().to_string()
+        self.runtime.orchestrator().last_trace().to_string()
     }
 
     /// Structured diagnostics for the currently displayed recorded attempt.
@@ -334,10 +307,16 @@ impl IronCanvas {
         } else {
             serde_wasm_bindgen::from_value(opts)?
         };
-        let canvas = self.orch.canvas_size();
-        let theme_snap = ThemeSnapshot::from(self.orch.theme());
+        let canvas = self.runtime.orchestrator().canvas_size();
+        let theme_snap = ThemeSnapshot::from(self.runtime.orchestrator().theme());
         let now = js_sys::Date::now();
-        let header = IcrHeader::new(canvas.w, canvas.h, self.last_dpr, theme_snap, now as u64);
+        let header = IcrHeader::new(
+            canvas.w,
+            canvas.h,
+            self.runtime.dpr(),
+            theme_snap,
+            now as u64,
+        );
         self.mode = CanvasMode::Recording(RecordingState {
             rec: Recording::new(header),
             started_at_ms: now,
@@ -346,16 +325,24 @@ impl IronCanvas {
             capped: false,
         });
         if filter.layers.includes_grid() {
-            self.orch
+            self.runtime
+                .orchestrator()
                 .grid_surface()
                 .set_skip_groups(filter.skip_groups.clone());
-            self.orch.grid_surface().enable_recording();
+            self.runtime
+                .orchestrator()
+                .grid_surface()
+                .enable_recording();
         }
         if filter.layers.includes_overlay() {
-            self.orch
+            self.runtime
+                .orchestrator()
                 .overlay_surface()
                 .set_skip_groups(filter.skip_groups);
-            self.orch.overlay_surface().enable_recording();
+            self.runtime
+                .orchestrator()
+                .overlay_surface()
+                .enable_recording();
         }
         // Synchronously request the recording baseline. Relying on the
         // host's next rAF tick is unsafe — that tick might be a narrow
@@ -363,10 +350,10 @@ impl IronCanvas {
         // attempt is marked as `forced_baseline`; if capture holds, it stays
         // in the diagnostic timeline and a later committed Fresh establishes
         // the replay anchor.
-        self.orch.request_repaint();
-        self.orch.grid_surface().begin_frame();
-        self.orch.overlay_surface().begin_frame();
-        let result = self.orch.paint_if_dirty();
+        self.runtime.orchestrator_mut().request_repaint();
+        self.runtime.orchestrator().grid_surface().begin_frame();
+        self.runtime.orchestrator().overlay_surface().begin_frame();
+        let result = self.runtime.orchestrator_mut().paint_if_dirty();
         self.capture_frame(result, RecordOrigin::ForcedBaseline);
         Ok(())
     }
@@ -380,8 +367,14 @@ impl IronCanvas {
         if !matches!(self.mode, CanvasMode::Recording(_)) {
             return Err(JsError::new("no active recording"));
         }
-        self.orch.grid_surface().disable_recording();
-        self.orch.overlay_surface().disable_recording();
+        self.runtime
+            .orchestrator()
+            .grid_surface()
+            .disable_recording();
+        self.runtime
+            .orchestrator()
+            .overlay_surface()
+            .disable_recording();
         let CanvasMode::Recording(state) = std::mem::replace(&mut self.mode, CanvasMode::Live)
         else {
             unreachable!("guarded above by matches!(Recording(_))")
@@ -410,7 +403,7 @@ impl IronCanvas {
         self.js_model = Some(Rc::clone(&backed));
         let erased: Rc<dyn CanvasModel> = backed;
         self.model = Some(Rc::clone(&erased));
-        self.orch.set_model(erased);
+        self.runtime.orchestrator_mut().set_model(erased);
         Ok(())
     }
 
@@ -436,9 +429,7 @@ impl IronCanvas {
     /// `document.fonts.addEventListener("loadingdone", () => canvas.fontsChanged());`
     #[wasm_bindgen(js_name = "fontsChanged")]
     pub fn fonts_changed(&mut self) {
-        self.grid_painter.clear_measure_cache();
-        self.overlay_painter.clear_measure_cache();
-        self.mark_content_dirty();
+        self.runtime.fonts_changed();
     }
 
     /// Render the current sheet as a self-contained SVG string. Returns
@@ -454,7 +445,7 @@ impl IronCanvas {
         };
         SvgSurface::render(
             Rc::clone(model),
-            self.orch.theme(),
+            self.runtime.orchestrator().theme(),
             CanvasSize { w: css_w, h: css_h },
         )
     }
@@ -470,7 +461,7 @@ impl IronCanvas {
         };
         PdfSurface::render(
             Rc::clone(model),
-            self.orch.theme(),
+            self.runtime.orchestrator().theme(),
             CanvasSize { w: css_w, h: css_h },
         )
     }
@@ -484,7 +475,8 @@ impl IronCanvas {
     /// builds a `CanvasTheme`.
     #[wasm_bindgen(js_name = "setThemeFromElement")]
     pub fn set_theme_from_element(&mut self, el: &web_sys::Element) {
-        self.orch
+        self.runtime
+            .orchestrator_mut()
             .set_theme(crate::theme_from_element::from_element(el));
         self.restamp_recording_theme();
     }
@@ -501,7 +493,7 @@ impl IronCanvas {
     /// `crate::wire::HitTestWire` for the JS shape (tagged on `kind`).
     #[wasm_bindgen(js_name = "hitTest")]
     pub fn hit_test_js(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
-        let wire: crate::wire::HitTestWire = self.orch.hit_test(x, y).into();
+        let wire: crate::wire::HitTestWire = self.runtime.orchestrator().hit_test(x, y).into();
         Ok(serde_wasm_bindgen::to_value(&wire)?)
     }
 
@@ -509,7 +501,7 @@ impl IronCanvas {
     /// (e.g. off-screen rows that the slot map hasn't materialized).
     #[wasm_bindgen(js_name = "cellRect")]
     pub fn cell_rect_js(&self, row: i32, column: i32) -> Result<JsValue, JsError> {
-        match self.orch.cell_rect(row, column) {
+        match self.runtime.orchestrator().cell_rect(row, column) {
             Some(rect) => Ok(serde_wasm_bindgen::to_value(&rect)?),
             None => Ok(JsValue::NULL),
         }
@@ -519,7 +511,11 @@ impl IronCanvas {
     /// Returns `null` if no row/column trailing edge is within tolerance.
     #[wasm_bindgen(js_name = "resizeHandleAt")]
     pub fn resize_handle_at_js(&self, x: f64, y: f64, tolerance: f64) -> Result<JsValue, JsError> {
-        match self.orch.resize_handle_at(x, y, tolerance) {
+        match self
+            .runtime
+            .orchestrator()
+            .resize_handle_at(x, y, tolerance)
+        {
             Some(target) => {
                 let wire: crate::wire::ResizeTargetWire = target.into();
                 Ok(serde_wasm_bindgen::to_value(&wire)?)
@@ -532,7 +528,7 @@ impl IronCanvas {
     /// drawn (the handle is anchored to the active selection).
     #[wasm_bindgen(js_name = "autofillHandlePos")]
     pub fn autofill_handle_pos(&self) -> Result<JsValue, JsError> {
-        match self.orch.autofill_handle() {
+        match self.runtime.orchestrator().autofill_handle() {
             Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
             None => Ok(JsValue::NULL),
         }
@@ -543,7 +539,7 @@ impl IronCanvas {
     /// otherwise claim the pointer.
     #[wasm_bindgen(js_name = "pixelToCell")]
     pub fn pixel_to_cell_js(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
-        match self.orch.pixel_to_cell(x, y) {
+        match self.runtime.orchestrator().pixel_to_cell(x, y) {
             Some((row, column)) => {
                 let wire = crate::wire::CellCoordWire { row, column };
                 Ok(serde_wasm_bindgen::to_value(&wire)?)
@@ -555,7 +551,7 @@ impl IronCanvas {
     /// Current CSS-pixel size of the drawable area: `{ w, h }`.
     #[wasm_bindgen(js_name = "canvasSize")]
     pub fn canvas_size_js(&self) -> Result<JsValue, JsError> {
-        let wire: crate::wire::CanvasSizeWire = self.orch.canvas_size().into();
+        let wire: crate::wire::CanvasSizeWire = self.runtime.orchestrator().canvas_size().into();
         Ok(serde_wasm_bindgen::to_value(&wire)?)
     }
 
@@ -568,7 +564,7 @@ impl IronCanvas {
     /// active cell, formula text) but not held in `RenderOverlays`.
     #[wasm_bindgen(js_name = "requestOverlayRepaint")]
     pub fn request_overlay_repaint_js(&mut self) {
-        self.orch.request_overlay_repaint();
+        self.runtime.orchestrator_mut().request_overlay_repaint();
     }
 
     /// The view moved: scroll, selection, active cell, or sheet. Marks view
@@ -578,14 +574,16 @@ impl IronCanvas {
     /// verdict, not the caller's.
     #[wasm_bindgen(js_name = "viewChanged")]
     pub fn view_changed_js(&mut self) {
-        self.orch.view_changed();
+        self.runtime.orchestrator_mut().view_changed();
     }
 
     /// Autofill drag target. Pass `null` to clear (drag ended / cancelled).
     #[wasm_bindgen(js_name = "setExtendTo")]
     pub fn set_extend_to_js(&mut self, target: JsValue) -> Result<(), JsError> {
         let wire: Option<crate::wire::AutofillTargetWire> = serde_wasm_bindgen::from_value(target)?;
-        self.orch.set_extend_to(wire.map(Into::into));
+        self.runtime
+            .orchestrator_mut()
+            .set_extend_to(wire.map(Into::into));
         Ok(())
     }
 
@@ -593,7 +591,9 @@ impl IronCanvas {
     #[wasm_bindgen(js_name = "setClipboard")]
     pub fn set_clipboard_js(&mut self, area: JsValue) -> Result<(), JsError> {
         let wire: Option<crate::wire::SheetAreaWire> = serde_wasm_bindgen::from_value(area)?;
-        self.orch.set_clipboard(wire.map(Into::into));
+        self.runtime
+            .orchestrator_mut()
+            .set_clipboard(wire.map(Into::into));
         Ok(())
     }
 
@@ -601,7 +601,9 @@ impl IronCanvas {
     #[wasm_bindgen(js_name = "setPointRange")]
     pub fn set_point_range_js(&mut self, range: JsValue) -> Result<(), JsError> {
         let wire: Option<crate::wire::RCRangeWire> = serde_wasm_bindgen::from_value(range)?;
-        self.orch.set_point_range(wire.map(Into::into));
+        self.runtime
+            .orchestrator_mut()
+            .set_point_range(wire.map(Into::into));
         Ok(())
     }
 
@@ -610,7 +612,7 @@ impl IronCanvas {
     pub fn set_formula_refs_js(&mut self, refs: JsValue) -> Result<(), JsError> {
         let wire: Vec<crate::wire::FormulaRefWire> = serde_wasm_bindgen::from_value(refs)?;
         let refs: Vec<iron_canvas_core::FormulaRef> = wire.into_iter().map(Into::into).collect();
-        self.orch.set_formula_refs(refs);
+        self.runtime.orchestrator_mut().set_formula_refs(refs);
         Ok(())
     }
 
@@ -621,7 +623,7 @@ impl IronCanvas {
     pub fn set_overlays_js(&mut self, overlays: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::RenderOverlaysWire = serde_wasm_bindgen::from_value(overlays)?;
         let engine = wire.into_engine().map_err(|msg| JsError::new(&msg))?;
-        self.orch.set_overlays(engine);
+        self.runtime.orchestrator_mut().set_overlays(engine);
         Ok(())
     }
 
@@ -636,7 +638,7 @@ impl IronCanvas {
     #[wasm_bindgen(js_name = "setTheme")]
     pub fn set_theme_js(&mut self, theme: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::CanvasThemeWire = serde_wasm_bindgen::from_value(theme)?;
-        self.orch.set_theme(wire.into());
+        self.runtime.orchestrator_mut().set_theme(wire.into());
         self.restamp_recording_theme();
         Ok(())
     }
@@ -647,7 +649,9 @@ impl IronCanvas {
     #[wasm_bindgen(js_name = "setThemeVariables")]
     pub fn set_theme_variables_js(&mut self, vars: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::ThemeVariablesWire = serde_wasm_bindgen::from_value(vars)?;
-        self.orch.set_theme_variables(wire.into());
+        self.runtime
+            .orchestrator_mut()
+            .set_theme_variables(wire.into());
         self.restamp_recording_theme();
         Ok(())
     }
@@ -657,32 +661,32 @@ impl IronCanvas {
 // these methods take Rust types that don't cross the JS bridge.
 impl IronCanvas {
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
-        self.orch.set_overlays(overlays);
+        self.runtime.orchestrator_mut().set_overlays(overlays);
     }
 
     pub fn set_extend_to(&mut self, target: Option<AutofillTarget>) {
-        self.orch.set_extend_to(target);
+        self.runtime.orchestrator_mut().set_extend_to(target);
     }
 
     pub fn set_clipboard(&mut self, area: Option<SheetArea>) {
-        self.orch.set_clipboard(area);
+        self.runtime.orchestrator_mut().set_clipboard(area);
     }
 
     pub fn set_point_range(&mut self, range: Option<RCRange>) {
-        self.orch.set_point_range(range);
+        self.runtime.orchestrator_mut().set_point_range(range);
     }
 
     pub fn set_formula_refs(&mut self, refs: Vec<FormulaRef>) {
-        self.orch.set_formula_refs(refs);
+        self.runtime.orchestrator_mut().set_formula_refs(refs);
     }
 
     pub fn set_theme(&mut self, theme: CanvasTheme) {
-        self.orch.set_theme(theme);
+        self.runtime.orchestrator_mut().set_theme(theme);
         self.restamp_recording_theme();
     }
 
     pub fn set_theme_variables(&mut self, vars: ThemeVariables) {
-        self.orch.set_theme_variables(vars);
+        self.runtime.orchestrator_mut().set_theme_variables(vars);
         self.restamp_recording_theme();
     }
 
@@ -693,58 +697,64 @@ impl IronCanvas {
         self.model = Some(Rc::clone(&model));
         // A Rust-level model replaces any JS one; its theme is host-resolved.
         self.js_model = None;
-        self.orch.set_model(model);
+        self.runtime.orchestrator_mut().set_model(model);
     }
 
     pub fn canvas_size(&self) -> CanvasSize {
-        self.orch.canvas_size()
+        self.runtime.orchestrator().canvas_size()
     }
 
     pub fn hit_test(&self, x: f64, y: f64) -> HitTest {
-        self.orch.hit_test(x, y)
+        self.runtime.orchestrator().hit_test(x, y)
     }
 
     /// Layer-bypassing cell resolver. Use during an active drag whose
     /// overlay (e.g. `FormulaRefsLayer`) would otherwise claim the
     /// pointer and starve the host of underlying cell coordinates.
     pub fn pixel_to_cell(&self, x: f64, y: f64) -> Option<(i32, i32)> {
-        self.orch.pixel_to_cell(x, y)
+        self.runtime.orchestrator().pixel_to_cell(x, y)
     }
 
     pub fn resize_handle_at(&self, x: f64, y: f64, tolerance: f64) -> Option<ResizeTarget> {
-        self.orch.resize_handle_at(x, y, tolerance)
+        self.runtime
+            .orchestrator()
+            .resize_handle_at(x, y, tolerance)
     }
 
     pub fn cell_rect(&self, row: i32, column: i32) -> Option<PixelRect> {
-        self.orch.cell_rect(row, column)
+        self.runtime.orchestrator().cell_rect(row, column)
     }
 
     pub fn scroll_pane_rect(&self) -> Option<PixelRect> {
-        self.orch.scroll_pane_rect()
+        self.runtime.orchestrator().scroll_pane_rect()
     }
 
     pub fn legal_scroll_origin(&self) -> Option<(i32, i32)> {
-        self.orch.legal_scroll_origin()
+        self.runtime.orchestrator().legal_scroll_origin()
     }
 
     pub fn scroll_to_show(&self, row: i32, column: i32) -> Option<(i32, i32)> {
-        self.orch.scroll_to_show(row, column)
+        self.runtime.orchestrator().scroll_to_show(row, column)
     }
 
     pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
-        self.orch.fit_column_width(col, first_row, last_row)
+        self.runtime
+            .orchestrator()
+            .fit_column_width(col, first_row, last_row)
     }
 
     pub fn fit_row_height(&self, row: i32, first_col: i32, last_col: i32) -> Option<f64> {
-        self.orch.fit_row_height(row, first_col, last_col)
+        self.runtime
+            .orchestrator()
+            .fit_row_height(row, first_col, last_col)
     }
 
     pub fn autofill_handle(&self) -> Option<Point> {
-        self.orch.autofill_handle()
+        self.runtime.orchestrator().autofill_handle()
     }
 
     pub fn request_overlay_repaint(&mut self) {
-        self.orch.request_overlay_repaint();
+        self.runtime.orchestrator_mut().request_overlay_repaint();
     }
 
     /// The view moved: scroll, selection, active cell, or sheet. Marks view
@@ -753,7 +763,7 @@ impl IronCanvas {
     /// frame, or needs a rebuild is the next `paint_if_dirty`'s geometric
     /// verdict, not the caller's.
     pub fn view_changed(&mut self) {
-        self.orch.view_changed();
+        self.runtime.orchestrator_mut().view_changed();
     }
 
     /// Drain the per-attempt op buffers, push a `Frame` for every non-idle
@@ -766,8 +776,8 @@ impl IronCanvas {
     /// drain the partial bytes.
     #[cfg(feature = "dev-tools")]
     fn capture_frame(&mut self, result: PaintResult, origin: RecordOrigin) {
-        let grid_ops = self.orch.grid_surface().end_frame();
-        let overlay_ops = self.orch.overlay_surface().end_frame();
+        let grid_ops = self.runtime.orchestrator().grid_surface().end_frame();
+        let overlay_ops = self.runtime.orchestrator().overlay_surface().end_frame();
         if result == PaintResult::Idle {
             return;
         }
@@ -789,7 +799,7 @@ impl IronCanvas {
                 PaintResult::Retry => RecordedPaintResult::Retry,
                 PaintResult::Idle => unreachable!("idle attempts are omitted above"),
             },
-            trace: TraceRecord::from(self.orch.last_trace()),
+            trace: TraceRecord::from(self.runtime.orchestrator().last_trace()),
             grid_ops,
             overlay_ops,
         });
@@ -805,8 +815,14 @@ impl IronCanvas {
         if !state.capped && state.bytes_estimate > HARD_CAP_BYTES {
             state.capped = true;
             state.rec.header.partial = true;
-            self.orch.grid_surface().disable_recording();
-            self.orch.overlay_surface().disable_recording();
+            self.runtime
+                .orchestrator()
+                .grid_surface()
+                .disable_recording();
+            self.runtime
+                .orchestrator()
+                .overlay_surface()
+                .disable_recording();
             crate::wasm::diag::console_warn(
                 "iron-canvas: recording exceeded 100MB cap; auto-stopped (partial)",
             );
@@ -823,7 +839,7 @@ impl IronCanvas {
     #[cfg(feature = "dev-tools")]
     fn restamp_recording_theme(&mut self) {
         if let CanvasMode::Recording(state) = &mut self.mode {
-            state.rec.header.theme = ThemeSnapshot::from(self.orch.theme());
+            state.rec.header.theme = ThemeSnapshot::from(self.runtime.orchestrator().theme());
         }
     }
 
@@ -872,8 +888,8 @@ impl IronCanvas {
         if rec.frames.is_empty() {
             return Err(JsError::new("recording has no frames"));
         }
-        let live_size = self.orch.canvas_size();
-        let live_dpr = self.last_dpr;
+        let live_size = self.runtime.orchestrator().canvas_size();
+        let live_dpr = self.runtime.dpr();
         let rec_size = CanvasSize {
             w: rec.header.canvas_w,
             h: rec.header.canvas_h,
@@ -884,10 +900,9 @@ impl IronCanvas {
         // dims. Inline CSS on the canvases is overridden separately —
         // the `.ws-canvas` class pins display size to `100%`, which would
         // otherwise scale the backing store back down to the container.
-        self.last_dpr = rec_dpr;
-        self.orch.resize(rec_size, rec_dpr);
-        set_canvas_css_size(self.orch.grid_surface().inner().canvas(), rec_size)?;
-        set_canvas_css_size(self.orch.overlay_surface().inner().canvas(), rec_size)?;
+        self.runtime.resize(rec_size, rec_dpr);
+        set_canvas_css_size(self.runtime.grid_canvas(), rec_size)?;
+        set_canvas_css_size(self.runtime.overlay_canvas(), rec_size)?;
 
         self.mode = CanvasMode::Playback(PlaybackSession::new(rec, live_size, live_dpr));
         self.seek_recording_inner(0)
@@ -1003,13 +1018,12 @@ impl IronCanvas {
         };
         // Clear the inline overrides so the `.ws-canvas { width: 100%;
         // height: 100% }` rule controls display size again.
-        let _ = clear_canvas_css_size(self.orch.grid_surface().inner().canvas());
-        let _ = clear_canvas_css_size(self.orch.overlay_surface().inner().canvas());
+        let _ = clear_canvas_css_size(self.runtime.grid_canvas());
+        let _ = clear_canvas_css_size(self.runtime.overlay_canvas());
 
-        self.last_dpr = session.live_dpr;
-        self.orch.resize(session.live_size, session.live_dpr);
+        self.runtime.resize(session.live_size, session.live_dpr);
         // Kept: playback bypasses last_frame, so resize's self-invalidation alone can't cover this.
-        self.orch.request_repaint();
+        self.runtime.orchestrator_mut().request_repaint();
     }
 
     /// `true` while a playback session is loaded.
@@ -1083,9 +1097,9 @@ impl IronCanvas {
         let clamped = frame_idx.min(count - 1);
         session.frame_idx = clamped;
 
-        let grid = self.orch.grid_surface().painter();
-        let overlay = self.orch.overlay_surface().painter();
-        let present_grid = || self.orch.grid_surface().present();
+        let grid = self.runtime.orchestrator().grid_surface().painter();
+        let overlay = self.runtime.orchestrator().overlay_surface().painter();
+        let present_grid = || self.runtime.orchestrator().grid_surface().present();
         replay_through(grid, overlay, &session.recording, clamped, &present_grid);
         Ok(())
     }
