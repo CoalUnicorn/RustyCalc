@@ -53,7 +53,7 @@ fn hidden_col_headers_collapse_col_thickness_and_y_origin() {
 
 use common::canvas_default;
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitPlan, PaneRegion};
+use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitPlan};
 use iron_canvas_core::{FrameDelta, FrameInputs};
 
 fn snap_at_top(m: &TestModel) -> ActiveCellSnapshot {
@@ -78,13 +78,9 @@ fn qualify_scroll(
     }
 }
 
-// Returns the x-origin of the BottomLeft (frozen-cols) sibling shift, or None
-// if no such shift is present in the plan.
-fn bottom_left_band_x(plan: &BlitPlan) -> Option<i32> {
-    plan.shifts
-        .iter()
-        .find(|s| s.pane == PaneRegion::BottomLeft)
-        .map(|s| s.src.top_left.x)
+// The merged shift covers both frozen and scrolling column bands.
+fn merged_band_x(plan: &BlitPlan) -> i32 {
+    plan.shift.src.top_left.x
 }
 
 /// With row-headers HIDDEN and frozen cols > 0, the BottomLeft frozen-cols
@@ -119,9 +115,7 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_hidden() {
         "single-row scroll with frozen cols must qualify for blit",
     );
 
-    let Some(band_x) = bottom_left_band_x(&plan) else {
-        panic!("frozen cols > 0 must produce a BottomLeft sibling shift")
-    };
+    let band_x = merged_band_x(&plan);
 
     // The band must start at cell_origin.x (== 0 when header hidden).
     // Bug: returned 1 (== CELL_AREA_INSET).
@@ -158,9 +152,7 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_shown() {
         "single-row scroll with frozen cols must qualify for blit",
     );
 
-    let Some(band_x) = bottom_left_band_x(&plan) else {
-        panic!("frozen cols > 0 must produce a BottomLeft sibling shift")
-    };
+    let band_x = merged_band_x(&plan);
 
     assert_eq!(
         band_x, expected_x,
@@ -178,13 +170,9 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_shown() {
 // edge of the frozen-row band on every column-scroll blit. The frozen-rows
 // sibling on a column scroll is the `TopRight` pane (see `try_blit_cols`).
 
-// Returns the y-origin of the TopRight (frozen-rows) sibling shift, or None
-// if no such shift is present in the plan.
-fn top_right_band_y(plan: &BlitPlan) -> Option<i32> {
-    plan.shifts
-        .iter()
-        .find(|s| s.pane == PaneRegion::TopRight)
-        .map(|s| s.src.top_left.y)
+// The merged shift covers both frozen and scrolling row bands.
+fn merged_band_y(plan: &BlitPlan) -> i32 {
+    plan.shift.src.top_left.y
 }
 
 /// With col-headers HIDDEN and frozen rows > 0, the TopRight frozen-rows
@@ -219,9 +207,7 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_hidden() {
         "single-column scroll with frozen rows must qualify for blit",
     );
 
-    let Some(band_y) = top_right_band_y(&plan) else {
-        panic!("frozen rows > 0 must produce a TopRight sibling shift")
-    };
+    let band_y = merged_band_y(&plan);
 
     // The band must start at cell_origin.y (== 0 when header hidden).
     // Bug: returned 1 (== CELL_AREA_INSET).
@@ -258,9 +244,7 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_shown() {
         "single-column scroll with frozen rows must qualify for blit",
     );
 
-    let Some(band_y) = top_right_band_y(&plan) else {
-        panic!("frozen rows > 0 must produce a TopRight sibling shift")
-    };
+    let band_y = merged_band_y(&plan);
 
     assert_eq!(
         band_y, expected_y,

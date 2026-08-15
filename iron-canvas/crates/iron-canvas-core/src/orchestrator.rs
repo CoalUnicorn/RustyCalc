@@ -12,17 +12,14 @@
 //! `PendingWork` x `FrameDelta` table lives on that function's doc comment.
 //! The plan's `GridWork` selects one of five `paint_*_regime` methods
 //! (cheapness-ordered: `Overlay`, `Viewport`, `Damage`, `SlotsReuse`,
-//! `Fresh`). The Fresh, SlotsReuse, and Damage arms rebuild via a
-//! `Chrome::next(.., FramePath::*)` walk through the matching `LayerBase`
-//! paint method; the Viewport arm goes through `Chrome::prepare_blit` /
-//! `Chrome::next_blit`; the Overlay arm reuses `last_frame` directly and
-//! repaints only the overlay.
+//! `Fresh`). Fresh builds a new `Chrome`; SlotsReuse and Damage reuse its
+//! slot vectors through `Chrome::next`; Viewport uses the reversible
+//! `Chrome::prepare_blit`; Overlay reuses `last_frame` directly.
 //!
 //! Each `paint_*_regime` method prepares (bulk bridge reads, no mutation of
 //! committed state) and executes (paints into the backing target) its own
-//! scope, returning every healthy pane's owned cache commit as data, then
-//! reduces to one
-//! `PaintOutcome` — `Committed` / `Partial` / `Held` — instead of advancing
+//! grid transaction, returning its aggregate `GridCacheCommit` as data, then
+//! reduces to one `PaintOutcome` — `Committed` or `Held` — instead of advancing
 //! `last_frame`, presenting a surface, or touching `self.pending` itself.
 //! [`Orchestrator::finish_attempt`] is the single completion boundary every
 //! outcome flows through: it installs the attempt-owned cache commit,
@@ -31,8 +28,7 @@
 //! `self.pending`, and publishes
 //! `last_regime`/`last_effective`/`last_work_flags`/`last_trace`. A bridge
 //! failure during a regime's own bulk fetch therefore surfaces as a clean
-//! `Held` (or, for `SlotsReuse`/`Damage`, a pane/row-scoped `Partial`)
-//! outcome rather than a partially-applied side effect.
+//! whole-grid `Held` outcome rather than a partially-applied side effect.
 //!
 //! The query API (`hit_test`, `cell_rect`, `resize_handle_at`,
 //! `autofill_handle`) reads `last_frame`, so hits agree with painted pixels
@@ -49,7 +45,7 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 
 use crate::CanvasModel;
-use crate::chrome::{BlitPlan, Chrome, FramePath, PaneRegion, PaneRegionMask, RecycledSlots};
+use crate::chrome::{BlitPlan, Chrome, FramePath, RecycledSlots};
 use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
 use crate::geometry::CanvasSize;
@@ -59,7 +55,7 @@ use crate::layer::{BlitPaint, LayerBase, Surface};
 use crate::painter::BlitPainter;
 use crate::pending_work::{ContentWork, PendingWork, RowSpan, WorkFlags};
 use crate::render_overlays::RenderOverlays;
-use crate::renderer::{GridRenderer, OverlayRenderer, PreparedCacheCommit};
+use crate::renderer::{GridCacheCommit, GridRenderer, OverlayRenderer};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -68,7 +64,7 @@ use crate::types::ui::{HitTest, ResizeTarget};
 /// `FramePlan.selected_strategy` into `Orchestrator.last_regime` so
 /// out-of-engine consumers (the recording pipeline) can attribute each
 /// captured frame to a strategy without seeing the plan's inner data
-/// (`BlitPlan`, `PaneRegionMask`, row spans — see `GridWork`). Serializes
+/// (`BlitPlan`, row spans — see `GridWork`). Serializes
 /// with snake_case variant names to match the `.icr` JSON-lines schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -92,7 +88,7 @@ pub enum PaintRegimeTag {
 /// | --- | --- |
 /// | `None` | borrow committed `Chrome` |
 /// | `Fresh` | fresh `Chrome` walk |
-/// | `Panes(_)` | slots-reused `Chrome` |
+/// | `AllContent` | slots-reused `Chrome` |
 /// | `Rows { .. }` | slots-reused `Chrome` |
 /// | `Blit(plan)` | blit-reused `Chrome`, with typed Fresh fallback |
 ///
@@ -103,11 +99,11 @@ pub enum PaintRegimeTag {
 pub(crate) enum GridWork {
     /// No grid touch at all — the committed `Chrome` is reused as-is.
     None,
-    /// Full rebuild: `FramePath::Fresh` construction, every pane repainted.
+    /// Full rebuild: `FramePath::Fresh` construction, whole grid repainted.
     Fresh,
-    /// `FramePath::SlotsReuse` construction; only `mask`'s panes refetch and
-    /// repaint.
-    Panes(PaneRegionMask),
+    /// `FramePath::SlotsReuse` construction; the visible grid refetches and
+    /// repaints.
+    AllContent,
     /// `FramePath::SlotsReuse` construction; only the named row bands —
     /// on `sheet`, the sheet the content work was originally recorded
     /// against — refetch and repaint via the blit-strip machinery.
@@ -170,9 +166,9 @@ pub(crate) struct FramePlan {
 /// | overlay/view only, `Scroll(plan)` | `Viewport` / `GridWork::Blit(plan)` |
 /// | overlay/view only, `Rebuild` | `Fresh` / `GridWork::Fresh` |
 /// | row content, optional view, `Stable`, sheet matches | `Damage` / `GridWork::Rows` |
-/// | row content, optional view, `Stable`, sheet differs | `SlotsReuse` / `Panes(ALL)` |
-/// | pane content, optional view, `Stable` | `SlotsReuse` / `GridWork::Panes(mask)` |
-/// | row or pane content, optional view, `Scroll`/`Rebuild` | `Fresh` / `GridWork::Fresh` |
+/// | row content, optional view, `Stable`, sheet differs | `SlotsReuse` / `AllContent` |
+/// | all content, optional view, `Stable` | `SlotsReuse` / `GridWork::AllContent` |
+/// | content, optional view, `Scroll`/`Rebuild` | `Fresh` / `GridWork::Fresh` |
 /// | any geometry, any delta | `Fresh` / `GridWork::Fresh` |
 ///
 /// Rules that must remain explicit (Stage 3 global constraints has the
@@ -187,10 +183,7 @@ pub(crate) struct FramePlan {
 /// - stable content plus view uses `Damage` or `SlotsReuse`; content plus a
 ///   real scroll or rebuild plans `Fresh`, never a blit over changed values;
 /// - `ContentWork::Rows` carries its original sheet into `GridWork::Rows`;
-/// - Rows imply `PaneRegionMask::ALL` whenever a mask is needed instead —
-///   row precision picks `Damage`, it never narrows the pane set, so a
-///   failed Damage choice (sheet mismatch) is never narrowed to visible
-///   panes;
+/// - Rows fall back to `AllContent` whenever `Damage` is ineligible;
 /// - geometry work forces `Fresh` even when `delta` is otherwise `Stable`.
 ///
 /// `OverlayWork` is calculated once here, from the captured selection
@@ -202,7 +195,7 @@ pub(crate) struct FramePlan {
 /// - `Fresh` always paints it — candidate geometry or model identity may
 ///   have changed, so a stale overlay could show handles or a selection
 ///   rect positioned against pixels that no longer match;
-/// - `Damage`/`SlotsReuse` (row or pane content work) paint it when overlay
+/// - `Damage`/`SlotsReuse` content work paints it when overlay
 ///   work is marked, or when captured selection visibility is true (content
 ///   then implies an active-cell repaint); otherwise they preserve it —
 ///   selection painting is disabled, so there is no active-cell repaint to
@@ -297,24 +290,13 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         };
     }
 
-    // Stable pane-addressed content can likewise reuse the committed slots
+    // Stable all-content work can likewise reuse the committed slots
     // even when the host also marked view/overlay work. Content-free stable
     // view work is owned by the earlier Overlay arm.
     if work.has_content() && !work.has_geometry() && reusable {
-        let mask = match work.content() {
-            ContentWork::Panes(mask) => *mask,
-            // Rows imply the whole grid whenever a mask is needed: row
-            // precision picks `Damage`, it never narrows the pane set.
-            // Reaching here means `Damage` was ineligible (sheet
-            // mismatch), so the fallback must stay whole-grid rather than
-            // intersect the spans with what happens to be visible.
-            ContentWork::Rows { .. } => PaneRegionMask::ALL,
-            // Guarded out by `work.has_content()` above.
-            ContentWork::Clean => PaneRegionMask::ALL,
-        };
         return FramePlan {
             selected_strategy: PaintRegimeTag::SlotsReuse,
-            grid: GridWork::Panes(mask),
+            grid: GridWork::AllContent,
             overlay: content_overlay,
             consumes: work,
             rebuild_reason,
@@ -322,8 +304,8 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     }
 
     // Fallback: geometry, content plus a real scroll, or a Rebuild delta that
-    // wasn't claimed above (row/pane content on a Rebuild also lands here —
-    // a rebuilt frame's pane buffers can't be range-matched against it).
+    // wasn't claimed above (content on a Rebuild also lands here because a
+    // rebuilt frame cannot range-match the committed grid buffers).
     // Always paints the overlay — candidate geometry or model identity may
     // have changed under it.
     FramePlan {
@@ -335,9 +317,8 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     }
 }
 
-/// What one `paint_if_dirty` call did. `Retry` means work was retained
-/// (whole-frame hold or pane-local partial commit — the trace's per-pane
-/// verdicts tell which) and the scheduler must keep the loop armed.
+/// What one `paint_if_dirty` call did. `Retry` means a whole-grid hold
+/// retained work and the scheduler must keep the loop armed.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PaintResult {
     Idle,
@@ -345,13 +326,9 @@ pub enum PaintResult {
     Retry,
 }
 
-/// What one pane's paint call decided this frame. Mirrors `RepaintPlan`
-/// plus the two outcomes the planner never produces, so every exit from
-/// `render_pane` / `render_pane_damage` / `execute_blit` maps to exactly
-/// one variant — the relationship `PaintRegimeTag` already has to
-/// `FramePlan`.
+/// What the grid paint decided this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaneVerdict {
+pub enum GridVerdict {
     Skip,
     Rows {
         spans: u8,
@@ -359,11 +336,11 @@ pub enum PaneVerdict {
     },
     Full,
     Strip,
-    /// `render_pane`'s own bridge preflight held this pane's prior buffers.
+    /// Grid-wide preflight held the prior buffers and pixels.
     Held,
 }
 
-impl fmt::Display for PaneVerdict {
+impl fmt::Display for GridVerdict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Skip => f.write_str("skip"),
@@ -415,42 +392,29 @@ fn origin_showing(
     current.max(smallest)
 }
 
-/// Whole-frame outcome, separate from the per-pane verdicts because the blit
-/// preflight aborts *before* the caller shifts a single pixel:
-/// `RendererCore::prepare_blit` returns `None` on the first pane's bridge
-/// failure, and `paint_grid_blit` returns without ever calling
-/// `Painter::blit`. Recording that as one pane's verdict would imply the
-/// other panes painted.
+/// Whole-frame outcome. Blit preflight validates every required address strip
+/// before the caller shifts a single pixel, so any bridge failure holds the
+/// grid transaction without calling `Painter::blit`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FrameOutcome {
     #[default]
     Painted,
-    /// A `SlotsReuse`/`Damage` attempt in which some, but not all, of the
-    /// target panes' fetches failed: the named panes held their prior
-    /// pixels/buffers while every other targeted pane committed and
-    /// presented. Distinct from `HeldOnBridgeFailure`, which names a
-    /// whole-frame hold where nothing committed at all.
-    PartialCommit(PaneRegionMask),
-    HeldOnBridgeFailure(PaneRegion),
+    HeldOnBridgeFailure,
     /// `FrameInputs::capture` failed before dispatch reached a regime at
     /// all — no candidate geometry, no cache invalidation, no paint. See
     /// `paint_if_dirty`'s capture-failure handling.
     HeldOnInputFailure(FrameInputFailure),
 }
 
-/// A pane the blit preflight could not stage a strip for, so it fell through to
-/// a whole-pane `render_pane` on a frame that was supposed to be cheap. Carries
-/// the reason because the two have different fixes: a cold cache means some
-/// earlier frame dropped the pane's range, while an incompatible range means
-/// `shift_is_safe` rejected the geometry (for a row scroll, the visible row
-/// count changed).
+/// A blit whose committed cache could not be shifted, so preparation fell back
+/// to a full-grid replacement. A cold cache and an incompatible layout have
+/// different diagnostic causes even though both use that replacement path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlitFallback {
-    pub pane: PaneRegion,
     pub cold_cache: bool,
 }
 
-/// Per-frame attribution: which regime ran, what each pane decided, and how
+/// Per-frame attribution: which regime ran, what the grid decided, and how
 /// much model traffic it cost. Written by the renderer during paint, stamped
 /// into `Orchestrator.last_trace` at the end of `paint_if_dirty`.
 ///
@@ -464,7 +428,7 @@ pub struct FrameTrace {
     /// a retry with the attempt that produced it.
     pub attempt_seq: u64,
     /// Identifier of the successful transaction committed by this attempt.
-    /// Holds leave this unset; partial commits still advance the sequence.
+    /// Holds leave this unset.
     pub committed_seq: Option<u64>,
     /// `None` before the first dispatch and on a capture hold. `PaintRegimeTag`
     /// has no `Default` on purpose — inventing one would name a regime that
@@ -483,18 +447,15 @@ pub struct FrameTrace {
     /// arms were *rejected* only once you know which categories carried
     /// work.
     pub work: WorkFlags,
-    /// Indexed by `PaneRegion as usize`. `None` = pane not visited this frame.
-    pub panes: [Option<PaneVerdict>; 4],
+    /// `None` when the grid was not visited this frame.
+    pub verdict: Option<GridVerdict>,
     pub outcome: FrameOutcome,
-    /// Set when a `Viewport` frame had to abandon the strip path for a pane.
-    /// Still the expensive case even though `prepare_full_pane` needs only
-    /// one bridge crossing: the pane still pays a whole-pane five-pass walk
-    /// on a frame that was supposed to repaint a strip.
+    /// Set when a `Viewport` frame had to abandon cache shifting and prepare a
+    /// full-grid replacement on a frame expected to repaint only a strip.
     pub blit_fallback: Option<BlitFallback>,
-    /// Cell slots handed to the model: summed over the four bulk accessors and
-    /// counted per call, so one 1000-cell pane fetch reads 4000. An unshiftable
-    /// pane is charged once — `render_pane` adopts the buffers the preflight
-    /// already validated instead of refetching the same cells.
+    /// Cell slots handed to the model, summed over the bundle channels and
+    /// counted per call. A full-grid blit fallback adopts the buffers its
+    /// preflight already validated instead of refetching the same cells.
     pub fetched_cell_slots: usize,
     /// Distinct addressed cells charged by the renderer's bundle fetches.
     /// Unlike `fetched_cell_slots`, this does not encode the current number of
@@ -513,18 +474,16 @@ impl fmt::Display for FrameTrace {
             None => f.write_str("-")?,
         }
         write!(f, "[{:?}]", self.work)?;
-        for (i, name) in ["tl", "tr", "bl", "br"].iter().enumerate() {
-            match self.panes.get(i).copied().flatten() {
-                Some(v) => write!(f, " {name}:{v}")?,
-                None => write!(f, " {name}:-")?,
-            }
+        match self.verdict {
+            Some(verdict) => write!(f, " grid:{verdict}")?,
+            None => f.write_str(" grid:-")?,
         }
-        if let FrameOutcome::HeldOnBridgeFailure(pane) = self.outcome {
-            write!(f, " HELD({pane:?})")?;
+        if self.outcome == FrameOutcome::HeldOnBridgeFailure {
+            f.write_str(" HELD")?;
         }
         if let Some(fb) = self.blit_fallback {
             let why = if fb.cold_cache { "cold" } else { "range" };
-            write!(f, " unshift({:?},{why})", fb.pane)?;
+            write!(f, " unshift({why})")?;
         }
         write!(f, " fetched={}", self.fetched_cell_slots)?;
         // Only printed on divergence (a `FreshFallback`) so the ordinary
@@ -539,10 +498,10 @@ impl fmt::Display for FrameTrace {
     }
 }
 
-/// Which surfaces `finish_attempt` must flush for a `Committed`/`Partial`
+/// Which surfaces `finish_attempt` must flush for a committed
 /// outcome. Grid presentation is tracked explicitly per attempt (an
 /// `Overlay` regime never painted the grid at all; a `SlotsReuse`/`Damage`
-/// attempt with every pane fingerprint-skipped still needs it, since the
+/// attempt with a grid-wide fingerprint skip still needs it, since the
 /// prior frame's pixels are already correct on screen and nothing new was
 /// drawn — see each regime helper's own construction site). Overlay
 /// presentation is not tracked here: it is driven directly by this
@@ -589,14 +548,9 @@ struct OverlayContext<'a> {
 /// thing `finish_attempt` accepts. See the Stage 4 design doc (transactional
 /// render pipeline) for the full contract this type closes over; in brief:
 ///
-/// - `Committed`: every touched pane executed. `frame` may still be
+/// - `Committed`: the grid transaction executed. `frame` may still be
 ///   `FrameUpdate::Preserve` (the `Overlay` regime never had a grid
 ///   candidate).
-/// - `Partial`: `SlotsReuse`/`Damage` only — some, but not all, target
-///   panes executed. Always carries a real replacement `Chrome`: even the
-///   held panes' geometry is unchanged (a `Stable`-delta precondition), so
-///   there is always a safe candidate to install, just never nothing to
-///   install.
 /// - `Held`: nothing executed and nothing may be presented, cached, or
 ///   observed as a geometry change. `frame` still needs a `FrameUpdate`
 ///   (not always `Preserve`) because a regime that *did* take ownership of
@@ -610,19 +564,14 @@ struct OverlayContext<'a> {
 ///   `FrameUpdate` a regime constructs here is either `Preserve` (nothing
 ///   was ever taken) or an already-resolved, zero-clone value the regime
 ///   had to build anyway to decide Held in the first place.
+// Completion owns the prepared cache transaction until `finish_attempt`.
+// Keeping that payload inline avoids a per-frame box allocation.
+#[allow(clippy::large_enum_variant)]
 enum PaintOutcome {
     Committed {
         painted_layers: PaintedLayers,
-        cache_commit: PreparedCacheCommit,
+        cache_commit: Option<GridCacheCommit>,
         frame: FrameUpdate,
-        effective: PaintRegimeTag,
-        outcome: FrameOutcome,
-    },
-    Partial {
-        painted_layers: PaintedLayers,
-        cache_commit: PreparedCacheCommit,
-        frame: Chrome,
-        retry: PendingWork,
         effective: PaintRegimeTag,
         outcome: FrameOutcome,
     },
@@ -633,29 +582,12 @@ enum PaintOutcome {
     },
 }
 
-/// Build the retry value for a pane-local partial commit (`SlotsReuse`,
-/// `Fresh`): only the held panes' content comes back. Overlay work is
-/// deliberately not included — the overlay already painted and presented
-/// on this frame, so re-marking it would repaint identical pixels every
-/// tick until the bridge recovers. Merged into `self.pending` exactly once,
-/// by `finish_attempt` — never assigned, so a producer that queued new work
-/// while this paint ran is not displaced.
-fn retry_for_held_panes(held: PaneRegionMask) -> PendingWork {
-    let mut retry = PendingWork::default();
-    retry.mark_panes(held);
-    retry
-}
-
-/// Build the retry value for a held `Damage` strip: the original sheet and
-/// row spans, so the next attempt keeps the band clipping instead of
-/// escalating to a whole-pane walk. Same merge-not-assign contract as
-/// [`retry_for_held_panes`].
-fn retry_for_held_rows(sheet: u32, spans: &[RowSpan]) -> PendingWork {
-    let mut retry = PendingWork::default();
-    for span in spans {
-        retry.mark_rows(sheet, *span);
-    }
-    retry
+/// A bridge hold invalidates the attempted content transaction as a whole.
+/// Preserve any coalesced geometry/view/overlay intent, but widen content to
+/// the full visible grid before merging the retry back into pending work.
+fn retry_grid_wide(mut work: PendingWork) -> PendingWork {
+    work.mark_all_content();
+    work
 }
 
 pub struct Orchestrator<S>
@@ -715,7 +647,7 @@ where
     /// Diagnostic projection of the work the last `paint_if_dirty` took.
     /// Empty before the first paint.
     last_work_flags: WorkFlags,
-    /// Per-pane attribution for the last `paint_if_dirty`. Collected by the
+    /// Grid-wide attribution for the last `paint_if_dirty`. Collected by the
     /// grid renderer during paint, stamped here after dispatch.
     last_trace: FrameTrace,
     /// Sequence assigned to the current/last non-idle attempt.
@@ -753,8 +685,8 @@ where
         }
     }
 
-    /// Per-pane attribution for the last `paint_if_dirty`. All-`None` panes
-    /// before the first paint.
+    /// Grid-wide attribution for the last `paint_if_dirty`. Its verdict is
+    /// `None` before the first paint.
     pub fn last_trace(&self) -> FrameTrace {
         self.last_trace
     }
@@ -799,8 +731,8 @@ where
     /// Content and view work already queued is preserved rather than
     /// cleared. Dropping it here would strand an edit that arrived earlier
     /// in the same tick: the escalated `Fresh` frame would rebuild geometry
-    /// but skip the pane-cache invalidation that only content work
-    /// triggers, and repaint the stale cached values.
+    /// but lose the content intent that the same Fresh transaction must
+    /// subsume.
     ///
     /// `last_frame` is deliberately preserved (see `set_model`'s matching
     /// comment): the geometry work marked below already forces `Fresh`, so
@@ -880,13 +812,13 @@ where
     /// Deliberately does *not* invalidate the grid paint cache (Stage 6,
     /// Gate A): since the only route out of that classifier rejection is a
     /// `Fresh` walk, and `Layer::paint_grid_fresh` invalidates after its
-    /// panes prepare and before its first draw, an eager call here is a
+    /// grid prepares and before its first draw, an eager call here is a
     /// second, redundant painter state transition. Leaving it out also stops
     /// a *held* theme Fresh from touching the painter at all. Cell repaint
     /// coverage does not depend on it either way: `invalidate_paint_cache`
     /// only resets painter ctx state, and a Fresh candidate forces
     /// `RepaintPlan::Full` without consulting the content-keyed fingerprint
-    /// tree (`build_prepared_full_pane`).
+    /// tree during full-grid preparation.
     pub fn set_theme(&mut self, theme: CanvasTheme) {
         if theme != *self.theme {
             self.theme = Rc::new(theme);
@@ -910,20 +842,20 @@ where
         // replacement, not to gate repaint.
         self.model_generation = self.model_generation.wrapping_add(1);
         // `last_frame` is deliberately preserved (not dropped) here: the
-        // geometry + all-panes + overlay work marked below already forces
+        // geometry + all-content + overlay work marked below already forces
         // the next paint to `Fresh` regardless of `Chrome::classify`'s
         // verdict, so retaining the old committed frame only keeps query
         // geometry (`hit_test`, `cell_rect`, ...) coherent with the old
         // pixels for the window between this call and that Fresh paint —
         // including if the new model's scalar capture temporarily fails.
         // The one setter that *discards* queued work instead of adding to
-        // it: rows and pane masks recorded against the outgoing model name
+        // it: row-scoped work recorded against the outgoing model names
         // nothing in the incoming one. Replaced wholesale by the
         // worst-case value, which subsumes anything the old work could
         // have asked for.
         self.pending = PendingWork::default();
         self.pending.mark_geometry();
-        self.pending.mark_panes(PaneRegionMask::ALL);
+        self.pending.mark_all_content();
         self.pending.mark_overlay();
     }
 
@@ -935,23 +867,22 @@ where
         self.pending.mark_overlay();
     }
 
-    /// Typed cell-content-changed signal. Marks the named panes' cached
-    /// buffers stale so the next `paint_if_dirty` refetches their values
-    /// from the model via the `SlotsReuse` arm (mask = these panes) —
+    /// Typed cell-content-changed signal. Marks all visible content dirty so
+    /// the next `paint_if_dirty` refetches its values from the model via the
+    /// grid-wide `SlotsReuse` arm —
     /// fixes the recalc bug where a formula dependent on an edited
     /// cell silently kept painting the stale cached value.
-    pub fn mark_content_dirty(&mut self, mask: PaneRegionMask) {
-        self.pending.mark_panes(mask);
+    pub fn mark_content_dirty(&mut self) {
+        self.pending.mark_all_content();
     }
 
     /// Row-scoped `mark_content_dirty`: also names the damaged rows so
     /// `plan_frame` can clip the repaint to full-width bands. All escalation
-    /// (cross-sheet rows, span-count cap, meeting unscoped pane work)
+    /// (cross-sheet rows, span-count cap, or meeting all-content work)
     /// belongs to `ContentWork`'s merge table, not to this callsite.
     ///
-    /// No pane mask is recorded alongside the rows: row precision chooses
-    /// the `Damage` strategy, it does not narrow the affected pane set, and
-    /// every consumer that needs a mask from `Rows` reads `ALL`.
+    /// Row precision chooses the `Damage` strategy; when that strategy is
+    /// ineligible, planning widens the work to `AllContent`.
     pub fn mark_rows_damaged(&mut self, sheet: u32, span: RowSpan) {
         self.pending.mark_rows(sheet, span);
     }
@@ -1194,7 +1125,7 @@ where
 
         // A capture failure still publishes a trace through `finish_attempt`.
         // Clear renderer-owned attribution before any fallible model reads so
-        // a held attempt cannot inherit pane verdicts, fetch counts, or blit
+        // a held attempt cannot inherit a grid verdict, fetch counts, or blit
         // fallback details from the previously painted frame.
         self.grid.renderer.reset_trace();
 
@@ -1257,14 +1188,14 @@ where
         let work_flags = plan.consumes.flags();
         // The trace was reset before capture so both successful dispatch and
         // the capture-failure path describe this attempt only. An `Overlay`
-        // regime legitimately leaves every pane `None` — it never calls a
-        // grid pane renderer.
+        // regime legitimately leaves the grid verdict `None` — it never
+        // calls the grid renderer.
         // `plan.consumes` is the attempt's taken `PendingWork`, owned by the
         // plan; moving it out here (rather than a second borrow of the
         // pre-take value) is what lets a held arm's `PaintOutcome` carry it
         // straight back to `finish_attempt`'s merge step. An arm that fully
         // commits does nothing further with it; only an arm that holds (in
-        // full or in part) constructs its own retry scope from it.
+        // constructs its grid-wide retry scope from it.
         let overlay_work = plan.overlay;
         let work = plan.consumes;
         let outcome = match plan.grid {
@@ -1272,7 +1203,7 @@ where
             GridWork::Blit(blit_plan) => {
                 self.paint_viewport_regime(model_dyn, &inputs, blit_plan, work)
             }
-            GridWork::Panes(mask) => self.paint_slots_reuse_regime(model_dyn, &inputs, mask, work),
+            GridWork::AllContent => self.paint_slots_reuse_regime(model_dyn, &inputs, work),
             GridWork::Fresh => self.paint_fresh_regime(model_dyn, &inputs, work),
             GridWork::Rows { sheet, spans } => {
                 self.paint_damage_regime(model_dyn, &inputs, sheet, spans, work)
@@ -1337,28 +1268,12 @@ where
                     outcome,
                 } => (
                     Some(painted_layers),
-                    Some(cache_commit),
+                    cache_commit,
                     frame,
                     None,
                     Some(effective),
                     outcome,
                     PaintResult::Painted,
-                ),
-                PaintOutcome::Partial {
-                    painted_layers,
-                    cache_commit,
-                    frame,
-                    retry,
-                    effective,
-                    outcome,
-                } => (
-                    Some(painted_layers),
-                    Some(cache_commit),
-                    FrameUpdate::Replace(frame),
-                    Some(retry),
-                    Some(effective),
-                    outcome,
-                    PaintResult::Retry,
                 ),
                 PaintOutcome::Held {
                     retry,
@@ -1380,13 +1295,13 @@ where
         //    carry no commit and therefore touch neither persistent cache nor
         //    frame state beyond their explicit rollback/preserve update.
         if let Some(cache_commit) = cache_commit {
-            self.grid.commit_pane_cache(cache_commit);
+            self.grid.commit_grid_cache(cache_commit);
         }
         self.install_frame(frame);
 
         if let Some(layers) = painted_layers {
             if let Some(ctx) = overlay_ctx {
-                // Committed and Partial refresh committed selection/
+                // Committed attempts refresh committed selection/
                 // active-cell state unconditionally — even an
                 // `OverlayWork::Preserve` attempt just repainted the grid
                 // with new pixels, so the next frame's `Chrome::classify`
@@ -1433,10 +1348,7 @@ where
             self.pending.merge(retry);
         }
 
-        let committed_seq = if matches!(
-            frame_outcome,
-            FrameOutcome::Painted | FrameOutcome::PartialCommit(_)
-        ) {
+        let committed_seq = if frame_outcome == FrameOutcome::Painted {
             self.commit_seq = self.commit_seq.wrapping_add(1);
             Some(self.commit_seq)
         } else {
@@ -1446,7 +1358,7 @@ where
         // 5. publish last_regime, last_effective, last_work_flags, and
         //    last_trace — built once here from plan metadata (`selected`/
         //    `work_flags`), the renderer's own prepared-fetch attribution
-        //    and pane verdicts (`self.grid.renderer.trace()`), and this
+        //    and grid verdict (`self.grid.renderer.trace()`), and this
         //    outcome's effective strategy/`FrameOutcome`.
         self.last_regime = selected;
         self.last_effective = effective;
@@ -1497,7 +1409,7 @@ where
         self.last_frame.as_ref()?;
         Some(PaintOutcome::Committed {
             painted_layers: PaintedLayers { grid: false },
-            cache_commit: PreparedCacheCommit::default(),
+            cache_commit: None,
             frame: FrameUpdate::Preserve,
             effective: PaintRegimeTag::Overlay,
             outcome: FrameOutcome::Painted,
@@ -1539,10 +1451,10 @@ where
                         // `prepare_blit`'s own `render_grid_blit` already
                         // stamped the renderer trace's `FrameOutcome` via
                         // `trace_frame_held` — read it back rather than
-                        // re-deriving which pane triggered the hold.
+                        // re-deriving which address fetch triggered the hold.
                         let outcome = self.grid.renderer.trace().outcome;
                         return Some(PaintOutcome::Held {
-                            retry: work,
+                            retry: retry_grid_wide(work),
                             // `rollback` moves `prev`'s untouched pieces back
                             // out of the now-discarded candidate — no clone was
                             // ever taken — so this is exactly what `last_frame`
@@ -1556,7 +1468,7 @@ where
                 };
                 Some(PaintOutcome::Committed {
                     painted_layers: PaintedLayers { grid: true },
-                    cache_commit,
+                    cache_commit: Some(cache_commit),
                     frame: FrameUpdate::Replace(prepared.commit()),
                     effective: PaintRegimeTag::Viewport,
                     outcome: FrameOutcome::Painted,
@@ -1570,11 +1482,8 @@ where
     /// `paint_viewport_regime`'s `FreshFallback` sub-path: builds a
     /// `Fresh`-kind candidate from `self.spare_slots` (never touching
     /// `self.last_frame` — see the module's Stage 4 design doc's Fresh
-    /// recipe) and paints every pane atomically via
-    /// `RendererCore::render_panes_atomic`. Returns the candidate and its
-    /// held-mask verdict, which is always exactly `PaneRegionMask::ALL`
-    /// (nothing committed) or `PaneRegionMask::EMPTY` (everything did) —
-    /// never a partial value. The caller still owns the held-vs-committed
+    /// recipe) and paints the grid atomically. Returns the candidate and its
+    /// grid-wide held verdict. The caller still owns the held-vs-committed
     /// `FrameUpdate`/pool-recycling decision, because the two callers
     /// differ in what (if anything) they must hand back on Held: ordinary
     /// Fresh never took `last_frame` at all, but `FreshFallback` already
@@ -1583,15 +1492,13 @@ where
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
-    ) -> (Chrome, Option<PreparedCacheCommit>) {
+    ) -> (Chrome, Option<GridCacheCommit>) {
         let spare = std::mem::take(&mut self.spare_slots);
         let frame = Chrome::build(model, inputs, spare);
-        // `paint_grid_fresh` prepares every pane before touching the
+        // `paint_grid_fresh` prepares the whole grid before touching the
         // painter at all (not even the cache invalidation or background
         // fill), so a held attempt is a true no-op here — see its doc.
-        let cache_commit = self
-            .grid
-            .paint_grid_fresh(model, &frame, PaneRegionMask::ALL);
+        let cache_commit = self.grid.paint_grid_fresh(model, &frame);
         (frame, cache_commit)
     }
 
@@ -1620,7 +1527,7 @@ where
             self.spare_slots = RecycledSlots::from_pane_set(frame.pane_set);
             let outcome = self.grid.renderer.trace().outcome;
             return Some(PaintOutcome::Held {
-                retry: work,
+                retry: retry_grid_wide(work),
                 frame: FrameUpdate::Replace(prev),
                 outcome,
             });
@@ -1634,54 +1541,30 @@ where
         self.spare_slots = RecycledSlots::from_pane_set(prev.pane_set);
         Some(PaintOutcome::Committed {
             painted_layers: PaintedLayers { grid: true },
-            cache_commit,
+            cache_commit: Some(cache_commit),
             frame: FrameUpdate::Replace(frame),
             effective: PaintRegimeTag::Fresh,
             outcome: FrameOutcome::Painted,
         })
     }
 
-    /// True when the renderer's own trace shows at least one pane that
-    /// actually executed (`Skip`/`Rows`/`Full`/`Strip`) this attempt,
-    /// rather than either `Held` or never having been visited at all
-    /// (`None` — a geometrically empty pane, or one outside this attempt's
-    /// scope). This is the Held-vs-Partial boundary for `SlotsReuse` and
-    /// `Damage`: comparing the returned held mask against the target mask
-    /// directly would misclassify an attempt as partial whenever the
-    /// target also names a geometrically empty pane (e.g. `TopLeft` on an
-    /// unfrozen sheet), since an empty pane is never counted in the held
-    /// mask at all.
-    fn any_pane_painted(&self) -> bool {
-        self.grid
-            .renderer
-            .trace()
-            .panes
-            .iter()
-            .any(|v| matches!(v, Some(pv) if *pv != PaneVerdict::Held))
-    }
-
     /// Damage regime: slot vecs survive (same preconditions as SlotsReuse),
-    /// prior grid pixels stay, only the damaged bands refetch + repaint.
-    /// No cache invalidation ahead of the paint — the strip path
-    /// (`prepare_damage_pane` / `execute_damage_pane`) splices fetched bands
-    /// into the pane buffers and leaves the pane fingerprint tree untouched,
-    /// atomically: a transient bridge failure on any of the four strip
-    /// buffers leaves that pane's buffers, pixels, range, and tree
-    /// untouched instead of partially splicing.
+    /// prior grid pixels stay, and only damaged bands refetch and repaint.
+    /// Preparation collects every required strip before execution; a bridge
+    /// failure leaves committed `GridCache` buffers, fingerprints, layout,
+    /// and pixels untouched instead of partially splicing them.
     fn paint_damage_regime(
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
-        sheet: u32,
+        _sheet: u32,
         spans: Vec<RowSpan>,
         work: PendingWork,
     ) -> Option<PaintOutcome> {
         let prev = self.last_frame.take()?;
         let frame = Chrome::next(Some(prev), model, inputs, FramePath::SlotsReuse);
         let grid_paint = self.grid.paint_grid_damage(model, &frame, &spans);
-        let held = grid_paint.held;
-
-        if held.is_empty() {
+        if !grid_paint.held {
             return Some(PaintOutcome::Committed {
                 painted_layers: PaintedLayers { grid: true },
                 cache_commit: grid_paint.cache_commit,
@@ -1691,72 +1574,29 @@ where
             });
         }
 
-        if self.any_pane_painted() {
-            // Pane-local partial commit: healthy bands painted and
-            // present; held bands keep their prior pixels. Retries the
-            // original sheet + row spans (never a pane mask) — row
-            // precision never narrows to a pane scope — reconstructed via
-            // `retry_for_held_rows` rather than `work` itself, since a
-            // Preserve row precision on retry. `ContentWork::Rows` has no
-            // pane mask, so every intersecting pane is revisited; healthy
-            // panes remain safe because each retry is freshly prepared and
-            // committed through the same completion boundary.
-            return Some(PaintOutcome::Partial {
-                painted_layers: PaintedLayers { grid: true },
-                cache_commit: grid_paint.cache_commit,
-                frame,
-                retry: retry_for_held_rows(sheet, &spans),
-                effective: PaintRegimeTag::Damage,
-                outcome: FrameOutcome::PartialCommit(held),
-            });
-        }
-        // Every intersected pane failed: a true hold, not a zero-pixel
-        // partial commit. `frame`'s geometry is content-identical to
-        // `prev` — the `Stable` delta that selected this regime already
-        // proves it — so installing it is exactly as safe as restoring
-        // `prev` would be, with no second construction path needed.
-        //
-        // Retries the complete consumed `work`, not a `sheet`/`spans`
-        // reconstruction: `plan_frame` derives `sheet`/`spans` FROM
-        // `work.content()` in the first place, so `work` already carries
-        // the identical row scope — but also whatever `view`/`overlay`
-        // bits rode along with it. A held attempt never runs the overlay
-        // refresh (see `finish_attempt`), so a `mark_rows_damaged` +
-        // `request_overlay_repaint` pair raised together in one tick, on
-        // an attempt that then fully fails, must have its overlay mark
-        // survive into the retry — `retry_for_held_rows` alone would
-        // silently drop it.
         Some(PaintOutcome::Held {
-            retry: work,
+            retry: retry_grid_wide(work),
             frame: FrameUpdate::Replace(frame),
-            outcome: FrameOutcome::HeldOnBridgeFailure(
-                held.regions().next().unwrap_or(PaneRegion::BottomRight),
-            ),
+            outcome: FrameOutcome::HeldOnBridgeFailure,
         })
     }
 
-    /// SlotsReuse regime: prev's slot vecs survive (viewport unchanged);
-    /// `render_pane` fetches every pane in `mask` unconditionally and
-    /// fingerprint-skips a pane whose refetch matches its prior committed
-    /// content — no eager cache invalidation is needed ahead of the paint
-    /// to force that fetch (see `PaneCache::invalidate`'s doc for the
-    /// buffer-range-only distinction that made the old eager call
-    /// redundant with `render_pane`'s own always-fetch, commit-on-success
-    /// behavior, and actively wrong on a held pane: it would have cleared
-    /// the pane's cached range before knowing the fetch would fail).
+    /// SlotsReuse regime: prev's slot vecs survive (viewport unchanged).
+    /// Grid preparation refetches visible content and fingerprint-skips when
+    /// it matches the committed `GridCache`. No eager cache invalidation is
+    /// needed: the candidate cache commit is installed only after every
+    /// segment prepares and the grid transaction executes successfully.
     fn paint_slots_reuse_regime(
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
-        mask: PaneRegionMask,
         work: PendingWork,
     ) -> Option<PaintOutcome> {
         let prev = self.last_frame.take()?;
         let frame = Chrome::next(Some(prev), model, inputs, FramePath::SlotsReuse);
-        let grid_paint = self.grid.paint_grid(model, &frame, mask);
-        let held = grid_paint.held;
+        let grid_paint = self.grid.paint_grid(model, &frame);
 
-        if held.is_empty() {
+        if !grid_paint.held {
             return Some(PaintOutcome::Committed {
                 painted_layers: PaintedLayers { grid: true },
                 cache_commit: grid_paint.cache_commit,
@@ -1766,51 +1606,16 @@ where
             });
         }
 
-        if self.any_pane_painted() {
-            // Pane-local partial commit (see plan contract): painted panes
-            // present; held panes keep their prior pixels. Retry narrows to
-            // exactly the held scope (via `retry_for_held_panes`), not the
-            // whole consumed `work` — the healthy panes must not repaint
-            // again, so the retry has to be strictly narrower than what
-            // was consumed.
-            return Some(PaintOutcome::Partial {
-                painted_layers: PaintedLayers { grid: true },
-                cache_commit: grid_paint.cache_commit,
-                frame,
-                retry: retry_for_held_panes(held),
-                effective: PaintRegimeTag::SlotsReuse,
-                outcome: FrameOutcome::PartialCommit(held),
-            });
-        }
-        // Every targeted pane failed: a true hold, not a zero-pixel partial
-        // commit. `frame`'s geometry is content-identical to `prev` for
-        // the same reason `paint_damage_regime` installs it on a full hold
-        // too.
-        //
-        // Retries the complete consumed `work`, not
-        // `retry_for_held_panes(mask)`: `plan_frame` derives `mask` FROM
-        // `work.content()` in the first place, so `work` already carries
-        // the identical pane scope (and, on the cross-sheet-rows or
-        // Clean-content fallback paths, the *original* content shape
-        // `mask` was normalized from) — but also whatever `view`/`overlay`
-        // bits rode along with it. A held attempt never runs the overlay
-        // refresh (see `finish_attempt`), so a `mark_content_dirty` +
-        // `request_overlay_repaint` pair raised together in one tick, on
-        // an attempt that then fully fails, must have its overlay mark
-        // survive into the retry — `retry_for_held_panes(mask)` alone
-        // would silently drop it.
         Some(PaintOutcome::Held {
-            retry: work,
+            retry: retry_grid_wide(work),
             frame: FrameUpdate::Replace(frame),
-            outcome: FrameOutcome::HeldOnBridgeFailure(
-                held.regions().next().unwrap_or(PaneRegion::BottomRight),
-            ),
+            outcome: FrameOutcome::HeldOnBridgeFailure,
         })
     }
 
     /// Full grid repaint. Slot vecs walked fresh from the model; the new
-    /// vecs make any cross-frame fingerprint compare meaningless, so every
-    /// pane repaints. Selected when slot vecs diverged or no prior frame.
+    /// vecs make any cross-frame fingerprint compare meaningless, so the
+    /// whole grid repaints. Selected when slot vecs diverged or no prior frame.
     ///
     /// Builds via [`Self::build_and_paint_fresh`] (`Chrome::build`, not
     /// `Chrome::next(.., FramePath::Fresh)`): the latter derives its
@@ -1838,7 +1643,7 @@ where
             self.spare_slots = RecycledSlots::from_pane_set(frame.pane_set);
             let outcome = self.grid.renderer.trace().outcome;
             return Some(PaintOutcome::Held {
-                retry: work,
+                retry: retry_grid_wide(work),
                 frame: FrameUpdate::Preserve,
                 outcome,
             });
@@ -1846,7 +1651,7 @@ where
 
         Some(PaintOutcome::Committed {
             painted_layers: PaintedLayers { grid: true },
-            cache_commit,
+            cache_commit: Some(cache_commit),
             frame: FrameUpdate::Replace(frame),
             effective: PaintRegimeTag::Fresh,
             outcome: FrameOutcome::Painted,
@@ -1856,12 +1661,27 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::origin_showing;
+    use super::{origin_showing, retry_grid_wide};
+    use crate::pending_work::{ContentWork, PendingWork, RowSpan};
 
     /// Uniform rows, so `extent / 20` is how many fit and every expectation
     /// below is arithmetic a reader can redo in their head.
     fn rows_20(_id: i32) -> i32 {
         20
+    }
+
+    #[test]
+    fn bridge_retry_widens_content_and_preserves_other_intent() {
+        let mut work = PendingWork::default();
+        work.mark_rows(7, RowSpan { r1: 2, r2: 4 });
+        work.mark_view();
+        work.mark_overlay();
+
+        let retry = retry_grid_wide(work);
+
+        assert_eq!(*retry.content(), ContentWork::All);
+        assert!(retry.has_view());
+        assert!(retry.has_overlay());
     }
 
     #[test]
@@ -1925,6 +1745,7 @@ mod tests {
 #[cfg(test)]
 mod frame_plan_tests {
     use super::*;
+    use crate::chrome::Shift;
     use crate::geometry::prim::Axis;
 
     const SHEET: u32 = 0;
@@ -1936,15 +1757,24 @@ mod frame_plan_tests {
         work
     }
 
-    /// Empty `shifts` is fine: `PaneShift` isn't nameable from this module
-    /// (`chrome::blit` is private to the `chrome` subtree), and the planner
-    /// never inspects a `BlitPlan`'s contents — it only wraps whatever
-    /// `Chrome::classify` handed it into `GridWork::Blit`.
+    /// The planner never inspects a `BlitPlan`'s contents; it only wraps
+    /// whatever `Chrome::classify` handed it into `GridWork::Blit`.
     fn stub_scroll() -> FrameDelta {
         FrameDelta::Scroll(BlitPlan {
             axis: Axis::Row,
-            shifts: Vec::new(),
-            repaint_strip: PixelRect {
+            shift: Shift {
+                src: PixelRect {
+                    top_left: Point { x: 0, y: 0 },
+                    width: 10,
+                    height: 10,
+                },
+                dst: PixelRect {
+                    top_left: Point { x: 0, y: 1 },
+                    width: 10,
+                    height: 10,
+                },
+            },
+            pixel_strip: PixelRect {
                 top_left: Point { x: 0, y: 0 },
                 width: 10,
                 height: 10,
@@ -2076,10 +1906,7 @@ mod frame_plan_tests {
             PaintRegimeTag::SlotsReuse,
             "row work recorded against a sheet that isn't on screen can't clip to bands"
         );
-        let GridWork::Panes(mask) = plan.grid else {
-            panic!("expected GridWork::Panes");
-        };
-        assert_eq!(mask, PaneRegionMask::ALL);
+        assert!(matches!(plan.grid, GridWork::AllContent));
     }
 
     #[test]
@@ -2100,23 +1927,20 @@ mod frame_plan_tests {
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
-    // ── Category: pane content only ──
+    // ── Category: whole-grid content only ──
 
     #[test]
-    fn pane_content_stable_selects_slots_reuse() {
-        let work = work_with(|w| w.mark_panes(PaneRegionMask::TOP_LEFT));
+    fn all_content_stable_selects_slots_reuse() {
+        let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
-        let GridWork::Panes(mask) = plan.grid else {
-            panic!("expected GridWork::Panes");
-        };
-        assert_eq!(mask, PaneRegionMask::TOP_LEFT);
+        assert!(matches!(plan.grid, GridWork::AllContent));
     }
 
     #[test]
-    fn pane_content_scroll_selects_fresh() {
-        let work = work_with(|w| w.mark_panes(PaneRegionMask::TOP_LEFT));
+    fn all_content_scroll_selects_fresh() {
+        let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
         assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
@@ -2124,8 +1948,8 @@ mod frame_plan_tests {
     }
 
     #[test]
-    fn pane_content_rebuild_selects_fresh() {
-        let work = work_with(|w| w.mark_panes(PaneRegionMask::TOP_LEFT));
+    fn all_content_rebuild_selects_fresh() {
+        let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
         assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
@@ -2153,19 +1977,16 @@ mod frame_plan_tests {
     }
 
     #[test]
-    fn content_panes_plus_view_stable_selects_slots_reuse() {
+    fn all_content_plus_view_stable_selects_slots_reuse() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
-            w.mark_panes(PaneRegionMask::TOP_LEFT);
+            w.mark_all_content();
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
-        let GridWork::Panes(mask) = plan.grid else {
-            panic!("expected GridWork::Panes");
-        };
-        assert_eq!(mask, PaneRegionMask::TOP_LEFT);
+        assert!(matches!(plan.grid, GridWork::AllContent));
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 
@@ -2179,10 +2000,7 @@ mod frame_plan_tests {
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
-        let GridWork::Panes(mask) = plan.grid else {
-            panic!("expected GridWork::Panes");
-        };
-        assert_eq!(mask, PaneRegionMask::ALL);
+        assert!(matches!(plan.grid, GridWork::AllContent));
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 
@@ -2190,7 +2008,7 @@ mod frame_plan_tests {
     fn content_plus_view_scroll_selects_fresh() {
         let work = work_with(|w| {
             w.mark_view();
-            w.mark_panes(PaneRegionMask::ALL);
+            w.mark_all_content();
         });
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
@@ -2254,7 +2072,7 @@ mod frame_plan_tests {
             w.mark_geometry();
             w.mark_view();
             w.mark_overlay();
-            w.mark_panes(PaneRegionMask::ALL);
+            w.mark_all_content();
         });
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
@@ -2286,7 +2104,7 @@ mod frame_plan_tests {
 
     #[test]
     fn slots_reuse_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
-        let work = work_with(|w| w.mark_panes(PaneRegionMask::ALL));
+        let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
         assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
@@ -2296,7 +2114,7 @@ mod frame_plan_tests {
     #[test]
     fn slots_reuse_paints_overlay_when_overlay_marked_even_with_selection_hidden() {
         let work = work_with(|w| {
-            w.mark_panes(PaneRegionMask::ALL);
+            w.mark_all_content();
             w.mark_view();
             w.mark_overlay();
         });

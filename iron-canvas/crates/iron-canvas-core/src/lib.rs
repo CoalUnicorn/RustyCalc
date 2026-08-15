@@ -23,11 +23,8 @@ pub mod types;
 
 pub use frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
 pub use orchestrator::{
-    FrameOutcome, FrameTrace, Orchestrator, PaintRegimeTag, PaintResult, PaneVerdict,
+    FrameOutcome, FrameTrace, GridVerdict, Orchestrator, PaintRegimeTag, PaintResult,
 };
-
-pub use renderer::blit_work::{BlitPaneWork, widen_blit_strip_to_pixel_clip};
-pub use renderer::cache::{PaneBlitAddressWork, PaneShiftPrep};
 
 pub use render_overlays::RenderOverlays;
 

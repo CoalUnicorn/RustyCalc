@@ -234,7 +234,7 @@
             // Schema constants — pinned to the producer's
             // ICR_SCHEMA_VERSION. Bump in lockstep with the recorder crate.
             // ──────────────────────────────────────────────────────────────
-            const ICR_SCHEMA_VERSION = 4;
+            const ICR_SCHEMA_VERSION = 5;
             // The viewer build version is for the version-mismatch banner.
             // Edit by hand when shipping a new recorder release.
             const VIEWER_VERSION = "0.1.0-alpha.1";
@@ -479,6 +479,7 @@
                     ["attempt", trace.attempt_seq ?? "–"],
                     ["commit", trace.committed_seq ?? "–"],
                     ["work", `0b${(trace.work ?? 0).toString(2).padStart(4, "0")}`],
+                    ["verdict", trace.verdict?.kind ?? "–"],
                     ["outcome", trace.outcome?.kind ?? "–"],
                     ["fetch cells", trace.fetched_cells ?? 0],
                     ["fetch batches", trace.fetch_batches ?? 0],

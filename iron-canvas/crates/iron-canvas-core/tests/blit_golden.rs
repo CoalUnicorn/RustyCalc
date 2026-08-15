@@ -12,9 +12,7 @@ use std::path::PathBuf;
 
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::FrameDelta;
-use iron_canvas_core::chrome::{
-    ActiveCellSnapshot, BlitOutcome, Chrome, FramePath, PaneRegionMask,
-};
+use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
 use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
@@ -36,7 +34,7 @@ fn capture_scroll_ops(apply_scroll: impl FnOnce(&TestModel)) -> Vec<DrawOp> {
     let inputs0 = test_inputs(&m, canvas, &theme);
     let frame0 = Chrome::next(None, &m, &inputs0, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(&m, &frame0, PaneRegionMask::ALL);
+    core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
 
     apply_scroll(&m);
@@ -94,7 +92,7 @@ fn blit_scroll_pixels_unchanged() {
     assert_blessed("blit_col_scroll", &format!("{col_ops:#?}"));
 }
 
-/// Stage 5 pin (Task 1, bullet 7): `execute_grid_blit` shifts `plan.shifts`
+/// Stage 5 pin (Task 1, bullet 7): `execute_grid_blit` applies `plan.shift`
 /// before it ever opens `BeginGroup(Grid)` — the prefix that must stay
 /// outside `execute_grid_shell`. Proven on both scroll axes so the pin isn't
 /// an artifact of one axis's shift ordering.

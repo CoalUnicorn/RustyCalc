@@ -13,7 +13,7 @@
 mod common;
 
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::chrome::{Chrome, FramePath, PaneRegionMask, measure_row_header_width};
+use iron_canvas_core::chrome::{Chrome, FramePath, measure_row_header_width};
 use iron_canvas_core::geometry::constants::{CELL_AREA_INSET, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
@@ -37,7 +37,7 @@ fn drive_render_grid(model: &TestModel, check: impl FnOnce(&Chrome, &[DrawOp])) 
     let inputs = test_inputs(model, canvas_default(), &theme);
     let frame = Chrome::next(None, model, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_grid(model, &frame, PaneRegionMask::ALL);
+    core.render_grid(model, &frame);
     let ops = core.painter().ops();
     check(&frame, &ops);
 }

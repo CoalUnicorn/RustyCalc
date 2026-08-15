@@ -89,13 +89,11 @@ impl PlaybackSession {
 /// pass a raw user-supplied index without pre-clamping. Returns `None` on
 /// empty input, or on a malformed recording with no `Fresh` frame in range
 /// — a recording may begin with held diagnostic attempts, so `None` is a
-/// valid diagnostics-only prefix. A partial Fresh commit is still eligible:
-/// its committed panes and retry scope are represented by the trace, while
-/// the retained pixels of held panes remain part of the preceding visual
-/// state; the subsequent retry is the self-healing anchor. Linear backward
-/// scan: regime is not monotonic, so binary search does not apply, and
-/// recordings tend to re-anchor frequently (resize / structural events),
-/// keeping the walk short.
+/// valid diagnostics-only prefix. A held Fresh attempt has no committed
+/// sequence and therefore cannot become an anchor. Linear backward scan:
+/// regime is not monotonic, so binary search does not apply, and recordings
+/// tend to re-anchor frequently (resize / structural events), keeping the
+/// walk short.
 pub fn find_fresh_anchor(frames: &[Frame], target: u32) -> Option<u32> {
     let last = frames.len().checked_sub(1)? as u32;
     let start = target.min(last);
@@ -175,7 +173,7 @@ mod tests {
                 regime,
                 effective: regime,
                 work: 0,
-                panes: [None; 4],
+                verdict: None,
                 outcome: TraceOutcome::Painted,
                 blit_fallback: None,
                 fetched_cell_slots: 0,

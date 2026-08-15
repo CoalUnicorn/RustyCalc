@@ -18,7 +18,6 @@ mod common;
 use std::rc::Rc;
 
 use iron_canvas_core::RowSpan;
-use iron_canvas_core::chrome::{PaneRegion, PaneRegionMask};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::constants::{
     CELL_AREA_INSET, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
@@ -29,7 +28,7 @@ use iron_canvas_core::types::coord::{AutofillTarget, RCRange, SheetArea};
 use iron_canvas_core::{CanvasTheme, Orchestrator};
 use iron_canvas_core::{PixelRect, Point};
 
-use iron_canvas_core::{PaintRegimeTag, PaintResult, PaneVerdict, WorkFlags};
+use iron_canvas_core::{GridVerdict, PaintRegimeTag, PaintResult, WorkFlags};
 use iron_canvas_recorder::recording::{
     Frame, IcrHeader, RecordOrigin, RecordedPaintResult, Recording, ThemeSnapshot, TraceRecord,
 };
@@ -191,7 +190,7 @@ fn slots_reuse_regime_skips_full_canvas_fill() {
     // the recalc bug), and reaching this far with no geometry/view work
     // selects SlotsReuse. Theme swaps no longer reach this regime — they
     // invalidate the paint cache and force Fresh.
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.paint_if_dirty();
 
     let new_grid_ops = grid_ops_since(&orch, grid_before);
@@ -278,7 +277,7 @@ fn fresh_slots_reuse_damage_viewport_share_the_grid_shell_group_order() {
     assert_shell(&grid_ops_since(&orch, before), "Fresh");
 
     let before = grid_ops_len(&orch);
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.paint_if_dirty();
     assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
     assert_shell(&grid_ops_since(&orch, before), "SlotsReuse");
@@ -402,16 +401,15 @@ fn empty_signals_short_circuit_paint_if_dirty() {
 }
 
 #[test]
-fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
+fn content_dirty_refreshes_grid_cache_through_slots_reuse() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
     orch.paint_if_dirty(); // Fresh.
 
     let grid_before = grid_ops_len(&orch);
 
-    // mark_content_dirty(ALL) raises CONTENT — viewport stays valid so
-    // plan_frame picks SlotsReuse with mask = ALL.
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    // Grid-wide content work with stable geometry selects SlotsReuse.
+    orch.mark_content_dirty();
     orch.paint_if_dirty();
 
     let new_grid_ops = grid_ops_since(&orch, grid_before);
@@ -435,7 +433,7 @@ fn content_dirty_invalidates_pane_cache_through_slots_reuse() {
 /// repaints the grid (correctly empty) but leaves the overlay's stale
 /// active-cell pixels (the old value) on screen.
 ///
-/// The fix lives in `plan_frame`'s `OverlayWork` calculation: row/pane
+/// The fix lives in `plan_frame`'s `OverlayWork` calculation: row/grid
 /// content work paints the overlay when overlay work is marked, or when
 /// captured selection visibility is true (content then implies an
 /// active-cell repaint) — `paint_slots_reuse_regime` just reads
@@ -453,7 +451,7 @@ fn content_dirty_with_active_cell_repaints_overlay() {
     // mark short-circuited and the overlay's stale active-cell pixels
     // stayed put.
     stub.set_cell(1, 1, "");
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.paint_if_dirty();
 
     let new_overlay_ops = overlay_ops_since(&orch, overlay_before);
@@ -473,7 +471,7 @@ fn content_dirty_with_active_cell_repaints_overlay() {
 }
 
 /// Regression for the workbook-switch stale-paint bug: `set_model` must
-/// mark geometry (plus panes(ALL) and overlay) so the next paint plans
+/// mark geometry (plus all-content and overlay work) so the next paint plans
 /// `Fresh` and clears both layers — `plan_frame`'s "any geometry work
 /// forces Fresh" rule guarantees this regardless of what `Chrome::classify`
 /// would otherwise report (independently, the changed `model_generation`
@@ -481,7 +479,7 @@ fn content_dirty_with_active_cell_repaints_overlay() {
 /// geometry mark, swapping the orchestrator's model in place (RustyCalc
 /// workbook switch, driven by the `current_uuid` Effect in `worksheet.rs`)
 /// could plan a stale SlotsReuse or Overlay paint that never repaints the
-/// grid, keeping the prior workbook's chrome / pane geometry / cached pane
+/// grid, keeping the prior workbook's chrome / pane geometry / cached grid
 /// buffers on screen.
 ///
 /// Tests the contract via the public `last_regime` accessor instead of
@@ -779,7 +777,7 @@ fn recording_serde_round_trip_across_all_five_regimes() {
     // (set_theme used to land here too, but a palette change now invalidates
     // the paint cache and routes to Fresh, so it can't be used as a
     // SlotsReuse trigger.)
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     push(&mut orch, 16); // SlotsReuse
     stub.set_top_row(2);
     orch.request_overlay_repaint();
@@ -833,26 +831,25 @@ fn recording_serde_round_trip_across_all_five_regimes() {
 
 #[test]
 fn damage_regime_paints_far_less_than_slots_reuse() {
-    // Same model, same content signal — one orchestrator takes the mask
+    // Same model, same content signal — one orchestrator takes the all-content
     // path, one the damage path. The band repaint being strictly smaller
     // is the entire point of the regime.
     //
     // The edit below must be load-bearing in TWO ways now:
     //
-    // 1. (pre-Task-4 reason, still true) An *unedited* mask=ALL content
+    // 1. An unedited all-content signal
     //    signal fetches identical bytes and fingerprint-skips the entire
     //    SlotsReuse walk for free (0 cell ops) — which would make
     //    SlotsReuse cheaper than Damage's unconditional named-row repaint
     //    no matter the grid size. A real edit is what actually raises
     //    CONTENT in production.
-    // 2. (Task 4) `render_pane`'s SlotsReuse mismatch now ALSO clips to a
-    //    row-band repaint when `plan_pane_repaint` finds the change safe —
+    // 2. SlotsReuse also clips a safe mismatch to a row-band repaint —
     //    a single-row edit like the old `stub.set_cell(2, 1, ...)` fixture
     //    would make SlotsReuse pay for the SAME clipped one-row band
     //    Damage takes, collapsing the very gap this test exists to prove.
-    //    Nine widely-spread row edits exceed `plan_pane_repaint`'s merge
+    //    Nine widely-spread row edits exceed the planner's merge
     //    cap (`MAX_DAMAGE_SPANS`), forcing SlotsReuse's mismatch back onto
-    //    the unclipped whole-pane walk this comparison is meant to
+    //    the unclipped whole-grid walk this comparison is meant to
     //    contrast against Damage's still-clipped single-row band (Damage
     //    paints only the row named in `mark_rows_damaged` below,
     //    regardless of how many rows actually changed).
@@ -868,7 +865,7 @@ fn damage_regime_paints_far_less_than_slots_reuse() {
     }
 
     let before = grid_ops_len(&slots);
-    slots.mark_content_dirty(PaneRegionMask::ALL);
+    slots.mark_content_dirty();
     slots.paint_if_dirty();
     let slots_ops = grid_ops_len(&slots) - before;
 
@@ -937,7 +934,7 @@ fn plain_content_dirty_poisons_damage_to_slots_reuse() {
     orch.paint_if_dirty();
 
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.paint_if_dirty();
     assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
 }
@@ -1003,7 +1000,7 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
     );
 
     // SlotsReuse (content dirty, viewport stable): grid presents again.
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.paint_if_dirty();
     assert_eq!(
         orch.grid_surface().presents(),
@@ -1022,64 +1019,36 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
     );
 }
 
-/// Slice out the ops painted strictly between one `GroupClass::Cells`
-/// `BeginGroup` and its matching `EndGroup` — the cell band only, excluding
-/// the headers/frozen-separator ops that repaint every Damage frame
-/// regardless and would otherwise mask a strip's atomic no-op. Cells never
-/// nests another group inside it, so the first `EndGroup` after the marker
-/// closes it.
-fn cells_group_ops(ops: &[DrawOp]) -> Vec<DrawOp> {
-    let start = ops
-        .iter()
-        .position(|op| matches!(op, DrawOp::BeginGroup { class } if *class == GroupClass::Cells))
-        .expect("ops must contain a Cells group");
-    let end = ops[start + 1..]
-        .iter()
-        .position(|op| matches!(op, DrawOp::EndGroup))
-        .expect("Cells group must close");
-    ops[start + 1..start + 1 + end].to_vec()
-}
-
-/// Task 5, acceptance criterion 2, at the orchestrator wiring level (the
-/// unit-level proof lives in `row_fingerprint_repaint.rs`'s
-/// `lifecycle_bridge_failed_damage_strip_is_atomic`): a transient
-/// `BridgeFailed` on the Damage regime's strip fetch must paint literally
-/// zero ops inside the `Cells` group — the atomic preflight rejects the
-/// whole strip before any splice/clear/paint. Filtered to the `Cells` group
-/// specifically because headers and the frozen separator still repaint
-/// every Damage frame regardless of the strip's outcome.
 #[test]
-fn damage_regime_bridge_failure_paints_no_cell_ops() {
+fn damage_regime_bridge_failure_holds_the_whole_grid() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh — primes the pane cache + painted tree.
+    orch.paint_if_dirty(); // Fresh — primes the grid cache + painted tree.
 
     stub.set_value_bridge_fail(true);
     let grid_before = grid_ops_len(&orch);
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    orch.paint_if_dirty();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
     let new_grid_ops = grid_ops_since(&orch, grid_before);
 
     assert!(
-        cells_group_ops(&new_grid_ops).is_empty(),
-        "a BridgeFailed Damage strip must paint zero ops inside the Cells \
-         group; got {:?}",
+        new_grid_ops.is_empty(),
+        "a BridgeFailed Damage attempt must paint no grid ops; got {:?}",
         new_grid_ops
     );
 
-    // The atomic-skip path must not poison future frames: once the bridge
-    // recovers, Damage must repaint the edited cell normally.
+    // Whole-grid retry widens row work to all content. Recovery therefore
+    // uses SlotsReuse and must repaint normally without cache poisoning.
     stub.set_value_bridge_fail(false);
     stub.set_cell(2, 1, "changed");
     let grid_before = grid_ops_len(&orch);
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
     orch.paint_if_dirty();
     let new_grid_ops = grid_ops_since(&orch, grid_before);
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Damage));
+    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
     assert!(
-        !cells_group_ops(&new_grid_ops).is_empty(),
-        "Damage must repaint the Cells group normally on the next \
-         successful frame after a BridgeFailed strip"
+        !new_grid_ops.is_empty(),
+        "recovery must repaint after a BridgeFailed damage attempt"
     );
 }
 
@@ -1241,7 +1210,7 @@ fn changed_overlay_setters_dispatch_overlay() {
 /// that reaches `decide` still declares itself content-carrying.
 ///
 /// The `CONTENT` flag is the discriminating assertion here: today's `Fresh`
-/// re-reads every pane unconditionally, so a cleared content mark paints
+/// re-reads every grid segment unconditionally, so a cleared content mark paints
 /// the same pixels and no output-level assertion can see the difference.
 /// It becomes load-bearing the moment `Fresh` learns to adopt a
 /// range-matched buffer — which is exactly why the mark must not be
@@ -1250,10 +1219,10 @@ fn changed_overlay_setters_dispatch_overlay() {
 fn content_then_request_repaint_is_fresh_and_keeps_the_content_mark() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh — primes last_frame and the pane cache.
+    orch.paint_if_dirty(); // Fresh — primes last_frame and the grid cache.
 
     stub.set_cell(2, 1, "edited");
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.request_repaint();
 
     stub.reset_bulk_fetch_calls();
@@ -1268,7 +1237,7 @@ fn content_then_request_repaint_is_fresh_and_keeps_the_content_mark() {
     );
     assert!(
         stub.bulk_fetch_calls() > 0,
-        "the escalated frame must still read pane content from the model"
+        "the escalated frame must still read grid content from the model"
     );
     assert!(
         grid_text_ops_containing(&orch, "edited") > 0,
@@ -1410,12 +1379,12 @@ fn geometry_plus_real_scroll_never_dispatches_viewport() {
 }
 
 /// Row work whose sheet tag doesn't match the painted frame can't clip to
-/// bands, so it falls back to `SlotsReuse` — and the fallback mask must be
-/// `ALL`, never a mask derived from where the spans happen to intersect the
-/// visible panes. Proven by editing both a frozen-band and a scroll-band
-/// cell: a narrowed mask would leave one of them unfetched and unpainted.
+/// bands, so it falls back to grid-wide `SlotsReuse`, never work narrowed from
+/// where the spans happen to intersect the visible segments. Proven by editing
+/// both a frozen-band and a scroll-band cell: narrowed work would leave one of
+/// them unfetched and unpainted.
 #[test]
-fn row_work_ineligible_for_damage_falls_back_to_all_panes() {
+fn row_work_ineligible_for_damage_falls_back_to_whole_grid() {
     let stub = Rc::new(
         TestModel::synthetic_grid()
             .with_data_until(30)
@@ -1434,30 +1403,30 @@ fn row_work_ineligible_for_damage_falls_back_to_all_panes() {
     assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
     assert!(
         grid_text_ops_containing(&orch, "frozen-edit") > 0,
-        "SlotsReuse(ALL) must refetch the frozen-band panes"
+        "grid-wide SlotsReuse must refetch the frozen band"
     );
     assert!(
         grid_text_ops_containing(&orch, "scroll-edit") > 0,
-        "SlotsReuse(ALL) must refetch the scroll-band panes"
+        "grid-wide SlotsReuse must refetch the scroll band"
     );
 }
 
 /// A sheet switch is a view change whose scroll, freeze and canvas size are
 /// all identical — exactly the shape that the cheap arms would happily
-/// reuse. It must reach `Fresh` and re-read the model, because pane buffers
-/// are keyed on row/column range with no sheet identity: reusing the frame
+/// reuse. It must reach `Fresh` and re-read the model, because grid buffers
+/// are keyed on exact layout with no sheet identity: reusing the frame
 /// would keep sheet 0's values on screen under sheet 1's header.
 ///
 /// The fetch-count assertion discriminates against the real failure mode
 /// (`Overlay` or `SlotsReuse` silently claiming the switch, which reads
 /// nothing / reads under the old frame). It does not isolate
-/// `paint_fresh_regime`'s pane-cache invalidation, which is unobservable
+/// `paint_fresh_regime`'s grid-cache invalidation, which is unobservable
 /// today — see the note on that method.
 #[test]
-fn active_sheet_view_change_is_fresh_and_refetches_pane_content() {
+fn active_sheet_view_change_is_fresh_and_refetches_grid_content() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh on sheet 0 — fills the pane cache.
+    orch.paint_if_dirty(); // Fresh on sheet 0 — fills the grid cache.
 
     stub.set_sheet(1); // identical visible coordinates
     orch.view_changed();
@@ -1471,7 +1440,7 @@ fn active_sheet_view_change_is_fresh_and_refetches_pane_content() {
     );
     assert!(
         stub.bulk_fetch_calls() > 0,
-        "the new sheet's pane content must be read from the model, not \
+        "the new sheet's grid content must be read from the model, not \
          carried over from the previous sheet's frame"
     );
 }
@@ -1561,7 +1530,7 @@ fn stable_commit_batch_selects_slots_reuse_and_moves_overlay() {
     stub.set_cell(5, 5, "typed");
     stub.set_active(6, 5);
     orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.view_changed();
 
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
@@ -1572,21 +1541,7 @@ fn stable_commit_batch_selects_slots_reuse_and_moves_overlay() {
         trace.work,
         WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
     );
-    assert_eq!(
-        trace.panes[PaneRegion::BottomRight as usize],
-        Some(PaneVerdict::Rows { spans: 1, rows: 1 })
-    );
-    for pane in [
-        PaneRegion::TopLeft,
-        PaneRegion::TopRight,
-        PaneRegion::BottomLeft,
-    ] {
-        assert_eq!(
-            trace.panes[pane as usize],
-            Some(PaneVerdict::Skip),
-            "unchanged {pane:?} pane must fingerprint-skip"
-        );
-    }
+    assert_eq!(trace.verdict, Some(GridVerdict::Rows { spans: 1, rows: 1 }));
 
     let grid_ops = grid_ops_since(&orch, grid_before);
     assert!(
@@ -1648,7 +1603,7 @@ fn stable_commit_with_hidden_selection_uses_slots_reuse_without_active_cell_repa
     stub.set_cell(5, 5, "hidden-selection-edit");
     stub.set_active(6, 5);
     orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.view_changed();
 
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);

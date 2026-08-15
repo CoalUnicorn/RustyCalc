@@ -188,9 +188,7 @@ impl IronCanvas {
     /// quadrants. Pane-granular masks stay Rust-internal.
     #[wasm_bindgen(js_name = "markContentDirty")]
     pub fn mark_content_dirty(&mut self) {
-        self.runtime
-            .orchestrator_mut()
-            .mark_content_dirty(iron_canvas_core::chrome::PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().mark_content_dirty();
     }
 
     /// Row-scoped `markContentDirty`: names the damaged rows so the engine
@@ -249,10 +247,10 @@ impl IronCanvas {
         result
     }
 
-    /// One-line attribution for the last painted frame: regime, per-pane
-    /// verdict (`tl tr bl br`), and the cell slots handed to the model.
+    /// One-line attribution for the last painted frame: regime, grid verdict,
+    /// and the cell slots handed to the model.
     /// Poll it per rAF tick to see which path a spiking frame took —
-    /// `Viewport tl:strip … ` then `SlotsReuse tl:FULL …` is the post-blit
+    /// `Viewport grid:strip … ` then `SlotsReuse grid:FULL …` is the post-blit
     /// full repaint that
     /// `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md` targets.
     #[wasm_bindgen(js_name = "frameTrace")]
@@ -346,7 +344,7 @@ impl IronCanvas {
         }
         // Synchronously request the recording baseline. Relying on the
         // host's next rAF tick is unsafe — that tick might be a narrow
-        // SlotsReuse (active-cell move, single-pane content edit). The
+        // SlotsReuse (active-cell move, stable-layout content edit). The
         // attempt is marked as `forced_baseline`; if capture holds, it stays
         // in the diagnostic timeline and a later committed Fresh establishes
         // the replay anchor.

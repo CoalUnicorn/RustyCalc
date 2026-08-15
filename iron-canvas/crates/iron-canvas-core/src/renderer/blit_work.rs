@@ -1,141 +1,115 @@
-//! Renderer-facing blit pane work.
-//!
-//! [`PaneBlitAddressWork`](crate::renderer::cache::PaneBlitAddressWork) is the
-//! cache's address-only half (computed in `renderer/cache/`, no `Chrome`
-//! dependency). This module widens it against the frame's slot geometry into a
-//! [`BlitPaneWork`] the renderer consumes: the address-space `strip_range`
-//! grows to cover every visible slot whose pixel extent overlaps the plan's
-//! repaint strip, and a `pixel_clip` is attached only for the main scroll pane.
-//!
-//! `BlitPaneWork` is transient — built per shifted pane each blit frame, never
-//! stored on `PaneBuffers` or `Chrome`.
+//! Candidate-derived address work for a pixel-only scroll-blit plan.
 
-use crate::chrome::{BlitPlan, Chrome, PaneRegion};
+use crate::chrome::{BlitPlan, Chrome, GridLayout, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
-use crate::renderer::cache::{PaneBlitAddressWork, PaneCache, PaneShiftPrep};
 use crate::types::coord::RCRange;
 
-/// One shifted pane's complete blit work for the renderer: the address-space
-/// strip to fetch/paint (widened to the pixel clip) plus an optional pixel
-/// clip applied while painting.
-pub struct BlitPaneWork {
-    pub pane: PaneRegion,
-    pub prev_range: RCRange,
-    pub new_range: RCRange,
-    pub axis: Axis,
-    pub strip_range: RCRange,
-    /// Clip applied while painting this pane's strip. `Some` only for the main
-    /// scroll pane that is clipped today (`BottomRight`); frozen-band sibling
-    /// panes (`BottomLeft` on row scroll, `TopRight` on column scroll) paint
-    /// their narrowed `strip_range` without an extra clip.
-    pub pixel_clip: Option<PixelRect>,
+pub(crate) struct FinalizedBlitWork {
+    pub(crate) address_strips: [Option<(PaneRegion, RCRange)>; 2],
+    pub(crate) pixel_clip: PixelRect,
 }
 
-/// Widen a pane's address-space strip to every visible slot whose pixel extent
-/// overlaps `plan.repaint_strip`, and attach the pixel clip for the main pane.
-///
-/// `compute_strip` (in `renderer/cache/`) is an address-space proxy for the
-/// pixel repaint strip; the two agree only when slot edges land on the canvas
-/// edge. On a non-aligned axis the partial slot at the canvas boundary
-/// transitions to fully-visible inside the dirty pixel rect — this loop extends
-/// the `RCRange` to cover it. Only the main `BottomRight` pane carries the
-/// `pixel_clip`; frozen-band siblings paint their narrowed range unclipped.
-pub fn widen_blit_strip_to_pixel_clip(
-    frame: &Chrome,
-    plan: &BlitPlan,
-    pane: PaneRegion,
-    work: PaneBlitAddressWork,
-) -> BlitPaneWork {
-    let PaneBlitAddressWork {
-        axis,
-        prev_range,
-        new_range,
-        mut strip_range,
-    } = work;
+fn segment_range(layout: GridLayout, region: PaneRegion) -> Option<RCRange> {
+    layout
+        .segments()
+        .find(|segment| segment.region() == region)
+        .map(|segment| segment.range())
+}
 
-    let repaint_strip = plan.repaint_strip;
+fn revealed_strip(previous: RCRange, candidate: RCRange, axis: Axis) -> Option<RCRange> {
     match axis {
-        Axis::Column => {
-            let xmin = repaint_strip.top_left.x;
-            let xmax = xmin + repaint_strip.width;
-            let mut new_c1 = strip_range.c1;
-            let mut new_c2 = strip_range.c2;
-            for c in pane.cols(frame) {
-                if c.left + c.width > xmin && c.left < xmax {
-                    new_c1 = new_c1.min(c.col);
-                    new_c2 = new_c2.max(c.col);
-                }
-            }
-            strip_range.c1 = new_c1;
-            strip_range.c2 = new_c2;
-        }
-        Axis::Row => {
-            let ymin = repaint_strip.top_left.y;
-            let ymax = ymin + repaint_strip.height;
-            let mut new_r1 = strip_range.r1;
-            let mut new_r2 = strip_range.r2;
-            for r in pane.rows(frame) {
-                if r.top + r.height > ymin && r.top < ymax {
-                    new_r1 = new_r1.min(r.row);
-                    new_r2 = new_r2.max(r.row);
-                }
-            }
-            strip_range.r1 = new_r1;
-            strip_range.r2 = new_r2;
-        }
-    }
-
-    let pixel_clip = match pane {
-        PaneRegion::BottomRight => Some(plan.repaint_strip),
-        PaneRegion::TopLeft | PaneRegion::TopRight | PaneRegion::BottomLeft => None,
-    };
-
-    BlitPaneWork {
-        pane,
-        prev_range,
-        new_range,
-        axis,
-        strip_range,
-        pixel_clip,
+        Axis::Row if candidate.r1 < previous.r1 => Some(RCRange {
+            r1: candidate.r1,
+            c1: candidate.c1,
+            r2: previous.r1 - 1,
+            c2: candidate.c2,
+        }),
+        Axis::Row if candidate.r2 > previous.r2 => Some(RCRange {
+            r1: previous.r2,
+            c1: candidate.c1,
+            r2: candidate.r2,
+            c2: candidate.c2,
+        }),
+        Axis::Column if candidate.c1 < previous.c1 => Some(RCRange {
+            r1: candidate.r1,
+            c1: candidate.c1,
+            r2: candidate.r2,
+            c2: previous.c1 - 1,
+        }),
+        Axis::Column if candidate.c2 > previous.c2 => Some(RCRange {
+            r1: candidate.r1,
+            c1: previous.c2,
+            r2: candidate.r2,
+            c2: candidate.c2,
+        }),
+        Axis::Row | Axis::Column => None,
     }
 }
 
-/// Classify `pane`'s cached range against `plan`'s live geometry and, only on
-/// a genuine `Shifted` result, widen it into the pane's complete
-/// [`BlitPaneWork`] — the one call [`crate::renderer::prepared::RendererCore::prepare_blit`]
-/// makes per `plan.shift_panes()` pane to decide the strip-vs-full-pane fork.
-///
-/// `None` covers every reason this pane cannot strip-paint this frame: never
-/// cached, an incompatible cached range (e.g. a canvas resize since the last
-/// fetch), or the defensive zero-delta/non-overlap guard inside
-/// [`PaneCache::plan_blit_pane`]. The caller routes all three uniformly to a
-/// full-pane fallback fetch without needing to know which one fired.
-///
-/// Pure: reads `pane_cache`/`frame`/`plan` only, via
-/// [`crate::renderer::cache::PaneBuffers::classify_shift`] — never rotates
-/// the pane's buffers or mutates its cached range. The actual rotation is
-/// execution's job, once the revealed strip's fetch is confirmed clean (see
-/// `renderer::prepared`'s module doc).
-pub(crate) fn shifted_pane_work(
-    pane_cache: &PaneCache,
+fn widen_to_pixel_clip(
+    frame: &Chrome,
+    region: PaneRegion,
+    axis: Axis,
+    pixel_clip: PixelRect,
+    mut range: RCRange,
+) -> RCRange {
+    match axis {
+        Axis::Row => {
+            let min = pixel_clip.top_left.y;
+            let max = min + pixel_clip.height;
+            for row in region.rows(frame) {
+                if row.top + row.height > min && row.top < max {
+                    range.r1 = range.r1.min(row.row);
+                    range.r2 = range.r2.max(row.row);
+                }
+            }
+        }
+        Axis::Column => {
+            let min = pixel_clip.top_left.x;
+            let max = min + pixel_clip.width;
+            for col in region.cols(frame) {
+                if col.left + col.width > min && col.left < max {
+                    range.c1 = range.c1.min(col.col);
+                    range.c2 = range.c2.max(col.col);
+                }
+            }
+        }
+    }
+    range
+}
+
+/// Finalize the one or two dense address strips only after the reversible
+/// candidate `Chrome` exists. The classifier remains pixel-only.
+pub(crate) fn finalize_blit_work(
+    previous: GridLayout,
+    candidate: GridLayout,
     frame: &Chrome,
     plan: &BlitPlan,
-    pane: PaneRegion,
-) -> Option<BlitPaneWork> {
-    let new_range = pane.range(frame)?;
-    let PaneShiftPrep::Shifted {
-        prev_range,
-        new_range,
-    } = pane_cache.pane(pane).classify_shift(new_range, plan.axis)
-    else {
-        return None;
+) -> Option<FinalizedBlitWork> {
+    let regions = match plan.axis {
+        Axis::Row => [PaneRegion::BottomLeft, PaneRegion::BottomRight],
+        Axis::Column => [PaneRegion::TopRight, PaneRegion::BottomRight],
     };
-    let address_work = pane_cache.plan_blit_pane(prev_range, new_range, plan.axis)?;
-    Some(widen_blit_strip_to_pixel_clip(
-        frame,
-        plan,
-        pane,
-        address_work,
-    ))
+    let mut address_strips = [None, None];
+    for (index, region) in regions.into_iter().enumerate() {
+        let (Some(previous), Some(candidate)) = (
+            segment_range(previous, region),
+            segment_range(candidate, region),
+        ) else {
+            continue;
+        };
+        let strip = revealed_strip(previous, candidate, plan.axis)?;
+        address_strips[index] = Some((
+            region,
+            widen_to_pixel_clip(frame, region, plan.axis, plan.pixel_strip, strip),
+        ));
+    }
+    if address_strips.iter().all(Option::is_none) {
+        return None;
+    }
+    Some(FinalizedBlitWork {
+        address_strips,
+        pixel_clip: plan.pixel_strip,
+    })
 }

@@ -74,7 +74,7 @@ pub struct TestModel {
     /// panes while frozen panes fetch cleanly.
     bulk_bridge_fail_from: Cell<Option<i32>>,
     /// Counts calls to any of the four bulk `*_in` accessors. Task 4's
-    /// row-band repaint must reuse the buffers `render_pane` already
+    /// row-band repaint must reuse the buffers the grid preflight already
     /// bulk-fetched once this frame — this counter is the evidence a test
     /// can check that N row spans painted from those buffers cost zero
     /// additional model queries, rather than trusting "it looks right".

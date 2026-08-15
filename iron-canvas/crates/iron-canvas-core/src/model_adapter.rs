@@ -106,7 +106,7 @@ pub trait CellContentQuery {
     /// a per-slot `BridgeFailed` must reach the pane buffer distinctly from
     /// `Absent` so the preflight (and the fingerprint) can tell a transient
     /// bridge failure apart from a legitimately empty cell. Rides the same
-    /// pane-cache / blit machinery so decorations stay aligned with
+    /// grid-cache / blit machinery so decorations stay aligned with
     /// styles/values/types across scrolls.
     fn get_cell_decorations_in(
         &self,

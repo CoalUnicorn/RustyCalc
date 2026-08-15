@@ -11,7 +11,7 @@
 //!
 //! - `fetched_slots` — `FrameTrace.fetched_cell_slots`: *logical* cell slots
 //!   handed to the four bulk content accessors, summed per call. It counts
-//!   neither host crossings nor elapsed time; a 1,000-cell pane reads 4,000
+//!   neither host crossings nor elapsed time; a 1,000-cell grid reads 4,000
 //!   whatever verdict the fingerprint planner later reaches.
 //! - `bulk_calls` / `observed_cells` / `fetch_ranges` — recorded by
 //!   [`ObservedModel`], the test-local wrapper that overrides only the four
@@ -35,7 +35,7 @@
 //! `post_blit_rotated_skip` (rotation applied) — and forcing the unavailable
 //! side with the one production mechanism that legitimately produces it: a
 //! Damage strip marks history stale, so the blit that follows may not rotate.
-//! Both arms still perform the same full-pane fetch, candidate build, shell,
+//! Both arms still perform the same full-grid fetch, candidate build, shell,
 //! header and presentation work and differ only in the cell painter, which is
 //! what the control was always for.
 //!
@@ -50,12 +50,11 @@ use std::fmt::Write as _;
 use std::mem::size_of;
 use std::rc::Rc;
 
-use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::constants::{CELL_AREA_INSET, FROZEN_SEP};
 use iron_canvas_core::{
     Border, BorderItem, BorderStyle, CanvasModel, CanvasSize, CanvasTheme, CanvasView,
     CellContentQuery, CellDecoration, CellKind, CellStyle, DataBarSpec, Fetched, FrameOutcome,
-    FrameTrace, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, Orchestrator, PaintResult, PaneVerdict,
+    FrameTrace, GridVerdict, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, Orchestrator, PaintResult,
     RCRange, RowSpan,
 };
 use iron_canvas_recorder::{DrawOp, MemSurface};
@@ -270,17 +269,17 @@ impl OpCounts {
 // ==============================================================================
 
 /// Fixed slot metrics for every shape. `synthetic_grid`'s 20 x 80 grid, so a
-/// target pane size maps to an exact canvas size.
+/// target visible-grid size maps to an exact canvas size.
 const ROW_H: f64 = 20.0;
 const COL_W: f64 = 80.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SizeKind {
-    /// The production-shaped 29 x 21 / 609-cell pane of the Stage 6 plan, read
+    /// The production-shaped 29 x 21 / 609-cell grid of the Stage 6 plan, read
     /// as 29 rows x 21 columns to match the fingerprint bench's ROWS x COLS
     /// convention.
     Production,
-    /// The plan's 50 x 20 / 1,000-cell stress pane.
+    /// The plan's 50 x 20 / 1,000-cell stress grid.
     Stress,
 }
 
@@ -416,12 +415,12 @@ enum Workload {
     W1,
     /// One row-addressed content change: the Damage fetch/painter baseline.
     W2,
-    /// The same cell edit routed through unrowed (pane-scoped) content work,
+    /// The same cell edit routed through unrowed grid-wide content work,
     /// so W2/W3 give the Damage-to-SlotsReuse ratio directly.
     W3,
     /// A qualifying one-axis row scroll: the Viewport strip baseline.
     W4,
-    /// W4, then two unchanged full-pane content notifications: the
+    /// W4, then two unchanged grid-wide content notifications: the
     /// fetch-equivalent post-blit Full/Skip pair.
     W5,
     /// W4, then a borderless overlapping-row edit: the real post-scroll edit.
@@ -489,7 +488,7 @@ impl Sample {
     }
 
     /// `channel:r1-r2xc1-c2@cells`, `|`-joined — CSV-safe (no commas) and
-    /// still precise enough to tell one whole-pane fetch from four strips.
+    /// still precise enough to tell one whole-grid fetch from four strips.
     fn fetch_ranges(&self) -> String {
         let mut out = String::new();
         for call in &self.calls {
@@ -644,7 +643,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
     let frozen = shape.frozen_count();
     let sheet = 0;
     // Every content edit lands on a column past the frozen band, so the frozen
-    // panes are not accidentally the only ones touched.
+    // frozen segments are not accidentally the only ones touched.
     let edit_col = frozen + 2;
 
     let mut rows = Vec::new();
@@ -680,7 +679,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.warm();
             let row = borderless_scroll_row(shape.scroll_origin());
             probe.model().set_cell(row, edit_col, "edited");
-            probe.orch.mark_content_dirty(PaneRegionMask::ALL);
+            probe.orch.mark_content_dirty();
             push("pane_content", probe.paint());
         }
         Workload::W4 => {
@@ -693,7 +692,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             // The phase-attribution control, re-shaped for Task 7. Both frames
             // below are the SAME interaction — an unchanged-content
             // notification arriving straight after a qualifying row blit — and
-            // both therefore pay the identical full-pane fetch. What differs is
+            // both therefore pay the identical full-grid fetch. What differs is
             // whether the blit was able to carry its fingerprint history across
             // the shift, which is the only thing Tasks 5-7 changed.
             //
@@ -719,7 +718,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.model().set_top_row(shape.scrolled_origin());
             probe.orch.view_changed();
             probe.warm();
-            probe.orch.mark_content_dirty(PaneRegionMask::ALL);
+            probe.orch.mark_content_dirty();
             push("post_blit_stale_full", probe.paint());
 
             // That Full reseeded exact history, so scrolling home and back out
@@ -730,7 +729,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.model().set_top_row(shape.scrolled_origin());
             probe.orch.view_changed();
             probe.warm();
-            probe.orch.mark_content_dirty(PaneRegionMask::ALL);
+            probe.orch.mark_content_dirty();
             push("post_blit_rotated_skip", probe.paint());
         }
         Workload::W6 => {
@@ -740,7 +739,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.warm();
             let row = borderless_scroll_row(shape.scrolled_origin());
             probe.model().set_cell(row, edit_col, "edited");
-            probe.orch.mark_content_dirty(PaneRegionMask::ALL);
+            probe.orch.mark_content_dirty();
             push("post_blit_edit", probe.paint());
         }
         Workload::W7 => {
@@ -765,7 +764,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.warm();
             let row = borderless_scroll_row(shape.scroll_origin());
             probe.model().set_cell(row, edit_col, "edited");
-            probe.orch.mark_content_dirty(PaneRegionMask::ALL);
+            probe.orch.mark_content_dirty();
             probe.model().set_top_row(shape.scrolled_origin());
             probe.orch.view_changed();
             push("content_plus_view", probe.paint());
@@ -785,11 +784,11 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
 // ==============================================================================
 
 const CSV_HEADER: &str = "workload,phase,size,frozen,style,result,regime,effective,work,outcome,\
-tl,tr,bl,br,blit_fallback,fetched_slots,fetched_cells,fetch_batches,bulk_calls,observed_cells,fetch_ranges,\
+grid,blit_fallback,fetched_slots,fetched_cells,fetch_batches,bulk_calls,observed_cells,fetch_ranges,\
 fills,strokes,text,clips,blits,invalidations,text_resets,dpr_transforms,group_brackets,ops_total,\
 drawing_ops";
 
-fn verdict_tag(verdict: Option<PaneVerdict>) -> String {
+fn verdict_tag(verdict: Option<GridVerdict>) -> String {
     match verdict {
         Some(v) => v.to_string(),
         None => "-".to_string(),
@@ -799,8 +798,7 @@ fn verdict_tag(verdict: Option<PaneVerdict>) -> String {
 fn outcome_tag(outcome: FrameOutcome) -> String {
     match outcome {
         FrameOutcome::Painted => "painted".to_string(),
-        FrameOutcome::PartialCommit(mask) => format!("partial({mask:?})"),
-        FrameOutcome::HeldOnBridgeFailure(pane) => format!("held_bridge({pane:?})"),
+        FrameOutcome::HeldOnBridgeFailure => "held_bridge".to_string(),
         FrameOutcome::HeldOnInputFailure(failure) => format!("held_input({failure:?})"),
     }
 }
@@ -809,7 +807,7 @@ fn fallback_tag(trace: &FrameTrace) -> String {
     match trace.blit_fallback {
         Some(fb) => {
             let why = if fb.cold_cache { "cold" } else { "range" };
-            format!("{:?}/{why}", fb.pane)
+            why.to_string()
         }
         None => "-".to_string(),
     }
@@ -826,7 +824,7 @@ fn csv_row(row: &Row) -> String {
     let ops = sample.ops;
     format!(
         "{workload},{phase},{size},{frozen},{style},{result:?},{regime},{effective},{work},\
-{outcome},{tl},{tr},{bl},{br},{fallback},{fetched},{fetched_cells},{fetch_batches},{bulk_calls},{observed_cells},{ranges},\
+{outcome},{grid},{fallback},{fetched},{fetched_cells},{fetch_batches},{bulk_calls},{observed_cells},{ranges},\
 {fills},{strokes},{text},{clips},{blits},{invalidations},{resets},{dpr},{groups},{total},{drawing}",
         size = shape.size_tag(),
         frozen = shape.frozen_tag(),
@@ -840,10 +838,7 @@ fn csv_row(row: &Row) -> String {
             .map_or_else(|| "-".to_string(), |r| format!("{r:?}")),
         work = format!("{:?}", trace.work).replace(',', ";"),
         outcome = outcome_tag(trace.outcome),
-        tl = verdict_tag(trace.panes[0]),
-        tr = verdict_tag(trace.panes[1]),
-        bl = verdict_tag(trace.panes[2]),
-        br = verdict_tag(trace.panes[3]),
+        grid = verdict_tag(trace.verdict),
         fallback = fallback_tag(trace),
         fetched = trace.fetched_cell_slots,
         fetched_cells = trace.fetched_cells,
@@ -923,7 +918,7 @@ fn fresh_trace_reports_one_bundle_and_four_logical_slots_per_cell() {
 ///
 /// Unequal painter traffic is what the arms are named for, and it is the native
 /// counterpart of Gate C's browser millisecond: the arm whose blit could not
-/// carry its history walks all five passes over the pane, and the arm whose
+/// carry its history walks all five passes over the grid, and the arm whose
 /// blit could does not. Asserting the *direction* (stale strictly greater)
 /// rather than an exact op count is deliberate — the count is a measurement the
 /// CSV reports, while the ordering is the invariant rotation exists to create.
@@ -951,14 +946,14 @@ fn w5_post_blit_arms_pay_equal_fetch_and_unequal_painter_traffic() {
     );
 
     assert_eq!(
-        stale.sample.trace.panes,
-        [None, None, None, Some(PaneVerdict::Full)],
+        stale.sample.trace.verdict,
+        Some(GridVerdict::Full),
         "the stale arm's blit must have refused to rotate, leaving the content check \
-         a whole-pane repaint"
+         a whole-grid repaint"
     );
     assert_eq!(
-        rotated.sample.trace.panes,
-        [None, None, None, Some(PaneVerdict::Skip)],
+        rotated.sample.trace.verdict,
+        Some(GridVerdict::Skip),
         "the rotated arm's blit must have installed history the content check can match"
     );
     assert!(

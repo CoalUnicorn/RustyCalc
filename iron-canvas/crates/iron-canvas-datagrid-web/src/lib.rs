@@ -20,7 +20,6 @@
 use std::rc::Rc;
 
 use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
-use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::{CanvasModel, CanvasTheme, Layer};
 use iron_canvas_datagrid::SortDirection;
@@ -104,9 +103,7 @@ impl DataGridCanvas {
     pub fn set_data(&mut self, data: JsValue) -> Result<(), JsValue> {
         let wire: wire::GridDataWire = serde_wasm_bindgen::from_value(data)?;
         self.model.replace(wire.into_model());
-        self.runtime
-            .orchestrator_mut()
-            .mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().mark_content_dirty();
         self.runtime.orchestrator_mut().request_repaint();
         Ok(())
     }
@@ -204,17 +201,13 @@ impl DataGridCanvas {
             SortDirection::Descending
         };
         self.model.borrow_mut_with(|g| g.sort_by(col as usize, dir));
-        self.runtime
-            .orchestrator_mut()
-            .mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().mark_content_dirty();
     }
 
     #[wasm_bindgen(js_name = "clearSort")]
     pub fn clear_sort(&mut self) {
         self.model.borrow_mut_with(|g| g.clear_sort());
-        self.runtime
-            .orchestrator_mut()
-            .mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().mark_content_dirty();
     }
 
     #[wasm_bindgen(js_name = "currentSort")]
@@ -237,9 +230,7 @@ impl DataGridCanvas {
         }
         self.model
             .borrow_mut_with(|g| g.set_cell(row as usize, col as usize, value)); // model set_cell is 0-based
-        self.runtime
-            .orchestrator_mut()
-            .mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().mark_content_dirty();
     }
 
     #[wasm_bindgen(js_name = "appendRows")]
@@ -250,9 +241,7 @@ impl DataGridCanvas {
                 g.append_row(r);
             }
         });
-        self.runtime
-            .orchestrator_mut()
-            .mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().mark_content_dirty();
         self.runtime.orchestrator_mut().request_repaint();
         Ok(())
     }

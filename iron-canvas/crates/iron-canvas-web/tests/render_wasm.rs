@@ -523,7 +523,7 @@ struct FreshFailureControls {
 /// needed: with no committed `Chrome` yet, the very first `paint_if_dirty()`
 /// on a resized canvas is necessarily a Fresh attempt (`GridWork::Fresh`),
 /// so failing every cell's style fetch while `fail` is set strikes Fresh's
-/// own bulk per-pane prepare directly — not `FrameInputs::capture` (already
+/// own bulk grid-segment prepare directly — not `FrameInputs::capture` (already
 /// covered by
 /// `selected_sheet_bridge_failure_holds_then_recovers_without_another_signal`)
 /// and not a Viewport strip reveal (covered above). `getCellStyle` returning
@@ -1195,9 +1195,9 @@ const STAGE6_CANVAS_H: f64 = 588.0;
 /// DPR 1.0, as in the native matrix, so backing-store scaling is not a variable.
 const STAGE6_DPR: f64 = 1.0;
 
-/// `fetched_cell_slots` for one full-pane fetch: four bulk content accessors
+/// `fetched_cell_slots` for one full-grid fetch: four bulk content accessors
 /// over 29 x 21 = 609 logical cells. The native matrix reports the same 2,436
-/// for every prod29x21 full-pane row.
+/// for every prod29x21 full-grid row.
 const STAGE6_FULL_PANE_SLOTS: i32 = 4 * STAGE6_ROWS * STAGE6_COLS;
 
 /// Plain "rNcM" text over the whole Stage 6 pane, one row and one column deeper
@@ -1699,7 +1699,7 @@ fn stage6_w5_stale_half(
 /// painter.
 ///
 /// Every non-painter phase is identical to the stale half — same SlotsReuse
-/// regime, same whole-pane fetch, same candidate build, same shell, headers and
+/// regime, same whole-grid fetch, same candidate build, same shell, headers and
 /// presentation — so the paired difference is the five-pass cell walk and
 /// nothing else.
 fn stage6_w5_rotated_half(
@@ -1790,11 +1790,11 @@ fn stage6_perf_w5_post_blit_full_then_skip() {
     // silently-Skipping "full" half would report a saving of zero and a
     // silently-Full "skip" half would report the whole frame.
     assert!(
-        full_trace.contains("br:FULL"),
+        full_trace.contains("grid:FULL"),
         "W5's stale half must walk the pane; trace was `{full_trace}`"
     );
     assert!(
-        skip_trace.contains("br:skip"),
+        skip_trace.contains("grid:skip"),
         "W5's rotated half must skip the cell painter; trace was `{skip_trace}`"
     );
 
@@ -1842,7 +1842,7 @@ fn stage6_perf_w6_post_blit_borderless_edit() {
         canvas.mark_content_dirty();
         samples.push(stage6_timed_paint(&mut canvas, &clock));
         // Captured here, before the untimed cleanup scroll below can
-        // overwrite it with `Viewport ... br:strip` — the trace must belong
+        // overwrite it with `Viewport ... grid:strip` — the trace must belong
         // to the timed paint it is emitted alongside.
         trace = canvas.frame_trace();
 
@@ -1854,7 +1854,7 @@ fn stage6_perf_w6_post_blit_borderless_edit() {
         "W6's timed paint must be the qualifying row-blit content check; trace was `{trace}`"
     );
     assert!(
-        trace.contains("br:rows"),
+        trace.contains("grid:rows"),
         "W6's timed paint must reach the rotated row-only painter path; trace was `{trace}`"
     );
 
@@ -1864,7 +1864,7 @@ fn stage6_perf_w6_post_blit_borderless_edit() {
 /// W7 — the `IncompatibleRange` full fallback. Row 1 is taller than the rest,
 /// so scrolling it out of view frees enough pixels for one extra row: the
 /// scroll-axis extent changes by one and `shift_is_safe` rejects the shift,
-/// costing a whole-pane fetch and paint on a frame that planned a strip.
+/// costing a whole-grid fetch and paint on a frame that planned a strip.
 #[wasm_bindgen_test]
 #[ignore = "Stage 6 manual browser timing probe; run with --release --ignored --nocapture"]
 fn stage6_perf_w7_incompatible_range_scroll() {
@@ -1951,7 +1951,7 @@ const STAGE6_EDIT_COL: i32 = 5;
 /// return its raw grid bytes — the reference every retained-pixel path is
 /// measured against. A brand-new `IronCanvas` has no cached buffers, no painted
 /// fingerprint tree and no prior pixels, so its first paint is unconditionally
-/// a whole-pane Fresh: nothing it produces can be inherited from an earlier
+/// a whole-grid Fresh: nothing it produces can be inherited from an earlier
 /// frame.
 fn stage6_forced_fresh_pixels(store: FixtureStore, top_row: i32, left_column: i32) -> Vec<u8> {
     let (_canvas, grid) = stage6_canvas_over(
@@ -2136,7 +2136,7 @@ fn stable_plain_commit_and_selection_move_matches_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "br:rows1/1", CASE);
+    stage6_assert_verdict(&trace, "grid:rows1/1", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
@@ -2158,7 +2158,7 @@ fn stable_multi_row_dependants_match_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "br:rows2/2", CASE);
+    stage6_assert_verdict(&trace, "grid:rows2/2", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
@@ -2176,7 +2176,7 @@ fn stable_unchanged_recalc_skips_grid_and_moves_overlay() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "br:skip", CASE);
+    stage6_assert_verdict(&trace, "grid:skip", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
@@ -2197,14 +2197,14 @@ fn stable_explicit_border_change_widens_to_full_and_matches_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "br:FULL", CASE);
+    stage6_assert_verdict(&trace, "grid:FULL", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
 
 #[wasm_bindgen_test]
-fn stable_frozen_pane_commit_skips_unchanged_panes_and_matches_fresh() {
-    const CASE: &str = "stable frozen-pane commit";
+fn stable_frozen_grid_commit_uses_one_verdict_and_matches_fresh() {
+    const CASE: &str = "stable frozen-grid commit";
     let store = stage6_fixture_store();
     let view = StableViewFixture::new(5, 5).with_frozen(2, 2);
     let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
@@ -2217,9 +2217,7 @@ fn stable_frozen_pane_commit_skips_unchanged_panes_and_matches_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    for verdict in ["tl:skip", "tr:skip", "bl:skip", "br:rows1/1"] {
-        stage6_assert_verdict(&trace, verdict, CASE);
-    }
+    stage6_assert_verdict(&trace, "grid:rows1/1", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
@@ -2240,7 +2238,7 @@ fn stable_hidden_selection_commit_matches_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "br:rows1/1", CASE);
+    stage6_assert_verdict(&trace, "grid:rows1/1", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
@@ -2262,7 +2260,7 @@ fn stable_hidden_selection_commit_matches_fresh() {
 /// retained-pixel path to differ from forced Fresh in a SUBSET of exactly these
 /// offsets and nowhere else. A stale stroke, an unshifted band or a missed
 /// strip row all land outside the set and fail. (A subset rather than an equal
-/// set because a conservative whole-pane repaint clears the cell background
+/// set because a conservative whole-grid repaint clears the cell background
 /// first, which erases the seam pixel and matches forced Fresh exactly.)
 fn stage6_repaint_seam(
     store: FixtureStore,
@@ -2280,7 +2278,7 @@ fn stage6_repaint_seam(
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     stage6_assert_verdict(
         &canvas.frame_trace(),
-        "br:skip",
+        "grid:skip",
         "repaint-seam control (unchanged content must skip)",
     );
     stage6_pixel_diff(&grid_pixels(&grid), fresh)
@@ -2371,7 +2369,7 @@ fn stage6_post_blit_unchanged_content_skips_and_matches_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     stage6_assert_verdict(
         &canvas.frame_trace(),
-        "br:skip",
+        "grid:skip",
         "post-blit unchanged content",
     );
 
@@ -2381,7 +2379,7 @@ fn stage6_post_blit_unchanged_content_skips_and_matches_forced_fresh() {
 /// Case 2 — a qualifying row blit followed by a borderless overlapping-row
 /// edit. Before rotation this frame could only be a range-mismatch `Full`;
 /// with rotation the planner can name the one changed row. The narrow band it
-/// repaints must reconstruct the same raster the whole-pane path would have.
+/// repaints must reconstruct the same raster the whole-grid path would have.
 #[wasm_bindgen_test]
 fn stage6_post_blit_borderless_edit_repaints_rows_and_matches_forced_fresh() {
     const EDITED_ROW: i32 = 12;
@@ -2395,7 +2393,7 @@ fn stage6_post_blit_borderless_edit_repaints_rows_and_matches_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     stage6_assert_verdict(
         &canvas.frame_trace(),
-        "br:rows",
+        "grid:rows",
         "post-blit borderless edit",
     );
 
@@ -2429,7 +2427,7 @@ fn stage6_post_blit_revealed_row_border_removal_is_border_safe_against_forced_fr
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     stage6_assert_verdict(
         &canvas.frame_trace(),
-        "br:FULL",
+        "grid:FULL",
         "revealed-row medium border removal",
     );
 
@@ -2460,7 +2458,7 @@ fn stage6_post_blit_revealed_row_cf_change_matches_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     assert!(
-        !trace.contains("br:skip"),
+        !trace.contains("grid:skip"),
         "a CF fill that disappeared from a revealed row must repaint something; trace was `{trace}`"
     );
 
@@ -2470,7 +2468,7 @@ fn stage6_post_blit_revealed_row_cf_change_matches_forced_fresh() {
 /// Case 5 — the healing path, and the same sequence the redesigned W5 stale
 /// half times. A Damage strip commits `MarkStale`, so the row blit after it
 /// cannot rotate; the retained tree still describes the pre-scroll range, and
-/// the following edit therefore takes the conservative whole-pane repaint that
+/// the following edit therefore takes the conservative whole-grid repaint that
 /// reseeds it. This is the case that must stay conservative: the assertion is
 /// that it does, and that the frame it produces is raster-correct.
 #[wasm_bindgen_test]
@@ -2482,7 +2480,7 @@ fn stage6_damage_then_blit_then_edit_heals_and_matches_forced_fresh() {
 
     canvas.mark_rows_damaged(0, STAGE6_DAMAGE_ROW, STAGE6_DAMAGE_ROW);
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
-    stage6_assert_verdict(&canvas.frame_trace(), "br:strip", "Damage strip");
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:strip", "Damage strip");
 
     stage6_scroll_to(&mut canvas, &top_row, 2);
 
@@ -2491,7 +2489,7 @@ fn stage6_damage_then_blit_then_edit_heals_and_matches_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     stage6_assert_verdict(
         &canvas.frame_trace(),
-        "br:FULL",
+        "grid:FULL",
         "Damage-then-blit-then-edit",
     );
 
@@ -2511,12 +2509,12 @@ fn stage6_column_blit_stays_conservative_and_matches_forced_fresh() {
     let (mut canvas, grid, _top_row, left_column) = stage6_raster_canvas(Rc::clone(&store));
 
     stage6_scroll_columns_to(&mut canvas, &left_column, 2);
-    stage6_assert_verdict(&canvas.frame_trace(), "br:strip", "column blit");
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:strip", "column blit");
 
     stage6_set_value(&store, EDITED_ROW, STAGE6_EDIT_COL, "post-column-blit-edit");
     canvas.mark_content_dirty();
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
-    stage6_assert_verdict(&canvas.frame_trace(), "br:FULL", "post-column-blit edit");
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:FULL", "post-column-blit edit");
 
     stage6_assert_matches_forced_fresh(&grid, &store, 1, 2, "post-column-blit edit");
 }

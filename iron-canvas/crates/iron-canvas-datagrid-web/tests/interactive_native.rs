@@ -11,7 +11,6 @@ use std::rc::Rc;
 
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::Orchestrator;
-use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_datagrid::{Column, DataGrid, SortDirection};
 use iron_canvas_datagrid_web::DataGridModel;
@@ -112,7 +111,7 @@ fn sort_orders_first_painted_data_row() {
     let mut orch = new_orch(&model);
 
     model.borrow_mut_with(|g| g.sort_by(0, SortDirection::Ascending));
-    orch.mark_content_dirty(PaneRegionMask::ALL);
+    orch.mark_content_dirty();
     orch.paint_if_dirty();
 
     // First data value among the name column should be alphabetically first.

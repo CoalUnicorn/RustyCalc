@@ -21,57 +21,13 @@ use crate::theme::CanvasTheme;
 
 use super::blit_rebuild::ShiftDir;
 use super::pane_set::ScrollAxisSlots;
-use super::{Chrome, FrameKindTag, PaneRegion, PaneRegionMask, PaneSet, measure_row_header_width};
+use super::{Chrome, FrameKindTag, PaneSet, measure_row_header_width};
 
-/// One pane's contribution to a scroll-blit. A row-axis scroll emits a
-/// `PaneShift` for `BottomRight` and, when `frozen_cols > 0`, another
-/// for `BottomLeft`; a column-axis scroll mirrors with `TopRight` when
-/// `frozen_rows > 0`. `src` and `dst` have identical `width`/`height`;
-/// only the offset along the scroll axis differs.
+/// The single pixel shift performed by a scroll blit.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PaneShift {
-    pub pane: PaneRegion,
+pub struct Shift {
     pub src: PixelRect,
     pub dst: PixelRect,
-}
-
-impl PaneShift {
-    /// Build a sibling shift in a cross-axis pane (the frozen-cross band).
-    /// The main-axis range carries over from `self`; only the cross-axis
-    /// origin/size are replaced. Row scrolls produce a BottomLeft sibling
-    /// (cross axis = X); column scrolls produce a TopRight sibling
-    /// (cross axis = Y).
-    fn for_frozen_band(
-        &self,
-        pane: PaneRegion,
-        scroll_axis: Axis,
-        cross_origin: i32,
-        cross_size: i32,
-    ) -> PaneShift {
-        let band = |rect: PixelRect| match scroll_axis {
-            Axis::Row => PixelRect {
-                top_left: Point {
-                    x: cross_origin,
-                    y: rect.top_left.y,
-                },
-                width: cross_size,
-                height: rect.height,
-            },
-            Axis::Column => PixelRect {
-                top_left: Point {
-                    x: rect.top_left.x,
-                    y: cross_origin,
-                },
-                width: rect.width,
-                height: cross_size,
-            },
-        };
-        PaneShift {
-            pane,
-            src: band(self.src),
-            dst: band(self.dst),
-        }
-    }
 }
 
 /// 1D pixel range along a single axis (origin + size). Used by
@@ -84,10 +40,9 @@ struct AxisRange {
     size: i32,
 }
 
-/// Pure-canvas-pixel description of a scroll-blit. `shifts` lists every
-/// pane the painter must copy (1 entry without frozen cross-axis lines,
-/// 2 when a frozen band crosses the scroll axis); `repaint_strip` is the
-/// shared band the renderer must paint over to fill in newly-revealed
+/// Pure-canvas-pixel description of a scroll-blit. `shift` is the one merged
+/// cell-area rectangle the painter copies; `pixel_strip` is the band the
+/// renderer must paint over to fill in newly-revealed
 /// content. Axis tells the orchestrator which header strip to repaint
 /// (the cross-axis header is untouched by the scroll).
 ///
@@ -97,27 +52,11 @@ struct AxisRange {
 #[must_use = "a BlitPlan represents a committed viewport-shift decision; dropping it means the blit never happens"]
 pub struct BlitPlan {
     pub axis: Axis,
-    pub shifts: Vec<PaneShift>,
-    pub repaint_strip: PixelRect,
+    pub shift: Shift,
+    pub pixel_strip: PixelRect,
 }
 
 impl BlitPlan {
-    /// Panes whose cached pane-buffer data shifts along `axis` and which
-    /// therefore need `apply_blit_shift` + strip-fetch + a repaint pass.
-    /// Cross-axis panes (TopLeft on either scroll; TopRight on row scroll;
-    /// BottomLeft on column scroll) are stable across the blit and are
-    /// excluded.
-    pub fn shift_panes(&self) -> PaneRegionMask {
-        match self.axis {
-            Axis::Row => PaneRegionMask::EMPTY
-                .with(PaneRegion::BottomLeft)
-                .with(PaneRegion::BottomRight),
-            Axis::Column => PaneRegionMask::EMPTY
-                .with(PaneRegion::TopRight)
-                .with(PaneRegion::BottomRight),
-        }
-    }
-
     /// Compose an axis-scroll `BlitPlan`. `main_pane` covers the pane along
     /// `scroll_axis`; `cross_pane` covers the perpendicular axis. `canvas_main`
     /// caps the repaint strip so it covers the entire untouched zone past the
@@ -136,7 +75,6 @@ impl BlitPlan {
         shift_px: i32,
         dir: ShiftDir,
         canvas_main: i32,
-        pane: PaneRegion,
     ) -> BlitPlan {
         let kept = main_pane.size - shift_px;
         let cross = cross_pane;
@@ -188,12 +126,11 @@ impl BlitPlan {
 
         BlitPlan {
             axis: scroll_axis,
-            shifts: vec![PaneShift {
-                pane,
+            shift: Shift {
                 src: make_rect(src_main, kept),
                 dst: make_rect(dst_main, kept),
-            }],
-            repaint_strip: make_rect(strip_main_origin, strip_main_size),
+            },
+            pixel_strip: make_rect(strip_main_origin, strip_main_size),
         }
     }
 }
@@ -210,12 +147,9 @@ pub enum FramePath {
     /// `prev = None` is the first-frame path.
     Fresh,
     /// Reuse prev's slot vecs verbatim; refresh per-frame state only
-    /// (theme). Carries no pane mask: which panes need repainting is the
-    /// caller's `GridWork` verdict, threaded straight into `render_grid` as
-    /// an explicit parameter instead of living on the constructed `Chrome` —
-    /// so a `SlotsReuse` following a blit can never inherit the blit's
-    /// narrow shift mask by way of stale `Chrome` state. Requires
-    /// `prev = Some`.
+    /// (theme). Content scope is the caller's `GridWork` verdict rather than
+    /// state stored on `Chrome`, so `SlotsReuse` following a blit cannot
+    /// inherit stale shift state. Requires `prev = Some`.
     SlotsReuse,
 }
 
@@ -487,17 +421,11 @@ pub(super) fn try_blit_reuse(
         col_header_labels,
     };
 
-    // `plan.shift_panes()` names the panes `render_grid_blit` visits — the
-    // orchestrator threads it straight from the `BlitPlan` it already holds,
-    // so `Chrome` itself needs no pane-scope field. Those panes route through
-    // `execute_blit` -> `execute_blit_pane`, whose strip paint never commits
-    // into its pane's painted-fingerprint tree — a splice leaves `painted`
-    // exactly as the last full/row-band paint left it (`PaneCache`, not
-    // `Chrome`, owns that state — see `pane_cache.rs`). A shifted pane's now-
-    // stale tree self-disqualifies on the next full-pane compare (its range
-    // no longer matches, via the range-in-digest property); an untouched
-    // pane's tree is still accurate and short-circuits that same compare via
-    // a digest match.
+    // The singular pixel shift stays on `BlitPlan`; exact address strips are
+    // derived later from this reversible candidate's `GridLayout`. `Chrome`
+    // therefore owns no content-scope or cache state. `GridCache` installs
+    // the matching layout/buffer/fingerprint transition only after the
+    // renderer has prepared and executed the whole grid transaction.
     let candidate = Chrome {
         sheet: prev.sheet,
         pane_set,
@@ -538,45 +466,24 @@ pub(super) fn try_blit_rows(
     if pane_w <= 0 || pane_h <= 0 {
         return None;
     }
-    // Frozen-cols band only exists when frozen_cols > 0; otherwise the
-    // gap between cell_origin.x and pane_x is the 1-px chrome stroke
-    // alone, NOT a paintable pane.
-    let frozen_band_x = prev.cell_origin.x;
-    let frozen_band_w = if prev.pane_set.cols.frozen_count() > 0 {
-        pane_x - frozen_band_x
-    } else {
-        0
-    };
-
     let (shift_px, dir) = prev
         .pane_set
         .probe_row_shift(model, sheet, new_top, pane_y, pane_h)?;
 
-    let mut plan = BlitPlan::for_axis_scroll(
+    Some(BlitPlan::for_axis_scroll(
         Axis::Row,
         AxisRange {
             origin: pane_y,
             size: pane_h,
         },
         AxisRange {
-            origin: pane_x,
-            size: pane_w,
+            origin: prev.cell_origin.x,
+            size: (prev.canvas_size.w.round() as i32) - prev.cell_origin.x,
         },
         shift_px,
         dir,
         prev.canvas_size.h.round() as i32,
-        PaneRegion::BottomRight,
-    );
-    if frozen_band_w > 0 {
-        let sibling = plan.shifts[0].for_frozen_band(
-            PaneRegion::BottomLeft,
-            Axis::Row,
-            frozen_band_x,
-            frozen_band_w,
-        );
-        plan.shifts.push(sibling);
-    }
-    Some(plan)
+    ))
 }
 
 pub(super) fn try_blit_cols(
@@ -595,40 +502,22 @@ pub(super) fn try_blit_cols(
     if pane_w <= 0 || pane_h <= 0 {
         return None;
     }
-    let frozen_band_y = prev.cell_origin.y;
-    let frozen_band_h = if prev.pane_set.rows.frozen_count() > 0 {
-        pane_y - frozen_band_y
-    } else {
-        0
-    };
-
     let (shift_px, dir) = prev
         .pane_set
         .probe_col_shift(model, sheet, new_left, pane_x, pane_w)?;
 
-    let mut plan = BlitPlan::for_axis_scroll(
+    Some(BlitPlan::for_axis_scroll(
         Axis::Column,
         AxisRange {
             origin: pane_x,
             size: pane_w,
         },
         AxisRange {
-            origin: pane_y,
-            size: pane_h,
+            origin: prev.cell_origin.y,
+            size: (prev.canvas_size.h.round() as i32) - prev.cell_origin.y,
         },
         shift_px,
         dir,
         prev.canvas_size.w.round() as i32,
-        PaneRegion::BottomRight,
-    );
-    if frozen_band_h > 0 {
-        let sibling = plan.shifts[0].for_frozen_band(
-            PaneRegion::TopRight,
-            Axis::Column,
-            frozen_band_y,
-            frozen_band_h,
-        );
-        plan.shifts.push(sibling);
-    }
-    Some(plan)
+    ))
 }

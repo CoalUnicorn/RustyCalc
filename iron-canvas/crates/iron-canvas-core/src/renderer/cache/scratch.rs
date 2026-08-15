@@ -4,7 +4,7 @@
 //! Lifetime is "across frames as `Vec` capacity, not across frames as
 //! content": the buffer Vecs survive frame boundaries to keep allocations
 //! warm, but their contents are clobbered on every `take`. Distinct from
-//! [`super::pane_cache::PaneCache`], whose contents *do* survive frames
+//! [`super::grid_cache::GridCache`], whose contents *do* survive frames
 //! and feed paint-skipping.
 
 use std::cell::{Cell, RefCell};
@@ -40,7 +40,7 @@ pub struct FrameCache {
     /// reused by every strip of a multi-span Damage preparation — drained
     /// into the pane buffers by `splice_strip_into` and parked back here
     /// afterward, including when a later strip aborts the batch.
-    /// Parked here (not on `PaneBuffers`, whose contents must survive
+    /// Parked here (not in committed `SegmentBuffers`, whose contents survive
     /// frames) so the strip path reuses one warm bundle instead of
     /// `FetchedCells::default()`-ing (four fresh `Vec`s) per scroll.
     /// `pub(crate)`, not `pub` like this struct's other fields — `FetchedCells`

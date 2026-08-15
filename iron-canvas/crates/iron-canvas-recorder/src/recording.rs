@@ -7,14 +7,14 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v4)
+//! # On-disk layout (v5)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":4,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":5,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
 //!    {"frame_idx":0,"t_ms":0,"origin":"forced_baseline",...},
 //!    {"frame_idx":1,"t_ms":17,"origin":"live",...}
@@ -27,7 +27,7 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `4`). Mismatch -> load fails.  |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `5`). Mismatch -> load fails.  |
 //! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
@@ -73,15 +73,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use iron_canvas_core::chrome::PaneRegion;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{FrameOutcome, FrameTrace, PaintRegimeTag, PaneVerdict};
+use iron_canvas_core::{FrameOutcome, FrameTrace, GridVerdict, PaintRegimeTag};
 
 use crate::DrawOp;
 
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
-pub const ICR_SCHEMA_VERSION: u32 = 4;
+pub const ICR_SCHEMA_VERSION: u32 = 5;
 
 /// Why an attempt entered the recording timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,7 +100,7 @@ pub enum RecordedPaintResult {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
-pub enum TracePane {
+pub enum TraceVerdict {
     Skip,
     Rows { spans: u8, rows: u16 },
     Full,
@@ -113,14 +112,12 @@ pub enum TracePane {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum TraceOutcome {
     Painted,
-    PartialCommit { held_panes: u8 },
-    HeldOnBridgeFailure { pane: u8 },
+    HeldOnBridgeFailure,
     HeldOnInputFailure { failure: u8 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceBlitFallback {
-    pub pane: u8,
     pub cold_cache: bool,
 }
 
@@ -133,7 +130,7 @@ pub struct TraceRecord {
     pub regime: Option<PaintRegimeTag>,
     pub effective: Option<PaintRegimeTag>,
     pub work: u8,
-    pub panes: [Option<TracePane>; 4],
+    pub verdict: Option<TraceVerdict>,
     pub outcome: TraceOutcome,
     pub blit_fallback: Option<TraceBlitFallback>,
     pub fetched_cell_slots: usize,
@@ -143,28 +140,16 @@ pub struct TraceRecord {
 
 impl From<FrameTrace> for TraceRecord {
     fn from(trace: FrameTrace) -> Self {
-        let panes = trace.panes.map(|pane| {
-            pane.map(|pane| match pane {
-                PaneVerdict::Skip => TracePane::Skip,
-                PaneVerdict::Rows { spans, rows } => TracePane::Rows { spans, rows },
-                PaneVerdict::Full => TracePane::Full,
-                PaneVerdict::Strip => TracePane::Strip,
-                PaneVerdict::Held => TracePane::Held,
-            })
+        let verdict = trace.verdict.map(|verdict| match verdict {
+            GridVerdict::Skip => TraceVerdict::Skip,
+            GridVerdict::Rows { spans, rows } => TraceVerdict::Rows { spans, rows },
+            GridVerdict::Full => TraceVerdict::Full,
+            GridVerdict::Strip => TraceVerdict::Strip,
+            GridVerdict::Held => TraceVerdict::Held,
         });
         let outcome = match trace.outcome {
             FrameOutcome::Painted => TraceOutcome::Painted,
-            FrameOutcome::PartialCommit(mask) => TraceOutcome::PartialCommit {
-                held_panes: mask.bits(),
-            },
-            FrameOutcome::HeldOnBridgeFailure(pane) => TraceOutcome::HeldOnBridgeFailure {
-                pane: match pane {
-                    PaneRegion::TopLeft => 0,
-                    PaneRegion::TopRight => 1,
-                    PaneRegion::BottomLeft => 2,
-                    PaneRegion::BottomRight => 3,
-                },
-            },
+            FrameOutcome::HeldOnBridgeFailure => TraceOutcome::HeldOnBridgeFailure,
             FrameOutcome::HeldOnInputFailure(failure) => TraceOutcome::HeldOnInputFailure {
                 failure: match failure {
                     iron_canvas_core::FrameInputFailure::SelectedSheet => 0,
@@ -178,12 +163,6 @@ impl From<FrameTrace> for TraceRecord {
             },
         };
         let blit_fallback = trace.blit_fallback.map(|fallback| TraceBlitFallback {
-            pane: match fallback.pane {
-                PaneRegion::TopLeft => 0,
-                PaneRegion::TopRight => 1,
-                PaneRegion::BottomLeft => 2,
-                PaneRegion::BottomRight => 3,
-            },
             cold_cache: fallback.cold_cache,
         });
         Self {
@@ -192,7 +171,7 @@ impl From<FrameTrace> for TraceRecord {
             regime: trace.regime,
             effective: trace.effective,
             work: trace.work.bits(),
-            panes,
+            verdict,
             outcome,
             blit_fallback,
             fetched_cell_slots: trace.fetched_cell_slots,
@@ -402,6 +381,24 @@ mod tests {
             ..FrameTrace::default()
         };
         TraceRecord::from(core_trace)
+    }
+
+    #[test]
+    fn trace_projection_uses_one_grid_verdict_and_pane_free_hold() {
+        let painted = TraceRecord::from(FrameTrace {
+            verdict: Some(GridVerdict::Rows { spans: 2, rows: 3 }),
+            ..FrameTrace::default()
+        });
+        assert_eq!(
+            painted.verdict,
+            Some(TraceVerdict::Rows { spans: 2, rows: 3 })
+        );
+
+        let held = TraceRecord::from(FrameTrace {
+            outcome: FrameOutcome::HeldOnBridgeFailure,
+            ..FrameTrace::default()
+        });
+        assert_eq!(held.outcome, TraceOutcome::HeldOnBridgeFailure);
     }
 
     #[test]

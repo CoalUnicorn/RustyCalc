@@ -1,5 +1,5 @@
 //! Stage 5 bulk decoration fetch — CF decorations must flow through the
-//! per-pane bulk buffer (`get_cell_decorations_in`) and reach the painter.
+//! per-segment bulk buffer (`get_cell_decorations_in`) and reach the painter.
 //! Decorations now resolve into `Painter` primitives at the renderer, so a
 //! data bar paints as a `RectFill` (no CF-specific op). The bulk path also
 //! has to survive the fingerprint-skip set-back: a second idempotent paint
@@ -7,11 +7,11 @@
 
 mod common;
 
-use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegion};
+use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched};
+use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
@@ -100,11 +100,11 @@ fn decoration_reaches_painter_and_skip_is_stable() {
     let inputs = test_inputs(&model, canvas_default(), &theme);
     let mut frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
 
-    // Painted-fingerprint state lives on `PaneCache` (on `RendererCore`),
+    // Painted-fingerprint state lives on `GridCache` (on `RendererCore`),
     // not `Chrome` — so the same `core` must paint both frames for the
     // second call's compare to see the first call's committed tree.
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_pane(&model, PaneRegion::BottomRight, &frame);
+    core.render_grid(&model, &frame);
     assert_eq!(
         data_bar_fill_count(core.painter(), "#3366cc"),
         1,
@@ -113,13 +113,15 @@ fn decoration_reaches_painter_and_skip_is_stable() {
 
     frame.kind = FrameKindTag::SlotsReused;
 
-    let ops_before = core.painter().ops().len();
-    core.render_pane(&model, PaneRegion::BottomRight, &frame);
-    // Unchanged content -> fingerprint match -> whole walk skipped, including
-    // the decoration pass; the set-back kept the buffer aligned.
+    let bars_before = data_bar_fill_count(core.painter(), "#3366cc");
+    core.reset_trace();
+    core.render_grid(&model, &frame);
+    // Unchanged content -> fingerprint match -> the cell walk is skipped,
+    // including the decoration pass; the grid shell may still paint chrome.
     assert_eq!(
-        core.painter().ops().len(),
-        ops_before,
-        "idempotent repaint must skip entirely after the decoration set-back",
+        data_bar_fill_count(core.painter(), "#3366cc"),
+        bars_before,
+        "idempotent repaint must not repaint the decoration",
     );
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Skip));
 }

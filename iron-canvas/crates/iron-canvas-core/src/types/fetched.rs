@@ -41,7 +41,7 @@ impl<T> Fetched<T> {
 
     /// Take the value out of a `&mut` slot, leaving `Absent` behind, and
     /// collapse to `Option`. Mirrors [`Option::take`] for the take-able
-    /// pane-cache scratch buffers, where the consumed slot is overwritten by
+    /// grid-cache scratch buffers, where the consumed slot is overwritten by
     /// the next frame's fetch. Collapses `BridgeFailed` to `None` like
     /// [`Self::value`] — the hold decision happens in the preflight, upstream.
     pub fn take_value(&mut self) -> Option<T> {

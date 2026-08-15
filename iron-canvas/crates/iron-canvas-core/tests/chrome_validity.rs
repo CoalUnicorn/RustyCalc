@@ -135,7 +135,7 @@ fn sheet_change_forces_rebuild() {
     let delta = Chrome::classify(Some(&frame), &model, &inputs, None);
     assert!(
         matches!(delta, FrameDelta::Rebuild(RebuildReason::Sheet)),
-        "sheet swap invalidates cached pane content even if geometry matches"
+        "sheet swap invalidates cached grid content even if geometry matches"
     );
 }
 

@@ -72,8 +72,7 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
 
     // The whole point of the fallback: if try_blit_reuse rejected, the outcome
     // must be `FreshFallback` (a Fresh-built frame) so paint_viewport_regime
-    // invalidates the cache and repaints every pane (the explicit
-    // `PaneRegionMask::ALL` it passes to `paint_grid`). The `BlitOutcome`
+    // invalidates the cache and repaints the whole grid. The `BlitOutcome`
     // type now makes "Fresh or Blitted, never anything else" structural —
     // the else branch needs no assertion.
     let is_fallback = matches!(outcome, BlitOutcome::FreshFallback(_));
@@ -200,18 +199,9 @@ fn grid_ops_len(orch: &Orchestrator<MemSurface>) -> usize {
     orch.grid_surface().recorder().ops().len()
 }
 
-/// RED against d8aed9c, for a compound reason: `paint_viewport_regime`'s
-/// `FreshFallback` arm calls `self.grid.paint_grid(model, &frame,
-/// PaneRegionMask::ALL)` and never binds — let alone checks — its returned
-/// held-pane mask, so a bulk bridge failure here is silently dropped even
-/// before considering the second issue: the `frame` a `FreshFallback` builds
-/// is `FramePath::Fresh` construction (same as an ordinary Fresh rebuild —
-/// see `held_frame.rs`'s section doc for why that gates off `render_pane`'s
-/// bridge-hold branch entirely, which is also why the ordinary Fresh regime
-/// does not return `Retry` here either). Either gap alone is enough for this
-/// test to fail: the function falls through to `self.grid.present()`,
-/// commits `self.last_frame = Some(frame)`, and returns
-/// `PaintResult::Painted` exactly as if every pane had painted cleanly.
+/// A `FreshFallback` uses the same whole-grid preflight as an ordinary Fresh
+/// frame. Any failed segment must therefore hold before painter interaction,
+/// presentation, or candidate geometry publication.
 #[test]
 fn held_fresh_fallback_at_row_header_digit_boundary_holds_atomically() {
     let stub = Rc::new(

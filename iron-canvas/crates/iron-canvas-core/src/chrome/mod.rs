@@ -49,9 +49,9 @@ mod pane_set;
 mod recycled_slots;
 
 pub(crate) use blit::PreparedBlitFrame;
-pub use blit::{BlitPlan, FramePath};
+pub use blit::{BlitPlan, FramePath, Shift};
 pub use kind::FrameKindTag;
-pub use pane_region::{PaneRegion, PaneRegionMask};
+pub use pane_region::{GridLayout, GridSegment, GridShape, PaneRegion};
 pub use pane_set::{PaneSet, measure_row_header_width};
 pub use recycled_slots::RecycledSlots;
 
@@ -177,6 +177,11 @@ pub enum BlitOutcome {
 }
 
 impl Chrome {
+    /// Piecewise address layout for the visible grid.
+    pub fn grid_layout(&self) -> GridLayout {
+        GridLayout::from_frame(self)
+    }
+
     /// Build the next-frame `Chrome` for the reuse-or-rebuild regimes. The
     /// `path` argument selects which one; the body branches once and inlines
     /// the two constructors. The blit fast-path is separate
@@ -215,10 +220,8 @@ impl Chrome {
                 // Slot vecs and header labels survive verbatim; every other
                 // per-attempt scalar still refreshes from the newly captured
                 // inputs so committed Chrome never lags behind the frame it
-                // was actually built for. Which panes actually need
-                // repainting is the caller's `GridWork` verdict — threaded
-                // straight into `render_grid` as an explicit parameter, not
-                // stored here.
+                // was actually built for. Grid paint scope remains the
+                // caller's `GridWork` verdict rather than state stored here.
                 prev.theme = Rc::clone(inputs.theme());
                 prev.dpr = inputs.dpr();
                 prev.model_generation = inputs.model_generation();
@@ -449,7 +452,7 @@ impl Chrome {
     /// Reads `model` only for the two checks that were always live-model
     /// reads, never part of `FrameInputs`: the active-cell re-hash and the
     /// overlap probe's row-height/col-width lookups. Never builds a
-    /// `Chrome`, mutates cache state, calls a painter, or fetches pane
+    /// `Chrome`, mutates cache state, calls a painter, or fetches cell
     /// content — qualification only. Construction (and its own independent
     /// reject, e.g. the row-header digit boundary) stays in
     /// `Chrome::next_blit`.

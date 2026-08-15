@@ -7,11 +7,11 @@
 //!   points (`paint_bg`, `repaint_active_cell`).
 //! - [`borders`] — `ResolvedBorders`, `BorderPaint`, and the grid /
 //!   explicit / single-cell border passes.
-//! - This module — `render_pane` (the five-pass walk over one quadrant)
+//! - This module — the five-pass walk over one grid segment
 //!   and `paint_cell` (single-cell composer).
 //!
-//! Pass order in `render_pane` is load-bearing: bg -> CF decoration ->
-//! grid borders -> explicit borders -> text. See the doc on `render_pane`
+//! Pass order is load-bearing: bg -> CF decoration -> grid borders ->
+//! explicit borders -> text. See the doc on `paint_cells_pass`
 //! for why.
 
 pub mod borders;
@@ -26,106 +26,14 @@ use crate::types::fetched::Fetched;
 
 use self::borders::BorderPaint;
 use self::text::TextPaint;
-use crate::CellContentQuery;
-use crate::chrome::{Chrome, PaneRegion};
-use crate::orchestrator::PaneVerdict;
 use crate::painter::Painter;
-use crate::pending_work::RowSpan;
-use crate::renderer::PaneExecution;
 use crate::renderer::RendererCore;
 use crate::renderer::cf_types::CfDecorationPaint;
-use crate::renderer::prepared::{FetchedCellsMut, PaneCacheCommit, PreparedPane};
+use crate::renderer::prepared::FetchedCellsMut;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {
-    /// Walk one frozen-pane quadrant in five deferred passes:
-    /// bg -> CF decoration -> grid borders -> explicit borders -> text.
-    ///
-    /// `BorderEdge::Right`/`Bottom` strokes at `x+width` snap (via
-    /// `snap_stroke`) into the NEXT cell's pixel column, where they'd land
-    /// inside that neighbour's bg. So this cell can only safely paint a
-    /// 1 px stroke on its OWN territory — i.e. its left and top edges
-    /// (which snap onto the cell's first column / first row). The grid
-    /// fallback therefore lives on left+top only and is suppressed when
-    /// the cell carries an explicit fill — colored cells extend cleanly to
-    /// every boundary, matching Excel/Sheets.
-    ///
-    /// The grid sub-pass runs across all cells before the explicit-border
-    /// sub-pass so an explicit `BorderItem::right` on cell A wins over
-    /// cell B's grid left at the shared pixel column (paint order: grid
-    /// across all -> explicit across all -> A.right strokes last on the
-    /// shared edge). Text remains the final pass so overflow is never
-    /// clipped by a neighbour's bg.
-    ///
-    /// Returns `true` when a transient bridge failure held this pane's prior
-    /// pixels instead of painting (see the `reuses_slots` preflight below);
-    /// `false` on every other exit, including the empty-pane early return.
-    pub fn render_pane(
-        &self,
-        model: &dyn CellContentQuery,
-        pane: PaneRegion,
-        frame: &Chrome,
-    ) -> bool {
-        match self.execute_pane(model, pane, frame) {
-            PaneExecution::Held => true,
-            PaneExecution::Untouched => false,
-            PaneExecution::Committed(commit) => {
-                self.install_pane_cache_commit(commit);
-                false
-            }
-        }
-    }
-
-    pub(super) fn execute_pane(
-        &self,
-        model: &dyn CellContentQuery,
-        pane: PaneRegion,
-        frame: &Chrome,
-    ) -> PaneExecution {
-        let Some(range) = pane.range(frame) else {
-            // Pane became empty (e.g. freeze removed on this axis). Forget the
-            // cached range so a future re-grow refetches. The painted tree
-            // needs no explicit reset: a later re-grow builds a scratch tree
-            // for a real range, and range-in-digest means it can't collide
-            // with whatever stale tree sits in `painted`. Routed through the
-            // one cache-commit entry point like every other outcome, rather
-            // than mutated inline here.
-            return PaneExecution::Committed(PaneCacheCommit::Empty { pane });
-        };
-
-        // A `Blitted` frame's fallback pane (`MissingCache`/`IncompatibleRange`)
-        // is prepared directly by `RendererCore::prepare_blit`, which calls
-        // this exact `prepare_full_pane` too — one fetch, no second `render_pane`
-        // round-trip for the same cells. This entry point never adopts a
-        // staged fetch of its own; it always fetches.
-        let prepared = match self.prepare_full_pane(model, pane, range, frame) {
-            Some(prepared) => prepared,
-            None => {
-                // The fetch reported a bridge failure — preparation touched
-                // only its own renderer-lifetime scratch (see
-                // `prepare_full_pane`'s doc), so the committed pane cache and
-                // painted tree are exactly as the last successful paint left
-                // them; a run of consecutive failures leaves them untouched
-                // too.
-                self.trace_pane(pane, PaneVerdict::Held);
-                return PaneExecution::Held;
-            }
-        };
-
-        let verdict = match &prepared {
-            PreparedPane::Full { repaint, .. } => PaneVerdict::from(&repaint.plan),
-            PreparedPane::Empty { .. }
-            | PreparedPane::Damage { .. }
-            | PreparedPane::Blit { .. } => {
-                unreachable!("render_pane only ever prepares PreparedPane::Full")
-            }
-        };
-        self.trace_pane(pane, verdict);
-
-        PaneExecution::Committed(self.execute_full_pane(frame, prepared))
-    }
-
     /// Shared paint tail for every prepared-execution method in
     /// `renderer::prepared` (`execute_full_pane`, `execute_damage_pane`,
     /// `execute_blit_pane`): the five deferred passes (bg -> CF decoration ->
@@ -135,7 +43,7 @@ impl<P: Painter> RendererCore<P> {
     /// once per span against the SAME owned [`FetchedCells`] bundle without
     /// re-taking it from `pane_buf` or parking it back in between —
     /// ownership and the take/park lifecycle live entirely with the caller.
-    /// Pass order is load-bearing — see the doc on `render_pane` for why bg
+    /// Pass order is load-bearing — see the module doc for why bg
     /// precedes borders precedes text. `pub(super)` so `renderer::prepared`'s
     /// execute methods can call it directly.
     ///
@@ -222,69 +130,6 @@ impl<P: Painter> RendererCore<P> {
     pub(super) fn paint_cell(&self, p: &CellPaint, theme: &CanvasTheme) {
         self.paint_bg(p, theme);
         self.paint_borders(p, theme);
-    }
-
-    /// Damage-frame entry for one pane: repaint only the full-width row
-    /// bands in `spans`. Every span that intersects this pane's range is
-    /// fetched (`renderer::prepared::RendererCore::prepare_damage_pane`)
-    /// BEFORE any of them splice into the cached buffers or paint — a
-    /// later span's bridge failure can never leave an earlier, healthy
-    /// span partially committed. Kept rows keep their pixels; a successful
-    /// batch splices into the pane buffers but leaves the painted
-    /// fingerprint tree alone (see `prepare_damage_pane`'s doc).
-    ///
-    /// Returns `true` when this pane's work was held rather than committed:
-    /// either the range-mismatch demotion forwards `render_pane`'s own
-    /// verdict, or any span's strip fetch failed.
-    pub fn render_pane_damage(
-        &self,
-        model: &dyn CellContentQuery,
-        frame: &Chrome,
-        pane: PaneRegion,
-        spans: &[RowSpan],
-    ) -> bool {
-        match self.execute_pane_damage(model, frame, pane, spans) {
-            PaneExecution::Held => true,
-            PaneExecution::Untouched => false,
-            PaneExecution::Committed(commit) => {
-                self.install_pane_cache_commit(commit);
-                false
-            }
-        }
-    }
-
-    pub(super) fn execute_pane_damage(
-        &self,
-        model: &dyn CellContentQuery,
-        frame: &Chrome,
-        pane: PaneRegion,
-        spans: &[RowSpan],
-    ) -> PaneExecution {
-        let pane_buf = self.pane_cache.pane(pane);
-        let Some(range) = pane.range(frame) else {
-            // Same empty-pane rationale as `render_pane`'s early return.
-            return PaneExecution::Committed(PaneCacheCommit::Empty { pane });
-        };
-        // `splice_strip_into` indexes the cached pane buffers; they are
-        // only aligned when the cached range matches this frame's. A
-        // mismatch (e.g. partial post-blit buffers) demotes the pane to
-        // the full walk instead of splicing at wrong indices.
-        if pane_buf.range.get() != Some(range) {
-            return self.execute_pane(model, pane, frame);
-        }
-
-        match self.prepare_damage_pane(model, frame, pane, range, spans) {
-            None => {
-                // Held: `prepare_damage_pane` already traced it and touched
-                // nothing persistent.
-                PaneExecution::Held
-            }
-            Some(PreparedPane::Damage { strips, .. }) if strips.is_empty() => {
-                // No span in `spans` intersected this pane's range at all.
-                PaneExecution::Untouched
-            }
-            Some(prepared) => PaneExecution::Committed(self.execute_damage_pane(frame, prepared)),
-        }
     }
 }
 

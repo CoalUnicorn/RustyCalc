@@ -30,7 +30,7 @@ pub struct CellPaint {
     pub rect: PixelRect,
     pub style: CellStyle,
     /// Per-edge resolved border paints. Computed once at iteration time so
-    /// the explicit-border sub-pass in `render_pane` is pure pixel pushing —
+    /// the explicit-border sub-pass in the grid walk is pure pixel pushing —
     /// no `BorderPaint::resolve` calls inside the paint loop.
     pub borders: ResolvedBorders,
     /// Conditional-formatting decoration (data bar / icon / rating), if any

@@ -11,7 +11,6 @@ use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
 use iron_canvas_core::Orchestrator;
-use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
 
@@ -101,7 +100,7 @@ where
     pub fn fonts_changed(&mut self) {
         self.grid_painter.clear_measure_cache();
         self.overlay_painter.clear_measure_cache();
-        self.orchestrator.mark_content_dirty(PaneRegionMask::ALL);
+        self.orchestrator.mark_content_dirty();
     }
 
     pub fn grid_canvas(&self) -> &HtmlCanvasElement {

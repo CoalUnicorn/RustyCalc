@@ -5,7 +5,6 @@
 use std::rc::Rc;
 
 use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
-use iron_canvas_core::chrome::PaneRegionMask;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::{CanvasModel, PaintResult};
 use iron_canvas_datagrid::{DataGrid, DataGridModel};
@@ -35,9 +34,7 @@ impl CameraCanvas {
 
     pub fn set_grid(&mut self, grid: DataGrid) {
         self.model.replace(grid);
-        self.runtime
-            .orchestrator_mut()
-            .mark_content_dirty(PaneRegionMask::ALL);
+        self.runtime.orchestrator_mut().mark_content_dirty();
         self.runtime.orchestrator_mut().request_repaint();
     }
 

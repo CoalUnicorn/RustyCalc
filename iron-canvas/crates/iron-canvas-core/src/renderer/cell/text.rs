@@ -98,14 +98,14 @@ impl TextPaint {
     /// Build a `TextPaint` at `rect` and fill `lines` with the
     /// resolved per-line text/width/position. Returns `None` (with `lines`
     /// left empty) for empty/too-small cells. Formatted value AND cell type
-    /// are supplied by the caller — `render_pane` drains both from the
-    /// prefetched `pane_values` / `pane_cell_types` buffers;
+    /// are supplied by the caller — the grid pass drains both from the
+    /// prefetched value and cell-type buffers;
     /// `repaint_active_cell` reads the model directly for the active cell.
     /// Font / alignment / colour are resolved via `CellTextStyle`.
     ///
     /// The split between `TextPaint` (per-cell scalars) and the externally
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
-    /// the caller takes the buffer once at the top of `render_pane`, hands it
+    /// the caller takes the buffer once for the grid segment, hands it
     /// to every cell, and parks it back on `FrameCache::text_lines`.
     pub fn resolve_into<P: Painter>(
         renderer: &RendererCore<P>,
