@@ -73,12 +73,16 @@ pub struct TestModel {
     /// range's r1 is >= this row. Lets a multi-pane test fail the scroll
     /// panes while frozen panes fetch cleanly.
     bulk_bridge_fail_from: Cell<Option<i32>>,
-    /// Counts calls to any of the four bulk `*_in` accessors. Task 4's
-    /// row-band repaint must reuse the buffers the grid preflight already
-    /// bulk-fetched once this frame — this counter is the evidence a test
-    /// can check that N row spans painted from those buffers cost zero
-    /// additional model queries, rather than trusting "it looks right".
+    /// Fail bulk calls after this many successful channel calls. This lets a
+    /// test prepare one complete segment/strip and fail a later one.
+    bulk_bridge_fail_after: Cell<Option<u32>>,
+    /// Counts calls to any of the four bulk `*_in` accessors. Tests use this
+    /// to prove that paint consumes preflighted buffers without issuing
+    /// additional model queries.
     bulk_fetch_calls: Cell<u32>,
+    /// One range per `FetchedCells` bundle, recorded by the styles accessor
+    /// before the other three channel calls for the same range.
+    bulk_fetch_ranges: RefCell<Vec<RCRange>>,
     /// Stage 3 `FrameInputs::capture` failure simulation: when set, the
     /// named scalar accessor returns `None` — except `SheetMismatch`, which
     /// leaves every accessor succeeding but makes `get_selected_view`'s
@@ -122,7 +126,9 @@ impl Default for TestModel {
             value_bridge_fail: Cell::new(false),
             bulk_bridge_fail: Cell::new(false),
             bulk_bridge_fail_from: Cell::new(None),
+            bulk_bridge_fail_after: Cell::new(None),
             bulk_fetch_calls: Cell::new(0),
+            bulk_fetch_ranges: RefCell::new(Vec::new()),
             capture_fail: Cell::new(None),
         }
     }
@@ -296,15 +302,33 @@ impl TestModel {
     pub fn set_bulk_bridge_fail_from(&self, row: Option<i32>) {
         self.bulk_bridge_fail_from.set(row);
     }
-    fn bulk_fails_for(&self, range: RCRange) -> bool {
+    pub fn set_bulk_bridge_fail_after(&self, successful_calls: Option<u32>) {
+        self.bulk_bridge_fail_after.set(successful_calls);
+    }
+    fn begin_bulk_call(&self, range: RCRange, records_bundle: bool) -> bool {
+        let call = self.bulk_fetch_calls.get() + 1;
+        self.bulk_fetch_calls.set(call);
+        if records_bundle {
+            self.bulk_fetch_ranges.borrow_mut().push(range);
+        }
         self.bulk_bridge_fail.get()
             || self
                 .bulk_bridge_fail_from
                 .get()
                 .is_some_and(|from| range.r1 >= from)
+            || self
+                .bulk_bridge_fail_after
+                .get()
+                .is_some_and(|successful| call > successful)
     }
     pub fn set_sheet(&self, sheet: u32) {
         self.sheet.set(sheet);
+    }
+    pub fn set_last_row(&self, row: i32) {
+        self.last_row.set(row);
+    }
+    pub fn set_last_column(&self, column: i32) {
+        self.last_column.set(column);
     }
 
     pub fn selection_range(&self) -> RCRange {
@@ -318,6 +342,10 @@ impl TestModel {
     }
     pub fn reset_bulk_fetch_calls(&self) {
         self.bulk_fetch_calls.set(0);
+        self.bulk_fetch_ranges.borrow_mut().clear();
+    }
+    pub fn bulk_fetch_ranges(&self) -> Vec<RCRange> {
+        self.bulk_fetch_ranges.borrow().clone()
     }
 }
 
@@ -443,8 +471,7 @@ impl CellContentQuery for TestModel {
     // body below is otherwise byte-identical to `CellContentQuery`'s
     // default impl for each of these four methods.
     fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
-        self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
-        if self.bulk_fails_for(range) {
+        if self.begin_bulk_call(range, true) {
             out.clear();
             for _ in range.r1..=range.r2 {
                 for _ in range.c1..=range.c2 {
@@ -466,8 +493,7 @@ impl CellContentQuery for TestModel {
         range: RCRange,
         out: &mut Vec<Fetched<String>>,
     ) {
-        self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
-        if self.bulk_fails_for(range) {
+        if self.begin_bulk_call(range, false) {
             out.clear();
             for _ in range.r1..=range.r2 {
                 for _ in range.c1..=range.c2 {
@@ -484,8 +510,7 @@ impl CellContentQuery for TestModel {
         }
     }
     fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
-        self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
-        if self.bulk_fails_for(range) {
+        if self.begin_bulk_call(range, false) {
             out.clear();
             for _ in range.r1..=range.r2 {
                 for _ in range.c1..=range.c2 {
@@ -507,8 +532,7 @@ impl CellContentQuery for TestModel {
         range: RCRange,
         out: &mut Vec<Fetched<CellDecoration>>,
     ) {
-        self.bulk_fetch_calls.set(self.bulk_fetch_calls.get() + 1);
-        if self.bulk_fails_for(range) {
+        if self.begin_bulk_call(range, false) {
             out.clear();
             for _ in range.r1..=range.r2 {
                 for _ in range.c1..=range.c2 {

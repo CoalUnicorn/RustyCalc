@@ -184,8 +184,7 @@ impl IronCanvas {
         self.runtime.orchestrator_mut().request_repaint();
     }
 
-    /// JS-facing cell-content-changed signal — marks all four pane
-    /// quadrants. Pane-granular masks stay Rust-internal.
+    /// JS-facing cell-content-changed signal for conservative grid-wide work.
     #[wasm_bindgen(js_name = "markContentDirty")]
     pub fn mark_content_dirty(&mut self) {
         self.runtime.orchestrator_mut().mark_content_dirty();

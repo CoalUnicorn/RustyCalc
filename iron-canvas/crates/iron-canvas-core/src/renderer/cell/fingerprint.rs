@@ -751,7 +751,7 @@ mod tests {
     }
 
     #[test]
-    fn frozen_band_row_rotation_matches_full_candidate() {
+    fn single_tree_rotation_frozen_boundary() {
         let previous_layout = layout(10, 8, 2, 2);
         let candidate_layout = layout(11, 8, 2, 2);
         let state = FingerprintState::default();

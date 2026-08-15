@@ -250,6 +250,12 @@ impl<P: Painter> RendererCore<P> {
         }
     }
 
+    /// Paint all visible grid segments for a slot-reusing frame.
+    ///
+    /// Returns `true` when any segment reports a bridge failure. A held call
+    /// performs no painter work and installs no cache state; `false` means the
+    /// attempt completed (including a fingerprint skip) and any owned cache
+    /// commit was installed.
     pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> bool {
         let result = self.execute_grid(model, frame);
         if let Some(commit) = result.cache_commit {
@@ -360,14 +366,16 @@ impl<P: Painter> RendererCore<P> {
     }
 
     /// Damage variant: prior pixels stay; only the damaged full-width row
-    /// bands per pane refetch + repaint. The outer sequence is not restated
+    /// bands refetch and repaint across every intersecting grid segment. The
+    /// outer sequence is not restated
     /// here — it is the shared [`Self::execute_grid_shell`] `render_grid`
     /// also runs through, which is what guarantees the frozen separators
     /// still paint after the cells (winning their pixels back from the
     /// band's re-stroked grid lines at the freeze boundary).
     ///
-    /// Returns the mask of panes whose damage work was held — see
-    /// `render_grid`'s doc for the same contract on the SlotsReuse path.
+    /// Returns `true` when any strip reports a bridge failure. The whole grid
+    /// is held atomically and no cache state is installed; see
+    /// [`Self::render_grid`] for the same SlotsReuse contract.
     pub fn render_grid_damage(
         &self,
         model: &dyn CanvasModel,

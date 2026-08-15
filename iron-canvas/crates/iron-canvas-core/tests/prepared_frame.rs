@@ -35,6 +35,27 @@ fn fresh_preflight_failure_mutates_neither_painter_nor_grid_cache() {
 }
 
 #[test]
+fn late_fresh_segment_failure_recycles_all() {
+    let model = TestModel::synthetic_grid()
+        .with_data_until(30)
+        .with_frozen(2, 2);
+    let frame = fresh_frame(&model);
+    let core = RendererCore::for_layer(Rc::new(RecorderPainter::new()));
+
+    model.reset_bulk_fetch_calls();
+    model.set_bulk_bridge_fail_after(Some(4));
+    assert!(core.render_grid_fresh(&model, &frame));
+
+    let capacities = core.grid_cache.preparation_scratch_capacities();
+    for (region, channels) in capacities.into_iter().enumerate().take(2) {
+        assert!(
+            channels.0 > 0 && channels.1 > 0 && channels.2 > 0 && channels.3 > 0,
+            "prepared region {region} must return every fetched channel on abort: {channels:?}"
+        );
+    }
+}
+
+#[test]
 fn slots_reuse_failure_preserves_committed_grid_cache_until_recovery() {
     let model = TestModel::synthetic_grid()
         .with_data_until(30)
@@ -86,4 +107,30 @@ fn damage_failure_preserves_committed_grid_cache_and_original_pixels() {
     assert_eq!(core.grid_cache.layout(), layout);
     assert_eq!(core.grid_cache.buffer_truth(), truth);
     assert_eq!(core.trace().verdict, Some(GridVerdict::Held));
+}
+
+#[test]
+fn late_damage_strip_failure_is_atomic() {
+    let model = TestModel::synthetic_grid()
+        .with_data_until(30)
+        .with_frozen_cols(2);
+    let mut frame = fresh_frame(&model);
+    let core = RendererCore::for_layer(Rc::new(RecorderPainter::new()));
+    assert!(!core.render_grid(&model, &frame));
+    frame.kind = FrameKindTag::SlotsReused;
+
+    model.reset_bulk_fetch_calls();
+    model.set_bulk_bridge_fail_after(Some(4));
+    let ops = core.painter().ops().len();
+    assert!(core.render_grid_damage(&model, &frame, &[RowSpan { r1: 5, r2: 5 }]));
+    assert_eq!(core.painter().ops().len(), ops);
+
+    let capacities = core.strip_scratch_capacities();
+    assert_eq!(capacities.len(), 2, "both prepared strips must be recycled");
+    for channels in capacities {
+        assert!(
+            channels.0 > 0 && channels.1 > 0 && channels.2 > 0 && channels.3 > 0,
+            "every recycled strip channel must retain capacity: {channels:?}"
+        );
+    }
 }

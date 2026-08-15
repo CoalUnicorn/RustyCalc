@@ -428,7 +428,14 @@ impl<P: Painter> RendererCore<P> {
             .grid_cache
             .layout()
             .expect("a Shift transition always has a committed layout");
-        let work = blit_work::finalize_blit_work(previous, candidate, frame, plan)?;
+        let Some(work) = blit_work::finalize_blit_work(previous, candidate, frame, plan) else {
+            // A classified Shift should always expose at least one address
+            // strip. If geometry rules drift, repainting the candidate is a
+            // safe recovery; treating this as a bridge hold would retry the
+            // same impossible plan indefinitely.
+            self.trace_blit_fallback(false);
+            return self.prepare_full_grid(model, frame);
+        };
         let mut address_strips: [Option<PreparedStrip>; 2] = std::array::from_fn(|_| None);
         for (index, strip) in work.address_strips.into_iter().enumerate() {
             let Some((region, range)) = strip else {

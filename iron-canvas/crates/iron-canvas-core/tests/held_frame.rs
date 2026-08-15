@@ -116,7 +116,7 @@ fn held_viewport_rolls_back_everything_and_recovery_commits_exact_history() {
 }
 
 #[test]
-fn held_slots_reuse_is_whole_grid_and_retries_complete_work() {
+fn held_frame_grid() {
     let model = Rc::new(
         TestModel::synthetic_grid()
             .with_data_until(30)
@@ -162,7 +162,7 @@ fn held_slots_reuse_is_whole_grid_and_retries_complete_work() {
 }
 
 #[test]
-fn held_damage_is_whole_grid_and_retries_original_rows() {
+fn held_damage_is_whole_grid_and_retries_grid_wide() {
     let model = Rc::new(
         TestModel::synthetic_grid()
             .with_data_until(30)

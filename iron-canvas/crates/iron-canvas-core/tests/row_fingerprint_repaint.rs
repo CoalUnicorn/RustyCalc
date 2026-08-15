@@ -41,7 +41,7 @@ fn one_changed_row_across_frozen_segments_has_one_grid_rows_verdict() {
 }
 
 #[test]
-fn soft_buffer_invalidation_preserves_painted_fingerprint_truth() {
+fn unchanged_refetch_preserves_skip() {
     let model = TestModel::synthetic_grid().with_data_until(30);
     let (frame, core) = primed(&model);
     let layout = core.grid_cache.layout();
