@@ -297,6 +297,8 @@ impl<P: Painter> RendererCore<P> {
         frame: &Chrome,
     ) -> Option<PreparedGrid> {
         let layout = frame.grid_layout();
+        #[cfg(feature = "dev-diagnostics")]
+        self.diag_geometry(frame, layout);
         let mut segments: [Option<SegmentData>; 4] = std::array::from_fn(|_| None);
         for grid_segment in layout.segments() {
             let region = grid_segment.region();
@@ -354,6 +356,8 @@ impl<P: Painter> RendererCore<P> {
         spans: &[RowSpan],
     ) -> Option<PreparedGrid> {
         let layout = frame.grid_layout();
+        #[cfg(feature = "dev-diagnostics")]
+        self.diag_geometry(frame, layout);
         if self.grid_cache.layout() != Some(layout)
             || self.grid_cache.buffer_truth() != BufferTruth::Valid
         {
@@ -411,6 +415,8 @@ impl<P: Painter> RendererCore<P> {
         plan: &BlitPlan,
     ) -> Option<PreparedGrid> {
         let candidate = frame.grid_layout();
+        #[cfg(feature = "dev-diagnostics")]
+        self.diag_geometry(frame, candidate);
         let transition = self.grid_cache.classify_layout(candidate);
         let GridLayoutTransition::Shift { axis } = transition else {
             self.trace_blit_fallback(self.grid_cache.layout().is_none());

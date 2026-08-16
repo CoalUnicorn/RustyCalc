@@ -597,6 +597,15 @@ impl<P: Painter> GridRenderer<P> {
     pub(crate) fn diag_reset_capture(&self) {
         self.core.diag_reset_capture();
     }
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) fn diag_begin_attempt(
+        &self,
+        delta: diag::DiagDeltaKind,
+        rebuild_reason: Option<crate::frame_plan::RebuildReason>,
+        probe: Option<RCRange>,
+    ) {
+        self.core.diag_begin_attempt(delta, rebuild_reason, probe);
+    }
 
     #[cfg(feature = "dev-diagnostics")]
     pub(crate) fn publish_diag(

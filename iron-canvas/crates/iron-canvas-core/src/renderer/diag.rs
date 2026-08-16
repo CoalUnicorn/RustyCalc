@@ -21,6 +21,7 @@
 use std::cell::{Cell, RefCell};
 
 use crate::chrome::{GridLayout, GridShape, PaneRegion};
+use crate::chrome::Chrome;
 use crate::frame_plan::{FrameDelta, RebuildReason};
 use crate::geometry::prim::Axis;
 use crate::geometry::pixel_rect::PixelRect;
@@ -29,6 +30,7 @@ use crate::orchestrator::{FrameOutcome, GridVerdict, PaintRegimeTag};
 use crate::pending_work::{RowSpan, WorkFlags};
 use crate::renderer::cache::BufferTruth;
 use crate::renderer::cell::fingerprint::FingerprintTruth;
+use crate::renderer::prepared::FetchedCells;
 use crate::types::coord::RCRange;
 /// Wire version of the snapshot shape. Bump when the projection changes.
 pub const DIAG_SCHEMA_VERSION: u8 = 1;
@@ -316,10 +318,7 @@ impl DiagState {
     }
 
     /// `&mut` access to a fresh capture. All write sites route through
-    /// this so an enable toggle mid-attempt never half-writes. Tasks 2-4
-    /// add the section writers that call it; Task 1 publishes via
-    /// `publish_diag` directly, hence the allow for now.
-    #[allow(dead_code)]
+    /// this so an enable toggle mid-attempt never half-writes.
     fn ensure_capture(&self) -> std::cell::RefMut<'_, Option<FrameDiagnostics>> {
         let mut slot = self.capture.borrow_mut();
         slot.get_or_insert_with(|| FrameDiagnostics {
@@ -348,6 +347,79 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
                 FingerprintTruth::Stale => DiagFingerprintTruth::Stale,
             },
         }
+    }
+
+    /// Classification facts plus the attempt-scoped probe and the
+    /// attempt-start committed cache truth, recorded once by
+    /// `paint_if_dirty` after `plan_frame`. The capture-failure path never
+    /// calls this — its snapshot keeps `delta`/`rebuild_reason`/`probe` at
+    /// `None` and `committed_before` is filled by `publish_diag`.
+    pub(crate) fn diag_begin_attempt(
+        &self,
+        delta: DiagDeltaKind,
+        rebuild_reason: Option<RebuildReason>,
+        probe: Option<RCRange>,
+    ) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.capture.borrow_mut();
+        *slot = Some(FrameDiagnostics {
+            schema_version: DIAG_SCHEMA_VERSION,
+            delta: Some(delta),
+            rebuild_reason,
+            probe,
+            cache: DiagCache {
+                committed_before: Some(self.cache_truth_now()),
+                ..DiagCache::default()
+            },
+            ..FrameDiagnostics::default()
+        });
+    }
+
+    /// Geometry of the frame a grid prepare is about to paint against,
+    /// plus which planned segments fully contain the attempt's probe.
+    /// Called from every grid prepare entry point; idempotent overwrite.
+    pub(crate) fn diag_geometry(&self, frame: &Chrome, layout: GridLayout) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        capture.probe_segments = capture
+            .probe
+            .into_iter()
+            .flat_map(|probe| {
+                layout.segments().filter_map(move |segment| {
+                    let range = segment.range();
+                    (range.r1 <= probe.r1
+                        && range.c1 <= probe.c1
+                        && range.r2 >= probe.r2
+                        && range.c2 >= probe.c2)
+                        .then_some(segment.region())
+                })
+            })
+            .collect();
+        capture.geometry = Some(DiagGeometry {
+            canvas: frame.canvas_size,
+            dpr: frame.dpr,
+            sheet: frame.sheet,
+            top_row: frame.pane_set.top_row(),
+            left_column: frame.pane_set.left_column(),
+            row_header_thickness: frame.row_header_thickness,
+            col_header_thickness: frame.col_header_thickness,
+            show_row_headers: frame.show_row_headers,
+            show_col_headers: frame.show_col_headers,
+            shape: layout.shape(),
+            segments: layout
+                .segments()
+                .map(|segment| DiagSegment {
+                    region: segment.region(),
+                    range: segment.range(),
+                    cells: FetchedCells::addressed_cells(segment.range()),
+                })
+                .collect(),
+        });
     }
 
     /// Runtime switch. Disabling drops the retained published snapshot so

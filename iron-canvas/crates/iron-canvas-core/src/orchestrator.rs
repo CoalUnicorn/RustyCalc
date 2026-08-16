@@ -58,6 +58,8 @@ use crate::render_overlays::RenderOverlays;
 use crate::renderer::{GridCacheCommit, GridRenderer, OverlayRenderer};
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diag::{DiagCacheResolution, DiagPaintedLayers, FrameDiagnostics};
+#[cfg(feature = "dev-diagnostics")]
+use crate::renderer::diag::DiagDeltaKind;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -144,10 +146,9 @@ pub(crate) struct FramePlan {
     /// it back into `self.pending` verbatim.
     consumes: PendingWork,
     /// Which hard break or scroll incompatibility fired, when `grid` is
-    /// `Fresh` because of one. Carried for diagnostic parity with
-    /// `Chrome::classify`'s verdict; not yet surfaced through `FrameTrace`
-    /// — a later stage may wire it in.
-    #[allow(dead_code)]
+    /// `Fresh` because of one. Read by the dev-diagnostics capture (the
+    /// only reader) after `plan_frame`; unread in feature-off builds.
+    #[cfg_attr(not(feature = "dev-diagnostics"), allow(dead_code))]
     rebuild_reason: Option<RebuildReason>,
 }
 
@@ -656,6 +657,13 @@ where
     attempt_seq: u64,
     /// Sequence assigned to the last committed transaction.
     commit_seq: u64,
+    /// Host-supplied expected-change address for the next paint attempt
+    /// (dev diagnostics only). Latched by `paint_if_dirty` after the
+    /// empty-work short circuit and cleared on consumption. Diagnostic
+    /// evidence only — never read by classification, planning, or any
+    /// prepare/execute path.
+    #[cfg(feature = "dev-diagnostics")]
+    diag_probe: Option<RCRange>,
 }
 
 impl<S> Orchestrator<S>
@@ -684,6 +692,8 @@ where
             last_trace: FrameTrace::default(),
             attempt_seq: 0,
             commit_seq: 0,
+            #[cfg(feature = "dev-diagnostics")]
+            diag_probe: None,
         }
     }
 
@@ -699,6 +709,13 @@ where
     #[cfg(feature = "dev-diagnostics")]
     pub fn set_frame_diagnostics_enabled(&mut self, enabled: bool) {
         self.grid.renderer.set_diag_enabled(enabled);
+    }
+    /// Set the diagnostic probe address for the next non-idle paint
+    /// attempt. Attempt-scoped: the next attempt latches it and it is
+    /// cleared on consumption. Dev builds only.
+    #[cfg(feature = "dev-diagnostics")]
+    pub fn set_frame_diagnostics_probe(&mut self, range: RCRange) {
+        self.diag_probe = Some(range);
     }
 
     /// Last completed attempt's structured diagnostics, or `None` when
@@ -1203,7 +1220,19 @@ where
             &inputs,
             self.decos.selection().active_cell.as_ref(),
         );
+        #[cfg(feature = "dev-diagnostics")]
+        let diag_delta = DiagDeltaKind::from(&delta);
         let plan = plan_frame(work, delta, inputs.sheet(), inputs.show_selection());
+        // Record the classification facts and latch the attempt's probe
+        // before dispatch; the renderer fills the rest during
+        // prepare/execute. The probe is consumed here so it can never leak
+        // into a later attempt's attribution.
+        #[cfg(feature = "dev-diagnostics")]
+        self.grid.renderer.diag_begin_attempt(
+            diag_delta,
+            plan.rebuild_reason,
+            self.diag_probe.take(),
+        );
         let selected = plan.selected_strategy;
         let work_flags = plan.consumes.flags();
         // The trace was reset before capture so both successful dispatch and
