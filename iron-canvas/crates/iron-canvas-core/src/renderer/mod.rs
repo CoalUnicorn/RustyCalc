@@ -77,6 +77,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::CanvasModel;
+#[cfg(feature = "dev-diagnostics")]
+use crate::chrome::GridLayout;
 pub use crate::chrome::PaneRegion;
 use crate::chrome::{BlitPlan, Chrome};
 use crate::geometry::prim::Axis;
@@ -605,6 +607,19 @@ impl<P: Painter> GridRenderer<P> {
         probe: Option<RCRange>,
     ) {
         self.core.diag_begin_attempt(delta, rebuild_reason, probe);
+    }
+
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) fn diag_blit(
+        &self,
+        plan: &BlitPlan,
+        result: diag::DiagBlitResultTag,
+        cold_cache: Option<bool>,
+        previous: Option<GridLayout>,
+        candidate: GridLayout,
+    ) {
+        self.core
+            .diag_blit(plan, result, cold_cache, previous, candidate);
     }
 
     #[cfg(feature = "dev-diagnostics")]

@@ -6,9 +6,12 @@ mod common;
 use std::rc::Rc;
 
 use iron_canvas_core::chrome::PaneRegion;
+use iron_canvas_core::geometry::prim::Axis;
 use iron_canvas_core::{
-    CanvasSize, DiagDeltaKind, DiagFetchPurpose, DiagRepaintReason, GridVerdict, Orchestrator,
-    PaintResult, RCRange, RebuildReason, RowSpan,
+    CanvasSize, DiagBlitResultTag, DiagBufferTruth, DiagCacheActionTag, DiagCacheResolution,
+    DiagDeltaKind, DiagFetchPurpose, DiagFingerprintActionTag, DiagFingerprintTruth,
+    DiagRepaintReason, FrameOutcome, GridVerdict, Orchestrator, PaintResult, RCRange,
+    RebuildReason, RowSpan,
 };
 use iron_canvas_recorder::MemSurface;
 
@@ -370,4 +373,110 @@ fn fetch_requests_sum_to_totals_and_match_segments() {
         assert!(request.range.c1 >= segment.range.c1);
         assert!(request.range.c2 <= segment.range.c2);
     }
+}
+
+#[test]
+fn row_blit_reports_shift_revealed_strip_and_effective_clip() {
+    let (mut orch, model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    model.set_top_row(5);
+    orch.view_changed();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.delta, Some(DiagDeltaKind::Scroll));
+    let blit = diag.blit.expect("one-axis scroll blits");
+    assert_eq!(blit.axis, Axis::Row);
+    assert_eq!(blit.delta, 4);
+    assert_eq!(blit.result, DiagBlitResultTag::Shifted);
+    assert!(blit.cold_cache.is_none());
+    // The revealed strips are the renderer's actual widened repaint bands:
+    // `revealed_strip` includes a boundary-overlap row (r1 = prev.r2) and
+    // `widen_to_pixel_clip` extends to every row intersecting the strip
+    // band, so the band covers at least the delta's newly scrolled-in rows.
+    let revealed_rows: i32 = blit
+        .revealed
+        .iter()
+        .map(|strip| strip.range.r2 - strip.range.r1 + 1)
+        .sum();
+    assert!(revealed_rows >= blit.delta);
+    // The blit's source and destination rectangles differ by the shift.
+    assert_ne!(blit.src, blit.dst);
+    assert!(blit.strip.width > 0 && blit.strip.height > 0);
+    // Today's finalized blit work hands `plan.pixel_strip` to push_clip
+    // (blit_work.rs:113), so the effective clip equals the repaint band —
+    // the snapshot must record the actual push_clip argument.
+    assert_eq!(blit.clip, blit.strip);
+    // Fetch requests for a clean shift are reveal-purpose only.
+    assert!(
+        diag.fetch
+            .requests
+            .iter()
+            .all(|r| r.purpose == DiagFetchPurpose::BlitReveal)
+    );
+}
+
+#[test]
+fn committed_attempt_records_cache_transition() {
+    let (mut orch, _model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.cache.resolution, DiagCacheResolution::Committed);
+    assert_eq!(diag.cache.planned_action, Some(DiagCacheActionTag::Replace));
+    assert_eq!(
+        diag.cache.fingerprint_action,
+        Some(DiagFingerprintActionTag::Install)
+    );
+    let before = diag
+        .cache
+        .committed_before
+        .expect("a dispatched attempt samples its starting cache truth");
+    assert!(before.layout.is_none());
+    assert_eq!(before.buffer_truth, DiagBufferTruth::Stale);
+    assert_eq!(before.fingerprint_truth, DiagFingerprintTruth::Stale);
+    assert!(diag.cache.committed_after.layout.is_some());
+    assert_eq!(
+        diag.cache.committed_after.buffer_truth,
+        DiagBufferTruth::Valid
+    );
+    assert_eq!(
+        diag.cache.committed_after.fingerprint_truth,
+        DiagFingerprintTruth::Exact
+    );
+    assert!(diag.paint_counts.rows > 0);
+    assert!(diag.paint_counts.cells > diag.paint_counts.rows);
+}
+
+#[test]
+fn held_attempt_keeps_committed_cache_state() {
+    let (mut orch, model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    model.set_bulk_bridge_fail(true);
+    orch.mark_content_dirty();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.outcome, FrameOutcome::HeldOnBridgeFailure);
+    assert_eq!(diag.cache.resolution, DiagCacheResolution::HeldForRetry);
+    assert_eq!(
+        diag.cache.committed_before,
+        Some(diag.cache.committed_after.clone()),
+        "a held attempt must not present candidate cache state as committed"
+    );
+}
+
+#[test]
+fn held_blit_preflight_reports_held_preflight_result() {
+    let (mut orch, model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    // Fail the revealed-strip fetch: the blit preflight must hold.
+    model.set_bulk_bridge_fail(true);
+    model.set_top_row(5);
+    orch.view_changed();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    let diag = orch.frame_diagnostics().unwrap();
+    let blit = diag.blit.expect("scroll attempt records blit detail");
+    assert_eq!(blit.result, DiagBlitResultTag::HeldPreflight);
 }

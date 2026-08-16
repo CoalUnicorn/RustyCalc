@@ -20,6 +20,7 @@
 
 use std::cell::{Cell, RefCell};
 
+use crate::chrome::BlitPlan;
 use crate::chrome::Chrome;
 use crate::chrome::{GridLayout, GridShape, PaneRegion};
 use crate::frame_plan::{FrameDelta, RebuildReason};
@@ -476,6 +477,97 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         capture.repaint.changed_rows = changed_rows.to_vec();
     }
 
+    /// Prepared grid-cache action tag, recorded once by each prepare entry
+    /// point next to its `cache_action`.
+    pub(crate) fn diag_cache_planned(&self, action: DiagCacheActionTag) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        capture.cache.planned_action = Some(action);
+    }
+
+    /// Fingerprint update carried by the prepared commit, recorded at each
+    /// execute arm where the commit installs it.
+    pub(crate) fn diag_fingerprint_action(&self, action: DiagFingerprintActionTag) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        capture.cache.fingerprint_action = Some(action);
+    }
+
+    /// Blit detail for a `Viewport` attempt. `delta` is derived from the
+    /// committed vs candidate scroll-band origin — the renderer never
+    /// re-reads the model for it. `clip` is recorded separately at the
+    /// `push_clip` call site, not derived here.
+    pub(crate) fn diag_blit(
+        &self,
+        plan: &BlitPlan,
+        result: DiagBlitResultTag,
+        cold_cache: Option<bool>,
+        previous: Option<GridLayout>,
+        candidate: GridLayout,
+    ) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let delta = match (previous, plan.axis) {
+            (Some(previous), Axis::Row) => scroll_delta(previous, candidate, true),
+            (Some(previous), Axis::Column) => scroll_delta(previous, candidate, false),
+            (None, _) => 0,
+        };
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        capture.blit = Some(DiagBlit {
+            axis: plan.axis,
+            delta,
+            src: plan.shift.src,
+            dst: plan.shift.dst,
+            clip: PixelRect::default(),
+            strip: plan.pixel_strip,
+            revealed: Vec::new(),
+            result,
+            cold_cache,
+        });
+    }
+
+    pub(crate) fn diag_blit_revealed(&self, region: PaneRegion, range: RCRange) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        if let Some(blit) = &mut capture.blit {
+            blit.revealed.push(DiagRevealedStrip { region, range });
+        }
+    }
+
+    /// The exact pixel rectangle handed to `Painter::push_clip` for strip
+    /// painting — the effective grid clip, recorded at the call site.
+    pub(crate) fn diag_blit_clip(&self, clip: PixelRect) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        if let Some(blit) = &mut capture.blit {
+            blit.clip = clip;
+        }
+    }
+
+    pub(crate) fn diag_paint_counts(&self, rows: usize, cells: usize) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        capture.paint_counts.rows += rows;
+        capture.paint_counts.cells += cells;
+    }
+
     /// Runtime switch. Disabling drops the retained published snapshot so
     /// the web facade's `frameDiagnostics()` returns `undefined`.
     pub(crate) fn set_diag_enabled(&self, enabled: bool) {
@@ -541,5 +633,24 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
     /// demand only.
     pub(crate) fn last_diag(&self) -> Option<FrameDiagnostics> {
         self.diag.published.borrow().clone()
+    }
+}
+
+/// Logical origin delta of the scroll-band BottomRight segment along the
+/// given axis (`true` = rows). Zero when either side lacks the segment —
+/// the blit result tag still carries the real fallback cause.
+fn scroll_delta(previous: GridLayout, candidate: GridLayout, rows: bool) -> i32 {
+    let origin = |layout: GridLayout| {
+        layout
+            .segments()
+            .find(|segment| segment.region() == PaneRegion::BottomRight)
+            .map(|segment| {
+                let range = segment.range();
+                if rows { range.r1 } else { range.c1 }
+            })
+    };
+    match (origin(previous), origin(candidate)) {
+        (Some(before), Some(after)) => after - before,
+        _ => 0,
     }
 }

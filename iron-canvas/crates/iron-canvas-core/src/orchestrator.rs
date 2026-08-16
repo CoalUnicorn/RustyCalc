@@ -58,7 +58,9 @@ use crate::render_overlays::RenderOverlays;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diag::DiagDeltaKind;
 #[cfg(feature = "dev-diagnostics")]
-use crate::renderer::diag::{DiagCacheResolution, DiagPaintedLayers, FrameDiagnostics};
+use crate::renderer::diag::{
+    DiagBlitResultTag, DiagCacheResolution, DiagPaintedLayers, FrameDiagnostics,
+};
 use crate::renderer::{GridCacheCommit, GridRenderer, OverlayRenderer};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
@@ -1557,7 +1559,17 @@ where
                     outcome: FrameOutcome::Painted,
                 })
             }
-            Err(prev) => self.paint_fresh_fallback(model, inputs, work, prev),
+            Err(prev) => {
+                #[cfg(feature = "dev-diagnostics")]
+                self.grid.renderer.diag_blit(
+                    &plan,
+                    DiagBlitResultTag::FreshFallback,
+                    None,
+                    None,
+                    prev.grid_layout(),
+                );
+                self.paint_fresh_fallback(model, inputs, work, prev)
+            }
         }
     }
 

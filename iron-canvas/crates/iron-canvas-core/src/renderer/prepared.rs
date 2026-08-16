@@ -17,7 +17,9 @@ use crate::renderer::cell::fingerprint::{
     StripFingerprintSource,
 };
 #[cfg(feature = "dev-diagnostics")]
-use crate::renderer::diag::DiagFetchPurpose;
+use crate::renderer::diag::{
+    DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose, DiagFingerprintActionTag,
+};
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
@@ -333,6 +335,8 @@ impl<P: Painter> RendererCore<P> {
         }
 
         if layout.segments().next().is_none() {
+            #[cfg(feature = "dev-diagnostics")]
+            self.diag_cache_planned(DiagCacheActionTag::Reset);
             return Some(PreparedGrid::Full {
                 layout,
                 segments,
@@ -353,6 +357,8 @@ impl<P: Painter> RendererCore<P> {
         } else {
             (RepaintPlan::Full, None)
         };
+        #[cfg(feature = "dev-diagnostics")]
+        self.diag_cache_planned(DiagCacheActionTag::Replace);
         Some(PreparedGrid::Full {
             layout,
             segments,
@@ -423,6 +429,8 @@ impl<P: Painter> RendererCore<P> {
                 });
             }
         }
+        #[cfg(feature = "dev-diagnostics")]
+        self.diag_cache_planned(DiagCacheActionTag::Splice);
         Some(PreparedGrid::Damage {
             layout,
             strips,
@@ -442,6 +450,14 @@ impl<P: Painter> RendererCore<P> {
         let transition = self.grid_cache.classify_layout(candidate);
         let GridLayoutTransition::Shift { axis } = transition else {
             self.trace_blit_fallback(self.grid_cache.layout().is_none());
+            #[cfg(feature = "dev-diagnostics")]
+            self.diag_blit(
+                plan,
+                DiagBlitResultTag::GridFallback,
+                Some(self.grid_cache.layout().is_none()),
+                self.grid_cache.layout(),
+                candidate,
+            );
             return self.prepare_full_grid(model, frame);
         };
         let same_axis = matches!(
@@ -450,6 +466,14 @@ impl<P: Painter> RendererCore<P> {
         );
         if !same_axis || self.grid_cache.buffer_truth() != BufferTruth::Valid {
             self.trace_blit_fallback(self.grid_cache.layout().is_none());
+            #[cfg(feature = "dev-diagnostics")]
+            self.diag_blit(
+                plan,
+                DiagBlitResultTag::GridFallback,
+                Some(self.grid_cache.layout().is_none()),
+                self.grid_cache.layout(),
+                candidate,
+            );
             return self.prepare_full_grid(model, frame);
         }
         let previous = self
@@ -462,6 +486,14 @@ impl<P: Painter> RendererCore<P> {
             // safe recovery; treating this as a bridge hold would retry the
             // same impossible plan indefinitely.
             self.trace_blit_fallback(false);
+            #[cfg(feature = "dev-diagnostics")]
+            self.diag_blit(
+                plan,
+                DiagBlitResultTag::GridFallback,
+                Some(false),
+                Some(previous),
+                candidate,
+            );
             return self.prepare_full_grid(model, frame);
         };
         let mut address_strips: [Option<PreparedStrip>; 2] = std::array::from_fn(|_| None);
@@ -485,6 +517,14 @@ impl<P: Painter> RendererCore<P> {
                         .park_prepare_scratch(prepared.region, prepared.fetched);
                 }
                 self.trace_frame_held();
+                #[cfg(feature = "dev-diagnostics")]
+                self.diag_blit(
+                    plan,
+                    DiagBlitResultTag::HeldPreflight,
+                    None,
+                    Some(previous),
+                    candidate,
+                );
                 return None;
             }
             address_strips[index] = Some(PreparedStrip {
@@ -519,6 +559,20 @@ impl<P: Painter> RendererCore<P> {
         } else {
             PreparedFingerprintUpdate::MarkStale
         };
+        #[cfg(feature = "dev-diagnostics")]
+        {
+            self.diag_blit(
+                plan,
+                DiagBlitResultTag::Shifted,
+                None,
+                Some(previous),
+                candidate,
+            );
+            for strip in address_strips.iter().flatten() {
+                self.diag_blit_revealed(strip.region, strip.range);
+            }
+            self.diag_cache_planned(DiagCacheActionTag::Shift);
+        }
         Some(PreparedGrid::Blit {
             layout: candidate,
             address_strips,
@@ -545,6 +599,8 @@ impl<P: Painter> RendererCore<P> {
                 cache_action,
             } => {
                 if matches!(cache_action, GridCacheAction::Reset) {
+                    #[cfg(feature = "dev-diagnostics")]
+                    self.diag_fingerprint_action(DiagFingerprintActionTag::Reset);
                     return GridCacheCommit::Reset;
                 }
                 let GridCacheAction::Replace {
@@ -582,6 +638,35 @@ impl<P: Painter> RendererCore<P> {
                         },
                     );
                 }
+                #[cfg(feature = "dev-diagnostics")]
+                {
+                    self.diag_fingerprint_action(DiagFingerprintActionTag::Install);
+                    let mut rows = 0usize;
+                    let mut cells = 0usize;
+                    for grid_segment in layout.segments() {
+                        let range = grid_segment.range();
+                        let cols = (range.c2 - range.c1 + 1).max(0) as usize;
+                        match &repaint.plan {
+                            RepaintPlan::Skip => {}
+                            RepaintPlan::Full => {
+                                rows += (range.r2 - range.r1 + 1).max(0) as usize;
+                                cells += FetchedCells::addressed_cells(range);
+                            }
+                            RepaintPlan::Rows(spans) => {
+                                for span in spans {
+                                    let r1 = span.r1.max(range.r1);
+                                    let r2 = span.r2.min(range.r2);
+                                    if r1 <= r2 {
+                                        let span_rows = (r2 - r1 + 1) as usize;
+                                        rows += span_rows;
+                                        cells += span_rows * cols;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    self.diag_paint_counts(rows, cells);
+                }
                 GridCacheCommit::Replace {
                     layout,
                     segments: std::array::from_fn(|index| {
@@ -608,6 +693,19 @@ impl<P: Painter> RendererCore<P> {
                 self.trace_grid(GridVerdict::Strip);
                 #[cfg(feature = "dev-diagnostics")]
                 self.diag_repaint(GridVerdict::Strip, None, &[]);
+                #[cfg(feature = "dev-diagnostics")]
+                {
+                    self.diag_fingerprint_action(DiagFingerprintActionTag::MarkStale);
+                    let rows = strips
+                        .iter()
+                        .map(|strip| (strip.range.r2 - strip.range.r1 + 1) as usize)
+                        .sum();
+                    let cells = strips
+                        .iter()
+                        .map(|strip| FetchedCells::addressed_cells(strip.range))
+                        .sum();
+                    self.diag_paint_counts(rows, cells);
+                }
                 GridCacheCommit::Splice {
                     layout,
                     strips,
@@ -631,6 +729,8 @@ impl<P: Painter> RendererCore<P> {
                 };
                 debug_assert_eq!(layout, candidate);
                 self.painter.push_clip(pixel_clip);
+                #[cfg(feature = "dev-diagnostics")]
+                self.diag_blit_clip(pixel_clip);
                 for strip in address_strips.iter_mut().flatten() {
                     paint_strip(self, frame, strip.region, strip.range, &mut strip.fetched);
                 }
@@ -638,6 +738,24 @@ impl<P: Painter> RendererCore<P> {
                 self.trace_grid(GridVerdict::Strip);
                 #[cfg(feature = "dev-diagnostics")]
                 self.diag_repaint(GridVerdict::Strip, None, &[]);
+                #[cfg(feature = "dev-diagnostics")]
+                {
+                    self.diag_fingerprint_action(match &fingerprint {
+                        PreparedFingerprintUpdate::Install(_) => DiagFingerprintActionTag::Install,
+                        PreparedFingerprintUpdate::MarkStale => DiagFingerprintActionTag::MarkStale,
+                    });
+                    let rows = address_strips
+                        .iter()
+                        .flatten()
+                        .map(|strip| (strip.range.r2 - strip.range.r1 + 1) as usize)
+                        .sum();
+                    let cells = address_strips
+                        .iter()
+                        .flatten()
+                        .map(|strip| FetchedCells::addressed_cells(strip.range))
+                        .sum();
+                    self.diag_paint_counts(rows, cells);
+                }
                 GridCacheCommit::Shift {
                     previous,
                     layout,
