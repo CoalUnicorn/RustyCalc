@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-16
 
-**Status:** Draft
+**Status:** Implemented (2026-08-16)
 
 **Scope:** dev-only inspection of live `iron-canvas` frame planning, grid layout,
 fetching, repaint selection, and cache transitions
@@ -357,17 +357,27 @@ segment.
   inspection.
 - Expanding the recorder schema before live diagnostic fields prove useful.
 
-## Questions to settle when preparing the plan
+## Questions settled at plan time
 
-1. Should the first UI expose the full JSON only, or render geometry, fetch,
-   repaint, and cache sections?
-2. Is painted row/cell counting already available at a clean renderer boundary,
-   or should it wait for a separate `Painter` counting decorator?
-3. Which cache truth states need public diagnostic names without exposing
-   internal buffer ownership?
-4. Should a later recorder version embed this schema, or store only a smaller
-   projection of fields proven useful by Task 4?
+1. First UI: expandable full-JSON view + copy action in the existing Perf
+   panel; one-line trace stays visible. Structured section rendering
+   deferred until Task 4 proves which fields matter.
+2. Painted row/cell counts are derived at the renderer boundary
+   (`execute_prepared_grid`) from prepared ranges — no per-cell overhead.
+   Primitive-op counts deferred to a `Painter` counting decorator.
+3. Cache truth uses diagnostic-only names (`DiagBufferTruth`,
+   `DiagFingerprintTruth`); internal buffer ownership stays private.
+4. No recorder schema change; the `.icr` v5 schema is untouched until live
+   probes prove the useful fields.
 
-Recommended defaults are: last snapshot only, runtime-disabled, JSON plus a
-small expandable view, row/cell counts before primitive-operation counts, and
-no recorder schema change in the first slice.
+## Review-driven additions
+
+- Segment attribution uses an attempt-scoped, range-only host probe
+  (`setFrameDiagnosticsProbe`): the snapshot reports which planned
+  segments contain it. It never enters planner eligibility.
+- Cache resolution is transaction outcome, not cache-work presence:
+  committed Overlay frames report `committed`.
+- Fingerprint reasons are absent unless the comparison ran; rebuilds use
+  `rebuildReason` as their authority.
+- The effective blit clip (`push_clip` argument) is recorded separately
+  from the repaint band.

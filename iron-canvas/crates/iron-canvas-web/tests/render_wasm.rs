@@ -2593,3 +2593,369 @@ struct DiagSegmentMirror {
     region: String,
     cells: usize,
 }
+
+// ==============================================================================
+// Stage 6, Task 7: dev-diagnostics browser scenarios.
+//
+// These drive the structured capture pipeline end to end through the web
+// facade. The assertions are deterministic, not adjust-to-observed: a freeze
+// toggle rebuilds Fresh with a named reason and exact segment accounting;
+// isolated edits land in exactly the probed segment and either skip with a
+// named fingerprint reason or repaint with changed rows intersecting the
+// probe; deep scrolls expose exact blit geometry. Raster truth stays under
+// the retained-pixel gates above — the snapshot explains, those prove.
+// ==============================================================================
+
+// Dev-diagnostics wire mirrors for scenario assertions. Field names are
+// pinned by the native wire conversion test in iron-canvas-web/src/wire.rs;
+// keep this mirror in exact correspondence with it.
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)] // mirrors carry the full wire shape; each scenario asserts a subset
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagScenario {
+    schema_version: u8,
+    attempt_seq: u64,
+    rebuild_reason: Option<String>,
+    outcome: FrameOutcomeMirror,
+    probe: Option<RcRangeScenario>,
+    probe_segments: Vec<String>,
+    geometry: Option<DiagGeometryScenario>,
+    fetch: DiagFetchScenario,
+    repaint: DiagRepaintScenario,
+    cache: DiagCacheScenario,
+    blit: Option<DiagBlitScenario>,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagGeometryScenario {
+    top_row: i32,
+    left_column: i32,
+    frozen_rows: i32,
+    frozen_cols: i32,
+    segments: Vec<DiagSegmentScenario>,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagSegmentScenario {
+    region: String,
+    range: RcRangeScenario,
+    cells: usize,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+struct RcRangeScenario {
+    r1: i32,
+    c1: i32,
+    r2: i32,
+    c2: i32,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagFetchScenario {
+    batches: usize,
+    addressed_cells: usize,
+    logical_slots: usize,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagRepaintScenario {
+    verdict: Option<VerdictScenario>,
+    reason: Option<String>,
+    changed_rows: Vec<RowSpanScenario>,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)]
+#[derive(serde::Deserialize, Debug)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum VerdictScenario {
+    Skip,
+    Rows { spans: u8, rows: u16 },
+    Full,
+    Strip,
+    Held,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize)]
+struct RowSpanScenario {
+    r1: i32,
+    r2: i32,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagCacheScenario {
+    resolution: String,
+    #[serde(rename = "committedBefore")]
+    committed_before: Option<TruthScenario>,
+    #[serde(rename = "committedAfter")]
+    committed_after: TruthScenario,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TruthScenario {
+    layout: Option<serde_json::Value>,
+    buffer_truth: String,
+    fingerprint_truth: String,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagBlitScenario {
+    axis: String,
+    delta: i32,
+    src: RectScenario,
+    dst: RectScenario,
+    clip: RectScenario,
+    strip: RectScenario,
+    result: String,
+    cold_cache: Option<bool>,
+    revealed: Vec<DiagRevealedScenario>,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize)]
+struct RectScenario {
+    width: f64,
+    height: f64,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagRevealedScenario {
+    region: String,
+    range: RcRangeScenario,
+}
+
+#[cfg(feature = "dev-tools")]
+fn diag_snapshot(canvas: &IronCanvas) -> DiagScenario {
+    let value = canvas.frame_diagnostics();
+    assert!(
+        !value.is_undefined(),
+        "frameDiagnostics must publish while enabled"
+    );
+    serde_wasm_bindgen::from_value(value).expect("snapshot parses")
+}
+
+#[cfg(feature = "dev-tools")]
+/// `stable_canvas_over` with structured diagnostics enabled BEFORE the
+/// cold Fresh paint, so the first published snapshot exists on return.
+/// Freeze and scroll controls come from the caller's `StableViewFixture`.
+fn stable_diag_canvas_over(
+    store: FixtureStore,
+    view: StableViewFixture,
+) -> (IronCanvas, HtmlCanvasElement, HtmlCanvasElement) {
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay.clone()) else {
+        panic!("create stable-view IronCanvas");
+    };
+    let Ok(content) = JsBackedModel::try_from_js_value(make_fixture_model(store)) else {
+        panic!("stable-view fixture content model passes the duck test");
+    };
+    canvas.set_model(Rc::new(StableFixtureModel { content, view }));
+    canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);
+    canvas.set_frame_diagnostics_enabled(true);
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    (canvas, grid, overlay)
+}
+
+/// The B3 freeze-toggle observation: a freeze change is a `Fresh` rebuild
+/// with `RebuildReason::Freeze`, and the snapshot must attribute the
+/// addressed-cell count to exact before/after segments.
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen_test]
+fn stage6_diag_freeze_toggle_explains_segments() {
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(1, 1);
+    let (mut canvas, _grid, _overlay) = stable_diag_canvas_over(store, view.clone());
+
+    // Baseline: one unfrozen BottomRight segment.
+    let before = diag_snapshot(&canvas);
+    assert_eq!(before.geometry.as_ref().unwrap().segments.len(), 1);
+
+    // Activate a 2x1 freeze: geometry work forces Fresh with reason Freeze.
+    view.frozen_rows.set(2);
+    view.frozen_cols.set(1);
+    canvas.request_repaint();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+
+    let after = diag_snapshot(&canvas);
+    assert_eq!(after.rebuild_reason.as_deref(), Some("freeze"));
+    let geo = after.geometry.as_ref().unwrap();
+    assert_eq!(geo.frozen_rows, 2);
+    assert_eq!(geo.frozen_cols, 1);
+    assert_eq!(geo.segments.len(), 4);
+    // Every addressed cell the fetch charged is inside exactly one segment.
+    let cells: usize = geo.segments.iter().map(|s| s.cells).sum();
+    assert_eq!(cells, after.fetch.addressed_cells);
+    // And the trace line's `fetched=` is exactly 4x the addressed cells.
+    assert_eq!(after.fetch.logical_slots, 4 * cells);
+    // A rebuild's Full verdict must NOT fabricate a fingerprint reason.
+    assert_eq!(after.repaint.reason, None);
+
+    // Deactivate: back to one segment, still Fresh/Freeze.
+    view.frozen_rows.set(0);
+    view.frozen_cols.set(0);
+    canvas.request_repaint();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let off = diag_snapshot(&canvas);
+    assert_eq!(off.rebuild_reason.as_deref(), Some("freeze"));
+    assert_eq!(off.geometry.as_ref().unwrap().segments.len(), 1);
+}
+
+/// One edit per real segment, attributed by the probe address: the probe
+/// must land in exactly the intended segment, an identical-value edit must
+/// `Skip` with `fingerprintsEqual`, and a real change must repaint with
+/// `changedRows` intersecting the probe.
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen_test]
+fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(1, 1).with_frozen(2, 1);
+    let (mut canvas, _grid, _overlay) = stable_diag_canvas_over(store.clone(), view.clone());
+
+    let snapshot = diag_snapshot(&canvas);
+    let geo = snapshot.geometry.as_ref().unwrap();
+    assert_eq!(geo.segments.len(), 4);
+    let cells: usize = geo.segments.iter().map(|s| s.cells).sum();
+    assert_eq!(cells, snapshot.fetch.addressed_cells);
+
+    for (region, row, col) in [
+        ("topLeft", 1, 1),
+        ("topRight", 1, 4),
+        ("bottomLeft", 5, 1),
+        ("bottomRight", 5, 4),
+    ] {
+        // Identical-value edit: the fixture seeds `r{row}c{col}`, so
+        // writing the same string back must compare equal and skip.
+        canvas.set_frame_diagnostics_probe(row, col, row, col);
+        stage6_set_value(&store, row, col, &format!("r{row}c{col}"));
+        canvas.mark_content_dirty();
+        assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+        let diag = diag_snapshot(&canvas);
+        assert_eq!(
+            diag.probe,
+            Some(RcRangeScenario { r1: row, c1: col, r2: row, c2: col })
+        );
+        assert_eq!(
+            diag.probe_segments,
+            vec![region.to_string()],
+            "the probe must belong to exactly the intended segment"
+        );
+        assert!(
+            matches!(diag.repaint.verdict, Some(VerdictScenario::Skip)),
+            "identical-value edit in {region} must skip; got {:?}",
+            diag.repaint.verdict
+        );
+        assert_eq!(
+            diag.repaint.reason.as_deref(),
+            Some("fingerprintsEqual"),
+            "a skip must name its reason"
+        );
+
+        // Real value change: repaint must report rows intersecting the
+        // probe, and the probe attribution must stay exact.
+        canvas.set_frame_diagnostics_probe(row, col, row, col);
+        stage6_set_value(&store, row, col, &format!("{region}-changed"));
+        canvas.mark_content_dirty();
+        assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+        let diag = diag_snapshot(&canvas);
+        assert_eq!(diag.probe_segments, vec![region.to_string()]);
+        assert!(
+            !matches!(diag.repaint.verdict, Some(VerdictScenario::Skip)),
+            "a real change in {region} must not skip"
+        );
+        assert_eq!(diag.repaint.reason.as_deref(), Some("changedRows"));
+        assert!(
+            diag.repaint
+                .changed_rows
+                .iter()
+                .any(|span| span.r1 <= row && row <= span.r2),
+            "changed rows must include the probed row in {region}"
+        );
+    }
+}
+
+/// Deep row and column scrolls must expose exact blit geometry: axis,
+/// logical delta, effective clip, revealed strips, and a named result.
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen_test]
+fn stage6_diag_deep_scrolls_expose_blit_clips() {
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(1, 1);
+    let (mut canvas, _grid, _overlay) = stable_diag_canvas_over(store, view.clone());
+
+    // Row scroll: origin 1 -> 12, a qualifying single-axis shift.
+    stage6_scroll_to(&mut canvas, &view.top_row, 12);
+    let row_blit = diag_snapshot(&canvas).blit.expect("row scroll blits");
+    assert_eq!(row_blit.axis, "row");
+    assert_eq!(row_blit.delta, 11);
+    assert_eq!(row_blit.result, "shifted");
+    assert!(row_blit.cold_cache.is_none());
+    // The revealed address band is the repaint band the renderer actually
+    // prepared: `revealed_strip` carries the boundary-overlap row and
+    // `widen_to_pixel_clip` may add one partial row. It must therefore
+    // cover AT LEAST the logical delta; the exact shift is pinned in
+    // pixels below.
+    let revealed_rows: i32 = row_blit
+        .revealed
+        .iter()
+        .map(|s| s.range.r2 - s.range.r1 + 1)
+        .sum();
+    assert!(
+        revealed_rows >= row_blit.delta,
+        "revealed band must cover at least the logical delta"
+    );
+    // Exact shift in pixels: strip height == delta rows x fixed row height.
+    assert_eq!(row_blit.strip.height, f64::from(row_blit.delta) * STAGE6_ROW_H);
+    // Effective clip equals the repaint band (finalized blit work hands
+    // plan.pixel_strip to push_clip) and is a nonzero band.
+    assert_eq!(row_blit.clip.width, row_blit.strip.width);
+    assert_eq!(row_blit.clip.height, row_blit.strip.height);
+    assert!(row_blit.clip.width > 0.0 && row_blit.clip.height > 0.0);
+    assert_ne!(row_blit.src.width, 0.0);
+
+    // Column scroll: origin 1 -> 8.
+    view.left_column.set(8);
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let col_blit = diag_snapshot(&canvas).blit.expect("column scroll blits");
+    assert_eq!(col_blit.axis, "column");
+    assert_eq!(col_blit.delta, 7);
+    assert_eq!(col_blit.result, "shifted");
+    let revealed_cols: i32 = col_blit
+        .revealed
+        .iter()
+        .map(|s| s.range.c2 - s.range.c1 + 1)
+        .sum();
+    assert!(
+        revealed_cols >= col_blit.delta,
+        "revealed band must cover at least the logical delta"
+    );
+    assert_eq!(col_blit.strip.width, f64::from(col_blit.delta) * STAGE6_COL_W);
+}
