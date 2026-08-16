@@ -1,4 +1,4 @@
-<!-- last-verified-against: c52b63e (2026-08-16) -->
+<!-- last-verified-against: 9ac4149 (2026-08-16) -->
 <!-- working-tree-verified: 2026-08-16 -->
 <!-- covers: iron-canvas/crates/ iron-canvas/Cargo.toml .github/workflows/test.yml -->
 
