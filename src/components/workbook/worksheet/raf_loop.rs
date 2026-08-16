@@ -298,6 +298,33 @@ pub(super) fn install_raf_loop(
             app.perf.frame_trace.set(Some(format!("#{n} {trace}")));
         }
 
+        // Structured frame diagnostics: sample `frameDiagnostics()` only when
+        // the panel toggle enabled capture and this frame actually published
+        // a trace. The toggle path lives entirely in `install_diag_effect`
+        // (which owns the wake); this block only reads signals, so a paused
+        // loop stops sampling as soon as the toggle flips back off.
+        #[cfg(feature = "dev-tools")]
+        if let Some(app) = &app
+            && app.perf.diag_enabled.get_untracked()
+            && action.publish_trace
+        {
+            let json = canvas_handle.with_value(|slot| {
+                slot.as_ref().and_then(|ic| {
+                    let value = ic.frame_diagnostics();
+                    if value.is_undefined() {
+                        None
+                    } else {
+                        js_sys::JSON::stringify(&value)
+                            .ok()
+                            .and_then(|text| text.as_string())
+                    }
+                })
+            });
+            if let Some(json) = json {
+                app.perf.frame_diagnostics.set(Some(json));
+            }
+        }
+
         action.keep_alive
     };
 

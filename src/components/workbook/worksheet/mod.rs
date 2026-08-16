@@ -166,6 +166,7 @@ pub fn Worksheet() -> impl IntoView {
         dev_tools_effects::install_recording_effect(state, app, canvas_handle);
         dev_tools_effects::install_playback_effect(state, app, canvas_handle, poke.clone());
         dev_tools_effects::install_export_effect(state, app, canvas_handle);
+        dev_tools_effects::install_diag_effect(state, app, canvas_handle, poke.clone());
     }
 
     // mousedown: dispatches via IronCanvas::hit_test (canvas_handle owns the

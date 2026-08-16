@@ -33,6 +33,13 @@ pub struct PerfTimings {
     /// per frame, and an instrument that runs when nobody is watching taxes
     /// the timings it exists to explain.
     pub frame_trace: RwSignal<Option<String>>,
+    /// Authoritative canvas capture state, mirrored by the worksheet's
+    /// diagnostics Effect. The rAF loop reads it (untracked) to decide
+    /// whether to sample `frameDiagnostics()`.
+    pub diag_enabled: RwSignal<bool>,
+    /// JSON string of the last captured `IronCanvas.frameDiagnostics()`.
+    /// `None` until capture is enabled and a painted frame completes.
+    pub frame_diagnostics: RwSignal<Option<String>>,
 }
 
 impl PerfTimings {
@@ -48,6 +55,8 @@ impl PerfTimings {
             render_ms: RwSignal::new(Some(0.0)),
             last_formula: RwSignal::new(None),
             frame_trace: RwSignal::new(None),
+            diag_enabled: RwSignal::new(false),
+            frame_diagnostics: RwSignal::new(None),
         }
     }
 }

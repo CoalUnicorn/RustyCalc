@@ -8,7 +8,7 @@
 
 use leptos::prelude::*;
 
-use crate::app_state::{AppState, ExportCmd, PlaybackCmd, RecordingCmd};
+use crate::app_state::{AppState, DiagCmd, ExportCmd, PlaybackCmd, RecordingCmd};
 use crate::input::mouse::CanvasHandle;
 use crate::state::{StatusMessage, WorkbookState};
 
@@ -217,5 +217,39 @@ pub(super) fn install_export_effect(
             }
         });
         app.export_cmd.set(None);
+    });
+}
+
+/// Diagnostics dispatch — drains `app.diag_cmd` (Set(bool) from the
+/// PerfPanel toggle) onto the live `IronCanvas`, mirrors the authoritative
+/// state back into `app.perf.diag_enabled`, and pokes the one-shot rAF so
+/// a paused loop samples (or stops sampling) the new state on the next
+/// frame. Disabling also clears the retained JSON readout.
+pub(super) fn install_diag_effect(
+    state: WorkbookState,
+    app: AppState,
+    canvas_handle: CanvasHandle,
+    poke: impl Fn() + Clone + 'static,
+) {
+    Effect::new(move |_| {
+        let Some(cmd) = app.diag_cmd.get() else {
+            return;
+        };
+        let DiagCmd::Set(enabled) = cmd;
+        canvas_handle.update_value(|slot| {
+            let Some(ic) = slot.as_mut() else {
+                state
+                    .status
+                    .set(Some(StatusMessage::Error("canvas not ready".into())));
+                return;
+            };
+            ic.set_frame_diagnostics_enabled(enabled);
+        });
+        app.perf.diag_enabled.set(enabled);
+        if !enabled {
+            app.perf.frame_diagnostics.set(None);
+        }
+        app.diag_cmd.set(None);
+        poke();
     });
 }

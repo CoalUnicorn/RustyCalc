@@ -1,6 +1,12 @@
 use leptos::prelude::*;
 
+#[cfg(feature = "dev-tools")]
+use crate::app_state::DiagCmd;
 use crate::app_state::{AppState, ExportCmd, RecordingCmd};
+#[cfg(feature = "dev-tools")]
+use crate::components::ui::popover::Popover;
+#[cfg(feature = "dev-tools")]
+use wasm_bindgen::JsCast;
 
 /// Displays the last commit->render timing breakdown.
 ///
@@ -56,6 +62,109 @@ pub fn PerfPanel() -> impl IntoView {
     let on_export_svg = move |_| app.export_cmd.set(Some(ExportCmd::Svg));
     let on_export_pdf = move |_| app.export_cmd.set(Some(ExportCmd::Pdf));
 
+    #[cfg(feature = "dev-tools")]
+    let diag_open = RwSignal::new(false);
+    #[cfg(feature = "dev-tools")]
+    let diag_pos = RwSignal::new((0, 0));
+    #[cfg(feature = "dev-tools")]
+    let diag_json = move || app.perf.frame_diagnostics.get();
+
+    #[cfg(feature = "dev-tools")]
+    let on_toggle_diag = move |ev: web_sys::MouseEvent| {
+        let pos = ev
+            .current_target()
+            .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
+            .map(|el| {
+                let rect = el.get_bounding_client_rect();
+                (rect.left() as i32, rect.top() as i32)
+            })
+            .unwrap_or((0, 0));
+        diag_pos.set(pos);
+        let next = !app.perf.diag_enabled.get_untracked();
+        diag_open.set(next);
+        app.diag_cmd.set(Some(DiagCmd::Set(next)));
+    };
+    #[cfg(feature = "dev-tools")]
+    let on_copy_json = move |_| {
+        if let Some(json) = app.perf.frame_diagnostics.get_untracked() {
+            // Best-effort clipboard write. `Clipboard::write_text` returns
+            // the `Promise` directly (no synchronous `Result` in web-sys),
+            // so failure (denied permissions, sandboxed iframe) surfaces as
+            // a promise rejection here. The text stays visible as a manual
+            // fallback.
+            let promise = window().navigator().clipboard().write_text(&json);
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise).await {
+                    web_sys::console::warn_1(
+                        &format!("[rustycalc diag] clipboard write failed: {e:?}").into(),
+                    );
+                }
+            });
+        }
+    };
+
+    // Forcing capture off on unmount: closing the Perf panel (or the
+    // worksheet) must not leave detailed capture active — it would
+    // contaminate later timing samples.
+    #[cfg(feature = "dev-tools")]
+    on_cleanup(move || app.diag_cmd.set(Some(DiagCmd::Set(false))));
+
+    // The leptos `view!` macro does not support `#[cfg]` on child nodes (the
+    // attribute is dropped, not applied), so the two diag fragments are built
+    // in these closures — where `#[cfg]` is plain Rust — and spliced through
+    // always-present dynamic children. In prod the body collapses to `None`
+    // (renders nothing), keeping every diag reference out of that build.
+    let diag_strip = move || {
+        #[cfg(feature = "dev-tools")]
+        {
+            Some(
+                view! {
+                    <span class="pp-sep">"|"</span>
+                    <button
+                        class="pp-diag-btn"
+                        class:active=move || app.perf.diag_enabled.get()
+                        title="Capture structured frame diagnostics (frameDiagnostics)"
+                        on:click=on_toggle_diag
+                        // Stop pointerdown so the Popover's click-outside
+                        // does not immediately re-close on the same event.
+                        on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
+                    >
+                        "◉ Diag"
+                    </button>
+                }
+                .into_any(),
+            )
+        }
+        #[cfg(not(feature = "dev-tools"))]
+        {
+            None::<AnyView>
+        }
+    };
+    let diag_popover = move || {
+        #[cfg(feature = "dev-tools")]
+        {
+            Some(
+                view! {
+                    <Popover
+                        open=diag_open.read_only()
+                        set_open=diag_open.write_only()
+                        pos=diag_pos.read_only()
+                        above_anchor=true
+                        class="pp-diag-popover"
+                    >
+                        <pre class="pp-diag-json">{move || diag_json().unwrap_or_default()}</pre>
+                        <button class="pp-diag-copy" on:click=on_copy_json>"Copy JSON"</button>
+                    </Popover>
+                }
+                .into_any(),
+            )
+        }
+        #[cfg(not(feature = "dev-tools"))]
+        {
+            None::<AnyView>
+        }
+    };
+
     view! {
         <div class="pp">
             <span class="pp-label">"⏱ Perf"</span>
@@ -94,6 +203,7 @@ pub fn PerfPanel() -> impl IntoView {
                     {t}
                 </span>
             })}
+            {diag_popover}
             {recording_supported.then(|| view! {
                 <span class="pp-sep">"|"</span>
                 <button
@@ -108,6 +218,7 @@ pub fn PerfPanel() -> impl IntoView {
                 {move || app.recording_active.get().then(|| view! {
                     <span class="pp-recording-label">"Recording..."</span>
                 })}
+                {diag_strip}
                 <span class="pp-sep">"|"</span>
                 <button
                     class="pp-export-btn"
