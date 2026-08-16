@@ -13,6 +13,7 @@ dev-tools = [
     "dep:iron-canvas-recorder",
     "dep:serde_json",
     "iron-canvas-core/surface-introspection",
+    "iron-canvas-core/dev-diagnostics",
 ]
 pdf = ["iron-canvas-export/pdf"]
 

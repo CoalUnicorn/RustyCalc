@@ -26,6 +26,15 @@ pub use orchestrator::{
     FrameOutcome, FrameTrace, GridVerdict, Orchestrator, PaintRegimeTag, PaintResult,
 };
 
+#[cfg(feature = "dev-diagnostics")]
+pub use renderer::diag::{
+    DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache, DiagCacheActionTag,
+    DiagCacheResolution, DiagCacheTruth, DiagDeltaKind, DiagFetch, DiagFetchPurpose,
+    DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth, DiagGeometry,
+    DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason, DiagRevealedStrip,
+    DiagSegment, FrameDiagnostics,
+};
+
 pub use render_overlays::RenderOverlays;
 
 pub use decoration::{DecorationId, Layer};

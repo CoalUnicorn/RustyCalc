@@ -56,6 +56,8 @@ use crate::painter::BlitPainter;
 use crate::pending_work::{ContentWork, PendingWork, RowSpan, WorkFlags};
 use crate::render_overlays::RenderOverlays;
 use crate::renderer::{GridCacheCommit, GridRenderer, OverlayRenderer};
+#[cfg(feature = "dev-diagnostics")]
+use crate::renderer::diag::{DiagCacheResolution, DiagPaintedLayers, FrameDiagnostics};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -691,6 +693,22 @@ where
         self.last_trace
     }
 
+    /// Enable or disable structured frame diagnostics (dev builds only).
+    /// Disabling clears the retained snapshot; `frame_diagnostics()`
+    /// returns `None` until an enabled attempt completes.
+    #[cfg(feature = "dev-diagnostics")]
+    pub fn set_frame_diagnostics_enabled(&mut self, enabled: bool) {
+        self.grid.renderer.set_diag_enabled(enabled);
+    }
+
+    /// Last completed attempt's structured diagnostics, or `None` when
+    /// capture is disabled or no enabled attempt has completed. Dev
+    /// builds only.
+    #[cfg(feature = "dev-diagnostics")]
+    pub fn frame_diagnostics(&self) -> Option<FrameDiagnostics> {
+        self.grid.renderer.last_diag()
+    }
+
     /// Regime stamped by the last `paint_if_dirty`. `None` before the
     /// first paint. Read by the recording pipeline.
     pub fn last_regime(&self) -> Option<PaintRegimeTag> {
@@ -1128,6 +1146,8 @@ where
         // a held attempt cannot inherit a grid verdict, fetch counts, or blit
         // fallback details from the previously painted frame.
         self.grid.renderer.reset_trace();
+        #[cfg(feature = "dev-diagnostics")]
+        self.grid.renderer.diag_reset_capture();
 
         let model_dyn: &dyn CanvasModel = model.as_ref();
 
@@ -1299,6 +1319,16 @@ where
         }
         self.install_frame(frame);
 
+        // (dev only) painted-layer facts for the diagnostics snapshot must
+        // be captured before the common overlay step consumes overlay_ctx.
+        #[cfg(feature = "dev-diagnostics")]
+        let grid_painted = painted_layers.is_some_and(|layers| layers.grid);
+        #[cfg(feature = "dev-diagnostics")]
+        let overlay_painted = painted_layers.is_some()
+            && overlay_ctx
+                .as_ref()
+                .is_some_and(|ctx| matches!(ctx.work, OverlayWork::Paint));
+
         if let Some(layers) = painted_layers {
             if let Some(ctx) = overlay_ctx {
                 // Committed attempts refresh committed selection/
@@ -1371,6 +1401,30 @@ where
         trace.work = work_flags;
         trace.outcome = frame_outcome;
         self.last_trace = trace;
+
+        // 5b. publish the structured diagnostics snapshot. Read after the
+        //     cache commit was installed, so `committed_after` reflects the
+        //     committed truth. Resolution comes from the transaction
+        //     outcome, never from the presence of a grid cache commit: an
+        //     Overlay regime commits with `cache_commit: None`.
+        #[cfg(feature = "dev-diagnostics")]
+        self.grid.renderer.publish_diag(
+            self.attempt_seq,
+            selected,
+            work_flags,
+            effective,
+            committed_seq,
+            frame_outcome,
+            DiagPaintedLayers {
+                grid: grid_painted,
+                overlay: overlay_painted,
+            },
+            if frame_outcome == FrameOutcome::Painted {
+                DiagCacheResolution::Committed
+            } else {
+                DiagCacheResolution::HeldForRetry
+            },
+        );
 
         // 6. return PaintResult::Painted or PaintResult::Retry.
         result

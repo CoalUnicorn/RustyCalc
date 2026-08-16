@@ -13,6 +13,11 @@ crate-type = ["rlib"]
 # integration tests (via the self dev-dependency below) and by
 # `iron-canvas-web`'s `dev-tools` feature (recording + playback).
 surface-introspection = []
+# Structured live-frame diagnostic capture. Dev-only: enabled by
+# iron-canvas-web's `dev-tools` and by this crate's self dev-dependency
+# below. Off in production builds — the renderer/orchestrator retain no
+# diagnostic state or allocation when it is disabled.
+dev-diagnostics = []
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
@@ -24,4 +29,4 @@ iron-canvas-recorder = { path = "../iron-canvas-recorder" }
 # `tests/` any other way (`#[cfg(test)]` doesn't reach the lib build).
 # This turns `surface-introspection` on for the integration tests that need
 # it, while the plain `cargo build` keeps it off.
-iron-canvas-core = { path = ".", features = ["surface-introspection"] }
+iron-canvas-core = { path = ".", features = ["surface-introspection", "dev-diagnostics"] }

@@ -50,6 +50,13 @@ pub(crate) struct FingerprintState {
     truth: Cell<FingerprintTruth>,
 }
 
+impl FingerprintState {
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) fn truth(&self) -> FingerprintTruth {
+        self.truth.get()
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum GridLayoutTransition {
     Exact,

@@ -94,7 +94,7 @@ pub struct Span {
 /// Carries no payload - the
 /// row/column index travels as a separate parameter so the same enum value
 /// can be used across call sites that don't care about a specific index.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Axis {
     Row,
     Column,

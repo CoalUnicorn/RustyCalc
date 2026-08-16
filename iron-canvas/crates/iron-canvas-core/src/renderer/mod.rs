@@ -66,6 +66,8 @@ pub mod cell;
 pub mod cf_types;
 pub mod frame;
 pub mod prepared;
+#[cfg(feature = "dev-diagnostics")]
+pub mod diag;
 // `renderer/overlay/` has moved to `src/decoration/`. Each decoration is
 // a struct that impls `Layer`; the orchestration that used to live in
 // `RendererCore::render_overlays` is now in
@@ -147,6 +149,12 @@ pub struct RendererCore<P: Painter> {
     /// on `&self` (the crate's paint-never-holds-`&mut` convention), and
     /// `FrameTrace` is `Copy`.
     trace: Cell<FrameTrace>,
+    /// Dev-only structured capture state. `pub(crate)` so the gated
+    /// capture methods in `renderer::diag` can read it; zero-size
+    /// contribution to production builds (feature-gated), and all writes
+    /// are no-ops while its `enabled` flag is false.
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) diag: diag::DiagState,
 }
 
 impl<P: Painter> RendererCore<P> {
@@ -247,6 +255,8 @@ impl<P: Painter> RendererCore<P> {
             font_intern: FontIntern::new(),
             color_intern: ColorIntern::new(),
             trace: Cell::new(FrameTrace::default()),
+            #[cfg(feature = "dev-diagnostics")]
+            diag: diag::DiagState::default(),
         }
     }
 
@@ -571,6 +581,45 @@ impl<P: Painter> GridRenderer<P> {
 
     pub fn trace(&self) -> FrameTrace {
         self.core.trace()
+    }
+
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) fn set_diag_enabled(&self, enabled: bool) {
+        self.core.set_diag_enabled(enabled);
+    }
+
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) fn last_diag(&self) -> Option<diag::FrameDiagnostics> {
+        self.core.last_diag()
+    }
+
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) fn diag_reset_capture(&self) {
+        self.core.diag_reset_capture();
+    }
+
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) fn publish_diag(
+        &self,
+        attempt_seq: u64,
+        selected: Option<crate::orchestrator::PaintRegimeTag>,
+        work: crate::pending_work::WorkFlags,
+        effective: Option<crate::orchestrator::PaintRegimeTag>,
+        committed_seq: Option<u64>,
+        outcome: FrameOutcome,
+        layers: diag::DiagPaintedLayers,
+        resolution: diag::DiagCacheResolution,
+    ) {
+        self.core.publish_diag(
+            attempt_seq,
+            selected,
+            work,
+            effective,
+            committed_seq,
+            outcome,
+            layers,
+            resolution,
+        );
     }
 
     pub fn for_layer(painter: Rc<P>) -> Self {
