@@ -13,8 +13,11 @@ use crate::renderer::blit_work;
 use crate::renderer::cache::BufferTruth;
 use crate::renderer::cell::PaneCells;
 use crate::renderer::cell::fingerprint::{
-    GridFingerprint, GridLayoutTransition, RepaintPlan, RowShiftIneligible, StripFingerprintSource,
+    GridFingerprint, GridLayoutTransition, RepaintPlan, RepaintReason, RowShiftIneligible,
+    StripFingerprintSource,
 };
+#[cfg(feature = "dev-diagnostics")]
+use crate::renderer::diag::DiagFetchPurpose;
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
@@ -201,6 +204,12 @@ pub(crate) enum PreparedFingerprintUpdate {
 pub(crate) struct PreparedRepaint {
     pub(crate) plan: RepaintPlan,
     pub(crate) candidate: GridFingerprint,
+    /// `Some` only when the fingerprint comparison ran. Fresh-built
+    /// geometry repaints `Full` without a comparison — its authority is
+    /// the attempt's `RebuildReason`, not a fingerprint branch. Read only
+    /// by the dev-diagnostics recorder; unread in feature-off builds.
+    #[cfg_attr(not(feature = "dev-diagnostics"), allow(dead_code))]
+    pub(crate) reason: Option<RepaintReason>,
 }
 
 pub(crate) struct SegmentData {
@@ -306,6 +315,8 @@ impl<P: Painter> RendererCore<P> {
             let scratch = self.grid_cache.take_prepare_scratch(region);
             let fetched = FetchedCells::fetch_into(model, frame.sheet, range, scratch);
             self.trace_fetch(range);
+            #[cfg(feature = "dev-diagnostics")]
+            self.diag_fetch(DiagFetchPurpose::FullSegment, Some(region), range);
             if fetched.has_bridge_failure() {
                 self.grid_cache.park_prepare_scratch(region, fetched);
                 for prepared in segments.into_iter().flatten() {
@@ -336,15 +347,20 @@ impl<P: Painter> RendererCore<P> {
             .grid_cache
             .fingerprint
             .build_candidate(layout, &fetched);
-        let plan = if frame.kind.reuses_slots() {
-            self.grid_cache.fingerprint.compare_to_painted(&candidate)
+        let (plan, reason) = if frame.kind.reuses_slots() {
+            let decision = self.grid_cache.fingerprint.compare_to_painted(&candidate);
+            (decision.plan, Some(decision.reason))
         } else {
-            RepaintPlan::Full
+            (RepaintPlan::Full, None)
         };
         Some(PreparedGrid::Full {
             layout,
             segments,
-            repaint: Some(PreparedRepaint { plan, candidate }),
+            repaint: Some(PreparedRepaint {
+                plan,
+                candidate,
+                reason,
+            }),
             cache_action: GridCacheAction::Replace { layout },
         })
     }
@@ -386,6 +402,12 @@ impl<P: Painter> RendererCore<P> {
                     self.take_strip_scratch(),
                 );
                 self.trace_fetch(strip_range);
+                #[cfg(feature = "dev-diagnostics")]
+                self.diag_fetch(
+                    DiagFetchPurpose::DamageStrip,
+                    Some(grid_segment.region()),
+                    strip_range,
+                );
                 if fetched.has_bridge_failure() {
                     self.park_strip_scratch(fetched);
                     for strip in strips {
@@ -454,6 +476,8 @@ impl<P: Painter> RendererCore<P> {
                 self.grid_cache.take_prepare_scratch(region),
             );
             self.trace_fetch(range);
+            #[cfg(feature = "dev-diagnostics")]
+            self.diag_fetch(DiagFetchPurpose::BlitReveal, Some(region), range);
             if fetched.has_bridge_failure() {
                 self.grid_cache.park_prepare_scratch(region, fetched);
                 for prepared in address_strips.into_iter().flatten() {
@@ -546,6 +570,18 @@ impl<P: Painter> RendererCore<P> {
                     }
                 }
                 self.trace_grid(GridVerdict::from(&repaint.plan));
+                #[cfg(feature = "dev-diagnostics")]
+                {
+                    let verdict = GridVerdict::from(&repaint.plan);
+                    self.diag_repaint(
+                        verdict,
+                        repaint.reason,
+                        match &repaint.plan {
+                            RepaintPlan::Rows(spans) => spans.as_slice(),
+                            RepaintPlan::Skip | RepaintPlan::Full => &[],
+                        },
+                    );
+                }
                 GridCacheCommit::Replace {
                     layout,
                     segments: std::array::from_fn(|index| {
@@ -570,6 +606,8 @@ impl<P: Painter> RendererCore<P> {
                     paint_strip(self, frame, strip.region, strip.range, &mut strip.fetched);
                 }
                 self.trace_grid(GridVerdict::Strip);
+                #[cfg(feature = "dev-diagnostics")]
+                self.diag_repaint(GridVerdict::Strip, None, &[]);
                 GridCacheCommit::Splice {
                     layout,
                     strips,
@@ -598,6 +636,8 @@ impl<P: Painter> RendererCore<P> {
                 }
                 self.painter.pop_clip();
                 self.trace_grid(GridVerdict::Strip);
+                #[cfg(feature = "dev-diagnostics")]
+                self.diag_repaint(GridVerdict::Strip, None, &[]);
                 GridCacheCommit::Shift {
                     previous,
                     layout,

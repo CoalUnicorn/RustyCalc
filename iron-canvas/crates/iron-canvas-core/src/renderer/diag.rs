@@ -20,16 +20,16 @@
 
 use std::cell::{Cell, RefCell};
 
-use crate::chrome::{GridLayout, GridShape, PaneRegion};
 use crate::chrome::Chrome;
+use crate::chrome::{GridLayout, GridShape, PaneRegion};
 use crate::frame_plan::{FrameDelta, RebuildReason};
-use crate::geometry::prim::Axis;
-use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::CanvasSize;
+use crate::geometry::pixel_rect::PixelRect;
+use crate::geometry::prim::Axis;
 use crate::orchestrator::{FrameOutcome, GridVerdict, PaintRegimeTag};
 use crate::pending_work::{RowSpan, WorkFlags};
 use crate::renderer::cache::BufferTruth;
-use crate::renderer::cell::fingerprint::FingerprintTruth;
+use crate::renderer::cell::fingerprint::{FingerprintTruth, RepaintReason};
 use crate::renderer::prepared::FetchedCells;
 use crate::types::coord::RCRange;
 /// Wire version of the snapshot shape. Bump when the projection changes.
@@ -422,6 +422,60 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         });
     }
 
+    /// One renderer-owned bundle fetch over `range`. Mirrors the existing
+    /// `trace_fetch` counters with per-request attribution.
+    pub(crate) fn diag_fetch(
+        &self,
+        purpose: DiagFetchPurpose,
+        region: Option<PaneRegion>,
+        range: RCRange,
+    ) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        capture.fetch.batches += 1;
+        capture.fetch.addressed_cells += FetchedCells::addressed_cells(range);
+        capture.fetch.logical_slots += FetchedCells::logical_channel_slots(range);
+        capture.fetch.requests.push(DiagFetchRequest {
+            purpose,
+            region,
+            range,
+            cells: FetchedCells::addressed_cells(range),
+            slots: FetchedCells::logical_channel_slots(range),
+        });
+    }
+
+    /// Grid verdict plus the fingerprint branch reason (when a comparison
+    /// ran) and the exact changed row spans. The single recorder for all
+    /// three grid arms — Full (with comparison reason), Damage and Blit
+    /// (both `Strip`, no reason) — so the structured snapshot never
+    /// disagrees with the one-line trace.
+    pub(crate) fn diag_repaint(
+        &self,
+        verdict: GridVerdict,
+        reason: Option<RepaintReason>,
+        changed_rows: &[RowSpan],
+    ) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        capture.repaint.verdict = Some(verdict);
+        capture.repaint.reason = reason.map(|reason| match reason {
+            RepaintReason::NoPaintedHistory => DiagRepaintReason::NoPaintedHistory,
+            RepaintReason::LayoutMismatch => DiagRepaintReason::LayoutMismatch,
+            RepaintReason::RowAddressMismatch => DiagRepaintReason::RowAddressMismatch,
+            RepaintReason::SpanCapExceeded => DiagRepaintReason::SpanCapExceeded,
+            RepaintReason::BorderSafety => DiagRepaintReason::BorderSafety,
+            RepaintReason::FingerprintsEqual => DiagRepaintReason::FingerprintsEqual,
+            RepaintReason::ChangedRows => DiagRepaintReason::ChangedRows,
+        });
+        capture.repaint.changed_rows = changed_rows.to_vec();
+    }
+
     /// Runtime switch. Disabling drops the retained published snapshot so
     /// the web facade's `frameDiagnostics()` returns `undefined`.
     pub(crate) fn set_diag_enabled(&self, enabled: bool) {
@@ -455,12 +509,15 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         if !self.diag.enabled.get() {
             return;
         }
-        let mut snapshot = self.diag.capture.borrow_mut().take().unwrap_or_else(|| {
-            FrameDiagnostics {
-                schema_version: DIAG_SCHEMA_VERSION,
-                ..FrameDiagnostics::default()
-            }
-        });
+        let mut snapshot =
+            self.diag
+                .capture
+                .borrow_mut()
+                .take()
+                .unwrap_or_else(|| FrameDiagnostics {
+                    schema_version: DIAG_SCHEMA_VERSION,
+                    ..FrameDiagnostics::default()
+                });
         snapshot.attempt_seq = attempt_seq;
         snapshot.committed_seq = committed_seq;
         snapshot.selected = selected;

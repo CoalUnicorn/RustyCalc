@@ -285,13 +285,14 @@ impl FingerprintState {
         candidate
     }
 
-    pub(crate) fn compare_to_painted(&self, candidate: &GridFingerprint) -> RepaintPlan {
-        self.painted
-            .borrow()
-            .as_ref()
-            .map_or(RepaintPlan::Full, |painted| {
-                plan_grid_repaint(painted, candidate)
-            })
+    pub(crate) fn compare_to_painted(&self, candidate: &GridFingerprint) -> RepaintDecision {
+        self.painted.borrow().as_ref().map_or_else(
+            || RepaintDecision {
+                plan: RepaintPlan::Full,
+                reason: RepaintReason::NoPaintedHistory,
+            },
+            |painted| plan_grid_repaint(painted, candidate),
+        )
     }
 
     pub(crate) fn install(&self, candidate: GridFingerprint) {
@@ -390,6 +391,28 @@ pub(crate) enum RepaintPlan {
     Full,
 }
 
+/// The branch `plan_grid_repaint` / `compare_to_painted` actually took.
+/// Recorded at the decision site; never re-derived by diagnostics. Only
+/// meaningful when the comparison ran — Fresh-built geometry and
+/// Damage/Blit strips never produce one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepaintReason {
+    NoPaintedHistory,
+    LayoutMismatch,
+    RowAddressMismatch,
+    SpanCapExceeded,
+    BorderSafety,
+    FingerprintsEqual,
+    ChangedRows,
+}
+
+/// One grid-wide repaint decision plus the reason for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RepaintDecision {
+    pub(crate) plan: RepaintPlan,
+    pub(crate) reason: RepaintReason,
+}
+
 impl From<&RepaintPlan> for GridVerdict {
     fn from(plan: &RepaintPlan) -> Self {
         match plan {
@@ -407,9 +430,12 @@ impl From<&RepaintPlan> for GridVerdict {
     }
 }
 
-fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> RepaintPlan {
+fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> RepaintDecision {
     if painted.layout != candidate.layout || painted.rows.len() != candidate.rows.len() {
-        return RepaintPlan::Full;
+        return RepaintDecision {
+            plan: RepaintPlan::Full,
+            reason: RepaintReason::LayoutMismatch,
+        };
     }
 
     let mut spans = Vec::<RowSpan>::new();
@@ -417,7 +443,10 @@ fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> 
         painted.rows.iter().zip(&candidate.rows)
     {
         if painted_row != candidate_row {
-            return RepaintPlan::Full;
+            return RepaintDecision {
+                plan: RepaintPlan::Full,
+                reason: RepaintReason::RowAddressMismatch,
+            };
         }
         if painted_digest == candidate_digest {
             continue;
@@ -432,11 +461,17 @@ fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> 
                 r2: *candidate_row,
             });
         } else {
-            return RepaintPlan::Full;
+            return RepaintDecision {
+                plan: RepaintPlan::Full,
+                reason: RepaintReason::SpanCapExceeded,
+            };
         }
     }
     if spans.is_empty() {
-        return RepaintPlan::Skip;
+        return RepaintDecision {
+            plan: RepaintPlan::Skip,
+            reason: RepaintReason::FingerprintsEqual,
+        };
     }
 
     for span in &spans {
@@ -452,15 +487,24 @@ fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> 
                 continue;
             }
             if start > band_start && rows_have_border(painted, candidate, [start - 1, start]) {
-                return RepaintPlan::Full;
+                return RepaintDecision {
+                    plan: RepaintPlan::Full,
+                    reason: RepaintReason::BorderSafety,
+                };
             }
             if end < band_end && rows_have_border(painted, candidate, [end, end + 1]) {
-                return RepaintPlan::Full;
+                return RepaintDecision {
+                    plan: RepaintPlan::Full,
+                    reason: RepaintReason::BorderSafety,
+                };
             }
         }
     }
 
-    RepaintPlan::Rows(spans)
+    RepaintDecision {
+        plan: RepaintPlan::Rows(spans),
+        reason: RepaintReason::ChangedRows,
+    }
 }
 
 fn rows_have_border(
@@ -822,27 +866,32 @@ mod tests {
     fn repaint_plans_skip_rows_and_full() {
         let exact_layout = layout(10, 8, 2, 2);
         let painted = build(exact_layout);
-        assert_eq!(plan_grid_repaint(&painted, &painted), RepaintPlan::Skip);
+        let decision = plan_grid_repaint(&painted, &painted);
+        assert_eq!(decision.plan, RepaintPlan::Skip);
+        assert_eq!(decision.reason, RepaintReason::FingerprintsEqual);
 
         let mut changed = painted.clone();
         let row = changed.scroll_band_start + 1;
         changed.rows[row].1.digest ^= 1;
+        let decision = plan_grid_repaint(&painted, &changed);
         assert_eq!(
-            plan_grid_repaint(&painted, &changed),
+            decision.plan,
             RepaintPlan::Rows(vec![RowSpan {
                 r1: changed.rows[row].0,
                 r2: changed.rows[row].0,
             }])
         );
+        assert_eq!(decision.reason, RepaintReason::ChangedRows);
 
         let mut unsafe_change = changed.clone();
         unsafe_change.rows[row].1.has_any_explicit_border = true;
-        assert_eq!(
-            plan_grid_repaint(&painted, &unsafe_change),
-            RepaintPlan::Full
-        );
+        let decision = plan_grid_repaint(&painted, &unsafe_change);
+        assert_eq!(decision.plan, RepaintPlan::Full);
+        assert_eq!(decision.reason, RepaintReason::BorderSafety);
 
         let shifted = build(layout(11, 8, 2, 2));
-        assert_eq!(plan_grid_repaint(&painted, &shifted), RepaintPlan::Full);
+        let decision = plan_grid_repaint(&painted, &shifted);
+        assert_eq!(decision.plan, RepaintPlan::Full);
+        assert_eq!(decision.reason, RepaintReason::LayoutMismatch);
     }
 }

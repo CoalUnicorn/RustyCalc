@@ -55,11 +55,11 @@ use crate::layer::{BlitPaint, LayerBase, Surface};
 use crate::painter::BlitPainter;
 use crate::pending_work::{ContentWork, PendingWork, RowSpan, WorkFlags};
 use crate::render_overlays::RenderOverlays;
-use crate::renderer::{GridCacheCommit, GridRenderer, OverlayRenderer};
-#[cfg(feature = "dev-diagnostics")]
-use crate::renderer::diag::{DiagCacheResolution, DiagPaintedLayers, FrameDiagnostics};
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diag::DiagDeltaKind;
+#[cfg(feature = "dev-diagnostics")]
+use crate::renderer::diag::{DiagCacheResolution, DiagPaintedLayers, FrameDiagnostics};
+use crate::renderer::{GridCacheCommit, GridRenderer, OverlayRenderer};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};

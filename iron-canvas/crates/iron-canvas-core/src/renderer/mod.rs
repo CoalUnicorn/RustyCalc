@@ -64,10 +64,10 @@ pub mod blit_work;
 pub mod cache;
 pub mod cell;
 pub mod cf_types;
-pub mod frame;
-pub mod prepared;
 #[cfg(feature = "dev-diagnostics")]
 pub mod diag;
+pub mod frame;
+pub mod prepared;
 // `renderer/overlay/` has moved to `src/decoration/`. Each decoration is
 // a struct that impls `Layer`; the orchestration that used to live in
 // `RendererCore::render_overlays` is now in

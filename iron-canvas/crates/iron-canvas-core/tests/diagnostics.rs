@@ -7,7 +7,8 @@ use std::rc::Rc;
 
 use iron_canvas_core::chrome::PaneRegion;
 use iron_canvas_core::{
-    CanvasSize, DiagDeltaKind, Orchestrator, PaintResult, RCRange, RebuildReason,
+    CanvasSize, DiagDeltaKind, DiagFetchPurpose, DiagRepaintReason, GridVerdict, Orchestrator,
+    PaintResult, RCRange, RebuildReason, RowSpan,
 };
 use iron_canvas_recorder::MemSurface;
 
@@ -216,4 +217,157 @@ fn overlay_only_attempt_has_no_geometry_and_no_probe_segments() {
     assert!(diag.geometry.is_none());
     assert_eq!(diag.repaint.verdict, None);
     assert!(diag.probe_segments.is_empty());
+}
+
+#[test]
+fn unchanged_content_skip_reports_fingerprints_equal() {
+    let (mut orch, _model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    orch.mark_content_dirty();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Skip));
+    assert_eq!(
+        diag.repaint.reason,
+        Some(DiagRepaintReason::FingerprintsEqual)
+    );
+    assert!(diag.repaint.changed_rows.is_empty());
+}
+
+#[test]
+fn one_changed_row_reports_exact_span_and_reason() {
+    let (mut orch, model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    model.set_cell(4, 2, "new value");
+    orch.mark_content_dirty();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(
+        diag.repaint.verdict,
+        Some(GridVerdict::Rows { spans: 1, rows: 1 })
+    );
+    assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedRows));
+    assert_eq!(diag.repaint.changed_rows, vec![RowSpan { r1: 4, r2: 4 }]);
+}
+
+#[test]
+fn span_cap_promotes_full_with_reason() {
+    let (mut orch, model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    // Nine disjoint changed rows exceed the fingerprint planner's 8-span cap.
+    for (i, row) in [1, 3, 5, 7, 9, 11, 13, 15, 17].iter().enumerate() {
+        model.set_cell(*row, 2, &format!("v{i}"));
+    }
+    orch.mark_content_dirty();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Full));
+    assert_eq!(
+        diag.repaint.reason,
+        Some(DiagRepaintReason::SpanCapExceeded)
+    );
+}
+
+#[test]
+fn border_safety_promotes_full_with_reason() {
+    use iron_canvas_core::{Border, BorderItem, BorderStyle, CellStyle};
+    let (mut orch, model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    // An explicit border on the changed row itself makes the band's edge
+    // unsafe to repaint in isolation (fingerprint's border-safety check).
+    model.set_style(
+        4,
+        2,
+        CellStyle {
+            border: Border {
+                top: Some(BorderItem {
+                    style: BorderStyle::Thin,
+                    color: Some("#000000".to_string()),
+                }),
+                ..Border::default()
+            },
+            ..CellStyle::default()
+        },
+    );
+    model.set_cell(4, 2, "bordered");
+    orch.mark_content_dirty();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Full));
+    assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::BorderSafety));
+}
+
+#[test]
+fn fresh_rebuild_full_carries_no_fingerprint_reason() {
+    // A freeze rebuild has painted history but the comparison never ran:
+    // the snapshot must not fabricate `noPaintedHistory`. The captured
+    // rebuildReason is the authority instead.
+    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
+    let model = Rc::new(TestModel::new().with_data_until(40).with_frozen(2, 1));
+    orch.set_model(model.clone());
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+
+    model.set_frozen_rows(3);
+    orch.request_repaint();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Full));
+    assert_eq!(diag.repaint.reason, None);
+    assert_eq!(diag.rebuild_reason, Some(RebuildReason::Freeze));
+}
+
+#[test]
+fn damage_strip_reports_strip_verdict_without_reason() {
+    let (mut orch, model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    model.set_cell(4, 2, "damage edit");
+    orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Strip));
+    assert_eq!(diag.repaint.reason, None);
+}
+
+#[test]
+fn fetch_requests_sum_to_totals_and_match_segments() {
+    let (mut orch, _model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.fetch.requests.len(), diag.fetch.batches);
+    assert_eq!(
+        diag.fetch.requests.iter().map(|r| r.cells).sum::<usize>(),
+        diag.fetch.addressed_cells
+    );
+    assert_eq!(
+        diag.fetch.requests.iter().map(|r| r.slots).sum::<usize>(),
+        diag.fetch.logical_slots
+    );
+    // The segment cell counts are the renderer's own fetch accounting:
+    // their sum equals the addressed-cell total.
+    let geo = diag.geometry.unwrap();
+    let cells: usize = geo.segments.iter().map(|s| s.cells).sum();
+    assert_eq!(cells, diag.fetch.addressed_cells);
+    // Every request's range lives inside its segment and every request is
+    // a full-segment fetch on the cold Fresh frame.
+    for request in &diag.fetch.requests {
+        assert_eq!(request.purpose, DiagFetchPurpose::FullSegment);
+        let region = request.region.unwrap();
+        let segment = geo
+            .segments
+            .iter()
+            .find(|s| s.region == region)
+            .expect("request region has a segment");
+        assert!(request.range.r1 >= segment.range.r1);
+        assert!(request.range.r2 <= segment.range.r2);
+        assert!(request.range.c1 >= segment.range.c1);
+        assert!(request.range.c2 <= segment.range.c2);
+    }
 }
