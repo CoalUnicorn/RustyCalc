@@ -16,7 +16,7 @@ mod playback;
 #[cfg(feature = "dev-tools")]
 mod replay;
 pub mod wasm;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", feature = "dev-tools"))]
 mod wire;
 
 pub use iron_canvas_canvas2d::{Canvas2dRuntime, CanvasPainter, WebSurface, theme_from_element};

@@ -2518,3 +2518,78 @@ fn stage6_column_blit_stays_conservative_and_matches_forced_fresh() {
 
     stage6_assert_matches_forced_fresh(&grid, &store, 1, 2, "post-column-blit edit");
 }
+
+// ==============================================================================
+// Stage 6, Task 5: dev-diagnostics wire smoke.
+//
+// The native wire-shape contract is pinned by
+// `crates/iron-canvas-web/src/wire.rs`'s `frame_diagnostics_wire_matches_declared_shape`
+// (host target, `--features dev-tools`). This browser test proves the facade
+// end to end: enabled capture publishes a snapshot object the browser mirrors
+// can parse, and disabled capture returns `undefined`.
+// ==============================================================================
+
+/// Dev-diagnostics wire smoke: enabled capture returns a snapshot object
+/// with the attempt fields; disabled capture returns `undefined`.
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen_test]
+fn stage6_frame_diagnostics_wire_smoke() {
+    let store = stage6_fixture_store();
+    let top_row = Rc::new(Cell::new(1));
+    let left_column = Rc::new(Cell::new(1));
+    let (mut canvas, _grid) = stage6_canvas_over(store, top_row, left_column, None);
+
+    assert!(canvas.frame_diagnostics().is_undefined());
+
+    canvas.set_frame_diagnostics_enabled(true);
+    // The cold Fresh already ran before this function returned; force a
+    // new attempt so an enabled capture actually publishes.
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    let value = canvas.frame_diagnostics();
+    assert!(!value.is_undefined(), "enabled capture must publish");
+
+    let diag: DiagWireMirror = serde_wasm_bindgen::from_value(value).expect("snapshot parses");
+    assert_eq!(diag.schema_version, 1);
+    assert_eq!(diag.attempt_seq, 2);
+    assert!(matches!(diag.outcome, FrameOutcomeMirror::Painted));
+    assert_eq!(diag.geometry.as_ref().unwrap().segments.len(), 1);
+
+    canvas.set_frame_diagnostics_enabled(false);
+    assert!(canvas.frame_diagnostics().is_undefined());
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagWireMirror {
+    schema_version: u8,
+    attempt_seq: u64,
+    outcome: FrameOutcomeMirror,
+    geometry: Option<DiagGeometryMirror>,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)] // mirror carries the full wire shape; the smoke asserts a subset
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum FrameOutcomeMirror {
+    Painted,
+    HeldOnBridgeFailure,
+    HeldOnInputFailure { input: String },
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagGeometryMirror {
+    segments: Vec<DiagSegmentMirror>,
+}
+
+#[cfg(feature = "dev-tools")]
+#[allow(dead_code)] // mirror carries the full wire shape; the smoke asserts a subset
+#[derive(serde::Deserialize)]
+struct DiagSegmentMirror {
+    region: String,
+    cells: usize,
+}

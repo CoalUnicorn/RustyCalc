@@ -261,6 +261,47 @@ impl IronCanvas {
         self.runtime.orchestrator().last_trace().to_string()
     }
 
+    /// Enable structured capture for the next `frameDiagnostics()` reads.
+    /// Disabled by default; disabling clears the retained snapshot.
+    /// Dev-tools builds only.
+    #[cfg(feature = "dev-tools")]
+    #[wasm_bindgen(js_name = "setFrameDiagnosticsEnabled")]
+    pub fn set_frame_diagnostics_enabled(&mut self, enabled: bool) {
+        self.runtime
+            .orchestrator_mut()
+            .set_frame_diagnostics_enabled(enabled);
+    }
+
+    /// Diagnostic probe address for the next non-idle paint attempt:
+    /// the snapshot reports which planned segments contain it. Attempt-
+    /// scoped, range-only, never read by the planner. Dev-tools only.
+    #[cfg(feature = "dev-tools")]
+    #[wasm_bindgen(js_name = "setFrameDiagnosticsProbe")]
+    pub fn set_frame_diagnostics_probe(&mut self, r1: i32, c1: i32, r2: i32, c2: i32) {
+        self.runtime
+            .orchestrator_mut()
+            .set_frame_diagnostics_probe(iron_canvas_core::RCRange { r1, c1, r2, c2 });
+    }
+
+    /// Structured snapshot of the last completed live attempt.
+    /// Returns `undefined` when capture is disabled or during playback;
+    /// live callers use `frameTrace()` for the allocation-free one-line
+    /// summary. Dev-tools builds only.
+    #[cfg(feature = "dev-tools")]
+    #[wasm_bindgen(js_name = "frameDiagnostics")]
+    pub fn frame_diagnostics(&self) -> JsValue {
+        if matches!(self.mode, CanvasMode::Playback(_)) {
+            return JsValue::UNDEFINED;
+        }
+        match self.runtime.orchestrator().frame_diagnostics() {
+            None => JsValue::UNDEFINED,
+            Some(diag) => {
+                let wire = crate::wire::FrameDiagnosticsWire::from(&diag);
+                serde_wasm_bindgen::to_value(&wire).unwrap_or(JsValue::UNDEFINED)
+            }
+        }
+    }
+
     /// Structured diagnostics for the currently displayed recorded attempt.
     /// Returns `undefined` outside playback; live callers should use
     /// `frameTrace()` for the allocation-free one-line core summary.
