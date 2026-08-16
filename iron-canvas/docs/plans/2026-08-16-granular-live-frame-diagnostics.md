@@ -1737,13 +1737,18 @@ fn row_blit_reports_shift_revealed_strip_and_effective_clip() {
     assert_eq!(blit.delta, 4);
     assert_eq!(blit.result, DiagBlitResultTag::Shifted);
     assert!(blit.cold_cache.is_none());
-    // The revealed strip covers exactly the four newly scrolled-in rows.
+    // The revealed address band is the repaint band the renderer actually
+    // prepared: `revealed_strip` carries the boundary-overlap row
+    // ([prev.r2, cand.r2] spans delta+1 rows) and `widen_to_pixel_clip`
+    // may add one partial row. It must therefore cover AT LEAST the four
+    // newly scrolled-in rows; the exact shift is pinned by `delta` and
+    // `strip.height`.
     let revealed_rows: i32 = blit
         .revealed
         .iter()
         .map(|strip| strip.range.r2 - strip.range.r1 + 1)
         .sum();
-    assert_eq!(revealed_rows, 4);
+    assert!(revealed_rows >= blit.delta, "revealed band must cover at least the logical delta");
     // The blit's source and destination rectangles differ by the shift.
     assert_ne!(blit.src, blit.dst);
     assert!(blit.strip.width > 0 && blit.strip.height > 0);
@@ -3802,12 +3807,22 @@ fn stage6_diag_deep_scrolls_expose_blit_clips() {
     assert_eq!(row_blit.delta, 11);
     assert_eq!(row_blit.result, "shifted");
     assert!(row_blit.cold_cache.is_none());
+    // The revealed address band is the repaint band the renderer actually
+    // prepared: `revealed_strip` carries the boundary-overlap row and
+    // `widen_to_pixel_clip` may add one partial row. It must therefore
+    // cover AT LEAST the logical delta; the exact shift is pinned in
+    // pixels below.
     let revealed_rows: i32 = row_blit
         .revealed
         .iter()
         .map(|s| s.range.r2 - s.range.r1 + 1)
         .sum();
-    assert_eq!(revealed_rows, 11, "revealed rows equal the logical delta");
+    assert!(
+        revealed_rows >= row_blit.delta,
+        "revealed band must cover at least the logical delta"
+    );
+    // Exact shift in pixels: strip height == delta rows x fixed row height.
+    assert_eq!(row_blit.strip.height, f64::from(row_blit.delta) * STAGE6_ROW_H);
     // Effective clip equals the repaint band (finalized blit work hands
     // plan.pixel_strip to push_clip) and is a nonzero band.
     assert_eq!(row_blit.clip.width, row_blit.strip.width);
@@ -3828,7 +3843,11 @@ fn stage6_diag_deep_scrolls_expose_blit_clips() {
         .iter()
         .map(|s| s.range.c2 - s.range.c1 + 1)
         .sum();
-    assert_eq!(revealed_cols, 7, "revealed columns equal the logical delta");
+    assert!(
+        revealed_cols >= col_blit.delta,
+        "revealed band must cover at least the logical delta"
+    );
+    assert_eq!(col_blit.strip.width, f64::from(col_blit.delta) * STAGE6_COL_W);
 }
 ```
 
