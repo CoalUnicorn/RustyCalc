@@ -1226,14 +1226,17 @@ where
         let diag_delta = DiagDeltaKind::from(&delta);
         let plan = plan_frame(work, delta, inputs.sheet(), inputs.show_selection());
         // Record the classification facts and latch the attempt's probe
-        // before dispatch; the renderer fills the rest during
-        // prepare/execute. The probe is consumed here so it can never leak
-        // into a later attempt's attribution.
+        // before dispatch; the renderer fills the rest during prepare/
+        // execute, and its geometry pass reads the probe back to compute
+        // containment. The probe is copied here, not consumed: `diag_probe`
+        // is cleared only after a regime outcome exists (below), so a silently
+        // dropped attempt never loses its attribution without a published
+        // snapshot.
         #[cfg(feature = "dev-diagnostics")]
         self.grid.renderer.diag_begin_attempt(
             diag_delta,
             plan.rebuild_reason,
-            self.diag_probe.take(),
+            self.diag_probe,
         );
         let selected = plan.selected_strategy;
         let work_flags = plan.consumes.flags();
@@ -1270,6 +1273,13 @@ where
             self.model = Some(model);
             return PaintResult::Idle;
         };
+        // A regime outcome exists, so `finish_attempt` is about to publish a
+        // snapshot: consume the probe now so it is attributed to this
+        // attempt and cannot leak into the next one.
+        #[cfg(feature = "dev-diagnostics")]
+        {
+            self.diag_probe = None;
+        }
 
         let overlay_ctx = Some(OverlayContext {
             model: model_dyn,
