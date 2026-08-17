@@ -363,23 +363,6 @@ With the feature on, `IronCanvas` exports `startRecording()` / `stopRecording()`
 
 Replay an `.icr` by opening [`web-test/recording-viewer.html`](web-test/recording-viewer.html) and drag-dropping the file; the page mirrors `iron_canvas_recorder::replay` in JS and paints onto a single 2D canvas. The always-on `recordingSupported() -> bool` probe lets the page detect whether the loaded wasm has recording compiled in. Without the feature flag, recording symbols are not exported and the prod bundle pays zero overhead.
 
-With `dev-tools`, `IronCanvas` also exports live frame diagnostics:
-
-- `setFrameDiagnosticsEnabled(enabled)` — runtime switch (default off;
-  off builds retain no diagnostic state or API);
-- `setFrameDiagnosticsProbe(r1, c1, r2, c2)` — attempt-scoped expected-
-  change address; the next snapshot reports which segments contain it;
-- `frameDiagnostics()` — structured snapshot of the last completed live
-  attempt (`schemaVersion: 1`): classification delta and rebuild reason,
-  probe attribution, exact grid segments, per-request fetch attribution,
-  repaint verdict + reason, cache transition, blit geometry with the
-  effective clip, painted row/cell counts. `undefined` while disabled or
-  during playback.
-
-Wall time belongs to the host: measure around `paintIfDirty` and keep
-detailed capture off during timing runs (see
-`docs/performance/2026-08-16-task4-probe-discipline.md`).
-
 ## Tests
 
 `RecorderPainter` (in `iron-canvas-recorder`) is the testing entry point.
