@@ -130,10 +130,19 @@
     border: 1px solid var(--border-inner);
     border-radius: 4px;
     padding: 6px;
-    max-width: 60vw;
+    /* The Perf strip sits below the sheet-tab bar (z-index 400), so a
+     * fixed popup growing upward would be covered by it. 1100 matches
+     * the context-menu/color-picker floating-layer range, above the bar
+     * and everything under the modal layer (2000). */
+    z-index: 1100;
+    /* Bounded, scrollable surface: the pretty-printed snapshot scrolls
+     * vertically, and long lines scroll horizontally (pre). */
+    min-width: 280px;
+    min-height: 120px;
+    max-width: min(60vw, 720px);
     max-height: 50vh;
     overflow: auto;
-    z-index: 60;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .pp-diag-json {
@@ -147,8 +156,12 @@
 .pp-diag-copy {
     cursor: pointer;
     border: 1px solid var(--border-inner);
-    background: transparent;
+    background: var(--bg-secondary);
     color: var(--text-dim);
     border-radius: 3px;
     padding: 1px 6px;
+    /* Stays pinned at the popover's bottom edge while the JSON scrolls,
+     * so the copy control is always reachable without scrolling. */
+    position: sticky;
+    bottom: 0;
 }

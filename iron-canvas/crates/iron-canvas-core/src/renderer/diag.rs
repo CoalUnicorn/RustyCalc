@@ -159,9 +159,17 @@ pub struct DiagSegment {
 
 /// Geometry facts of the frame the grid prepared against. `None` for an
 /// overlay-only attempt (the grid renderer was never entered).
+///
+/// `backing_size` is the physical backing-store size derived from the CSS
+/// size and DPR via [`CanvasSize::to_backing_size`] (browser rounding).
+/// Core never sees the backend canvas element, so this is the documented
+/// derivation; the web facade overwrites it with the actual canvas
+/// backing store when the snapshot is projected, making CSS/backing
+/// mismatches visible.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiagGeometry {
     pub canvas: CanvasSize,
+    pub backing_size: (u32, u32),
     pub dpr: f64,
     pub sheet: u32,
     pub top_row: i32,
@@ -241,23 +249,30 @@ pub struct DiagRevealedStrip {
 /// Blit geometry for a `Viewport` attempt. `delta` is the logical row or
 /// column count the viewport moved (negative = toward the origin). `clip`
 /// is the exact pixel rectangle `Painter::push_clip` applied around strip
-/// painting; `strip` is the newly exposed repaint band. The two are
-/// distinct concepts that happen to share one value in today's finalized
-/// blit work — the snapshot records the actual clip argument, not a
-/// re-derivation of it.
+/// painting, `Some` only when execution actually reached `push_clip` —
+/// fallback and held attempts never apply a clip and report `None`, never
+/// a fabricated zero rectangle. `strip` is the newly exposed repaint band.
+/// The two are distinct concepts that happen to share one value in today's
+/// finalized blit work — the snapshot records the actual clip argument,
+/// not a re-derivation of it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DiagBlit {
     pub axis: Axis,
     pub delta: i32,
     pub src: PixelRect,
     pub dst: PixelRect,
-    pub clip: PixelRect,
+    pub clip: Option<PixelRect>,
     pub strip: PixelRect,
     pub revealed: Vec<DiagRevealedStrip>,
     pub result: DiagBlitResultTag,
     pub cold_cache: Option<bool>,
 }
 
+/// Painted-area accounting. `rows` counts DISTINCT absolute grid rows
+/// painted by this attempt, deduplicated across segments — frozen columns
+/// split one row band into left/right segments, and a one-row repaint must
+/// report one row, not one per visited segment. `cells` counts addressed
+/// cells; segments are column-disjoint, so cells never double-count.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DiagPaintCounts {
     pub rows: usize,
@@ -290,6 +305,22 @@ pub struct FrameDiagnostics {
     pub cache: DiagCache,
     pub blit: Option<DiagBlit>,
     pub paint_counts: DiagPaintCounts,
+}
+
+/// Frame-completion facts assembled by `Orchestrator::finish_attempt` and
+/// handed to publication as ONE value. The renderer wrapper and the core
+/// sink take this by value so adjacent scalar arguments cannot be swapped
+/// at the wrapper boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiagCompletion {
+    pub attempt_seq: u64,
+    pub selected: Option<PaintRegimeTag>,
+    pub work: WorkFlags,
+    pub effective: Option<PaintRegimeTag>,
+    pub committed_seq: Option<u64>,
+    pub outcome: FrameOutcome,
+    pub layers: DiagPaintedLayers,
+    pub resolution: DiagCacheResolution,
 }
 
 /// Renderer-owned capture state: enable flag, in-flight buffer, published
@@ -403,6 +434,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
             .collect();
         capture.geometry = Some(DiagGeometry {
             canvas: frame.canvas_size,
+            backing_size: frame.canvas_size.to_backing_size(frame.dpr),
             dpr: frame.dpr,
             sheet: frame.sheet,
             top_row: frame.pane_set.top_row(),
@@ -526,7 +558,9 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
             delta,
             src: plan.shift.src,
             dst: plan.shift.dst,
-            clip: PixelRect::default(),
+            // `None` until the execute arm actually reaches `push_clip`;
+            // fallback and held attempts never apply a clip.
+            clip: None,
             strip: plan.pixel_strip,
             revealed: Vec::new(),
             result,
@@ -554,7 +588,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         let mut slot = self.diag.ensure_capture();
         let capture = slot.as_mut().expect("ensure_capture inserted a frame");
         if let Some(blit) = &mut capture.blit {
-            blit.clip = clip;
+            blit.clip = Some(clip);
         }
     }
 
@@ -587,17 +621,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
     /// (if any) was installed — so `committed_after` reads the
     /// post-commit truth and a held attempt keeps
     /// `committed_before == committed_after`.
-    pub(crate) fn publish_diag(
-        &self,
-        attempt_seq: u64,
-        selected: Option<PaintRegimeTag>,
-        work: WorkFlags,
-        effective: Option<PaintRegimeTag>,
-        committed_seq: Option<u64>,
-        outcome: FrameOutcome,
-        layers: DiagPaintedLayers,
-        resolution: DiagCacheResolution,
-    ) {
+    pub(crate) fn publish_diag(&self, completion: DiagCompletion) {
         if !self.diag.enabled.get() {
             return;
         }
@@ -610,14 +634,14 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
                     schema_version: DIAG_SCHEMA_VERSION,
                     ..FrameDiagnostics::default()
                 });
-        snapshot.attempt_seq = attempt_seq;
-        snapshot.committed_seq = committed_seq;
-        snapshot.selected = selected;
-        snapshot.effective = effective;
-        snapshot.work = work;
-        snapshot.outcome = outcome;
-        snapshot.painted_layers = layers;
-        snapshot.cache.resolution = resolution;
+        snapshot.attempt_seq = completion.attempt_seq;
+        snapshot.committed_seq = completion.committed_seq;
+        snapshot.selected = completion.selected;
+        snapshot.effective = completion.effective;
+        snapshot.work = completion.work;
+        snapshot.outcome = completion.outcome;
+        snapshot.painted_layers = completion.layers;
+        snapshot.cache.resolution = completion.resolution;
         let committed_after = self.cache_truth_now();
         // A capture-failure attempt never reaches a grid prepare, so its
         // committed cache could not have changed during the attempt —
@@ -634,6 +658,35 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
     pub(crate) fn last_diag(&self) -> Option<FrameDiagnostics> {
         self.diag.published.borrow().clone()
     }
+}
+
+/// Number of distinct absolute grid rows covered by the given inclusive
+/// `(r1, r2)` intervals. Intervals from different segments overlap when
+/// frozen columns split one band into left and right halves; merging them
+/// keeps `DiagPaintCounts.rows` a unique-row count. Intervals are assumed
+/// valid (`r1 <= r2`), as constructed by the execute arms.
+#[cfg(feature = "dev-diagnostics")]
+pub(crate) fn distinct_rows(intervals: &[(i32, i32)]) -> usize {
+    let mut sorted: Vec<(i32, i32)> = intervals.to_vec();
+    sorted.sort_unstable_by_key(|(r1, _)| *r1);
+    let mut rows = 0usize;
+    let mut current: Option<(i32, i32)> = None;
+    for (r1, r2) in sorted {
+        match current {
+            Some((c1, c2)) if r1 <= c2 + 1 => {
+                current = Some((c1, c2.max(r2)));
+            }
+            Some((c1, c2)) => {
+                rows += (c2 - c1 + 1) as usize;
+                current = Some((r1, r2));
+            }
+            None => current = Some((r1, r2)),
+        }
+    }
+    if let Some((c1, c2)) = current {
+        rows += (c2 - c1 + 1) as usize;
+    }
+    rows
 }
 
 /// Logical origin delta of the scroll-band BottomRight segment along the

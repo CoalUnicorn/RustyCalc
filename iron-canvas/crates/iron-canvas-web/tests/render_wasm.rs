@@ -2553,7 +2553,27 @@ fn stage6_frame_diagnostics_wire_smoke() {
     assert_eq!(diag.schema_version, 1);
     assert_eq!(diag.attempt_seq, 2);
     assert!(matches!(diag.outcome, FrameOutcomeMirror::Painted));
-    assert_eq!(diag.geometry.as_ref().unwrap().segments.len(), 1);
+    let geo = diag
+        .geometry
+        .as_ref()
+        .expect("grid-visited attempt has geometry");
+    assert_eq!(geo.segments.len(), 1);
+    // cssSize is the CSS size the grid planned against; backingSize is the
+    // ACTUAL grid canvas backing store (STAGE6_DPR == 1.0, so they agree).
+    assert_eq!(
+        geo.css_size,
+        SizeScenario {
+            w: STAGE6_CANVAS_W,
+            h: STAGE6_CANVAS_H
+        }
+    );
+    assert_eq!(
+        geo.backing_size,
+        SizeScenario {
+            w: STAGE6_CANVAS_W,
+            h: STAGE6_CANVAS_H
+        }
+    );
 
     canvas.set_frame_diagnostics_enabled(false);
     assert!(canvas.frame_diagnostics().is_undefined());
@@ -2583,6 +2603,8 @@ enum FrameOutcomeMirror {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DiagGeometryMirror {
+    css_size: SizeScenario,
+    backing_size: SizeScenario,
     segments: Vec<DiagSegmentMirror>,
 }
 
@@ -2633,11 +2655,21 @@ struct DiagScenario {
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DiagGeometryScenario {
+    css_size: SizeScenario,
+    backing_size: SizeScenario,
+    dpr: f64,
     top_row: i32,
     left_column: i32,
     frozen_rows: i32,
     frozen_cols: i32,
     segments: Vec<DiagSegmentScenario>,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+struct SizeScenario {
+    w: f64,
+    h: f64,
 }
 
 #[cfg(feature = "dev-tools")]
@@ -2728,7 +2760,9 @@ struct DiagBlitScenario {
     delta: i32,
     src: RectScenario,
     dst: RectScenario,
-    clip: RectScenario,
+    // `null` for held and fallback blits — a shift is the only outcome
+    // whose execution reaches `push_clip`.
+    clip: Option<RectScenario>,
     strip: RectScenario,
     result: String,
     cold_cache: Option<bool>,
@@ -2860,7 +2894,12 @@ fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
         let diag = diag_snapshot(&canvas);
         assert_eq!(
             diag.probe,
-            Some(RcRangeScenario { r1: row, c1: col, r2: row, c2: col })
+            Some(RcRangeScenario {
+                r1: row,
+                c1: col,
+                r2: row,
+                c2: col
+            })
         );
         assert_eq!(
             diag.probe_segments,
@@ -2932,12 +2971,17 @@ fn stage6_diag_deep_scrolls_expose_blit_clips() {
         "revealed band must cover at least the logical delta"
     );
     // Exact shift in pixels: strip height == delta rows x fixed row height.
-    assert_eq!(row_blit.strip.height, f64::from(row_blit.delta) * STAGE6_ROW_H);
+    assert_eq!(
+        row_blit.strip.height,
+        f64::from(row_blit.delta) * STAGE6_ROW_H
+    );
     // Effective clip equals the repaint band (finalized blit work hands
-    // plan.pixel_strip to push_clip) and is a nonzero band.
-    assert_eq!(row_blit.clip.width, row_blit.strip.width);
-    assert_eq!(row_blit.clip.height, row_blit.strip.height);
-    assert!(row_blit.clip.width > 0.0 && row_blit.clip.height > 0.0);
+    // plan.pixel_strip to push_clip): the shifted arm reached push_clip,
+    // so the wire must carry the exact rectangle, not null.
+    let row_clip = row_blit.clip.as_ref().expect("shifted blit applies a clip");
+    assert_eq!(row_clip.width, row_blit.strip.width);
+    assert_eq!(row_clip.height, row_blit.strip.height);
+    assert!(row_clip.width > 0.0 && row_clip.height > 0.0);
     assert_ne!(row_blit.src.width, 0.0);
 
     // Column scroll: origin 1 -> 8.
@@ -2957,5 +3001,8 @@ fn stage6_diag_deep_scrolls_expose_blit_clips() {
         revealed_cols >= col_blit.delta,
         "revealed band must cover at least the logical delta"
     );
-    assert_eq!(col_blit.strip.width, f64::from(col_blit.delta) * STAGE6_COL_W);
+    assert_eq!(
+        col_blit.strip.width,
+        f64::from(col_blit.delta) * STAGE6_COL_W
+    );
 }

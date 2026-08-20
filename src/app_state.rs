@@ -27,9 +27,9 @@ pub enum RecordingCmd {
 
 /// One-shot command from the PerfPanel diagnostics toggle to the
 /// Worksheet dispatch Effect: `Some(enabled)` means "set the canvas
-/// capture flag". Drains via `set(None)`. Exists in both build flavors —
-/// in prod (no `dev-tools`) it is written but never read.
-#[allow(dead_code)]
+/// capture flag". Drains via `set(None)`. Dev-tools builds only — the
+/// design promise is that production builds retain no diagnostic state.
+#[cfg(feature = "dev-tools")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagCmd {
     Set(bool),
@@ -78,8 +78,8 @@ pub struct AppState {
     /// once dispatched. See [`RecordingCmd`].
     pub recording_cmd: Split<Option<RecordingCmd>>,
     /// Pending diagnostics-toggle command from the PerfPanel. Cleared by
-    /// Worksheet once dispatched. See [`DiagCmd`].
-    #[allow(dead_code)]
+    /// Worksheet once dispatched. See [`DiagCmd`]. Dev-tools only.
+    #[cfg(feature = "dev-tools")]
     pub diag_cmd: Split<Option<DiagCmd>>,
     /// Pending export command from the PerfPanel SVG/PDF buttons.
     /// Cleared by Worksheet once the file download has been triggered.
@@ -112,6 +112,7 @@ impl AppState {
             show_perf_panel: Split::new(cfg!(feature = "dev-tools")),
             recording_active: Split::new(false),
             recording_cmd: Split::new(None),
+            #[cfg(feature = "dev-tools")]
             diag_cmd: Split::new(None),
             export_cmd: Split::new(None),
             playback_cmd: Split::new(None),

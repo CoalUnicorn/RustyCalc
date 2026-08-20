@@ -35,10 +35,14 @@ pub struct PerfTimings {
     pub frame_trace: RwSignal<Option<String>>,
     /// Authoritative canvas capture state, mirrored by the worksheet's
     /// diagnostics Effect. The rAF loop reads it (untracked) to decide
-    /// whether to sample `frameDiagnostics()`.
+    /// whether to sample `frameDiagnostics()`. Dev-tools only — the design
+    /// promise is that production builds retain no diagnostic state.
+    #[cfg(feature = "dev-tools")]
     pub diag_enabled: RwSignal<bool>,
     /// JSON string of the last captured `IronCanvas.frameDiagnostics()`.
     /// `None` until capture is enabled and a painted frame completes.
+    /// Dev-tools only.
+    #[cfg(feature = "dev-tools")]
     pub frame_diagnostics: RwSignal<Option<String>>,
 }
 
@@ -55,7 +59,9 @@ impl PerfTimings {
             render_ms: RwSignal::new(Some(0.0)),
             last_formula: RwSignal::new(None),
             frame_trace: RwSignal::new(None),
+            #[cfg(feature = "dev-tools")]
             diag_enabled: RwSignal::new(false),
+            #[cfg(feature = "dev-tools")]
             frame_diagnostics: RwSignal::new(None),
         }
     }

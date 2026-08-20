@@ -59,7 +59,7 @@ use crate::render_overlays::RenderOverlays;
 use crate::renderer::diag::DiagDeltaKind;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diag::{
-    DiagBlitResultTag, DiagCacheResolution, DiagPaintedLayers, FrameDiagnostics,
+    DiagBlitResultTag, DiagCacheResolution, DiagCompletion, DiagPaintedLayers, FrameDiagnostics,
 };
 use crate::renderer::{GridCacheCommit, GridRenderer, OverlayRenderer};
 use crate::theme::{CanvasTheme, ThemeVariables};
@@ -1233,11 +1233,9 @@ where
         // dropped attempt never loses its attribution without a published
         // snapshot.
         #[cfg(feature = "dev-diagnostics")]
-        self.grid.renderer.diag_begin_attempt(
-            diag_delta,
-            plan.rebuild_reason,
-            self.diag_probe,
-        );
+        self.grid
+            .renderer
+            .diag_begin_attempt(diag_delta, plan.rebuild_reason, self.diag_probe);
         let selected = plan.selected_strategy;
         let work_flags = plan.consumes.flags();
         // The trace was reset before capture so both successful dispatch and
@@ -1449,23 +1447,23 @@ where
         //     outcome, never from the presence of a grid cache commit: an
         //     Overlay regime commits with `cache_commit: None`.
         #[cfg(feature = "dev-diagnostics")]
-        self.grid.renderer.publish_diag(
-            self.attempt_seq,
+        self.grid.renderer.publish_diag(DiagCompletion {
+            attempt_seq: self.attempt_seq,
             selected,
-            work_flags,
+            work: work_flags,
             effective,
             committed_seq,
-            frame_outcome,
-            DiagPaintedLayers {
+            outcome: frame_outcome,
+            layers: DiagPaintedLayers {
                 grid: grid_painted,
                 overlay: overlay_painted,
             },
-            if frame_outcome == FrameOutcome::Painted {
+            resolution: if frame_outcome == FrameOutcome::Painted {
                 DiagCacheResolution::Committed
             } else {
                 DiagCacheResolution::HeldForRetry
             },
-        );
+        });
 
         // 6. return PaintResult::Painted or PaintResult::Retry.
         result

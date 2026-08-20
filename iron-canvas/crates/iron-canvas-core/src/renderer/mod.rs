@@ -205,6 +205,13 @@ impl<P: Painter> RendererCore<P> {
         t.verdict = Some(GridVerdict::Held);
         t.outcome = FrameOutcome::HeldOnBridgeFailure;
         self.trace.set(t);
+        // The structured snapshot records the SAME final grid verdict at
+        // this decision site, so a held frame never publishes a null
+        // `repaint.verdict` while the one-line trace says `grid:held`.
+        // Capture-failure holds never reach here and keep `verdict: None`
+        // — the grid genuinely never decided for them.
+        #[cfg(feature = "dev-diagnostics")]
+        self.diag_repaint(GridVerdict::Held, None, &[]);
     }
 
     /// Charge one renderer bundle fetch over `range`. The legacy logical slot
@@ -623,27 +630,8 @@ impl<P: Painter> GridRenderer<P> {
     }
 
     #[cfg(feature = "dev-diagnostics")]
-    pub(crate) fn publish_diag(
-        &self,
-        attempt_seq: u64,
-        selected: Option<crate::orchestrator::PaintRegimeTag>,
-        work: crate::pending_work::WorkFlags,
-        effective: Option<crate::orchestrator::PaintRegimeTag>,
-        committed_seq: Option<u64>,
-        outcome: FrameOutcome,
-        layers: diag::DiagPaintedLayers,
-        resolution: diag::DiagCacheResolution,
-    ) {
-        self.core.publish_diag(
-            attempt_seq,
-            selected,
-            work,
-            effective,
-            committed_seq,
-            outcome,
-            layers,
-            resolution,
-        );
+    pub(crate) fn publish_diag(&self, completion: diag::DiagCompletion) {
+        self.core.publish_diag(completion);
     }
 
     pub fn for_layer(painter: Rc<P>) -> Self {

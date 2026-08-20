@@ -716,11 +716,16 @@ mod dev_wire {
 
     /// Geometry: the design's example carries frozen counts at the geometry
     /// root (topRow/leftColumn/frozenRows/frozenColumns); the shape object
-    /// repeats them alongside the exact slot lengths.
+    /// repeats them alongside the exact slot lengths. `cssSize` is the
+    /// logical CSS size the grid planned against; `backingSize` is the
+    /// physical backing-store size — core derives it from CSS x DPR, and
+    /// the facade overwrites it with the actual canvas backing store
+    /// before serialization so CSS/backing mismatches are visible.
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     pub(crate) struct DiagGeometryWire {
-        pub canvas: CanvasSizeWire,
+        pub css_size: CanvasSizeWire,
+        pub backing_size: BackingSizeWire,
         pub dpr: f64,
         pub sheet: u32,
         pub top_row: i32,
@@ -735,10 +740,19 @@ mod dev_wire {
         pub segments: Vec<DiagSegmentWire>,
     }
 
+    #[derive(Serialize, Clone, Copy)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct BackingSizeWire {
+        pub w: u32,
+        pub h: u32,
+    }
+
     impl From<&DiagGeometry> for DiagGeometryWire {
         fn from(geometry: &DiagGeometry) -> Self {
+            let (w, h) = geometry.backing_size;
             Self {
-                canvas: CanvasSizeWire::from(geometry.canvas),
+                css_size: CanvasSizeWire::from(geometry.canvas),
+                backing_size: BackingSizeWire { w, h },
                 dpr: geometry.dpr,
                 sheet: geometry.sheet,
                 top_row: geometry.top_row,
@@ -1102,7 +1116,9 @@ mod dev_wire {
         // .icr schema) — serialize them directly, as wire.rs already does.
         pub src: iron_canvas_core::geometry::pixel_rect::PixelRect,
         pub dst: iron_canvas_core::geometry::pixel_rect::PixelRect,
-        pub clip: iron_canvas_core::geometry::pixel_rect::PixelRect,
+        // `null` when execution never reached `push_clip` (held and both
+        // fallback outcomes) — never a fabricated zero rectangle.
+        pub clip: Option<iron_canvas_core::geometry::pixel_rect::PixelRect>,
         pub strip: iron_canvas_core::geometry::pixel_rect::PixelRect,
         pub revealed: Vec<DiagRevealedStripWire>,
         pub result: DiagBlitResultTagWire,
@@ -1208,7 +1224,19 @@ mod tests {
                     fingerprint_truth: DiagFingerprintTruth::Exact,
                 },
             },
-            blit: None,
+            // A fallback/held blit never reaches `push_clip`: the wire
+            // must carry `clip: null`, never a fabricated zero rect.
+            blit: Some(iron_canvas_core::DiagBlit {
+                axis: iron_canvas_core::geometry::prim::Axis::Row,
+                delta: 4,
+                src: iron_canvas_core::PixelRect::default(),
+                dst: iron_canvas_core::PixelRect::default(),
+                clip: None,
+                strip: iron_canvas_core::PixelRect::default(),
+                revealed: Vec::new(),
+                result: iron_canvas_core::DiagBlitResultTag::GridFallback,
+                cold_cache: Some(true),
+            }),
             paint_counts: DiagPaintCounts { rows: 1, cells: 21 },
         };
 
@@ -1243,7 +1271,13 @@ mod tests {
         assert_eq!(json["cache"]["committedBefore"]["bufferTruth"], "stale");
         assert_eq!(json["cache"]["resolution"], "committed");
         assert_eq!(json["cache"]["committedAfter"]["fingerprintTruth"], "exact");
-        assert_eq!(json["blit"], serde_json::Value::Null);
+        assert_eq!(
+            json["blit"]["clip"],
+            serde_json::Value::Null,
+            "a blit that never reached push_clip must emit clip: null"
+        );
+        assert_eq!(json["blit"]["result"], "gridFallback");
+        assert_eq!(json["blit"]["delta"], 4);
         assert_eq!(json["paintCounts"]["rows"], 1);
         assert_eq!(json["paintCounts"]["cells"], 21);
     }

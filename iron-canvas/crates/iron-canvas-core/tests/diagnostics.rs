@@ -405,14 +405,107 @@ fn row_blit_reports_shift_revealed_strip_and_effective_clip() {
     assert!(blit.strip.width > 0 && blit.strip.height > 0);
     // Today's finalized blit work hands `plan.pixel_strip` to push_clip
     // (blit_work.rs:113), so the effective clip equals the repaint band —
-    // the snapshot must record the actual push_clip argument.
-    assert_eq!(blit.clip, blit.strip);
+    // the snapshot must record the actual push_clip argument, as Some.
+    assert_eq!(blit.clip, Some(blit.strip));
     // Fetch requests for a clean shift are reveal-purpose only.
     assert!(
         diag.fetch
             .requests
             .iter()
             .all(|r| r.purpose == DiagFetchPurpose::BlitReveal)
+    );
+}
+
+#[test]
+fn geometry_reports_css_and_backing_size() {
+    let (mut orch, _model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    let geo = diag.geometry.expect("grid-visited attempt has geometry");
+    assert_eq!(geo.canvas, CanvasSize { w: 800.0, h: 600.0 });
+    // dpr 1.0: derived backing size equals the CSS size.
+    assert_eq!(geo.backing_size, (800, 600));
+
+    // dpr 2.0: the derived backing size doubles, matching browser
+    // rounding of CSS x DPR.
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 2.0);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    let geo = diag.geometry.expect("grid-visited attempt has geometry");
+    assert_eq!(geo.dpr, 2.0);
+    assert_eq!(geo.backing_size, (1600, 1200));
+}
+
+#[test]
+fn damage_one_row_with_frozen_columns_reports_one_painted_row() {
+    // Frozen columns split one damaged row band into left and right
+    // segments. `paint.rows` counts DISTINCT grid rows, so the same
+    // absolute row visited in both segments must count exactly once.
+    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
+    let model = Rc::new(TestModel::new().with_data_until(40).with_frozen(2, 1));
+    orch.set_model(model.clone());
+    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+
+    model.set_cell(4, 2, "damaged");
+    orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Strip));
+    assert_eq!(
+        diag.paint_counts.rows, 1,
+        "one damaged row split across frozen segments must count once"
+    );
+    // The cells stay disjoint across segments: exactly the frozen BL
+    // column plus every visible BR column, from the segment ranges the
+    // renderer actually painted.
+    let geo = diag.geometry.expect("grid-visited attempt has geometry");
+    let br = geo
+        .segments
+        .iter()
+        .find(|s| s.region == PaneRegion::BottomRight)
+        .expect("frozen columns create a BR segment");
+    // The frozen BL column contributes exactly one cell (row 4, col 1).
+    assert_eq!(
+        diag.paint_counts.cells,
+        1 + (br.range.c2 - br.range.c1 + 1) as usize
+    );
+}
+
+#[test]
+fn fresh_fallback_blit_reports_no_clip_and_full_verdict() {
+    // Row-header digit boundary (last visible row 999 -> 1000 widens the
+    // header): `Chrome::prepare_blit` rejects in-place reuse and the
+    // attempt demotes to a full Fresh rebuild. The blit record must say
+    // FreshFallback and must NOT fabricate a clip rectangle.
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(980)
+            .with_active(980, 1),
+    );
+    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
+    orch.set_model(model.clone());
+    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+
+    model.set_top_row(981);
+    orch.view_changed();
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+
+    let diag = orch.frame_diagnostics().unwrap();
+    let blit = diag.blit.expect("viewport attempt records blit detail");
+    assert_eq!(blit.result, DiagBlitResultTag::FreshFallback);
+    assert_eq!(
+        blit.clip, None,
+        "a Fresh fallback never reaches push_clip and must not fabricate a clip"
+    );
+    assert!(
+        matches!(diag.repaint.verdict, Some(GridVerdict::Full)),
+        "the fallback repaints the whole grid; got {:?}",
+        diag.repaint.verdict
     );
 }
 
@@ -464,6 +557,26 @@ fn held_attempt_keeps_committed_cache_state() {
         Some(diag.cache.committed_after.clone()),
         "a held attempt must not present candidate cache state as committed"
     );
+    assert_eq!(
+        diag.repaint.verdict,
+        Some(GridVerdict::Held),
+        "a held Fresh attempt must stamp the final grid verdict, not null"
+    );
+}
+
+#[test]
+fn held_damage_attempt_reports_held_verdict() {
+    let (mut orch, model) = harness();
+    orch.set_frame_diagnostics_enabled(true);
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    // Fail the damage-strip fetch: the Damage regime must hold.
+    model.set_bulk_bridge_fail(true);
+    model.set_cell(4, 2, "damaged");
+    orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
+    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    let diag = orch.frame_diagnostics().unwrap();
+    assert_eq!(diag.outcome, FrameOutcome::HeldOnBridgeFailure);
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Held));
 }
 
 #[test]
@@ -479,4 +592,13 @@ fn held_blit_preflight_reports_held_preflight_result() {
     let diag = orch.frame_diagnostics().unwrap();
     let blit = diag.blit.expect("scroll attempt records blit detail");
     assert_eq!(blit.result, DiagBlitResultTag::HeldPreflight);
+    assert_eq!(
+        diag.repaint.verdict,
+        Some(GridVerdict::Held),
+        "a held blit attempt must stamp the final grid verdict, not null"
+    );
+    assert_eq!(
+        blit.clip, None,
+        "a held blit never reached push_clip and must not fabricate a clip"
+    );
 }

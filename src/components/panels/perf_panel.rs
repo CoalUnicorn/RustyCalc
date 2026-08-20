@@ -109,6 +109,19 @@ pub fn PerfPanel() -> impl IntoView {
     #[cfg(feature = "dev-tools")]
     on_cleanup(move || app.diag_cmd.set(Some(DiagCmd::Set(false))));
 
+    // One control governs both capture and visibility. The toggle button
+    // dispatches `DiagCmd::Set(next)` itself, but the Popover's
+    // outside-click close only writes `diag_open` — this effect closes that
+    // gap so a dismissed popup disables capture too, instead of leaving
+    // instrumentation running invisibly. Reads `diag_enabled` untracked, so
+    // the effect only reacts to popup state, never to its own output.
+    #[cfg(feature = "dev-tools")]
+    Effect::new(move |_| {
+        if !diag_open.get() && app.perf.diag_enabled.get_untracked() {
+            app.diag_cmd.set(Some(DiagCmd::Set(false)));
+        }
+    });
+
     // The leptos `view!` macro does not support `#[cfg]` on child nodes (the
     // attribute is dropped, not applied), so the two diag fragments are built
     // in these closures — where `#[cfg]` is plain Rust — and spliced through

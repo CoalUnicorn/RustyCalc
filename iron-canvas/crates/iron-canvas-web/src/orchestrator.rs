@@ -296,7 +296,18 @@ impl IronCanvas {
         match self.runtime.orchestrator().frame_diagnostics() {
             None => JsValue::UNDEFINED,
             Some(diag) => {
-                let wire = crate::wire::FrameDiagnosticsWire::from(&diag);
+                let mut wire = crate::wire::FrameDiagnosticsWire::from(&diag);
+                // The grid canvas backing store is the ground truth for
+                // CSS/backing mismatch diagnosis; core can only derive it
+                // from CSS x DPR. Overwrite the derived value with the
+                // actual physical size before serialization.
+                if let Some(geometry) = &mut wire.geometry {
+                    let canvas = self.runtime.grid_canvas();
+                    geometry.backing_size = crate::wire::BackingSizeWire {
+                        w: canvas.width(),
+                        h: canvas.height(),
+                    };
+                }
                 serde_wasm_bindgen::to_value(&wire).unwrap_or(JsValue::UNDEFINED)
             }
         }

@@ -19,6 +19,7 @@ use crate::renderer::cell::fingerprint::{
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diag::{
     DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose, DiagFingerprintActionTag,
+    distinct_rows,
 };
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
@@ -641,7 +642,11 @@ impl<P: Painter> RendererCore<P> {
                 #[cfg(feature = "dev-diagnostics")]
                 {
                     self.diag_fingerprint_action(DiagFingerprintActionTag::Install);
-                    let mut rows = 0usize;
+                    // Absolute row intervals per painted segment, merged so
+                    // `rows` counts distinct grid rows even when frozen
+                    // columns visit the same rows in left and right
+                    // segments. Cells stay disjoint across segments.
+                    let mut row_intervals: Vec<(i32, i32)> = Vec::new();
                     let mut cells = 0usize;
                     for grid_segment in layout.segments() {
                         let range = grid_segment.range();
@@ -649,7 +654,7 @@ impl<P: Painter> RendererCore<P> {
                         match &repaint.plan {
                             RepaintPlan::Skip => {}
                             RepaintPlan::Full => {
-                                rows += (range.r2 - range.r1 + 1).max(0) as usize;
+                                row_intervals.push((range.r1, range.r2));
                                 cells += FetchedCells::addressed_cells(range);
                             }
                             RepaintPlan::Rows(spans) => {
@@ -657,15 +662,14 @@ impl<P: Painter> RendererCore<P> {
                                     let r1 = span.r1.max(range.r1);
                                     let r2 = span.r2.min(range.r2);
                                     if r1 <= r2 {
-                                        let span_rows = (r2 - r1 + 1) as usize;
-                                        rows += span_rows;
-                                        cells += span_rows * cols;
+                                        row_intervals.push((r1, r2));
+                                        cells += (r2 - r1 + 1) as usize * cols;
                                     }
                                 }
                             }
                         }
                     }
-                    self.diag_paint_counts(rows, cells);
+                    self.diag_paint_counts(distinct_rows(&row_intervals), cells);
                 }
                 GridCacheCommit::Replace {
                     layout,
@@ -696,15 +700,15 @@ impl<P: Painter> RendererCore<P> {
                 #[cfg(feature = "dev-diagnostics")]
                 {
                     self.diag_fingerprint_action(DiagFingerprintActionTag::MarkStale);
-                    let rows = strips
+                    let row_intervals: Vec<(i32, i32)> = strips
                         .iter()
-                        .map(|strip| (strip.range.r2 - strip.range.r1 + 1) as usize)
-                        .sum();
+                        .map(|strip| (strip.range.r1, strip.range.r2))
+                        .collect();
                     let cells = strips
                         .iter()
                         .map(|strip| FetchedCells::addressed_cells(strip.range))
                         .sum();
-                    self.diag_paint_counts(rows, cells);
+                    self.diag_paint_counts(distinct_rows(&row_intervals), cells);
                 }
                 GridCacheCommit::Splice {
                     layout,
@@ -744,17 +748,17 @@ impl<P: Painter> RendererCore<P> {
                         PreparedFingerprintUpdate::Install(_) => DiagFingerprintActionTag::Install,
                         PreparedFingerprintUpdate::MarkStale => DiagFingerprintActionTag::MarkStale,
                     });
-                    let rows = address_strips
+                    let row_intervals: Vec<(i32, i32)> = address_strips
                         .iter()
                         .flatten()
-                        .map(|strip| (strip.range.r2 - strip.range.r1 + 1) as usize)
-                        .sum();
+                        .map(|strip| (strip.range.r1, strip.range.r2))
+                        .collect();
                     let cells = address_strips
                         .iter()
                         .flatten()
                         .map(|strip| FetchedCells::addressed_cells(strip.range))
                         .sum();
-                    self.diag_paint_counts(rows, cells);
+                    self.diag_paint_counts(distinct_rows(&row_intervals), cells);
                 }
                 GridCacheCommit::Shift {
                     previous,

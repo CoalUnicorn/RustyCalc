@@ -24,6 +24,8 @@ use crate::input::mouse::CanvasHandle;
 use crate::state::{ModelStore, Split};
 use iron_canvas_core::*;
 use iron_canvas_web::{IronCanvas, JsPaintResult};
+#[cfg(feature = "dev-tools")]
+use wasm_bindgen::JsValue;
 
 use super::ClipboardDraw;
 use super::adapter::WorksheetModelAdapter;
@@ -314,9 +316,16 @@ pub(super) fn install_raf_loop(
                     if value.is_undefined() {
                         None
                     } else {
-                        js_sys::JSON::stringify(&value)
-                            .ok()
-                            .and_then(|text| text.as_string())
+                        // Two-space indent: the popup shows the snapshot in
+                        // a bounded scrollable surface, so multi-line JSON
+                        // is far more inspectable than one compact line.
+                        js_sys::JSON::stringify_with_replacer_and_space(
+                            &value,
+                            &JsValue::NULL,
+                            &JsValue::from_str("  "),
+                        )
+                        .ok()
+                        .and_then(|text| text.as_string())
                     }
                 })
             });
