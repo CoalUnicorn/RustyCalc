@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{RCRange, geometry::pixel_rect::PixelRect};
+use crate::{RCRange, geometry::pixel_rect::PixelRect, types::ui::Side};
 
 /// A point in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -134,20 +134,8 @@ impl Axis {
     }
 }
 
-/// Which edge of a cell rectangle is being stroked.
-///
-/// `line()` projects the edge onto a `PixelRect` to produce the
-/// axis-aligned `Line` segment painted by `paint_border`.
-#[derive(Copy, Clone)]
-pub enum BorderEdge {
-    Left,
-    Top,
-    Right,
-    Bottom,
-}
-
-impl BorderEdge {
-    /// The axis-aligned `Line` this edge would stroke on `rect`.
+impl Side {
+    /// The axis-aligned [`Line`] this side would stroke on `rect`.
     pub fn line(self, rect: PixelRect) -> Line {
         let PixelRect {
             top_left: Point { x, y },
@@ -155,28 +143,28 @@ impl BorderEdge {
             height,
         } = rect;
         match self {
-            BorderEdge::Left => Line::V {
+            Side::Left => Line::V {
                 x,
                 span: Span {
                     from: y,
                     to: y + height,
                 },
             },
-            BorderEdge::Top => Line::H {
+            Side::Top => Line::H {
                 span: Span {
                     from: x,
                     to: x + width,
                 },
                 y,
             },
-            BorderEdge::Right => Line::V {
+            Side::Right => Line::V {
                 x: x + width,
                 span: Span {
                     from: y,
                     to: y + height,
                 },
             },
-            BorderEdge::Bottom => Line::H {
+            Side::Bottom => Line::H {
                 span: Span {
                     from: x,
                     to: x + width,

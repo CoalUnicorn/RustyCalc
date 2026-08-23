@@ -19,7 +19,8 @@ The foundation. Every other crate in the workspace depends on `iron-canvas-core`
 - `CanvasTheme`, `ThemeVariables`: resolved colors and metrics
 - `PixelRect`, `CanvasSize`, `Point`, `Line`, `Span`, `col_name`: geometry
 - `CellStyle`, `CellKind`, `CellDecoration`, `Alignment`, `Border`: style model
-- `HitTest`, `ResizeTarget`, `RefZone`, `Side`: pointer-to-cell results
+- `HitTest`, `ResizeTarget`, `RefZone`: pointer-to-cell results
+- `Side`: cardinal side shared by hit testing and border paint
 - `FormulaRef`, `RCRange`, `SheetArea`, `AutofillTarget`: coordinate types
 - `RenderOverlays`: pushed overlay state (autofill target, marching ants, point-mode range, formula refs)
 - `Layer`, `DecorationId`: consumer-defined overlay decorations registered on the orchestrator

@@ -9,7 +9,7 @@ use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
-    Border, BorderItem, BorderStyle, CellStyle, FrameOutcome, GridVerdict, RowSpan,
+    Border, BorderItem, BorderStyle, CellStyle, FrameOutcome, GridVerdict, Line, RowSpan,
 };
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
@@ -39,6 +39,75 @@ fn cells_group(ops: &[DrawOp]) -> &[DrawOp] {
         .map(|offset| start + offset)
         .expect("grid paint must close the Cells group");
     &ops[start..end]
+}
+
+#[test]
+fn grid_fallback_strokes_left_before_top() {
+    let model = TestModel::synthetic_grid().with_data_until(30);
+    let (frame, core) = fixture(&model);
+
+    assert!(!core.render_grid(&model, &frame));
+    let ops = core.painter().ops();
+    let strokes: Vec<_> = cells_group(&ops)
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::StrokeLine { line, .. } => Some(line),
+            _ => None,
+        })
+        .take(2)
+        .collect();
+
+    assert!(matches!(
+        strokes.as_slice(),
+        [Line::V { .. }, Line::H { .. }]
+    ));
+}
+
+#[test]
+fn explicit_borders_preserve_left_top_right_bottom_stroke_order() {
+    const LEFT: &str = "#110001";
+    const TOP: &str = "#220002";
+    const RIGHT: &str = "#330003";
+    const BOTTOM: &str = "#440004";
+
+    fn border(color: &str) -> Option<BorderItem> {
+        Some(BorderItem {
+            style: BorderStyle::Thin,
+            color: Some(color.to_string()),
+        })
+    }
+
+    let model = TestModel::synthetic_grid().with_data_until(30);
+    model.set_style(
+        5,
+        3,
+        CellStyle {
+            border: Border {
+                left: border(LEFT),
+                top: border(TOP),
+                right: border(RIGHT),
+                bottom: border(BOTTOM),
+                ..Border::default()
+            },
+            ..CellStyle::default()
+        },
+    );
+    let (frame, core) = fixture(&model);
+
+    assert!(!core.render_grid(&model, &frame));
+    let explicit_colors = [LEFT, TOP, RIGHT, BOTTOM];
+    let ops = core.painter().ops();
+    let strokes: Vec<_> = ops
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::StrokeLine { color, .. } if explicit_colors.contains(&color.as_str()) => {
+                Some(color.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(strokes, explicit_colors);
 }
 
 #[test]

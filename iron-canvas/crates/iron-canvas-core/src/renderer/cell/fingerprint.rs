@@ -18,6 +18,7 @@ use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
+use crate::types::ui::Side;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CellFingerprint(u64);
@@ -258,10 +259,9 @@ fn style_has_explicit_border(style: &Fetched<CellStyle>) -> bool {
     let Fetched::Value(style) = style else {
         return false;
     };
-    style.border.left.is_some()
-        || style.border.right.is_some()
-        || style.border.top.is_some()
-        || style.border.bottom.is_some()
+    Side::ALL
+        .into_iter()
+        .any(|side| style.border.get(side).is_some())
 }
 
 fn rebuild_grid_fingerprint(
@@ -807,16 +807,15 @@ impl Hash for StyleDigest<'_> {
                 alignment.wrap_text.hash(state);
             }
         }
-        hash_border_item(&style.border.left, state);
-        hash_border_item(&style.border.right, state);
-        hash_border_item(&style.border.top, state);
-        hash_border_item(&style.border.bottom, state);
+        for side in [Side::Left, Side::Right, Side::Top, Side::Bottom] {
+            hash_border_item(style.border.get(side), state);
+        }
         style.border.diagonal_up.hash(state);
         style.border.diagonal_down.hash(state);
     }
 }
 
-fn hash_border_item<H: Hasher>(border: &Option<BorderItem>, state: &mut H) {
+fn hash_border_item<H: Hasher>(border: Option<&BorderItem>, state: &mut H) {
     match border {
         None => state.write_u8(0),
         Some(border) => {

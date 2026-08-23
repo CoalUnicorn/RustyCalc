@@ -19,11 +19,11 @@ use crate::style::{Border, BorderItem, BorderStyle};
 use super::paint::CellPaint;
 use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 use crate::geometry::pixel_rect::PixelRect;
-use crate::geometry::prim::BorderEdge;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
 use crate::theme::CanvasTheme;
+use crate::types::ui::Side;
 
 /// Per-edge `BorderPaint` resolved from a cell's `Borders` style. `None` on
 /// an edge means the cell carries no explicit border there — the grid
@@ -43,21 +43,26 @@ impl ResolvedBorders {
     pub(super) fn resolve(border: &Border, theme: &CanvasTheme, intern: &ColorIntern) -> Self {
         Self {
             left: border
-                .left
-                .as_ref()
+                .get(Side::Left)
                 .map(|i| BorderPaint::resolve(i, theme, intern)),
             top: border
-                .top
-                .as_ref()
+                .get(Side::Top)
                 .map(|i| BorderPaint::resolve(i, theme, intern)),
             right: border
-                .right
-                .as_ref()
+                .get(Side::Right)
                 .map(|i| BorderPaint::resolve(i, theme, intern)),
             bottom: border
-                .bottom
-                .as_ref()
+                .get(Side::Bottom)
                 .map(|i| BorderPaint::resolve(i, theme, intern)),
+        }
+    }
+
+    pub(super) fn get(&self, side: Side) -> Option<&BorderPaint> {
+        match side {
+            Side::Left => self.left.as_ref(),
+            Side::Top => self.top.as_ref(),
+            Side::Right => self.right.as_ref(),
+            Side::Bottom => self.bottom.as_ref(),
         }
     }
 }
@@ -159,11 +164,10 @@ impl<P: Painter> RendererCore<P> {
         if p.style.fill_color.is_some() {
             return;
         }
-        if p.borders.left.is_none() {
-            self.paint_border(BorderEdge::Left, p.rect, grid);
-        }
-        if p.borders.top.is_none() {
-            self.paint_border(BorderEdge::Top, p.rect, grid);
+        for side in [Side::Left, Side::Top] {
+            if p.borders.get(side).is_none() {
+                self.paint_border(side, p.rect, grid);
+            }
         }
     }
 
@@ -172,17 +176,10 @@ impl<P: Painter> RendererCore<P> {
     /// Run across every slot AFTER the grid sub-pass so an explicit right on
     /// cell A wins over cell B's grid left at the shared pixel column.
     pub(super) fn paint_borders_explicit(&self, p: &CellPaint) {
-        if let Some(b) = &p.borders.left {
-            self.paint_border(BorderEdge::Left, p.rect, b);
-        }
-        if let Some(b) = &p.borders.top {
-            self.paint_border(BorderEdge::Top, p.rect, b);
-        }
-        if let Some(b) = &p.borders.right {
-            self.paint_border(BorderEdge::Right, p.rect, b);
-        }
-        if let Some(b) = &p.borders.bottom {
-            self.paint_border(BorderEdge::Bottom, p.rect, b);
+        for side in Side::ALL {
+            if let Some(border) = p.borders.get(side) {
+                self.paint_border(side, p.rect, border);
+            }
         }
     }
 
@@ -197,13 +194,13 @@ impl<P: Painter> RendererCore<P> {
 
     /// Stroke one resolved border. `Double`-style borders render as two
     /// parallel strokes offset ±1 px on the cross-axis.
-    fn paint_border(&self, edge: BorderEdge, rect: PixelRect, b: &BorderPaint) {
+    fn paint_border(&self, side: Side, rect: PixelRect, b: &BorderPaint) {
         // Extend each edge by half its width so perpendicular borders overlap
         // at the corner instead of leaving a butt-cap notch. With the painter's
         // parity-aware pixel snap, `width_px / 2` is the exact reach of the
         // crossing edge's band from its centerline (0 for 1-px borders, which
         // already meet cleanly).
-        let line = edge.line(rect).extend(b.stroke.width_px / 2);
+        let line = side.line(rect).extend(b.stroke.width_px / 2);
         let offsets: &[i32] = if b.stroke.double { &[-1, 1] } else { &[0] };
         let color = match &b.color {
             BorderColor::Static(s) => PaintColor::from_theme_str(s),
