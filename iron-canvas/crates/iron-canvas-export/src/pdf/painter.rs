@@ -12,6 +12,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use iron_canvas_core::geometry::constants::DASHED_RECT_PATTERN;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
@@ -23,10 +24,6 @@ use crate::common::color::parse_css_color;
 use crate::common::escape::pdf_string_escape;
 use crate::common::metrics;
 use crate::pdf::doc::stream::ContentStream;
-
-/// Visible dash pattern when `rect_dashed` is invoked. Matches the
-/// `stroke-dasharray="3 3"` SVG emits.
-const DASH_ON_OFF: &str = "[3 3]";
 
 pub struct PdfPainter {
     body: Rc<RefCell<ContentStream>>,
@@ -173,7 +170,10 @@ impl Painter for PdfPainter {
         let (x, y, w, h) = rect.as_f64_tuple();
         self.emit_stroke_color(color);
         self.emit_line_width(width);
-        self.write_str(&format!("{DASH_ON_OFF} 0 d\n"));
+        self.write_str(&format!(
+            "[{} {}] 0 d\n",
+            DASHED_RECT_PATTERN[0], DASHED_RECT_PATTERN[1]
+        ));
         self.emit_rect(x, y, w, h);
         self.write_str("S\n");
         // Reset to solid so subsequent strokes don't inherit the dash.

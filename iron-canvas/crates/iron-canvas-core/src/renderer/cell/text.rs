@@ -430,10 +430,7 @@ impl<P: Painter> RendererCore<P> {
                     // SVG `text-anchor="start"` renders glyphs at their natural
                     // width; `needs_clip` contains any escaping glyphs to the
                     // cell rectangle on both SVG and Canvas2D backends.
-                    (
-                        f64::from(t.clip.left()) + CELL_PADDING,
-                        TextAlign::Start,
-                    )
+                    (f64::from(t.clip.left()) + CELL_PADDING, TextAlign::Start)
                 }
             };
             self.painter.fill_text(

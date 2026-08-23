@@ -159,7 +159,7 @@ impl PaneSet {
         origin_y: i32,
         view_top_row: i32,
         last_row: i32,
-        canvas_h: f64,
+        canvas_h: i32,
     ) {
         self.rows.fill(
             model,
@@ -167,7 +167,7 @@ impl PaneSet {
             origin_y,
             view_top_row,
             last_row,
-            canvas_h.ceil() as i32,
+            canvas_h,
             |model, row| row_height(model, sheet, row),
         );
     }
@@ -184,7 +184,7 @@ impl PaneSet {
         origin_x: i32,
         view_left_column: i32,
         last_column: i32,
-        canvas_w: f64,
+        canvas_w: i32,
     ) {
         self.cols.fill(
             model,
@@ -192,7 +192,7 @@ impl PaneSet {
             origin_x,
             view_left_column,
             last_column,
-            canvas_w.ceil() as i32,
+            canvas_w,
             |model, col| col_width(model, sheet, col),
         );
     }

@@ -10,6 +10,7 @@ use std::cell::{Cell, RefCell};
 use std::fmt::Write as _;
 use std::mem;
 
+use iron_canvas_core::geometry::constants::DASHED_RECT_PATTERN;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
@@ -174,7 +175,8 @@ impl Painter for SvgPainter {
         xml_escape(color.as_str(), &mut body);
         let _ = write!(
             body,
-            "\" stroke-width=\"{width:.3}\" stroke-dasharray=\"4 3\"/>"
+            "\" stroke-width=\"{width:.3}\" stroke-dasharray=\"{} {}\"/>",
+            DASHED_RECT_PATTERN[0], DASHED_RECT_PATTERN[1]
         );
     }
 

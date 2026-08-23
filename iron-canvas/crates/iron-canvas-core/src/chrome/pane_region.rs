@@ -140,4 +140,8 @@ impl GridLayout {
     pub fn segments(&self) -> impl Iterator<Item = GridSegment> + '_ {
         self.segments.iter().copied().flatten()
     }
+
+    pub(crate) fn segment(self, region: PaneRegion) -> Option<GridSegment> {
+        self.segments().find(|segment| segment.region() == region)
+    }
 }

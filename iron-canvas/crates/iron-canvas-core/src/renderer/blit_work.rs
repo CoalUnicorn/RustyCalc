@@ -10,13 +10,6 @@ pub(crate) struct FinalizedBlitWork {
     pub(crate) pixel_clip: PixelRect,
 }
 
-fn segment_range(layout: GridLayout, region: PaneRegion) -> Option<RCRange> {
-    layout
-        .segments()
-        .find(|segment| segment.region() == region)
-        .map(|segment| segment.range())
-}
-
 fn revealed_strip(previous: RCRange, candidate: RCRange, axis: Axis) -> Option<RCRange> {
     match axis {
         Axis::Row if candidate.r1 < previous.r1 => Some(RCRange {
@@ -94,8 +87,8 @@ pub(crate) fn finalize_blit_work(
     let mut address_strips = [None, None];
     for (index, region) in regions.into_iter().enumerate() {
         let (Some(previous), Some(candidate)) = (
-            segment_range(previous, region),
-            segment_range(candidate, region),
+            previous.segment(region).map(|segment| segment.range()),
+            candidate.segment(region).map(|segment| segment.range()),
         ) else {
             continue;
         };

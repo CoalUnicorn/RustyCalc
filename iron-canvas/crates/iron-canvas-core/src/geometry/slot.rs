@@ -91,9 +91,8 @@ impl AxisSlot for ColSlot {
 /// next slot would sit) — used by the frozen pass to compute the band offset.
 ///
 /// `max_cursor = None` disables the break, used for the frozen band which
-/// always paints regardless of viewport size. For the scroll band callers
-/// pass `Some(canvas_extent.ceil() as i32)` — exactly equivalent to the
-/// original `f64::from(cursor) >= canvas_extent` test, for any positive extent.
+/// always paints regardless of viewport size. Scroll-band callers pass the
+/// canvas's outward-rounded logical extent.
 pub fn fill_axis<S: AxisSlot>(
     slots: &mut Vec<S>,
     range: std::ops::RangeInclusive<i32>,

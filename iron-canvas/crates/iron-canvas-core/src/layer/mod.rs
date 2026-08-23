@@ -98,10 +98,11 @@ where
 /// Full-canvas pixel rect. Layer-wide fill / clear converge here so the
 /// `f64` (CSS) -> `i32` (PixelRect) rounding lives in one place.
 fn full_canvas_rect(size: CanvasSize) -> PixelRect {
+    let (width, height) = size.to_logical_extent();
     PixelRect {
         top_left: Point { x: 0, y: 0 },
-        width: size.w.round() as i32,
-        height: size.h.round() as i32,
+        width,
+        height,
     }
 }
 

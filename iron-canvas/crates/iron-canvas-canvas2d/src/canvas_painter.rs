@@ -13,6 +13,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, js_sys};
 
 use iron_canvas_core::geometry::{
+    constants::{DASHED_RECT_PATTERN, STANDARD_BORDER_WIDTH},
     pixel_rect::PixelRect,
     prim::{Line, Point, Span},
 };
@@ -35,9 +36,6 @@ extern "C" {
 /// (not per-painter) so grid + overlay layers share a single signal —
 /// the failure mode is a ctx-level capability, not a layer-local one.
 static MEASURE_WARN_EMITTED: AtomicBool = AtomicBool::new(false);
-
-/// Standard border line width (1px in CSS pixels).
-pub(crate) const STANDARD_BORDER_WIDTH: f64 = 1.0;
 
 /// Snap an axis-aligned stroke's cross-axis coordinate onto the pixel grid.
 ///
@@ -153,7 +151,10 @@ impl CanvasPainter {
             ctx,
             blit_src: None,
             setter_cache: SetterCache::default(),
-            dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
+            dash_pattern: js_sys::Array::of2(
+                &DASHED_RECT_PATTERN[0].into(),
+                &DASHED_RECT_PATTERN[1].into(),
+            ),
             dash_empty: js_sys::Array::new(),
             clip_depth: Cell::new(0),
             dpr: Cell::new(1.0),
@@ -211,7 +212,7 @@ impl CanvasPainter {
     pub(crate) fn with_stroke_width<F: FnOnce(&Self)>(&self, width: f64, f: F) {
         self.set_line_width_cached(width);
         f(self);
-        self.set_line_width_cached(STANDARD_BORDER_WIDTH);
+        self.set_line_width_cached(f64::from(STANDARD_BORDER_WIDTH));
     }
 
     /// Map a call-site `PaintColor` to its `CachedColor`. `Static` stays

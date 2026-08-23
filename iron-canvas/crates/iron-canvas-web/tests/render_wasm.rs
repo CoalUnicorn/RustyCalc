@@ -3110,7 +3110,7 @@ struct DiagRepaintScenario {
     reason: Option<String>,
     changed_rows: Vec<RowSpanScenario>,
     changed_cells: Vec<ChangedCellScenario>,
-    clip: Option<RepaintClipScenario>,
+    clip: Option<RectScenario>,
     source_ranges: Vec<SourceRangeScenario>,
 }
 
@@ -3148,15 +3148,6 @@ struct RowSpanScenario {
 struct ChangedCellScenario {
     row: i32,
     column: i32,
-}
-
-#[cfg(feature = "dev-tools")]
-#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
-struct RepaintClipScenario {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
 }
 
 #[cfg(feature = "dev-tools")]
@@ -3380,7 +3371,10 @@ fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
             vec![ChangedCellScenario { row, column: col }]
         );
         let clip = diag.repaint.clip.as_ref().expect("cell repaint has a clip");
-        assert!(clip.w > 0 && clip.h > 0, "cell repaint clip has area");
+        assert!(
+            clip.width > 0.0 && clip.height > 0.0,
+            "cell repaint clip has area"
+        );
         assert!(
             diag.repaint
                 .source_ranges

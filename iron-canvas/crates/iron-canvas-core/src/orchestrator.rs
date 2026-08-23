@@ -1047,12 +1047,13 @@ where
             x: frame.pane_set.cols.frozen_offset,
             y: frame.pane_set.rows.frozen_offset,
         };
+        let (canvas_w, canvas_h) = frame.canvas_size.to_logical_extent();
         // The frame's own canvas size, not `self.size` — a resize between the
         // last paint and this query must not be mixed into a snapshot answer.
         Some(PixelRect {
             top_left,
-            width: (frame.canvas_size.w as i32 - top_left.x).max(0),
-            height: (frame.canvas_size.h as i32 - top_left.y).max(0),
+            width: (canvas_w - top_left.x).max(0),
+            height: (canvas_h - top_left.y).max(0),
         })
     }
 

@@ -93,7 +93,7 @@ pub enum DiagRepaintReason {
     ClipAlignment,
 }
 
-/// Prepared grid-cache action tag (projection of `GridCacheAction`).
+/// Prepared grid-cache transition tag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagCacheActionTag {
     None,
@@ -566,8 +566,8 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         .collect();
     }
 
-    /// Prepared grid-cache action tag, recorded once by each prepare entry
-    /// point next to its `cache_action`.
+    /// Prepared grid-cache transition tag, recorded once by each prepare entry
+    /// point.
     pub(crate) fn diag_cache_planned(&self, action: DiagCacheActionTag) {
         if !self.diag.enabled.get() {
             return;
@@ -751,13 +751,10 @@ pub(crate) fn distinct_rows(intervals: &[(i32, i32)]) -> usize {
 /// the blit result tag still carries the real fallback cause.
 fn scroll_delta(previous: GridLayout, candidate: GridLayout, rows: bool) -> i32 {
     let origin = |layout: GridLayout| {
-        layout
-            .segments()
-            .find(|segment| segment.region() == PaneRegion::BottomRight)
-            .map(|segment| {
-                let range = segment.range();
-                if rows { range.r1 } else { range.c1 }
-            })
+        layout.segment(PaneRegion::BottomRight).map(|segment| {
+            let range = segment.range();
+            if rows { range.r1 } else { range.c1 }
+        })
     };
     match (origin(previous), origin(candidate)) {
         (Some(before), Some(after)) => after - before,

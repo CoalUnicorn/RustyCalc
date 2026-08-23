@@ -35,7 +35,7 @@ use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
     pixel_rect::PixelRect,
     prim::Point,
-    slot::{scroll_first, AxisSlot},
+    slot::{AxisSlot, scroll_first},
 };
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -326,6 +326,7 @@ impl Chrome {
         // Phase B — row walk, bounded by the model's grid (Excel's
         // LAST_ROW/LAST_COLUMN by default; finite models override).
         let canvas = inputs.size();
+        let (canvas_w, canvas_h) = canvas.to_logical_extent();
         let last_row = model.last_row(sheet);
         let last_column = model.last_column(sheet);
         let origin_y = if show_col {
@@ -340,7 +341,7 @@ impl Chrome {
             origin_y,
             view.top_row,
             last_row,
-            canvas.h,
+            canvas_h,
         );
 
         // Phase C — measure row_header_thickness from the last visible row label.
@@ -369,7 +370,7 @@ impl Chrome {
             origin_x,
             view.left_column,
             last_column,
-            canvas.w,
+            canvas_w,
         );
 
         // Data-driven header labels in walk_header_strip (frozen ++ scroll)
@@ -550,6 +551,7 @@ impl Chrome {
     /// model access.
     pub fn range_rect(&self, range: RCRange) -> Option<PixelRect> {
         let p = &self.pane_set;
+        let (canvas_w, canvas_h) = self.canvas_size.to_logical_extent();
         let frozen_rows = p.rows.frozen_count();
         let frozen_cols = p.cols.frozen_count();
 
@@ -560,12 +562,12 @@ impl Chrome {
         let x = p.col_to_x(range.c1);
         let y = p.row_to_y(range.r1);
         let right = if range.c2 > p.last_visible_col() && range.c2 > frozen_cols {
-            self.canvas_size.w as i32
+            canvas_w
         } else {
             p.col_to_x(range.c2) + p.col_extent_at(range.c2)
         };
         let bottom = if range.r2 > p.last_visible_row() && range.r2 > frozen_rows {
-            self.canvas_size.h as i32
+            canvas_h
         } else {
             p.row_to_y(range.r2) + p.row_extent_at(range.r2)
         };

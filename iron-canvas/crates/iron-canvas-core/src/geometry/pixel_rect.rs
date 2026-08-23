@@ -143,7 +143,10 @@ impl Display for PixelRect {
         write!(
             f,
             "left:{:.0}px;top:{:.0}px;width:{:.0}px;height:{:.0}px;",
-            self.left(), self.top(), self.width, self.height
+            self.left(),
+            self.top(),
+            self.width,
+            self.height
         )
     }
 }

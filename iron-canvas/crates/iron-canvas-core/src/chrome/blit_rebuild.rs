@@ -193,10 +193,11 @@ impl PaneSet {
         new_top: i32,
         canvas: CanvasSize,
     ) -> Option<Vec<RowSlot>> {
+        let (_, canvas_h) = canvas.to_logical_extent();
         rebuild_axis_slots(
             &self.rows.scroll,
             self.rows.frozen_offset,
-            canvas.h.ceil() as i32,
+            canvas_h,
             new_top,
             // prev's fill-time snapshot: the blit path is gated on
             // !content_dirty, so the model's bound cannot have moved
@@ -213,10 +214,11 @@ impl PaneSet {
         new_left: i32,
         canvas: CanvasSize,
     ) -> Option<Vec<ColSlot>> {
+        let (canvas_w, _) = canvas.to_logical_extent();
         rebuild_axis_slots(
             &self.cols.scroll,
             self.cols.frozen_offset,
-            canvas.w.ceil() as i32,
+            canvas_w,
             new_left,
             self.cols.last_id,
             |c| col_width(model, sheet, c),

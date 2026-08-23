@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use crate::chrome::{GridLayout, GridSegment, PaneRegion};
+use crate::chrome::{GridLayout, PaneRegion};
 use crate::geometry::prim::Axis;
 use crate::orchestrator::GridVerdict;
 use crate::pending_work::{MAX_DAMAGE_SPANS, RowSpan};
@@ -72,10 +72,6 @@ pub(crate) enum GridLayoutTransition {
     Incompatible,
 }
 
-fn segment(layout: GridLayout, region: PaneRegion) -> Option<GridSegment> {
-    layout.segments().find(|segment| segment.region() == region)
-}
-
 impl GridLayoutTransition {
     /// Classify only exact-layout compatibility. Buffer validity is an
     /// independent grid-cache fact and must not change this result.
@@ -87,10 +83,10 @@ impl GridLayoutTransition {
             return Self::Incompatible;
         }
 
-        let unchanged = |region| segment(committed, region) == segment(candidate, region);
+        let unchanged = |region| committed.segment(region) == candidate.segment(region);
         let shifted = |region: PaneRegion, axis: Axis| {
-            let before = segment(committed, region);
-            let after = segment(candidate, region);
+            let before = committed.segment(region);
+            let after = candidate.segment(region);
             match (before, after) {
                 (None, None) => true,
                 (Some(before), Some(after)) => {
@@ -149,7 +145,7 @@ fn band_rows(layout: GridLayout, frozen: bool) -> Option<std::ops::RangeInclusiv
     };
     regions
         .into_iter()
-        .find_map(|region| segment(layout, region).map(|segment| segment.range().rows()))
+        .find_map(|region| layout.segment(region).map(|segment| segment.range().rows()))
 }
 
 fn fingerprint_grid_row(
@@ -552,7 +548,7 @@ fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> 
     let full_cost = candidate
         .layout
         .segments()
-        .map(|segment| addressed_cells(segment.range()))
+        .map(|segment| FetchedCells::addressed_cells(segment.range()))
         .sum::<usize>();
     if envelope_cost >= full_cost {
         return RepaintDecision {
@@ -656,10 +652,6 @@ fn range_intersection(a: RCRange, b: RCRange) -> Option<RCRange> {
         .then_some(intersection)
 }
 
-fn addressed_cells(range: RCRange) -> usize {
-    (range.r2 - range.r1 + 1).max(0) as usize * (range.c2 - range.c1 + 1).max(0) as usize
-}
-
 fn addressed_cost(layout: GridLayout, spans: &[RowSpan], range: Option<RCRange>) -> usize {
     layout
         .segments()
@@ -667,7 +659,7 @@ fn addressed_cost(layout: GridLayout, spans: &[RowSpan], range: Option<RCRange>)
             let segment_range = segment.range();
             if let Some(range) = range {
                 return range_intersection(segment_range, range)
-                    .map(addressed_cells)
+                    .map(FetchedCells::addressed_cells)
                     .unwrap_or(0);
             }
             spans
@@ -682,7 +674,7 @@ fn addressed_cost(layout: GridLayout, spans: &[RowSpan], range: Option<RCRange>)
                             c2: segment_range.c2,
                         },
                     )
-                    .map(addressed_cells)
+                    .map(FetchedCells::addressed_cells)
                     .unwrap_or(0)
                 })
                 .sum()
@@ -1018,8 +1010,14 @@ mod tests {
             .into_iter()
             .enumerate()
         {
-            let previous = segment(previous_layout, region).unwrap().range();
-            let candidate = segment(candidate_layout, region).unwrap().range();
+            let previous = previous_layout
+                .segment(region)
+                .expect("the previous test layout contains every pane segment")
+                .range();
+            let candidate = candidate_layout
+                .segment(region)
+                .expect("the candidate test layout contains every pane segment")
+                .range();
             let range = RCRange {
                 r1: previous.r2 + 1,
                 c1: candidate.c1,

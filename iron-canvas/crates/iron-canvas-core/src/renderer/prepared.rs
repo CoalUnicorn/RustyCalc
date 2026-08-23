@@ -232,42 +232,27 @@ pub(crate) struct PreparedStrip {
     pub(crate) fetched: FetchedCells,
 }
 
-pub(crate) enum GridCacheAction {
-    Replace {
-        layout: GridLayout,
-    },
-    Shift {
-        previous: GridLayout,
-        candidate: GridLayout,
-        axis: Axis,
-    },
-    Splice {
-        layout: GridLayout,
-    },
-    Reset,
-}
-
 // Full preparation uses fixed segment storage by design. Boxing the large arm
 // would trade this predictable stack value for a heap allocation per frame.
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum PreparedGrid {
+    Empty,
     Full {
         layout: GridLayout,
         segments: [Option<SegmentData>; 4],
-        repaint: Option<PreparedRepaint>,
-        cache_action: GridCacheAction,
+        repaint: PreparedRepaint,
     },
     Damage {
         layout: GridLayout,
         strips: Vec<PreparedStrip>,
-        cache_action: GridCacheAction,
     },
     Blit {
+        previous: GridLayout,
         layout: GridLayout,
+        axis: Axis,
         address_strips: [Option<PreparedStrip>; 2],
         pixel_clip: PixelRect,
         fingerprint: PreparedFingerprintUpdate,
-        cache_action: GridCacheAction,
     },
 }
 
@@ -290,10 +275,6 @@ pub(crate) enum GridCacheCommit {
         fingerprint: PreparedFingerprintUpdate,
     },
     Reset,
-}
-
-fn segment(layout: GridLayout, region: PaneRegion) -> Option<GridSegment> {
-    layout.segments().find(|segment| segment.region() == region)
 }
 
 impl<P: Painter> RendererCore<P> {
@@ -344,12 +325,11 @@ impl<P: Painter> RendererCore<P> {
         if layout.segments().next().is_none() {
             #[cfg(feature = "dev-diagnostics")]
             self.diag_cache_planned(DiagCacheActionTag::Reset);
-            return Some(PreparedGrid::Full {
-                layout,
-                segments,
-                repaint: None,
-                cache_action: GridCacheAction::Reset,
-            });
+            for prepared in segments.into_iter().flatten() {
+                self.grid_cache
+                    .park_prepare_scratch(prepared.segment.region(), prepared.fetched);
+            }
+            return Some(PreparedGrid::Empty);
         }
 
         let fetched: [Option<&FetchedCells>; 4] =
@@ -391,7 +371,7 @@ impl<P: Painter> RendererCore<P> {
         Some(PreparedGrid::Full {
             layout,
             segments,
-            repaint: Some(PreparedRepaint {
+            repaint: PreparedRepaint {
                 plan,
                 envelope,
                 candidate,
@@ -400,8 +380,7 @@ impl<P: Painter> RendererCore<P> {
                 changed_rows,
                 #[cfg(feature = "dev-diagnostics")]
                 changed_cells,
-            }),
-            cache_action: GridCacheAction::Replace { layout },
+            },
         })
     }
 
@@ -465,11 +444,7 @@ impl<P: Painter> RendererCore<P> {
         }
         #[cfg(feature = "dev-diagnostics")]
         self.diag_cache_planned(DiagCacheActionTag::Splice);
-        Some(PreparedGrid::Damage {
-            layout,
-            strips,
-            cache_action: GridCacheAction::Splice { layout },
-        })
+        Some(PreparedGrid::Damage { layout, strips })
     }
 
     pub(crate) fn prepare_blit_grid(
@@ -608,15 +583,12 @@ impl<P: Painter> RendererCore<P> {
             self.diag_cache_planned(DiagCacheActionTag::Shift);
         }
         Some(PreparedGrid::Blit {
+            previous,
             layout: candidate,
+            axis,
             address_strips,
             pixel_clip: work.pixel_clip,
             fingerprint,
-            cache_action: GridCacheAction::Shift {
-                previous,
-                candidate,
-                axis,
-            },
         })
     }
 
@@ -626,25 +598,16 @@ impl<P: Painter> RendererCore<P> {
         prepared: PreparedGrid,
     ) -> GridCacheCommit {
         match prepared {
+            PreparedGrid::Empty => {
+                #[cfg(feature = "dev-diagnostics")]
+                self.diag_fingerprint_action(DiagFingerprintActionTag::Reset);
+                GridCacheCommit::Reset
+            }
             PreparedGrid::Full {
                 layout,
                 mut segments,
                 repaint,
-                cache_action,
             } => {
-                if matches!(cache_action, GridCacheAction::Reset) {
-                    #[cfg(feature = "dev-diagnostics")]
-                    self.diag_fingerprint_action(DiagFingerprintActionTag::Reset);
-                    return GridCacheCommit::Reset;
-                }
-                let GridCacheAction::Replace {
-                    layout: commit_layout,
-                } = cache_action
-                else {
-                    unreachable!("PreparedGrid::Full has Replace or Reset cache work")
-                };
-                debug_assert_eq!(layout, commit_layout);
-                let repaint = repaint.expect("a non-empty full grid has a repaint candidate");
                 let _painted_envelope = match &repaint.plan {
                     RepaintPlan::Cell(_) | RepaintPlan::Range(_) => {
                         paint_repaint_envelope(
@@ -735,18 +698,7 @@ impl<P: Painter> RendererCore<P> {
                     fingerprint: repaint.candidate,
                 }
             }
-            PreparedGrid::Damage {
-                layout,
-                mut strips,
-                cache_action,
-            } => {
-                let GridCacheAction::Splice {
-                    layout: commit_layout,
-                } = cache_action
-                else {
-                    unreachable!("PreparedGrid::Damage always has Splice cache work")
-                };
-                debug_assert_eq!(layout, commit_layout);
+            PreparedGrid::Damage { layout, mut strips } => {
                 for strip in &mut strips {
                     paint_strip(self, frame, strip.region, strip.range, &mut strip.fetched);
                 }
@@ -773,21 +725,13 @@ impl<P: Painter> RendererCore<P> {
                 }
             }
             PreparedGrid::Blit {
+                previous,
                 layout,
+                axis,
                 mut address_strips,
                 pixel_clip,
                 fingerprint,
-                cache_action,
             } => {
-                let GridCacheAction::Shift {
-                    previous,
-                    candidate,
-                    axis,
-                } = cache_action
-                else {
-                    unreachable!("PreparedGrid::Blit always has Shift cache work")
-                };
-                debug_assert_eq!(layout, candidate);
                 self.painter.push_clip(pixel_clip);
                 #[cfg(feature = "dev-diagnostics")]
                 self.diag_blit_clip(pixel_clip);
@@ -847,7 +791,8 @@ impl<P: Painter> RendererCore<P> {
                 let mut cells = self.grid_cache.take_cells();
                 for grid_segment in layout.segments() {
                     let region = grid_segment.region();
-                    let previous_range = segment(previous, region)
+                    let previous_range = previous
+                        .segment(region)
                         .expect("a compatible Shift preserves segment presence")
                         .range();
                     cells[region as usize]
@@ -856,7 +801,8 @@ impl<P: Painter> RendererCore<P> {
                         .shift(previous_range, grid_segment.range(), axis);
                 }
                 for strip in address_strips.iter_mut().flatten() {
-                    let segment_range = segment(layout, strip.region)
+                    let segment_range = layout
+                        .segment(strip.region)
                         .expect("a committed blit strip belongs to the candidate layout")
                         .range();
                     cells[strip.region as usize]
@@ -885,7 +831,8 @@ impl<P: Painter> RendererCore<P> {
             } => {
                 let mut cells = self.grid_cache.take_cells();
                 for strip in &mut strips {
-                    let segment_range = segment(layout, strip.region)
+                    let segment_range = layout
+                        .segment(strip.region)
                         .expect("a committed Damage strip belongs to the exact layout")
                         .range();
                     cells[strip.region as usize]

@@ -89,7 +89,7 @@ fn rect_dashed_emits_dash_pattern_and_resets() {
     let p = PdfPainter::new(W, H);
     p.rect_dashed(rect(0, 0, 10, 10), PaintColor::Static("#0000ff"), 1.0);
     let s = snapshot(&p);
-    assert!(s.contains("[3 3] 0 d"), "missing dash pattern: {s:?}");
+    assert!(s.contains("[4 3] 0 d"), "missing dash pattern: {s:?}");
     assert!(s.contains("[] 0 d"), "missing dash reset: {s:?}");
     assert!(s.contains("\nS\n"));
 }

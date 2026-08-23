@@ -453,6 +453,7 @@ pub(super) fn try_blit_rows(
     sheet: u32,
     new_top: i32,
 ) -> Option<BlitPlan> {
+    let (canvas_w, canvas_h) = prev.canvas_size.to_logical_extent();
     let pane_x = prev.pane_set.cols.frozen_offset;
     let pane_y = prev.pane_set.rows.frozen_offset;
     // pane_h is bounded by the canvas backing store extent, not by
@@ -461,8 +462,8 @@ pub(super) fn try_blit_rows(
     // canvas — using slot-bound pane_h here would send drawImage's
     // source rect past the backing store and the spec's proportional
     // source/dest clip would leave the bottom row stale.
-    let pane_w = (prev.canvas_size.w.round() as i32) - pane_x;
-    let pane_h = (prev.canvas_size.h.round() as i32) - pane_y;
+    let pane_w = canvas_w - pane_x;
+    let pane_h = canvas_h - pane_y;
     if pane_w <= 0 || pane_h <= 0 {
         return None;
     }
@@ -478,11 +479,11 @@ pub(super) fn try_blit_rows(
         },
         AxisRange {
             origin: prev.cell_origin.x,
-            size: (prev.canvas_size.w.round() as i32) - prev.cell_origin.x,
+            size: canvas_w - prev.cell_origin.x,
         },
         shift_px,
         dir,
-        prev.canvas_size.h.round() as i32,
+        canvas_h,
     ))
 }
 
@@ -492,13 +493,14 @@ pub(super) fn try_blit_cols(
     sheet: u32,
     new_left: i32,
 ) -> Option<BlitPlan> {
+    let (canvas_w, canvas_h) = prev.canvas_size.to_logical_extent();
     let pane_x = prev.pane_set.cols.frozen_offset;
     let pane_y = prev.pane_set.rows.frozen_offset;
     // pane_w is bounded by the canvas backing store extent, not by
     // `scroll_cols.last().left + width` — mirror of the comment in
     // try_blit_rows.
-    let pane_w = (prev.canvas_size.w.round() as i32) - pane_x;
-    let pane_h = (prev.canvas_size.h.round() as i32) - pane_y;
+    let pane_w = canvas_w - pane_x;
+    let pane_h = canvas_h - pane_y;
     if pane_w <= 0 || pane_h <= 0 {
         return None;
     }
@@ -514,10 +516,10 @@ pub(super) fn try_blit_cols(
         },
         AxisRange {
             origin: prev.cell_origin.y,
-            size: (prev.canvas_size.h.round() as i32) - prev.cell_origin.y,
+            size: canvas_h - prev.cell_origin.y,
         },
         shift_px,
         dir,
-        prev.canvas_size.w.round() as i32,
+        canvas_w,
     ))
 }

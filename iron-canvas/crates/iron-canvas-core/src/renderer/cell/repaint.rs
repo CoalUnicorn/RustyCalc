@@ -20,10 +20,11 @@ pub(crate) fn build_cell_repaint_envelope(
     frame: &Chrome,
     changed_cells: &[RCRange],
 ) -> CellRepaintEnvelope {
+    let (width, height) = frame.canvas_size.to_logical_extent();
     let canvas = PixelRect {
         top_left: Point { x: 0, y: 0 },
-        width: frame.canvas_size.w.round() as i32,
-        height: frame.canvas_size.h.round() as i32,
+        width,
+        height,
     };
     let changed_bounds = changed_cells
         .iter()
@@ -225,12 +226,7 @@ mod tests {
         else {
             panic!("a common fractional DPR must produce an aligned envelope");
         };
-        for edge in [
-            clip.left(),
-            clip.top(),
-            clip.right(),
-            clip.bottom(),
-        ] {
+        for edge in [clip.left(), clip.top(), clip.right(), clip.bottom()] {
             let backing = f64::from(edge) * frame.dpr;
             assert!((backing - backing.round()).abs() <= 1.0e-9);
         }

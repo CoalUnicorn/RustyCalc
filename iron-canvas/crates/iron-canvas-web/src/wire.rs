@@ -99,7 +99,7 @@ pub(crate) struct CanvasSizeWire {
 /// `Option<(row, col)>` from `pixel_to_cell` becomes a `{row, column}`
 /// object when present, matching the rest of the API (named fields, not
 /// positional tuples).
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CellCoordWire {
     pub row: i32,
@@ -191,7 +191,7 @@ impl From<CanvasSize> for CanvasSizeWire {
 // validate by `try_into()` at the call site so a malformed payload surfaces
 // as a `JsError`, not a panic.
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct RCRangeWire {
     pub r1: i32,
     pub c1: i32,
@@ -250,6 +250,17 @@ impl From<RCRangeWire> for RCRange {
             c1: r.c1,
             r2: r.r2,
             c2: r.c2,
+        }
+    }
+}
+
+impl From<RCRange> for RCRangeWire {
+    fn from(range: RCRange) -> Self {
+        Self {
+            r1: range.r1,
+            c1: range.c1,
+            r2: range.r2,
+            c2: range.c2,
         }
     }
 }
@@ -406,7 +417,7 @@ mod dev_wire {
     // `schemaVersion` (DIAG_SCHEMA_VERSION) so a later recorder embedding can
     // migrate. Field names are asserted by the native conversion test above.
 
-    use super::CanvasSizeWire;
+    use super::{CanvasSizeWire, CellCoordWire, RCRangeWire};
     use serde::Serialize;
 
     use iron_canvas_core::chrome::{GridShape, PaneRegion};
@@ -418,7 +429,7 @@ mod dev_wire {
         DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
     };
     use iron_canvas_core::{
-        FrameInputFailure, GridVerdict, PaintRegimeTag, RCRange, RebuildReason, RowSpan, WorkFlags,
+        FrameInputFailure, GridVerdict, PaintRegimeTag, RebuildReason, RowSpan, WorkFlags,
     };
 
     /// camelCase mirror of `PaintRegimeTag`. The engine tag rides the `.icr`
@@ -459,7 +470,7 @@ mod dev_wire {
         pub rebuild_reason: Option<RebuildReasonWire>,
         pub outcome: FrameOutcomeWire,
         pub painted_layers: DiagPaintedLayersWire,
-        pub probe: Option<RCRangeWireOut>,
+        pub probe: Option<RCRangeWire>,
         pub probe_segments: Vec<PaneRegionWire>,
         pub geometry: Option<DiagGeometryWire>,
         pub fetch: DiagFetchWire,
@@ -498,7 +509,7 @@ mod dev_wire {
                     grid: diag.painted_layers.grid,
                     overlay: diag.painted_layers.overlay,
                 },
-                probe: diag.probe.map(RCRangeWireOut::from),
+                probe: diag.probe.map(RCRangeWire::from),
                 probe_segments: diag
                     .probe_segments
                     .iter()
@@ -638,26 +649,6 @@ mod dev_wire {
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
-    pub(crate) struct RCRangeWireOut {
-        pub r1: i32,
-        pub c1: i32,
-        pub r2: i32,
-        pub c2: i32,
-    }
-
-    impl From<RCRange> for RCRangeWireOut {
-        fn from(range: RCRange) -> Self {
-            Self {
-                r1: range.r1,
-                c1: range.c1,
-                r2: range.r2,
-                c2: range.c2,
-            }
-        }
-    }
-
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
     pub(crate) enum PaneRegionWire {
         TopLeft,
         TopRight,
@@ -680,7 +671,7 @@ mod dev_wire {
     #[serde(rename_all = "camelCase")]
     pub(crate) struct DiagSegmentWire {
         pub region: PaneRegionWire,
-        pub range: RCRangeWireOut,
+        pub range: RCRangeWire,
         pub cells: usize,
     }
 
@@ -688,7 +679,7 @@ mod dev_wire {
         fn from(segment: &DiagSegment) -> Self {
             Self {
                 region: PaneRegionWire::from(segment.region),
-                range: RCRangeWireOut::from(segment.range),
+                range: RCRangeWire::from(segment.range),
                 cells: segment.cells,
             }
         }
@@ -796,7 +787,7 @@ mod dev_wire {
     pub(crate) struct DiagFetchRequestWire {
         pub purpose: DiagFetchPurposeWire,
         pub region: Option<PaneRegionWire>,
-        pub range: RCRangeWireOut,
+        pub range: RCRangeWire,
         pub cells: usize,
         pub slots: usize,
     }
@@ -806,7 +797,7 @@ mod dev_wire {
             Self {
                 purpose: DiagFetchPurposeWire::from(request.purpose),
                 region: request.region.map(PaneRegionWire::from),
-                range: RCRangeWireOut::from(request.range),
+                range: RCRangeWire::from(request.range),
                 cells: request.cells,
                 slots: request.slots,
             }
@@ -911,14 +902,7 @@ mod dev_wire {
         }
     }
 
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
-    pub(crate) struct DiagChangedCellWire {
-        pub row: i32,
-        pub column: i32,
-    }
-
-    impl From<DiagChangedCell> for DiagChangedCellWire {
+    impl From<DiagChangedCell> for CellCoordWire {
         fn from(cell: DiagChangedCell) -> Self {
             Self {
                 row: cell.row,
@@ -929,36 +913,16 @@ mod dev_wire {
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
-    pub(crate) struct RepaintClipWire {
-        pub x: i32,
-        pub y: i32,
-        pub w: i32,
-        pub h: i32,
-    }
-
-    impl From<iron_canvas_core::PixelRect> for RepaintClipWire {
-        fn from(rect: iron_canvas_core::PixelRect) -> Self {
-            Self {
-                x: rect.left(),
-                y: rect.top(),
-                w: rect.width,
-                h: rect.height,
-            }
-        }
-    }
-
-    #[derive(Serialize)]
-    #[serde(rename_all = "camelCase")]
     pub(crate) struct DiagSourceRangeWire {
         pub region: PaneRegionWire,
-        pub range: RCRangeWireOut,
+        pub range: RCRangeWire,
     }
 
     impl From<DiagSourceRange> for DiagSourceRangeWire {
         fn from(source: DiagSourceRange) -> Self {
             Self {
                 region: PaneRegionWire::from(source.region),
-                range: RCRangeWireOut::from(source.range),
+                range: RCRangeWire::from(source.range),
             }
         }
     }
@@ -969,8 +933,8 @@ mod dev_wire {
         pub verdict: Option<GridVerdictWire>,
         pub reason: Option<DiagRepaintReasonWire>,
         pub changed_rows: Vec<RowSpanWire>,
-        pub changed_cells: Vec<DiagChangedCellWire>,
-        pub clip: Option<RepaintClipWire>,
+        pub changed_cells: Vec<CellCoordWire>,
+        pub clip: Option<iron_canvas_core::PixelRect>,
         pub source_ranges: Vec<DiagSourceRangeWire>,
     }
 
@@ -989,9 +953,9 @@ mod dev_wire {
                     .changed_cells
                     .iter()
                     .copied()
-                    .map(DiagChangedCellWire::from)
+                    .map(CellCoordWire::from)
                     .collect(),
-                clip: repaint.clip.map(RepaintClipWire::from),
+                clip: repaint.clip,
                 source_ranges: repaint
                     .source_ranges
                     .iter()
@@ -1081,7 +1045,7 @@ mod dev_wire {
                     .segments()
                     .map(|segment| DiagSegmentWire {
                         region: PaneRegionWire::from(segment.region()),
-                        range: RCRangeWireOut::from(segment.range()),
+                        range: RCRangeWire::from(segment.range()),
                         cells: (segment.range().r2 - segment.range().r1 + 1).max(0) as usize
                             * (segment.range().c2 - segment.range().c1 + 1).max(0) as usize,
                     })
@@ -1173,14 +1137,14 @@ mod dev_wire {
     #[serde(rename_all = "camelCase")]
     pub(crate) struct DiagRevealedStripWire {
         pub region: PaneRegionWire,
-        pub range: RCRangeWireOut,
+        pub range: RCRangeWire,
     }
 
     impl From<&DiagRevealedStrip> for DiagRevealedStripWire {
         fn from(strip: &DiagRevealedStrip) -> Self {
             Self {
                 region: PaneRegionWire::from(strip.region),
-                range: RCRangeWireOut::from(strip.range),
+                range: RCRangeWire::from(strip.range),
             }
         }
     }
@@ -1364,7 +1328,11 @@ mod tests {
         );
         assert_eq!(
             json["repaint"]["clip"],
-            serde_json::json!({ "x": 20, "y": 30, "w": 64, "h": 24 })
+            serde_json::json!({
+                "top_left": { "x": 20, "y": 30 },
+                "width": 64,
+                "height": 24
+            })
         );
         assert_eq!(
             json["repaint"]["sourceRanges"],
