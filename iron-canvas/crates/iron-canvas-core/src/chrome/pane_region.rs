@@ -1,6 +1,6 @@
 use crate::{
     chrome::Chrome,
-    geometry::slot::{ColSlot, RowSlot},
+    geometry::slot::{AxisSlot, ColSlot, RowSlot},
     types::coord::RCRange,
 };
 
@@ -47,10 +47,10 @@ impl PaneRegion {
         let rows = self.rows(frame);
         let cols = self.cols(frame);
         Some(RCRange {
-            r1: rows.first()?.row,
-            c1: cols.first()?.col,
-            r2: rows.last()?.row,
-            c2: cols.last()?.col,
+            r1: rows.first()?.id(),
+            c1: cols.first()?.id(),
+            r2: rows.last()?.id(),
+            c2: cols.last()?.id(),
         })
     }
 }

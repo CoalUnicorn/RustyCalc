@@ -53,9 +53,9 @@ impl Layer for AutofillLayer {
     ) -> Option<HitTest> {
         let h = frame.autofill_handle_rect(selection_range)?;
         let pad = AUTOFILL_HIT_PAD_PX;
-        if x < h.top_left.x - pad
+        if x < h.left() - pad
             || x > h.right() + pad
-            || y < h.top_left.y - pad
+            || y < h.top() - pad
             || y > h.bottom() + pad
         {
             return None;

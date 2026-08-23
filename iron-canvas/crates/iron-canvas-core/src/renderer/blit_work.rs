@@ -56,7 +56,7 @@ fn widen_to_pixel_clip(
 ) -> RCRange {
     match axis {
         Axis::Row => {
-            let min = pixel_clip.top_left.y;
+            let min = pixel_clip.top();
             let max = min + pixel_clip.height;
             for row in region.rows(frame) {
                 if row.top + row.height > min && row.top < max {
@@ -66,7 +66,7 @@ fn widen_to_pixel_clip(
             }
         }
         Axis::Column => {
-            let min = pixel_clip.top_left.x;
+            let min = pixel_clip.left();
             let max = min + pixel_clip.width;
             for col in region.cols(frame) {
                 if col.left + col.width > min && col.left < max {

@@ -94,8 +94,8 @@ impl Layer for FormulaRefsLayer {
 /// `pad` of one edge) > `Body` (inside, away from edges) > `None`
 /// (outside the padded rect). `rect` is assumed normalized.
 fn classify_ref_zone(rect: PixelRect, x: i32, y: i32, pad: i32) -> Option<RefZone> {
-    let l = rect.top_left.x;
-    let t = rect.top_left.y;
+    let l = rect.left();
+    let t = rect.top();
     let r = rect.right();
     let b = rect.bottom();
 

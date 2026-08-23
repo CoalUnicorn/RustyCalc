@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{RCRange, geometry::pixel_rect::PixelRect};
 
 /// A point in logical (CSS) pixels on the canvas.
-#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Point {
     pub x: i32,
     pub y: i32,

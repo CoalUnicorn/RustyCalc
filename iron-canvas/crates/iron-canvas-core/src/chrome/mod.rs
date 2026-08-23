@@ -35,7 +35,7 @@ use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
     pixel_rect::PixelRect,
     prim::Point,
-    slot::scroll_first,
+    slot::{scroll_first, AxisSlot},
 };
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -348,7 +348,7 @@ impl Chrome {
             .rows
             .scroll
             .last()
-            .map(|s| s.row)
+            .map(|s| s.id())
             .unwrap_or((frozen_row_count + 1).max(view.top_row));
         let row_header_thickness = if show_row {
             measure_row_header_width(last_visible_row)

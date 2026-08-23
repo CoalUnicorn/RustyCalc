@@ -203,7 +203,7 @@ fn position_lines(
         line.center_x = match h_align {
             HAlign::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
             HAlign::Center | HAlign::CenterContinuous => f64::from(center.x),
-            _ => f64::from(rect.top_left.x) + CELL_PADDING + tw / 2.0,
+            _ => f64::from(rect.left()) + CELL_PADDING + tw / 2.0,
         };
         // Top / Justify / Distributed default to top-anchored.
         line.center_y = match v_align {
@@ -212,7 +212,7 @@ fn position_lines(
                     + (i_f - line_count + 1.0) * line_height
             }
             VAlign::Center => f64::from(center.y) + (i_f + (1.0 - line_count) / 2.0) * line_height,
-            _ => f64::from(rect.top_left.y) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
+            _ => f64::from(rect.top()) + size_px / 2.0 + TEXT_V_INSET_PX + i_f * line_height,
         };
     }
 }
@@ -229,7 +229,7 @@ fn position_lines(
 /// save/restore for multi-line cells that genuinely fit.
 fn lines_escape_cell(lines: &[TextLine], usable_w: f64, rect: PixelRect, line_height: f64) -> bool {
     let half_line = line_height / 2.0;
-    let top = f64::from(rect.top_left.y);
+    let top = f64::from(rect.top());
     let bottom = f64::from(rect.bottom());
     lines.iter().any(|l| {
         l.width > usable_w || l.center_y - half_line < top || l.center_y + half_line > bottom
@@ -428,9 +428,10 @@ impl<P: Painter> RendererCore<P> {
                     // Left / General / Justify / Distributed / Fill — start-anchored
                     // on the cell's left edge. No width approximation needed; the
                     // SVG `text-anchor="start"` renders glyphs at their natural
-                    // width and overflow into adjacent empty cells just works.
+                    // width; `needs_clip` contains any escaping glyphs to the
+                    // cell rectangle on both SVG and Canvas2D backends.
                     (
-                        f64::from(t.clip.top_left.x) + CELL_PADDING,
+                        f64::from(t.clip.left()) + CELL_PADDING,
                         TextAlign::Start,
                     )
                 }

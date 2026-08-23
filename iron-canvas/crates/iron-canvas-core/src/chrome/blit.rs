@@ -16,7 +16,7 @@ use crate::CanvasModel;
 use crate::frame_plan::FrameInputs;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
-use crate::geometry::slot::{AxisSlots, RowSlot, scroll_first};
+use crate::geometry::slot::{AxisSlot, AxisSlots, RowSlot, scroll_first};
 use crate::theme::CanvasTheme;
 
 use super::blit_rebuild::ShiftDir;
@@ -167,7 +167,7 @@ pub enum FramePath {
 fn blit_row_header_thickness(scroll_rows: &[RowSlot], frozen_rows_count: i32, new_top: i32) -> i32 {
     let last_visible_row = scroll_rows
         .last()
-        .map(|s| s.row)
+        .map(|s| s.id())
         .unwrap_or((frozen_rows_count + 1).max(new_top));
     measure_row_header_width(last_visible_row)
 }

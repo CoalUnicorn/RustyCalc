@@ -9,7 +9,7 @@
 
 use crate::CanvasModel;
 use crate::geometry::constants::HEADER_COL_WIDTH;
-use crate::geometry::slot::{AxisSlots, ColSlot, RowSlot, col_width, row_height};
+use crate::geometry::slot::{AxisSlot, AxisSlots, ColSlot, RowSlot, col_width, row_height};
 
 use super::recycled_slots::RecycledSlots;
 
@@ -116,8 +116,8 @@ impl PaneSet {
             .chain(scroll.iter())
             .map(|s| {
                 model
-                    .get_row_header_text(sheet, s.row)
-                    .unwrap_or_else(|| s.row.to_string())
+                    .get_row_header_text(sheet, s.id())
+                    .unwrap_or_else(|| s.id().to_string())
             })
             .collect()
     }
@@ -135,8 +135,8 @@ impl PaneSet {
             .chain(scroll.iter())
             .map(|s| {
                 model
-                    .get_column_header_text(sheet, s.col)
-                    .unwrap_or_else(|| crate::geometry::utils::col_name(s.col))
+                    .get_column_header_text(sheet, s.id())
+                    .unwrap_or_else(|| crate::geometry::utils::col_name(s.id()))
             })
             .collect()
     }

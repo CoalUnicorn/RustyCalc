@@ -17,6 +17,7 @@
 pub mod borders;
 pub mod fingerprint;
 pub mod paint;
+pub mod repaint;
 pub mod text;
 
 pub use paint::{CellPaint, PaneCells};

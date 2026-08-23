@@ -114,9 +114,9 @@ fn paint_rating<P: Painter + ?Sized>(painter: &P, rect: PixelRect, stars: u8, fi
     if slot_w <= 0 || outer_r <= 0.0 {
         return;
     }
-    let cy = inner.top_left.y + inner.height / 2;
+    let cy = inner.top() + inner.height / 2;
     for i in 0..i32::from(stars) {
-        let cx = inner.top_left.x + slot_w * i + slot_w / 2;
+        let cx = inner.left() + slot_w * i + slot_w / 2;
         let pts = star_points(Point { x: cx, y: cy }, outer_r);
         let color = if (i as u8) < filled {
             RATING_FILLED

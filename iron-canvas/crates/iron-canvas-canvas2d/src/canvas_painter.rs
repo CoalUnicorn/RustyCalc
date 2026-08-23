@@ -482,14 +482,9 @@ impl BlitPainter for CanvasPainter {
         // src multiplies explicitly. This matches the asymmetry of
         // CanvasRenderingContext2D.drawImage's source/destination spaces.
         let dpr = self.dpr.get();
-        let sx = f64::from(src.top_left.x) * dpr;
-        let sy = f64::from(src.top_left.y) * dpr;
-        let sw = f64::from(src.width) * dpr;
-        let sh = f64::from(src.height) * dpr;
-        let dx = f64::from(dst.top_left.x);
-        let dy = f64::from(dst.top_left.y);
-        let dw = f64::from(dst.width);
-        let dh = f64::from(dst.height);
+        let (sx0, sy0, sw0, sh0) = src.as_f64_tuple();
+        let (dx, dy, dw, dh) = dst.as_f64_tuple();
+        let (sx, sy, sw, sh) = (sx0 * dpr, sy0 * dpr, sw0 * dpr, sh0 * dpr);
 
         let _ = self
             .ctx

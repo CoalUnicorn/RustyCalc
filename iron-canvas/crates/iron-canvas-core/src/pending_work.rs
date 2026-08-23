@@ -45,15 +45,11 @@ pub(crate) enum GeometryWork {
     Rebuild,
 }
 
-/// Row-band or whole-grid content work, carried inside `PendingWork`. Rows,
-/// not cell rectangles, are the repaint unit: a row's shared top/bottom
-/// border may be owned by (painted from) the row above or below it, and
-/// cell text overflows horizontally into row neighbours unclipped, so a
-/// rectangle clipped to just the changed cell risks leaving a stale
-/// shared-edge stroke behind or clipping fresh overflow text either way
-/// (the fingerprint planner's border-safety check exists for exactly this).
-/// A full-width band is the smallest repaint unit that
-/// cannot get either case wrong.
+/// Row-addressed or whole-grid content hints carried inside `PendingWork`.
+/// These hints select a regime; they are not the final repaint unit. Damage
+/// uses full-width bands because a shared border can be owned by a neighbouring
+/// row. SlotsReuse refines whole-grid content through exact cell fingerprints
+/// and contributor envelopes. Escaping text is currently clipped to its cell.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ContentWork {
     #[default]
