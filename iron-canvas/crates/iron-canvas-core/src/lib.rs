@@ -29,10 +29,10 @@ pub use orchestrator::{
 #[cfg(feature = "dev-diagnostics")]
 pub use renderer::diag::{
     DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache, DiagCacheActionTag,
-    DiagCacheResolution, DiagCacheTruth, DiagCompletion, DiagDeltaKind, DiagFetch,
+    DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagCompletion, DiagDeltaKind, DiagFetch,
     DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
     DiagGeometry, DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason,
-    DiagRevealedStrip, DiagSegment, FrameDiagnostics,
+    DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
 };
 
 pub use render_overlays::RenderOverlays;

@@ -180,10 +180,20 @@ const FIXTURE_DPR: f64 = 1.0;
 #[derive(Clone, Default)]
 struct FixtureCell {
     value: String,
-    border_top: bool,
-    border_bottom: bool,
+    border_top: Option<ic::BorderStyle>,
+    border_bottom: Option<ic::BorderStyle>,
     border_left: Option<ic::BorderStyle>,
+    border_right: Option<ic::BorderStyle>,
     fill: Option<String>,
+    wrap: bool,
+}
+
+#[derive(Clone, Copy)]
+enum FixtureSide {
+    Top,
+    Right,
+    Bottom,
+    Left,
 }
 
 type FixtureStore = Rc<RefCell<HashMap<(i32, i32), FixtureCell>>>;
@@ -263,16 +273,24 @@ fn make_fixture_model(store: FixtureStore) -> JsValue {
             .cloned()
             .unwrap_or_default();
         let style = ic::Style {
+            alignment: cell.wrap.then_some(ic::Alignment {
+                wrap_text: true,
+                ..ic::Alignment::default()
+            }),
             border: ic::Border {
-                top: cell.border_top.then_some(ic::BorderItem {
-                    style: ic::BorderStyle::Thin,
+                top: cell.border_top.map(|style| ic::BorderItem {
+                    style,
                     color: ic::Color::None,
                 }),
-                bottom: cell.border_bottom.then_some(ic::BorderItem {
-                    style: ic::BorderStyle::Thin,
+                bottom: cell.border_bottom.map(|style| ic::BorderItem {
+                    style,
                     color: ic::Color::None,
                 }),
                 left: cell.border_left.map(|style| ic::BorderItem {
+                    style,
+                    color: ic::Color::None,
+                }),
+                right: cell.border_right.map(|style| ic::BorderItem {
                     style,
                     color: ic::Color::None,
                 }),
@@ -712,7 +730,7 @@ fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() 
             let Some(cell) = cells.get_mut(&(9, 1)) else {
                 panic!("seeded");
             };
-            cell.border_bottom = true;
+            cell.border_bottom = Some(ic::BorderStyle::Thin);
         }
         store
     };
@@ -765,7 +783,7 @@ fn partial_repaint_matches_forced_fresh_when_changed_rows_own_border_is_removed(
         let Some(cell) = cells.get_mut(&(10, 1)) else {
             panic!("seeded");
         };
-        cell.border_bottom = true;
+        cell.border_bottom = Some(ic::BorderStyle::Thin);
     }
     let (mut canvas, grid) = canvas_over(Rc::clone(&store));
     canvas.paint_if_dirty(); // baseline (row 10 has a bottom border)
@@ -775,7 +793,7 @@ fn partial_repaint_matches_forced_fresh_when_changed_rows_own_border_is_removed(
         let Some(cell) = cells.get_mut(&(10, 1)) else {
             panic!("seeded");
         };
-        cell.border_bottom = false;
+        cell.border_bottom = None;
     }
     canvas.mark_content_dirty();
     canvas.paint_if_dirty(); // must fall back to Full and erase the stroke
@@ -1231,6 +1249,8 @@ struct StableViewFixture {
     frozen_rows: Rc<Cell<i32>>,
     frozen_cols: Rc<Cell<i32>>,
     show_selection: Rc<Cell<bool>>,
+    row_heights: Rc<RefCell<HashMap<i32, f64>>>,
+    column_widths: Rc<RefCell<HashMap<i32, f64>>>,
 }
 
 impl StableViewFixture {
@@ -1244,6 +1264,8 @@ impl StableViewFixture {
             frozen_rows: Rc::new(Cell::new(0)),
             frozen_cols: Rc::new(Cell::new(0)),
             show_selection: Rc::new(Cell::new(true)),
+            row_heights: Rc::new(RefCell::new(HashMap::new())),
+            column_widths: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -1261,6 +1283,14 @@ impl StableViewFixture {
 
     fn set_show_selection(&self, show: bool) {
         self.show_selection.set(show);
+    }
+
+    fn set_row_height(&self, row: i32, height: f64) {
+        self.row_heights.borrow_mut().insert(row, height);
+    }
+
+    fn set_column_width(&self, column: i32, width: f64) {
+        self.column_widths.borrow_mut().insert(column, width);
     }
 
     fn snapshot(&self) -> CanvasView {
@@ -1346,12 +1376,26 @@ impl CanvasModel for StableFixtureModel {
         Some(self.view.frozen_cols.get())
     }
 
-    fn get_row_height(&self, _sheet: u32, _row: i32) -> Option<f64> {
-        Some(STAGE6_ROW_H)
+    fn get_row_height(&self, _sheet: u32, row: i32) -> Option<f64> {
+        Some(
+            self.view
+                .row_heights
+                .borrow()
+                .get(&row)
+                .copied()
+                .unwrap_or(STAGE6_ROW_H),
+        )
     }
 
-    fn get_column_width(&self, _sheet: u32, _column: i32) -> Option<f64> {
-        Some(STAGE6_COL_W)
+    fn get_column_width(&self, _sheet: u32, column: i32) -> Option<f64> {
+        Some(
+            self.view
+                .column_widths
+                .borrow()
+                .get(&column)
+                .copied()
+                .unwrap_or(STAGE6_COL_W),
+        )
     }
 
     fn get_show_grid_lines(&self, _sheet: u32) -> Option<bool> {
@@ -1367,6 +1411,16 @@ fn stable_canvas_over(
     store: FixtureStore,
     view: StableViewFixture,
 ) -> (IronCanvas, HtmlCanvasElement, HtmlCanvasElement) {
+    stable_canvas_over_at(store, view, STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR)
+}
+
+fn stable_canvas_over_at(
+    store: FixtureStore,
+    view: StableViewFixture,
+    width: f64,
+    height: f64,
+    dpr: f64,
+) -> (IronCanvas, HtmlCanvasElement, HtmlCanvasElement) {
     let grid = make_canvas();
     let overlay = make_canvas();
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay.clone()) else {
@@ -1376,7 +1430,7 @@ fn stable_canvas_over(
         panic!("stable-view fixture content model passes the duck test");
     };
     canvas.set_model(Rc::new(StableFixtureModel { content, view }));
-    canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);
+    canvas.resize(width, height, dpr);
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     (canvas, grid, overlay)
 }
@@ -1997,11 +2051,26 @@ fn stage6_set_left_border(
     col: i32,
     style: Option<ic::BorderStyle>,
 ) {
+    stage6_set_border(store, row, col, FixtureSide::Left, style);
+}
+
+fn stage6_set_border(
+    store: &FixtureStore,
+    row: i32,
+    col: i32,
+    side: FixtureSide,
+    style: Option<ic::BorderStyle>,
+) {
     let mut cells = store.borrow_mut();
     let Some(cell) = cells.get_mut(&(row, col)) else {
         panic!("the Stage 6 fixture seeds every cell in and one step past the pane");
     };
-    cell.border_left = style;
+    match side {
+        FixtureSide::Top => cell.border_top = style,
+        FixtureSide::Right => cell.border_right = style,
+        FixtureSide::Bottom => cell.border_bottom = style,
+        FixtureSide::Left => cell.border_left = style,
+    }
 }
 
 fn stage6_set_fill(store: &FixtureStore, row: i32, col: i32, fill: Option<&str>) {
@@ -2010,6 +2079,14 @@ fn stage6_set_fill(store: &FixtureStore, row: i32, col: i32, fill: Option<&str>)
         panic!("the Stage 6 fixture seeds every cell in and one step past the pane");
     };
     cell.fill = fill.map(str::to_string);
+}
+
+fn stage6_set_wrap(store: &FixtureStore, row: i32, col: i32, wrap: bool) {
+    let mut cells = store.borrow_mut();
+    let Some(cell) = cells.get_mut(&(row, col)) else {
+        panic!("the Stage 6 fixture seeds every cell in and one step past the pane");
+    };
+    cell.wrap = wrap;
 }
 
 /// Every byte offset at which `actual` and `expected` disagree.
@@ -2023,17 +2100,26 @@ fn stage6_pixel_diff(actual: &[u8], expected: &[u8]) -> Vec<usize> {
         .collect()
 }
 
-fn stable_forced_fresh_pixels(store: FixtureStore, view: StableViewFixture) -> (Vec<u8>, Vec<u8>) {
-    let (_canvas, grid, overlay) = stable_canvas_over(store, view);
+fn stable_forced_fresh_pixels_at(
+    store: FixtureStore,
+    view: StableViewFixture,
+    width: f64,
+    height: f64,
+    dpr: f64,
+) -> (Vec<u8>, Vec<u8>) {
+    let (_canvas, grid, overlay) = stable_canvas_over_at(store, view, width, height, dpr);
     (canvas_pixels(&grid), canvas_pixels(&overlay))
 }
 
-fn stable_second_paint_seam(
+fn stable_second_paint_seam_at(
     store: FixtureStore,
     view: StableViewFixture,
     fresh_grid: &[u8],
+    width: f64,
+    height: f64,
+    dpr: f64,
 ) -> Vec<usize> {
-    let (mut canvas, grid, _overlay) = stable_canvas_over(store, view);
+    let (mut canvas, grid, _overlay) = stable_canvas_over_at(store, view, width, height, dpr);
     canvas.mark_content_dirty();
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     stage6_pixel_diff(&canvas_pixels(&grid), fresh_grid)
@@ -2076,15 +2162,44 @@ fn stable_assert_matches_forced_fresh(
     final_view: &StableViewFixture,
     case: &str,
 ) {
+    stable_assert_matches_forced_fresh_at(
+        grid,
+        overlay,
+        store,
+        final_view,
+        case,
+        STAGE6_CANVAS_W,
+        STAGE6_CANVAS_H,
+        STAGE6_DPR,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn stable_assert_matches_forced_fresh_at(
+    grid: &HtmlCanvasElement,
+    overlay: &HtmlCanvasElement,
+    store: &FixtureStore,
+    final_view: &StableViewFixture,
+    case: &str,
+    width: f64,
+    height: f64,
+    dpr: f64,
+) {
     let (fresh_grid, fresh_overlay) =
-        stable_forced_fresh_pixels(Rc::clone(store), final_view.clone());
+        stable_forced_fresh_pixels_at(Rc::clone(store), final_view.clone(), width, height, dpr);
     let actual_grid = canvas_pixels(grid);
     let actual_overlay = canvas_pixels(overlay);
     assert_eq!(actual_grid.len(), fresh_grid.len());
     assert_eq!(actual_overlay.len(), fresh_overlay.len());
 
-    let seam =
-        stable_second_paint_seam(Rc::clone(store), final_view.clone(), fresh_grid.as_slice());
+    let seam = stable_second_paint_seam_at(
+        Rc::clone(store),
+        final_view.clone(),
+        fresh_grid.as_slice(),
+        width,
+        height,
+        dpr,
+    );
     let unexpected_grid: Vec<usize> = stage6_pixel_diff(&actual_grid, &fresh_grid)
         .into_iter()
         .filter(|offset| !seam.contains(offset))
@@ -2122,7 +2237,7 @@ fn stable_assert_slots_reuse_trace(trace: &str, case: &str) {
 }
 
 #[wasm_bindgen_test]
-fn stable_plain_commit_and_selection_move_matches_forced_fresh() {
+fn cell_repaint_plain_commit_and_selection_move_matches_forced_fresh() {
     const CASE: &str = "stable plain commit and selection move";
     let store = stage6_fixture_store();
     let view = StableViewFixture::new(5, 3);
@@ -2136,13 +2251,104 @@ fn stable_plain_commit_and_selection_move_matches_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "grid:rows1/1", CASE);
+    stage6_assert_verdict(&trace, "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
 
 #[wasm_bindgen_test]
-fn stable_multi_row_dependants_match_forced_fresh() {
+fn cell_repaint_clipped_long_text_matches_forced_fresh() {
+    const CASE: &str = "clipped long text";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(
+        &store,
+        5,
+        3,
+        "a deliberately long value that must be clipped to the edited cell",
+    );
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_wrapped_text_matches_forced_fresh() {
+    const CASE: &str = "wrapped text";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(&store, 5, 3, "wrapped text across more than one line");
+    stage6_set_wrap(&store, 5, 3, true);
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_fill_change_matches_forced_fresh() {
+    const CASE: &str = "fill change";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_fill(&store, 5, 3, Some("#FFCC00"));
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_viewport_top_left_matches_forced_fresh() {
+    const CASE: &str = "viewport top-left cell";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(&store, 1, 1, "top-left-change");
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_viewport_bottom_right_matches_forced_fresh() {
+    const CASE: &str = "viewport bottom-right cell";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(&store, STAGE6_ROWS, STAGE6_COLS, "bottom-right-change");
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_multi_row_dependants_match_forced_fresh() {
     const CASE: &str = "stable multi-row dependants";
     let store = stage6_fixture_store();
     let view = StableViewFixture::new(5, 3);
@@ -2158,7 +2364,27 @@ fn stable_multi_row_dependants_match_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "grid:rows2/2", CASE);
+    stage6_assert_verdict(&trace, "grid:range", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_range_crosses_hidden_row_and_column() {
+    const CASE: &str = "range across hidden row and column";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(4, 3);
+    view.set_row_height(5, 0.0);
+    view.set_column_width(4, 0.0);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_value(&store, 4, 3, "before-hidden-slot");
+    stage6_set_value(&store, 6, 5, "after-hidden-slot");
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:range", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
@@ -2182,7 +2408,7 @@ fn stable_unchanged_recalc_skips_grid_and_moves_overlay() {
 }
 
 #[wasm_bindgen_test]
-fn stable_explicit_border_change_widens_to_full_and_matches_fresh() {
+fn cell_repaint_medium_left_border_removal_matches_fresh() {
     const CASE: &str = "stable explicit border removal";
     let store = stage6_fixture_store();
     stage6_set_left_border(&store, 5, 3, Some(ic::BorderStyle::Medium));
@@ -2197,13 +2423,186 @@ fn stable_explicit_border_change_widens_to_full_and_matches_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "grid:FULL", CASE);
+    stage6_assert_verdict(&trace, "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
 
 #[wasm_bindgen_test]
-fn stable_frozen_grid_commit_uses_one_verdict_and_matches_fresh() {
+fn cell_repaint_thick_top_border_addition_matches_fresh() {
+    const CASE: &str = "thick top border addition";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_border(&store, 5, 3, FixtureSide::Top, Some(ic::BorderStyle::Thick));
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_thick_bottom_border_addition_matches_fresh() {
+    const CASE: &str = "thick bottom border addition";
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_border(
+        &store,
+        5,
+        3,
+        FixtureSide::Bottom,
+        Some(ic::BorderStyle::Thick),
+    );
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_double_right_border_removal_matches_fresh() {
+    const CASE: &str = "double right border removal";
+    let store = stage6_fixture_store();
+    stage6_set_border(
+        &store,
+        5,
+        3,
+        FixtureSide::Right,
+        Some(ic::BorderStyle::Double),
+    );
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_border(&store, 5, 3, FixtureSide::Right, None);
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_exposes_neighbour_owned_competing_edge() {
+    const CASE: &str = "neighbour-owned competing edge";
+    let store = stage6_fixture_store();
+    stage6_set_border(
+        &store,
+        5,
+        2,
+        FixtureSide::Right,
+        Some(ic::BorderStyle::Medium),
+    );
+    stage6_set_border(
+        &store,
+        5,
+        3,
+        FixtureSide::Left,
+        Some(ic::BorderStyle::Double),
+    );
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over(Rc::clone(&store), view.clone());
+
+    stage6_set_border(&store, 5, 3, FixtureSide::Left, None);
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_double_border_at_dpr_2_matches_fresh() {
+    const CASE: &str = "double border at DPR 2";
+    const DPR: f64 = 2.0;
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over_at(
+        Rc::clone(&store),
+        view.clone(),
+        STAGE6_CANVAS_W,
+        STAGE6_CANVAS_H,
+        DPR,
+    );
+
+    stage6_set_border(
+        &store,
+        5,
+        3,
+        FixtureSide::Right,
+        Some(ic::BorderStyle::Double),
+    );
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh_at(
+        &grid,
+        &overlay,
+        &store,
+        &view,
+        CASE,
+        STAGE6_CANVAS_W,
+        STAGE6_CANVAS_H,
+        DPR,
+    );
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_medium_border_at_fractional_dpr_matches_fresh() {
+    const CASE: &str = "medium border at fractional DPR";
+    const DPR: f64 = 1.25;
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(5, 3);
+    let (mut canvas, grid, overlay) = stable_canvas_over_at(
+        Rc::clone(&store),
+        view.clone(),
+        STAGE6_CANVAS_W,
+        STAGE6_CANVAS_H,
+        DPR,
+    );
+
+    stage6_set_border(
+        &store,
+        5,
+        3,
+        FixtureSide::Left,
+        Some(ic::BorderStyle::Medium),
+    );
+    view.set_active(6, 3);
+    canvas.mark_content_dirty();
+    canvas.view_changed_js();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
+
+    stable_assert_matches_forced_fresh_at(
+        &grid,
+        &overlay,
+        &store,
+        &view,
+        CASE,
+        STAGE6_CANVAS_W,
+        STAGE6_CANVAS_H,
+        DPR,
+    );
+}
+
+#[wasm_bindgen_test]
+fn cell_repaint_frozen_grid_commit_uses_one_verdict_and_matches_fresh() {
     const CASE: &str = "stable frozen-grid commit";
     let store = stage6_fixture_store();
     let view = StableViewFixture::new(5, 5).with_frozen(2, 2);
@@ -2217,7 +2616,7 @@ fn stable_frozen_grid_commit_uses_one_verdict_and_matches_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "grid:rows1/1", CASE);
+    stage6_assert_verdict(&trace, "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
@@ -2238,7 +2637,7 @@ fn stable_hidden_selection_commit_matches_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
-    stage6_assert_verdict(&trace, "grid:rows1/1", CASE);
+    stage6_assert_verdict(&trace, "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
 }
@@ -2381,7 +2780,7 @@ fn stage6_post_blit_unchanged_content_skips_and_matches_forced_fresh() {
 /// with rotation the planner can name the one changed row. The narrow band it
 /// repaints must reconstruct the same raster the whole-grid path would have.
 #[wasm_bindgen_test]
-fn stage6_post_blit_borderless_edit_repaints_rows_and_matches_forced_fresh() {
+fn stage6_post_blit_borderless_edit_repaints_cell_and_matches_forced_fresh() {
     const EDITED_ROW: i32 = 12;
 
     let store = stage6_fixture_store();
@@ -2393,7 +2792,7 @@ fn stage6_post_blit_borderless_edit_repaints_rows_and_matches_forced_fresh() {
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     stage6_assert_verdict(
         &canvas.frame_trace(),
-        "grid:rows",
+        "grid:cell",
         "post-blit borderless edit",
     );
 
@@ -2405,9 +2804,9 @@ fn stage6_post_blit_borderless_edit_repaints_rows_and_matches_forced_fresh() {
 /// blit's own strip; the next frame removes it. A medium stroke is drawn wider
 /// than a thin one and does not stay inside its cell rect, so clearing only the
 /// changed row's band would leave a stale stub above it. The planner must
-/// therefore refuse the narrow band, and whole-canvas byte equality against
-/// forced Fresh is what proves no stub survived anywhere — including the rows
-/// the blit merely shifted and never repainted.
+/// therefore include the neighbouring contributor cells in the cell envelope.
+/// Whole-canvas byte equality against forced Fresh proves no stub survived
+/// anywhere — including the rows the blit merely shifted and never repainted.
 #[wasm_bindgen_test]
 fn stage6_post_blit_revealed_row_border_removal_is_border_safe_against_forced_fresh() {
     let store = stage6_fixture_store();
@@ -2427,7 +2826,7 @@ fn stage6_post_blit_revealed_row_border_removal_is_border_safe_against_forced_fr
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     stage6_assert_verdict(
         &canvas.frame_trace(),
-        "grid:FULL",
+        "grid:cell",
         "revealed-row medium border removal",
     );
 
@@ -2550,7 +2949,7 @@ fn stage6_frame_diagnostics_wire_smoke() {
     assert!(!value.is_undefined(), "enabled capture must publish");
 
     let diag: DiagWireMirror = serde_wasm_bindgen::from_value(value).expect("snapshot parses");
-    assert_eq!(diag.schema_version, 1);
+    assert_eq!(diag.schema_version, 2);
     assert_eq!(diag.attempt_seq, 2);
     assert!(matches!(diag.outcome, FrameOutcomeMirror::Painted));
     let geo = diag
@@ -2648,6 +3047,7 @@ struct DiagScenario {
     repaint: DiagRepaintScenario,
     cache: DiagCacheScenario,
     blit: Option<DiagBlitScenario>,
+    paint_counts: DiagPaintCountsScenario,
 }
 
 #[cfg(feature = "dev-tools")]
@@ -2702,12 +3102,23 @@ struct DiagFetchScenario {
 }
 
 #[cfg(feature = "dev-tools")]
+#[allow(dead_code)] // mirror carries every schema-v2 repaint field
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DiagRepaintScenario {
     verdict: Option<VerdictScenario>,
     reason: Option<String>,
     changed_rows: Vec<RowSpanScenario>,
+    changed_cells: Vec<ChangedCellScenario>,
+    clip: Option<RepaintClipScenario>,
+    source_ranges: Vec<SourceRangeScenario>,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize)]
+struct DiagPaintCountsScenario {
+    rows: usize,
+    cells: usize,
 }
 
 #[cfg(feature = "dev-tools")]
@@ -2716,6 +3127,8 @@ struct DiagRepaintScenario {
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum VerdictScenario {
     Skip,
+    Cell,
+    Range,
     Rows { spans: u8, rows: u16 },
     Full,
     Strip,
@@ -2723,10 +3136,34 @@ enum VerdictScenario {
 }
 
 #[cfg(feature = "dev-tools")]
+#[allow(dead_code)] // retained for Rows verdict diagnostics
 #[derive(serde::Deserialize)]
 struct RowSpanScenario {
     r1: i32,
     r2: i32,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+struct ChangedCellScenario {
+    row: i32,
+    column: i32,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+struct RepaintClipScenario {
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+}
+
+#[cfg(feature = "dev-tools")]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
+struct SourceRangeScenario {
+    region: String,
+    range: RcRangeScenario,
 }
 
 #[cfg(feature = "dev-tools")]
@@ -2803,6 +3240,17 @@ fn stable_diag_canvas_over(
     store: FixtureStore,
     view: StableViewFixture,
 ) -> (IronCanvas, HtmlCanvasElement, HtmlCanvasElement) {
+    stable_diag_canvas_over_at(store, view, STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR)
+}
+
+#[cfg(feature = "dev-tools")]
+fn stable_diag_canvas_over_at(
+    store: FixtureStore,
+    view: StableViewFixture,
+    width: f64,
+    height: f64,
+    dpr: f64,
+) -> (IronCanvas, HtmlCanvasElement, HtmlCanvasElement) {
     let grid = make_canvas();
     let overlay = make_canvas();
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay.clone()) else {
@@ -2812,7 +3260,7 @@ fn stable_diag_canvas_over(
         panic!("stable-view fixture content model passes the duck test");
     };
     canvas.set_model(Rc::new(StableFixtureModel { content, view }));
-    canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);
+    canvas.resize(width, height, dpr);
     canvas.set_frame_diagnostics_enabled(true);
     assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
     (canvas, grid, overlay)
@@ -2865,7 +3313,7 @@ fn stage6_diag_freeze_toggle_explains_segments() {
 /// One edit per real segment, attributed by the probe address: the probe
 /// must land in exactly the intended segment, an identical-value edit must
 /// `Skip` with `fingerprintsEqual`, and a real change must repaint with
-/// `changedRows` intersecting the probe.
+/// exact changed-cell evidence and a concrete repaint envelope.
 #[cfg(feature = "dev-tools")]
 #[wasm_bindgen_test]
 fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
@@ -2917,27 +3365,92 @@ fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
             "a skip must name its reason"
         );
 
-        // Real value change: repaint must report rows intersecting the
-        // probe, and the probe attribution must stay exact.
+        // Real value change: repaint must report the exact changed cell and
+        // applied envelope, while probe attribution stays exact.
         canvas.set_frame_diagnostics_probe(row, col, row, col);
         stage6_set_value(&store, row, col, &format!("{region}-changed"));
         canvas.mark_content_dirty();
         assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
         let diag = diag_snapshot(&canvas);
         assert_eq!(diag.probe_segments, vec![region.to_string()]);
-        assert!(
-            !matches!(diag.repaint.verdict, Some(VerdictScenario::Skip)),
-            "a real change in {region} must not skip"
+        assert!(matches!(diag.repaint.verdict, Some(VerdictScenario::Cell)));
+        assert_eq!(diag.repaint.reason.as_deref(), Some("changedCell"));
+        assert_eq!(
+            diag.repaint.changed_cells,
+            vec![ChangedCellScenario { row, column: col }]
         );
-        assert_eq!(diag.repaint.reason.as_deref(), Some("changedRows"));
+        let clip = diag.repaint.clip.as_ref().expect("cell repaint has a clip");
+        assert!(clip.w > 0 && clip.h > 0, "cell repaint clip has area");
         assert!(
             diag.repaint
-                .changed_rows
+                .source_ranges
                 .iter()
-                .any(|span| span.r1 <= row && row <= span.r2),
-            "changed rows must include the probed row in {region}"
+                .any(|source| source.region == region
+                    && source.range.r1 <= row
+                    && row <= source.range.r2
+                    && source.range.c1 <= col
+                    && col <= source.range.c2),
+            "source ranges must contain the changed cell in {region}"
         );
     }
+}
+
+/// The supplied 30 by 18 live-debug case keeps its whole-grid bridge fetch but
+/// paints only the bounded contributor envelope around the edited cell.
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen_test]
+fn cell_repaint_diag_30_by_18_keeps_fetch_and_reduces_paint() {
+    const ROWS: i32 = 30;
+    const COLS: i32 = 18;
+    const CANVAS_W: f64 = 1_390.0;
+    const CANVAS_H: f64 = 608.0;
+    const ADDRESSED: usize = (ROWS * COLS) as usize;
+
+    let store = stage6_fixture_store();
+    let view = StableViewFixture::new(15, 9);
+    let (mut canvas, grid, overlay) =
+        stable_diag_canvas_over_at(Rc::clone(&store), view.clone(), CANVAS_W, CANVAS_H, 1.0);
+    let baseline = diag_snapshot(&canvas);
+    assert_eq!(baseline.fetch.addressed_cells, ADDRESSED);
+    assert_eq!(baseline.fetch.logical_slots, 4 * ADDRESSED);
+
+    stage6_set_border(
+        &store,
+        15,
+        9,
+        FixtureSide::Right,
+        Some(ic::BorderStyle::Medium),
+    );
+    stage6_set_value(&store, 15, 9, "edited");
+    canvas.set_frame_diagnostics_probe(15, 9, 15, 9);
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+
+    let diag = diag_snapshot(&canvas);
+    assert!(matches!(diag.repaint.verdict, Some(VerdictScenario::Cell)));
+    assert_eq!(diag.repaint.reason.as_deref(), Some("changedCell"));
+    assert_eq!(
+        diag.repaint.changed_cells,
+        vec![ChangedCellScenario { row: 15, column: 9 }]
+    );
+    assert_eq!(diag.fetch.addressed_cells, ADDRESSED);
+    assert_eq!(diag.fetch.logical_slots, 4 * ADDRESSED);
+    assert!(diag.repaint.clip.is_some());
+    assert!(!diag.repaint.source_ranges.is_empty());
+    assert_eq!(diag.paint_counts.rows, 3);
+    assert_eq!(diag.paint_counts.cells, 9);
+    stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", "30 by 18 edit");
+
+    stable_assert_matches_forced_fresh_at(
+        &grid,
+        &overlay,
+        &store,
+        &view,
+        "30 by 18 edit",
+        CANVAS_W,
+        CANVAS_H,
+        1.0,
+    );
 }
 
 /// Deep row and column scrolls must expose exact blit geometry: axis,

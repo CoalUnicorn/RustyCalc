@@ -12,25 +12,32 @@ use std::hash::{Hash, Hasher};
 use crate::chrome::{GridLayout, GridSegment, PaneRegion};
 use crate::geometry::prim::Axis;
 use crate::orchestrator::GridVerdict;
-use crate::pending_work::RowSpan;
+use crate::pending_work::{MAX_DAMAGE_SPANS, RowSpan};
 use crate::renderer::cf_types::parse_hex_color;
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
 
-/// One grid row's paint digest and conservative shared-border risk bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CellFingerprint(u64);
+
+/// One grid row's paint digest, shared-border risk, and flat leaf slice.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RowDigest {
+pub(crate) struct RowFingerprint {
+    pub(crate) row: i32,
     pub(crate) digest: u64,
     pub(crate) has_any_explicit_border: bool,
+    pub(crate) cell_start: u32,
+    pub(crate) cell_len: u32,
 }
 
 /// Fingerprint truth keyed by the complete address layout that produced it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GridFingerprint {
     pub(crate) layout: GridLayout,
-    pub(crate) rows: Vec<(i32, RowDigest)>,
+    pub(crate) rows: Vec<RowFingerprint>,
+    pub(crate) cells: Vec<CellFingerprint>,
     pub(crate) scroll_band_start: usize,
 }
 
@@ -148,7 +155,9 @@ fn fingerprint_grid_row(
     layout: GridLayout,
     row: i32,
     cells: &[Option<&FetchedCells>; 4],
-) -> RowDigest {
+    leaves: &mut Vec<CellFingerprint>,
+) -> RowFingerprint {
+    let cell_start = leaves.len();
     let mut row_hasher = DefaultHasher::new();
     row_hasher.write_i32(row);
     let mut has_any_explicit_border = false;
@@ -167,21 +176,25 @@ fn fingerprint_grid_row(
             let idx = base + col_offset;
             let style = &fetched.styles()[idx];
             has_any_explicit_border |= style_has_explicit_border(style);
-            cell_digest(
+            let digest = cell_digest(
                 row,
                 col,
                 style,
                 &fetched.values()[idx],
                 &fetched.cell_types()[idx],
                 &fetched.decorations()[idx],
-            )
-            .hash(&mut row_hasher);
+            );
+            leaves.push(CellFingerprint(digest));
+            digest.hash(&mut row_hasher);
         }
     }
 
-    RowDigest {
+    RowFingerprint {
+        row,
         digest: row_hasher.finish(),
         has_any_explicit_border,
+        cell_start: cell_start as u32,
+        cell_len: (leaves.len() - cell_start) as u32,
     }
 }
 
@@ -189,7 +202,9 @@ fn fingerprint_strip_row(
     layout: GridLayout,
     row: i32,
     strips: &[StripFingerprintSource<'_>],
-) -> Option<RowDigest> {
+    leaves: &mut Vec<CellFingerprint>,
+) -> Option<RowFingerprint> {
+    let cell_start = leaves.len();
     let mut row_hasher = DefaultHasher::new();
     row_hasher.write_i32(row);
     let mut has_any_explicit_border = false;
@@ -201,34 +216,41 @@ fn fingerprint_strip_row(
     {
         found_segment = true;
         let segment_range = grid_segment.range();
-        let strip = strips.iter().find(|strip| {
+        let Some(strip) = strips.iter().find(|strip| {
             strip.region == grid_segment.region()
                 && strip.range.rows().contains(&row)
                 && strip.range.c1 == segment_range.c1
                 && strip.range.c2 == segment_range.c2
                 && strip.cells.is_dense_for(strip.range)
-        })?;
+        }) else {
+            leaves.truncate(cell_start);
+            return None;
+        };
         let cols = (strip.range.c2 - strip.range.c1 + 1).max(0) as usize;
         let base = (row - strip.range.r1).max(0) as usize * cols;
         for (col_offset, col) in strip.range.columns().enumerate() {
             let idx = base + col_offset;
             let style = &strip.cells.styles()[idx];
             has_any_explicit_border |= style_has_explicit_border(style);
-            cell_digest(
+            let digest = cell_digest(
                 row,
                 col,
                 style,
                 &strip.cells.values()[idx],
                 &strip.cells.cell_types()[idx],
                 &strip.cells.decorations()[idx],
-            )
-            .hash(&mut row_hasher);
+            );
+            leaves.push(CellFingerprint(digest));
+            digest.hash(&mut row_hasher);
         }
     }
 
-    found_segment.then(|| RowDigest {
+    found_segment.then(|| RowFingerprint {
+        row,
         digest: row_hasher.finish(),
         has_any_explicit_border,
+        cell_start: cell_start as u32,
+        cell_len: (leaves.len() - cell_start) as u32,
     })
 }
 
@@ -249,16 +271,21 @@ fn rebuild_grid_fingerprint(
 ) {
     target.layout = layout;
     target.rows.clear();
+    target.cells.clear();
     if let Some(rows) = band_rows(layout, true) {
-        target
-            .rows
-            .extend(rows.map(|row| (row, fingerprint_grid_row(layout, row, cells))));
+        for row in rows {
+            target
+                .rows
+                .push(fingerprint_grid_row(layout, row, cells, &mut target.cells));
+        }
     }
     target.scroll_band_start = target.rows.len();
     if let Some(rows) = band_rows(layout, false) {
-        target
-            .rows
-            .extend(rows.map(|row| (row, fingerprint_grid_row(layout, row, cells))));
+        for row in rows {
+            target
+                .rows
+                .push(fingerprint_grid_row(layout, row, cells, &mut target.cells));
+        }
     }
 }
 
@@ -266,6 +293,7 @@ fn empty_grid_fingerprint(layout: GridLayout) -> GridFingerprint {
     GridFingerprint {
         layout,
         rows: Vec::new(),
+        cells: Vec::new(),
         scroll_band_start: 0,
     }
 }
@@ -290,6 +318,8 @@ impl FingerprintState {
             || RepaintDecision {
                 plan: RepaintPlan::Full,
                 reason: RepaintReason::NoPaintedHistory,
+                changed_rows: Vec::new(),
+                changed_cells: Vec::new(),
             },
             |painted| plan_grid_repaint(painted, candidate),
         )
@@ -344,31 +374,42 @@ impl FingerprintState {
             .unwrap_or_else(|| empty_grid_fingerprint(candidate_layout));
         candidate.layout = candidate_layout;
         candidate.rows.clear();
+        candidate.cells.clear();
 
-        let append_band = |frozen: bool, output: &mut Vec<(i32, RowDigest)>| {
+        let append_band = |frozen: bool,
+                           output_rows: &mut Vec<RowFingerprint>,
+                           output_cells: &mut Vec<CellFingerprint>| {
             if let Some(band) = band_rows(candidate_layout, frozen) {
                 for row in band {
-                    let digest = fingerprint_strip_row(candidate_layout, row, strips)
-                        .or_else(|| {
-                            painted
-                                .rows
-                                .iter()
-                                .find(|(painted_row, _)| *painted_row == row)
-                                .map(|(_, digest)| digest.clone())
-                        })
+                    if let Some(fingerprint) =
+                        fingerprint_strip_row(candidate_layout, row, strips, output_cells)
+                    {
+                        output_rows.push(fingerprint);
+                        continue;
+                    }
+                    let painted_row = painted
+                        .rows
+                        .iter()
+                        .find(|painted_row| painted_row.row == row)
                         .ok_or(RowShiftIneligible::IncompleteStripOrExtent)?;
-                    output.push((row, digest));
+                    let painted_leaves = row_cells(painted, painted_row)
+                        .ok_or(RowShiftIneligible::IncompleteStripOrExtent)?;
+                    let cell_start = output_cells.len();
+                    output_cells.extend_from_slice(painted_leaves);
+                    let mut copied = painted_row.clone();
+                    copied.cell_start = cell_start as u32;
+                    output_rows.push(copied);
                 }
             }
             Ok::<(), RowShiftIneligible>(())
         };
 
-        if let Err(reason) = append_band(true, &mut candidate.rows) {
+        if let Err(reason) = append_band(true, &mut candidate.rows, &mut candidate.cells) {
             *self.scratch.borrow_mut() = Some(candidate);
             return Err(reason);
         }
         candidate.scroll_band_start = candidate.rows.len();
-        if let Err(reason) = append_band(false, &mut candidate.rows) {
+        if let Err(reason) = append_band(false, &mut candidate.rows, &mut candidate.cells) {
             *self.scratch.borrow_mut() = Some(candidate);
             return Err(reason);
         }
@@ -387,6 +428,8 @@ pub(crate) enum RowShiftIneligible {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RepaintPlan {
     Skip,
+    Cell(RCRange),
+    Range(RCRange),
     Rows(Vec<RowSpan>),
     Full,
 }
@@ -400,10 +443,11 @@ pub(crate) enum RepaintReason {
     NoPaintedHistory,
     LayoutMismatch,
     RowAddressMismatch,
-    SpanCapExceeded,
-    BorderSafety,
     FingerprintsEqual,
+    ChangedCell,
+    ChangedCells,
     ChangedRows,
+    ClipAlignment,
 }
 
 /// One grid-wide repaint decision plus the reason for it.
@@ -411,12 +455,16 @@ pub(crate) enum RepaintReason {
 pub(crate) struct RepaintDecision {
     pub(crate) plan: RepaintPlan,
     pub(crate) reason: RepaintReason,
+    pub(crate) changed_rows: Vec<RowSpan>,
+    pub(crate) changed_cells: Vec<RCRange>,
 }
 
 impl From<&RepaintPlan> for GridVerdict {
     fn from(plan: &RepaintPlan) -> Self {
         match plan {
             RepaintPlan::Skip => Self::Skip,
+            RepaintPlan::Cell(_) => Self::Cell,
+            RepaintPlan::Range(_) => Self::Range,
             RepaintPlan::Rows(spans) => Self::Rows {
                 spans: spans.len().min(u8::MAX as usize) as u8,
                 rows: spans
@@ -431,80 +479,237 @@ impl From<&RepaintPlan> for GridVerdict {
 }
 
 fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> RepaintDecision {
-    if painted.layout != candidate.layout || painted.rows.len() != candidate.rows.len() {
+    if painted.layout != candidate.layout
+        || painted.rows.len() != candidate.rows.len()
+        || painted.cells.len() != candidate.cells.len()
+    {
         return RepaintDecision {
             plan: RepaintPlan::Full,
             reason: RepaintReason::LayoutMismatch,
+            changed_rows: Vec::new(),
+            changed_cells: Vec::new(),
         };
     }
 
     let mut spans = Vec::<RowSpan>::new();
-    for ((painted_row, painted_digest), (candidate_row, candidate_digest)) in
-        painted.rows.iter().zip(&candidate.rows)
-    {
-        if painted_row != candidate_row {
+    for (painted_row, candidate_row) in painted.rows.iter().zip(&candidate.rows) {
+        if painted_row.row != candidate_row.row {
             return RepaintDecision {
                 plan: RepaintPlan::Full,
                 reason: RepaintReason::RowAddressMismatch,
+                changed_rows: Vec::new(),
+                changed_cells: Vec::new(),
             };
         }
-        if painted_digest == candidate_digest {
+        if painted_row.digest == candidate_row.digest {
             continue;
         }
         if let Some(last) = spans.last_mut()
-            && last.r2 + 1 == *candidate_row
+            && last.r2 + 1 == candidate_row.row
         {
-            last.r2 = *candidate_row;
-        } else if spans.len() < 8 {
-            spans.push(RowSpan {
-                r1: *candidate_row,
-                r2: *candidate_row,
-            });
+            last.r2 = candidate_row.row;
         } else {
-            return RepaintDecision {
-                plan: RepaintPlan::Full,
-                reason: RepaintReason::SpanCapExceeded,
-            };
+            spans.push(RowSpan {
+                r1: candidate_row.row,
+                r2: candidate_row.row,
+            });
         }
     }
     if spans.is_empty() {
         return RepaintDecision {
             plan: RepaintPlan::Skip,
             reason: RepaintReason::FingerprintsEqual,
+            changed_rows: Vec::new(),
+            changed_cells: Vec::new(),
         };
     }
 
-    for span in &spans {
-        for frozen in [true, false] {
+    let Ok(changed_cells) = exact_changed_cells(painted, candidate) else {
+        return RepaintDecision {
+            plan: RepaintPlan::Full,
+            reason: RepaintReason::LayoutMismatch,
+            changed_rows: spans,
+            changed_cells: Vec::new(),
+        };
+    };
+    if changed_cells.len() == 1 {
+        return RepaintDecision {
+            plan: RepaintPlan::Cell(changed_cells[0]),
+            reason: RepaintReason::ChangedCell,
+            changed_rows: spans,
+            changed_cells,
+        };
+    }
+    let Some(changed_range) = bounding_range(&changed_cells) else {
+        return RepaintDecision {
+            plan: RepaintPlan::Full,
+            reason: RepaintReason::LayoutMismatch,
+            changed_rows: spans,
+            changed_cells,
+        };
+    };
+    let envelope_cost = addressed_cost(candidate.layout, &[], Some(changed_range.grow_by(1)));
+    let full_cost = candidate
+        .layout
+        .segments()
+        .map(|segment| addressed_cells(segment.range()))
+        .sum::<usize>();
+    if envelope_cost >= full_cost {
+        return RepaintDecision {
+            plan: RepaintPlan::Full,
+            reason: RepaintReason::ChangedCells,
+            changed_rows: spans,
+            changed_cells,
+        };
+    }
+
+    let rows_are_safe = !changed_row_boundaries_have_border(painted, candidate, &spans);
+    let rows_are_eligible = spans.len() <= MAX_DAMAGE_SPANS;
+    let rows_cost = addressed_cost(candidate.layout, &spans, None);
+    let (plan, reason) = if rows_are_safe && rows_are_eligible && rows_cost <= envelope_cost {
+        (RepaintPlan::Rows(spans.clone()), RepaintReason::ChangedRows)
+    } else {
+        (
+            RepaintPlan::Range(changed_range),
+            RepaintReason::ChangedCells,
+        )
+    };
+
+    RepaintDecision {
+        plan,
+        reason,
+        changed_rows: spans,
+        changed_cells,
+    }
+}
+
+fn row_cells<'a>(
+    fingerprint: &'a GridFingerprint,
+    row: &RowFingerprint,
+) -> Option<&'a [CellFingerprint]> {
+    let start = row.cell_start as usize;
+    let end = start.checked_add(row.cell_len as usize)?;
+    fingerprint.cells.get(start..end)
+}
+
+fn exact_changed_cells(
+    painted: &GridFingerprint,
+    candidate: &GridFingerprint,
+) -> Result<Vec<RCRange>, ()> {
+    let mut changed = Vec::new();
+    for (painted_row, candidate_row) in painted.rows.iter().zip(&candidate.rows) {
+        if painted_row.row != candidate_row.row {
+            return Err(());
+        }
+        let painted_cells = row_cells(painted, painted_row).ok_or(())?;
+        let candidate_cells = row_cells(candidate, candidate_row).ok_or(())?;
+        if painted_cells.len() != candidate_cells.len() {
+            return Err(());
+        }
+        if painted_row.digest == candidate_row.digest {
+            continue;
+        }
+
+        let mut leaf_index = 0usize;
+        for segment in candidate
+            .layout
+            .segments()
+            .filter(|segment| segment.range().rows().contains(&candidate_row.row))
+        {
+            for column in segment.range().columns() {
+                if painted_cells.get(leaf_index) != candidate_cells.get(leaf_index) {
+                    changed.push(RCRange::from_cell(candidate_row.row, column));
+                }
+                leaf_index += 1;
+            }
+        }
+        if leaf_index != candidate_cells.len() {
+            return Err(());
+        }
+    }
+    Ok(changed)
+}
+
+fn bounding_range(cells: &[RCRange]) -> Option<RCRange> {
+    cells
+        .iter()
+        .copied()
+        .map(RCRange::normalized)
+        .reduce(|a, b| RCRange {
+            r1: a.r1.min(b.r1),
+            c1: a.c1.min(b.c1),
+            r2: a.r2.max(b.r2),
+            c2: a.c2.max(b.c2),
+        })
+}
+
+fn range_intersection(a: RCRange, b: RCRange) -> Option<RCRange> {
+    let a = a.normalized();
+    let b = b.normalized();
+    let intersection = RCRange {
+        r1: a.r1.max(b.r1),
+        c1: a.c1.max(b.c1),
+        r2: a.r2.min(b.r2),
+        c2: a.c2.min(b.c2),
+    };
+    (intersection.r1 <= intersection.r2 && intersection.c1 <= intersection.c2)
+        .then_some(intersection)
+}
+
+fn addressed_cells(range: RCRange) -> usize {
+    (range.r2 - range.r1 + 1).max(0) as usize * (range.c2 - range.c1 + 1).max(0) as usize
+}
+
+fn addressed_cost(layout: GridLayout, spans: &[RowSpan], range: Option<RCRange>) -> usize {
+    layout
+        .segments()
+        .map(|segment| {
+            let segment_range = segment.range();
+            if let Some(range) = range {
+                return range_intersection(segment_range, range)
+                    .map(addressed_cells)
+                    .unwrap_or(0);
+            }
+            spans
+                .iter()
+                .map(|span| {
+                    range_intersection(
+                        segment_range,
+                        RCRange {
+                            r1: span.r1,
+                            c1: segment_range.c1,
+                            r2: span.r2,
+                            c2: segment_range.c2,
+                        },
+                    )
+                    .map(addressed_cells)
+                    .unwrap_or(0)
+                })
+                .sum()
+        })
+        .sum()
+}
+
+fn changed_row_boundaries_have_border(
+    painted: &GridFingerprint,
+    candidate: &GridFingerprint,
+    spans: &[RowSpan],
+) -> bool {
+    spans.iter().any(|span| {
+        [true, false].into_iter().any(|frozen| {
             let Some(band) = band_rows(candidate.layout, frozen) else {
-                continue;
+                return false;
             };
             let band_start = *band.start();
             let band_end = *band.end();
             let start = span.r1.max(band_start);
             let end = span.r2.min(band_end);
-            if start > end {
-                continue;
-            }
-            if start > band_start && rows_have_border(painted, candidate, [start - 1, start]) {
-                return RepaintDecision {
-                    plan: RepaintPlan::Full,
-                    reason: RepaintReason::BorderSafety,
-                };
-            }
-            if end < band_end && rows_have_border(painted, candidate, [end, end + 1]) {
-                return RepaintDecision {
-                    plan: RepaintPlan::Full,
-                    reason: RepaintReason::BorderSafety,
-                };
-            }
-        }
-    }
-
-    RepaintDecision {
-        plan: RepaintPlan::Rows(spans),
-        reason: RepaintReason::ChangedRows,
-    }
+            start <= end
+                && ((start > band_start
+                    && rows_have_border(painted, candidate, [start - 1, start]))
+                    || (end < band_end && rows_have_border(painted, candidate, [end, end + 1])))
+        })
+    })
 }
 
 fn rows_have_border(
@@ -516,8 +721,8 @@ fn rows_have_border(
         rows.into_iter().any(|row| {
             tree.rows
                 .iter()
-                .find(|(tree_row, _)| *tree_row == row)
-                .is_some_and(|(_, digest)| digest.has_any_explicit_border)
+                .find(|tree_row| tree_row.row == row)
+                .is_some_and(|fingerprint| fingerprint.has_any_explicit_border)
         })
     })
 }
@@ -863,7 +1068,7 @@ mod tests {
     }
 
     #[test]
-    fn repaint_plans_skip_rows_and_full() {
+    fn repaint_plans_skip_cell_and_full() {
         let exact_layout = layout(10, 8, 2, 2);
         let painted = build(exact_layout);
         let decision = plan_grid_repaint(&painted, &painted);
@@ -872,22 +1077,19 @@ mod tests {
 
         let mut changed = painted.clone();
         let row = changed.scroll_band_start + 1;
-        changed.rows[row].1.digest ^= 1;
+        let cell = changed.rows[row].cell_start as usize;
+        changed.cells[cell].0 ^= 1;
+        changed.rows[row].digest ^= 1;
         let decision = plan_grid_repaint(&painted, &changed);
-        assert_eq!(
-            decision.plan,
-            RepaintPlan::Rows(vec![RowSpan {
-                r1: changed.rows[row].0,
-                r2: changed.rows[row].0,
-            }])
-        );
-        assert_eq!(decision.reason, RepaintReason::ChangedRows);
+        assert_eq!(decision.plan, RepaintPlan::Cell(decision.changed_cells[0]));
+        assert_eq!(decision.reason, RepaintReason::ChangedCell);
+        assert_eq!(decision.changed_cells.len(), 1);
 
         let mut unsafe_change = changed.clone();
-        unsafe_change.rows[row].1.has_any_explicit_border = true;
+        unsafe_change.rows[row].has_any_explicit_border = true;
         let decision = plan_grid_repaint(&painted, &unsafe_change);
-        assert_eq!(decision.plan, RepaintPlan::Full);
-        assert_eq!(decision.reason, RepaintReason::BorderSafety);
+        assert!(matches!(decision.plan, RepaintPlan::Cell(_)));
+        assert_eq!(decision.reason, RepaintReason::ChangedCell);
 
         let shifted = build(layout(11, 8, 2, 2));
         let decision = plan_grid_repaint(&painted, &shifted);

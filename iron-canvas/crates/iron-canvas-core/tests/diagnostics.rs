@@ -38,7 +38,7 @@ fn enable_then_disable_round_trips() {
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
     let diag = orch.frame_diagnostics().expect("enabled capture publishes");
-    assert_eq!(diag.schema_version, 1);
+    assert_eq!(diag.schema_version, 2);
     assert_eq!(diag.attempt_seq, 1);
     assert_eq!(diag.committed_seq, Some(1));
     orch.set_frame_diagnostics_enabled(false);
@@ -236,10 +236,13 @@ fn unchanged_content_skip_reports_fingerprints_equal() {
         Some(DiagRepaintReason::FingerprintsEqual)
     );
     assert!(diag.repaint.changed_rows.is_empty());
+    assert!(diag.repaint.changed_cells.is_empty());
+    assert_eq!(diag.repaint.clip, None);
+    assert!(diag.repaint.source_ranges.is_empty());
 }
 
 #[test]
-fn one_changed_row_reports_exact_span_and_reason() {
+fn one_changed_cell_reports_exact_evidence_and_executed_envelope() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
@@ -247,41 +250,43 @@ fn one_changed_row_reports_exact_span_and_reason() {
     orch.mark_content_dirty();
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
     let diag = orch.frame_diagnostics().unwrap();
-    assert_eq!(
-        diag.repaint.verdict,
-        Some(GridVerdict::Rows { spans: 1, rows: 1 })
-    );
-    assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedRows));
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Cell));
+    assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedCell));
     assert_eq!(diag.repaint.changed_rows, vec![RowSpan { r1: 4, r2: 4 }]);
+    assert_eq!(diag.repaint.changed_cells.len(), 1);
+    assert_eq!(diag.repaint.changed_cells[0].row, 4);
+    assert_eq!(diag.repaint.changed_cells[0].column, 2);
+    assert!(diag.repaint.clip.is_some());
+    assert!(!diag.repaint.source_ranges.is_empty());
+    assert!(diag.paint_counts.cells < diag.fetch.addressed_cells);
 }
 
 #[test]
-fn span_cap_promotes_full_with_reason() {
+fn span_cap_disables_rows_but_keeps_a_bounded_range() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
-    // Nine disjoint changed rows exceed the fingerprint planner's 8-span cap.
+    // Nine disjoint changed rows exceed the row-sweep alternative's 8-span cap.
     for (i, row) in [1, 3, 5, 7, 9, 11, 13, 15, 17].iter().enumerate() {
         model.set_cell(*row, 2, &format!("v{i}"));
     }
     orch.mark_content_dirty();
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
     let diag = orch.frame_diagnostics().unwrap();
-    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Full));
-    assert_eq!(
-        diag.repaint.reason,
-        Some(DiagRepaintReason::SpanCapExceeded)
-    );
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Range));
+    assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedCells));
+    assert_eq!(diag.repaint.changed_rows.len(), 9);
+    assert_eq!(diag.repaint.changed_cells.len(), 9);
+    assert!(diag.repaint.clip.is_some());
 }
 
 #[test]
-fn border_safety_promotes_full_with_reason() {
+fn border_change_uses_changed_cell_envelope() {
     use iron_canvas_core::{Border, BorderItem, BorderStyle, CellStyle};
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
-    // An explicit border on the changed row itself makes the band's edge
-    // unsafe to repaint in isolation (fingerprint's border-safety check).
+    // Exact leaf evidence bypasses the old whole-row border promotion.
     model.set_style(
         4,
         2,
@@ -300,8 +305,10 @@ fn border_safety_promotes_full_with_reason() {
     orch.mark_content_dirty();
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
     let diag = orch.frame_diagnostics().unwrap();
-    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Full));
-    assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::BorderSafety));
+    assert_eq!(diag.repaint.verdict, Some(GridVerdict::Cell));
+    assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedCell));
+    assert_eq!(diag.repaint.changed_cells.len(), 1);
+    assert!(diag.repaint.clip.is_some());
 }
 
 #[test]

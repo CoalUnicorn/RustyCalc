@@ -16,6 +16,7 @@ use crate::renderer::cell::fingerprint::{
     GridFingerprint, GridLayoutTransition, RepaintPlan, RepaintReason, RowShiftIneligible,
     StripFingerprintSource,
 };
+use crate::renderer::cell::repaint::{CellRepaintEnvelope, build_cell_repaint_envelope};
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diag::{
     DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose, DiagFingerprintActionTag,
@@ -206,6 +207,7 @@ pub(crate) enum PreparedFingerprintUpdate {
 
 pub(crate) struct PreparedRepaint {
     pub(crate) plan: RepaintPlan,
+    pub(crate) envelope: Option<CellRepaintEnvelope>,
     pub(crate) candidate: GridFingerprint,
     /// `Some` only when the fingerprint comparison ran. Fresh-built
     /// geometry repaints `Full` without a comparison — its authority is
@@ -213,6 +215,10 @@ pub(crate) struct PreparedRepaint {
     /// by the dev-diagnostics recorder; unread in feature-off builds.
     #[cfg_attr(not(feature = "dev-diagnostics"), allow(dead_code))]
     pub(crate) reason: Option<RepaintReason>,
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) changed_rows: Vec<RowSpan>,
+    #[cfg(feature = "dev-diagnostics")]
+    pub(crate) changed_cells: Vec<RCRange>,
 }
 
 pub(crate) struct SegmentData {
@@ -352,12 +358,34 @@ impl<P: Painter> RendererCore<P> {
             .grid_cache
             .fingerprint
             .build_candidate(layout, &fetched);
-        let (plan, reason) = if frame.kind.reuses_slots() {
+        let (mut plan, mut reason, changed_rows, changed_cells) = if frame.kind.reuses_slots() {
             let decision = self.grid_cache.fingerprint.compare_to_painted(&candidate);
-            (decision.plan, Some(decision.reason))
+            (
+                decision.plan,
+                Some(decision.reason),
+                decision.changed_rows,
+                decision.changed_cells,
+            )
         } else {
-            (RepaintPlan::Full, None)
+            (RepaintPlan::Full, None, Vec::new(), Vec::new())
         };
+        let envelope = if matches!(plan, RepaintPlan::Cell(_) | RepaintPlan::Range(_)) {
+            match build_cell_repaint_envelope(frame, &changed_cells) {
+                CellRepaintEnvelope::UnalignedDpr => {
+                    plan = RepaintPlan::Full;
+                    reason = Some(RepaintReason::ClipAlignment);
+                    None
+                }
+                envelope => Some(envelope),
+            }
+        } else {
+            None
+        };
+        #[cfg(not(feature = "dev-diagnostics"))]
+        {
+            drop(changed_rows);
+            drop(changed_cells);
+        }
         #[cfg(feature = "dev-diagnostics")]
         self.diag_cache_planned(DiagCacheActionTag::Replace);
         Some(PreparedGrid::Full {
@@ -365,8 +393,13 @@ impl<P: Painter> RendererCore<P> {
             segments,
             repaint: Some(PreparedRepaint {
                 plan,
+                envelope,
                 candidate,
                 reason,
+                #[cfg(feature = "dev-diagnostics")]
+                changed_rows,
+                #[cfg(feature = "dev-diagnostics")]
+                changed_cells,
             }),
             cache_action: GridCacheAction::Replace { layout },
         })
@@ -612,20 +645,40 @@ impl<P: Painter> RendererCore<P> {
                 };
                 debug_assert_eq!(layout, commit_layout);
                 let repaint = repaint.expect("a non-empty full grid has a repaint candidate");
-                for grid_segment in layout.segments() {
-                    let data = segments[grid_segment.region() as usize]
-                        .as_mut()
-                        .expect("every layout segment must have prepared data");
-                    match &repaint.plan {
-                        RepaintPlan::Skip => {}
-                        RepaintPlan::Rows(spans) => {
-                            for span in spans {
-                                paint_segment_span(self, frame, data, *span);
+                let _painted_envelope = match &repaint.plan {
+                    RepaintPlan::Cell(_) | RepaintPlan::Range(_) => {
+                        paint_repaint_envelope(
+                            self,
+                            frame,
+                            layout,
+                            &mut segments,
+                            repaint
+                                .envelope
+                                .expect("an envelope plan must carry prepared geometry"),
+                        );
+                        true
+                    }
+                    RepaintPlan::Skip | RepaintPlan::Rows(_) | RepaintPlan::Full => {
+                        for grid_segment in layout.segments() {
+                            let data = segments[grid_segment.region() as usize]
+                                .as_mut()
+                                .expect("every layout segment must have prepared data");
+                            match &repaint.plan {
+                                RepaintPlan::Skip => {}
+                                RepaintPlan::Rows(spans) => {
+                                    for span in spans {
+                                        paint_segment_span(self, frame, data, *span);
+                                    }
+                                }
+                                RepaintPlan::Full => paint_full_segment(self, frame, data),
+                                RepaintPlan::Cell(_) | RepaintPlan::Range(_) => {
+                                    unreachable!("envelope plans execute before the segment loop")
+                                }
                             }
                         }
-                        RepaintPlan::Full => paint_full_segment(self, frame, data),
+                        false
                     }
-                }
+                };
                 self.trace_grid(GridVerdict::from(&repaint.plan));
                 #[cfg(feature = "dev-diagnostics")]
                 {
@@ -633,10 +686,8 @@ impl<P: Painter> RendererCore<P> {
                     self.diag_repaint(
                         verdict,
                         repaint.reason,
-                        match &repaint.plan {
-                            RepaintPlan::Rows(spans) => spans.as_slice(),
-                            RepaintPlan::Skip | RepaintPlan::Full => &[],
-                        },
+                        &repaint.changed_rows,
+                        &repaint.changed_cells,
                     );
                 }
                 #[cfg(feature = "dev-diagnostics")]
@@ -646,30 +697,35 @@ impl<P: Painter> RendererCore<P> {
                     // `rows` counts distinct grid rows even when frozen
                     // columns visit the same rows in left and right
                     // segments. Cells stay disjoint across segments.
-                    let mut row_intervals: Vec<(i32, i32)> = Vec::new();
-                    let mut cells = 0usize;
-                    for grid_segment in layout.segments() {
-                        let range = grid_segment.range();
-                        let cols = (range.c2 - range.c1 + 1).max(0) as usize;
-                        match &repaint.plan {
-                            RepaintPlan::Skip => {}
-                            RepaintPlan::Full => {
-                                row_intervals.push((range.r1, range.r2));
-                                cells += FetchedCells::addressed_cells(range);
-                            }
-                            RepaintPlan::Rows(spans) => {
-                                for span in spans {
-                                    let r1 = span.r1.max(range.r1);
-                                    let r2 = span.r2.min(range.r2);
-                                    if r1 <= r2 {
-                                        row_intervals.push((r1, r2));
-                                        cells += (r2 - r1 + 1) as usize * cols;
+                    if !_painted_envelope {
+                        let mut row_intervals: Vec<(i32, i32)> = Vec::new();
+                        let mut cells = 0usize;
+                        for grid_segment in layout.segments() {
+                            let range = grid_segment.range();
+                            let cols = (range.c2 - range.c1 + 1).max(0) as usize;
+                            match &repaint.plan {
+                                RepaintPlan::Skip => {}
+                                RepaintPlan::Full => {
+                                    row_intervals.push((range.r1, range.r2));
+                                    cells += FetchedCells::addressed_cells(range);
+                                }
+                                RepaintPlan::Rows(spans) => {
+                                    for span in spans {
+                                        let r1 = span.r1.max(range.r1);
+                                        let r2 = span.r2.min(range.r2);
+                                        if r1 <= r2 {
+                                            row_intervals.push((r1, r2));
+                                            cells += (r2 - r1 + 1) as usize * cols;
+                                        }
                                     }
+                                }
+                                RepaintPlan::Cell(_) | RepaintPlan::Range(_) => {
+                                    unreachable!("envelope counts were returned by execution")
                                 }
                             }
                         }
+                        self.diag_paint_counts(distinct_rows(&row_intervals), cells);
                     }
-                    self.diag_paint_counts(distinct_rows(&row_intervals), cells);
                 }
                 GridCacheCommit::Replace {
                     layout,
@@ -696,7 +752,7 @@ impl<P: Painter> RendererCore<P> {
                 }
                 self.trace_grid(GridVerdict::Strip);
                 #[cfg(feature = "dev-diagnostics")]
-                self.diag_repaint(GridVerdict::Strip, None, &[]);
+                self.diag_repaint(GridVerdict::Strip, None, &[], &[]);
                 #[cfg(feature = "dev-diagnostics")]
                 {
                     self.diag_fingerprint_action(DiagFingerprintActionTag::MarkStale);
@@ -741,7 +797,7 @@ impl<P: Painter> RendererCore<P> {
                 self.painter.pop_clip();
                 self.trace_grid(GridVerdict::Strip);
                 #[cfg(feature = "dev-diagnostics")]
-                self.diag_repaint(GridVerdict::Strip, None, &[]);
+                self.diag_repaint(GridVerdict::Strip, None, &[], &[]);
                 #[cfg(feature = "dev-diagnostics")]
                 {
                     self.diag_fingerprint_action(match &fingerprint {
@@ -853,6 +909,59 @@ impl<P: Painter> RendererCore<P> {
             GridCacheCommit::Reset => self.grid_cache.reset(),
         }
     }
+}
+
+fn paint_repaint_envelope<P: Painter>(
+    renderer: &RendererCore<P>,
+    frame: &Chrome,
+    layout: GridLayout,
+    segments: &mut [Option<SegmentData>; 4],
+    envelope: CellRepaintEnvelope,
+) {
+    let CellRepaintEnvelope::Visible { clip, sources } = envelope else {
+        debug_assert_eq!(envelope, CellRepaintEnvelope::NoPixels);
+        #[cfg(feature = "dev-diagnostics")]
+        {
+            renderer.diag_repaint_envelope(None, &[None; 4]);
+            renderer.diag_paint_counts(0, 0);
+        }
+        return;
+    };
+
+    renderer.painter.push_clip(clip);
+    #[cfg(feature = "dev-diagnostics")]
+    renderer.diag_repaint_envelope(Some(clip), &sources);
+    renderer
+        .painter
+        .rect_fill(clip, PaintColor::from_theme_str(&frame.theme.cell_bg));
+    #[cfg(feature = "dev-diagnostics")]
+    let mut row_intervals = Vec::new();
+    #[cfg(feature = "dev-diagnostics")]
+    let mut painted_cells = 0usize;
+    for grid_segment in layout.segments() {
+        let region = grid_segment.region();
+        let Some(source) = sources[region as usize] else {
+            continue;
+        };
+        let data = segments[region as usize]
+            .as_mut()
+            .expect("every contributor source belongs to a prepared segment");
+        renderer.paint_cells_pass(
+            PaneCells::for_strip(&region, frame, source),
+            data.segment.range(),
+            &frame.theme,
+            data.fetched.as_mut(),
+        );
+        #[cfg(feature = "dev-diagnostics")]
+        {
+            row_intervals.push((source.r1, source.r2));
+            painted_cells += FetchedCells::addressed_cells(source);
+        }
+    }
+    renderer.painter.pop_clip();
+
+    #[cfg(feature = "dev-diagnostics")]
+    renderer.diag_paint_counts(distinct_rows(&row_intervals), painted_cells);
 }
 
 fn paint_full_segment<P: Painter>(

@@ -412,10 +412,10 @@ fn fresh_frame_has_grid_sections() {
 }
 
 #[test]
-fn schema_version_is_pinned_at_5() {
-    // Schema 5 collapses pane verdicts and pane-bearing failure attribution
-    // into one grid-wide trace shape.
-    assert_eq!(ICR_SCHEMA_VERSION, 5);
+fn schema_version_is_pinned_at_6() {
+    // Schema 6 adds the `cell` and `range` trace verdict tags used by exact
+    // fingerprint repaint envelopes.
+    assert_eq!(ICR_SCHEMA_VERSION, 6);
 }
 
 #[test]

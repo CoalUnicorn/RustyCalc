@@ -34,7 +34,7 @@ use crate::renderer::cell::fingerprint::{FingerprintTruth, RepaintReason};
 use crate::renderer::prepared::FetchedCells;
 use crate::types::coord::RCRange;
 /// Wire version of the snapshot shape. Bump when the projection changes.
-pub const DIAG_SCHEMA_VERSION: u8 = 1;
+pub const DIAG_SCHEMA_VERSION: u8 = 2;
 
 /// Classification verdict for this attempt, as `Chrome::classify` decided.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,8 +83,14 @@ pub enum DiagRepaintReason {
     BorderSafety,
     /// Every compared row digest matched — nothing to paint.
     FingerprintsEqual,
+    /// Exactly one retained cell leaf changed.
+    ChangedCell,
+    /// Several retained cell leaves selected one merged envelope.
+    ChangedCells,
     /// At least one row digest changed and the bands are paint-safe.
     ChangedRows,
+    /// An integer-CSS clip could not be aligned to backing pixels.
+    ClipAlignment,
 }
 
 /// Prepared grid-cache action tag (projection of `GridCacheAction`).
@@ -206,6 +212,21 @@ pub struct DiagRepaint {
     pub verdict: Option<GridVerdict>,
     pub reason: Option<DiagRepaintReason>,
     pub changed_rows: Vec<RowSpan>,
+    pub changed_cells: Vec<DiagChangedCell>,
+    pub clip: Option<PixelRect>,
+    pub source_ranges: Vec<DiagSourceRange>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiagChangedCell {
+    pub row: i32,
+    pub column: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DiagSourceRange {
+    pub region: PaneRegion,
+    pub range: RCRange,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -490,6 +511,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         verdict: GridVerdict,
         reason: Option<RepaintReason>,
         changed_rows: &[RowSpan],
+        changed_cells: &[RCRange],
     ) {
         if !self.diag.enabled.get() {
             return;
@@ -501,12 +523,47 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
             RepaintReason::NoPaintedHistory => DiagRepaintReason::NoPaintedHistory,
             RepaintReason::LayoutMismatch => DiagRepaintReason::LayoutMismatch,
             RepaintReason::RowAddressMismatch => DiagRepaintReason::RowAddressMismatch,
-            RepaintReason::SpanCapExceeded => DiagRepaintReason::SpanCapExceeded,
-            RepaintReason::BorderSafety => DiagRepaintReason::BorderSafety,
             RepaintReason::FingerprintsEqual => DiagRepaintReason::FingerprintsEqual,
+            RepaintReason::ChangedCell => DiagRepaintReason::ChangedCell,
+            RepaintReason::ChangedCells => DiagRepaintReason::ChangedCells,
             RepaintReason::ChangedRows => DiagRepaintReason::ChangedRows,
+            RepaintReason::ClipAlignment => DiagRepaintReason::ClipAlignment,
         });
         capture.repaint.changed_rows = changed_rows.to_vec();
+        capture.repaint.changed_cells = changed_cells
+            .iter()
+            .map(|cell| {
+                let cell = cell.normalized();
+                DiagChangedCell {
+                    row: cell.r1,
+                    column: cell.c1,
+                }
+            })
+            .collect();
+    }
+
+    pub(crate) fn diag_repaint_envelope(
+        &self,
+        clip: Option<PixelRect>,
+        sources: &[Option<RCRange>; 4],
+    ) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut slot = self.diag.ensure_capture();
+        let capture = slot.as_mut().expect("ensure_capture inserted a frame");
+        capture.repaint.clip = clip;
+        capture.repaint.source_ranges = [
+            PaneRegion::TopLeft,
+            PaneRegion::TopRight,
+            PaneRegion::BottomLeft,
+            PaneRegion::BottomRight,
+        ]
+        .into_iter()
+        .filter_map(|region| {
+            sources[region as usize].map(|range| DiagSourceRange { region, range })
+        })
+        .collect();
     }
 
     /// Prepared grid-cache action tag, recorded once by each prepare entry

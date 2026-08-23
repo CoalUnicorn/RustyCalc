@@ -69,6 +69,8 @@ pub struct TestModel {
     /// healthy. Not a `JsBackedModel` simulation (that adapter degrades
     /// bulk->scalar); it pins the core hold contract for any CanvasModel.
     bulk_bridge_fail: Cell<bool>,
+    /// One-based bulk channel to fail: styles, values, kinds, decorations.
+    bulk_bridge_fail_channel: Cell<Option<u8>>,
     /// Row-scoped variant: bulk fetches fail only when the requested
     /// range's r1 is >= this row. Lets a multi-pane test fail the scroll
     /// panes while frozen panes fetch cleanly.
@@ -125,6 +127,7 @@ impl Default for TestModel {
             show_selection: Cell::new(true),
             value_bridge_fail: Cell::new(false),
             bulk_bridge_fail: Cell::new(false),
+            bulk_bridge_fail_channel: Cell::new(None),
             bulk_bridge_fail_from: Cell::new(None),
             bulk_bridge_fail_after: Cell::new(None),
             bulk_fetch_calls: Cell::new(0),
@@ -299,6 +302,13 @@ impl TestModel {
     pub fn set_bulk_bridge_fail(&self, fail: bool) {
         self.bulk_bridge_fail.set(fail);
     }
+    pub fn set_bulk_bridge_fail_channel(&self, channel: Option<u8>) {
+        assert!(
+            channel.is_none_or(|channel| (1..=4).contains(&channel)),
+            "bulk bridge failure channel must be in 1..=4"
+        );
+        self.bulk_bridge_fail_channel.set(channel);
+    }
     pub fn set_bulk_bridge_fail_from(&self, row: Option<i32>) {
         self.bulk_bridge_fail_from.set(row);
     }
@@ -311,7 +321,9 @@ impl TestModel {
         if records_bundle {
             self.bulk_fetch_ranges.borrow_mut().push(range);
         }
+        let channel = ((call - 1) % 4 + 1) as u8;
         self.bulk_bridge_fail.get()
+            || self.bulk_bridge_fail_channel.get() == Some(channel)
             || self
                 .bulk_bridge_fail_from
                 .get()

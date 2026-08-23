@@ -35,9 +35,9 @@
 //!   formula-refs) plus header highlights.
 //!
 //! The cell sub-pass order is the contract: grid borders run across the
-//! whole pane before explicit borders, so an explicit `right` on cell A
-//! wins over cell B's grid `left` at the shared pixel column. Text runs
-//! last so overflow is never clipped by a neighbour's bg.
+//! whole segment before explicit borders, so an explicit `right` on cell A
+//! wins over cell B's grid `left` at the shared pixel column. Text runs last;
+//! text that would escape its cell is clipped by the text painter.
 //!
 //! # Frozen panes
 //!
@@ -211,7 +211,7 @@ impl<P: Painter> RendererCore<P> {
         // Capture-failure holds never reach here and keep `verdict: None`
         // — the grid genuinely never decided for them.
         #[cfg(feature = "dev-diagnostics")]
-        self.diag_repaint(GridVerdict::Held, None, &[]);
+        self.diag_repaint(GridVerdict::Held, None, &[], &[]);
     }
 
     /// Charge one renderer bundle fetch over `range`. The legacy logical slot

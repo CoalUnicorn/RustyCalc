@@ -335,6 +335,8 @@ pub enum PaintResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridVerdict {
     Skip,
+    Cell,
+    Range,
     Rows {
         spans: u8,
         rows: u16,
@@ -349,6 +351,8 @@ impl fmt::Display for GridVerdict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Skip => f.write_str("skip"),
+            Self::Cell => f.write_str("cell"),
+            Self::Range => f.write_str("range"),
             Self::Rows { spans, rows } => write!(f, "rows{spans}/{rows}"),
             Self::Full => f.write_str("FULL"),
             Self::Strip => f.write_str("strip"),

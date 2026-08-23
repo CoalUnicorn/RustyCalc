@@ -7,14 +7,14 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v5)
+//! # On-disk layout (v6)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":5,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":6,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
 //!    {"frame_idx":0,"t_ms":0,"origin":"forced_baseline",...},
 //!    {"frame_idx":1,"t_ms":17,"origin":"live",...}
@@ -27,7 +27,7 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `5`). Mismatch -> load fails.  |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `6`). Mismatch -> load fails.  |
 //! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
@@ -80,7 +80,7 @@ use crate::DrawOp;
 
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
-pub const ICR_SCHEMA_VERSION: u32 = 5;
+pub const ICR_SCHEMA_VERSION: u32 = 6;
 
 /// Why an attempt entered the recording timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +102,8 @@ pub enum RecordedPaintResult {
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum TraceVerdict {
     Skip,
+    Cell,
+    Range,
     Rows { spans: u8, rows: u16 },
     Full,
     Strip,
@@ -142,6 +144,8 @@ impl From<FrameTrace> for TraceRecord {
     fn from(trace: FrameTrace) -> Self {
         let verdict = trace.verdict.map(|verdict| match verdict {
             GridVerdict::Skip => TraceVerdict::Skip,
+            GridVerdict::Cell => TraceVerdict::Cell,
+            GridVerdict::Range => TraceVerdict::Range,
             GridVerdict::Rows { spans, rows } => TraceVerdict::Rows { spans, rows },
             GridVerdict::Full => TraceVerdict::Full,
             GridVerdict::Strip => TraceVerdict::Strip,

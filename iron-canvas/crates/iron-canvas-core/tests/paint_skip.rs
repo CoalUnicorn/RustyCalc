@@ -41,15 +41,6 @@ fn cells_group(ops: &[DrawOp]) -> &[DrawOp] {
     &ops[start..end]
 }
 
-fn rect_fills_stay_in_row(ops: &[DrawOp], top: i32, height: i32) -> bool {
-    ops.iter().all(|op| match op {
-        DrawOp::RectFill { rect, .. } => {
-            rect.top_left.y >= top && rect.top_left.y + rect.height <= top + height
-        }
-        _ => true,
-    })
-}
-
 #[test]
 fn idempotent_grid_repaint_skips_cell_walk() {
     let model = TestModel::synthetic_grid().with_data_until(30);
@@ -63,7 +54,7 @@ fn idempotent_grid_repaint_skips_cell_walk() {
 }
 
 #[test]
-fn changed_cell_repaints_only_its_grid_row() {
+fn changed_cell_selects_one_cell_envelope() {
     let model = TestModel::synthetic_grid().with_data_until(30);
     let (mut frame, core) = fixture(&model);
     assert!(!core.render_grid(&model, &frame));
@@ -72,14 +63,11 @@ fn changed_cell_repaints_only_its_grid_row() {
     model.set_cell(5, 3, "changed");
     core.reset_trace();
     assert!(!core.render_grid(&model, &frame));
-    assert_eq!(
-        core.trace().verdict,
-        Some(GridVerdict::Rows { spans: 1, rows: 1 })
-    );
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Cell));
 }
 
 #[test]
-fn row_repaint_rect_fills_stay_inside_the_changed_band() {
+fn cell_repaint_has_one_balanced_outer_clip() {
     let model = TestModel::synthetic_grid().with_data_until(30);
     let (mut frame, core) = fixture(&model);
     assert!(!core.render_grid(&model, &frame));
@@ -92,14 +80,6 @@ fn row_repaint_rect_fills_stay_inside_the_changed_band() {
         .expect("unfrozen fixture has one segment")
         .range();
     let row = range.r1 + 2;
-    let band = frame
-        .range_rect(iron_canvas_core::RCRange {
-            r1: row,
-            c1: range.c1,
-            r2: row,
-            c2: range.c2,
-        })
-        .expect("changed row must be visible");
     model.set_cell(row, range.c1, "changed");
     let before = core.painter().ops().len();
 
@@ -111,15 +91,21 @@ fn row_repaint_rect_fills_stay_inside_the_changed_band() {
             .iter()
             .any(|op| matches!(op, DrawOp::RectFill { .. }))
     );
-    assert!(rect_fills_stay_in_row(
-        cell_ops,
-        band.top_left.y,
-        band.height
-    ));
+    let pushes = cell_ops
+        .iter()
+        .filter(|op| matches!(op, DrawOp::PushClip { .. }))
+        .count();
+    let pops = cell_ops
+        .iter()
+        .filter(|op| matches!(op, DrawOp::PopClip))
+        .count();
+    assert_eq!(pushes, pops, "the outer clip and any text clips balance");
+    assert!(matches!(cell_ops.first(), Some(DrawOp::PushClip { .. })));
+    assert!(matches!(cell_ops.last(), Some(DrawOp::PopClip)));
 }
 
 #[test]
-fn border_change_widens_grid_repaint_to_full() {
+fn border_change_uses_the_cell_envelope() {
     let model = TestModel::synthetic_grid().with_data_until(30);
     let (mut frame, core) = fixture(&model);
     assert!(!core.render_grid(&model, &frame));
@@ -141,11 +127,11 @@ fn border_change_widens_grid_repaint_to_full() {
     );
     core.reset_trace();
     assert!(!core.render_grid(&model, &frame));
-    assert_eq!(core.trace().verdict, Some(GridVerdict::Full));
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Cell));
 }
 
 #[test]
-fn border_removal_widens_grid_repaint_to_full() {
+fn border_removal_uses_the_cell_envelope() {
     let model = TestModel::synthetic_grid().with_data_until(30);
     let (mut frame, core) = fixture(&model);
     let range = frame
@@ -176,11 +162,11 @@ fn border_removal_widens_grid_repaint_to_full() {
     model.set_style(row, range.c1, CellStyle::default());
     core.reset_trace();
     assert!(!core.render_grid(&model, &frame));
-    assert_eq!(core.trace().verdict, Some(GridVerdict::Full));
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Cell));
 }
 
 #[test]
-fn more_than_eight_changed_spans_repaint_the_full_grid() {
+fn more_than_eight_changed_spans_use_one_bounded_range() {
     let model = TestModel::synthetic_grid();
     let theme = Rc::new(CanvasTheme::light());
     let inputs = test_inputs(&model, canvas_large(), &theme);
@@ -203,7 +189,7 @@ fn more_than_eight_changed_spans_repaint_the_full_grid() {
 
     core.reset_trace();
     assert!(!core.render_grid(&model, &frame));
-    assert_eq!(core.trace().verdict, Some(GridVerdict::Full));
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Range));
 }
 
 #[test]
@@ -243,10 +229,7 @@ fn damage_strip_splices_precise_history_for_next_content_check() {
 
     core.reset_trace();
     assert!(!core.render_grid(&model, &frame));
-    assert_eq!(
-        core.trace().verdict,
-        Some(GridVerdict::Rows { spans: 1, rows: 1 })
-    );
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Cell));
 }
 
 #[test]

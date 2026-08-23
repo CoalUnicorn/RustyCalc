@@ -412,10 +412,10 @@ mod dev_wire {
     use iron_canvas_core::chrome::{GridShape, PaneRegion};
     use iron_canvas_core::renderer::diag::{
         DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache, DiagCacheActionTag,
-        DiagCacheResolution, DiagCacheTruth, DiagDeltaKind, DiagFetch, DiagFetchPurpose,
-        DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth, DiagGeometry,
-        DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason, DiagRevealedStrip,
-        DiagSegment, FrameDiagnostics,
+        DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagDeltaKind, DiagFetch,
+        DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
+        DiagGeometry, DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason,
+        DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
     };
     use iron_canvas_core::{
         FrameInputFailure, GridVerdict, PaintRegimeTag, RCRange, RebuildReason, RowSpan, WorkFlags,
@@ -841,6 +841,8 @@ mod dev_wire {
     #[serde(tag = "kind", rename_all = "camelCase")]
     pub(crate) enum GridVerdictWire {
         Skip,
+        Cell,
+        Range,
         Rows { spans: u8, rows: u16 },
         Full,
         Strip,
@@ -851,6 +853,8 @@ mod dev_wire {
         fn from(verdict: GridVerdict) -> Self {
             match verdict {
                 GridVerdict::Skip => Self::Skip,
+                GridVerdict::Cell => Self::Cell,
+                GridVerdict::Range => Self::Range,
                 GridVerdict::Rows { spans, rows } => Self::Rows { spans, rows },
                 GridVerdict::Full => Self::Full,
                 GridVerdict::Strip => Self::Strip,
@@ -868,7 +872,10 @@ mod dev_wire {
         SpanCapExceeded,
         BorderSafety,
         FingerprintsEqual,
+        ChangedCell,
+        ChangedCells,
         ChangedRows,
+        ClipAlignment,
     }
 
     impl From<DiagRepaintReason> for DiagRepaintReasonWire {
@@ -880,7 +887,10 @@ mod dev_wire {
                 DiagRepaintReason::SpanCapExceeded => Self::SpanCapExceeded,
                 DiagRepaintReason::BorderSafety => Self::BorderSafety,
                 DiagRepaintReason::FingerprintsEqual => Self::FingerprintsEqual,
+                DiagRepaintReason::ChangedCell => Self::ChangedCell,
+                DiagRepaintReason::ChangedCells => Self::ChangedCells,
                 DiagRepaintReason::ChangedRows => Self::ChangedRows,
+                DiagRepaintReason::ClipAlignment => Self::ClipAlignment,
             }
         }
     }
@@ -903,10 +913,65 @@ mod dev_wire {
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagChangedCellWire {
+        pub row: i32,
+        pub column: i32,
+    }
+
+    impl From<DiagChangedCell> for DiagChangedCellWire {
+        fn from(cell: DiagChangedCell) -> Self {
+            Self {
+                row: cell.row,
+                column: cell.column,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct RepaintClipWire {
+        pub x: i32,
+        pub y: i32,
+        pub w: i32,
+        pub h: i32,
+    }
+
+    impl From<iron_canvas_core::PixelRect> for RepaintClipWire {
+        fn from(rect: iron_canvas_core::PixelRect) -> Self {
+            Self {
+                x: rect.left(),
+                y: rect.top(),
+                w: rect.width,
+                h: rect.height,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagSourceRangeWire {
+        pub region: PaneRegionWire,
+        pub range: RCRangeWireOut,
+    }
+
+    impl From<DiagSourceRange> for DiagSourceRangeWire {
+        fn from(source: DiagSourceRange) -> Self {
+            Self {
+                region: PaneRegionWire::from(source.region),
+                range: RCRangeWireOut::from(source.range),
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
     pub(crate) struct DiagRepaintWire {
         pub verdict: Option<GridVerdictWire>,
         pub reason: Option<DiagRepaintReasonWire>,
         pub changed_rows: Vec<RowSpanWire>,
+        pub changed_cells: Vec<DiagChangedCellWire>,
+        pub clip: Option<RepaintClipWire>,
+        pub source_ranges: Vec<DiagSourceRangeWire>,
     }
 
     impl From<&DiagRepaint> for DiagRepaintWire {
@@ -919,6 +984,19 @@ mod dev_wire {
                     .iter()
                     .copied()
                     .map(RowSpanWire::from)
+                    .collect(),
+                changed_cells: repaint
+                    .changed_cells
+                    .iter()
+                    .copied()
+                    .map(DiagChangedCellWire::from)
+                    .collect(),
+                clip: repaint.clip.map(RepaintClipWire::from),
+                source_ranges: repaint
+                    .source_ranges
+                    .iter()
+                    .copied()
+                    .map(DiagSourceRangeWire::from)
                     .collect(),
             }
         }
@@ -1170,10 +1248,10 @@ mod tests {
     use super::*;
     use iron_canvas_core::chrome::PaneRegion;
     use iron_canvas_core::{
-        DiagBufferTruth, DiagCacheActionTag, DiagCacheResolution, DiagCacheTruth, DiagDeltaKind,
-        DiagFingerprintActionTag, DiagFingerprintTruth, DiagPaintCounts, DiagPaintedLayers,
-        DiagRepaintReason, FrameDiagnostics, FrameOutcome, GridVerdict, RCRange, RebuildReason,
-        RowSpan,
+        DiagBufferTruth, DiagCacheActionTag, DiagCacheResolution, DiagCacheTruth, DiagChangedCell,
+        DiagDeltaKind, DiagFingerprintActionTag, DiagFingerprintTruth, DiagPaintCounts,
+        DiagPaintedLayers, DiagRepaintReason, DiagSourceRange, FrameDiagnostics, FrameOutcome,
+        GridVerdict, PixelRect, Point, RCRange, RebuildReason, RowSpan,
     };
 
     /// The wire shape is the contract the browser mirrors parse. Prove the
@@ -1182,7 +1260,7 @@ mod tests {
     #[test]
     fn frame_diagnostics_wire_matches_declared_shape() {
         let diag = FrameDiagnostics {
-            schema_version: 1,
+            schema_version: 2,
             attempt_seq: 7,
             committed_seq: Some(6),
             selected: Some(iron_canvas_core::PaintRegimeTag::SlotsReuse),
@@ -1205,9 +1283,24 @@ mod tests {
             geometry: None,
             fetch: Default::default(),
             repaint: iron_canvas_core::DiagRepaint {
-                verdict: Some(GridVerdict::Rows { spans: 1, rows: 1 }),
-                reason: Some(DiagRepaintReason::ChangedRows),
+                verdict: Some(GridVerdict::Cell),
+                reason: Some(DiagRepaintReason::ChangedCell),
                 changed_rows: vec![RowSpan { r1: 5, r2: 5 }],
+                changed_cells: vec![DiagChangedCell { row: 5, column: 4 }],
+                clip: Some(PixelRect {
+                    top_left: Point { x: 20, y: 30 },
+                    width: 64,
+                    height: 24,
+                }),
+                source_ranges: vec![DiagSourceRange {
+                    region: PaneRegion::BottomLeft,
+                    range: RCRange {
+                        r1: 4,
+                        c1: 3,
+                        r2: 6,
+                        c2: 5,
+                    },
+                }],
             },
             cache: iron_canvas_core::DiagCache {
                 planned_action: Some(DiagCacheActionTag::Replace),
@@ -1243,7 +1336,7 @@ mod tests {
         let wire = FrameDiagnosticsWire::from(&diag);
         let json = serde_json::to_value(&wire).expect("wire serializes");
 
-        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["schemaVersion"], 2);
         assert_eq!(json["attemptSeq"], 7);
         assert_eq!(json["committedSeq"], 6);
         assert_eq!(json["selected"], "slotsReuse");
@@ -1259,12 +1352,26 @@ mod tests {
         );
         assert_eq!(json["probeSegments"], serde_json::json!(["bottomLeft"]));
         assert_eq!(json["geometry"], serde_json::Value::Null);
-        assert_eq!(json["repaint"]["verdict"]["kind"], "rows");
-        assert_eq!(json["repaint"]["verdict"]["spans"], 1);
-        assert_eq!(json["repaint"]["reason"], "changedRows");
+        assert_eq!(json["repaint"]["verdict"]["kind"], "cell");
+        assert_eq!(json["repaint"]["reason"], "changedCell");
         assert_eq!(
             json["repaint"]["changedRows"],
             serde_json::json!([{ "r1": 5, "r2": 5 }])
+        );
+        assert_eq!(
+            json["repaint"]["changedCells"],
+            serde_json::json!([{ "row": 5, "column": 4 }])
+        );
+        assert_eq!(
+            json["repaint"]["clip"],
+            serde_json::json!({ "x": 20, "y": 30, "w": 64, "h": 24 })
+        );
+        assert_eq!(
+            json["repaint"]["sourceRanges"],
+            serde_json::json!([{
+                "region": "bottomLeft",
+                "range": { "r1": 4, "c1": 3, "r2": 6, "c2": 5 }
+            }])
         );
         assert_eq!(json["cache"]["plannedAction"], "replace");
         assert_eq!(json["cache"]["fingerprintAction"], "install");

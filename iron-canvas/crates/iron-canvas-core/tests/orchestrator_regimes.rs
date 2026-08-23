@@ -830,7 +830,7 @@ fn recording_serde_round_trip_across_all_five_regimes() {
 // ─── Damage regime ───
 
 #[test]
-fn damage_regime_paints_far_less_than_slots_reuse() {
+fn named_damage_paints_less_than_a_multi_cell_slots_reuse_envelope() {
     // Same model, same content signal — one orchestrator takes the all-content
     // path, one the damage path. The band repaint being strictly smaller
     // is the entire point of the regime.
@@ -843,16 +843,9 @@ fn damage_regime_paints_far_less_than_slots_reuse() {
     //    SlotsReuse cheaper than Damage's unconditional named-row repaint
     //    no matter the grid size. A real edit is what actually raises
     //    CONTENT in production.
-    // 2. SlotsReuse also clips a safe mismatch to a row-band repaint —
-    //    a single-row edit like the old `stub.set_cell(2, 1, ...)` fixture
-    //    would make SlotsReuse pay for the SAME clipped one-row band
-    //    Damage takes, collapsing the very gap this test exists to prove.
-    //    Nine widely-spread row edits exceed the planner's merge
-    //    cap (`MAX_DAMAGE_SPANS`), forcing SlotsReuse's mismatch back onto
-    //    the unclipped whole-grid walk this comparison is meant to
-    //    contrast against Damage's still-clipped single-row band (Damage
-    //    paints only the row named in `mark_rows_damaged` below,
-    //    regardless of how many rows actually changed).
+    // 2. A single exact change now uses the cell envelope. Nine spread row
+    //    edits make SlotsReuse reconstruct a taller merged envelope, while
+    //    Damage still paints only the row named below.
     let stub = Rc::new(TestModel::synthetic_grid());
 
     let mut slots = build(Rc::clone(&stub));
@@ -877,8 +870,8 @@ fn damage_regime_paints_far_less_than_slots_reuse() {
     assert_eq!(damage.last_regime(), Some(PaintRegimeTag::Damage));
     assert!(damage_ops > 0, "damage must repaint the band");
     assert!(
-        damage_ops * 3 < slots_ops,
-        "one-row band repaint must be far smaller than the full SlotsReuse walk (got {damage_ops} vs {slots_ops})"
+        damage_ops < slots_ops,
+        "one named row must be smaller than the merged SlotsReuse envelope (got {damage_ops} vs {slots_ops})"
     );
 }
 
@@ -1541,7 +1534,7 @@ fn stable_commit_batch_selects_slots_reuse_and_moves_overlay() {
         trace.work,
         WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
     );
-    assert_eq!(trace.verdict, Some(GridVerdict::Rows { spans: 1, rows: 1 }));
+    assert_eq!(trace.verdict, Some(GridVerdict::Cell));
 
     let grid_ops = grid_ops_since(&orch, grid_before);
     assert!(
