@@ -181,17 +181,9 @@ impl Painter for PdfPainter {
     }
 
     fn stroke_line(&self, line: Line, color: PaintColor, width: f64) {
-        self.emit_stroke_color(color);
-        self.emit_line_width(width);
         match line {
-            Line::H { span, y } => {
-                let y = f64::from(y);
-                self.emit_line(f64::from(span.from), y, f64::from(span.to), y)
-            }
-            Line::V { x, span } => {
-                let x = f64::from(x);
-                self.emit_line(x, f64::from(span.from), x, f64::from(span.to))
-            }
+            Line::H { span, y } => self.stroke_hline(span, f64::from(y), color, width),
+            Line::V { x, span } => self.stroke_vline(f64::from(x), span, color, width),
         }
     }
 
