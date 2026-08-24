@@ -49,7 +49,7 @@ pub(crate) fn build_cell_repaint_envelope(
     let mut sources = [None; 4];
     for segment in frame.grid_layout().segments() {
         let region = segment.region();
-        sources[region as usize] = contributor_source(region.rows(frame), region.cols(frame), clip);
+        sources[region.index()] = contributor_source(region.rows(frame), region.cols(frame), clip);
     }
 
     CellRepaintEnvelope::Visible { clip, sources }
@@ -210,7 +210,7 @@ mod tests {
         };
         assert_eq!(clip, rect.inset(-2, -2));
         assert_eq!(
-            sources[PaneRegion::BottomRight as usize],
+            sources[PaneRegion::BottomRight.index()],
             Some(RCRange {
                 r1: 1,
                 c1: 1,

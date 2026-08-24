@@ -87,7 +87,7 @@ impl GridCache {
     }
 
     pub(crate) fn take_prepare_scratch(&self, region: PaneRegion) -> FetchedCells {
-        self.buffers.borrow_mut()[region as usize]
+        self.buffers.borrow_mut()[region.index()]
             .as_mut()
             .map(SegmentBuffers::take_prepare_scratch)
             .unwrap_or_default()
@@ -95,7 +95,7 @@ impl GridCache {
 
     pub(crate) fn park_prepare_scratch(&self, region: PaneRegion, cells: FetchedCells) {
         let mut buffers = self.buffers.borrow_mut();
-        let slot = &mut buffers[region as usize];
+        let slot = &mut buffers[region.index()];
         slot.get_or_insert_with(SegmentBuffers::default)
             .park_prepare_scratch(cells);
     }

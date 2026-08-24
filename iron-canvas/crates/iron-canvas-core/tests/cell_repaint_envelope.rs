@@ -246,7 +246,7 @@ fn frozen_envelope_sources_keep_canonical_region_order() {
         .repaint
         .source_ranges
         .iter()
-        .map(|source| source.region as usize)
+        .map(|source| source.region.index())
         .collect();
     assert!(order.windows(2).all(|pair| pair[0] < pair[1]));
     assert_eq!(

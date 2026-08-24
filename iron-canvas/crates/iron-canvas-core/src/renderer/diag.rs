@@ -563,9 +563,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
             PaneRegion::BottomRight,
         ]
         .into_iter()
-        .filter_map(|region| {
-            sources[region as usize].map(|range| DiagSourceRange { region, range })
-        })
+        .filter_map(|region| sources[region.index()].map(|range| DiagSourceRange { region, range }))
         .collect();
     }
 

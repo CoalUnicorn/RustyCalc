@@ -316,7 +316,7 @@ impl<P: Painter> RendererCore<P> {
                 self.trace_frame_held();
                 return None;
             }
-            segments[region as usize] = Some(SegmentData {
+            segments[region.index()] = Some(SegmentData {
                 segment: grid_segment,
                 fetched,
             });
@@ -623,7 +623,7 @@ impl<P: Painter> RendererCore<P> {
                     }
                     RepaintPlan::Skip | RepaintPlan::Rows(_) | RepaintPlan::Full => {
                         for grid_segment in layout.segments() {
-                            let data = segments[grid_segment.region() as usize]
+                            let data = segments[grid_segment.region().index()]
                                 .as_mut()
                                 .expect("every layout segment must have prepared data");
                             match &repaint.plan {
@@ -795,7 +795,7 @@ impl<P: Painter> RendererCore<P> {
                         .segment(region)
                         .expect("a compatible Shift preserves segment presence")
                         .range();
-                    cells[region as usize]
+                    cells[region.index()]
                         .as_mut()
                         .expect("valid grid buffers contain every shifted segment")
                         .shift(previous_range, grid_segment.range(), axis);
@@ -805,7 +805,7 @@ impl<P: Painter> RendererCore<P> {
                         .segment(strip.region)
                         .expect("a committed blit strip belongs to the candidate layout")
                         .range();
-                    cells[strip.region as usize]
+                    cells[strip.region.index()]
                         .as_mut()
                         .expect("valid grid buffers contain every shifted segment")
                         .splice_strip_from(&mut strip.fetched, segment_range, strip.range);
@@ -835,7 +835,7 @@ impl<P: Painter> RendererCore<P> {
                         .segment(strip.region)
                         .expect("a committed Damage strip belongs to the exact layout")
                         .range();
-                    cells[strip.region as usize]
+                    cells[strip.region.index()]
                         .as_mut()
                         .expect("valid grid buffers contain every layout segment")
                         .splice_strip_from(&mut strip.fetched, segment_range, strip.range);
@@ -924,10 +924,10 @@ fn paint_repaint_envelope<P: Painter>(
     let mut painted_cells = 0usize;
     for grid_segment in layout.segments() {
         let region = grid_segment.region();
-        let Some(source) = sources[region as usize] else {
+        let Some(source) = sources[region.index()] else {
             continue;
         };
-        let data = segments[region as usize]
+        let data = segments[region.index()]
             .as_mut()
             .expect("every contributor source belongs to a prepared segment");
         paint_cells_in(

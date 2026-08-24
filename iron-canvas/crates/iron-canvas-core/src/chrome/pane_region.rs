@@ -19,6 +19,16 @@ pub enum PaneRegion {
 }
 
 impl PaneRegion {
+    /// Stable index for arrays stored in TL, TR, BL, BR order.
+    pub const fn index(self) -> usize {
+        match self {
+            PaneRegion::TopLeft => 0,
+            PaneRegion::TopRight => 1,
+            PaneRegion::BottomLeft => 2,
+            PaneRegion::BottomRight => 3,
+        }
+    }
+
     pub fn rows(self, frame: &Chrome) -> &[RowSlot] {
         match self {
             PaneRegion::TopLeft | PaneRegion::TopRight => &frame.pane_set.rows.frozen,
@@ -52,6 +62,19 @@ impl PaneRegion {
             r2: rows.last()?.id(),
             c2: cols.last()?.id(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PaneRegion;
+
+    #[test]
+    fn pane_region_index_uses_canonical_order() {
+        assert_eq!(PaneRegion::TopLeft.index(), 0);
+        assert_eq!(PaneRegion::TopRight.index(), 1);
+        assert_eq!(PaneRegion::BottomLeft.index(), 2);
+        assert_eq!(PaneRegion::BottomRight.index(), 3);
     }
 }
 

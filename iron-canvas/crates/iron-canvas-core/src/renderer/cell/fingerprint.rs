@@ -164,7 +164,7 @@ fn fingerprint_grid_row(
         .filter(|segment| segment.range().rows().contains(&row))
     {
         let range = grid_segment.range();
-        let fetched = cells[grid_segment.region() as usize]
+        let fetched = cells[grid_segment.region().index()]
             .expect("every layout segment must have a fetched bundle");
         debug_assert!(fetched.is_dense_for(range));
         let cols = (range.c2 - range.c1 + 1).max(0) as usize;
@@ -925,7 +925,7 @@ mod tests {
     fn bundles(layout: GridLayout) -> [Option<FetchedCells>; 4] {
         let mut bundles = std::array::from_fn(|_| None);
         for segment in layout.segments() {
-            bundles[segment.region() as usize] = Some(dense(segment.range()));
+            bundles[segment.region().index()] = Some(dense(segment.range()));
         }
         bundles
     }

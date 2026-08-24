@@ -423,7 +423,7 @@ fn late_blit_strip_failure_rolls_back() {
 
     let capacities = core.grid_cache.preparation_scratch_capacities();
     for region in [PaneRegion::BottomLeft, PaneRegion::BottomRight] {
-        let channels = capacities[region as usize];
+        let channels = capacities[region.index()];
         assert!(
             channels.0 > 0 && channels.1 > 0 && channels.2 > 0 && channels.3 > 0,
             "{region:?} strip capacity must return to the cache: {channels:?}"
