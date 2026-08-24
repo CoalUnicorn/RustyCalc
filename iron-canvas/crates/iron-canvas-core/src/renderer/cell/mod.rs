@@ -44,6 +44,8 @@ impl<P: Painter> RendererCore<P> {
     /// once per span against the SAME owned [`FetchedCells`] bundle without
     /// re-taking it from `pane_buf` or parking it back in between —
     /// ownership and the take/park lifecycle live entirely with the caller.
+    /// `index_range` is the address domain of the dense fetched channels;
+    /// it may be larger than the `cells` walk during a partial repaint.
     /// Pass order is load-bearing — see the module doc for why bg
     /// precedes borders precedes text. `pub(super)` so `renderer::prepared`'s
     /// execute methods can call it directly.
@@ -52,16 +54,16 @@ impl<P: Painter> RendererCore<P> {
     pub(super) fn paint_cells_pass(
         &self,
         cells: PaneCells,
-        range: RCRange,
+        index_range: RCRange,
         theme: &CanvasTheme,
         fetched: FetchedCellsMut<'_>,
     ) {
-        let cols_w = range.c2 - range.c1 + 1;
+        let cols_w = index_range.c2 - index_range.c1 + 1;
 
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
         for slot in cells {
-            let idx = ((slot.row - range.r1) * cols_w + (slot.col - range.c1)) as usize;
+            let idx = ((slot.row - index_range.r1) * cols_w + (slot.col - index_range.c1)) as usize;
             let Some(own_style) = fetched.styles.get_mut(idx).and_then(Fetched::take_value) else {
                 continue;
             };
@@ -106,7 +108,7 @@ impl<P: Painter> RendererCore<P> {
 
         let mut text_lines = self.frame_cache.text_lines.take();
         for p in &slots {
-            let idx = ((p.row - range.r1) * cols_w + (p.col - range.c1)) as usize;
+            let idx = ((p.row - index_range.r1) * cols_w + (p.col - index_range.c1)) as usize;
             let Some(text) = fetched.values.get_mut(idx).and_then(Fetched::take_value) else {
                 continue;
             };

@@ -858,6 +858,43 @@ impl<P: Painter> RendererCore<P> {
     }
 }
 
+/// Binds the cells visited by a paint pass to the address range that owns
+/// the dense fetched-buffer indexing. These ranges intentionally differ for
+/// row-span and repaint-envelope walks over full-segment fetches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PaintCellsRanges {
+    walk_range: RCRange,
+    index_range: RCRange,
+}
+
+fn paint_cells_in<P: Painter>(
+    renderer: &RendererCore<P>,
+    frame: &Chrome,
+    region: PaneRegion,
+    fetched: &mut FetchedCells,
+    ranges: PaintCellsRanges,
+) {
+    debug_assert!(
+        ranges
+            .index_range
+            .contains(ranges.walk_range.r1, ranges.walk_range.c1)
+            && ranges
+                .index_range
+                .contains(ranges.walk_range.r2, ranges.walk_range.c2),
+        "paint walk must stay inside the fetched-buffer index range"
+    );
+    debug_assert!(
+        fetched.is_dense_for(ranges.index_range),
+        "fetched buffer must be dense for its index range"
+    );
+    renderer.paint_cells_pass(
+        PaneCells::for_strip(&region, frame, ranges.walk_range),
+        ranges.index_range,
+        &frame.theme,
+        fetched.as_mut(),
+    );
+}
+
 fn paint_repaint_envelope<P: Painter>(
     renderer: &RendererCore<P>,
     frame: &Chrome,
@@ -893,11 +930,15 @@ fn paint_repaint_envelope<P: Painter>(
         let data = segments[region as usize]
             .as_mut()
             .expect("every contributor source belongs to a prepared segment");
-        renderer.paint_cells_pass(
-            PaneCells::for_strip(&region, frame, source),
-            data.segment.range(),
-            &frame.theme,
-            data.fetched.as_mut(),
+        paint_cells_in(
+            renderer,
+            frame,
+            region,
+            &mut data.fetched,
+            PaintCellsRanges {
+                walk_range: source,
+                index_range: data.segment.range(),
+            },
         );
         #[cfg(feature = "dev-diagnostics")]
         {
@@ -917,6 +958,7 @@ fn paint_full_segment<P: Painter>(
     data: &mut SegmentData,
 ) {
     let range = data.segment.range();
+    let region = data.segment.region();
     if frame.kind.reuses_slots()
         && let Some(rect) = frame.range_rect(range)
     {
@@ -924,11 +966,15 @@ fn paint_full_segment<P: Painter>(
             .painter
             .rect_fill(rect, PaintColor::from_theme_str(&frame.theme.cell_bg));
     }
-    renderer.paint_cells_pass(
-        PaneCells::new(&data.segment.region(), frame),
-        range,
-        &frame.theme,
-        data.fetched.as_mut(),
+    paint_cells_in(
+        renderer,
+        frame,
+        region,
+        &mut data.fetched,
+        PaintCellsRanges {
+            walk_range: range,
+            index_range: range,
+        },
     );
 }
 
@@ -955,11 +1001,15 @@ fn paint_segment_span<P: Painter>(
             .painter
             .rect_fill(rect, PaintColor::from_theme_str(&frame.theme.cell_bg));
     }
-    renderer.paint_cells_pass(
-        PaneCells::for_strip(&data.segment.region(), frame, strip),
-        range,
-        &frame.theme,
-        data.fetched.as_mut(),
+    paint_cells_in(
+        renderer,
+        frame,
+        data.segment.region(),
+        &mut data.fetched,
+        PaintCellsRanges {
+            walk_range: strip,
+            index_range: range,
+        },
     );
 }
 
@@ -975,11 +1025,15 @@ fn paint_strip<P: Painter>(
             .painter
             .rect_fill(rect, PaintColor::from_theme_str(&frame.theme.cell_bg));
     }
-    renderer.paint_cells_pass(
-        PaneCells::for_strip(&region, frame, strip_range),
-        strip_range,
-        &frame.theme,
-        cells.as_mut(),
+    paint_cells_in(
+        renderer,
+        frame,
+        region,
+        cells,
+        PaintCellsRanges {
+            walk_range: strip_range,
+            index_range: strip_range,
+        },
     );
 }
 

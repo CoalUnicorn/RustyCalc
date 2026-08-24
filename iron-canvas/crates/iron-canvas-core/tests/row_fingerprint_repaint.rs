@@ -9,7 +9,7 @@ use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::renderer::cache::BufferTruth;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_recorder::RecorderPainter;
+use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
 
@@ -32,11 +32,28 @@ fn one_changed_row_across_frozen_segments_has_one_grid_rows_verdict() {
 
     model.set_cell(5, 1, "frozen-column edit");
     model.set_cell(5, 4, "scroll-column edit");
+    let ops_before = core.painter().ops().len();
     core.reset_trace();
     assert!(!core.render_grid(&model, &frame));
     assert_eq!(
         core.trace().verdict,
         Some(GridVerdict::Rows { spans: 1, rows: 1 })
+    );
+    let ops = core.painter().ops();
+    let painted_text: Vec<&str> = ops[ops_before..]
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::FillText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        painted_text.contains(&"frozen-column edit"),
+        "row walk must index the frozen segment's full fetched buffer"
+    );
+    assert!(
+        painted_text.contains(&"scroll-column edit"),
+        "row walk must index the scrolling segment's full fetched buffer"
     );
 }
 
