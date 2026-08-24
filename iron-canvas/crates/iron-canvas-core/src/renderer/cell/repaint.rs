@@ -1,7 +1,7 @@
 use crate::chrome::Chrome;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
-use crate::renderer::cell::PaneCells;
+use crate::geometry::slot::AxisSlot;
 use crate::types::coord::RCRange;
 
 pub(crate) const CELL_REPAINT_PAD_PX: i32 = 2;
@@ -49,26 +49,35 @@ pub(crate) fn build_cell_repaint_envelope(
     let mut sources = [None; 4];
     for segment in frame.grid_layout().segments() {
         let region = segment.region();
-        let mut source: Option<RCRange> = None;
-        for slot in PaneCells::new(&region, frame) {
-            if !positive_area(&slot.rect) || grow_pixel_rect(slot.rect).intersection(clip).is_none()
-            {
-                continue;
-            }
-            source = Some(match source {
-                None => RCRange::from_cell(slot.row, slot.col),
-                Some(range) => RCRange {
-                    r1: range.r1.min(slot.row),
-                    c1: range.c1.min(slot.col),
-                    r2: range.r2.max(slot.row),
-                    c2: range.c2.max(slot.col),
-                },
-            });
-        }
-        sources[region as usize] = source;
+        sources[region as usize] = contributor_source(region.rows(frame), region.cols(frame), clip);
     }
 
     CellRepaintEnvelope::Visible { clip, sources }
+}
+
+fn contributor_source<R: AxisSlot, C: AxisSlot>(
+    rows: &[R],
+    cols: &[C],
+    clip: PixelRect,
+) -> Option<RCRange> {
+    let (r1, r2) = contributing_slot_ids(rows, clip.top(), clip.bottom())?;
+    let (c1, c2) = contributing_slot_ids(cols, clip.left(), clip.right())?;
+    Some(RCRange { r1, c1, r2, c2 })
+}
+
+fn contributing_slot_ids<S: AxisSlot>(
+    slots: &[S],
+    clip_start: i32,
+    clip_end: i32,
+) -> Option<(i32, i32)> {
+    let first =
+        slots.partition_point(|slot| slot.end().saturating_add(CELL_REPAINT_PAD_PX) <= clip_start);
+    let end =
+        slots.partition_point(|slot| slot.start().saturating_sub(CELL_REPAINT_PAD_PX) < clip_end);
+    let candidates = slots.get(first..end)?;
+    let first_id = candidates.iter().find(|slot| slot.extent() > 0)?.id();
+    let last_id = candidates.iter().rfind(|slot| slot.extent() > 0)?.id();
+    Some((first_id, last_id))
 }
 
 fn positive_area(rect: &PixelRect) -> bool {
@@ -112,6 +121,7 @@ mod tests {
     use crate::FrameInputs;
     use crate::chrome::{FramePath, PaneRegion};
     use crate::geometry::CanvasSize;
+    use crate::geometry::slot::RowSlot;
     use crate::model_adapter::{CanvasModel, CanvasView, CellContentQuery};
     use crate::style::{CellKind, CellStyle};
     use crate::theme::CanvasTheme;
@@ -216,6 +226,81 @@ mod tests {
             build_cell_repaint_envelope(&frame(), &[RCRange::from_cell(2, 2)]),
             CellRepaintEnvelope::NoPixels
         );
+    }
+
+    #[test]
+    fn pixel_bounds_cross_hidden_address_gap_to_adjacent_visible_slot() {
+        let mut rows = vec![RowSlot {
+            row: 1,
+            top: 0,
+            height: 20,
+        }];
+        rows.extend((2..=100).map(|row| RowSlot {
+            row,
+            top: 20,
+            height: 0,
+        }));
+        rows.extend([
+            RowSlot {
+                row: 101,
+                top: 20,
+                height: 20,
+            },
+            RowSlot {
+                row: 102,
+                top: 40,
+                height: 20,
+            },
+        ]);
+
+        assert_eq!(contributing_slot_ids(&rows, 18, 42), Some((1, 102)));
+    }
+
+    #[test]
+    fn pixel_bounded_slot_ids_match_per_slot_intersections() {
+        let rows = [
+            RowSlot {
+                row: 1,
+                top: 0,
+                height: 20,
+            },
+            RowSlot {
+                row: 2,
+                top: 20,
+                height: 0,
+            },
+            RowSlot {
+                row: 3,
+                top: 20,
+                height: 15,
+            },
+            RowSlot {
+                row: 4,
+                top: 35,
+                height: 25,
+            },
+        ];
+
+        for clip_start in -3..=63 {
+            for clip_end in (clip_start + 1)..=(clip_start + 8) {
+                let mut contributors = rows.iter().filter(|slot| {
+                    slot.extent() > 0
+                        && slot.end().saturating_add(CELL_REPAINT_PAD_PX) > clip_start
+                        && slot.start().saturating_sub(CELL_REPAINT_PAD_PX) < clip_end
+                });
+                let expected = contributors
+                    .clone()
+                    .next()
+                    .zip(contributors.next_back())
+                    .map(|(first, last)| (first.id(), last.id()));
+
+                assert_eq!(
+                    contributing_slot_ids(&rows, clip_start, clip_end),
+                    expected,
+                    "clip {clip_start}..{clip_end}"
+                );
+            }
+        }
     }
 
     #[test]
