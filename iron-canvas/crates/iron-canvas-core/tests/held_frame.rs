@@ -187,6 +187,7 @@ fn held_damage_is_whole_grid_and_retries_grid_wide() {
     );
     assert_eq!(orch.grid_surface().presents(), grid_presents);
     assert_eq!(orch.last_trace().verdict, Some(GridVerdict::Held));
+    assert_eq!(orch.last_trace().outcome, FrameOutcome::HeldOnBridgeFailure);
 
     model.set_bulk_bridge_fail_from(None);
     assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);

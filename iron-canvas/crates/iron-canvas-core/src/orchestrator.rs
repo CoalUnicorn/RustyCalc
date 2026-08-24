@@ -1682,10 +1682,11 @@ where
             });
         }
 
+        let outcome = self.grid.renderer.trace().outcome;
         Some(PaintOutcome::Held {
             retry: retry_grid_wide(work),
             frame: FrameUpdate::Replace(frame),
-            outcome: FrameOutcome::HeldOnBridgeFailure,
+            outcome,
         })
     }
 
@@ -1714,10 +1715,11 @@ where
             });
         }
 
+        let outcome = self.grid.renderer.trace().outcome;
         Some(PaintOutcome::Held {
             retry: retry_grid_wide(work),
             frame: FrameUpdate::Replace(frame),
-            outcome: FrameOutcome::HeldOnBridgeFailure,
+            outcome,
         })
     }
 
