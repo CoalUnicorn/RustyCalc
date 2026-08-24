@@ -856,12 +856,13 @@ mod dev_wire {
 
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
+    /// Explicit JSON projection boundary for the public diagnostic reason.
+    /// Keep this separate from core planner internals so wire names change
+    /// only with an intentional diagnostics-schema change.
     pub(crate) enum DiagRepaintReasonWire {
         NoPaintedHistory,
         LayoutMismatch,
         RowAddressMismatch,
-        SpanCapExceeded,
-        BorderSafety,
         FingerprintsEqual,
         ChangedCell,
         ChangedCells,
@@ -875,8 +876,6 @@ mod dev_wire {
                 DiagRepaintReason::NoPaintedHistory => Self::NoPaintedHistory,
                 DiagRepaintReason::LayoutMismatch => Self::LayoutMismatch,
                 DiagRepaintReason::RowAddressMismatch => Self::RowAddressMismatch,
-                DiagRepaintReason::SpanCapExceeded => Self::SpanCapExceeded,
-                DiagRepaintReason::BorderSafety => Self::BorderSafety,
                 DiagRepaintReason::FingerprintsEqual => Self::FingerprintsEqual,
                 DiagRepaintReason::ChangedCell => Self::ChangedCell,
                 DiagRepaintReason::ChangedCells => Self::ChangedCells,
@@ -1221,6 +1220,28 @@ mod tests {
     /// The wire shape is the contract the browser mirrors parse. Prove the
     /// exact field names here, natively, before any browser test relies on
     /// them.
+    #[test]
+    fn repaint_reason_wire_names_are_stable() {
+        let cases = [
+            (DiagRepaintReason::NoPaintedHistory, "noPaintedHistory"),
+            (DiagRepaintReason::LayoutMismatch, "layoutMismatch"),
+            (DiagRepaintReason::RowAddressMismatch, "rowAddressMismatch"),
+            (DiagRepaintReason::FingerprintsEqual, "fingerprintsEqual"),
+            (DiagRepaintReason::ChangedCell, "changedCell"),
+            (DiagRepaintReason::ChangedCells, "changedCells"),
+            (DiagRepaintReason::ChangedRows, "changedRows"),
+            (DiagRepaintReason::ClipAlignment, "clipAlignment"),
+        ];
+
+        for (reason, expected) in cases {
+            let json = serde_json::to_value(DiagRepaintReasonWire::from(reason))
+                .expect("diagnostic repaint reason serializes");
+            assert_eq!(json, expected);
+        }
+    }
+
+    /// The aggregate snapshot projection keeps field names stable alongside
+    /// the enum-value contract above.
     #[test]
     fn frame_diagnostics_wire_matches_declared_shape() {
         let diag = FrameDiagnostics {

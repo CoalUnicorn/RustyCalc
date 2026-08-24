@@ -69,6 +69,11 @@ pub enum DiagFetchPurpose {
 /// the comparison itself took — a Fresh-built geometry or a Damage/Blit
 /// strip never runs the comparison, so they carry no reason and the
 /// captured `rebuild_reason` (or the strategy) is their authority.
+///
+/// This public mirror is intentionally separate from the private planner
+/// enum: snapshot names are a stable diagnostics contract, while planner
+/// internals may evolve independently. Every variant here must have a live
+/// producer in the exhaustive conversion in `diag_repaint`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagRepaintReason {
     /// `FingerprintState::painted` was `None` — first content comparison.
@@ -77,10 +82,6 @@ pub enum DiagRepaintReason {
     LayoutMismatch,
     /// Row addresses diverged at some absolute row.
     RowAddressMismatch,
-    /// More than 8 disjoint changed bands — whole-grid walk wins.
-    SpanCapExceeded,
-    /// A changed band's edge row carries an explicit border.
-    BorderSafety,
     /// Every compared row digest matched — nothing to paint.
     FingerprintsEqual,
     /// Exactly one retained cell leaf changed.
@@ -111,6 +112,7 @@ pub enum DiagFingerprintActionTag {
     Reset,
 }
 
+/// Stable diagnostic mirror of renderer cache-buffer truth.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DiagBufferTruth {
     Valid,
@@ -118,6 +120,7 @@ pub enum DiagBufferTruth {
     Stale,
 }
 
+/// Stable diagnostic mirror of renderer fingerprint truth.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DiagFingerprintTruth {
     Exact,
