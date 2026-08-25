@@ -429,30 +429,30 @@ mod dev_wire {
         DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
     };
     use iron_canvas_core::{
-        FrameInputFailure, GridVerdict, PaintRegimeTag, RebuildReason, RowSpan, WorkFlags,
+        FrameInputFailure, GridVerdict, RebuildReason, RenderStrategy, RowSpan, WorkFlags,
     };
 
-    /// camelCase mirror of `PaintRegimeTag`. The engine tag rides the `.icr`
+    /// camelCase mirror of `RenderStrategy`. The engine tag rides the `.icr`
     /// recorder schema with `snake_case` names; this projection re-tags it
     /// camelCase to match the rest of the diagnostics wire.
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
-    pub(crate) enum PaintRegimeTagWire {
-        Overlay,
-        Viewport,
-        SlotsReuse,
-        Fresh,
-        Damage,
+    pub(crate) enum RenderStrategyWire {
+        OverlayOnly,
+        ScrollBlit,
+        ChangedCells,
+        FullRebuild,
+        DamagedRows,
     }
 
-    impl From<PaintRegimeTag> for PaintRegimeTagWire {
-        fn from(tag: PaintRegimeTag) -> Self {
+    impl From<RenderStrategy> for RenderStrategyWire {
+        fn from(tag: RenderStrategy) -> Self {
             match tag {
-                PaintRegimeTag::Overlay => Self::Overlay,
-                PaintRegimeTag::Viewport => Self::Viewport,
-                PaintRegimeTag::SlotsReuse => Self::SlotsReuse,
-                PaintRegimeTag::Fresh => Self::Fresh,
-                PaintRegimeTag::Damage => Self::Damage,
+                RenderStrategy::OverlayOnly => Self::OverlayOnly,
+                RenderStrategy::ScrollBlit => Self::ScrollBlit,
+                RenderStrategy::ChangedCells => Self::ChangedCells,
+                RenderStrategy::FullRebuild => Self::FullRebuild,
+                RenderStrategy::DamagedRows => Self::DamagedRows,
             }
         }
     }
@@ -463,8 +463,8 @@ mod dev_wire {
         pub schema_version: u8,
         pub attempt_seq: u64,
         pub committed_seq: Option<u64>,
-        pub selected: Option<PaintRegimeTagWire>,
-        pub effective: Option<PaintRegimeTagWire>,
+        pub selected: Option<RenderStrategyWire>,
+        pub effective: Option<RenderStrategyWire>,
         pub work: Vec<&'static str>,
         pub delta: Option<DiagDeltaKindWire>,
         pub rebuild_reason: Option<RebuildReasonWire>,
@@ -499,8 +499,8 @@ mod dev_wire {
                 schema_version: diag.schema_version,
                 attempt_seq: diag.attempt_seq,
                 committed_seq: diag.committed_seq,
-                selected: diag.selected.map(PaintRegimeTagWire::from),
-                effective: diag.effective.map(PaintRegimeTagWire::from),
+                selected: diag.selected.map(RenderStrategyWire::from),
+                effective: diag.effective.map(RenderStrategyWire::from),
                 work,
                 delta: diag.delta.map(DiagDeltaKindWire::from),
                 rebuild_reason: diag.rebuild_reason.map(RebuildReasonWire::from),
@@ -1248,8 +1248,8 @@ mod tests {
             schema_version: 2,
             attempt_seq: 7,
             committed_seq: Some(6),
-            selected: Some(iron_canvas_core::PaintRegimeTag::SlotsReuse),
-            effective: Some(iron_canvas_core::PaintRegimeTag::SlotsReuse),
+            selected: Some(iron_canvas_core::RenderStrategy::ChangedCells),
+            effective: Some(iron_canvas_core::RenderStrategy::ChangedCells),
             work: iron_canvas_core::WorkFlags::CONTENT,
             delta: Some(DiagDeltaKind::Stable),
             rebuild_reason: Some(RebuildReason::Freeze),
@@ -1324,7 +1324,7 @@ mod tests {
         assert_eq!(json["schemaVersion"], 2);
         assert_eq!(json["attemptSeq"], 7);
         assert_eq!(json["committedSeq"], 6);
-        assert_eq!(json["selected"], "slotsReuse");
+        assert_eq!(json["selected"], "changedCells");
         assert_eq!(json["work"], serde_json::json!(["content"]));
         assert_eq!(json["delta"], "stable");
         assert_eq!(json["rebuildReason"], "freeze");

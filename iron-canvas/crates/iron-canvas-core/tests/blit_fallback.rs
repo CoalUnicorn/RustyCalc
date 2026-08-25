@@ -3,7 +3,7 @@
 //! this fires only at a row-header digit boundary, when the new
 //! last-visible row gains a digit and `row_header_thickness` widens. The
 //! dispatch must hand back a `Fresh` frame rather than a malformed
-//! `Blitted` one, otherwise `paint_viewport_regime` would skip the full
+//! `Blitted` one, otherwise `render_scroll_blit` would skip the full
 //! grid rebuild.
 
 mod common;
@@ -13,7 +13,7 @@ use std::rc::Rc;
 use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
-    CanvasModel, CanvasSize, FrameDelta, Orchestrator, PaintRegimeTag, PaintResult, RebuildReason,
+    CanvasModel, CanvasSize, FrameDelta, Orchestrator, PaintResult, RebuildReason, RenderStrategy,
 };
 use iron_canvas_recorder::MemSurface;
 
@@ -71,7 +71,7 @@ fn blit_fallback_at_row_header_digit_boundary_returns_fresh() {
     let outcome = Chrome::next_blit(Some(prev), &model, &inputs1, &plan);
 
     // The whole point of the fallback: if try_blit_reuse rejected, the outcome
-    // must be `FreshFallback` (a Fresh-built frame) so paint_viewport_regime
+    // must be `FreshFallback` (a Fresh-built frame) so render_scroll_blit
     // invalidates the cache and repaints the whole grid. The `BlitOutcome`
     // type now makes "Fresh or Blitted, never anything else" structural —
     // the else branch needs no assertion.
@@ -183,7 +183,7 @@ fn bridge_failed_active_cell_rejects_blit() {
 // when in-place reuse is rejected. Driven through the real `Orchestrator`
 // dispatch (not the raw `Chrome::classify`/`next_blit` calls the rest of
 // this file uses) with a bulk bridge failure added, this proves
-// `paint_viewport_regime`'s `FreshFallback` arm must hold atomically —
+// `render_scroll_blit`'s `FreshFallback` arm must hold atomically —
 // selected Viewport, effective Fresh fallback — exactly like an ordinary
 // Fresh attempt, per the Resolved Failure Policy table.
 // ==============================================================================
@@ -210,7 +210,7 @@ fn held_fresh_fallback_at_row_header_digit_boundary_holds_atomically() {
             .with_active(980, 1),
     );
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh baseline at top_row=980 (last visible row 999, 3 digits).
+    orch.render_pending(); // Fresh baseline at top_row=980 (last visible row 999, 3 digits).
 
     let rect_before = orch.cell_rect(980, 1);
     assert!(
@@ -223,17 +223,17 @@ fn held_fresh_fallback_at_row_header_digit_boundary_holds_atomically() {
     stub.set_top_row(981); // last visible row becomes 1000 (4 digits) -> FreshFallback.
     stub.set_bulk_bridge_fail(true);
     orch.request_overlay_repaint(); // wakes dispatch without a view/content mark (nav semantics).
-    let result = orch.paint_if_dirty();
+    let result = orch.render_pending();
 
     assert_eq!(
         result,
-        PaintResult::Retry,
+        PaintResult::RetryRequired,
         "a FreshFallback must hold atomically on a bulk bridge failure, the \
          same as an ordinary Fresh attempt — got {result:?}"
     );
     assert_eq!(
-        orch.last_regime(),
-        Some(PaintRegimeTag::Viewport),
+        orch.last_strategy(),
+        Some(RenderStrategy::ScrollBlit),
         "planning still selects Viewport; only the execution demotes"
     );
     assert_eq!(
@@ -285,7 +285,7 @@ fn held_viewport_blit_with_frozen_cols_restores_and_recovers() {
             .with_active(5, 5),
     );
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh baseline.
+    orch.render_pending(); // Fresh baseline.
 
     // Frozen-column cell (col 1): a row scroll never shifts BottomLeft's
     // own pixels, but a rollback that dropped or corrupted
@@ -310,9 +310,9 @@ fn held_viewport_blit_with_frozen_cols_restores_and_recovers() {
     stub.set_top_row(2);
     stub.set_bulk_bridge_fail(true);
     orch.request_overlay_repaint();
-    let result = orch.paint_if_dirty();
+    let result = orch.render_pending();
 
-    assert_eq!(result, PaintResult::Retry, "held blit must retry");
+    assert_eq!(result, PaintResult::RetryRequired, "held blit must retry");
     assert_eq!(
         orch.cell_rect(3, 1),
         frozen_rect_before,
@@ -331,8 +331,8 @@ fn held_viewport_blit_with_frozen_cols_restores_and_recovers() {
     // the whole rect unchanged here would be the wrong invariant; X alone
     // is the frozen-column property this test cares about.
     stub.set_bulk_bridge_fail(false);
-    let result = orch.paint_if_dirty();
-    assert_eq!(result, PaintResult::Painted, "recovery must commit");
+    let result = orch.render_pending();
+    assert_eq!(result, PaintResult::Rendered, "recovery must commit");
     let frozen_rect_after = orch.cell_rect(3, 1);
     assert!(
         frozen_rect_after.is_some(),

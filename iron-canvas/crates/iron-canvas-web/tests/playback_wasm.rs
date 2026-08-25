@@ -14,7 +14,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use iron_canvas_core::PaintRegimeTag;
+use iron_canvas_core::RenderStrategy;
 use iron_canvas_recorder::DrawOp;
 use iron_canvas_recorder::recording::Recording;
 use iron_canvas_web::IronCanvas;
@@ -55,7 +55,7 @@ fn set_prop(obj: &js_sys::Object, name: &str, f: &js_sys::Function) {
 
 /// Duck-typed model whose `getSelectedView` reads `top_row` live off a
 /// shared `Cell` — the view analogue of `render_wasm.rs`'s shared-store
-/// idiom (a mutable value visible to the very next `paintIfDirty()` with
+/// idiom (a mutable value visible to the very next `renderPending()` with
 /// no second `setModel` round-trip), so a test can "scroll" between two
 /// paints. Cell content is a pure `r{row}c{col}` function of position —
 /// no shared store needed since no scenario here edits a value.
@@ -219,7 +219,7 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
         panic!("scroll fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
-    canvas.paint_if_dirty(); // baseline Fresh paint with real data, before recording starts
+    canvas.render_pending(); // baseline Fresh paint with real data, before recording starts
 
     let Ok(()) = canvas.start_recording(JsValue::UNDEFINED) else {
         panic!("start recording");
@@ -230,7 +230,7 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     // still detects the actual scroll geometrically, then `plan_frame` picks
     // the Viewport (blit) regime — this call only wakes dispatch.
     canvas.view_changed_js();
-    canvas.paint_if_dirty(); // must land the Viewport (blit) regime
+    canvas.render_pending(); // must land the Viewport (blit) regime
 
     let Ok(bytes_arr) = canvas.stop_recording() else {
         panic!("stop recording");
@@ -242,11 +242,11 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     let Ok(rec) = Recording::deserialize(&bytes) else {
         panic!("recording deserializes");
     };
-    let regimes: Vec<PaintRegimeTag> = rec.frames.iter().filter_map(|f| f.trace.regime).collect();
+    let regimes: Vec<RenderStrategy> = rec.frames.iter().filter_map(|f| f.trace.regime).collect();
     assert!(
         rec.frames
             .iter()
-            .any(|f| f.trace.regime == Some(PaintRegimeTag::Viewport)
+            .any(|f| f.trace.regime == Some(RenderStrategy::ScrollBlit)
                 && f.grid_ops
                     .iter()
                     .any(|op| matches!(op, DrawOp::Blit { .. }))),

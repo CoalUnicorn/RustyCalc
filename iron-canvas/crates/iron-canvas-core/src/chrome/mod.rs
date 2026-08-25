@@ -238,7 +238,7 @@ impl Chrome {
     /// handed back whole — on reject (see `try_blit_reuse`'s doc for both
     /// cases). `Chrome::next_blit` is the immediate-commit wrapper built on
     /// top of this for callers that don't need to hold the decision open;
-    /// `Orchestrator::paint_viewport_regime` calls this directly instead, so
+    /// `Orchestrator::render_scroll_blit` calls this directly instead, so
     /// it can call `PreparedBlitFrame::rollback` if the paint that follows a
     /// successful `Ok` still fails a bulk bridge read. `pub(crate)`: an
     /// execution detail of the render pipeline, not consumer-facing API.
@@ -267,7 +267,7 @@ impl Chrome {
     /// `SlotsReused` away.
     ///
     /// Implemented through [`Self::prepare_blit`] — the same internal
-    /// candidate builder `Orchestrator::paint_viewport_regime` uses — with an
+    /// candidate builder `Orchestrator::render_scroll_blit` uses — with an
     /// immediate `.commit()`: there is no second blit construction algorithm,
     /// only a second (non-atomic) way to consume the first one's result.
     pub fn next_blit(
@@ -289,7 +289,7 @@ impl Chrome {
 
     /// Build a `FramePath::Fresh` candidate directly from a caller-supplied
     /// `recycled` pool, bypassing `Chrome::next`'s `prev`-derived recycling.
-    /// `pub(crate)` so `Orchestrator::paint_fresh_regime` can build the
+    /// `pub(crate)` so `Orchestrator::render_full_rebuild` can build the
     /// candidate from its own standing `spare_slots` pool without handing
     /// `prev`'s ownership to this call at all — `prev` stays fully intact
     /// (and, today, still committed in `self.last_frame`) for the whole
@@ -305,7 +305,7 @@ impl Chrome {
         // counts, and header visibility already read exactly once and
         // validated (a bridge failure on any of them holds the whole paint
         // attempt before `Chrome::build` is ever called — see
-        // `Orchestrator::paint_if_dirty`). No fallback default is needed or
+        // `Orchestrator::render_pending`). No fallback default is needed or
         // read here.
         let view = inputs.view();
         let sheet = inputs.sheet();

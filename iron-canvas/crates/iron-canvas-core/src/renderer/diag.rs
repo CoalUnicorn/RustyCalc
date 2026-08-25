@@ -27,7 +27,7 @@ use crate::frame_plan::{FrameDelta, RebuildReason};
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
-use crate::orchestrator::{FrameOutcome, GridVerdict, PaintRegimeTag};
+use crate::orchestrator::{FrameOutcome, GridVerdict, RenderStrategy};
 use crate::pending_work::{RowSpan, WorkFlags};
 use crate::renderer::cache::BufferTruth;
 use crate::renderer::cell::fingerprint::{FingerprintTruth, RepaintReason};
@@ -310,8 +310,8 @@ pub struct FrameDiagnostics {
     pub schema_version: u8,
     pub attempt_seq: u64,
     pub committed_seq: Option<u64>,
-    pub selected: Option<PaintRegimeTag>,
-    pub effective: Option<PaintRegimeTag>,
+    pub selected: Option<RenderStrategy>,
+    pub effective: Option<RenderStrategy>,
     pub work: WorkFlags,
     pub delta: Option<DiagDeltaKind>,
     pub rebuild_reason: Option<RebuildReason>,
@@ -338,9 +338,9 @@ pub struct FrameDiagnostics {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiagCompletion {
     pub attempt_seq: u64,
-    pub selected: Option<PaintRegimeTag>,
+    pub selected: Option<RenderStrategy>,
     pub work: WorkFlags,
-    pub effective: Option<PaintRegimeTag>,
+    pub effective: Option<RenderStrategy>,
     pub committed_seq: Option<u64>,
     pub outcome: FrameOutcome,
     pub layers: DiagPaintedLayers,
@@ -366,7 +366,7 @@ impl Default for DiagState {
 }
 
 impl DiagState {
-    /// Empty the in-flight capture. Called by `paint_if_dirty` at attempt
+    /// Empty the in-flight capture. Called by `render_pending` at attempt
     /// start so a capture-failure hold cannot inherit the previous
     /// attempt's renderer sections.
     pub(crate) fn reset_capture(&self) {
@@ -407,7 +407,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
 
     /// Classification facts plus the attempt-scoped probe and the
     /// attempt-start committed cache truth, recorded once by
-    /// `paint_if_dirty` after `plan_frame`. The capture-failure path never
+    /// `render_pending` after `plan_frame`. The capture-failure path never
     /// calls this — its snapshot keeps `delta`/`rebuild_reason`/`probe` at
     /// `None` and `committed_before` is filled by `publish_diag`.
     pub(crate) fn diag_begin_attempt(

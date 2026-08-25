@@ -1,5 +1,5 @@
 //! Native integration tests for the dev-diagnostics snapshot.
-//! Harness mirrors tests/orchestrator_regimes.rs: MemSurface + TestModel.
+//! Harness mirrors tests/orchestrator_strategies.rs: MemSurface + TestModel.
 
 mod common;
 
@@ -28,7 +28,7 @@ fn harness() -> (Orchestrator<MemSurface>, Rc<TestModel>) {
 #[test]
 fn disabled_by_default_publishes_no_snapshot() {
     let (mut orch, _model) = harness();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert!(orch.frame_diagnostics().is_none());
 }
 
@@ -36,7 +36,7 @@ fn disabled_by_default_publishes_no_snapshot() {
 fn enable_then_disable_round_trips() {
     let (mut orch, _model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().expect("enabled capture publishes");
     assert_eq!(diag.schema_version, 2);
     assert_eq!(diag.attempt_seq, 1);
@@ -49,10 +49,10 @@ fn enable_then_disable_round_trips() {
 fn capture_hold_still_publishes_and_keeps_cache_state() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     model.set_capture_fail(Some(iron_canvas_core::FrameInputFailure::SelectedSheet));
     orch.request_repaint();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.attempt_seq, 2);
     assert_eq!(diag.committed_seq, None);
@@ -71,7 +71,7 @@ fn capture_hold_still_publishes_and_keeps_cache_state() {
 
 #[test]
 fn overlay_only_attempt_commits_without_cache_work() {
-    // Live recipe from orchestrator_regimes.rs:1303-1324: an in-viewport
+    // Live recipe from orchestrator_strategies.rs: an in-viewport
     // selection move is a committed Overlay regime with NO grid cache
     // commit. It must not be mislabelled as held.
     let model = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
@@ -79,11 +79,11 @@ fn overlay_only_attempt_commits_without_cache_work() {
     orch.set_model(model.clone());
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     model.set_active(6, 2);
     orch.view_changed();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(
@@ -105,7 +105,7 @@ fn overlay_only_attempt_commits_without_cache_work() {
 fn cold_start_reports_no_committed_frame_reason_and_delta_rebuild() {
     let (mut orch, _model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.delta, Some(DiagDeltaKind::Rebuild));
     assert_eq!(diag.rebuild_reason, Some(RebuildReason::NoCommittedFrame));
@@ -118,11 +118,11 @@ fn freeze_rebuild_reports_reason_and_exact_segments() {
     orch.set_model(model.clone());
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     model.set_frozen_rows(3);
     orch.request_repaint();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.rebuild_reason, Some(RebuildReason::Freeze));
@@ -154,7 +154,7 @@ fn probe_reports_exact_containing_segment_and_is_consumed() {
     orch.set_model(model.clone());
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     // Probe the frozen top-left corner: exactly TL contains it.
     orch.set_frame_diagnostics_probe(RCRange {
@@ -164,7 +164,7 @@ fn probe_reports_exact_containing_segment_and_is_consumed() {
         c2: 1,
     });
     orch.mark_content_dirty();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(
         diag.probe,
@@ -179,7 +179,7 @@ fn probe_reports_exact_containing_segment_and_is_consumed() {
 
     // The probe is attempt-scoped: the next attempt consumes nothing.
     orch.mark_content_dirty();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.probe, None);
     assert!(diag.probe_segments.is_empty());
@@ -189,7 +189,7 @@ fn probe_reports_exact_containing_segment_and_is_consumed() {
 fn probe_outside_all_segments_reports_empty_attribution() {
     let (mut orch, _model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     orch.set_frame_diagnostics_probe(RCRange {
         r1: 999,
         c1: 999,
@@ -197,7 +197,7 @@ fn probe_outside_all_segments_reports_empty_attribution() {
         c2: 999,
     });
     orch.mark_content_dirty();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert!(diag.probe.is_some());
     assert!(diag.probe_segments.is_empty());
@@ -210,11 +210,11 @@ fn overlay_only_attempt_has_no_geometry_and_no_probe_segments() {
     orch.set_model(model.clone());
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     model.set_active(6, 2);
     orch.view_changed();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.delta, Some(DiagDeltaKind::Stable));
     assert!(diag.geometry.is_none());
@@ -226,9 +226,9 @@ fn overlay_only_attempt_has_no_geometry_and_no_probe_segments() {
 fn unchanged_content_skip_reports_fingerprints_equal() {
     let (mut orch, _model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     orch.mark_content_dirty();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Skip));
     assert_eq!(
@@ -245,10 +245,10 @@ fn unchanged_content_skip_reports_fingerprints_equal() {
 fn one_changed_cell_reports_exact_evidence_and_executed_envelope() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     model.set_cell(4, 2, "new value");
     orch.mark_content_dirty();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Cell));
     assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedCell));
@@ -265,13 +265,13 @@ fn one_changed_cell_reports_exact_evidence_and_executed_envelope() {
 fn span_cap_disables_rows_but_keeps_a_bounded_range() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     // Nine disjoint changed rows exceed the row-sweep alternative's 8-span cap.
     for (i, row) in [1, 3, 5, 7, 9, 11, 13, 15, 17].iter().enumerate() {
         model.set_cell(*row, 2, &format!("v{i}"));
     }
     orch.mark_content_dirty();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Range));
     assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedCells));
@@ -285,7 +285,7 @@ fn border_change_uses_changed_cell_envelope() {
     use iron_canvas_core::{Border, BorderItem, BorderStyle, CellStyle};
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     // Exact leaf evidence bypasses the old whole-row border promotion.
     model.set_style(
         4,
@@ -303,7 +303,7 @@ fn border_change_uses_changed_cell_envelope() {
     );
     model.set_cell(4, 2, "bordered");
     orch.mark_content_dirty();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Cell));
     assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedCell));
@@ -321,11 +321,11 @@ fn fresh_rebuild_full_carries_no_fingerprint_reason() {
     orch.set_model(model.clone());
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     model.set_frozen_rows(3);
     orch.request_repaint();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Full));
     assert_eq!(diag.repaint.reason, None);
@@ -333,13 +333,13 @@ fn fresh_rebuild_full_carries_no_fingerprint_reason() {
 }
 
 #[test]
-fn damage_strip_reports_strip_verdict_without_reason() {
+fn damaged_rows_strip_reports_strip_verdict_without_reason() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     model.set_cell(4, 2, "damage edit");
     orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Strip));
     assert_eq!(diag.repaint.reason, None);
@@ -349,7 +349,7 @@ fn damage_strip_reports_strip_verdict_without_reason() {
 fn fetch_requests_sum_to_totals_and_match_segments() {
     let (mut orch, _model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.fetch.requests.len(), diag.fetch.batches);
     assert_eq!(
@@ -386,10 +386,10 @@ fn fetch_requests_sum_to_totals_and_match_segments() {
 fn row_blit_reports_shift_revealed_strip_and_effective_clip() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     model.set_top_row(5);
     orch.view_changed();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.delta, Some(DiagDeltaKind::Scroll));
     let blit = diag.blit.expect("one-axis scroll blits");
@@ -427,7 +427,7 @@ fn row_blit_reports_shift_revealed_strip_and_effective_clip() {
 fn geometry_reports_css_and_backing_size() {
     let (mut orch, _model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     let geo = diag.geometry.expect("grid-visited attempt has geometry");
     assert_eq!(geo.canvas, CanvasSize { w: 800.0, h: 600.0 });
@@ -437,7 +437,7 @@ fn geometry_reports_css_and_backing_size() {
     // dpr 2.0: the derived backing size doubles, matching browser
     // rounding of CSS x DPR.
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 2.0);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     let geo = diag.geometry.expect("grid-visited attempt has geometry");
     assert_eq!(geo.dpr, 2.0);
@@ -445,7 +445,7 @@ fn geometry_reports_css_and_backing_size() {
 }
 
 #[test]
-fn damage_one_row_with_frozen_columns_reports_one_painted_row() {
+fn damaged_rows_with_frozen_columns_reports_one_painted_row() {
     // Frozen columns split one damaged row band into left and right
     // segments. `paint.rows` counts DISTINCT grid rows, so the same
     // absolute row visited in both segments must count exactly once.
@@ -454,11 +454,11 @@ fn damage_one_row_with_frozen_columns_reports_one_painted_row() {
     orch.set_model(model.clone());
     orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     model.set_cell(4, 2, "damaged");
     orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Strip));
     assert_eq!(
@@ -496,11 +496,11 @@ fn fresh_fallback_blit_reports_no_clip_and_full_verdict() {
     orch.set_model(model.clone());
     orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     model.set_top_row(981);
     orch.view_changed();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     let diag = orch.frame_diagnostics().unwrap();
     let blit = diag.blit.expect("viewport attempt records blit detail");
@@ -520,7 +520,7 @@ fn fresh_fallback_blit_reports_no_clip_and_full_verdict() {
 fn committed_attempt_records_cache_transition() {
     let (mut orch, _model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.cache.resolution, DiagCacheResolution::Committed);
     assert_eq!(diag.cache.planned_action, Some(DiagCacheActionTag::Replace));
@@ -552,10 +552,10 @@ fn committed_attempt_records_cache_transition() {
 fn held_attempt_keeps_committed_cache_state() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     model.set_bulk_bridge_fail(true);
     orch.mark_content_dirty();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.outcome, FrameOutcome::HeldOnBridgeFailure);
     assert_eq!(diag.cache.resolution, DiagCacheResolution::HeldForRetry);
@@ -575,12 +575,12 @@ fn held_attempt_keeps_committed_cache_state() {
 fn held_damage_attempt_reports_held_verdict() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     // Fail the damage-strip fetch: the Damage regime must hold.
     model.set_bulk_bridge_fail(true);
     model.set_cell(4, 2, "damaged");
     orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.outcome, FrameOutcome::HeldOnBridgeFailure);
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Held));
@@ -590,12 +590,12 @@ fn held_damage_attempt_reports_held_verdict() {
 fn held_blit_preflight_reports_held_preflight_result() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     // Fail the revealed-strip fetch: the blit preflight must hold.
     model.set_bulk_bridge_fail(true);
     model.set_top_row(5);
     orch.view_changed();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     let diag = orch.frame_diagnostics().unwrap();
     let blit = diag.blit.expect("scroll attempt records blit detail");
     assert_eq!(blit.result, DiagBlitResultTag::HeldPreflight);

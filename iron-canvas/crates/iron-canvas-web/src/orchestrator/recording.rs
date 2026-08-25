@@ -207,7 +207,7 @@ impl IronCanvas {
         self.runtime.orchestrator_mut().request_repaint();
         self.runtime.orchestrator().grid_surface().begin_frame();
         self.runtime.orchestrator().overlay_surface().begin_frame();
-        let result = self.runtime.orchestrator_mut().paint_if_dirty();
+        let result = self.runtime.orchestrator_mut().render_pending();
         self.capture_frame(result, RecordOrigin::ForcedBaseline);
         Ok(())
     }
@@ -270,8 +270,8 @@ impl IronCanvas {
             t_ms,
             origin,
             result: match result {
-                PaintResult::Painted => RecordedPaintResult::Painted,
-                PaintResult::Retry => RecordedPaintResult::Retry,
+                PaintResult::Rendered => RecordedPaintResult::Painted,
+                PaintResult::RetryRequired => RecordedPaintResult::Retry,
                 PaintResult::Idle => unreachable!("idle attempts are omitted above"),
             },
             trace: TraceRecord::from(self.runtime.orchestrator().last_trace()),

@@ -29,4 +29,4 @@ pub use iron_canvas_core::{
     ResizeTarget, SheetArea, Side, Span, ThemeVariables, chrome, decoration, geometry,
     model_adapter, painter, renderer, theme, types,
 };
-pub use orchestrator::{IronCanvas, JsPaintResult};
+pub use orchestrator::{IronCanvas, RenderResult};

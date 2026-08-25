@@ -86,11 +86,11 @@ impl CachedColor {
 }
 
 /// Sticky `ctx.set_*` state cache for `CanvasPainter`. Lifted out as its
-/// own type so the regime arms in `Orchestrator::paint_if_dirty` own the
-/// invalidation contract explicitly: `paint_fresh_regime` /
-/// `paint_slots_reuse_regime` invalidate at the arm prologue (ctx state
-/// about to change); `paint_viewport_regime`'s blit path /
-/// `paint_overlay_regime` preserve (blit + overlay-only don't touch grid
+/// own type so the strategy arms in `Orchestrator::render_pending` own the
+/// invalidation contract explicitly: `render_full_rebuild` and
+/// `render_changed_cells` invalidate at the arm prologue (ctx state
+/// about to change); `render_scroll_blit` and
+/// `render_overlay_only` preserve it (blit and overlay-only do not touch grid
 /// ctx state). Other painter backends (SvgPainter, RecorderPainter) have
 /// no analog — the cache is a Canvas2D-specific optimization.
 #[derive(Default)]

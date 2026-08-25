@@ -14,7 +14,7 @@
 //! survives across frames.
 //!
 //! State pushes from the host mark work on `Orchestrator`'s single pending
-//! value. `Orchestrator::paint_if_dirty` picks a regime from it and drives
+//! value. `Orchestrator::render_pending` picks a regime from it and drives
 //! the layers that regime paints through their `LayerBase` paint method:
 //! `paint_grid` / `paint_grid_blit` for the grid, `paint_overlay_layer`
 //! for the overlay. The grid path calls into [`RendererCore::render_grid`];
@@ -24,7 +24,7 @@
 //!
 //! # Render pipeline
 //!
-//! Two paint entry points, each driven by `paint_if_dirty` per regime:
+//! Two paint entry points, each driven by `render_pending` per regime:
 //!
 //! - [`RendererCore::render_grid`] paints cells (four frozen-pane
 //!   quadrants, each running five cell sub-passes: bg, then CF decoration,
@@ -164,7 +164,7 @@ impl<P: Painter> RendererCore<P> {
         self.painter.as_ref()
     }
 
-    /// Clear the trace for a new frame. Called once by `paint_if_dirty`
+    /// Clear the trace for a new frame. Called once by `render_pending`
     /// before dispatch, never by a paint method — a paint method that reset
     /// it would erase attribution already recorded by the current attempt.
     pub fn reset_trace(&self) {

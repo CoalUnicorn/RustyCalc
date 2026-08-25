@@ -22,7 +22,7 @@
 
 use std::path::Path;
 
-use iron_canvas_core::PaintRegimeTag;
+use iron_canvas_core::RenderStrategy;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{GroupClass, TextAlign, TextBaseline};
@@ -37,12 +37,12 @@ use iron_canvas_recorder::recording::{
 const FIXTURE_PATH: &str = "tests/fixtures/fresh_paint.icr";
 const OVERLAY_FIXTURE_PATH: &str = "tests/fixtures/overlay_paint.icr";
 
-fn trace(regime: PaintRegimeTag, work: u8) -> TraceRecord {
+fn trace(strategy: RenderStrategy, work: u8) -> TraceRecord {
     let core_trace = iron_canvas_core::FrameTrace {
         attempt_seq: 1,
         committed_seq: Some(1),
-        regime: Some(regime),
-        effective: Some(regime),
+        strategy: Some(strategy),
+        effective: Some(strategy),
         work: iron_canvas_core::WorkFlags::from_bits_retain(work),
         ..iron_canvas_core::FrameTrace::default()
     };
@@ -170,7 +170,7 @@ fn build_fixture() -> Recording {
         t_ms: 0,
         origin: RecordOrigin::Live,
         result: RecordedPaintResult::Painted,
-        trace: trace(PaintRegimeTag::Fresh, 0b0100),
+        trace: trace(RenderStrategy::FullRebuild, 0b0100),
         grid_ops,
         overlay_ops,
     });
@@ -313,7 +313,7 @@ fn build_overlay_fixture() -> Recording {
         t_ms: 0,
         origin: RecordOrigin::Live,
         result: RecordedPaintResult::Painted,
-        trace: trace(PaintRegimeTag::Fresh, 0b1000),
+        trace: trace(RenderStrategy::FullRebuild, 0b1000),
         grid_ops: Vec::new(),
         overlay_ops,
     });
@@ -419,8 +419,8 @@ fn schema_version_is_pinned_at_6() {
 }
 
 #[test]
-fn paint_regime_tag_serializes_to_documented_snake_case() {
-    // Both fixtures above only ever exercise `PaintRegimeTag::Fresh` (see
+fn render_strategy_serializes_to_compatible_snake_case() {
+    // Both fixtures above only ever exercise `RenderStrategy::FullRebuild` (see
     // `build_fixture`/`build_overlay_fixture`), so byte-identity against
     // disk never actually pins the other four regimes' wire spelling.
     // Stage 4's global constraints name the exact set — `overlay`,
@@ -429,11 +429,11 @@ fn paint_regime_tag_serializes_to_documented_snake_case() {
     // directly) rather than trusting a parallel assumption about it. This
     // builds an in-memory `Recording`, never touching the on-disk fixtures.
     for (regime, expected) in [
-        (PaintRegimeTag::Overlay, "overlay"),
-        (PaintRegimeTag::Viewport, "viewport"),
-        (PaintRegimeTag::SlotsReuse, "slots_reuse"),
-        (PaintRegimeTag::Fresh, "fresh"),
-        (PaintRegimeTag::Damage, "damage"),
+        (RenderStrategy::OverlayOnly, "overlay"),
+        (RenderStrategy::ScrollBlit, "viewport"),
+        (RenderStrategy::ChangedCells, "slots_reuse"),
+        (RenderStrategy::FullRebuild, "fresh"),
+        (RenderStrategy::DamagedRows, "damage"),
     ] {
         let header = IcrHeader::new(
             10.0,
@@ -456,7 +456,7 @@ fn paint_regime_tag_serializes_to_documented_snake_case() {
         let json = String::from_utf8(bytes).expect(".icr bytes are valid UTF-8");
         assert!(
             json.contains(&format!("\"regime\":\"{expected}\"")),
-            "PaintRegimeTag::{regime:?} must serialize as {expected:?}; got {json}"
+            "RenderStrategy::{regime:?} must serialize as {expected:?}; got {json}"
         );
     }
 }

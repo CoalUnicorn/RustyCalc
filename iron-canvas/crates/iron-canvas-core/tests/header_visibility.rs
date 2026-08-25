@@ -264,7 +264,7 @@ fn paint(model: Rc<TestModel>) -> Vec<DrawOp> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(model);
-    orch.paint_if_dirty();
+    orch.render_pending();
     orch.grid_surface().recorder().ops().clone()
 }
 
@@ -277,7 +277,7 @@ fn overlay_paint(model: Rc<TestModel>) -> Vec<DrawOp> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(model);
-    orch.paint_if_dirty();
+    orch.render_pending();
     orch.overlay_surface().recorder().ops().clone()
 }
 

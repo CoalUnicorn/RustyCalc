@@ -1,11 +1,11 @@
 //! Live-canvas playback for `.icr` recordings.
 //!
-//! Suspends the normal `paint_if_dirty` loop and replays recorded ops onto the
+//! Suspends the normal `render_pending` loop and replays recorded ops onto the
 //! live grid + overlay painters. Each seek walks from the most recent `Fresh`
 //! frame at or before the target — cumulative on both grid and overlay
 //! surfaces. Owned by `IronCanvas`; the orchestrator is unaware.
 
-use iron_canvas_core::PaintRegimeTag;
+use iron_canvas_core::RenderStrategy;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::{BlitPainter, Painter};
 use iron_canvas_recorder::recording::{Frame, Recording};
@@ -99,7 +99,7 @@ pub fn find_fresh_anchor(frames: &[Frame], target: u32) -> Option<u32> {
     let start = target.min(last);
     (0..=start).rev().find(|&i| {
         let trace = &frames[i as usize].trace;
-        trace.regime == Some(PaintRegimeTag::Fresh) && trace.committed_seq.is_some()
+        trace.regime == Some(RenderStrategy::FullRebuild) && trace.committed_seq.is_some()
     })
 }
 
@@ -161,7 +161,7 @@ mod tests {
         RecordOrigin, RecordedPaintResult, TraceOutcome, TraceRecord,
     };
 
-    fn attempt(regime: Option<PaintRegimeTag>, committed_seq: Option<u64>) -> Frame {
+    fn attempt(regime: Option<RenderStrategy>, committed_seq: Option<u64>) -> Frame {
         Frame {
             frame_idx: 0,
             t_ms: 0,
@@ -188,8 +188,8 @@ mod tests {
     #[test]
     fn fresh_anchor_requires_a_committed_trace() {
         let frames = vec![
-            attempt(Some(PaintRegimeTag::Fresh), None),
-            attempt(Some(PaintRegimeTag::Fresh), Some(2)),
+            attempt(Some(RenderStrategy::FullRebuild), None),
+            attempt(Some(RenderStrategy::FullRebuild), Some(2)),
         ];
         assert_eq!(find_fresh_anchor(&frames, 0), None);
         assert_eq!(find_fresh_anchor(&frames, 1), Some(1));

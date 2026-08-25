@@ -53,19 +53,19 @@ fn wrap_surface(s: WebSurface) -> FacadeSurface {
     s
 }
 
-/// The result of one `paintIfDirty()` call.
+/// The result of one `renderPending()` call.
 ///
 /// The first three variants match `iron_canvas_core::PaintResult`.
-/// The `Playback` variant shows that playback bypassed the core orchestrator.
+/// The `PlaybackActive` variant shows that playback bypassed the core orchestrator.
 /// This enum does not allocate a `String` for each frame.
 #[wasm_bindgen]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum JsPaintResult {
+pub enum RenderResult {
     Idle,
-    Painted,
-    Retry,
+    Rendered,
+    RetryRequired,
     /// Playback bypassed the core paint operation for this tick.
-    Playback,
+    PlaybackActive,
 }
 
 #[wasm_bindgen]
@@ -159,11 +159,11 @@ impl IronCanvas {
     /// The capture includes a held attempt that has no paint operations.
     /// The method does not capture an idle rAF tick.
     /// The host uses `Retry` to schedule another rAF tick.
-    #[wasm_bindgen(js_name = "paintIfDirty")]
-    pub fn paint_if_dirty(&mut self) -> JsPaintResult {
+    #[wasm_bindgen(js_name = "renderPending")]
+    pub fn render_pending(&mut self) -> RenderResult {
         #[cfg(feature = "dev-tools")]
         if matches!(self.mode, CanvasMode::Playback(_)) {
-            return JsPaintResult::Playback;
+            return RenderResult::PlaybackActive;
         }
         #[cfg(feature = "dev-tools")]
         let recording_active = matches!(self.mode, CanvasMode::Recording(_));
@@ -173,11 +173,11 @@ impl IronCanvas {
             self.runtime.orchestrator().overlay_surface().begin_frame();
         }
 
-        let core_result = self.runtime.orchestrator_mut().paint_if_dirty();
+        let core_result = self.runtime.orchestrator_mut().render_pending();
         let result = match core_result {
-            PaintResult::Idle => JsPaintResult::Idle,
-            PaintResult::Painted => JsPaintResult::Painted,
-            PaintResult::Retry => JsPaintResult::Retry,
+            PaintResult::Idle => RenderResult::Idle,
+            PaintResult::Rendered => RenderResult::Rendered,
+            PaintResult::RetryRequired => RenderResult::RetryRequired,
         };
 
         #[cfg(feature = "dev-tools")]
@@ -224,7 +224,7 @@ impl IronCanvas {
     ///
     /// Call this method after `model.setTheme(...)`.
     /// The method clears the cached bridge theme and marks content as dirty.
-    /// The next `paintIfDirty` call fetches the styles again.
+    /// The next `renderPending` call fetches the styles again.
     /// For a Rust model, the method only marks content as dirty.
     #[wasm_bindgen(js_name = "themeChanged")]
     pub fn theme_changed(&mut self) {
@@ -349,7 +349,7 @@ impl IronCanvas {
     /// Report a change to the scroll position, selection, active cell, or sheet.
     ///
     /// This method marks the view and overlay in one operation.
-    /// The next `paint_if_dirty` call selects the applicable paint strategy.
+    /// The next `render_pending` call selects the applicable paint strategy.
     pub fn view_changed(&mut self) {
         self.runtime.orchestrator_mut().view_changed();
     }

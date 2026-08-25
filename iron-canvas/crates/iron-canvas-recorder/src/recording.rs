@@ -74,7 +74,7 @@
 use serde::{Deserialize, Serialize};
 
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{FrameOutcome, FrameTrace, GridVerdict, PaintRegimeTag};
+use iron_canvas_core::{FrameOutcome, FrameTrace, GridVerdict, RenderStrategy};
 
 use crate::DrawOp;
 
@@ -129,8 +129,8 @@ pub struct TraceBlitFallback {
 pub struct TraceRecord {
     pub attempt_seq: u64,
     pub committed_seq: Option<u64>,
-    pub regime: Option<PaintRegimeTag>,
-    pub effective: Option<PaintRegimeTag>,
+    pub regime: Option<RenderStrategy>,
+    pub effective: Option<RenderStrategy>,
     pub work: u8,
     pub verdict: Option<TraceVerdict>,
     pub outcome: TraceOutcome,
@@ -172,7 +172,7 @@ impl From<FrameTrace> for TraceRecord {
         Self {
             attempt_seq: trace.attempt_seq,
             committed_seq: trace.committed_seq,
-            regime: trace.regime,
+            regime: trace.strategy,
             effective: trace.effective,
             work: trace.work.bits(),
             verdict,
@@ -375,12 +375,12 @@ mod tests {
         }
     }
 
-    fn trace(regime: PaintRegimeTag, work: u8) -> TraceRecord {
+    fn trace(strategy: RenderStrategy, work: u8) -> TraceRecord {
         let core_trace = FrameTrace {
             attempt_seq: 1,
             committed_seq: Some(1),
-            regime: Some(regime),
-            effective: Some(regime),
+            strategy: Some(strategy),
+            effective: Some(strategy),
             work: iron_canvas_core::WorkFlags::from_bits_retain(work),
             ..FrameTrace::default()
         };
@@ -413,7 +413,7 @@ mod tests {
             t_ms: 0,
             origin: RecordOrigin::Live,
             result: RecordedPaintResult::Painted,
-            trace: trace(PaintRegimeTag::Fresh, 0b0100), // GEOMETRY
+            trace: trace(RenderStrategy::FullRebuild, 0b0100), // GEOMETRY
             grid_ops: vec![DrawOp::RectFill {
                 rect: pix(0, 0, 10, 10),
                 color: "#fff".into(),
@@ -425,7 +425,7 @@ mod tests {
             t_ms: 17,
             origin: RecordOrigin::Live,
             result: RecordedPaintResult::Painted,
-            trace: trace(PaintRegimeTag::Overlay, 0b1000), // OVERLAY
+            trace: trace(RenderStrategy::OverlayOnly, 0b1000), // OVERLAY
             grid_ops: vec![],
             overlay_ops: vec![DrawOp::RectStroke {
                 rect: pix(0, 0, 20, 20),

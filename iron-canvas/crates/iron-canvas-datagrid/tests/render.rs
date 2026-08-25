@@ -12,7 +12,7 @@ fn painted(grid: DataGrid) -> Vec<String> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(Rc::new(grid));
-    orch.paint_if_dirty();
+    orch.render_pending();
     orch.grid_surface()
         .recorder()
         .ops()
@@ -57,11 +57,11 @@ fn hidden_selection_still_paints_grid_but_draws_no_selection() {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(Rc::new(g));
-    let result = orch.paint_if_dirty();
+    let result = orch.render_pending();
 
     assert_eq!(
         result,
-        PaintResult::Painted,
+        PaintResult::Rendered,
         "a selection-less grid must still commit a paint, not hold in Retry"
     );
 

@@ -183,7 +183,7 @@ fn blit_row_header_thickness(scroll_rows: &[RowSlot], frozen_rows_count: i32, ne
 /// `Chrome::next_blit` is the immediate-commit convenience wrapper most
 /// callers want (and the only shape `BlitOutcome`'s two variants need).
 /// `Chrome::prepare_blit` hands back this type instead, for the one caller
-/// (`Orchestrator::paint_viewport_regime`) that must hold the
+/// (`Orchestrator::render_scroll_blit`) that must hold the
 /// commit-or-rollback decision open until it knows whether the paint that
 /// follows actually succeeded.
 pub(crate) struct PreparedBlitFrame {

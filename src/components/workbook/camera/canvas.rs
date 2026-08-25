@@ -96,8 +96,8 @@ impl CameraCanvas {
         }
     }
 
-    pub fn paint_if_dirty(&mut self) -> PaintResult {
-        self.runtime.orchestrator_mut().paint_if_dirty()
+    pub fn render_pending(&mut self) -> PaintResult {
+        self.runtime.orchestrator_mut().render_pending()
     }
 
     /// See `IronCanvas::fontsChanged` — clear text-measure memos after

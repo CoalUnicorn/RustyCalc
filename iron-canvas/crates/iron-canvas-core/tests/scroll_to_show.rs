@@ -24,7 +24,7 @@ fn painted(model: TestModel) -> Orchestrator<MemSurface> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(CANVAS, 1.0);
     orch.set_model(Rc::new(model));
-    orch.paint_if_dirty();
+    orch.render_pending();
     orch
 }
 

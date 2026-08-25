@@ -1,15 +1,15 @@
-//! `Orchestrator<MemSurface>` five-regime integration test.
+//! `Orchestrator<MemSurface>` five-strategy integration test.
 //!
-//! Drives all five strategies a `FramePlan` can select (`Fresh`,
-//! `SlotsReuse`, `Damage`, `Viewport`, `Overlay`) through the same dispatch
+//! Drives all five strategies a `FramePlan` can select (`FullRebuild`,
+//! `ChangedCells`, `DamagedRows`, `ScrollBlit`, `OverlayOnly`) through the same dispatch
 //! entry point a browser would use, and asserts the captured `DrawOp` log
-//! matches each regime's contract:
+//! matches each strategy's contract:
 //!
-//! - `Fresh`: full-canvas fill on the grid surface.
-//! - `SlotsReuse`: no full-canvas fill (prior pixels are reused).
-//! - `Damage`: row-band-clipped repaint, strictly fewer ops than SlotsReuse.
-//! - `Viewport`: `DrawOp::Blit` ops on the grid surface (scroll-blit).
-//! - `Overlay`: zero new grid ops; overlay surface clears + repaints.
+//! - `FullRebuild`: full-canvas fill on the grid surface.
+//! - `ChangedCells`: no full-canvas fill because prior pixels are reused.
+//! - `DamagedRows`: row-band repaint with fewer operations than `ChangedCells`.
+//! - `ScrollBlit`: `DrawOp::Blit` operations on the grid surface.
+//! - `OverlayOnly`: no new grid operations and a repainted overlay surface.
 
 #![allow(clippy::unwrap_used)]
 
@@ -28,7 +28,7 @@ use iron_canvas_core::types::coord::{AutofillTarget, RCRange, SheetArea};
 use iron_canvas_core::{CanvasTheme, Orchestrator};
 use iron_canvas_core::{PixelRect, Point};
 
-use iron_canvas_core::{GridVerdict, PaintRegimeTag, PaintResult, WorkFlags};
+use iron_canvas_core::{GridVerdict, PaintResult, RenderStrategy, WorkFlags};
 use iron_canvas_recorder::recording::{
     Frame, IcrHeader, RecordOrigin, RecordedPaintResult, Recording, ThemeSnapshot, TraceRecord,
 };
@@ -148,11 +148,11 @@ fn is_col_label(text: &str) -> bool {
 }
 
 #[test]
-fn fresh_regime_emits_canvas_fill_and_overlay_clear() {
+fn full_rebuild_emits_canvas_fill_and_overlay_clear() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
 
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let grid_ops = orch.grid_surface().recorder().ops();
     let overlay_ops = orch.overlay_surface().recorder().ops();
@@ -178,10 +178,10 @@ fn fresh_regime_emits_canvas_fill_and_overlay_clear() {
 }
 
 #[test]
-fn slots_reuse_regime_skips_full_canvas_fill() {
+fn changed_cells_skips_full_canvas_fill() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh — primes last_frame.
+    orch.render_pending(); // Fresh — primes last_frame.
 
     let grid_before = grid_ops_len(&orch);
 
@@ -191,7 +191,7 @@ fn slots_reuse_regime_skips_full_canvas_fill() {
     // selects SlotsReuse. Theme swaps no longer reach this regime — they
     // invalidate the paint cache and force Fresh.
     orch.mark_content_dirty();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let new_grid_ops = grid_ops_since(&orch, grid_before);
     assert!(!new_grid_ops.is_empty(), "SlotsReuse must repaint the grid");
@@ -206,28 +206,28 @@ fn slots_reuse_regime_skips_full_canvas_fill() {
 }
 
 #[test]
-fn viewport_regime_emits_blit_op() {
+fn scroll_blit_emits_blit_op() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh.
+    orch.render_pending(); // Fresh.
 
     let grid_before = grid_ops_len(&orch);
 
     // Scroll one row. No content change. Raise OVERLAY (the only typed
-    // signal we have for "something happened") so paint_if_dirty doesn't
+    // signal we have for "something happened") so render_pending doesn't
     // bail empty — last_frame stays populated, Chrome::classify catches the
     // viewport shift as FrameDelta::Scroll, and plan_frame routes it to
     // Viewport.
     stub.set_top_row(2);
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let new_grid_ops = grid_ops_since(&orch, grid_before);
     assert!(
         new_grid_ops
             .iter()
             .any(|op| matches!(op, DrawOp::Blit { .. })),
-        "Viewport regime must emit at least one DrawOp::Blit; got {:?}",
+        "ScrollBlit must emit at least one DrawOp::Blit; got {:?}",
         new_grid_ops
     );
 }
@@ -239,7 +239,7 @@ fn viewport_regime_emits_blit_op() {
 /// Drives all four through one `Orchestrator` in sequence so each assertion
 /// exercises the exact production dispatch path a browser would use.
 #[test]
-fn fresh_slots_reuse_damage_viewport_share_the_grid_shell_group_order() {
+fn grid_strategies_share_the_grid_shell_group_order() {
     let expected = vec![
         GroupClass::Grid,
         GroupClass::Cells,
@@ -272,27 +272,27 @@ fn fresh_slots_reuse_damage_viewport_share_the_grid_shell_group_order() {
     let mut orch = build(Rc::clone(&stub));
 
     let before = grid_ops_len(&orch);
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::FullRebuild));
     assert_shell(&grid_ops_since(&orch, before), "Fresh");
 
     let before = grid_ops_len(&orch);
     orch.mark_content_dirty();
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
     assert_shell(&grid_ops_since(&orch, before), "SlotsReuse");
 
     let before = grid_ops_len(&orch);
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Damage));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::DamagedRows));
     assert_shell(&grid_ops_since(&orch, before), "Damage");
 
     let before = grid_ops_len(&orch);
     stub.set_top_row(2);
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ScrollBlit));
     assert_shell(&grid_ops_since(&orch, before), "Viewport");
 }
 
@@ -303,16 +303,16 @@ fn fresh_slots_reuse_damage_viewport_share_the_grid_shell_group_order() {
 /// `fresh_slots_reuse_damage_viewport_share_the_grid_shell_group_order`).
 /// Asserted against the observable op stream, not the private enum.
 #[test]
-fn viewport_row_scroll_repaints_row_headers_but_not_column_headers() {
+fn scroll_blit_row_scroll_repaints_row_headers_but_not_column_headers() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh.
+    orch.render_pending(); // Fresh.
 
     let before = grid_ops_len(&orch);
     stub.set_top_row(2);
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ScrollBlit));
 
     let new_ops = grid_ops_since(&orch, before);
     let texts = grid_fill_text_values(&new_ops);
@@ -328,16 +328,16 @@ fn viewport_row_scroll_repaints_row_headers_but_not_column_headers() {
 
 /// Mirror of the row-scroll pin above, for the column axis.
 #[test]
-fn viewport_column_scroll_repaints_column_headers_but_not_row_headers() {
+fn scroll_blit_column_scroll_repaints_column_headers_but_not_row_headers() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh.
+    orch.render_pending(); // Fresh.
 
     let before = grid_ops_len(&orch);
     stub.set_left_column(2);
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ScrollBlit));
 
     let new_ops = grid_ops_since(&orch, before);
     let texts = grid_fill_text_values(&new_ops);
@@ -352,10 +352,10 @@ fn viewport_column_scroll_repaints_column_headers_but_not_row_headers() {
 }
 
 #[test]
-fn overlay_regime_leaves_grid_untouched() {
+fn overlay_only_leaves_grid_untouched() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh.
+    orch.render_pending(); // Fresh.
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
@@ -363,38 +363,38 @@ fn overlay_regime_leaves_grid_untouched() {
     // Autofill drag: raises OVERLAY only, no grid signal. Viewport
     // unchanged -> FrameDelta::Stable, and plan_frame picks Overlay.
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let new_grid_ops = grid_ops_since(&orch, grid_before);
     let new_overlay_ops = overlay_ops_since(&orch, overlay_before);
     assert!(
         new_grid_ops.is_empty(),
-        "Overlay regime must NOT touch the grid surface; got {:?}",
+        "OverlayOnly must not touch the grid surface; got {:?}",
         new_grid_ops
     );
     assert!(
         !new_overlay_ops.is_empty(),
-        "Overlay regime must repaint the overlay"
+        "OverlayOnly must repaint the overlay"
     );
     assert!(
         new_overlay_ops
             .iter()
             .any(|op| matches!(op, DrawOp::ClearRect { .. })),
-        "Overlay regime must clear the overlay canvas"
+        "OverlayOnly must clear the overlay canvas"
     );
 }
 
 #[test]
-fn empty_signals_short_circuit_paint_if_dirty() {
+fn empty_signals_short_circuit_render_pending() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh.
+    orch.render_pending(); // Fresh.
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
 
-    // No signals raised since the prior paint — paint_if_dirty must bail.
-    orch.paint_if_dirty();
+    // No signals raised since the prior paint — render_pending must bail.
+    orch.render_pending();
 
     assert_eq!(grid_ops_len(&orch), grid_before);
     assert_eq!(overlay_ops_len(&orch), overlay_before);
@@ -404,13 +404,13 @@ fn empty_signals_short_circuit_paint_if_dirty() {
 fn content_dirty_refreshes_grid_cache_through_slots_reuse() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh.
+    orch.render_pending(); // Fresh.
 
     let grid_before = grid_ops_len(&orch);
 
     // Grid-wide content work with stable geometry selects SlotsReuse.
     orch.mark_content_dirty();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let new_grid_ops = grid_ops_since(&orch, grid_before);
     assert!(
@@ -429,20 +429,20 @@ fn content_dirty_refreshes_grid_cache_through_slots_reuse() {
 /// Regression for the DEL-on-active-cell bug: a `CONTENT`-only signal must
 /// repaint the overlay whenever there's an active cell, because the overlay
 /// layer hosts the active-cell repaint hook that paints the model's current
-/// value on top of the grid. Without this implication, `paint_slots_reuse_regime`
+/// value on top of the grid. Without this implication, `render_changed_cells`
 /// repaints the grid (correctly empty) but leaves the overlay's stale
 /// active-cell pixels (the old value) on screen.
 ///
 /// The fix lives in `plan_frame`'s `OverlayWork` calculation: row/grid
 /// content work paints the overlay when overlay work is marked, or when
 /// captured selection visibility is true (content then implies an
-/// active-cell repaint) — `paint_slots_reuse_regime` just reads
+/// active-cell repaint) — `render_changed_cells` just reads
 /// `plan.overlay` rather than re-deriving it.
 #[test]
 fn content_dirty_with_active_cell_repaints_overlay() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(1, 1));
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh — primes last_frame and overlay.
+    orch.render_pending(); // Fresh — primes last_frame and overlay.
 
     let overlay_before = overlay_ops_len(&orch);
 
@@ -452,7 +452,7 @@ fn content_dirty_with_active_cell_repaints_overlay() {
     // stayed put.
     stub.set_cell(1, 1, "");
     orch.mark_content_dirty();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let new_overlay_ops = overlay_ops_since(&orch, overlay_before);
     assert!(
@@ -482,14 +482,14 @@ fn content_dirty_with_active_cell_repaints_overlay() {
 /// grid, keeping the prior workbook's chrome / pane geometry / cached grid
 /// buffers on screen.
 ///
-/// Tests the contract via the public `last_regime` accessor instead of
+/// Tests the contract through the public `last_strategy` accessor instead of
 /// reaching into private fields: `Fresh` after `set_model` is exactly the
 /// behavior the geometry mark is supposed to produce.
 #[test]
 fn set_model_marks_geometry_and_forces_fresh() {
     let stub_a = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub_a));
-    orch.paint_if_dirty(); // Fresh — primes last_frame.
+    orch.render_pending(); // Fresh — primes last_frame.
 
     // A second paint with no signals would short-circuit; a content-dirty
     // paint here would land on SlotsReuse. We're proving set_model defeats
@@ -499,14 +499,14 @@ fn set_model_marks_geometry_and_forces_fresh() {
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     assert_eq!(
-        orch.last_regime(),
-        Some(PaintRegimeTag::Fresh),
+        orch.last_strategy(),
+        Some(RenderStrategy::FullRebuild),
         "set_model must mark geometry work so the next paint takes Fresh; \
          got {:?} — the workbook-switch stale-paint bug is back",
-        orch.last_regime(),
+        orch.last_strategy(),
     );
 
     let new_grid_ops = grid_ops_since(&orch, grid_before);
@@ -528,8 +528,8 @@ fn set_model_marks_geometry_and_forces_fresh() {
 // Reuses TestModel + the same regime scenarios as the MemSurface
 // suite above. Each test wraps both surfaces in RecordingSurface and
 // asserts:
-//   1. Orchestrator::last_regime() stamps the expected PaintRegimeTag.
-//      (Covers the deferred-from-Stage-2 `last_regime_set_after_each_arm`.)
+//   1. Orchestrator::last_strategy() stamps the expected RenderStrategy.
+//      This covers the deferred strategy-stamping test.
 //   2. The captured per-frame op streams round-trip through serde +
 //      replay() byte-equal against the originals.
 
@@ -550,16 +550,16 @@ fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>>
 /// pinned to the `GridSignals` word it replaced.
 fn paint_and_capture(
     orch: &mut Orchestrator<RecordingSurface<MemSurface>>,
-) -> (Vec<DrawOp>, Vec<DrawOp>, Option<PaintRegimeTag>, u8) {
+) -> (Vec<DrawOp>, Vec<DrawOp>, Option<RenderStrategy>, u8) {
     orch.grid_surface().begin_frame();
     orch.overlay_surface().begin_frame();
-    orch.paint_if_dirty();
+    orch.render_pending();
     let grid_ops = orch.grid_surface().end_frame();
     let overlay_ops = orch.overlay_surface().end_frame();
     (
         grid_ops,
         overlay_ops,
-        orch.last_regime(),
+        orch.last_strategy(),
         orch.last_work_flags().bits(),
     )
 }
@@ -578,12 +578,12 @@ fn replay_and_drain(ops: &[DrawOp]) -> Vec<DrawOp> {
 }
 
 #[test]
-fn last_regime_fresh_after_initial_paint() {
+fn last_strategy_is_full_rebuild_after_initial_render() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     let (grid_ops, overlay_ops, regime, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(PaintRegimeTag::Fresh));
+    assert_eq!(regime, Some(RenderStrategy::FullRebuild));
     assert!(!grid_ops.is_empty());
     assert!(!overlay_ops.is_empty());
     // Round-trip through replay — proves the captured stream is
@@ -593,7 +593,7 @@ fn last_regime_fresh_after_initial_paint() {
 }
 
 #[test]
-fn last_regime_fresh_after_theme_swap() {
+fn last_strategy_is_full_rebuild_after_theme_swap() {
     // Theme is frame-wide: a palette change makes the cached frame's
     // pixels stale. `Chrome::classify` rejects the theme-mismatched frame
     // with `Rebuild(Theme)`, so the next paint takes the Fresh arm;
@@ -605,7 +605,7 @@ fn last_regime_fresh_after_theme_swap() {
     orch.set_theme(CanvasTheme::dark());
     let (grid_ops, _, regime, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(PaintRegimeTag::Fresh));
+    assert_eq!(regime, Some(RenderStrategy::FullRebuild));
     assert!(!grid_ops.is_empty());
 }
 
@@ -613,7 +613,7 @@ fn last_regime_fresh_after_theme_swap() {
 /// eagerly, so the healthy Fresh prologue is the *only* source of the
 /// invalidate/reset pair.
 ///
-/// The capture window opens before `set_theme`, not before `paint_if_dirty`
+/// The capture window opens before `set_theme`, not before `render_pending`
 /// — an eager invalidation happens outside a `begin_frame`/`end_frame`
 /// bracket that starts at the paint, which is exactly how the Stage 6 probe
 /// first under-counted the pair.
@@ -628,10 +628,10 @@ fn theme_change_emits_exactly_one_invalidation_pair_before_the_first_draw() {
 
     orch.grid_surface().begin_frame();
     orch.set_theme(dark);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let grid_ops = orch.grid_surface().end_frame();
 
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::FullRebuild));
     assert_eq!(
         count_op(&grid_ops, &DrawOp::InvalidateCache),
         1,
@@ -671,7 +671,7 @@ fn held_theme_fresh_emits_no_painter_op_and_its_retry_emits_one_pair() {
     stub.set_bulk_bridge_fail(true);
     orch.grid_surface().begin_frame();
     orch.set_theme(dark);
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     let held_ops = orch.grid_surface().end_frame();
 
     assert!(
@@ -681,10 +681,10 @@ fn held_theme_fresh_emits_no_painter_op_and_its_retry_emits_one_pair() {
 
     stub.set_bulk_bridge_fail(false);
     orch.grid_surface().begin_frame();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let retry_ops = orch.grid_surface().end_frame();
 
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::FullRebuild));
     assert_eq!(count_op(&retry_ops, &DrawOp::InvalidateCache), 1);
     assert_eq!(count_op(&retry_ops, &DrawOp::ResetTextDefaults), 1);
     assert_eq!(first_draw_index(&retry_ops), Some(2));
@@ -705,7 +705,7 @@ fn reapplying_an_equal_theme_stays_idle() {
 
     orch.grid_surface().begin_frame();
     orch.set_theme(CanvasTheme::light()); // The theme `Orchestrator::new` starts with.
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Idle);
+    assert_eq!(orch.render_pending(), PaintResult::Idle);
     let grid_ops = orch.grid_surface().end_frame();
 
     assert!(
@@ -715,7 +715,7 @@ fn reapplying_an_equal_theme_stays_idle() {
 }
 
 #[test]
-fn last_regime_viewport_after_row_scroll() {
+fn last_strategy_is_scroll_blit_after_row_scroll() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
@@ -724,12 +724,12 @@ fn last_regime_viewport_after_row_scroll() {
     orch.request_overlay_repaint();
     let (grid_ops, _, regime, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(PaintRegimeTag::Viewport));
+    assert_eq!(regime, Some(RenderStrategy::ScrollBlit));
     assert!(grid_ops.iter().any(|op| matches!(op, DrawOp::Blit { .. })));
 }
 
 #[test]
-fn last_regime_overlay_after_autofill_drag() {
+fn last_strategy_is_overlay_only_after_autofill_drag() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
     paint_and_capture(&mut orch); // Fresh.
@@ -737,13 +737,13 @@ fn last_regime_overlay_after_autofill_drag() {
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
     let (grid_ops, overlay_ops, regime, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(PaintRegimeTag::Overlay));
+    assert_eq!(regime, Some(RenderStrategy::OverlayOnly));
     assert!(grid_ops.is_empty(), "Overlay must not touch the grid");
     assert!(!overlay_ops.is_empty());
 }
 
 #[test]
-fn recording_serde_round_trip_across_all_five_regimes() {
+fn recording_serde_round_trip_across_all_five_strategies() {
     // Drive Fresh -> Damage -> SlotsReuse -> Viewport -> Overlay through one
     // Orchestrator, collecting one Frame per regime, then serialize the
     // whole Recording and assert deserialize is bit-equal to the original.
@@ -785,19 +785,19 @@ fn recording_serde_round_trip_across_all_five_regimes() {
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
     push(&mut orch, 48); // Overlay
 
-    assert_eq!(frames.len(), 5, "all five regimes should produce frames");
+    assert_eq!(frames.len(), 5, "all five strategies must produce frames");
     let regimes: Vec<_> = frames
         .iter()
-        .map(|f| f.trace.regime.expect("regime must be stamped"))
+        .map(|f| f.trace.regime.expect("recorded regime must be stamped"))
         .collect();
     assert_eq!(
         regimes,
         vec![
-            PaintRegimeTag::Fresh,
-            PaintRegimeTag::Damage,
-            PaintRegimeTag::SlotsReuse,
-            PaintRegimeTag::Viewport,
-            PaintRegimeTag::Overlay,
+            RenderStrategy::FullRebuild,
+            RenderStrategy::DamagedRows,
+            RenderStrategy::ChangedCells,
+            RenderStrategy::ScrollBlit,
+            RenderStrategy::OverlayOnly,
         ],
     );
 
@@ -849,9 +849,9 @@ fn named_damage_paints_less_than_a_multi_cell_slots_reuse_envelope() {
     let stub = Rc::new(TestModel::synthetic_grid());
 
     let mut slots = build(Rc::clone(&stub));
-    slots.paint_if_dirty();
+    slots.render_pending();
     let mut damage = build(Rc::clone(&stub));
-    damage.paint_if_dirty();
+    damage.render_pending();
 
     for row in [2, 5, 8, 11, 14, 17, 20, 23, 26] {
         stub.set_cell(row, 1, "changed");
@@ -859,15 +859,15 @@ fn named_damage_paints_less_than_a_multi_cell_slots_reuse_envelope() {
 
     let before = grid_ops_len(&slots);
     slots.mark_content_dirty();
-    slots.paint_if_dirty();
+    slots.render_pending();
     let slots_ops = grid_ops_len(&slots) - before;
 
     let before = grid_ops_len(&damage);
     damage.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    damage.paint_if_dirty();
+    damage.render_pending();
     let damage_ops = grid_ops_len(&damage) - before;
 
-    assert_eq!(damage.last_regime(), Some(PaintRegimeTag::Damage));
+    assert_eq!(damage.last_strategy(), Some(RenderStrategy::DamagedRows));
     assert!(damage_ops > 0, "damage must repaint the band");
     assert!(
         damage_ops < slots_ops,
@@ -876,18 +876,18 @@ fn named_damage_paints_less_than_a_multi_cell_slots_reuse_envelope() {
 }
 
 #[test]
-fn damage_regime_repaints_chrome_like_other_grid_regimes() {
+fn damaged_rows_repaints_chrome_like_other_grid_strategies() {
     // The damage renderer must run the full grid wrapper: frozen
     // separators paint after cells (winning back boundary pixels the
     // band re-stroked) and headers/corner stay in the sequence. Group
     // markers are the observable contract.
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let before = grid_ops_len(&orch);
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    orch.paint_if_dirty();
+    orch.render_pending();
     let ops = grid_ops_since(&orch, before);
 
     for class in [
@@ -899,7 +899,7 @@ fn damage_regime_repaints_chrome_like_other_grid_regimes() {
         assert!(
             ops.iter()
                 .any(|op| matches!(op, DrawOp::BeginGroup { class: c } if *c == class)),
-            "damage paint must emit the {class:?} group like every grid regime"
+            "DamagedRows must emit the {class:?} group like every grid strategy"
         );
     }
 
@@ -924,36 +924,36 @@ fn damage_regime_repaints_chrome_like_other_grid_regimes() {
 fn plain_content_dirty_poisons_damage_to_slots_reuse() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
     orch.mark_content_dirty();
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
 }
 
 #[test]
 fn cross_sheet_damage_degrades_to_slots_reuse() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
     orch.mark_rows_damaged(1, RowSpan { r1: 3, r2: 3 });
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
 }
 
 #[test]
-fn damage_is_drained_by_the_paint() {
+fn damaged_rows_work_is_drained_by_the_render() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    orch.paint_if_dirty();
+    orch.render_pending();
     let after = grid_ops_len(&orch);
-    orch.paint_if_dirty(); // nothing raised since -> no-op
+    orch.render_pending(); // nothing raised since -> no-op
     assert_eq!(grid_ops_len(&orch), after);
 }
 
@@ -970,7 +970,7 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
     let mut orch = build(Rc::clone(&stub));
 
     // Fresh: paints grid + overlay -> one present each.
-    orch.paint_if_dirty();
+    orch.render_pending();
     assert_eq!(orch.grid_surface().presents(), 1, "Fresh presents the grid");
     assert_eq!(
         orch.overlay_surface().presents(),
@@ -980,7 +980,7 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
 
     // Overlay regime: grid pixels untouched -> grid must NOT re-present.
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
     assert_eq!(
         orch.grid_surface().presents(),
         1,
@@ -994,7 +994,7 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
 
     // SlotsReuse (content dirty, viewport stable): grid presents again.
     orch.mark_content_dirty();
-    orch.paint_if_dirty();
+    orch.render_pending();
     assert_eq!(
         orch.grid_surface().presents(),
         2,
@@ -1004,7 +1004,7 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
     // Viewport (scroll one row): grid blit + overlay repaint -> both present.
     stub.set_top_row(2);
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
     assert_eq!(
         orch.grid_surface().presents(),
         3,
@@ -1013,20 +1013,20 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
 }
 
 #[test]
-fn damage_regime_bridge_failure_holds_the_whole_grid() {
+fn damaged_rows_bridge_failure_holds_the_whole_grid() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh — primes the grid cache + painted tree.
+    orch.render_pending(); // Fresh — primes the grid cache + painted tree.
 
     stub.set_value_bridge_fail(true);
     let grid_before = grid_ops_len(&orch);
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Retry);
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     let new_grid_ops = grid_ops_since(&orch, grid_before);
 
     assert!(
         new_grid_ops.is_empty(),
-        "a BridgeFailed Damage attempt must paint no grid ops; got {:?}",
+        "a BridgeFailed DamagedRows attempt must paint no grid ops; got {:?}",
         new_grid_ops
     );
 
@@ -1036,9 +1036,9 @@ fn damage_regime_bridge_failure_holds_the_whole_grid() {
     stub.set_cell(2, 1, "changed");
     let grid_before = grid_ops_len(&orch);
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    orch.paint_if_dirty();
+    orch.render_pending();
     let new_grid_ops = grid_ops_since(&orch, grid_before);
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
     assert!(
         !new_grid_ops.is_empty(),
         "recovery must repaint after a BridgeFailed damage attempt"
@@ -1046,17 +1046,17 @@ fn damage_regime_bridge_failure_holds_the_whole_grid() {
 }
 
 #[test]
-fn damage_with_active_cell_repaints_overlay() {
+fn damaged_rows_with_active_cell_repaints_overlay() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(1, 1));
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let overlay_before = overlay_ops_len(&orch);
     stub.set_cell(1, 1, "");
     orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 });
-    orch.paint_if_dirty();
+    orch.render_pending();
 
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Damage));
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::DamagedRows));
     let new_overlay_ops = overlay_ops_since(&orch, overlay_before);
     assert!(
         new_overlay_ops
@@ -1080,7 +1080,7 @@ fn scroll_pane_rect_starts_after_the_frozen_bands() {
         "no painted frame yet — the host must not autoscroll pre-mount"
     );
 
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let x = (f64::from(HEADER_COL_WIDTH + CELL_AREA_INSET)
         + 3.0 * DEFAULT_COL_WIDTH
@@ -1106,7 +1106,7 @@ fn scroll_pane_rect_starts_after_the_frozen_bands() {
 #[test]
 fn scroll_pane_rect_collapses_to_zero_when_frozen_bands_exceed_the_canvas() {
     let mut orch = build(Rc::new(TestModel::new().with_frozen(400, 400)));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let Some(rect) = orch.scroll_pane_rect() else {
         unreachable!("a painted frame must yield a rect");
@@ -1117,8 +1117,8 @@ fn scroll_pane_rect_collapses_to_zero_when_frozen_bands_exceed_the_canvas() {
 
 // ─── Stage 2: dispatch over one `PendingWork` value ───
 //
-// Every assertion below drives the real `paint_if_dirty` entry point and
-// reads the regime back through `last_regime()` / `last_work_flags()` / the
+// Every assertion below drives the real `render_pending` entry point and
+// reads the strategy through `last_strategy()`, `last_work_flags()`, and the
 // recorded op stream. None of them inspect `PendingWork` directly — the
 // point is to pin the *dispatch* the work algebra produces, which is what a
 // regression would actually break.
@@ -1130,10 +1130,10 @@ fn scroll_pane_rect_collapses_to_zero_when_frozen_bands_exceed_the_canvas() {
 fn unchanged_overlay_setters_queue_no_work() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh — primes last_frame.
+    orch.render_pending(); // Fresh — primes last_frame.
 
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     // Same autofill target, and the three others at their existing default.
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
@@ -1142,7 +1142,7 @@ fn unchanged_overlay_setters_queue_no_work() {
     orch.set_formula_refs(Vec::new());
 
     assert_eq!(
-        orch.paint_if_dirty(),
+        orch.render_pending(),
         PaintResult::Idle,
         "no overlay value changed, so nothing may be queued"
     );
@@ -1154,16 +1154,16 @@ fn unchanged_overlay_setters_queue_no_work() {
 fn changed_overlay_setters_dispatch_overlay() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh.
+    orch.render_pending(); // Fresh.
 
     // Each setter is checked in its own paint, so a later one cannot mask an
     // earlier one that queued nothing.
     let expect_overlay_only = |orch: &mut Orchestrator<MemSurface>, name: &str| {
         let grid_before = grid_ops_len(orch);
-        assert_eq!(orch.paint_if_dirty(), PaintResult::Painted, "{name}");
+        assert_eq!(orch.render_pending(), PaintResult::Rendered, "{name}");
         assert_eq!(
-            orch.last_regime(),
-            Some(PaintRegimeTag::Overlay),
+            orch.last_strategy(),
+            Some(RenderStrategy::OverlayOnly),
             "{name} must dispatch Overlay"
         );
         assert!(
@@ -1212,15 +1212,15 @@ fn changed_overlay_setters_dispatch_overlay() {
 fn content_then_request_repaint_is_fresh_and_keeps_the_content_mark() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh — primes last_frame and the grid cache.
+    orch.render_pending(); // Fresh — primes last_frame and the grid cache.
 
     stub.set_cell(2, 1, "edited");
     orch.mark_content_dirty();
     orch.request_repaint();
 
     stub.reset_bulk_fetch_calls();
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::FullRebuild));
     assert!(
         orch.last_work_flags()
             .contains(WorkFlags::CONTENT | WorkFlags::GEOMETRY),
@@ -1245,12 +1245,12 @@ fn content_then_request_repaint_is_fresh_and_keeps_the_content_mark() {
 fn repeated_set_model_still_forces_fresh() {
     let stub_a = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub_a));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     for _ in 0..2 {
         orch.set_model(Rc::new(TestModel::synthetic_grid()));
-        assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
-        assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+        assert_eq!(orch.render_pending(), PaintResult::Rendered);
+        assert_eq!(orch.last_strategy(), Some(RenderStrategy::FullRebuild));
     }
 }
 
@@ -1271,15 +1271,15 @@ fn repeated_set_model_still_forces_fresh() {
 fn visible_selection_navigation_dispatches_overlay() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh — primes last_frame.
+    orch.render_pending(); // Fresh — primes last_frame.
 
     stub.set_active(6, 2); // still well inside the painted viewport
     orch.view_changed();
 
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert_eq!(
-        orch.last_regime(),
-        Some(PaintRegimeTag::Overlay),
+        orch.last_strategy(),
+        Some(RenderStrategy::OverlayOnly),
         "view work with no pixel shift on a reusable frame must fall back to \
          Overlay; anything else means the Overlay guard is excluding `view`"
     );
@@ -1296,14 +1296,14 @@ fn visible_selection_navigation_dispatches_overlay() {
 fn view_only_navigation_without_a_shift_emits_no_grid_ops() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
 
     stub.set_active(6, 2);
     orch.view_changed();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     assert!(
         grid_ops_since(&orch, grid_before).is_empty(),
@@ -1322,14 +1322,14 @@ fn view_only_navigation_without_a_shift_emits_no_grid_ops() {
 fn real_scroll_view_change_dispatches_viewport() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let grid_before = grid_ops_len(&orch);
     stub.set_top_row(2);
     orch.view_changed();
 
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Viewport));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ScrollBlit));
     assert!(
         grid_ops_since(&orch, grid_before)
             .iter()
@@ -1350,16 +1350,16 @@ fn real_scroll_view_change_dispatches_viewport() {
 fn geometry_plus_real_scroll_never_dispatches_viewport() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     stub.set_top_row(2); // the same real shift real_scroll_view_change_dispatches_viewport uses
     orch.resize(CanvasSize { w: 900.0, h: 600.0 }, 1.0); // marks geometry
     orch.view_changed();
 
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert_eq!(
-        orch.last_regime(),
-        Some(PaintRegimeTag::Fresh),
+        orch.last_strategy(),
+        Some(RenderStrategy::FullRebuild),
         "geometry work concurrent with a real shift must dispatch Fresh, \
          never Viewport"
     );
@@ -1384,7 +1384,7 @@ fn row_work_ineligible_for_damage_falls_back_to_whole_grid() {
             .with_frozen_rows(2),
     );
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     stub.set_cell(1, 3, "frozen-edit"); // top band
     stub.set_cell(6, 3, "scroll-edit"); // bottom band
@@ -1392,8 +1392,8 @@ fn row_work_ineligible_for_damage_falls_back_to_whole_grid() {
     // is ineligible, but the content work is still real.
     orch.mark_rows_damaged(7, RowSpan { r1: 1, r2: 1 });
 
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
     assert!(
         grid_text_ops_containing(&orch, "frozen-edit") > 0,
         "grid-wide SlotsReuse must refetch the frozen band"
@@ -1413,22 +1413,22 @@ fn row_work_ineligible_for_damage_falls_back_to_whole_grid() {
 /// The fetch-count assertion discriminates against the real failure mode
 /// (`Overlay` or `SlotsReuse` silently claiming the switch, which reads
 /// nothing / reads under the old frame). It does not isolate
-/// `paint_fresh_regime`'s grid-cache invalidation, which is unobservable
+/// `render_full_rebuild`'s grid-cache invalidation, which is unobservable
 /// today — see the note on that method.
 #[test]
 fn active_sheet_view_change_is_fresh_and_refetches_grid_content() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty(); // Fresh on sheet 0 — fills the grid cache.
+    orch.render_pending(); // Fresh on sheet 0 — fills the grid cache.
 
     stub.set_sheet(1); // identical visible coordinates
     orch.view_changed();
     stub.reset_bulk_fetch_calls();
 
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert_eq!(
-        orch.last_regime(),
-        Some(PaintRegimeTag::Fresh),
+        orch.last_strategy(),
+        Some(RenderStrategy::FullRebuild),
         "a sheet switch invalidates the frame outright"
     );
     assert!(
@@ -1446,7 +1446,7 @@ fn active_sheet_view_change_is_fresh_and_refetches_grid_content() {
 fn stable_row_content_plus_view_dispatches_damage() {
     let stub = Rc::new(TestModel::synthetic_grid().with_active(5, 1));
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
@@ -1469,10 +1469,10 @@ fn stable_row_content_plus_view_dispatches_damage() {
     orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
     orch.view_changed();
 
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let trace = orch.last_trace();
-    assert_eq!(trace.regime, Some(PaintRegimeTag::Damage));
-    assert_eq!(trace.effective, Some(PaintRegimeTag::Damage));
+    assert_eq!(trace.strategy, Some(RenderStrategy::DamagedRows));
+    assert_eq!(trace.effective, Some(RenderStrategy::DamagedRows));
     assert_eq!(
         trace.work,
         WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
@@ -1516,7 +1516,7 @@ fn stable_commit_batch_selects_slots_reuse_and_moves_overlay() {
             .with_active(5, 5),
     );
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
@@ -1526,10 +1526,10 @@ fn stable_commit_batch_selects_slots_reuse_and_moves_overlay() {
     orch.mark_content_dirty();
     orch.view_changed();
 
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let trace = orch.last_trace();
-    assert_eq!(trace.regime, Some(PaintRegimeTag::SlotsReuse));
-    assert_eq!(trace.effective, Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(trace.strategy, Some(RenderStrategy::ChangedCells));
+    assert_eq!(trace.effective, Some(RenderStrategy::ChangedCells));
     assert_eq!(
         trace.work,
         WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY
@@ -1588,7 +1588,7 @@ fn stable_commit_with_hidden_selection_uses_slots_reuse_without_active_cell_repa
             .with_show_selection(false),
     );
     let mut orch = build(Rc::clone(&stub));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
@@ -1599,8 +1599,8 @@ fn stable_commit_with_hidden_selection_uses_slots_reuse_without_active_cell_repa
     orch.mark_content_dirty();
     orch.view_changed();
 
-    assert_eq!(orch.paint_if_dirty(), PaintResult::Painted);
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::SlotsReuse));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
     assert_eq!(
         orch.last_work_flags(),
         WorkFlags::VIEW | WorkFlags::CONTENT | WorkFlags::OVERLAY

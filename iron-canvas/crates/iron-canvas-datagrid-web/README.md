@@ -20,7 +20,7 @@ The shippable artifact for non-spreadsheet consumers. Composes `datagrid` (data)
   - **custom overlay**: `setHover`
   - **sort**: `sortByColumn`, `clearSort`, `currentSort`
   - **theme**: `setThemeFromElement`, `setThemeName`
-  - **paint / export**: `paintIfDirty`, `exportSvg`
+  - **paint / export**: `renderPending`, `exportSvg`
 
 ## Dependencies
 
@@ -34,7 +34,7 @@ The shippable artifact for non-spreadsheet consumers. Composes `datagrid` (data)
 ```js
 const grid = new DataGridCanvas(gridCanvas, overlayCanvas);
 grid.setData({ columns: [...], rows: [...] });
-function frame() { grid.paintIfDirty(); requestAnimationFrame(frame); }
+function frame() { grid.renderPending(); requestAnimationFrame(frame); }
 ```
 
 ## Relationship to sibling crates

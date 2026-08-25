@@ -20,7 +20,7 @@ pub struct PerfTimings {
     pub input_done: RwSignal<Option<f64>>,
     /// `performance.now()` just after `evaluate()`.
     pub eval_done: RwSignal<Option<f64>>,
-    /// Duration of the last `paintIfDirty()` call in milliseconds — measured
+    /// Duration of the last `renderPending()` call in milliseconds — measured
     /// inside the rAF loop only on frames that actually rendered (the loop
     /// is demand-driven and only runs when poked). Independent of the
     /// commit pipeline: scroll-only or overlay-only repaints update this too.

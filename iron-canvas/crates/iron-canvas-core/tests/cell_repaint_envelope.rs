@@ -23,7 +23,7 @@ fn harness_at_dpr(model: Rc<TestModel>, dpr: f64) -> Orchestrator<MemSurface> {
     orchestrator.resize(CanvasSize { w: 800.0, h: 600.0 }, dpr);
     orchestrator.set_model(model);
     orchestrator.set_frame_diagnostics_enabled(true);
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     orchestrator
 }
 
@@ -34,7 +34,7 @@ fn unaligned_fractional_dpr_falls_back_to_full() {
 
     model.set_cell(5, 3, "changed");
     orchestrator.mark_content_dirty();
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     let diagnostics = orchestrator.frame_diagnostics().unwrap();
     assert_eq!(diagnostics.repaint.verdict, Some(GridVerdict::Full));
     assert_eq!(
@@ -78,7 +78,7 @@ fn cell_envelope_wraps_all_contributor_paint() {
 
     model.set_cell(5, 3, "changed");
     orchestrator.mark_content_dirty();
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     assert_eq!(orchestrator.last_trace().verdict, Some(GridVerdict::Cell));
 
     let ops = &orchestrator.grid_surface().recorder().ops()[cursor..];
@@ -112,7 +112,7 @@ fn every_bulk_channel_failure_holds_before_envelope_and_recovers() {
         model.set_cell(5, 3, "changed");
         model.set_bulk_bridge_fail_channel(Some(channel));
         orchestrator.mark_content_dirty();
-        assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Retry);
+        assert_eq!(orchestrator.render_pending(), PaintResult::RetryRequired);
         assert_eq!(
             orchestrator.grid_surface().recorder().ops().len(),
             ops_before
@@ -123,10 +123,10 @@ fn every_bulk_channel_failure_holds_before_envelope_and_recovers() {
         assert_eq!(held.cache.resolution, DiagCacheResolution::HeldForRetry);
 
         model.set_bulk_bridge_fail_channel(None);
-        assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+        assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
         assert_eq!(orchestrator.last_trace().verdict, Some(GridVerdict::Cell));
         orchestrator.mark_content_dirty();
-        assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+        assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
         assert_eq!(orchestrator.last_trace().verdict, Some(GridVerdict::Skip));
     }
 }
@@ -139,7 +139,7 @@ fn hidden_changed_cell_commits_without_pixel_work() {
 
     model.set_cell(4, 2, "hidden change");
     orchestrator.mark_content_dirty();
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     let diagnostics = orchestrator.frame_diagnostics().unwrap();
     assert_eq!(diagnostics.repaint.verdict, Some(GridVerdict::Cell));
     assert_eq!(diagnostics.repaint.clip, None);
@@ -148,7 +148,7 @@ fn hidden_changed_cell_commits_without_pixel_work() {
     assert_eq!(diagnostics.paint_counts.cells, 0);
 
     orchestrator.mark_content_dirty();
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     assert_eq!(orchestrator.last_trace().verdict, Some(GridVerdict::Skip));
 }
 
@@ -161,7 +161,7 @@ fn sparse_wide_changes_choose_the_cheaper_row_sweep() {
     model.set_cell(range.r2 - 2, range.c2 - 2, "second");
 
     orchestrator.mark_content_dirty();
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     let diagnostics = orchestrator.frame_diagnostics().unwrap();
     assert!(matches!(
         diagnostics.repaint.verdict,
@@ -200,7 +200,7 @@ fn unsafe_row_boundary_selects_the_merged_range() {
     model.set_cell(second.0, second.1, "second");
 
     orchestrator.mark_content_dirty();
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     assert_eq!(orchestrator.last_trace().verdict, Some(GridVerdict::Range));
     assert_eq!(
         orchestrator.frame_diagnostics().unwrap().repaint.reason,
@@ -217,7 +217,7 @@ fn whole_visible_bounding_range_degenerates_to_full() {
     model.set_cell(range.r2, range.c2, "second");
 
     orchestrator.mark_content_dirty();
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     let diagnostics = orchestrator.frame_diagnostics().unwrap();
     assert_eq!(diagnostics.repaint.verdict, Some(GridVerdict::Full));
     assert_eq!(
@@ -239,7 +239,7 @@ fn frozen_envelope_sources_keep_canonical_region_order() {
     model.set_cell(2, 2, "seam change");
 
     orchestrator.mark_content_dirty();
-    assert_eq!(orchestrator.paint_if_dirty(), PaintResult::Painted);
+    assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);
     let diagnostics = orchestrator.frame_diagnostics().unwrap();
     assert_eq!(diagnostics.repaint.verdict, Some(GridVerdict::Cell));
     let order: Vec<usize> = diagnostics

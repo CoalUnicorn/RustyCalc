@@ -78,7 +78,7 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
             let mut result = PaintResult::Idle;
             cam.update_value(|slot| {
                 if let Some(c) = slot.as_mut() {
-                    result = c.paint_if_dirty();
+                    result = c.render_pending();
                 }
             });
             return keep_camera_raf_alive(result);
@@ -495,7 +495,7 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
 }
 
 fn keep_camera_raf_alive(result: PaintResult) -> bool {
-    matches!(result, PaintResult::Retry)
+    matches!(result, PaintResult::RetryRequired)
 }
 
 #[cfg(test)]
@@ -504,9 +504,9 @@ mod tests {
 
     #[test]
     fn camera_retry_keeps_one_shot_raf_alive() {
-        assert!(keep_camera_raf_alive(PaintResult::Retry));
+        assert!(keep_camera_raf_alive(PaintResult::RetryRequired));
         assert!(!keep_camera_raf_alive(PaintResult::Idle));
-        assert!(!keep_camera_raf_alive(PaintResult::Painted));
+        assert!(!keep_camera_raf_alive(PaintResult::Rendered));
     }
 }
 

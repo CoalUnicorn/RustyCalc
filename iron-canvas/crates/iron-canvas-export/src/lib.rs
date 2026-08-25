@@ -30,7 +30,7 @@ use {
 ///
 /// Captures the one ordered sequence both `SvgSurface::render` and
 /// `PdfSurface::render` repeat (`new → set_theme → set_model → resize →
-/// paint_if_dirty → drop`) — the only drift surface between the two
+/// render_pending → drop`) — the only drift surface between the two
 /// backends. No explicit `request_repaint` is needed: `set_model` already
 /// discards any queued work and installs a fresh `geometry + content(ALL) +
 /// overlay` value, and `resize` drops `last_frame` and marks geometry too —
@@ -50,7 +50,7 @@ pub(crate) fn drive_once<S: Surface>(
     orchestrator.set_theme(theme.clone());
     orchestrator.set_model(model);
     orchestrator.resize(size, 1.0);
-    orchestrator.paint_if_dirty();
+    orchestrator.render_pending();
     // `orchestrator` (and its `Rc<P>` surface clones) drop here; the caller's
     // pre-cloned grid painter/stream survives to `finish()` / `build_document`.
 }

@@ -4,7 +4,7 @@
 //! bug where `resize()` rounded `dpr` before forwarding it to
 //! `WebSurface::resize`, silently mapping e.g. 1.25 -> 1 and 1.5 -> 2.
 
-use iron_canvas_web::{CanvasSize, CanvasView, IronCanvas, JsPaintResult, RCRange};
+use iron_canvas_web::{CanvasSize, CanvasView, IronCanvas, RCRange, RenderResult};
 use wasm_bindgen::JsCast;
 use wasm_bindgen_test::*;
 use web_sys::HtmlCanvasElement;
@@ -135,7 +135,7 @@ fn header_visibility_reads_supplied_false() {
 // A small JS "model" object is backed by a shared, mutable Rust
 // `(row, col) -> FixtureCell` store: `getCellStyle` / `getFormattedCellValue`
 // / `getCellType` all read the store live on every call, so mutating the
-// store between two `paintIfDirty()` calls on the SAME `IronCanvas` is
+// store between two `renderPending()` calls on the SAME `IronCanvas` is
 // visible to the very next paint without any JS round-trip or a second
 // `setModel` — exactly what's needed to drive one canvas through
 // baseline-paint -> content-edit -> partial-repaint, while a second,
@@ -471,7 +471,7 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
         panic!("scroll-failure fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
 
     let baseline_pixels = grid_pixels(&grid);
     let Some(baseline_a1) = canvas.cell_rect(1, 1) else {
@@ -487,8 +487,8 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     canvas.view_changed();
 
     assert_eq!(
-        canvas.paint_if_dirty(),
-        JsPaintResult::Retry,
+        canvas.render_pending(),
+        RenderResult::RetryRequired,
         "the revealed-row bridge failure must hold the Viewport transaction"
     );
     assert_eq!(
@@ -504,8 +504,8 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
 
     controls.fail_from_row.set(None);
     assert_eq!(
-        canvas.paint_if_dirty(),
-        JsPaintResult::Painted,
+        canvas.render_pending(),
+        RenderResult::Rendered,
         "retained Viewport work must commit after recovery without a new signal"
     );
     assert!(
@@ -523,7 +523,7 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
         panic!("forced-fresh fixture model passes the duck test");
     };
     fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
-    assert_eq!(fresh_canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(fresh_canvas.render_pending(), RenderResult::Rendered);
 
     assert_eq!(
         grid_pixels(&grid),
@@ -538,7 +538,7 @@ struct FreshFailureControls {
 
 /// Build the shared fixture with a controllable style-fetch failure. Unlike
 /// `make_scroll_failure_fixture_model`, no scroll/top-row bookkeeping is
-/// needed: with no committed `Chrome` yet, the very first `paint_if_dirty()`
+/// needed: with no committed `Chrome` yet, the very first `render_pending()`
 /// on a resized canvas is necessarily a Fresh attempt (`GridWork::Fresh`),
 /// so failing every cell's style fetch while `fail` is set strikes Fresh's
 /// own bulk grid-segment prepare directly — not `FrameInputs::capture` (already
@@ -575,11 +575,11 @@ fn make_fresh_failure_fixture_model(store: FixtureStore) -> (JsValue, FreshFailu
 
 /// A failed Fresh bulk-cell fetch is transactional. With no committed
 /// `Chrome` yet, the very first paint attempt is necessarily Fresh
-/// (`GridWork::Fresh`); `paint_fresh_regime` prepares every pane (via
+/// (`GridWork::Fresh`); `render_full_rebuild` prepares every pane (via
 /// `build_and_paint_fresh` -> `paint_grid_fresh`) before touching the
 /// painter at all, so a bulk style-fetch failure there must leave the front
 /// canvas exactly as `resize` left it, answer no committed query geometry,
-/// and recover on the very next `paint_if_dirty()` — no `view_changed()` /
+/// and recover on the very next `render_pending()` — no `view_changed()` /
 /// `markContentDirty()` / `requestRepaint()` call needed — landing
 /// byte-identical to a second canvas that painted the same healthy final
 /// state fresh in one shot.
@@ -598,8 +598,8 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
 
     controls.fail.set(true);
     assert_eq!(
-        canvas.paint_if_dirty(),
-        JsPaintResult::Retry,
+        canvas.render_pending(),
+        RenderResult::RetryRequired,
         "a bulk style-fetch failure during the first (Fresh) attempt must hold, not commit"
     );
     assert!(
@@ -615,12 +615,12 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
     // No `view_changed()` / `markContentDirty()` / `requestRepaint()` call
     // here: a held Fresh attempt leaves `last_frame` untouched and the
     // retry contract merges the complete consumed work back into `pending`
-    // (see `paint_fresh_regime`), so the very next `paintIfDirty()` alone
+    // (see `render_full_rebuild`), so the very next `renderPending()` alone
     // must recover.
     controls.fail.set(false);
     assert_eq!(
-        canvas.paint_if_dirty(),
-        JsPaintResult::Painted,
+        canvas.render_pending(),
+        RenderResult::Rendered,
         "the recovered attempt must paint without another invalidation call"
     );
     assert!(
@@ -637,7 +637,7 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
         panic!("forced-fresh fixture model passes the duck test");
     };
     fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
-    assert_eq!(fresh_canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(fresh_canvas.render_pending(), RenderResult::Rendered);
 
     assert_eq!(
         grid_pixels(&grid),
@@ -658,7 +658,7 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
 // which rejects in-place blit reuse (`Chrome::next_blit` returns
 // `BlitOutcome::FreshFallback`), and a bulk bridge failure on that demoted
 // Fresh candidate holds atomically: zero new grid ops, zero presents, and
-// query geometry pinned to the pre-attempt frame — with `last_regime`
+// query geometry pinned to the pre-attempt frame — with `last_strategy`
 // staying `Viewport` while `last_trace().effective` reads `None`.
 //
 // Reproducing that fixture through this file's duck-typed JS harness would
@@ -685,7 +685,7 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
 fn partial_repaint_matches_forced_fresh_for_border_free_change() {
     let store = plain_fixture_store();
     let (mut canvas, grid) = canvas_over(Rc::clone(&store));
-    canvas.paint_if_dirty(); // baseline
+    canvas.render_pending(); // baseline
 
     {
         let mut cells = store.borrow_mut();
@@ -695,7 +695,7 @@ fn partial_repaint_matches_forced_fresh_for_border_free_change() {
         cell.value = "changed-10-2".to_string();
     }
     canvas.mark_content_dirty();
-    canvas.paint_if_dirty(); // partial repaint
+    canvas.render_pending(); // partial repaint
 
     let fresh_store = plain_fixture_store();
     {
@@ -706,7 +706,7 @@ fn partial_repaint_matches_forced_fresh_for_border_free_change() {
         cell.value = "changed-10-2".to_string();
     }
     let (mut fresh_canvas, fresh_grid) = canvas_over(fresh_store);
-    fresh_canvas.paint_if_dirty(); // single Fresh paint of the final state
+    fresh_canvas.render_pending(); // single Fresh paint of the final state
 
     assert_eq!(
         grid_pixels(&grid),
@@ -737,7 +737,7 @@ fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() 
 
     let store = build_store();
     let (mut canvas, grid) = canvas_over(Rc::clone(&store));
-    canvas.paint_if_dirty(); // baseline (row 9's bottom border already present)
+    canvas.render_pending(); // baseline (row 9's bottom border already present)
 
     {
         let mut cells = store.borrow_mut();
@@ -747,7 +747,7 @@ fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() 
         cell.value = "changed".to_string();
     }
     canvas.mark_content_dirty();
-    canvas.paint_if_dirty(); // must fall back to Full — row 9 owns the shared edge
+    canvas.render_pending(); // must fall back to Full — row 9 owns the shared edge
 
     let fresh_store = build_store();
     {
@@ -758,7 +758,7 @@ fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() 
         cell.value = "changed".to_string();
     }
     let (mut fresh_canvas, fresh_grid) = canvas_over(fresh_store);
-    fresh_canvas.paint_if_dirty();
+    fresh_canvas.render_pending();
 
     assert_eq!(
         grid_pixels(&grid),
@@ -786,7 +786,7 @@ fn partial_repaint_matches_forced_fresh_when_changed_rows_own_border_is_removed(
         cell.border_bottom = Some(ic::BorderStyle::Thin);
     }
     let (mut canvas, grid) = canvas_over(Rc::clone(&store));
-    canvas.paint_if_dirty(); // baseline (row 10 has a bottom border)
+    canvas.render_pending(); // baseline (row 10 has a bottom border)
 
     {
         let mut cells = store.borrow_mut();
@@ -796,11 +796,11 @@ fn partial_repaint_matches_forced_fresh_when_changed_rows_own_border_is_removed(
         cell.border_bottom = None;
     }
     canvas.mark_content_dirty();
-    canvas.paint_if_dirty(); // must fall back to Full and erase the stroke
+    canvas.render_pending(); // must fall back to Full and erase the stroke
 
     let fresh_store = plain_fixture_store(); // final state: no border anywhere
     let (mut fresh_canvas, fresh_grid) = canvas_over(fresh_store);
-    fresh_canvas.paint_if_dirty();
+    fresh_canvas.render_pending();
 
     assert_eq!(
         grid_pixels(&grid),
@@ -812,14 +812,14 @@ fn partial_repaint_matches_forced_fresh_when_changed_rows_own_border_is_removed(
 
 // ==============================================================================
 // Task 4 Step 6 (deferred): `Orchestrator::resize` is self-invalidating — a
-// real size or DPR change alone must force the next `paintIfDirty` to Fresh,
+// real size or DPR change alone must force the next `renderPending` to Fresh,
 // with no follow-up `requestRepaint()` needed. Proven the same way as Task 6
 // above: raster bytes after the self-invalidating path must be identical to
 // a second canvas painting the same final size/DPR fresh in one shot.
 // ==============================================================================
 
 /// Acceptance criterion: a full resize (both CSS size and DPR change)
-/// followed by a bare `paintIfDirty()` — no `requestRepaint()` — must
+/// followed by a bare `renderPending()` — no `requestRepaint()` — must
 /// raster identically to a canvas built directly at the new size/DPR.
 #[wasm_bindgen_test]
 fn resize_self_invalidates_without_explicit_repaint() {
@@ -839,10 +839,10 @@ fn resize_self_invalidates_without_explicit_repaint() {
         panic!("fixture model passes the duck test");
     };
     canvas.resize(OLD_W, OLD_H, OLD_DPR);
-    canvas.paint_if_dirty(); // baseline Fresh paint at the old size
+    canvas.render_pending(); // baseline Fresh paint at the old size
 
     canvas.resize(NEW_W, NEW_H, NEW_DPR);
-    canvas.paint_if_dirty(); // bare paintIfDirty — no requestRepaint()
+    canvas.render_pending(); // bare renderPending — no requestRepaint()
 
     let fresh_grid = make_canvas();
     let fresh_overlay = make_canvas();
@@ -853,18 +853,18 @@ fn resize_self_invalidates_without_explicit_repaint() {
         panic!("fixture model passes the duck test");
     };
     fresh_canvas.resize(NEW_W, NEW_H, NEW_DPR);
-    fresh_canvas.paint_if_dirty(); // single Fresh paint straight at the new size/DPR
+    fresh_canvas.render_pending(); // single Fresh paint straight at the new size/DPR
 
     assert_eq!(
         grid_pixels(&grid),
         grid_pixels(&fresh_grid),
-        "resize must self-invalidate so a bare paintIfDirty() after it matches a forced-fresh \
+        "resize must self-invalidate so a bare renderPending() after it matches a forced-fresh \
          render at the new size/DPR, with no requestRepaint() needed"
     );
 }
 
 /// Acceptance criterion: a DPR-only resize (CSS size unchanged) followed
-/// by a bare `paintIfDirty()` must raster identically to a canvas built
+/// by a bare `renderPending()` must raster identically to a canvas built
 /// directly at the new DPR.
 #[wasm_bindgen_test]
 fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
@@ -882,10 +882,10 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
         panic!("fixture model passes the duck test");
     };
     canvas.resize(W, H, OLD_DPR);
-    canvas.paint_if_dirty(); // baseline Fresh paint at the old DPR
+    canvas.render_pending(); // baseline Fresh paint at the old DPR
 
     canvas.resize(W, H, NEW_DPR); // CSS size unchanged, DPR-only change
-    canvas.paint_if_dirty(); // bare paintIfDirty — no requestRepaint()
+    canvas.render_pending(); // bare renderPending — no requestRepaint()
 
     let fresh_grid = make_canvas();
     let fresh_overlay = make_canvas();
@@ -896,12 +896,12 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
         panic!("fixture model passes the duck test");
     };
     fresh_canvas.resize(W, H, NEW_DPR);
-    fresh_canvas.paint_if_dirty(); // single Fresh paint straight at the new DPR
+    fresh_canvas.render_pending(); // single Fresh paint straight at the new DPR
 
     assert_eq!(
         grid_pixels(&grid),
         grid_pixels(&fresh_grid),
-        "a DPR-only resize must self-invalidate so a bare paintIfDirty() after it matches a \
+        "a DPR-only resize must self-invalidate so a bare renderPending() after it matches a \
          forced-fresh render at the new DPR, with no requestRepaint() needed"
     );
 }
@@ -914,7 +914,7 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
 // ==============================================================================
 
 /// Acceptance criterion: `view_changed()` alone — no scroll, no content
-/// change — still wakes `paint_if_dirty()` (proving navigation-only intent
+/// change — still wakes `render_pending()` (proving navigation-only intent
 /// reaches a paint attempt instead of going `Idle`), and because nothing
 /// actually shifted on screen the dispatch matrix's `Overlay` fallback
 /// applies: the GRID canvas's pixels must be untouched. Only the overlay
@@ -922,14 +922,14 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
 #[wasm_bindgen_test]
 fn view_changed_wakes_a_paint_without_shifting_grid_pixels() {
     let (mut canvas, grid) = canvas_over(plain_fixture_store());
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted); // baseline
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered); // baseline
     let baseline_pixels = grid_pixels(&grid);
 
     canvas.view_changed();
     assert_eq!(
-        canvas.paint_if_dirty(),
-        JsPaintResult::Painted,
-        "view_changed() alone must wake the next paint_if_dirty(), not go Idle"
+        canvas.render_pending(),
+        RenderResult::Rendered,
+        "view_changed() alone must wake the next render_pending(), not go Idle"
     );
     assert_eq!(
         grid_pixels(&grid),
@@ -1039,18 +1039,19 @@ fn active_sheet_change_repaints_new_sheets_values_at_identical_coordinates() {
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = canvas.set_model_js(make_active_sheet_fixture_model(Rc::clone(&active_sheet))) else {
+    let Ok(()) = canvas.set_model_js(make_active_sheet_fixture_model(Rc::clone(&active_sheet)))
+    else {
         panic!("active-sheet fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted); // sheet 0 baseline
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered); // sheet 0 baseline
     let sheet0_pixels = grid_pixels(&grid);
 
     active_sheet.set(1);
     canvas.view_changed(); // sheet switch: view changed, same coordinates
     assert_eq!(
-        canvas.paint_if_dirty(),
-        JsPaintResult::Painted,
+        canvas.render_pending(),
+        RenderResult::Rendered,
         "an active-sheet change must reach a paint"
     );
     let sheet1_pixels = grid_pixels(&grid);
@@ -1066,7 +1067,7 @@ fn active_sheet_change_repaints_new_sheets_values_at_identical_coordinates() {
 // ==============================================================================
 // Stage 3 Task 1: `FrameInputs::capture` failure holds the whole paint
 // attempt (no ops, `Retry`); the recovered attempt paints on the very next
-// `paintIfDirty()` alone, with no further host signal — the retry contract
+// `renderPending()` alone, with no further host signal — the retry contract
 // merges the original queued work back into `pending` rather than requiring
 // the host to re-raise it.
 // ==============================================================================
@@ -1112,8 +1113,8 @@ fn selected_sheet_bridge_failure_holds_then_recovers_without_another_signal() {
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
 
     assert_eq!(
-        canvas.paint_if_dirty(),
-        JsPaintResult::Retry,
+        canvas.render_pending(),
+        RenderResult::RetryRequired,
         "a getSelectedSheet throw during capture must hold the first paint attempt"
     );
     assert!(
@@ -1128,10 +1129,10 @@ fn selected_sheet_bridge_failure_holds_then_recovers_without_another_signal() {
 
     // No `view_changed()` / `markContentDirty()` / `requestRepaint()` call
     // here: the retry contract merges the original queued work back into
-    // `pending`, so the very next `paintIfDirty()` alone must recover.
+    // `pending`, so the very next `renderPending()` alone must recover.
     assert_eq!(
-        canvas.paint_if_dirty(),
-        JsPaintResult::Painted,
+        canvas.render_pending(),
+        RenderResult::Rendered,
         "the recovered attempt must paint without another invalidation call"
     );
     assert!(
@@ -1431,7 +1432,7 @@ fn stable_canvas_over_at(
     };
     canvas.set_model(Rc::new(StableFixtureModel { content, view }));
     canvas.resize(width, height, dpr);
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     (canvas, grid, overlay)
 }
 
@@ -1582,7 +1583,7 @@ fn stage6_canvas_over(
         panic!("scrollable fixture model passes the duck test");
     };
     canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     // The cold Fresh covers the whole pane, so it is the cheapest place to
     // prove the geometry before any sample or pixel is taken. A tall row
     // deliberately costs the pane one row, so it is exempt.
@@ -1611,18 +1612,18 @@ fn stage6_scrollable_canvas(tall_row: Option<i32>) -> (IronCanvas, FixtureStore,
 fn stage6_scroll_to(canvas: &mut IronCanvas, top_row: &Rc<Cell<i32>>, row: i32) {
     top_row.set(row);
     canvas.view_changed_js();
-    canvas.paint_if_dirty();
+    canvas.render_pending();
 }
 
-/// Time one `paintIfDirty()` in milliseconds. Asserts the attempt actually
+/// Time one `renderPending()` in milliseconds. Asserts the attempt actually
 /// painted: a held or idle attempt would contribute a meaningless sample.
 fn stage6_timed_paint(canvas: &mut IronCanvas, clock: &PerfClock) -> f64 {
     let start = clock.now_ms();
-    let result = canvas.paint_if_dirty();
+    let result = canvas.render_pending();
     let elapsed = clock.now_ms() - start;
     assert_eq!(
         result,
-        JsPaintResult::Painted,
+        RenderResult::Rendered,
         "a timed Stage 6 paint must commit — a held or idle attempt is not a sample"
     );
     elapsed
@@ -1737,7 +1738,7 @@ fn stage6_w5_stale_half(
     clock: &PerfClock,
 ) -> (f64, String) {
     canvas.mark_rows_damaged(0, STAGE6_DAMAGE_ROW, STAGE6_DAMAGE_ROW);
-    canvas.paint_if_dirty();
+    canvas.render_pending();
     stage6_scroll_to(canvas, top_row, away);
     canvas.mark_content_dirty();
     let elapsed = stage6_timed_paint(canvas, clock);
@@ -1881,7 +1882,7 @@ fn stage6_perf_w6_post_blit_borderless_edit() {
         stage6_scroll_to(&mut canvas, &top_row, 2);
         edit(generation);
         canvas.mark_content_dirty();
-        canvas.paint_if_dirty();
+        canvas.render_pending();
         stage6_scroll_to(&mut canvas, &top_row, 1);
     }
 
@@ -1955,9 +1956,9 @@ fn stage6_perf_w8_theme_change_fresh() {
 
     for _ in 0..STAGE6_WARMUP {
         canvas.set_theme_name("dark");
-        canvas.paint_if_dirty();
+        canvas.render_pending();
         canvas.set_theme_name("light");
-        canvas.paint_if_dirty();
+        canvas.render_pending();
     }
 
     let mut to_dark = Vec::with_capacity(STAGE6_PAIRS);
@@ -2022,7 +2023,7 @@ fn stage6_forced_fresh_pixels(store: FixtureStore, top_row: i32, left_column: i3
 fn stage6_scroll_columns_to(canvas: &mut IronCanvas, left_column: &Rc<Cell<i32>>, column: i32) {
     left_column.set(column);
     canvas.view_changed_js();
-    canvas.paint_if_dirty();
+    canvas.render_pending();
 }
 
 /// Build a Stage 6 canvas at the origin every raster case starts from, plus the
@@ -2121,7 +2122,7 @@ fn stable_second_paint_seam_at(
 ) -> Vec<usize> {
     let (mut canvas, grid, _overlay) = stable_canvas_over_at(store, view, width, height, dpr);
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_pixel_diff(&canvas_pixels(&grid), fresh_grid)
 }
 
@@ -2248,7 +2249,7 @@ fn cell_repaint_plain_commit_and_selection_move_matches_forced_fresh() {
     canvas.mark_rows_damaged(0, 5, 5);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:cell", CASE);
@@ -2272,7 +2273,7 @@ fn cell_repaint_clipped_long_text_matches_forced_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2290,7 +2291,7 @@ fn cell_repaint_wrapped_text_matches_forced_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2307,7 +2308,7 @@ fn cell_repaint_fill_change_matches_forced_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2324,7 +2325,7 @@ fn cell_repaint_viewport_top_left_matches_forced_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2341,7 +2342,7 @@ fn cell_repaint_viewport_bottom_right_matches_forced_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2361,7 +2362,7 @@ fn cell_repaint_multi_row_dependants_match_forced_fresh() {
     canvas.mark_rows_damaged(0, 9, 9);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:range", CASE);
@@ -2383,7 +2384,7 @@ fn cell_repaint_range_crosses_hidden_row_and_column() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:range", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2399,7 +2400,7 @@ fn stable_unchanged_recalc_skips_grid_and_moves_overlay() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:skip", CASE);
@@ -2420,7 +2421,7 @@ fn cell_repaint_medium_left_border_removal_matches_fresh() {
     canvas.mark_rows_damaged(0, 5, 5);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:cell", CASE);
@@ -2439,7 +2440,7 @@ fn cell_repaint_thick_top_border_addition_matches_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2462,7 +2463,7 @@ fn cell_repaint_thick_bottom_border_addition_matches_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2486,7 +2487,7 @@ fn cell_repaint_double_right_border_removal_matches_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2517,7 +2518,7 @@ fn cell_repaint_exposes_neighbour_owned_competing_edge() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2547,7 +2548,7 @@ fn cell_repaint_double_border_at_dpr_2_matches_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh_at(
@@ -2586,7 +2587,7 @@ fn cell_repaint_medium_border_at_fractional_dpr_matches_fresh() {
     view.set_active(6, 3);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh_at(
@@ -2613,7 +2614,7 @@ fn cell_repaint_frozen_grid_commit_uses_one_verdict_and_matches_fresh() {
     canvas.mark_rows_damaged(0, 5, 5);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:cell", CASE);
@@ -2634,7 +2635,7 @@ fn stable_hidden_selection_commit_matches_fresh() {
     canvas.mark_rows_damaged(0, 5, 5);
     canvas.mark_content_dirty();
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
     stable_assert_slots_reuse_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:cell", CASE);
@@ -2674,7 +2675,7 @@ fn stage6_repaint_seam(
         None,
     );
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(
         &canvas.frame_trace(),
         "grid:skip",
@@ -2765,7 +2766,7 @@ fn stage6_post_blit_unchanged_content_skips_and_matches_forced_fresh() {
 
     stage6_scroll_to(&mut canvas, &top_row, 2);
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(
         &canvas.frame_trace(),
         "grid:skip",
@@ -2789,7 +2790,7 @@ fn stage6_post_blit_borderless_edit_repaints_cell_and_matches_forced_fresh() {
     stage6_scroll_to(&mut canvas, &top_row, 2);
     stage6_set_value(&store, EDITED_ROW, STAGE6_EDIT_COL, "post-blit-edit");
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(
         &canvas.frame_trace(),
         "grid:cell",
@@ -2823,7 +2824,7 @@ fn stage6_post_blit_revealed_row_border_removal_is_border_safe_against_forced_fr
 
     stage6_set_left_border(&store, STAGE6_REVEALED_ROW, STAGE6_EDIT_COL, None);
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(
         &canvas.frame_trace(),
         "grid:cell",
@@ -2854,7 +2855,7 @@ fn stage6_post_blit_revealed_row_cf_change_matches_forced_fresh() {
 
     stage6_set_fill(&store, STAGE6_REVEALED_ROW, STAGE6_EDIT_COL, None);
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
     assert!(
         !trace.contains("grid:skip"),
@@ -2878,14 +2879,14 @@ fn stage6_damage_then_blit_then_edit_heals_and_matches_forced_fresh() {
     let (mut canvas, grid, top_row, _left_column) = stage6_raster_canvas(Rc::clone(&store));
 
     canvas.mark_rows_damaged(0, STAGE6_DAMAGE_ROW, STAGE6_DAMAGE_ROW);
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:strip", "Damage strip");
 
     stage6_scroll_to(&mut canvas, &top_row, 2);
 
     stage6_set_value(&store, EDITED_ROW, STAGE6_EDIT_COL, "healed");
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(
         &canvas.frame_trace(),
         "grid:FULL",
@@ -2912,7 +2913,7 @@ fn stage6_column_blit_stays_conservative_and_matches_forced_fresh() {
 
     stage6_set_value(&store, EDITED_ROW, STAGE6_EDIT_COL, "post-column-blit-edit");
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     stage6_assert_verdict(&canvas.frame_trace(), "grid:FULL", "post-column-blit edit");
 
     stage6_assert_matches_forced_fresh(&grid, &store, 1, 2, "post-column-blit edit");
@@ -2944,7 +2945,7 @@ fn stage6_frame_diagnostics_wire_smoke() {
     // The cold Fresh already ran before this function returned; force a
     // new attempt so an enabled capture actually publishes.
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let value = canvas.frame_diagnostics();
     assert!(!value.is_undefined(), "enabled capture must publish");
 
@@ -3253,7 +3254,7 @@ fn stable_diag_canvas_over_at(
     canvas.set_model(Rc::new(StableFixtureModel { content, view }));
     canvas.resize(width, height, dpr);
     canvas.set_frame_diagnostics_enabled(true);
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     (canvas, grid, overlay)
 }
 
@@ -3275,7 +3276,7 @@ fn stage6_diag_freeze_toggle_explains_segments() {
     view.frozen_rows.set(2);
     view.frozen_cols.set(1);
     canvas.request_repaint();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
 
     let after = diag_snapshot(&canvas);
     assert_eq!(after.rebuild_reason.as_deref(), Some("freeze"));
@@ -3295,7 +3296,7 @@ fn stage6_diag_freeze_toggle_explains_segments() {
     view.frozen_rows.set(0);
     view.frozen_cols.set(0);
     canvas.request_repaint();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let off = diag_snapshot(&canvas);
     assert_eq!(off.rebuild_reason.as_deref(), Some("freeze"));
     assert_eq!(off.geometry.as_ref().unwrap().segments.len(), 1);
@@ -3329,7 +3330,7 @@ fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
         canvas.set_frame_diagnostics_probe(row, col, row, col);
         stage6_set_value(&store, row, col, &format!("r{row}c{col}"));
         canvas.mark_content_dirty();
-        assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
         let diag = diag_snapshot(&canvas);
         assert_eq!(
             diag.probe,
@@ -3361,7 +3362,7 @@ fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
         canvas.set_frame_diagnostics_probe(row, col, row, col);
         stage6_set_value(&store, row, col, &format!("{region}-changed"));
         canvas.mark_content_dirty();
-        assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
         let diag = diag_snapshot(&canvas);
         assert_eq!(diag.probe_segments, vec![region.to_string()]);
         assert!(matches!(diag.repaint.verdict, Some(VerdictScenario::Cell)));
@@ -3418,7 +3419,7 @@ fn cell_repaint_diag_30_by_18_keeps_fetch_and_reduces_paint() {
     stage6_set_value(&store, 15, 9, "edited");
     canvas.set_frame_diagnostics_probe(15, 9, 15, 9);
     canvas.mark_content_dirty();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
 
     let diag = diag_snapshot(&canvas);
     assert!(matches!(diag.repaint.verdict, Some(VerdictScenario::Cell)));
@@ -3494,7 +3495,7 @@ fn stage6_diag_deep_scrolls_expose_blit_clips() {
     // Column scroll: origin 1 -> 8.
     view.left_column.set(8);
     canvas.view_changed_js();
-    assert_eq!(canvas.paint_if_dirty(), JsPaintResult::Painted);
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let col_blit = diag_snapshot(&canvas).blit.expect("column scroll blits");
     assert_eq!(col_blit.axis, "column");
     assert_eq!(col_blit.delta, 7);

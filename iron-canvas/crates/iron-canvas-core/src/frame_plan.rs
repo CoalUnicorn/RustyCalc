@@ -8,7 +8,7 @@
 //! synthetic default (an all-A1 view, sheet `0`, "headers visible"): the
 //! frame still built, just against fabricated state. [`FrameInputs::capture`]
 //! replaces that with a fallible constructor — any one bridge failure holds
-//! the whole attempt (see `Orchestrator::paint_if_dirty`'s capture-failure
+//! the whole attempt (see `Orchestrator::render_pending`'s capture-failure
 //! handling) instead of silently painting the wrong sheet.
 //!
 //! [`FrameDelta`] and [`RebuildReason`] are the classification types

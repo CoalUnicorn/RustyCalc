@@ -147,7 +147,7 @@ pub(super) fn install_playback_effect(
                     app.playback_frame.set(0);
                     app.playback_frame_count.set(0);
                     // exitPlayback called request_repaint on the engine; poke
-                    // so paintIfDirty actually fires on the next frame.
+                    // so renderPending actually fires on the next frame.
                     poke();
                 }
             }

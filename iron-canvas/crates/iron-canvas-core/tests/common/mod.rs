@@ -144,7 +144,7 @@ impl TestModel {
 
     /// Uniform 20px row × 80px column grid. The dimensions every
     /// recorder-based suite in this crate (chrome_invariants, scroll_blit,
-    /// paint_skip, orchestrator_regimes, frame_kind) was calibrated
+    /// paint_skip, orchestrator_strategies, frame_kind) was calibrated
     /// against — visible-row counts, blit overlap arithmetic, and
     /// hit-test pixel positions all depend on those exact numbers.
     /// `canvas_model.rs` keeps the production defaults (`new()`).

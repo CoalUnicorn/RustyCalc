@@ -13,7 +13,7 @@ use super::{CanvasMode, IronCanvas};
 //
 // Playback uses the live grid painter and the live overlay painter.
 // It sends the recorded `DrawOp` values to these painters.
-// `paintIfDirty` bypasses the orchestrator while a session is loaded.
+// `renderPending` bypasses the orchestrator while a session is loaded.
 // `exitPlayback` requests a `Fresh` repaint for the next tick.
 // ============================================================================
 
@@ -21,7 +21,7 @@ use super::{CanvasMode, IronCanvas};
 #[wasm_bindgen]
 impl IronCanvas {
     /// Load `.icr` data and paint frame 0.
-    /// `paintIfDirty` does no work while playback is active.
+    /// `renderPending` does no work while playback is active.
     ///
     /// The method returns an error if capture is active.
     /// Replay during capture would add replay operations to the active recording.
@@ -123,8 +123,8 @@ impl IronCanvas {
     /// Pause playback at the last frame.
     /// Do no work if playback is not active.
     ///
-    /// Call this method from the rAF loop that calls `paintIfDirty`.
-    /// `paintIfDirty` does not paint while playback is active.
+    /// Call this method from the rAF loop that calls `renderPending`.
+    /// `renderPending` does not paint while playback is active.
     #[wasm_bindgen(js_name = "tickPlayback")]
     pub fn tick_playback(&mut self, now_ms: f64) -> bool {
         let CanvasMode::Playback(s) = &mut self.mode else {

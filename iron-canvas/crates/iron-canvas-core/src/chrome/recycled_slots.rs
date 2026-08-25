@@ -4,7 +4,7 @@
 //!
 //! Stage 4: `Orchestrator` owns one standing `RecycledSlots` (`spare_slots`)
 //! across paint attempts, rather than a fresh one being derived from `prev`
-//! inline on every `FramePath::Fresh` build. `Orchestrator::paint_fresh_regime`
+//! inline on every `FramePath::Fresh` build. `Orchestrator::render_full_rebuild`
 //! takes the pool's vectors to build the candidate — leaving the committed
 //! `prev` untouched for the duration of that build — and only folds `prev`'s
 //! own outgoing vectors back into the pool once the candidate is confirmed

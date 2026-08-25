@@ -556,7 +556,7 @@ impl Probe {
     /// attempt they precede.
     fn paint(&mut self) -> Sample {
         self.model.clear_calls();
-        let result = self.orch.paint_if_dirty();
+        let result = self.orch.render_pending();
         let ops = {
             let recorded = self.orch.grid_surface().recorder().ops();
             let counted = OpCounts::of(&recorded[self.cursor..]);
@@ -831,7 +831,7 @@ fn csv_row(row: &Row) -> String {
         style = shape.style_tag(),
         result = sample.result,
         regime = trace
-            .regime
+            .strategy
             .map_or_else(|| "-".to_string(), |r| format!("{r:?}")),
         effective = trace
             .effective

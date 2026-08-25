@@ -7,7 +7,7 @@
 //! zero-size-container edge case (refs resolved but layout pass hasn't
 //! measured yet) without extra ResizeObserver plumbing.
 //!
-//! `ic.paint_if_dirty()` is cheap and safe to call unconditionally (it
+//! `ic.render_pending()` is cheap and safe to call unconditionally (it
 //! no-ops internally when nothing is dirty), so there is no separate
 //! "should I paint" gate here beyond "did something poke() me" -- that
 //! is exactly what `use_one_shot_raf` already answers.
@@ -23,7 +23,7 @@ use crate::coord::SheetRange;
 use crate::input::mouse::CanvasHandle;
 use crate::state::{ModelStore, Split};
 use iron_canvas_core::*;
-use iron_canvas_web::{IronCanvas, JsPaintResult};
+use iron_canvas_web::{IronCanvas, RenderResult};
 #[cfg(feature = "dev-tools")]
 use wasm_bindgen::JsValue;
 
@@ -219,7 +219,7 @@ pub(super) fn install_raf_loop(
         let trace_wanted = app
             .as_ref()
             .is_some_and(|a| a.show_perf_panel.get_untracked());
-        let mut paint_result = JsPaintResult::Idle;
+        let mut paint_result = RenderResult::Idle;
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
                 if theme_dirty.get_value() {
@@ -229,7 +229,7 @@ pub(super) fn install_raf_loop(
                     }
                     theme_dirty.set_value(false);
                 }
-                paint_result = ic.paint_if_dirty();
+                paint_result = ic.render_pending();
             }
         });
         #[cfg(feature = "dev-tools")]
@@ -359,7 +359,7 @@ pub(super) fn install_raf_loop(
     poke
 }
 
-/// What one rAF tick does with `paint_if_dirty`'s outcome, decided once so
+/// What one rAF tick does with `render_pending`'s outcome, decided once so
 /// the four call sites in `install_raf_loop`'s `paint` closure don't each
 /// re-derive "which variants publish / count / keep alive".
 struct SchedulerAction {
@@ -375,27 +375,27 @@ struct SchedulerAction {
 /// `true` so the one-shot loop stays armed until the held attempt commits.
 /// No external bridge-recovery signal exists to wake a paused loop, so a
 /// `Retry` must remain live even when the failure lasts for many frames.
-fn scheduling_after(result: JsPaintResult, playback_active: bool) -> SchedulerAction {
+fn scheduling_after(result: RenderResult, playback_active: bool) -> SchedulerAction {
     match result {
-        JsPaintResult::Idle => SchedulerAction {
+        RenderResult::Idle => SchedulerAction {
             publish_trace: false,
             count_frame: false,
             update_timing: false,
             keep_alive: playback_active,
         },
-        JsPaintResult::Painted => SchedulerAction {
+        RenderResult::Rendered => SchedulerAction {
             publish_trace: true,
             count_frame: true,
             update_timing: true,
             keep_alive: playback_active,
         },
-        JsPaintResult::Retry => SchedulerAction {
+        RenderResult::RetryRequired => SchedulerAction {
             publish_trace: true,
             count_frame: false,
             update_timing: false,
             keep_alive: true,
         },
-        JsPaintResult::Playback => SchedulerAction {
+        RenderResult::PlaybackActive => SchedulerAction {
             publish_trace: false,
             count_frame: false,
             update_timing: false,
@@ -410,13 +410,13 @@ mod scheduling_after_tests {
 
     #[test]
     fn idle_touches_no_diagnostic_and_preserves_keep_alive() {
-        let action = scheduling_after(JsPaintResult::Idle, false);
+        let action = scheduling_after(RenderResult::Idle, false);
         assert!(!action.publish_trace);
         assert!(!action.count_frame);
         assert!(!action.update_timing);
         assert!(!action.keep_alive);
 
-        let action = scheduling_after(JsPaintResult::Idle, true);
+        let action = scheduling_after(RenderResult::Idle, true);
         assert!(
             action.keep_alive,
             "idle must not clear an already-active playback tick"
@@ -425,7 +425,7 @@ mod scheduling_after_tests {
 
     #[test]
     fn painted_publishes_counts_and_times() {
-        let action = scheduling_after(JsPaintResult::Painted, false);
+        let action = scheduling_after(RenderResult::Rendered, false);
         assert!(action.publish_trace);
         assert!(action.count_frame);
         assert!(action.update_timing);
@@ -434,7 +434,7 @@ mod scheduling_after_tests {
 
     #[test]
     fn retry_publishes_without_counting_and_forces_keep_alive() {
-        let action = scheduling_after(JsPaintResult::Retry, false);
+        let action = scheduling_after(RenderResult::RetryRequired, false);
         assert!(action.publish_trace);
         assert!(!action.count_frame);
         assert!(!action.update_timing);
@@ -443,7 +443,7 @@ mod scheduling_after_tests {
 
     #[test]
     fn playback_leaves_every_diagnostic_untouched() {
-        let action = scheduling_after(JsPaintResult::Playback, true);
+        let action = scheduling_after(RenderResult::PlaybackActive, true);
         assert!(!action.publish_trace);
         assert!(!action.count_frame);
         assert!(!action.update_timing);
@@ -456,11 +456,11 @@ mod scheduling_after_tests {
     #[test]
     fn retry_remains_live_until_a_later_attempt_commits() {
         for attempt in 1..=1_000 {
-            let action = scheduling_after(JsPaintResult::Retry, false);
+            let action = scheduling_after(RenderResult::RetryRequired, false);
             assert!(action.keep_alive, "retry attempt {attempt} paused the loop");
         }
 
-        let committed = scheduling_after(JsPaintResult::Painted, false);
+        let committed = scheduling_after(RenderResult::Rendered, false);
         assert!(
             !committed.keep_alive,
             "a committed paint may let an otherwise-idle loop pause"

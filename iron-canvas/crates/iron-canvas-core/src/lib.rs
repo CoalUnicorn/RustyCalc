@@ -23,7 +23,7 @@ pub mod types;
 
 pub use frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
 pub use orchestrator::{
-    FrameOutcome, FrameTrace, GridVerdict, Orchestrator, PaintRegimeTag, PaintResult,
+    FrameOutcome, FrameTrace, GridVerdict, Orchestrator, PaintResult, RenderStrategy,
 };
 
 #[cfg(feature = "dev-diagnostics")]

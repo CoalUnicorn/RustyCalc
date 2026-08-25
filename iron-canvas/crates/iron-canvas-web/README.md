@@ -4,7 +4,7 @@ The `#[wasm_bindgen]` facade for IronCalc spreadsheets — the full spreadsheet 
 
 ## What it does
 
-Exposes `IronCanvas` to JavaScript: bind it to an IronCalc-compatible model handle and a pair of canvases, and it renders a live spreadsheet with selection, marching ants, formula-reference overlays, autofill handles, and frozen panes. It owns the repaint lifecycle (`requestRepaint` / `markContentDirty` / `markRowsDamaged` / `viewChanged` / `paintIfDirty`), always supports SVG export, and exposes PDF export when built with its `pdf` feature.
+Exposes `IronCanvas` to JavaScript: bind it to an IronCalc-compatible model handle and a pair of canvases, and it renders a live spreadsheet with selection, marching ants, formula-reference overlays, autofill handles, and frozen panes. It owns the repaint lifecycle (`requestRepaint` / `markContentDirty` / `markRowsDamaged` / `viewChanged` / `renderPending`), always supports SVG export, and exposes PDF export when built with its `pdf` feature.
 
 ## Crate role
 
@@ -15,8 +15,8 @@ The primary shippable artifact for spreadsheet consumers: RustyCalc's Leptos fro
 Method names are camelCase, matching the IronCalc wasm API convention (snake_case stays on the Rust side). Payload setters return `Result<(), JsError>`; optional query results are `null` when absent.
 
 - **lifecycle** — `create(gridCanvas, overlayCanvas)` (static), `setModel(model)`, `resize(cssW, cssH, dpr)`, `dispose()`
-- **paint** — `requestRepaint`, `markContentDirty`, `markRowsDamaged(sheet, rowStart, rowEnd)`, `viewChanged`, `requestOverlayRepaint`, `paintIfDirty`, `fontsChanged`, `frameTrace`, `recordingSupported` (static)
-  - `paintIfDirty` returns `JsPaintResult`: `Idle` / `Painted` / `Retry` / `Playback` — `Retry` means an attempt was held back and the caller should call again next frame with no new signal.
+- **paint** — `requestRepaint`, `markContentDirty`, `markRowsDamaged(sheet, rowStart, rowEnd)`, `viewChanged`, `requestOverlayRepaint`, `renderPending`, `fontsChanged`, `frameTrace`, `recordingSupported` (static)
+  - `renderPending` returns `RenderResult`: `Idle`, `Rendered`, `RetryRequired`, or `PlaybackActive`. Call it again on the next frame after `RetryRequired`.
   - `recordingSupported` reports whether the `dev-tools` feature is compiled in, so hosts can hide their Record button on prod builds.
 - **theme** — `setThemeName(name)` (`"dark"` recognized, everything else maps to light), `setThemeFromElement(el)` (reads `--palette-*` CSS vars), `setTheme(theme)` (full palette push, every field required), `setThemeVariables(vars)` (partial override with light fallback), `themeChanged()`
 - **export** — `exportSvg(cssW, cssH)`; `exportPdf(cssW, cssH)` with feature `pdf`

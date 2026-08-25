@@ -114,7 +114,7 @@ impl IronCanvas {
 
     /// Report a change to the scroll position, selection, active cell, or sheet.
     /// This method marks the view and overlay in one operation.
-    /// The next `paintIfDirty` call selects the applicable paint strategy.
+    /// The next `renderPending` call selects the applicable paint strategy.
     #[wasm_bindgen(js_name = "viewChanged")]
     pub fn view_changed_js(&mut self) {
         self.runtime.orchestrator_mut().view_changed();

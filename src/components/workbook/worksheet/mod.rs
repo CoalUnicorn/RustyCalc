@@ -138,7 +138,7 @@ pub fn Worksheet() -> impl IntoView {
     // Workbook-switch Effect — watching `current_uuid` gives us a deterministic
     // signal that fires once per workbook switch. Without a set_model call,
     // the orchestrator keeps last_frame from the old workbook (stale pane
-    // geometry, stale sheet ID), and paint_if_dirty never drops it for a
+    // geometry, stale sheet ID), and render_pending never drops it for a
     // Fresh rebuild. `set_model` is idempotent-safe — re-pushing the same
     // adapter triggers a full repaint. `poke()` after `set_model` closes a
     // real gap: nothing previously woke the render loop for a workbook

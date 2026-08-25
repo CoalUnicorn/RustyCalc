@@ -14,7 +14,7 @@
 //! wasm is single-threaded: there is no Rust async runtime here. "Live data"
 //! means the consumer calls these mutators from any JS callback (`fetch`,
 //! WebSocket, `setInterval`) and drives a `requestAnimationFrame` loop that
-//! calls `paintIfDirty()`. The bindings never block; `paint_if_dirty` is a
+//! calls `renderPending()`. The bindings never block; `render_pending` is a
 //! no-op when clean.
 
 use std::rc::Rc;
@@ -112,9 +112,9 @@ impl DataGridCanvas {
         self.runtime.resize(CanvasSize { w: css_w, h: css_h }, dpr);
     }
 
-    #[wasm_bindgen(js_name = "paintIfDirty")]
-    pub fn paint_if_dirty(&mut self) {
-        self.runtime.orchestrator_mut().paint_if_dirty();
+    #[wasm_bindgen(js_name = "renderPending")]
+    pub fn render_pending(&mut self) {
+        self.runtime.orchestrator_mut().render_pending();
     }
 
     // D.1 Scrolling

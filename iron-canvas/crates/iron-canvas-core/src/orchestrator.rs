@@ -6,17 +6,15 @@
 //! `Rc<dyn CanvasModel>`, so the struct carries one type parameter (the
 //! `Surface`), not two.
 //!
-//! `paint_if_dirty` takes the single queued `PendingWork` value, classifies
+//! `render_pending` takes the single queued `PendingWork` value, classifies
 //! the attempt's geometric delta via `Chrome::classify`, and turns both into
 //! one closed `FramePlan` via the pure `plan_frame` function — the complete
 //! `PendingWork` x `FrameDelta` table lives on that function's doc comment.
-//! The plan's `GridWork` selects one of five `paint_*_regime` methods
-//! (cheapness-ordered: `Overlay`, `Viewport`, `Damage`, `SlotsReuse`,
-//! `Fresh`). Fresh builds a new `Chrome`; SlotsReuse and Damage reuse its
-//! slot vectors through `Chrome::next`; Viewport uses the reversible
-//! `Chrome::prepare_blit`; Overlay reuses `last_frame` directly.
+//! The plan's `GridWork` selects one of five render methods.
+//! The strategy order is `OverlayOnly`, `ScrollBlit`, `DamagedRows`,
+//! `ChangedCells`, and `FullRebuild`.
 //!
-//! Each `paint_*_regime` method prepares (bulk bridge reads, no mutation of
+//! Each render method prepares (bulk bridge reads, no mutation of
 //! committed state) and executes (paints into the backing target) its own
 //! grid transaction, returning its aggregate `GridCacheCommit` as data, then
 //! reduces to one `PaintOutcome` — `Committed` or `Held` — instead of advancing
@@ -26,8 +24,8 @@
 //! preserves or replaces `last_frame`, presents whichever layers actually
 //! painted, merges retry work back into
 //! `self.pending`, and publishes
-//! `last_regime`/`last_effective`/`last_work_flags`/`last_trace`. A bridge
-//! failure during a regime's own bulk fetch therefore surfaces as a clean
+//! `last_strategy`/`last_effective_strategy`/`last_work_flags`/`last_trace`.
+//! A bridge failure during a strategy's bulk fetch therefore gives a clean
 //! whole-grid `Held` outcome rather than a partially-applied side effect.
 //!
 //! The query API (`hit_test`, `cell_rect`, `resize_handle_at`,
@@ -66,26 +64,30 @@ use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
 
-/// Data-free strategy tag. Stamped by `paint_if_dirty` from
-/// `FramePlan.selected_strategy` into `Orchestrator.last_regime` so
+/// Data-free strategy tag. Stamped by `render_pending` from
+/// `FramePlan.selected_strategy` into `Orchestrator.last_strategy` so
 /// out-of-engine consumers (the recording pipeline) can attribute each
 /// captured frame to a strategy without seeing the plan's inner data
 /// (`BlitPlan`, row spans — see `GridWork`). Serializes
 /// with snake_case variant names to match the `.icr` JSON-lines schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[must_use = "PaintRegimeTag is the recorded regime attribution; dropping it skips a recorder frame"]
-pub enum PaintRegimeTag {
-    Overlay,
-    Viewport,
-    SlotsReuse,
-    Fresh,
-    Damage,
+#[must_use = "RenderStrategy records the selected strategy; dropping it skips a recorder frame"]
+pub enum RenderStrategy {
+    #[serde(rename = "overlay")]
+    OverlayOnly,
+    #[serde(rename = "viewport")]
+    ScrollBlit,
+    #[serde(rename = "slots_reuse")]
+    ChangedCells,
+    #[serde(rename = "fresh")]
+    FullRebuild,
+    #[serde(rename = "damage")]
+    DamagedRows,
 }
 
 /// What `plan_frame` decided the grid needs this attempt. Each variant
-/// carries exactly the payload its matching `paint_*_regime` arm needs —
-/// the same shapes the former payload-bearing `PaintRegime` carried, before
+/// carries the payload that its render method needs.
+/// These payloads have the same shapes as the former `PaintRegime` values.
 /// planning and execution were split into their own closed types.
 ///
 /// `GridWork` alone determines candidate `Chrome` construction exhaustively:
@@ -131,20 +133,20 @@ pub(crate) enum OverlayWork {
     Paint,
 }
 
-/// The closed output of `plan_frame`: everything `paint_if_dirty` needs to
+/// The closed output of `plan_frame`: everything `render_pending` needs to
 /// dispatch one paint attempt, plus the taken `PendingWork` the plan was
 /// built from — owned here so a held/retried arm has it to merge back into
 /// `self.pending` without a second, separate borrow of the pre-take value.
 pub(crate) struct FramePlan {
-    /// Stamped into `Orchestrator.last_regime` before dispatch. May diverge
+    /// Stamped into `Orchestrator.last_strategy` before dispatch. May diverge
     /// from what actually painted — see `FrameTrace::effective`'s doc for
     /// the selected-Viewport/effective-Fresh case, which this field does
     /// not itself encode.
-    selected_strategy: PaintRegimeTag,
+    selected_strategy: RenderStrategy,
     grid: GridWork,
     overlay: OverlayWork,
     /// The attempt's taken `PendingWork`, owned by the plan so a held
-    /// execution arm (`paint_viewport_regime`'s whole-frame hold) can merge
+    /// execution arm (`render_scroll_blit`'s whole-frame hold) can merge
     /// it back into `self.pending` verbatim.
     consumes: PendingWork,
     /// Which hard break or scroll incompatibility fired, when `grid` is
@@ -167,40 +169,40 @@ pub(crate) struct FramePlan {
 ///
 /// | attempted work and live delta | strategy / grid work |
 /// | --- | --- |
-/// | overlay/view only, `Stable` | `Overlay` / `GridWork::None` |
-/// | overlay/view only, `Scroll(plan)` | `Viewport` / `GridWork::Blit(plan)` |
-/// | overlay/view only, `Rebuild` | `Fresh` / `GridWork::Fresh` |
-/// | row content, optional view, `Stable`, sheet matches | `Damage` / `GridWork::Rows` |
-/// | row content, optional view, `Stable`, sheet differs | `SlotsReuse` / `AllContent` |
-/// | all content, optional view, `Stable` | `SlotsReuse` / `GridWork::AllContent` |
-/// | content, optional view, `Scroll`/`Rebuild` | `Fresh` / `GridWork::Fresh` |
-/// | any geometry, any delta | `Fresh` / `GridWork::Fresh` |
+/// | overlay/view only, `Stable` | `OverlayOnly` / `GridWork::None` |
+/// | overlay/view only, `Scroll(plan)` | `ScrollBlit` / `GridWork::Blit(plan)` |
+/// | overlay/view only, `Rebuild` | `FullRebuild` / `GridWork::Fresh` |
+/// | row content, optional view, `Stable`, sheet matches | `DamagedRows` / `GridWork::Rows` |
+/// | row content, optional view, `Stable`, sheet differs | `ChangedCells` / `AllContent` |
+/// | all content, optional view, `Stable` | `ChangedCells` / `GridWork::AllContent` |
+/// | content, optional view, `Scroll`/`Rebuild` | `FullRebuild` / `GridWork::Fresh` |
+/// | any geometry, any delta | `FullRebuild` / `GridWork::Fresh` |
 ///
 /// Rules that must remain explicit (Stage 3 global constraints has the
 /// rationale behind each):
 ///
-/// - a view mark does not exclude `Overlay` — `Scroll` is attempted first,
-///   and a stable in-viewport selection move falls back to `Overlay`;
+/// - a view mark does not exclude `OverlayOnly` — `Scroll` is attempted first,
+///   and a stable in-viewport selection move falls back to `OverlayOnly`;
 /// - a legacy overlay-only wakeup (no `view` mark at all) may still select
-///   `Viewport` when the live geometric delta is a safe scroll — this is
+///   `ScrollBlit` when the live geometric delta is a safe scroll — this is
 ///   also the renderer's own correctness fallback for a host that moved the
 ///   view without calling `view_changed`;
-/// - stable content plus view uses `Damage` or `SlotsReuse`; content plus a
-///   real scroll or rebuild plans `Fresh`, never a blit over changed values;
+/// - stable content plus view uses `DamagedRows` or `ChangedCells`; content plus a
+///   real scroll or rebuild plans `FullRebuild`, never a blit over changed values;
 /// - `ContentWork::Rows` carries its original sheet into `GridWork::Rows`;
-/// - Rows fall back to `AllContent` whenever `Damage` is ineligible;
-/// - geometry work forces `Fresh` even when `delta` is otherwise `Stable`.
+/// - Rows fall back to `AllContent` whenever `DamagedRows` is ineligible;
+/// - geometry work forces `FullRebuild` even when `delta` is otherwise `Stable`.
 ///
 /// `OverlayWork` is calculated once here, from the captured selection
 /// visibility and the attempted work, so every execution arm reads
 /// `plan.overlay` instead of re-deriving `must_paint_overlay`:
 ///
-/// - `Overlay` and `Viewport` always paint it (unconditionally, in their own
+/// - `OverlayOnly` and `ScrollBlit` always paint it (unconditionally, in their own
 ///   arms — this function only needs to compute the conditional cases);
-/// - `Fresh` always paints it — candidate geometry or model identity may
+/// - `FullRebuild` always paints it — candidate geometry or model identity may
 ///   have changed, so a stale overlay could show handles or a selection
 ///   rect positioned against pixels that no longer match;
-/// - `Damage`/`SlotsReuse` content work paints it when overlay
+/// - `DamagedRows`/`ChangedCells` content work paints it when overlay
 ///   work is marked, or when captured selection visibility is true (content
 ///   then implies an active-cell repaint); otherwise they preserve it —
 ///   selection painting is disabled, so there is no active-cell repaint to
@@ -216,7 +218,7 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     let reusable = matches!(delta, FrameDelta::Stable);
 
     // Computed once, from the captured selection visibility and the
-    // attempted work, so `Damage`/`SlotsReuse` below never re-derive it.
+    // attempted work, so `DamagedRows`/`ChangedCells` below never re-derive it.
     let content_overlay = if work.has_overlay() || show_selection {
         OverlayWork::Paint
     } else {
@@ -238,7 +240,7 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         && let FrameDelta::Scroll(plan) = delta
     {
         return FramePlan {
-            selected_strategy: PaintRegimeTag::Viewport,
+            selected_strategy: RenderStrategy::ScrollBlit,
             grid: GridWork::Blit(plan),
             overlay: OverlayWork::Paint,
             consumes: work,
@@ -259,7 +261,7 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         && reusable
     {
         return FramePlan {
-            selected_strategy: PaintRegimeTag::Overlay,
+            selected_strategy: RenderStrategy::OverlayOnly,
             grid: GridWork::None,
             overlay: OverlayWork::Paint,
             consumes: work,
@@ -284,7 +286,7 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         let rows_sheet = *rows_sheet;
         let spans = spans.clone();
         return FramePlan {
-            selected_strategy: PaintRegimeTag::Damage,
+            selected_strategy: RenderStrategy::DamagedRows,
             grid: GridWork::Rows {
                 sheet: rows_sheet,
                 spans,
@@ -300,7 +302,7 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     // view work is owned by the earlier Overlay arm.
     if work.has_content() && !work.has_geometry() && reusable {
         return FramePlan {
-            selected_strategy: PaintRegimeTag::SlotsReuse,
+            selected_strategy: RenderStrategy::ChangedCells,
             grid: GridWork::AllContent,
             overlay: content_overlay,
             consumes: work,
@@ -314,7 +316,7 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     // Always paints the overlay — candidate geometry or model identity may
     // have changed under it.
     FramePlan {
-        selected_strategy: PaintRegimeTag::Fresh,
+        selected_strategy: RenderStrategy::FullRebuild,
         grid: GridWork::Fresh,
         overlay: OverlayWork::Paint,
         consumes: work,
@@ -322,13 +324,13 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     }
 }
 
-/// What one `paint_if_dirty` call did. `Retry` means a whole-grid hold
-/// retained work and the scheduler must keep the loop armed.
+/// The result of one `render_pending` call.
+/// `RetryRequired` means that the scheduler must keep the loop active.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PaintResult {
     Idle,
-    Painted,
-    Retry,
+    Rendered,
+    RetryRequired,
 }
 
 /// What the grid paint decided this frame.
@@ -411,7 +413,7 @@ pub enum FrameOutcome {
     HeldOnBridgeFailure,
     /// `FrameInputs::capture` failed before dispatch reached a regime at
     /// all — no candidate geometry, no cache invalidation, no paint. See
-    /// `paint_if_dirty`'s capture-failure handling.
+    /// `render_pending`'s capture-failure handling.
     HeldOnInputFailure(FrameInputFailure),
 }
 
@@ -423,12 +425,12 @@ pub struct BlitFallback {
     pub cold_cache: bool,
 }
 
-/// Per-frame attribution: which regime ran, what the grid decided, and how
+/// Per-frame attribution: which strategy ran, what the grid decided, and how
 /// much model traffic it cost. Written by the renderer during paint, stamped
-/// into `Orchestrator.last_trace` at the end of `paint_if_dirty`.
+/// into `Orchestrator.last_trace` at the end of `render_pending`.
 ///
 /// Exists to answer "which path painted this frame?" without a code read —
-/// specifically whether a post-blit `SlotsReuse` reports `Full`, which is the
+/// specifically whether a post-blit `ChangedCells` strategy reports `Full`.
 /// hypothesis in `docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FrameTrace {
@@ -439,27 +441,24 @@ pub struct FrameTrace {
     /// Identifier of the successful transaction committed by this attempt.
     /// Holds leave this unset.
     pub committed_seq: Option<u64>,
-    /// `None` before the first dispatch and on a capture hold. `PaintRegimeTag`
-    /// has no `Default` on purpose — inventing one would name a regime that
+    /// `None` before the first dispatch and on a capture hold. `RenderStrategy`
+    /// has no `Default` on purpose. A default would name a strategy that
     /// never ran.
-    pub regime: Option<PaintRegimeTag>,
-    /// The regime that actually painted pixels this frame. Equal to `regime`
-    /// except when a `Viewport` blit rejected in-place reuse and fell
-    /// through to a full repaint (`BlitOutcome::FreshFallback`) —
-    /// `plan_frame`'s selection and the executor's actual work diverge, and
-    /// this field names the latter. `None` before the first paint and on a
-    /// capture hold, alongside `regime`.
-    pub effective: Option<PaintRegimeTag>,
+    pub strategy: Option<RenderStrategy>,
+    /// The strategy that painted pixels in this frame. It is equal to
+    /// `strategy` unless a `ScrollBlit` rejects in-place reuse and uses
+    /// `BlitOutcome::FreshFallback`. `None` means that no paint completed.
+    pub effective: Option<RenderStrategy>,
     /// Diagnostic projection of the `PendingWork` snapshot `plan_frame`
-    /// acted on. Included because the regime alone cannot explain itself:
-    /// `SlotsReuse` is the fallthrough arm, so seeing it tells you which
+    /// acted on. The strategy alone cannot explain the decision.
+    /// `ChangedCells` is the fallback arm, so it identifies rejected
     /// arms were *rejected* only once you know which categories carried
     /// work.
     pub work: WorkFlags,
     /// `None` when the grid was not visited this frame.
     pub verdict: Option<GridVerdict>,
     pub outcome: FrameOutcome,
-    /// Set when a `Viewport` frame had to abandon cache shifting and prepare a
+    /// Set when a `ScrollBlit` frame had to abandon cache shifting and prepare a
     /// full-grid replacement on a frame expected to repaint only a strip.
     pub blit_fallback: Option<BlitFallback>,
     /// Cell slots handed to the model, summed over the bundle channels and
@@ -478,7 +477,7 @@ pub struct FrameTrace {
 
 impl fmt::Display for FrameTrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.regime {
+        match self.strategy {
             Some(r) => write!(f, "{r:?}")?,
             None => f.write_str("-")?,
         }
@@ -497,7 +496,7 @@ impl fmt::Display for FrameTrace {
         write!(f, " fetched={}", self.fetched_cell_slots)?;
         // Only printed on divergence (a `FreshFallback`) so the ordinary
         // line stays exactly as short as before this field existed.
-        if self.effective != self.regime {
+        if self.effective != self.strategy {
             match self.effective {
                 Some(e) => write!(f, " eff:{e:?}")?,
                 None => f.write_str(" eff:-")?,
@@ -509,7 +508,7 @@ impl fmt::Display for FrameTrace {
 
 /// Which surfaces `finish_attempt` must flush for a committed
 /// outcome. Grid presentation is tracked explicitly per attempt (an
-/// `Overlay` regime never painted the grid at all; a `SlotsReuse`/`Damage`
+/// `OverlayOnly` never painted the grid. A `ChangedCells` or `DamagedRows`
 /// attempt with a grid-wide fingerprint skip still needs it, since the
 /// prior frame's pixels are already correct on screen and nothing new was
 /// drawn — see each regime helper's own construction site). Overlay
@@ -525,7 +524,7 @@ struct PaintedLayers {
 /// outcome. `Preserve` covers two distinct cases that both mean "do not
 /// touch the field": an `Overlay` attempt never had a candidate to begin
 /// with, and an atomically-held `Fresh` attempt deliberately never took
-/// `last_frame` out of `self` during preparation (see `paint_fresh_regime`)
+/// `last_frame` out of `self` during preparation (see `render_full_rebuild`)
 /// so there is nothing to put back.
 // `Chrome` is large and intentionally carried by value here, matching
 // `chrome::blit`'s own `#[allow(clippy::result_large_err)]` precedent on
@@ -581,7 +580,7 @@ enum PaintOutcome {
         painted_layers: PaintedLayers,
         cache_commit: Option<GridCacheCommit>,
         frame: FrameUpdate,
-        effective: PaintRegimeTag,
+        effective: RenderStrategy,
         outcome: FrameOutcome,
     },
     Held {
@@ -621,7 +620,7 @@ where
     /// construction, owned here (not derived from `last_frame` inline) so a
     /// Fresh candidate can be built via `Chrome::build` without touching
     /// `last_frame`'s own pane_set at all until the candidate is confirmed
-    /// good — see `chrome::recycled_slots`'s module doc. `paint_fresh_regime`
+    /// good — see `chrome::recycled_slots`'s module doc. `render_full_rebuild`
     /// takes this pool's vectors to build, then folds the *outgoing*
     /// committed frame's vectors back in once the candidate has replaced it.
     spare_slots: RecycledSlots,
@@ -642,21 +641,21 @@ where
     /// needs no end-of-paint clearing assignment. Only a regime's own retry
     /// rule merges work back in.
     pending: PendingWork,
-    /// Last regime `paint_if_dirty` dispatched. Stamped from
+    /// Last strategy that `render_pending` dispatched. Stamped from
     /// `FramePlan.selected_strategy` after `plan_frame`, read by the
-    /// recording pipeline via `last_regime()`. `None` before
-    /// the first paint. Plain field — `paint_if_dirty` already holds
+    /// recording pipeline via `last_strategy()`. `None` before
+    /// the first paint. Plain field — `render_pending` already holds
     /// `&mut self`, so no interior mutability is needed.
-    last_regime: Option<PaintRegimeTag>,
-    /// The regime that actually ran, once dispatch may have overridden its
-    /// own selection (see `FrameTrace::effective`). Set to `last_regime`'s
-    /// value at dispatch; `paint_viewport_regime`'s `FreshFallback` arm is
+    last_strategy: Option<RenderStrategy>,
+    /// The strategy that actually ran after dispatch can override its
+    /// own selection (see `FrameTrace::effective`). Set to `last_strategy`'s
+    /// value at dispatch; `render_scroll_blit`'s `FreshFallback` arm is
     /// the only site that overwrites it afterward.
-    last_effective: Option<PaintRegimeTag>,
-    /// Diagnostic projection of the work the last `paint_if_dirty` took.
+    last_effective_strategy: Option<RenderStrategy>,
+    /// Diagnostic projection of the work the last `render_pending` took.
     /// Empty before the first paint.
     last_work_flags: WorkFlags,
-    /// Grid-wide attribution for the last `paint_if_dirty`. Collected by the
+    /// Grid-wide attribution for the last `render_pending`. Collected by the
     /// grid renderer during paint, stamped here after dispatch.
     last_trace: FrameTrace,
     /// Sequence assigned to the current/last non-idle attempt.
@@ -664,7 +663,7 @@ where
     /// Sequence assigned to the last committed transaction.
     commit_seq: u64,
     /// Host-supplied expected-change address for the next paint attempt
-    /// (dev diagnostics only). Latched by `paint_if_dirty` after the
+    /// (dev diagnostics only). Latched by `render_pending` after the
     /// empty-work short circuit and cleared on consumption. Diagnostic
     /// evidence only — never read by classification, planning, or any
     /// prepare/execute path.
@@ -692,8 +691,8 @@ where
             size: CanvasSize { w: 0.0, h: 0.0 },
             last_dpr: None,
             pending: PendingWork::default(),
-            last_regime: None,
-            last_effective: None,
+            last_strategy: None,
+            last_effective_strategy: None,
             last_work_flags: WorkFlags::empty(),
             last_trace: FrameTrace::default(),
             attempt_seq: 0,
@@ -703,7 +702,7 @@ where
         }
     }
 
-    /// Grid-wide attribution for the last `paint_if_dirty`. Its verdict is
+    /// Grid-wide attribution for the last `render_pending`. Its verdict is
     /// `None` before the first paint.
     pub fn last_trace(&self) -> FrameTrace {
         self.last_trace
@@ -732,13 +731,13 @@ where
         self.grid.renderer.last_diag()
     }
 
-    /// Regime stamped by the last `paint_if_dirty`. `None` before the
-    /// first paint. Read by the recording pipeline.
-    pub fn last_regime(&self) -> Option<PaintRegimeTag> {
-        self.last_regime
+    /// Strategy stamped by the last `render_pending` call.
+    /// `None` means that no paint started. The recording pipeline reads it.
+    pub fn last_strategy(&self) -> Option<RenderStrategy> {
+        self.last_strategy
     }
 
-    /// Diagnostic projection of the work the last `paint_if_dirty` acted
+    /// Diagnostic projection of the work the last `render_pending` acted
     /// upon. Empty before the first paint.
     pub fn last_work_flags(&self) -> WorkFlags {
         self.last_work_flags
@@ -746,7 +745,7 @@ where
 
     /// Resize both layers in one call. No public per-layer resize, so
     /// callers can't leave the pair half-sized. Self-invalidating: a real
-    /// size or DPR change forces the next `paint_if_dirty` to `Fresh` — no
+    /// size or DPR change forces the next `render_pending` to `Fresh` — no
     /// caller needs a follow-up `request_repaint()`.
     pub fn resize(&mut self, size: CanvasSize, dpr: f64) {
         if size == self.size && self.last_dpr == Some(dpr) {
@@ -764,7 +763,7 @@ where
     }
 
     /// Conservative repaint blanket. Marks geometry so the next
-    /// `paint_if_dirty` falls to `Fresh` — the cheaper `SlotsReuse` /
+    /// `render_pending` falls to `Fresh` — the cheaper `SlotsReuse` /
     /// `Viewport` arms gate on geometry being clean. Adds geometry plus
     /// overlay work; it never *adds* content work, which is reserved for
     /// real cell-value changes via `mark_content_dirty`.
@@ -902,14 +901,14 @@ where
 
     /// Mark the overlay dirty. Selection, autofill, formula-ref, and
     /// clipboard signals funnel through here; grid escalation on scroll /
-    /// freeze / sheet / size change is owned by `paint_if_dirty` via
+    /// freeze / sheet / size change is owned by `render_pending` via
     /// `Chrome::classify`, not duplicated at the callsite.
     pub fn request_overlay_repaint(&mut self) {
         self.pending.mark_overlay();
     }
 
     /// Typed cell-content-changed signal. Marks all visible content dirty so
-    /// the next `paint_if_dirty` refetches its values from the model via the
+    /// the next `render_pending` refetches its values from the model via the
     /// grid-wide `SlotsReuse` arm —
     /// fixes the recalc bug where a formula dependent on an edited
     /// cell silently kept painting the stale cached value.
@@ -933,8 +932,8 @@ where
     /// primitives, and splitting the two would let a caller queue movement
     /// that never repaints the selection rectangle.
     ///
-    /// Intent only. Whether the movement shifts pixels (`Viewport`), stays
-    /// inside the painted frame (`Overlay`), or needs a rebuild (`Fresh`) is
+    /// Intent only. Whether the movement shifts pixels (`ScrollBlit`), stays
+    /// inside the painted frame (`OverlayOnly`), or needs a rebuild (`FullRebuild`) is
     /// `plan_frame`'s geometric verdict, not the caller's.
     pub fn view_changed(&mut self) {
         self.pending.mark_view();
@@ -972,7 +971,7 @@ where
     }
 
     // Query API. All queries resolve against `last_frame`, the snapshot
-    // emitted by the most recent `paint_if_dirty`. Before the first paint
+    // emitted by the most recent `render_pending`. Before the first paint
     // `last_frame` is `None` and every query returns its absent variant.
 
     pub fn hit_test(&self, x: f64, y: f64) -> HitTest {
@@ -1141,10 +1140,10 @@ where
     /// Paint whichever layers are dirty. Classifies the attempt's geometric
     /// delta via `Chrome::classify`, plans it via `plan_frame` into one
     /// closed `FramePlan`, then dispatches on `plan.grid` into one of five
-    /// named regimes: `Overlay`, `Viewport`, `Damage`, `SlotsReuse`,
-    /// `Fresh`. The `match` is exhaustive — adding a `GridWork` variant
+    /// named strategies: `OverlayOnly`, `ScrollBlit`, `DamagedRows`, `ChangedCells`,
+    /// and `FullRebuild`. The `match` is exhaustive — adding a `GridWork` variant
     /// breaks the build here by design.
-    pub fn paint_if_dirty(&mut self) -> PaintResult {
+    pub fn render_pending(&mut self) -> PaintResult {
         // Model-absent -> return *before* taking. Work queued before the
         // first model push describes cells nothing can paint yet; taking it
         // here would drop it silently and leave the first real frame
@@ -1200,7 +1199,7 @@ where
             Ok(inputs) => inputs,
             Err(failure) => {
                 let flags = work.flags();
-                // Capture failure never reaches a regime at all — no
+                // Capture failure never reaches a strategy — no
                 // candidate geometry, no cache invalidation, no paint — so
                 // it routes through `finish_attempt` as a `Held` outcome
                 // with nothing to install: `frame: FrameUpdate::Preserve`
@@ -1234,7 +1233,7 @@ where
         // before dispatch; the renderer fills the rest during prepare/
         // execute, and its geometry pass reads the probe back to compute
         // containment. The probe is copied here, not consumed: `diag_probe`
-        // is cleared only after a regime outcome exists (below), so a silently
+        // is cleared only after a strategy outcome exists (below), so a silently
         // dropped attempt never loses its attribution without a published
         // snapshot.
         #[cfg(feature = "dev-diagnostics")]
@@ -1244,8 +1243,8 @@ where
         let selected = plan.selected_strategy;
         let work_flags = plan.consumes.flags();
         // The trace was reset before capture so both successful dispatch and
-        // the capture-failure path describe this attempt only. An `Overlay`
-        // regime legitimately leaves the grid verdict `None` — it never
+        // the capture-failure path describe this attempt only. `OverlayOnly`
+        // legitimately leaves the grid verdict `None` — it never
         // calls the grid renderer.
         // `plan.consumes` is the attempt's taken `PendingWork`, owned by the
         // plan; moving it out here (rather than a second borrow of the
@@ -1256,17 +1255,17 @@ where
         let overlay_work = plan.overlay;
         let work = plan.consumes;
         let outcome = match plan.grid {
-            GridWork::None => self.paint_overlay_regime(),
+            GridWork::None => self.render_overlay_only(),
             GridWork::Blit(blit_plan) => {
-                self.paint_viewport_regime(model_dyn, &inputs, blit_plan, work)
+                self.render_scroll_blit(model_dyn, &inputs, blit_plan, work)
             }
-            GridWork::AllContent => self.paint_slots_reuse_regime(model_dyn, &inputs, work),
-            GridWork::Fresh => self.paint_fresh_regime(model_dyn, &inputs, work),
+            GridWork::AllContent => self.render_changed_cells(model_dyn, &inputs, work),
+            GridWork::Fresh => self.render_full_rebuild(model_dyn, &inputs, work),
             GridWork::Rows { sheet, spans } => {
-                self.paint_damage_regime(model_dyn, &inputs, sheet, spans, work)
+                self.render_damaged_rows(model_dyn, &inputs, sheet, spans, work)
             }
         };
-        // Every dispatched regime's own precondition (a `Stable`/`Scroll`
+        // Every dispatched strategy's own precondition (a `Stable`/`Scroll`
         // delta, or `plan_frame`'s `reusable` gate) already proves
         // `last_frame.is_some()` before it takes it — `None` here means
         // that invariant broke, and the defensive fallback is to treat the
@@ -1276,7 +1275,7 @@ where
             self.model = Some(model);
             return PaintResult::Idle;
         };
-        // A regime outcome exists, so `finish_attempt` is about to publish a
+        // A strategy outcome exists, so `finish_attempt` is about to publish a
         // snapshot: consume the probe now so it is attributed to this
         // attempt and cannot leak into the next one.
         #[cfg(feature = "dev-diagnostics")]
@@ -1291,33 +1290,33 @@ where
         });
         let result = self.finish_attempt(Some(selected), work_flags, overlay_ctx, outcome);
 
-        // Restore site for every regime that reached dispatch. The other
+        // Restore site for every strategy that reached dispatch. The other
         // restore site is the capture-failure early return above, which
-        // returns before any regime runs.
+        // returns before any strategy runs.
         self.model = Some(model);
         result
     }
 
     /// The one function that completes a paint attempt. Every
-    /// `paint_*_regime` preparation/execution helper reduces to a
+    /// render preparation and execution helper reduces to a
     /// `PaintOutcome`; this is the completion boundary that advances or
     /// preserves `last_frame`, refreshes and (conditionally) repaints the
     /// overlay against the frame that will be committed, presents whichever
     /// surfaces actually painted, merges retry work back into
     /// `self.pending`, and publishes
-    /// `last_regime`/`last_effective`/`last_work_flags`/`last_trace`. It also
+    /// `last_strategy`/`last_effective_strategy`/`last_work_flags`/`last_trace`.
     /// installs the aggregate cache commit before publishing/presenting the
     /// matching frame.
     ///
     /// `selected` and `work_flags` come from `plan_frame`'s verdict —
     /// known before dispatch, so every outcome (including a `Held` capture
-    /// failure, which never reaches a regime) can still stamp them.
+    /// failure, which never reaches a strategy) can still stamp them.
     /// `overlay_ctx` is `None` only for that capture-failure case: a
     /// `Held` outcome never refreshes overlay state regardless, so the
     /// context simply isn't there to consult on that branch.
     fn finish_attempt(
         &mut self,
-        selected: Option<PaintRegimeTag>,
+        selected: Option<RenderStrategy>,
         work_flags: WorkFlags,
         overlay_ctx: Option<OverlayContext<'_>>,
         outcome: PaintOutcome,
@@ -1337,7 +1336,7 @@ where
                     None,
                     Some(effective),
                     outcome,
-                    PaintResult::Painted,
+                    PaintResult::Rendered,
                 ),
                 PaintOutcome::Held {
                     retry,
@@ -1350,7 +1349,7 @@ where
                     Some(retry),
                     None,
                     outcome,
-                    PaintResult::Retry,
+                    PaintResult::RetryRequired,
                 ),
             };
 
@@ -1429,18 +1428,18 @@ where
             None
         };
 
-        // 5. publish last_regime, last_effective, last_work_flags, and
+        // 5. Publish last_strategy, last_effective_strategy, last_work_flags, and
         //    last_trace — built once here from plan metadata (`selected`/
         //    `work_flags`), the renderer's own prepared-fetch attribution
         //    and grid verdict (`self.grid.renderer.trace()`), and this
         //    outcome's effective strategy/`FrameOutcome`.
-        self.last_regime = selected;
-        self.last_effective = effective;
+        self.last_strategy = selected;
+        self.last_effective_strategy = effective;
         self.last_work_flags = work_flags;
         let mut trace = self.grid.renderer.trace();
         trace.attempt_seq = self.attempt_seq;
         trace.committed_seq = committed_seq;
-        trace.regime = selected;
+        trace.strategy = selected;
         trace.effective = effective;
         trace.work = work_flags;
         trace.outcome = frame_outcome;
@@ -1470,7 +1469,7 @@ where
             },
         });
 
-        // 6. return PaintResult::Painted or PaintResult::Retry.
+        // 6. return PaintResult::Rendered or PaintResult::RetryRequired.
         result
     }
 
@@ -1502,14 +1501,14 @@ where
     /// `FrameUpdate::Preserve` to read `self.last_frame` as it already
     /// stands. `None` is the defensive fallback for `plan_frame`'s own
     /// precondition (a `Stable` delta already implies a committed frame);
-    /// `paint_if_dirty` treats it as a plain Idle, touching no state.
-    fn paint_overlay_regime(&self) -> Option<PaintOutcome> {
+    /// `render_pending` treats it as a plain Idle, touching no state.
+    fn render_overlay_only(&self) -> Option<PaintOutcome> {
         self.last_frame.as_ref()?;
         Some(PaintOutcome::Committed {
             painted_layers: PaintedLayers { grid: false },
             cache_commit: None,
             frame: FrameUpdate::Preserve,
-            effective: PaintRegimeTag::Overlay,
+            effective: RenderStrategy::OverlayOnly,
             outcome: FrameOutcome::Painted,
         })
     }
@@ -1528,10 +1527,10 @@ where
     /// `Err(prev)` arm is the demote-to-`Fresh` path (e.g. a row-header
     /// digit boundary rejects in-place reuse), delegated to
     /// [`Self::paint_fresh_fallback`] — the same atomic-Fresh mechanics
-    /// `paint_fresh_regime` uses, since a `FreshFallback`'s geometry and
+    /// `render_full_rebuild` uses, since a `FreshFallback`'s geometry and
     /// full-canvas background differ from the committed frame exactly like
     /// an ordinary Fresh rebuild's do.
-    fn paint_viewport_regime(
+    fn render_scroll_blit(
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
@@ -1568,7 +1567,7 @@ where
                     painted_layers: PaintedLayers { grid: true },
                     cache_commit: Some(cache_commit),
                     frame: FrameUpdate::Replace(prepared.commit()),
-                    effective: PaintRegimeTag::Viewport,
+                    effective: RenderStrategy::ScrollBlit,
                     outcome: FrameOutcome::Painted,
                 })
             }
@@ -1586,8 +1585,8 @@ where
         }
     }
 
-    /// Shared Fresh-construction tail for `paint_fresh_regime` and
-    /// `paint_viewport_regime`'s `FreshFallback` sub-path: builds a
+    /// Shared full-rebuild construction tail for `render_full_rebuild` and
+    /// `render_scroll_blit`'s `FreshFallback` sub-path. This function builds a
     /// `Fresh`-kind candidate from `self.spare_slots` (never touching
     /// `self.last_frame` — see the module's Stage 4 design doc's Fresh
     /// recipe) and paints the grid atomically. Returns the candidate and its
@@ -1610,7 +1609,7 @@ where
         (frame, cache_commit)
     }
 
-    /// `paint_viewport_regime`'s `Err(prev)` arm: `prepare_blit` rejected
+    /// `render_scroll_blit`'s `Err(prev)` arm: `prepare_blit` rejected
     /// in-place reuse and handed `prev` back whole (never partially
     /// consumed — see `try_blit_reuse`'s doc), so it is still available
     /// here as an ordinary owned value, not something sitting in
@@ -1651,17 +1650,17 @@ where
             painted_layers: PaintedLayers { grid: true },
             cache_commit: Some(cache_commit),
             frame: FrameUpdate::Replace(frame),
-            effective: PaintRegimeTag::Fresh,
+            effective: RenderStrategy::FullRebuild,
             outcome: FrameOutcome::Painted,
         })
     }
 
-    /// Damage regime: slot vecs survive (same preconditions as SlotsReuse),
+    /// Damaged-rows strategy: slot vectors survive as in `ChangedCells`.
     /// prior grid pixels stay, and only damaged bands refetch and repaint.
     /// Preparation collects every required strip before execution; a bridge
     /// failure leaves committed `GridCache` buffers, fingerprints, layout,
     /// and pixels untouched instead of partially splicing them.
-    fn paint_damage_regime(
+    fn render_damaged_rows(
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
@@ -1677,7 +1676,7 @@ where
                 painted_layers: PaintedLayers { grid: true },
                 cache_commit: grid_paint.cache_commit,
                 frame: FrameUpdate::Replace(frame),
-                effective: PaintRegimeTag::Damage,
+                effective: RenderStrategy::DamagedRows,
                 outcome: FrameOutcome::Painted,
             });
         }
@@ -1690,12 +1689,12 @@ where
         })
     }
 
-    /// SlotsReuse regime: prev's slot vecs survive (viewport unchanged).
+    /// Changed-cells strategy: the previous slot vectors survive.
     /// Grid preparation refetches visible content and fingerprint-skips when
     /// it matches the committed `GridCache`. No eager cache invalidation is
     /// needed: the candidate cache commit is installed only after every
     /// segment prepares and the grid transaction executes successfully.
-    fn paint_slots_reuse_regime(
+    fn render_changed_cells(
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
@@ -1710,7 +1709,7 @@ where
                 painted_layers: PaintedLayers { grid: true },
                 cache_commit: grid_paint.cache_commit,
                 frame: FrameUpdate::Replace(frame),
-                effective: PaintRegimeTag::SlotsReuse,
+                effective: RenderStrategy::ChangedCells,
                 outcome: FrameOutcome::Painted,
             });
         }
@@ -1736,7 +1735,7 @@ where
     /// at all, so a held attempt leaves `self.last_frame` exactly as it
     /// was (see `FrameUpdate::Preserve`'s doc); only a committed attempt
     /// folds the outgoing `prev` into the pool, via `install_frame`.
-    fn paint_fresh_regime(
+    fn render_full_rebuild(
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
@@ -1763,7 +1762,7 @@ where
             painted_layers: PaintedLayers { grid: true },
             cache_commit: Some(cache_commit),
             frame: FrameUpdate::Replace(frame),
-            effective: PaintRegimeTag::Fresh,
+            effective: RenderStrategy::FullRebuild,
             outcome: FrameOutcome::Painted,
         })
     }
@@ -1845,7 +1844,7 @@ mod tests {
 /// frame_plan` — the Task 4 brief's exact run command — collects them.
 ///
 /// These are unit tests over the pure `plan_frame` function directly, not
-/// `Orchestrator::paint_if_dirty` — `GridWork`/`OverlayWork`/`FramePlan` are
+/// `Orchestrator::render_pending` — `GridWork`/`OverlayWork`/`FramePlan` are
 /// crate-private, so only a test module nested here (a descendant of
 /// `orchestrator`, hence able to see its private items) can construct and
 /// inspect them. The real-world painter-op consequence of the hot-path case
@@ -1904,14 +1903,14 @@ mod frame_plan_tests {
     /// plan zero grid work, or every arrow-key press regresses to a
     /// full-grid repaint.
     #[test]
-    fn view_and_overlay_stable_selects_overlay_with_no_grid_work() {
+    fn view_and_overlay_stable_selects_overlay_only_with_no_grid_work() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Overlay);
+        assert_eq!(plan.selected_strategy, RenderStrategy::OverlayOnly);
         assert!(
             matches!(plan.grid, GridWork::None),
             "a stable, no-shift view+overlay attempt must plan zero grid work"
@@ -1922,11 +1921,11 @@ mod frame_plan_tests {
     // ── Category: overlay/view only, no content, no geometry ──
 
     #[test]
-    fn overlay_only_stable_selects_overlay() {
+    fn overlay_only_stable_selects_overlay_only() {
         let work = work_with(|w| w.mark_overlay());
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Overlay);
+        assert_eq!(plan.selected_strategy, RenderStrategy::OverlayOnly);
         assert!(matches!(plan.grid, GridWork::None));
     }
 
@@ -1935,27 +1934,27 @@ mod frame_plan_tests {
     /// specifically. Regressing this to require `has_overlay()` too would
     /// turn ordinary arrow-key navigation into a full-grid repaint.
     #[test]
-    fn view_only_no_shift_still_selects_overlay() {
+    fn view_only_no_shift_still_selects_overlay_only() {
         let work = work_with(|w| w.mark_view());
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(
             plan.selected_strategy,
-            PaintRegimeTag::Overlay,
+            RenderStrategy::OverlayOnly,
             "view alone, with no pixel shift, must still fall back to Overlay"
         );
         assert!(matches!(plan.grid, GridWork::None));
     }
 
     #[test]
-    fn view_and_overlay_scroll_selects_viewport() {
+    fn view_and_overlay_scroll_selects_scroll_blit() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
         });
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Viewport);
+        assert_eq!(plan.selected_strategy, RenderStrategy::ScrollBlit);
         assert!(matches!(plan.grid, GridWork::Blit(_)));
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
@@ -1965,27 +1964,27 @@ mod frame_plan_tests {
     /// is also the renderer's own correctness fallback for a host that moved
     /// the view without calling `view_changed`.
     #[test]
-    fn overlay_only_scroll_still_selects_viewport() {
+    fn overlay_only_scroll_still_selects_scroll_blit() {
         let work = work_with(|w| w.mark_overlay());
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
         assert_eq!(
             plan.selected_strategy,
-            PaintRegimeTag::Viewport,
+            RenderStrategy::ScrollBlit,
             "an overlay-only wakeup must still discover a real geometric scroll"
         );
         assert!(matches!(plan.grid, GridWork::Blit(_)));
     }
 
     #[test]
-    fn view_and_overlay_rebuild_selects_fresh() {
+    fn view_and_overlay_rebuild_selects_full_rebuild() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
         });
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
         assert_eq!(plan.overlay, OverlayWork::Paint);
         assert_eq!(plan.rebuild_reason, Some(RebuildReason::Sheet));
@@ -1994,11 +1993,11 @@ mod frame_plan_tests {
     // ── Category: row content only — both row-sheet outcomes ──
 
     #[test]
-    fn row_content_stable_matching_sheet_selects_damage() {
+    fn row_content_stable_matching_sheet_selects_damaged_rows() {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Damage);
+        assert_eq!(plan.selected_strategy, RenderStrategy::DamagedRows);
         let GridWork::Rows { sheet, spans } = plan.grid else {
             panic!("expected GridWork::Rows");
         };
@@ -2007,69 +2006,69 @@ mod frame_plan_tests {
     }
 
     #[test]
-    fn row_content_stable_mismatched_sheet_falls_back_to_slots_reuse_all() {
+    fn row_content_stable_mismatched_sheet_falls_back_to_changed_cells_all() {
         let work = work_with(|w| w.mark_rows(OTHER_SHEET, RowSpan { r1: 2, r2: 4 }));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(
             plan.selected_strategy,
-            PaintRegimeTag::SlotsReuse,
+            RenderStrategy::ChangedCells,
             "row work recorded against a sheet that isn't on screen can't clip to bands"
         );
         assert!(matches!(plan.grid, GridWork::AllContent));
     }
 
     #[test]
-    fn row_content_scroll_selects_fresh() {
+    fn row_content_scroll_selects_full_rebuild() {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
     #[test]
-    fn row_content_rebuild_selects_fresh() {
+    fn row_content_rebuild_selects_full_rebuild() {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
     // ── Category: whole-grid content only ──
 
     #[test]
-    fn all_content_stable_selects_slots_reuse() {
+    fn all_content_stable_selects_changed_cells() {
         let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
+        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
         assert!(matches!(plan.grid, GridWork::AllContent));
     }
 
     #[test]
-    fn all_content_scroll_selects_fresh() {
+    fn all_content_scroll_selects_full_rebuild() {
         let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
     #[test]
-    fn all_content_rebuild_selects_fresh() {
+    fn all_content_rebuild_selects_full_rebuild() {
         let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
     // ── Category: content plus view ──
 
     #[test]
-    fn content_rows_plus_view_stable_selects_damage() {
+    fn content_rows_plus_view_stable_selects_damaged_rows() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
@@ -2077,7 +2076,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Damage);
+        assert_eq!(plan.selected_strategy, RenderStrategy::DamagedRows);
         let GridWork::Rows { sheet, spans } = plan.grid else {
             panic!("expected GridWork::Rows");
         };
@@ -2087,7 +2086,7 @@ mod frame_plan_tests {
     }
 
     #[test]
-    fn all_content_plus_view_stable_selects_slots_reuse() {
+    fn all_content_plus_view_stable_selects_changed_cells() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
@@ -2095,13 +2094,13 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
+        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
         assert!(matches!(plan.grid, GridWork::AllContent));
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 
     #[test]
-    fn content_rows_wrong_sheet_plus_view_stable_selects_slots_reuse_all() {
+    fn content_rows_wrong_sheet_plus_view_stable_selects_changed_cells_all() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
@@ -2109,38 +2108,38 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
+        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
         assert!(matches!(plan.grid, GridWork::AllContent));
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 
     #[test]
-    fn content_plus_view_scroll_selects_fresh() {
+    fn content_plus_view_scroll_selects_full_rebuild() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_all_content();
         });
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
     #[test]
-    fn content_plus_view_rebuild_selects_fresh() {
+    fn content_plus_view_rebuild_selects_full_rebuild() {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_rows(SHEET, RowSpan { r1: 1, r2: 1 });
         });
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
         assert_eq!(plan.rebuild_reason, Some(RebuildReason::Sheet));
     }
 
     #[test]
-    fn geometry_plus_content_view_stable_selects_fresh() {
+    fn geometry_plus_content_view_stable_selects_full_rebuild() {
         let work = work_with(|w| {
             w.mark_geometry();
             w.mark_view();
@@ -2149,27 +2148,27 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
     // ── Category: any geometry — always Fresh, any delta ──
 
     #[test]
-    fn geometry_alone_stable_selects_fresh() {
+    fn geometry_alone_stable_selects_full_rebuild() {
         let work = work_with(|w| w.mark_geometry());
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
     #[test]
-    fn geometry_alone_rebuild_selects_fresh() {
+    fn geometry_alone_rebuild_selects_full_rebuild() {
         let work = work_with(|w| w.mark_geometry());
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2177,7 +2176,7 @@ mod frame_plan_tests {
     /// `geometry_plus_real_scroll_never_dispatches_viewport`: geometry work
     /// concurrent with a real shift must never dispatch `Viewport`.
     #[test]
-    fn geometry_with_everything_else_still_selects_fresh() {
+    fn geometry_with_everything_else_still_selects_full_rebuild() {
         let work = work_with(|w| {
             w.mark_geometry();
             w.mark_view();
@@ -2186,17 +2185,17 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
     }
 
     // ── OverlayWork policy ──
 
     #[test]
-    fn damage_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
+    fn damaged_rows_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 2 }));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Damage);
+        assert_eq!(plan.selected_strategy, RenderStrategy::DamagedRows);
         assert_eq!(
             plan.overlay,
             OverlayWork::Preserve,
@@ -2205,7 +2204,7 @@ mod frame_plan_tests {
     }
 
     #[test]
-    fn damage_paints_overlay_when_selection_is_visible() {
+    fn damaged_rows_paints_overlay_when_selection_is_visible() {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 2 }));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
@@ -2213,16 +2212,16 @@ mod frame_plan_tests {
     }
 
     #[test]
-    fn slots_reuse_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
+    fn changed_cells_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
         let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
+        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
         assert_eq!(plan.overlay, OverlayWork::Preserve);
     }
 
     #[test]
-    fn slots_reuse_paints_overlay_when_overlay_marked_even_with_selection_hidden() {
+    fn changed_cells_paints_overlay_when_overlay_marked_even_with_selection_hidden() {
         let work = work_with(|w| {
             w.mark_all_content();
             w.mark_view();
@@ -2230,7 +2229,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::SlotsReuse);
+        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
         assert_eq!(
             plan.overlay,
             OverlayWork::Paint,
@@ -2239,11 +2238,11 @@ mod frame_plan_tests {
     }
 
     #[test]
-    fn fresh_always_paints_overlay_even_with_selection_hidden() {
+    fn full_rebuild_always_paints_overlay_even_with_selection_hidden() {
         let work = work_with(|w| w.mark_geometry());
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
-        assert_eq!(plan.selected_strategy, PaintRegimeTag::Fresh);
+        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 

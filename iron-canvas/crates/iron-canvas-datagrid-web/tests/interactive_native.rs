@@ -66,7 +66,7 @@ fn scroll_changes_top_painted_row() {
     // setScroll(2, 0) -> 0-based JS, model is 1-based so top_row becomes 3.
     model.borrow_mut_with(|g| g.set_scroll(2 + 1, 0 + 1));
     orch.view_changed();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let texts = grid_texts(&orch);
     assert!(
@@ -87,14 +87,14 @@ fn column_width_widens_following_column() {
     // Baseline x of a known column-1 value.
     let mut base = new_orch(&model);
     base.request_repaint();
-    base.paint_if_dirty();
+    base.render_pending();
     let x_before = text_x(&base, "1").expect("col-1 value must paint at default width");
 
     // setColumnWidth(0, 240.0): 0-based, geometry change -> request_repaint.
     model.borrow_mut_with(|g| g.set_column_width(0, 240.0));
     let mut wide = new_orch(&model);
     wide.request_repaint();
-    wide.paint_if_dirty();
+    wide.render_pending();
     let x_after = text_x(&wide, "1").expect("col-1 value must still paint when col 0 widened");
 
     assert!(
@@ -112,7 +112,7 @@ fn sort_orders_first_painted_data_row() {
 
     model.borrow_mut_with(|g| g.sort_by(0, SortDirection::Ascending));
     orch.mark_content_dirty();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     // First data value among the name column should be alphabetically first.
     let texts = grid_texts(&orch);
@@ -134,16 +134,16 @@ fn idempotent_paint_records_no_new_text() {
     let mut orch = new_orch(&model);
 
     orch.request_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
     let count_first = grid_texts(&orch).len();
 
     // No change -> second paint is a clean no-op (fingerprint skip).
-    orch.paint_if_dirty();
+    orch.render_pending();
     let count_second = grid_texts(&orch).len();
 
     assert_eq!(
         count_first, count_second,
-        "a no-change paint_if_dirty must record zero new FillText ops"
+        "a no-change render_pending must record zero new FillText ops"
     );
 }
 
@@ -153,7 +153,7 @@ fn select_cell_strokes_overlay() {
     model.replace(fruit_grid());
     let mut orch = new_orch(&model);
     orch.request_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     // selectCell(1, 0): 0-based JS -> model active+selection at 1-based (2,1).
     model.borrow_mut_with(|g| {
@@ -161,7 +161,7 @@ fn select_cell_strokes_overlay() {
         g.set_selection(1 + 1, 0 + 1, 1 + 1, 0 + 1);
     });
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let stroked = orch
         .overlay_surface()

@@ -22,7 +22,7 @@ pub fn PerfPanel() -> impl IntoView {
 
     let timing = move || {
         // In / Eval are durations within the cell-commit pipeline.
-        // Draw is the most recent `paintIfDirty()` duration — independent of
+        // Draw is the most recent `renderPending()` duration — independent of
         // commit, so it stays meaningful even when the last action was a
         // scroll, overlay change, or theme flip.
         let commit_start = perf.commit_start.get()?;
