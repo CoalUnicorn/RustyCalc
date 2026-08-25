@@ -215,7 +215,7 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = canvas.setModel(make_scroll_fixture_model(Rc::clone(&top_row))) else {
+    let Ok(()) = canvas.set_model_js(make_scroll_fixture_model(Rc::clone(&top_row))) else {
         panic!("scroll fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);

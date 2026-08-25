@@ -422,7 +422,7 @@ fn canvas_over(store: FixtureStore) -> (IronCanvas, HtmlCanvasElement) {
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = canvas.setModel(make_fixture_model(store)) else {
+    let Ok(()) = canvas.set_model_js(make_fixture_model(store)) else {
         panic!("fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
@@ -467,7 +467,7 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
         panic!("create IronCanvas");
     };
     let (model, controls) = make_scroll_failure_fixture_model(plain_fixture_store(), 1);
-    let Ok(()) = canvas.setModel(model) else {
+    let Ok(()) = canvas.set_model_js(model) else {
         panic!("scroll-failure fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
@@ -519,7 +519,7 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
         panic!("create forced-fresh IronCanvas");
     };
     let (fresh_model, _) = make_scroll_failure_fixture_model(plain_fixture_store(), 2);
-    let Ok(()) = fresh_canvas.setModel(fresh_model) else {
+    let Ok(()) = fresh_canvas.set_model_js(fresh_model) else {
         panic!("forced-fresh fixture model passes the duck test");
     };
     fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
@@ -591,7 +591,7 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
         panic!("create IronCanvas");
     };
     let (model, controls) = make_fresh_failure_fixture_model(plain_fixture_store());
-    let Ok(()) = canvas.setModel(model) else {
+    let Ok(()) = canvas.set_model_js(model) else {
         panic!("fresh-failure fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
@@ -633,7 +633,7 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
     let Ok(mut fresh_canvas) = IronCanvas::create(fresh_grid.clone(), fresh_overlay) else {
         panic!("create forced-fresh IronCanvas");
     };
-    let Ok(()) = fresh_canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+    let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("forced-fresh fixture model passes the duck test");
     };
     fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
@@ -835,7 +835,7 @@ fn resize_self_invalidates_without_explicit_repaint() {
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+    let Ok(()) = canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
     canvas.resize(OLD_W, OLD_H, OLD_DPR);
@@ -849,7 +849,7 @@ fn resize_self_invalidates_without_explicit_repaint() {
     let Ok(mut fresh_canvas) = IronCanvas::create(fresh_grid.clone(), fresh_overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = fresh_canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+    let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
     fresh_canvas.resize(NEW_W, NEW_H, NEW_DPR);
@@ -878,7 +878,7 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+    let Ok(()) = canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
     canvas.resize(W, H, OLD_DPR);
@@ -892,7 +892,7 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
     let Ok(mut fresh_canvas) = IronCanvas::create(fresh_grid.clone(), fresh_overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = fresh_canvas.setModel(make_fixture_model(plain_fixture_store())) else {
+    let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
     fresh_canvas.resize(W, H, NEW_DPR);
@@ -1039,7 +1039,7 @@ fn active_sheet_change_repaints_new_sheets_values_at_identical_coordinates() {
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = canvas.setModel(make_active_sheet_fixture_model(Rc::clone(&active_sheet))) else {
+    let Ok(()) = canvas.set_model_js(make_active_sheet_fixture_model(Rc::clone(&active_sheet))) else {
         panic!("active-sheet fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
@@ -1105,7 +1105,7 @@ fn selected_sheet_bridge_failure_holds_then_recovers_without_another_signal() {
     let Ok(mut canvas) = IronCanvas::create(grid.clone(), overlay) else {
         panic!("create IronCanvas");
     };
-    let Ok(()) = canvas.setModel(make_sheet_throws_once_fixture_model(plain_fixture_store()))
+    let Ok(()) = canvas.set_model_js(make_sheet_throws_once_fixture_model(plain_fixture_store()))
     else {
         panic!("sheet-throws-once fixture model passes the duck test");
     };
@@ -1578,7 +1578,7 @@ fn stage6_canvas_over(
         panic!("create IronCanvas");
     };
     let model = make_scrollable_fixture_model(store, top_row, left_column, tall_row);
-    let Ok(()) = canvas.setModel(model) else {
+    let Ok(()) = canvas.set_model_js(model) else {
         panic!("scrollable fixture model passes the duck test");
     };
     canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);

@@ -112,7 +112,7 @@ from your rAF loop; it skips silently when nothing changed.
 
 | Method | Description |
 | ------ | ----------- |
-| `canvas.set_theme_name(name)` | Switch to a built-in palette: `"light"` or `"dark"`. |
+| `canvas.setThemeName(name)` | Switch to a built-in palette: `"light"` or `"dark"`. |
 | `canvas.setThemeFromElement(el)` | *(wasm32 only)* Read `--palette-*` CSS vars off `el` and apply them. |
 | `canvas.themeChanged()` | Notify that external theme vars changed (e.g. OS dark-mode toggle). Re-reads `--palette-*` and triggers a full repaint. |
 
