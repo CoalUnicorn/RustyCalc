@@ -2,375 +2,123 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <title>iron-canvas web-test</title>
-        <style>
-            body {
-                margin: 0;
-                padding: 16px;
-                font:
-                    14px system-ui,
-                    sans-serif;
-                background: #f7f7f8;
-                color: #222;
-            }
-            h1 {
-                font-size: 16px;
-                margin: 0 0 12px;
-            }
-            #status {
-                margin: 0 0 12px;
-                color: #555;
-            }
-            #status.err {
-                color: #b00020;
-                font-family: ui-monospace, SFMono-Regular, monospace;
-                white-space: pre-wrap;
-            }
-            .stack {
-                position: relative;
-                width: 800px;
-                height: 400px;
-                background: #fff;
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-            }
-            .stack canvas {
-                position: absolute;
-                inset: 0;
-                width: 100%;
-                height: 100%;
-                display: block;
-            }
-            .stack canvas.overlay {
-                pointer-events: none;
-            }
-            #tabs {
-                display: flex;
-                gap: 2px;
-                width: 800px;
-                margin-top: 0;
-                background: #ececef;
-                border-top: 1px solid #d8d8dc;
-                padding: 4px 6px;
-                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-            }
-            #tabs button {
-                font: inherit;
-                padding: 4px 12px;
-                background: #f7f7f8;
-                border: 1px solid #d8d8dc;
-                border-bottom: none;
-                border-radius: 4px 4px 0 0;
-                cursor: pointer;
-                color: #555;
-            }
-            #tabs button.active {
-                background: #fff;
-                color: #111;
-                font-weight: 600;
-            }
-            .hint {
-                margin: 8px 0 0;
-                color: #888;
-                font-size: 12px;
-            }
-        </style>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>iron-canvas browser harness</title>
+        <link rel="stylesheet" href="./harness.css" />
     </head>
     <body>
-        <h1>iron-canvas &mdash; smoke harness</h1>
-        <div id="status">loading wasm…</div>
-        <div class="stack">
-            <canvas id="grid"></canvas>
-            <canvas id="overlay" class="overlay"></canvas>
-        </div>
-        <div id="tabs"></div>
-        <div class="hint">
-            Three sheets are populated at boot. Click a tab to switch the
-            selected sheet — the canvas reads the new view on the next paint.
-            Open DevTools for the bridge snapshot.
-        </div>
-        <p style="margin-top: 12px">
-            <button id="save-svg" type="button">Save as SVG</button>
-            <button id="highlight-a1c5" type="button">Highlight A1:C5</button>
-            <button id="clear-highlight" type="button">Clear highlight</button>
-            <button id="dump-bridge-calls" type="button">Log + reset bridge calls</button>
-            <button id="swap-theme" type="button">Swap workbook theme</button>
-        </p>
+        <main class="harness">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">iron-canvas / web-test</p>
+                    <h1>Browser API harness</h1>
+                </div>
+                <output id="status" class="status loading" role="status" data-testid="status">
+                    Loading WebAssembly…
+                </output>
+            </header>
 
-        <script type="module">
-            import initIronCanvas, {
-                IronCanvas,
-            } from "./vendor/iron-canvas/iron_canvas_web.js";
-            import initIronCalc, { Model } from "./vendor/ironcalc/wasm.js";
+            <section class="workbook-bar" aria-label="Workbook controls">
+                <label for="workbook-select">Workbook</label>
+                <select id="workbook-select" data-testid="workbook-select">
+                    <option value="sample">Generated API sample</option>
+                    <option value="dynamic_arrays">Demo: dynamic arrays</option>
+                    <option value="forensics">Demo: forensics</option>
+                    <option value="sales_dashboard">Demo: sales dashboard</option>
+                </select>
+                <button id="load-workbook" type="button">Load</button>
+                <span id="workbook-source" class="source">Generated in JavaScript</span>
+            </section>
 
-            const statusEl = document.getElementById("status");
-            const tabsEl   = document.getElementById("tabs");
-            const gridEl   = document.getElementById("grid");
-            const overlayEl = document.getElementById("overlay");
+            <div class="workspace">
+                <section class="sheet" aria-label="Rendered spreadsheet">
+                    <div id="canvas-stack" class="canvas-stack" data-testid="canvas-stack">
+                        <canvas id="grid" aria-label="Spreadsheet grid"></canvas>
+                        <canvas id="overlay" class="overlay" aria-hidden="true"></canvas>
+                    </div>
+                    <nav id="tabs" class="tabs" aria-label="Worksheets"></nav>
+                    <div class="canvas-footer">
+                        <output id="cursor-readout" class="cursor-readout">
+                            Move over the grid to inspect hitTest()
+                        </output>
+                        <output id="frame-trace" class="frame-trace">No frame trace yet</output>
+                    </div>
+                </section>
 
-            const setStatus = (msg) => {
-                statusEl.className = "";
-                statusEl.textContent = msg;
-            };
-            const setError = (msg) => {
-                statusEl.className = "err";
-                statusEl.textContent = msg;
-            };
+                <aside class="inspector" aria-label="API inspector">
+                    <section class="panel checks-panel">
+                        <div class="panel-heading">
+                            <div>
+                                <p class="eyebrow">Automation</p>
+                                <h2>API checks</h2>
+                            </div>
+                            <button id="run-checks" class="primary" type="button" data-testid="run-checks">
+                                Run checks
+                            </button>
+                        </div>
+                        <p class="panel-copy">
+                            Runs against this visible canvas. Add <code>?autorun=1</code>
+                            for WebDriver or CI.
+                        </p>
+                        <ol id="check-results" class="check-results" data-testid="check-results"></ol>
+                    </section>
 
-            let phase = "init wasm";
-            try {
-                await Promise.all([initIronCanvas(), initIronCalc()]);
+                    <section class="panel">
+                        <p class="eyebrow">Manual inspection</p>
+                        <h2>Column sizing</h2>
+                        <p class="panel-copy">
+                            Measure the workbook's used rows through <code>autofit.rs</code>,
+                            apply the returned CSS-pixel widths, and repaint.
+                        </p>
+                        <button
+                            id="autofit-columns"
+                            class="wide-action"
+                            type="button"
+                            data-testid="autofit-columns"
+                        >
+                            Autofit workbook columns
+                        </button>
+                        <output id="autofit-result" class="autofit-result" data-testid="autofit-result">
+                            Original workbook widths are unchanged
+                        </output>
+                    </section>
 
-                phase = "new Model";
-                const model = new Model("Workbook", "en", "UTC", "en");
+                    <section class="panel">
+                        <p class="eyebrow">Manual inspection</p>
+                        <h2>Overlays</h2>
+                        <div class="button-grid">
+                            <button id="point-range" type="button">Point A1:C5</button>
+                            <button id="clipboard" type="button">Clipboard B2:D4</button>
+                            <button id="formula-refs" type="button">Formula refs</button>
+                            <button id="clear-overlays" type="button">Clear</button>
+                        </div>
+                    </section>
 
-                phase = "populate sheets";
-                // Sheet 0 already exists; rename it and add cells.
-                model.renameSheet(0, "Numbers");
-                model.setUserInput(0, 1, 1, "1");
-                model.setUserInput(0, 2, 1, "2");
-                model.setUserInput(0, 3, 1, "3");
-                model.setUserInput(0, 1, 2, "=A1+10");
-                model.setUserInput(0, 2, 2, "=A2+10");
-                model.setUserInput(0, 3, 2, "=A3+10");
+                    <section class="panel">
+                        <p class="eyebrow">Rendering</p>
+                        <h2>Theme and output</h2>
+                        <div class="button-grid">
+                            <button id="theme-light" type="button">Light</button>
+                            <button id="theme-dark" type="button">Dark</button>
+                            <button id="swap-workbook-theme" type="button">Swap accent</button>
+                            <button id="save-svg" type="button">Save SVG</button>
+                        </div>
+                    </section>
 
-                model.newSheet();
-                model.renameSheet(1, "Text");
-                model.setUserInput(1, 1, 1, "hello");
-                model.setUserInput(1, 2, 1, "world");
-                model.setUserInput(1, 1, 2, "iron-canvas");
+                    <section class="panel bridge-panel">
+                        <div class="panel-heading">
+                            <div>
+                                <p class="eyebrow">Model bridge</p>
+                                <h2>Crossings</h2>
+                            </div>
+                            <button id="reset-bridge" type="button">Reset</button>
+                        </div>
+                        <dl id="bridge-counts" class="bridge-counts"></dl>
+                    </section>
+                </aside>
+            </div>
+        </main>
 
-                model.newSheet();
-                model.renameSheet(2, "Math");
-                model.setUserInput(2, 1, 1, "3.14159");
-                model.setUserInput(2, 2, 1, "2.71828");
-                model.setUserInput(2, 3, 1, "=A1*A2");
-
-                // Theme-colored fills on Numbers!C1:D3 — exercises the
-                // Color::Theme path end-to-end. "[4, 0]" = slot 4 (accent1);
-                // the second column gets a 0.4 tint of the same slot.
-                model.updateRangeStyle(
-                    { sheet: 0, row: 1, column: 3, width: 1, height: 3 },
-                    "fill.color", "[4, 0]");
-                model.updateRangeStyle(
-                    { sheet: 0, row: 1, column: 4, width: 1, height: 3 },
-                    "fill.color", "[4, 0.4]");
-
-                // ----------------------------------------------------------------
-                // Phase 4: batched `*In` host methods + bridge-call instrumentation
-                // ----------------------------------------------------------------
-                // iron-canvas probes these three names once (D-1). When present,
-                // a pane fetch collapses from N per-cell crossings to one. We
-                // build each batch by looping the *original* per-cell accessor,
-                // so the array is byte-identical (incl. dxf-merge) to what the
-                // per-cell path returns — the parity contract holds by
-                // construction. Blank cells return a valid default object/""/kind,
-                // never null, matching the per-cell path the bridge falls back to.
-                // Note: the loop below still runs per-cell *inside JS*, so this
-                // demo shrinks the wasm<->JS boundary (the costly hop the counter
-                // measures), not JS->engine calls; a real host would issue a
-                // native range query that batches those too.
-                const bridgeCalls = {
-                    getCellStyle: 0,
-                    getCellType: 0,
-                    getFormattedCellValue: 0,
-                    getCellStylesIn: 0,
-                    getFormattedCellValuesIn: 0,
-                    getCellTypesIn: 0,
-                };
-                window.__bridgeCalls = bridgeCalls;
-
-                // Bind the originals before shadowing, so the counted wrappers
-                // (and the dense builders) call the real wasm method with the
-                // correct `this`. The dense builders use these originals so a
-                // batched call counts as ONE host crossing, not N.
-                const rawStyle = model.getCellStyle.bind(model);
-                const rawType = model.getCellType.bind(model);
-                const rawValue = model.getFormattedCellValue.bind(model);
-
-                // Count every per-cell crossing the bridge makes. Once the `*In`
-                // methods exist these should sit near zero during bulk paints —
-                // that gap IS the win, made visible.
-                model.getCellStyle = (s, r, c) => {
-                    bridgeCalls.getCellStyle++;
-                    return rawStyle(s, r, c);
-                };
-                model.getCellType = (s, r, c) => {
-                    bridgeCalls.getCellType++;
-                    return rawType(s, r, c);
-                };
-                model.getFormattedCellValue = (s, r, c) => {
-                    bridgeCalls.getFormattedCellValue++;
-                    return rawValue(s, r, c);
-                };
-
-                // Dense, row-major: out[(r-r1)*cols + (c-c1)]. The bridge's D-2
-                // gate rejects any wrong-length or null-bearing array, so we
-                // emit exactly (r2-r1+1)*(c2-c1+1) non-null elements.
-                const denseRowMajor = (r1, c1, r2, c2, fetch) => {
-                    const out = [];
-                    for (let r = r1; r <= r2; r++) {
-                        for (let c = c1; c <= c2; c++) {
-                            out.push(fetch(r, c));
-                        }
-                    }
-                    return out;
-                };
-                model.getCellStylesIn = (s, r1, c1, r2, c2) => {
-                    bridgeCalls.getCellStylesIn++;
-                    return denseRowMajor(r1, c1, r2, c2, (r, c) => rawStyle(s, r, c));
-                };
-                model.getFormattedCellValuesIn = (s, r1, c1, r2, c2) => {
-                    bridgeCalls.getFormattedCellValuesIn++;
-                    return denseRowMajor(r1, c1, r2, c2, (r, c) => rawValue(s, r, c));
-                };
-                model.getCellTypesIn = (s, r1, c1, r2, c2) => {
-                    bridgeCalls.getCellTypesIn++;
-                    return denseRowMajor(r1, c1, r2, c2, (r, c) => rawType(s, r, c));
-                };
-
-                phase = "IronCanvas.create";
-                const canvas = IronCanvas.create(gridEl, overlayEl);
-                phase = "setModel";
-                canvas.setModel(model);
-                phase = "resize";
-                canvas.resize(800, 400, window.devicePixelRatio || 1);
-
-                phase = "wire font-load invalidation";
-                document.fonts.addEventListener("loadingdone", () => { canvas.fontsChanged(); });
-
-                phase = "bridge snapshot";
-                console.log("bridge snapshot", {
-                    selectedView: model.getSelectedView(),
-                    styleA1: model.getCellStyle(0, 1, 1),
-                    typeA1: model.getCellType(0, 1, 1),
-                    formattedB1Numbers: model.getFormattedCellValue(0, 1, 2),
-                    rowHeight1: model.getRowHeight(0, 1),
-                    colWidth1: model.getColumnWidth(0, 1),
-                    frozenRows: model.getFrozenRowsCount(0),
-                    frozenCols: model.getFrozenColumnsCount(0),
-                    gridLines: model.getShowGridLines(0),
-                    worksheets: model.getWorksheetsProperties(),
-                });
-
-                phase = "render tabs";
-                const sheets = model.getWorksheetsProperties();
-                const renderTabs = () => {
-                    const active = model.getSelectedSheet();
-                    tabsEl.innerHTML = "";
-                    sheets.forEach((props, idx) => {
-                        const btn = document.createElement("button");
-                        btn.textContent = props.name;
-                        if (idx === active) btn.classList.add("active");
-                        btn.addEventListener("click", () => {
-                            model.setSelectedSheet(idx);
-                            canvas.viewChanged();
-                            renderTabs();
-                        });
-                        tabsEl.appendChild(btn);
-                    });
-                };
-                renderTabs();
-
-                phase = "wire save-svg";
-                document
-                    .getElementById("save-svg")
-                    .addEventListener("click", () => {
-                        const svg = canvas.exportSvg(800, 400);
-                        const blob = new Blob([svg], {
-                            type: "image/svg+xml",
-                        });
-                        const url = URL.createObjectURL(blob);
-                        const a = Object.assign(
-                            document.createElement("a"),
-                            { href: url, download: "sheet.svg" },
-                        );
-                        document.body.appendChild(a);
-                        a.click();
-                        a.remove();
-                        URL.revokeObjectURL(url);
-                    });
-
-                phase = "wire setPointRange demo";
-                document
-                    .getElementById("highlight-a1c5")
-                    .addEventListener("click", () => {
-                        canvas.setPointRange({ r1: 1, c1: 1, r2: 5, c2: 3 });
-                        canvas.requestOverlayRepaint();
-                    });
-                document
-                    .getElementById("clear-highlight")
-                    .addEventListener("click", () => {
-                        canvas.setPointRange(null);
-                        canvas.requestOverlayRepaint();
-                    });
-
-                phase = "wire bridge-call counter";
-                // Phase 4 verification surface. Click after a scroll/repaint:
-                // the per-cell counts should be ~0 and the `*In` counts a small
-                // constant (one per pane per pass), proving the O(cells)→O(1)
-                // collapse. Resets so each click measures a fresh interval.
-                document
-                    .getElementById("dump-bridge-calls")
-                    .addEventListener("click", () => {
-                        console.table({ ...bridgeCalls });
-                        for (const k of Object.keys(bridgeCalls)) bridgeCalls[k] = 0;
-                    });
-
-                phase = "wire theme swap";
-                // Workbook-theme refresh contract: mutate the theme on the
-                // model, then tell the canvas — themeChanged() drops the
-                // bridge's cached theme and marks content dirty, so the next
-                // paintIfDirty repaints from fresh fetches. The accent1 fills
-                // in Numbers!C1:D3 must flip color on every click; if they
-                // don't, the cache invalidation path is broken.
-                let accentSwapped = false;
-                document
-                    .getElementById("swap-theme")
-                    .addEventListener("click", () => {
-                        const theme = model.getTheme();
-                        theme.accent1 = accentSwapped ? "#4472C4" : "#E91E63";
-                        accentSwapped = !accentSwapped;
-                        model.setTheme(theme);
-                        canvas.themeChanged();
-                    });
-
-                phase = "wire hitTest demo";
-                // Phase 1 JS-API parity demo. Throttle to once per frame so
-                // the console doesn't drown; log only when the resolved
-                // variant changes (kind+row+column) — every cell drag would
-                // otherwise spam thousands of identical "cell" entries.
-                let lastHit = "";
-                gridEl.addEventListener("mousemove", (ev) => {
-                    const r = gridEl.getBoundingClientRect();
-                    const hit = canvas.hitTest(ev.clientX - r.left, ev.clientY - r.top);
-                    const key = JSON.stringify(hit);
-                    if (key !== lastHit) {
-                        lastHit = key;
-                        console.log("hitTest", hit);
-                    }
-                });
-
-                phase = "paint loop";
-                canvas.requestRepaint();
-                const loop = () => {
-                    canvas.paintIfDirty();
-                    requestAnimationFrame(loop);
-                };
-                requestAnimationFrame(loop);
-
-                setStatus(
-                    "ready — three sheets populated. Click a tab to switch.",
-                );
-            } catch (e) {
-                const detail =
-                    e instanceof Error
-                        ? e.stack || e.message
-                        : typeof e === "object" && e !== null
-                          ? JSON.stringify(e, Object.getOwnPropertyNames(e), 2)
-                          : String(e);
-                console.error("[" + phase + "]", e);
-                setError("[" + phase + "] " + detail);
-            }
-        </script>
+        <script type="module" src="./harness.js"></script>
     </body>
 </html>

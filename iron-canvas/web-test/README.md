@@ -1,13 +1,13 @@
 # web-test
 
-Manual smoke harness for iron-canvas. Two standalone HTML pages, vanilla
-JS, no framework, no bundler.
+Browser harnesses for iron-canvas. They use vanilla JavaScript with no
+framework or bundler.
 
 | Page                    | Purpose                                                                                          |
 | ----------------------- | ------------------------------------------------------------------------------------------------ |
-| `index.html`            | Paints a three-sheet workbook through the real iron-canvas pipeline. Console-logs a snapshot of every `JsBackedModel` bridge round-trip on first paint. Has a **Save as SVG** button that calls `canvas.exportSvg(800, 400)` and downloads `sheet.svg`. |
+| `index.html`            | Interactive and automatable `IronCanvas` JS API harness. Exercises queries, core column autofit, overlays, themes, SVG export, bulk bridge fetches, workbook/sheet switching, and the real two-canvas paint path. Loads the generated sample or a workbook from `demo/`. |
 | `recording-viewer.html` | Standalone `.icr` viewer. Drag-drop a recording file (or use the file picker) and the page replays it onto a single 2D canvas via a JS mirror of `iron_canvas_recorder::replay`. Compression is intentionally not handled (deferred to `RECORDING_PLAN.md` Phase 3). Fixtures live in `crates/iron-canvas-recorder/tests/fixtures/`. |
-| `datagrid.html`         | Standalone vanilla-JS demo of the engine-agnostic `iron-canvas-datagrid-web` bundle (`DataGridCanvas`). Exercises the full interactive API: scroll, header-sort, cell-select, column-resize-drag, SVG export, append/live rows, light/dark theme, and the optional frozen header. Build + serve with `make datagrid-serve` (no IronCalc vendor needed) and open `/datagrid.html`. Plain `make serve` also works but additionally requires the IronCalc + iron-canvas vendor (its `sync` step pulls all three bundles). |
+| `datagrid.html`         | Standalone vanilla-JS demo of the engine-agnostic `iron-canvas-datagrid-web` bundle (`DataGridCanvas`). Exercises the full interactive API: scroll, header-sort, cell-select, column-resize-drag, SVG export, append/live rows, light/dark theme, and the optional frozen header. Build + serve with `make datagrid-serve` (no IronCalc vendor needed) and open `/datagrid.html`. `make serve` can host it only when `vendor/iron-canvas-datagrid/` was populated by an earlier `make datagrid`. |
 
 Open: <http://localhost:8000/index.html> · <http://localhost:8000/recording-viewer.html> · <http://localhost:8000/datagrid.html>
 
@@ -30,15 +30,67 @@ cd - && make sync
 ## Workflow
 
 ```sh
-# Build iron-canvas-web wasm, then copy it + IronCalc into vendor/.
+# Build iron-canvas-web wasm.
+make build
+
+# Convert demo/*.xlsx to browser-loadable .ic files and copy the two wasm
+# packages into vendor/.
 make sync
 
 # python3 -m http.server on $(PORT), default 8000.
 make serve
 
-# Remove vendor/iron-canvas and vendor/ironcalc.
+# JavaScript helper tests (no browser required).
+make check
+
+# Start an isolated server + ChromeDriver and run the visible harness checks.
+make browser-test
+
+# Run the same browser checks against every workbook in demo/.
+make browser-test-all
+
+# Remove vendored packages and generated demo/*.ic files.
 make clean
 ```
+
+## Spreadsheet demos
+
+The IronCalc JavaScript package contains the calculation engine but not the
+`.xlsx` reader. `make demos` uses IronCalc's existing `xlsx_2_icalc` binary to
+convert each tracked `demo/*.xlsx` source into an ignored `demo/*.ic` browser
+artifact. `Model.from_bytes(...)` loads that artifact without adding another
+wasm bundle or a server-side import endpoint.
+
+Choose a demo from the workbook selector in `index.html`. `make sync` and
+`make serve` depend on `make demos`, so the browser files stay in sync with
+their spreadsheet sources. A rebuilt IronCalc wasm package also invalidates
+the derived files, preventing the reader/converter bitcode schemas from
+silently drifting apart.
+
+## Browser automation
+
+The harness installs `window.ironCanvasHarness`:
+
+```js
+await window.ironCanvasHarness.ready;
+await window.ironCanvasHarness.loadWorkbook("dynamic_arrays");
+const sizing = await window.ironCanvasHarness.autofitColumns();
+const report = await window.ironCanvasHarness.runChecks();
+```
+
+`report` is JSON-serializable and contains `passed`, `failed`, and the result
+of every check. Stable `data-testid` attributes are also present for UI-driven
+tools. Open `index.html?workbook=forensics&autorun=1` to load a demo and run
+the same checks automatically while leaving their results visible for a human.
+The forensics check preserves its intentionally narrow imported A:E widths as
+the baseline, then requires `fitColumnWidth` to widen several columns after the
+host applies the measured values through IronCalc's `setColumnsWidth`.
+
+`make browser-test` drives this contract through headless Chromium using the
+standard WebDriver protocol; it has no npm dependencies. It defaults to
+`dynamic_arrays`; use `make browser-test WORKBOOK=forensics` for one named demo
+or `make browser-test-all` for all three. Override `PORT` or `WEBDRIVER_PORT`
+when those defaults are already in use.
 
 `make build` always passes `--no-opt` to `wasm-pack` — wasm-opt
 roughly doubles the build time for no visible benefit at this scale,

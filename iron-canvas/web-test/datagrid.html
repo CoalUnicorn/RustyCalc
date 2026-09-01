@@ -324,7 +324,7 @@
                 // --- paint loop ---
                 phase = "paint loop";
                 const loop = () => {
-                    canvas.paintIfDirty();
+                    canvas.renderPending();
                     requestAnimationFrame(loop);
                 };
                 requestAnimationFrame(loop);
