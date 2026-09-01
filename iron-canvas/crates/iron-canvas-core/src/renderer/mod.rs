@@ -95,9 +95,17 @@ pub(crate) use crate::renderer::prepared::GridCacheCommit;
 use crate::renderer::prepared::{FetchedCells, PreparedGrid};
 use crate::types::coord::RCRange;
 
-pub(crate) struct PreparedGridPaint {
-    pub(crate) held: bool,
-    pub(crate) cache_commit: Option<GridCacheCommit>,
+// The successful arm deliberately owns the fixed-size cache commit; boxing
+// it would add one allocation to every retained-paint frame.
+#[must_use]
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum GridPaintOutcome {
+    /// The grid executed; owns the aggregate cache commit for the
+    /// completion boundary to install.
+    Committed(GridCacheCommit),
+    /// A bridge failure held the whole grid before any paint or cache
+    /// mutation; no commit exists.
+    Held,
 }
 
 /// Which header strips a grid execution repaints. A scroll blit shifts only
@@ -276,11 +284,13 @@ impl<P: Painter> RendererCore<P> {
     /// attempt completed (including a fingerprint skip) and any owned cache
     /// commit was installed.
     pub fn render_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> bool {
-        let result = self.execute_grid(model, frame);
-        if let Some(commit) = result.cache_commit {
-            self.commit_grid_cache(commit);
+        match self.execute_grid(model, frame) {
+            GridPaintOutcome::Committed(commit) => {
+                self.commit_grid_cache(commit);
+                false
+            }
+            GridPaintOutcome::Held => true,
         }
-        result.held
     }
 
     /// The grid group sequence every strategy shares:
@@ -329,24 +339,14 @@ impl<P: Painter> RendererCore<P> {
         cells
     }
 
-    pub(crate) fn execute_grid(
-        &self,
-        model: &dyn CanvasModel,
-        frame: &Chrome,
-    ) -> PreparedGridPaint {
+    pub(crate) fn execute_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> GridPaintOutcome {
         let Some(prepared) = self.prepare_full_grid(model, frame) else {
-            return PreparedGridPaint {
-                held: true,
-                cache_commit: None,
-            };
+            return GridPaintOutcome::Held;
         };
         let commit = self.execute_grid_shell(model, frame, GridHeaderScope::Both, || {
             self.execute_prepared_grid(frame, prepared)
         });
-        PreparedGridPaint {
-            held: false,
-            cache_commit: Some(commit),
-        }
+        GridPaintOutcome::Committed(commit)
     }
 
     /// Preflight every grid segment for a Fresh frame without touching the
@@ -401,11 +401,13 @@ impl<P: Painter> RendererCore<P> {
         frame: &Chrome,
         spans: &[RowSpan],
     ) -> bool {
-        let result = self.execute_grid_damage(model, frame, spans);
-        if let Some(commit) = result.cache_commit {
-            self.commit_grid_cache(commit);
+        match self.execute_grid_damage(model, frame, spans) {
+            GridPaintOutcome::Committed(commit) => {
+                self.commit_grid_cache(commit);
+                false
+            }
+            GridPaintOutcome::Held => true,
         }
-        result.held
     }
 
     pub(crate) fn execute_grid_damage(
@@ -413,20 +415,14 @@ impl<P: Painter> RendererCore<P> {
         model: &dyn CanvasModel,
         frame: &Chrome,
         spans: &[RowSpan],
-    ) -> PreparedGridPaint {
+    ) -> GridPaintOutcome {
         let Some(prepared) = self.prepare_damage_grid(model, frame, spans) else {
-            return PreparedGridPaint {
-                held: true,
-                cache_commit: None,
-            };
+            return GridPaintOutcome::Held;
         };
         let commit = self.execute_grid_shell(model, frame, GridHeaderScope::Both, || {
             self.execute_prepared_grid(frame, prepared)
         });
-        PreparedGridPaint {
-            held: false,
-            cache_commit: Some(commit),
-        }
+        GridPaintOutcome::Committed(commit)
     }
 
     /// Paint the header corner box, gated for *correctness*: at thickness 0 it
@@ -469,11 +465,13 @@ impl<P: BlitPainter> RendererCore<P> {
         frame: &Chrome,
         plan: &BlitPlan,
     ) -> bool {
-        let Some(cache_commit) = self.execute_grid_blit(model, frame, plan) else {
-            return true;
-        };
-        self.commit_grid_cache(cache_commit);
-        false
+        match self.execute_grid_blit(model, frame, plan) {
+            GridPaintOutcome::Committed(cache_commit) => {
+                self.commit_grid_cache(cache_commit);
+                false
+            }
+            GridPaintOutcome::Held => true,
+        }
     }
 
     pub(crate) fn execute_grid_blit(
@@ -481,8 +479,10 @@ impl<P: BlitPainter> RendererCore<P> {
         model: &dyn CanvasModel,
         frame: &Chrome,
         plan: &BlitPlan,
-    ) -> Option<GridCacheCommit> {
-        let prepared = self.prepare_blit_grid(model, frame, plan)?;
+    ) -> GridPaintOutcome {
+        let Some(prepared) = self.prepare_blit_grid(model, frame, plan) else {
+            return GridPaintOutcome::Held;
+        };
         let is_shift = matches!(&prepared, PreparedGrid::Blit { .. });
 
         // The shifts stay ahead of the shell: a held attempt must move zero
@@ -500,7 +500,7 @@ impl<P: BlitPainter> RendererCore<P> {
         let cache_commit = self.execute_grid_shell(model, frame, headers, || {
             self.execute_prepared_grid(frame, prepared)
         });
-        Some(cache_commit)
+        GridPaintOutcome::Committed(cache_commit)
     }
 }
 
@@ -531,11 +531,7 @@ impl<P: Painter> GridRenderer<P> {
         self.core.render_grid(model, frame)
     }
 
-    pub(crate) fn execute_grid(
-        &self,
-        model: &dyn CanvasModel,
-        frame: &Chrome,
-    ) -> PreparedGridPaint {
+    pub(crate) fn execute_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> GridPaintOutcome {
         self.core.execute_grid(model, frame)
     }
 
@@ -553,7 +549,7 @@ impl<P: Painter> GridRenderer<P> {
         model: &dyn CanvasModel,
         frame: &Chrome,
         spans: &[RowSpan],
-    ) -> PreparedGridPaint {
+    ) -> GridPaintOutcome {
         self.core.execute_grid_damage(model, frame, spans)
     }
 
@@ -668,7 +664,7 @@ impl<P: BlitPainter> GridRenderer<P> {
         model: &dyn CanvasModel,
         frame: &Chrome,
         plan: &BlitPlan,
-    ) -> Option<GridCacheCommit> {
+    ) -> GridPaintOutcome {
         self.core.execute_grid_blit(model, frame, plan)
     }
 

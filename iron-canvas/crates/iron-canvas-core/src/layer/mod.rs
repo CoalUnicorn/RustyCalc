@@ -22,9 +22,7 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::painter::{BlitPainter, GroupClass, PaintColor, Painter};
 use crate::pending_work::RowSpan;
-use crate::renderer::{
-    GridCacheCommit, GridRenderer, LayerOps, OverlayRenderer, PreparedGridPaint,
-};
+use crate::renderer::{GridCacheCommit, GridPaintOutcome, GridRenderer, LayerOps, OverlayRenderer};
 
 /// Drawing target abstraction. Production wasm holds one Surface per
 /// `<canvas>` (grid + overlay); a Cairo backend would hold one per
@@ -106,17 +104,6 @@ fn full_canvas_rect(size: CanvasSize) -> PixelRect {
     }
 }
 
-/// Outcome of the blit grid paint. `Held` = the preflight aborted before
-/// any pixel shifted; the caller must not present or commit the frame.
-#[must_use]
-// The successful arm deliberately owns the fixed-size cache commit across the
-// layer boundary. Boxing it would add one allocation to every viewport blit.
-#[allow(clippy::large_enum_variant)]
-pub(crate) enum BlitPaint {
-    Painted(GridCacheCommit),
-    Held,
-}
-
 // Grid-layer specialization. Lives here, not on `GridRenderer<P>`, because the
 // full-canvas bg fill is the *surface's* concern — the renderer paints cells
 // and chrome through the painter, but the layer-wide clear is a once-per-frame
@@ -126,19 +113,19 @@ where
     S: Surface,
     S::P: BlitPainter,
 {
-    /// SlotsReuse grid paint: prior frame's pixels stay, so fingerprint
-    /// fingerprint-skip wins are preserved and no full-canvas bg fill runs.
+    /// SlotsReuse grid paint: prior frame's pixels stay, so fingerprint-skip
+    /// wins are preserved and no full-canvas background fill runs.
     /// Only ever called with a `SlotsReused`/`Blitted`-kind `frame` — see
     /// [`Self::paint_grid_fresh`] for the atomic `Fresh` counterpart, which
     /// cannot share this method's retained-pixel shape (the bg fill
     /// alone would already be an observable op on a would-be-held attempt).
     ///
-    /// Returns the grid-wide held verdict from `render_grid` — see its doc.
+    /// Returns the grid-wide committed or held outcome.
     pub(crate) fn paint_grid(
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome,
-    ) -> PreparedGridPaint {
+    ) -> GridPaintOutcome {
         self.renderer.execute_grid(model, frame)
     }
 
@@ -146,9 +133,8 @@ where
     /// bulk fetch and bridge-check only, zero painter interaction — and
     /// only once every one is confirmed clean does anything reach the
     /// painter at all, including the paint-cache invalidation and the
-    /// full-canvas background fill. Returns `true` (held) with the painter
-    /// completely untouched by this call on any segment's bridge failure —
-    /// not even a group bracket — `false` once the frame actually painted.
+    /// full-canvas background fill. A held outcome leaves the painter
+    /// untouched, including group brackets.
     ///
     /// Order on the healthy path (invalidate, then bg fill, then cells)
     /// matches what the pre-Stage-4 unconditional call sequence produced,
@@ -157,21 +143,23 @@ where
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome,
-    ) -> Option<GridCacheCommit> {
-        let prepared = self.renderer.prepare_fresh_grid(model, frame)?;
+    ) -> GridPaintOutcome {
+        let Some(prepared) = self.renderer.prepare_fresh_grid(model, frame) else {
+            return GridPaintOutcome::Held;
+        };
         self.renderer.invalidate_paint_cache();
         self.surface.painter().rect_fill(
             full_canvas_rect(frame.canvas_size),
             PaintColor::from_theme_str(&frame.theme.cell_bg),
         );
-        Some(self.renderer.execute_fresh_grid(model, frame, prepared))
+        GridPaintOutcome::Committed(self.renderer.execute_fresh_grid(model, frame, prepared))
     }
 
     /// Scroll-blit grid paint: `RendererCore::render_grid_blit` prepares
     /// every required address strip (fetching and bridge-validating all of
-    /// them BEFORE a single pixel moves), performs `BlitPlan::shift`, and
+    /// them before a single pixel moves), performs `BlitPlan::shift`, and
     /// paints the revealed strip, all in that one call. If any required
-    /// required fetch fails, the whole frame is abandoned as a no-op: no
+    /// fetch fails, the whole frame is abandoned as a no-op: no
     /// shift, no paint — the renderer never gets far enough to call
     /// `Painter::blit`. This is deliberate and minimal — shifting pixels and
     /// then discovering the fetch failed is the bug being fixed (it strands
@@ -179,29 +167,26 @@ where
     /// repaint is intentionally NOT attempted here; a future frame
     /// reconciles once the bridge recovers via the normal frame-kind
     /// dispatch, so a reader should not "upgrade" the returned
-    /// `BlitPaint::Held` without re-deriving why it is sufficient.
+    /// `GridPaintOutcome::Held` without re-deriving why it is sufficient.
     pub(crate) fn paint_grid_blit(
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome,
         plan: &BlitPlan,
-    ) -> BlitPaint {
-        match self.renderer.execute_grid_blit(model, frame, plan) {
-            Some(cache_commit) => BlitPaint::Painted(cache_commit),
-            None => BlitPaint::Held,
-        }
+    ) -> GridPaintOutcome {
+        self.renderer.execute_grid_blit(model, frame, plan)
     }
 
     /// Damage grid paint: prior pixels stay; only the damaged full-width
     /// row bands refetch and repaint. No full-canvas bg fill by design.
     ///
-    /// Returns the grid-wide held verdict from `render_grid_damage`.
+    /// Returns the grid-wide committed or held outcome.
     pub(crate) fn paint_grid_damage(
         &mut self,
         model: &dyn CanvasModel,
         frame: &Chrome,
         spans: &[RowSpan],
-    ) -> PreparedGridPaint {
+    ) -> GridPaintOutcome {
         self.renderer.execute_grid_damage(model, frame, spans)
     }
 

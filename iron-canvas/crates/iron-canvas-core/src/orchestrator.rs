@@ -17,8 +17,9 @@
 //! Each render method prepares (bulk bridge reads, no mutation of
 //! committed state) and executes (paints into the backing target) its own
 //! grid transaction, returning its aggregate `GridCacheCommit` as data, then
-//! reduces to one `PaintOutcome` — `Committed` or `Held` — instead of advancing
-//! `last_frame`, presenting a surface, or touching `self.pending` itself.
+//! reduces to one private `AttemptOutcome` — overlay or grid committed, or
+//! held — instead of advancing `last_frame`, presenting a surface, or
+//! touching `self.pending` itself.
 //! [`Orchestrator::finish_attempt`] is the single completion boundary every
 //! outcome flows through: it installs the attempt-owned cache commit,
 //! preserves or replaces `last_frame`, presents whichever layers actually
@@ -49,7 +50,7 @@ use crate::frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReaso
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
-use crate::layer::{BlitPaint, LayerBase, Surface};
+use crate::layer::{LayerBase, Surface};
 use crate::painter::BlitPainter;
 use crate::pending_work::{ContentWork, PendingWork, RowSpan, WorkFlags};
 use crate::render_overlays::RenderOverlays;
@@ -59,16 +60,16 @@ use crate::renderer::diag::DiagDeltaKind;
 use crate::renderer::diag::{
     DiagBlitResultTag, DiagCacheResolution, DiagCompletion, DiagPaintedLayers, FrameDiagnostics,
 };
-use crate::renderer::{GridCacheCommit, GridRenderer, OverlayRenderer};
+use crate::renderer::{GridCacheCommit, GridPaintOutcome, GridRenderer, OverlayRenderer};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::types::ui::{HitTest, ResizeTarget};
 
 /// Data-free strategy tag. Stamped by `render_pending` from
-/// `FramePlan.selected_strategy` into `Orchestrator.last_strategy` so
-/// out-of-engine consumers (the recording pipeline) can attribute each
-/// captured frame to a strategy without seeing the plan's inner data
-/// (`BlitPlan`, row spans — see `GridWork`). Serializes
+/// [`GridWork::strategy`] — derived, never stored alongside the work — into
+/// `Orchestrator.last_strategy` so out-of-engine consumers (the recording
+/// pipeline) can attribute each captured frame to a strategy without seeing
+/// the plan's inner data (`BlitPlan`, row spans — see `GridWork`). Serializes
 /// with snake_case variant names to match the `.icr` JSON-lines schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[must_use = "RenderStrategy records the selected strategy; dropping it skips a recorder frame"]
@@ -121,6 +122,23 @@ pub(crate) enum GridWork {
     Blit(BlitPlan),
 }
 
+impl GridWork {
+    /// The `RenderStrategy` this work selects — the single authority for
+    /// the strategy tag. `FramePlan` deliberately stores no separate
+    /// strategy field: the mapping is one-to-one (each variant names one
+    /// strategy), so a second stored value could contradict the work that
+    /// was actually dispatched.
+    pub(crate) fn strategy(&self) -> RenderStrategy {
+        match self {
+            GridWork::None => RenderStrategy::OverlayOnly,
+            GridWork::Fresh => RenderStrategy::FullRebuild,
+            GridWork::AllContent => RenderStrategy::ChangedCells,
+            GridWork::Rows { .. } => RenderStrategy::DamagedRows,
+            GridWork::Blit(_) => RenderStrategy::ScrollBlit,
+        }
+    }
+}
+
 /// Whether this attempt must repaint the overlay layer, computed once by
 /// `plan_frame` so every execution arm reads the same verdict instead of
 /// re-deriving `must_paint_overlay` from `PendingWork` and decoration
@@ -138,11 +156,11 @@ pub(crate) enum OverlayWork {
 /// built from — owned here so a held/retried arm has it to merge back into
 /// `self.pending` without a second, separate borrow of the pre-take value.
 pub(crate) struct FramePlan {
-    /// Stamped into `Orchestrator.last_strategy` before dispatch. May diverge
-    /// from what actually painted — see `FrameTrace::effective`'s doc for
-    /// the selected-Viewport/effective-Fresh case, which this field does
-    /// not itself encode.
-    selected_strategy: RenderStrategy,
+    /// The dispatched grid work. Its `strategy()` is stamped into
+    /// `Orchestrator.last_strategy` before dispatch; that derived value may
+    /// still diverge from what actually painted — see `FrameTrace::effective`'s
+    /// doc for the selected-Viewport/effective-Fresh case, which no plan
+    /// field encodes.
     grid: GridWork,
     overlay: OverlayWork,
     /// The attempt's taken `PendingWork`, owned by the plan so a held
@@ -240,7 +258,6 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         && let FrameDelta::Scroll(plan) = delta
     {
         return FramePlan {
-            selected_strategy: RenderStrategy::ScrollBlit,
             grid: GridWork::Blit(plan),
             overlay: OverlayWork::Paint,
             consumes: work,
@@ -261,7 +278,6 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         && reusable
     {
         return FramePlan {
-            selected_strategy: RenderStrategy::OverlayOnly,
             grid: GridWork::None,
             overlay: OverlayWork::Paint,
             consumes: work,
@@ -286,7 +302,6 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
         let rows_sheet = *rows_sheet;
         let spans = spans.clone();
         return FramePlan {
-            selected_strategy: RenderStrategy::DamagedRows,
             grid: GridWork::Rows {
                 sheet: rows_sheet,
                 spans,
@@ -302,7 +317,6 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     // view work is owned by the earlier Overlay arm.
     if work.has_content() && !work.has_geometry() && reusable {
         return FramePlan {
-            selected_strategy: RenderStrategy::ChangedCells,
             grid: GridWork::AllContent,
             overlay: content_overlay,
             consumes: work,
@@ -316,7 +330,6 @@ fn plan_frame(work: PendingWork, delta: FrameDelta, sheet: u32, show_selection: 
     // Always paints the overlay — candidate geometry or model identity may
     // have changed under it.
     FramePlan {
-        selected_strategy: RenderStrategy::FullRebuild,
         grid: GridWork::Fresh,
         overlay: OverlayWork::Paint,
         consumes: work,
@@ -506,20 +519,6 @@ impl fmt::Display for FrameTrace {
     }
 }
 
-/// Which surfaces `finish_attempt` must flush for a committed
-/// outcome. Grid presentation is tracked explicitly per attempt (an
-/// `OverlayOnly` never painted the grid. A `ChangedCells` or `DamagedRows`
-/// attempt with a grid-wide fingerprint skip still needs it, since the
-/// prior frame's pixels are already correct on screen and nothing new was
-/// drawn — see each regime helper's own construction site). Overlay
-/// presentation is not tracked here: it is driven directly by this
-/// attempt's `OverlayWork` verdict inside `finish_attempt`, since paint and
-/// present are always paired 1:1 for the overlay layer.
-#[derive(Clone, Copy, Default)]
-struct PaintedLayers {
-    grid: bool,
-}
-
 /// What `finish_attempt` does to `Orchestrator::last_frame` for one
 /// outcome. `Preserve` covers two distinct cases that both mean "do not
 /// touch the field": an `Overlay` attempt never had a candidate to begin
@@ -553,41 +552,72 @@ struct OverlayContext<'a> {
 
 /// Private completion outcome for one paint attempt — the one value every
 /// `paint_*_regime` preparation/execution helper reduces to, and the only
-/// thing `finish_attempt` accepts. See the Stage 4 design doc (transactional
-/// render pipeline) for the full contract this type closes over; in brief:
+/// thing `finish_attempt` accepts. The variants close the outcome algebra:
+/// a committed attempt either never touched the grid (`OverlayCommitted`)
+/// or owns the grid cache commit it installed (`GridCommitted`), so a grid
+/// strategy can never commit without its commit and the overlay arm can
+/// never carry one. `Held` carries only held causes (`HoldReason`), so a
+/// held attempt can never report a committed outcome.
 ///
-/// - `Committed`: the grid transaction executed. `frame` may still be
-///   `FrameUpdate::Preserve` (the `Overlay` regime never had a grid
-///   candidate).
-/// - `Held`: nothing executed and nothing may be presented, cached, or
-///   observed as a geometry change. `frame` still needs a `FrameUpdate`
-///   (not always `Preserve`) because a regime that *did* take ownership of
-///   `last_frame` to build its candidate (`Viewport`'s blit, or a
-///   `Viewport`-selected `FreshFallback`) must hand back an equivalent
-///   value — the alternative would leave `last_frame` stuck at `None` for
-///   the rest of the attempt's synchronous call chain. This is the one
-///   deliberate deviation from the plan's literal `Held { retry, trace }`
-///   shape: the invariant it protects (one function performs the actual
-///   `self.last_frame = ..` assignment) still holds, because every
-///   `FrameUpdate` a regime constructs here is either `Preserve` (nothing
-///   was ever taken) or an already-resolved, zero-clone value the regime
-///   had to build anyway to decide Held in the first place.
-// Completion owns the prepared cache transaction until `finish_attempt`.
-// Keeping that payload inline avoids a per-frame box allocation.
+/// `frame` on a `Held` outcome is not always `Preserve`: a regime that *did*
+/// take ownership of `last_frame` to build its candidate (`Viewport`'s
+/// blit, or a `Viewport`-selected `FreshFallback`) must hand back an
+/// equivalent value — the alternative would leave `last_frame` stuck at
+/// `None` for the rest of the attempt's synchronous call chain. Every
+/// `FrameUpdate` a regime constructs here is either `Preserve` (nothing was
+/// ever taken) or an already-resolved, zero-clone value the regime had to
+/// build anyway to decide Held in the first place; `finish_attempt` remains
+/// the one function that performs the actual `self.last_frame = ..`
+/// assignment.
+//
+// Keeping the prepared cache transaction inline avoids a per-frame box
+// allocation. The public `FrameOutcome`, painted layers, commit sequence,
+// and cache resolution are all derived from this one value in
+// `finish_attempt`.
+#[must_use]
 #[allow(clippy::large_enum_variant)]
-enum PaintOutcome {
-    Committed {
-        painted_layers: PaintedLayers,
-        cache_commit: Option<GridCacheCommit>,
+enum AttemptOutcome {
+    /// Overlay-only attempt: no grid candidate, no cache commit; the
+    /// committed `Chrome` is preserved as-is.
+    OverlayCommitted,
+    /// A grid strategy executed; owns the aggregate cache commit for
+    /// `finish_attempt` to install.
+    GridCommitted {
+        cache_commit: GridCacheCommit,
         frame: FrameUpdate,
         effective: RenderStrategy,
-        outcome: FrameOutcome,
     },
+    /// Nothing executed and nothing may be presented, cached, or observed
+    /// as a geometry change.
     Held {
         retry: PendingWork,
         frame: FrameUpdate,
-        outcome: FrameOutcome,
+        reason: HoldReason,
     },
+}
+
+/// Why a paint attempt was held. Only held causes exist here — a `Held`
+/// outcome can never carry a committed reason.
+// The shared `Failure` postfix is the point: every variant names a held cause.
+#[allow(clippy::enum_variant_names)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HoldReason {
+    /// `FrameInputs::capture` failed before dispatch reached a regime at
+    /// all — no candidate geometry, no cache invalidation, no paint.
+    InputFailure(FrameInputFailure),
+    /// A bulk bridge fetch failed during a strategy's prepare phase; the
+    /// whole attempt is requeued.
+    BridgeFailure,
+}
+
+impl HoldReason {
+    /// Exact public outcome projection for `FrameTrace`.
+    fn frame_outcome(&self) -> FrameOutcome {
+        match self {
+            HoldReason::InputFailure(failure) => FrameOutcome::HeldOnInputFailure(*failure),
+            HoldReason::BridgeFailure => FrameOutcome::HeldOnBridgeFailure,
+        }
+    }
 }
 
 /// A bridge hold invalidates the attempted content transaction as a whole.
@@ -642,7 +672,7 @@ where
     /// rule merges work back in.
     pending: PendingWork,
     /// Last strategy that `render_pending` dispatched. Stamped from
-    /// `FramePlan.selected_strategy` after `plan_frame`, read by the
+    /// `plan.grid.strategy()` after `plan_frame`, read by the
     /// recording pipeline via `last_strategy()`. `None` before
     /// the first paint. Plain field — `render_pending` already holds
     /// `&mut self`, so no interior mutability is needed.
@@ -1209,10 +1239,10 @@ where
                     None,
                     flags,
                     None,
-                    PaintOutcome::Held {
+                    AttemptOutcome::Held {
                         retry: work,
                         frame: FrameUpdate::Preserve,
-                        outcome: FrameOutcome::HeldOnInputFailure(failure),
+                        reason: HoldReason::InputFailure(failure),
                     },
                 );
                 self.model = Some(model);
@@ -1240,7 +1270,7 @@ where
         self.grid
             .renderer
             .diag_begin_attempt(diag_delta, plan.rebuild_reason, self.diag_probe);
-        let selected = plan.selected_strategy;
+        let selected = plan.grid.strategy();
         let work_flags = plan.consumes.flags();
         // The trace was reset before capture so both successful dispatch and
         // the capture-failure path describe this attempt only. `OverlayOnly`
@@ -1248,14 +1278,14 @@ where
         // calls the grid renderer.
         // `plan.consumes` is the attempt's taken `PendingWork`, owned by the
         // plan; moving it out here (rather than a second borrow of the
-        // pre-take value) is what lets a held arm's `PaintOutcome` carry it
+        // pre-take value) is what lets a held arm's `AttemptOutcome` carry it
         // straight back to `finish_attempt`'s merge step. An arm that fully
-        // commits does nothing further with it; only an arm that holds (in
+        // commits does nothing further with it; only an arm that holds
         // constructs its grid-wide retry scope from it.
         let overlay_work = plan.overlay;
         let work = plan.consumes;
         let outcome = match plan.grid {
-            GridWork::None => self.render_overlay_only(),
+            GridWork::None => self.render_overlay_only(model_dyn, &inputs, work),
             GridWork::Blit(blit_plan) => {
                 self.render_scroll_blit(model_dyn, &inputs, blit_plan, work)
             }
@@ -1265,16 +1295,10 @@ where
                 self.render_damaged_rows(model_dyn, &inputs, sheet, spans, work)
             }
         };
-        // Every dispatched strategy's own precondition (a `Stable`/`Scroll`
-        // delta, or `plan_frame`'s `reusable` gate) already proves
-        // `last_frame.is_some()` before it takes it — `None` here means
-        // that invariant broke, and the defensive fallback is to treat the
-        // attempt as if nothing had been raised at all, exactly like the
-        // pre-capture empty-work short circuit above.
-        let Some(outcome) = outcome else {
-            self.model = Some(model);
-            return PaintResult::Idle;
-        };
+        // Every strategy helper is total — it returns one `AttemptOutcome`
+        // for every planned branch (an absent `last_frame` is an explicit
+        // invariant hold that requeues the consumed work, never an `Idle`
+        // that drops it), so there is no `Option` to fall through here.
         // A strategy outcome exists, so `finish_attempt` is about to publish a
         // snapshot: consume the probe now so it is attributed to this
         // attempt and cannot leak into the next one.
@@ -1298,15 +1322,15 @@ where
     }
 
     /// The one function that completes a paint attempt. Every
-    /// render preparation and execution helper reduces to a
-    /// `PaintOutcome`; this is the completion boundary that advances or
+    /// render preparation and execution helper reduces to an
+    /// `AttemptOutcome`; this is the completion boundary that advances or
     /// preserves `last_frame`, refreshes and (conditionally) repaints the
     /// overlay against the frame that will be committed, presents whichever
     /// surfaces actually painted, merges retry work back into
     /// `self.pending`, and publishes
     /// `last_strategy`/`last_effective_strategy`/`last_work_flags`/`last_trace`.
-    /// installs the aggregate cache commit before publishing/presenting the
-    /// matching frame.
+    /// It installs the aggregate cache commit before publishing or presenting
+    /// the matching frame.
     ///
     /// `selected` and `work_flags` come from `plan_frame`'s verdict —
     /// known before dispatch, so every outcome (including a `Held` capture
@@ -1319,39 +1343,56 @@ where
         selected: Option<RenderStrategy>,
         work_flags: WorkFlags,
         overlay_ctx: Option<OverlayContext<'_>>,
-        outcome: PaintOutcome,
+        outcome: AttemptOutcome,
     ) -> PaintResult {
-        let (painted_layers, cache_commit, frame, retry, effective, frame_outcome, result) =
+        let (committed, grid_painted, cache_commit, frame, retry, effective, frame_outcome, result) =
             match outcome {
-                PaintOutcome::Committed {
-                    painted_layers,
+                AttemptOutcome::OverlayCommitted => (
+                    true,
+                    false,
+                    None,
+                    FrameUpdate::Preserve,
+                    None,
+                    Some(RenderStrategy::OverlayOnly),
+                    FrameOutcome::Painted,
+                    PaintResult::Rendered,
+                ),
+                AttemptOutcome::GridCommitted {
                     cache_commit,
                     frame,
                     effective,
-                    outcome,
                 } => (
-                    Some(painted_layers),
-                    cache_commit,
+                    true,
+                    true,
+                    Some(cache_commit),
                     frame,
                     None,
                     Some(effective),
-                    outcome,
+                    FrameOutcome::Painted,
                     PaintResult::Rendered,
                 ),
-                PaintOutcome::Held {
+                AttemptOutcome::Held {
                     retry,
                     frame,
-                    outcome,
+                    reason,
                 } => (
-                    None,
+                    false,
+                    false,
                     None,
                     frame,
                     Some(retry),
                     None,
-                    outcome,
+                    reason.frame_outcome(),
                     PaintResult::RetryRequired,
                 ),
             };
+        // Grid pixels executed exactly when the outcome was `GridCommitted`
+        // — every grid strategy returns a cache commit, even a grid-wide
+        // fingerprint skip, because it installs the fingerprint tree as the
+        // committed truth. Presentation follows the same derivation; the
+        // separate `PaintedLayers` field that could contradict the outcome
+        // is gone, and the variant shape makes the projection exhaustive.
+        // `cache_commit` is `Some` iff `grid_painted`, by construction.
 
         // 1. install the attempt-owned cache commit, then publish the frame
         //    whose pixels and cache metadata it describes. Held outcomes
@@ -1362,17 +1403,15 @@ where
         }
         self.install_frame(frame);
 
-        // (dev only) painted-layer facts for the diagnostics snapshot must
+        // (dev only) overlay-painted facts for the diagnostics snapshot must
         // be captured before the common overlay step consumes overlay_ctx.
         #[cfg(feature = "dev-diagnostics")]
-        let grid_painted = painted_layers.is_some_and(|layers| layers.grid);
-        #[cfg(feature = "dev-diagnostics")]
-        let overlay_painted = painted_layers.is_some()
+        let overlay_painted = committed
             && overlay_ctx
                 .as_ref()
                 .is_some_and(|ctx| matches!(ctx.work, OverlayWork::Paint));
 
-        if let Some(layers) = painted_layers {
+        if committed {
             if let Some(ctx) = overlay_ctx {
                 // Committed attempts refresh committed selection/
                 // active-cell state unconditionally — even an
@@ -1408,8 +1447,8 @@ where
                     self.overlay.present();
                 }
             }
-            // 3. present the grid iff the outcome says grid pixels executed.
-            if layers.grid {
+            // 3. present the grid iff grid pixels executed (derived above).
+            if grid_painted {
                 self.grid.present();
             }
         }
@@ -1421,7 +1460,7 @@ where
             self.pending.merge(retry);
         }
 
-        let committed_seq = if frame_outcome == FrameOutcome::Painted {
+        let committed_seq = if committed {
             self.commit_seq = self.commit_seq.wrapping_add(1);
             Some(self.commit_seq)
         } else {
@@ -1447,9 +1486,9 @@ where
 
         // 5b. publish the structured diagnostics snapshot. Read after the
         //     cache commit was installed, so `committed_after` reflects the
-        //     committed truth. Resolution comes from the transaction
-        //     outcome, never from the presence of a grid cache commit: an
-        //     Overlay regime commits with `cache_commit: None`.
+        //     committed truth. Resolution comes from `AttemptOutcome`, not
+        //     from the presence of a grid cache commit: Overlay-only commits
+        //     without one.
         #[cfg(feature = "dev-diagnostics")]
         self.grid.renderer.publish_diag(DiagCompletion {
             attempt_seq: self.attempt_seq,
@@ -1462,7 +1501,7 @@ where
                 grid: grid_painted,
                 overlay: overlay_painted,
             },
-            resolution: if frame_outcome == FrameOutcome::Painted {
+            resolution: if committed {
                 DiagCacheResolution::Committed
             } else {
                 DiagCacheResolution::HeldForRetry
@@ -1491,26 +1530,25 @@ where
         }
     }
 
-    /// Overlay-only fast path. Triggered by autofill drag, clipboard state
+    /// Overlay-only fast path: reuses the committed frame verbatim with no
+    /// grid touch at all. Triggered by autofill drag, clipboard state
     /// change, formula-ref highlight updates, and active-cell moves —
-    /// anything that leaves grid pixels untouched. `plan_frame` proves the
-    /// preconditions (slot vecs still match, `last_frame` is `Some`).
-    /// Overlay-only fast path: reuses the committed frame verbatim, no grid
-    /// touch at all. Preparation/execution helper only — `finish_attempt`
-    /// does the actual overlay refresh/paint/present, using this outcome's
-    /// `FrameUpdate::Preserve` to read `self.last_frame` as it already
-    /// stands. `None` is the defensive fallback for `plan_frame`'s own
-    /// precondition (a `Stable` delta already implies a committed frame);
-    /// `render_pending` treats it as a plain Idle, touching no state.
-    fn render_overlay_only(&self) -> Option<PaintOutcome> {
-        self.last_frame.as_ref()?;
-        Some(PaintOutcome::Committed {
-            painted_layers: PaintedLayers { grid: false },
-            cache_commit: None,
-            frame: FrameUpdate::Preserve,
-            effective: RenderStrategy::OverlayOnly,
-            outcome: FrameOutcome::Painted,
-        })
+    /// anything that leaves grid pixels untouched. Preparation/execution
+    /// helper only — `finish_attempt` does the actual overlay
+    /// refresh/paint/present, reading `self.last_frame` as it already
+    /// stands (`OverlayCommitted` implies `FrameUpdate::Preserve`). If the
+    /// committed-frame precondition is unexpectedly absent, it falls back to
+    /// a safe full rebuild in the same attempt.
+    fn render_overlay_only(
+        &mut self,
+        model: &dyn CanvasModel,
+        inputs: &FrameInputs,
+        work: PendingWork,
+    ) -> AttemptOutcome {
+        if self.last_frame.is_none() {
+            return self.render_full_rebuild(model, inputs, work);
+        }
+        AttemptOutcome::OverlayCommitted
     }
 
     /// Scroll-blit fast path. `plan_frame` already filtered no-op scrolls and
@@ -1536,40 +1574,33 @@ where
         inputs: &FrameInputs,
         plan: BlitPlan,
         work: PendingWork,
-    ) -> Option<PaintOutcome> {
-        let prev = self.last_frame.take()?;
+    ) -> AttemptOutcome {
+        let Some(prev) = self.last_frame.take() else {
+            return self.render_full_rebuild(model, inputs, work);
+        };
         match Chrome::prepare_blit(prev, model, inputs, &plan) {
             Ok(prepared) => {
-                let cache_commit = match self.grid.paint_grid_blit(model, prepared.frame(), &plan) {
-                    BlitPaint::Painted(cache_commit) => cache_commit,
-                    BlitPaint::Held => {
+                match self.grid.paint_grid_blit(model, prepared.frame(), &plan) {
+                    GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
+                        cache_commit,
+                        frame: FrameUpdate::Replace(prepared.commit()),
+                        effective: RenderStrategy::ScrollBlit,
+                    },
+                    GridPaintOutcome::Held => {
                         // Whole-frame hold: the preflight aborted before a pixel
-                        // shifted, so nothing at all was committed.
-                        // `prepare_blit`'s own `render_grid_blit` already
-                        // stamped the renderer trace's `FrameOutcome` via
-                        // `trace_frame_held` — read it back rather than
-                        // re-deriving which address fetch triggered the hold.
-                        let outcome = self.grid.renderer.trace().outcome;
-                        return Some(PaintOutcome::Held {
+                        // shifted, so nothing at all was committed. `rollback`
+                        // moves `prev`'s untouched pieces back out of the
+                        // now-discarded candidate — no clone was ever taken —
+                        // so this is exactly what `last_frame` held before the
+                        // attempt; the entire attempt (including the overlay
+                        // mark, which never painted) comes back via `retry`.
+                        AttemptOutcome::Held {
                             retry: retry_grid_wide(work),
-                            // `rollback` moves `prev`'s untouched pieces back
-                            // out of the now-discarded candidate — no clone was
-                            // ever taken — so this is exactly what `last_frame`
-                            // held before the attempt; the entire attempt
-                            // (including the overlay mark, which never painted)
-                            // comes back via `retry`.
                             frame: FrameUpdate::Replace(prepared.rollback()),
-                            outcome,
-                        });
+                            reason: HoldReason::BridgeFailure,
+                        }
                     }
-                };
-                Some(PaintOutcome::Committed {
-                    painted_layers: PaintedLayers { grid: true },
-                    cache_commit: Some(cache_commit),
-                    frame: FrameUpdate::Replace(prepared.commit()),
-                    effective: RenderStrategy::ScrollBlit,
-                    outcome: FrameOutcome::Painted,
-                })
+                }
             }
             Err(prev) => {
                 #[cfg(feature = "dev-diagnostics")]
@@ -1599,7 +1630,7 @@ where
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
-    ) -> (Chrome, Option<GridCacheCommit>) {
+    ) -> (Chrome, GridPaintOutcome) {
         let spare = std::mem::take(&mut self.spare_slots);
         let frame = Chrome::build(model, inputs, spare);
         // `paint_grid_fresh` prepares the whole grid before touching the
@@ -1622,22 +1653,24 @@ where
         inputs: &FrameInputs,
         work: PendingWork,
         prev: Chrome,
-    ) -> Option<PaintOutcome> {
-        let (frame, cache_commit) = self.build_and_paint_fresh(model, inputs);
+    ) -> AttemptOutcome {
+        let (frame, paint) = self.build_and_paint_fresh(model, inputs);
 
-        let Some(cache_commit) = cache_commit else {
-            // Atomic hold: park the failed candidate's own vecs for reuse
-            // and hand `prev` back explicitly — unlike an ordinary Fresh
-            // hold, `prev` isn't sitting in `self.last_frame` for
-            // `finish_attempt` to simply leave alone; it was already taken
-            // out for the original blit attempt above.
-            self.spare_slots = RecycledSlots::from_pane_set(frame.pane_set);
-            let outcome = self.grid.renderer.trace().outcome;
-            return Some(PaintOutcome::Held {
-                retry: retry_grid_wide(work),
-                frame: FrameUpdate::Replace(prev),
-                outcome,
-            });
+        let cache_commit = match paint {
+            GridPaintOutcome::Committed(cache_commit) => cache_commit,
+            GridPaintOutcome::Held => {
+                // Atomic hold: park the failed candidate's own vecs for reuse
+                // and hand `prev` back explicitly — unlike an ordinary Fresh
+                // hold, `prev` isn't sitting in `self.last_frame` for
+                // `finish_attempt` to simply leave alone; it was already taken
+                // out for the original blit attempt above.
+                self.spare_slots = RecycledSlots::from_pane_set(frame.pane_set);
+                return AttemptOutcome::Held {
+                    retry: retry_grid_wide(work),
+                    frame: FrameUpdate::Replace(prev),
+                    reason: HoldReason::BridgeFailure,
+                };
+            }
         };
 
         // `prev`'s own vecs are about to be displaced by `frame`; recycle
@@ -1646,13 +1679,11 @@ where
         // original blit attempt, so `finish_attempt`'s own recycle step
         // would otherwise find nothing to fold in.
         self.spare_slots = RecycledSlots::from_pane_set(prev.pane_set);
-        Some(PaintOutcome::Committed {
-            painted_layers: PaintedLayers { grid: true },
-            cache_commit: Some(cache_commit),
+        AttemptOutcome::GridCommitted {
+            cache_commit,
             frame: FrameUpdate::Replace(frame),
             effective: RenderStrategy::FullRebuild,
-            outcome: FrameOutcome::Painted,
-        })
+        }
     }
 
     /// Damaged-rows strategy: slot vectors survive as in `ChangedCells`.
@@ -1667,26 +1698,23 @@ where
         _sheet: u32,
         spans: Vec<RowSpan>,
         work: PendingWork,
-    ) -> Option<PaintOutcome> {
-        let prev = self.last_frame.take()?;
+    ) -> AttemptOutcome {
+        let Some(prev) = self.last_frame.take() else {
+            return self.render_full_rebuild(model, inputs, work);
+        };
         let frame = Chrome::next(Some(prev), model, inputs, FramePath::SlotsReuse);
-        let grid_paint = self.grid.paint_grid_damage(model, &frame, &spans);
-        if !grid_paint.held {
-            return Some(PaintOutcome::Committed {
-                painted_layers: PaintedLayers { grid: true },
-                cache_commit: grid_paint.cache_commit,
+        match self.grid.paint_grid_damage(model, &frame, &spans) {
+            GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
+                cache_commit,
                 frame: FrameUpdate::Replace(frame),
                 effective: RenderStrategy::DamagedRows,
-                outcome: FrameOutcome::Painted,
-            });
+            },
+            GridPaintOutcome::Held => AttemptOutcome::Held {
+                retry: retry_grid_wide(work),
+                frame: FrameUpdate::Replace(frame),
+                reason: HoldReason::BridgeFailure,
+            },
         }
-
-        let outcome = self.grid.renderer.trace().outcome;
-        Some(PaintOutcome::Held {
-            retry: retry_grid_wide(work),
-            frame: FrameUpdate::Replace(frame),
-            outcome,
-        })
     }
 
     /// Changed-cells strategy: the previous slot vectors survive.
@@ -1699,27 +1727,23 @@ where
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
         work: PendingWork,
-    ) -> Option<PaintOutcome> {
-        let prev = self.last_frame.take()?;
+    ) -> AttemptOutcome {
+        let Some(prev) = self.last_frame.take() else {
+            return self.render_full_rebuild(model, inputs, work);
+        };
         let frame = Chrome::next(Some(prev), model, inputs, FramePath::SlotsReuse);
-        let grid_paint = self.grid.paint_grid(model, &frame);
-
-        if !grid_paint.held {
-            return Some(PaintOutcome::Committed {
-                painted_layers: PaintedLayers { grid: true },
-                cache_commit: grid_paint.cache_commit,
+        match self.grid.paint_grid(model, &frame) {
+            GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
+                cache_commit,
                 frame: FrameUpdate::Replace(frame),
                 effective: RenderStrategy::ChangedCells,
-                outcome: FrameOutcome::Painted,
-            });
+            },
+            GridPaintOutcome::Held => AttemptOutcome::Held {
+                retry: retry_grid_wide(work),
+                frame: FrameUpdate::Replace(frame),
+                reason: HoldReason::BridgeFailure,
+            },
         }
-
-        let outcome = self.grid.renderer.trace().outcome;
-        Some(PaintOutcome::Held {
-            retry: retry_grid_wide(work),
-            frame: FrameUpdate::Replace(frame),
-            outcome,
-        })
     }
 
     /// Full grid repaint. Slot vecs walked fresh from the model; the new
@@ -1740,37 +1764,37 @@ where
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
         work: PendingWork,
-    ) -> Option<PaintOutcome> {
-        let (frame, cache_commit) = self.build_and_paint_fresh(model, inputs);
+    ) -> AttemptOutcome {
+        let (frame, paint) = self.build_and_paint_fresh(model, inputs);
 
-        let Some(cache_commit) = cache_commit else {
-            // Atomic hold: give the failed candidate's own vecs back to the
-            // pool and leave `last_frame` completely untouched — it was
-            // never taken (see `build_and_paint_fresh`), so `prev` (or
-            // `None`, on a held first frame) is exactly what
-            // `finish_attempt` will still see.
-            self.spare_slots = RecycledSlots::from_pane_set(frame.pane_set);
-            let outcome = self.grid.renderer.trace().outcome;
-            return Some(PaintOutcome::Held {
-                retry: retry_grid_wide(work),
-                frame: FrameUpdate::Preserve,
-                outcome,
-            });
+        let cache_commit = match paint {
+            GridPaintOutcome::Committed(cache_commit) => cache_commit,
+            GridPaintOutcome::Held => {
+                // Atomic hold: give the failed candidate's own vecs back to the
+                // pool and leave `last_frame` completely untouched — it was
+                // never taken (see `build_and_paint_fresh`), so `prev` (or
+                // `None`, on a held first frame) is exactly what
+                // `finish_attempt` will still see.
+                self.spare_slots = RecycledSlots::from_pane_set(frame.pane_set);
+                return AttemptOutcome::Held {
+                    retry: retry_grid_wide(work),
+                    frame: FrameUpdate::Preserve,
+                    reason: HoldReason::BridgeFailure,
+                };
+            }
         };
 
-        Some(PaintOutcome::Committed {
-            painted_layers: PaintedLayers { grid: true },
-            cache_commit: Some(cache_commit),
+        AttemptOutcome::GridCommitted {
+            cache_commit,
             frame: FrameUpdate::Replace(frame),
             effective: RenderStrategy::FullRebuild,
-            outcome: FrameOutcome::Painted,
-        })
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{origin_showing, retry_grid_wide};
+    use super::{FrameInputFailure, FrameOutcome, HoldReason, origin_showing, retry_grid_wide};
     use crate::pending_work::{ContentWork, PendingWork, RowSpan};
 
     /// Uniform rows, so `extent / 20` is how many fit and every expectation
@@ -1791,6 +1815,21 @@ mod tests {
         assert_eq!(*retry.content(), ContentWork::All);
         assert!(retry.has_view());
         assert!(retry.has_overlay());
+    }
+
+    /// `HoldReason` is the private authority for held-frame outcomes; the
+    /// public `FrameOutcome` and wire names are derived from it, so a held
+    /// cause and a committed report can never contradict each other.
+    #[test]
+    fn hold_reason_projects_to_the_public_frame_outcome() {
+        assert_eq!(
+            HoldReason::InputFailure(FrameInputFailure::SelectedSheet).frame_outcome(),
+            FrameOutcome::HeldOnInputFailure(FrameInputFailure::SelectedSheet)
+        );
+        assert_eq!(
+            HoldReason::BridgeFailure.frame_outcome(),
+            FrameOutcome::HeldOnBridgeFailure
+        );
     }
 
     #[test]
@@ -1895,6 +1934,35 @@ mod frame_plan_tests {
         FrameDelta::Rebuild(RebuildReason::Sheet)
     }
 
+    // ── Strategy derivation: `GridWork` is the single strategy authority ──
+
+    /// The one-to-one `GridWork -> RenderStrategy` mapping, pinned directly.
+    /// The planner tests below assert the same mapping through `plan_frame`;
+    /// this test guards `GridWork::strategy` itself so a future variant
+    /// cannot drift from the tag `render_pending` stamps into `last_strategy`
+    /// (there is no stored `FramePlan.selected_strategy` left to disagree).
+    #[test]
+    fn grid_work_derives_the_strategy_tag() {
+        assert_eq!(GridWork::None.strategy(), RenderStrategy::OverlayOnly);
+        assert_eq!(GridWork::Fresh.strategy(), RenderStrategy::FullRebuild);
+        assert_eq!(
+            GridWork::AllContent.strategy(),
+            RenderStrategy::ChangedCells
+        );
+        assert_eq!(
+            GridWork::Rows {
+                sheet: 0,
+                spans: vec![RowSpan { r1: 1, r2: 2 }],
+            }
+            .strategy(),
+            RenderStrategy::DamagedRows
+        );
+        let FrameDelta::Scroll(plan) = stub_scroll() else {
+            unreachable!("stub_scroll always plans a scroll");
+        };
+        assert_eq!(GridWork::Blit(plan).strategy(), RenderStrategy::ScrollBlit);
+    }
+
     // ── Required hot-path assertion ──
 
     /// `view + overlay, FrameDelta::Stable -> selected Overlay ->
@@ -1910,7 +1978,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::OverlayOnly);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::OverlayOnly);
         assert!(
             matches!(plan.grid, GridWork::None),
             "a stable, no-shift view+overlay attempt must plan zero grid work"
@@ -1925,7 +1993,7 @@ mod frame_plan_tests {
         let work = work_with(|w| w.mark_overlay());
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::OverlayOnly);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::OverlayOnly);
         assert!(matches!(plan.grid, GridWork::None));
     }
 
@@ -1939,7 +2007,7 @@ mod frame_plan_tests {
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(
-            plan.selected_strategy,
+            plan.grid.strategy(),
             RenderStrategy::OverlayOnly,
             "view alone, with no pixel shift, must still fall back to Overlay"
         );
@@ -1954,7 +2022,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::ScrollBlit);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::ScrollBlit);
         assert!(matches!(plan.grid, GridWork::Blit(_)));
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
@@ -1969,7 +2037,7 @@ mod frame_plan_tests {
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
         assert_eq!(
-            plan.selected_strategy,
+            plan.grid.strategy(),
             RenderStrategy::ScrollBlit,
             "an overlay-only wakeup must still discover a real geometric scroll"
         );
@@ -1984,7 +2052,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
         assert_eq!(plan.overlay, OverlayWork::Paint);
         assert_eq!(plan.rebuild_reason, Some(RebuildReason::Sheet));
@@ -1997,7 +2065,7 @@ mod frame_plan_tests {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::DamagedRows);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
         let GridWork::Rows { sheet, spans } = plan.grid else {
             panic!("expected GridWork::Rows");
         };
@@ -2011,7 +2079,7 @@ mod frame_plan_tests {
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(
-            plan.selected_strategy,
+            plan.grid.strategy(),
             RenderStrategy::ChangedCells,
             "row work recorded against a sheet that isn't on screen can't clip to bands"
         );
@@ -2023,7 +2091,7 @@ mod frame_plan_tests {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2032,7 +2100,7 @@ mod frame_plan_tests {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2043,7 +2111,7 @@ mod frame_plan_tests {
         let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
         assert!(matches!(plan.grid, GridWork::AllContent));
     }
 
@@ -2052,7 +2120,7 @@ mod frame_plan_tests {
         let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2061,7 +2129,7 @@ mod frame_plan_tests {
         let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2076,7 +2144,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::DamagedRows);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
         let GridWork::Rows { sheet, spans } = plan.grid else {
             panic!("expected GridWork::Rows");
         };
@@ -2094,7 +2162,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
         assert!(matches!(plan.grid, GridWork::AllContent));
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
@@ -2108,7 +2176,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
         assert!(matches!(plan.grid, GridWork::AllContent));
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
@@ -2121,7 +2189,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2133,7 +2201,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
         assert_eq!(plan.rebuild_reason, Some(RebuildReason::Sheet));
     }
@@ -2148,7 +2216,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2159,7 +2227,7 @@ mod frame_plan_tests {
         let work = work_with(|w| w.mark_geometry());
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2168,7 +2236,7 @@ mod frame_plan_tests {
         let work = work_with(|w| w.mark_geometry());
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
@@ -2185,7 +2253,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
     }
 
     // ── OverlayWork policy ──
@@ -2195,7 +2263,7 @@ mod frame_plan_tests {
         let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 2 }));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::DamagedRows);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
         assert_eq!(
             plan.overlay,
             OverlayWork::Preserve,
@@ -2216,7 +2284,7 @@ mod frame_plan_tests {
         let work = work_with(PendingWork::mark_all_content);
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
         assert_eq!(plan.overlay, OverlayWork::Preserve);
     }
 
@@ -2229,7 +2297,7 @@ mod frame_plan_tests {
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::ChangedCells);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
         assert_eq!(
             plan.overlay,
             OverlayWork::Paint,
@@ -2242,7 +2310,7 @@ mod frame_plan_tests {
         let work = work_with(|w| w.mark_geometry());
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
-        assert_eq!(plan.selected_strategy, RenderStrategy::FullRebuild);
+        assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 

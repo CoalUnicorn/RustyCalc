@@ -4,6 +4,7 @@ target/*
 notes/*
 web-test/vendor/iron-canvas/
 web-test/vendor/ironcalc/
+web-test/demo/*.ic
 web-test/node-*
 /bindings/python/target/*
 .worktrees/

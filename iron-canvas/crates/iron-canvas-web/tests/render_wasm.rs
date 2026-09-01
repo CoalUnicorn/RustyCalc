@@ -1753,10 +1753,9 @@ fn stage6_w5_stale_half(
 /// tree. The unchanged-content notification now matches and skips the cell
 /// painter.
 ///
-/// Every non-painter phase is identical to the stale half — same SlotsReuse
-/// regime, same whole-grid fetch, same candidate build, same shell, headers and
-/// presentation — so the paired difference is the five-pass cell walk and
-/// nothing else.
+/// Every non-painter phase is identical to the stale half — same ChangedCells
+/// strategy, same whole-grid fetch, same candidate build, same shell, headers,
+/// and presentation. The paired difference is the five-pass cell walk.
 fn stage6_w5_rotated_half(
     canvas: &mut IronCanvas,
     top_row: &Rc<Cell<i32>>,
@@ -1782,7 +1781,7 @@ fn stage6_w5_rotated_half(
 /// rotation unavailable versus rotation applied — and forces the unavailable
 /// side with the one production mechanism that legitimately produces it
 /// (`Damage` marks history stale). The measured quantity is unchanged: the
-/// median paired difference between an identically-fetched SlotsReuse frame
+/// median paired difference between an identically-fetched ChangedCells frame
 /// that walks the pane and one that does not.
 #[wasm_bindgen_test]
 #[ignore = "Stage 6 manual browser timing probe; run with --release --ignored --nocapture"]
@@ -1905,7 +1904,7 @@ fn stage6_perf_w6_post_blit_borderless_edit() {
     }
 
     assert!(
-        trace.contains("SlotsReuse"),
+        trace.contains("ChangedCells"),
         "W6's timed paint must be the qualifying row-blit content check; trace was `{trace}`"
     );
     assert!(
@@ -2229,10 +2228,10 @@ fn stable_assert_matches_forced_fresh_at(
     }
 }
 
-fn stable_assert_slots_reuse_trace(trace: &str, case: &str) {
+fn stable_assert_changed_cells_trace(trace: &str, case: &str) {
     assert!(
-        trace.starts_with("SlotsReuse[WorkFlags(VIEW | CONTENT | OVERLAY)]"),
-        "stable repaint case `{case}` must carry VIEW | CONTENT | OVERLAY through SlotsReuse; \
+        trace.starts_with("ChangedCells[WorkFlags(VIEW | CONTENT | OVERLAY)]"),
+        "stable repaint case `{case}` must carry VIEW | CONTENT | OVERLAY through ChangedCells; \
          trace was `{trace}`"
     );
 }
@@ -2251,7 +2250,7 @@ fn cell_repaint_plain_commit_and_selection_move_matches_forced_fresh() {
     canvas.view_changed_js();
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
-    stable_assert_slots_reuse_trace(&trace, CASE);
+    stable_assert_changed_cells_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2364,7 +2363,7 @@ fn cell_repaint_multi_row_dependants_match_forced_fresh() {
     canvas.view_changed_js();
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
-    stable_assert_slots_reuse_trace(&trace, CASE);
+    stable_assert_changed_cells_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:range", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2402,7 +2401,7 @@ fn stable_unchanged_recalc_skips_grid_and_moves_overlay() {
     canvas.view_changed_js();
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
-    stable_assert_slots_reuse_trace(&trace, CASE);
+    stable_assert_changed_cells_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:skip", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2423,7 +2422,7 @@ fn cell_repaint_medium_left_border_removal_matches_fresh() {
     canvas.view_changed_js();
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
-    stable_assert_slots_reuse_trace(&trace, CASE);
+    stable_assert_changed_cells_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2616,7 +2615,7 @@ fn cell_repaint_frozen_grid_commit_uses_one_verdict_and_matches_fresh() {
     canvas.view_changed_js();
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
-    stable_assert_slots_reuse_trace(&trace, CASE);
+    stable_assert_changed_cells_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
@@ -2637,7 +2636,7 @@ fn stable_hidden_selection_commit_matches_fresh() {
     canvas.view_changed_js();
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     let trace = canvas.frame_trace();
-    stable_assert_slots_reuse_trace(&trace, CASE);
+    stable_assert_changed_cells_trace(&trace, CASE);
     stage6_assert_verdict(&trace, "grid:cell", CASE);
 
     stable_assert_matches_forced_fresh(&grid, &overlay, &store, &view, CASE);
