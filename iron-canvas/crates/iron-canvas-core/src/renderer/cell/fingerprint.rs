@@ -11,7 +11,6 @@ use std::hash::{Hash, Hasher};
 
 use crate::chrome::{GridLayout, PaneRegion};
 use crate::geometry::prim::Axis;
-use crate::orchestrator::GridVerdict;
 use crate::pending_work::{MAX_DAMAGE_SPANS, RowSpan};
 use crate::renderer::cf_types::parse_hex_color;
 use crate::renderer::prepared::FetchedCells;
@@ -453,25 +452,6 @@ pub(crate) struct RepaintDecision {
     pub(crate) reason: RepaintReason,
     pub(crate) changed_rows: Vec<RowSpan>,
     pub(crate) changed_cells: Vec<RCRange>,
-}
-
-impl From<&RepaintPlan> for GridVerdict {
-    fn from(plan: &RepaintPlan) -> Self {
-        match plan {
-            RepaintPlan::Skip => Self::Skip,
-            RepaintPlan::Cell(_) => Self::Cell,
-            RepaintPlan::Range(_) => Self::Range,
-            RepaintPlan::Rows(spans) => Self::Rows {
-                spans: spans.len().min(u8::MAX as usize) as u8,
-                rows: spans
-                    .iter()
-                    .map(|span| (span.r2 - span.r1 + 1).max(0) as u32)
-                    .sum::<u32>()
-                    .min(u16::MAX as u32) as u16,
-            },
-            RepaintPlan::Full => Self::Full,
-        }
-    }
 }
 
 fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> RepaintDecision {

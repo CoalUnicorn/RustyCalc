@@ -6,20 +6,24 @@ use crate::types::coord::RCRange;
 
 pub(crate) const CELL_REPAINT_PAD_PX: i32 = 2;
 
+/// Executable repaint geometry for a cell or range decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CellRepaintEnvelope {
+pub(crate) enum Envelope {
     NoPixels,
-    UnalignedDpr,
     Visible {
         clip: PixelRect,
         sources: [Option<RCRange>; 4],
     },
 }
 
-pub(crate) fn build_cell_repaint_envelope(
-    frame: &Chrome,
-    changed_cells: &[RCRange],
-) -> CellRepaintEnvelope {
+/// Result of building an envelope before the prepared repaint plan is closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnvelopeBuild {
+    Ready(Envelope),
+    UnalignedDpr,
+}
+
+pub(crate) fn build_envelope(frame: &Chrome, changed_cells: &[RCRange]) -> EnvelopeBuild {
     let (width, height) = frame.canvas_size.to_logical_extent();
     let canvas = PixelRect {
         top_left: Point { x: 0, y: 0 },
@@ -37,13 +41,13 @@ pub(crate) fn build_cell_repaint_envelope(
         .map(grow_pixel_rect)
         .reduce(PixelRect::bounding_union);
     let Some(bounds) = changed_bounds else {
-        return CellRepaintEnvelope::NoPixels;
+        return EnvelopeBuild::Ready(Envelope::NoPixels);
     };
     let Some(aligned) = align_outward_to_backing(bounds, frame.dpr) else {
-        return CellRepaintEnvelope::UnalignedDpr;
+        return EnvelopeBuild::UnalignedDpr;
     };
     let Some(clip) = aligned.intersection(canvas) else {
-        return CellRepaintEnvelope::NoPixels;
+        return EnvelopeBuild::Ready(Envelope::NoPixels);
     };
 
     let mut sources = [None; 4];
@@ -52,7 +56,7 @@ pub(crate) fn build_cell_repaint_envelope(
         sources[region.index()] = contributor_source(region.rows(frame), region.cols(frame), clip);
     }
 
-    CellRepaintEnvelope::Visible { clip, sources }
+    EnvelopeBuild::Ready(Envelope::Visible { clip, sources })
 }
 
 fn contributor_source<R: AxisSlot, C: AxisSlot>(
@@ -203,8 +207,8 @@ mod tests {
         let rect = frame
             .cell_rect(3, 3)
             .expect("the test cell is visible and addressable");
-        let CellRepaintEnvelope::Visible { clip, sources } =
-            build_cell_repaint_envelope(&frame, &[RCRange::from_cell(3, 3)])
+        let EnvelopeBuild::Ready(Envelope::Visible { clip, sources }) =
+            build_envelope(&frame, &[RCRange::from_cell(3, 3)])
         else {
             panic!("a visible cell must produce an envelope");
         };
@@ -223,8 +227,8 @@ mod tests {
     #[test]
     fn hidden_changed_cell_produces_no_pixels() {
         assert_eq!(
-            build_cell_repaint_envelope(&frame(), &[RCRange::from_cell(2, 2)]),
-            CellRepaintEnvelope::NoPixels
+            build_envelope(&frame(), &[RCRange::from_cell(2, 2)]),
+            EnvelopeBuild::Ready(Envelope::NoPixels)
         );
     }
 
@@ -306,8 +310,8 @@ mod tests {
     #[test]
     fn fractional_dpr_clip_edges_align_outward_to_backing_pixels() {
         let frame = frame_at_dpr(1.25);
-        let CellRepaintEnvelope::Visible { clip, .. } =
-            build_cell_repaint_envelope(&frame, &[RCRange::from_cell(3, 3)])
+        let EnvelopeBuild::Ready(Envelope::Visible { clip, .. }) =
+            build_envelope(&frame, &[RCRange::from_cell(3, 3)])
         else {
             panic!("a common fractional DPR must produce an aligned envelope");
         };
@@ -320,11 +324,11 @@ mod tests {
     #[test]
     fn unrepresentable_fractional_dpr_requests_conservative_fallback() {
         assert_eq!(
-            build_cell_repaint_envelope(
+            build_envelope(
                 &frame_at_dpr(std::f64::consts::SQRT_2),
                 &[RCRange::from_cell(3, 3)]
             ),
-            CellRepaintEnvelope::UnalignedDpr
+            EnvelopeBuild::UnalignedDpr
         );
     }
 }
