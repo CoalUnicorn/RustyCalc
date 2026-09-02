@@ -28,7 +28,7 @@ pub struct PerfTimings {
     /// The formula/text that was committed (for display).
     pub last_formula: RwSignal<Option<String>>,
     /// One-line paint attribution for the last frame, straight from
-    /// `IronCanvas.frameTrace()`: regime + per-pane verdict + cells fetched.
+    /// `IronCanvas.frameTrace()`: strategy + per-pane verdict + cells fetched.
     /// Only sampled while the panel is open — reading it costs a wasm call
     /// per frame, and an instrument that runs when nobody is watching taxes
     /// the timings it exists to explain.

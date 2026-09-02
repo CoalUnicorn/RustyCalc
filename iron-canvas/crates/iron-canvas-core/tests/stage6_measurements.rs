@@ -418,7 +418,7 @@ enum Workload {
     /// The same cell edit routed through unrowed grid-wide content work,
     /// so W2/W3 give the Damage-to-SlotsReuse ratio directly.
     W3,
-    /// A qualifying one-axis row scroll: the Viewport strip baseline.
+    /// A qualifying one-axis row scroll: the ScrollBlit strip baseline.
     W4,
     /// W4, then two unchanged grid-wide content notifications: the
     /// fetch-equivalent post-blit Full/Skip pair.
@@ -433,7 +433,7 @@ enum Workload {
     /// Content plus a real row scroll in one attempt: conservative Fresh.
     /// W9 changes `top_row`, so it is not a stable-geometry commit sample.
     W9,
-    /// Horizontal Viewport scroll: the column-axis control.
+    /// Horizontal ScrollBlit: the column-axis control.
     W10,
 }
 
@@ -783,7 +783,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
 // CSV emission
 // ==============================================================================
 
-const CSV_HEADER: &str = "workload,phase,size,frozen,style,result,regime,effective,work,outcome,\
+const CSV_HEADER: &str = "workload,phase,size,frozen,style,result,strategy,effective,work,outcome,\
 grid,blit_fallback,fetched_slots,fetched_cells,fetch_batches,bulk_calls,observed_cells,fetch_ranges,\
 fills,strokes,text,clips,blits,invalidations,text_resets,dpr_transforms,group_brackets,ops_total,\
 drawing_ops";
@@ -823,14 +823,14 @@ fn csv_row(row: &Row) -> String {
     let trace = &sample.trace;
     let ops = sample.ops;
     format!(
-        "{workload},{phase},{size},{frozen},{style},{result:?},{regime},{effective},{work},\
+        "{workload},{phase},{size},{frozen},{style},{result:?},{strategy},{effective},{work},\
 {outcome},{grid},{fallback},{fetched},{fetched_cells},{fetch_batches},{bulk_calls},{observed_cells},{ranges},\
 {fills},{strokes},{text},{clips},{blits},{invalidations},{resets},{dpr},{groups},{total},{drawing}",
         size = shape.size_tag(),
         frozen = shape.frozen_tag(),
         style = shape.style_tag(),
         result = sample.result,
-        regime = trace
+        strategy = trace
             .strategy
             .map_or_else(|| "-".to_string(), |r| format!("{r:?}")),
         effective = trace

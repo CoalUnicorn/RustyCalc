@@ -8,7 +8,9 @@ import {
     installDenseRangeMethods,
     queryOptions,
     rectCenter,
+    shouldRescheduleAfterDrain,
 } from "./harness-core.js";
+import { findFullRebuildAnchor } from "./recording-viewer.js";
 
 test("autofit plans preserve the demo workbook used ranges", () => {
     assert.deepEqual(autofitPlanFor("forensics", 0), {
@@ -87,4 +89,44 @@ test("queryOptions accepts known demos and rejects unknown workbook ids", () => 
         autorun: false,
         workbook: "sample",
     });
+});
+
+test("a held RetryRequired drain outcome keeps the scheduler armed", () => {
+    // Mirrors the wasm `RenderResult` enum exported by the iron-canvas
+    // bindings (numeric values 0-3). The browser smoke never forces a
+    // bridge failure, so this path is pinned here instead.
+    const renderResult = Object.freeze({
+        Idle: 0,
+        Rendered: 1,
+        RetryRequired: 2,
+        PlaybackActive: 3,
+    });
+    assert.equal(
+        shouldRescheduleAfterDrain(renderResult.RetryRequired, renderResult),
+        true,
+        "a held attempt must request another frame with no new host signal",
+    );
+    for (const outcome of [
+        renderResult.Idle,
+        renderResult.Rendered,
+        renderResult.PlaybackActive,
+    ]) {
+        assert.equal(
+            shouldRescheduleAfterDrain(outcome, renderResult),
+            false,
+            `outcome ${outcome} must not keep the scheduler armed`,
+        );
+    }
+});
+
+test("recording replay anchors at a committed full-rebuild strategy", () => {
+    const frames = [
+        { trace: { strategy: "full_rebuild", committed_seq: null } },
+        { trace: { strategy: "changed_cells", committed_seq: 1 } },
+        { trace: { strategy: "full_rebuild", committed_seq: 2 } },
+        { trace: { strategy: "scroll_blit", committed_seq: 3 } },
+    ];
+
+    assert.equal(findFullRebuildAnchor(frames, 1), null);
+    assert.equal(findFullRebuildAnchor(frames, 3), 2);
 });

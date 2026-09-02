@@ -137,7 +137,7 @@ pub(super) fn install_raf_loop(
         let playing = false;
 
         // ==============================================================
-        // Viewport reconciliation — runs before the paint so a correction
+        // View reconciliation — runs before the paint so a correction
         // lands on this frame rather than flashing on the next one.
         // ==============================================================
 
@@ -235,9 +235,9 @@ pub(super) fn install_raf_loop(
         #[cfg(feature = "dev-tools")]
         web_sys::console::time_end_with_label("render");
 
-        // Idle touches no diagnostic; Painted counts + times; Retry publishes
+        // Idle touches no diagnostic; Rendered counts + times; RetryRequired publishes
         // the held-pane trace without counting a frame and forces the loop to
-        // stay armed; Playback (dev-tools short-circuit) leaves every
+        // stay armed; PlaybackActive (dev-tools short-circuit) leaves every
         // diagnostic untouched. See `scheduling_after` below.
         let action = scheduling_after(paint_result, playing);
         let mut frame_trace = None;
@@ -272,7 +272,7 @@ pub(super) fn install_raf_loop(
         // cell commit has happened so the panel stays on its placeholder
         // ("commit a cell to measure") and we don't spam the signal on
         // every scroll / resize / overlay tick — and skipped on a tick that
-        // didn't commit or retry a paint (Idle / Playback).
+        // didn't commit or retry a paint (Idle / PlaybackActive).
         if action.update_timing
             && let Some(app) = &app
             && app.perf.commit_start.get_untracked().is_some()
@@ -286,8 +286,8 @@ pub(super) fn install_raf_loop(
         //
         // Written on every painted or retried frame, not only on change, and
         // prefixed with a frame counter: an unchanging string is otherwise
-        // indistinguishable from a stale panel, and "which regime, every
-        // single frame" is exactly the question being asked. A held Retry
+        // indistinguishable from a stale panel, and "which strategy, every
+        // single frame" is exactly the question being asked. A held RetryRequired
         // publishes at the same counter value rather than a new one — it
         // names the attempt, not a committed frame.
         if let Some(app) = &app
@@ -371,10 +371,10 @@ struct SchedulerAction {
 
 /// Pure outcome policy. `playback_active` is the same
 /// `playing` bool the dev-tools playback tick already computed this frame —
-/// `Idle` and `Playback` simply hand it back unchanged; `Retry` forces it to
+/// `Idle` and `PlaybackActive` simply hand it back unchanged; `RetryRequired` forces it to
 /// `true` so the one-shot loop stays armed until the held attempt commits.
 /// No external bridge-recovery signal exists to wake a paused loop, so a
-/// `Retry` must remain live even when the failure lasts for many frames.
+/// `RetryRequired` must remain live even when the failure lasts for many frames.
 fn scheduling_after(result: RenderResult, playback_active: bool) -> SchedulerAction {
     match result {
         RenderResult::Idle => SchedulerAction {

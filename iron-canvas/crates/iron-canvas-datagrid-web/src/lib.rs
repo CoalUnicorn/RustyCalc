@@ -69,7 +69,7 @@ impl DataGridCanvas {
     pub fn set_theme_from_element(&mut self, el: &web_sys::Element) {
         // `set_theme` value-compares and, on change, marks geometry + overlay
         // itself; `Chrome::classify` rejects a theme-mismatched frame, so no
-        // separate `request_repaint` is needed to force the next Fresh paint.
+        // separate `request_repaint` is needed to force the next FullRebuild.
         self.runtime
             .orchestrator_mut()
             .set_theme(iron_canvas_canvas2d::theme_from_element::from_element(el));
@@ -185,7 +185,7 @@ impl DataGridCanvas {
         }
         self.model
             .borrow_mut_with(|g| g.set_column_width(col as usize, width));
-        self.runtime.orchestrator_mut().request_repaint(); // geometry changed -> Fresh rebuild
+        self.runtime.orchestrator_mut().request_repaint(); // geometry changed -> FullRebuild
     }
 
     // D.4 Sort

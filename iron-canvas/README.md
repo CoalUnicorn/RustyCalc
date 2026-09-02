@@ -295,7 +295,7 @@ execute -> finish` before a paint attempt is complete:
    infallible by design). Any failure holds the whole attempt: the
    taken `PendingWork` merges back into `self.pending` unmodified,
    nothing paints or presents, and `render_pending` returns
-   `PaintResult::Retry`. There is no synthetic-default fallback.
+   `PaintResult::RetryRequired`. There is no synthetic-default fallback.
 2. `Chrome::classify(prev, model, &inputs, active_cell)` compares the
    captured inputs against the committed `Chrome` and returns one
    `FrameDelta`: `Stable`, `Scroll(BlitPlan)`, or
@@ -327,7 +327,7 @@ execute -> finish` before a paint attempt is complete:
    and `DamagedRows` can commit healthy panes or rows and hold only the
    failed scope.
 
-A held or partial attempt (`PaintResult::Retry`) merges its failed scope
+A held or partial attempt (`PaintResult::RetryRequired`) merges its failed scope
 back into `self.pending` — the whole attempt (a capture failure, or an
 atomic `FullRebuild` or `ScrollBlit` hold) or a narrower strategy scope
 (`ChangedCells` failed pane mask or `DamagedRows` original row spans). Thus,
@@ -359,7 +359,7 @@ wasm-pack build --target web --features dev-tools     # standalone
 trunk serve --features dev-tools                      # full app
 ```
 
-With the feature on, `IronCanvas` exports `startRecording()` / `stopRecording()` and `RecordingSurface<S>` forks every painter call into a per-frame buffer. The output is a single uncompressed JSON document conforming to the `.icr` schema in `crates/iron-canvas-recorder/src/recording.rs` (`IcrHeader { schema_version, iron_canvas_version, canvas_w, canvas_h, dpr, theme, started_at_unix_ms, partial }` plus frames containing `frame_idx`, `t_ms`, `regime`, `signals` (the engine's diagnostic `WorkFlags` bits — `VIEW | CONTENT | GEOMETRY | OVERLAY`), `grid_ops`, and `overlay_ops`).
+With the feature on, `IronCanvas` exports `startRecording()` / `stopRecording()` and `RecordingSurface<S>` forks every painter call into a per-frame buffer. The output is a single uncompressed JSON document conforming to the `.icr` schema in `crates/iron-canvas-recorder/src/recording.rs` (`IcrHeader { schema_version, iron_canvas_version, canvas_w, canvas_h, dpr, theme, started_at_unix_ms, partial }` plus frames containing `frame_idx`, `t_ms`, `strategy`, `signals` (the engine's diagnostic `WorkFlags` bits — `VIEW | CONTENT | GEOMETRY | OVERLAY`), `grid_ops`, and `overlay_ops`).
 
 Replay an `.icr` by opening [`web-test/recording-viewer.html`](web-test/recording-viewer.html) and drag-dropping the file; the page mirrors `iron_canvas_recorder::replay` in JS and paints onto a single 2D canvas. The always-on `recordingSupported() -> bool` probe lets the page detect whether the loaded wasm has recording compiled in. Without the feature flag, recording symbols are not exported and the prod bundle pays zero overhead.
 

@@ -11,6 +11,7 @@ import {
     installDenseRangeMethods,
     queryOptions,
     rectCenter,
+    shouldRescheduleAfterDrain,
 } from "./harness-core.js";
 
 const LIGHT_THEME = Object.freeze({
@@ -222,7 +223,7 @@ function schedulePaint() {
     paintFrame = requestAnimationFrame(() => {
         paintFrame = 0;
         const outcomes = drainPaint();
-        if (outcomes.at(-1) === RenderResult.Retry) schedulePaint();
+        if (shouldRescheduleAfterDrain(outcomes.at(-1), RenderResult)) schedulePaint();
     });
 }
 

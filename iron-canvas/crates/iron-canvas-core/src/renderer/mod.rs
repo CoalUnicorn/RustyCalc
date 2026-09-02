@@ -14,8 +14,8 @@
 //! survives across frames.
 //!
 //! State pushes from the host mark work on `Orchestrator`'s single pending
-//! value. `Orchestrator::render_pending` picks a regime from it and drives
-//! the layers that regime paints through their `LayerBase` paint method:
+//! value. `Orchestrator::render_pending` picks a strategy from it and drives
+//! the layers that strategy paints through their `LayerBase` paint method:
 //! `paint_grid` / `paint_grid_blit` for the grid, `paint_overlay_layer`
 //! for the overlay. The grid path calls into [`RendererCore::render_grid`];
 //! the overlay path iterates the [`Layer`](crate::decoration::Layer)
@@ -24,7 +24,7 @@
 //!
 //! # Render pipeline
 //!
-//! Two paint entry points, each driven by `render_pending` per regime:
+//! Two paint entry points, each driven by `render_pending` per strategy:
 //!
 //! - [`RendererCore::render_grid`] paints cells (four frozen-pane
 //!   quadrants, each running five cell sub-passes: bg, then CF decoration,
@@ -199,7 +199,7 @@ impl<P: Painter> RendererCore<P> {
         self.trace.set(t);
     }
 
-    /// Record why a `Viewport` frame lost the grid-wide strip path.
+    /// Record why a `ScrollBlit` frame lost the grid-wide strip path.
     fn trace_blit_fallback(&self, cold_cache: bool) {
         let mut t = self.trace.get();
         if t.blit_fallback.is_none() {
@@ -295,7 +295,8 @@ impl<P: Painter> RendererCore<P> {
 
     /// The grid group sequence every strategy shares:
     /// `Grid -> Cells -> FrozenSep -> Headers -> Corner`. Only the work
-    /// inside Cells differs between SlotsReuse, Damage, Fresh and Viewport,
+    /// inside Cells differs between ChangedCells, DamagedRows, FullRebuild,
+    /// and ScrollBlit,
     /// so `execute_cells` owns that and nothing else; its typed result
     /// passes straight back out.
     ///

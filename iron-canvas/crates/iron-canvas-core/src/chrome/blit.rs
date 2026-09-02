@@ -135,13 +135,13 @@ impl BlitPlan {
     }
 }
 
-/// Dispatch input for `Chrome::next` — which reuse-or-rebuild regime the
+/// Dispatch input for `Chrome::next` — which reuse-or-rebuild strategy the
 /// orchestrator selected for this frame. Exhaustive: adding a variant breaks
-/// every regime arm at compile time. The blit fast-path is *not* here — it has
+/// every strategy arm at compile time. The blit fast-path is *not* here — it has
 /// a two-outcome result and lives in [`Chrome::next_blit`] returning
 /// [`super::BlitOutcome`], so it never widens into this shared dispatch.
 #[derive(Clone, Copy)]
-#[must_use = "FramePath dispatches Chrome::next; dropping it skips the chosen construction regime"]
+#[must_use = "FramePath dispatches Chrome::next; dropping it skips the chosen construction strategy"]
 pub enum FramePath {
     /// Full rebuild walk. `prev = Some` recycles slot Vec allocations;
     /// `prev = None` is the first-frame path.

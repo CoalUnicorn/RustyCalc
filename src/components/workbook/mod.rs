@@ -307,7 +307,7 @@ fn copy_to_app_clipboard(
             clipboard_store.update_value(|c| *c = Some(app_cb));
             // Wake the subscribe Effect so set_overlays repaints the
             // marching-ants border. The copied range isn't mutated, so this
-            // reuses the content regime purely as a redraw trigger (overlay-only
+            // reuses the content strategy purely as a redraw trigger (overlay-only
             // routing deferred — see SESSION.md).
             state.emit_event(SpreadsheetEvent::Content(ContentEvent::RangeChanged {
                 sheet_area,

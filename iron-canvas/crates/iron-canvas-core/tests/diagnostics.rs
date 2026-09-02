@@ -38,7 +38,7 @@ fn enable_then_disable_round_trips() {
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().expect("enabled capture publishes");
-    assert_eq!(diag.schema_version, 2);
+    assert_eq!(diag.schema_version, 3);
     assert_eq!(diag.attempt_seq, 1);
     assert_eq!(diag.committed_seq, Some(1));
     orch.set_frame_diagnostics_enabled(false);
@@ -72,7 +72,7 @@ fn capture_hold_still_publishes_and_keeps_cache_state() {
 #[test]
 fn overlay_only_attempt_commits_without_cache_work() {
     // Live recipe from orchestrator_strategies.rs: an in-viewport
-    // selection move is a committed Overlay regime with NO grid cache
+    // selection move is a committed Overlay strategy with NO grid cache
     // commit. It must not be mislabelled as held.
     let model = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
@@ -89,7 +89,7 @@ fn overlay_only_attempt_commits_without_cache_work() {
     assert_eq!(
         diag.cache.resolution,
         iron_canvas_core::DiagCacheResolution::Committed,
-        "an Overlay regime commits a transaction; it is not held"
+        "an OverlayOnly strategy commits a transaction; it is not held"
     );
     assert!(diag.committed_seq.is_some());
     assert_eq!(diag.cache.planned_action, None);
@@ -576,7 +576,7 @@ fn held_damage_attempt_reports_held_verdict() {
     let (mut orch, model) = harness();
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
-    // Fail the damage-strip fetch: the Damage regime must hold.
+    // Fail the damage-strip fetch: the Damage strategy must hold.
     model.set_bulk_bridge_fail(true);
     model.set_cell(4, 2, "damaged");
     orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });

@@ -34,7 +34,10 @@ use crate::renderer::cell::fingerprint::{FingerprintTruth, RepaintReason};
 use crate::renderer::prepared::FetchedCells;
 use crate::types::coord::RCRange;
 /// Wire version of the snapshot shape. Bump when the projection changes.
-pub const DIAG_SCHEMA_VERSION: u8 = 2;
+/// Schema 3 replaces `overlay`, `viewport`, `slotsReuse`, `fresh`, and
+/// `damage` with the camelCase `RenderStrategy` names `overlayOnly`,
+/// `scrollBlit`, `changedCells`, `fullRebuild`, and `damagedRows`.
+pub const DIAG_SCHEMA_VERSION: u8 = 3;
 
 /// Classification verdict for this attempt, as `Chrome::classify` decided.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -130,7 +133,7 @@ pub enum DiagFingerprintTruth {
 
 /// What happened to the prepared cache action. Derived from the TRANSACTION
 /// outcome, never from the presence of a grid cache commit: an Overlay
-/// regime commits with `cache_commit: None`. There is no "discarded" state
+/// strategy commits with `cache_commit: None`. There is no "discarded" state
 /// in the current pipeline — an attempt either commits or holds whole-grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagCacheResolution {
@@ -270,7 +273,7 @@ pub struct DiagRevealedStrip {
     pub range: RCRange,
 }
 
-/// Blit geometry for a `Viewport` attempt. `delta` is the logical row or
+/// Blit geometry for a `ScrollBlit` attempt. `delta` is the logical row or
 /// column count the viewport moved (negative = toward the origin). `clip`
 /// is the exact pixel rectangle `Painter::push_clip` applied around strip
 /// painting, `Some` only when execution actually reached `push_clip` —
@@ -589,7 +592,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         capture.cache.fingerprint_action = Some(action);
     }
 
-    /// Blit detail for a `Viewport` attempt. `delta` is derived from the
+    /// Blit detail for a `ScrollBlit` attempt. `delta` is derived from the
     /// committed vs candidate scroll-band origin — the renderer never
     /// re-reads the model for it. `clip` is recorded separately at the
     /// `push_clip` call site, not derived here.

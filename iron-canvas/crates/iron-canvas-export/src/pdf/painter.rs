@@ -310,7 +310,7 @@ impl Painter for PdfPainter {
 impl BlitPainter for PdfPainter {
     fn blit(&self, _src: PixelRect, _dst: PixelRect) {
         // PDF has no source-copy primitive. The throwaway export
-        // orchestrator can never reach the Viewport regime — see the
+        // orchestrator can never reach the ScrollBlit strategy — see the
         // "`BlitPainter::blit` — short-circuit (proven safe)" section of
         // OUTPUT_REFACTOR_PLAN.md for the proof. No-op is sound.
     }

@@ -6,8 +6,8 @@
 //! `CanvasPainter::blit` reads its kept band from the *visible front*
 //! canvas, while replay paints into the detached back canvas —
 //! `WebSurface::present` is the only thing that copies back -> front. A
-//! recorded `Fresh` -> `Viewport` (blit) sequence therefore needs the
-//! `Fresh` frame presented before the `Viewport` frame's `Blit` op replays,
+//! recorded `FullRebuild` -> `ScrollBlit` sequence therefore needs the
+//! `FullRebuild` frame presented before the `ScrollBlit` frame's `Blit` op replays,
 //! or the blit reads stale/cleared front pixels and the final composite is
 //! corrupted.
 
@@ -114,7 +114,7 @@ fn make_scroll_fixture_model(top_row: Rc<Cell<i32>>) -> JsValue {
     );
 
     // Required for the blit *probe* specifically: `overlaps_match` compares
-    // this directly (no default-height fallback, unlike the Fresh build
+    // this directly (no default-height fallback, unlike the full-rebuild
     // path) to verify the kept band's rows still match after a scroll.
     set_prop(
         &obj,
@@ -203,7 +203,7 @@ fn clear_canvas_white(canvas: &HtmlCanvasElement) {
     ctx.fill_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
 }
 
-/// Acceptance criterion: seeking to a recorded `Viewport` (blit) frame must
+/// Acceptance criterion: seeking to a recorded `ScrollBlit` frame must
 /// raster identically to the live frame it was captured from. Before the
 /// fix, `replay_through` never presented the grid surface mid-replay, so
 /// the front canvas kept whatever `clear_canvas_white` left it at.
@@ -219,7 +219,7 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
         panic!("scroll fixture model passes the duck test");
     };
     canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
-    canvas.render_pending(); // baseline Fresh paint with real data, before recording starts
+    canvas.render_pending(); // baseline FullRebuild paint before recording starts
 
     let Ok(()) = canvas.start_recording(JsValue::UNDEFINED) else {
         panic!("start recording");
@@ -228,9 +228,9 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     top_row.set(2); // scroll by one row
     // `view_changed()` declares the navigation intent; `Chrome::classify`
     // still detects the actual scroll geometrically, then `plan_frame` picks
-    // the Viewport (blit) regime — this call only wakes dispatch.
+    // the ScrollBlit strategy — this call only wakes dispatch.
     canvas.view_changed_js();
-    canvas.render_pending(); // must land the Viewport (blit) regime
+    canvas.render_pending(); // must land the ScrollBlit strategy
 
     let Ok(bytes_arr) = canvas.stop_recording() else {
         panic!("stop recording");
@@ -238,19 +238,23 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     let bytes = bytes_arr.to_vec();
 
     // Guard the fixture: the scenario is worthless if the scroll above
-    // didn't actually record a Viewport frame carrying a Blit op.
+    // did not record a ScrollBlit frame carrying a Blit op.
     let Ok(rec) = Recording::deserialize(&bytes) else {
         panic!("recording deserializes");
     };
-    let regimes: Vec<RenderStrategy> = rec.frames.iter().filter_map(|f| f.trace.regime).collect();
+    let strategies: Vec<RenderStrategy> = rec
+        .frames
+        .iter()
+        .filter_map(|frame| frame.trace.strategy)
+        .collect();
     assert!(
         rec.frames
             .iter()
-            .any(|f| f.trace.regime == Some(RenderStrategy::ScrollBlit)
+            .any(|f| f.trace.strategy == Some(RenderStrategy::ScrollBlit)
                 && f.grid_ops
                     .iter()
                     .any(|op| matches!(op, DrawOp::Blit { .. }))),
-        "fixture must record a Viewport frame containing a Blit op — got regimes {regimes:?}"
+        "fixture must record a ScrollBlit frame containing a Blit op; got {strategies:?}"
     );
 
     let live_bytes = grid_pixels(&grid);

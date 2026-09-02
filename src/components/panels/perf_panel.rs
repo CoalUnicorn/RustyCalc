@@ -40,8 +40,8 @@ pub fn PerfPanel() -> impl IntoView {
     let formula_text = move || perf.last_formula.get().unwrap_or_default();
 
     // Which renderer path drew the last frame. Reads e.g.
-    // "SlotsReuse tl:skip tr:- bl:- br:FULL fetched=8000" — a `FULL` on the
-    // frame right after a `Viewport` is the post-blit full repaint described
+    // "ChangedCells tl:skip tr:- bl:- br:FULL fetched=8000" — a `FULL` on the
+    // frame right after a `ScrollBlit` is the post-blit full repaint described
     // in iron-canvas/docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md.
     let frame_trace = move || perf.frame_trace.get();
 
@@ -211,7 +211,7 @@ pub fn PerfPanel() -> impl IntoView {
                 <span class="pp-sep">"|"</span>
                 <span
                     class="pp-trace"
-                    title="Last frame: regime + per-pane verdict (tl tr bl br) + cell slots fetched"
+                    title="Last frame: strategy + per-pane verdict (tl tr bl br) + cell slots fetched"
                 >
                     {t}
                 </span>

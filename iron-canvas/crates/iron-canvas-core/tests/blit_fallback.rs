@@ -184,8 +184,8 @@ fn bridge_failed_active_cell_rejects_blit() {
 // dispatch (not the raw `Chrome::classify`/`next_blit` calls the rest of
 // this file uses) with a bulk bridge failure added, this proves
 // `render_scroll_blit`'s `FreshFallback` arm must hold atomically —
-// selected Viewport, effective Fresh fallback — exactly like an ordinary
-// Fresh attempt, per the Resolved Failure Policy table.
+// selected ScrollBlit, effective FullRebuild fallback — exactly like an
+// ordinary FullRebuild attempt, per the Resolved Failure Policy table.
 // ==============================================================================
 
 fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface> {
@@ -234,7 +234,7 @@ fn held_fresh_fallback_at_row_header_digit_boundary_holds_atomically() {
     assert_eq!(
         orch.last_strategy(),
         Some(RenderStrategy::ScrollBlit),
-        "planning still selects Viewport; only the execution demotes"
+        "planning still selects ScrollBlit; only the execution demotes"
     );
     assert_eq!(
         orch.last_trace().effective,
@@ -260,7 +260,7 @@ fn held_fresh_fallback_at_row_header_digit_boundary_holds_atomically() {
 }
 
 // ==============================================================================
-// Task 3: `PreparedBlitFrame`/`BlitRollback` field coverage. The Viewport
+// Task 3: `PreparedBlitFrame`/`BlitRollback` field coverage. The ScrollBlit
 // `held_*` fixtures in held_frame.rs (`held_viewport_presents_nothing_and_keeps_query_geometry`,
 // `held_viewport_retries_after_bridge_recovery`) already prove the held-then-
 // restored round trip GREEN end to end, but their model has no frozen rows

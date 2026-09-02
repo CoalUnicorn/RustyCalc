@@ -168,7 +168,7 @@ fn full_rebuild_emits_canvas_fill_and_overlay_clear() {
         )),
         "Fresh must emit a full-canvas RectFill (the grid bg)"
     );
-    // Overlay clears its canvas at frame start (every regime that paints it).
+    // Overlay clears its canvas at frame start (every strategy that paints it).
     assert!(
         overlay_ops
             .iter()
@@ -186,9 +186,9 @@ fn changed_cells_skips_full_canvas_fill() {
     let grid_before = grid_ops_len(&orch);
 
     // A content-dirty signal keeps the viewport stable -> plan_frame plans
-    // SlotsReuse. CONTENT blocks the Viewport arm (blit on stale content is
+    // ChangedCells. CONTENT blocks the ScrollBlit arm (blit on stale content is
     // the recalc bug), and reaching this far with no geometry/view work
-    // selects SlotsReuse. Theme swaps no longer reach this regime — they
+    // selects SlotsReuse. Theme swaps no longer reach this strategy — they
     // invalidate the paint cache and force Fresh.
     orch.mark_content_dirty();
     orch.render_pending();
@@ -217,7 +217,7 @@ fn scroll_blit_emits_blit_op() {
     // signal we have for "something happened") so render_pending doesn't
     // bail empty — last_frame stays populated, Chrome::classify catches the
     // viewport shift as FrameDelta::Scroll, and plan_frame routes it to
-    // Viewport.
+    // ScrollBlit.
     stub.set_top_row(2);
     orch.request_overlay_repaint();
     orch.render_pending();
@@ -232,7 +232,7 @@ fn scroll_blit_emits_blit_op() {
     );
 }
 
-/// Stage 5 pin (Task 1, bullets 2+3): the four grid-painting regimes must
+/// Stage 5 pin (Task 1, bullets 2+3): the four grid-painting strategies must
 /// share one outer scaffold — `Grid, Cells, FrozenSep, Headers, Corner`, in
 /// that order, with every `BeginGroup` balanced by an `EndGroup` — before
 /// `execute_grid_shell` consolidates their four independent copies of it.
@@ -293,10 +293,10 @@ fn grid_strategies_share_the_grid_shell_group_order() {
     orch.request_overlay_repaint();
     orch.render_pending();
     assert_eq!(orch.last_strategy(), Some(RenderStrategy::ScrollBlit));
-    assert_shell(&grid_ops_since(&orch, before), "Viewport");
+    assert_shell(&grid_ops_since(&orch, before), "ScrollBlit");
 }
 
-/// Stage 5 pin (Task 1, bullet 5): a row scroll's `Viewport` frame repaints
+/// Stage 5 pin (Task 1, bullet 5): a row scroll's `ScrollBlit` frame repaints
 /// only the row-header strip — the plan's `GridHeaderScope::Axis(Row)` — so
 /// its new ops must contain row-header content and must NOT contain any
 /// column-header content, even though the `Headers` group still opens (see
@@ -360,8 +360,8 @@ fn overlay_only_leaves_grid_untouched() {
     let grid_before = grid_ops_len(&orch);
     let overlay_before = overlay_ops_len(&orch);
 
-    // Autofill drag: raises OVERLAY only, no grid signal. Viewport
-    // unchanged -> FrameDelta::Stable, and plan_frame picks Overlay.
+    // Autofill drag: raises OVERLAY only, no grid signal. The viewport is
+    // unchanged, so FrameDelta::Stable lets plan_frame pick OverlayOnly.
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
     orch.render_pending();
 
@@ -525,7 +525,7 @@ fn set_model_marks_geometry_and_forces_fresh() {
 
 // ─── Stage 5: Recording round-trip through RecordingSurface<MemSurface> ───
 //
-// Reuses TestModel + the same regime scenarios as the MemSurface
+// Reuses TestModel + the same strategy scenarios as the MemSurface
 // suite above. Each test wraps both surfaces in RecordingSurface and
 // asserts:
 //   1. Orchestrator::last_strategy() stamps the expected RenderStrategy.
@@ -545,7 +545,7 @@ fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>>
 }
 
 /// Bracket a paint with begin_frame/end_frame on both surfaces and
-/// return (grid_ops, overlay_ops, regime, work_bits). The `.icr` attempt
+/// return (grid_ops, overlay_ops, strategy, work_bits). The `.icr` attempt
 /// `signals: u8` field is fed from `WorkFlags::bits()`, whose layout is
 /// pinned to the `GridSignals` word it replaced.
 fn paint_and_capture(
@@ -581,9 +581,9 @@ fn replay_and_drain(ops: &[DrawOp]) -> Vec<DrawOp> {
 fn last_strategy_is_full_rebuild_after_initial_render() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
-    let (grid_ops, overlay_ops, regime, _) = paint_and_capture(&mut orch);
+    let (grid_ops, overlay_ops, strategy, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(RenderStrategy::FullRebuild));
+    assert_eq!(strategy, Some(RenderStrategy::FullRebuild));
     assert!(!grid_ops.is_empty());
     assert!(!overlay_ops.is_empty());
     // Round-trip through replay — proves the captured stream is
@@ -603,9 +603,9 @@ fn last_strategy_is_full_rebuild_after_theme_swap() {
     paint_and_capture(&mut orch); // Fresh.
 
     orch.set_theme(CanvasTheme::dark());
-    let (grid_ops, _, regime, _) = paint_and_capture(&mut orch);
+    let (grid_ops, _, strategy, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(RenderStrategy::FullRebuild));
+    assert_eq!(strategy, Some(RenderStrategy::FullRebuild));
     assert!(!grid_ops.is_empty());
 }
 
@@ -722,9 +722,9 @@ fn last_strategy_is_scroll_blit_after_row_scroll() {
 
     stub.set_top_row(2);
     orch.request_overlay_repaint();
-    let (grid_ops, _, regime, _) = paint_and_capture(&mut orch);
+    let (grid_ops, _, strategy, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(RenderStrategy::ScrollBlit));
+    assert_eq!(strategy, Some(RenderStrategy::ScrollBlit));
     assert!(grid_ops.iter().any(|op| matches!(op, DrawOp::Blit { .. })));
 }
 
@@ -735,17 +735,18 @@ fn last_strategy_is_overlay_only_after_autofill_drag() {
     paint_and_capture(&mut orch); // Fresh.
 
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
-    let (grid_ops, overlay_ops, regime, _) = paint_and_capture(&mut orch);
+    let (grid_ops, overlay_ops, strategy, _) = paint_and_capture(&mut orch);
 
-    assert_eq!(regime, Some(RenderStrategy::OverlayOnly));
+    assert_eq!(strategy, Some(RenderStrategy::OverlayOnly));
     assert!(grid_ops.is_empty(), "Overlay must not touch the grid");
     assert!(!overlay_ops.is_empty());
 }
 
 #[test]
 fn recording_serde_round_trip_across_all_five_strategies() {
-    // Drive Fresh -> Damage -> SlotsReuse -> Viewport -> Overlay through one
-    // Orchestrator, collecting one Frame per regime, then serialize the
+    // Drive FullRebuild -> DamagedRows -> ChangedCells -> ScrollBlit ->
+    // OverlayOnly through one
+    // Orchestrator, collecting one Frame per strategy, then serialize the
     // whole Recording and assert deserialize is bit-equal to the original.
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build_rec(Rc::clone(&stub));
@@ -766,32 +767,37 @@ fn recording_serde_round_trip_across_all_five_strategies() {
         });
     };
 
-    push(&mut orch, 0); // Fresh
+    push(&mut orch, 0); // FullRebuild
     // mark_rows_damaged names row 2 on sheet 0 with an actual edit behind it:
     // viewport stays reusable and every CONTENT raise since the last paint
-    // named its rows on the on-screen sheet -> Damage.
+    // named its rows on the on-screen sheet -> DamagedRows.
     stub.set_cell(2, 1, "changed");
     orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    push(&mut orch, 8); // Damage
-    // mark_content_dirty raises CONTENT; viewport stays valid -> SlotsReuse.
+    push(&mut orch, 8); // DamagedRows
+    // mark_content_dirty raises CONTENT; viewport stays valid -> ChangedCells.
     // (set_theme used to land here too, but a palette change now invalidates
-    // the paint cache and routes to Fresh, so it can't be used as a
-    // SlotsReuse trigger.)
+    // the paint cache and routes to FullRebuild, so it cannot be used as a
+    // ChangedCells trigger.)
     orch.mark_content_dirty();
-    push(&mut orch, 16); // SlotsReuse
+    push(&mut orch, 16); // ChangedCells
     stub.set_top_row(2);
     orch.request_overlay_repaint();
-    push(&mut orch, 32); // Viewport
+    push(&mut orch, 32); // ScrollBlit
     orch.set_extend_to(Some(AutofillTarget { row: 1, col: 2 }));
-    push(&mut orch, 48); // Overlay
+    push(&mut orch, 48); // OverlayOnly
 
     assert_eq!(frames.len(), 5, "all five strategies must produce frames");
-    let regimes: Vec<_> = frames
+    let strategies: Vec<_> = frames
         .iter()
-        .map(|f| f.trace.regime.expect("recorded regime must be stamped"))
+        .map(|frame| {
+            frame
+                .trace
+                .strategy
+                .expect("recorded strategy must be stamped")
+        })
         .collect();
     assert_eq!(
-        regimes,
+        strategies,
         vec![
             RenderStrategy::FullRebuild,
             RenderStrategy::DamagedRows,
@@ -827,13 +833,13 @@ fn recording_serde_round_trip_across_all_five_strategies() {
     }
 }
 
-// ─── Damage regime ───
+// ─── Damage strategy ───
 
 #[test]
 fn named_damage_paints_less_than_a_multi_cell_slots_reuse_envelope() {
     // Same model, same content signal — one orchestrator takes the all-content
     // path, one the damage path. The band repaint being strictly smaller
-    // is the entire point of the regime.
+    // is the entire point of the strategy.
     //
     // The edit below must be load-bearing in TWO ways now:
     //
@@ -905,7 +911,7 @@ fn damaged_rows_repaints_chrome_like_other_grid_strategies() {
 
     // Order, not just presence: cells must open (and the frozen separator's
     // pixels must win back the band's re-stroked grid lines) strictly before
-    // headers/corner, matching every other grid regime's shell order.
+    // headers/corner, matching every other grid strategy's shell order.
     assert_eq!(
         grid_shell_group_sequence(&ops),
         vec![
@@ -959,9 +965,9 @@ fn damaged_rows_work_is_drained_by_the_render() {
 
 // ─── present() contract ───
 
-/// Every regime arm must call `Surface::present()` exactly once per layer
+/// Every strategy arm must call `Surface::present()` exactly once per layer
 /// it actually painted, and must NOT present a layer it left untouched
-/// (Overlay regime skips the grid entirely). `MemSurface::presents()`
+/// (Overlay strategy skips the grid entirely). `MemSurface::presents()`
 /// counts real `present()` calls — this is the counting test Task 2's
 /// `WebSurface` back-buffer flip depends on.
 #[test]
@@ -978,18 +984,18 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
         "Fresh presents the overlay"
     );
 
-    // Overlay regime: grid pixels untouched -> grid must NOT re-present.
+    // Overlay strategy: grid pixels untouched -> grid must NOT re-present.
     orch.request_overlay_repaint();
     orch.render_pending();
     assert_eq!(
         orch.grid_surface().presents(),
         1,
-        "Overlay regime must not present the grid"
+        "OverlayOnly must not present the grid"
     );
     assert_eq!(
         orch.overlay_surface().presents(),
         2,
-        "Overlay regime presents the overlay"
+        "OverlayOnly presents the overlay"
     );
 
     // SlotsReuse (content dirty, viewport stable): grid presents again.
@@ -1001,14 +1007,14 @@ fn every_paint_arm_presents_the_surfaces_it_painted() {
         "SlotsReuse presents the grid"
     );
 
-    // Viewport (scroll one row): grid blit + overlay repaint -> both present.
+    // ScrollBlit (scroll one row): grid blit + overlay repaint -> both present.
     stub.set_top_row(2);
     orch.request_overlay_repaint();
     orch.render_pending();
     assert_eq!(
         orch.grid_surface().presents(),
         3,
-        "Viewport presents the grid"
+        "ScrollBlit presents the grid"
     );
 }
 
@@ -1317,7 +1323,7 @@ fn view_only_navigation_without_a_shift_emits_no_grid_ops() {
 }
 
 /// The other view row: when the movement *does* shift pixels, the geometric
-/// probe claims it and `Viewport` blits the kept band.
+/// probe claims it and `ScrollBlit` blits the kept band.
 #[test]
 fn real_scroll_view_change_dispatches_viewport() {
     let stub = Rc::new(TestModel::synthetic_grid());
@@ -1338,13 +1344,13 @@ fn real_scroll_view_change_dispatches_viewport() {
     );
 }
 
-/// `decide`'s `Viewport` probe carries an explicit `!work.has_geometry()`
+/// `plan_frame`'s `ScrollBlit` probe carries an explicit `!work.has_geometry()`
 /// guard. It has no reachable failure through public API today: every
 /// current geometry producer (`resize` here) already drops `last_frame`
 /// before `decide` runs, which excludes the probe on its own. This pins the
 /// externally observable contract instead of the guard specifically —
-/// geometry work concurrent with a real shift must still land on `Fresh`,
-/// never `Viewport` — so it keeps failing the moment a future geometry
+/// geometry work concurrent with a real shift must still land on `FullRebuild`,
+/// never `ScrollBlit` — so it keeps failing the moment a future geometry
 /// producer stops tripping last_frame/size/theme independently.
 #[test]
 fn geometry_plus_real_scroll_never_dispatches_viewport() {
@@ -1360,8 +1366,8 @@ fn geometry_plus_real_scroll_never_dispatches_viewport() {
     assert_eq!(
         orch.last_strategy(),
         Some(RenderStrategy::FullRebuild),
-        "geometry work concurrent with a real shift must dispatch Fresh, \
-         never Viewport"
+        "geometry work concurrent with a real shift must dispatch FullRebuild, \
+         never ScrollBlit"
     );
     assert!(
         orch.last_work_flags()

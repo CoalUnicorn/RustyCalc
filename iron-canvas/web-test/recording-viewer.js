@@ -2,12 +2,12 @@
 // shell so these functions can be exercised independently in a browser or
 // JavaScript test runner.
 
-export function findFreshAnchor(frames, target) {
+export function findFullRebuildAnchor(frames, target) {
     const last = frames.length - 1;
     if (last < 0) return null;
     for (let i = Math.min(target, last); i >= 0; i--) {
         const trace = frames[i]?.trace;
-        if (trace?.regime === "fresh" && trace.committed_seq != null) {
+        if (trace?.strategy === "full_rebuild" && trace.committed_seq != null) {
             return i;
         }
     }

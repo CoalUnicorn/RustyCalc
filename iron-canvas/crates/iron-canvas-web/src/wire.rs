@@ -1245,7 +1245,7 @@ mod tests {
     #[test]
     fn frame_diagnostics_wire_matches_declared_shape() {
         let diag = FrameDiagnostics {
-            schema_version: 2,
+            schema_version: 3,
             attempt_seq: 7,
             committed_seq: Some(6),
             selected: Some(iron_canvas_core::RenderStrategy::ChangedCells),
@@ -1321,7 +1321,7 @@ mod tests {
         let wire = FrameDiagnosticsWire::from(&diag);
         let json = serde_json::to_value(&wire).expect("wire serializes");
 
-        assert_eq!(json["schemaVersion"], 2);
+        assert_eq!(json["schemaVersion"], 3);
         assert_eq!(json["attemptSeq"], 7);
         assert_eq!(json["committedSeq"], 6);
         assert_eq!(json["selected"], "changedCells");

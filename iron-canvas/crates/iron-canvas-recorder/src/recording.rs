@@ -7,14 +7,14 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v6)
+//! # On-disk layout (v7)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":6,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":7,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
 //!    {"frame_idx":0,"t_ms":0,"origin":"forced_baseline",...},
 //!    {"frame_idx":1,"t_ms":17,"origin":"live",...}
@@ -27,7 +27,7 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `6`). Mismatch -> load fails.  |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `7`). Mismatch -> load fails.  |
 //! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
@@ -80,7 +80,7 @@ use crate::DrawOp;
 
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
-pub const ICR_SCHEMA_VERSION: u32 = 6;
+pub const ICR_SCHEMA_VERSION: u32 = 7;
 
 /// Why an attempt entered the recording timeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -129,7 +129,7 @@ pub struct TraceBlitFallback {
 pub struct TraceRecord {
     pub attempt_seq: u64,
     pub committed_seq: Option<u64>,
-    pub regime: Option<RenderStrategy>,
+    pub strategy: Option<RenderStrategy>,
     pub effective: Option<RenderStrategy>,
     pub work: u8,
     pub verdict: Option<TraceVerdict>,
@@ -172,7 +172,7 @@ impl From<FrameTrace> for TraceRecord {
         Self {
             attempt_seq: trace.attempt_seq,
             committed_seq: trace.committed_seq,
-            regime: trace.strategy,
+            strategy: trace.strategy,
             effective: trace.effective,
             work: trace.work.bits(),
             verdict,

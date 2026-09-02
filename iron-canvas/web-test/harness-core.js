@@ -145,3 +145,12 @@ export function queryOptions(search) {
         workbook: requested === "sample" || requested in DEMO_WORKBOOKS ? requested : "sample",
     };
 }
+/**
+ * Decide whether the one-shot rAF scheduler must stay armed after a drain.
+ * `result` is the wasm `RenderResult` enum object. A held attempt
+ * (`RetryRequired`) needs another frame with no new host signal; every
+ * other outcome lets the loop sleep until the next `schedulePaint()` poke.
+ */
+export function shouldRescheduleAfterDrain(lastOutcome, result) {
+    return lastOutcome === result.RetryRequired;
+}

@@ -105,7 +105,7 @@ impl SetterCache {
     /// Clear all four sticky binds. Called from the trait-level
     /// `invalidate_cache`, from `pop_clip` (ctx.restore wipes ctx state),
     /// and — via `RendererCore::invalidate_paint_cache` — from the paint
-    /// regime arms that change ctx fillStyle/strokeStyle/font/lineWidth.
+    /// strategy arms that change ctx fillStyle/strokeStyle/font/lineWidth.
     pub(crate) fn invalidate(&self) {
         self.last_fill.set(CachedColor::Empty);
         self.last_stroke.set(CachedColor::Empty);

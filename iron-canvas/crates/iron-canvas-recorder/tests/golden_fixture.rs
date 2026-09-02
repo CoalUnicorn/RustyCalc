@@ -412,28 +412,32 @@ fn fresh_frame_has_grid_sections() {
 }
 
 #[test]
-fn schema_version_is_pinned_at_6() {
-    // Schema 6 adds the `cell` and `range` trace verdict tags used by exact
-    // fingerprint repaint envelopes.
-    assert_eq!(ICR_SCHEMA_VERSION, 6);
+fn schema_version_is_pinned_at_7() {
+    // Schema 7 renames the trace field `regime` to `strategy` and
+    // switches `RenderStrategy` to plain snake_case wire values
+    // (`overlay_only`, `scroll_blit`, `changed_cells`, `full_rebuild`,
+    // `damaged_rows`), completing the public render-terminology rename at
+    // the recorder boundary.
+    assert_eq!(ICR_SCHEMA_VERSION, 7);
 }
 
 #[test]
-fn render_strategy_serializes_to_compatible_snake_case() {
+fn render_strategy_serializes_to_snake_case() {
     // Both fixtures above only ever exercise `RenderStrategy::FullRebuild` (see
     // `build_fixture`/`build_overlay_fixture`), so byte-identity against
-    // disk never actually pins the other four regimes' wire spelling.
-    // Stage 4's global constraints name the exact set — `overlay`,
-    // `viewport`, `slots_reuse`, `fresh`, `damage` — so sweep every variant
-    // through the real `Recording::serialize()` encoder (not `serde_json`
-    // directly) rather than trusting a parallel assumption about it. This
-    // builds an in-memory `Recording`, never touching the on-disk fixtures.
-    for (regime, expected) in [
-        (RenderStrategy::OverlayOnly, "overlay"),
-        (RenderStrategy::ScrollBlit, "viewport"),
-        (RenderStrategy::ChangedCells, "slots_reuse"),
-        (RenderStrategy::FullRebuild, "fresh"),
-        (RenderStrategy::DamagedRows, "damage"),
+    // disk never actually pins the other four strategies' wire spelling.
+    // The reviewed contract names the exact set — `overlay_only`,
+    // `scroll_blit`, `changed_cells`, `full_rebuild`, `damaged_rows` — so
+    // sweep every variant through the real `Recording::serialize()` encoder
+    // (not `serde_json` directly) rather than trusting a parallel assumption
+    // about it. This builds an in-memory `Recording`, never touching the
+    // on-disk fixtures.
+    for (strategy, expected) in [
+        (RenderStrategy::OverlayOnly, "overlay_only"),
+        (RenderStrategy::ScrollBlit, "scroll_blit"),
+        (RenderStrategy::ChangedCells, "changed_cells"),
+        (RenderStrategy::FullRebuild, "full_rebuild"),
+        (RenderStrategy::DamagedRows, "damaged_rows"),
     ] {
         let header = IcrHeader::new(
             10.0,
@@ -448,15 +452,15 @@ fn render_strategy_serializes_to_compatible_snake_case() {
             t_ms: 0,
             origin: RecordOrigin::Live,
             result: RecordedPaintResult::Painted,
-            trace: trace(regime, 0),
+            trace: trace(strategy, 0),
             grid_ops: vec![DrawOp::InvalidateCache],
             overlay_ops: Vec::new(),
         });
         let bytes = rec.serialize().expect("serialize");
         let json = String::from_utf8(bytes).expect(".icr bytes are valid UTF-8");
         assert!(
-            json.contains(&format!("\"regime\":\"{expected}\"")),
-            "RenderStrategy::{regime:?} must serialize as {expected:?}; got {json}"
+            json.contains(&format!("\"strategy\":\"{expected}\"")),
+            "RenderStrategy::{strategy:?} must serialize as {expected:?}; got {json}"
         );
     }
 }

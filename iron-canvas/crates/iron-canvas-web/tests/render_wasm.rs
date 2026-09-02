@@ -343,7 +343,7 @@ struct ScrollFailureControls {
 
 /// Build the same fixture with a live scroll origin and a controllable invalid
 /// style payload from a chosen row onward. Keeping the active cell outside
-/// those rows lets `Chrome::classify` approve the Viewport plan; decoding then
+/// those rows lets `Chrome::classify` approve the ScrollBlit plan; decoding then
 /// yields `BridgeFailed` during revealed-strip preflight, where the transaction
 /// must hold.
 fn make_scroll_failure_fixture_model(
@@ -455,7 +455,7 @@ fn grid_pixels(canvas: &HtmlCanvasElement) -> Vec<u8> {
     canvas_pixels(canvas)
 }
 
-/// A failed Viewport strip fetch is transactional: the visible front canvas
+/// A failed ScrollBlit strip fetch is transactional: the visible front canvas
 /// and query geometry stay at the prior committed frame, the retained work
 /// succeeds without another invalidation after the bridge recovers, and the
 /// recovered raster matches a forced-fresh render of the same final viewport.
@@ -489,12 +489,12 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     assert_eq!(
         canvas.render_pending(),
         RenderResult::RetryRequired,
-        "the revealed-row bridge failure must hold the Viewport transaction"
+        "the revealed-row bridge failure must hold the ScrollBlit transaction"
     );
     assert_eq!(
         grid_pixels(&grid),
         baseline_pixels,
-        "a held Viewport attempt must not present partial back-buffer pixels"
+        "a held ScrollBlit attempt must not present partial back-buffer pixels"
     );
     assert_eq!(
         canvas.cell_rect(1, 1),
@@ -506,7 +506,7 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     assert_eq!(
         canvas.render_pending(),
         RenderResult::Rendered,
-        "retained Viewport work must commit after recovery without a new signal"
+        "retained ScrollBlit work must commit after recovery without a new signal"
     );
     assert!(
         canvas.cell_rect(1, 1).is_none(),
@@ -528,7 +528,7 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     assert_eq!(
         grid_pixels(&grid),
         grid_pixels(&fresh_grid),
-        "recovered Viewport raster must be byte-identical to forced fresh"
+        "recovered ScrollBlit raster must be byte-identical to forced fresh"
     );
 }
 
@@ -544,7 +544,7 @@ struct FreshFailureControls {
 /// own bulk grid-segment prepare directly — not `FrameInputs::capture` (already
 /// covered by
 /// `selected_sheet_bridge_failure_holds_then_recovers_without_another_signal`)
-/// and not a Viewport strip reveal (covered above). `getCellStyle` returning
+/// and not a ScrollBlit strip reveal (covered above). `getCellStyle` returning
 /// `null` is the same decode-failure mechanism
 /// `make_scroll_failure_fixture_model` uses: `serde_wasm_bindgen` cannot
 /// decode `null` into `Style`, so `JsBackedModel::get_cell_style` reports
@@ -648,8 +648,8 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
 }
 
 // ==============================================================================
-// Stage 4 Task 6: no browser-level gate for selected-Viewport/effective-
-// FreshFallback bulk-bridge failure at a row-header digit boundary.
+// Stage 4 Task 6: no browser-level gate for selected-ScrollBlit/effective-
+// FullRebuild fallback bulk-bridge failure at a row-header digit boundary.
 //
 // `crates/iron-canvas-core/tests/blit_fallback.rs`'s
 // `held_fresh_fallback_at_row_header_digit_boundary_holds_atomically`
@@ -659,7 +659,7 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
 // `BlitOutcome::FreshFallback`), and a bulk bridge failure on that demoted
 // Fresh candidate holds atomically: zero new grid ops, zero presents, and
 // query geometry pinned to the pre-attempt frame — with `last_strategy`
-// staying `Viewport` while `last_trace().effective` reads `None`.
+// staying `ScrollBlit` while `last_trace().effective` reads `None`.
 //
 // Reproducing that fixture through this file's duck-typed JS harness would
 // need a synthetic ~1000-row model plus pixel-exact control over where the
@@ -1682,7 +1682,7 @@ fn stage6_emit(workload: &str, phase: &str, trace: &str, samples: &[f64]) {
     stage6_console_line(&line);
 }
 
-/// W4 — the qualifying one-axis row scroll, the Viewport strip baseline.
+/// W4 — the qualifying one-axis row scroll, the ScrollBlit strip baseline.
 /// Alternates direction so each pair returns the fixture to its origin without
 /// rebuilding the canvas.
 #[wasm_bindgen_test]
@@ -1896,7 +1896,7 @@ fn stage6_perf_w6_post_blit_borderless_edit() {
         canvas.mark_content_dirty();
         samples.push(stage6_timed_paint(&mut canvas, &clock));
         // Captured here, before the untimed cleanup scroll below can
-        // overwrite it with `Viewport ... grid:strip` — the trace must belong
+        // overwrite it with `ScrollBlit ... grid:strip` — the trace must belong
         // to the timed paint it is emitted alongside.
         trace = canvas.frame_trace();
 
@@ -2949,7 +2949,7 @@ fn stage6_frame_diagnostics_wire_smoke() {
     assert!(!value.is_undefined(), "enabled capture must publish");
 
     let diag: DiagWireMirror = serde_wasm_bindgen::from_value(value).expect("snapshot parses");
-    assert_eq!(diag.schema_version, 2);
+    assert_eq!(diag.schema_version, 3);
     assert_eq!(diag.attempt_seq, 2);
     assert!(matches!(diag.outcome, FrameOutcomeMirror::Painted));
     let geo = diag

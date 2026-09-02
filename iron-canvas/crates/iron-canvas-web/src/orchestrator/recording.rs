@@ -200,10 +200,10 @@ impl IronCanvas {
                 .enable_recording();
         }
         // Request and paint the recording baseline immediately.
-        // The next host rAF tick can select a narrow `SlotsReuse` paint.
+        // The next host rAF tick can select a narrow `ChangedCells` paint.
         // Such a paint is not a valid replay baseline.
         // A held baseline stays in the diagnostic timeline.
-        // A subsequent committed `Fresh` frame becomes the replay anchor.
+        // A subsequent committed `FullRebuild` frame becomes the replay anchor.
         self.runtime.orchestrator_mut().request_repaint();
         self.runtime.orchestrator().grid_surface().begin_frame();
         self.runtime.orchestrator().overlay_surface().begin_frame();

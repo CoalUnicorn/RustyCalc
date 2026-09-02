@@ -321,7 +321,7 @@ impl Painter for SvgPainter {
 impl BlitPainter for SvgPainter {
     fn blit(&self, _src: PixelRect, _dst: PixelRect) {
         unreachable!(
-            "SvgPainter::blit invoked — SVG export must always run via a Fresh-regime frame"
+            "SvgPainter::blit invoked — SVG export must always run via a FullRebuild frame"
         );
     }
 }

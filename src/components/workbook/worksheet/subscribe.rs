@@ -93,7 +93,7 @@ pub(super) fn install_subscribe_effect(
                 // Format events include row/col resize (LayoutChanged) —
                 // those mutate slot pixel geometry and must drop last_frame,
                 // so they route through requestRepaint. Row-addressed content
-                // edits feed markRowsDamaged (Damage regime: one row band
+                // edits feed markRowsDamaged (DamagedRows strategy: one row band
                 // fetched + repainted); un-rowed events fall back to
                 // markContentDirty, which poisons the batch to the pane-mask
                 // path inside the engine — conservative, never wrong. Nav

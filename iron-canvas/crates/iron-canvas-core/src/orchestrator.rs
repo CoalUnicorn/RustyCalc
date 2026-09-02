@@ -73,16 +73,12 @@ use crate::types::ui::{HitTest, ResizeTarget};
 /// with snake_case variant names to match the `.icr` JSON-lines schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[must_use = "RenderStrategy records the selected strategy; dropping it skips a recorder frame"]
+#[serde(rename_all = "snake_case")]
 pub enum RenderStrategy {
-    #[serde(rename = "overlay")]
     OverlayOnly,
-    #[serde(rename = "viewport")]
     ScrollBlit,
-    #[serde(rename = "slots_reuse")]
     ChangedCells,
-    #[serde(rename = "fresh")]
     FullRebuild,
-    #[serde(rename = "damage")]
     DamagedRows,
 }
 
@@ -159,7 +155,7 @@ pub(crate) struct FramePlan {
     /// The dispatched grid work. Its `strategy()` is stamped into
     /// `Orchestrator.last_strategy` before dispatch; that derived value may
     /// still diverge from what actually painted — see `FrameTrace::effective`'s
-    /// doc for the selected-Viewport/effective-Fresh case, which no plan
+    /// doc for the selected-`ScrollBlit`/effective-`FullRebuild` case, which no plan
     /// field encodes.
     grid: GridWork,
     overlay: OverlayWork,
@@ -424,7 +420,7 @@ pub enum FrameOutcome {
     #[default]
     Painted,
     HeldOnBridgeFailure,
-    /// `FrameInputs::capture` failed before dispatch reached a regime at
+    /// `FrameInputs::capture` failed before dispatch reached a strategy at
     /// all — no candidate geometry, no cache invalidation, no paint. See
     /// `render_pending`'s capture-failure handling.
     HeldOnInputFailure(FrameInputFailure),
@@ -540,7 +536,7 @@ enum FrameUpdate {
 /// `plan_frame`'s `OverlayWork` verdict — everything `finish_attempt` needs
 /// to refresh and (conditionally) repaint the overlay against the frame
 /// that will be committed. `None` only for the capture-failure attempt,
-/// which never reaches a regime and so never refreshes overlay state at
+/// which never reaches a strategy and so never refreshes overlay state at
 /// all. Bundled rather than three loose parameters so it is impossible to
 /// pass `inputs` without the `model`/`overlay_work` it was captured
 /// alongside.
@@ -551,7 +547,7 @@ struct OverlayContext<'a> {
 }
 
 /// Private completion outcome for one paint attempt — the one value every
-/// `paint_*_regime` preparation/execution helper reduces to, and the only
+/// strategy preparation/execution helper reduces to, and the only
 /// thing `finish_attempt` accepts. The variants close the outcome algebra:
 /// a committed attempt either never touched the grid (`OverlayCommitted`)
 /// or owns the grid cache commit it installed (`GridCommitted`), so a grid
@@ -559,13 +555,13 @@ struct OverlayContext<'a> {
 /// never carry one. `Held` carries only held causes (`HoldReason`), so a
 /// held attempt can never report a committed outcome.
 ///
-/// `frame` on a `Held` outcome is not always `Preserve`: a regime that *did*
-/// take ownership of `last_frame` to build its candidate (`Viewport`'s
-/// blit, or a `Viewport`-selected `FreshFallback`) must hand back an
+/// `frame` on a `Held` outcome is not always `Preserve`: a strategy that *did*
+/// take ownership of `last_frame` to build its candidate (`ScrollBlit`'s
+/// blit, or a `ScrollBlit`-selected `FreshFallback`) must hand back an
 /// equivalent value — the alternative would leave `last_frame` stuck at
 /// `None` for the rest of the attempt's synchronous call chain. Every
-/// `FrameUpdate` a regime constructs here is either `Preserve` (nothing was
-/// ever taken) or an already-resolved, zero-clone value the regime had to
+/// `FrameUpdate` a strategy constructs here is either `Preserve` (nothing was
+/// ever taken) or an already-resolved, zero-clone value the strategy had to
 /// build anyway to decide Held in the first place; `finish_attempt` remains
 /// the one function that performs the actual `self.last_frame = ..`
 /// assignment.
@@ -602,7 +598,7 @@ enum AttemptOutcome {
 #[allow(clippy::enum_variant_names)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum HoldReason {
-    /// `FrameInputs::capture` failed before dispatch reached a regime at
+    /// `FrameInputs::capture` failed before dispatch reached a strategy at
     /// all — no candidate geometry, no cache invalidation, no paint.
     InputFailure(FrameInputFailure),
     /// A bulk bridge fetch failed during a strategy's prepare phase; the
@@ -668,7 +664,7 @@ where
     /// movement, content damage, overlay repaint. The single owner of paint
     /// work — layers hold none. Every setter marks intent here; a paint
     /// attempt consumes it with one `mem::take`, so successful consumption
-    /// needs no end-of-paint clearing assignment. Only a regime's own retry
+    /// needs no end-of-paint clearing assignment. Only a strategy's own retry
     /// rule merges work back in.
     pending: PendingWork,
     /// Last strategy that `render_pending` dispatched. Stamped from
@@ -793,8 +789,8 @@ where
     }
 
     /// Conservative repaint blanket. Marks geometry so the next
-    /// `render_pending` falls to `Fresh` — the cheaper `SlotsReuse` /
-    /// `Viewport` arms gate on geometry being clean. Adds geometry plus
+    /// `render_pending` falls to `FullRebuild` — the cheaper `ChangedCells` /
+    /// `ScrollBlit` arms gate on geometry being clean. Adds geometry plus
     /// overlay work; it never *adds* content work, which is reserved for
     /// real cell-value changes via `mark_content_dirty`.
     ///
@@ -1429,7 +1425,7 @@ where
                 {
                     // Overlay-only uses `FrameUpdate::Preserve`, so this
                     // reads the existing committed `Chrome` exactly as
-                    // before; every other regime reads the frame
+                    // before; every other strategy reads the frame
                     // `install_frame` just installed above. A missing frame
                     // here would mean that invariant broke; the defensive
                     // fallback is to skip this tick's overlay paint (and its
@@ -1516,7 +1512,7 @@ where
     /// slot Vecs into `spare_slots` whenever one is actually displaced —
     /// the only consumer of that pool is the next `Fresh` attempt's
     /// `Chrome::build` (see `chrome::recycled_slots`'s module doc). A
-    /// `Preserve` update never touches either field: the regime that
+    /// `Preserve` update never touches either field: the strategy that
     /// produced it either never took `last_frame` out of `self` to begin
     /// with (an atomically-held `Fresh` attempt, or `Overlay`, which has no
     /// candidate at all) or already resolved Held to an equal-content
@@ -1887,7 +1883,7 @@ mod tests {
 /// crate-private, so only a test module nested here (a descendant of
 /// `orchestrator`, hence able to see its private items) can construct and
 /// inspect them. The real-world painter-op consequence of the hot-path case
-/// below is the same scenario `orchestrator_regimes.rs`'s
+/// below is the same scenario `orchestrator_strategies.rs`'s
 /// `view_only_navigation_without_a_shift_emits_no_grid_ops` drives through
 /// the actual `Orchestrator` + recorder.
 #[cfg(test)]
@@ -2240,9 +2236,9 @@ mod frame_plan_tests {
         assert!(matches!(plan.grid, GridWork::Fresh));
     }
 
-    /// Mirrors `orchestrator_regimes.rs`'s
+    /// Mirrors `orchestrator_strategies.rs`'s
     /// `geometry_plus_real_scroll_never_dispatches_viewport`: geometry work
-    /// concurrent with a real shift must never dispatch `Viewport`.
+    /// concurrent with a real shift must never dispatch `ScrollBlit`.
     #[test]
     fn geometry_with_everything_else_still_selects_full_rebuild() {
         let work = work_with(|w| {

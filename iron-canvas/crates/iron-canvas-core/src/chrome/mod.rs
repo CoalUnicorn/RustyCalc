@@ -182,10 +182,10 @@ impl Chrome {
         GridLayout::from_frame(self)
     }
 
-    /// Build the next-frame `Chrome` for the reuse-or-rebuild regimes. The
+    /// Build the next-frame `Chrome` for the reuse-or-rebuild strategies. The
     /// `path` argument selects which one; the body branches once and inlines
     /// the two constructors. The blit fast-path is separate
-    /// ([`Self::next_blit`]) — it has a two-outcome result, not a regime tag.
+    /// ([`Self::next_blit`]) — it has a two-outcome result, not a strategy tag.
     ///
     ///   * `Fresh` — full rebuild. `prev = Some` recycles slot Vec
     ///     allocations; `None` is the first-frame path. See the
@@ -408,7 +408,7 @@ impl Chrome {
     /// (`FrameValidity` from `is_still_valid`, `Option<BlitPlan>` from
     /// `screen_for_blit`) with a single three-way [`FrameDelta`].
     /// `Chrome::next`/`Chrome::next_blit`'s own dispatch is unchanged; the
-    /// orchestrator passes this verdict through `plan_frame` to the regime
+    /// orchestrator passes this verdict through `plan_frame` to the strategy
     /// executor.
     ///
     /// `prev = None` (no committed frame — right after a `resize`, or

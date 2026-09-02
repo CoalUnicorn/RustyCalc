@@ -158,7 +158,7 @@ impl IronCanvas {
     /// During recording, this method captures each non-idle paint attempt.
     /// The capture includes a held attempt that has no paint operations.
     /// The method does not capture an idle rAF tick.
-    /// The host uses `Retry` to schedule another rAF tick.
+    /// The host uses `RetryRequired` to schedule another rAF tick.
     #[wasm_bindgen(js_name = "renderPending")]
     pub fn render_pending(&mut self) -> RenderResult {
         #[cfg(feature = "dev-tools")]
@@ -190,7 +190,7 @@ impl IronCanvas {
 
     /// Return a one-line trace for the last paint attempt.
     ///
-    /// The trace contains the regime, the grid verdict, and the fetched slots.
+    /// The trace contains the strategy, the grid verdict, and the fetched slots.
     /// Read the trace after each rAF tick to identify expensive paint paths.
     #[wasm_bindgen(js_name = "frameTrace")]
     pub fn frame_trace(&self) -> String {

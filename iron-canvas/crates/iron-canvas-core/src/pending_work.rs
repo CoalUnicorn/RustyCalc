@@ -46,7 +46,7 @@ pub(crate) enum GeometryWork {
 }
 
 /// Row-addressed or whole-grid content hints carried inside `PendingWork`.
-/// These hints select a regime; they are not the final repaint unit. Damage
+/// These hints select a strategy; they are not the final repaint unit. Damage
 /// uses full-width bands because a shared border can be owned by a neighbouring
 /// row. SlotsReuse refines whole-grid content through exact cell fingerprints
 /// and contributor envelopes. Escaping text is currently clipped to its cell.
@@ -200,8 +200,8 @@ impl PendingWork {
 
     /// Diagnostic-only snapshot of which categories carry work. Never
     /// mutated as queued state, and must not gain a `grid_dirty()`-style
-    /// convenience predicate — regime eligibility reads the typed fields
-    /// above directly, with the view-specific `Viewport`-then-`Overlay`
+    /// convenience predicate — strategy eligibility reads the typed fields
+    /// above directly, with the view-specific `ScrollBlit`-then-`OverlayOnly`
     /// fallback left to the dispatcher.
     pub(crate) fn flags(&self) -> WorkFlags {
         let mut flags = WorkFlags::empty();

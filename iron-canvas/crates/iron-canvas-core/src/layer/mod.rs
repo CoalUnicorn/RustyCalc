@@ -7,7 +7,7 @@
 //! `LayerBase<S, R>` pairs a Surface with a layer-specific renderer and owns
 //! the surface, resize, present, cache invalidation, and paint execution —
 //! and nothing else. It holds no dirty state: all paint work is queued on
-//! `Orchestrator`'s single `PendingWork` value, which decides regimes
+//! `Orchestrator`'s single `PendingWork` value, which decides strategies
 //! globally rather than per layer. Layer-specific paint methods live on the
 //! renderer wrappers (`GridRenderer<P>` / `OverlayRenderer<P>`), reached
 //! through `LayerBase::renderer`.
@@ -86,7 +86,7 @@ where
     }
 
     /// Flush this layer's surface. Callers present a layer iff the current
-    /// paint arm actually painted it — see the regime arms in
+    /// paint arm actually painted it — see the strategy arms in
     /// `orchestrator.rs` for the per-arm "painted -> present" wiring.
     pub fn present(&self) {
         self.surface.present();
