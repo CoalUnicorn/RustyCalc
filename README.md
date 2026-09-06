@@ -83,8 +83,6 @@ Without the feature flag, the recorder and its optional serialization dependency
 ## Docs
 
 - [iron-canvas/README.md](iron-canvas/README.md): renderer architecture entry point (ownership, render-attempt lifecycle, five paint strategies, crate boundaries)
-- [iron-canvas/docs/rendering-and-damage.md](iron-canvas/docs/rendering-and-damage.md): exact planner/cache/retry/edit-path reference
-- [iron-canvas/docs/designs/2026-07-27-transactional-render-pipeline.md](iron-canvas/docs/designs/2026-07-27-transactional-render-pipeline.md): transactional render pipeline design history and implementation record (not a quick start)
 - [iron-canvas/web-test/README.md](iron-canvas/web-test/README.md): standalone smoke harness and `.icr` recording viewer
 - [docs/state-and-events.md](docs/state-and-events.md): `WorkbookState`, `EventBus`
 - [docs/leptos-patterns.md](docs/leptos-patterns.md): Leptos conventions

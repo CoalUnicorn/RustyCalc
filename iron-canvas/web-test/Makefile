@@ -38,6 +38,7 @@ demo/%.ic: demo/%.xlsx $(ICALC_PKG)/wasm_bg.wasm
 sync: demos
 	@test -d $(IC_PKG)    || (echo "missing $(IC_PKG) — run 'make build' first" && exit 1)
 	@test -d $(ICALC_PKG) || (echo "missing $(ICALC_PKG) — run 'make' in IronCalc/bindings/wasm/" && exit 1)
+	mkdir -p vendor
 	rm -rf vendor/iron-canvas vendor/ironcalc
 	cp -r $(IC_PKG)    vendor/iron-canvas
 	cp -r $(ICALC_PKG) vendor/ironcalc
@@ -65,6 +66,7 @@ clean:
 
 datagrid:
 	cd $(DG_DIR) && wasm-pack build --target web $(PROFILE_FLAG) --no-opt
+	mkdir -p vendor
 	rm -rf vendor/iron-canvas-datagrid
 	cp -r $(DG_PKG) vendor/iron-canvas-datagrid
 	# No ironcalc vendor needed: the datagrid bundle is engine-agnostic.

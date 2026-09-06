@@ -309,7 +309,7 @@ execute -> finish` before a paint attempt is complete:
    only the masked panes — but `Panes(mask)` here is *candidate* fetch
    scope, not the repaint verdict: each fetched pane's own fingerprint
    tree still decides `Skip`, `Rows`, or `Full` independently against
-   what is actually on screen (`docs/rendering-and-damage.md` §1, §3).
+   what is actually on screen.
    `FullRebuild` rebuilds all pixels. Stable content plus view work can use
    `DamagedRows` (matching row scope) or `ChangedCells` (pane candidate scope),
    with the overlay painted in the same committed attempt. Content plus
@@ -332,14 +332,12 @@ back into `self.pending` — the whole attempt (a capture failure, or an
 atomic `FullRebuild` or `ScrollBlit` hold) or a narrower strategy scope
 (`ChangedCells` failed pane mask or `DamagedRows` original row spans). Thus,
 the caller can call `render_pending` again on the next tick with no new
-external input needed. See `docs/rendering-and-damage.md` for the full
-decision-machinery writeup, including the exact per-strategy failure
-policy table.
+external input needed.
 
-No paired Canvas2D runtime exists yet: `WebSurface`/`CanvasPainter`
-pairs (grid + overlay) are still constructed and owned separately by
-each facade — `IronCanvas`, `DataGridCanvas` — rather than by one
-shared lifecycle object.
+`Canvas2dRuntime<S>` owns the paired grid and overlay surfaces, their
+orchestrator, and their shared DPR lifecycle. `IronCanvas`, `DataGridCanvas`,
+and the RustyCalc camera host use this runtime while retaining their
+model-specific state and API boundaries.
 
 ### Pane pipeline and theme
 
@@ -375,13 +373,6 @@ resulting `Vec<DrawOp>`. The five-strategy integration test in
 ```
 cargo test --workspace
 ```
-
-## Further reading
-
-| Reader need | Target |
-| --- | --- |
-| exact planner/cache/retry behavior | [`docs/rendering-and-damage.md`](docs/rendering-and-damage.md) |
-| transactional rationale and migration record | [`docs/designs/2026-07-27-transactional-render-pipeline.md`](docs/designs/2026-07-27-transactional-render-pipeline.md) |
 
 ## Status
 
