@@ -229,3 +229,59 @@ fn frame_inputs_failure_column_header_visibility() {
         Err(FrameInputFailure::ColumnHeaderVisibility)
     ));
 }
+
+// Frozen counts are range-checked at capture, not at geometry time: a
+// negative value would reach `Vec::reserve(frozen_count as usize)` as an
+// enormous `usize` capacity request, and a count past the axis's last id
+// would make the frozen-band walk read rows/columns the sheet cannot
+// contain. The `CanvasModel` API stays raw `i32`; capture rejects the
+// invalid values before any allocation or walk.
+#[test]
+fn frame_inputs_rejects_negative_frozen_row_count() {
+    let model = base_model().with_frozen_rows(-1);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::InvalidFrozenRowCount)
+    ));
+}
+
+#[test]
+fn frame_inputs_rejects_frozen_row_count_past_last_row() {
+    let model = base_model().with_frozen_rows(iron_canvas_core::LAST_ROW + 1);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::InvalidFrozenRowCount)
+    ));
+}
+
+#[test]
+fn frame_inputs_accepts_frozen_row_count_at_last_row() {
+    let model = base_model().with_frozen_rows(iron_canvas_core::LAST_ROW);
+    let inputs = capture(&model).expect("LAST_ROW frozen rows are in range");
+    assert_eq!(inputs.frozen_rows(), iron_canvas_core::LAST_ROW);
+}
+
+#[test]
+fn frame_inputs_rejects_negative_frozen_column_count() {
+    let model = base_model().with_frozen_cols(-1);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::InvalidFrozenColumnCount)
+    ));
+}
+
+#[test]
+fn frame_inputs_rejects_frozen_column_count_past_last_column() {
+    let model = base_model().with_frozen_cols(iron_canvas_core::LAST_COLUMN + 1);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::InvalidFrozenColumnCount)
+    ));
+}
+
+#[test]
+fn frame_inputs_accepts_frozen_column_count_at_last_column() {
+    let model = base_model().with_frozen_cols(iron_canvas_core::LAST_COLUMN);
+    let inputs = capture(&model).expect("LAST_COLUMN frozen columns are in range");
+    assert_eq!(inputs.frozen_cols(), iron_canvas_core::LAST_COLUMN);
+}

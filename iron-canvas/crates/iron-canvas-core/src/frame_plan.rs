@@ -23,15 +23,57 @@
 use std::rc::Rc;
 
 use crate::geometry::CanvasSize;
+use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
 use crate::model_adapter::{CanvasModel, CanvasView};
 use crate::theme::CanvasTheme;
 
+/// Validated count of frozen leading rows or columns along one axis.
+///
+/// The model reports frozen counts as raw signed `i32` values (see
+/// [`CanvasModel::get_frozen_rows_count`]). Those values feed
+/// `Vec::reserve(frozen_count as usize)` and the `1..=frozen_count`
+/// frozen-band walk in `AxisSlots::fill` (`geometry/slot.rs`), so an
+/// unchecked count is not a harmless geometry quirk: a negative value
+/// becomes an enormous `usize` capacity request, and a count past the
+/// axis's last id asks the frozen-band walk to read rows or columns the
+/// sheet cannot contain. This type is the one checked path into that
+/// geometry — construction requires `0 <= count <= axis_last_id`, and no
+/// unchecked constructor exists — so [`FrameInputs::capture`] stores frozen
+/// counts only as `FrozenCount` values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FrozenCount {
+    count: i32,
+}
+
+impl FrozenCount {
+    /// The only constructor: `Ok` only when `count` lies in
+    /// `0..=axis_last_id`; `Err(out_of_range)` otherwise. `axis_last_id` is
+    /// the axis's last addressable id (`LAST_ROW` for rows,
+    /// `LAST_COLUMN` for columns).
+    fn checked(
+        count: i32,
+        axis_last_id: i32,
+        out_of_range: FrameInputFailure,
+    ) -> Result<Self, FrameInputFailure> {
+        if (0..=axis_last_id).contains(&count) {
+            Ok(Self { count })
+        } else {
+            Err(out_of_range)
+        }
+    }
+
+    /// The validated raw count for the geometry walks.
+    pub(crate) fn get(self) -> i32 {
+        self.count
+    }
+}
+
 /// Immutable, once-per-paint-attempt snapshot of the scalar model and
 /// geometry inputs a frame needs. The only constructor is [`Self::capture`],
-/// which enforces the fixed read order and the sheet/view consistency
-/// check — there is no public mutation path that could assemble an
-/// internally inconsistent snapshot (e.g. a view from one sheet paired with
-/// another sheet's frozen counts).
+/// which enforces the fixed read order, the frozen-count range checks, and
+/// the sheet/view consistency check — there is no public mutation path that
+/// could assemble an internally inconsistent snapshot (e.g. a view from one
+/// sheet paired with another sheet's frozen counts).
 ///
 /// Fields stay `pub(crate)`: `Chrome`'s constructor and the classifier this
 /// struct feeds are both in-crate. A handful of read-only accessors below
@@ -45,17 +87,19 @@ pub struct FrameInputs {
     pub(crate) model_generation: u64,
     pub(crate) sheet: u32,
     pub(crate) view: CanvasView,
-    pub(crate) frozen_rows: i32,
-    pub(crate) frozen_cols: i32,
+    pub(crate) frozen_rows: FrozenCount,
+    pub(crate) frozen_cols: FrozenCount,
     pub(crate) show_row_headers: bool,
     pub(crate) show_col_headers: bool,
     pub(crate) show_selection: bool,
 }
 
-/// Which scalar read a failed [`FrameInputs::capture`] attempt could not
-/// complete. Named per accessor (rather than one generic "bridge failed")
+/// Which scalar input a failed [`FrameInputs::capture`] attempt could not
+/// accept. Either an accessor read failed (the bridge returned `None`) or —
+/// for the two frozen counts — the model returned a value outside the axis's
+/// valid range. Named per accessor (rather than one generic "bridge failed")
 /// so a held frame's diagnostics — and `FrameOutcome::HeldOnInputFailure` —
-/// can say which read regressed.
+/// can say which input regressed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameInputFailure {
     SelectedSheet,
@@ -64,8 +108,17 @@ pub enum FrameInputFailure {
     /// Building a frame from one accessor's sheet and the other's
     /// coordinates is not a valid fallback — see the module docs.
     SheetMismatch,
+    /// The frozen-row-count read itself failed (`None` from the bridge).
     FrozenRows,
+    /// The frozen-column-count read itself failed (`None` from the bridge).
     FrozenColumns,
+    /// The frozen-row-count read succeeded but returned a value outside
+    /// `0..=LAST_ROW`. Rejected at capture so the value can never reach
+    /// `Vec::reserve` or the frozen-band walk as an unchecked signed count.
+    InvalidFrozenRowCount,
+    /// Column mirror of [`Self::InvalidFrozenRowCount`], bounded by
+    /// `LAST_COLUMN`.
+    InvalidFrozenColumnCount,
     RowHeaderVisibility,
     ColumnHeaderVisibility,
 }
@@ -107,12 +160,25 @@ impl FrameInputs {
         if view.sheet != sheet {
             return Err(FrameInputFailure::SheetMismatch);
         }
-        let frozen_rows = model
-            .get_frozen_rows_count(sheet)
-            .ok_or(FrameInputFailure::FrozenRows)?;
-        let frozen_cols = model
-            .get_frozen_columns_count(sheet)
-            .ok_or(FrameInputFailure::FrozenColumns)?;
+        // Frozen counts are range-checked before they can reach the slot
+        // geometry: `AxisSlots::fill` reserves `frozen_count as usize` and
+        // walks `1..=frozen_count`, so a negative value would be an enormous
+        // capacity request and an over-limit value would read rows/columns
+        // the sheet cannot contain. Reads 3 and 4 in the order above.
+        let frozen_rows = FrozenCount::checked(
+            model
+                .get_frozen_rows_count(sheet)
+                .ok_or(FrameInputFailure::FrozenRows)?,
+            LAST_ROW,
+            FrameInputFailure::InvalidFrozenRowCount,
+        )?;
+        let frozen_cols = FrozenCount::checked(
+            model
+                .get_frozen_columns_count(sheet)
+                .ok_or(FrameInputFailure::FrozenColumns)?,
+            LAST_COLUMN,
+            FrameInputFailure::InvalidFrozenColumnCount,
+        )?;
         let show_row_headers = model
             .get_show_row_headers(sheet)
             .ok_or(FrameInputFailure::RowHeaderVisibility)?;
@@ -153,11 +219,11 @@ impl FrameInputs {
     }
 
     pub fn frozen_rows(&self) -> i32 {
-        self.frozen_rows
+        self.frozen_rows.get()
     }
 
     pub fn frozen_cols(&self) -> i32 {
-        self.frozen_cols
+        self.frozen_cols.get()
     }
 
     pub fn show_row_headers(&self) -> bool {

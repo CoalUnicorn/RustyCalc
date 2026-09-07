@@ -273,3 +273,84 @@ fn new_work_merges_with_retained_whole_grid_retry() {
     assert!(grid_text_ops_containing(&orch, "held-edit") > 0);
     assert!(grid_text_ops_containing(&orch, "late-edit") > 0);
 }
+
+#[test]
+fn invalid_frozen_row_count_holds_before_any_geometry() {
+    let model = Rc::new(TestModel::synthetic_grid());
+    model.set_frozen_rows(-1);
+    let mut orch = build(Rc::clone(&model));
+    // `build` leaves both recorders with their static scene-setup ops only.
+    let grid_ops = grid_ops_len(&orch);
+    let overlay_ops = overlay_ops_len(&orch);
+
+    // A negative frozen count must hold at capture, before `Vec::reserve`
+    // or the frozen-band walk: no new geometry, draw ops, or presentation.
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+    assert_eq!(
+        orch.last_trace().outcome,
+        FrameOutcome::HeldOnInputFailure(FrameInputFailure::InvalidFrozenRowCount)
+    );
+    assert_eq!(orch.cell_rect(1, 1), None);
+    assert_eq!(orch.grid_surface().presents(), 0);
+    assert_eq!(orch.overlay_surface().presents(), 0);
+    assert_eq!(grid_ops_len(&orch), grid_ops);
+    assert_eq!(overlay_ops_len(&orch), overlay_ops);
+
+    model.set_frozen_rows(0);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert!(orch.cell_rect(1, 1).is_some());
+    assert!(grid_ops_len(&orch) > grid_ops, "recovery paints cells");
+}
+
+#[test]
+fn invalid_frozen_counts_preserve_committed_frame_and_retry_work() {
+    let cases = [
+        (-1, 0, FrameInputFailure::InvalidFrozenRowCount),
+        (
+            iron_canvas_core::LAST_ROW + 1,
+            0,
+            FrameInputFailure::InvalidFrozenRowCount,
+        ),
+        (0, -1, FrameInputFailure::InvalidFrozenColumnCount),
+        (
+            0,
+            iron_canvas_core::LAST_COLUMN + 1,
+            FrameInputFailure::InvalidFrozenColumnCount,
+        ),
+    ];
+
+    for (rows, cols, failure) in cases {
+        let model = Rc::new(TestModel::synthetic_grid());
+        let mut orch = build(Rc::clone(&model));
+        assert_eq!(orch.render_pending(), PaintResult::Rendered);
+        let rect = orch.cell_rect(1, 1).expect("initial frame contains A1");
+        let grid_ops = grid_ops_len(&orch);
+        let overlay_ops = overlay_ops_len(&orch);
+        let grid_presents = orch.grid_surface().presents();
+        let overlay_presents = orch.overlay_surface().presents();
+
+        model.set_cell(1, 1, "retry-after-invalid-freeze");
+        model.set_frozen_rows(rows);
+        model.set_frozen_cols(cols);
+        orch.mark_content_dirty();
+        for _ in 0..2 {
+            assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+            assert_eq!(
+                orch.last_trace().outcome,
+                FrameOutcome::HeldOnInputFailure(failure)
+            );
+            assert_eq!(orch.last_trace().committed_seq, None);
+            assert_eq!(orch.cell_rect(1, 1), Some(rect));
+            assert_eq!(grid_ops_len(&orch), grid_ops);
+            assert_eq!(overlay_ops_len(&orch), overlay_ops);
+            assert_eq!(orch.grid_surface().presents(), grid_presents);
+            assert_eq!(orch.overlay_surface().presents(), overlay_presents);
+        }
+
+        model.set_frozen_rows(0);
+        model.set_frozen_cols(0);
+        assert_eq!(orch.render_pending(), PaintResult::Rendered);
+        assert!(grid_text_ops_containing(&orch, "retry-after-invalid-freeze") > 0);
+        assert_eq!(orch.render_pending(), PaintResult::Idle);
+    }
+}

@@ -163,6 +163,9 @@ impl From<FrameTrace> for TraceRecord {
                     iron_canvas_core::FrameInputFailure::FrozenColumns => 4,
                     iron_canvas_core::FrameInputFailure::RowHeaderVisibility => 5,
                     iron_canvas_core::FrameInputFailure::ColumnHeaderVisibility => 6,
+                    // Codes are stable wire values: new variants append.
+                    iron_canvas_core::FrameInputFailure::InvalidFrozenRowCount => 7,
+                    iron_canvas_core::FrameInputFailure::InvalidFrozenColumnCount => 8,
                 },
             },
         };
@@ -437,6 +440,46 @@ mod tests {
         let bytes = rec.serialize().expect("serialize");
         let back = Recording::deserialize(&bytes).expect("deserialize");
         assert_eq!(rec, back);
+    }
+
+    #[test]
+    fn input_failure_codes_survive_recording_round_trip() {
+        use iron_canvas_core::FrameInputFailure;
+
+        let cases = [
+            (FrameInputFailure::SelectedSheet, 0),
+            (FrameInputFailure::SelectedView, 1),
+            (FrameInputFailure::SheetMismatch, 2),
+            (FrameInputFailure::FrozenRows, 3),
+            (FrameInputFailure::FrozenColumns, 4),
+            (FrameInputFailure::RowHeaderVisibility, 5),
+            (FrameInputFailure::ColumnHeaderVisibility, 6),
+            (FrameInputFailure::InvalidFrozenRowCount, 7),
+            (FrameInputFailure::InvalidFrozenColumnCount, 8),
+        ];
+        for (failure, code) in cases {
+            let mut rec = Recording::new(header());
+            rec.push_frame(Frame {
+                frame_idx: 0,
+                t_ms: 0,
+                origin: RecordOrigin::Live,
+                result: RecordedPaintResult::Retry,
+                trace: TraceRecord::from(FrameTrace {
+                    outcome: FrameOutcome::HeldOnInputFailure(failure),
+                    ..FrameTrace::default()
+                }),
+                grid_ops: Vec::new(),
+                overlay_ops: Vec::new(),
+            });
+            let bytes = rec.serialize().expect("held recording serializes");
+            let back = Recording::deserialize(&bytes).expect("held recording decodes");
+            assert_eq!(back.frames.len(), 1);
+            assert_eq!(back.frames[0].result, RecordedPaintResult::Retry);
+            assert_eq!(
+                back.frames[0].trace.outcome,
+                TraceOutcome::HeldOnInputFailure { failure: code }
+            );
+        }
     }
 
     #[test]

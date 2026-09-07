@@ -615,6 +615,8 @@ mod dev_wire {
         FrozenColumns,
         RowHeaderVisibility,
         ColumnHeaderVisibility,
+        InvalidFrozenRowCount,
+        InvalidFrozenColumnCount,
     }
 
     impl From<FrameInputFailure> for FrameInputFailureWire {
@@ -627,6 +629,8 @@ mod dev_wire {
                 FrameInputFailure::FrozenColumns => Self::FrozenColumns,
                 FrameInputFailure::RowHeaderVisibility => Self::RowHeaderVisibility,
                 FrameInputFailure::ColumnHeaderVisibility => Self::ColumnHeaderVisibility,
+                FrameInputFailure::InvalidFrozenRowCount => Self::InvalidFrozenRowCount,
+                FrameInputFailure::InvalidFrozenColumnCount => Self::InvalidFrozenColumnCount,
             }
         }
     }
@@ -1220,6 +1224,45 @@ mod tests {
     /// The wire shape is the contract the browser mirrors parse. Prove the
     /// exact field names here, natively, before any browser test relies on
     /// them.
+    #[test]
+    fn input_failure_wire_names_are_stable() {
+        use iron_canvas_core::FrameInputFailure;
+
+        let cases = [
+            (FrameInputFailure::SelectedSheet, "selectedSheet"),
+            (FrameInputFailure::SelectedView, "selectedView"),
+            (FrameInputFailure::SheetMismatch, "sheetMismatch"),
+            (FrameInputFailure::FrozenRows, "frozenRows"),
+            (FrameInputFailure::FrozenColumns, "frozenColumns"),
+            (
+                FrameInputFailure::RowHeaderVisibility,
+                "rowHeaderVisibility",
+            ),
+            (
+                FrameInputFailure::ColumnHeaderVisibility,
+                "columnHeaderVisibility",
+            ),
+            (
+                FrameInputFailure::InvalidFrozenRowCount,
+                "invalidFrozenRowCount",
+            ),
+            (
+                FrameInputFailure::InvalidFrozenColumnCount,
+                "invalidFrozenColumnCount",
+            ),
+        ];
+        for (failure, expected) in cases {
+            let json = serde_json::to_value(FrameOutcomeWire::from(
+                FrameOutcome::HeldOnInputFailure(failure),
+            ))
+            .expect("input failure outcome serializes");
+            assert_eq!(
+                json,
+                serde_json::json!({ "kind": "heldOnInputFailure", "input": expected })
+            );
+        }
+    }
+
     #[test]
     fn repaint_reason_wire_names_are_stable() {
         let cases = [
