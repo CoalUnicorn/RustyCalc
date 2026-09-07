@@ -304,13 +304,11 @@ impl<P: Painter> RendererCore<P> {
     /// opened here always close.
     fn execute_grid_shell<T>(
         &self,
-        model: &dyn CanvasModel,
         frame: &Chrome,
         headers: GridHeaderScope,
         execute_cells: impl FnOnce() -> T,
     ) -> T {
         self.painter.begin_group(GroupClass::Grid);
-        self.cache_show_grid(model, frame.sheet);
 
         self.painter.begin_group(GroupClass::Cells);
         let cells = execute_cells();
@@ -341,10 +339,13 @@ impl<P: Painter> RendererCore<P> {
     }
 
     pub(crate) fn execute_grid(&self, model: &dyn CanvasModel, frame: &Chrome) -> GridPaintOutcome {
+        if self.fetch_show_grid(model, frame.sheet).is_none() {
+            return GridPaintOutcome::Held;
+        }
         let Some(prepared) = self.prepare_full_grid(model, frame) else {
             return GridPaintOutcome::Held;
         };
-        let commit = self.execute_grid_shell(model, frame, GridHeaderScope::Both, || {
+        let commit = self.execute_grid_shell(frame, GridHeaderScope::Both, || {
             self.execute_prepared_grid(frame, prepared)
         });
         GridPaintOutcome::Committed(commit)
@@ -362,14 +363,15 @@ impl<P: Painter> RendererCore<P> {
     }
 
     /// Execute a fully preflighted Fresh grid. The returned owned commit is
-    /// installed only by the caller's successful completion boundary.
+    /// installed only by the caller's successful completion boundary. The
+    /// grid-line config was fetched by the caller before any painter op.
     pub(crate) fn execute_fresh_grid(
         &self,
-        model: &dyn CanvasModel,
+        _model: &dyn CanvasModel,
         frame: &Chrome,
         prepared: PreparedGrid,
     ) -> GridCacheCommit {
-        self.execute_grid_shell(model, frame, GridHeaderScope::Both, || {
+        self.execute_grid_shell(frame, GridHeaderScope::Both, || {
             self.execute_prepared_grid(frame, prepared)
         })
     }
@@ -377,6 +379,9 @@ impl<P: Painter> RendererCore<P> {
     /// Combined Fresh prepare and execute. Returns `true` with zero painter
     /// interaction on any bridge failure; otherwise commits the whole grid.
     pub fn render_grid_fresh(&self, model: &dyn CanvasModel, frame: &Chrome) -> bool {
+        if self.fetch_show_grid(model, frame.sheet).is_none() {
+            return true;
+        }
         let Some(prepared) = self.prepare_fresh_grid(model, frame) else {
             return true;
         };
@@ -417,10 +422,13 @@ impl<P: Painter> RendererCore<P> {
         frame: &Chrome,
         spans: &[RowSpan],
     ) -> GridPaintOutcome {
+        if self.fetch_show_grid(model, frame.sheet).is_none() {
+            return GridPaintOutcome::Held;
+        }
         let Some(prepared) = self.prepare_damage_grid(model, frame, spans) else {
             return GridPaintOutcome::Held;
         };
-        let commit = self.execute_grid_shell(model, frame, GridHeaderScope::Both, || {
+        let commit = self.execute_grid_shell(frame, GridHeaderScope::Both, || {
             self.execute_prepared_grid(frame, prepared)
         });
         GridPaintOutcome::Committed(commit)
@@ -436,19 +444,26 @@ impl<P: Painter> RendererCore<P> {
         }
     }
 
-    /// Cache the per-sheet grid-line toggle once for this frame so the
-    /// hot per-cell `paint_borders_grid` walk doesn't re-enter the model.
-    /// Falls back to "show" on model failure, matching Excel's default-on.
+    /// Resolve the per-sheet grid-line toggle once per grid execution and
+    /// cache it for the hot per-cell `paint_borders_grid` walk. `Absent`
+    /// (no override) selects the documented default — show, matching
+    /// Excel's default-on. `BridgeFailed` returns `None`: the caller must
+    /// hold the attempt before any painter op — painting grid lines (or not)
+    /// from a fabricated answer is a config lie, not a pixel choice.
     ///
     /// `sheet` is the committed frame's own sheet (`frame.sheet`), not
     /// another `CanvasModel::get_selected_sheet()` read — the gridline
     /// lookup runs once per grid execution and must agree with the geometry
     /// it is painting over, not with whatever the live model reports this
     /// instant.
-    fn cache_show_grid(&self, model: &dyn CanvasModel, sheet: u32) {
-        self.frame_cache
-            .show_grid
-            .set(model.get_show_grid_lines(sheet).unwrap_or(true));
+    pub(crate) fn fetch_show_grid(&self, model: &dyn CanvasModel, sheet: u32) -> Option<bool> {
+        let show = match model.get_show_grid_lines(sheet) {
+            crate::types::fetched::Fetched::Value(v) => v,
+            crate::types::fetched::Fetched::Absent => true,
+            crate::types::fetched::Fetched::BridgeFailed => return None,
+        };
+        self.frame_cache.show_grid.set(show);
+        Some(show)
     }
 }
 
@@ -481,6 +496,9 @@ impl<P: BlitPainter> RendererCore<P> {
         frame: &Chrome,
         plan: &BlitPlan,
     ) -> GridPaintOutcome {
+        if self.fetch_show_grid(model, frame.sheet).is_none() {
+            return GridPaintOutcome::Held;
+        }
         let Some(prepared) = self.prepare_blit_grid(model, frame, plan) else {
             return GridPaintOutcome::Held;
         };
@@ -498,7 +516,7 @@ impl<P: BlitPainter> RendererCore<P> {
         } else {
             GridHeaderScope::Both
         };
-        let cache_commit = self.execute_grid_shell(model, frame, headers, || {
+        let cache_commit = self.execute_grid_shell(frame, headers, || {
             self.execute_prepared_grid(frame, prepared)
         });
         GridPaintOutcome::Committed(cache_commit)
@@ -552,6 +570,12 @@ impl<P: Painter> GridRenderer<P> {
         spans: &[RowSpan],
     ) -> GridPaintOutcome {
         self.core.execute_grid_damage(model, frame, spans)
+    }
+
+    /// See [`RendererCore::fetch_show_grid`]. `pub(crate)` so the layer's
+    /// grid paint entries can hold before a bg fill or pixel shift.
+    pub(crate) fn fetch_show_grid(&self, model: &dyn CanvasModel, sheet: u32) -> Option<bool> {
+        self.core.fetch_show_grid(model, sheet)
     }
 
     /// See [`RendererCore::prepare_fresh_grid`]. `pub(crate)`: an

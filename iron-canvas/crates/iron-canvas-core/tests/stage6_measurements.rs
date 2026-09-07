@@ -191,9 +191,9 @@ impl CanvasModel for ObservedModel {
         fn get_selected_view(&self) -> Option<CanvasView>;
         fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
         fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
-        fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
-        fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
-        fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+        fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64>;
+        fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64>;
+        fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool>;
         fn get_show_selection(&self) -> bool;
         fn last_row(&self, sheet: u32) -> i32;
         fn last_column(&self, sheet: u32) -> i32;

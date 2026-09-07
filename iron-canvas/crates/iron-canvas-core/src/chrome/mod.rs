@@ -161,6 +161,19 @@ pub struct Chrome {
     pub kind: FrameKindTag,
 }
 
+/// Outcome of [`Chrome::build`] (the `FramePath::Fresh` walk). The two
+/// results are a built frame or a held attempt: a transient `BridgeFailed`
+/// on any row-height or column-width read makes the whole geometry
+/// untrustworthy (one slot's cursor depends on every earlier extent), so the
+/// walk aborts before any pixel or cache state is committed. `Held` hands
+/// the drained slot pool back so the retry reuses its allocations.
+#[must_use = "a held Fresh build must become an AttemptOutcome::Held, never a painted frame"]
+pub(crate) enum FreshBuild {
+    Ready(Chrome),
+    /// Geometry reads failed; `RecycledSlots` is the drained pool for reuse.
+    Held(RecycledSlots),
+}
+
 /// Outcome of [`Chrome::next_blit`]. The blit construction has exactly two
 /// results — in-place reuse succeeded, or it rejected and fell back to a full
 /// rebuild — so they are *variants*, not a tag the caller has to assert one
@@ -199,6 +212,14 @@ impl Chrome {
     /// `SlotsReuse` requires `prev = Some`; `None` falls through to `Fresh`
     /// defensively. The orchestrator proves `prev.is_some()` before selecting
     /// that path, but the fallback keeps `Chrome::next` total.
+    /// Construct the next `Chrome` on the assumption that the model's
+    /// geometry/config reads succeed (`Absent` overrides select the
+    /// documented defaults). A transient `BridgeFailed` on any row-height,
+    /// column-width, or grid-line read makes geometry untrustworthy; the
+    /// orchestrator routes those through [`Chrome::build`] (which returns
+    /// `None`) and holds the attempt instead of fabricating. This wrapper
+    /// keeps its total `-> Self` shape for healthy-model construction
+    /// (tests, reuse paths); see `build`'s doc.
     pub fn next(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
@@ -211,7 +232,15 @@ impl Chrome {
                     Some(c) => RecycledSlots::from_pane_set(c.pane_set),
                     None => RecycledSlots::default(),
                 };
-                Self::build(model, inputs, recycled)
+                match Self::build(model, inputs, recycled) {
+                    FreshBuild::Ready(frame) => frame,
+                    FreshBuild::Held(_) => {
+                        panic!(
+                            "Chrome::next(Fresh) requires a geometry-healthy model; \
+                                bridge failures hold through Orchestrator::render_pending"
+                        )
+                    }
+                }
             }
             FramePath::SlotsReuse => {
                 let Some(mut prev) = prev else {
@@ -300,13 +329,21 @@ impl Chrome {
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
         recycled: RecycledSlots,
-    ) -> Self {
+    ) -> FreshBuild {
         // `inputs` is a `FrameInputs::capture` snapshot: sheet, view, freeze
         // counts, and header visibility already read exactly once and
         // validated (a bridge failure on any of them holds the whole paint
         // attempt before `Chrome::build` is ever called — see
         // `Orchestrator::render_pending`). No fallback default is needed or
         // read here.
+        //
+        // Row heights and column widths are *not* capture-time scalars: they
+        // are walked per visible slot below. A transient `BridgeFailed` on any
+        // of those reads makes the whole geometry untrustworthy — a slot's
+        // cursor position depends on every earlier extent — so `build`
+        // returns `Held` (with the drained slot pool handed back for the
+        // retry to reuse) and the caller holds the attempt instead of
+        // committing fabricated geometry.
         let view = inputs.view();
         let sheet = inputs.sheet();
 
@@ -334,7 +371,7 @@ impl Chrome {
         } else {
             0
         };
-        pane_set.fill_rows(
+        if !pane_set.fill_rows(
             model,
             sheet,
             frozen_row_count,
@@ -342,7 +379,9 @@ impl Chrome {
             view.top_row,
             last_row,
             canvas_h,
-        );
+        ) {
+            return FreshBuild::Held(RecycledSlots::from_pane_set(pane_set));
+        }
 
         // Phase C — measure row_header_thickness from the last visible row label.
         let last_visible_row = pane_set
@@ -363,7 +402,7 @@ impl Chrome {
         } else {
             0
         };
-        pane_set.fill_cols(
+        if !pane_set.fill_cols(
             model,
             sheet,
             frozen_col_count,
@@ -371,7 +410,9 @@ impl Chrome {
             view.left_column,
             last_column,
             canvas_w,
-        );
+        ) {
+            return FreshBuild::Held(RecycledSlots::from_pane_set(pane_set));
+        }
 
         // Data-driven header labels in walk_header_strip (frozen ++ scroll)
         // order so header_strip can zip slots <-> labels positionally.
@@ -388,7 +429,7 @@ impl Chrome {
             y: origin_y,
         };
 
-        Chrome {
+        FreshBuild::Ready(Chrome {
             sheet,
             pane_set,
             row_header_thickness,
@@ -401,7 +442,7 @@ impl Chrome {
             show_row_headers: show_row,
             show_col_headers: show_col,
             kind: FrameKindTag::Fresh,
-        }
+        })
     }
 
     /// The one classifier that replaces the former split verdict

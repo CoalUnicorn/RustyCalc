@@ -150,6 +150,10 @@ impl PaneSet {
     /// `sheet` is the caller's already-captured sheet, threaded into the
     /// per-row `measure` closure so the walk reads it once instead of once
     /// per row (`row_height`'s doc).
+    ///
+    /// Returns `false` when a row-height read failed transiently
+    /// (`BridgeFailed`); the caller must not commit the partially-filled
+    /// band. `Absent` rows resolve to the documented default height.
     #[allow(clippy::too_many_arguments)]
     pub fn fill_rows(
         &mut self,
@@ -160,7 +164,7 @@ impl PaneSet {
         view_top_row: i32,
         last_row: i32,
         canvas_h: i32,
-    ) {
+    ) -> bool {
         self.rows.fill(
             model,
             frozen_count,
@@ -168,13 +172,14 @@ impl PaneSet {
             view_top_row,
             last_row,
             canvas_h,
-            |model, row| row_height(model, sheet, row),
-        );
+            |model, row| row_height(model, sheet, row).extent(),
+        )
     }
 
     /// Column-axis mirror of `fill_rows`. Runs as Phase D, using the
     /// cell-area X origin that already folds in the measured
-    /// `row_header_thickness`.
+    /// `row_header_thickness`. Returns `false` on a transient
+    /// column-width read failure, mirroring `fill_rows`.
     #[allow(clippy::too_many_arguments)]
     pub fn fill_cols(
         &mut self,
@@ -185,7 +190,7 @@ impl PaneSet {
         view_left_column: i32,
         last_column: i32,
         canvas_w: i32,
-    ) {
+    ) -> bool {
         self.cols.fill(
             model,
             frozen_count,
@@ -193,8 +198,8 @@ impl PaneSet {
             view_left_column,
             last_column,
             canvas_w,
-            |model, col| col_width(model, sheet, col),
-        );
+            |model, col| col_width(model, sheet, col).extent(),
+        )
     }
 
     #[inline]

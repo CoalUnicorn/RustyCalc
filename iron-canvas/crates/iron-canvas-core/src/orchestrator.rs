@@ -44,7 +44,7 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 
 use crate::CanvasModel;
-use crate::chrome::{BlitPlan, Chrome, FramePath, RecycledSlots};
+use crate::chrome::{BlitPlan, Chrome, FramePath, FreshBuild, RecycledSlots};
 use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
 use crate::geometry::CanvasSize;
@@ -378,20 +378,22 @@ impl fmt::Display for GridVerdict {
 ///
 /// The backward walk is bounded by how many slots fit in `extent`, so a jump of
 /// 100k rows costs the same as a jump of one. Returning `current` unchanged is
-/// the "already visible / nothing to do" answer.
+/// the "already visible / nothing to do" answer. `None` when `measure`
+/// reports a transient bridge failure — a scroll target derived from
+/// fabricated heights is not trustworthy.
 fn origin_showing(
     target: i32,
     current: i32,
     frozen: i32,
     extent: i32,
-    mut measure: impl FnMut(i32) -> i32,
-) -> i32 {
+    mut measure: impl FnMut(i32) -> Option<i32>,
+) -> Option<i32> {
     // A collapsed axis scrolls nowhere, and a frozen target is always painted.
     if extent <= 0 || target <= frozen {
-        return current;
+        return Some(current);
     }
     if target < current {
-        return target; // scrolled past it — flush against the near edge
+        return Some(target); // scrolled past it — flush against the near edge
     }
 
     // Walk back from the target while the run still fits. `smallest` is then
@@ -400,16 +402,16 @@ fn origin_showing(
     // The loop floor also keeps `smallest` out of the frozen run, so the result
     // is a legal origin without clamping `current` on the way in.
     let mut smallest = target;
-    let mut run = measure(target);
+    let mut run = measure(target)?;
     while smallest > frozen + 1 {
-        let previous = measure(smallest - 1);
+        let previous = measure(smallest - 1)?;
         if run + previous > extent {
             break;
         }
         smallest -= 1;
         run += previous;
     }
-    current.max(smallest)
+    Some(current.max(smallest))
 }
 
 /// Whole-frame outcome. Blit preflight validates every required address strip
@@ -1126,15 +1128,15 @@ where
             view.top_row,
             frame.pane_set.rows.frozen_count(),
             pane.height,
-            |id| crate::geometry::slot::row_height(model, view.sheet, id),
-        );
+            |id| crate::geometry::slot::row_height(model, view.sheet, id).extent(),
+        )?;
         let left = origin_showing(
             column,
             view.left_column,
             frame.pane_set.cols.frozen_count(),
             pane.width,
-            |id| crate::geometry::slot::col_width(model, view.sheet, id),
-        );
+            |id| crate::geometry::slot::col_width(model, view.sheet, id).extent(),
+        )?;
         ((top, left) != (view.top_row, view.left_column)).then_some((top, left))
     }
 
@@ -1622,18 +1624,25 @@ where
     /// differ in what (if anything) they must hand back on Held: ordinary
     /// Fresh never took `last_frame` at all, but `FreshFallback` already
     /// took it for the original blit attempt and holds `prev` locally.
+    /// Returns `Err(recycled)` — the drained pool, for the caller to stash
+    /// back into `self.spare_slots` — when a row-height or column-width read
+    /// failed transiently during `Chrome::build`, before any paint. See
+    /// `FreshBuild::Held`'s doc.
     fn build_and_paint_fresh(
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
-    ) -> (Chrome, GridPaintOutcome) {
+    ) -> Result<(Chrome, GridPaintOutcome), RecycledSlots> {
         let spare = std::mem::take(&mut self.spare_slots);
-        let frame = Chrome::build(model, inputs, spare);
+        let frame = match Chrome::build(model, inputs, spare) {
+            FreshBuild::Ready(frame) => frame,
+            FreshBuild::Held(recycled) => return Err(recycled),
+        };
         // `paint_grid_fresh` prepares the whole grid before touching the
         // painter at all (not even the cache invalidation or background
         // fill), so a held attempt is a true no-op here — see its doc.
         let cache_commit = self.grid.paint_grid_fresh(model, &frame);
-        (frame, cache_commit)
+        Ok((frame, cache_commit))
     }
 
     /// `render_scroll_blit`'s `Err(prev)` arm: `prepare_blit` rejected
@@ -1650,7 +1659,22 @@ where
         work: PendingWork,
         prev: Chrome,
     ) -> AttemptOutcome {
-        let (frame, paint) = self.build_and_paint_fresh(model, inputs);
+        let (frame, paint) = match self.build_and_paint_fresh(model, inputs) {
+            Ok(ok) => ok,
+            Err(recycled) => {
+                // Geometry held before any paint. `prev` was already taken
+                // out of `self.last_frame` for the original blit attempt, so
+                // it must be handed back explicitly via `Replace(prev)`;
+                // `prev`'s own vecs are still inside it, so only the failed
+                // candidate's drained pool needs stashing for the retry.
+                self.spare_slots = recycled;
+                return AttemptOutcome::Held {
+                    retry: retry_grid_wide(work),
+                    frame: FrameUpdate::Replace(prev),
+                    reason: HoldReason::BridgeFailure,
+                };
+            }
+        };
 
         let cache_commit = match paint {
             GridPaintOutcome::Committed(cache_commit) => cache_commit,
@@ -1761,7 +1785,22 @@ where
         inputs: &FrameInputs,
         work: PendingWork,
     ) -> AttemptOutcome {
-        let (frame, paint) = self.build_and_paint_fresh(model, inputs);
+        let (frame, paint) = match self.build_and_paint_fresh(model, inputs) {
+            Ok(ok) => ok,
+            Err(recycled) => {
+                // Geometry held before any paint: the drained pool goes back
+                // to `spare_slots`, and `last_frame` is left completely
+                // untouched — it was never taken (see
+                // `build_and_paint_fresh`), so `prev` (or `None`, on a held
+                // first frame) is exactly what `finish_attempt` will see.
+                self.spare_slots = recycled;
+                return AttemptOutcome::Held {
+                    retry: retry_grid_wide(work),
+                    frame: FrameUpdate::Preserve,
+                    reason: HoldReason::BridgeFailure,
+                };
+            }
+        };
 
         let cache_commit = match paint {
             GridPaintOutcome::Committed(cache_commit) => cache_commit,
@@ -1795,8 +1834,8 @@ mod tests {
 
     /// Uniform rows, so `extent / 20` is how many fit and every expectation
     /// below is arithmetic a reader can redo in their head.
-    fn rows_20(_id: i32) -> i32 {
-        20
+    fn rows_20(_id: i32) -> Option<i32> {
+        Some(20)
     }
 
     #[test]
@@ -1831,15 +1870,15 @@ mod tests {
     #[test]
     fn stays_put_when_there_is_nothing_to_scroll() {
         // A collapsed axis has nowhere to put the target.
-        assert_eq!(origin_showing(50, 7, 0, 0, rows_20), 7);
-        assert_eq!(origin_showing(50, 7, 0, -100, rows_20), 7);
+        assert_eq!(origin_showing(50, 7, 0, 0, rows_20), Some(7));
+        assert_eq!(origin_showing(50, 7, 0, -100, rows_20), Some(7));
         // A frozen target is painted whatever the scrollable band shows.
-        assert_eq!(origin_showing(2, 7, 3, 500, rows_20), 7);
+        assert_eq!(origin_showing(2, 7, 3, 500, rows_20), Some(7));
     }
 
     #[test]
     fn flushes_against_the_near_edge_when_scrolled_past() {
-        assert_eq!(origin_showing(5, 20, 0, 500, rows_20), 5);
+        assert_eq!(origin_showing(5, 20, 0, 500, rows_20), Some(5));
     }
 
     /// The trailing `max` earns its keep here: the walk finds row 8 as the
@@ -1847,7 +1886,7 @@ mod tests {
     /// shows row 12 — scrolling back to 8 would be visible, pointless motion.
     #[test]
     fn leaves_an_already_visible_target_alone() {
-        assert_eq!(origin_showing(12, 10, 0, 100, rows_20), 10);
+        assert_eq!(origin_showing(12, 10, 0, 100, rows_20), Some(10));
     }
 
     /// A target past the far edge pulls the origin forward — to the *smallest*
@@ -1856,20 +1895,20 @@ mod tests {
     fn walks_back_to_the_smallest_origin_that_shows_the_target() {
         // Five 20 px rows fill 100, so 26..=30 is the earliest band showing 30.
         // An implementation that stopped after one step would answer 29.
-        assert_eq!(origin_showing(30, 2, 0, 100, rows_20), 26);
+        assert_eq!(origin_showing(30, 2, 0, 100, rows_20), Some(26));
     }
 
     /// Rows of 8/19/30/41/52 px on a five-row cycle, so a walk that assumed a
     /// uniform height cannot land on the right origin by symmetry.
-    fn rows_uneven(id: i32) -> i32 {
-        8 + id.rem_euclid(5) * 11
+    fn rows_uneven(id: i32) -> Option<i32> {
+        Some(8 + id.rem_euclid(5) * 11)
     }
 
     /// The walk accumulates real heights: rows 30 (8 px) and 29 (52 px) fill 60
     /// of the 100 px band, and taking row 28 (41 px) too would overflow it.
     #[test]
     fn walk_sums_actual_row_heights_rather_than_assuming_uniform_rows() {
-        assert_eq!(origin_showing(30, 2, 0, 100, rows_uneven), 29);
+        assert_eq!(origin_showing(30, 2, 0, 100, rows_uneven), Some(29));
     }
 }
 

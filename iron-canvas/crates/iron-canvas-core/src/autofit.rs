@@ -160,9 +160,16 @@ pub fn fit_height(
             .is_some_and(|s| s.alignment.as_ref().is_some_and(|a| a.wrap_text));
         // Soft-wrap needs the cell's usable inner width; `0.0` (no column
         // width) makes `layout_into` split on '\n' only, never soft-wrap.
-        let usable_w = model
-            .get_column_width(sheet, col)
-            .map_or(0.0, |w| w - 2.0 * CELL_PADDING);
+        // `Absent` (no override) selects the documented default width;
+        // `BridgeFailed` aborts the whole fit — a fitted height measured
+        // against an unknown width is fabricated, not a trustworthy answer.
+        let usable_w = match model.get_column_width(sheet, col) {
+            crate::types::fetched::Fetched::Value(w) => w - 2.0 * CELL_PADDING,
+            crate::types::fetched::Fetched::Absent => {
+                crate::geometry::constants::DEFAULT_COL_WIDTH - 2.0 * CELL_PADDING
+            }
+            crate::types::fetched::Fetched::BridgeFailed => return None,
+        };
 
         // Reuse the painter's exact split + wrap so the line count we measure
         // is the line count that gets drawn.

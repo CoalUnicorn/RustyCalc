@@ -157,6 +157,14 @@ pub struct JsBackedModel {
     has_get_theme: bool,
     has_show_row_headers: bool,
     has_show_col_headers: bool,
+    // Geometry/config accessors are optional on the host. A method that is
+    // *statically absent* means the host has no override data for that
+    // dimension — `Absent`, so the engine's documented default applies. A
+    // present method that *throws* is a transient bridge failure
+    // (`BridgeFailed`), which must hold the attempt, not fall back.
+    has_row_height: bool,
+    has_column_width: bool,
+    has_show_grid_lines: bool,
     // Workbook theme, fetched lazily and cached for the model's lifetime
     // (user decision: cache once, explicit refresh). The host must call
     // `IronCanvas.themeChanged()` after `model.setTheme(...)` — a stale
@@ -173,6 +181,9 @@ impl JsBackedModel {
         let has_get_theme = Self::has_method(&handle, "getTheme");
         let has_show_row_headers = Self::has_method(&handle, "getShowRowHeaders");
         let has_show_col_headers = Self::has_method(&handle, "getShowColHeaders");
+        let has_row_height = Self::has_method(&handle, "getRowHeight");
+        let has_column_width = Self::has_method(&handle, "getColumnWidth");
+        let has_show_grid_lines = Self::has_method(&handle, "getShowGridLines");
         Self {
             handle,
             js_throw_count: Cell::new(0),
@@ -183,6 +194,9 @@ impl JsBackedModel {
             has_get_theme,
             has_show_row_headers,
             has_show_col_headers,
+            has_row_height,
+            has_column_width,
+            has_show_grid_lines,
             theme: RefCell::new(None),
         }
     }
@@ -367,19 +381,37 @@ impl CanvasModel for JsBackedModel {
         )
     }
 
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
-        self.note_throw("getRowHeight", self.handle.get_row_height(sheet, row))
+    fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64> {
+        if !self.has_row_height {
+            return Fetched::Absent;
+        }
+        match self.note_throw("getRowHeight", self.handle.get_row_height(sheet, row)) {
+            Some(h) => Fetched::Value(h),
+            None => Fetched::BridgeFailed,
+        }
     }
 
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
-        self.note_throw(
+    fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64> {
+        if !self.has_column_width {
+            return Fetched::Absent;
+        }
+        match self.note_throw(
             "getColumnWidth",
             self.handle.get_column_width(sheet, column),
-        )
+        ) {
+            Some(w) => Fetched::Value(w),
+            None => Fetched::BridgeFailed,
+        }
     }
 
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
-        self.note_throw("getShowGridLines", self.handle.get_show_grid_lines(sheet))
+    fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool> {
+        if !self.has_show_grid_lines {
+            return Fetched::Absent;
+        }
+        match self.note_throw("getShowGridLines", self.handle.get_show_grid_lines(sheet)) {
+            Some(v) => Fetched::Value(v),
+            None => Fetched::BridgeFailed,
+        }
     }
 
     fn get_show_row_headers(&self, sheet: u32) -> Option<bool> {

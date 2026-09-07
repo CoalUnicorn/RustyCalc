@@ -31,17 +31,21 @@ impl CanvasModel for DataGrid {
     fn get_frozen_columns_count(&self, _s: u32) -> Option<i32> {
         Some(0)
     }
-    fn get_row_height(&self, _s: u32, _row: i32) -> Option<f64> {
-        Some(self.default_row_height())
+    fn get_row_height(&self, _s: u32, _row: i32) -> Fetched<f64> {
+        Fetched::Value(self.default_row_height())
     }
-    fn get_column_width(&self, _s: u32, column: i32) -> Option<f64> {
-        if column < 1 {
-            return Some(96.0); // row-header gutter — standard column width
-        }
-        Some(self.column_width_px((column - 1) as usize))
+    fn get_column_width(&self, _s: u32, column: i32) -> Fetched<f64> {
+        // `column < 1` is the row-header gutter pseudo-column — always a
+        // concrete width, never absent.
+        let w = if column < 1 {
+            96.0 // row-header gutter — standard column width
+        } else {
+            self.column_width_px((column - 1) as usize)
+        };
+        Fetched::Value(w)
     }
-    fn get_show_grid_lines(&self, _s: u32) -> Option<bool> {
-        Some(true)
+    fn get_show_grid_lines(&self, _s: u32) -> Fetched<bool> {
+        Fetched::Value(true)
     }
     /// Finite grid: scroll extents, blit rebuilds, and the autofill guard
     /// end at the data. Floored at 1 so an empty grid keeps one addressable

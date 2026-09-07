@@ -67,13 +67,13 @@ impl CanvasModel for CountingModel {
         self.frozen_cols_calls.set(self.frozen_cols_calls.get() + 1);
         self.inner.get_frozen_columns_count(sheet)
     }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
+    fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64> {
         self.inner.get_row_height(sheet, row)
     }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
+    fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64> {
         self.inner.get_column_width(sheet, column)
     }
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
+    fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool> {
         self.inner.get_show_grid_lines(sheet)
     }
     fn get_show_row_headers(&self, sheet: u32) -> Option<bool> {

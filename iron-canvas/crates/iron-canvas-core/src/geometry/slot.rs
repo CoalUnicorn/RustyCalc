@@ -87,8 +87,11 @@ impl AxisSlot for ColSlot {
 
 /// Walk an inclusive `range` starting at canvas coordinate `start`, push one
 /// slot per id, break **post-push** when the slot's leading edge has reached
-/// `max_cursor`. Returns the cursor past the last accepted slot (where the
-/// next slot would sit) — used by the frozen pass to compute the band offset.
+/// `max_cursor`. Returns `Some(cursor)` — the cursor past the last accepted
+/// slot (where the next slot would sit) — used by the frozen pass to compute
+/// the band offset. `None` when `measure` aborts the walk: a model read
+/// failed transiently (`BridgeFailed`), so the caller must not commit the
+/// partially-built geometry.
 ///
 /// `max_cursor = None` disables the break, used for the frozen band which
 /// always paints regardless of viewport size. Scroll-band callers pass the
@@ -98,18 +101,18 @@ pub fn fill_axis<S: AxisSlot>(
     range: std::ops::RangeInclusive<i32>,
     start: i32,
     max_cursor: Option<i32>,
-    mut measure: impl FnMut(i32) -> i32,
-) -> i32 {
+    mut measure: impl FnMut(i32) -> Option<i32>,
+) -> Option<i32> {
     let mut cursor = start;
     for id in range {
-        let extent = measure(id);
+        let extent = measure(id)?;
         slots.push(S::new(id, cursor, extent));
         if max_cursor.is_some_and(|max| cursor >= max) {
             break;
         }
         cursor += extent;
     }
-    cursor
+    Some(cursor)
 }
 
 /// First non-frozen visible id along an axis: the larger of `frozen_count + 1`
@@ -279,6 +282,10 @@ impl<S: AxisSlot> AxisSlots<S> {
     ///
     /// `frozen_offset` is the seam invariant `boundary_at` relies on: the
     /// scroll band must begin at or after the frozen band ends.
+    ///
+    /// The `measure` closure returns `None` when the model read failed
+    /// transiently (`BridgeFailed`); the walk aborts and `fill` returns
+    /// `false`, so the caller must not commit the partially-filled slots.
     // Mirrors `fill_axis`'s walker shape — each arg is an independent axis
     // input (counts, origin, viewport bound, measure); bundling them would
     // only add an indirection struct.
@@ -291,43 +298,80 @@ impl<S: AxisSlot> AxisSlots<S> {
         view_first: i32,
         last: i32,
         canvas_extent: i32,
-        mut measure: impl FnMut(&dyn CanvasModel, i32) -> i32,
-    ) {
+        mut measure: impl FnMut(&dyn CanvasModel, i32) -> Option<i32>,
+    ) -> bool {
         self.last_id = last;
         self.frozen.reserve(frozen_count as usize);
-        let after_frozen = fill_axis(&mut self.frozen, 1..=frozen_count, origin, None, |id| {
-            measure(model, id)
-        });
+        let Some(after_frozen) =
+            fill_axis(&mut self.frozen, 1..=frozen_count, origin, None, |id| {
+                measure(model, id)
+            })
+        else {
+            return false;
+        };
         self.frozen_offset = after_frozen + if frozen_count > 0 { FROZEN_SEP } else { 0 };
 
-        let _ = fill_axis(
+        fill_axis(
             &mut self.scroll,
             scroll_first(frozen_count, view_first)..=last,
             self.frozen_offset,
             Some(canvas_extent),
             |id| measure(model, id),
-        );
+        )
+        .is_some()
     }
 }
 
+/// A single-axis slot extent resolved from a model read.
+///
+/// The `Fetched` outcome from `CanvasModel` is resolved here, at the
+/// geometry boundary: `Value` becomes its pixel extent, `Absent` selects the
+/// axis's documented default (a row/column the model has no override for),
+/// and `BridgeFailed` becomes `Err` — the caller must hold the attempt, never
+/// substitute a default and commit fabricated geometry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtentFetch {
+    Px(i32),
+    BridgeFailed,
+}
+
+impl ExtentFetch {
+    /// Collapse to a pixel extent for an abortable walk: `Some(px)` for a
+    /// resolved extent (concrete value or documented default), `None` for a
+    /// transient bridge failure so the walk stops without committing
+    /// fabricated geometry.
+    pub fn extent(self) -> Option<i32> {
+        match self {
+            ExtentFetch::Px(px) => Some(px),
+            ExtentFetch::BridgeFailed => None,
+        }
+    }
+}
+
+/// Resolve one row-height read to a pixel extent.
+///
 /// `sheet` is the caller's already-captured/committed sheet — this never
 /// re-reads `CanvasModel::get_selected_sheet()` itself, so a slot walk over
 /// many rows costs one sheet read total, not one per row (see
 /// `PaneSet::fill_rows`, `Chrome`'s blit rebuild, and `Orchestrator::scroll_to_show`,
 /// every one of which now supplies it explicitly).
-pub fn row_height(model: &dyn CanvasModel, sheet: u32, row: i32) -> i32 {
-    model
-        .get_row_height(sheet, row)
-        .unwrap_or(DEFAULT_ROW_HEIGHT)
-        .round() as i32
+pub fn row_height(model: &dyn CanvasModel, sheet: u32, row: i32) -> ExtentFetch {
+    match model.get_row_height(sheet, row) {
+        crate::types::fetched::Fetched::Value(h) => ExtentFetch::Px(h.round() as i32),
+        crate::types::fetched::Fetched::Absent => {
+            ExtentFetch::Px(DEFAULT_ROW_HEIGHT.round() as i32)
+        }
+        crate::types::fetched::Fetched::BridgeFailed => ExtentFetch::BridgeFailed,
+    }
 }
 
 /// Column mirror of [`row_height`]; same explicit-`sheet` rationale.
-pub fn col_width(model: &dyn CanvasModel, sheet: u32, col: i32) -> i32 {
-    model
-        .get_column_width(sheet, col)
-        .unwrap_or(DEFAULT_COL_WIDTH)
-        .round() as i32
+pub fn col_width(model: &dyn CanvasModel, sheet: u32, col: i32) -> ExtentFetch {
+    match model.get_column_width(sheet, col) {
+        crate::types::fetched::Fetched::Value(w) => ExtentFetch::Px(w.round() as i32),
+        crate::types::fetched::Fetched::Absent => ExtentFetch::Px(DEFAULT_COL_WIDTH.round() as i32),
+        crate::types::fetched::Fetched::BridgeFailed => ExtentFetch::BridgeFailed,
+    }
 }
 
 #[cfg(test)]

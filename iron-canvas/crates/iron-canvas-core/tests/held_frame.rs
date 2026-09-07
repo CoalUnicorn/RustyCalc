@@ -354,3 +354,104 @@ fn invalid_frozen_counts_preserve_committed_frame_and_retry_work() {
         assert_eq!(orch.render_pending(), PaintResult::Idle);
     }
 }
+
+// ─── FSM-A2: geometry and configuration bridge failures ──────────────────
+//
+// Row heights, column widths, and grid-line visibility now carry an explicit
+// fetch outcome. A transient `BridgeFailed` on any of them must hold the
+// whole attempt before paint — no fabricated default geometry or grid state
+// may commit — and recovery needs no new host notification, exactly like the
+// content-bridge holds above.
+
+/// A geometry read failure during `Chrome::build` (fresh geometry) must hold
+/// the attempt before any paint, preserving the committed frame, draw ops,
+/// and presentations. The edited content stays queued; it renders once the
+/// read recovers.
+///
+/// A freeze toggle forces the Fresh geometry walk (SlotsReuse strategies
+/// never re-read row heights). A1 stays visible in the frozen band, so the
+/// committed rect must survive every held retry unchanged.
+#[test]
+fn row_height_bridge_failure_holds_fresh_geometry_and_retries() {
+    let model = Rc::new(TestModel::synthetic_grid().with_data_until(40));
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    let rect = orch.cell_rect(1, 1).expect("A1 visible before failure");
+
+    model.set_cell(1, 1, "row-height-retry");
+    orch.mark_content_dirty();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    let content_ops = grid_ops_len(&orch);
+    let grid_presents = orch.grid_surface().presents();
+
+    model.set_row_height_bridge_fail(true);
+    model.set_frozen_rows(1); // forces Fresh: the row walk runs
+    orch.view_changed();
+    for _ in 0..2 {
+        assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+        assert_eq!(orch.last_trace().outcome, FrameOutcome::HeldOnBridgeFailure);
+        assert_eq!(orch.last_trace().committed_seq, None);
+        assert_eq!(orch.cell_rect(1, 1), Some(rect));
+        assert_eq!(grid_ops_len(&orch), content_ops);
+        assert_eq!(orch.grid_surface().presents(), grid_presents);
+    }
+
+    model.set_row_height_bridge_fail(false);
+    model.set_frozen_rows(0); // another Fresh rebuild now succeeds
+    orch.view_changed();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert!(grid_text_ops_containing(&orch, "row-height-retry") > 0);
+    assert_eq!(orch.render_pending(), PaintResult::Idle);
+}
+
+/// Column widths feed the same fresh-geometry walk; a `BridgeFailed` there
+/// holds exactly like a row-height failure.
+#[test]
+fn col_width_bridge_failure_holds_fresh_geometry_and_retries() {
+    let model = Rc::new(TestModel::synthetic_grid().with_data_until(40));
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    let rect = orch.cell_rect(1, 1).expect("A1 visible before failure");
+    let grid_ops = grid_ops_len(&orch);
+    let grid_presents = orch.grid_surface().presents();
+
+    model.set_col_width_bridge_fail(true);
+    model.set_frozen_cols(1); // forces Fresh: the col walk runs
+    orch.view_changed();
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+    assert_eq!(orch.last_trace().outcome, FrameOutcome::HeldOnBridgeFailure);
+    assert_eq!(orch.last_trace().committed_seq, None);
+    assert_eq!(orch.cell_rect(1, 1), Some(rect));
+    assert_eq!(grid_ops_len(&orch), grid_ops);
+    assert_eq!(orch.grid_surface().presents(), grid_presents);
+
+    model.set_col_width_bridge_fail(false);
+    model.set_frozen_cols(0);
+    orch.view_changed();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert!(orch.cell_rect(1, 1).is_some(), "committed view rebuilt");
+    assert_eq!(orch.render_pending(), PaintResult::Idle);
+}
+
+/// Grid-line visibility is per-execution config: `BridgeFailed` must hold
+/// the grid transaction (no fabricated show/hide state painted), then
+/// recover with the model's real answer.
+#[test]
+fn grid_lines_bridge_failure_holds_before_paint_and_recovers() {
+    let model = Rc::new(TestModel::synthetic_grid().with_data_until(20));
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    let grid_ops = grid_ops_len(&orch);
+    let grid_presents = orch.grid_surface().presents();
+
+    model.set_grid_lines_bridge_fail(true);
+    orch.mark_content_dirty();
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+    assert_eq!(orch.last_trace().outcome, FrameOutcome::HeldOnBridgeFailure);
+    assert_eq!(grid_ops_len(&orch), grid_ops);
+    assert_eq!(orch.grid_surface().presents(), grid_presents);
+
+    model.set_grid_lines_bridge_fail(false);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(orch.render_pending(), PaintResult::Idle);
+}

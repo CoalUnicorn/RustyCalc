@@ -144,6 +144,12 @@ where
         model: &dyn CanvasModel,
         frame: &Chrome,
     ) -> GridPaintOutcome {
+        // Grid-line visibility is per-execution config (a toggle repaints
+        // without a geometry rebuild); read it before any painter op — the
+        // bg fill below is a pixel op, so a BridgeFailed must hold first.
+        if self.renderer.fetch_show_grid(model, frame.sheet).is_none() {
+            return GridPaintOutcome::Held;
+        }
         let Some(prepared) = self.renderer.prepare_fresh_grid(model, frame) else {
             return GridPaintOutcome::Held;
         };

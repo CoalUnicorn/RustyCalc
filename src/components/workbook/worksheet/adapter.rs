@@ -54,15 +54,25 @@ impl CanvasModel for WorksheetModelAdapter {
         self.store
             .with_value(|m| m.get_frozen_columns_count(sheet).ok())
     }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
-        self.store.with_value(|m| m.get_row_height(sheet, row).ok())
+    fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64> {
+        match self.store.with_value(|m| m.get_row_height(sheet, row)) {
+            Ok(h) => Fetched::Value(h),
+            // Native model error (persistent, not transient) — treat as
+            // "no override", matching the content accessors' convention.
+            Err(_) => Fetched::Absent,
+        }
     }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
-        self.store
-            .with_value(|m| m.get_column_width(sheet, column).ok())
+    fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64> {
+        match self.store.with_value(|m| m.get_column_width(sheet, column)) {
+            Ok(w) => Fetched::Value(w),
+            Err(_) => Fetched::Absent,
+        }
     }
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
-        self.store.with_value(|m| m.get_show_grid_lines(sheet).ok())
+    fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool> {
+        match self.store.with_value(|m| m.get_show_grid_lines(sheet)) {
+            Ok(v) => Fetched::Value(v),
+            Err(_) => Fetched::Absent,
+        }
     }
     fn get_show_row_headers(&self, _sheet: u32) -> Option<bool> {
         Some(self.show_headers.get_untracked())

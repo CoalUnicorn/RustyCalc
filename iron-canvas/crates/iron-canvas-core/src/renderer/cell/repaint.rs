@@ -171,16 +171,16 @@ mod tests {
             Some(0)
         }
 
-        fn get_row_height(&self, _: u32, row: i32) -> Option<f64> {
-            Some(if row == 2 { 0.0 } else { 20.0 })
+        fn get_row_height(&self, _: u32, row: i32) -> Fetched<f64> {
+            Fetched::Value(if row == 2 { 0.0 } else { 20.0 })
         }
 
-        fn get_column_width(&self, _: u32, column: i32) -> Option<f64> {
-            Some(if column == 2 { 0.0 } else { 60.0 })
+        fn get_column_width(&self, _: u32, column: i32) -> Fetched<f64> {
+            Fetched::Value(if column == 2 { 0.0 } else { 60.0 })
         }
 
-        fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
-            Some(true)
+        fn get_show_grid_lines(&self, _: u32) -> Fetched<bool> {
+            Fetched::Value(true)
         }
     }
 

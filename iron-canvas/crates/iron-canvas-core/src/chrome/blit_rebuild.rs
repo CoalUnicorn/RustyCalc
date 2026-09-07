@@ -93,7 +93,7 @@ fn rebuild_axis_slots<S: AxisSlot>(
     max_cursor: i32,
     new_first_idx: i32,
     last_idx_limit: i32,
-    measure: impl Fn(i32) -> i32,
+    measure: impl Fn(i32) -> Option<i32>,
 ) -> Option<Vec<S>> {
     let first = prev_slots.first()?;
     let old_first_idx = first.id();
@@ -126,7 +126,7 @@ fn rebuild_axis_slots<S: AxisSlot>(
             frozen_offset,
             None,
             &measure,
-        );
+        )?;
         let strip_size = strip_cursor_end - frozen_offset;
         for slot in &prev_slots[..prev_slots.len() - d] {
             new_slots.push(S::new(slot.id(), slot.start() + strip_size, slot.extent()));
@@ -147,13 +147,13 @@ fn rebuild_axis_slots<S: AxisSlot>(
             .last()
             .map(|s| s.id() + 1)
             .unwrap_or(new_first_idx);
-        let _ = fill_axis(
+        fill_axis(
             &mut new_slots,
             next_id..=last_idx_limit,
             cursor,
             Some(max_cursor),
             &measure,
-        );
+        )?;
     }
 
     Some(new_slots)
@@ -169,7 +169,7 @@ impl PaneSet {
         pane_h: i32,
     ) -> Option<(i32, ShiftDir)> {
         probe_axis_shift(&self.rows.scroll, new_top, pane_y, pane_h, |r| {
-            model.get_row_height(sheet, r).map(|h| h.round() as i32)
+            row_height(model, sheet, r).extent()
         })
     }
 
@@ -182,7 +182,7 @@ impl PaneSet {
         pane_w: i32,
     ) -> Option<(i32, ShiftDir)> {
         probe_axis_shift(&self.cols.scroll, new_left, pane_x, pane_w, |c| {
-            model.get_column_width(sheet, c).map(|w| w.round() as i32)
+            col_width(model, sheet, c).extent()
         })
     }
 
@@ -203,7 +203,7 @@ impl PaneSet {
             // !content_dirty, so the model's bound cannot have moved
             // since prev was built — both rebuild paths agree.
             self.rows.last_id,
-            |r| row_height(model, sheet, r),
+            |r| row_height(model, sheet, r).extent(),
         )
     }
 
@@ -221,7 +221,7 @@ impl PaneSet {
             canvas_w,
             new_left,
             self.cols.last_id,
-            |c| col_width(model, sheet, c),
+            |c| col_width(model, sheet, c).extent(),
         )
     }
 }

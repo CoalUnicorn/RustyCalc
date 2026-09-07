@@ -134,8 +134,14 @@ pub trait CellContentQuery {
 /// interpreted beyond that. Single-surface models (the datagrid impl, for
 /// one) return a constant and ignore the parameter.
 ///
-/// The `Option`-returning config/selection accessors use `None` for a transient
-/// JS-bridge failure (the next animation frame re-queries), while the
+/// The geometry/config accessors that carry an "absent override vs failed
+/// read" distinction (`get_row_height`, `get_column_width`,
+/// `get_show_grid_lines`) return [`Fetched<T>`]: only `Absent` may select the
+/// engine's documented default, and `BridgeFailed` must hold and retry the
+/// attempt. The scalar selection accessors (`get_selected_sheet`,
+/// `get_selected_view`, frozen counts, header visibility) return `Option` —
+/// `None` there is a transient JS-bridge failure (the next animation frame
+/// re-queries), which `FrameInputs::capture` turns into a hold. The
 /// `get_*_header_text` overrides use `None` for "no override, fall back to the
 /// default."
 pub trait CanvasModel: CellContentQuery {
@@ -149,9 +155,30 @@ pub trait CanvasModel: CellContentQuery {
     fn get_selected_view(&self) -> Option<CanvasView>;
     fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
     fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+
+    /// Effective pixel height of `row` on `sheet`, as a fetch outcome.
+    ///
+    /// `Value(px)` is the model's authoritative answer — a custom height or
+    /// the host-resolved default. `Absent` means the model has no override
+    /// for this row, so the engine's documented default
+    /// ([`DEFAULT_ROW_HEIGHT`](crate::geometry::constants::DEFAULT_ROW_HEIGHT))
+    /// applies. `BridgeFailed` is a transient read failure: the attempt must
+    /// hold and retry, never fabricate a default height. A negative or
+    /// non-finite `Value` is invalid input and also must not reach the slot
+    /// geometry (validated at the extent boundary).
+    fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64>;
+
+    /// Column mirror of [`Self::get_row_height`], with the column-width
+    /// documented default on `Absent`.
+    fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64>;
+
+    /// Whether the grid line for each cell on `sheet` is visible.
+    ///
+    /// `Value(show)` is the model's authoritative answer. `Absent` means no
+    /// override, so the engine shows grid lines (Excel's default-on).
+    /// `BridgeFailed` is a transient read failure: hold and retry rather
+    /// than painting a fabricated grid state.
+    fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool>;
 
     /// Whether the selection (fill, stroke, autofill handle, active-cell
     /// overlay repaint, header highlights) should paint at all. Infallible
@@ -250,9 +277,9 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_selected_view(&self) -> Option<CanvasView>;
         fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
         fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
-        fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
-        fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
-        fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+        fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64>;
+        fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64>;
+        fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool>;
         fn get_show_selection(&self) -> bool;
         fn last_row(&self, sheet: u32) -> i32;
         fn last_column(&self, sheet: u32) -> i32;

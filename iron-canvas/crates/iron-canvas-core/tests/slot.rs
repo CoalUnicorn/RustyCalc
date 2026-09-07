@@ -13,13 +13,13 @@ use iron_canvas_core::geometry::slot::{
 fn fill_axis_walks_inclusive_range_and_returns_post_cursor() {
     // 4 columns of 50 px each starting at x=10 -> returns 10 + 4*50 = 210.
     let mut slots: Vec<ColSlot> = Vec::new();
-    let end = fill_axis(&mut slots, 1..=4, 10, None, |_| 50);
+    let end = fill_axis(&mut slots, 1..=4, 10, None, |_| Some(50));
     assert_eq!(slots.len(), 4);
     assert_eq!(slots[0].col, 1);
     assert_eq!(slots[0].left, 10);
     assert_eq!(slots[3].col, 4);
     assert_eq!(slots[3].left, 160);
-    assert_eq!(end, 210, "cursor returned must be past the last slot");
+    assert_eq!(end, Some(210), "cursor returned must be past the last slot");
 }
 
 #[test]
@@ -31,20 +31,24 @@ fn fill_axis_breaks_post_push_at_max_cursor() {
     // entirely off-canvas; that overshoot is intentional so consumers
     // never miss the last visible boundary.
     let mut slots: Vec<ColSlot> = Vec::new();
-    let end = fill_axis(&mut slots, 1..=10, 0, Some(110), |_| 50);
+    let end = fill_axis(&mut slots, 1..=10, 0, Some(110), |_| Some(50));
     assert_eq!(slots.len(), 4);
     assert_eq!(slots.last().expect("at least one slot").col, 4);
     assert_eq!(slots[3].left, 150);
-    assert_eq!(end, 150, "cursor sits at the breaking slot's leading edge");
+    assert_eq!(
+        end,
+        Some(150),
+        "cursor sits at the breaking slot's leading edge"
+    );
 }
 
 #[test]
 fn fill_axis_empty_range_pushes_nothing_and_returns_start() {
     let mut slots: Vec<RowSlot> = Vec::new();
     #[allow(clippy::reversed_empty_ranges)]
-    let end = fill_axis(&mut slots, 5..=4, 100, None, |_| 20);
+    let end = fill_axis(&mut slots, 5..=4, 100, None, |_| Some(20));
     assert!(slots.is_empty());
-    assert_eq!(end, 100);
+    assert_eq!(end, Some(100));
 }
 
 #[test]
@@ -55,7 +59,7 @@ fn fill_axis_max_cursor_at_start_still_pushes_first_slot() {
     // a real ceiling — the frozen band never short-circuits, but the
     // scroll band must still emit at least one slot per call.
     let mut slots: Vec<ColSlot> = Vec::new();
-    fill_axis(&mut slots, 1..=10, 0, Some(0), |_| 50);
+    fill_axis(&mut slots, 1..=10, 0, Some(0), |_| Some(50));
     assert_eq!(slots.len(), 1, "first slot pushes before the break check");
 }
 

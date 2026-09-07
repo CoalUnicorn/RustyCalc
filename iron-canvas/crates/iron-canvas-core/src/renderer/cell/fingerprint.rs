@@ -855,16 +855,16 @@ mod tests {
             Some(self.frozen_cols)
         }
 
-        fn get_row_height(&self, _: u32, _: i32) -> Option<f64> {
-            Some(20.0)
+        fn get_row_height(&self, _: u32, _: i32) -> Fetched<f64> {
+            Fetched::Value(20.0)
         }
 
-        fn get_column_width(&self, _: u32, _: i32) -> Option<f64> {
-            Some(60.0)
+        fn get_column_width(&self, _: u32, _: i32) -> Fetched<f64> {
+            Fetched::Value(60.0)
         }
 
-        fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
-            Some(true)
+        fn get_show_grid_lines(&self, _: u32) -> Fetched<bool> {
+            Fetched::Value(true)
         }
     }
 
