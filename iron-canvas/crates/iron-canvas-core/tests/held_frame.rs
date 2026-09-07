@@ -455,3 +455,32 @@ fn grid_lines_bridge_failure_holds_before_paint_and_recovers() {
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert_eq!(orch.render_pending(), PaintResult::Idle);
 }
+
+/// A host extent value that cannot become geometry (NaN row height) must
+/// hold exactly like a bridge failure: no fabricated hidden row from an
+/// `as i32` cast, no committed geometry. Recovery is a fixed host value.
+#[test]
+fn invalid_row_height_holds_fresh_geometry_and_retries() {
+    let model = Rc::new(TestModel::synthetic_grid().with_data_until(40));
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    let rect = orch.cell_rect(1, 1).expect("A1 visible before failure");
+    let grid_ops = grid_ops_len(&orch);
+    let grid_presents = orch.grid_surface().presents();
+
+    model.set_row_height(1, f64::NAN); // a Value that cannot become px
+    model.set_frozen_rows(1); // force Fresh: the row walk reads row 1
+    orch.view_changed();
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+    assert_eq!(orch.last_trace().outcome, FrameOutcome::HeldOnBridgeFailure);
+    assert_eq!(orch.last_trace().committed_seq, None);
+    assert_eq!(orch.cell_rect(1, 1), Some(rect));
+    assert_eq!(grid_ops_len(&orch), grid_ops);
+    assert_eq!(orch.grid_surface().presents(), grid_presents);
+
+    model.set_row_height(1, 20.0);
+    model.set_frozen_rows(0);
+    orch.view_changed();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(orch.render_pending(), PaintResult::Idle);
+}

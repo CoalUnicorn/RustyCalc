@@ -325,25 +325,53 @@ impl<S: AxisSlot> AxisSlots<S> {
 /// A single-axis slot extent resolved from a model read.
 ///
 /// The `Fetched` outcome from `CanvasModel` is resolved here, at the
-/// geometry boundary: `Value` becomes its pixel extent, `Absent` selects the
-/// axis's documented default (a row/column the model has no override for),
-/// and `BridgeFailed` becomes `Err` — the caller must hold the attempt, never
-/// substitute a default and commit fabricated geometry.
+/// geometry boundary: `Value` becomes its validated pixel extent, `Absent`
+/// selects the axis's documented default (a row/column the model has no
+/// override for), `BridgeFailed` is a transient read failure, and `Invalid`
+/// is a host value that cannot become geometry (non-finite, negative, or
+/// beyond `i32::MAX` px). `BridgeFailed` and `Invalid` both abort the walk —
+/// the caller must hold the attempt, never substitute a default or fabricate
+/// geometry from a broken number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExtentFetch {
+    /// Validated pixel extent: finite, non-negative, `0..=i32::MAX` px.
     Px(i32),
+    /// The host returned a value that cannot become a slot extent
+    /// (non-finite, negative, or overflowing `i32` px). Never round/cast it
+    /// into geometry: a `NaN` cast would fabricate a hidden row, a negative
+    /// value would break monotonic slot math.
+    Invalid,
+    /// The model read failed transiently; retry the whole attempt later.
     BridgeFailed,
 }
 
 impl ExtentFetch {
+    /// Validated pixel parse for one host extent value.
+    ///
+    /// Accepts a finite value in `0..=i32::MAX` px after rounding. Zero stays
+    /// a valid extent — the hidden-row/hidden-column value. Everything else
+    /// (NaN, infinities, negative values, overflow) is `ExtentFetch::Invalid`,
+    /// never clamped or cast into a fabricated slot.
+    fn from_host_px(v: f64) -> ExtentFetch {
+        if !v.is_finite() || v < 0.0 {
+            return ExtentFetch::Invalid;
+        }
+        let px = v.round();
+        if px > i32::MAX as f64 {
+            return ExtentFetch::Invalid;
+        }
+        ExtentFetch::Px(px as i32)
+    }
+
     /// Collapse to a pixel extent for an abortable walk: `Some(px)` for a
-    /// resolved extent (concrete value or documented default), `None` for a
-    /// transient bridge failure so the walk stops without committing
+    /// resolved extent (validated concrete value or documented default),
+    /// `None` for `BridgeFailed` (transient) or `Invalid` (host value that
+    /// cannot become geometry), so the walk stops without committing
     /// fabricated geometry.
     pub fn extent(self) -> Option<i32> {
         match self {
             ExtentFetch::Px(px) => Some(px),
-            ExtentFetch::BridgeFailed => None,
+            ExtentFetch::Invalid | ExtentFetch::BridgeFailed => None,
         }
     }
 }
@@ -357,7 +385,7 @@ impl ExtentFetch {
 /// every one of which now supplies it explicitly).
 pub fn row_height(model: &dyn CanvasModel, sheet: u32, row: i32) -> ExtentFetch {
     match model.get_row_height(sheet, row) {
-        crate::types::fetched::Fetched::Value(h) => ExtentFetch::Px(h.round() as i32),
+        crate::types::fetched::Fetched::Value(h) => ExtentFetch::from_host_px(h),
         crate::types::fetched::Fetched::Absent => {
             ExtentFetch::Px(DEFAULT_ROW_HEIGHT.round() as i32)
         }
@@ -368,7 +396,7 @@ pub fn row_height(model: &dyn CanvasModel, sheet: u32, row: i32) -> ExtentFetch 
 /// Column mirror of [`row_height`]; same explicit-`sheet` rationale.
 pub fn col_width(model: &dyn CanvasModel, sheet: u32, col: i32) -> ExtentFetch {
     match model.get_column_width(sheet, col) {
-        crate::types::fetched::Fetched::Value(w) => ExtentFetch::Px(w.round() as i32),
+        crate::types::fetched::Fetched::Value(w) => ExtentFetch::from_host_px(w),
         crate::types::fetched::Fetched::Absent => ExtentFetch::Px(DEFAULT_COL_WIDTH.round() as i32),
         crate::types::fetched::Fetched::BridgeFailed => ExtentFetch::BridgeFailed,
     }
