@@ -896,11 +896,13 @@ mod dev_wire {
         pub r2: i32,
     }
 
+    /// The wire shape stays `{r1, r2}` — the engine's normalized pair maps
+    /// onto the existing schema fields.
     impl From<RowSpan> for RowSpanWire {
         fn from(span: RowSpan) -> Self {
             Self {
-                r1: span.r1,
-                r2: span.r2,
+                r1: span.start(),
+                r2: span.end(),
             }
         }
     }
@@ -1313,7 +1315,7 @@ mod tests {
             repaint: iron_canvas_core::DiagRepaint {
                 verdict: Some(GridVerdict::Cell),
                 reason: Some(DiagRepaintReason::ChangedCell),
-                changed_rows: vec![RowSpan { r1: 5, r2: 5 }],
+                changed_rows: vec![RowSpan::new(5, 5)],
                 changed_cells: vec![DiagChangedCell { row: 5, column: 4 }],
                 clip: Some(PixelRect {
                     top_left: Point { x: 20, y: 30 },

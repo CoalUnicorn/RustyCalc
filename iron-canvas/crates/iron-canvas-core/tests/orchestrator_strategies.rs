@@ -283,7 +283,7 @@ fn grid_strategies_share_the_grid_shell_group_order() {
     assert_shell(&grid_ops_since(&orch, before), "SlotsReuse");
 
     let before = grid_ops_len(&orch);
-    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_rows_damaged(0, RowSpan::new(2, 2));
     orch.render_pending();
     assert_eq!(orch.last_strategy(), Some(RenderStrategy::DamagedRows));
     assert_shell(&grid_ops_since(&orch, before), "Damage");
@@ -772,7 +772,7 @@ fn recording_serde_round_trip_across_all_five_strategies() {
     // viewport stays reusable and every CONTENT raise since the last paint
     // named its rows on the on-screen sheet -> DamagedRows.
     stub.set_cell(2, 1, "changed");
-    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_rows_damaged(0, RowSpan::new(2, 2));
     push(&mut orch, 8); // DamagedRows
     // mark_content_dirty raises CONTENT; viewport stays valid -> ChangedCells.
     // (set_theme used to land here too, but a palette change now invalidates
@@ -869,7 +869,7 @@ fn named_damage_paints_less_than_a_multi_cell_slots_reuse_envelope() {
     let slots_ops = grid_ops_len(&slots) - before;
 
     let before = grid_ops_len(&damage);
-    damage.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    damage.mark_rows_damaged(0, RowSpan::new(2, 2));
     damage.render_pending();
     let damage_ops = grid_ops_len(&damage) - before;
 
@@ -892,7 +892,7 @@ fn damaged_rows_repaints_chrome_like_other_grid_strategies() {
     orch.render_pending();
 
     let before = grid_ops_len(&orch);
-    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_rows_damaged(0, RowSpan::new(2, 2));
     orch.render_pending();
     let ops = grid_ops_since(&orch, before);
 
@@ -932,7 +932,7 @@ fn plain_content_dirty_poisons_damage_to_slots_reuse() {
     let mut orch = build(Rc::clone(&stub));
     orch.render_pending();
 
-    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_rows_damaged(0, RowSpan::new(2, 2));
     orch.mark_content_dirty();
     orch.render_pending();
     assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
@@ -944,8 +944,8 @@ fn cross_sheet_damage_degrades_to_slots_reuse() {
     let mut orch = build(Rc::clone(&stub));
     orch.render_pending();
 
-    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
-    orch.mark_rows_damaged(1, RowSpan { r1: 3, r2: 3 });
+    orch.mark_rows_damaged(0, RowSpan::new(2, 2));
+    orch.mark_rows_damaged(1, RowSpan::new(3, 3));
     orch.render_pending();
     assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
 }
@@ -956,7 +956,7 @@ fn damaged_rows_work_is_drained_by_the_render() {
     let mut orch = build(Rc::clone(&stub));
     orch.render_pending();
 
-    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_rows_damaged(0, RowSpan::new(2, 2));
     orch.render_pending();
     let after = grid_ops_len(&orch);
     orch.render_pending(); // nothing raised since -> no-op
@@ -1026,7 +1026,7 @@ fn damaged_rows_bridge_failure_holds_the_whole_grid() {
 
     stub.set_value_bridge_fail(true);
     let grid_before = grid_ops_len(&orch);
-    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_rows_damaged(0, RowSpan::new(2, 2));
     assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     let new_grid_ops = grid_ops_since(&orch, grid_before);
 
@@ -1041,7 +1041,7 @@ fn damaged_rows_bridge_failure_holds_the_whole_grid() {
     stub.set_value_bridge_fail(false);
     stub.set_cell(2, 1, "changed");
     let grid_before = grid_ops_len(&orch);
-    orch.mark_rows_damaged(0, RowSpan { r1: 2, r2: 2 });
+    orch.mark_rows_damaged(0, RowSpan::new(2, 2));
     orch.render_pending();
     let new_grid_ops = grid_ops_since(&orch, grid_before);
     assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
@@ -1059,7 +1059,7 @@ fn damaged_rows_with_active_cell_repaints_overlay() {
 
     let overlay_before = overlay_ops_len(&orch);
     stub.set_cell(1, 1, "");
-    orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 });
+    orch.mark_rows_damaged(0, RowSpan::new(1, 1));
     orch.render_pending();
 
     assert_eq!(orch.last_strategy(), Some(RenderStrategy::DamagedRows));
@@ -1396,7 +1396,7 @@ fn row_work_ineligible_for_damage_falls_back_to_whole_grid() {
     stub.set_cell(6, 3, "scroll-edit"); // bottom band
     // Rows recorded against a sheet that is not the one on screen: `Damage`
     // is ineligible, but the content work is still real.
-    orch.mark_rows_damaged(7, RowSpan { r1: 1, r2: 1 });
+    orch.mark_rows_damaged(7, RowSpan::new(1, 1));
 
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert_eq!(orch.last_strategy(), Some(RenderStrategy::ChangedCells));
@@ -1472,7 +1472,7 @@ fn stable_row_content_plus_view_dispatches_damage() {
 
     stub.set_cell(5, 1, "typed");
     stub.set_active(6, 1);
-    orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
+    orch.mark_rows_damaged(0, RowSpan::new(5, 5));
     orch.view_changed();
 
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
@@ -1528,7 +1528,7 @@ fn stable_commit_batch_selects_slots_reuse_and_moves_overlay() {
     let overlay_before = overlay_ops_len(&orch);
     stub.set_cell(5, 5, "typed");
     stub.set_active(6, 5);
-    orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
+    orch.mark_rows_damaged(0, RowSpan::new(5, 5));
     orch.mark_content_dirty();
     orch.view_changed();
 
@@ -1601,7 +1601,7 @@ fn stable_commit_with_hidden_selection_uses_slots_reuse_without_active_cell_repa
     let overlay_presents = orch.overlay_surface().presents();
     stub.set_cell(5, 5, "hidden-selection-edit");
     stub.set_active(6, 5);
-    orch.mark_rows_damaged(0, RowSpan { r1: 5, r2: 5 });
+    orch.mark_rows_damaged(0, RowSpan::new(5, 5));
     orch.mark_content_dirty();
     orch.view_changed();
 

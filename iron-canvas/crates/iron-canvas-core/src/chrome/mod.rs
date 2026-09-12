@@ -591,56 +591,40 @@ impl Chrome {
     }
 
     /// Map a sheet-coordinate range to canvas pixel bounds, clamping
-    /// oversized selections to the canvas edge. `None` when the range
-    /// lies entirely outside the drawable fold. Pure `Chrome` math, no
-    /// model access.
+    /// oversized selections to the canvas edge. `None` when no row or no
+    /// column of the range is painted in this frame — the range lies entirely
+    /// in the address gap between the frozen band and the scrolled-to band, or
+    /// beyond the walked extent. Pure `Chrome` math, no model access.
+    ///
+    /// Both axes are normalized once, then projected onto their
+    /// frozen-plus-scroll union ([`AxisSlots::project_interval`]). A range that
+    /// starts in the address gap and ends in the scroll band therefore covers
+    /// only the ids it names — never the header or frozen pixels between them —
+    /// and a range that overlaps only the frozen band still returns its true
+    /// rectangle instead of a zero-extent one built from off-frame zeros.
     pub fn range_rect(&self, range: RCRange) -> Option<PixelRect> {
+        let norm = range.normalized();
         let p = &self.pane_set;
         let (canvas_w, canvas_h) = self.canvas_size.to_logical_extent();
-        let frozen_rows = p.rows.frozen_count();
-        let frozen_cols = p.cols.frozen_count();
 
-        if !self.range_intersects_fold(range, frozen_rows, frozen_cols) {
-            return None;
+        let (x, mut right) = p.cols.project_interval(norm.c1, norm.c2)?;
+        let (y, mut bottom) = p.rows.project_interval(norm.r1, norm.r2)?;
+
+        // The selection continues past the last painted id: there is no slot to
+        // take a trailing edge from, so the outline runs to the canvas edge.
+        if norm.c2 > p.cols.frozen_count().max(p.cols.last_visible()) {
+            right = canvas_w;
         }
-
-        let x = p.col_to_x(range.c1);
-        let y = p.row_to_y(range.r1);
-        let right = if range.c2 > p.last_visible_col() && range.c2 > frozen_cols {
-            canvas_w
-        } else {
-            p.col_to_x(range.c2) + p.col_extent_at(range.c2)
-        };
-        let bottom = if range.r2 > p.last_visible_row() && range.r2 > frozen_rows {
-            canvas_h
-        } else {
-            p.row_to_y(range.r2) + p.row_extent_at(range.r2)
-        };
+        if norm.r2 > p.rows.frozen_count().max(p.rows.last_visible()) {
+            bottom = canvas_h;
+        }
         Some(PixelRect {
             top_left: Point { x, y },
-            width: right - x,
-            height: bottom - y,
+            // A frozen band taller/wider than the canvas can start past the
+            // clamped edge; never hand a painter a negative extent.
+            width: (right - x).max(0),
+            height: (bottom - y).max(0),
         })
-    }
-
-    /// True if `range` overlaps the drawable fold (scrollable viewport
-    /// plus the frozen bands). Guards `range_rect`'s slot lookups against
-    /// off-screen refs like `=BB3` when column BB is not visible.
-    fn range_intersects_fold(&self, range: RCRange, frozen_rows: i32, frozen_cols: i32) -> bool {
-        let p = &self.pane_set;
-        if range.c1 > p.last_visible_col() && range.c1 > frozen_cols {
-            return false;
-        }
-        if range.r1 > p.last_visible_row() && range.r1 > frozen_rows {
-            return false;
-        }
-        if range.c2 < p.left_column() && range.c2 > frozen_cols {
-            return false;
-        }
-        if range.r2 < p.top_row() && range.r2 > frozen_rows {
-            return false;
-        }
-        true
     }
 
     pub fn autofill_handle(&self, selection_range: RCRange) -> Option<Point> {

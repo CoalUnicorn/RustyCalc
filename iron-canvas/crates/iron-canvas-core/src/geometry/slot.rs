@@ -277,6 +277,56 @@ impl<S: AxisSlot> AxisSlots<S> {
         self.slot(id).is_some()
     }
 
+    /// Project an inclusive address interval onto this axis's frozen+scroll
+    /// slot union.
+    ///
+    /// Returns `Some((start, end))` — the leading pixel edge of the lowest
+    /// covered id and the trailing pixel edge of the highest covered id — or
+    /// `None` when no id in the interval has a slot in this frame (it lies
+    /// entirely in the address gap between the frozen band and the
+    /// scrolled-to band, or past the walked extent).
+    ///
+    /// The bands are deliberately not flattened. An interval that covers the
+    /// frozen band *and* the scroll band projects across the separator between
+    /// them, so the returned span includes both bands and the separator pixels
+    /// — which is what an outline over rows in both bands must cover. Both vecs
+    /// hold dense, contiguous ids (`fill_axis` guarantees it), so each covered
+    /// sub-span is a slice, not a scan of skipped ids.
+    pub fn project_interval(&self, a: i32, b: i32) -> Option<(i32, i32)> {
+        let lo = a.min(b);
+        let hi = a.max(b);
+        match (self.frozen_span(lo, hi), self.scroll_span(lo, hi)) {
+            (Some((f_start, f_end)), Some((s_start, s_end))) => {
+                Some((f_start.min(s_start), f_end.max(s_end)))
+            }
+            (Some(span), None) | (None, Some(span)) => Some(span),
+            (None, None) => None,
+        }
+    }
+
+    /// Covered pixel span of the frozen band within `[lo, hi]` (ids `1..=len`).
+    fn frozen_span(&self, lo: i32, hi: i32) -> Option<(i32, i32)> {
+        let len = self.frozen.len() as i32;
+        if len == 0 || hi < 1 || lo > len {
+            return None;
+        }
+        let first = &self.frozen[(lo.max(1) - 1) as usize];
+        let last = &self.frozen[(hi.min(len) - 1) as usize];
+        Some((first.start(), last.end()))
+    }
+
+    /// Covered pixel span of the scroll band within `[lo, hi]`.
+    fn scroll_span(&self, lo: i32, hi: i32) -> Option<(i32, i32)> {
+        let first_id = self.scroll.first()?.id();
+        let last_id = self.scroll.last()?.id();
+        if hi < first_id || lo > last_id {
+            return None;
+        }
+        let first = &self.scroll[(lo.max(first_id) - first_id) as usize];
+        let last = &self.scroll[(hi.min(last_id) - first_id) as usize];
+        Some((first.start(), last.end()))
+    }
+
     /// Populate `frozen` + `scroll` and record `frozen_offset`. Walks the
     /// frozen band first (always painted — `None` disables the viewport
     /// break), notes where the scroll band starts, then walks the scroll band

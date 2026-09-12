@@ -105,6 +105,80 @@ impl From<[i32; 4]> for RCRange {
     }
 }
 
+/// An ordered, dense address rectangle: `r1 <= r2` and `c1 <= c2`.
+///
+/// [`RCRange`] permits either corner order on purpose — selection growth,
+/// point-mode drags, and range arithmetic all hand back whichever corner came
+/// first, and normalizing at every read would tax the whole crate for a
+/// property only dense work needs. Dense work is that property: the bulk fetch
+/// filling one `FetchedCells` bundle iterates `r1..=r2` and its index math
+/// multiplies height by width, so a reversed range there is not a clampable
+/// quirk — it is zero cells fetched and blank paint.
+///
+/// This type *parses* the permissive range once at the dense boundary
+/// ([`DenseRange::from_rc`], or `RCRange::into`). Downstream code reads ordered
+/// fields and needs no `max`/`min` repair. It is crate-private: dense fetch and
+/// bundle indexing are execution details, not consumer API.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DenseRange {
+    r1: i32,
+    c1: i32,
+    r2: i32,
+    c2: i32,
+}
+
+impl DenseRange {
+    /// Normalize `range`'s corners into the dense invariant. This is the one
+    /// place a dual-direction [`RCRange`] becomes an ordered rectangle.
+    pub(crate) fn from_rc(range: RCRange) -> Self {
+        let n = range.normalized();
+        Self {
+            r1: n.r1,
+            c1: n.c1,
+            r2: n.r2,
+            c2: n.c2,
+        }
+    }
+
+    /// Row count. Computed in `i64` so a full `i32` address span cannot
+    /// overflow the subtraction the way the raw `r2 - r1 + 1` form could.
+    #[inline]
+    pub(crate) fn height(self) -> usize {
+        usize::try_from(i64::from(self.r2) - i64::from(self.r1) + 1).unwrap_or(usize::MAX)
+    }
+
+    /// Column count; same `i64` width as [`Self::height`].
+    #[inline]
+    pub(crate) fn width(self) -> usize {
+        usize::try_from(i64::from(self.c2) - i64::from(self.c1) + 1).unwrap_or(usize::MAX)
+    }
+
+    /// Addressed cell count for the four fetched channels.
+    #[inline]
+    pub(crate) fn addressed_cells(self) -> usize {
+        self.height().saturating_mul(self.width())
+    }
+
+    /// Back to the permissive address type, e.g. for the model's bulk
+    /// accessors (which keep their `RCRange` signatures) and the diagnostic
+    /// wire shape.
+    #[inline]
+    pub(crate) fn as_rc(self) -> RCRange {
+        RCRange {
+            r1: self.r1,
+            c1: self.c1,
+            r2: self.r2,
+            c2: self.c2,
+        }
+    }
+}
+
+impl From<RCRange> for DenseRange {
+    fn from(range: RCRange) -> Self {
+        Self::from_rc(range)
+    }
+}
+
 /// Target cell of an in-progress autofill-handle drag.
 #[derive(Copy, Clone, PartialEq)]
 pub struct AutofillTarget {
@@ -148,6 +222,41 @@ pub struct FormulaRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dense_full_address_span_never_wraps_to_zero() {
+        let dense = DenseRange::from_rc(RCRange::from([i32::MIN, i32::MIN, i32::MAX, i32::MAX]));
+        let expected = usize::try_from(1_u64 << 32).unwrap_or(usize::MAX);
+        assert_eq!(dense.height(), expected);
+        assert_eq!(dense.width(), expected);
+        assert_eq!(dense.addressed_cells(), usize::MAX);
+    }
+
+    /// The dense boundary is where a dual-direction range stops being
+    /// permissive: the parsed value counts its full area instead of the zero
+    /// cells a raw `r1..=r2` walk would fetch.
+    #[test]
+    fn dense_range_parses_reversed_corners_into_full_area() {
+        let dense = DenseRange::from_rc(RCRange {
+            r1: 5,
+            c1: 3,
+            r2: 2,
+            c2: 1,
+        });
+
+        assert_eq!(
+            dense.as_rc(),
+            RCRange {
+                r1: 2,
+                c1: 1,
+                r2: 5,
+                c2: 3
+            }
+        );
+        assert_eq!(dense.height(), 4);
+        assert_eq!(dense.width(), 3);
+        assert_eq!(dense.addressed_cells(), 12);
+    }
 
     // A range with reversed corners must report the same geometry as its
     // normalized form — height/width stay positive, contains/cells aren't empty.

@@ -481,14 +481,11 @@ fn plan_grid_repaint(painted: &GridFingerprint, candidate: &GridFingerprint) -> 
             continue;
         }
         if let Some(last) = spans.last_mut()
-            && last.r2 + 1 == candidate_row.row
+            && last.end() + 1 == candidate_row.row
         {
-            last.r2 = candidate_row.row;
+            *last = RowSpan::new(last.start(), candidate_row.row);
         } else {
-            spans.push(RowSpan {
-                r1: candidate_row.row,
-                r2: candidate_row.row,
-            });
+            spans.push(RowSpan::new(candidate_row.row, candidate_row.row));
         }
     }
     if spans.is_empty() {
@@ -648,9 +645,9 @@ fn addressed_cost(layout: GridLayout, spans: &[RowSpan], range: Option<RCRange>)
                     range_intersection(
                         segment_range,
                         RCRange {
-                            r1: span.r1,
+                            r1: span.start(),
                             c1: segment_range.c1,
-                            r2: span.r2,
+                            r2: span.end(),
                             c2: segment_range.c2,
                         },
                     )
@@ -674,8 +671,8 @@ fn changed_row_boundaries_have_border(
             };
             let band_start = *band.start();
             let band_end = *band.end();
-            let start = span.r1.max(band_start);
-            let end = span.r2.min(band_end);
+            let start = span.start().max(band_start);
+            let end = span.end().min(band_end);
             start <= end
                 && ((start > band_start
                     && rows_have_border(painted, candidate, [start - 1, start]))

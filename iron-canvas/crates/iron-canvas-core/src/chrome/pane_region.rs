@@ -49,10 +49,11 @@ impl PaneRegion {
     /// empty except `BottomRight`).
     ///
     /// The returned range spans `[first_row..=last_row] × [first_col..=last_col]`
-    /// from the slot vecs. Hidden rows/cols are NOT removed from the
-    /// rectangle — the slot vecs skip hidden lines, but the range stays
-    /// contiguous so a dense per-cell buffer keyed by `(row - r1, col - c1)`
-    /// indexes correctly.
+    /// from the slot vecs. Hidden rows/cols are **not** removed from the
+    /// rectangle: the slot vecs carry one slot per id including hidden ones
+    /// (hidden slots have zero extent), so the range is contiguous by
+    /// construction and a dense per-cell buffer keyed by
+    /// `(row - r1, col - c1)` indexes correctly.
     pub fn range(self, frame: &Chrome) -> Option<RCRange> {
         let rows = self.rows(frame);
         let cols = self.cols(frame);
@@ -80,12 +81,15 @@ mod tests {
 
 /// Structural grid geometry that remains stable across a compatible address
 /// shift.
+///
+/// The frozen counts are not stored: they are exactly the frozen-axis
+/// lengths ([`Self::row_lens`]/[`Self::col_lens`]'s first element), which
+/// `GridLayout::from_frame` fills from the same `AxisSlots` vecs. Storing
+/// both would let equality compare a value against its own source.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct GridShape {
     row_lens: [usize; 2],
     col_lens: [usize; 2],
-    frozen_rows: i32,
-    frozen_cols: i32,
 }
 
 impl GridShape {
@@ -98,11 +102,11 @@ impl GridShape {
     }
 
     pub const fn frozen_rows(self) -> i32 {
-        self.frozen_rows
+        self.row_lens[0] as i32
     }
 
     pub const fn frozen_cols(self) -> i32 {
-        self.frozen_cols
+        self.col_lens[0] as i32
     }
 }
 
@@ -137,8 +141,6 @@ impl GridLayout {
         let shape = GridShape {
             row_lens: [rows.frozen.len(), rows.scroll.len()],
             col_lens: [cols.frozen.len(), cols.scroll.len()],
-            frozen_rows: rows.frozen_count(),
-            frozen_cols: cols.frozen_count(),
         };
         let segments = [
             PaneRegion::TopLeft,
@@ -164,7 +166,10 @@ impl GridLayout {
         self.segments.iter().copied().flatten()
     }
 
+    /// The segment for `region`, by its canonical TL/TR/BL/BR position.
+    /// `from_frame` fills the array in that same order, so the index *is* the
+    /// lookup — no scan of the other three entries.
     pub(crate) fn segment(self, region: PaneRegion) -> Option<GridSegment> {
-        self.segments().find(|segment| segment.region() == region)
+        self.segments[region.index()]
     }
 }

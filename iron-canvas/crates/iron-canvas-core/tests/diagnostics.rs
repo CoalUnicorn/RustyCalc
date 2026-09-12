@@ -252,7 +252,7 @@ fn one_changed_cell_reports_exact_evidence_and_executed_envelope() {
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Cell));
     assert_eq!(diag.repaint.reason, Some(DiagRepaintReason::ChangedCell));
-    assert_eq!(diag.repaint.changed_rows, vec![RowSpan { r1: 4, r2: 4 }]);
+    assert_eq!(diag.repaint.changed_rows, vec![RowSpan::new(4, 4)]);
     assert_eq!(diag.repaint.changed_cells.len(), 1);
     assert_eq!(diag.repaint.changed_cells[0].row, 4);
     assert_eq!(diag.repaint.changed_cells[0].column, 2);
@@ -338,7 +338,7 @@ fn damaged_rows_strip_reports_strip_verdict_without_reason() {
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     model.set_cell(4, 2, "damage edit");
-    orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
+    orch.mark_rows_damaged(0, RowSpan::new(4, 4));
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Strip));
@@ -457,7 +457,7 @@ fn damaged_rows_with_frozen_columns_reports_one_painted_row() {
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     model.set_cell(4, 2, "damaged");
-    orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
+    orch.mark_rows_damaged(0, RowSpan::new(4, 4));
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.repaint.verdict, Some(GridVerdict::Strip));
@@ -579,7 +579,7 @@ fn held_damage_attempt_reports_held_verdict() {
     // Fail the damage-strip fetch: the Damage strategy must hold.
     model.set_bulk_bridge_fail(true);
     model.set_cell(4, 2, "damaged");
-    orch.mark_rows_damaged(0, RowSpan { r1: 4, r2: 4 });
+    orch.mark_rows_damaged(0, RowSpan::new(4, 4));
     assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     let diag = orch.frame_diagnostics().unwrap();
     assert_eq!(diag.outcome, FrameOutcome::HeldOnBridgeFailure);

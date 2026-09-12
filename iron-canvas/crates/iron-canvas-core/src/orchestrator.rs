@@ -1846,7 +1846,7 @@ mod tests {
     #[test]
     fn bridge_retry_widens_content_and_preserves_other_intent() {
         let mut work = PendingWork::default();
-        work.mark_rows(7, RowSpan { r1: 2, r2: 4 });
+        work.mark_rows(7, RowSpan::new(2, 4));
         work.mark_view();
         work.mark_overlay();
 
@@ -1992,7 +1992,7 @@ mod frame_plan_tests {
         assert_eq!(
             GridWork::Rows {
                 sheet: 0,
-                spans: vec![RowSpan { r1: 1, r2: 2 }],
+                spans: vec![RowSpan::new(1, 2)],
             }
             .strategy(),
             RenderStrategy::DamagedRows
@@ -2102,7 +2102,7 @@ mod frame_plan_tests {
 
     #[test]
     fn row_content_stable_matching_sheet_selects_damaged_rows() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 4)));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
@@ -2110,12 +2110,12 @@ mod frame_plan_tests {
             panic!("expected GridWork::Rows");
         };
         assert_eq!(sheet, SHEET);
-        assert_eq!(spans, vec![RowSpan { r1: 2, r2: 4 }]);
+        assert_eq!(spans, vec![RowSpan::new(2, 4)]);
     }
 
     #[test]
     fn row_content_stable_mismatched_sheet_falls_back_to_changed_cells_all() {
-        let work = work_with(|w| w.mark_rows(OTHER_SHEET, RowSpan { r1: 2, r2: 4 }));
+        let work = work_with(|w| w.mark_rows(OTHER_SHEET, RowSpan::new(2, 4)));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(
@@ -2128,7 +2128,7 @@ mod frame_plan_tests {
 
     #[test]
     fn row_content_scroll_selects_full_rebuild() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 4)));
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
         assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
@@ -2137,7 +2137,7 @@ mod frame_plan_tests {
 
     #[test]
     fn row_content_rebuild_selects_full_rebuild() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 4)));
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
         assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
@@ -2180,7 +2180,7 @@ mod frame_plan_tests {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
-            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 3 });
+            w.mark_rows(SHEET, RowSpan::new(1, 3));
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
@@ -2189,7 +2189,7 @@ mod frame_plan_tests {
             panic!("expected GridWork::Rows");
         };
         assert_eq!(sheet, SHEET);
-        assert_eq!(spans, vec![RowSpan { r1: 1, r2: 3 }]);
+        assert_eq!(spans, vec![RowSpan::new(1, 3)]);
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 
@@ -2212,7 +2212,7 @@ mod frame_plan_tests {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
-            w.mark_rows(OTHER_SHEET, RowSpan { r1: 1, r2: 3 });
+            w.mark_rows(OTHER_SHEET, RowSpan::new(1, 3));
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
@@ -2237,7 +2237,7 @@ mod frame_plan_tests {
     fn content_plus_view_rebuild_selects_full_rebuild() {
         let work = work_with(|w| {
             w.mark_view();
-            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 1 });
+            w.mark_rows(SHEET, RowSpan::new(1, 1));
         });
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
@@ -2252,7 +2252,7 @@ mod frame_plan_tests {
             w.mark_geometry();
             w.mark_view();
             w.mark_overlay();
-            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 1 });
+            w.mark_rows(SHEET, RowSpan::new(1, 1));
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
@@ -2300,7 +2300,7 @@ mod frame_plan_tests {
 
     #[test]
     fn damaged_rows_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 2 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 2)));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
         assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
@@ -2313,7 +2313,7 @@ mod frame_plan_tests {
 
     #[test]
     fn damaged_rows_paints_overlay_when_selection_is_visible() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 2 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 2)));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(plan.overlay, OverlayWork::Paint);

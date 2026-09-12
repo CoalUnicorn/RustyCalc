@@ -23,7 +23,7 @@ use crate::renderer::diag::{
     distinct_rows,
 };
 use crate::style::{CellDecoration, CellKind, CellStyle};
-use crate::types::coord::RCRange;
+use crate::types::coord::{DenseRange, RCRange};
 use crate::types::fetched::Fetched;
 
 #[derive(Default, Clone)]
@@ -37,17 +37,22 @@ pub(crate) struct FetchedCells {
 impl FetchedCells {
     pub(crate) const CHANNEL_COUNT: usize = 4;
 
-    pub(crate) fn addressed_cells(range: RCRange) -> usize {
-        let rows = (range.r2 - range.r1 + 1).max(0) as usize;
-        let columns = (range.c2 - range.c1 + 1).max(0) as usize;
-        rows.saturating_mul(columns)
+    /// Addressed cells of `range`, counted against the dense invariant.
+    ///
+    /// `range` is any permissive address value convertible into a
+    /// [`DenseRange`] (today always an `RCRange`); the conversion normalizes
+    /// the corners once, so a dual-direction range can no longer be counted as
+    /// zero cells. Reads of the returned bundle always cover `range`'s rows by
+    /// `range`'s columns, never a smaller normalized subset.
+    pub(crate) fn addressed_cells(range: impl Into<DenseRange>) -> usize {
+        range.into().addressed_cells()
     }
 
-    pub(crate) fn logical_channel_slots(range: RCRange) -> usize {
+    pub(crate) fn logical_channel_slots(range: impl Into<DenseRange>) -> usize {
         Self::addressed_cells(range).saturating_mul(Self::CHANNEL_COUNT)
     }
 
-    pub(crate) fn is_dense_for(&self, range: RCRange) -> bool {
+    pub(crate) fn is_dense_for(&self, range: impl Into<DenseRange>) -> bool {
         let expected = Self::addressed_cells(range);
         self.styles.len() == expected
             && self.values.len() == expected
@@ -96,12 +101,21 @@ impl FetchedCells {
         &self.decorations
     }
 
+    /// Fetch all four channels for `range` into `reuse`'s buffers.
+    ///
+    /// `range` is parsed into a [`DenseRange`] first: the model's bulk
+    /// accessors keep their permissive `RCRange` signatures, so without this
+    /// parse a reversed range would reach them and fetch nothing while the
+    /// caller still believed a full bundle was addressed. Every consumer of
+    /// the returned bundle may therefore index it by `height * width`
+    /// directly.
     pub(crate) fn fetch_into(
         model: &dyn CellContentQuery,
         sheet: u32,
-        range: RCRange,
+        range: impl Into<DenseRange>,
         reuse: Self,
     ) -> Self {
+        let range = range.into().as_rc();
         let Self {
             mut styles,
             mut values,
@@ -230,7 +244,7 @@ impl From<&PreparedRepaintPlan> for GridVerdict {
                 spans: spans.len().min(u8::MAX as usize) as u8,
                 rows: spans
                     .iter()
-                    .map(|span| (span.r2 - span.r1 + 1).max(0) as u32)
+                    .map(|span| (span.end() - span.start() + 1).max(0) as u32)
                     .sum::<u32>()
                     .min(u16::MAX as u32) as u16,
             },
@@ -451,8 +465,8 @@ impl<P: Painter> RendererCore<P> {
         for grid_segment in layout.segments() {
             let range = grid_segment.range();
             for span in spans {
-                let r1 = span.r1.max(range.r1);
-                let r2 = span.r2.min(range.r2);
+                let r1 = span.start().max(range.r1);
+                let r2 = span.end().min(range.r2);
                 if r1 > r2 {
                     continue;
                 }
@@ -724,8 +738,8 @@ impl<P: Painter> RendererCore<P> {
                                 let range = grid_segment.range();
                                 let cols = (range.c2 - range.c1 + 1).max(0) as usize;
                                 for span in spans {
-                                    let r1 = span.r1.max(range.r1);
-                                    let r2 = span.r2.min(range.r2);
+                                    let r1 = span.start().max(range.r1);
+                                    let r2 = span.end().min(range.r2);
                                     if r1 <= r2 {
                                         row_intervals.push((r1, r2));
                                         cells += (r2 - r1 + 1) as usize * cols;
@@ -1032,8 +1046,8 @@ fn paint_segment_span<P: Painter>(
     span: RowSpan,
 ) {
     let range = data.segment.range();
-    let r1 = span.r1.max(range.r1);
-    let r2 = span.r2.min(range.r2);
+    let r1 = span.start().max(range.r1);
+    let r2 = span.end().min(range.r2);
     if r1 > r2 {
         return;
     }
@@ -1128,6 +1142,30 @@ fn shift_channel<E: Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reversed_fetch_preserves_dense_channels_and_row_major_values() {
+        struct Model;
+        impl CellContentQuery for Model {
+            fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Fetched<CellStyle> {
+                Fetched::Absent
+            }
+            fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Fetched<CellKind> {
+                Fetched::Absent
+            }
+            fn get_formatted_cell_value(&self, sheet: u32, row: i32, col: i32) -> Fetched<String> {
+                Fetched::Value(format!("{sheet}:{row}:{col}"))
+            }
+        }
+        let range = RCRange::from([3, 2, 2, 1]);
+        let cells = FetchedCells::fetch_into(&Model, 7, range, FetchedCells::default());
+        assert!(cells.is_dense_for(range));
+        assert_eq!(FetchedCells::logical_channel_slots(range), 16);
+        assert_eq!(
+            cells.values,
+            ["7:2:1", "7:2:2", "7:3:1", "7:3:2"].map(|value| Fetched::Value(value.into()))
+        );
+    }
 
     #[test]
     fn bridge_failure_is_detected_in_each_dense_channel() {

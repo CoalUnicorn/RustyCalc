@@ -293,7 +293,7 @@ fn damage_strip_splices_precise_history_for_next_content_check() {
 
     model.set_cell(5, 3, "damaged");
     core.reset_trace();
-    assert!(!core.render_grid_damage(&model, &frame, &[RowSpan { r1: 5, r2: 5 }]));
+    assert!(!core.render_grid_damage(&model, &frame, &[RowSpan::new(5, 5)]));
     assert_eq!(core.trace().verdict, Some(GridVerdict::Strip));
 
     core.reset_trace();

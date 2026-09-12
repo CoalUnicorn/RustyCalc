@@ -179,8 +179,8 @@ fn held_damage_is_whole_grid_and_retries_grid_wide() {
     model.set_cell(1, 2, "frozen-damage");
     model.set_cell(6, 2, "scroll-damage");
     model.set_bulk_bridge_fail_from(Some(3));
-    orch.mark_rows_damaged(0, RowSpan { r1: 1, r2: 1 });
-    orch.mark_rows_damaged(0, RowSpan { r1: 6, r2: 6 });
+    orch.mark_rows_damaged(0, RowSpan::new(1, 1));
+    orch.mark_rows_damaged(0, RowSpan::new(6, 6));
 
     assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     assert_eq!(

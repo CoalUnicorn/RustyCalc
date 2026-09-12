@@ -670,9 +670,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.warm();
             let row = borderless_scroll_row(shape.scroll_origin());
             probe.model().set_cell(row, edit_col, "edited");
-            probe
-                .orch
-                .mark_rows_damaged(sheet, RowSpan { r1: row, r2: row });
+            probe.orch.mark_rows_damaged(sheet, RowSpan::new(row, row));
             push("row_damage", probe.paint());
         }
         Workload::W3 => {
@@ -707,13 +705,9 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.warm();
             let damaged = borderless_scroll_row(shape.scroll_origin());
 
-            probe.orch.mark_rows_damaged(
-                sheet,
-                RowSpan {
-                    r1: damaged,
-                    r2: damaged,
-                },
-            );
+            probe
+                .orch
+                .mark_rows_damaged(sheet, RowSpan::new(damaged, damaged));
             probe.warm();
             probe.model().set_top_row(shape.scrolled_origin());
             probe.orch.view_changed();

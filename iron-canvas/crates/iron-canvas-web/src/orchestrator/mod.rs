@@ -144,13 +144,9 @@ impl IronCanvas {
     /// Incomplete damage information causes a full content repaint.
     #[wasm_bindgen(js_name = "markRowsDamaged")]
     pub fn mark_rows_damaged(&mut self, sheet: u32, row_start: i32, row_end: i32) {
-        self.runtime.orchestrator_mut().mark_rows_damaged(
-            sheet,
-            iron_canvas_core::RowSpan {
-                r1: row_start,
-                r2: row_end,
-            },
-        );
+        self.runtime
+            .orchestrator_mut()
+            .mark_rows_damaged(sheet, iron_canvas_core::RowSpan::new(row_start, row_end));
     }
 
     /// Paint each layer that has pending work.
