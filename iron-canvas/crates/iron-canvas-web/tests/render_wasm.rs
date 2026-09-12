@@ -60,6 +60,177 @@ use iron_canvas_web::wasm::JsBackedModel;
 use iron_canvas_web::{CanvasModel, CellContentQuery};
 use wasm_bindgen::JsValue;
 
+#[wasm_bindgen_test]
+fn geometry_accessors_preserve_absence_values_and_throws() {
+    let absent = model_with_methods(&[]);
+    assert_eq!(absent.get_row_height(0, 1), Fetched::Absent);
+    assert_eq!(absent.get_column_width(0, 1), Fetched::Absent);
+    assert_eq!(absent.get_show_grid_lines(0), Fetched::Absent);
+
+    let height = js_sys::Function::new_no_args("return 20.5;");
+    let width = js_sys::Function::new_no_args("return 0;");
+    let grid = js_sys::Function::new_no_args("return false;");
+    let values = model_with_methods(&[
+        ("getRowHeight", &height),
+        ("getColumnWidth", &width),
+        ("getShowGridLines", &grid),
+    ]);
+    assert_eq!(values.get_row_height(0, 1), Fetched::Value(20.5));
+    assert_eq!(values.get_column_width(0, 1), Fetched::Value(0.0));
+    assert_eq!(values.get_show_grid_lines(0), Fetched::Value(false));
+
+    let throws = js_sys::Function::new_no_args("throw new Error('extent unavailable');");
+    let failed = model_with_methods(&[
+        ("getRowHeight", &throws),
+        ("getColumnWidth", &throws),
+        ("getShowGridLines", &throws),
+    ]);
+    assert_eq!(failed.get_row_height(0, 1), Fetched::BridgeFailed);
+    assert_eq!(failed.get_column_width(0, 1), Fetched::BridgeFailed);
+    assert_eq!(failed.get_show_grid_lines(0), Fetched::BridgeFailed);
+}
+
+#[wasm_bindgen_test]
+fn backward_scroll_after_one_failed_measure_matches_fresh() {
+    for (method, value) in [("getRowHeight", "20"), ("getColumnWidth", "80")] {
+        let top = Rc::new(Cell::new(3));
+        let left = Rc::new(Cell::new(3));
+        let handle: js_sys::Object = make_scrollable_fixture_model(
+            stage6_fixture_store(),
+            Rc::clone(&top),
+            Rc::clone(&left),
+            None,
+        )
+        .unchecked_into();
+        let accessor = js_sys::Function::new_with_args(
+            "sheet, id",
+            &format!(
+                "if (id === 1 && this.failOnce) {{ this.failOnce = false; throw new Error('one failed measure'); }} return {value};"
+            ),
+        );
+        set_prop(&handle, method, &accessor);
+        let grid = make_canvas();
+        let overlay = make_canvas();
+        let mut canvas = IronCanvas::create(grid.clone(), overlay.clone())
+            .expect("create backward scroll canvas");
+        canvas
+            .set_model_js(handle.clone().into())
+            .expect("valid fixture");
+        canvas.resize(400.0, 240.0, 1.25);
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+
+        set_value_prop(&handle, "failOnce", &JsValue::TRUE);
+        if method == "getRowHeight" {
+            top.set(1);
+        } else {
+            left.set(1);
+        }
+        canvas.view_changed();
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+
+        let fresh_grid = make_canvas();
+        let fresh_overlay = make_canvas();
+        let mut fresh = IronCanvas::create(fresh_grid.clone(), fresh_overlay.clone())
+            .expect("create Fresh reference canvas");
+        fresh
+            .set_model_js(handle.into())
+            .expect("same recovered model");
+        fresh.resize(400.0, 240.0, 1.25);
+        assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+        assert_eq!(grid_pixels(&grid), grid_pixels(&fresh_grid), "{method}");
+        assert_eq!(grid_pixels(&overlay), grid_pixels(&fresh_overlay));
+    }
+}
+
+#[wasm_bindgen_test]
+fn geometry_and_grid_failures_preserve_pixels_and_retry() {
+    for dpr in [1.0, 1.25, 1.5] {
+        for (method, value, path) in [
+            ("getRowHeight", "20", "fresh"),
+            ("getColumnWidth", "80", "fresh"),
+            ("getRowHeight", "20", "rows"),
+            ("getColumnWidth", "80", "columns"),
+            ("getShowGridLines", "true", "fresh"),
+            ("getShowGridLines", "true", "content"),
+            ("getShowGridLines", "true", "damage"),
+            ("getShowGridLines", "true", "rows"),
+        ] {
+            let top = Rc::new(Cell::new(3));
+            let left = Rc::new(Cell::new(3));
+            let handle: js_sys::Object = make_scrollable_fixture_model(
+                stage6_fixture_store(),
+                Rc::clone(&top),
+                Rc::clone(&left),
+                None,
+            )
+            .unchecked_into();
+            let accessor = js_sys::Function::new_no_args(&format!(
+                "if (this.fail) throw new Error('temporary read failure'); return {value};"
+            ));
+            set_prop(&handle, method, &accessor);
+            let grid = make_canvas();
+            let overlay = make_canvas();
+            let mut canvas = IronCanvas::create(grid.clone(), overlay.clone())
+                .expect("create failure fixture canvas");
+            canvas
+                .set_model_js(handle.clone().into())
+                .expect("valid fixture model");
+            canvas.resize(400.0, 240.0, dpr);
+            assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+            let before_grid = grid_pixels(&grid);
+            let before_overlay = grid_pixels(&overlay);
+            set_value_prop(&handle, "fail", &JsValue::TRUE);
+            match path {
+                "fresh" => canvas.request_repaint(),
+                "content" => canvas.mark_content_dirty(),
+                "damage" => canvas.mark_rows_damaged(0, 5, 5),
+                "rows" => {
+                    top.set(1);
+                    canvas.view_changed();
+                }
+                "columns" => {
+                    left.set(1);
+                    canvas.view_changed();
+                }
+                _ => unreachable!("fixture path"),
+            }
+            for _ in 0..2 {
+                assert_eq!(
+                    canvas.render_pending(),
+                    RenderResult::RetryRequired,
+                    "{method}/{path}/{dpr}"
+                );
+                assert_eq!(grid_pixels(&grid), before_grid);
+                assert_eq!(grid_pixels(&overlay), before_overlay);
+            }
+            set_value_prop(&handle, "fail", &JsValue::FALSE);
+            assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+            assert_eq!(canvas.render_pending(), RenderResult::Idle);
+
+            let fresh_grid = make_canvas();
+            let fresh_overlay = make_canvas();
+            let mut fresh = IronCanvas::create(fresh_grid.clone(), fresh_overlay.clone())
+                .expect("create Fresh reference canvas");
+            fresh
+                .set_model_js(handle.into())
+                .expect("same healthy fixture model");
+            fresh.resize(400.0, 240.0, dpr);
+            assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+            // Stable retries use ChangedCells. Compare with the same healthy
+            // execution: stable repaint differs from Fresh at fractional DPR.
+            if matches!(path, "content" | "damage") {
+                fresh.mark_content_dirty();
+                assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+            }
+            assert!(
+                grid_pixels(&grid) == grid_pixels(&fresh_grid),
+                "{method}/{path}/{dpr}"
+            );
+            assert_eq!(grid_pixels(&overlay), grid_pixels(&fresh_overlay));
+        }
+    }
+}
+
 /// Minimal duck-typed model handle: `try_from_js_value` requires
 /// `getSelectedView`, `getSelectedSheet`, `getFrozenRowsCount`, and
 /// `getFrozenColumnsCount`; extra methods are supplied per test.
@@ -1377,8 +1548,8 @@ impl CanvasModel for StableFixtureModel {
         Some(self.view.frozen_cols.get())
     }
 
-    fn get_row_height(&self, _sheet: u32, row: i32) -> Option<f64> {
-        Some(
+    fn get_row_height(&self, _sheet: u32, row: i32) -> Fetched<f64> {
+        Fetched::Value(
             self.view
                 .row_heights
                 .borrow()
@@ -1388,8 +1559,8 @@ impl CanvasModel for StableFixtureModel {
         )
     }
 
-    fn get_column_width(&self, _sheet: u32, column: i32) -> Option<f64> {
-        Some(
+    fn get_column_width(&self, _sheet: u32, column: i32) -> Fetched<f64> {
+        Fetched::Value(
             self.view
                 .column_widths
                 .borrow()
@@ -1399,8 +1570,8 @@ impl CanvasModel for StableFixtureModel {
         )
     }
 
-    fn get_show_grid_lines(&self, _sheet: u32) -> Option<bool> {
-        Some(true)
+    fn get_show_grid_lines(&self, _sheet: u32) -> Fetched<bool> {
+        Fetched::Value(true)
     }
 
     fn get_show_selection(&self) -> bool {

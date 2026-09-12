@@ -405,7 +405,7 @@ fn origin_showing(
     let mut run = measure(target)?;
     while smallest > frozen + 1 {
         let previous = measure(smallest - 1)?;
-        if run + previous > extent {
+        if i64::from(run) + i64::from(previous) > i64::from(extent) {
             break;
         }
         smallest -= 1;
@@ -1836,6 +1836,11 @@ mod tests {
     /// below is arithmetic a reader can redo in their head.
     fn rows_20(_id: i32) -> Option<i32> {
         Some(20)
+    }
+
+    #[test]
+    fn origin_showing_does_not_overflow_on_large_valid_extents() {
+        assert_eq!(origin_showing(3, 1, 0, 100, |_| Some(i32::MAX)), Some(3));
     }
 
     #[test]

@@ -90,8 +90,8 @@ impl AxisSlot for ColSlot {
 /// `max_cursor`. Returns `Some(cursor)` — the cursor past the last accepted
 /// slot (where the next slot would sit) — used by the frozen pass to compute
 /// the band offset. `None` when `measure` aborts the walk: a model read
-/// failed transiently (`BridgeFailed`), so the caller must not commit the
-/// partially-built geometry.
+/// failed, an extent was invalid, or a slot end overflowed. The caller must
+/// not commit the partially-built geometry.
 ///
 /// `max_cursor = None` disables the break, used for the frozen band which
 /// always paints regardless of viewport size. Scroll-band callers pass the
@@ -106,11 +106,13 @@ pub fn fill_axis<S: AxisSlot>(
     let mut cursor = start;
     for id in range {
         let extent = measure(id)?;
+        // Queries also read the trailing slot's end, even when it is off-canvas.
+        let end = cursor.checked_add(extent)?;
         slots.push(S::new(id, cursor, extent));
         if max_cursor.is_some_and(|max| cursor >= max) {
             break;
         }
-        cursor += extent;
+        cursor = end;
     }
     Some(cursor)
 }
@@ -309,7 +311,12 @@ impl<S: AxisSlot> AxisSlots<S> {
         else {
             return false;
         };
-        self.frozen_offset = after_frozen + if frozen_count > 0 { FROZEN_SEP } else { 0 };
+        let Some(frozen_offset) =
+            after_frozen.checked_add(if frozen_count > 0 { FROZEN_SEP } else { 0 })
+        else {
+            return false;
+        };
+        self.frozen_offset = frozen_offset;
 
         fill_axis(
             &mut self.scroll,

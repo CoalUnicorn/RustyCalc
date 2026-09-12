@@ -214,12 +214,16 @@ impl Chrome {
     /// that path, but the fallback keeps `Chrome::next` total.
     /// Construct the next `Chrome` on the assumption that the model's
     /// geometry/config reads succeed (`Absent` overrides select the
-    /// documented defaults). A transient `BridgeFailed` on any row-height,
-    /// column-width, or grid-line read makes geometry untrustworthy; the
-    /// orchestrator routes those through [`Chrome::build`] (which returns
-    /// `None`) and holds the attempt instead of fabricating. This wrapper
-    /// keeps its total `-> Self` shape for healthy-model construction
-    /// (tests, reuse paths); see `build`'s doc.
+    /// documented defaults). A transient `BridgeFailed` on any row-height
+    /// or column-width read makes geometry untrustworthy. The orchestrator
+    /// uses [`Chrome::build`] and handles `FreshBuild::Held` before paint.
+    /// This wrapper is for healthy-model construction and slot reuse.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a Fresh build fails because an extent read failed, an
+    /// extent was invalid, or slot coordinates overflowed. This also applies
+    /// to `SlotsReuse` when `prev` is `None` and construction falls back to Fresh.
     pub fn next(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,

@@ -183,3 +183,16 @@ fn bridge_failed_extents_stay_bridge_failed() {
     assert_eq!(col_width(&model, 0, 4), ExtentFetch::BridgeFailed);
     assert_eq!(row_height(&model, 0, 3).extent(), None);
 }
+
+#[test]
+fn frozen_separator_overflow_rejects_geometry() {
+    use iron_canvas_core::geometry::slot::{AxisSlots, RowSlot};
+    let mut slots: AxisSlots<RowSlot> = AxisSlots {
+        frozen: Vec::new(),
+        scroll: Vec::new(),
+        frozen_offset: 0,
+        last_id: 0,
+    };
+    let model = TestModel::synthetic_grid();
+    assert!(!slots.fill(&model, 1, 0, 2, 2, 100, |_, _| Some(i32::MAX)));
+}

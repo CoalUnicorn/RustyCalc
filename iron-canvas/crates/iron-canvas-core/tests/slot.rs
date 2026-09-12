@@ -10,6 +10,18 @@ use iron_canvas_core::geometry::slot::{
 };
 
 #[test]
+fn fill_axis_rejects_overflow_even_in_the_trailing_slot() {
+    for max_cursor in [None, Some(10)] {
+        let mut slots: Vec<RowSlot> = Vec::new();
+        assert_eq!(
+            fill_axis(&mut slots, 1..=1, 10, max_cursor, |_| Some(i32::MAX)),
+            None
+        );
+        assert!(slots.is_empty(), "an overflowing slot must not be stored");
+    }
+}
+
+#[test]
 fn fill_axis_walks_inclusive_range_and_returns_post_cursor() {
     // 4 columns of 50 px each starting at x=10 -> returns 10 + 4*50 = 210.
     let mut slots: Vec<ColSlot> = Vec::new();

@@ -484,3 +484,55 @@ fn invalid_row_height_holds_fresh_geometry_and_retries() {
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert_eq!(orch.render_pending(), PaintResult::Idle);
 }
+
+#[test]
+fn extent_coordinate_overflow_holds_and_recovers_without_notification() {
+    for rows in [true, false] {
+        for frozen in [0, 2] {
+            let model = Rc::new(TestModel::synthetic_grid());
+            let mut orch = build(Rc::clone(&model));
+            assert_eq!(orch.render_pending(), PaintResult::Rendered);
+            let rect = orch.cell_rect(1, 1);
+            let grid_ops = grid_ops_len(&orch);
+            let overlay_ops = overlay_ops_len(&orch);
+            let presents = (
+                orch.grid_surface().presents(),
+                orch.overlay_surface().presents(),
+            );
+
+            // Each extent fits i32. The cursor plus one extent (scroll)
+            // or the sum of two extents (frozen) does not.
+            let extent = if frozen == 0 { i32::MAX } else { i32::MAX / 2 };
+            for id in 1..=2 {
+                if rows {
+                    model.set_row_height(id, f64::from(extent));
+                } else {
+                    model.set_col_width(id, f64::from(extent));
+                }
+            }
+            model.set_frozen_rows(if rows { frozen } else { 0 });
+            model.set_frozen_cols(if rows { 0 } else { frozen });
+            orch.request_repaint();
+            for _ in 0..2 {
+                assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+                assert_eq!(orch.cell_rect(1, 1), rect);
+                assert_eq!(grid_ops_len(&orch), grid_ops);
+                assert_eq!(overlay_ops_len(&orch), overlay_ops);
+                assert_eq!(
+                    (
+                        orch.grid_surface().presents(),
+                        orch.overlay_surface().presents()
+                    ),
+                    presents
+                );
+                assert_eq!(orch.last_trace().committed_seq, None);
+            }
+            for id in 1..=2 {
+                model.set_row_height(id, 20.0);
+                model.set_col_width(id, 80.0);
+            }
+            assert_eq!(orch.render_pending(), PaintResult::Rendered);
+            assert_eq!(orch.render_pending(), PaintResult::Idle);
+        }
+    }
+}

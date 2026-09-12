@@ -21,6 +21,16 @@ impl TextMetrics for CharWidth {
 }
 
 #[test]
+fn fit_height_rejects_invalid_column_extents() {
+    let model = TestModel::synthetic_grid();
+    model.set_cell(1, 1, "text");
+    for width in [f64::NAN, f64::INFINITY, -1.0, i32::MAX as f64 + 1.0] {
+        model.set_col_width(1, width);
+        assert_eq!(fit_height(&model, &CharWidth, 1, 1, 1), None, "{width}");
+    }
+}
+
+#[test]
 fn fit_width_returns_widest_value_plus_padding() {
     // col 2, rows 1..=3: "", "hello" (5), "ab" (2). Widest = 5 * 10 = 50.
     let model = TestModel::synthetic_grid();
