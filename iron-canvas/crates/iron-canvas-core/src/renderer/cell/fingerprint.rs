@@ -9,10 +9,10 @@ use std::cell::{Cell, RefCell};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use super::cf::parse_hex_color;
 use crate::chrome::{GridLayout, PaneRegion};
 use crate::geometry::prim::Axis;
 use crate::pending_work::{MAX_DAMAGE_SPANS, RowSpan};
-use crate::renderer::cf_types::parse_hex_color;
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
 use crate::types::coord::RCRange;

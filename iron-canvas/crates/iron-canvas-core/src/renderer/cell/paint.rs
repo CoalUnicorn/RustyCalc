@@ -10,6 +10,7 @@
 //! semi-transparent selection fill.
 
 use super::borders::ResolvedBorders;
+use super::cf::CfDecorationPaint;
 use super::text::TextPaint;
 use crate::CellContentQuery;
 use crate::chrome::{Chrome, PaneRegion};
@@ -19,7 +20,6 @@ use crate::geometry::slot::{ColSlot, RowSlot};
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
-use crate::renderer::cf_types::CfDecorationPaint;
 use crate::style::{CellKind, CellStyle};
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;

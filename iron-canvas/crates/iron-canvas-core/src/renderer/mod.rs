@@ -63,7 +63,6 @@
 pub mod blit_work;
 pub mod cache;
 pub mod cell;
-pub mod cf_types;
 #[cfg(feature = "dev-diagnostics")]
 pub mod diag;
 pub mod frame;
