@@ -56,6 +56,9 @@ impl RCRange {
         }
     }
 
+    /// True when the range addresses exactly one cell: `r1 == r2` and
+    /// `c1 == c2`. Corner order does not matter — a reversed-corner range
+    /// still addresses one cell, so it is never a false negative here.
     pub fn is_single_cell(self) -> bool {
         self.r1 == self.r2 && self.c1 == self.c2
     }
