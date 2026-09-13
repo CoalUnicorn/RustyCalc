@@ -4,6 +4,12 @@
 //! [`prim::Line`]. The cell-address <-> pixel-rect mapping lives in
 //! [`slot`]; layout values in [`constants`]; the Excel-style column
 //! label helper in [`utils`].
+//!
+//! This module root defines the canvas extent itself: [`CanvasSize`], the
+//! permissive logical (CSS) size, and [`CanvasMetrics`], the size and DPR pair
+//! parsed once at the host boundary, with [`CanvasMetricError`] as its parse
+//! failure. They stay at the root — not in a submodule of their own — because
+//! every geometry walk, hit test, backend, and export path names them.
 
 pub mod constants;
 pub mod pixel_rect;
