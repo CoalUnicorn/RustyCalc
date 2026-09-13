@@ -38,7 +38,10 @@ use common::TestModel;
 
 fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_model(model);
     orch
 }
@@ -539,7 +542,10 @@ fn build_rec(model: Rc<TestModel>) -> Orchestrator<RecordingSurface<MemSurface>>
     grid.enable_recording();
     overlay.enable_recording();
     let mut orch = Orchestrator::<RecordingSurface<MemSurface>>::new(grid, overlay);
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_model(model);
     orch
 }
@@ -1359,7 +1365,10 @@ fn geometry_plus_real_scroll_never_dispatches_viewport() {
     orch.render_pending();
 
     stub.set_top_row(2); // the same real shift real_scroll_view_change_dispatches_viewport uses
-    orch.resize(CanvasSize { w: 900.0, h: 600.0 }, 1.0); // marks geometry
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 900.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    ); // marks geometry
     orch.view_changed();
 
     assert_eq!(orch.render_pending(), PaintResult::Rendered);

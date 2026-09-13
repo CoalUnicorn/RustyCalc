@@ -20,11 +20,50 @@ pub use pdf::{PdfPainter, PdfSurface};
 
 #[cfg(any(feature = "svg", feature = "pdf"))]
 use {
-    iron_canvas_core::geometry::CanvasSize,
+    iron_canvas_core::geometry::{CanvasMetricError, CanvasMetrics},
     iron_canvas_core::layer::Surface,
-    iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator},
+    iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator, PaintResult},
     std::rc::Rc,
 };
+
+/// Why a one-shot export produced no document.
+///
+/// The export path is one paint attempt: a held attempt leaves the grid with
+/// partial or no pixels, so the honest result is an error rather than a
+/// document that silently misses content.
+#[cfg(any(feature = "svg", feature = "pdf"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportError {
+    /// The requested canvas size cannot be a canvas metric pair (see
+    /// [`CanvasMetricError`]): non-finite, negative, or too large to back.
+    Metrics(CanvasMetricError),
+    /// The single paint attempt did not commit a frame — a scalar or bulk
+    /// model read failed, so the pixels are not trustworthy. A host that
+    /// wants the document can retry once the model is readable again.
+    RetryRequired,
+}
+
+#[cfg(any(feature = "svg", feature = "pdf"))]
+impl std::fmt::Display for ExportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Metrics(e) => write!(f, "invalid export canvas metrics: {e}"),
+            Self::RetryRequired => {
+                f.write_str("export paint attempt did not commit a frame; retry required")
+            }
+        }
+    }
+}
+
+#[cfg(any(feature = "svg", feature = "pdf"))]
+impl std::error::Error for ExportError {}
+
+#[cfg(any(feature = "svg", feature = "pdf"))]
+impl From<CanvasMetricError> for ExportError {
+    fn from(error: CanvasMetricError) -> Self {
+        Self::Metrics(error)
+    }
+}
 
 /// Drive a throwaway `Orchestrator` for a single one-shot export frame.
 ///
@@ -38,19 +77,27 @@ use {
 /// Policy-neutral: the helper never finishes a surface, so the
 /// overlay-discard decision stays with the caller, which pre-clones the
 /// *grid* handle and never reads the overlay.
+///
+/// `metrics` is already parsed by the caller (which also sized its painters
+/// from it). Returns [`ExportError::RetryRequired`] when the attempt did not
+/// paint — an `Idle` result here would mean the helper's own queued Fresh
+/// work vanished, which is as unusable to a caller as a held attempt.
 #[cfg(any(feature = "svg", feature = "pdf"))]
 pub(crate) fn drive_once<S: Surface>(
     grid: S,
     overlay: S,
     model: Rc<dyn CanvasModel>,
     theme: &CanvasTheme,
-    size: CanvasSize,
-) {
+    metrics: CanvasMetrics,
+) -> Result<(), ExportError> {
     let mut orchestrator = Orchestrator::new(grid, overlay);
     orchestrator.set_theme(theme.clone());
     orchestrator.set_model(model);
-    orchestrator.resize(size, 1.0);
-    orchestrator.render_pending();
+    orchestrator.resize(metrics);
+    match orchestrator.render_pending() {
+        PaintResult::Rendered => Ok(()),
+        PaintResult::Idle | PaintResult::RetryRequired => Err(ExportError::RetryRequired),
+    }
     // `orchestrator` (and its `Rc<P>` surface clones) drop here; the caller's
     // pre-cloned grid painter/stream survives to `finish()` / `build_document`.
 }

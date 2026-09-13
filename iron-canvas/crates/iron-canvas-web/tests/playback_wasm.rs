@@ -203,6 +203,86 @@ fn clear_canvas_white(canvas: &HtmlCanvasElement) {
     ctx.fill_rect(0.0, 0.0, canvas.width() as f64, canvas.height() as f64);
 }
 
+fn recorded_canvas() -> (IronCanvas, HtmlCanvasElement, HtmlCanvasElement, Recording) {
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let mut canvas = IronCanvas::create(grid.clone(), overlay.clone()).expect("create canvas");
+    canvas
+        .set_model_js(make_scroll_fixture_model(Rc::new(Cell::new(1))))
+        .expect("fixture model");
+    canvas.resize(400.0, 400.0, 1.25).expect("live metrics");
+    canvas.render_pending();
+    canvas
+        .start_recording(JsValue::UNDEFINED)
+        .expect("start capture");
+    let bytes = canvas.stop_recording().expect("stop capture").to_vec();
+    let rec = Recording::deserialize(&bytes).expect("recording decodes");
+    (canvas, grid, overlay, rec)
+}
+
+#[wasm_bindgen_test]
+fn invalid_resize_and_recording_preserve_live_state() {
+    let (mut canvas, grid, overlay, mut rec) = recorded_canvas();
+    let before_grid = grid_pixels(&grid);
+    let before_overlay = grid_pixels(&overlay);
+    for (w, h, dpr) in [
+        (f64::NAN, 400.0, 1.0),
+        (400.0, -1.0, 1.0),
+        (400.0, 400.0, 0.0),
+        (400.0, 400.0, f64::MAX),
+    ] {
+        assert!(canvas.resize(w, h, dpr).is_err());
+        assert_eq!((grid.width(), grid.height()), (500, 500));
+        assert_eq!(grid_pixels(&grid), before_grid);
+        assert_eq!(grid_pixels(&overlay), before_overlay);
+    }
+    rec.frames[0].grid_ops.push(DrawOp::PopClip);
+    assert!(
+        canvas
+            .load_recording(&rec.serialize().expect("serialize invalid recording"))
+            .is_err()
+    );
+    assert!(!canvas.playback_active());
+    assert_eq!((grid.width(), grid.height()), (500, 500));
+    assert_eq!(grid_pixels(&grid), before_grid);
+    assert_eq!(grid_pixels(&overlay), before_overlay);
+    assert_eq!(
+        grid.style().get_property_value("width").expect("CSS width"),
+        ""
+    );
+}
+
+#[wasm_bindgen_test]
+fn replacement_recording_preserves_original_live_metrics() {
+    let (mut canvas, grid, overlay, mut rec) = recorded_canvas();
+    for width in [200.0, 300.0] {
+        rec.header.canvas_w = width;
+        rec.header.canvas_h = 100.0;
+        rec.header.dpr = 1.0;
+        canvas
+            .load_recording(&rec.serialize().expect("serialize recording"))
+            .expect("load recording");
+        assert_eq!((grid.width(), grid.height()), (width as u32, 100));
+    }
+    let before = grid_pixels(&grid);
+    rec.frames[0].overlay_ops.push(DrawOp::PopClip);
+    assert!(
+        canvas
+            .load_recording(&rec.serialize().expect("serialize invalid recording"))
+            .is_err()
+    );
+    assert!(canvas.playback_active());
+    assert_eq!(grid_pixels(&grid), before);
+    canvas.exit_playback();
+    assert!(!canvas.playback_active());
+    assert_eq!((grid.width(), grid.height()), (500, 500));
+    assert_eq!((overlay.width(), overlay.height()), (500, 500));
+    assert_eq!(
+        grid.style().get_property_value("width").expect("CSS width"),
+        ""
+    );
+}
+
 /// Acceptance criterion: seeking to a recorded `ScrollBlit` frame must
 /// raster identically to the live frame it was captured from. Before the
 /// fix, `replay_through` never presented the grid surface mid-replay, so
@@ -218,7 +298,9 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
     let Ok(()) = canvas.set_model_js(make_scroll_fixture_model(Rc::clone(&top_row))) else {
         panic!("scroll fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     canvas.render_pending(); // baseline FullRebuild paint before recording starts
 
     let Ok(()) = canvas.start_recording(JsValue::UNDEFINED) else {

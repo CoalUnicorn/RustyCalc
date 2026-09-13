@@ -21,7 +21,10 @@ fn harness() -> (Orchestrator<MemSurface>, Rc<TestModel>) {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     let model = Rc::new(TestModel::new().with_data_until(40));
     orch.set_model(model.clone());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     (orch, model)
 }
 
@@ -77,7 +80,10 @@ fn overlay_only_attempt_commits_without_cache_work() {
     let model = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.set_model(model.clone());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
@@ -116,7 +122,10 @@ fn freeze_rebuild_reports_reason_and_exact_segments() {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     let model = Rc::new(TestModel::new().with_data_until(40).with_frozen(2, 1));
     orch.set_model(model.clone());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
@@ -152,7 +161,10 @@ fn probe_reports_exact_containing_segment_and_is_consumed() {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     let model = Rc::new(TestModel::new().with_data_until(40).with_frozen(2, 1));
     orch.set_model(model.clone());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
@@ -208,7 +220,10 @@ fn overlay_only_attempt_has_no_geometry_and_no_probe_segments() {
     let model = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.set_model(model.clone());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
@@ -319,7 +334,10 @@ fn fresh_rebuild_full_carries_no_fingerprint_reason() {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     let model = Rc::new(TestModel::new().with_data_until(40).with_frozen(2, 1));
     orch.set_model(model.clone());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
@@ -436,7 +454,10 @@ fn geometry_reports_css_and_backing_size() {
 
     // dpr 2.0: the derived backing size doubles, matching browser
     // rounding of CSS x DPR.
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 2.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 2.0)
+            .expect("test canvas metrics are valid"),
+    );
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().unwrap();
     let geo = diag.geometry.expect("grid-visited attempt has geometry");
@@ -452,7 +473,10 @@ fn damaged_rows_with_frozen_columns_reports_one_painted_row() {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     let model = Rc::new(TestModel::new().with_data_until(40).with_frozen(2, 1));
     orch.set_model(model.clone());
-    orch.resize(CanvasSize { w: 800.0, h: 600.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
@@ -494,7 +518,10 @@ fn fresh_fallback_blit_reports_no_clip_and_full_verdict() {
     );
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.set_model(model.clone());
-    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 600.0, h: 400.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 

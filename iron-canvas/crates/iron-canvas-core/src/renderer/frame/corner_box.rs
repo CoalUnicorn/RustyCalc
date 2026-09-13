@@ -10,7 +10,7 @@ use crate::renderer::RendererCore;
 
 impl<P: Painter> RendererCore<P> {
     pub fn draw_corner_box(&self, frame: &Chrome) {
-        let (canvas_w, canvas_h) = frame.canvas_size.to_logical_extent();
+        let (canvas_w, canvas_h) = frame.canvas_size().to_logical_extent();
         let corner = PixelRect {
             top_left: Point { x: 0, y: 0 },
             width: frame.row_header_thickness,

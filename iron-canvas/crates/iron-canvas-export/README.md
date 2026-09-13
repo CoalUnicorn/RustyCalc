@@ -12,7 +12,7 @@ The "save a picture of the grid" layer. `iron-canvas-web` uses it for SVG and op
 
 ## Key exports
 
-- `SvgPainter`, `SvgSurface` (feature `svg`) — DPR-aware, XML-escaped `<svg>` with structured `<g>` groups and `<defs>` clip-paths; `SvgSurface::render(model, theme, size) -> String` is the one-shot entry point
+- `SvgPainter`, `SvgSurface` (feature `svg`) — DPR-aware, XML-escaped `<svg>` with structured `<g>` groups and `<defs>` clip-paths; `SvgSurface::render(model, theme, size) -> Result<String, ExportError>` is the one-shot entry point
 - `PdfPainter`, `PdfSurface` (feature `pdf`) — single-page PDF 1.7 via a hand-rolled writer; base-14 Helvetica, WinAnsi-only, no font embedding
 - `common` (module) — XML/PDF string escaping and CSS-color parsing
 
@@ -23,7 +23,7 @@ The "save a picture of the grid" layer. `iron-canvas-web` uses it for SVG and op
 ## Usage
 
 ```rust
-let svg = SvgSurface::render(model, theme, CanvasSize { w, h });
+let svg = SvgSurface::render(model, theme, CanvasSize { w, h })?;
 ```
 
 ## Feature flags

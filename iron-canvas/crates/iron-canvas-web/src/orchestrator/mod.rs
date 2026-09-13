@@ -21,6 +21,7 @@ use crate::wasm::JsBackedModel;
 use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::PaintResult;
+use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
@@ -104,8 +105,16 @@ impl IronCanvas {
     }
 
     /// Resize both layers in one call.
-    pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.runtime.resize(CanvasSize { w: css_w, h: css_h }, dpr);
+    ///
+    /// The width, height, and DPR are parsed here, at the host boundary: a
+    /// non-finite or negative extent, a DPR that is not finite and greater
+    /// than zero, and a DPR-scaled backing store that cannot fit `u32` are all
+    /// rejected before the canvas or any geometry changes.
+    pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) -> Result<(), JsError> {
+        let metrics = CanvasMetrics::new(CanvasSize { w: css_w, h: css_h }, dpr)
+            .map_err(|error| JsError::new(&format!("invalid canvas metrics: {error}")))?;
+        self.runtime.resize(metrics);
+        Ok(())
     }
 
     /// Set the theme from its name.

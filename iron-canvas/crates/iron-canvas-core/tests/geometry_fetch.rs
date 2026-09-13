@@ -27,8 +27,14 @@ use common::{TestModel, canvas_default};
 
 fn test_frame(model: &TestModel) -> Chrome {
     let theme = Rc::new(CanvasTheme::light());
-    let inputs =
-        FrameInputs::capture(model, canvas_default(), 1.0, theme, 0).expect("healthy capture");
+    let inputs = FrameInputs::capture(
+        model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        theme,
+        0,
+    )
+    .expect("healthy capture");
     Chrome::next(None, model, &inputs, FramePath::Fresh)
 }
 

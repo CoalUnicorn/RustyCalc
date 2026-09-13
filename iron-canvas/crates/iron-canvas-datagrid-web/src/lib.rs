@@ -20,7 +20,7 @@
 use std::rc::Rc;
 
 use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
-use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::geometry::{CanvasMetrics, CanvasSize};
 use iron_canvas_core::{CanvasModel, CanvasTheme, Layer};
 use iron_canvas_datagrid::SortDirection;
 use iron_canvas_export::SvgSurface;
@@ -108,8 +108,11 @@ impl DataGridCanvas {
         Ok(())
     }
 
-    pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.runtime.resize(CanvasSize { w: css_w, h: css_h }, dpr);
+    pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) -> Result<(), JsValue> {
+        let metrics = CanvasMetrics::new(CanvasSize { w: css_w, h: css_h }, dpr)
+            .map_err(|error| JsValue::from_str(&format!("invalid canvas metrics: {error}")))?;
+        self.runtime.resize(metrics);
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = "renderPending")]
@@ -247,7 +250,7 @@ impl DataGridCanvas {
     }
 
     #[wasm_bindgen(js_name = "exportSvg")]
-    pub fn export_svg(&self, css_w: f64, css_h: f64) -> String {
+    pub fn export_svg(&self, css_w: f64, css_h: f64) -> Result<String, JsValue> {
         // `&self` is fine: `SvgSurface::render` clones the model `Rc` and
         // drives its own throwaway orchestrator — `self` is never mutated.
         SvgSurface::render(
@@ -255,5 +258,6 @@ impl DataGridCanvas {
             self.runtime.orchestrator().theme(),
             CanvasSize { w: css_w, h: css_h },
         )
+        .map_err(|error| JsValue::from_str(&format!("SVG export failed: {error}")))
     }
 }

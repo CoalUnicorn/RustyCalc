@@ -1,6 +1,6 @@
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
-use iron_canvas_recorder::recording::Recording;
+use iron_canvas_recorder::recording::{Recording, ValidatedRecording};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
@@ -29,6 +29,11 @@ impl IronCanvas {
     /// The method sets the canvas size and DPR from the recording.
     /// It also sets the inline CSS dimensions.
     /// `exitPlayback` restores the previous size and DPR.
+    ///
+    /// The recording is validated before it can mutate live state: an invalid
+    /// canvas, backwards timestamps, unbalanced clip/group brackets, or grid
+    /// ops with no committed anchor are rejected here (see
+    /// `iron_canvas_recorder::recording::ValidatedRecording`).
     #[wasm_bindgen(js_name = "loadRecording")]
     pub fn load_recording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
         if matches!(self.mode, CanvasMode::Recording(_)) {
@@ -38,25 +43,23 @@ impl IronCanvas {
         }
         let rec = Recording::deserialize(bytes)
             .map_err(|e| JsError::new(&format!("recording deserialize failed: {e}")))?;
-        if rec.frames.is_empty() {
-            return Err(JsError::new("recording has no frames"));
-        }
-        let live_size = self.runtime.orchestrator().canvas_size();
-        let live_dpr = self.runtime.dpr();
-        let rec_size = CanvasSize {
-            w: rec.header.canvas_w,
-            h: rec.header.canvas_h,
+        let validated = ValidatedRecording::try_from(rec)
+            .map_err(|e| JsError::new(&format!("recording validation failed: {e}")))?;
+        let live_metrics = match &self.mode {
+            CanvasMode::Playback(session) => session.live_metrics,
+            CanvasMode::Live | CanvasMode::Recording(_) => self.runtime.orchestrator().metrics(),
         };
-        let rec_dpr = rec.header.dpr;
+        let rec_size = validated.metrics().size();
 
         // Set the orchestrator and backing stores to the recorded size.
         // Set the inline CSS size because `.ws-canvas` uses `100%`.
-        self.runtime.resize(rec_size, rec_dpr);
+        self.runtime.resize(validated.metrics());
         set_canvas_css_size(self.runtime.grid_canvas(), rec_size)?;
         set_canvas_css_size(self.runtime.overlay_canvas(), rec_size)?;
 
-        self.mode = CanvasMode::Playback(PlaybackSession::new(rec, live_size, live_dpr));
-        self.seek_recording_inner(0)
+        self.mode = CanvasMode::Playback(PlaybackSession::new(validated, live_metrics));
+        self.seek_recording_inner(0)?;
+        Ok(())
     }
 
     /// Paint the specified recorded frame.
@@ -165,7 +168,7 @@ impl IronCanvas {
         let _ = clear_canvas_css_size(self.runtime.grid_canvas());
         let _ = clear_canvas_css_size(self.runtime.overlay_canvas());
 
-        self.runtime.resize(session.live_size, session.live_dpr);
+        self.runtime.resize(session.live_metrics);
         // Playback bypasses `last_frame`. Thus, resize invalidation is not sufficient.
         self.runtime.orchestrator_mut().request_repaint();
     }
@@ -228,6 +231,7 @@ fn clear_canvas_css_size(canvas: &HtmlCanvasElement) -> Result<(), JsError> {
 
 #[cfg(feature = "dev-tools")]
 impl IronCanvas {
+    /// Replay the clamped frame from its committed anchor.
     fn seek_recording_inner(&mut self, frame_idx: u32) -> Result<(), JsError> {
         let CanvasMode::Playback(session) = &mut self.mode else {
             return Err(JsError::new("no recording loaded"));

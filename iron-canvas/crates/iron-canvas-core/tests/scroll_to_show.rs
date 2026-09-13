@@ -22,7 +22,9 @@ const CANVAS: CanvasSize = CanvasSize { w: 800.0, h: 600.0 };
 
 fn painted(model: TestModel) -> Orchestrator<MemSurface> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CANVAS, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CANVAS, 1.0).expect("test canvas metrics are valid"),
+    );
     orch.set_model(Rc::new(model));
     orch.render_pending();
     orch
@@ -54,7 +56,9 @@ fn a_visible_target_asks_for_no_scroll() {
 #[test]
 fn no_painted_frame_declines() {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CANVAS, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CANVAS, 1.0).expect("test canvas metrics are valid"),
+    );
     orch.set_model(Rc::new(TestModel::new()));
     assert_eq!(
         orch.scroll_to_show(1, 1),

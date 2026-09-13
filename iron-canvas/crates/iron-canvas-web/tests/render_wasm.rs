@@ -35,9 +35,14 @@ fn fractional_dpr_reaches_canvas_backing_store() {
         panic!("create IronCanvas");
     };
 
-    canvas.resize(300.0, 200.0, 1.25);
+    canvas
+        .resize(300.0, 200.0, 1.25)
+        .expect("fixture canvas metrics are valid");
 
-    let (expect_w, expect_h) = CanvasSize { w: 300.0, h: 200.0 }.to_backing_size(1.25);
+    let (expect_w, expect_h) =
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 300.0, h: 200.0 }, 1.25)
+            .expect("fixture canvas metrics are valid")
+            .backing_size();
     assert_eq!(
         grid.width(),
         expect_w,
@@ -116,7 +121,9 @@ fn backward_scroll_after_one_failed_measure_matches_fresh() {
         canvas
             .set_model_js(handle.clone().into())
             .expect("valid fixture");
-        canvas.resize(400.0, 240.0, 1.25);
+        canvas
+            .resize(400.0, 240.0, 1.25)
+            .expect("fixture canvas metrics are valid");
         assert_eq!(canvas.render_pending(), RenderResult::Rendered);
 
         set_value_prop(&handle, "failOnce", &JsValue::TRUE);
@@ -135,7 +142,9 @@ fn backward_scroll_after_one_failed_measure_matches_fresh() {
         fresh
             .set_model_js(handle.into())
             .expect("same recovered model");
-        fresh.resize(400.0, 240.0, 1.25);
+        fresh
+            .resize(400.0, 240.0, 1.25)
+            .expect("fixture canvas metrics are valid");
         assert_eq!(fresh.render_pending(), RenderResult::Rendered);
         assert_eq!(grid_pixels(&grid), grid_pixels(&fresh_grid), "{method}");
         assert_eq!(grid_pixels(&overlay), grid_pixels(&fresh_overlay));
@@ -175,7 +184,9 @@ fn geometry_and_grid_failures_preserve_pixels_and_retry() {
             canvas
                 .set_model_js(handle.clone().into())
                 .expect("valid fixture model");
-            canvas.resize(400.0, 240.0, dpr);
+            canvas
+                .resize(400.0, 240.0, dpr)
+                .expect("fixture canvas metrics are valid");
             assert_eq!(canvas.render_pending(), RenderResult::Rendered);
             let before_grid = grid_pixels(&grid);
             let before_overlay = grid_pixels(&overlay);
@@ -214,7 +225,9 @@ fn geometry_and_grid_failures_preserve_pixels_and_retry() {
             fresh
                 .set_model_js(handle.into())
                 .expect("same healthy fixture model");
-            fresh.resize(400.0, 240.0, dpr);
+            fresh
+                .resize(400.0, 240.0, dpr)
+                .expect("fixture canvas metrics are valid");
             assert_eq!(fresh.render_pending(), RenderResult::Rendered);
             // Stable retries use ChangedCells. Compare with the same healthy
             // execution: stable repaint differs from Fresh at fractional DPR.
@@ -596,7 +609,9 @@ fn canvas_over(store: FixtureStore) -> (IronCanvas, HtmlCanvasElement) {
     let Ok(()) = canvas.set_model_js(make_fixture_model(store)) else {
         panic!("fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     (canvas, grid)
 }
 
@@ -641,7 +656,9 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     let Ok(()) = canvas.set_model_js(model) else {
         panic!("scroll-failure fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
 
     let baseline_pixels = grid_pixels(&grid);
@@ -693,7 +710,9 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     let Ok(()) = fresh_canvas.set_model_js(fresh_model) else {
         panic!("forced-fresh fixture model passes the duck test");
     };
-    fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    fresh_canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(fresh_canvas.render_pending(), RenderResult::Rendered);
 
     assert_eq!(
@@ -765,7 +784,9 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
     let Ok(()) = canvas.set_model_js(model) else {
         panic!("fresh-failure fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
 
     controls.fail.set(true);
     assert_eq!(
@@ -807,7 +828,9 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
     let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("forced-fresh fixture model passes the duck test");
     };
-    fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    fresh_canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(fresh_canvas.render_pending(), RenderResult::Rendered);
 
     assert_eq!(
@@ -1009,10 +1032,14 @@ fn resize_self_invalidates_without_explicit_repaint() {
     let Ok(()) = canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
-    canvas.resize(OLD_W, OLD_H, OLD_DPR);
+    canvas
+        .resize(OLD_W, OLD_H, OLD_DPR)
+        .expect("fixture canvas metrics are valid");
     canvas.render_pending(); // baseline Fresh paint at the old size
 
-    canvas.resize(NEW_W, NEW_H, NEW_DPR);
+    canvas
+        .resize(NEW_W, NEW_H, NEW_DPR)
+        .expect("fixture canvas metrics are valid");
     canvas.render_pending(); // bare renderPending — no requestRepaint()
 
     let fresh_grid = make_canvas();
@@ -1023,7 +1050,9 @@ fn resize_self_invalidates_without_explicit_repaint() {
     let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
-    fresh_canvas.resize(NEW_W, NEW_H, NEW_DPR);
+    fresh_canvas
+        .resize(NEW_W, NEW_H, NEW_DPR)
+        .expect("fixture canvas metrics are valid");
     fresh_canvas.render_pending(); // single Fresh paint straight at the new size/DPR
 
     assert_eq!(
@@ -1052,10 +1081,14 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
     let Ok(()) = canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
-    canvas.resize(W, H, OLD_DPR);
+    canvas
+        .resize(W, H, OLD_DPR)
+        .expect("fixture canvas metrics are valid");
     canvas.render_pending(); // baseline Fresh paint at the old DPR
 
-    canvas.resize(W, H, NEW_DPR); // CSS size unchanged, DPR-only change
+    canvas
+        .resize(W, H, NEW_DPR)
+        .expect("fixture canvas metrics are valid"); // CSS size unchanged, DPR-only change
     canvas.render_pending(); // bare renderPending — no requestRepaint()
 
     let fresh_grid = make_canvas();
@@ -1066,7 +1099,9 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
     let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
-    fresh_canvas.resize(W, H, NEW_DPR);
+    fresh_canvas
+        .resize(W, H, NEW_DPR)
+        .expect("fixture canvas metrics are valid");
     fresh_canvas.render_pending(); // single Fresh paint straight at the new DPR
 
     assert_eq!(
@@ -1214,7 +1249,9 @@ fn active_sheet_change_repaints_new_sheets_values_at_identical_coordinates() {
     else {
         panic!("active-sheet fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(canvas.render_pending(), RenderResult::Rendered); // sheet 0 baseline
     let sheet0_pixels = grid_pixels(&grid);
 
@@ -1281,7 +1318,9 @@ fn selected_sheet_bridge_failure_holds_then_recovers_without_another_signal() {
     else {
         panic!("sheet-throws-once fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
 
     assert_eq!(
         canvas.render_pending(),
@@ -1602,7 +1641,9 @@ fn stable_canvas_over_at(
         panic!("stable-view fixture content model passes the duck test");
     };
     canvas.set_model(Rc::new(StableFixtureModel { content, view }));
-    canvas.resize(width, height, dpr);
+    canvas
+        .resize(width, height, dpr)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     (canvas, grid, overlay)
 }
@@ -1753,7 +1794,9 @@ fn stage6_canvas_over(
     let Ok(()) = canvas.set_model_js(model) else {
         panic!("scrollable fixture model passes the duck test");
     };
-    canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);
+    canvas
+        .resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     // The cold Fresh covers the whole pane, so it is the cheapest place to
     // prove the geometry before any sample or pixel is taken. A tall row
@@ -3422,7 +3465,9 @@ fn stable_diag_canvas_over_at(
         panic!("stable-view fixture content model passes the duck test");
     };
     canvas.set_model(Rc::new(StableFixtureModel { content, view }));
-    canvas.resize(width, height, dpr);
+    canvas
+        .resize(width, height, dpr)
+        .expect("fixture canvas metrics are valid");
     canvas.set_frame_diagnostics_enabled(true);
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     (canvas, grid, overlay)

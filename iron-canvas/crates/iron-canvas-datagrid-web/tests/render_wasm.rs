@@ -41,9 +41,14 @@ fn fractional_dpr_reaches_canvas_backing_store() {
     let mut canvas =
         DataGridCanvas::new(grid.clone(), overlay.clone()).expect("create DataGridCanvas");
 
-    canvas.resize(300.0, 200.0, 1.25);
+    canvas
+        .resize(300.0, 200.0, 1.25)
+        .expect("fixture canvas metrics are valid");
 
-    let (expect_w, expect_h) = CanvasSize { w: 300.0, h: 200.0 }.to_backing_size(1.25);
+    let (expect_w, expect_h) =
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 300.0, h: 200.0 }, 1.25)
+            .expect("fixture canvas metrics are valid")
+            .backing_size();
     assert_eq!(
         grid.width(),
         expect_w,

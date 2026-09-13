@@ -186,14 +186,16 @@ fn pdf_render_discards_overlay() {
         .column(Column::new("A"))
         .row(vec!["hello".to_string()])
         .build();
-    let a = PdfSurface::render(Rc::new(plain), &theme, size);
+    let a = PdfSurface::render(Rc::new(plain), &theme, size)
+        .expect("a one-shot export of a readable model commits a frame");
 
     let mut selected = DataGrid::builder()
         .column(Column::new("A"))
         .row(vec!["hello".to_string()])
         .build();
     selected.set_selection(1, 1, 3, 3); // overlay-only difference
-    let b = PdfSurface::render(Rc::new(selected), &theme, size);
+    let b = PdfSurface::render(Rc::new(selected), &theme, size)
+        .expect("a one-shot export of a readable model commits a frame");
 
     assert!(a.starts_with(b"%PDF-1.7"), "not a valid PDF 1.7 document");
     assert!(a.ends_with(b"%%EOF"), "missing %%EOF terminator");

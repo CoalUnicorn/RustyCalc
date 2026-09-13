@@ -21,6 +21,7 @@ The shippable artifact for non-spreadsheet consumers. Composes `datagrid` (data)
   - **sort**: `sortByColumn`, `clearSort`, `currentSort`
   - **theme**: `setThemeFromElement`, `setThemeName`
   - **paint / export**: `renderPending`, `exportSvg`
+  - **canvas**: `resize(cssW, cssH, dpr)` — throws on values that cannot be canvas metrics; `exportSvg` throws when the export attempt does not commit a frame
 
 ## Dependencies
 

@@ -47,6 +47,7 @@ use crate::CanvasModel;
 use crate::chrome::{BlitPlan, Chrome, FramePath, FreshBuild, RecycledSlots};
 use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
+use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
@@ -652,16 +653,12 @@ where
     /// takes this pool's vectors to build, then folds the *outgoing*
     /// committed frame's vectors back in once the candidate has replaced it.
     spare_slots: RecycledSlots,
-    /// Logical (CSS) canvas size; written by `resize`, read when building
-    /// the next `Chrome`.
-    size: CanvasSize,
-    /// DPR from the last `resize` call. `None` before the first resize —
-    /// not a `0.0` sentinel, since `resize` must self-invalidate on the
-    /// very first call regardless of what DPR it's given. Private and
-    /// unexposed — distinct from the wasm facade's own `last_dpr` in
-    /// `iron-canvas-web`, which keeps an independent copy for the
+    /// Validated canvas metrics from the last `resize`. `None` before the
+    /// first resize — not a zero sentinel, since `resize` must self-invalidate
+    /// on the very first call regardless of what values it is given. Private
+    /// and unexposed: the wasm facade keeps its own DPR copy for the
     /// recording/playback pipeline.
-    last_dpr: Option<f64>,
+    metrics: Option<CanvasMetrics>,
     /// Everything queued for the next paint attempt: geometry rebuild, view
     /// movement, content damage, overlay repaint. The single owner of paint
     /// work — layers hold none. Every setter marks intent here; a paint
@@ -716,8 +713,7 @@ where
             model_generation: 0,
             last_frame: None,
             spare_slots: RecycledSlots::default(),
-            size: CanvasSize { w: 0.0, h: 0.0 },
-            last_dpr: None,
+            metrics: None,
             pending: PendingWork::default(),
             last_strategy: None,
             last_effective_strategy: None,
@@ -775,14 +771,17 @@ where
     /// callers can't leave the pair half-sized. Self-invalidating: a real
     /// size or DPR change forces the next `render_pending` to `Fresh` — no
     /// caller needs a follow-up `request_repaint()`.
-    pub fn resize(&mut self, size: CanvasSize, dpr: f64) {
-        if size == self.size && self.last_dpr == Some(dpr) {
+    ///
+    /// Takes [`CanvasMetrics`]: the host boundary parses the raw
+    /// width/height/DPR once (`CanvasMetrics::new`), and every backend and
+    /// geometry walk downstream reads the validated value.
+    pub fn resize(&mut self, metrics: CanvasMetrics) {
+        if self.metrics == Some(metrics) {
             return;
         }
-        self.size = size;
-        self.last_dpr = Some(dpr);
-        self.grid.resize(size, dpr);
-        self.overlay.resize(size, dpr);
+        self.metrics = Some(metrics);
+        self.grid.resize(metrics);
+        self.overlay.resize(metrics);
         // A backing-store resize may clear both canvases (Canvas2D), so
         // geometry invalidation must be atomic with the resize itself.
         self.last_frame = None;
@@ -969,7 +968,14 @@ where
     }
 
     pub fn canvas_size(&self) -> CanvasSize {
-        self.size
+        self.metrics.unwrap_or_else(CanvasMetrics::unresized).size()
+    }
+
+    /// Validated canvas metrics for the committed configuration. Before the
+    /// first `resize` this is the zero-size, DPR-1.0 default — the same pair
+    /// the renderer assumed before the type carried an invariant.
+    pub fn metrics(&self) -> CanvasMetrics {
+        self.metrics.unwrap_or_else(CanvasMetrics::unresized)
     }
 
     pub fn theme(&self) -> &CanvasTheme {
@@ -1074,9 +1080,9 @@ where
             x: frame.pane_set.cols.frozen_offset,
             y: frame.pane_set.rows.frozen_offset,
         };
-        let (canvas_w, canvas_h) = frame.canvas_size.to_logical_extent();
-        // The frame's own canvas size, not `self.size` — a resize between the
-        // last paint and this query must not be mixed into a snapshot answer.
+        let (canvas_w, canvas_h) = frame.canvas_size().to_logical_extent();
+        // The frame's own canvas size, not `self.metrics()` — a resize between
+        // the last paint and this query must not be mixed into a snapshot answer.
         Some(PixelRect {
             top_left,
             width: (canvas_w - top_left.x).max(0),
@@ -1206,14 +1212,12 @@ where
         // This runs after the model/pending early exits above but before
         // delta classification, plan construction, Chrome mutation, cache
         // invalidation, paint, or presentation — a failure here can hold
-        // the whole attempt having touched none of those. DPR defaults to
-        // `1.0` before the first `resize`, matching the renderer's own
-        // default transform.
-        let dpr = self.last_dpr.unwrap_or(1.0);
+        // the whole attempt having touched none of those. Metrics default to
+        // a zero-size canvas at DPR 1.0 before the first `resize`, matching
+        // the renderer's own default transform.
         let capture = FrameInputs::capture(
             model_dyn,
-            self.size,
-            dpr,
+            self.metrics(),
             Rc::clone(&self.theme),
             self.model_generation,
         );

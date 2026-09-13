@@ -5,10 +5,9 @@
 //! `FullRebuild` frame at or before the target — cumulative on both grid and overlay
 //! surfaces. Owned by `IronCanvas`; the orchestrator is unaware.
 
-use iron_canvas_core::RenderStrategy;
-use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::painter::{BlitPainter, Painter};
-use iron_canvas_recorder::recording::{Frame, Recording};
+use iron_canvas_recorder::recording::{Frame, ValidatedRecording};
 use iron_canvas_recorder::replay;
 
 /// Two-state playback clock. `Paused` carries no data; `Playing` carries the
@@ -25,31 +24,28 @@ pub enum PlayClock {
 }
 
 pub struct PlaybackSession {
-    pub recording: Recording,
+    pub recording: ValidatedRecording,
     pub frame_idx: u32,
     pub clock: PlayClock,
-    /// Pre-playback live canvas size, captured at `loadRecording`. The
-    /// orchestrator and canvas backing stores are resized to recording
-    /// dimensions for the session's lifetime; on `exitPlayback` we
-    /// resize back to this.
-    pub live_size: CanvasSize,
-    /// Pre-playback live DPR. Mirrors `live_size`.
-    pub live_dpr: f64,
+    /// Pre-playback live canvas metrics, captured at `loadRecording`. The
+    /// orchestrator and canvas backing stores are resized to the recording's
+    /// dimensions for the session's lifetime; on `exitPlayback` we resize back
+    /// to this.
+    pub live_metrics: CanvasMetrics,
 }
 
 impl PlaybackSession {
-    pub fn new(recording: Recording, live_size: CanvasSize, live_dpr: f64) -> Self {
+    pub fn new(recording: ValidatedRecording, live_metrics: CanvasMetrics) -> Self {
         Self {
             recording,
             frame_idx: 0,
             clock: PlayClock::Paused,
-            live_size,
-            live_dpr,
+            live_metrics,
         }
     }
 
     pub fn frame_count(&self) -> u32 {
-        self.recording.frames.len() as u32
+        self.recording.frame_count()
     }
 
     /// Pin the playback clock and enter `Playing`: subsequent
@@ -68,7 +64,7 @@ impl PlaybackSession {
     /// only — playback is strictly monotonic. Returns the anchor index when
     /// no frame has elapsed yet.
     pub fn target_frame_for(&self, anchor_ms: f64, anchor_frame_idx: u32, now_ms: f64) -> u32 {
-        let frames = &self.recording.frames;
+        let frames = self.recording.frames();
         if frames.is_empty() {
             return 0;
         }
@@ -98,10 +94,9 @@ impl PlaybackSession {
 pub fn find_full_rebuild_anchor(frames: &[Frame], target: u32) -> Option<u32> {
     let last = frames.len().checked_sub(1)? as u32;
     let start = target.min(last);
-    (0..=start).rev().find(|&i| {
-        let trace = &frames[i as usize].trace;
-        trace.strategy == Some(RenderStrategy::FullRebuild) && trace.committed_seq.is_some()
-    })
+    (0..=start)
+        .rev()
+        .find(|&i| frames[i as usize].is_replay_anchor())
 }
 
 /// Replay cumulative grid and overlay state for `target_idx`
@@ -117,19 +112,17 @@ pub fn find_full_rebuild_anchor(frames: &[Frame], target: u32) -> Option<u32> {
 /// canvas — a `Blit` op replayed before its predecessor's pixels are
 /// presented reads stale/cleared front pixels and corrupts the composite.
 /// Mirrors the live loop, which presents after every painted frame.
+///
 pub fn replay_through<P>(
     grid: &P,
     overlay: &P,
-    recording: &Recording,
+    recording: &ValidatedRecording,
     target_idx: u32,
     present_grid: &dyn Fn(),
 ) where
     P: Painter + BlitPainter,
 {
-    let frames = &recording.frames;
-    if frames.is_empty() {
-        return;
-    }
+    let frames = recording.frames();
     let target_idx = target_idx.min((frames.len() - 1) as u32);
 
     let Some(anchor) = find_full_rebuild_anchor(frames, target_idx) else {
@@ -158,6 +151,7 @@ pub fn replay_through<P>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use iron_canvas_core::RenderStrategy;
     use iron_canvas_recorder::recording::{
         RecordOrigin, RecordedPaintResult, TraceOutcome, TraceRecord,
     };
@@ -200,5 +194,15 @@ mod tests {
     fn diagnostics_only_prefix_has_no_replay_anchor() {
         let frames = vec![attempt(None, None)];
         assert_eq!(find_full_rebuild_anchor(&frames, 0), None);
+    }
+
+    #[test]
+    fn fallback_reanchors_but_a_held_attempt_does_not() {
+        let mut fallback = attempt(Some(RenderStrategy::ScrollBlit), Some(2));
+        fallback.trace.effective = Some(RenderStrategy::FullRebuild);
+        let mut held = attempt(Some(RenderStrategy::FullRebuild), Some(3));
+        held.trace.outcome = TraceOutcome::HeldOnBridgeFailure;
+        let frames = vec![fallback, held];
+        assert_eq!(find_full_rebuild_anchor(&frames, 1), Some(0));
     }
 }

@@ -31,6 +31,7 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use crate::frame_plan::{FrameDelta, FrameInputs, RebuildReason};
+use crate::geometry::CanvasMetrics;
 use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
     pixel_rect::PixelRect,
@@ -130,9 +131,12 @@ pub struct Chrome {
     /// Top-left of the cell area; single source of truth for hit-test
     /// and viewport math.
     pub cell_origin: Point,
-    /// Canvas size at build time. `Chrome::classify` reads this to detect
-    /// a resize.
-    pub canvas_size: CanvasSize,
+    /// Canvas metrics at build time. `Chrome::classify` reads this to detect
+    /// a resize or DPR change, and every geometry walk takes its logical extent
+    /// and backing size from here. Private: the value carries
+    /// [`CanvasMetrics`]' validated invariant, and `Chrome::next`/`next_blit`
+    /// are the only producers.
+    metrics: CanvasMetrics,
     /// Theme this frame was painted with. The renderer reads `frame.theme`
     /// directly; `IronCanvas::set_theme` marks both layers dirty on change,
     /// so the overlay-only fast path never paints against a stale theme.
@@ -141,10 +145,6 @@ pub struct Chrome {
     /// every color `String` — `Chrome` is rebuilt on every Fresh/SlotsReuse/
     /// Blit frame (B-1).
     pub theme: Rc<CanvasTheme>,
-    /// Device pixel ratio this frame was captured with. Committed geometry
-    /// metadata, not a live orchestrator read — lets `Chrome::classify`
-    /// detect a DPR change by comparing committed frames only.
-    pub dpr: f64,
     /// `Orchestrator::model_generation` at capture time. Committed so
     /// `Chrome::classify` can detect a `set_model` replacement without
     /// comparing trait-object pointers.
@@ -190,6 +190,23 @@ pub enum BlitOutcome {
 }
 
 impl Chrome {
+    /// Validated canvas metrics this frame was built with.
+    pub fn metrics(&self) -> CanvasMetrics {
+        self.metrics
+    }
+
+    /// Logical canvas size at build time.
+    pub fn canvas_size(&self) -> CanvasSize {
+        self.metrics.size()
+    }
+
+    /// Device pixel ratio this frame was captured with. Committed geometry
+    /// metadata, not a live orchestrator read — lets `Chrome::classify`
+    /// detect a DPR change by comparing committed frames only.
+    pub fn dpr(&self) -> f64 {
+        self.metrics.dpr()
+    }
+
     /// Piecewise address layout for the visible grid.
     pub fn grid_layout(&self) -> GridLayout {
         GridLayout::from_frame(self)
@@ -256,7 +273,7 @@ impl Chrome {
                 // was actually built for. Grid paint scope remains the
                 // caller's `GridWork` verdict rather than state stored here.
                 prev.theme = Rc::clone(inputs.theme());
-                prev.dpr = inputs.dpr();
+                prev.metrics = inputs.metrics();
                 prev.model_generation = inputs.model_generation();
                 prev.show_row_headers = inputs.show_row_headers();
                 prev.show_col_headers = inputs.show_col_headers();
@@ -439,9 +456,8 @@ impl Chrome {
             row_header_thickness,
             col_header_thickness,
             cell_origin,
-            canvas_size: canvas,
+            metrics: inputs.metrics(),
             theme: Rc::clone(inputs.theme()),
-            dpr: inputs.dpr(),
             model_generation: inputs.model_generation(),
             show_row_headers: show_row,
             show_col_headers: show_col,
@@ -511,10 +527,10 @@ impl Chrome {
         let Some(prev) = prev else {
             return FrameDelta::Rebuild(RebuildReason::NoCommittedFrame);
         };
-        if inputs.size() != prev.canvas_size {
+        if inputs.size() != prev.canvas_size() {
             return FrameDelta::Rebuild(RebuildReason::Size);
         }
-        if inputs.dpr() != prev.dpr {
+        if inputs.dpr() != prev.dpr() {
             return FrameDelta::Rebuild(RebuildReason::Dpr);
         }
         if inputs.theme() != &prev.theme {
@@ -605,7 +621,7 @@ impl Chrome {
     pub fn range_rect(&self, range: RCRange) -> Option<PixelRect> {
         let norm = range.normalized();
         let p = &self.pane_set;
-        let (canvas_w, canvas_h) = self.canvas_size.to_logical_extent();
+        let (canvas_w, canvas_h) = self.metrics.logical_extent();
 
         let (x, mut right) = p.cols.project_interval(norm.c1, norm.c2)?;
         let (y, mut bottom) = p.rows.project_interval(norm.r1, norm.r2)?;

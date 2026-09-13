@@ -531,7 +531,10 @@ impl Probe {
         let model = Rc::new(ObservedModel::new(inner));
 
         let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-        orch.resize(shape.canvas(), 1.0);
+        orch.resize(
+            iron_canvas_core::CanvasMetrics::new(shape.canvas(), 1.0)
+                .expect("test canvas metrics are valid"),
+        );
         orch.set_model(Rc::clone(&model) as Rc<dyn CanvasModel>);
         // Construction is not part of any workload, so the first measured
         // window opens after `resize`/`set_model`, not at op zero.

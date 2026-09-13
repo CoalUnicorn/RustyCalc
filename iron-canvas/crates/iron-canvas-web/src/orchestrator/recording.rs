@@ -127,7 +127,7 @@ impl IronCanvas {
         let CanvasMode::Playback(session) = &self.mode else {
             return Ok(JsValue::UNDEFINED);
         };
-        let Some(frame) = session.recording.frames.get(session.frame_idx as usize) else {
+        let Some(frame) = session.recording.frames().get(session.frame_idx as usize) else {
             return Ok(JsValue::UNDEFINED);
         };
         serde_wasm_bindgen::to_value(frame)

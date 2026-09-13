@@ -12,7 +12,7 @@ use std::rc::Rc;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, js_sys};
 
-use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::layer::Surface;
 
 use crate::canvas_painter::CanvasPainter;
@@ -73,8 +73,8 @@ impl Surface for WebSurface {
         Rc::clone(&self.painter)
     }
 
-    fn resize(&mut self, css: CanvasSize, dpr: f64) {
-        let (target_w, target_h) = css.to_backing_size(dpr);
+    fn resize(&mut self, metrics: CanvasMetrics) {
+        let (target_w, target_h) = metrics.backing_size();
         for c in std::iter::once(&self.canvas).chain(self.back.iter()) {
             if c.width() != target_w || c.height() != target_h {
                 c.set_width(target_w);
@@ -87,7 +87,6 @@ impl Surface for WebSurface {
         // `LayerBase::resize` follows up with `LayerOps::resize_for_dpr`,
         // which routes through `RendererCore::resize_for_dpr` and calls
         // `apply_dpr_transform` + `invalidate_cache` on the painter we share.
-        let _ = dpr;
     }
 
     fn present(&self) {

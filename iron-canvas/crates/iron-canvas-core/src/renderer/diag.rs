@@ -173,7 +173,7 @@ pub struct DiagSegment {
 /// overlay-only attempt (the grid renderer was never entered).
 ///
 /// `backing_size` is the physical backing-store size derived from the CSS
-/// size and DPR via [`CanvasSize::to_backing_size`] (browser rounding).
+/// size and DPR via [`CanvasMetrics::backing_size`] (browser rounding).
 /// Core never sees the backend canvas element, so this is the documented
 /// derivation; the web facade overwrites it with the actual canvas
 /// backing store when the snapshot is projected, making CSS/backing
@@ -460,9 +460,9 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
             })
             .collect();
         capture.geometry = Some(DiagGeometry {
-            canvas: frame.canvas_size,
-            backing_size: frame.canvas_size.to_backing_size(frame.dpr),
-            dpr: frame.dpr,
+            canvas: frame.canvas_size(),
+            backing_size: frame.metrics().backing_size(),
+            dpr: frame.dpr(),
             sheet: frame.sheet,
             top_row: frame.pane_set.top_row(),
             left_column: frame.pane_set.left_column(),

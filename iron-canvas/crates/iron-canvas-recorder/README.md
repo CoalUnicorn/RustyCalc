@@ -19,6 +19,7 @@ The test and dev-tooling backend. `RecorderPainter` and `MemSurface` implement `
 - `RecordingSurface<S>` — the opt-in dev-tool decorator over a live `Surface`, serializing sessions to the `.icr` format (wired behind `iron-canvas-web`'s `dev-tools` feature)
 - `RecordingFilter`, `LayerScope` — narrow recording to specific layers/ops
 - `replay()` — re-drive a recorded op stream through any `BlitPainter`
+- `recording::ValidatedRecording` — the playback precondition check over a deserialized `.icr` (valid canvas metrics, nondecreasing timestamps, balanced clip/group brackets, finite draw numbers, and a committed anchor before the first grid ops); `TryFrom<Recording>` is the only constructor
 
 ## Dependencies
 

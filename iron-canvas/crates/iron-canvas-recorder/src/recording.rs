@@ -73,6 +73,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use iron_canvas_core::geometry::{CanvasMetrics, CanvasSize};
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{FrameOutcome, FrameTrace, GridVerdict, RenderStrategy};
 
@@ -202,6 +203,192 @@ pub struct Frame {
     pub overlay_ops: Vec<DrawOp>,
 }
 
+impl Frame {
+    /// A committed Fresh paint can replace all prior grid pixels.
+    /// Use the effective strategy: a ScrollBlit can fall back to FullRebuild.
+    pub fn is_replay_anchor(&self) -> bool {
+        self.result == RecordedPaintResult::Painted
+            && self.trace.outcome == TraceOutcome::Painted
+            && self.trace.effective == Some(RenderStrategy::FullRebuild)
+            && self.trace.committed_seq.is_some()
+    }
+}
+
+/// A recording that passed the playback preconditions.
+///
+/// [`Recording`] is raw wire data: [`Recording::deserialize`] checks the schema
+/// version and nothing else, because a file may legitimately be inspected or
+/// shown by a viewer that paints nothing. Playback is different — it drives the
+/// live painter and the live backing stores, so a recording whose canvas cannot
+/// exist, whose timestamps run backwards, whose clip or group brackets are
+/// unbalanced, or whose first grid ops have no committed anchor would push the
+/// visible canvas into a state no later frame repairs.
+///
+/// This type is that parse. `ValidatedRecording::try_from(Recording)` is the only
+/// constructor, so every consumer of [`crate::replay`] and of the web facade's
+/// playback session holds a checked value. It is never serialized: the ICR
+/// wire shape is unchanged, and this change only rejects inputs the loader
+/// previously accepted.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValidatedRecording {
+    recording: Recording,
+    metrics: CanvasMetrics,
+}
+
+impl ValidatedRecording {
+    /// Validated canvas metrics from the header. Playback resizes the live
+    /// canvas to these, so they are parsed once here rather than at each use.
+    pub fn metrics(&self) -> CanvasMetrics {
+        self.metrics
+    }
+
+    /// The checked recording, for readers that need the header or frames.
+    pub fn recording(&self) -> &Recording {
+        &self.recording
+    }
+
+    pub fn frames(&self) -> &[Frame] {
+        &self.recording.frames
+    }
+
+    pub fn frame_count(&self) -> u32 {
+        self.recording.frames.len() as u32
+    }
+
+    pub fn into_recording(self) -> Recording {
+        self.recording
+    }
+}
+
+impl TryFrom<Recording> for ValidatedRecording {
+    type Error = IcrError;
+
+    fn try_from(recording: Recording) -> Result<Self, Self::Error> {
+        recording.validate_schema()?;
+        let header = &recording.header;
+        let metrics = CanvasMetrics::new(
+            CanvasSize {
+                w: header.canvas_w,
+                h: header.canvas_h,
+            },
+            header.dpr,
+        )
+        .map_err(|error| IcrError::Format(format!("invalid recording canvas metrics: {error}")))?;
+        if recording.frames.is_empty() {
+            return Err(IcrError::Format("recording has no frames".to_string()));
+        }
+        validate_frames(&recording.frames)?;
+        Ok(Self { recording, metrics })
+    }
+}
+
+/// Rejections that protect live replay state. Each carries the offending frame
+/// index so a viewer can point at it.
+fn validate_frames(frames: &[Frame]) -> Result<(), IcrError> {
+    let mut previous_t_ms: Option<u64> = None;
+    let mut anchored = false;
+    for (index, frame) in frames.iter().enumerate() {
+        if let Some(previous) = previous_t_ms
+            && frame.t_ms < previous
+        {
+            return Err(IcrError::Format(format!(
+                "frame {index}: timestamp {} precedes the previous frame's {previous}",
+                frame.t_ms,
+            )));
+        }
+        previous_t_ms = Some(frame.t_ms);
+        validate_ops(index, "grid", &frame.grid_ops)?;
+        validate_ops(index, "overlay", &frame.overlay_ops)?;
+        if frame.is_replay_anchor() {
+            anchored = true;
+        }
+        if !frame.grid_ops.is_empty() && !anchored {
+            return Err(IcrError::Format(format!(
+                "frame {index}: grid ops precede any committed FullRebuild anchor, so a replay \
+                 has no pixels to composite them onto",
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// One frame's op list must be a balanced bracket sequence with finite numbers.
+///
+/// A frame is a whole paint attempt, so its clips and groups return to zero
+/// inside it. Replay applies the ops directly to the live painter; an
+/// unbalanced bracket would leave the visible canvas clipped or transformed for
+/// every later frame, and a `NaN` coordinate would poison the painter's
+/// transform for the same span.
+fn validate_ops(frame_index: usize, channel: &str, ops: &[DrawOp]) -> Result<(), IcrError> {
+    let mut clips: i32 = 0;
+    let mut groups: i32 = 0;
+    for op in ops {
+        match op {
+            DrawOp::PushClip { .. } => clips += 1,
+            DrawOp::PopClip => {
+                clips -= 1;
+                if clips < 0 {
+                    return Err(IcrError::Format(format!(
+                        "frame {frame_index} {channel}: PopClip without a matching PushClip",
+                    )));
+                }
+            }
+            DrawOp::BeginGroup { .. } => groups += 1,
+            DrawOp::EndGroup => {
+                groups -= 1;
+                if groups < 0 {
+                    return Err(IcrError::Format(format!(
+                        "frame {frame_index} {channel}: EndGroup without a matching BeginGroup",
+                    )));
+                }
+            }
+            _ => {}
+        }
+        if !draw_op_numbers_are_finite(op) {
+            return Err(IcrError::Format(format!(
+                "frame {frame_index} {channel}: draw op carries a non-finite coordinate or width",
+            )));
+        }
+    }
+    if clips != 0 {
+        return Err(IcrError::Format(format!(
+            "frame {frame_index} {channel}: {clips} clip(s) left open at the end of the frame",
+        )));
+    }
+    if groups != 0 {
+        return Err(IcrError::Format(format!(
+            "frame {frame_index} {channel}: {groups} group(s) left open at the end of the frame",
+        )));
+    }
+    Ok(())
+}
+
+/// Every `f64` a draw op can carry. Integer fields (`PixelRect`, `Point`,
+/// `Span`, `Line`) are finite by their types.
+fn draw_op_numbers_are_finite(op: &DrawOp) -> bool {
+    match op {
+        DrawOp::RectStroke { width, .. } | DrawOp::RectDashed { width, .. } => width.is_finite(),
+        DrawOp::StrokeLine { width, .. } => width.is_finite(),
+        DrawOp::StrokeHLine { y, width, .. } => y.is_finite() && width.is_finite(),
+        DrawOp::StrokeVLine { x, width, .. } => x.is_finite() && width.is_finite(),
+        DrawOp::StrokeTextHLine {
+            x1, x2, y, width, ..
+        } => x1.is_finite() && x2.is_finite() && y.is_finite() && width.is_finite(),
+        DrawOp::FillText { x, y, .. } => x.is_finite() && y.is_finite(),
+        DrawOp::ApplyDprTransform { dpr } => dpr.is_finite() && *dpr > 0.0,
+        DrawOp::RectFill { .. }
+        | DrawOp::FillPath { .. }
+        | DrawOp::ClearRect { .. }
+        | DrawOp::PushClip { .. }
+        | DrawOp::PopClip
+        | DrawOp::InvalidateCache
+        | DrawOp::ResetTextDefaults
+        | DrawOp::BeginGroup { .. }
+        | DrawOp::EndGroup
+        | DrawOp::Blit { .. } => true,
+    }
+}
+
 /// Flattened, owned-string mirror of `CanvasTheme`. Built `From<&CanvasTheme>`
 /// so the engine type stays serde-free — its `Cow<'static, str>` fields
 /// don't round-trip through `serde_json` (they'd deserialize as `Cow::Owned`,
@@ -318,15 +505,24 @@ impl Recording {
     /// Decode a single JSON document. Rejects on schema-version mismatch
     /// — the caller decides whether `iron_canvas_version` divergence
     /// is fatal.
+    ///
+    /// This is the *wire* check only. Playback must convert the result with
+    /// [`ValidatedRecording::try_from`], which additionally rejects a
+    /// recording that cannot drive the live painter (see that type).
     pub fn deserialize(bytes: &[u8]) -> Result<Self, IcrError> {
         let rec: Recording = serde_json::from_slice(bytes)?;
-        if rec.header.schema_version != ICR_SCHEMA_VERSION {
+        rec.validate_schema()?;
+        Ok(rec)
+    }
+
+    fn validate_schema(&self) -> Result<(), IcrError> {
+        if self.header.schema_version != ICR_SCHEMA_VERSION {
             return Err(IcrError::Format(format!(
                 "schema_version mismatch: file={}, reader={}",
-                rec.header.schema_version, ICR_SCHEMA_VERSION,
+                self.header.schema_version, ICR_SCHEMA_VERSION,
             )));
         }
-        Ok(rec)
+        Ok(())
     }
 }
 
@@ -358,7 +554,10 @@ mod tests {
     use super::*;
     use iron_canvas_core::geometry::pixel_rect::PixelRect;
     use iron_canvas_core::geometry::prim::Point;
+    use iron_canvas_core::painter::{TextAlign, TextBaseline};
     use iron_canvas_core::theme::CanvasTheme;
+
+    use crate::GroupClass;
 
     fn header() -> IcrHeader {
         IcrHeader::new(
@@ -558,5 +757,192 @@ mod tests {
         assert!(s.contains("\"frames\":[]"), "empty frames array");
         let back = Recording::deserialize(&bytes).expect("deserialize");
         assert_eq!(back.frames.len(), 0);
+    }
+
+    /// A frame carrying the given grid ops, with a committed FullRebuild
+    /// trace — the shape a capture's baseline writes.
+    fn anchored_frame(index: u32, t_ms: u64, grid_ops: Vec<DrawOp>) -> Frame {
+        Frame {
+            frame_idx: index,
+            t_ms,
+            origin: RecordOrigin::Live,
+            result: RecordedPaintResult::Painted,
+            trace: trace(RenderStrategy::FullRebuild, 0b0100),
+            grid_ops,
+            overlay_ops: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn validated_recording_accepts_anchored_frames_and_metrics() {
+        let mut rec = Recording::new(header());
+        rec.push_frame(anchored_frame(
+            0,
+            0,
+            vec![
+                DrawOp::PushClip {
+                    rect: pix(0, 0, 10, 10),
+                },
+                DrawOp::RectFill {
+                    rect: pix(0, 0, 10, 10),
+                    color: "#fff".into(),
+                },
+                DrawOp::PopClip,
+            ],
+        ));
+        let validated = ValidatedRecording::try_from(rec).expect("well-formed recording");
+
+        assert_eq!(validated.metrics().backing_size(), (800, 400));
+        assert_eq!(validated.frame_count(), 1);
+        assert_eq!(validated.frames().len(), 1);
+    }
+
+    /// A diagnostics-only prefix (no grid ops, no anchor) is legitimate: the
+    /// recording may begin with held attempts that painted nothing.
+    #[test]
+    fn validated_recording_accepts_anchorless_diagnostics_prefix() {
+        let mut rec = Recording::new(header());
+        let mut held = anchored_frame(0, 0, Vec::new());
+        held.trace.outcome = TraceOutcome::HeldOnBridgeFailure;
+        held.trace.committed_seq = None;
+        held.trace.effective = None;
+        held.result = RecordedPaintResult::Retry;
+        rec.push_frame(held);
+        rec.push_frame(anchored_frame(1, 17, Vec::new()));
+
+        assert!(ValidatedRecording::try_from(rec).is_ok());
+    }
+
+    #[test]
+    fn validation_and_anchor_use_effective_committed_paint() {
+        let mut fallback = anchored_frame(0, 0, vec![DrawOp::InvalidateCache]);
+        fallback.trace.strategy = Some(RenderStrategy::ScrollBlit);
+        assert!(fallback.is_replay_anchor());
+        let mut rec = Recording::new(header());
+        rec.push_frame(fallback.clone());
+        assert!(ValidatedRecording::try_from(rec).is_ok());
+
+        for failure in 0..3 {
+            let mut invalid = fallback.clone();
+            match failure {
+                0 => invalid.trace.outcome = TraceOutcome::HeldOnBridgeFailure,
+                1 => invalid.result = RecordedPaintResult::Retry,
+                2 => invalid.trace.effective = Some(RenderStrategy::ScrollBlit),
+                _ => unreachable!(),
+            }
+            invalid.trace.strategy = Some(RenderStrategy::FullRebuild);
+            assert!(!invalid.is_replay_anchor());
+            let mut rec = Recording::new(header());
+            rec.push_frame(invalid);
+            assert!(ValidatedRecording::try_from(rec).is_err());
+        }
+    }
+
+    #[test]
+    fn validated_recording_checks_directly_constructed_schema() {
+        let mut rec = Recording::new(header());
+        rec.push_frame(anchored_frame(0, 0, Vec::new()));
+        rec.header.schema_version = ICR_SCHEMA_VERSION + 1;
+        assert!(ValidatedRecording::try_from(rec).is_err());
+    }
+
+    #[test]
+    fn validated_recording_rejects_invalid_canvas_metrics() {
+        for (w, h, dpr) in [
+            (f64::NAN, 400.0, 1.0),
+            (800.0, f64::INFINITY, 1.0),
+            (800.0, 400.0, 0.0),
+            (800.0, 400.0, -1.0),
+            (f64::from(i32::MAX) * 4.0, 400.0, 1.0),
+        ] {
+            let mut rec = Recording::new(IcrHeader::new(
+                w,
+                h,
+                dpr,
+                ThemeSnapshot::from(&CanvasTheme::light()),
+                0,
+            ));
+            rec.push_frame(anchored_frame(0, 0, Vec::new()));
+            assert!(
+                ValidatedRecording::try_from(rec).is_err(),
+                "{w} x {h} @ {dpr} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validated_recording_rejects_backwards_timestamps() {
+        let mut rec = Recording::new(header());
+        rec.push_frame(anchored_frame(0, 10, Vec::new()));
+        rec.push_frame(anchored_frame(1, 9, Vec::new()));
+
+        assert!(ValidatedRecording::try_from(rec).is_err());
+    }
+
+    #[test]
+    fn validated_recording_rejects_unbalanced_brackets_and_non_finite_numbers() {
+        let cases = [
+            // Clip left open at the end of the frame.
+            vec![DrawOp::PushClip {
+                rect: pix(0, 0, 1, 1),
+            }],
+            // Pop with nothing pushed.
+            vec![DrawOp::PopClip],
+            // Group left open.
+            vec![DrawOp::BeginGroup {
+                class: GroupClass::Grid,
+            }],
+            // Non-finite stroke width.
+            vec![DrawOp::RectStroke {
+                rect: pix(0, 0, 1, 1),
+                color: "#000".into(),
+                width: f64::NAN,
+            }],
+            // Non-finite text origin.
+            vec![DrawOp::FillText {
+                text: "x".into(),
+                x: f64::INFINITY,
+                y: 0.0,
+                font_css: "12px sans-serif".into(),
+                color: "#000".into(),
+                align: TextAlign::Start,
+                baseline: TextBaseline::Top,
+            }],
+            // DPR transform that cannot name a scale.
+            vec![DrawOp::ApplyDprTransform { dpr: 0.0 }],
+        ];
+        for (index, ops) in cases.into_iter().enumerate() {
+            let mut rec = Recording::new(header());
+            rec.push_frame(anchored_frame(0, 0, ops));
+            assert!(
+                ValidatedRecording::try_from(rec).is_err(),
+                "case {index} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn validated_recording_rejects_grid_ops_before_a_committed_anchor() {
+        let mut rec = Recording::new(header());
+        let mut blit = anchored_frame(
+            0,
+            0,
+            vec![DrawOp::ClearRect {
+                rect: pix(0, 0, 1, 1),
+            }],
+        );
+        // A blit frame: painted grid ops, but no committed FullRebuild has
+        // been seen, so a replay has no pixels to composite onto.
+        blit.trace = trace(RenderStrategy::ScrollBlit, 0b0100);
+        rec.push_frame(blit);
+
+        assert!(ValidatedRecording::try_from(rec).is_err());
+    }
+
+    #[test]
+    fn validated_recording_rejects_empty_frame_list() {
+        let rec = Recording::new(header());
+
+        assert!(ValidatedRecording::try_from(rec).is_err());
     }
 }

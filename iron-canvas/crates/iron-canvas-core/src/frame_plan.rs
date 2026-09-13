@@ -22,6 +22,7 @@
 
 use std::rc::Rc;
 
+use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
 use crate::model_adapter::{CanvasModel, CanvasView};
@@ -75,23 +76,27 @@ impl FrozenCount {
 /// could assemble an internally inconsistent snapshot (e.g. a view from one
 /// sheet paired with another sheet's frozen counts).
 ///
-/// Fields stay `pub(crate)`: `Chrome`'s constructor and the classifier this
-/// struct feeds are both in-crate. A handful of read-only accessors below
-/// expose values to out-of-crate integration tests without opening a
-/// mutation path.
+/// Fields are private: only [`Self::capture`] in this module may read or
+/// write them, so the read order, the frozen-count checks, and the
+/// sheet/view consistency check cannot be bypassed by assembling a
+/// snapshot elsewhere in the crate. The read-only accessors below are the
+/// crate-wide and out-of-crate read surface.
 #[derive(Clone)]
 pub struct FrameInputs {
-    pub(crate) size: CanvasSize,
-    pub(crate) dpr: f64,
-    pub(crate) theme: Rc<CanvasTheme>,
-    pub(crate) model_generation: u64,
-    pub(crate) sheet: u32,
-    pub(crate) view: CanvasView,
-    pub(crate) frozen_rows: FrozenCount,
-    pub(crate) frozen_cols: FrozenCount,
-    pub(crate) show_row_headers: bool,
-    pub(crate) show_col_headers: bool,
-    pub(crate) show_selection: bool,
+    /// Validated canvas metrics. The orchestrator parsed the host's resize
+    /// arguments once; carrying the parsed value (rather than a raw size/DPR
+    /// pair) is what makes every downstream `logical_extent`/`backing_size`
+    /// cast infallible.
+    metrics: CanvasMetrics,
+    theme: Rc<CanvasTheme>,
+    model_generation: u64,
+    sheet: u32,
+    view: CanvasView,
+    frozen_rows: FrozenCount,
+    frozen_cols: FrozenCount,
+    show_row_headers: bool,
+    show_col_headers: bool,
+    show_selection: bool,
 }
 
 /// Which scalar input a failed [`FrameInputs::capture`] attempt could not
@@ -135,9 +140,10 @@ impl FrameInputs {
     /// 6. column-header visibility;
     /// 7. selection visibility.
     ///
-    /// `size`, `dpr`, `theme`, and `model_generation` come from the caller
+    /// `metrics`, `theme`, and `model_generation` come from the caller
     /// (`Orchestrator`) rather than the model — they are host/orchestrator
-    /// state, not bridge reads. Selection visibility
+    /// state, not bridge reads, and `metrics` was already parsed from the
+    /// host's resize arguments. Selection visibility
     /// (`CanvasModel::get_show_selection`) is infallible by design (default
     /// `true`), so it cannot itself hold the attempt.
     ///
@@ -146,8 +152,7 @@ impl FrameInputs {
     /// failed read.
     pub fn capture(
         model: &dyn CanvasModel,
-        size: CanvasSize,
-        dpr: f64,
+        metrics: CanvasMetrics,
         theme: Rc<CanvasTheme>,
         model_generation: u64,
     ) -> Result<Self, FrameInputFailure> {
@@ -188,8 +193,7 @@ impl FrameInputs {
         let show_selection = model.get_show_selection();
 
         Ok(FrameInputs {
-            size,
-            dpr,
+            metrics,
             theme,
             model_generation,
             sheet,
@@ -202,8 +206,13 @@ impl FrameInputs {
         })
     }
 
+    /// Validated canvas metrics for this attempt.
+    pub fn metrics(&self) -> CanvasMetrics {
+        self.metrics
+    }
+
     pub fn size(&self) -> CanvasSize {
-        self.size
+        self.metrics.size()
     }
 
     pub fn theme(&self) -> &Rc<CanvasTheme> {
@@ -239,7 +248,7 @@ impl FrameInputs {
     }
 
     pub fn dpr(&self) -> f64 {
-        self.dpr
+        self.metrics.dpr()
     }
 
     pub fn model_generation(&self) -> u64 {

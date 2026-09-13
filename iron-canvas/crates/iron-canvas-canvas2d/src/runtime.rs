@@ -11,7 +11,7 @@ use wasm_bindgen::JsValue;
 use web_sys::HtmlCanvasElement;
 
 use iron_canvas_core::Orchestrator;
-use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::layer::Surface;
 
 use crate::{CanvasPainter, WebSurface};
@@ -85,9 +85,12 @@ where
 
     /// Resize both surfaces and keep the playback/recording DPR beside the
     /// same operation that updates the backing stores.
-    pub fn resize(&mut self, size: CanvasSize, dpr: f64) {
-        self.dpr = dpr;
-        self.orchestrator.resize(size, dpr);
+    /// Resize the canvas runtime and both backing stores in one call.
+    /// `metrics` was parsed by the caller (the wasm facade or the datagrid
+    /// runtime), so every backend receives a validated pair.
+    pub fn resize(&mut self, metrics: CanvasMetrics) {
+        self.dpr = metrics.dpr();
+        self.orchestrator.resize(metrics);
     }
 
     pub fn dpr(&self) -> f64 {

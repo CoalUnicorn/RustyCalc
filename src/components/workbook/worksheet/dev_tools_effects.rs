@@ -185,26 +185,36 @@ pub(super) fn install_export_effect(
                 .map(|s| s.replace(':', "-"))
                 .unwrap_or_else(|| "now".into());
             match cmd {
-                ExportCmd::Svg => {
-                    let svg = ic.export_svg(size.w, size.h);
-                    if let Err(e) = crate::input::xlsx_io::trigger_download(
-                        svg.as_bytes(),
-                        &format!("sheet-{ts}.svg"),
-                        Some("image/svg+xml"),
-                    ) {
-                        state.status.set(Some(StatusMessage::Error(e)));
+                ExportCmd::Svg => match ic.export_svg(size.w, size.h) {
+                    Ok(svg) => {
+                        if let Err(e) = crate::input::xlsx_io::trigger_download(
+                            svg.as_bytes(),
+                            &format!("sheet-{ts}.svg"),
+                            Some("image/svg+xml"),
+                        ) {
+                            state.status.set(Some(StatusMessage::Error(e)));
+                        }
                     }
-                }
+                    Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                        "exportSvg failed: {e:?}"
+                    )))),
+                },
                 ExportCmd::Pdf => {
                     #[cfg(feature = "export")]
                     {
-                        let pdf = ic.export_pdf(size.w, size.h);
-                        if let Err(e) = crate::input::xlsx_io::trigger_download(
-                            &pdf,
-                            &format!("sheet-{ts}.pdf"),
-                            Some("application/pdf"),
-                        ) {
-                            state.status.set(Some(StatusMessage::Error(e)));
+                        match ic.export_pdf(size.w, size.h) {
+                            Ok(pdf) => {
+                                if let Err(e) = crate::input::xlsx_io::trigger_download(
+                                    &pdf,
+                                    &format!("sheet-{ts}.pdf"),
+                                    Some("application/pdf"),
+                                ) {
+                                    state.status.set(Some(StatusMessage::Error(e)));
+                                }
+                            }
+                            Err(e) => state.status.set(Some(StatusMessage::Error(format!(
+                                "exportPdf failed: {e:?}"
+                            )))),
                         }
                     }
                     #[cfg(not(feature = "export"))]

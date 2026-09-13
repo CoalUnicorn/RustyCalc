@@ -8,7 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
 
-use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::layer::Surface;
@@ -440,7 +440,7 @@ impl Surface for MemSurface {
         Rc::clone(&self.painter)
     }
 
-    fn resize(&mut self, _css: CanvasSize, _dpr: f64) {}
+    fn resize(&mut self, _metrics: CanvasMetrics) {}
     fn present(&self) {
         self.presents.set(self.presents.get() + 1);
     }
@@ -733,8 +733,8 @@ impl<S: Surface> Surface for RecordingSurface<S> {
         Rc::clone(&self.painter)
     }
 
-    fn resize(&mut self, css: CanvasSize, dpr: f64) {
-        self.inner.resize(css, dpr);
+    fn resize(&mut self, metrics: CanvasMetrics) {
+        self.inner.resize(metrics);
     }
 
     fn present(&self) {

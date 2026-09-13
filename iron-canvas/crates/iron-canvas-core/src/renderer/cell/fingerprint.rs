@@ -874,8 +874,8 @@ mod tests {
         };
         let inputs = FrameInputs::capture(
             &model,
-            CanvasSize { w: 420.0, h: 260.0 },
-            1.0,
+            crate::geometry::CanvasMetrics::new(CanvasSize { w: 420.0, h: 260.0 }, 1.0)
+                .expect("test canvas metrics are valid"),
             Rc::new(CanvasTheme::light()),
             0,
         )

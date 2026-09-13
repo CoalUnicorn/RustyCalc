@@ -330,8 +330,14 @@ fn chrome_build_uses_captured_sheet_not_a_second_live_read() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
 
     // Capture is the one read `Chrome::build` is allowed to depend on.
-    let inputs = iron_canvas_core::FrameInputs::capture(&model, canvas_default(), 1.0, theme, 0)
-        .expect("healthy model must capture successfully");
+    let inputs = iron_canvas_core::FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        theme,
+        0,
+    )
+    .expect("healthy model must capture successfully");
     assert_eq!(inputs.sheet(), 0, "capture must see the first-call value");
 
     // Prove the premise: a second call to the same accessor really does

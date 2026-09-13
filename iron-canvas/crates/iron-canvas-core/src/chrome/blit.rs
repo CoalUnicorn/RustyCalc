@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 use crate::frame_plan::FrameInputs;
+use crate::geometry::CanvasMetrics;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::geometry::slot::{AxisSlot, AxisSlots, RowSlot, scroll_first};
@@ -220,13 +221,13 @@ impl PreparedBlitFrame {
             row_header_labels,
             col_header_labels,
             theme,
-            dpr,
+            metrics,
             model_generation,
             show_row_headers,
             show_col_headers,
             kind,
         } = rollback;
-        // `theme`/`dpr`/`model_generation`/`show_row_headers`/
+        // `theme`/`metrics`/`model_generation`/`show_row_headers`/
         // `show_col_headers`/`kind` all came from `inputs`/`FrameKindTag::Blitted`
         // when `candidate` was built, not from `prev` — dropped here in
         // favor of `rollback`'s saved originals, bound above.
@@ -236,7 +237,6 @@ impl PreparedBlitFrame {
             row_header_thickness,
             col_header_thickness,
             cell_origin,
-            canvas_size,
             ..
         } = candidate;
         Chrome {
@@ -245,9 +245,8 @@ impl PreparedBlitFrame {
             row_header_thickness,
             col_header_thickness,
             cell_origin,
-            canvas_size,
+            metrics,
             theme,
-            dpr,
             model_generation,
             show_row_headers,
             show_col_headers,
@@ -259,9 +258,9 @@ impl PreparedBlitFrame {
 /// The exact fields `try_blit_reuse` replaces when it builds `candidate`
 /// from `prev`, saved so [`PreparedBlitFrame::rollback`] can restore them
 /// without re-deriving anything from `inputs` or the model. `sheet`,
-/// `col_header_thickness`, `cell_origin`, `canvas_size`, and
-/// `row_header_thickness` are deliberately not here: `try_blit_reuse`
-/// always either copies them from `prev` unchanged or proves them equal to
+/// `col_header_thickness`, `cell_origin`, and `row_header_thickness` are
+/// deliberately not here: `try_blit_reuse` always either copies them from
+/// `prev` unchanged or proves them equal to
 /// `prev`'s value — via its own row-header-thickness gate, or via
 /// `Chrome::classify`'s canvas-size/etc. hard breaks that must pass before
 /// `try_blit_reuse` is ever called — before `candidate` is built, so
@@ -275,7 +274,7 @@ struct BlitRollback {
     row_header_labels: Vec<String>,
     col_header_labels: Vec<String>,
     theme: Rc<CanvasTheme>,
-    dpr: f64,
+    metrics: CanvasMetrics,
     model_generation: u64,
     show_row_headers: bool,
     show_col_headers: bool,
@@ -395,7 +394,7 @@ pub(super) fn try_blit_reuse(
         row_header_labels: std::mem::take(&mut prev.pane_set.row_header_labels),
         col_header_labels: std::mem::take(&mut prev.pane_set.col_header_labels),
         theme: prev.theme,
-        dpr: prev.dpr,
+        metrics: prev.metrics,
         model_generation: prev.model_generation,
         show_row_headers: prev.show_row_headers,
         show_col_headers: prev.show_col_headers,
@@ -432,9 +431,8 @@ pub(super) fn try_blit_reuse(
         row_header_thickness,
         col_header_thickness: prev.col_header_thickness,
         cell_origin: prev.cell_origin,
-        canvas_size: canvas,
+        metrics: inputs.metrics(),
         theme: Rc::clone(inputs.theme()),
-        dpr: inputs.dpr(),
         model_generation: inputs.model_generation(),
         show_row_headers: inputs.show_row_headers(),
         show_col_headers: inputs.show_col_headers(),
@@ -453,7 +451,7 @@ pub(super) fn try_blit_rows(
     sheet: u32,
     new_top: i32,
 ) -> Option<BlitPlan> {
-    let (canvas_w, canvas_h) = prev.canvas_size.to_logical_extent();
+    let (canvas_w, canvas_h) = prev.metrics.logical_extent();
     let pane_x = prev.pane_set.cols.frozen_offset;
     let pane_y = prev.pane_set.rows.frozen_offset;
     // pane_h is bounded by the canvas backing store extent, not by
@@ -493,7 +491,7 @@ pub(super) fn try_blit_cols(
     sheet: u32,
     new_left: i32,
 ) -> Option<BlitPlan> {
-    let (canvas_w, canvas_h) = prev.canvas_size.to_logical_extent();
+    let (canvas_w, canvas_h) = prev.metrics.logical_extent();
     let pane_x = prev.pane_set.cols.frozen_offset;
     let pane_y = prev.pane_set.rows.frozen_offset;
     // pane_w is bounded by the canvas backing store extent, not by

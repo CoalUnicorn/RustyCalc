@@ -101,7 +101,13 @@ fn frame_inputs_capture_reads_each_scalar_exactly_once() {
     };
     let theme = Rc::new(CanvasTheme::light());
 
-    let result = FrameInputs::capture(&model, canvas_default(), 1.0, theme, 0);
+    let result = FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        theme,
+        0,
+    );
 
     let inputs = result.expect("healthy model must capture successfully");
     assert_eq!(
@@ -152,8 +158,8 @@ fn base_model() -> TestModel {
 fn capture(model: &TestModel) -> Result<FrameInputs, FrameInputFailure> {
     FrameInputs::capture(
         model,
-        canvas_default(),
-        1.0,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
         Rc::new(CanvasTheme::light()),
         0,
     )

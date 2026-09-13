@@ -45,7 +45,8 @@ fn svg_render_discards_overlay() {
         model,
         &CanvasTheme::light(),
         CanvasSize { w: 300.0, h: 200.0 },
-    );
+    )
+    .expect("a one-shot export of a readable model commits a frame");
 
     assert!(
         svg.starts_with("<svg "),

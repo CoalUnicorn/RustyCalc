@@ -20,7 +20,10 @@ fn harness(model: Rc<TestModel>) -> Orchestrator<MemSurface> {
 
 fn harness_at_dpr(model: Rc<TestModel>, dpr: f64) -> Orchestrator<MemSurface> {
     let mut orchestrator = Orchestrator::new(MemSurface::new(), MemSurface::new());
-    orchestrator.resize(CanvasSize { w: 800.0, h: 600.0 }, dpr);
+    orchestrator.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, dpr)
+            .expect("test canvas metrics are valid"),
+    );
     orchestrator.set_model(model);
     orchestrator.set_frame_diagnostics_enabled(true);
     assert_eq!(orchestrator.render_pending(), PaintResult::Rendered);

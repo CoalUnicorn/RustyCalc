@@ -653,6 +653,11 @@ pub fn test_inputs(
     canvas: CanvasSize,
     theme: &Rc<CanvasTheme>,
 ) -> FrameInputs {
-    FrameInputs::capture(model, canvas, 1.0, Rc::clone(theme), 0)
-        .expect("test model must capture FrameInputs successfully")
+    FrameInputs::capture(
+        model,
+        iron_canvas_core::CanvasMetrics::new(canvas, 1.0).expect("test canvas metrics are valid"),
+        Rc::clone(theme),
+        0,
+    )
+    .expect("test model must capture FrameInputs successfully")
 }
