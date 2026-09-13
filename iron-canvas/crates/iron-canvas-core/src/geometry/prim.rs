@@ -60,18 +60,12 @@ impl Line {
     pub fn extend(self, d: i32) -> Self {
         match self {
             Line::H { span, y } => Line::H {
-                span: Span {
-                    from: span.from - d,
-                    to: span.to + d,
-                },
+                span: span.extend(d),
                 y,
             },
             Line::V { span, x } => Line::V {
                 x,
-                span: Span {
-                    from: span.from - d,
-                    to: span.to + d,
-                },
+                span: span.extend(d),
             },
         }
     }
@@ -83,6 +77,27 @@ impl Line {
 pub struct Span {
     pub from: i32,
     pub to: i32,
+}
+
+impl Span {
+    /// Move `from` down and `to` up by `d` pixels, along the segment.
+    /// Negative `d` shrinks it instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use iron_canvas_core::Span;
+    /// assert_eq!(
+    ///     Span { from: 10, to: 100 }.extend(2),
+    ///     Span { from: 8, to: 102 },
+    /// );
+    /// ```
+    pub fn extend(self, d: i32) -> Span {
+        Span {
+            from: self.from - d,
+            to: self.to + d,
+        }
+    }
 }
 
 //  Shared axis - row-vs-column symmetry
