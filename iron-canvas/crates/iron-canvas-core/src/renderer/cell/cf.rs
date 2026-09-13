@@ -18,6 +18,7 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::cache::ColorIntern;
+use crate::renderer::cache::color::data_bar_rgb;
 use crate::style::CellDecoration;
 
 /// Resolved icon decoration for a cell. The `icon` field is a String
@@ -66,7 +67,7 @@ impl CfDecorationPaint {
                 color_rgb: [0, 0, 0], // unused until icon glyphs are painted
             }),
             CellDecoration::DataBar(spec) => CfDecorationPaint::DataBar(CfDataBarPaint {
-                fill_css: intern.get_rgb(parse_hex_color(&spec.color).unwrap_or([0, 0, 0])),
+                fill_css: intern.get_rgb(data_bar_rgb(&spec)),
                 fill_fraction: spec.fraction.clamp(0.0, 1.0),
             }),
             // RatingSpec fields are u32; CfDecorationPaint::Rating is u8.
@@ -160,54 +161,10 @@ fn star_points(center: Point, outer_r: f64) -> [Point; 10] {
     })
 }
 
-/// Parse a `#RRGGBB` hex string into `[R, G, B]`. Returns `None` for
-/// invalid formats or non-hex characters.
-///
-/// `pub(super)`: also used by [`super::fingerprint`]'s `hash_decoration` to
-/// hash a data bar's resolved color without constructing a
-/// `CfDecorationPaint`.
-pub(super) fn parse_hex_color(hex: &str) -> Option<[u8; 3]> {
-    let hex = hex.trim_start_matches('#');
-    if hex.len() != 6 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return None;
-    }
-    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-    Some([r, g, b])
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::style::{DataBarSpec, RatingSpec};
-
-    #[test]
-    fn parses_hex_with_and_without_hash() {
-        assert_eq!(parse_hex_color("#FF8000"), Some([255, 128, 0]));
-        assert_eq!(parse_hex_color("00ff00"), Some([0, 255, 0]));
-    }
-
-    #[test]
-    fn rejects_malformed_hex() {
-        assert_eq!(parse_hex_color("#FFF"), None); // too short
-        assert_eq!(parse_hex_color("#GGGGGG"), None); // non-hex
-        assert_eq!(parse_hex_color(""), None);
-    }
-
-    #[test]
-    fn rejects_non_ascii_hex_without_panicking() {
-        for color in ["#aé000", "#00aé0", "#0000é", "#中文"] {
-            assert_eq!(parse_hex_color(color), None, "{color}");
-        }
-    }
-
-    #[test]
-    fn rejects_signed_hex_components() {
-        for color in ["#+10000", "#00+100", "#0000+1"] {
-            assert_eq!(parse_hex_color(color), None, "{color}");
-        }
-    }
 
     #[test]
     fn data_bar_clamps_fraction_and_normalizes_color() {

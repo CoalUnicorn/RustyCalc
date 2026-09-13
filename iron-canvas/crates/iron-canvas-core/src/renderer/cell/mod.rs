@@ -16,12 +16,16 @@
 //! Pass order is load-bearing: bg -> CF decoration -> grid borders ->
 //! explicit borders -> text. See the doc on `paint_cells_pass`
 //! for why.
+//!
+//! [`repaint`] and [`repaint_plan`] are the retained-pixel decisions this tier
+//! consumes: `repaint_plan` selects a plan from the cache-tier fingerprint
+//! trees, and `repaint` turns it into executable clip geometry.
 
 pub mod borders;
 pub mod cf;
-pub mod fingerprint;
 pub mod paint;
 pub mod repaint;
+pub mod repaint_plan;
 pub mod text;
 
 pub use paint::{CellPaint, PaneCells};

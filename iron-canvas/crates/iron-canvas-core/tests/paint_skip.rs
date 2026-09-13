@@ -285,7 +285,7 @@ fn bridge_failure_holds_prior_grid_and_recovery_can_skip() {
 }
 
 #[test]
-fn damage_strip_splices_precise_history_for_next_content_check() {
+fn damage_strip_requires_exact_history_before_next_content_check_can_skip() {
     let model = TestModel::synthetic_grid().with_data_until(30);
     let (mut frame, core) = fixture(&model);
     assert!(!core.render_grid(&model, &frame));
@@ -298,7 +298,11 @@ fn damage_strip_splices_precise_history_for_next_content_check() {
 
     core.reset_trace();
     assert!(!core.render_grid(&model, &frame));
-    assert_eq!(core.trace().verdict, Some(GridVerdict::Cell));
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Full));
+
+    core.reset_trace();
+    assert!(!core.render_grid(&model, &frame));
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Skip));
 }
 
 #[test]

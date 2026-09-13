@@ -11,12 +11,13 @@ use crate::pending_work::RowSpan;
 use crate::renderer::RendererCore;
 use crate::renderer::blit_work;
 use crate::renderer::cache::BufferTruth;
-use crate::renderer::cell::PaneCells;
-use crate::renderer::cell::fingerprint::{
-    GridFingerprint, GridLayoutTransition, RepaintPlan, RepaintReason, RowShiftIneligible,
-    StripFingerprintSource,
+use crate::renderer::cache::fingerprint::{
+    GridFingerprint, RowShiftIneligible, StripFingerprintSource,
 };
+use crate::renderer::cache::layout_transition::GridLayoutTransition;
+use crate::renderer::cell::PaneCells;
 use crate::renderer::cell::repaint;
+use crate::renderer::cell::repaint_plan::{self, RepaintPlan, RepaintReason};
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diag::{
     DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose, DiagFingerprintActionTag,
@@ -386,7 +387,10 @@ impl<P: Painter> RendererCore<P> {
             .fingerprint
             .build_candidate(layout, &fetched);
         let (plan, reason, changed_rows, changed_cells) = if frame.kind.reuses_slots() {
-            let decision = self.grid_cache.fingerprint.compare_to_painted(&candidate);
+            let decision = repaint_plan::plan_grid_repaint(
+                self.grid_cache.fingerprint.painted().as_deref(),
+                &candidate,
+            );
             let mut reason = decision.reason;
             let plan = match decision.plan {
                 RepaintPlan::Cell(_) => {

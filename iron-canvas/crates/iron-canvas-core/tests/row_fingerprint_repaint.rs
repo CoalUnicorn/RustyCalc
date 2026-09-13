@@ -4,11 +4,11 @@ mod common;
 
 use std::rc::Rc;
 
-use iron_canvas_core::GridVerdict;
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::renderer::cache::BufferTruth;
 use iron_canvas_core::theme::CanvasTheme;
+use iron_canvas_core::{GridVerdict, RowSpan};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
@@ -72,4 +72,32 @@ fn unchanged_refetch_preserves_skip() {
     assert_eq!(core.trace().verdict, Some(GridVerdict::Skip));
     assert_eq!(core.grid_cache.buffer_truth(), BufferTruth::Valid);
     assert_eq!(core.grid_cache.layout(), layout);
+}
+
+#[test]
+fn damage_then_revert_must_repaint_before_history_can_skip() {
+    let model = TestModel::synthetic_grid()
+        .with_data_until(30)
+        .with_frozen_cols(2);
+    model.set_cell(5, 1, "original");
+    let (frame, core) = primed(&model);
+
+    model.set_cell(5, 1, "damaged");
+    assert!(!core.render_grid_damage(&model, &frame, &[RowSpan::new(5, 5)]));
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Strip));
+
+    model.set_cell(5, 1, "original");
+    let before = core.painter().ops().len();
+    core.reset_trace();
+    assert!(!core.render_grid(&model, &frame));
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Full));
+    assert!(
+        core.painter().ops()[before..]
+            .iter()
+            .any(|op| matches!(op, DrawOp::FillText { text, .. } if text == "original"))
+    );
+
+    core.reset_trace();
+    assert!(!core.render_grid(&model, &frame));
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Skip));
 }

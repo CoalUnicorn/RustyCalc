@@ -30,7 +30,8 @@ use crate::geometry::prim::Axis;
 use crate::orchestrator::{FrameOutcome, GridVerdict, RenderStrategy};
 use crate::pending_work::{RowSpan, WorkFlags};
 use crate::renderer::cache::BufferTruth;
-use crate::renderer::cell::fingerprint::{FingerprintTruth, RepaintReason};
+use crate::renderer::cache::fingerprint::FingerprintTruth;
+use crate::renderer::cell::repaint_plan::RepaintReason;
 use crate::renderer::prepared::FetchedCells;
 use crate::types::coord::RCRange;
 /// Wire version of the snapshot shape. Bump when the projection changes.

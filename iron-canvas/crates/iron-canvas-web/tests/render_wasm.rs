@@ -965,7 +965,7 @@ fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() 
 /// Acceptance criterion 2b: the CHANGED row's own bottom border disappears
 /// this frame (present in `painted`, absent in `scratch`) — an internal
 /// span-boundary change, not just a neighbour's static state — which also
-/// forces `RepaintPlan::Full` (`fingerprint.rs`'s "old border removed"
+/// forces `RepaintPlan::Full` (`repaint_plan.rs`'s "old border removed"
 /// arm). Byte-identical to forced-fresh proves the fallback actually
 /// erases the stale stroke correctly, not just that *some* repaint
 /// happened.
@@ -2448,6 +2448,48 @@ fn stable_assert_changed_cells_trace(trace: &str, case: &str) {
         "stable repaint case `{case}` must carry VIEW | CONTENT | OVERLAY through ChangedCells; \
          trace was `{trace}`"
     );
+}
+
+#[wasm_bindgen_test]
+fn damage_then_revert_matches_forced_fresh() {
+    for dpr in [1.0, 1.25, 2.0] {
+        let store = stage6_fixture_store();
+        let view = StableViewFixture::new(5, 3);
+        let row = STAGE6_DAMAGE_ROW;
+        let col = STAGE6_EDIT_COL;
+        stage6_set_value(&store, row, col, "original");
+        let (mut canvas, grid, overlay) = stable_canvas_over_at(
+            Rc::clone(&store),
+            view.clone(),
+            STAGE6_CANVAS_W,
+            STAGE6_CANVAS_H,
+            dpr,
+        );
+
+        stage6_set_value(&store, row, col, "damaged");
+        canvas.mark_rows_damaged(0, row, row);
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+        stage6_assert_verdict(&canvas.frame_trace(), "grid:strip", "damage before revert");
+
+        stage6_set_value(&store, row, col, "original");
+        canvas.mark_content_dirty();
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+        stable_assert_matches_forced_fresh_at(
+            &grid,
+            &overlay,
+            &store,
+            &view,
+            &format!("Damage followed by a reverted value at DPR {dpr}"),
+            STAGE6_CANVAS_W,
+            STAGE6_CANVAS_H,
+            dpr,
+        );
+        stage6_assert_verdict(&canvas.frame_trace(), "grid:FULL", "revert after damage");
+
+        canvas.mark_content_dirty();
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+        stage6_assert_verdict(&canvas.frame_trace(), "grid:skip", "reseeded history");
+    }
 }
 
 #[wasm_bindgen_test]
