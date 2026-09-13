@@ -225,8 +225,9 @@ impl Frame {
 /// visible canvas into a state no later frame repairs.
 ///
 /// This type is that parse. `ValidatedRecording::try_from(Recording)` is the only
-/// constructor, so every consumer of [`crate::replay`] and of the web facade's
-/// playback session holds a checked value. It is never serialized: the ICR
+/// constructor, so the web facade's playback session holds a checked value.
+/// The low-level [`crate::replay`] API accepts raw operations separately.
+/// This type is never serialized: the ICR
 /// wire shape is unchanged, and this change only rejects inputs the loader
 /// previously accepted.
 #[derive(Debug, Clone, PartialEq)]

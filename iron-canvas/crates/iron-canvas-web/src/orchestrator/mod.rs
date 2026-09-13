@@ -8,6 +8,8 @@ mod export;
 mod js_api;
 #[cfg(feature = "dev-tools")]
 mod playback_api;
+#[cfg(feature = "dev-tools")]
+pub use playback_api::ReplayResult;
 mod recording;
 
 use std::rc::Rc;
@@ -19,6 +21,7 @@ use crate::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::wasm::JsBackedModel;
 use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
+use iron_canvas_core::AutoFitError;
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::PaintResult;
 use iron_canvas_core::geometry::CanvasMetrics;
@@ -331,13 +334,27 @@ impl IronCanvas {
         self.runtime.orchestrator().scroll_to_show(row, column)
     }
 
-    pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
+    /// `Ok(None)` when the span has no content to fit; `Err` when the model
+    /// is missing or a read fails. See
+    /// [`iron_canvas_core::AutoFitError`].
+    pub fn fit_column_width(
+        &self,
+        col: i32,
+        first_row: i32,
+        last_row: i32,
+    ) -> Result<Option<f64>, AutoFitError> {
         self.runtime
             .orchestrator()
             .fit_column_width(col, first_row, last_row)
     }
 
-    pub fn fit_row_height(&self, row: i32, first_col: i32, last_col: i32) -> Option<f64> {
+    /// Row mirror of [`Self::fit_column_width`].
+    pub fn fit_row_height(
+        &self,
+        row: i32,
+        first_col: i32,
+        last_col: i32,
+    ) -> Result<Option<f64>, AutoFitError> {
         self.runtime
             .orchestrator()
             .fit_row_height(row, first_col, last_col)

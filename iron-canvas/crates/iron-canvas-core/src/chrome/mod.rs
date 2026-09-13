@@ -49,7 +49,7 @@ mod pane_region;
 mod pane_set;
 mod recycled_slots;
 
-pub(crate) use blit::PreparedBlitFrame;
+pub(crate) use blit::PreparedBlitOutcome;
 pub use blit::{BlitPlan, FramePath, Shift};
 pub use kind::FrameKindTag;
 pub use pane_region::{GridLayout, GridSegment, GridShape, PaneRegion};
@@ -284,24 +284,21 @@ impl Chrome {
     }
 
     /// Prepare the blit fast-path's next-frame candidate without committing:
-    /// `Ok(prepared)` on successful in-place reuse, `Err(prev)` — `prev`
-    /// handed back whole — on reject (see `try_blit_reuse`'s doc for both
-    /// cases). `Chrome::next_blit` is the immediate-commit wrapper built on
-    /// top of this for callers that don't need to hold the decision open;
-    /// `Orchestrator::render_scroll_blit` calls this directly instead, so
-    /// it can call `PreparedBlitFrame::rollback` if the paint that follows a
-    /// successful `Ok` still fails a bulk bridge read. `pub(crate)`: an
-    /// execution detail of the render pipeline, not consumer-facing API.
-    // Same large-`Err` shape as `try_blit_reuse` (this just forwards to it) —
-    // see that function's own comment for why `Chrome` stays by-value here
-    // instead of boxed.
-    #[allow(clippy::result_large_err)]
+    /// [`PreparedBlitOutcome::Ready`] on successful in-place reuse,
+    /// [`PreparedBlitOutcome::FreshFallback`] carrying `prev` whole on reject
+    /// (see `try_blit_reuse`'s doc for both cases). `Chrome::next_blit` is the
+    /// immediate-commit wrapper built on top of this for callers that don't
+    /// need to hold the decision open; `Orchestrator::render_scroll_blit`
+    /// calls this directly instead, so it can call
+    /// `PreparedBlitFrame::rollback` if the paint that follows a successful
+    /// `Ready` still fails a bulk bridge read. `pub(crate)`: an execution
+    /// detail of the render pipeline, not consumer-facing API.
     pub(crate) fn prepare_blit(
         prev: Chrome,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
         plan: &BlitPlan,
-    ) -> Result<PreparedBlitFrame, Chrome> {
+    ) -> PreparedBlitOutcome {
         blit::try_blit_reuse(prev, model, inputs, plan)
     }
 
@@ -311,9 +308,10 @@ impl Chrome {
     /// Qualification passed (`Chrome::classify` returned `FrameDelta::Scroll`),
     /// but in-place reuse may still reject — e.g. the row-header digit boundary at 99 -> 100,
     /// where `row_header_thickness` widens and the cross-axis cell-area origin
-    /// shifts. `try_blit_reuse` hands `prev` back (`Err`) on reject, and we
-    /// rebuild `Fresh`. The two results map straight to the two `BlitOutcome`
-    /// arms at the decision point, so no caller has to assert an impossible
+    /// shifts. `try_blit_reuse` hands `prev` back
+    /// (`PreparedBlitOutcome::FreshFallback`) on reject, and we rebuild
+    /// `Fresh`. The two outcomes map straight to the two `BlitOutcome` arms at
+    /// the decision point, so no caller has to assert an impossible
     /// `SlotsReused` away.
     ///
     /// Implemented through [`Self::prepare_blit`] — the same internal
@@ -330,8 +328,8 @@ impl Chrome {
             return BlitOutcome::FreshFallback(Self::next(None, model, inputs, FramePath::Fresh));
         };
         match Self::prepare_blit(prev, model, inputs, plan) {
-            Ok(prepared) => BlitOutcome::Blitted(prepared.commit()),
-            Err(prev) => {
+            PreparedBlitOutcome::Ready(prepared) => BlitOutcome::Blitted(prepared.commit()),
+            PreparedBlitOutcome::FreshFallback(prev) => {
                 BlitOutcome::FreshFallback(Self::next(Some(prev), model, inputs, FramePath::Fresh))
             }
         }
@@ -613,7 +611,8 @@ impl Chrome {
     /// beyond the walked extent. Pure `Chrome` math, no model access.
     ///
     /// Both axes are normalized once, then projected onto their
-    /// frozen-plus-scroll union ([`AxisSlots::project_interval`]). A range that
+    /// frozen-plus-scroll union
+    /// ([`AxisSlots::project_interval`](crate::geometry::slot::AxisSlots::project_interval)). A range that
     /// starts in the address gap and ends in the scroll band therefore covers
     /// only the ids it names — never the header or frozen pixels between them —
     /// and a range that overlaps only the frozen band still returns its true

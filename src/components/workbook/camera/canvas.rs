@@ -43,12 +43,7 @@ impl CameraCanvas {
     /// (non-finite or negative extent, non-positive DPR, backing store past
     /// `u32`) leaves the runtime untouched, so a camera keeps its last valid
     /// size instead of adopting a canvas no geometry can describe.
-    pub fn resize(
-        &mut self,
-        css_w: f64,
-        css_h: f64,
-        dpr: f64,
-    ) -> Result<(), CanvasMetricError> {
+    pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) -> Result<(), CanvasMetricError> {
         let metrics = CanvasMetrics::new(CanvasSize { w: css_w, h: css_h }, dpr)?;
         self.runtime.resize(metrics);
         Ok(())
@@ -88,7 +83,10 @@ impl CameraCanvas {
             .borrow_with(|g| (g.row_count(), g.column_count()));
         for col in 0..cols {
             // 1-based model coords for the measure; 0-based index for the write.
-            if let Some(w) =
+            // A failed measurement (no model, unreadable sheet or column extent)
+            // leaves that column at its stored width; `Ok(None)` means the
+            // column has no content to fit to.
+            if let Ok(Some(w)) =
                 self.runtime
                     .orchestrator()
                     .fit_column_width(col as i32 + 1, 1, rows as i32)

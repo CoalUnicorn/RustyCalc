@@ -37,6 +37,7 @@ pub use renderer::diag::{
 
 pub use render_overlays::RenderOverlays;
 
+pub use autofit::AutoFitError;
 pub use decoration::{DecorationId, Layer};
 pub use geometry::{
     CanvasMetricError, CanvasMetrics, CanvasSize,

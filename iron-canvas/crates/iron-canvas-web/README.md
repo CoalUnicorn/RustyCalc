@@ -15,20 +15,22 @@ The primary shippable artifact for spreadsheet consumers: RustyCalc's Leptos fro
 Method names are camelCase, matching the IronCalc wasm API convention (snake_case stays on the Rust side). Payload setters return `Result<(), JsError>`; optional query results are `null` when absent.
 
 - **lifecycle** — `create(gridCanvas, overlayCanvas)` (static), `setModel(model)`, `resize(cssW, cssH, dpr)`, `dispose()`
+  - `resize` parses its arguments as canvas metrics at the host boundary and throws on a non-finite or negative extent, a DPR that is not finite and greater than zero, or a DPR-scaled backing store that cannot fit `u32`.
 - **paint** — `requestRepaint`, `markContentDirty`, `markRowsDamaged(sheet, rowStart, rowEnd)`, `viewChanged`, `requestOverlayRepaint`, `renderPending`, `fontsChanged`, `frameTrace`, `recordingSupported` (static)
   - `renderPending` returns `RenderResult`: `Idle`, `Rendered`, `RetryRequired`, or `PlaybackActive`. Call it again on the next frame after `RetryRequired`.
   - `recordingSupported` reports whether the `dev-tools` feature is compiled in, so hosts can hide their Record button on prod builds.
 - **theme** — `setThemeName(name)` (`"dark"` recognized, everything else maps to light), `setThemeFromElement(el)` (reads `--palette-*` CSS vars), `setTheme(theme)` (full palette push, every field required), `setThemeVariables(vars)` (partial override with light fallback), `themeChanged()`
 - **export** — `exportSvg(cssW, cssH)`; `exportPdf(cssW, cssH)` with feature `pdf`
+  - Both parse the size as canvas metrics and drive one paint attempt. They throw when no model is bound, the size is invalid, or the attempt does not commit a frame; the old empty-string / empty-array return for a missing model is gone.
 - **queries** — `hitTest(x, y)`, `cellRect(row, column)`, `resizeHandleAt(x, y, tolerance)`, `autofillHandlePos()`, `pixelToCell(x, y)`, `canvasSize()`, `fitColumnWidth(column, firstRow, lastRow)`
   - Shapes: `hitTest` → object tagged on `kind`; `cellRect` → `{x, y, w, h}`; `autofillHandlePos` → `{x, y}`; `pixelToCell` → `{row, column}`; `canvasSize` → `{w, h}`.
-  - `fitColumnWidth` measures a 1-based column over an inclusive row span and returns CSS pixels, or `undefined` when there is no content to fit. The host applies the result through its workbook model and requests a repaint.
+  - `fitColumnWidth` measures a 1-based column over an inclusive row span and returns CSS pixels, or `undefined` when there is no content to fit. A missing model or failed sheet, value, or style read throws. The host applies a successful measurement through its workbook model and requests a repaint.
 - **overlays** — `setExtendTo(target|null)`, `setClipboard(area|null)`, `setPointRange(range|null)`, `setFormulaRefs(refs)`, `setOverlays(overlays)` (all camelCase field objects; see `wire.rs` for exact shapes)
 
 ### dev-tools (feature `dev-tools`)
 
 - **recording** — `startRecording(opts)`, `stopRecording()`, `setFrameDiagnosticsEnabled(b)`, `setFrameDiagnosticsProbe(r1, c1, r2, c2)`, `frameDiagnostics()`, `recordingCurrentAttempt()`
-- **playback** — `loadRecording(bytes)`, `seekRecording(frameIdx)`, `playRecording(nowMs)`, `pauseRecording()`, `isPlaying()`, `tickPlayback(nowMs)`, `exitPlayback()`, `playbackActive()`, `recordingFrameCount()`, `recordingCurrentFrame()`
+- **playback** — `loadRecording(bytes)` (rejects a recording whose canvas metrics are invalid, whose timestamps go backwards, whose clip/group brackets are unbalanced, whose draw numbers are non-finite, or whose first grid ops have no committed anchor), `seekRecording(frameIdx)` (returns `ReplayResult::{Replayed, NoCommittedFrame}`; `NoCommittedFrame` means the recording has no committed `FullRebuild` anchor at or before the target, so the canvas keeps its previous pixels), `playRecording(nowMs)`, `pauseRecording()`, `isPlaying()`, `tickPlayback(nowMs)`, `exitPlayback()`, `playbackActive()`, `recordingFrameCount()`, `recordingCurrentFrame()`
 - **free functions** — `icrReplayGridOps(ctx, opsJson)`, `icrReplayOverlayOps(ctx, opsJson)`
 
 ## JS model contract — `setModel`

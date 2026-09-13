@@ -173,7 +173,8 @@ pub struct DiagSegment {
 /// overlay-only attempt (the grid renderer was never entered).
 ///
 /// `backing_size` is the physical backing-store size derived from the CSS
-/// size and DPR via [`CanvasMetrics::backing_size`] (browser rounding).
+/// size and DPR via [`CanvasMetrics::backing_size`](crate::CanvasMetrics::backing_size)
+/// (browser rounding).
 /// Core never sees the backend canvas element, so this is the documented
 /// derivation; the web facade overwrites it with the actual canvas
 /// backing store when the snapshot is projected, making CSS/backing

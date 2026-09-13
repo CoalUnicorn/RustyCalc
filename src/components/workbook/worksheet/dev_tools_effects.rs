@@ -11,6 +11,8 @@ use leptos::prelude::*;
 use crate::app_state::{AppState, DiagCmd, ExportCmd, PlaybackCmd, RecordingCmd};
 use crate::input::mouse::CanvasHandle;
 use crate::state::{StatusMessage, WorkbookState};
+#[cfg(feature = "dev-tools")]
+use iron_canvas_web::ReplayResult;
 
 /// Recording dispatch — drains `app.recording_cmd` (Start/Stop from
 /// PerfPanel). `set(None)` at the end re-fires this same Effect with
@@ -111,10 +113,17 @@ pub(super) fn install_playback_effect(
                     )))),
                 },
                 PlaybackCmd::Seek(idx) => match ic.seek_recording(idx) {
-                    Ok(()) => {
+                    Ok(outcome) => {
                         app.playback_frame.set(ic.recording_current_frame());
                         // Stage 2 invariant: seek pauses any active play loop.
                         app.playback_playing.set(false);
+                        if matches!(outcome, ReplayResult::NoCommittedFrame) {
+                            // Nothing to replay before the first committed
+                            // FullRebuild frame; the canvas keeps its pixels.
+                            state.status.set(Some(StatusMessage::Error(
+                                "no committed frame at or before this position".into(),
+                            )));
+                        }
                         // Seeking changes which frame the engine should show;
                         // poke so the render loop actually paints it.
                         poke();

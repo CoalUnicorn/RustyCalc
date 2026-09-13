@@ -17,7 +17,7 @@
 //! name, including multi-word families like "Times New Roman".
 
 use crate::CanvasModel;
-use crate::RCRange;
+use crate::Fetched;
 use crate::painter::{CHAR_WIDTH_FACTOR, TextMetrics};
 use crate::renderer::cache::font::escape_font_family;
 use crate::renderer::cell::text::{CELL_PADDING, LINE_HEIGHT_FACTOR};
@@ -68,39 +68,76 @@ pub fn font_css(style: &CellStyle) -> String {
     format!("{weight}{slant}{size_px}px {family}")
 }
 
+/// Why an auto-fit could not produce a measurement.
+///
+/// The measured extent is optional (`Ok(None)` when the span holds no
+/// formatted content), but a *failed read* is not the same as an empty span:
+/// the host must not apply "no content" to a column whose extents it could not
+/// read. `Result<Option<f64>, AutoFitError>` keeps the two apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoFitError {
+    /// The orchestrator has no model bound, so there is nothing to measure.
+    NoModel,
+    /// The selected-sheet read failed (a transient bridge failure).
+    SelectedSheet,
+    /// A column-width read failed or returned a value that cannot be a slot
+    /// extent (non-finite, negative, or past `i32::MAX` px). The painted width
+    /// and the measured width would disagree.
+    ColumnExtent,
+    /// A formatted cell value could not be read.
+    CellValue,
+    /// A non-empty cell's style could not be read.
+    CellStyle,
+}
+
+impl std::fmt::Display for AutoFitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::NoModel => "no model is bound to measure",
+            Self::SelectedSheet => "the selected-sheet read failed",
+            Self::ColumnExtent => "a column width could not be read as a valid extent",
+            Self::CellValue => "a formatted cell value could not be read",
+            Self::CellStyle => "a cell style could not be read",
+        };
+        f.write_str(message)
+    }
+}
+
+impl std::error::Error for AutoFitError {}
+
 /// Widest formatted value across `col` over the `[first_row, last_row]`
-/// used-row span, plus padding. `None` when every scanned cell in `col` is
-/// empty (nothing to fit to), or when the selected-sheet read fails (an
-/// out-of-frame query API, so it propagates the bridge failure with `?`
-/// rather than holding a paint attempt).
+/// used-row span, plus padding.
+///
+/// `Ok(None)` when every scanned cell in `col` is empty — there is nothing to
+/// fit to. `Err` when a model read fails (see [`AutoFitError`]); the old
+/// signature folded that into `None`, so a host could silently keep a column
+/// at its default width after a transient read failure.
 pub fn fit_width(
     model: &dyn CanvasModel,
     metrics: &dyn TextMetrics,
     col: i32,
     first_row: i32,
     last_row: i32,
-) -> Option<f64> {
-    let sheet = model.get_selected_sheet()?;
+) -> Result<Option<f64>, AutoFitError> {
+    let sheet = model
+        .get_selected_sheet()
+        .ok_or(AutoFitError::SelectedSheet)?;
     let (first, last) = capped_range(first_row, last_row);
 
-    let span = RCRange {
-        r1: first,
-        c1: col,
-        r2: last,
-        c2: col,
-    };
-
     let mut max = 0.0_f64;
-    for (r, col) in span.cells() {
-        let Some(text) = model.get_formatted_cell_value(sheet, r, col).value() else {
-            continue;
+    for r in first..=last {
+        let text = match model.get_formatted_cell_value(sheet, r, col) {
+            Fetched::Value(text) => text,
+            Fetched::Absent => continue,
+            Fetched::BridgeFailed => return Err(AutoFitError::CellValue),
         };
         if text.is_empty() {
             continue;
         }
-        let css = match model.get_cell_style(sheet, r, col).value() {
-            Some(style) => font_css(&style),
-            None => "12px sans-serif".to_owned(),
+        let css = match model.get_cell_style(sheet, r, col) {
+            Fetched::Value(style) => font_css(&style),
+            Fetched::Absent => "12px sans-serif".to_owned(),
+            Fetched::BridgeFailed => return Err(AutoFitError::CellStyle),
         };
         let w = metrics.measure_text_width(&text, &css);
         if w > max {
@@ -109,33 +146,30 @@ pub fn fit_width(
     }
 
     if max <= 0.0 {
-        return None;
+        return Ok(None);
     }
-    Some((max + FIT_PADDING).max(MIN_EXTENT))
+    Ok(Some((max + FIT_PADDING).max(MIN_EXTENT)))
 }
 
 /// Tallest text block across `row` over the `[first_col, last_col]`
 /// used-column span, plus padding. Multi-line aware: each cell's wrapped line
 /// count comes from the renderer's own [`layout_into`], so the fitted height
 /// matches what the painter stacks (the module's measured-==-painted invariant).
-/// `None` when every scanned cell in `row` is empty, or when the
-/// selected-sheet read fails (see [`fit_width`]'s doc on propagating rather
-/// than holding).
+///
+/// `Ok(None)` when every scanned cell in `row` is empty; `Err` when the
+/// selected sheet, cell content, style, or column extent cannot be read (see
+/// [`AutoFitError`]).
 pub fn fit_height(
     model: &dyn CanvasModel,
     metrics: &dyn TextMetrics,
     row: i32,
     first_col: i32,
     last_col: i32,
-) -> Option<f64> {
-    let sheet = model.get_selected_sheet()?;
+) -> Result<Option<f64>, AutoFitError> {
+    let sheet = model
+        .get_selected_sheet()
+        .ok_or(AutoFitError::SelectedSheet)?;
     let (first, last) = capped_range(first_col, last_col);
-    let span = RCRange {
-        r1: row,
-        c1: first,
-        r2: row,
-        c2: last,
-    };
 
     // One-shot measurement (not the per-frame hot path), so plain local
     // scratch buffers are fine — no need for the renderer's slot-reuse dance.
@@ -143,14 +177,20 @@ pub fn fit_height(
     let mut wrap_buf = String::new();
 
     let mut max_height = 0.0_f64;
-    for (r, col) in span.cells() {
-        let Some(text) = model.get_formatted_cell_value(sheet, r, col).value() else {
-            continue;
+    for col in first..=last {
+        let text = match model.get_formatted_cell_value(sheet, row, col) {
+            Fetched::Value(text) => text,
+            Fetched::Absent => continue,
+            Fetched::BridgeFailed => return Err(AutoFitError::CellValue),
         };
         if text.is_empty() {
             continue;
         }
-        let style = model.get_cell_style(sheet, r, col).value();
+        let style = match model.get_cell_style(sheet, row, col) {
+            Fetched::Value(style) => Some(style),
+            Fetched::Absent => None,
+            Fetched::BridgeFailed => return Err(AutoFitError::CellStyle),
+        };
         let size_px = style.as_ref().map_or(12.0, |s| s.font.size);
         let css = style
             .as_ref()
@@ -160,8 +200,11 @@ pub fn fit_height(
             .is_some_and(|s| s.alignment.as_ref().is_some_and(|a| a.wrap_text));
         // Use the same validated, rounded width as the painted slot.
         // Failed or invalid reads abort the fit; Absent selects the default.
-        let usable_w = f64::from(crate::geometry::slot::col_width(model, sheet, col).extent()?)
-            - 2.0 * CELL_PADDING;
+        let usable_w = f64::from(
+            crate::geometry::slot::col_width(model, sheet, col)
+                .extent()
+                .ok_or(AutoFitError::ColumnExtent)?,
+        ) - 2.0 * CELL_PADDING;
 
         // Reuse the painter's exact split + wrap so the line count we measure
         // is the line count that gets drawn.
@@ -184,9 +227,9 @@ pub fn fit_height(
     }
 
     if max_height <= 0.0 {
-        return None;
+        return Ok(None);
     }
-    Some(max_height.max(MIN_EXTENT))
+    Ok(Some(max_height.max(MIN_EXTENT)))
 }
 
 /// Fitted pixel height of one cell's text block.

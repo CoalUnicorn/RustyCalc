@@ -64,6 +64,7 @@ pub struct TestModel {
     /// `Fetched::BridgeFailed` — simulating a JS-bridge throw so tests can
     /// exercise the active-cell repaint's atomic-skip path.
     value_bridge_fail: Cell<bool>,
+    style_bridge_fail_at: Cell<Option<(i32, i32)>>,
     /// Adversarial contract knob: the four bulk `*_in` accessors fill their
     /// output with `Fetched::BridgeFailed` while single accessors stay
     /// healthy. Not a `JsBackedModel` simulation (that adapter degrades
@@ -142,6 +143,7 @@ impl Default for TestModel {
             show_col_headers: Cell::new(true),
             show_selection: Cell::new(true),
             value_bridge_fail: Cell::new(false),
+            style_bridge_fail_at: Cell::new(None),
             bulk_bridge_fail: Cell::new(false),
             bulk_bridge_fail_channel: Cell::new(None),
             bulk_bridge_fail_from: Cell::new(None),
@@ -342,6 +344,9 @@ impl TestModel {
     pub fn set_value_bridge_fail(&self, fail: bool) {
         self.value_bridge_fail.set(fail);
     }
+    pub fn set_style_bridge_fail_at(&self, cell: Option<(i32, i32)>) {
+        self.style_bridge_fail_at.set(cell);
+    }
     pub fn set_bulk_bridge_fail(&self, fail: bool) {
         self.bulk_bridge_fail.set(fail);
     }
@@ -511,6 +516,9 @@ impl CanvasModel for TestModel {
 
 impl CellContentQuery for TestModel {
     fn get_cell_style(&self, _: u32, row: i32, col: i32) -> Fetched<CellStyle> {
+        if self.style_bridge_fail_at.get() == Some((row, col)) {
+            return Fetched::BridgeFailed;
+        }
         match self.cell_styles.borrow().get(&(row, col)).cloned() {
             Some(s) => Fetched::Value(s),
             None => Fetched::Value(CellStyle::default()),

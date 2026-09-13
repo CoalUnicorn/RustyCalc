@@ -44,7 +44,8 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 
 use crate::CanvasModel;
-use crate::chrome::{BlitPlan, Chrome, FramePath, FreshBuild, RecycledSlots};
+use crate::autofit::AutoFitError;
+use crate::chrome::{BlitPlan, Chrome, FramePath, FreshBuild, PreparedBlitOutcome, RecycledSlots};
 use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
 use crate::geometry::CanvasMetrics;
@@ -525,10 +526,10 @@ impl fmt::Display for FrameTrace {
 /// `last_frame` out of `self` during preparation (see `render_full_rebuild`)
 /// so there is nothing to put back.
 // `Chrome` is large and intentionally carried by value here, matching
-// `chrome::blit`'s own `#[allow(clippy::result_large_err)]` precedent on
-// `try_blit_reuse`/`Chrome::prepare_blit`/`Chrome::next_blit`: boxing it
-// would add a heap allocation to every committed paint attempt, not just
-// the rare held/rollback path clippy's size comparison is really about.
+// `chrome::blit`'s own `#[allow(clippy::large_enum_variant)]` precedent on
+// `PreparedBlitOutcome`: boxing a variant would add a heap allocation to
+// every committed paint attempt, not just the rare held/rollback path
+// clippy's size comparison is really about.
 #[allow(clippy::large_enum_variant)]
 enum FrameUpdate {
     Preserve,
@@ -1147,20 +1148,33 @@ where
     }
 
     /// Auto-fit width for `col`: widest formatted value across the
-    /// `[first_row, last_row]` used-row span, plus padding. `None` when the
-    /// model is absent or no scanned cell in `col` has text. Pure
-    /// measurement — the consumer applies the returned extent.
-    pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
-        let model = self.model.as_deref()?;
+    /// `[first_row, last_row]` used-row span, plus padding.
+    ///
+    /// `Ok(None)` when no scanned cell in `col` has text — nothing to fit to.
+    /// `Err(AutoFitError)` when there is no model, or a model read fails: a
+    /// host must not treat a failed read as "no content". Pure measurement —
+    /// the consumer applies the returned extent.
+    pub fn fit_column_width(
+        &self,
+        col: i32,
+        first_row: i32,
+        last_row: i32,
+    ) -> Result<Option<f64>, AutoFitError> {
+        let model = self.model.as_deref().ok_or(AutoFitError::NoModel)?;
         let metrics = self.grid.surface.painter();
         crate::autofit::fit_width(model, metrics, col, first_row, last_row)
     }
 
     /// Auto-fit height for `row`: tallest font across the `[first_col,
-    /// last_col]` used-column span, plus padding. Same absence semantics as
-    /// `fit_column_width`.
-    pub fn fit_row_height(&self, row: i32, first_col: i32, last_col: i32) -> Option<f64> {
-        let model = self.model.as_deref()?;
+    /// last_col]` used-column span, plus padding. Same
+    /// [`AutoFitError`] semantics as `fit_column_width`.
+    pub fn fit_row_height(
+        &self,
+        row: i32,
+        first_col: i32,
+        last_col: i32,
+    ) -> Result<Option<f64>, AutoFitError> {
+        let model = self.model.as_deref().ok_or(AutoFitError::NoModel)?;
         let metrics = self.grid.surface.painter();
         crate::autofit::fit_height(model, metrics, row, first_col, last_col)
     }
@@ -1564,7 +1578,7 @@ where
     /// built. Holding the `PreparedBlitFrame` open until that result is
     /// known is what lets the `Held` outcome carry `prepared.rollback()`
     /// instead of restoring from a clone taken up front. `prepare_blit`'s
-    /// `Err(prev)` arm is the demote-to-`Fresh` path (e.g. a row-header
+    /// `FreshFallback` arm is the demote-to-`Fresh` path (e.g. a row-header
     /// digit boundary rejects in-place reuse), delegated to
     /// [`Self::paint_fresh_fallback`] — the same atomic-Fresh mechanics
     /// `render_full_rebuild` uses, since a `FreshFallback`'s geometry and
@@ -1581,7 +1595,7 @@ where
             return self.render_full_rebuild(model, inputs, work);
         };
         match Chrome::prepare_blit(prev, model, inputs, &plan) {
-            Ok(prepared) => {
+            PreparedBlitOutcome::Ready(prepared) => {
                 match self.grid.paint_grid_blit(model, prepared.frame(), &plan) {
                     GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
                         cache_commit,
@@ -1604,7 +1618,7 @@ where
                     }
                 }
             }
-            Err(prev) => {
+            PreparedBlitOutcome::FreshFallback(prev) => {
                 #[cfg(feature = "dev-diagnostics")]
                 self.grid.renderer.diag_blit(
                     &plan,
@@ -1649,7 +1663,7 @@ where
         Ok((frame, cache_commit))
     }
 
-    /// `render_scroll_blit`'s `Err(prev)` arm: `prepare_blit` rejected
+    /// `render_scroll_blit`'s `FreshFallback` arm: `prepare_blit` rejected
     /// in-place reuse and handed `prev` back whole (never partially
     /// consumed — see `try_blit_reuse`'s doc), so it is still available
     /// here as an ordinary owned value, not something sitting in

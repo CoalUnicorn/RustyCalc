@@ -23,6 +23,19 @@ pub enum PlayClock {
     },
 }
 
+/// What a replay actually painted.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReplayOutcome {
+    /// The anchor and every frame up to the target replayed onto the live
+    /// painters.
+    Replayed,
+    /// No committed `FullRebuild` frame exists at or before the target, so
+    /// there was nothing to replay: the canvas keeps the pixels it already
+    /// had. A recording may begin with held attempts, so a diagnostics-only
+    /// prefix legitimately ends here.
+    NoCommittedFrame,
+}
+
 pub struct PlaybackSession {
     pub recording: ValidatedRecording,
     pub frame_idx: u32,
@@ -113,20 +126,25 @@ pub fn find_full_rebuild_anchor(frames: &[Frame], target: u32) -> Option<u32> {
 /// presented reads stale/cleared front pixels and corrupts the composite.
 /// Mirrors the live loop, which presents after every painted frame.
 ///
+/// Returns [`ReplayOutcome::NoCommittedFrame`] — rather than silently doing
+/// nothing — when the recording has no committed `FullRebuild` frame at or
+/// before the target. That state is legitimate (a diagnostics-only prefix),
+/// so it is a reported outcome, not an error.
 pub fn replay_through<P>(
     grid: &P,
     overlay: &P,
     recording: &ValidatedRecording,
     target_idx: u32,
     present_grid: &dyn Fn(),
-) where
+) -> ReplayOutcome
+where
     P: Painter + BlitPainter,
 {
     let frames = recording.frames();
     let target_idx = target_idx.min((frames.len() - 1) as u32);
 
     let Some(anchor) = find_full_rebuild_anchor(frames, target_idx) else {
-        return;
+        return ReplayOutcome::NoCommittedFrame;
     };
 
     // Grid: the FullRebuild anchor's first ops are `ApplyDprTransform` + a
@@ -146,6 +164,7 @@ pub fn replay_through<P>(
             replay(overlay, &frame.overlay_ops);
         }
     }
+    ReplayOutcome::Replayed
 }
 
 #[cfg(test)]

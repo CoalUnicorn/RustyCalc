@@ -92,13 +92,20 @@ impl IronCanvas {
     /// Measure the required width of a 1-based column in an inclusive row range.
     ///
     /// The host must apply the result to its model and request a repaint.
-    /// Return `undefined` if the range has no formatted content.
-    /// Also return `undefined` if the model read fails.
+    /// The method returns `undefined` if the range has no formatted content.
+    /// The method throws if the model is missing or a model read fails: a
+    /// failed read is not "no content".
     #[wasm_bindgen(js_name = "fitColumnWidth")]
-    pub fn fit_column_width_js(&self, column: i32, first_row: i32, last_row: i32) -> Option<f64> {
+    pub fn fit_column_width_js(
+        &self,
+        column: i32,
+        first_row: i32,
+        last_row: i32,
+    ) -> Result<Option<f64>, JsError> {
         self.runtime
             .orchestrator()
             .fit_column_width(column, first_row, last_row)
+            .map_err(|error| JsError::new(&format!("column width fit failed: {error}")))
     }
 
     // ============================================================

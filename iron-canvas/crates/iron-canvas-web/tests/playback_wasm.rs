@@ -221,6 +221,93 @@ fn recorded_canvas() -> (IronCanvas, HtmlCanvasElement, HtmlCanvasElement, Recor
 }
 
 #[wasm_bindgen_test]
+fn exit_playback_preserves_an_active_capture() {
+    let (mut canvas, _, _, _) = recorded_canvas();
+    canvas
+        .start_recording(JsValue::UNDEFINED)
+        .expect("start capture");
+    canvas.exit_playback();
+    let bytes = canvas
+        .stop_recording()
+        .expect("capture remains active")
+        .to_vec();
+    assert!(
+        !Recording::deserialize(&bytes)
+            .expect("capture decodes")
+            .frames
+            .is_empty()
+    );
+}
+
+#[wasm_bindgen_test]
+fn facade_autofit_and_export_report_read_failures() {
+    let mut canvas = IronCanvas::create(make_canvas(), make_canvas()).expect("create canvas");
+    assert!(canvas.fit_column_width_js(1, 1, 2).is_err());
+    assert!(canvas.export_svg(200.0, 100.0).is_err());
+    #[cfg(feature = "pdf")]
+    assert!(canvas.export_pdf(200.0, 100.0).is_err());
+    for method in ["getSelectedSheet", "getFormattedCellValue", "getCellStyle"] {
+        let model = make_scroll_fixture_model(Rc::new(Cell::new(1)));
+        let obj: &js_sys::Object = model.unchecked_ref();
+        set_prop(
+            obj,
+            method,
+            &js_sys::Function::new_no_args("throw new Error('read failure');"),
+        );
+        canvas.set_model_js(model).expect("fixture model");
+        assert!(canvas.fit_column_width_js(1, 1, 2).is_err(), "{method}");
+        assert!(canvas.export_svg(200.0, 100.0).is_err(), "{method}");
+        #[cfg(feature = "pdf")]
+        assert!(canvas.export_pdf(200.0, 100.0).is_err(), "{method}");
+    }
+    let model = make_scroll_fixture_model(Rc::new(Cell::new(1)));
+    set_prop(
+        model.unchecked_ref(),
+        "getFormattedCellValue",
+        &js_sys::Function::new_no_args("return '';"),
+    );
+    canvas.set_model_js(model).expect("empty model");
+    assert_eq!(
+        canvas
+            .fit_column_width_js(1, 1, 2)
+            .expect("valid empty range"),
+        None
+    );
+    assert!(canvas.export_svg(200.0, 100.0).is_ok());
+}
+
+#[wasm_bindgen_test]
+fn seek_reports_diagnostics_prefix_without_mutating_pixels() {
+    use iron_canvas_recorder::recording::{RecordedPaintResult, TraceOutcome};
+    use iron_canvas_web::ReplayResult;
+    let (mut canvas, grid, overlay, mut rec) = recorded_canvas();
+    let mut held = rec.frames[0].clone();
+    held.result = RecordedPaintResult::Retry;
+    held.trace.committed_seq = None;
+    held.trace.effective = None;
+    held.trace.outcome = TraceOutcome::HeldOnBridgeFailure;
+    held.grid_ops.clear();
+    held.overlay_ops.clear();
+    rec.frames.insert(0, held);
+    canvas
+        .load_recording(&rec.serialize().expect("serialize prefix"))
+        .expect("load prefix");
+    assert_eq!(
+        canvas.seek_recording(1).expect("paint anchor"),
+        ReplayResult::Replayed
+    );
+    let before_grid = grid_pixels(&grid);
+    let before_overlay = grid_pixels(&overlay);
+    assert_eq!(
+        canvas.seek_recording(0).expect("seek held prefix"),
+        ReplayResult::NoCommittedFrame
+    );
+    assert_eq!(canvas.recording_current_frame(), 0);
+    assert_eq!(grid_pixels(&grid), before_grid);
+    assert_eq!(grid_pixels(&overlay), before_overlay);
+}
+
+#[wasm_bindgen_test]
 fn invalid_resize_and_recording_preserve_live_state() {
     let (mut canvas, grid, overlay, mut rec) = recorded_canvas();
     let before_grid = grid_pixels(&grid);
@@ -346,9 +433,14 @@ fn playback_presents_scroll_blit_frame_byte_identical_to_live() {
         panic!("load recording");
     };
     let last = canvas.recording_frame_count() - 1;
-    let Ok(()) = canvas.seek_recording(last) else {
+    let Ok(outcome) = canvas.seek_recording(last) else {
         panic!("seek to final frame");
     };
+    assert_eq!(
+        outcome,
+        iron_canvas_web::ReplayResult::Replayed,
+        "the fixture records a committed FullRebuild anchor, so the seek must replay it"
+    );
 
     assert_eq!(
         grid_pixels(&grid),
