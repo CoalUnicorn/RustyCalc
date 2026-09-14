@@ -8,7 +8,7 @@
 
 use crate::chrome::Chrome;
 use crate::geometry::prim::Axis;
-use crate::geometry::slot::{ColSlot, RowSlot};
+use crate::geometry::slot::{AxisSlot, ColSlot, RowSlot};
 use crate::painter::{PaintColor, Painter, TextAlign, TextBaseline};
 use crate::renderer::RendererCore;
 
@@ -39,24 +39,24 @@ impl HeaderSlot {
     /// Cell index along the strip (`row` / `col`).
     fn index(self) -> i32 {
         match self {
-            Self::Row(slot) => slot.row,
-            Self::Col(slot) => slot.col,
+            Self::Row(slot) => slot.id(),
+            Self::Col(slot) => slot.id(),
         }
     }
 
     /// Leading edge along the strip axis (top y / left x).
     fn start(self) -> i32 {
         match self {
-            Self::Row(slot) => slot.top,
-            Self::Col(slot) => slot.left,
+            Self::Row(slot) => slot.start(),
+            Self::Col(slot) => slot.start(),
         }
     }
 
     /// Extent along the strip axis (height / width).
     fn extent(self) -> i32 {
         match self {
-            Self::Row(slot) => slot.height,
-            Self::Col(slot) => slot.width,
+            Self::Row(slot) => slot.extent(),
+            Self::Col(slot) => slot.extent(),
         }
     }
 }

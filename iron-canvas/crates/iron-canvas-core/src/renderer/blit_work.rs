@@ -3,6 +3,7 @@
 use crate::chrome::{BlitPlan, Chrome, GridLayout, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
+use crate::geometry::slot::AxisSlot;
 use crate::types::coord::RCRange;
 
 pub(crate) struct FinalizedBlitWork {
@@ -49,22 +50,18 @@ fn widen_to_pixel_clip(
 ) -> RCRange {
     match axis {
         Axis::Row => {
-            let min = pixel_clip.top();
-            let max = min + pixel_clip.height;
             for row in region.rows(frame) {
-                if row.top + row.height > min && row.top < max {
-                    range.r1 = range.r1.min(row.row);
-                    range.r2 = range.r2.max(row.row);
+                if row.end() > pixel_clip.top() && row.start() < pixel_clip.bottom() {
+                    range.r1 = range.r1.min(row.id());
+                    range.r2 = range.r2.max(row.id());
                 }
             }
         }
         Axis::Column => {
-            let min = pixel_clip.left();
-            let max = min + pixel_clip.width;
             for col in region.cols(frame) {
-                if col.left + col.width > min && col.left < max {
-                    range.c1 = range.c1.min(col.col);
-                    range.c2 = range.c2.max(col.col);
+                if col.end() > pixel_clip.left() && col.start() < pixel_clip.right() {
+                    range.c1 = range.c1.min(col.id());
+                    range.c2 = range.c2.max(col.id());
                 }
             }
         }
