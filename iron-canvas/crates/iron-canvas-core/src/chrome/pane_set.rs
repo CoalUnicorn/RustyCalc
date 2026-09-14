@@ -253,23 +253,14 @@ impl PaneSet {
     }
 }
 
-/// Decimal digit count, clamped to `>= 1` so a zero input still reserves a slot.
-fn digit_count(n: i32) -> i32 {
-    let mut n = n.max(1);
-    let mut d = 0;
-    while n > 0 {
-        d += 1;
-        n /= 10;
-    }
-    d
-}
-
 /// Pixel width the row-header strip needs to fit the widest visible row
 /// label. Uses a pessimistic char-count approximation to avoid threading
 /// `TextMetrics` (and thus a painter dependency) into `Chrome::build`.
 /// Floored at `HEADER_COL_WIDTH` so 3-digit labels never shrink the strip.
 pub fn measure_row_header_width(max_visible_row: i32) -> i32 {
-    let digits = digit_count(max_visible_row);
+    // Decimal digit count of the label, clamped to `>= 1` so a zero input
+    // still reserves one slot.
+    let digits = max_visible_row.max(1).ilog10() as i32 + 1;
     let approx = digits * APPROX_DIGIT_WIDTH_PX + 2 * HEADER_LABEL_PAD_PX;
     approx.max(HEADER_COL_WIDTH)
 }
