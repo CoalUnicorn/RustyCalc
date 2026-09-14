@@ -13,9 +13,6 @@ pub trait PainterShapes: Painter {
     fn fill_rect(&self, r: PixelRect, c: PaintColor) {
         self.fill_path(&r.corners(), c);
     }
-    fn fill_polygon(&self, pts: &[Point], c: PaintColor) {
-        self.fill_path(pts, c);
-    }
 }
 
 impl<T: Painter + ?Sized> PainterShapes for T {}
