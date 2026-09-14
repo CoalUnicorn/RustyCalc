@@ -187,12 +187,7 @@ fn pixel_to_id<S: AxisSlot>(frozen: &[S], scroll: &[S], pixel: i32) -> Option<i3
 /// the post-`tolerance` break in the frozen leg must not cut off a still-
 /// reachable scroll slot. That holds only while the scroll band starts at or
 /// after the frozen band ends; the `debug_assert!` guards that seam invariant.
-fn boundary_at<S: AxisSlot>(
-    frozen: &[S],
-    scroll: &[S],
-    pixel: i32,
-    tolerance: i32,
-) -> Option<i32> {
+fn boundary_at<S: AxisSlot>(frozen: &[S], scroll: &[S], pixel: i32, tolerance: i32) -> Option<i32> {
     debug_assert!(
         match (frozen.last(), scroll.first()) {
             (Some(f), Some(s)) => s.start() >= f.end(),
@@ -503,8 +498,8 @@ mod tests {
         assert!(r.contains(1) && !r.contains(99));
     }
 
-    //  Relocated from tests/slot.rs: these helpers are crate-private, so
-    //  their edge cases are covered next to the code they exercise.
+    // Relocated from tests/slot.rs to test the private query helpers here.
+    // The public fill_axis and scroll_first tests stay with the same suite.
 
     #[test]
     fn fill_axis_rejects_overflow_even_in_the_trailing_slot() {
