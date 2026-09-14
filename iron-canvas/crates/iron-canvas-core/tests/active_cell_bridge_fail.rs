@@ -15,6 +15,7 @@ mod common;
 
 use std::rc::Rc;
 
+use iron_canvas_core::CellCoord;
 use iron_canvas_core::chrome::{Chrome, FramePath};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
@@ -38,7 +39,7 @@ fn active_cell_repaints_when_every_fetch_answers() {
     let painter = Rc::new(RecorderPainter::new());
     let core = RendererCore::for_layer(Rc::clone(&painter));
 
-    core.repaint_active_cell(&model, 1, 1, &frame);
+    core.repaint_active_cell(&model, CellCoord { row: 1, col: 1 }, &frame);
 
     assert!(
         !painter.ops().is_empty(),
@@ -57,7 +58,7 @@ fn active_cell_repaint_skips_entirely_on_bridge_failure() {
     let painter = Rc::new(RecorderPainter::new());
     let core = RendererCore::for_layer(Rc::clone(&painter));
 
-    core.repaint_active_cell(&model, 1, 1, &frame);
+    core.repaint_active_cell(&model, CellCoord { row: 1, col: 1 }, &frame);
 
     assert!(
         painter.ops().is_empty(),

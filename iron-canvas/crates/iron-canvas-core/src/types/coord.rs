@@ -188,6 +188,17 @@ pub struct AutofillTarget {
     pub col: i32,
 }
 
+/// Sheet coordinates of one cell, 1-based on both axes.
+///
+/// Named so a row/column pair that travels across module boundaries — selection
+/// state to the overlay paint pass — cannot be transposed the way two adjacent
+/// `i32` parameters can.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct CellCoord {
+    pub row: i32,
+    pub col: i32,
+}
+
 /// An [`RCRange`] qualified with the sheet it lives on.
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq)]
 pub struct SheetArea {

@@ -245,10 +245,9 @@ where
         // Gate on `Some` so a tick where the model briefly has no selected
         // view (sheet swap, workbook reload) does not repaint A1 with the
         // default-zero snapshot or emit an empty bracket into recordings.
-        if let Some(hook) = selection.active_cell_repaint() {
+        if let Some(cell) = selection.active_cell_repaint() {
             painter.begin_group(GroupClass::ActiveCellRepaint);
-            self.renderer
-                .repaint_active_cell(model, hook.row, hook.col, frame);
+            self.renderer.repaint_active_cell(model, cell, frame);
             painter.end_group();
         }
 

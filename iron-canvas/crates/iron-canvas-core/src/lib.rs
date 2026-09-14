@@ -56,6 +56,6 @@ pub use style::{
     FontStyle, HAlign, IconSpec, RatingSpec, VAlign,
 };
 pub use theme::{CanvasTheme, ThemeVariables};
-pub use types::coord::{AutofillTarget, FormulaRef, FormulaRefKind, RCRange, SheetArea};
+pub use types::coord::{AutofillTarget, CellCoord, FormulaRef, FormulaRefKind, RCRange, SheetArea};
 pub use types::fetched::Fetched;
 pub use types::ui::{HitTest, RectCorner, RefZone, ResizeTarget, Side};

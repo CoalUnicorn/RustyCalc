@@ -9,7 +9,7 @@ use crate::decoration::Layer;
 use crate::geometry::constants::{AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH};
 use crate::model_adapter::CanvasView;
 use crate::painter::{GroupClass, PaintColor, Painter};
-use crate::types::coord::RCRange;
+use crate::types::coord::{CellCoord, RCRange};
 
 #[derive(Default)]
 pub struct SelectionLayer {
@@ -27,13 +27,6 @@ pub struct SelectionLayer {
     /// Last captured selection visibility, so `active_cell_repaint` can
     /// suppress its paint hook independently of `active_cell`'s presence.
     show_selection: bool,
-}
-
-/// Coordinates of the active cell the renderer must repaint between the
-/// selection fill and stroke phases.
-pub struct RepaintActiveCell {
-    pub row: i32,
-    pub col: i32,
 }
 
 impl SelectionLayer {
@@ -77,11 +70,11 @@ impl SelectionLayer {
     /// when the captured `show_selection` is false — a selection-less host
     /// must draw no active-cell repaint even though `active_cell` itself
     /// stays populated for `Chrome::classify`'s scroll-safety re-hash.
-    pub fn active_cell_repaint(&self) -> Option<RepaintActiveCell> {
+    pub fn active_cell_repaint(&self) -> Option<CellCoord> {
         if !self.show_selection {
             return None;
         }
-        self.active_cell.as_ref().map(|a| RepaintActiveCell {
+        self.active_cell.as_ref().map(|a| CellCoord {
             row: a.row,
             col: a.col,
         })

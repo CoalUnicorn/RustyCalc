@@ -732,11 +732,10 @@ impl<P: Painter> OverlayRenderer<P> {
     pub fn repaint_active_cell(
         &self,
         model: &dyn CanvasModel,
-        row: i32,
-        column: i32,
+        cell: crate::types::coord::CellCoord,
         frame: &Chrome,
     ) {
-        self.core.repaint_active_cell(model, row, column, frame);
+        self.core.repaint_active_cell(model, cell, frame);
     }
 }
 
