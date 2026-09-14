@@ -17,12 +17,12 @@ use crate::frame_plan::FrameInputs;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
-use crate::geometry::slot::{AxisSlot, AxisSlots, RowSlot, scroll_first};
+use crate::geometry::slot::{AxisSlots, scroll_first};
 use crate::theme::CanvasTheme;
 
 use super::blit_rebuild::ShiftDir;
-use super::pane_set::ScrollAxisSlots;
-use super::{Chrome, FrameKindTag, PaneSet, measure_row_header_width};
+use super::pane_set::{ScrollAxisSlots, row_header_thickness_for};
+use super::{Chrome, FrameKindTag, PaneSet};
 
 /// The single pixel shift performed by a scroll blit.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -161,17 +161,6 @@ pub enum FramePath {
 // verify the kept band's row heights (col widths) match what the model
 // still reports — that is the final qualification that the shifted pixels
 // will land where the new chrome would paint them.
-
-/// Row-header thickness implied by the last visible row's label — the value
-/// the blit gate compares against `prev`. `scroll_rows` is the scrolled axis's
-/// band (rebuilt or unchanged); an empty band falls back to the first scroll id.
-fn blit_row_header_thickness(scroll_rows: &[RowSlot], frozen_rows_count: i32, new_top: i32) -> i32 {
-    let last_visible_row = scroll_rows
-        .last()
-        .map(|s| s.id())
-        .unwrap_or((frozen_rows_count + 1).max(new_top));
-    measure_row_header_width(last_visible_row)
-}
 
 /// Result of [`try_blit_reuse`]: either a reversible in-place candidate, or
 /// `prev` handed back whole so the caller rebuilds `Fresh`.
@@ -369,7 +358,7 @@ pub(super) fn try_blit_reuse(
                 Some(rows) => rows,
                 None => return PreparedBlitOutcome::FreshFallback(prev),
             };
-            let thickness = blit_row_header_thickness(&rows, frozen_rows_count, new_top);
+            let thickness = row_header_thickness_for(&rows, frozen_rows_count, new_top);
             if thickness != prev.row_header_thickness {
                 return PreparedBlitOutcome::FreshFallback(prev);
             }
@@ -388,7 +377,7 @@ pub(super) fn try_blit_reuse(
             // Cross-axis rows band is unchanged across a column scroll; read it
             // (not taken yet) for the gate.
             let thickness =
-                blit_row_header_thickness(&prev.pane_set.rows.scroll, frozen_rows_count, new_top);
+                row_header_thickness_for(&prev.pane_set.rows.scroll, frozen_rows_count, new_top);
             if thickness != prev.row_header_thickness {
                 return PreparedBlitOutcome::FreshFallback(prev);
             }

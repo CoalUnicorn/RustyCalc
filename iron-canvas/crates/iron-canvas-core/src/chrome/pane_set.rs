@@ -9,7 +9,9 @@
 
 use crate::CanvasModel;
 use crate::geometry::constants::HEADER_COL_WIDTH;
-use crate::geometry::slot::{AxisSlot, AxisSlots, ColSlot, RowSlot, col_width, row_height};
+use crate::geometry::slot::{
+    AxisSlot, AxisSlots, ColSlot, RowSlot, col_width, row_height, scroll_first,
+};
 
 use super::recycled_slots::RecycledSlots;
 
@@ -270,4 +272,24 @@ pub fn measure_row_header_width(max_visible_row: i32) -> i32 {
     let digits = digit_count(max_visible_row);
     let approx = digits * APPROX_DIGIT_WIDTH_PX + 2 * HEADER_LABEL_PAD_PX;
     approx.max(HEADER_COL_WIDTH)
+}
+
+/// Row-header thickness the row band implies: the last visible row's label
+/// width, or — for an empty band — the band's first id, which is
+/// [`scroll_first`] of the frozen count and the scrolled-to row.
+///
+/// `Chrome::build` (phase C) and the blit gate derive
+/// `row_header_thickness` from this one expression. The gate compares the
+/// thickness a rebuilt band implies against the committed frame's, so the
+/// two derivations must agree by construction.
+pub(crate) fn row_header_thickness_for(
+    rows: &[RowSlot],
+    frozen_count: i32,
+    scroll_top: i32,
+) -> i32 {
+    let last_visible_row = rows
+        .last()
+        .map(AxisSlot::id)
+        .unwrap_or_else(|| scroll_first(frozen_count, scroll_top));
+    measure_row_header_width(last_visible_row)
 }

@@ -36,7 +36,7 @@ use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
     pixel_rect::PixelRect,
     prim::Point,
-    slot::{AxisSlot, scroll_first},
+    slot::scroll_first,
 };
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -403,14 +403,12 @@ impl Chrome {
         }
 
         // Phase C — measure row_header_thickness from the last visible row label.
-        let last_visible_row = pane_set
-            .rows
-            .scroll
-            .last()
-            .map(|s| s.id())
-            .unwrap_or((frozen_row_count + 1).max(view.top_row));
         let row_header_thickness = if show_row {
-            measure_row_header_width(last_visible_row)
+            pane_set::row_header_thickness_for(
+                &pane_set.rows.scroll,
+                frozen_row_count,
+                view.top_row,
+            )
         } else {
             0
         };
