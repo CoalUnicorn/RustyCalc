@@ -668,6 +668,13 @@ fn batch_is_dense<T>(decoded: &[Option<T>], range: RCRange) -> bool {
     decoded.len() == rows * cols
 }
 
+/// The `getSelectedView` payload.
+///
+/// The host's `SelectedView` (IronCalc's wasm/node API) names its fields in
+/// snake_case — `top_row` / `left_column` — like every other IronCalc model
+/// payload the bridge consumes, so this is deliberately the one inbound shape
+/// without a camelCase rename policy. The shapes in `crate::wire` are
+/// iron-canvas's own API and stay camelCase; do not merge the conventions.
 #[derive(Deserialize)]
 struct JsSelectedView {
     sheet: u32,
@@ -811,8 +818,11 @@ mod tests {
     }
 }
 
+/// Browser-run tests over the exact JS payload shapes the bridge decodes.
+/// Only a `from_value` decode pins the wire key names — a fixture built as the
+/// Rust struct in the sibling module cannot see them.
 #[cfg(test)]
-mod js_style_tests {
+mod js_payload_decode_tests {
     use super::*;
     use wasm_bindgen_test::*;
 
@@ -861,6 +871,49 @@ mod js_style_tests {
             .expect("ExtendedStyle payload must decode")
             .into();
         assert_eq!(decoded, inner);
+    }
+
+    /// Pin the exact key names the host sends. `JsSelectedView` carries no
+    /// rename policy, so a camelCase `topRow`/`leftColumn` payload would decode
+    /// to an error and hold every paint attempt as `HeldOnInputFailure` — a
+    /// failure the natively-built fixture in the sibling module cannot catch.
+    #[wasm_bindgen_test]
+    fn decodes_the_host_selected_view_payload() {
+        let payload = js_sys::Object::new();
+        for (key, number) in [
+            ("sheet", 2.0),
+            ("row", 7.0),
+            ("column", 3.0),
+            ("top_row", 6.0),
+            ("left_column", 2.0),
+        ] {
+            js_sys::Reflect::set(
+                &payload,
+                &JsValue::from_str(key),
+                &JsValue::from_f64(number),
+            )
+            .expect("set payload key");
+        }
+        let range = js_sys::Array::new();
+        for number in [5.0, 1.0, 12.0, 4.0] {
+            range.push(&JsValue::from_f64(number));
+        }
+        js_sys::Reflect::set(&payload, &JsValue::from_str("range"), &range).expect("set range");
+
+        let decoded: JsSelectedView =
+            serde_wasm_bindgen::from_value(payload.into()).expect("host payload must decode");
+        let view = decoded.into_canvas_view();
+        assert_eq!((view.sheet, view.row, view.column), (2, 7, 3));
+        assert_eq!((view.top_row, view.left_column), (6, 2));
+        assert_eq!(
+            view.selection,
+            RCRange {
+                r1: 5,
+                c1: 1,
+                r2: 12,
+                c2: 4
+            }
+        );
     }
 }
 
