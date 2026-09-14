@@ -20,6 +20,10 @@ pub const FORMULA_REF_COLORS: &[&str] = &[
 /// 8% alpha tints of `FORMULA_REF_COLORS`, indexed in lockstep. Used as the
 /// fill for tinted dashed overlays so paint never needs to allocate an
 /// `rgba(...)` string per frame.
+///
+/// Indexed by `color_idx % FORMULA_REF_COLORS.len()`, so the two arrays must
+/// keep the same length. The `const _` assertion below turns a one-sided edit
+/// into a compile error.
 pub const FORMULA_REF_TINTS: &[&str] = &[
     "rgba(89,185,188,0.08)", // Cyan
     "rgba(236,87,83,0.08)",  // Flamingo
@@ -32,6 +36,11 @@ pub const FORMULA_REF_TINTS: &[&str] = &[
     "rgba(229,62,62,0.08)",  // Red
     "rgba(11,154,138,0.08)", // Teal
 ];
+
+// `formula_refs` takes `color_idx % FORMULA_REF_COLORS.len()` and indexes both
+// arrays with it, so unequal lengths would panic inside a paint pass on the
+// first ref landing on an index only one array has.
+const _: () = assert!(FORMULA_REF_COLORS.len() == FORMULA_REF_TINTS.len());
 
 /// Resolved color palette consumed by the renderer.
 ///
