@@ -51,11 +51,22 @@ impl IronCanvas {
         };
         let rec_size = validated.metrics().size();
 
-        // Set the orchestrator and backing stores to the recorded size.
         // Set the inline CSS size because `.ws-canvas` uses `100%`.
+        // Apply the fallible overrides before any live state changes: a rejected
+        // override must not leave the runtime sized for the recording while
+        // `mode` is still Live, with no session holding the live size to restore.
+        // On failure both overrides are cleared, which is the live canvas state
+        // (`exitPlayback` clears the same two properties).
+        if let Err(error) = set_canvas_css_size(self.runtime.grid_canvas(), rec_size)
+            .and_then(|()| set_canvas_css_size(self.runtime.overlay_canvas(), rec_size))
+        {
+            let _ = clear_canvas_css_size(self.runtime.grid_canvas());
+            let _ = clear_canvas_css_size(self.runtime.overlay_canvas());
+            return Err(error);
+        }
+
+        // Set the orchestrator and backing stores to the recorded size.
         self.runtime.resize(validated.metrics());
-        set_canvas_css_size(self.runtime.grid_canvas(), rec_size)?;
-        set_canvas_css_size(self.runtime.overlay_canvas(), rec_size)?;
 
         self.mode = CanvasMode::Playback(PlaybackSession::new(validated, live_metrics));
         self.seek_recording_inner(0)?;
