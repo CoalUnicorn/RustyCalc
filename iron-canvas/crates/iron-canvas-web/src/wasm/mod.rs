@@ -90,13 +90,16 @@ extern "C" {
         column: i32,
     ) -> Result<JsValue, JsValue>;
 
+    // The three content accessors return `JsValue`, not the decoded type: a JS
+    // `null` must stay distinguishable from a throw. `(catch)` reports the
+    // throw as `Err`; the `null` decodes to `None` here.
     #[wasm_bindgen(catch, method, js_name = "getCellType")]
     fn get_cell_type(
         this: &IronCalcModelHandle,
         sheet: u32,
         row: i32,
         column: i32,
-    ) -> Result<i32, JsValue>;
+    ) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(catch, method, js_name = "getFormattedCellValue")]
     fn get_formatted_cell_value(
@@ -104,7 +107,7 @@ extern "C" {
         sheet: u32,
         row: i32,
         column: i32,
-    ) -> Result<String, JsValue>;
+    ) -> Result<JsValue, JsValue>;
 
     // Batched range accessors (optional on the host). A dense, row-major array
     // of length `(r2-r1+1)*(c2-c1+1)` collapses a pane fetch to one boundary
@@ -481,11 +484,14 @@ impl CellContentQuery for JsBackedModel {
         ) else {
             return Fetched::BridgeFailed;
         };
-        match serde_wasm_bindgen::from_value::<JsStyle>(jsv) {
-            Ok(s) => {
+        match serde_wasm_bindgen::from_value::<Option<JsStyle>>(jsv) {
+            Ok(Some(s)) => {
                 let s: ic::Style = s.into();
                 Fetched::Value(self.with_theme(|t| style_to_core(s, &|c| color_to_css(c, t))))
             }
+            // A `null` payload is a blank cell — the same meaning the bulk
+            // `getCellStylesIn` contract gives a null element.
+            Ok(None) => Fetched::Absent,
             Err(e) => {
                 self.note_serde_err("getCellStyle", &e);
                 Fetched::BridgeFailed
@@ -496,30 +502,47 @@ impl CellContentQuery for JsBackedModel {
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind> {
         // Two failures with opposite lifetimes must not share a variant. A
         // *throw* is transient — `BridgeFailed`, so the caller holds prior
-        // pixels and re-queries next frame. A successful call carrying a
-        // discriminant the core enum doesn't model is *persistent* (re-querying
-        // returns the same value); routing it through `BridgeFailed` would
-        // suppress the active-cell overlay every frame. It maps to `Absent`,
-        // letting the renderer's `unwrap_or(CellKind::Text)` own the fallback —
-        // matching the native adapter, where a model error is also `Absent`.
-        let Some(disc) =
-            self.note_throw("getCellType", self.handle.get_cell_type(sheet, row, column))
-        else {
+        // pixels and re-queries next frame. A `null` payload is a blank cell,
+        // and a successful call carrying a discriminant the core enum doesn't
+        // model is *persistent* (re-querying returns the same value); both map
+        // to `Absent`, letting the renderer's `unwrap_or(CellKind::Text)` own
+        // the fallback — matching the native adapter, where a model error is
+        // also `Absent`.
+        let Some(jsv) = self.note_throw(
+            "getCellType",
+            self.handle.get_cell_type(sheet, row, column),
+        ) else {
             return Fetched::BridgeFailed;
         };
-        match cell_kind_from_discriminant(disc) {
-            Some(k) => Fetched::Value(k),
-            None => Fetched::Absent,
+        match serde_wasm_bindgen::from_value::<Option<i32>>(jsv) {
+            Ok(Some(disc)) => match cell_kind_from_discriminant(disc) {
+                Some(k) => Fetched::Value(k),
+                None => Fetched::Absent,
+            },
+            Ok(None) => Fetched::Absent,
+            Err(e) => {
+                self.note_serde_err("getCellType", &e);
+                Fetched::BridgeFailed
+            }
         }
     }
 
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String> {
-        match self.note_throw(
+        // A throw is a transient bridge failure; a `null` payload is a blank
+        // cell, matching the bulk `getFormattedCellValuesIn` contract.
+        let Some(jsv) = self.note_throw(
             "getFormattedCellValue",
             self.handle.get_formatted_cell_value(sheet, row, column),
-        ) {
-            Some(v) => Fetched::Value(v),
-            None => Fetched::BridgeFailed,
+        ) else {
+            return Fetched::BridgeFailed;
+        };
+        match serde_wasm_bindgen::from_value::<Option<String>>(jsv) {
+            Ok(Some(v)) => Fetched::Value(v),
+            Ok(None) => Fetched::Absent,
+            Err(e) => {
+                self.note_serde_err("getFormattedCellValue", &e);
+                Fetched::BridgeFailed
+            }
         }
     }
 

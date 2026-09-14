@@ -96,6 +96,23 @@ fn geometry_accessors_preserve_absence_values_and_throws() {
 }
 
 #[wasm_bindgen_test]
+fn content_accessors_read_null_as_a_blank_cell() {
+    // The bulk contract reads a null element as a blank cell. The per-cell
+    // twins must agree: the same host data paints blank through
+    // `getCellStylesIn` and holds the frame forever through `getCellStyle` if
+    // they do not.
+    let null = js_sys::Function::new_no_args("return null;");
+    let model = model_with_methods(&[
+        ("getCellStyle", &null),
+        ("getCellType", &null),
+        ("getFormattedCellValue", &null),
+    ]);
+    assert_eq!(model.get_cell_style(0, 1, 1), Fetched::Absent);
+    assert_eq!(model.get_cell_type(0, 1, 1), Fetched::Absent);
+    assert_eq!(model.get_formatted_cell_value(0, 1, 1), Fetched::Absent);
+}
+
+#[wasm_bindgen_test]
 fn backward_scroll_after_one_failed_measure_matches_fresh() {
     for (method, value) in [("getRowHeight", "20"), ("getColumnWidth", "80")] {
         let top = Rc::new(Cell::new(3));
@@ -627,6 +644,14 @@ struct ScrollFailureControls {
     fail_from_row: Rc<Cell<Option<i32>>>,
 }
 
+/// A `getCellStyle` payload no `JsStyle` arm decodes — the shape-drift failure
+/// the held-transaction fixtures inject. `null` is *not* usable for this: the
+/// per-cell and bulk contracts both read a null style as a blank cell
+/// (`Fetched::Absent`).
+fn invalid_style_payload() -> JsValue {
+    JsValue::from_str("not-a-style")
+}
+
 /// Build the same fixture with a live scroll origin and a controllable invalid
 /// style payload from a chosen row onward. Keeping the active cell outside
 /// those rows lets `Chrome::classify` approve the ScrollBlit plan; decoding then
@@ -677,7 +702,7 @@ fn make_scroll_failure_fixture_model(
                 .get()
                 .is_some_and(|first_failed| row >= first_failed)
             {
-                JsValue::NULL
+                invalid_style_payload()
             } else {
                 let Ok(value) = serde_wasm_bindgen::to_value(&ic::Style::default()) else {
                     panic!("default fixture Style always serializes");
@@ -837,10 +862,9 @@ struct FreshFailureControls {
 /// covered by
 /// `selected_sheet_bridge_failure_holds_then_recovers_without_another_signal`)
 /// and not a ScrollBlit strip reveal (covered above). `getCellStyle` returning
-/// `null` is the same decode-failure mechanism
-/// `make_scroll_failure_fixture_model` uses: `serde_wasm_bindgen` cannot
-/// decode `null` into `Style`, so `JsBackedModel::get_cell_style` reports
-/// `Fetched::BridgeFailed`.
+/// an undecodable payload is the same decode-failure mechanism
+/// `make_scroll_failure_fixture_model` uses: no `JsStyle` arm accepts it, so
+/// `JsBackedModel::get_cell_style` reports `Fetched::BridgeFailed`.
 fn make_fresh_failure_fixture_model(store: FixtureStore) -> (JsValue, FreshFailureControls) {
     let model = make_fixture_model(store);
     let obj: js_sys::Object = model.unchecked_into();
@@ -850,7 +874,7 @@ fn make_fresh_failure_fixture_model(store: FixtureStore) -> (JsValue, FreshFailu
     let get_style = Closure::wrap(
         Box::new(move |_sheet: u32, _row: i32, _col: i32| -> JsValue {
             if style_fail.get() {
-                JsValue::NULL
+                invalid_style_payload()
             } else {
                 let Ok(value) = serde_wasm_bindgen::to_value(&ic::Style::default()) else {
                     panic!("default fixture Style always serializes");
