@@ -1011,26 +1011,56 @@ mod dev_wire {
         }
     }
 
+    /// camelCase mirror of `DiagBufferTruth` — a mirror like every sibling diag
+    /// enum, not a hand-rolled string, so the wire name cannot drift from the
+    /// engine variant.
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagBufferTruthWire {
+        Valid,
+        Stale,
+    }
+
+    impl From<DiagBufferTruth> for DiagBufferTruthWire {
+        fn from(truth: DiagBufferTruth) -> Self {
+            match truth {
+                DiagBufferTruth::Valid => Self::Valid,
+                DiagBufferTruth::Stale => Self::Stale,
+            }
+        }
+    }
+
+    /// camelCase mirror of `DiagFingerprintTruth`. See `DiagBufferTruthWire`.
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagFingerprintTruthWire {
+        Exact,
+        Stale,
+    }
+
+    impl From<DiagFingerprintTruth> for DiagFingerprintTruthWire {
+        fn from(truth: DiagFingerprintTruth) -> Self {
+            match truth {
+                DiagFingerprintTruth::Exact => Self::Exact,
+                DiagFingerprintTruth::Stale => Self::Stale,
+            }
+        }
+    }
+
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     pub(crate) struct DiagCacheTruthWire {
         pub layout: Option<DiagLayoutWire>,
-        pub buffer_truth: String,
-        pub fingerprint_truth: String,
+        pub buffer_truth: DiagBufferTruthWire,
+        pub fingerprint_truth: DiagFingerprintTruthWire,
     }
 
     impl From<&DiagCacheTruth> for DiagCacheTruthWire {
         fn from(truth: &DiagCacheTruth) -> Self {
             Self {
                 layout: truth.layout.map(DiagLayoutWire::from),
-                buffer_truth: match truth.buffer_truth {
-                    DiagBufferTruth::Valid => "valid".to_string(),
-                    DiagBufferTruth::Stale => "stale".to_string(),
-                },
-                fingerprint_truth: match truth.fingerprint_truth {
-                    DiagFingerprintTruth::Exact => "exact".to_string(),
-                    DiagFingerprintTruth::Stale => "stale".to_string(),
-                },
+                buffer_truth: truth.buffer_truth.into(),
+                fingerprint_truth: truth.fingerprint_truth.into(),
             }
         }
     }
