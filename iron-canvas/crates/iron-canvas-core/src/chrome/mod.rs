@@ -640,6 +640,10 @@ impl Chrome {
         })
     }
 
+    /// Anchor point of the autofill handle: the selection's bottom-right
+    /// corner in canvas pixels. `None` when that corner is off-frame or the
+    /// selection already reaches the last row/column — there is nothing
+    /// beyond to fill into.
     pub fn autofill_handle(&self, selection_range: RCRange) -> Option<Point> {
         let norm = selection_range.normalized();
         let r2 = norm.r2;
@@ -660,6 +664,10 @@ impl Chrome {
         })
     }
 
+    /// Painted square of the autofill handle: [`AUTOFILL_HANDLE_PX`] per side,
+    /// anchored by its bottom-right corner at
+    /// [`autofill_handle`](Chrome::autofill_handle), so it lies inside the
+    /// selection's last cell. `None` under the same conditions as the anchor.
     pub fn autofill_handle_rect(&self, selection_range: RCRange) -> Option<PixelRect> {
         let p = self.autofill_handle(selection_range)?;
         Some(PixelRect {

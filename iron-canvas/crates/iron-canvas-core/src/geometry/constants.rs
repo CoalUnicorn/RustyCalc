@@ -34,9 +34,10 @@ pub const FROZEN_SEP: i32 = 3;
 /// the separator occupies the single pixel at `thickness`, and the cell area
 /// starts immediately after at `thickness + HEADER_SEPARATOR_WIDTH`.
 pub const CELL_AREA_INSET: i32 = HEADER_SEPARATOR_WIDTH;
-/// Side length of the autofill handle square. The handle's top-left sits at
-/// the selection's bottom-right corner (Excel anchor) so it visually pokes
-/// outside the selection rectangle.
+/// Side length of the autofill handle square. The square spans
+/// `[corner - AUTOFILL_HANDLE_PX, corner]` on both axes — its bottom-right
+/// corner is the selection's bottom-right corner — so it sits inside the
+/// selection's last cell and stays clear of the selection rectangle's edge.
 pub const AUTOFILL_HANDLE_PX: i32 = 6;
 /// Width of the contrasting outline ring stroked around the handle. Sourced
 /// from `theme.cell_bg` so the handle pops against any cell fill underneath.
