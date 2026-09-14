@@ -16,6 +16,44 @@ use std::rc::Rc;
 use super::font;
 use crate::painter::CssColor;
 
+/// Renderer-lifetime intern table: a `RefCell`-guarded vec scanned linearly,
+/// with the value built only on a miss.
+///
+/// Linear scan beats a `HashMap` at the cardinality these tables see (fewer
+/// than ~10 unique fonts, and a handful of colors, per realistic sheet) and
+/// keeps the insert-only lifetime obvious. `probe` tests a stored key without
+/// building one, so the hit path stays allocation-free even when the stored
+/// key owns a `Box<str>` the caller only has as a `&str`.
+struct LinearIntern<K, V> {
+    entries: RefCell<Vec<(K, V)>>,
+}
+
+impl<K, V: Clone> LinearIntern<K, V> {
+    fn new() -> Self {
+        Self {
+            entries: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Cached value for the entry `probe` accepts; `make_key` + `make_value`
+    /// run once on a miss. Hit: one `V::clone` ([`Rc::clone`] for both tables
+    /// above). Miss: one scan, one key, one value, inserted together.
+    fn get_or_insert(
+        &self,
+        probe: impl Fn(&K) -> bool,
+        make_key: impl FnOnce() -> K,
+        make_value: impl FnOnce() -> V,
+    ) -> V {
+        let mut entries = self.entries.borrow_mut();
+        if let Some((_, value)) = entries.iter().find(|(key, _)| probe(key)) {
+            return value.clone();
+        }
+        let value = make_value();
+        entries.push((make_key(), value.clone()));
+        value
+    }
+}
+
 /// Renderer-lifetime intern table for `ctx.font` strings.
 ///
 /// `font::build` is the *only* allocation source on the per-cell text path
@@ -25,7 +63,7 @@ use crate::painter::CssColor;
 /// not `FrameCache`, because it is *cross-frame*: the same fonts repeat
 /// every repaint.
 pub struct FontIntern {
-    entries: RefCell<Vec<(FontKey, Rc<str>)>>,
+    entries: LinearIntern<FontKey, Rc<str>>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -39,7 +77,7 @@ struct FontKey {
 impl FontIntern {
     pub fn new() -> Self {
         Self {
-            entries: RefCell::new(Vec::new()),
+            entries: LinearIntern::new(),
         }
     }
 
@@ -55,27 +93,21 @@ impl FontIntern {
         fallback: &str,
     ) -> Rc<str> {
         let size_bits = size_px.to_bits();
-        let mut entries = self.entries.borrow_mut();
-        let hit = entries.iter().find(|(key, _)| {
-            key.size_bits == size_bits
-                && key.bold == bold
-                && key.italic == italic
-                && &*key.family == family
-        });
-        if let Some((_, css)) = hit {
-            return Rc::clone(css);
-        }
-        let css: Rc<str> = font::build(size_px, bold, italic, family, fallback).into();
-        entries.push((
-            FontKey {
+        self.entries.get_or_insert(
+            |key| {
+                key.size_bits == size_bits
+                    && key.bold == bold
+                    && key.italic == italic
+                    && &*key.family == family
+            },
+            || FontKey {
                 size_bits,
                 bold,
                 italic,
                 family: family.into(),
             },
-            Rc::clone(&css),
-        ));
-        css
+            || font::build(size_px, bold, italic, family, fallback).into(),
+        )
     }
 }
 
@@ -94,7 +126,7 @@ impl Default for FontIntern {
 /// to the same color produce two entries — accepted, cardinality is bounded
 /// by the small set of distinct colors a sheet uses.
 pub struct ColorIntern {
-    entries: RefCell<Vec<(ColorKey, Rc<str>)>>,
+    entries: LinearIntern<ColorKey, Rc<str>>,
 }
 
 /// One interned color's identity. `Raw` keeps the model's own string;
@@ -108,7 +140,7 @@ enum ColorKey {
 impl ColorIntern {
     pub fn new() -> Self {
         Self {
-            entries: RefCell::new(Vec::new()),
+            entries: LinearIntern::new(),
         }
     }
 
@@ -116,16 +148,11 @@ impl ColorIntern {
     /// Miss: one `CssColor::new(raw).into_string()` + one `Box<str>` key +
     /// one `Rc<str>` value, then `Rc::clone` for the return.
     pub fn get(&self, raw: &str) -> Rc<str> {
-        let mut entries = self.entries.borrow_mut();
-        if let Some((_, css)) = entries
-            .iter()
-            .find(|(key, _)| matches!(key, ColorKey::Raw(k) if &**k == raw))
-        {
-            return Rc::clone(css);
-        }
-        let css: Rc<str> = CssColor::new(raw).into_string().into();
-        entries.push((ColorKey::Raw(raw.into()), Rc::clone(&css)));
-        css
+        self.entries.get_or_insert(
+            |key| matches!(key, ColorKey::Raw(k) if &**k == raw),
+            || ColorKey::Raw(raw.into()),
+            || CssColor::new(raw).into_string().into(),
+        )
     }
 
     /// Returns the interned `#rrggbb` color for a parsed rgb triple. Hit:
@@ -134,16 +161,11 @@ impl ColorIntern {
     /// `Rc::clone` for the return. Lowercase hex digits make the result its
     /// own `CssColor` normalization, so no second pass runs.
     pub fn get_rgb(&self, rgb: [u8; 3]) -> Rc<str> {
-        let mut entries = self.entries.borrow_mut();
-        if let Some((_, css)) = entries
-            .iter()
-            .find(|(key, _)| matches!(key, ColorKey::Rgb(k) if *k == rgb))
-        {
-            return Rc::clone(css);
-        }
-        let css: Rc<str> = rgb_hex(rgb).into();
-        entries.push((ColorKey::Rgb(rgb), Rc::clone(&css)));
-        css
+        self.entries.get_or_insert(
+            |key| matches!(key, ColorKey::Rgb(k) if *k == rgb),
+            || ColorKey::Rgb(rgb),
+            || rgb_hex(rgb).into(),
+        )
     }
 }
 
