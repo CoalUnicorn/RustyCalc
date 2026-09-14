@@ -187,7 +187,8 @@ pub struct JsBackedModel {
     // (user decision: cache once, explicit refresh). The host must call
     // `IronCanvas.themeChanged()` after `model.setTheme(...)` — a stale
     // cache silently misrenders theme colors, and that is a host bug, not
-    // a recoverable bridge failure.
+    // a recoverable bridge failure. Only a real answer fills the slot: a
+    // failed fetch leaves it empty so the next conversion retries.
     theme: RefCell<Option<ic::Theme>>,
 }
 
@@ -228,29 +229,39 @@ impl JsBackedModel {
     }
 
     /// Run `f` against the cached workbook theme, filling the cache on first
-    /// use. A throw, a bad shape, or a host without `getTheme` all cache the
-    /// Office default — strictly better than dropping theme colors, and
-    /// recoverable via `theme_changed()` once the host fixes itself.
+    /// use. Only a real answer is cached: a throw or a non-conforming payload
+    /// leaves the slot empty, so the next conversion re-fetches instead of
+    /// pinning the Office default for the model's lifetime. Recovery therefore
+    /// needs no explicit `themeChanged()` call — a host that threw once starts
+    /// rendering resolved theme colors again on its own.
     /// Holds the `RefCell` borrow across `f`; `f` must not re-enter the theme
     /// cache (style conversion never does).
     fn with_theme<T>(&self, f: impl FnOnce(&ic::Theme) -> T) -> T {
         let mut slot = self.theme.borrow_mut();
-        let theme = slot.get_or_insert_with(|| self.fetch_theme());
-        f(theme)
+        if slot.is_none() {
+            *slot = self.fetch_theme();
+        }
+        match slot.as_ref() {
+            Some(theme) => f(theme),
+            // This fetch failed: convert with the Office default, uncached, so
+            // the next one re-queries.
+            None => f(&ic::Theme::default()),
+        }
     }
 
-    fn fetch_theme(&self) -> ic::Theme {
+    /// Fetch the workbook theme. `None` is a failure the caller must not cache.
+    /// A host without `getTheme` answers `Some(default)`: that absence is
+    /// structural and cannot change, so the default is permanent.
+    fn fetch_theme(&self) -> Option<ic::Theme> {
         if !self.has_get_theme {
-            return ic::Theme::default();
+            return Some(ic::Theme::default());
         }
-        let Some(jsv) = self.note_throw("getTheme", self.handle.get_theme()) else {
-            return ic::Theme::default();
-        };
+        let jsv = self.note_throw("getTheme", self.handle.get_theme())?;
         match serde_wasm_bindgen::from_value(jsv) {
-            Ok(t) => t,
+            Ok(t) => Some(t),
             Err(e) => {
                 self.note_serde_err("getTheme", &e);
-                ic::Theme::default()
+                None
             }
         }
     }

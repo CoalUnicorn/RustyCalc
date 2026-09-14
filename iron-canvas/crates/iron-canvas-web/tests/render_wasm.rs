@@ -132,6 +132,68 @@ fn content_accessors_hold_on_an_undecodable_payload() {
     assert_eq!(model.get_cell_type(0, 1, 1), Fetched::Absent);
 }
 
+/// A transient `getTheme` failure must not pin the Office default for the
+/// model's lifetime: the failing conversion paints with the default, and the
+/// next one resolves against the host theme once the host answers.
+#[wasm_bindgen_test]
+fn transient_get_theme_failure_is_retried() {
+    let host_theme = ic::Theme {
+        accent1: "#FF0000".to_string(),
+        ..ic::Theme::default()
+    };
+    let theme_js = serde_wasm_bindgen::to_value(&host_theme).expect("fixture Theme serializes");
+    let calls = Rc::new(Cell::new(0u32));
+    let get_theme = Closure::wrap(Box::new(move || -> JsValue {
+        let n = calls.get();
+        calls.set(n + 1);
+        if n == 0 {
+            wasm_bindgen::throw_val(JsValue::from_str("transient getTheme failure"));
+        }
+        theme_js.clone()
+    }) as Box<dyn Fn() -> JsValue>);
+
+    // A theme-indexed fill: accent1 resolves through whichever theme the bridge
+    // holds, so the two assertions below see the theme, not the style.
+    let style = ic::Style {
+        fill: ic::Fill {
+            color: ic::Color::Theme(4, 0.0),
+        },
+        ..ic::Style::default()
+    };
+    let style_js = serde_wasm_bindgen::to_value(&style).expect("fixture Style serializes");
+    let get_style = Closure::wrap(Box::new(move |_sheet: u32, _row: i32, _col: i32| -> JsValue {
+        style_js.clone()
+    }) as Box<dyn Fn(u32, i32, i32) -> JsValue>);
+
+    let model = model_with_methods(&[
+        ("getCellStyle", get_style.as_ref().unchecked_ref()),
+        ("getTheme", get_theme.as_ref().unchecked_ref()),
+    ]);
+
+    let Fetched::Value(first) = model.get_cell_style(0, 1, 1) else {
+        panic!("a conforming style payload must resolve");
+    };
+    assert_eq!(
+        first.fill_color.as_deref(),
+        Some("#4472C4"),
+        "the failed fetch falls back to the Office default accent1"
+    );
+
+    let Fetched::Value(second) = model.get_cell_style(0, 1, 1) else {
+        panic!("a conforming style payload must resolve");
+    };
+    assert_eq!(
+        second.fill_color.as_deref(),
+        Some("#FF0000"),
+        "the next conversion must re-query the theme instead of pinning the default"
+    );
+    assert_eq!(
+        model.diagnostic_counts().0,
+        1,
+        "exactly one throw: the retry succeeded on the second fetch"
+    );
+}
+
 #[wasm_bindgen_test]
 fn backward_scroll_after_one_failed_measure_matches_fresh() {
     for (method, value) in [("getRowHeight", "20"), ("getColumnWidth", "80")] {

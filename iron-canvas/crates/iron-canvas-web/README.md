@@ -42,7 +42,7 @@ Method names are camelCase, matching the IronCalc wasm API convention (snake_cas
 Optional extensions, probed once at bind time; absence degrades gracefully:
 
 - **bulk fetch** — `getCellStylesIn(sheet, r1, c1, r2, c2)`, `getFormattedCellValuesIn(...)`, `getCellTypesIn(...)`, returning dense row-major arrays. Without them the engine falls back to per-cell calls. These are **not** in the upstream IronCalc wasm API — hosts install them on the handle (see `web-test/index.html`).
-- `getTheme()` — workbook theme for `Color::Theme(idx, tint)` resolution; absent → Office default.
+- `getTheme()` — workbook theme for `Color::Theme(idx, tint)` resolution; absent → Office default. The cache only ever holds a real answer, so a transient `getTheme` failure retries on the next style conversion instead of pinning the default for the model's lifetime.
 - `getShowRowHeaders(sheet)` / `getShowColHeaders(sheet)` — absent → headers assumed visible.
 
 `getCellStyle` may return the CF-merged `ExtendedCellStyle` wrapper (`{style, icon, data_bar, rating}`) or a bare `Style`; both deserialize.
