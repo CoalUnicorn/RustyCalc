@@ -167,12 +167,10 @@ impl IronCanvas {
     }
 
     /// Replace all overlay state.
-    /// The `Result` permits future validation errors without an API change.
     #[wasm_bindgen(js_name = "setOverlays")]
     pub fn set_overlays_js(&mut self, overlays: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::RenderOverlaysWire = serde_wasm_bindgen::from_value(overlays)?;
-        let engine = wire.into_engine().map_err(|msg| JsError::new(&msg))?;
-        self.runtime.orchestrator_mut().set_overlays(engine);
+        self.runtime.orchestrator_mut().set_overlays(wire.into());
         Ok(())
     }
 

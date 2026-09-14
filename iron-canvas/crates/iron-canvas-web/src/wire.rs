@@ -392,17 +392,17 @@ impl From<ThemeVariablesWire> for ThemeVariables {
     }
 }
 
-impl RenderOverlaysWire {
-    /// Convert to the engine `RenderOverlays`. Currently infallible; the
-    /// `Result` is preserved so future boundary invariants can surface as
-    /// a `JsError` without rippling through the call sites.
-    pub(crate) fn into_engine(self) -> Result<RenderOverlays, String> {
-        Ok(RenderOverlays {
-            extend_to: self.extend_to.map(Into::into),
-            clipboard: self.clipboard.map(Into::into),
-            point_range: self.point_range.map(Into::into),
-            formula_refs: self.formula_refs.into_iter().map(Into::into).collect(),
-        })
+impl From<RenderOverlaysWire> for RenderOverlays {
+    /// Convert to the engine `RenderOverlays`. Infallible: every field already
+    /// carries the engine shape, and the optional ones map through their own
+    /// `From` impls like every other inbound wire type.
+    fn from(w: RenderOverlaysWire) -> Self {
+        RenderOverlays {
+            extend_to: w.extend_to.map(Into::into),
+            clipboard: w.clipboard.map(Into::into),
+            point_range: w.point_range.map(Into::into),
+            formula_refs: w.formula_refs.into_iter().map(Into::into).collect(),
+        }
     }
 }
 
