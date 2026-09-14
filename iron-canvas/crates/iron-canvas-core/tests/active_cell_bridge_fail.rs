@@ -66,3 +66,27 @@ fn active_cell_repaint_skips_entirely_on_bridge_failure() {
         painter.ops()
     );
 }
+
+#[test]
+fn active_cell_coordinates_reach_the_overlay_without_transposition() {
+    use iron_canvas_core::{CanvasMetrics, Orchestrator, PaintResult};
+    use iron_canvas_recorder::{DrawOp, MemSurface};
+
+    let model = Rc::new(TestModel::synthetic_grid().with_active(2, 3));
+    model.set_cell(2, 3, "target cell");
+    model.set_cell(3, 2, "transposed cell");
+    let mut orch = Orchestrator::new(MemSurface::new(), MemSurface::new());
+    orch.resize(CanvasMetrics::new(canvas_default(), 1.0).expect("valid test metrics"));
+    orch.set_model(model);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let ops = orch.overlay_surface().recorder().ops();
+    let cell_text: Vec<_> = ops
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::FillText { text, .. } if text.ends_with(" cell") => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(cell_text, ["target cell"]);
+}

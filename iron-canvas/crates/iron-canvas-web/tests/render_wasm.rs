@@ -152,6 +152,108 @@ fn backward_scroll_after_one_failed_measure_matches_fresh() {
 }
 
 #[wasm_bindgen_test]
+fn hidden_row_header_blits_match_fresh_on_both_axes() {
+    use iron_canvas_core::geometry::prim::Axis;
+
+    for dpr in [1.0, 1.25, 1.5] {
+        for axis in [Axis::Row, Axis::Column] {
+            for (frozen, show_col_headers) in
+                [(false, true), (true, true), (false, false), (true, false)]
+            {
+                let top = Rc::new(Cell::new(3));
+                let left = Rc::new(Cell::new(3));
+                let handle: js_sys::Object = make_scrollable_fixture_model(
+                    stage6_fixture_store(),
+                    Rc::clone(&top),
+                    Rc::clone(&left),
+                    None,
+                )
+                .unchecked_into();
+                set_prop(
+                    &handle,
+                    "getShowRowHeaders",
+                    &js_sys::Function::new_no_args("return false;"),
+                );
+                if !show_col_headers {
+                    set_prop(
+                        &handle,
+                        "getShowColHeaders",
+                        &js_sys::Function::new_no_args("return false;"),
+                    );
+                }
+                if frozen {
+                    set_prop(
+                        &handle,
+                        "getFrozenRowsCount",
+                        &js_sys::Function::new_no_args("return 2;"),
+                    );
+                    set_prop(
+                        &handle,
+                        "getFrozenColumnsCount",
+                        &js_sys::Function::new_no_args("return 1;"),
+                    );
+                }
+                let grid = make_canvas();
+                let overlay = make_canvas();
+                let mut canvas = IronCanvas::create(grid.clone(), overlay.clone())
+                    .expect("create hidden-header canvas");
+                canvas
+                    .set_model_js(handle.clone().into())
+                    .expect("valid fixture");
+                canvas.resize(400.0, 240.0, dpr).expect("valid metrics");
+                assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+
+                for origin in [4, 3] {
+                    match axis {
+                        Axis::Row => top.set(origin),
+                        Axis::Column => left.set(origin),
+                    }
+                    canvas.view_changed();
+                    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+                    let trace = canvas.frame_trace();
+                    assert!(trace.contains("ScrollBlit"), "{trace}");
+                    if dpr == 1.0 || (!frozen && !show_col_headers) {
+                        stage6_assert_verdict(&trace, "grid:strip", "aligned hidden-header blit");
+                    } else {
+                        stage6_assert_verdict(&trace, "grid:FULL", "fractional header boundary");
+                    }
+                    let fresh_grid = make_canvas();
+                    let fresh_overlay = make_canvas();
+                    let mut fresh = IronCanvas::create(fresh_grid.clone(), fresh_overlay.clone())
+                        .expect("create Fresh reference canvas");
+                    fresh
+                        .set_model_js(handle.clone().into())
+                        .expect("same fixture");
+                    fresh.resize(400.0, 240.0, dpr).expect("valid metrics");
+                    assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+                    let expected = grid_pixels(&fresh_grid);
+                    let actual = grid_pixels(&grid);
+                    let differences: Vec<_> = actual
+                        .iter()
+                        .zip(&expected)
+                        .enumerate()
+                        .filter_map(|(offset, (actual, expected))| {
+                            (actual != expected).then_some((offset, *actual, *expected))
+                        })
+                        .collect();
+                    assert!(
+                        differences.is_empty(),
+                        "grid: {axis:?}, origin {origin}, frozen {frozen}, col headers {show_col_headers}, DPR {dpr}: {} bytes differ from Fresh; first {:?}",
+                        differences.len(),
+                        differences.first()
+                    );
+                    assert_eq!(
+                        grid_pixels(&overlay),
+                        grid_pixels(&fresh_overlay),
+                        "overlay: {axis:?}, origin {origin}, frozen {frozen}, DPR {dpr}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[wasm_bindgen_test]
 fn geometry_and_grid_failures_preserve_pixels_and_retry() {
     for dpr in [1.0, 1.25, 1.5] {
         for (method, value, path) in [

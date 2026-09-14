@@ -322,6 +322,27 @@ pub(super) fn try_blit_reuse(
     inputs: &FrameInputs,
     plan: &BlitPlan,
 ) -> PreparedBlitOutcome {
+    // Hidden row headers previously always used Fresh. Fractional-DPR headers
+    // and frozen separators can blend again over copied pixels. Keep Fresh
+    // for those cases, and require aligned copy/strip edges in the others.
+    let dpr = inputs.dpr();
+    let fractional_chrome = dpr.fract() != 0.0
+        && (inputs.show_col_headers()
+            || !prev.pane_set.rows.frozen.is_empty()
+            || !prev.pane_set.cols.frozen.is_empty());
+    if !inputs.show_row_headers()
+        && (fractional_chrome
+            || [plan.shift.src, plan.shift.dst, plan.pixel_strip]
+                .into_iter()
+                .any(|rect| {
+                    let (x, y, w, h) = rect.as_f64_tuple();
+                    [x, y, w, h]
+                        .into_iter()
+                        .any(|value| (value * dpr).fract() != 0.0)
+                }))
+    {
+        return PreparedBlitOutcome::FreshFallback(prev);
+    }
     // `inputs.view()` is this attempt's one already-validated read (see
     // `Chrome::build`'s comment) — no `None`/fallback branch needed here.
     let view = inputs.view();
@@ -358,7 +379,12 @@ pub(super) fn try_blit_reuse(
                 Some(rows) => rows,
                 None => return PreparedBlitOutcome::FreshFallback(prev),
             };
-            let thickness = row_header_thickness_for(&rows, frozen_rows_count, new_top);
+            let thickness = row_header_thickness_for(
+                &rows,
+                frozen_rows_count,
+                new_top,
+                inputs.show_row_headers(),
+            );
             if thickness != prev.row_header_thickness {
                 return PreparedBlitOutcome::FreshFallback(prev);
             }
@@ -376,8 +402,12 @@ pub(super) fn try_blit_reuse(
             };
             // Cross-axis rows band is unchanged across a column scroll; read it
             // (not taken yet) for the gate.
-            let thickness =
-                row_header_thickness_for(&prev.pane_set.rows.scroll, frozen_rows_count, new_top);
+            let thickness = row_header_thickness_for(
+                &prev.pane_set.rows.scroll,
+                frozen_rows_count,
+                new_top,
+                inputs.show_row_headers(),
+            );
             if thickness != prev.row_header_thickness {
                 return PreparedBlitOutcome::FreshFallback(prev);
             }

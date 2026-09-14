@@ -121,6 +121,39 @@ fn blit_inside_stable_digit_band_keeps_blitted_kind() {
     );
 }
 
+#[test]
+fn hidden_row_headers_keep_both_scroll_axes_on_blit_path() {
+    use iron_canvas_core::geometry::prim::Axis;
+
+    for axis in [Axis::Row, Axis::Column] {
+        for (frozen_rows, frozen_cols) in [(0, 0), (2, 1)] {
+            let model = Rc::new(
+                TestModel::synthetic_grid()
+                    .with_frozen(frozen_rows, frozen_cols)
+                    .with_hidden_row_headers()
+                    .with_top_row(10)
+                    .with_left_column(5)
+                    .with_active(10, 5),
+            );
+            let mut orch = build(model.clone());
+            assert_eq!(orch.render_pending(), PaintResult::Rendered);
+            match axis {
+                Axis::Row => model.set_top_row(11),
+                Axis::Column => model.set_left_column(6),
+            }
+            orch.view_changed();
+            assert_eq!(orch.render_pending(), PaintResult::Rendered);
+            let trace = orch.last_trace();
+            assert_eq!(trace.strategy, Some(RenderStrategy::ScrollBlit));
+            assert_eq!(
+                trace.effective,
+                Some(RenderStrategy::ScrollBlit),
+                "hidden row headers must not force a rebuild: {axis:?}, frozen {frozen_rows}/{frozen_cols}"
+            );
+        }
+    }
+}
+
 /// Review finding #3: a `BridgeFailed` fetch of the active cell is an *unknown*
 /// value — it can't prove the cell is unchanged, so the blit must be rejected
 /// regardless of which side (capture or compare) saw the failure. The control

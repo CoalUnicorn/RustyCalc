@@ -180,7 +180,7 @@ fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
 #[test]
 fn autofill_handle_rect_anchors_at_bot_right_corner() {
     // The handle's bottom-right corner is the selection's bottom-right
-    // corner, so the square lies inside the selection's last cell.
+    // cell corner. The fill rectangle extends six pixels back on each axis.
     let m = TestModel::new().with_selection([2, 3, 4, 5]);
     let inputs = test_inputs(&m, test_canvas(), &std::rc::Rc::new(LIGHT));
     let frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);

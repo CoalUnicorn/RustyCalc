@@ -403,15 +403,12 @@ impl Chrome {
         }
 
         // Phase C — measure row_header_thickness from the last visible row label.
-        let row_header_thickness = if show_row {
-            pane_set::row_header_thickness_for(
-                &pane_set.rows.scroll,
-                frozen_row_count,
-                view.top_row,
-            )
-        } else {
-            0
-        };
+        let row_header_thickness = pane_set::row_header_thickness_for(
+            &pane_set.rows.scroll,
+            frozen_row_count,
+            view.top_row,
+            show_row,
+        );
 
         // Phase D — col walk uses the measured width to anchor `origin_x`.
         let origin_x = if show_row {
@@ -640,10 +637,10 @@ impl Chrome {
         })
     }
 
-    /// Anchor point of the autofill handle: the selection's bottom-right
-    /// corner in canvas pixels. `None` when that corner is off-frame or the
-    /// selection already reaches the last row/column — there is nothing
-    /// beyond to fill into.
+    /// Return the bottom-right corner of the selection's last cell in canvas
+    /// pixels. Return `None` if either cell coordinate has no frame slot or
+    /// reaches the model's last row or column. A retained edge slot can extend
+    /// past the canvas, so the returned point is not clipped to the canvas.
     pub fn autofill_handle(&self, selection_range: RCRange) -> Option<Point> {
         let norm = selection_range.normalized();
         let r2 = norm.r2;
@@ -664,10 +661,11 @@ impl Chrome {
         })
     }
 
-    /// Painted square of the autofill handle: [`AUTOFILL_HANDLE_PX`] per side,
-    /// anchored by its bottom-right corner at
-    /// [`autofill_handle`](Chrome::autofill_handle), so it lies inside the
-    /// selection's last cell. `None` under the same conditions as the anchor.
+    /// Return the handle's fill rectangle, with [`AUTOFILL_HANDLE_PX`] per side.
+    /// Its bottom-right corner is [`autofill_handle`](Chrome::autofill_handle).
+    /// The rectangle can extend beyond a cell smaller than the handle.
+    /// The selection painter strokes a separate outline around this rectangle.
+    /// Return `None` under the same conditions as the anchor.
     pub fn autofill_handle_rect(&self, selection_range: RCRange) -> Option<PixelRect> {
         let p = self.autofill_handle(selection_range)?;
         Some(PixelRect {

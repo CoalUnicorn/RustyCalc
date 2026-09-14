@@ -268,6 +268,7 @@ pub fn measure_row_header_width(max_visible_row: i32) -> i32 {
 /// Row-header thickness the row band implies: the last visible row's label
 /// width, or — for an empty band — the band's first id, which is
 /// [`scroll_first`] of the frozen count and the scrolled-to row.
+/// Hidden row headers have zero thickness.
 ///
 /// `Chrome::build` (phase C) and the blit gate derive
 /// `row_header_thickness` from this one expression. The gate compares the
@@ -277,7 +278,11 @@ pub(crate) fn row_header_thickness_for(
     rows: &[RowSlot],
     frozen_count: i32,
     scroll_top: i32,
+    show_row_headers: bool,
 ) -> i32 {
+    if !show_row_headers {
+        return 0;
+    }
     let last_visible_row = rows
         .last()
         .map(AxisSlot::id)
