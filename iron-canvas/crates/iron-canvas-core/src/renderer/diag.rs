@@ -32,7 +32,9 @@ use crate::pending_work::{RowSpan, WorkFlags};
 use crate::renderer::cache::BufferTruth;
 use crate::renderer::cache::fingerprint::FingerprintTruth;
 use crate::renderer::cell::repaint_plan::RepaintReason;
-use crate::renderer::prepared::FetchedCells;
+use crate::renderer::prepared::{
+    FetchedCells, PreparedFingerprintUpdate, PreparedRepaint, PreparedRepaintPlan, PreparedStrip,
+};
 use crate::types::coord::RCRange;
 /// Wire version of the snapshot shape. Bump when the projection changes.
 /// Schema 3 replaces `overlay`, `viewport`, `slotsReuse`, `fresh`, and
@@ -663,6 +665,106 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         let capture = slot.as_mut().expect("ensure_capture inserted a frame");
         capture.paint_counts.rows += rows;
         capture.paint_counts.cells += cells;
+    }
+
+    /// Everything the `PreparedGrid::Full` execute arm reports: verdict,
+    /// fingerprint reason, changed addresses, the installed fingerprint, and
+    /// the painted counts. The arm calls this once instead of carrying its
+    /// capture inline, so the production path reads as paint-then-commit.
+    ///
+    /// Every writer reached here owns disjoint capture fields, so nothing in
+    /// the arm depends on the order of these calls.
+    pub(crate) fn diag_commit_replace(&self, repaint: &PreparedRepaint, layout: GridLayout) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        self.diag_repaint(
+            GridVerdict::from(&repaint.plan),
+            repaint.reason,
+            &repaint.changed_rows,
+            &repaint.changed_cells,
+        );
+        self.diag_fingerprint_action(DiagFingerprintActionTag::Install);
+        match &repaint.plan {
+            PreparedRepaintPlan::Skip => self.diag_paint_counts(0, 0),
+            PreparedRepaintPlan::Full => {
+                self.diag_paint_ranges(layout.segments().map(|segment| segment.range()));
+            }
+            PreparedRepaintPlan::Rows(spans) => {
+                // Absolute row intervals per painted segment, merged so `rows`
+                // counts distinct grid rows even when frozen columns visit the
+                // same rows in the left and right segments. Cells stay disjoint
+                // across segments.
+                let mut row_intervals: Vec<(i32, i32)> = Vec::new();
+                let mut cells = 0usize;
+                for grid_segment in layout.segments() {
+                    let range = grid_segment.range();
+                    let cols = (range.c2 - range.c1 + 1).max(0) as usize;
+                    for span in spans {
+                        let r1 = span.start().max(range.r1);
+                        let r2 = span.end().min(range.r2);
+                        if r1 <= r2 {
+                            row_intervals.push((r1, r2));
+                            cells += (r2 - r1 + 1) as usize * cols;
+                        }
+                    }
+                }
+                self.diag_paint_counts(distinct_rows(&row_intervals), cells);
+            }
+            // Envelope plans record their own counts, inside
+            // `paint_repaint_envelope`.
+            PreparedRepaintPlan::Cell { .. } | PreparedRepaintPlan::Range { .. } => {}
+        }
+    }
+
+    /// Everything the `PreparedGrid::Damage` execute arm reports: a strip
+    /// verdict with no fingerprint comparison, a stale-marked fingerprint, and
+    /// the painted strips' counts.
+    pub(crate) fn diag_commit_splice(&self, strips: &[PreparedStrip]) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        self.diag_repaint(GridVerdict::Strip, None, &[], &[]);
+        self.diag_fingerprint_action(DiagFingerprintActionTag::MarkStale);
+        self.diag_paint_ranges(strips.iter().map(|strip| strip.range));
+    }
+
+    /// Everything the `PreparedGrid::Blit` execute arm reports after painting:
+    /// the revealed strips' counts and the fingerprint update the commit
+    /// carries. The blit clip is NOT here — it is recorded at its `push_clip`
+    /// call site, which runs before the paint loop.
+    pub(crate) fn diag_commit_shift(
+        &self,
+        address_strips: &[Option<PreparedStrip>; 2],
+        fingerprint: &PreparedFingerprintUpdate,
+    ) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        self.diag_repaint(GridVerdict::Strip, None, &[], &[]);
+        self.diag_fingerprint_action(match fingerprint {
+            PreparedFingerprintUpdate::Install(_) => DiagFingerprintActionTag::Install,
+            PreparedFingerprintUpdate::MarkStale => DiagFingerprintActionTag::MarkStale,
+        });
+        self.diag_paint_ranges(address_strips.iter().flatten().map(|strip| strip.range));
+    }
+
+    /// Painted row/cell counts for one execute arm. `ranges` yields the
+    /// absolute address ranges that arm painted: rows count distinct, because
+    /// frozen columns revisit the same absolute rows in the left and right
+    /// segments, while cells add up, because a cell belongs to one segment
+    /// only.
+    fn diag_paint_ranges(&self, ranges: impl Iterator<Item = RCRange>) {
+        if !self.diag.enabled.get() {
+            return;
+        }
+        let mut row_intervals: Vec<(i32, i32)> = Vec::new();
+        let mut cells = 0usize;
+        for range in ranges {
+            row_intervals.push((range.r1, range.r2));
+            cells += FetchedCells::addressed_cells(range);
+        }
+        self.diag_paint_counts(distinct_rows(&row_intervals), cells);
     }
 
     /// Runtime switch. Disabling drops the retained published snapshot so

@@ -701,60 +701,7 @@ impl<P: Painter> RendererCore<P> {
                 }
                 self.trace_grid(GridVerdict::from(&repaint.plan));
                 #[cfg(feature = "dev-diagnostics")]
-                {
-                    let verdict = GridVerdict::from(&repaint.plan);
-                    self.diag_repaint(
-                        verdict,
-                        repaint.reason,
-                        &repaint.changed_rows,
-                        &repaint.changed_cells,
-                    );
-                }
-                #[cfg(feature = "dev-diagnostics")]
-                {
-                    self.diag_fingerprint_action(DiagFingerprintActionTag::Install);
-                    // Absolute row intervals per painted segment, merged so
-                    // `rows` counts distinct grid rows even when frozen
-                    // columns visit the same rows in left and right
-                    // segments. Cells stay disjoint across segments.
-                    // Envelope plans record their own counts inside
-                    // `paint_repaint_envelope`.
-                    match &repaint.plan {
-                        PreparedRepaintPlan::Skip => self.diag_paint_counts(0, 0),
-                        PreparedRepaintPlan::Full => {
-                            let row_intervals: Vec<(i32, i32)> = layout
-                                .segments()
-                                .map(|grid_segment| grid_segment.range())
-                                .map(|range| (range.r1, range.r2))
-                                .collect();
-                            let cells = layout
-                                .segments()
-                                .map(|grid_segment| {
-                                    FetchedCells::addressed_cells(grid_segment.range())
-                                })
-                                .sum();
-                            self.diag_paint_counts(distinct_rows(&row_intervals), cells);
-                        }
-                        PreparedRepaintPlan::Rows(spans) => {
-                            let mut row_intervals: Vec<(i32, i32)> = Vec::new();
-                            let mut cells = 0usize;
-                            for grid_segment in layout.segments() {
-                                let range = grid_segment.range();
-                                let cols = (range.c2 - range.c1 + 1).max(0) as usize;
-                                for span in spans {
-                                    let r1 = span.start().max(range.r1);
-                                    let r2 = span.end().min(range.r2);
-                                    if r1 <= r2 {
-                                        row_intervals.push((r1, r2));
-                                        cells += (r2 - r1 + 1) as usize * cols;
-                                    }
-                                }
-                            }
-                            self.diag_paint_counts(distinct_rows(&row_intervals), cells);
-                        }
-                        PreparedRepaintPlan::Cell { .. } | PreparedRepaintPlan::Range { .. } => {}
-                    }
-                }
+                self.diag_commit_replace(&repaint, layout);
                 GridCacheCommit::Replace {
                     layout,
                     segments: std::array::from_fn(|index| {
@@ -769,20 +716,7 @@ impl<P: Painter> RendererCore<P> {
                 }
                 self.trace_grid(GridVerdict::Strip);
                 #[cfg(feature = "dev-diagnostics")]
-                self.diag_repaint(GridVerdict::Strip, None, &[], &[]);
-                #[cfg(feature = "dev-diagnostics")]
-                {
-                    self.diag_fingerprint_action(DiagFingerprintActionTag::MarkStale);
-                    let row_intervals: Vec<(i32, i32)> = strips
-                        .iter()
-                        .map(|strip| (strip.range.r1, strip.range.r2))
-                        .collect();
-                    let cells = strips
-                        .iter()
-                        .map(|strip| FetchedCells::addressed_cells(strip.range))
-                        .sum();
-                    self.diag_paint_counts(distinct_rows(&row_intervals), cells);
-                }
+                self.diag_commit_splice(&strips);
                 GridCacheCommit::Splice {
                     layout,
                     strips,
@@ -806,25 +740,7 @@ impl<P: Painter> RendererCore<P> {
                 self.painter.pop_clip();
                 self.trace_grid(GridVerdict::Strip);
                 #[cfg(feature = "dev-diagnostics")]
-                self.diag_repaint(GridVerdict::Strip, None, &[], &[]);
-                #[cfg(feature = "dev-diagnostics")]
-                {
-                    self.diag_fingerprint_action(match &fingerprint {
-                        PreparedFingerprintUpdate::Install(_) => DiagFingerprintActionTag::Install,
-                        PreparedFingerprintUpdate::MarkStale => DiagFingerprintActionTag::MarkStale,
-                    });
-                    let row_intervals: Vec<(i32, i32)> = address_strips
-                        .iter()
-                        .flatten()
-                        .map(|strip| (strip.range.r1, strip.range.r2))
-                        .collect();
-                    let cells = address_strips
-                        .iter()
-                        .flatten()
-                        .map(|strip| FetchedCells::addressed_cells(strip.range))
-                        .sum();
-                    self.diag_paint_counts(distinct_rows(&row_intervals), cells);
-                }
+                self.diag_commit_shift(&address_strips, &fingerprint);
                 GridCacheCommit::Shift {
                     previous,
                     layout,
