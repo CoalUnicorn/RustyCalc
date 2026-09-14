@@ -62,7 +62,7 @@ impl IronCanvas {
     /// Return the pixel position of the autofill handle.
     /// Return `null` if the canvas does not show a selection.
     #[wasm_bindgen(js_name = "autofillHandlePos")]
-    pub fn autofill_handle_pos(&self) -> Result<JsValue, JsError> {
+    pub fn autofill_handle_js(&self) -> Result<JsValue, JsError> {
         match self.runtime.orchestrator().autofill_handle() {
             Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
             None => Ok(JsValue::NULL),
