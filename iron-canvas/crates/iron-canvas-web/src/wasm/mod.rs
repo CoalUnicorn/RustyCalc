@@ -13,6 +13,7 @@
 use std::cell::{Cell, RefCell};
 
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -315,34 +316,68 @@ impl JsBackedModel {
         }
     }
 
+    /// Fill `out` row-major over `range` with one per-cell fetch each. This is
+    /// the trait's own default body and the degrade path every batch accessor
+    /// shares, so it lives once.
+    fn fill_per_cell<T>(
+        out: &mut Vec<Fetched<T>>,
+        sheet: u32,
+        range: RCRange,
+        mut fetch: impl FnMut(u32, i32, i32) -> Fetched<T>,
+    ) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(fetch(sheet, r, c));
+            }
+        }
+    }
+
     /// Per-cell style fill — the trait default's body, reachable as a real
     /// method so a flag-miss or batched-failure can degrade to today's exact
     /// behaviour. (`super` can't reach a trait default.)
     fn styles_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_cell_style(sheet, r, c));
-            }
-        }
+        Self::fill_per_cell(out, sheet, range, |sheet, row, column| {
+            self.get_cell_style(sheet, row, column)
+        });
     }
 
     fn values_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<String>>) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_formatted_cell_value(sheet, r, c));
-            }
-        }
+        Self::fill_per_cell(out, sheet, range, |sheet, row, column| {
+            self.get_formatted_cell_value(sheet, row, column)
+        });
     }
 
     fn types_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_cell_type(sheet, r, c));
+        Self::fill_per_cell(out, sheet, range, |sheet, row, column| {
+            self.get_cell_type(sheet, row, column)
+        });
+    }
+
+    /// One boundary crossing for a dense row-major range, or `None` when the
+    /// batch cannot be trusted and the caller must degrade to the per-cell
+    /// path. Owns the whole D-1/D-2 ladder so all three channels apply the
+    /// same rules: a throw is transient (`note_throw`), a non-conforming
+    /// payload is a shape error (`note_serde_err`), and a length other than
+    /// the range's cell count cannot be indexed row-major (`batch_is_dense`).
+    ///
+    /// A `null` *element* is none of those — it is a blank cell, and each
+    /// channel decides what that maps to.
+    fn decode_dense_batch<T: DeserializeOwned>(
+        &self,
+        ctx: &str,
+        fetch: Result<JsValue, JsValue>,
+        range: RCRange,
+    ) -> Option<Vec<Option<T>>> {
+        let jsv = self.note_throw(ctx, fetch)?;
+        let decoded: Vec<Option<T>> = match serde_wasm_bindgen::from_value(jsv) {
+            Ok(v) => v,
+            Err(e) => {
+                self.note_serde_err(ctx, &e);
+                return None;
             }
-        }
+        };
+        batch_is_dense(&decoded, range).then_some(decoded)
     }
 }
 
@@ -493,32 +528,21 @@ impl CellContentQuery for JsBackedModel {
         if !self.has_styles_in {
             return self.styles_in_per_cell(sheet, range, out);
         }
-        // A transient throw is a fall-back, not a corruption.
-        let jsv = match self.note_throw(
+        // D-2: a throw, a shape drift, or a wrong-length array forfeits the
+        // batch. None of them corrupts the output — the per-cell path re-reads
+        // every cell and reports its own outcome.
+        let Some(decoded) = self.decode_dense_batch::<JsStyle>(
             "getCellStylesIn",
             self.handle
                 .get_cell_styles_in(sheet, range.r1, range.c1, range.r2, range.c2),
-        ) {
-            Some(v) => v,
-            None => return self.styles_in_per_cell(sheet, range, out),
-        };
-        // The array element shape is the per-cell shape — no new wire struct.
-        let decoded: Vec<Option<JsStyle>> = match serde_wasm_bindgen::from_value(jsv) {
-            Ok(v) => v,
-            Err(e) => {
-                self.note_serde_err("getCellStylesIn", &e);
-                return self.styles_in_per_cell(sheet, range, out);
-            }
-        };
-
-        // D-2: only a wrong-length array is untrustworthy now; a null element
-        // is a blank cell. A *clean dense batch* never carries `BridgeFailed`:
-        // the whole-batch throw is the only failure here and routed to per-cell
-        // above — so a null element is `Absent`, not a transient failure.
-        if !batch_is_dense(&decoded, range) {
+            range,
+        ) else {
             return self.styles_in_per_cell(sheet, range, out);
-        }
+        };
         out.clear();
+        // The array element shape is the per-cell shape — no new wire struct.
+        // A null element is a blank cell: `Absent`, never `BridgeFailed`, so a
+        // pane full of blanks skips the O(cells) per-cell refetch.
         // One theme borrow for the whole batch — not one cache hit per cell.
         self.with_theme(|t| {
             out.extend(decoded.into_iter().map(|s| match s {
@@ -537,24 +561,14 @@ impl CellContentQuery for JsBackedModel {
         if !self.has_values_in {
             return self.values_in_per_cell(sheet, range, out);
         }
-        let jsv = match self.note_throw(
+        let Some(decoded) = self.decode_dense_batch::<String>(
             "getFormattedCellValuesIn",
             self.handle
                 .get_formatted_cell_values_in(sheet, range.r1, range.c1, range.r2, range.c2),
-        ) {
-            Some(v) => v,
-            None => return self.values_in_per_cell(sheet, range, out),
-        };
-        let decoded: Vec<Option<String>> = match serde_wasm_bindgen::from_value(jsv) {
-            Ok(v) => v,
-            Err(e) => {
-                self.note_serde_err("getFormattedCellValuesIn", &e);
-                return self.values_in_per_cell(sheet, range, out);
-            }
-        };
-        if !batch_is_dense(&decoded, range) {
+            range,
+        ) else {
             return self.values_in_per_cell(sheet, range, out);
-        }
+        };
         out.clear();
         out.extend(decoded.into_iter().map(|v| match v {
             Some(v) => Fetched::Value(v),
@@ -566,24 +580,14 @@ impl CellContentQuery for JsBackedModel {
         if !self.has_types_in {
             return self.types_in_per_cell(sheet, range, out);
         }
-        let jsv = match self.note_throw(
+        let Some(decoded) = self.decode_dense_batch::<i32>(
             "getCellTypesIn",
             self.handle
                 .get_cell_types_in(sheet, range.r1, range.c1, range.r2, range.c2),
-        ) {
-            Some(v) => v,
-            None => return self.types_in_per_cell(sheet, range, out),
-        };
-        let decoded: Vec<Option<i32>> = match serde_wasm_bindgen::from_value(jsv) {
-            Ok(v) => v,
-            Err(e) => {
-                self.note_serde_err("getCellTypesIn", &e);
-                return self.types_in_per_cell(sheet, range, out);
-            }
-        };
-        if !batch_is_dense(&decoded, range) {
+            range,
+        ) else {
             return self.types_in_per_cell(sheet, range, out);
-        }
+        };
         // A valid discriminant maps to a `CellKind`; a null or out-of-range one
         // yields `Absent` — the same legitimate per-cell outcome (matching
         // single-cell `get_cell_type`), not a corruption.
