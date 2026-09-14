@@ -113,6 +113,26 @@ fn content_accessors_read_null_as_a_blank_cell() {
 }
 
 #[wasm_bindgen_test]
+fn content_accessors_hold_on_an_undecodable_payload() {
+    // A payload no arm decodes is wire-shape drift: it must hold the attempt
+    // (`BridgeFailed`), never paint a fabricated cell. Only a payload that
+    // *did* decode into a value the core does not model (an out-of-range type
+    // discriminant) is `Absent`, where the renderer owns the fallback.
+    let bad_style = js_sys::Function::new_no_args("return 'not-a-style';");
+    let bad_value = js_sys::Function::new_no_args("return 7;");
+    let unknown_kind = js_sys::Function::new_no_args("return 999;");
+    let model = model_with_methods(&[
+        ("getCellStyle", &bad_style),
+        ("getFormattedCellValue", &bad_value),
+    ]);
+    assert_eq!(model.get_cell_style(0, 1, 1), Fetched::BridgeFailed);
+    assert_eq!(model.get_formatted_cell_value(0, 1, 1), Fetched::BridgeFailed);
+
+    let model = model_with_methods(&[("getCellType", &unknown_kind)]);
+    assert_eq!(model.get_cell_type(0, 1, 1), Fetched::Absent);
+}
+
+#[wasm_bindgen_test]
 fn backward_scroll_after_one_failed_measure_matches_fresh() {
     for (method, value) in [("getRowHeight", "20"), ("getColumnWidth", "80")] {
         let top = Rc::new(Cell::new(3));

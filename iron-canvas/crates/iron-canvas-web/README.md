@@ -47,6 +47,8 @@ Optional extensions, probed once at bind time; absence degrades gracefully:
 
 `getCellStyle` may return the CF-merged `ExtendedCellStyle` wrapper (`{style, icon, data_bar, rating}`) or a bare `Style`; both deserialize.
 
+**Cell-content failures**: a thrown model call holds the frame — prior pixels stay and the attempt retries. A `null` return means a blank cell in both the per-cell and the bulk reads. Any other payload the bridge cannot decode is a wire-shape failure: it holds too, and the bridge reports it once per session on the console. A decoded value the engine does not model (an out-of-range `getCellType` discriminant) paints through with the renderer's fallback instead of holding.
+
 **Theme host contract**: after `model.setTheme(...)`, call `ironCanvas.themeChanged()` — it drops the bridge's cached theme and marks content dirty. Without it the stale cache silently misrenders theme colors (host bug, no error).
 
 ## Theme shapes

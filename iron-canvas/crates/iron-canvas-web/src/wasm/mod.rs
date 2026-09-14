@@ -9,6 +9,20 @@
 //! didn't deserialize. Both are counted on `Cell<u64>` and surfaced via
 //! `console.warn` exactly once per class per session — enough signal to
 //! diagnose a contract drift, not enough to flood the console.
+//!
+//! One rule decides what a content read reports:
+//!
+//! - a JS throw, or a payload no arm decodes, is a wire-shape failure →
+//!   [`Fetched::BridgeFailed`]: the attempt holds prior pixels and re-reads.
+//! - a decoded payload carrying a `null` or a value the core does not model
+//!   (an out-of-range `getCellType` discriminant) is a known-empty or
+//!   unknown-value cell → [`Fetched::Absent`], which the renderer paints with
+//!   its documented fallback.
+//!
+//! So the split is about what is *known*, not about how the host misbehaves: a
+//! `null` is data the bulk and per-cell paths must both read as a blank cell,
+//! while an undecodable payload is a broken contract — and holding a frame on
+//! a broken contract is the only answer that cannot paint a lie.
 
 use std::cell::{Cell, RefCell};
 
@@ -474,10 +488,10 @@ impl CellContentQuery for JsBackedModel {
         // hashes what is painted. If JS returns the base style, CF cells paint
         // unmerged here — a known parity gap with the native adapter.
         //
-        // A JS throw or a non-conforming payload is a transient bridge failure,
-        // not an empty cell — the next frame re-queries. `getCellStyle` never
-        // legitimately answers "absent" (a blank cell still has a base style),
-        // so there is no `Absent` arm here.
+        // A JS throw, or a payload no `JsStyle` arm decodes, is a wire-shape
+        // failure — `BridgeFailed`, so the attempt holds prior pixels and the
+        // next frame re-reads. An explicit `null` is data, not a failure: the
+        // bulk contract's blank cell, reported as `Absent`.
         let Some(jsv) = self.note_throw(
             "getCellStyle",
             self.handle.get_cell_style(sheet, row, column),
@@ -500,14 +514,14 @@ impl CellContentQuery for JsBackedModel {
     }
 
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind> {
-        // Two failures with opposite lifetimes must not share a variant. A
-        // *throw* is transient — `BridgeFailed`, so the caller holds prior
-        // pixels and re-queries next frame. A `null` payload is a blank cell,
-        // and a successful call carrying a discriminant the core enum doesn't
-        // model is *persistent* (re-querying returns the same value); both map
-        // to `Absent`, letting the renderer's `unwrap_or(CellKind::Text)` own
-        // the fallback — matching the native adapter, where a model error is
-        // also `Absent`.
+        // A throw, or a payload no arm decodes, is a wire-shape failure —
+        // `BridgeFailed`, so the caller holds prior pixels and re-queries next
+        // frame. A `null` is the bulk contract's blank cell. A discriminant the
+        // core enum does not model decoded fine: the *value* is unknown, not the
+        // payload, and re-querying returns the same one — so it maps to
+        // `Absent`, letting the renderer's `unwrap_or(CellKind::Text)` own the
+        // fallback, matching the native adapter where a model error is also
+        // `Absent`.
         let Some(jsv) = self.note_throw(
             "getCellType",
             self.handle.get_cell_type(sheet, row, column),
