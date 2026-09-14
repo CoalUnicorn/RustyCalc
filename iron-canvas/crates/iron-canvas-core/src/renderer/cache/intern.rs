@@ -1,14 +1,15 @@
-//! Renderer-lifetime intern tables: dedup CSS strings into `Rc<str>` so
+//! Renderer-lifetime intern tables: dedup repeated strings into `Rc<str>` so
 //! the per-cell hot path is `Rc::clone` instead of `String::clone` (or
-//! `format!`) for repeated colors / fonts / column labels.
+//! `format!`) for repeated colors and fonts.
 //!
-//! Two tables, two keying strategies:
-//! - [`FontIntern`] — composite key `(size, bold, italic, family)`, linear
-//!   scan; bounded by ~10 unique tuples per realistic sheet.
+//! Both tables are one `LinearIntern` — a linear scan that builds the value
+//! only on a miss — with their own key type and value constructor:
+//! - [`FontIntern`] — composite key `(size, bold, italic, family)` around
+//!   `font::build`; bounded by ~10 unique tuples per realistic sheet.
 //! - [`ColorIntern`] — `ColorKey` into a normalized `Rc<str>` value: the
 //!   model's raw `&str` for border / text overrides, or a parsed `[u8; 3]`
-//!   for the conditional-formatting data bar. Linear scan, bounded by the
-//!   small set of distinct colors a sheet uses.
+//!   for the conditional-formatting data bar. Bounded by the small set of
+//!   distinct colors a sheet uses.
 
 use std::cell::RefCell;
 use std::rc::Rc;
