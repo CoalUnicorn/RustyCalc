@@ -2,14 +2,15 @@
 //! the per-cell hot path is `Rc::clone` instead of `String::clone` (or
 //! `format!`) for repeated colors and fonts.
 //!
-//! Both tables are one `LinearIntern` — a linear scan that builds the value
-//! only on a miss — with their own key type and value constructor:
-//! - [`FontIntern`] — composite key `(size, bold, italic, family)` around
-//!   `font::build`; bounded by ~10 unique tuples per realistic sheet.
+//! Each table uses `LinearIntern` with its own key and value constructor.
+//! A lookup builds the key and value only on a miss:
+//! - [`FontIntern`] — size, bold, italic, family, and the fallback when the
+//!   family is blank. The value comes from `font::build`.
 //! - [`ColorIntern`] — `ColorKey` into a normalized `Rc<str>` value: the
 //!   model's raw `&str` for border / text overrides, or a parsed `[u8; 3]`
-//!   for the conditional-formatting data bar. Bounded by the small set of
-//!   distinct colors a sheet uses.
+//!   for the conditional-formatting data bar.
+//!
+//! Entries remain for the renderer lifetime. Neither table has a size limit.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -20,11 +21,9 @@ use crate::painter::CssColor;
 /// Renderer-lifetime intern table: a `RefCell`-guarded vec scanned linearly,
 /// with the value built only on a miss.
 ///
-/// Linear scan beats a `HashMap` at the cardinality these tables see (fewer
-/// than ~10 unique fonts, and a handful of colors, per realistic sheet) and
-/// keeps the insert-only lifetime obvious. `probe` tests a stored key without
-/// building one, so the hit path stays allocation-free even when the stored
-/// key owns a `Box<str>` the caller only has as a `&str`.
+/// A lookup scans the stored keys. `probe` borrows each key, so a hit does
+/// not allocate a key. Both callers use `Rc<str>` values, so cloning a hit
+/// does not allocate a value either.
 struct LinearIntern<K, V> {
     entries: RefCell<Vec<(K, V)>>,
 }
@@ -57,12 +56,8 @@ impl<K, V: Clone> LinearIntern<K, V> {
 
 /// Renderer-lifetime intern table for `ctx.font` strings.
 ///
-/// `font::build` is the *only* allocation source on the per-cell text path
-/// that doesn't depend on cell content. Realistic spreadsheets touch fewer
-/// than ~10 unique (size, bold, italic, family) tuples, so a linear scan
-/// beats a HashMap for the actual cardinality. Lives on `RendererCore`,
-/// not `FrameCache`, because it is *cross-frame*: the same fonts repeat
-/// every repaint.
+/// Stored on `RendererCore` so repeated fonts reuse the same string across
+/// cells and frames. Only a cache miss calls `font::build`.
 pub struct FontIntern {
     entries: LinearIntern<FontKey, Rc<str>>,
 }
@@ -73,6 +68,7 @@ struct FontKey {
     bold: bool,
     italic: bool,
     family: Box<str>,
+    fallback: Option<Box<str>>,
 }
 
 impl FontIntern {
@@ -82,9 +78,10 @@ impl FontIntern {
         }
     }
 
-    /// Returns the interned `ctx.font` string for `(size_px, bold, italic, family)`.
-    /// Cache hit: zero alloc, just an `Rc::clone`. Miss: one `font::build` +
-    /// one `Box<str>` for the key family + one `Rc<str>` for the value.
+    /// Returns the interned `ctx.font` string for the supplied font.
+    /// The key includes `fallback` only when `family` is blank.
+    /// A hit clones the `Rc` without allocation. A miss builds the CSS
+    /// string and stores the family and any used fallback in the key.
     pub fn get_or_build(
         &self,
         size_px: f64,
@@ -94,18 +91,21 @@ impl FontIntern {
         fallback: &str,
     ) -> Rc<str> {
         let size_bits = size_px.to_bits();
+        let used_fallback = family.trim().is_empty().then_some(fallback);
         self.entries.get_or_insert(
             |key| {
                 key.size_bits == size_bits
                     && key.bold == bold
                     && key.italic == italic
                     && &*key.family == family
+                    && key.fallback.as_deref() == used_fallback
             },
             || FontKey {
                 size_bits,
                 bold,
                 italic,
                 family: family.into(),
+                fallback: used_fallback.map(Into::into),
             },
             || font::build(size_px, bold, italic, family, fallback).into(),
         )
@@ -124,8 +124,8 @@ impl Default for FontIntern {
 /// parsed rgb triple for the data bar, whose CSS color the renderer would
 /// otherwise re-format once per decorated cell per frame. The value is the
 /// normalized output the painter actually consumes; two keys that normalize
-/// to the same color produce two entries — accepted, cardinality is bounded
-/// by the small set of distinct colors a sheet uses.
+/// to the same color produce two entries. Entries remain until the renderer
+/// is dropped.
 pub struct ColorIntern {
     entries: LinearIntern<ColorKey, Rc<str>>,
 }

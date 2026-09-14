@@ -245,7 +245,7 @@ struct CellTextStyle {
     text_color: TextColor,
     underline: bool,
     strike: bool,
-    /// The model's five-way `HAlign` is collapsed here, once, into the three
+    /// The model's `HAlign` is collapsed here, once, into the three
     /// paint directions — so `position_lines` and `paint_text` match an
     /// exhaustive enum instead of each re-deriving the fallback rules.
     h_align: TextAlign,

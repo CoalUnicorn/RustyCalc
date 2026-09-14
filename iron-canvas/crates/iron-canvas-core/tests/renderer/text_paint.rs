@@ -56,6 +56,140 @@ fn font_intern_distinguishes_family() {
     assert!(!Rc::ptr_eq(&a, &b));
 }
 
+#[test]
+fn font_intern_distinguishes_fallback_for_blank_families() {
+    for family in ["", " \t "] {
+        let intern = FontIntern::new();
+        let first = intern.get_or_build(12.0, false, false, family, "Calibri");
+        let second = intern.get_or_build(12.0, false, false, family, "Arial");
+        assert_eq!(&*first, "12px Calibri");
+        assert_eq!(&*second, "12px Arial");
+        assert!(Rc::ptr_eq(
+            &second,
+            &intern.get_or_build(12.0, false, false, family, "Arial")
+        ));
+        assert!(Rc::ptr_eq(
+            &first,
+            &intern.get_or_build(12.0, false, false, family, "Calibri")
+        ));
+    }
+}
+
+#[test]
+fn font_intern_ignores_unused_fallback_for_explicit_family() {
+    let intern = FontIntern::new();
+    let first = intern.get_or_build(12.0, false, false, "Arial", "Calibri");
+    let second = intern.get_or_build(12.0, false, false, "Arial", "Helvetica");
+    assert_eq!(&*first, "12px Arial");
+    assert!(Rc::ptr_eq(&first, &second));
+}
+
+#[test]
+fn horizontal_alignment_keeps_text_and_decoration_anchors_consistent() {
+    use iron_canvas_core::geometry::pixel_rect::PixelRect;
+    use iron_canvas_core::geometry::prim::Point;
+    use iron_canvas_core::painter::TextAlign;
+    use iron_canvas_core::renderer::RendererCore;
+    use iron_canvas_core::renderer::cell::text::TextPaint;
+    use iron_canvas_core::theme::CanvasTheme;
+    use iron_canvas_core::{Alignment, CellKind, CellStyle, FontStyle, HAlign};
+    use iron_canvas_recorder::{DrawOp, RecorderPainter};
+
+    let cases = [
+        (None, TextAlign::Start, TextAlign::End),
+        (Some(HAlign::General), TextAlign::Start, TextAlign::End),
+        (Some(HAlign::Left), TextAlign::Start, TextAlign::Start),
+        (Some(HAlign::Fill), TextAlign::Start, TextAlign::Start),
+        (Some(HAlign::Justify), TextAlign::Start, TextAlign::Start),
+        (
+            Some(HAlign::Distributed),
+            TextAlign::Start,
+            TextAlign::Start,
+        ),
+        (Some(HAlign::Right), TextAlign::End, TextAlign::End),
+        (Some(HAlign::Center), TextAlign::Center, TextAlign::Center),
+        (
+            Some(HAlign::CenterContinuous),
+            TextAlign::Center,
+            TextAlign::Center,
+        ),
+    ];
+    let rect = PixelRect {
+        top_left: Point { x: 30, y: 40 },
+        width: 100,
+        height: 30,
+    };
+    for (horizontal, other_align, number_align) in cases {
+        for kind in [
+            CellKind::Text,
+            CellKind::Number,
+            CellKind::Logical,
+            CellKind::Error,
+        ] {
+            let expected = if kind == CellKind::Number {
+                number_align
+            } else {
+                other_align
+            };
+            let painter = Rc::new(RecorderPainter::new());
+            let renderer = RendererCore::for_layer(Rc::clone(&painter));
+            let style = CellStyle {
+                alignment: horizontal.map(|horizontal| Alignment {
+                    horizontal,
+                    ..Alignment::default()
+                }),
+                font: FontStyle {
+                    underline: true,
+                    strike: true,
+                    ..FontStyle::default()
+                },
+                ..CellStyle::default()
+            };
+            let mut lines = Vec::new();
+            let paint =
+                TextPaint::resolve_into(&renderer, rect, &style, "42".into(), kind, &mut lines)
+                    .expect("short text fits the cell");
+            renderer.paint_text(&paint, &CanvasTheme::light(), &lines);
+            let expected_x = match expected {
+                TextAlign::Start => 34.0,
+                TextAlign::Center => 80.0,
+                TextAlign::End => 126.0,
+            };
+            let ops = painter.ops();
+            let anchors: Vec<_> = ops
+                .iter()
+                .filter_map(|op| match op {
+                    DrawOp::FillText { x, align, .. } => Some((*x, *align)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                anchors,
+                [(expected_x, expected)],
+                "{horizontal:?} / {kind:?}"
+            );
+            let width = lines[0].width;
+            let expected_left = match expected {
+                TextAlign::Start => expected_x,
+                TextAlign::Center => expected_x - width / 2.0,
+                TextAlign::End => expected_x - width,
+            };
+            let decorations: Vec<_> = ops
+                .iter()
+                .filter_map(|op| match op {
+                    DrawOp::StrokeTextHLine { x1, x2, .. } => Some((*x1, *x2)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(decorations.len(), 2);
+            for (left, right) in decorations {
+                assert!((left - expected_left).abs() < 1e-9);
+                assert!((right - expected_left - width).abs() < 1e-9);
+            }
+        }
+    }
+}
+
 // -----
 // layout_into: TextLine String capacity reuse
 //

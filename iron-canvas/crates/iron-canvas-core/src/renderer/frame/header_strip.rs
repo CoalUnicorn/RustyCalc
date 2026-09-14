@@ -149,7 +149,7 @@ impl<P: Painter> RendererCore<P> {
             Axis::Column => frame.col_header_thickness,
         };
         let full = axis.header_rect(slot.start(), slot.extent(), header_thickness);
-        // 1px inset on the cross-axis leaves the border strip visible
+        // 1px inset along the strip axis leaves the border strip visible
         // top+bottom (row) or left+right (column).
         let body = match axis {
             Axis::Row => full.inset(0, 1),
