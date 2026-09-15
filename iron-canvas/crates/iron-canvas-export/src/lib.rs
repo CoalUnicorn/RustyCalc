@@ -65,6 +65,21 @@ impl From<CanvasMetricError> for ExportError {
     }
 }
 
+/// Whole-pixel document dimensions for a one-shot export.
+///
+/// Both backend surfaces bake these into their document (`/MediaBox`,
+/// `viewBox`) at construction and assert against them in `resize`, so the
+/// conversion lives here rather than once per backend. The size is already
+/// validated by [`CanvasMetrics::new`], so neither cast can overflow.
+/// Deliberately rounds instead of truncating as
+/// [`CanvasMetrics::backing_size`] does: a fractional CSS size must not clip
+/// the document's last pixel.
+#[cfg(any(feature = "svg", feature = "pdf"))]
+pub(crate) fn document_size(metrics: CanvasMetrics) -> (u32, u32) {
+    let size = metrics.size();
+    (size.w.round() as u32, size.h.round() as u32)
+}
+
 /// Drive a throwaway `Orchestrator` for a single one-shot export frame.
 ///
 /// Captures the one ordered sequence both `SvgSurface::render` and

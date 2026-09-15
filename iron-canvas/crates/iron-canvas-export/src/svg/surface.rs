@@ -15,7 +15,7 @@ pub struct SvgSurface {
 }
 
 impl SvgSurface {
-    pub fn new(width: i32, height: i32) -> Self {
+    pub fn new(width: u32, height: u32) -> Self {
         Self {
             painter: Rc::new(SvgPainter::new(width, height)),
         }
@@ -48,8 +48,7 @@ impl SvgSurface {
         size: CanvasSize,
     ) -> Result<String, crate::ExportError> {
         let metrics = CanvasMetrics::new(size, 1.0)?;
-        let width = metrics.size().w.round() as i32;
-        let height = metrics.size().h.round() as i32;
+        let (width, height) = crate::document_size(metrics);
 
         let grid = SvgSurface::new(width, height);
         let overlay = SvgSurface::new(width, height);
@@ -78,10 +77,7 @@ impl Surface for SvgSurface {
     /// with the same `(w, h)` — the assert hardens that contract.
     fn resize(&mut self, metrics: CanvasMetrics) {
         debug_assert_eq!(
-            (
-                metrics.size().w.round() as i32,
-                metrics.size().h.round() as i32
-            ),
+            crate::document_size(metrics),
             (self.painter.width, self.painter.height),
             "SvgSurface::resize disagrees with SvgPainter dimensions baked at construction",
         );

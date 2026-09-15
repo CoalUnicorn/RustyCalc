@@ -89,8 +89,7 @@ impl PdfSurface {
         size: CanvasSize,
     ) -> Result<Vec<u8>, crate::ExportError> {
         let metrics = CanvasMetrics::new(size, 1.0)?;
-        let width = metrics.size().w.round() as u32;
-        let height = metrics.size().h.round() as u32;
+        let (width, height) = crate::document_size(metrics);
 
         let grid = PdfSurface::new(width, height);
         let overlay = PdfSurface::new(width, height);

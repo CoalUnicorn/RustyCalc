@@ -32,13 +32,13 @@ pub struct SvgPainter {
     /// that never draws any) keep emitting no `<defs>` at all, same as
     /// today, instead of always paying for the embedded font's data URI.
     has_text: Cell<bool>,
-    pub(super) width: i32,
-    pub(super) height: i32,
+    pub(super) width: u32,
+    pub(super) height: u32,
     dpr: Cell<f64>,
 }
 
 impl SvgPainter {
-    pub fn new(width: i32, height: i32) -> Self {
+    pub fn new(width: u32, height: u32) -> Self {
         Self {
             body: RefCell::new(String::new()),
             defs: RefCell::new(String::new()),
