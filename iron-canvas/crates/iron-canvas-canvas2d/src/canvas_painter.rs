@@ -72,11 +72,11 @@ fn snap_stroke_cross(coord: f64, width: f64) -> f64 {
 
 /// Cached color/font value. `Static` is the zero-alloc fast path: when the
 /// renderer pushed a `&'static str` (theme color, `HEADER_FONT`), we keep the
-/// reference and ptr-eq it on the next call. `Owned` carries a custom color
-/// that originated as a non-static `&str`, deduped to a painter-lifetime
-/// `Rc<str>` (see `intern_borrowed`) so a recurring color is `Rc::clone`, not
-/// a fresh allocation. `Empty` is the initial / post-clip state — always
-/// misses so the next paint re-binds the ctx.
+/// reference and ptr-eq it on the next call. `Owned` carries a custom color —
+/// or a font CSS string — that originated as a non-static `&str`, deduped to a
+/// painter-lifetime `Rc<str>` (see `intern_string`) so a recurring value is
+/// `Rc::clone`, not a fresh allocation. `Empty` is the initial / post-clip
+/// state — always misses so the next paint re-binds the ctx.
 #[derive(Default, Clone)]
 pub(crate) enum CachedColor {
     #[default]
@@ -147,12 +147,14 @@ pub struct CanvasPainter {
     /// reads from the DPR-scaled backing store) is sized in backing-store
     /// pixels — dest coords go through the active transform unchanged.
     pub dpr: Cell<f64>,
-    /// Painter-lifetime dedup of custom (`Borrowed`) color strings to
-    /// `Rc<str>`. Distinct from `SetterCache`: `invalidate` resets the sticky
-    /// binds, but the palette outlives invalidation — an interned color is
-    /// still a valid key. Not cleared, so cardinality tracks the sheet's
-    /// distinct-color set (bounded, like `ColorIntern`).
-    palette: RefCell<Vec<Rc<str>>>,
+    /// Painter-lifetime dedup of the non-static (`Borrowed`) strings the
+    /// setter caches key on: custom fill/stroke colors *and* the font CSS
+    /// strings `measure_text_width` binds through `set_font_cached`. Distinct
+    /// from `SetterCache`: `invalidate` resets the sticky binds, but an
+    /// interned string outlives invalidation — it is still a valid key. Not
+    /// cleared, so cardinality tracks the sheet's distinct-color set plus its
+    /// distinct font strings (bounded, like `ColorIntern`).
+    interned_strings: RefCell<Vec<Rc<str>>>,
     /// Memo of `ctx.measure_text` widths keyed `(font_css, text)`.
     /// Interior mutability because `TextMetrics::measure_text_width` takes
     /// `&self`. `get` and `insert` are separate short borrows — never held
@@ -175,7 +177,7 @@ impl CanvasPainter {
             dash_empty: js_sys::Array::new(),
             clip_depth: Cell::new(0),
             dpr: Cell::new(1.0),
-            palette: RefCell::new(Vec::new()),
+            interned_strings: RefCell::new(Vec::new()),
             measure_cache: RefCell::new(MeasureCache::default()),
         }
     }
@@ -233,26 +235,29 @@ impl CanvasPainter {
     }
 
     /// Map a call-site `PaintColor` to its `CachedColor`. `Static` stays
-    /// zero-alloc; `Borrowed` is deduped through the painter palette so a
-    /// recurring color reuses its `Rc<str>` instead of reallocating.
+    /// zero-alloc; `Borrowed` is deduped through `interned_strings`, so a
+    /// recurring color reuses its `Rc<str>` instead of reallocating. The font
+    /// cache routes here too (`set_font_cached`), which is why the strings a
+    /// `PaintColor` can carry are not only colors.
     fn cache_color(&self, color: PaintColor<'_>) -> CachedColor {
         match color {
             PaintColor::Static(s) => CachedColor::Static(s),
-            PaintColor::Borrowed(s) => CachedColor::Owned(self.intern_borrowed(s)),
+            PaintColor::Borrowed(s) => CachedColor::Owned(self.intern_string(s)),
         }
     }
 
-    /// Dedup a custom (`Borrowed`) color string to a painter-lifetime
-    /// `Rc<str>`, so a color seen before is an `Rc::clone` rather than a fresh
-    /// allocation. Cardinality is bounded by the sheet's palette (same
-    /// assumption as `ColorIntern`).
-    fn intern_borrowed(&self, s: &str) -> Rc<str> {
-        let mut palette = self.palette.borrow_mut();
-        if let Some(rc) = palette.iter().find(|rc| &***rc == s) {
+    /// Dedup a non-static (`Borrowed`) string — a custom color, or one of the
+    /// font CSS strings `measure_text_width` passes to `set_font_cached` — to
+    /// a painter-lifetime `Rc<str>`, so a value seen before is an `Rc::clone`
+    /// rather than a fresh allocation. Cardinality is bounded by the sheet's
+    /// palette plus its font strings (same assumption as `ColorIntern`).
+    fn intern_string(&self, s: &str) -> Rc<str> {
+        let mut interned = self.interned_strings.borrow_mut();
+        if let Some(rc) = interned.iter().find(|rc| &***rc == s) {
             return Rc::clone(rc);
         }
         let rc: Rc<str> = Rc::from(s);
-        palette.push(Rc::clone(&rc));
+        interned.push(Rc::clone(&rc));
         rc
     }
 
