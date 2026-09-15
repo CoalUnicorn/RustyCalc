@@ -239,11 +239,9 @@ impl DataGridCanvas {
     #[wasm_bindgen(js_name = "appendRows")]
     pub fn append_rows(&mut self, rows: JsValue) -> Result<(), JsValue> {
         let rows: Vec<Vec<String>> = serde_wasm_bindgen::from_value(rows)?;
-        self.model.borrow_mut_with(|g| {
-            for r in rows {
-                g.append_row(r);
-            }
-        });
+        // One model call: a sorted grid re-sorts once for the whole batch
+        // instead of once per row.
+        self.model.borrow_mut_with(|g| g.append_rows(rows));
         self.runtime.orchestrator_mut().mark_content_dirty();
         self.runtime.orchestrator_mut().request_repaint();
         Ok(())

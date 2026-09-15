@@ -208,11 +208,26 @@ impl DataGrid {
         }
     }
 
+    /// Append one row, re-sorting when a sort is active.
     pub fn append_row(&mut self, cells: Vec<String>) {
-        let idx = self.rows.len();
-        self.rows.push(cells.into_iter().map(Cell::text).collect());
-        self.order.push(idx);
+        self.push_row(cells);
         self.resort(); // keep display order consistent if a sort is active
+    }
+
+    /// Append a batch, re-sorting once. `append_row` per row costs a full
+    /// `resort` each time — O(N² log N) for a bulk feed into a sorted grid.
+    pub fn append_rows(&mut self, rows: Vec<Vec<String>>) {
+        self.rows.reserve(rows.len());
+        for cells in rows {
+            self.push_row(cells);
+        }
+        self.resort();
+    }
+
+    /// Append without touching the display order — the caller re-sorts.
+    fn push_row(&mut self, cells: Vec<String>) {
+        self.order.push(self.rows.len());
+        self.rows.push(cells.into_iter().map(Cell::text).collect());
     }
 
     pub fn set_data(&mut self, columns: Vec<Column>, rows: Vec<Vec<String>>) {
