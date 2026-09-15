@@ -45,9 +45,23 @@ pub struct CellWire {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HitTestWire {
-    Cell { row: i32, col: i32 },
-    RowHeader { row: i32 },
-    ColumnHeader { col: i32 },
+    Cell {
+        row: i32,
+        col: i32,
+    },
+    RowHeader {
+        row: i32,
+    },
+    ColumnHeader {
+        col: i32,
+    },
+    /// The selected range's fill handle. Its own kind, not a `Cell`: the engine
+    /// paints that handle, so a consumer that wants to grab the handle (or
+    /// ignore the click) must be able to tell it from the cell underneath.
+    AutofillHandle {
+        row: i32,
+        col: i32,
+    },
     Corner,
     Outside,
 }
@@ -59,13 +73,17 @@ impl From<HitTest> for HitTestWire {
                 row: row - 1,
                 col: column - 1,
             },
-            HitTest::AutofillHandle { row, column } => HitTestWire::Cell {
+            HitTest::AutofillHandle { row, column } => HitTestWire::AutofillHandle {
                 row: row - 1,
                 col: column - 1,
             },
             HitTest::RowHeader(r) => HitTestWire::RowHeader { row: r - 1 },
             HitTest::ColumnHeader(c) => HitTestWire::ColumnHeader { col: c - 1 },
             HitTest::Corner => HitTestWire::Corner,
+            // `FormulaRef` needs the formula-ref overlay, which this facade
+            // never arms (no `setFormulaRefs` counterpart), so its own
+            // orchestrator cannot produce that hit. It falls in with `Outside`
+            // rather than getting an unreachable wire variant.
             HitTest::FormulaRef { .. } | HitTest::Outside => HitTestWire::Outside,
         }
     }

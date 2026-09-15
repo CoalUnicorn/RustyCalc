@@ -1,4 +1,17 @@
-use iron_canvas_datagrid_web::wire::{CellWire, ColumnWire, GridDataWire, RowWire};
+use iron_canvas_core::HitTest;
+use iron_canvas_datagrid_web::wire::{CellWire, ColumnWire, GridDataWire, HitTestWire, RowWire};
+
+/// A pointer on the selection's fill handle sits inside a cell rectangle, so
+/// the engine hit is an `AutofillHandle`; the wire must say so. Conflating it
+/// with `Cell` loses the kind before JS can decide to grab the handle, and the
+/// engine coords are 1-based while every coord on the wire is 0-based.
+#[test]
+fn autofill_handle_hit_keeps_its_kind() {
+    match HitTestWire::from(HitTest::AutofillHandle { row: 3, column: 2 }) {
+        HitTestWire::AutofillHandle { row, col } => assert_eq!((row, col), (2, 1)),
+        _ => panic!("autofill handle was collapsed into another hit kind"),
+    }
+}
 
 fn cell(value: &str) -> CellWire {
     CellWire {
