@@ -1,5 +1,23 @@
+use iron_canvas_core::HAlign;
 use iron_canvas_core::HitTest;
-use iron_canvas_datagrid_web::wire::{CellWire, ColumnWire, GridDataWire, HitTestWire, RowWire};
+use iron_canvas_datagrid_web::wire::{
+    AlignWire, CellWire, ColumnWire, GridDataWire, HitTestWire, RowWire,
+};
+
+/// `align` is a typed mirror of the three legal spellings. A typo or a miscased
+/// value must fail the payload, not silently produce a `General` column: the
+/// consumer sees a `setData` error instead of a misaligned grid.
+#[test]
+fn align_is_parsed_as_a_typed_mirror() {
+    let ok: ColumnWire = serde_json::from_str(r#"{"header":"Qty","align":"right"}"#)
+        .expect("the documented spelling deserializes");
+    assert_eq!(ok.align.map(HAlign::from), Some(HAlign::Right));
+
+    assert!(
+        serde_json::from_str::<ColumnWire>(r#"{"header":"Qty","align":"LEFT"}"#).is_err(),
+        "a miscased align was accepted instead of rejected",
+    );
+}
 
 /// A pointer on the selection's fill handle sits inside a cell rectangle, so
 /// the engine hit is an `AutofillHandle`; the wire must say so. Conflating it
@@ -36,7 +54,7 @@ fn wire_builds_model_with_styles() {
             ColumnWire {
                 header: "Qty".into(),
                 width: None,
-                align: Some("right".into()),
+                align: Some(AlignWire::Right),
             },
         ],
         rows: vec![

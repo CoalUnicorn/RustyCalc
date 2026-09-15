@@ -17,7 +17,7 @@ pub struct GridDataWire {
 pub struct ColumnWire {
     pub header: String,
     pub width: Option<f64>,
-    pub align: Option<String>, // "left" | "center" | "right"
+    pub align: Option<AlignWire>,
 }
 
 #[derive(Deserialize)]
@@ -36,7 +36,29 @@ pub struct CellWire {
     pub italic: Option<bool>,
     pub color: Option<String>, // CSS text color
     pub fill: Option<String>,  // CSS background
-    pub align: Option<String>,
+    pub align: Option<AlignWire>,
+}
+
+/// Inbound horizontal alignment: a typed mirror of the three values a
+/// `setData` payload may set. Serde owns the parse, so an unknown or miscased
+/// value (`"LEFT"`, a typo) fails `setData` instead of silently producing a
+/// `General`-aligned column or cell.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AlignWire {
+    Left,
+    Center,
+    Right,
+}
+
+impl From<AlignWire> for HAlign {
+    fn from(a: AlignWire) -> Self {
+        match a {
+            AlignWire::Left => HAlign::Left,
+            AlignWire::Center => HAlign::Center,
+            AlignWire::Right => HAlign::Right,
+        }
+    }
 }
 
 // Stage D result mirrors: engine enums are tuple-variant, so serialize
@@ -112,15 +134,6 @@ pub struct SortWire {
     pub ascending: bool,
 }
 
-fn halign(s: &str) -> HAlign {
-    match s {
-        "left" => HAlign::Left,
-        "center" => HAlign::Center,
-        "right" => HAlign::Right,
-        _ => HAlign::General,
-    }
-}
-
 impl GridDataWire {
     pub fn into_model(self) -> DataGrid {
         let mut b = DataGrid::builder();
@@ -132,8 +145,8 @@ impl GridDataWire {
             if let Some(w) = c.width {
                 col = col.width(w);
             }
-            if let Some(a) = c.align.as_deref() {
-                col = col.align(halign(a));
+            if let Some(a) = c.align {
+                col = col.align(a.into());
             }
             b = b.column(col);
         }
@@ -176,10 +189,10 @@ fn cell_style(c: &CellWire) -> Option<CellStyle> {
     if let Some(f) = &c.fill {
         st.fill_color = Some(f.clone());
     }
-    if let Some(a) = c.align.as_deref() {
+    if let Some(a) = c.align {
         st.alignment
             .get_or_insert_with(Alignment::default)
-            .horizontal = halign(a);
+            .horizontal = a.into();
     }
     Some(st)
 }
