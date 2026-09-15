@@ -1,5 +1,5 @@
 //! Stage 5 bulk decoration fetch — CF decorations must flow through the
-//! per-pane bulk buffer (`get_cell_decorations_in`) and reach the painter.
+//! per-segment bulk buffer (`get_cell_decorations_in`) and reach the painter.
 //! Decorations now resolve into `Painter` primitives at the renderer, so a
 //! data bar paints as a `RectFill` (no CF-specific op). The bulk path also
 //! has to survive the fingerprint-skip set-back: a second idempotent paint
@@ -7,14 +7,14 @@
 
 mod common;
 
-use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath, PaneRegion};
+use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CellDecoration, DataBarSpec};
+use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{TestModel, canvas_default};
+use common::{TestModel, canvas_default, test_inputs};
 
 // A data bar paints as a `RectFill` in its own distinctive color; cell
 // backgrounds always use the theme color, so matching on the bar color
@@ -56,9 +56,15 @@ fn bulk_method_places_decoration_at_correct_index() {
     let target = ((2 - range.r1) * cols as i32 + (3 - range.c1)) as usize;
     for (i, slot) in out.iter().enumerate() {
         if i == target {
-            assert!(slot.is_some(), "decorated cell present at its index");
+            assert!(
+                matches!(slot, Fetched::Value(_)),
+                "decorated cell present at its index"
+            );
         } else {
-            assert!(slot.is_none(), "non-decorated slot {i} must be None");
+            assert!(
+                matches!(slot, Fetched::Absent),
+                "non-decorated slot {i} must be Absent"
+            );
         }
     }
 }
@@ -66,8 +72,11 @@ fn bulk_method_places_decoration_at_correct_index() {
 // Trait helper to call the bulk method without naming `CanvasModel` twice.
 use iron_canvas_core::CanvasModel;
 trait CanvasModelExt: CanvasModel {
-    fn decorations(&self, range: RCRange, out: &mut Vec<Option<CellDecoration>>) {
-        self.get_cell_decorations_in(self.get_selected_sheet(), range, out);
+    fn decorations(&self, range: RCRange, out: &mut Vec<Fetched<CellDecoration>>) {
+        let sheet = self
+            .get_selected_sheet()
+            .expect("test model always has a selected sheet");
+        self.get_cell_decorations_in(sheet, range, out);
     }
 }
 impl<T: CanvasModel> CanvasModelExt for T {}
@@ -88,26 +97,31 @@ fn decoration_reaches_painter_and_skip_is_stable() {
     );
 
     let theme = std::rc::Rc::new(CanvasTheme::light());
-    let mut frame = Chrome::next(None, &model, canvas_default(), &theme, FramePath::Fresh);
+    let inputs = test_inputs(&model, canvas_default(), &theme);
+    let mut frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
 
+    // Painted-fingerprint state lives on `GridCache` (on `RendererCore`),
+    // not `Chrome` — so the same `core` must paint both frames for the
+    // second call's compare to see the first call's committed tree.
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core.render_pane(&model, PaneRegion::BottomRight, &frame);
+    core.render_grid(&model, &frame);
     assert_eq!(
         data_bar_fill_count(core.painter(), "#3366cc"),
         1,
         "bulk fetch must deliver exactly one data-bar RectFill",
     );
 
-    frame.prev_pane_fingerprints = frame.pane_fingerprints.replace([0; 4]);
     frame.kind = FrameKindTag::SlotsReused;
 
-    let core2 = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
-    core2.render_pane(&model, PaneRegion::BottomRight, &frame);
-    // Unchanged content -> fingerprint match -> whole walk skipped, including
-    // the decoration pass; the set-back kept the buffer aligned.
+    let bars_before = data_bar_fill_count(core.painter(), "#3366cc");
+    core.reset_trace();
+    core.render_grid(&model, &frame);
+    // Unchanged content -> fingerprint match -> the cell walk is skipped,
+    // including the decoration pass; the grid shell may still paint chrome.
     assert_eq!(
-        core2.painter().ops().len(),
-        0,
-        "idempotent repaint must skip entirely after the decoration set-back",
+        data_bar_fill_count(core.painter(), "#3366cc"),
+        bars_before,
+        "idempotent repaint must not repaint the decoration",
     );
+    assert_eq!(core.trace().verdict, Some(GridVerdict::Skip));
 }

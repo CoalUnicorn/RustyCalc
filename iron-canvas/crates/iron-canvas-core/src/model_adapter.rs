@@ -102,19 +102,22 @@ pub trait CellContentQuery {
     }
 
     /// Bulk-fetch CF decorations for `range` on `sheet`. Same dense
-    /// row-major layout and `None`-as-absent semantics as the other
-    /// `*_in` accessors; rides the same pane-cache / blit machinery so
-    /// decorations stay aligned with styles/values/types across scrolls.
+    /// row-major layout and `Vec<Fetched<T>>` rationale as `get_cell_styles_in` —
+    /// a per-slot `BridgeFailed` must reach the pane buffer distinctly from
+    /// `Absent` so the preflight (and the fingerprint) can tell a transient
+    /// bridge failure apart from a legitimately empty cell. Rides the same
+    /// grid-cache / blit machinery so decorations stay aligned with
+    /// styles/values/types across scrolls.
     fn get_cell_decorations_in(
         &self,
         sheet: u32,
         range: RCRange,
-        out: &mut Vec<Option<CellDecoration>>,
+        out: &mut Vec<Fetched<CellDecoration>>,
     ) {
         out.clear();
         for r in range.r1..=range.r2 {
             for c in range.c1..=range.c2 {
-                out.push(self.get_extended_cell_style(sheet, r, c).value());
+                out.push(self.get_extended_cell_style(sheet, r, c));
             }
         }
     }
@@ -136,7 +139,10 @@ pub trait CellContentQuery {
 /// `get_*_header_text` overrides use `None` for "no override, fall back to the
 /// default."
 pub trait CanvasModel: CellContentQuery {
-    fn get_selected_sheet(&self) -> u32;
+    /// `None` signals a transient JS-bridge failure: the bridge call threw
+    /// or the returned shape didn't deserialize. `FrameInputs::capture`
+    /// holds the paint attempt rather than substituting sheet `0`.
+    fn get_selected_sheet(&self) -> Option<u32>;
     /// `None` signals a transient JS-bridge failure: the bridge call threw
     /// or the returned shape didn't deserialize. The next animation frame
     /// will re-query.
@@ -146,6 +152,22 @@ pub trait CanvasModel: CellContentQuery {
     fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
     fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
     fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+
+    /// Whether the selection (fill, stroke, autofill handle, active-cell
+    /// overlay repaint, header highlights) should paint at all. Infallible
+    /// and default-`true` — unlike the other accessors here, there is no
+    /// "transient bridge failure" reading for this one, so it cannot itself
+    /// hold a paint attempt.
+    ///
+    /// Exists so a deliberately selection-less host (the data-grid adapter
+    /// with `show_selection(false)`) can signal that *without* overloading
+    /// `get_selected_view() -> None`, which `FrameInputs::capture` treats as
+    /// an unconditional hold — a selection-less grid would otherwise retry
+    /// forever. The data-grid adapter overrides this and still returns a
+    /// real `CanvasView` from `get_selected_view()`.
+    fn get_show_selection(&self) -> bool {
+        true
+    }
 
     /// Last addressable row of `sheet`, 1-based inclusive. The slot walks,
     /// the blit-path rebuilds, and the autofill-handle guard clamp here.
@@ -218,19 +240,20 @@ impl<T: CellContentQuery + ?Sized> CellContentQuery for Rc<T> {
         fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>);
         fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<String>>);
         fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>);
-        fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Option<CellDecoration>>);
+        fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellDecoration>>);
     }
 }
 
 impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
     forward_methods! {
-        fn get_selected_sheet(&self) -> u32;
+        fn get_selected_sheet(&self) -> Option<u32>;
         fn get_selected_view(&self) -> Option<CanvasView>;
         fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
         fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
         fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
         fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
         fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+        fn get_show_selection(&self) -> bool;
         fn last_row(&self, sheet: u32) -> i32;
         fn last_column(&self, sheet: u32) -> i32;
         fn get_show_row_headers(&self, sheet: u32) -> Option<bool>;
@@ -262,6 +285,13 @@ mod tests {
         fn get_formatted_cell_value(&self, _s: u32, _row: i32, _col: i32) -> Fetched<String> {
             Fetched::Absent
         }
+        fn get_extended_cell_style(&self, _s: u32, row: i32, col: i32) -> Fetched<CellDecoration> {
+            match (row, col) {
+                (1, 1) => Fetched::BridgeFailed,
+                (1, 2) => Fetched::Value(CellDecoration::Icon("ArrowUp".to_string())),
+                _ => Fetched::Absent,
+            }
+        }
     }
 
     // Stage 1 (Fetched bulk channel): the default `get_cell_styles_in` loop must
@@ -283,6 +313,28 @@ mod tests {
         // Row-major: (1,1), (1,2), (2,1), (2,2).
         assert!(matches!(out[0], Fetched::BridgeFailed));
         assert!(matches!(out[1], Fetched::Value(_)));
+        assert!(matches!(out[2], Fetched::Absent));
+        assert!(matches!(out[3], Fetched::Absent));
+    }
+
+    // Acceptance 5: the default `get_cell_decorations_in` loop must forward
+    // each `Fetched` verbatim, same as the style bulk path above — a
+    // per-cell `BridgeFailed` must not collapse to `Absent`/`None` on its
+    // way through the bulk decoration query.
+    #[test]
+    fn default_bulk_decorations_preserve_bridge_failed_per_slot() {
+        let range = RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 2,
+            c2: 2,
+        };
+        let mut out = Vec::new();
+        PerCellOutcomeModel.get_cell_decorations_in(0, range, &mut out);
+
+        // Row-major: (1,1), (1,2), (2,1), (2,2).
+        assert!(matches!(out[0], Fetched::BridgeFailed));
+        assert!(matches!(out[1], Fetched::Value(CellDecoration::Icon(_))));
         assert!(matches!(out[2], Fetched::Absent));
         assert!(matches!(out[3], Fetched::Absent));
     }

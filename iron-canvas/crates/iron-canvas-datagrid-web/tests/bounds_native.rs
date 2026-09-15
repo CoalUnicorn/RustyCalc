@@ -29,7 +29,7 @@ fn grid_extent_ends_at_the_data() {
     let model = Rc::new(DataGridModel::empty());
     model.replace(grid);
     let mut orch = build(Rc::clone(&model));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     assert!(orch.cell_rect(3, 2).is_some(), "last data cell is in frame");
     assert!(
@@ -46,7 +46,7 @@ fn grid_extent_ends_at_the_data() {
 fn empty_grid_keeps_one_addressable_row() {
     let model = Rc::new(DataGridModel::empty());
     let mut orch = build(Rc::clone(&model));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     assert!(
         orch.cell_rect(1, 1).is_some(),

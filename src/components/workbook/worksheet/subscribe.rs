@@ -1,8 +1,8 @@
 //! Event-category -> IronCanvas dispatch decision.
 //!
 //! Reactive subscription Effect that tracks event signals and overlay
-//! changes. Does NOT render — only sets `render_needed` so the rAF loop
-//! can do the draw on the next animation frame.
+//! changes. Does NOT render — only pokes the demand-driven render loop
+//! (`use_one_shot_raf`) so it can do the draw on the next animation frame.
 //!
 //! Decoupling subscription from rendering is the key to smooth navigation:
 //! holding an arrow key fires ~30 keydown events per second, each emitting
@@ -34,7 +34,7 @@ pub(super) fn install_subscribe_effect(
     theme_dirty: StoredValue<bool>,
     reactive_overlay: Memo<OverlayTuple>,
     clipboard_draw: ClipboardDraw,
-    render_needed: RwSignal<bool>,
+    poke: impl Fn() + Clone + 'static,
 ) {
     Effect::new(move |prev: Option<OverlayTuple>| {
         let content_events = state.events.content.get();
@@ -50,7 +50,7 @@ pub(super) fn install_subscribe_effect(
         {
             return overlay;
         }
-        render_needed.set(true);
+        poke();
 
         // Push the same state into the IronCanvas orchestrator. Each setter
         // value-compares, so redundant pushes (e.g. format-only events not
@@ -83,18 +83,29 @@ pub(super) fn install_subscribe_effect(
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
                 ic.set_overlays(overlays);
-                // Format events include row/col resize (LayoutChanged) — those
-                // mutate slot pixel geometry and must drop last_frame, so they
-                // route through requestRepaint with structure. Row-addressed
-                // content edits feed markRowsDamaged (Damage regime: one row
-                // band fetched + repainted); un-rowed events fall back to
+                // Each category below is independent, not an if/else-if
+                // cascade: a structure resize, a content edit, and a nav
+                // batch can all land in the same event-bus tick (commit-Enter
+                // fires content + nav together), and every category that
+                // fired must reach the orchestrator truthfully rather than
+                // one suppressing the others.
+                //
+                // Format events include row/col resize (LayoutChanged) —
+                // those mutate slot pixel geometry and must drop last_frame,
+                // so they route through requestRepaint. Row-addressed content
+                // edits feed markRowsDamaged (DamagedRows strategy: one row band
+                // fetched + repainted); un-rowed events fall back to
                 // markContentDirty, which poisons the batch to the pane-mask
                 // path inside the engine — conservative, never wrong. Nav
-                // co-firing (commit-Enter) needs an explicit overlay raise
-                // because neither content raise touches the overlay bit.
+                // raises view_changed, which marks view plus overlay
+                // atomically — needed standalone for pure navigation, and
+                // needed alongside content for commit-then-move (Enter/Tab),
+                // where content raise alone never touches the view/overlay
+                // bits.
                 if has_structure || has_format {
                     ic.request_repaint();
-                } else if has_content {
+                }
+                if has_content {
                     for event in &content_events {
                         match event {
                             ContentEvent::CellChanged { address, .. } => {
@@ -112,11 +123,9 @@ pub(super) fn install_subscribe_effect(
                             | ContentEvent::NamedRangesChanged => ic.mark_content_dirty(),
                         }
                     }
-                    if has_nav {
-                        ic.request_overlay_repaint();
-                    }
-                } else if has_nav {
-                    ic.request_overlay_repaint();
+                }
+                if has_nav {
+                    ic.view_changed();
                 }
             }
         });

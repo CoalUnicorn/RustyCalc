@@ -8,22 +8,32 @@
 pub mod autofit;
 pub mod chrome;
 pub mod decoration;
+mod frame_plan;
 pub mod geometry;
 pub mod layer;
 pub mod model_adapter;
 mod orchestrator;
 pub mod painter;
+mod pending_work;
 mod render_overlays;
 pub mod renderer;
-pub mod signal;
 mod style;
 pub mod theme;
 pub mod types;
 
-pub use orchestrator::{Orchestrator, PaintRegime, PaintRegimeTag};
+pub use frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
+pub use orchestrator::{
+    FrameOutcome, FrameTrace, GridVerdict, Orchestrator, PaintResult, RenderStrategy,
+};
 
-pub use renderer::blit_work::{BlitPaneWork, widen_blit_strip_to_pixel_clip};
-pub use renderer::cache::{PaneBlitAddressWork, PaneShiftPrep};
+#[cfg(feature = "dev-diagnostics")]
+pub use renderer::diag::{
+    DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache, DiagCacheActionTag,
+    DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagCompletion, DiagDeltaKind, DiagFetch,
+    DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
+    DiagGeometry, DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason,
+    DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
+};
 
 pub use render_overlays::RenderOverlays;
 
@@ -39,6 +49,7 @@ pub use geometry::{
     utils::col_name,
 };
 pub use model_adapter::{CanvasModel, CanvasView, CellContentQuery};
+pub use pending_work::{RowSpan, WorkFlags};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
     FontStyle, HAlign, IconSpec, RatingSpec, VAlign,

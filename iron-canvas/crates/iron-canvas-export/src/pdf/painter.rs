@@ -12,6 +12,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use iron_canvas_core::geometry::constants::DASHED_RECT_PATTERN;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::painter::{
@@ -23,10 +24,6 @@ use crate::common::color::parse_css_color;
 use crate::common::escape::pdf_string_escape;
 use crate::common::metrics;
 use crate::pdf::doc::stream::ContentStream;
-
-/// Visible dash pattern when `rect_dashed` is invoked. Matches the
-/// `stroke-dasharray="3 3"` SVG emits.
-const DASH_ON_OFF: &str = "[3 3]";
 
 pub struct PdfPainter {
     body: Rc<RefCell<ContentStream>>,
@@ -173,7 +170,10 @@ impl Painter for PdfPainter {
         let (x, y, w, h) = rect.as_f64_tuple();
         self.emit_stroke_color(color);
         self.emit_line_width(width);
-        self.write_str(&format!("{DASH_ON_OFF} 0 d\n"));
+        self.write_str(&format!(
+            "[{} {}] 0 d\n",
+            DASHED_RECT_PATTERN[0], DASHED_RECT_PATTERN[1]
+        ));
         self.emit_rect(x, y, w, h);
         self.write_str("S\n");
         // Reset to solid so subsequent strokes don't inherit the dash.
@@ -181,17 +181,9 @@ impl Painter for PdfPainter {
     }
 
     fn stroke_line(&self, line: Line, color: PaintColor, width: f64) {
-        self.emit_stroke_color(color);
-        self.emit_line_width(width);
         match line {
-            Line::H { span, y } => {
-                let y = f64::from(y);
-                self.emit_line(f64::from(span.from), y, f64::from(span.to), y)
-            }
-            Line::V { x, span } => {
-                let x = f64::from(x);
-                self.emit_line(x, f64::from(span.from), x, f64::from(span.to))
-            }
+            Line::H { span, y } => self.stroke_hline(span, f64::from(y), color, width),
+            Line::V { x, span } => self.stroke_vline(f64::from(x), span, color, width),
         }
     }
 
@@ -318,7 +310,7 @@ impl Painter for PdfPainter {
 impl BlitPainter for PdfPainter {
     fn blit(&self, _src: PixelRect, _dst: PixelRect) {
         // PDF has no source-copy primitive. The throwaway export
-        // orchestrator can never reach the Viewport regime — see the
+        // orchestrator can never reach the ScrollBlit strategy — see the
         // "`BlitPainter::blit` — short-circuit (proven safe)" section of
         // OUTPUT_REFACTOR_PLAN.md for the proof. No-op is sound.
     }

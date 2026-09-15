@@ -70,7 +70,9 @@ pub fn font_css(style: &CellStyle) -> String {
 
 /// Widest formatted value across `col` over the `[first_row, last_row]`
 /// used-row span, plus padding. `None` when every scanned cell in `col` is
-/// empty (nothing to fit to).
+/// empty (nothing to fit to), or when the selected-sheet read fails (an
+/// out-of-frame query API, so it propagates the bridge failure with `?`
+/// rather than holding a paint attempt).
 pub fn fit_width(
     model: &dyn CanvasModel,
     metrics: &dyn TextMetrics,
@@ -78,7 +80,7 @@ pub fn fit_width(
     first_row: i32,
     last_row: i32,
 ) -> Option<f64> {
-    let sheet = model.get_selected_sheet();
+    let sheet = model.get_selected_sheet()?;
     let (first, last) = capped_range(first_row, last_row);
 
     let span = RCRange {
@@ -116,7 +118,9 @@ pub fn fit_width(
 /// used-column span, plus padding. Multi-line aware: each cell's wrapped line
 /// count comes from the renderer's own [`layout_into`], so the fitted height
 /// matches what the painter stacks (the module's measured-==-painted invariant).
-/// `None` when every scanned cell in `row` is empty.
+/// `None` when every scanned cell in `row` is empty, or when the
+/// selected-sheet read fails (see [`fit_width`]'s doc on propagating rather
+/// than holding).
 pub fn fit_height(
     model: &dyn CanvasModel,
     metrics: &dyn TextMetrics,
@@ -124,7 +128,7 @@ pub fn fit_height(
     first_col: i32,
     last_col: i32,
 ) -> Option<f64> {
-    let sheet = model.get_selected_sheet();
+    let sheet = model.get_selected_sheet()?;
     let (first, last) = capped_range(first_col, last_col);
     let span = RCRange {
         r1: row,

@@ -192,6 +192,7 @@ fn finish_commit(model: ModelStore, state: &WorkbookState, edit: &EditingCell, d
     state.drag.set(DragState::Idle);
 
     mutate(model, EvaluationMode::Deferred, |m| m.nav_arrow(dir));
+    state.scroll_into_view.set_value(true);
 
     let nav_address = model.with_value(CellAddress::from_view);
     let mut events = vec![

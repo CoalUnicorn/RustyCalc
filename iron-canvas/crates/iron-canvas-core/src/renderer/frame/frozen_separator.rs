@@ -27,8 +27,7 @@ impl<P: Painter> RendererCore<P> {
         let half_sep = f64::from(FROZEN_SEP) / 2.0;
         let sep_y = f64::from(p.rows.frozen_offset) - half_sep;
         let sep_x = f64::from(p.cols.frozen_offset) - half_sep;
-        let canvas_w = frame.canvas_size.w as i32;
-        let canvas_h = frame.canvas_size.h as i32;
+        let (canvas_w, canvas_h) = frame.canvas_size.to_logical_extent();
 
         if frozen_rows > 0 {
             self.painter.stroke_hline(

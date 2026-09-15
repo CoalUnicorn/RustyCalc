@@ -44,6 +44,18 @@ impl RCRange {
         }
     }
 
+    /// Grow every address edge by `amount` without imposing worksheet bounds.
+    pub fn grow_by(self, amount: i32) -> Self {
+        assert!(amount >= 0, "RCRange growth must be non-negative");
+        let normalized = self.normalized();
+        Self {
+            r1: normalized.r1.saturating_sub(amount),
+            c1: normalized.c1.saturating_sub(amount),
+            r2: normalized.r2.saturating_add(amount),
+            c2: normalized.c2.saturating_add(amount),
+        }
+    }
+
     pub fn is_single_cell(self) -> bool {
         self.r1 == self.r2 && self.c1 == self.c2
     }
@@ -159,5 +171,41 @@ mod tests {
         let cells: Vec<_> = reversed.cells().collect();
         assert_eq!(cells, forward.cells().collect::<Vec<_>>());
         assert!(!cells.is_empty());
+    }
+
+    #[test]
+    fn grow_by_normalizes_and_saturates_without_clamping_to_one() {
+        let grown = RCRange {
+            r1: 3,
+            c1: 2,
+            r2: 1,
+            c2: 4,
+        }
+        .grow_by(2);
+        assert_eq!(
+            grown,
+            RCRange {
+                r1: -1,
+                c1: 0,
+                r2: 5,
+                c2: 6,
+            }
+        );
+
+        assert_eq!(
+            RCRange::from_cell(i32::MAX, i32::MIN).grow_by(1),
+            RCRange {
+                r1: i32::MAX - 1,
+                c1: i32::MIN,
+                r2: i32::MAX,
+                c2: i32::MIN + 1,
+            }
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "RCRange growth must be non-negative")]
+    fn grow_by_rejects_negative_amounts() {
+        let _ = RCRange::from_cell(1, 1).grow_by(-1);
     }
 }

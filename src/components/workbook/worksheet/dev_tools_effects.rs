@@ -8,7 +8,7 @@
 
 use leptos::prelude::*;
 
-use crate::app_state::{AppState, ExportCmd, PlaybackCmd, RecordingCmd};
+use crate::app_state::{AppState, DiagCmd, ExportCmd, PlaybackCmd, RecordingCmd};
 use crate::input::mouse::CanvasHandle;
 use crate::state::{StatusMessage, WorkbookState};
 
@@ -80,7 +80,7 @@ pub(super) fn install_playback_effect(
     state: WorkbookState,
     app: AppState,
     canvas_handle: CanvasHandle,
-    render_needed: RwSignal<bool>,
+    poke: impl Fn() + Clone + 'static,
 ) {
     Effect::new(move |_| {
         let Some(cmd) = app.playback_cmd.get() else {
@@ -100,6 +100,11 @@ pub(super) fn install_playback_effect(
                         app.playback_frame_count.set(ic.recording_frame_count());
                         app.playback_frame.set(ic.recording_current_frame());
                         app.playback_playing.set(false);
+                        // Loading seeds frame 0 on the engine side; poke so
+                        // it actually reaches the screen instead of waiting
+                        // for an unrelated event to wake the (self-pausing)
+                        // render loop.
+                        poke();
                     }
                     Err(e) => state.status.set(Some(StatusMessage::Error(format!(
                         "loadRecording failed: {e:?}"
@@ -110,6 +115,9 @@ pub(super) fn install_playback_effect(
                         app.playback_frame.set(ic.recording_current_frame());
                         // Stage 2 invariant: seek pauses any active play loop.
                         app.playback_playing.set(false);
+                        // Seeking changes which frame the engine should show;
+                        // poke so the render loop actually paints it.
+                        poke();
                     }
                     Err(e) => state.status.set(Some(StatusMessage::Error(format!(
                         "seekRecording failed: {e:?}"
@@ -118,10 +126,11 @@ pub(super) fn install_playback_effect(
                 PlaybackCmd::Play => match ic.play_recording(crate::perf::now()) {
                     Ok(()) => {
                         app.playback_playing.set(true);
-                        // Wake the rAF: tickPlayback runs on every frame
-                        // unconditionally, but a render_needed bump ensures
-                        // we don't stall on a sleeping rAF after a long pause.
-                        render_needed.set(true);
+                        // Wake the (self-pausing) render loop: raf_loop.rs's
+                        // playback-tick block keeps itself going every frame
+                        // once playing, but the loop may currently be paused
+                        // if nothing else woke it since the last idle frame.
+                        poke();
                     }
                     Err(e) => state.status.set(Some(StatusMessage::Error(format!(
                         "playRecording failed: {e:?}"
@@ -137,9 +146,9 @@ pub(super) fn install_playback_effect(
                     app.playback_playing.set(false);
                     app.playback_frame.set(0);
                     app.playback_frame_count.set(0);
-                    // exitPlayback called request_repaint on the engine; we
-                    // also need a rAF wake so paintIfDirty fires next tick.
-                    render_needed.set(true);
+                    // exitPlayback called request_repaint on the engine; poke
+                    // so renderPending actually fires on the next frame.
+                    poke();
                 }
             }
         });
@@ -208,5 +217,39 @@ pub(super) fn install_export_effect(
             }
         });
         app.export_cmd.set(None);
+    });
+}
+
+/// Diagnostics dispatch — drains `app.diag_cmd` (Set(bool) from the
+/// PerfPanel toggle) onto the live `IronCanvas`, mirrors the authoritative
+/// state back into `app.perf.diag_enabled`, and pokes the one-shot rAF so
+/// a paused loop samples (or stops sampling) the new state on the next
+/// frame. Disabling also clears the retained JSON readout.
+pub(super) fn install_diag_effect(
+    state: WorkbookState,
+    app: AppState,
+    canvas_handle: CanvasHandle,
+    poke: impl Fn() + Clone + 'static,
+) {
+    Effect::new(move |_| {
+        let Some(cmd) = app.diag_cmd.get() else {
+            return;
+        };
+        let DiagCmd::Set(enabled) = cmd;
+        canvas_handle.update_value(|slot| {
+            let Some(ic) = slot.as_mut() else {
+                state
+                    .status
+                    .set(Some(StatusMessage::Error("canvas not ready".into())));
+                return;
+            };
+            ic.set_frame_diagnostics_enabled(enabled);
+        });
+        app.perf.diag_enabled.set(enabled);
+        if !enabled {
+            app.perf.frame_diagnostics.set(None);
+        }
+        app.diag_cmd.set(None);
+        poke();
     });
 }

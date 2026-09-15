@@ -15,8 +15,8 @@ use iron_canvas_core::chrome::Chrome;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::{GroupClass, PaintColor, Painter};
 use iron_canvas_core::{
-    FormulaRef, FormulaRefKind, HitTest, Layer, Orchestrator, PaintRegimeTag, PixelRect, Point,
-    RCRange, SheetArea,
+    FormulaRef, FormulaRefKind, HitTest, Layer, Orchestrator, PixelRect, Point, RCRange,
+    RenderStrategy, SheetArea,
 };
 use iron_canvas_recorder::{DrawOp, MemSurface};
 
@@ -83,7 +83,7 @@ fn custom_band_paints_above_formula_refs() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(stub);
     orch.add_decoration(Rc::new(ProbeLayer { hits: false }));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let formula_refs = overlay_group_pos(&orch, GroupClass::FormulaRefs);
     let custom = overlay_group_pos(&orch, GroupClass::Custom);
@@ -113,7 +113,7 @@ fn custom_hit_beats_formula_ref_until_removed() {
         kind: FormulaRefKind::Direct,
     }]);
     let id = orch.add_decoration(Rc::new(ProbeLayer { hits: true }));
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let Some(rect) = orch.cell_rect(3, 3) else {
         panic!("cell (3,3) must be in frame after the first paint");
@@ -143,29 +143,29 @@ fn custom_hit_beats_formula_ref_until_removed() {
 fn add_and_found_removal_raise_overlay_noop_removal_does_not() {
     let stub = Rc::new(TestModel::synthetic_grid());
     let mut orch = build(stub);
-    orch.paint_if_dirty();
-    assert_eq!(orch.last_regime(), Some(PaintRegimeTag::Fresh));
+    orch.render_pending();
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::FullRebuild));
 
     let id = orch.add_decoration(Rc::new(ProbeLayer { hits: false }));
-    orch.paint_if_dirty();
+    orch.render_pending();
     assert_eq!(
-        orch.last_regime(),
-        Some(PaintRegimeTag::Overlay),
+        orch.last_strategy(),
+        Some(RenderStrategy::OverlayOnly),
         "add_decoration raises OVERLAY",
     );
 
     assert!(orch.remove_decoration(id), "first removal finds the id");
-    orch.paint_if_dirty();
+    orch.render_pending();
     assert_eq!(
-        orch.last_regime(),
-        Some(PaintRegimeTag::Overlay),
+        orch.last_strategy(),
+        Some(RenderStrategy::OverlayOnly),
         "found removal raises OVERLAY",
     );
 
     let grid_ops = orch.grid_surface().recorder().ops().len();
     let overlay_ops = orch.overlay_surface().recorder().ops().len();
     assert!(!orch.remove_decoration(id), "second removal is a no-op");
-    orch.paint_if_dirty();
+    orch.render_pending();
     assert_eq!(
         orch.grid_surface().recorder().ops().len(),
         grid_ops,

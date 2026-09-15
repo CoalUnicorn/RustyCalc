@@ -25,8 +25,8 @@ pub(super) struct WorksheetModelAdapter {
 }
 
 impl CanvasModel for WorksheetModelAdapter {
-    fn get_selected_sheet(&self) -> u32 {
-        self.store.with_value(|m| m.get_selected_sheet())
+    fn get_selected_sheet(&self) -> Option<u32> {
+        self.store.with_value(|m| Some(m.get_selected_sheet()))
     }
     fn get_selected_view(&self) -> Option<CanvasView> {
         self.store.with_value(|m| {

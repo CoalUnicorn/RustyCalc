@@ -7,204 +7,73 @@
 //!   points (`paint_bg`, `repaint_active_cell`).
 //! - [`borders`] — `ResolvedBorders`, `BorderPaint`, and the grid /
 //!   explicit / single-cell border passes.
-//! - This module — `render_pane` (the five-pass walk over one quadrant)
+//! - This module — the five-pass walk over one grid segment
 //!   and `paint_cell` (single-cell composer).
 //!
-//! Pass order in `render_pane` is load-bearing: bg -> CF decoration ->
-//! grid borders -> explicit borders -> text. See the doc on `render_pane`
+//! Pass order is load-bearing: bg -> CF decoration -> grid borders ->
+//! explicit borders -> text. See the doc on `paint_cells_pass`
 //! for why.
 
 pub mod borders;
 pub mod fingerprint;
 pub mod paint;
+pub mod repaint;
 pub mod text;
 
 pub use paint::{CellPaint, PaneCells};
 
-use crate::style::{CellDecoration, CellKind, CellStyle};
+use crate::style::CellKind;
 use crate::types::fetched::Fetched;
 
 use self::borders::BorderPaint;
-use self::fingerprint::compute_pane_fingerprint;
 use self::text::TextPaint;
-use crate::CellContentQuery;
-use crate::chrome::{Chrome, PaneRegion};
-use crate::painter::{PaintColor, Painter};
+use crate::painter::Painter;
 use crate::renderer::RendererCore;
-use crate::renderer::blit_work::BlitPaneWork;
 use crate::renderer::cf_types::CfDecorationPaint;
-use crate::signal::RowSpan;
+use crate::renderer::prepared::FetchedCellsMut;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {
-    /// Walk one frozen-pane quadrant in five deferred passes:
-    /// bg -> CF decoration -> grid borders -> explicit borders -> text.
+    /// Shared paint tail for every prepared-execution method in
+    /// `renderer::prepared` (`execute_full_pane`, `execute_damage_pane`,
+    /// `execute_blit_pane`): the five deferred passes (bg -> CF decoration ->
+    /// grid borders -> explicit borders -> text) over `cells`, reading the
+    /// fetched channels *by mutable borrow* ([`FetchedCellsMut`]) rather
+    /// than by value, so a multi-span/multi-strip caller can invoke this
+    /// once per span against the SAME owned [`FetchedCells`] bundle without
+    /// re-taking it from `pane_buf` or parking it back in between —
+    /// ownership and the take/park lifecycle live entirely with the caller.
+    /// `index_range` is the address domain of the dense fetched channels;
+    /// it may be larger than the `cells` walk during a partial repaint.
+    /// Pass order is load-bearing — see the module doc for why bg
+    /// precedes borders precedes text. `pub(super)` so `renderer::prepared`'s
+    /// execute methods can call it directly.
     ///
-    /// `BorderEdge::Right`/`Bottom` strokes at `x+width` snap (via
-    /// `snap_stroke`) into the NEXT cell's pixel column, where they'd land
-    /// inside that neighbour's bg. So this cell can only safely paint a
-    /// 1 px stroke on its OWN territory — i.e. its left and top edges
-    /// (which snap onto the cell's first column / first row). The grid
-    /// fallback therefore lives on left+top only and is suppressed when
-    /// the cell carries an explicit fill — colored cells extend cleanly to
-    /// every boundary, matching Excel/Sheets.
-    ///
-    /// The grid sub-pass runs across all cells before the explicit-border
-    /// sub-pass so an explicit `BorderItem::right` on cell A wins over
-    /// cell B's grid left at the shared pixel column (paint order: grid
-    /// across all -> explicit across all -> A.right strokes last on the
-    /// shared edge). Text remains the final pass so overflow is never
-    /// clipped by a neighbour's bg.
-    pub fn render_pane(&self, model: &dyn CellContentQuery, pane: PaneRegion, frame: &Chrome) {
-        let pane_idx = pane as usize;
-        let pane_buf = self.pane_cache.pane(pane);
-
-        let Some(range) = pane.range(frame) else {
-            // Pane became empty (e.g. freeze removed on this axis). Forget
-            // the cached range so a future re-grow doesn't false-match.
-            pane_buf.range.set(None);
-            return;
-        };
-
-        let theme = &frame.theme;
-        let reuses_slots = frame.kind.reuses_slots();
-
-        // On reused-slot frames, prior pixels are still visible until this
-        // method paints over them. A transient BridgeFailed fetch is therefore
-        // an instruction to hold the old pane atomically: no clear, no
-        // fingerprint commit, and no cache poisoning. Keep the prior buffers
-        // parked aside while the new fetch uses fresh scratch vectors. Fresh
-        // frames keep the old allocation-reuse path because there are no prior
-        // pane pixels to preserve.
-        let previous_buffers = if reuses_slots {
-            Some((
-                pane_buf.styles.take(),
-                pane_buf.values.take(),
-                pane_buf.cell_types.take(),
-                pane_buf.decorations.take(),
-            ))
-        } else {
-            None
-        };
-
-        // Bulk-fetch styles + formatted values for the whole rectangular
-        // range. UserModel default impls loop the per-cell accessors (no perf
-        // change); JsBackedModel will override (W5) and collapse each to one
-        // JS call per pane.
-        let (mut pane_styles, mut pane_values, mut pane_cell_types, mut pane_decorations) =
-            match &previous_buffers {
-                Some((styles, values, cell_types, decorations)) => (
-                    Vec::with_capacity(styles.len()),
-                    Vec::with_capacity(values.len()),
-                    Vec::with_capacity(cell_types.len()),
-                    Vec::with_capacity(decorations.len()),
-                ),
-                None => (
-                    pane_buf.styles.take(),
-                    pane_buf.values.take(),
-                    pane_buf.cell_types.take(),
-                    pane_buf.decorations.take(),
-                ),
-            };
-        model.get_cell_styles_in(frame.sheet, range, &mut pane_styles);
-        model.get_formatted_cell_values_in(frame.sheet, range, &mut pane_values);
-        model.get_cell_types_in(frame.sheet, range, &mut pane_cell_types);
-        model.get_cell_decorations_in(frame.sheet, range, &mut pane_decorations);
-
-        if reuses_slots
-            && (has_bridge_failure(&pane_styles)
-                || has_bridge_failure(&pane_values)
-                || has_bridge_failure(&pane_cell_types))
-        {
-            if let Some((styles, values, cell_types, decorations)) = previous_buffers {
-                pane_buf.styles.set(styles);
-                pane_buf.values.set(values);
-                pane_buf.cell_types.set(cell_types);
-                pane_buf.decorations.set(decorations);
-            }
-            return;
-        }
-
-        // Fingerprint paint-skip: same content as the previous frame
-        // -> canvas pixels are still correct, skip the five-pass walk. Bulk
-        // fetch above is unconditional now — content changes that don't
-        // raise CONTENT (e.g. recalc triggered by an upstream edit a
-        // caller forgot to mark) are detected here via fingerprint
-        // mismatch, not assumed away by a geometric early-exit.
-        let new_fp = compute_pane_fingerprint(&pane_styles, &pane_values, &pane_cell_types, range);
-        let mut fps = frame.pane_fingerprints.get();
-        fps[pane_idx] = new_fp;
-        frame.pane_fingerprints.set(fps);
-
-        if reuses_slots {
-            if new_fp == frame.prev_pane_fingerprints[pane_idx] {
-                pane_buf.styles.set(pane_styles);
-                pane_buf.values.set(pane_values);
-                pane_buf.cell_types.set(pane_cell_types);
-                // Set decorations back too: a later blit `prepare_shift` rotates
-                // this buffer against the cached `Some(range)`; an empty vec
-                // would misalign indices and yield wrong decorations.
-                pane_buf.decorations.set(pane_decorations);
-                pane_buf.range.set(Some(range));
-                return;
-            }
-            // Content changed on a reused-canvas frame: clear the pane bg
-            // so cells whose data just disappeared don't leave stale pixels.
-            if let Some(pane_rect) = frame.range_rect(range) {
-                self.painter
-                    .rect_fill(pane_rect, PaintColor::from_theme_str(&theme.cell_bg));
-            }
-        }
-
-        self.paint_pane_cells(
-            PaneCells::new(&pane, frame),
-            pane,
-            range,
-            theme,
-            pane_styles,
-            pane_values,
-            pane_cell_types,
-            pane_decorations,
-        );
-    }
-
-    /// Shared paint tail for both `render_pane` and `render_pane_strip`:
-    /// the five deferred passes (bg -> CF decoration -> grid borders ->
-    /// explicit borders -> text) over `cells`, reading from the four bulk
-    /// buffers and parking them back onto `pane`'s cache. The two callers
-    /// differ only in which `PaneCells` they hand in — the full quadrant
-    /// (`new`) or the revealed strip (`for_strip`); the pass machinery is
-    /// identical, so it lives here once. Pass order is load-bearing — see
-    /// the doc on `render_pane` for why bg precedes borders precedes text.
-    #[allow(clippy::too_many_arguments)]
-    fn paint_pane_cells(
+    /// [`FetchedCells`]: crate::renderer::prepared::FetchedCells
+    pub(super) fn paint_cells_pass(
         &self,
         cells: PaneCells,
-        pane: PaneRegion,
-        range: RCRange,
+        index_range: RCRange,
         theme: &CanvasTheme,
-        mut pane_styles: Vec<Fetched<CellStyle>>,
-        mut pane_values: Vec<Fetched<String>>,
-        mut pane_cell_types: Vec<Fetched<CellKind>>,
-        mut pane_decorations: Vec<Option<CellDecoration>>,
+        fetched: FetchedCellsMut<'_>,
     ) {
-        let pane_buf = self.pane_cache.pane(pane);
-        let cols_w = range.c2 - range.c1 + 1;
+        let cols_w = index_range.c2 - index_range.c1 + 1;
 
         let mut slots = self.frame_cache.text_slots.take();
         slots.clear();
         for slot in cells {
-            let idx = ((slot.row - range.r1) * cols_w + (slot.col - range.c1)) as usize;
-            let Some(own_style) = pane_styles.get_mut(idx).and_then(Fetched::take_value) else {
+            let idx = ((slot.row - index_range.r1) * cols_w + (slot.col - index_range.c1)) as usize;
+            let Some(own_style) = fetched.styles.get_mut(idx).and_then(Fetched::take_value) else {
                 continue;
             };
             // `own_style` already holds the dxf-merged CellStyle (the bridge folds
             // the CF overlay in get_cell_styles_in). The decoration rides the
             // same bulk buffer, indexed alongside styles/values/types.
-            let cf_decoration = pane_decorations
+            let cf_decoration = fetched
+                .decorations
                 .get_mut(idx)
-                .and_then(Option::take)
+                .and_then(Fetched::take_value)
                 .map(|deco| CfDecorationPaint::from_cell_decoration(&deco));
             let Some(mut p) =
                 CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
@@ -215,8 +84,6 @@ impl<P: Painter> RendererCore<P> {
             self.paint_bg(&p, theme);
             slots.push(p);
         }
-        pane_buf.styles.set(pane_styles);
-        pane_buf.decorations.set(pane_decorations);
         // CF decoration pass: data bars / icons / ratings overlay the cell
         // fill, below grid/explicit borders so the bar doesn't obscure border
         // strokes. Each decoration resolves into `Painter` primitives at the
@@ -241,11 +108,12 @@ impl<P: Painter> RendererCore<P> {
 
         let mut text_lines = self.frame_cache.text_lines.take();
         for p in &slots {
-            let idx = ((p.row - range.r1) * cols_w + (p.col - range.c1)) as usize;
-            let Some(text) = pane_values.get_mut(idx).and_then(Fetched::take_value) else {
+            let idx = ((p.row - index_range.r1) * cols_w + (p.col - index_range.c1)) as usize;
+            let Some(text) = fetched.values.get_mut(idx).and_then(Fetched::take_value) else {
                 continue;
             };
-            let cell_type = pane_cell_types
+            let cell_type = fetched
+                .cell_types
                 .get_mut(idx)
                 .and_then(Fetched::take_value)
                 .unwrap_or(CellKind::Text);
@@ -255,9 +123,6 @@ impl<P: Painter> RendererCore<P> {
                 self.paint_text(&tp, theme, &text_lines);
             }
         }
-        pane_buf.values.set(pane_values);
-        pane_buf.cell_types.set(pane_cell_types);
-        pane_buf.range.set(Some(range));
         self.frame_cache.text_slots.set(slots);
         self.frame_cache.text_lines.set(text_lines);
     }
@@ -269,145 +134,12 @@ impl<P: Painter> RendererCore<P> {
         self.paint_bg(p, theme);
         self.paint_borders(p, theme);
     }
-
-    /// Blit-frame entry: paint only the revealed strip. The cache rotation
-    /// (`prepare_shift`) and the strip/axis/clip computation already happened in
-    /// `render_grid_blit` — this consumes the precomputed [`BlitPaneWork`] and
-    /// fetches + paints the strip cells; kept-band cells keep their blitted
-    /// pixels and are skipped because `render_pane_strip` narrows the walk to
-    /// the strip (`PaneCells::for_strip`).
-    pub fn render_pane_blit(
-        &self,
-        model: &dyn CellContentQuery,
-        frame: &Chrome,
-        work: &BlitPaneWork,
-    ) {
-        let pane = work.pane;
-        let pane_idx = pane as usize;
-        let pane_buf = self.pane_cache.pane(pane);
-        let Some(range) = pane.range(frame) else {
-            pane_buf.range.set(None);
-            return;
-        };
-        self.render_pane_strip(model, pane, range, pane_idx, frame, work.strip_range);
-    }
-
-    /// Damage-frame entry for one pane: repaint only the full-width row
-    /// bands in `spans`, via the same strip machinery the blit path uses.
-    /// Kept rows keep their pixels; each band fetch splices into the pane
-    /// buffers and zeroes the pane fingerprint (`render_pane_strip`).
-    pub fn render_pane_damage(
-        &self,
-        model: &dyn CellContentQuery,
-        frame: &Chrome,
-        pane: PaneRegion,
-        spans: &[RowSpan],
-    ) {
-        let pane_idx = pane as usize;
-        let pane_buf = self.pane_cache.pane(pane);
-        let Some(range) = pane.range(frame) else {
-            pane_buf.range.set(None);
-            return;
-        };
-        // `splice_strip_into` indexes the cached pane buffers; they are
-        // only aligned when the cached range matches this frame's. A
-        // mismatch (e.g. partial post-blit buffers) demotes the pane to
-        // the full walk instead of splicing at wrong indices.
-        if pane_buf.range.get() != Some(range) {
-            self.render_pane(model, pane, frame);
-            return;
-        }
-        for span in spans {
-            let r1 = span.r1.max(range.r1);
-            let r2 = span.r2.min(range.r2);
-            if r1 > r2 {
-                continue;
-            }
-            let band = RCRange {
-                r1,
-                c1: range.c1,
-                r2,
-                c2: range.c2,
-            };
-            self.render_pane_strip(model, pane, range, pane_idx, frame, band);
-        }
-    }
-
-    /// Stage 3.3 strip path: kept-band pixels were preserved by the
-    /// painter blit; the freshly-revealed strip subrange (`strip`, precomputed
-    /// in `render_grid_blit`) is fetched from the model and painted; kept-band
-    /// cells are skipped because the walk is narrowed to the strip
-    /// (`PaneCells::for_strip`). Sets `pane_fingerprints[idx]`
-    /// to 0 — the partial buffer can't produce a content fingerprint for next
-    /// frame's Stage 1 compare, so next frame falls through to a full
-    /// bulk-fetch path.
-    fn render_pane_strip(
-        &self,
-        model: &dyn CellContentQuery,
-        pane: PaneRegion,
-        range: RCRange,
-        pane_idx: usize,
-        frame: &Chrome,
-        strip: RCRange,
-    ) {
-        let theme = &frame.theme;
-        let pane_buf = self.pane_cache.pane(pane);
-
-        // Strip-fetch scratch reused from `FrameCache` (take/set rhythm),
-        // not `Vec::new()` per frame — `splice_strip_into` drains these into
-        // the pane buffers, leaving warm capacity to park back below. The
-        // `*_in` defaults `clear()` before filling, so prior contents are
-        // harmless.
-        let mut strip_styles = self.frame_cache.strip_styles.take();
-        let mut strip_values = self.frame_cache.strip_values.take();
-        let mut strip_cell_types = self.frame_cache.strip_cell_types.take();
-        let mut strip_decorations = self.frame_cache.strip_decorations.take();
-        model.get_cell_styles_in(frame.sheet, strip, &mut strip_styles);
-        model.get_formatted_cell_values_in(frame.sheet, strip, &mut strip_values);
-        model.get_cell_types_in(frame.sheet, strip, &mut strip_cell_types);
-        model.get_cell_decorations_in(frame.sheet, strip, &mut strip_decorations);
-
-        let mut pane_styles = pane_buf.styles.take();
-        let mut pane_values = pane_buf.values.take();
-        let mut pane_cell_types = pane_buf.cell_types.take();
-        let mut pane_decorations = pane_buf.decorations.take();
-        splice_strip_into(&mut pane_styles, &mut strip_styles, range, strip);
-        splice_strip_into(&mut pane_values, &mut strip_values, range, strip);
-        splice_strip_into(&mut pane_cell_types, &mut strip_cell_types, range, strip);
-        splice_strip_into(&mut pane_decorations, &mut strip_decorations, range, strip);
-        self.frame_cache.strip_styles.set(strip_styles);
-        self.frame_cache.strip_values.set(strip_values);
-        self.frame_cache.strip_cell_types.set(strip_cell_types);
-        self.frame_cache.strip_decorations.set(strip_decorations);
-
-        if let Some(strip_rect) = frame.range_rect(strip) {
-            self.painter
-                .rect_fill(strip_rect, PaintColor::from_theme_str(&theme.cell_bg));
-        }
-
-        // Walk strip cells only. `apply_blit_shift` rotated the kept-band
-        // entries (still `Some(...)`) into their new pane indices, so a
-        // full-pane walk would re-`take` and re-paint the kept band on top
-        // of pixels the painter blit already placed — wasting the entire
-        // win. `PaneCells::for_strip` narrows the slot slices up front.
-        self.paint_pane_cells(
-            PaneCells::for_strip(&pane, frame, strip),
-            pane,
-            range,
-            theme,
-            pane_styles,
-            pane_values,
-            pane_cell_types,
-            pane_decorations,
-        );
-
-        let mut fps = frame.pane_fingerprints.get();
-        fps[pane_idx] = 0;
-        frame.pane_fingerprints.set(fps);
-    }
 }
 
-fn has_bridge_failure<T>(items: &[Fetched<T>]) -> bool {
+/// `pub(super)` so `renderer::prepared::FetchedCells::has_bridge_failure`
+/// (checking all four channels as one bundle) can reuse this same
+/// per-channel predicate instead of duplicating it.
+pub(super) fn has_bridge_failure<T>(items: &[Fetched<T>]) -> bool {
     items.iter().any(Fetched::is_bridge_failed)
 }
 
@@ -416,7 +148,9 @@ fn has_bridge_failure<T>(items: &[Fetched<T>]) -> bool {
 /// `strip_buf` via `mem::swap` (no `Default`/`Clone` bound, so it serves both
 /// `Fetched<T>` and `Option<T>` buffers): the pane slot's stale value lands
 /// in the strip scratch, which the caller's next `*_in` fetch `clear()`s.
-fn splice_strip_into<E>(
+/// `pub(super)` so `renderer::prepared`'s multi-strip Damage execution can
+/// reuse it (single-strip splice, called once per prepared strip).
+pub(super) fn splice_strip_into<E>(
     pane_buf: &mut [E],
     strip_buf: &mut [E],
     pane_range: RCRange,

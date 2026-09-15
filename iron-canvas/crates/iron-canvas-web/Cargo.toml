@@ -13,6 +13,7 @@ dev-tools = [
     "dep:iron-canvas-recorder",
     "dep:serde_json",
     "iron-canvas-core/surface-introspection",
+    "iron-canvas-core/dev-diagnostics",
 ]
 pdf = ["iron-canvas-export/pdf"]
 
@@ -28,7 +29,8 @@ web-sys = { version = "0.3", features = [
     "CanvasRenderingContext2d",
     "HtmlCanvasElement","OffscreenCanvas",
     "TextMetrics",
-    "Window","Element", "Document", "CssStyleDeclaration"
+    "Window","Element", "Document", "CssStyleDeclaration",
+    "ImageData"
 ] }
 serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"

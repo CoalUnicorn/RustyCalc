@@ -55,9 +55,8 @@ await Promise.all([initIronCanvas(), initIronCalc()]);
 const canvas = IronCanvas.create(gridCanvasEl, overlayCanvasEl);
 canvas.setModel(model);
 canvas.resize(800, 400, window.devicePixelRatio || 1);
-canvas.requestRepaint();
 
-const loop = () => { canvas.paintIfDirty(); requestAnimationFrame(loop); };
+const loop = () => { canvas.renderPending(); requestAnimationFrame(loop); };
 requestAnimationFrame(loop);
 ```
 
@@ -86,7 +85,7 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 | Method | Description |
 | ------ | ----------- |
 | `IronCanvas.create(gridCanvas, overlayCanvas)` | Construct over two stacked canvases. Returns `IronCanvas` or throws. |
-| `canvas.resize(css_w, css_h, dpr)` | Resize both layers. Call whenever the element's CSS size or DPR changes. |
+| `canvas.resize(css_w, css_h, dpr)` | Resize both layers. Call it when the CSS size or DPR changes. A real change forces `renderPending()` to rebuild all pixels. |
 | `canvas.dispose()` | Release the canvas. Call when unmounting. |
 
 #### Model
@@ -99,20 +98,21 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 
 #### Repaint triggers
 
-Setters are value-compared — pushing the same value is a no-op. Call `paintIfDirty`
+Setters compare values. The same value has no effect. Call `renderPending()`
 from your rAF loop; it skips silently when nothing changed.
 
 | Method | Description |
 | ------ | ----------- |
-| `canvas.requestRepaint()` | Force a full grid + overlay repaint on the next `paintIfDirty`. Use after structural changes (sheet switch, freeze). Does not raise `CONTENT` — use `markContentDirty` when cell values changed. |
-| `canvas.markContentDirty()` | Signal that cell values have changed. Grid refetches all panes on the next `paintIfDirty`. |
-| `canvas.paintIfDirty()` | Drive the paint loop. Call from `requestAnimationFrame`. |
+| `canvas.requestRepaint()` | Force a full grid and overlay rebuild on the next `renderPending()` call. Use it after structural changes. Use `markContentDirty()` when cell values change. |
+| `canvas.markContentDirty()` | Signal that cell values changed. The grid fetches all panes on the next `renderPending()` call. |
+| `canvas.viewChanged()` | Signal that the view moved. The next `renderPending()` call selects the applicable render strategy. |
+| `canvas.renderPending()` | Drive the render loop. It returns `RenderResult.Idle`, `Rendered`, `RetryRequired`, or `PlaybackActive`. Call it again after `RetryRequired`. |
 
 #### Theme
 
 | Method | Description |
 | ------ | ----------- |
-| `canvas.set_theme_name(name)` | Switch to a built-in palette: `"light"` or `"dark"`. |
+| `canvas.setThemeName(name)` | Switch to a built-in palette: `"light"` or `"dark"`. |
 | `canvas.setThemeFromElement(el)` | *(wasm32 only)* Read `--palette-*` CSS vars off `el` and apply them. |
 | `canvas.themeChanged()` | Notify that external theme vars changed (e.g. OS dark-mode toggle). Re-reads `--palette-*` and triggers a full repaint. |
 
@@ -135,10 +135,16 @@ and raises `OVERLAY`; only the overlay layer repaints.
 | `canvas.set_formula_refs(refs)` | Formula-ref outlines (`Vec<FormulaRef>`). |
 | `canvas.set_overlays(overlays)` | Batch overlay setter — `RenderOverlays` struct carrying all decorations at once. |
 
+`canvas.view_changed()` (Rust-only mirror of `viewChanged()` above) does not
+belong in this table: it marks view movement plus overlay atomically, and
+unlike everything above it, it can escalate past an overlay-only repaint into
+a scroll blit or a full rebuild — that verdict is geometric, decided fresh on
+the next `renderPending()` call, never at the setter call.
+
 #### Queries
 
 All queries read the last painted `Chrome`. Return immediately; no rebuild triggered.
-Before the first `paintIfDirty` every query returns its absent variant.
+Before the first `renderPending()` call, every query returns its absent variant.
 
 ```rust
 // What is the cursor over?
@@ -228,9 +234,9 @@ A workbook with only frozen rows collapses to `top_left` + `bottom_left`; only f
 
 ### Layers, surfaces, painters
 
-Both layers read the same `Option<Rc<dyn CanvasModel>>` held by the `Orchestrator<S>` — a single type param, with the model carried as a field rather than a second generic. The grid canvas is opaque (`alpha: false`) and the overlay uses `alpha: true, desynchronized: true`. Each layer is a `LayerBase<S, R>` where `S: Surface` owns the painter and `R: LayerOps<Painter = S::P>` is the renderer wrapper. The surface hands the renderer an `Rc<S::P>` clone at construction, so paint methods do not re-borrow through the surface on every call. `LayerBase` also carries a `PaintGate` (typed `GridSignals` dirty bits) and a long-lived `RendererCore<S::P>` whose caches survive across frames.
+Both layers read the same `Option<Rc<dyn CanvasModel>>` held by the `Orchestrator<S>` — a single type param, with the model carried as a field rather than a second generic. The grid canvas is opaque (`alpha: false`) and the overlay uses `alpha: true, desynchronized: true`. Each layer is a `LayerBase<S, R>` where `S: Surface` owns the painter and `R: LayerOps<Painter = S::P>` is the renderer wrapper. The surface hands the renderer an `Rc<S::P>` clone at construction, so paint methods do not re-borrow through the surface on every call. `LayerBase` is gate-free — it carries no dirty-bit state of its own — plus a long-lived `RendererCore<S::P>` whose caches survive across frames. Every bit of paint intent instead lives on `Orchestrator` as one `PendingWork` value (see "Per-frame snapshot and dispatch" below).
 
-`Surface` is the backend-agnostic drawing target. It owns an associated `type P: Painter + BlitPainter` plus `painter`, `clone_painter`, `resize`, and `present`. `WebSurface` wraps an `HtmlCanvasElement` and an `Rc<CanvasPainter>`. `MemSurface` (in `iron-canvas-recorder`) wraps an `Rc<RecorderPainter>` and drives `Orchestrator<MemSurface>` through every paint regime inside core's integration tests.
+`Surface` is the backend-agnostic drawing target. It owns an associated `type P: Painter + BlitPainter` plus `painter`, `clone_painter`, `resize`, and `present`. `WebSurface` wraps an `HtmlCanvasElement` and an `Rc<CanvasPainter>`. `MemSurface` (in `iron-canvas-recorder`) wraps an `Rc<RecorderPainter>` and drives `Orchestrator<MemSurface>` through every render strategy in core integration tests.
 
 The `Painter` trait is unsealed; adapter crates implement it. Renderer code does not touch `CanvasRenderingContext2d` directly. The layer-clear and full-canvas-fill paths route through `Painter::clear_rect` and `Painter::rect_fill` so SVG, PDF, and recorder backends see the same op stream. Five painter types ship today: `CanvasPainter`, `SvgPainter`, `PdfPainter`, `RecorderPainter`, and the `RecordingPainter<P>` decorator.
 
@@ -240,21 +246,108 @@ The `Painter` trait is unsealed; adapter crates implement it. Renderer code does
 
 Selection, autofill preview, clipboard ants, point-mode, and formula-ref outlines each implement the `Layer` trait in `crates/iron-canvas-core/src/decoration/`. `LayerBase::paint_overlay_layer` walks the built-ins in fixed z-order, followed by consumer layers registered through `Orchestrator::add_decoration`.
 
+### Ownership
+
+Nine decisions, each owned by exactly one place. Reach for this table
+before reading source: it answers "who decides this" so you don't have
+to reconstruct it from call sites.
+
+| State/decision | Owner | Invariant |
+| --- | --- | --- |
+| queued intent | `Orchestrator::pending: PendingWork` | one mergeable value, taken once per attempt via `mem::take` |
+| captured scalar inputs | `FrameInputs::capture` | fallible values read once before geometry/paint; any failure holds the whole attempt |
+| committed geometry | `Orchestrator::last_frame: Option<Chrome>` | queries see only a presented/committed frame, never a candidate |
+| geometric verdict | `Chrome::classify` | one `Stable`/`Scroll`/`Rebuild` result per attempt |
+| planned grid/overlay work | `FramePlan` | scope (`GridWork`, pane mask, row spans) is explicit and passed in, never read back off `Chrome` |
+| prepared model data | renderer-owned `Prepared*` values | failed preparation writes only renderer-lifetime scratch, never committed state |
+| committed pane/fingerprint cache | `PaneCache` / `PaneFingerprintState` | metadata describes only pixels that actually painted |
+| completion/retry/presentation | `Orchestrator::finish_attempt` | one boundary installs cache, advances `last_frame`, presents, and merges retry |
+| drawing backend state | `Surface` and `Painter` | renderer stays backend-neutral; no `CanvasRenderingContext2d` outside the backend crate |
+
 ### Per-frame snapshot and dispatch
 
-`Chrome` has two construction paths. `Chrome::next(prev, model, canvas, theme, path)` handles `FramePath::Fresh` and `FramePath::SlotsReuse`; the pure-scroll fast path is `Chrome::next_blit(.., &BlitPlan) -> BlitOutcome`. The resulting `Chrome` is the single source of truth for hit-test geometry.
+`Chrome` is committed frame geometry — canvas size, DPR, theme, model
+generation, sheet, pane slot vecs, header thicknesses — and nothing
+else. It does not carry pending paint scope (no pane mask, no row
+spans): that scope is decided fresh every attempt and passed explicitly
+into the painting call, never read back off `Chrome`. It has two
+construction paths: `Chrome::next(prev, model, inputs, path)` — where
+`inputs: &FrameInputs` is the captured snapshot below — handles
+`FramePath::Fresh` and `FramePath::SlotsReuse`; the pure-scroll fast
+path is `Chrome::next_blit(.., &BlitPlan) -> BlitOutcome`, or, on the
+live orchestrator dispatch path, the reversible `Chrome::prepare_blit`,
+which builds the identical candidate but holds it open until the strip
+fetch confirms clean. The resulting `Chrome` is the single source of
+truth for hit-test geometry.
 
-`paint_if_dirty` (on `Orchestrator`; `IronCanvas::paintIfDirty` delegates to it) drains typed dirty signals from both layers and dispatches to one of four regimes in cheapness order. `Overlay` repaints the overlay only and skips the grid rebuild. `Viewport` runs the scroll blit. `SlotsReuse` keeps the viewport stable and refetches only the masked panes. `Fresh` is the full rebuild.
+`render_pending` (on `Orchestrator`; `IronCanvas::renderPending`
+delegates to it) takes the single queued `PendingWork` value
+(`self.pending`, via one `mem::take`) and runs it through
+`PendingWork -> FrameInputs -> FrameDelta -> FramePlan -> prepare ->
+execute -> finish` before a paint attempt is complete:
+
+1. `FrameInputs::capture` reads every scalar the frame needs (selected
+   sheet, selected view, frozen counts, header visibility, selection
+   visibility) exactly once. `CanvasModel::get_selected_sheet()` returns
+   `Option<u32>` — a JS-bridge failure is `None`, never a silent `0` —
+   and every other scalar read here is equally fallible except
+   selection visibility (`get_show_selection`, default `true`,
+   infallible by design). Any failure holds the whole attempt: the
+   taken `PendingWork` merges back into `self.pending` unmodified,
+   nothing paints or presents, and `render_pending` returns
+   `PaintResult::RetryRequired`. There is no synthetic-default fallback.
+2. `Chrome::classify(prev, model, &inputs, active_cell)` compares the
+   captured inputs against the committed `Chrome` and returns one
+   `FrameDelta`: `Stable`, `Scroll(BlitPlan)`, or
+   `Rebuild(RebuildReason)`.
+3. `plan_frame` turns the taken `PendingWork` plus the `FrameDelta`
+   into one `FramePlan`, whose `grid: GridWork` field dispatches to one
+   of five strategies in cost order. `OverlayOnly` repaints the overlay
+   only and skips the grid rebuild. `ScrollBlit` runs the scroll blit.
+   `DamagedRows` repaints explicitly damaged row bands and preserves
+   slot geometry. `ChangedCells` keeps the viewport stable and refetches
+   only the masked panes — but `Panes(mask)` here is *candidate* fetch
+   scope, not the repaint verdict: each fetched pane's own fingerprint
+   tree still decides `Skip`, `Rows`, or `Full` independently against
+   what is actually on screen.
+   `FullRebuild` rebuilds all pixels. Stable content plus view work can use
+   `DamagedRows` (matching row scope) or `ChangedCells` (pane candidate scope),
+   with the overlay painted in the same committed attempt. Content plus
+   a real `Scroll` or any `Rebuild` remains `FullRebuild`; changed content is
+   never blitted.
+4. The selected strategy *prepares* its scope — every bulk bridge read,
+   classified against the pane cache's committed state — without
+   installing any of it, then *executes*: paints the prepared scope and
+   returns an owned aggregate cache commit in `PaintOutcome`.
+   `Orchestrator::finish_attempt` is the single completion boundary that
+   installs the aggregate, advances or preserves `last_frame`, and presents
+   whichever layers painted — a bridge failure during prepare can therefore
+   never partially apply.
+   `FullRebuild` and `ScrollBlit` hold the whole attempt atomically. `ChangedCells`
+   and `DamagedRows` can commit healthy panes or rows and hold only the
+   failed scope.
+
+A held or partial attempt (`PaintResult::RetryRequired`) merges its failed scope
+back into `self.pending` — the whole attempt (a capture failure, or an
+atomic `FullRebuild` or `ScrollBlit` hold) or a narrower strategy scope
+(`ChangedCells` failed pane mask or `DamagedRows` original row spans). Thus,
+the caller can call `render_pending` again on the next tick with no new
+external input needed.
+
+`Canvas2dRuntime<S>` owns the paired grid and overlay surfaces, their
+orchestrator, and their shared DPR lifecycle. `IronCanvas`, `DataGridCanvas`,
+and the RustyCalc camera host use this runtime while retaining their
+model-specific state and API boundaries.
 
 ### Pane pipeline and theme
 
-`render_grid` paints the four pane quadrants (`top_left`, `top_right`, `bottom_left`, `bottom_right`), then frozen separators, then headers, then the corner box. Each pane runs five deferred sub-passes over one reused slot vec: background, conditional-formatting decoration, grid borders, explicit borders, then text. The sub-pass order is the contract — decorations stay below borders, explicit borders win over grid borders at shared edges, and text runs last so overflow is not clipped by a neighbour's background.
+`render_grid` paints the four pane quadrants (`top_left`, `top_right`, `bottom_left`, `bottom_right`), then frozen separators, headers, and the corner box. The sequence is the same for `FullRebuild`, `ChangedCells`, `DamagedRows`, and `ScrollBlit`. Each pane runs five deferred passes: background, conditional-formatting decoration, grid borders, explicit borders, and text.
 
 `CanvasTheme` fields are `Cow<'static, str>`. `light()` and `dark()` are built-in palettes (`Cow::Borrowed`, ptr-eq cache hit); host overrides via `ThemeVariables` are `Cow::Owned`. On wasm32, `setThemeFromElement` reads `--palette-*` off `getComputedStyle`.
 
 ### Recording
 
-`iron-canvas-recorder` does double duty: it is both the test backend (`RecorderPainter` + `MemSurface` driving `Orchestrator<MemSurface>` through every regime) and the dev-only producer of `.icr` recording files.
+`iron-canvas-recorder` is the test backend and the development-only `.icr` producer. Its `RecorderPainter` and `MemSurface` run every render strategy.
 
 Enable the producer by building `iron-canvas-web` with the `dev-tools` feature:
 
@@ -264,7 +357,7 @@ wasm-pack build --target web --features dev-tools     # standalone
 trunk serve --features dev-tools                      # full app
 ```
 
-With the feature on, `IronCanvas` exports `startRecording()` / `stopRecording()` and `RecordingSurface<S>` forks every painter call into a per-frame buffer. The output is a single uncompressed JSON document conforming to the `.icr` schema in `crates/iron-canvas-recorder/src/recording.rs` (`IcrHeader { schema_version, iron_canvas_version, canvas_w, canvas_h, dpr, theme, started_at_unix_ms, partial }` plus frames containing `frame_idx`, `t_ms`, `regime`, `signals`, `grid_ops`, and `overlay_ops`).
+With the feature on, `IronCanvas` exports `startRecording()` / `stopRecording()` and `RecordingSurface<S>` forks every painter call into a per-frame buffer. The output is a single uncompressed JSON document conforming to the `.icr` schema in `crates/iron-canvas-recorder/src/recording.rs` (`IcrHeader { schema_version, iron_canvas_version, canvas_w, canvas_h, dpr, theme, started_at_unix_ms, partial }` plus frames containing `frame_idx`, `t_ms`, `strategy`, `signals` (the engine's diagnostic `WorkFlags` bits — `VIEW | CONTENT | GEOMETRY | OVERLAY`), `grid_ops`, and `overlay_ops`).
 
 Replay an `.icr` by opening [`web-test/recording-viewer.html`](web-test/recording-viewer.html) and drag-dropping the file; the page mirrors `iron_canvas_recorder::replay` in JS and paints onto a single 2D canvas. The always-on `recordingSupported() -> bool` probe lets the page detect whether the loaded wasm has recording compiled in. Without the feature flag, recording symbols are not exported and the prod bundle pays zero overhead.
 
@@ -272,10 +365,10 @@ Replay an `.icr` by opening [`web-test/recording-viewer.html`](web-test/recordin
 
 `RecorderPainter` (in `iron-canvas-recorder`) is the testing entry point.
 Renderer tests construct one, drive a render pass, and assert against the
-resulting `Vec<DrawOp>`. The four-regime integration test in
-`crates/iron-canvas-core/tests/orchestrator_regimes.rs` drives
-`Orchestrator<MemSurface>` through `Fresh` / `SlotsReuse` / `Viewport` /
-`Overlay` and asserts the expected op log for each.
+resulting `Vec<DrawOp>`. The five-strategy integration test in
+`crates/iron-canvas-core/tests/orchestrator_strategies.rs` drives
+`Orchestrator<MemSurface>` through `FullRebuild`, `ChangedCells`, `DamagedRows`,
+`ScrollBlit`, and `OverlayOnly`. It checks the operation log for each strategy.
 
 ```
 cargo test --workspace

@@ -11,23 +11,18 @@ mod common;
 use std::path::PathBuf;
 
 use iron_canvas_core::CanvasModel;
+use iron_canvas_core::FrameDelta;
 use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitOutcome, Chrome, FramePath};
-use iron_canvas_core::painter::BlitPainter;
+use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
-use common::{TestModel, canvas_default as canvas};
+use common::{TestModel, canvas_default as canvas, test_inputs};
 
 fn snap(m: &TestModel) -> ActiveCellSnapshot {
     let view = m.get_selected_view().expect("scroll model has view");
-    ActiveCellSnapshot::capture(m, m.get_selected_sheet(), view.row, view.column)
-}
-
-fn issue_blits<P: BlitPainter>(painter: &P, plan: &iron_canvas_core::chrome::BlitPlan) {
-    for s in &plan.shifts {
-        painter.blit(s.src, s.dst);
-    }
+    ActiveCellSnapshot::capture(m, view.sheet, view.row, view.column)
 }
 
 /// Capture the draw ops emitted by a single-axis scroll-blit on a fresh model.
@@ -36,22 +31,23 @@ fn capture_scroll_ops(apply_scroll: impl FnOnce(&TestModel)) -> Vec<DrawOp> {
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let canvas = canvas();
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs0, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&m, &frame0);
     let baseline_ops = core.painter().ops().len();
 
     apply_scroll(&m);
 
-    let plan = frame0
-        .screen_for_blit(&m, canvas, &theme, &snap(&m))
-        .expect("single-axis scroll must qualify for blit");
-
-    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, canvas, &theme, &plan)
+    let inputs1 = test_inputs(&m, canvas, &theme);
+    let FrameDelta::Scroll(plan) = Chrome::classify(Some(&frame0), &m, &inputs1, Some(&snap(&m)))
     else {
+        panic!("single-axis scroll must qualify for blit");
+    };
+
+    let BlitOutcome::Blitted(frame1) = Chrome::next_blit(Some(frame0), &m, &inputs1, &plan) else {
         panic!("single-axis scroll must blit in place");
     };
-    issue_blits(core.painter(), &plan);
     core.render_grid_blit(&m, &frame1, &plan);
 
     core.painter()
@@ -94,4 +90,35 @@ fn blit_scroll_pixels_unchanged() {
 
     let col_ops = capture_scroll_ops(|m| m.set_left_column(2));
     assert_blessed("blit_col_scroll", &format!("{col_ops:#?}"));
+}
+
+/// Stage 5 pin (Task 1, bullet 7): `execute_grid_blit` applies `plan.shift`
+/// before it ever opens `BeginGroup(Grid)` — the prefix that must stay
+/// outside `execute_grid_shell`. Proven on both scroll axes so the pin isn't
+/// an artifact of one axis's shift ordering.
+#[test]
+fn blit_shifts_pixels_before_opening_the_grid_group() {
+    let assert_blit_precedes_grid = |ops: &[DrawOp], label: &str| {
+        let first_blit = ops.iter().position(|op| matches!(op, DrawOp::Blit { .. }));
+        let first_grid_group = ops.iter().position(
+            |op| matches!(op, DrawOp::BeginGroup { class } if *class == GroupClass::Grid),
+        );
+        let (Some(blit_idx), Some(grid_idx)) = (first_blit, first_grid_group) else {
+            panic!(
+                "{label}: a successful scroll-blit must emit both a Blit and \
+                 a Grid group; got {ops:#?}"
+            );
+        };
+        assert!(
+            blit_idx < grid_idx,
+            "{label}: the first Blit (index {blit_idx}) must precede \
+             BeginGroup(Grid) (index {grid_idx}); got {ops:#?}"
+        );
+    };
+
+    assert_blit_precedes_grid(&capture_scroll_ops(|m| m.set_top_row(2)), "row scroll");
+    assert_blit_precedes_grid(
+        &capture_scroll_ops(|m| m.set_left_column(2)),
+        "column scroll",
+    );
 }

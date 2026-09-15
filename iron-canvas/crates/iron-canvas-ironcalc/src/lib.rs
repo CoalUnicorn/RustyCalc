@@ -43,8 +43,8 @@ impl<'a> std::ops::Deref for IronCalcModel<'a> {
 }
 
 impl<'a> CanvasModel for IronCalcModel<'a> {
-    fn get_selected_sheet(&self) -> u32 {
-        UserModel::get_selected_sheet(&self.0)
+    fn get_selected_sheet(&self) -> Option<u32> {
+        Some(UserModel::get_selected_sheet(&self.0))
     }
     fn get_selected_view(&self) -> Option<CanvasView> {
         let v = UserModel::get_selected_view(&self.0);

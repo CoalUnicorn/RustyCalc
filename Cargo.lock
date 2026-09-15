@@ -1112,7 +1112,7 @@ dependencies = [
 
 [[package]]
 name = "ironcalc"
-version = "0.7.1"
+version = "0.8.3"
 dependencies = [
  "bitcode",
  "chrono",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "ironcalc_base"
-version = "0.7.1"
+version = "0.8.3"
 dependencies = [
  "bitcode",
  "chrono",

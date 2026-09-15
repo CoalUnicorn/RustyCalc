@@ -9,7 +9,7 @@
 
 use crate::CanvasModel;
 use crate::geometry::constants::HEADER_COL_WIDTH;
-use crate::geometry::slot::{AxisSlots, ColSlot, RowSlot, col_width, row_height};
+use crate::geometry::slot::{AxisSlot, AxisSlots, ColSlot, RowSlot, col_width, row_height};
 
 use super::recycled_slots::RecycledSlots;
 
@@ -19,7 +19,7 @@ const APPROX_DIGIT_WIDTH_PX: i32 = 8;
 /// Padding either side of the row-label inside the header strip.
 const HEADER_LABEL_PAD_PX: i32 = 4;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PaneSet {
     pub rows: AxisSlots<RowSlot>,
     pub cols: AxisSlots<ColSlot>,
@@ -28,6 +28,16 @@ pub struct PaneSet {
     pub row_header_labels: Vec<String>,
     /// Resolved column-header labels, parallel to cols.frozen ++ cols.scroll.
     pub col_header_labels: Vec<String>,
+}
+
+/// One axis's scroll-slot Vec, tagged with which axis it belongs to. A
+/// single-axis blit only ever rebuilds one of `rows.scroll`/`cols.scroll` —
+/// this lets [`PaneSet::swap_scroll_axis`] and `chrome::blit`'s
+/// `BlitRollback` carry "the other axis's Vec" without a caller having to
+/// track separately which field a bare `Vec` was meant for.
+pub(super) enum ScrollAxisSlots {
+    Row(Vec<RowSlot>),
+    Column(Vec<ColSlot>),
 }
 
 impl PaneSet {
@@ -52,6 +62,45 @@ impl PaneSet {
         }
     }
 
+    /// Move `self` apart and reassemble with `scroll`'s axis swapped in
+    /// alongside fresh header labels; the frozen bands and the *other*
+    /// axis's scroll Vec carry over unchanged, by move.
+    ///
+    /// Symmetric by construction, not just by intent: `chrome::blit`'s
+    /// `PreparedBlitFrame::rollback` is today's one caller, handing back
+    /// a blit candidate's `PaneSet` (whose cross-axis scroll Vec is already
+    /// `prev`'s original, untouched by the blit) plus the saved original
+    /// scroll-axis Vec and labels, and getting `prev`'s original `PaneSet`
+    /// back — no field cloned, only moved.
+    pub(super) fn swap_scroll_axis(
+        self,
+        scroll: ScrollAxisSlots,
+        row_header_labels: Vec<String>,
+        col_header_labels: Vec<String>,
+    ) -> PaneSet {
+        let PaneSet { rows, cols, .. } = self;
+        match scroll {
+            ScrollAxisSlots::Row(scroll_rows) => PaneSet {
+                rows: AxisSlots {
+                    scroll: scroll_rows,
+                    ..rows
+                },
+                cols,
+                row_header_labels,
+                col_header_labels,
+            },
+            ScrollAxisSlots::Column(scroll_cols) => PaneSet {
+                cols: AxisSlots {
+                    scroll: scroll_cols,
+                    ..cols
+                },
+                rows,
+                row_header_labels,
+                col_header_labels,
+            },
+        }
+    }
+
     /// Resolve `frozen ++ scroll` header labels in walk_header_strip order:
     /// a model override, else the 1-based row number. The Fresh build and the
     /// blit rebuild both call this, so the two paths can never drift out of the
@@ -67,8 +116,8 @@ impl PaneSet {
             .chain(scroll.iter())
             .map(|s| {
                 model
-                    .get_row_header_text(sheet, s.row)
-                    .unwrap_or_else(|| s.row.to_string())
+                    .get_row_header_text(sheet, s.id())
+                    .unwrap_or_else(|| s.id().to_string())
             })
             .collect()
     }
@@ -86,8 +135,8 @@ impl PaneSet {
             .chain(scroll.iter())
             .map(|s| {
                 model
-                    .get_column_header_text(sheet, s.col)
-                    .unwrap_or_else(|| crate::geometry::utils::col_name(s.col))
+                    .get_column_header_text(sheet, s.id())
+                    .unwrap_or_else(|| crate::geometry::utils::col_name(s.id()))
             })
             .collect()
     }
@@ -97,14 +146,20 @@ impl PaneSet {
     /// [`chrome`](crate::chrome) module docs).
     /// Runs before the row-label measurement, so it does not depend on
     /// `row_header_thickness`.
+    ///
+    /// `sheet` is the caller's already-captured sheet, threaded into the
+    /// per-row `measure` closure so the walk reads it once instead of once
+    /// per row (`row_height`'s doc).
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_rows(
         &mut self,
         model: &dyn CanvasModel,
+        sheet: u32,
         frozen_count: i32,
         origin_y: i32,
         view_top_row: i32,
         last_row: i32,
-        canvas_h: f64,
+        canvas_h: i32,
     ) {
         self.rows.fill(
             model,
@@ -112,22 +167,24 @@ impl PaneSet {
             origin_y,
             view_top_row,
             last_row,
-            canvas_h.ceil() as i32,
-            row_height,
+            canvas_h,
+            |model, row| row_height(model, sheet, row),
         );
     }
 
     /// Column-axis mirror of `fill_rows`. Runs as Phase D, using the
     /// cell-area X origin that already folds in the measured
     /// `row_header_thickness`.
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_cols(
         &mut self,
         model: &dyn CanvasModel,
+        sheet: u32,
         frozen_count: i32,
         origin_x: i32,
         view_left_column: i32,
         last_column: i32,
-        canvas_w: f64,
+        canvas_w: i32,
     ) {
         self.cols.fill(
             model,
@@ -135,8 +192,8 @@ impl PaneSet {
             origin_x,
             view_left_column,
             last_column,
-            canvas_w.ceil() as i32,
-            col_width,
+            canvas_w,
+            |model, col| col_width(model, sheet, col),
         );
     }
 

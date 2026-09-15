@@ -13,6 +13,7 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, js_sys};
 
 use iron_canvas_core::geometry::{
+    constants::{DASHED_RECT_PATTERN, STANDARD_BORDER_WIDTH},
     pixel_rect::PixelRect,
     prim::{Line, Point, Span},
 };
@@ -35,9 +36,6 @@ extern "C" {
 /// (not per-painter) so grid + overlay layers share a single signal —
 /// the failure mode is a ctx-level capability, not a layer-local one.
 static MEASURE_WARN_EMITTED: AtomicBool = AtomicBool::new(false);
-
-/// Standard border line width (1px in CSS pixels).
-pub(crate) const STANDARD_BORDER_WIDTH: f64 = 1.0;
 
 /// Snap an axis-aligned stroke's cross-axis coordinate onto the pixel grid.
 ///
@@ -88,11 +86,11 @@ impl CachedColor {
 }
 
 /// Sticky `ctx.set_*` state cache for `CanvasPainter`. Lifted out as its
-/// own type so the regime arms in `Orchestrator::paint_if_dirty` own the
-/// invalidation contract explicitly: `paint_fresh_regime` /
-/// `paint_slots_reuse_regime` invalidate at the arm prologue (ctx state
-/// about to change); `paint_viewport_regime`'s blit path /
-/// `paint_overlay_regime` preserve (blit + overlay-only don't touch grid
+/// own type so the strategy arms in `Orchestrator::render_pending` own the
+/// invalidation contract explicitly: `render_full_rebuild` and
+/// `render_changed_cells` invalidate at the arm prologue (ctx state
+/// about to change); `render_scroll_blit` and
+/// `render_overlay_only` preserve it (blit and overlay-only do not touch grid
 /// ctx state). Other painter backends (SvgPainter, RecorderPainter) have
 /// no analog — the cache is a Canvas2D-specific optimization.
 #[derive(Default)]
@@ -107,7 +105,7 @@ impl SetterCache {
     /// Clear all four sticky binds. Called from the trait-level
     /// `invalidate_cache`, from `pop_clip` (ctx.restore wipes ctx state),
     /// and — via `RendererCore::invalidate_paint_cache` — from the paint
-    /// regime arms that change ctx fillStyle/strokeStyle/font/lineWidth.
+    /// strategy arms that change ctx fillStyle/strokeStyle/font/lineWidth.
     pub(crate) fn invalidate(&self) {
         self.last_fill.set(CachedColor::Empty);
         self.last_stroke.set(CachedColor::Empty);
@@ -153,7 +151,10 @@ impl CanvasPainter {
             ctx,
             blit_src: None,
             setter_cache: SetterCache::default(),
-            dash_pattern: js_sys::Array::of2(&4.0_f64.into(), &3.0_f64.into()),
+            dash_pattern: js_sys::Array::of2(
+                &DASHED_RECT_PATTERN[0].into(),
+                &DASHED_RECT_PATTERN[1].into(),
+            ),
             dash_empty: js_sys::Array::new(),
             clip_depth: Cell::new(0),
             dpr: Cell::new(1.0),
@@ -211,7 +212,7 @@ impl CanvasPainter {
     pub(crate) fn with_stroke_width<F: FnOnce(&Self)>(&self, width: f64, f: F) {
         self.set_line_width_cached(width);
         f(self);
-        self.set_line_width_cached(STANDARD_BORDER_WIDTH);
+        self.set_line_width_cached(f64::from(STANDARD_BORDER_WIDTH));
     }
 
     /// Map a call-site `PaintColor` to its `CachedColor`. `Static` stays
@@ -482,14 +483,9 @@ impl BlitPainter for CanvasPainter {
         // src multiplies explicitly. This matches the asymmetry of
         // CanvasRenderingContext2D.drawImage's source/destination spaces.
         let dpr = self.dpr.get();
-        let sx = f64::from(src.top_left.x) * dpr;
-        let sy = f64::from(src.top_left.y) * dpr;
-        let sw = f64::from(src.width) * dpr;
-        let sh = f64::from(src.height) * dpr;
-        let dx = f64::from(dst.top_left.x);
-        let dy = f64::from(dst.top_left.y);
-        let dw = f64::from(dst.width);
-        let dh = f64::from(dst.height);
+        let (sx0, sy0, sw0, sh0) = src.as_f64_tuple();
+        let (dx, dy, dw, dh) = dst.as_f64_tuple();
+        let (sx, sy, sw, sh) = (sx0 * dpr, sy0 * dpr, sw0 * dpr, sh0 * dpr);
 
         let _ = self
             .ctx

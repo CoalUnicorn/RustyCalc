@@ -1,6 +1,8 @@
 // Engine-agnostic cell styling — mirrors the renderer's read-set exactly.
 // Colors are CSS strings (resolved against the theme at paint time, not here).
 
+use crate::types::ui::Side;
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CellStyle {
     pub fill_color: Option<String>,
@@ -74,6 +76,18 @@ pub struct Border {
     pub bottom: Option<BorderItem>,
     pub diagonal_up: bool,
     pub diagonal_down: bool,
+}
+
+impl Border {
+    /// The border item stored on `side`, if any.
+    pub fn get(&self, side: Side) -> Option<&BorderItem> {
+        match side {
+            Side::Left => self.left.as_ref(),
+            Side::Top => self.top.as_ref(),
+            Side::Right => self.right.as_ref(),
+            Side::Bottom => self.bottom.as_ref(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

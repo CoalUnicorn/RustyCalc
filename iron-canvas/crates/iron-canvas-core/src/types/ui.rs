@@ -33,15 +33,24 @@ pub enum HitTest {
     Outside,
 }
 
-/// Cardinal side of a formula-ref rectangle. Used by `RefZone::Edge` to
-/// say which edge the cursor is over; drag handlers map this to a single-
-/// axis resize direction.
+/// Cardinal side of a rectangle.
+///
+/// Formula-reference hit testing uses it through [`RefZone::Edge`]; border
+/// paint uses [`Side::line`] to project the side onto a stroke segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
     Top,
     Right,
     Bottom,
     Left,
+}
+
+impl Side {
+    /// All four sides in the renderer's explicit-stroke order.
+    ///
+    /// The order is observable where differently styled strokes overlap at a
+    /// corner, so border paint must preserve it.
+    pub const ALL: [Self; 4] = [Self::Left, Self::Top, Self::Right, Self::Bottom];
 }
 
 /// One of the four corners of a formula-ref rectangle. Used by

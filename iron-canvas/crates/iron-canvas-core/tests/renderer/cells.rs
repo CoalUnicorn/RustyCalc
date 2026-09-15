@@ -1,8 +1,17 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
 
+use iron_canvas_core::Side;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
-use iron_canvas_core::geometry::prim::{BorderEdge, Line, Point, Span};
+use iron_canvas_core::geometry::prim::{Line, Point, Span};
+
+#[test]
+fn all_sides_preserve_explicit_stroke_order() {
+    assert_eq!(
+        Side::ALL,
+        [Side::Left, Side::Top, Side::Right, Side::Bottom]
+    );
+}
 
 #[test]
 fn left_edge_is_vertical_line_at_rect_x() {
@@ -12,7 +21,7 @@ fn left_edge_is_vertical_line_at_rect_x() {
         height: 15,
     };
     assert_eq!(
-        BorderEdge::Left.line(rect),
+        Side::Left.line(rect),
         Line::V {
             x: 5,
             span: Span { from: 10, to: 25 }
@@ -28,7 +37,7 @@ fn right_edge_is_vertical_line_at_rect_right() {
         height: 15,
     };
     assert_eq!(
-        BorderEdge::Right.line(rect),
+        Side::Right.line(rect),
         Line::V {
             x: 25,
             span: Span { from: 10, to: 25 },
@@ -44,7 +53,7 @@ fn top_edge_is_horizontal_line_at_rect_y() {
         height: 15,
     };
     assert_eq!(
-        BorderEdge::Top.line(rect),
+        Side::Top.line(rect),
         Line::H {
             y: 10,
             span: Span { from: 5, to: 25 },
@@ -60,7 +69,7 @@ fn bottom_edge_is_horizontal_line_at_rect_bottom() {
         height: 15,
     };
     assert_eq!(
-        BorderEdge::Bottom.line(rect),
+        Side::Bottom.line(rect),
         Line::H {
             y: 25,
             span: Span { from: 5, to: 25 },

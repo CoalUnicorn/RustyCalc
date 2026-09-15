@@ -7,7 +7,6 @@ use crate::app_state::AppState;
 use crate::components::panels::conditional_formatting::ConditionalFormattingDialog;
 use crate::components::panels::named_ranges::NamedRangesDialog;
 use crate::components::workbook::editing::cell_editor::CellEditor;
-use crate::events::{SpreadsheetEvent, StructureEvent};
 use crate::input::mouse::{
     CanvasHandle, handle_contextmenu, handle_dblclick, handle_mousedown, handle_mousemove,
     handle_mouseup, handle_wheel,
@@ -62,52 +61,65 @@ pub fn Worksheet() -> impl IntoView {
     let app = expect_context::<AppState>();
     let model = expect_context::<ModelStore>();
 
-    // ResizeObserver: re-render when the container changes size.
-    // Leptos signals don't fire on DOM resize, so we use a ResizeObserver
-    // that bumps the redraw counter whenever the worksheet div is resized
-    // (e.g. browser window resize, devtools open/close).
-    // Cleanup is automatic when the component unmounts.
+    // ResizeObserver: re-render when the container changes size. Leptos
+    // signals don't fire on DOM resize, so we use a ResizeObserver instead
+    // (e.g. browser window resize, devtools open/close). Registered further
+    // down, once `poke` exists — see the comment there.
     let container_ref = NodeRef::<html::Div>::new();
-    let _ = use_resize_observer(container_ref, move |_, _| {
-        // During playback the orchestrator + canvas backing stores are
-        // pinned to the recording's dimensions; a live container resize
-        // (window resize, devtools) would otherwise clobber them and skew
-        // the replay.
-        #[cfg(feature = "dev-tools")]
-        if app.playback_loaded.get_untracked() {
-            return;
-        }
-
-        state.emit_event(SpreadsheetEvent::Structure(StructureEvent::DocumentReset));
-
-        // Mirror the new dims into the orchestrator. Both canvases share CSS
-        // dims, so reading from grid_ref is sufficient. If the ref hasn't
-        // resolved yet, the rAF lazy-construct will pick up the current size
-        // on its next tick.
-        let Some(grid_el) = grid_ref.get_untracked() else {
-            return;
-        };
-        let w = grid_el.client_width() as f64;
-        let h = grid_el.client_height() as f64;
-        if w <= 0.0 || h <= 0.0 {
-            return;
-        }
-        let dpr = window().device_pixel_ratio();
-        canvas_handle.update_value(|slot| {
-            if let Some(ic) = slot.as_mut() {
-                ic.resize(w, h, dpr);
-                ic.request_repaint();
-            }
-        });
-    });
 
     let clipboard_draw = expect_context::<ClipboardDraw>();
     let reactive_overlay = reactive_overlay(state, model);
 
-    // Flag: set by the reactive subscription Effect, cleared by the rAF
-    // render loop. Starts true so the first animation frame draws the
-    // initial state without waiting for an event.
-    let render_needed = RwSignal::new(true);
+    // `install_raf_loop` runs first so `poke` exists before anything below
+    // needs to wake the (now demand-driven, self-pausing) render loop.
+    let poke = raf_loop::install_raf_loop(
+        grid_ref,
+        overlay_ref,
+        canvas_handle,
+        model,
+        reactive_overlay,
+        clipboard_draw,
+        theme_dirty,
+        Some(app),
+        state.show_headers,
+        state.scroll_into_view,
+    );
+
+    // Cleanup is automatic when the component unmounts. Needs `poke`, so it
+    // is registered here rather than alongside `container_ref` above.
+    {
+        let poke = poke.clone();
+        let _ = use_resize_observer(container_ref, move |_, _| {
+            // During playback the orchestrator + canvas backing stores are
+            // pinned to the recording's dimensions; a live container resize
+            // (window resize, devtools) would otherwise clobber them and
+            // skew the replay.
+            #[cfg(feature = "dev-tools")]
+            if app.playback_loaded.get_untracked() {
+                return;
+            }
+
+            // Mirror the new dims into the orchestrator. Both canvases share
+            // CSS dims, so reading from grid_ref is sufficient. If the ref
+            // hasn't resolved yet, the rAF lazy-construct will pick up the
+            // current size on its next tick.
+            let Some(grid_el) = grid_ref.get_untracked() else {
+                return;
+            };
+            let w = grid_el.client_width() as f64;
+            let h = grid_el.client_height() as f64;
+            if w <= 0.0 || h <= 0.0 {
+                return;
+            }
+            let dpr = window().device_pixel_ratio();
+            canvas_handle.update_value(|slot| {
+                if let Some(ic) = slot.as_mut() {
+                    ic.resize(w, h, dpr);
+                }
+            });
+            poke();
+        });
+    }
 
     subscribe::install_subscribe_effect(
         state,
@@ -115,7 +127,7 @@ pub fn Worksheet() -> impl IntoView {
         theme_dirty,
         reactive_overlay,
         clipboard_draw,
-        render_needed,
+        poke.clone(),
     );
 
     // Grow rows to fit multi-line / wrapped content on commit. Lives here
@@ -126,11 +138,15 @@ pub fn Worksheet() -> impl IntoView {
     // Workbook-switch Effect — watching `current_uuid` gives us a deterministic
     // signal that fires once per workbook switch. Without a set_model call,
     // the orchestrator keeps last_frame from the old workbook (stale pane
-    // geometry, stale sheet ID), and paint_if_dirty never drops it for a
+    // geometry, stale sheet ID), and render_pending never drops it for a
     // Fresh rebuild. `set_model` is idempotent-safe — re-pushing the same
-    // adapter triggers a full repaint.
+    // adapter triggers a full repaint. `poke()` after `set_model` closes a
+    // real gap: nothing previously woke the render loop for a workbook
+    // switch specifically (it only painted if `render_needed` happened to
+    // already be true for an unrelated reason).
     {
         let current_uuid = state.current_uuid.read();
+        let poke = poke.clone();
         Effect::new(move |_| {
             let _uuid = current_uuid.get();
             canvas_handle.update_value(|slot| {
@@ -141,28 +157,17 @@ pub fn Worksheet() -> impl IntoView {
                     }));
                 }
             });
+            poke();
         });
     }
 
     #[cfg(feature = "dev-tools")]
     {
         dev_tools_effects::install_recording_effect(state, app, canvas_handle);
-        dev_tools_effects::install_playback_effect(state, app, canvas_handle, render_needed);
+        dev_tools_effects::install_playback_effect(state, app, canvas_handle, poke.clone());
         dev_tools_effects::install_export_effect(state, app, canvas_handle);
+        dev_tools_effects::install_diag_effect(state, app, canvas_handle, poke.clone());
     }
-
-    raf_loop::install_raf_loop(
-        grid_ref,
-        overlay_ref,
-        canvas_handle,
-        model,
-        reactive_overlay,
-        clipboard_draw,
-        theme_dirty,
-        render_needed,
-        Some(app),
-        state.show_headers,
-    );
 
     // mousedown: dispatches via IronCanvas::hit_test (canvas_handle owns the
     // painted-frame snapshot every event resolves against).

@@ -1,11 +1,11 @@
 //! Live-canvas playback for `.icr` recordings.
 //!
-//! Suspends the normal `paint_if_dirty` loop and replays recorded ops onto the
-//! live grid + overlay painters. Each seek walks from the most recent `Fresh`
-//! frame at or before the target — cumulative on the grid surface, per-frame
-//! on the overlay surface. Owned by `IronCanvas`; the orchestrator is unaware.
+//! Suspends the normal `render_pending` loop and replays recorded ops onto the
+//! live grid + overlay painters. Each seek walks from the most recent
+//! `FullRebuild` frame at or before the target — cumulative on both grid and overlay
+//! surfaces. Owned by `IronCanvas`; the orchestrator is unaware.
 
-use iron_canvas_core::PaintRegimeTag;
+use iron_canvas_core::RenderStrategy;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::painter::{BlitPainter, Painter};
 use iron_canvas_recorder::recording::{Frame, Recording};
@@ -83,31 +83,47 @@ impl PlaybackSession {
     }
 }
 
-/// Slice index of the most recent `Fresh` frame at or before `target`.
+/// Slice index of the most recent committed `FullRebuild` frame at or before
+/// `target`.
 ///
 /// `target` past the end is clamped to `frames.len() - 1` so callers can
 /// pass a raw user-supplied index without pre-clamping. Returns `None` on
-/// empty input, or on a malformed recording with no `Fresh` frame in range
-/// — the recorder synchronously emits `Fresh` as frame 0, so `None` should
-/// only fire on a corrupt `.icr`. Linear backward scan: regime is not
-/// monotonic, so binary search does not apply, and recordings tend to
-/// re-anchor frequently (resize / structural events), keeping the walk short.
-pub fn find_fresh_anchor(frames: &[Frame], target: u32) -> Option<u32> {
+/// empty input, or on a malformed recording with no `FullRebuild` frame in range
+/// — a recording may begin with held diagnostic attempts, so `None` is a
+/// valid diagnostics-only prefix. A held `FullRebuild` attempt has no committed
+/// sequence and therefore cannot become an anchor. Linear backward scan:
+/// strategy is not monotonic, so binary search does not apply, and recordings
+/// tend to re-anchor frequently (resize / structural events), keeping the
+/// walk short.
+pub fn find_full_rebuild_anchor(frames: &[Frame], target: u32) -> Option<u32> {
     let last = frames.len().checked_sub(1)? as u32;
     let start = target.min(last);
-    (0..=start)
-        .rev()
-        .find(|&i| frames[i as usize].regime == PaintRegimeTag::Fresh)
+    (0..=start).rev().find(|&i| {
+        let trace = &frames[i as usize].trace;
+        trace.strategy == Some(RenderStrategy::FullRebuild) && trace.committed_seq.is_some()
+    })
 }
 
-/// Replay cumulative grid state + per-frame overlay state for `target_idx`
+/// Replay cumulative grid and overlay state for `target_idx`
 /// onto the live painters.
 ///
 /// Generic over `Painter + BlitPainter` so it works against both the bare
 /// `CanvasPainter` and the dev-tools `RecordingPainter<CanvasPainter>` that
 /// `RecordingSurface` returns from `painter()`.
-pub fn replay_through<P>(grid: &P, overlay: &P, recording: &Recording, target_idx: u32)
-where
+///
+/// `present_grid` is called after **every** replayed grid frame, not once
+/// at the end. `CanvasPainter::blit` reads its kept band from the
+/// *visible front* canvas, while replay paints into the detached back
+/// canvas — a `Blit` op replayed before its predecessor's pixels are
+/// presented reads stale/cleared front pixels and corrupts the composite.
+/// Mirrors the live loop, which presents after every painted frame.
+pub fn replay_through<P>(
+    grid: &P,
+    overlay: &P,
+    recording: &Recording,
+    target_idx: u32,
+    present_grid: &dyn Fn(),
+) where
     P: Painter + BlitPainter,
 {
     let frames = &recording.frames;
@@ -116,20 +132,73 @@ where
     }
     let target_idx = target_idx.min((frames.len() - 1) as u32);
 
-    let Some(anchor) = find_fresh_anchor(frames, target_idx) else {
+    let Some(anchor) = find_full_rebuild_anchor(frames, target_idx) else {
         return;
     };
 
-    // Grid: the Fresh anchor's first ops are `ApplyDprTransform` + a
+    // Grid: the FullRebuild anchor's first ops are `ApplyDprTransform` + a
     // full-canvas fill, so no manual clear is needed before replay.
     grid.invalidate_cache();
     for frame in &frames[anchor as usize..=target_idx as usize] {
         replay(grid, &frame.grid_ops);
+        present_grid();
     }
 
-    // Overlay: per-frame. The recorded ops include their own clear when
-    // the layer was repainted; if a frame's overlay_ops is empty, the
-    // overlay simply retains the previous content, matching live render.
+    // Overlay: cumulative from the same committed FullRebuild anchor. Empty ops
+    // preserve the prior overlay; replaying only the target frame would lose
+    // that state on backward seeks and grid-only attempts.
     overlay.invalidate_cache();
-    replay(overlay, &frames[target_idx as usize].overlay_ops);
+    for frame in &frames[anchor as usize..=target_idx as usize] {
+        if !frame.overlay_ops.is_empty() {
+            replay(overlay, &frame.overlay_ops);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iron_canvas_recorder::recording::{
+        RecordOrigin, RecordedPaintResult, TraceOutcome, TraceRecord,
+    };
+
+    fn attempt(strategy: Option<RenderStrategy>, committed_seq: Option<u64>) -> Frame {
+        Frame {
+            frame_idx: 0,
+            t_ms: 0,
+            origin: RecordOrigin::Live,
+            result: RecordedPaintResult::Painted,
+            trace: TraceRecord {
+                attempt_seq: 1,
+                committed_seq,
+                strategy,
+                effective: strategy,
+                work: 0,
+                verdict: None,
+                outcome: TraceOutcome::Painted,
+                blit_fallback: None,
+                fetched_cell_slots: 0,
+                fetched_cells: 0,
+                fetch_batches: 0,
+            },
+            grid_ops: Vec::new(),
+            overlay_ops: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn full_rebuild_anchor_requires_a_committed_trace() {
+        let frames = vec![
+            attempt(Some(RenderStrategy::FullRebuild), None),
+            attempt(Some(RenderStrategy::FullRebuild), Some(2)),
+        ];
+        assert_eq!(find_full_rebuild_anchor(&frames, 0), None);
+        assert_eq!(find_full_rebuild_anchor(&frames, 1), Some(1));
+    }
+
+    #[test]
+    fn diagnostics_only_prefix_has_no_replay_anchor() {
+        let frames = vec![attempt(None, None)];
+        assert_eq!(find_full_rebuild_anchor(&frames, 0), None);
+    }
 }

@@ -42,11 +42,14 @@ impl DataGridModel {
 // forwarded anyway: their defaults return Excel bounds, not delegations,
 // so skipping the forward would lose the grid's finite extent.
 impl CanvasModel for DataGridModel {
-    fn get_selected_sheet(&self) -> u32 {
+    fn get_selected_sheet(&self) -> Option<u32> {
         self.0.borrow().get_selected_sheet()
     }
     fn get_selected_view(&self) -> Option<CanvasView> {
         self.0.borrow().get_selected_view()
+    }
+    fn get_show_selection(&self) -> bool {
+        self.0.borrow().get_show_selection()
     }
     fn get_frozen_rows_count(&self, s: u32) -> Option<i32> {
         self.0.borrow().get_frozen_rows_count(s)

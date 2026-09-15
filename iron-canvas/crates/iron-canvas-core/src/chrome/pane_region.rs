@@ -1,6 +1,6 @@
 use crate::{
     chrome::Chrome,
-    geometry::slot::{ColSlot, RowSlot},
+    geometry::slot::{AxisSlot, ColSlot, RowSlot},
     types::coord::RCRange,
 };
 
@@ -9,7 +9,7 @@ use crate::{
 /// `rows(frame)` / `cols(frame)` select which of the frame's row-slot and
 /// col-slot vecs to walk; `range(frame)` returns the address-space `RCRange`
 /// they span. Slot `.left` / `.top` are absolute canvas coordinates, so
-/// there is no per-pane origin to track.
+/// there is no region-specific origin to track.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PaneRegion {
     TopLeft,
@@ -19,6 +19,16 @@ pub enum PaneRegion {
 }
 
 impl PaneRegion {
+    /// Stable index for arrays stored in TL, TR, BL, BR order.
+    pub const fn index(self) -> usize {
+        match self {
+            PaneRegion::TopLeft => 0,
+            PaneRegion::TopRight => 1,
+            PaneRegion::BottomLeft => 2,
+            PaneRegion::BottomRight => 3,
+        }
+    }
+
     pub fn rows(self, frame: &Chrome) -> &[RowSlot] {
         match self {
             PaneRegion::TopLeft | PaneRegion::TopRight => &frame.pane_set.rows.frozen,
@@ -47,56 +57,114 @@ impl PaneRegion {
         let rows = self.rows(frame);
         let cols = self.cols(frame);
         Some(RCRange {
-            r1: rows.first()?.row,
-            c1: cols.first()?.col,
-            r2: rows.last()?.row,
-            c2: cols.last()?.col,
+            r1: rows.first()?.id(),
+            c1: cols.first()?.id(),
+            r2: rows.last()?.id(),
+            c2: cols.last()?.id(),
         })
     }
 }
 
-bitflags::bitflags! {
-    /// Bitset over `PaneRegion`. `Chrome.stale_panes` carries one of these
-    /// to tell `render_grid` which quadrants still need painting. Bit
-    /// positions are pinned to `PaneRegion as u8` so `with(region)` /
-    /// `regions()` can map between enum and bit by left-shift.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct PaneRegionMask: u8 {
-        const TOP_LEFT     = 1 << PaneRegion::TopLeft as u8;
-        const TOP_RIGHT    = 1 << PaneRegion::TopRight as u8;
-        const BOTTOM_LEFT  = 1 << PaneRegion::BottomLeft as u8;
-        const BOTTOM_RIGHT = 1 << PaneRegion::BottomRight as u8;
+#[cfg(test)]
+mod tests {
+    use super::PaneRegion;
+
+    #[test]
+    fn pane_region_index_uses_canonical_order() {
+        assert_eq!(PaneRegion::TopLeft.index(), 0);
+        assert_eq!(PaneRegion::TopRight.index(), 1);
+        assert_eq!(PaneRegion::BottomLeft.index(), 2);
+        assert_eq!(PaneRegion::BottomRight.index(), 3);
     }
 }
 
-impl PaneRegionMask {
-    /// Aliases for the bitflags-provided `empty()` / `all()` so call sites
-    /// (`PaneRegionMask::EMPTY`, `::ALL`) stay declarative.
-    pub const EMPTY: Self = Self::empty();
-    pub const ALL: Self = Self::all();
+/// Structural grid geometry that remains stable across a compatible address
+/// shift.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GridShape {
+    row_lens: [usize; 2],
+    col_lens: [usize; 2],
+    frozen_rows: i32,
+    frozen_cols: i32,
+}
 
-    pub fn with(self, region: PaneRegion) -> Self {
-        self | Self::from_bits_truncate(1 << region as u8)
+impl GridShape {
+    pub const fn row_lens(self) -> [usize; 2] {
+        self.row_lens
     }
 
-    /// Region-typed membership test. Distinct name from `bitflags`'
-    /// `contains(other: Self)` so both surfaces stay usable.
-    pub fn contains_region(self, region: PaneRegion) -> bool {
-        self.bits() & (1 << region as u8) != 0
+    pub const fn col_lens(self) -> [usize; 2] {
+        self.col_lens
     }
 
-    /// Yields panes in render order (TopLeft, TopRight, BottomLeft,
-    /// BottomRight). Order is load-bearing for `render_grid_blit`'s
-    /// BottomRight strip-clip wrapping. Distinct from `bitflags`'
-    /// inherent `iter()`, which yields single-bit `Self` values.
-    pub fn regions(self) -> impl Iterator<Item = PaneRegion> {
-        [
+    pub const fn frozen_rows(self) -> i32 {
+        self.frozen_rows
+    }
+
+    pub const fn frozen_cols(self) -> i32 {
+        self.frozen_cols
+    }
+}
+
+/// One dense address rectangle in the piecewise visible grid.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GridSegment {
+    region: PaneRegion,
+    range: RCRange,
+}
+
+impl GridSegment {
+    pub const fn region(self) -> PaneRegion {
+        self.region
+    }
+
+    pub const fn range(self) -> RCRange {
+        self.range
+    }
+}
+
+/// Exact address layout for one frame, stored in TL, TR, BL, BR order.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GridLayout {
+    shape: GridShape,
+    segments: [Option<GridSegment>; 4],
+}
+
+impl GridLayout {
+    pub(super) fn from_frame(frame: &Chrome) -> Self {
+        let rows = &frame.pane_set.rows;
+        let cols = &frame.pane_set.cols;
+        let shape = GridShape {
+            row_lens: [rows.frozen.len(), rows.scroll.len()],
+            col_lens: [cols.frozen.len(), cols.scroll.len()],
+            frozen_rows: rows.frozen_count(),
+            frozen_cols: cols.frozen_count(),
+        };
+        let segments = [
             PaneRegion::TopLeft,
             PaneRegion::TopRight,
             PaneRegion::BottomLeft,
             PaneRegion::BottomRight,
         ]
-        .into_iter()
-        .filter(move |&p| self.contains_region(p))
+        .map(|region| {
+            region
+                .range(frame)
+                .map(|range| GridSegment { region, range })
+        });
+
+        Self { shape, segments }
+    }
+
+    pub const fn shape(self) -> GridShape {
+        self.shape
+    }
+
+    /// Allocation-free render-order walk over 1–4 dense address segments.
+    pub fn segments(&self) -> impl Iterator<Item = GridSegment> + '_ {
+        self.segments.iter().copied().flatten()
+    }
+
+    pub(crate) fn segment(self, region: PaneRegion) -> Option<GridSegment> {
+        self.segments().find(|segment| segment.region() == region)
     }
 }

@@ -12,6 +12,13 @@
 //! - Inbound (setter API): `Deserialize`-only shapes with `From<Wire> for
 //!   Engine` impls — overlay setter inputs and theme setter inputs.
 
+// The query/setter shapes above are consumed only by the wasm32 JS bridge.
+// On host dev-tools builds — where this module is compiled for the native
+// wire-shape test below — they are intentionally unused, so the dead-code
+// lint is relaxed only off-wasm32 (the wasm32 build still catches genuinely
+// orphaned shapes).
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+
 use serde::{Deserialize, Serialize};
 
 use std::borrow::Cow;
@@ -92,7 +99,7 @@ pub(crate) struct CanvasSizeWire {
 /// `Option<(row, col)>` from `pixel_to_cell` becomes a `{row, column}`
 /// object when present, matching the rest of the API (named fields, not
 /// positional tuples).
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CellCoordWire {
     pub row: i32,
@@ -184,7 +191,7 @@ impl From<CanvasSize> for CanvasSizeWire {
 // validate by `try_into()` at the call site so a malformed payload surfaces
 // as a `JsError`, not a panic.
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct RCRangeWire {
     pub r1: i32,
     pub c1: i32,
@@ -243,6 +250,17 @@ impl From<RCRangeWire> for RCRange {
             c1: r.c1,
             r2: r.r2,
             c2: r.c2,
+        }
+    }
+}
+
+impl From<RCRange> for RCRangeWire {
+    fn from(range: RCRange) -> Self {
+        Self {
+            r1: range.r1,
+            c1: range.c1,
+            r2: range.r2,
+            c2: range.c2,
         }
     }
 }
@@ -385,5 +403,978 @@ impl RenderOverlaysWire {
             point_range: self.point_range.map(Into::into),
             formula_refs: self.formula_refs.into_iter().map(Into::into).collect(),
         })
+    }
+}
+
+#[cfg(feature = "dev-tools")]
+mod dev_wire {
+    // =============================================================================
+    // Outbound (Rust->JS, Serialize): dev-only frame diagnostics projection.
+    // =============================================================================
+    //
+    // The engine's `FrameDiagnostics` stays serde-free; this projection is the
+    // only place that decides wire names and tagging. Versioned by
+    // `schemaVersion` (DIAG_SCHEMA_VERSION) so a later recorder embedding can
+    // migrate. Field names are asserted by the native conversion test above.
+
+    use super::{CanvasSizeWire, CellCoordWire, RCRangeWire};
+    use serde::Serialize;
+
+    use iron_canvas_core::chrome::{GridShape, PaneRegion};
+    use iron_canvas_core::renderer::diag::{
+        DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache, DiagCacheActionTag,
+        DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagDeltaKind, DiagFetch,
+        DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
+        DiagGeometry, DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason,
+        DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
+    };
+    use iron_canvas_core::{
+        FrameInputFailure, GridVerdict, RebuildReason, RenderStrategy, RowSpan, WorkFlags,
+    };
+
+    /// camelCase mirror of `RenderStrategy`. The engine tag rides the `.icr`
+    /// recorder schema with `snake_case` names; this projection re-tags it
+    /// camelCase to match the rest of the diagnostics wire.
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum RenderStrategyWire {
+        OverlayOnly,
+        ScrollBlit,
+        ChangedCells,
+        FullRebuild,
+        DamagedRows,
+    }
+
+    impl From<RenderStrategy> for RenderStrategyWire {
+        fn from(tag: RenderStrategy) -> Self {
+            match tag {
+                RenderStrategy::OverlayOnly => Self::OverlayOnly,
+                RenderStrategy::ScrollBlit => Self::ScrollBlit,
+                RenderStrategy::ChangedCells => Self::ChangedCells,
+                RenderStrategy::FullRebuild => Self::FullRebuild,
+                RenderStrategy::DamagedRows => Self::DamagedRows,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct FrameDiagnosticsWire {
+        pub schema_version: u8,
+        pub attempt_seq: u64,
+        pub committed_seq: Option<u64>,
+        pub selected: Option<RenderStrategyWire>,
+        pub effective: Option<RenderStrategyWire>,
+        pub work: Vec<&'static str>,
+        pub delta: Option<DiagDeltaKindWire>,
+        pub rebuild_reason: Option<RebuildReasonWire>,
+        pub outcome: FrameOutcomeWire,
+        pub painted_layers: DiagPaintedLayersWire,
+        pub probe: Option<RCRangeWire>,
+        pub probe_segments: Vec<PaneRegionWire>,
+        pub geometry: Option<DiagGeometryWire>,
+        pub fetch: DiagFetchWire,
+        pub repaint: DiagRepaintWire,
+        pub cache: DiagCacheWire,
+        pub blit: Option<DiagBlitWire>,
+        pub paint_counts: DiagPaintCountsWire,
+    }
+
+    impl From<&FrameDiagnostics> for FrameDiagnosticsWire {
+        fn from(diag: &FrameDiagnostics) -> Self {
+            let mut work = Vec::new();
+            if diag.work.contains(WorkFlags::VIEW) {
+                work.push("view");
+            }
+            if diag.work.contains(WorkFlags::CONTENT) {
+                work.push("content");
+            }
+            if diag.work.contains(WorkFlags::GEOMETRY) {
+                work.push("geometry");
+            }
+            if diag.work.contains(WorkFlags::OVERLAY) {
+                work.push("overlay");
+            }
+            Self {
+                schema_version: diag.schema_version,
+                attempt_seq: diag.attempt_seq,
+                committed_seq: diag.committed_seq,
+                selected: diag.selected.map(RenderStrategyWire::from),
+                effective: diag.effective.map(RenderStrategyWire::from),
+                work,
+                delta: diag.delta.map(DiagDeltaKindWire::from),
+                rebuild_reason: diag.rebuild_reason.map(RebuildReasonWire::from),
+                outcome: FrameOutcomeWire::from(diag.outcome),
+                painted_layers: DiagPaintedLayersWire {
+                    grid: diag.painted_layers.grid,
+                    overlay: diag.painted_layers.overlay,
+                },
+                probe: diag.probe.map(RCRangeWire::from),
+                probe_segments: diag
+                    .probe_segments
+                    .iter()
+                    .copied()
+                    .map(PaneRegionWire::from)
+                    .collect(),
+                geometry: diag.geometry.as_ref().map(DiagGeometryWire::from),
+                fetch: DiagFetchWire::from(&diag.fetch),
+                repaint: DiagRepaintWire::from(&diag.repaint),
+                cache: DiagCacheWire::from(&diag.cache),
+                blit: diag.blit.as_ref().map(DiagBlitWire::from),
+                paint_counts: DiagPaintCountsWire {
+                    rows: diag.paint_counts.rows,
+                    cells: diag.paint_counts.cells,
+                },
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagDeltaKindWire {
+        Stable,
+        Scroll,
+        Rebuild,
+    }
+
+    impl From<DiagDeltaKind> for DiagDeltaKindWire {
+        fn from(kind: DiagDeltaKind) -> Self {
+            match kind {
+                DiagDeltaKind::Stable => Self::Stable,
+                DiagDeltaKind::Scroll => Self::Scroll,
+                DiagDeltaKind::Rebuild => Self::Rebuild,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum RebuildReasonWire {
+        NoCommittedFrame,
+        Size,
+        Dpr,
+        Theme,
+        Model,
+        Sheet,
+        Freeze,
+        Headers,
+        TwoAxisScroll,
+        MissingActiveSnapshot,
+        ActiveCellChangedOrUnknown,
+        IncompatibleScrollOverlap,
+    }
+
+    impl From<RebuildReason> for RebuildReasonWire {
+        fn from(reason: RebuildReason) -> Self {
+            match reason {
+                RebuildReason::NoCommittedFrame => Self::NoCommittedFrame,
+                RebuildReason::Size => Self::Size,
+                RebuildReason::Dpr => Self::Dpr,
+                RebuildReason::Theme => Self::Theme,
+                RebuildReason::Model => Self::Model,
+                RebuildReason::Sheet => Self::Sheet,
+                RebuildReason::Freeze => Self::Freeze,
+                RebuildReason::Headers => Self::Headers,
+                RebuildReason::TwoAxisScroll => Self::TwoAxisScroll,
+                RebuildReason::MissingActiveSnapshot => Self::MissingActiveSnapshot,
+                RebuildReason::ActiveCellChangedOrUnknown => Self::ActiveCellChangedOrUnknown,
+                RebuildReason::IncompatibleScrollOverlap => Self::IncompatibleScrollOverlap,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(tag = "kind", rename_all = "camelCase")]
+    pub(crate) enum FrameOutcomeWire {
+        Painted,
+        HeldOnBridgeFailure,
+        HeldOnInputFailure { input: FrameInputFailureWire },
+    }
+
+    impl From<iron_canvas_core::FrameOutcome> for FrameOutcomeWire {
+        fn from(outcome: iron_canvas_core::FrameOutcome) -> Self {
+            match outcome {
+                iron_canvas_core::FrameOutcome::Painted => Self::Painted,
+                iron_canvas_core::FrameOutcome::HeldOnBridgeFailure => Self::HeldOnBridgeFailure,
+                iron_canvas_core::FrameOutcome::HeldOnInputFailure(input) => {
+                    Self::HeldOnInputFailure {
+                        input: FrameInputFailureWire::from(input),
+                    }
+                }
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum FrameInputFailureWire {
+        SelectedSheet,
+        SelectedView,
+        SheetMismatch,
+        FrozenRows,
+        FrozenColumns,
+        RowHeaderVisibility,
+        ColumnHeaderVisibility,
+    }
+
+    impl From<FrameInputFailure> for FrameInputFailureWire {
+        fn from(failure: FrameInputFailure) -> Self {
+            match failure {
+                FrameInputFailure::SelectedSheet => Self::SelectedSheet,
+                FrameInputFailure::SelectedView => Self::SelectedView,
+                FrameInputFailure::SheetMismatch => Self::SheetMismatch,
+                FrameInputFailure::FrozenRows => Self::FrozenRows,
+                FrameInputFailure::FrozenColumns => Self::FrozenColumns,
+                FrameInputFailure::RowHeaderVisibility => Self::RowHeaderVisibility,
+                FrameInputFailure::ColumnHeaderVisibility => Self::ColumnHeaderVisibility,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagPaintedLayersWire {
+        pub grid: bool,
+        pub overlay: bool,
+    }
+
+    impl From<DiagPaintedLayers> for DiagPaintedLayersWire {
+        fn from(layers: DiagPaintedLayers) -> Self {
+            Self {
+                grid: layers.grid,
+                overlay: layers.overlay,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum PaneRegionWire {
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight,
+    }
+
+    impl From<PaneRegion> for PaneRegionWire {
+        fn from(region: PaneRegion) -> Self {
+            match region {
+                PaneRegion::TopLeft => Self::TopLeft,
+                PaneRegion::TopRight => Self::TopRight,
+                PaneRegion::BottomLeft => Self::BottomLeft,
+                PaneRegion::BottomRight => Self::BottomRight,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagSegmentWire {
+        pub region: PaneRegionWire,
+        pub range: RCRangeWire,
+        pub cells: usize,
+    }
+
+    impl From<&DiagSegment> for DiagSegmentWire {
+        fn from(segment: &DiagSegment) -> Self {
+            Self {
+                region: PaneRegionWire::from(segment.region),
+                range: RCRangeWire::from(segment.range),
+                cells: segment.cells,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct GridShapeWire {
+        pub row_lens: [usize; 2],
+        pub col_lens: [usize; 2],
+        pub frozen_rows: i32,
+        pub frozen_cols: i32,
+    }
+
+    impl From<GridShape> for GridShapeWire {
+        fn from(shape: GridShape) -> Self {
+            Self {
+                row_lens: shape.row_lens(),
+                col_lens: shape.col_lens(),
+                frozen_rows: shape.frozen_rows(),
+                frozen_cols: shape.frozen_cols(),
+            }
+        }
+    }
+
+    /// Geometry: the design's example carries frozen counts at the geometry
+    /// root (topRow/leftColumn/frozenRows/frozenColumns); the shape object
+    /// repeats them alongside the exact slot lengths. `cssSize` is the
+    /// logical CSS size the grid planned against; `backingSize` is the
+    /// physical backing-store size — core derives it from CSS x DPR, and
+    /// the facade overwrites it with the actual canvas backing store
+    /// before serialization so CSS/backing mismatches are visible.
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagGeometryWire {
+        pub css_size: CanvasSizeWire,
+        pub backing_size: BackingSizeWire,
+        pub dpr: f64,
+        pub sheet: u32,
+        pub top_row: i32,
+        pub left_column: i32,
+        pub frozen_rows: i32,
+        pub frozen_cols: i32,
+        pub row_header_thickness: i32,
+        pub col_header_thickness: i32,
+        pub show_row_headers: bool,
+        pub show_col_headers: bool,
+        pub shape: GridShapeWire,
+        pub segments: Vec<DiagSegmentWire>,
+    }
+
+    #[derive(Serialize, Clone, Copy)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct BackingSizeWire {
+        pub w: u32,
+        pub h: u32,
+    }
+
+    impl From<&DiagGeometry> for DiagGeometryWire {
+        fn from(geometry: &DiagGeometry) -> Self {
+            let (w, h) = geometry.backing_size;
+            Self {
+                css_size: CanvasSizeWire::from(geometry.canvas),
+                backing_size: BackingSizeWire { w, h },
+                dpr: geometry.dpr,
+                sheet: geometry.sheet,
+                top_row: geometry.top_row,
+                left_column: geometry.left_column,
+                frozen_rows: geometry.shape.frozen_rows(),
+                frozen_cols: geometry.shape.frozen_cols(),
+                row_header_thickness: geometry.row_header_thickness,
+                col_header_thickness: geometry.col_header_thickness,
+                show_row_headers: geometry.show_row_headers,
+                show_col_headers: geometry.show_col_headers,
+                shape: GridShapeWire::from(geometry.shape),
+                segments: geometry
+                    .segments
+                    .iter()
+                    .map(DiagSegmentWire::from)
+                    .collect(),
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagFetchPurposeWire {
+        FullSegment,
+        DamageStrip,
+        BlitReveal,
+    }
+
+    impl From<DiagFetchPurpose> for DiagFetchPurposeWire {
+        fn from(purpose: DiagFetchPurpose) -> Self {
+            match purpose {
+                DiagFetchPurpose::FullSegment => Self::FullSegment,
+                DiagFetchPurpose::DamageStrip => Self::DamageStrip,
+                DiagFetchPurpose::BlitReveal => Self::BlitReveal,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagFetchRequestWire {
+        pub purpose: DiagFetchPurposeWire,
+        pub region: Option<PaneRegionWire>,
+        pub range: RCRangeWire,
+        pub cells: usize,
+        pub slots: usize,
+    }
+
+    impl From<&DiagFetchRequest> for DiagFetchRequestWire {
+        fn from(request: &DiagFetchRequest) -> Self {
+            Self {
+                purpose: DiagFetchPurposeWire::from(request.purpose),
+                region: request.region.map(PaneRegionWire::from),
+                range: RCRangeWire::from(request.range),
+                cells: request.cells,
+                slots: request.slots,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagFetchWire {
+        pub batches: usize,
+        pub addressed_cells: usize,
+        pub logical_slots: usize,
+        pub requests: Vec<DiagFetchRequestWire>,
+    }
+
+    impl From<&DiagFetch> for DiagFetchWire {
+        fn from(fetch: &DiagFetch) -> Self {
+            Self {
+                batches: fetch.batches,
+                addressed_cells: fetch.addressed_cells,
+                logical_slots: fetch.logical_slots,
+                requests: fetch
+                    .requests
+                    .iter()
+                    .map(DiagFetchRequestWire::from)
+                    .collect(),
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(tag = "kind", rename_all = "camelCase")]
+    pub(crate) enum GridVerdictWire {
+        Skip,
+        Cell,
+        Range,
+        Rows { spans: u8, rows: u16 },
+        Full,
+        Strip,
+        Held,
+    }
+
+    impl From<GridVerdict> for GridVerdictWire {
+        fn from(verdict: GridVerdict) -> Self {
+            match verdict {
+                GridVerdict::Skip => Self::Skip,
+                GridVerdict::Cell => Self::Cell,
+                GridVerdict::Range => Self::Range,
+                GridVerdict::Rows { spans, rows } => Self::Rows { spans, rows },
+                GridVerdict::Full => Self::Full,
+                GridVerdict::Strip => Self::Strip,
+                GridVerdict::Held => Self::Held,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    /// Explicit JSON projection boundary for the public diagnostic reason.
+    /// Keep this separate from core planner internals so wire names change
+    /// only with an intentional diagnostics-schema change.
+    pub(crate) enum DiagRepaintReasonWire {
+        NoPaintedHistory,
+        LayoutMismatch,
+        RowAddressMismatch,
+        FingerprintsEqual,
+        ChangedCell,
+        ChangedCells,
+        ChangedRows,
+        ClipAlignment,
+    }
+
+    impl From<DiagRepaintReason> for DiagRepaintReasonWire {
+        fn from(reason: DiagRepaintReason) -> Self {
+            match reason {
+                DiagRepaintReason::NoPaintedHistory => Self::NoPaintedHistory,
+                DiagRepaintReason::LayoutMismatch => Self::LayoutMismatch,
+                DiagRepaintReason::RowAddressMismatch => Self::RowAddressMismatch,
+                DiagRepaintReason::FingerprintsEqual => Self::FingerprintsEqual,
+                DiagRepaintReason::ChangedCell => Self::ChangedCell,
+                DiagRepaintReason::ChangedCells => Self::ChangedCells,
+                DiagRepaintReason::ChangedRows => Self::ChangedRows,
+                DiagRepaintReason::ClipAlignment => Self::ClipAlignment,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct RowSpanWire {
+        pub r1: i32,
+        pub r2: i32,
+    }
+
+    impl From<RowSpan> for RowSpanWire {
+        fn from(span: RowSpan) -> Self {
+            Self {
+                r1: span.r1,
+                r2: span.r2,
+            }
+        }
+    }
+
+    impl From<DiagChangedCell> for CellCoordWire {
+        fn from(cell: DiagChangedCell) -> Self {
+            Self {
+                row: cell.row,
+                column: cell.column,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagSourceRangeWire {
+        pub region: PaneRegionWire,
+        pub range: RCRangeWire,
+    }
+
+    impl From<DiagSourceRange> for DiagSourceRangeWire {
+        fn from(source: DiagSourceRange) -> Self {
+            Self {
+                region: PaneRegionWire::from(source.region),
+                range: RCRangeWire::from(source.range),
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagRepaintWire {
+        pub verdict: Option<GridVerdictWire>,
+        pub reason: Option<DiagRepaintReasonWire>,
+        pub changed_rows: Vec<RowSpanWire>,
+        pub changed_cells: Vec<CellCoordWire>,
+        pub clip: Option<iron_canvas_core::PixelRect>,
+        pub source_ranges: Vec<DiagSourceRangeWire>,
+    }
+
+    impl From<&DiagRepaint> for DiagRepaintWire {
+        fn from(repaint: &DiagRepaint) -> Self {
+            Self {
+                verdict: repaint.verdict.map(GridVerdictWire::from),
+                reason: repaint.reason.map(DiagRepaintReasonWire::from),
+                changed_rows: repaint
+                    .changed_rows
+                    .iter()
+                    .copied()
+                    .map(RowSpanWire::from)
+                    .collect(),
+                changed_cells: repaint
+                    .changed_cells
+                    .iter()
+                    .copied()
+                    .map(CellCoordWire::from)
+                    .collect(),
+                clip: repaint.clip,
+                source_ranges: repaint
+                    .source_ranges
+                    .iter()
+                    .copied()
+                    .map(DiagSourceRangeWire::from)
+                    .collect(),
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagCacheActionTagWire {
+        None,
+        Replace,
+        Splice,
+        Shift,
+        Reset,
+    }
+
+    impl From<DiagCacheActionTag> for DiagCacheActionTagWire {
+        fn from(tag: DiagCacheActionTag) -> Self {
+            match tag {
+                DiagCacheActionTag::None => Self::None,
+                DiagCacheActionTag::Replace => Self::Replace,
+                DiagCacheActionTag::Splice => Self::Splice,
+                DiagCacheActionTag::Shift => Self::Shift,
+                DiagCacheActionTag::Reset => Self::Reset,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagFingerprintActionTagWire {
+        Install,
+        MarkStale,
+        Reset,
+    }
+
+    impl From<DiagFingerprintActionTag> for DiagFingerprintActionTagWire {
+        fn from(tag: DiagFingerprintActionTag) -> Self {
+            match tag {
+                DiagFingerprintActionTag::Install => Self::Install,
+                DiagFingerprintActionTag::MarkStale => Self::MarkStale,
+                DiagFingerprintActionTag::Reset => Self::Reset,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagCacheTruthWire {
+        pub layout: Option<DiagLayoutWire>,
+        pub buffer_truth: String,
+        pub fingerprint_truth: String,
+    }
+
+    impl From<&DiagCacheTruth> for DiagCacheTruthWire {
+        fn from(truth: &DiagCacheTruth) -> Self {
+            Self {
+                layout: truth.layout.map(DiagLayoutWire::from),
+                buffer_truth: match truth.buffer_truth {
+                    DiagBufferTruth::Valid => "valid".to_string(),
+                    DiagBufferTruth::Stale => "stale".to_string(),
+                },
+                fingerprint_truth: match truth.fingerprint_truth {
+                    DiagFingerprintTruth::Exact => "exact".to_string(),
+                    DiagFingerprintTruth::Stale => "stale".to_string(),
+                },
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagLayoutWire {
+        pub shape: GridShapeWire,
+        pub segments: Vec<DiagSegmentWire>,
+    }
+
+    impl From<iron_canvas_core::chrome::GridLayout> for DiagLayoutWire {
+        fn from(layout: iron_canvas_core::chrome::GridLayout) -> Self {
+            Self {
+                shape: GridShapeWire::from(layout.shape()),
+                segments: layout
+                    .segments()
+                    .map(|segment| DiagSegmentWire {
+                        region: PaneRegionWire::from(segment.region()),
+                        range: RCRangeWire::from(segment.range()),
+                        cells: (segment.range().r2 - segment.range().r1 + 1).max(0) as usize
+                            * (segment.range().c2 - segment.range().c1 + 1).max(0) as usize,
+                    })
+                    .collect(),
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagCacheResolutionWire {
+        Committed,
+        HeldForRetry,
+    }
+
+    impl From<DiagCacheResolution> for DiagCacheResolutionWire {
+        fn from(resolution: DiagCacheResolution) -> Self {
+            match resolution {
+                DiagCacheResolution::Committed => Self::Committed,
+                DiagCacheResolution::HeldForRetry => Self::HeldForRetry,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagCacheWire {
+        pub planned_action: Option<DiagCacheActionTagWire>,
+        pub fingerprint_action: Option<DiagFingerprintActionTagWire>,
+        pub committed_before: Option<DiagCacheTruthWire>,
+        pub resolution: DiagCacheResolutionWire,
+        pub committed_after: DiagCacheTruthWire,
+    }
+
+    impl From<&DiagCache> for DiagCacheWire {
+        fn from(cache: &DiagCache) -> Self {
+            Self {
+                planned_action: cache.planned_action.map(DiagCacheActionTagWire::from),
+                fingerprint_action: cache
+                    .fingerprint_action
+                    .map(DiagFingerprintActionTagWire::from),
+                committed_before: cache
+                    .committed_before
+                    .as_ref()
+                    .map(DiagCacheTruthWire::from),
+                resolution: DiagCacheResolutionWire::from(cache.resolution),
+                committed_after: DiagCacheTruthWire::from(&cache.committed_after),
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum AxisWire {
+        Row,
+        Column,
+    }
+
+    impl From<iron_canvas_core::geometry::prim::Axis> for AxisWire {
+        fn from(axis: iron_canvas_core::geometry::prim::Axis) -> Self {
+            match axis {
+                iron_canvas_core::geometry::prim::Axis::Row => Self::Row,
+                iron_canvas_core::geometry::prim::Axis::Column => Self::Column,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagBlitResultTagWire {
+        Shifted,
+        HeldPreflight,
+        GridFallback,
+        FreshFallback,
+    }
+
+    impl From<DiagBlitResultTag> for DiagBlitResultTagWire {
+        fn from(tag: DiagBlitResultTag) -> Self {
+            match tag {
+                DiagBlitResultTag::Shifted => Self::Shifted,
+                DiagBlitResultTag::HeldPreflight => Self::HeldPreflight,
+                DiagBlitResultTag::GridFallback => Self::GridFallback,
+                DiagBlitResultTag::FreshFallback => Self::FreshFallback,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagRevealedStripWire {
+        pub region: PaneRegionWire,
+        pub range: RCRangeWire,
+    }
+
+    impl From<&DiagRevealedStrip> for DiagRevealedStripWire {
+        fn from(strip: &DiagRevealedStrip) -> Self {
+            Self {
+                region: PaneRegionWire::from(strip.region),
+                range: RCRangeWire::from(strip.range),
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagBlitWire {
+        pub axis: AxisWire,
+        pub delta: i32,
+        // `PixelRect`/`Point` already derive Serialize in core (they ride the
+        // .icr schema) — serialize them directly, as wire.rs already does.
+        pub src: iron_canvas_core::geometry::pixel_rect::PixelRect,
+        pub dst: iron_canvas_core::geometry::pixel_rect::PixelRect,
+        // `null` when execution never reached `push_clip` (held and both
+        // fallback outcomes) — never a fabricated zero rectangle.
+        pub clip: Option<iron_canvas_core::geometry::pixel_rect::PixelRect>,
+        pub strip: iron_canvas_core::geometry::pixel_rect::PixelRect,
+        pub revealed: Vec<DiagRevealedStripWire>,
+        pub result: DiagBlitResultTagWire,
+        pub cold_cache: Option<bool>,
+    }
+
+    impl From<&DiagBlit> for DiagBlitWire {
+        fn from(blit: &DiagBlit) -> Self {
+            Self {
+                axis: AxisWire::from(blit.axis),
+                delta: blit.delta,
+                src: blit.src,
+                dst: blit.dst,
+                clip: blit.clip,
+                strip: blit.strip,
+                revealed: blit
+                    .revealed
+                    .iter()
+                    .map(DiagRevealedStripWire::from)
+                    .collect(),
+                result: DiagBlitResultTagWire::from(blit.result),
+                cold_cache: blit.cold_cache,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) struct DiagPaintCountsWire {
+        pub rows: usize,
+        pub cells: usize,
+    }
+
+    impl From<DiagPaintCounts> for DiagPaintCountsWire {
+        fn from(counts: DiagPaintCounts) -> Self {
+            Self {
+                rows: counts.rows,
+                cells: counts.cells,
+            }
+        }
+    }
+}
+
+#[cfg(feature = "dev-tools")]
+pub(crate) use dev_wire::*;
+
+#[cfg(all(test, feature = "dev-tools"))]
+mod tests {
+    use super::*;
+    use iron_canvas_core::chrome::PaneRegion;
+    use iron_canvas_core::{
+        DiagBufferTruth, DiagCacheActionTag, DiagCacheResolution, DiagCacheTruth, DiagChangedCell,
+        DiagDeltaKind, DiagFingerprintActionTag, DiagFingerprintTruth, DiagPaintCounts,
+        DiagPaintedLayers, DiagRepaintReason, DiagSourceRange, FrameDiagnostics, FrameOutcome,
+        GridVerdict, PixelRect, Point, RCRange, RebuildReason, RowSpan,
+    };
+
+    /// The wire shape is the contract the browser mirrors parse. Prove the
+    /// exact field names here, natively, before any browser test relies on
+    /// them.
+    #[test]
+    fn repaint_reason_wire_names_are_stable() {
+        let cases = [
+            (DiagRepaintReason::NoPaintedHistory, "noPaintedHistory"),
+            (DiagRepaintReason::LayoutMismatch, "layoutMismatch"),
+            (DiagRepaintReason::RowAddressMismatch, "rowAddressMismatch"),
+            (DiagRepaintReason::FingerprintsEqual, "fingerprintsEqual"),
+            (DiagRepaintReason::ChangedCell, "changedCell"),
+            (DiagRepaintReason::ChangedCells, "changedCells"),
+            (DiagRepaintReason::ChangedRows, "changedRows"),
+            (DiagRepaintReason::ClipAlignment, "clipAlignment"),
+        ];
+
+        for (reason, expected) in cases {
+            let json = serde_json::to_value(DiagRepaintReasonWire::from(reason))
+                .expect("diagnostic repaint reason serializes");
+            assert_eq!(json, expected);
+        }
+    }
+
+    /// The aggregate snapshot projection keeps field names stable alongside
+    /// the enum-value contract above.
+    #[test]
+    fn frame_diagnostics_wire_matches_declared_shape() {
+        let diag = FrameDiagnostics {
+            schema_version: 3,
+            attempt_seq: 7,
+            committed_seq: Some(6),
+            selected: Some(iron_canvas_core::RenderStrategy::ChangedCells),
+            effective: Some(iron_canvas_core::RenderStrategy::ChangedCells),
+            work: iron_canvas_core::WorkFlags::CONTENT,
+            delta: Some(DiagDeltaKind::Stable),
+            rebuild_reason: Some(RebuildReason::Freeze),
+            outcome: FrameOutcome::Painted,
+            painted_layers: DiagPaintedLayers {
+                grid: true,
+                overlay: false,
+            },
+            probe: Some(RCRange {
+                r1: 5,
+                c1: 4,
+                r2: 5,
+                c2: 4,
+            }),
+            probe_segments: vec![PaneRegion::BottomLeft],
+            geometry: None,
+            fetch: Default::default(),
+            repaint: iron_canvas_core::DiagRepaint {
+                verdict: Some(GridVerdict::Cell),
+                reason: Some(DiagRepaintReason::ChangedCell),
+                changed_rows: vec![RowSpan { r1: 5, r2: 5 }],
+                changed_cells: vec![DiagChangedCell { row: 5, column: 4 }],
+                clip: Some(PixelRect {
+                    top_left: Point { x: 20, y: 30 },
+                    width: 64,
+                    height: 24,
+                }),
+                source_ranges: vec![DiagSourceRange {
+                    region: PaneRegion::BottomLeft,
+                    range: RCRange {
+                        r1: 4,
+                        c1: 3,
+                        r2: 6,
+                        c2: 5,
+                    },
+                }],
+            },
+            cache: iron_canvas_core::DiagCache {
+                planned_action: Some(DiagCacheActionTag::Replace),
+                fingerprint_action: Some(DiagFingerprintActionTag::Install),
+                committed_before: Some(DiagCacheTruth {
+                    layout: None,
+                    buffer_truth: DiagBufferTruth::Stale,
+                    fingerprint_truth: DiagFingerprintTruth::Stale,
+                }),
+                resolution: DiagCacheResolution::Committed,
+                committed_after: DiagCacheTruth {
+                    layout: None,
+                    buffer_truth: DiagBufferTruth::Valid,
+                    fingerprint_truth: DiagFingerprintTruth::Exact,
+                },
+            },
+            // A fallback/held blit never reaches `push_clip`: the wire
+            // must carry `clip: null`, never a fabricated zero rect.
+            blit: Some(iron_canvas_core::DiagBlit {
+                axis: iron_canvas_core::geometry::prim::Axis::Row,
+                delta: 4,
+                src: iron_canvas_core::PixelRect::default(),
+                dst: iron_canvas_core::PixelRect::default(),
+                clip: None,
+                strip: iron_canvas_core::PixelRect::default(),
+                revealed: Vec::new(),
+                result: iron_canvas_core::DiagBlitResultTag::GridFallback,
+                cold_cache: Some(true),
+            }),
+            paint_counts: DiagPaintCounts { rows: 1, cells: 21 },
+        };
+
+        let wire = FrameDiagnosticsWire::from(&diag);
+        let json = serde_json::to_value(&wire).expect("wire serializes");
+
+        assert_eq!(json["schemaVersion"], 3);
+        assert_eq!(json["attemptSeq"], 7);
+        assert_eq!(json["committedSeq"], 6);
+        assert_eq!(json["selected"], "changedCells");
+        assert_eq!(json["work"], serde_json::json!(["content"]));
+        assert_eq!(json["delta"], "stable");
+        assert_eq!(json["rebuildReason"], "freeze");
+        assert_eq!(json["outcome"]["kind"], "painted");
+        assert_eq!(json["paintedLayers"]["grid"], true);
+        assert_eq!(json["paintedLayers"]["overlay"], false);
+        assert_eq!(
+            json["probe"],
+            serde_json::json!({ "r1": 5, "c1": 4, "r2": 5, "c2": 4 })
+        );
+        assert_eq!(json["probeSegments"], serde_json::json!(["bottomLeft"]));
+        assert_eq!(json["geometry"], serde_json::Value::Null);
+        assert_eq!(json["repaint"]["verdict"]["kind"], "cell");
+        assert_eq!(json["repaint"]["reason"], "changedCell");
+        assert_eq!(
+            json["repaint"]["changedRows"],
+            serde_json::json!([{ "r1": 5, "r2": 5 }])
+        );
+        assert_eq!(
+            json["repaint"]["changedCells"],
+            serde_json::json!([{ "row": 5, "column": 4 }])
+        );
+        assert_eq!(
+            json["repaint"]["clip"],
+            serde_json::json!({
+                "top_left": { "x": 20, "y": 30 },
+                "width": 64,
+                "height": 24
+            })
+        );
+        assert_eq!(
+            json["repaint"]["sourceRanges"],
+            serde_json::json!([{
+                "region": "bottomLeft",
+                "range": { "r1": 4, "c1": 3, "r2": 6, "c2": 5 }
+            }])
+        );
+        assert_eq!(json["cache"]["plannedAction"], "replace");
+        assert_eq!(json["cache"]["fingerprintAction"], "install");
+        assert_eq!(json["cache"]["committedBefore"]["bufferTruth"], "stale");
+        assert_eq!(json["cache"]["resolution"], "committed");
+        assert_eq!(json["cache"]["committedAfter"]["fingerprintTruth"], "exact");
+        assert_eq!(
+            json["blit"]["clip"],
+            serde_json::Value::Null,
+            "a blit that never reached push_clip must emit clip: null"
+        );
+        assert_eq!(json["blit"]["result"], "gridFallback");
+        assert_eq!(json["blit"]["delta"], 4);
+        assert_eq!(json["paintCounts"]["rows"], 1);
+        assert_eq!(json["paintCounts"]["cells"], 21);
     }
 }

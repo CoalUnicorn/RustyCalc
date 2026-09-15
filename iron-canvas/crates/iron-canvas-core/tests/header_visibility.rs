@@ -6,18 +6,14 @@ use iron_canvas_core::CanvasSize;
 use iron_canvas_core::chrome::{Chrome, FramePath};
 use iron_canvas_core::theme::CanvasTheme;
 
-use common::TestModel;
+use common::{TestModel, test_inputs};
 
 const CANVAS: CanvasSize = CanvasSize { w: 600.0, h: 400.0 };
 
 fn frame(model: &TestModel) -> Chrome {
-    Chrome::next(
-        None,
-        model,
-        CANVAS,
-        &std::rc::Rc::new(CanvasTheme::light()),
-        FramePath::Fresh,
-    )
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let inputs = test_inputs(model, CANVAS, &theme);
+    Chrome::next(None, model, &inputs, FramePath::Fresh)
 }
 
 #[test]
@@ -57,22 +53,34 @@ fn hidden_col_headers_collapse_col_thickness_and_y_origin() {
 
 use common::canvas_default;
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitPlan, PaneRegion};
+use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitPlan};
+use iron_canvas_core::{FrameDelta, FrameInputs};
 
 fn snap_at_top(m: &TestModel) -> ActiveCellSnapshot {
     let Some(view) = m.get_selected_view() else {
         panic!("get_selected_view() returned None")
     };
-    ActiveCellSnapshot::capture(m, m.get_selected_sheet(), view.row, view.column)
+    ActiveCellSnapshot::capture(m, view.sheet, view.row, view.column)
 }
 
-// Returns the x-origin of the BottomLeft (frozen-cols) sibling shift, or None
-// if no such shift is present in the plan.
-fn bottom_left_band_x(plan: &BlitPlan) -> Option<i32> {
-    plan.shifts
-        .iter()
-        .find(|s| s.pane == PaneRegion::BottomLeft)
-        .map(|s| s.src.top_left.x)
+/// Classify `prev` against `m`'s live state and unwrap the qualifying
+/// `BlitPlan`, panicking with `msg` otherwise. Mirrors `scroll_blit.rs`'s
+/// helper of the same shape.
+fn qualify_scroll(
+    prev: &Chrome,
+    m: &TestModel,
+    inputs: &FrameInputs,
+    msg: &'static str,
+) -> BlitPlan {
+    match Chrome::classify(Some(prev), m, inputs, Some(&snap_at_top(m))) {
+        FrameDelta::Scroll(plan) => plan,
+        _ => panic!("{msg}"),
+    }
+}
+
+// The merged shift covers both frozen and scrolling column bands.
+fn merged_band_x(plan: &BlitPlan) -> i32 {
+    plan.shift.src.top_left.x
 }
 
 /// With row-headers HIDDEN and frozen cols > 0, the BottomLeft frozen-cols
@@ -89,7 +97,8 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_hidden() {
         .with_hidden_row_headers();
     m.set_data_until(30);
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs0, FramePath::Fresh);
 
     // cell_origin.x must be 0 (confirmed by the geometry tests above).
     assert_eq!(
@@ -98,13 +107,15 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_hidden() {
     );
 
     m.set_top_row(2);
-    let Some(plan) = frame0.screen_for_blit(&m, canvas, &theme, &snap_at_top(&m)) else {
-        panic!("single-row scroll with frozen cols must qualify for blit")
-    };
+    let inputs1 = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs1,
+        "single-row scroll with frozen cols must qualify for blit",
+    );
 
-    let Some(band_x) = bottom_left_band_x(&plan) else {
-        panic!("frozen cols > 0 must produce a BottomLeft sibling shift")
-    };
+    let band_x = merged_band_x(&plan);
 
     // The band must start at cell_origin.x (== 0 when header hidden).
     // Bug: returned 1 (== CELL_AREA_INSET).
@@ -124,7 +135,8 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_shown() {
     let m = TestModel::synthetic_grid().with_frozen_cols(2);
     m.set_data_until(30);
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs0, FramePath::Fresh);
     let expected_x = frame0.cell_origin.x;
     assert!(
         expected_x > 0,
@@ -132,13 +144,15 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_shown() {
     );
 
     m.set_top_row(2);
-    let Some(plan) = frame0.screen_for_blit(&m, canvas, &theme, &snap_at_top(&m)) else {
-        panic!("single-row scroll with frozen cols must qualify for blit")
-    };
+    let inputs1 = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs1,
+        "single-row scroll with frozen cols must qualify for blit",
+    );
 
-    let Some(band_x) = bottom_left_band_x(&plan) else {
-        panic!("frozen cols > 0 must produce a BottomLeft sibling shift")
-    };
+    let band_x = merged_band_x(&plan);
 
     assert_eq!(
         band_x, expected_x,
@@ -156,13 +170,9 @@ fn frozen_cols_blit_band_starts_at_cell_origin_when_row_header_shown() {
 // edge of the frozen-row band on every column-scroll blit. The frozen-rows
 // sibling on a column scroll is the `TopRight` pane (see `try_blit_cols`).
 
-// Returns the y-origin of the TopRight (frozen-rows) sibling shift, or None
-// if no such shift is present in the plan.
-fn top_right_band_y(plan: &BlitPlan) -> Option<i32> {
-    plan.shifts
-        .iter()
-        .find(|s| s.pane == PaneRegion::TopRight)
-        .map(|s| s.src.top_left.y)
+// The merged shift covers both frozen and scrolling row bands.
+fn merged_band_y(plan: &BlitPlan) -> i32 {
+    plan.shift.src.top_left.y
 }
 
 /// With col-headers HIDDEN and frozen rows > 0, the TopRight frozen-rows
@@ -179,7 +189,8 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_hidden() {
         .with_hidden_col_headers();
     m.set_data_until(30);
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs0, FramePath::Fresh);
 
     // cell_origin.y must be 0 (confirmed by the geometry tests above).
     assert_eq!(
@@ -188,13 +199,15 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_hidden() {
     );
 
     m.set_left_column(2);
-    let Some(plan) = frame0.screen_for_blit(&m, canvas, &theme, &snap_at_top(&m)) else {
-        panic!("single-column scroll with frozen rows must qualify for blit")
-    };
+    let inputs1 = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs1,
+        "single-column scroll with frozen rows must qualify for blit",
+    );
 
-    let Some(band_y) = top_right_band_y(&plan) else {
-        panic!("frozen rows > 0 must produce a TopRight sibling shift")
-    };
+    let band_y = merged_band_y(&plan);
 
     // The band must start at cell_origin.y (== 0 when header hidden).
     // Bug: returned 1 (== CELL_AREA_INSET).
@@ -214,7 +227,8 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_shown() {
     let m = TestModel::synthetic_grid().with_frozen_rows(2);
     m.set_data_until(30);
 
-    let frame0 = Chrome::next(None, &m, canvas, &theme, FramePath::Fresh);
+    let inputs0 = test_inputs(&m, canvas, &theme);
+    let frame0 = Chrome::next(None, &m, &inputs0, FramePath::Fresh);
     let expected_y = frame0.cell_origin.y;
     assert!(
         expected_y > 0,
@@ -222,13 +236,15 @@ fn frozen_rows_blit_band_starts_at_cell_origin_when_col_header_shown() {
     );
 
     m.set_left_column(2);
-    let Some(plan) = frame0.screen_for_blit(&m, canvas, &theme, &snap_at_top(&m)) else {
-        panic!("single-column scroll with frozen rows must qualify for blit")
-    };
+    let inputs1 = test_inputs(&m, canvas, &theme);
+    let plan = qualify_scroll(
+        &frame0,
+        &m,
+        &inputs1,
+        "single-column scroll with frozen rows must qualify for blit",
+    );
 
-    let Some(band_y) = top_right_band_y(&plan) else {
-        panic!("frozen rows > 0 must produce a TopRight sibling shift")
-    };
+    let band_y = merged_band_y(&plan);
 
     assert_eq!(
         band_y, expected_y,
@@ -248,7 +264,7 @@ fn paint(model: Rc<TestModel>) -> Vec<DrawOp> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(model);
-    orch.paint_if_dirty();
+    orch.render_pending();
     orch.grid_surface().recorder().ops().clone()
 }
 
@@ -261,7 +277,7 @@ fn overlay_paint(model: Rc<TestModel>) -> Vec<DrawOp> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(OrchCanvasSize { w: 600.0, h: 400.0 }, 1.0);
     orch.set_model(model);
-    orch.paint_if_dirty();
+    orch.render_pending();
     orch.overlay_surface().recorder().ops().clone()
 }
 

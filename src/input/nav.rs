@@ -1,6 +1,6 @@
 //! Navigation actions: arrow keys, page up/down, home/end, sheet switching.
 
-use leptos::prelude::WithValue;
+use leptos::prelude::{SetValue, WithValue};
 
 use crate::coord::{CellAddress, SheetRange};
 use crate::events::{NavigationEvent, SpreadsheetEvent};
@@ -10,9 +10,14 @@ use crate::model::{
 };
 use crate::state::{ModelStore, WorkbookState};
 
-/// Helper to emit SelectionChanged event after navigation
+/// Helper to emit SelectionChanged event after navigation.
+///
+/// Also arms the viewport follow: every arm of `execute_nav` funnels through
+/// here or through [`emit_selection_range_changed`], so the two helpers are the
+/// complete set of "the selection moved" sites in this module.
 fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
     let address = model.with_value(CellAddress::from_view);
+    state.scroll_into_view.set_value(true);
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionChanged { address },
     ));
@@ -21,6 +26,7 @@ fn emit_selection_changed(model: ModelStore, state: &WorkbookState) {
 /// Helper to emit SelectionRangeChanged event after range operations
 fn emit_selection_range_changed(model: ModelStore, state: &WorkbookState) {
     let sheet_area = model.with_value(SheetRange::from_view);
+    state.scroll_into_view.set_value(true);
     state.emit_event(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged { sheet_area },
     ));

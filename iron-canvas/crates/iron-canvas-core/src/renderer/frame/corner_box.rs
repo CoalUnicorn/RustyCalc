@@ -10,6 +10,7 @@ use crate::renderer::RendererCore;
 
 impl<P: Painter> RendererCore<P> {
     pub fn draw_corner_box(&self, frame: &Chrome) {
+        let (canvas_w, canvas_h) = frame.canvas_size.to_logical_extent();
         let corner = PixelRect {
             top_left: Point { x: 0, y: 0 },
             width: frame.row_header_thickness,
@@ -28,7 +29,7 @@ impl<P: Painter> RendererCore<P> {
         self.painter.stroke_hline(
             Span {
                 from: 0,
-                to: frame.canvas_size.w as i32,
+                to: canvas_w,
             },
             f64::from(frame.col_header_thickness) + 0.5,
             border_color,
@@ -38,7 +39,7 @@ impl<P: Painter> RendererCore<P> {
             f64::from(frame.row_header_thickness) + 0.5,
             Span {
                 from: 0,
-                to: frame.canvas_size.h as i32,
+                to: canvas_h,
             },
             border_color,
             f64::from(STANDARD_BORDER_WIDTH),

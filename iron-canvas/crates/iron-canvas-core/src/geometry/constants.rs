@@ -4,6 +4,8 @@ pub const STANDARD_BORDER_WIDTH: i32 = 1;
 pub const MEDIUM_BORDER_WIDTH: i32 = 2;
 pub const THICK_BORDER_WIDTH: i32 = 3;
 pub const DASHED_BORDER_WIDTH: i32 = 2;
+/// On/off lengths in CSS pixels for dashed rectangle outlines.
+pub const DASHED_RECT_PATTERN: [f64; 2] = [4.0, 3.0];
 
 /// Width of the 1-px line separating a header strip from the cell area,
 /// stroked sharply by `draw_corner_box` at `header_thickness + 0.5`. The

@@ -3,7 +3,7 @@
 //! The viewer (web-test/recording-viewer.html) drives a *cumulative*
 //! grid canvas and a *per-frame* overlay canvas. Both consume the same
 //! `DrawOp` slices the renderer emits — the split is purely so the JS
-//! side can decide cadence (anchor at last `Fresh`, paint forward for
+//! side can decide cadence (anchor at last `FullRebuild`, paint forward for
 //! grid; clear + paint single frame for overlay).
 //!
 //! Both wasm fns wrap `iron_canvas_recorder::replay`, so the dispatch

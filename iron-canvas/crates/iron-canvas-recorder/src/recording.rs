@@ -7,17 +7,17 @@
 //! (`tests/fixtures/fresh_paint.icr` via `ICR_REGEN=1 cargo test
 //! -p iron-canvas-recorder --test golden_fixture`).
 //!
-//! # On-disk layout (v3)
+//! # On-disk layout (v7)
 //!
 //! UTF-8 bytes. One JSON object — a `Recording` with `header` and
 //! `frames` fields. Standard JSON, so `jq .` and any JSON validator
 //! reads it without special-casing:
 //!
 //! ```text
-//! {"header":{"schema_version":3,"iron_canvas_version":"0.1.0-alpha.1",...},
+//! {"header":{"schema_version":7,"iron_canvas_version":"0.1.0-alpha.1",...},
 //!  "frames":[
-//!    {"frame_idx":0,"t_ms":0,"regime":"fresh",...},
-//!    {"frame_idx":1,"t_ms":17,"regime":"overlay",...}
+//!    {"frame_idx":0,"t_ms":0,"origin":"forced_baseline",...},
+//!    {"frame_idx":1,"t_ms":17,"origin":"live",...}
 //!  ]}
 //! ```
 //!
@@ -27,31 +27,32 @@
 //!
 //! | Field                 | Type            | Meaning                                                              |
 //! | --------------------- | --------------- | -------------------------------------------------------------------- |
-//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `3`). Mismatch -> load fails.  |
+//! | `schema_version`      | `u32`           | Always `ICR_SCHEMA_VERSION` (currently `7`). Mismatch -> load fails.  |
 //! | `iron_canvas_version` | `String`        | `env!("CARGO_PKG_VERSION")` at serialize time. Mismatch -> warn-only. |
 //! | `canvas_w` / `canvas_h` | `f64`         | Canvas dimensions at recording start. The viewer auto-sizes to these.|
 //! | `theme`               | `ThemeSnapshot` | Owned-string mirror of `CanvasTheme`'s 14 palette fields.            |
 //! | `started_at_unix_ms`  | `u64`          | Wall-clock at `startRecording`. Host-supplied; tests pass `0`.       |
 //! | `partial`             | `bool`          | `true` when the hard-cap watchdog (100 MB) auto-stopped capture.    |
 //!
-//! # Frame
+//! # Attempt (`Frame`)
 //!
 //! | Field           | Type                                  | Meaning                                                                                |
 //! | --------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
-//! | `frame_idx`     | `u32`                                 | Monotonic index; `0` for the first captured frame.                                     |
+//! | `frame_idx`     | `u32`                                 | Storage index; not a render-attempt identity.                                           |
 //! | `t_ms`          | `u64`                                 | Milliseconds since `started_at_unix_ms`.                                               |
-//! | `regime`        | `PaintRegimeTag`                      | Which dispatch arm painted this frame: `fresh` / `slots_reuse` / `viewport` / `overlay` / `damage`.|
-//! | `signals`       | `u8`                                  | `GridSignals::bits()` — VIEWPORT(1) \| CONTENT(2) \| STRUCTURAL(4) \| OVERLAY(8).      |
+//! | `origin`        | `RecordOrigin`                        | Whether capture was requested by `startRecording` or a normal paint tick.              |
+//! | `result`        | `RecordedPaintResult`                 | Scheduler result. Idle ticks are omitted; holds remain as zero-op retries.              |
+//! | `trace`         | `TraceRecord`                         | Recorder-owned projection of the complete core trace.                                   |
 //! | `grid_ops`      | `Vec<DrawOp>`                         | Ops captured from the grid surface for this frame. May be empty for `overlay`.        |
 //! | `overlay_ops`   | `Vec<DrawOp>`                         | Ops captured from the overlay surface for this frame.                                  |
 //!
-//! Empty frames (no ops on either layer) are dropped by the producer —
-//! a Frame in the file always carries at least one op.
+//! Empty non-idle attempts are retained so bridge/input holds and retries are
+//! visible in the diagnostic timeline.
 //!
 //! # Compatibility rules
 //!
 //! - `schema_version`: exact-match enforced by `deserialize()`. A
-//!   reader for v2 refuses v3 files (and vice versa).
+//!   reader for another schema version refuses the file.
 //! - `iron_canvas_version`: divergence is a *warning* on load. The
 //!   recording still plays. The viewer surfaces this as a banner since
 //!   replay against drifted renderer output is the most common bug-repro
@@ -59,6 +60,9 @@
 //! - `DrawOp` variants: additive only within a schema version. Adding
 //!   a new variant is a breaking change (older readers don't recognize
 //!   it) — bump the schema.
+//! - `trace`: the recorder projection is authoritative for strategy, work,
+//!   outcome, fetch attribution, and attempt/commit identities. Painter ops
+//!   remain layer-local and may be empty for a held or skipped attempt.
 //!
 //! # See also
 //!
@@ -69,28 +73,128 @@
 
 use serde::{Deserialize, Serialize};
 
-use iron_canvas_core::PaintRegimeTag;
 use iron_canvas_core::theme::CanvasTheme;
+use iron_canvas_core::{FrameOutcome, FrameTrace, GridVerdict, RenderStrategy};
 
 use crate::DrawOp;
 
 /// Bumped only on breaking changes to the on-disk shape (added fields
 /// with defaults don't bump). The loader rejects mismatched versions.
-pub const ICR_SCHEMA_VERSION: u32 = 3;
+pub const ICR_SCHEMA_VERSION: u32 = 7;
 
-/// Per-paint-tick capture. Built by the host (e.g. `IronCanvas::paintIfDirty`
-/// wrapper) by reading `Orchestrator::last_regime()` + `last_signals()`
-/// and draining `RecordingSurface::end_frame()` for both layers.
+/// Why an attempt entered the recording timeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordOrigin {
+    ForcedBaseline,
+    Live,
+}
+
+/// Scheduler result for a non-idle core attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordedPaintResult {
+    Painted,
+    Retry,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum TraceVerdict {
+    Skip,
+    Cell,
+    Range,
+    Rows { spans: u8, rows: u16 },
+    Full,
+    Strip,
+    Held,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum TraceOutcome {
+    Painted,
+    HeldOnBridgeFailure,
+    HeldOnInputFailure { failure: u8 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceBlitFallback {
+    pub cold_cache: bool,
+}
+
+/// Stable wire representation of the allocation-free core `FrameTrace`.
+/// Serde and schema concerns stay in the recorder crate rather than in core.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceRecord {
+    pub attempt_seq: u64,
+    pub committed_seq: Option<u64>,
+    pub strategy: Option<RenderStrategy>,
+    pub effective: Option<RenderStrategy>,
+    pub work: u8,
+    pub verdict: Option<TraceVerdict>,
+    pub outcome: TraceOutcome,
+    pub blit_fallback: Option<TraceBlitFallback>,
+    pub fetched_cell_slots: usize,
+    pub fetched_cells: usize,
+    pub fetch_batches: usize,
+}
+
+impl From<FrameTrace> for TraceRecord {
+    fn from(trace: FrameTrace) -> Self {
+        let verdict = trace.verdict.map(|verdict| match verdict {
+            GridVerdict::Skip => TraceVerdict::Skip,
+            GridVerdict::Cell => TraceVerdict::Cell,
+            GridVerdict::Range => TraceVerdict::Range,
+            GridVerdict::Rows { spans, rows } => TraceVerdict::Rows { spans, rows },
+            GridVerdict::Full => TraceVerdict::Full,
+            GridVerdict::Strip => TraceVerdict::Strip,
+            GridVerdict::Held => TraceVerdict::Held,
+        });
+        let outcome = match trace.outcome {
+            FrameOutcome::Painted => TraceOutcome::Painted,
+            FrameOutcome::HeldOnBridgeFailure => TraceOutcome::HeldOnBridgeFailure,
+            FrameOutcome::HeldOnInputFailure(failure) => TraceOutcome::HeldOnInputFailure {
+                failure: match failure {
+                    iron_canvas_core::FrameInputFailure::SelectedSheet => 0,
+                    iron_canvas_core::FrameInputFailure::SelectedView => 1,
+                    iron_canvas_core::FrameInputFailure::SheetMismatch => 2,
+                    iron_canvas_core::FrameInputFailure::FrozenRows => 3,
+                    iron_canvas_core::FrameInputFailure::FrozenColumns => 4,
+                    iron_canvas_core::FrameInputFailure::RowHeaderVisibility => 5,
+                    iron_canvas_core::FrameInputFailure::ColumnHeaderVisibility => 6,
+                },
+            },
+        };
+        let blit_fallback = trace.blit_fallback.map(|fallback| TraceBlitFallback {
+            cold_cache: fallback.cold_cache,
+        });
+        Self {
+            attempt_seq: trace.attempt_seq,
+            committed_seq: trace.committed_seq,
+            strategy: trace.strategy,
+            effective: trace.effective,
+            work: trace.work.bits(),
+            verdict,
+            outcome,
+            blit_fallback,
+            fetched_cell_slots: trace.fetched_cell_slots,
+            fetched_cells: trace.fetched_cells,
+            fetch_batches: trace.fetch_batches,
+        }
+    }
+}
+
+/// Per-attempt capture. `trace` is authoritative for strategy, work, outcome,
+/// and identities; the storage index is only an array position.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Frame {
     pub frame_idx: u32,
     /// Milliseconds since `IcrHeader::started_at_unix_ms`.
     pub t_ms: u64,
-    pub regime: PaintRegimeTag,
-    /// `GridSignals::bits()` from `Orchestrator::last_signals` — the
-    /// dirty bits the engine acted on for this frame. The bit layout is
-    /// the engine's `GridSignals` (`VIEWPORT|CONTENT|STRUCTURAL|OVERLAY`).
-    pub signals: u8,
+    pub origin: RecordOrigin,
+    pub result: RecordedPaintResult,
+    pub trace: TraceRecord,
     pub grid_ops: Vec<DrawOp>,
     pub overlay_ops: Vec<DrawOp>,
 }
@@ -271,14 +375,45 @@ mod tests {
         }
     }
 
+    fn trace(strategy: RenderStrategy, work: u8) -> TraceRecord {
+        let core_trace = FrameTrace {
+            attempt_seq: 1,
+            committed_seq: Some(1),
+            strategy: Some(strategy),
+            effective: Some(strategy),
+            work: iron_canvas_core::WorkFlags::from_bits_retain(work),
+            ..FrameTrace::default()
+        };
+        TraceRecord::from(core_trace)
+    }
+
+    #[test]
+    fn trace_projection_uses_one_grid_verdict_and_pane_free_hold() {
+        let painted = TraceRecord::from(FrameTrace {
+            verdict: Some(GridVerdict::Rows { spans: 2, rows: 3 }),
+            ..FrameTrace::default()
+        });
+        assert_eq!(
+            painted.verdict,
+            Some(TraceVerdict::Rows { spans: 2, rows: 3 })
+        );
+
+        let held = TraceRecord::from(FrameTrace {
+            outcome: FrameOutcome::HeldOnBridgeFailure,
+            ..FrameTrace::default()
+        });
+        assert_eq!(held.outcome, TraceOutcome::HeldOnBridgeFailure);
+    }
+
     #[test]
     fn serialize_deserialize_round_trip() {
         let mut rec = Recording::new(header());
         rec.push_frame(Frame {
             frame_idx: 0,
             t_ms: 0,
-            regime: PaintRegimeTag::Fresh,
-            signals: 0b0100, // STRUCTURAL
+            origin: RecordOrigin::Live,
+            result: RecordedPaintResult::Painted,
+            trace: trace(RenderStrategy::FullRebuild, 0b0100), // GEOMETRY
             grid_ops: vec![DrawOp::RectFill {
                 rect: pix(0, 0, 10, 10),
                 color: "#fff".into(),
@@ -288,8 +423,9 @@ mod tests {
         rec.push_frame(Frame {
             frame_idx: 1,
             t_ms: 17,
-            regime: PaintRegimeTag::Overlay,
-            signals: 0b1000, // OVERLAY
+            origin: RecordOrigin::Live,
+            result: RecordedPaintResult::Painted,
+            trace: trace(RenderStrategy::OverlayOnly, 0b1000), // OVERLAY
             grid_ops: vec![],
             overlay_ops: vec![DrawOp::RectStroke {
                 rect: pix(0, 0, 20, 20),
@@ -301,6 +437,34 @@ mod tests {
         let bytes = rec.serialize().expect("serialize");
         let back = Recording::deserialize(&bytes).expect("deserialize");
         assert_eq!(rec, back);
+    }
+
+    #[test]
+    fn zero_op_retry_keeps_trace_in_timeline() {
+        let core_trace = FrameTrace {
+            attempt_seq: 7,
+            outcome: iron_canvas_core::FrameOutcome::HeldOnInputFailure(
+                iron_canvas_core::FrameInputFailure::SelectedSheet,
+            ),
+            ..FrameTrace::default()
+        };
+        let mut rec = Recording::new(header());
+        rec.push_frame(Frame {
+            frame_idx: 0,
+            t_ms: 12,
+            origin: RecordOrigin::Live,
+            result: RecordedPaintResult::Retry,
+            trace: TraceRecord::from(core_trace),
+            grid_ops: Vec::new(),
+            overlay_ops: Vec::new(),
+        });
+
+        let back = Recording::deserialize(&rec.serialize().expect("serialize")).expect("decode");
+        assert_eq!(back.frames.len(), 1);
+        assert_eq!(back.frames[0].trace.attempt_seq, 7);
+        assert_eq!(back.frames[0].result, RecordedPaintResult::Retry);
+        assert!(back.frames[0].grid_ops.is_empty());
+        assert!(back.frames[0].overlay_ops.is_empty());
     }
 
     #[test]

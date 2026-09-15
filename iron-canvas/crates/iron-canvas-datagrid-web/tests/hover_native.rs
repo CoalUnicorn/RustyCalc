@@ -57,7 +57,7 @@ fn hover_paints_one_stroke_through_the_custom_band() {
         "first set changes state"
     );
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let bracket = last_custom_bracket(&orch);
     assert_eq!(
@@ -77,7 +77,7 @@ fn hover_compare_set_dedupes_and_clear_paints_nothing() {
     let (mut orch, hover) = build();
     assert!(hover.set_cell(HoverLayer::cell_from_js(1, 0)));
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     // Pointer-move spam on the same cell: no state change, no repaint owed.
     assert!(
@@ -89,7 +89,7 @@ fn hover_compare_set_dedupes_and_clear_paints_nothing() {
     // paint brackets an empty custom band.
     assert!(hover.set_cell(HoverLayer::cell_from_js(-1, -1)));
     orch.request_overlay_repaint();
-    orch.paint_if_dirty();
+    orch.render_pending();
 
     let bracket = last_custom_bracket(&orch);
     assert!(

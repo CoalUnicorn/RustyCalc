@@ -18,6 +18,7 @@ mod model_frontend;
 mod model_frontend_types;
 mod model_style;
 mod mouse;
+mod one_shot_raf;
 mod state;
 mod toolbar_section;
 mod verify_share;
