@@ -553,8 +553,7 @@ impl From<serde_json::Error> for IcrError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iron_canvas_core::geometry::pixel_rect::PixelRect;
-    use iron_canvas_core::geometry::prim::Point;
+    use crate::test_support::pix;
     use iron_canvas_core::painter::{TextAlign, TextBaseline};
     use iron_canvas_core::theme::CanvasTheme;
 
@@ -568,14 +567,6 @@ mod tests {
             ThemeSnapshot::from(&CanvasTheme::light()),
             0,
         )
-    }
-
-    fn pix(x: i32, y: i32, w: i32, h: i32) -> PixelRect {
-        PixelRect {
-            top_left: Point { x, y },
-            width: w,
-            height: h,
-        }
     }
 
     fn trace(strategy: RenderStrategy, work: u8) -> TraceRecord {

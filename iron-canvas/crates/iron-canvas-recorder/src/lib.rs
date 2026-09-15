@@ -18,9 +18,12 @@ pub use painter::RecorderPainter;
 pub use surfaces::{MemSurface, RecordingPainter, RecordingSurface};
 
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use iron_canvas_core::geometry::pixel_rect::PixelRect;
+    use crate::test_support::pix;
     use iron_canvas_core::geometry::prim::{Line, Point, Span};
     use iron_canvas_core::layer::Surface;
     use iron_canvas_core::painter::{
@@ -28,21 +31,10 @@ mod tests {
     };
     use std::collections::HashSet;
 
-    fn rect(x: f64, y: f64, w: f64, h: f64) -> PixelRect {
-        PixelRect {
-            top_left: Point {
-                x: x as i32,
-                y: y as i32,
-            },
-            width: w as i32,
-            height: h as i32,
-        }
-    }
-
     #[test]
     fn rect_fill_records_op() {
         let p = RecorderPainter::new();
-        p.rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#ff0000"));
+        p.rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#ff0000"));
         let ops = p.into_ops();
         assert_eq!(ops.len(), 1);
         assert!(matches!(
@@ -54,7 +46,7 @@ mod tests {
     #[test]
     fn push_pop_clip_balances_depth() {
         let p = RecorderPainter::new();
-        p.push_clip(rect(0.0, 0.0, 10.0, 10.0));
+        p.push_clip(pix(0, 0, 10, 10));
         p.pop_clip();
         let ops = p.into_ops();
         assert_eq!(ops.len(), 2);
@@ -65,8 +57,8 @@ mod tests {
     #[test]
     fn blit_records_op() {
         let p = RecorderPainter::new();
-        let src = rect(0.0, 20.0, 100.0, 200.0);
-        let dst = rect(0.0, 0.0, 100.0, 200.0);
+        let src = pix(0, 20, 100, 200);
+        let dst = pix(0, 0, 100, 200);
         p.blit(src, dst);
         let ops = p.into_ops();
         assert_eq!(ops.len(), 1);
@@ -82,7 +74,7 @@ mod tests {
         // and assert the sink's log equals the source's (modulo the
         // leading `InvalidateCache` that `replay` always prepends).
         let src = RecorderPainter::new();
-        let r = rect(0.0, 0.0, 10.0, 10.0);
+        let r = pix(0, 0, 10, 10);
         src.rect_fill(r, PaintColor::Static("#ff0000"));
         src.fill_path(
             &[
@@ -152,7 +144,7 @@ mod tests {
         surface.begin_frame();
         surface
             .painter()
-            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
+            .rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#fff"));
         let ops = surface.end_frame();
         assert_eq!(ops.len(), 1);
         assert!(matches!(ops[0], DrawOp::RectFill { .. }));
@@ -165,7 +157,7 @@ mod tests {
         surface.begin_frame();
         surface
             .painter()
-            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
+            .rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#fff"));
         let ops = surface.end_frame();
         assert!(ops.is_empty(), "disabled recording should capture nothing");
     }
@@ -178,12 +170,12 @@ mod tests {
         // disabled
         surface
             .painter()
-            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#aaa"));
+            .rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#aaa"));
         // enabled
         surface.enable_recording();
         surface
             .painter()
-            .rect_fill(rect(0.0, 0.0, 20.0, 20.0), PaintColor::Static("#bbb"));
+            .rect_fill(pix(0, 0, 20, 20), PaintColor::Static("#bbb"));
         // Inner MemSurface's RecorderPainter sees BOTH ops.
         assert_eq!(surface.inner().recorder().ops().len(), 2);
     }
@@ -195,7 +187,7 @@ mod tests {
         surface.begin_frame();
         surface
             .painter()
-            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
+            .rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#fff"));
         assert_eq!(surface.recorder().ops().len(), 1);
         surface.begin_frame();
         assert!(
@@ -211,7 +203,7 @@ mod tests {
         surface.begin_frame();
         surface
             .painter()
-            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
+            .rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#fff"));
         let ops = surface.end_frame();
         assert_eq!(ops.len(), 1);
         assert!(
@@ -230,9 +222,9 @@ mod tests {
         surface.enable_recording();
         surface.begin_frame();
         let p = surface.painter();
-        p.rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
-        p.rect_stroke(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#000"), 1.0);
-        p.push_clip(rect(0.0, 0.0, 5.0, 5.0));
+        p.rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#fff"));
+        p.rect_stroke(pix(0, 0, 10, 10), PaintColor::Static("#000"), 1.0);
+        p.push_clip(pix(0, 0, 5, 5));
         p.fill_text(
             "hi",
             1.0,
@@ -243,7 +235,7 @@ mod tests {
             TextBaseline::Top,
         );
         p.pop_clip();
-        p.blit(rect(0.0, 20.0, 10.0, 10.0), rect(0.0, 0.0, 10.0, 10.0));
+        p.blit(pix(0, 20, 10, 10), pix(0, 0, 10, 10));
         let captured = surface.end_frame();
 
         let sink = RecorderPainter::new();
@@ -268,10 +260,10 @@ mod tests {
         let p = surface.painter();
         p.begin_group(GroupClass::Grid);
         p.begin_group(GroupClass::Cells);
-        p.rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
+        p.rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#fff"));
         p.end_group();
         p.begin_group(GroupClass::Headers);
-        p.rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#000"));
+        p.rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#000"));
         p.end_group();
         p.end_group();
         let ops = surface.end_frame();
@@ -314,12 +306,12 @@ mod tests {
         p.begin_group(GroupClass::Grid);
         p.begin_group(GroupClass::Cells);
         p.begin_group(GroupClass::FrozenSep); // nested inside skipped outer
-        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#aaa"));
+        p.rect_fill(pix(0, 0, 1, 1), PaintColor::Static("#aaa"));
         p.end_group(); // ends FrozenSep — still suppressed (depth 2 -> 1)
-        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#bbb"));
+        p.rect_fill(pix(0, 0, 1, 1), PaintColor::Static("#bbb"));
         p.end_group(); // ends Cells — depth 1 -> 0, capture resumes
         p.begin_group(GroupClass::Headers);
-        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#ccc"));
+        p.rect_fill(pix(0, 0, 1, 1), PaintColor::Static("#ccc"));
         p.end_group();
         p.end_group();
         let ops = surface.end_frame();
@@ -357,12 +349,12 @@ mod tests {
         let p = surface.painter();
 
         p.begin_group(GroupClass::Cells);
-        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#aaa"));
+        p.rect_fill(pix(0, 0, 1, 1), PaintColor::Static("#aaa"));
         surface.disable_recording();
         p.end_group();
 
         surface.enable_recording();
-        p.rect_fill(rect(0.0, 0.0, 1.0, 1.0), PaintColor::Static("#bbb"));
+        p.rect_fill(pix(0, 0, 1, 1), PaintColor::Static("#bbb"));
         let ops = surface.end_frame();
 
         assert_eq!(
@@ -390,10 +382,10 @@ mod tests {
         grid.begin_frame();
         overlay.begin_frame();
         grid.painter()
-            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#fff"));
+            .rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#fff"));
         overlay
             .painter()
-            .rect_fill(rect(0.0, 0.0, 10.0, 10.0), PaintColor::Static("#000"));
+            .rect_fill(pix(0, 0, 10, 10), PaintColor::Static("#000"));
         let grid_ops = grid.end_frame();
         let overlay_ops = overlay.end_frame();
 
