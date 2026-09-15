@@ -1,7 +1,7 @@
 //! Engine-agnostic tabular model: columns + rows of styled string cells,
 //! with sorting, selection, viewport, and live mutation. No IronCalc, no web.
 
-use iron_canvas_core::{Alignment, CellStyle, HAlign};
+use iron_canvas_core::{Alignment, CanvasSize, CellStyle, HAlign};
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -114,12 +114,12 @@ impl DataGrid {
 
     /// Natural pixel size of the full grid body (every column × every row,
     /// headers excluded) — what a shrink-wrapped viewport would show.
-    pub fn content_extent(&self) -> (f64, f64) {
+    pub fn content_extent(&self) -> CanvasSize {
         let w: f64 = (0..self.column_count())
             .map(|c| self.column_width_px(c))
             .sum();
         let h = self.row_count() as f64 * self.default_row_height();
-        (w, h)
+        CanvasSize { w, h }
     }
     pub fn column_header(&self, col: usize) -> Option<&str> {
         self.columns.get(col).map(|c| c.header.as_str())
@@ -149,7 +149,8 @@ impl DataGrid {
         }
     }
 
-    /// Current sort as (0-based column, ascending) or `None`.
+    /// Current sort as `(0-based column, ascending)` or `None` — the shape the
+    /// facade's `currentSort()` returns, so the tuple is deliberate here.
     pub fn current_sort(&self) -> Option<(usize, bool)> {
         self.sort
             .map(|s| (s.column, matches!(s.dir, SortDirection::Ascending)))
@@ -290,6 +291,7 @@ impl DataGrid {
         self.clamp_view();
     }
 
+    /// Viewport anchor as 1-based display coords: `(top_row, left_col)`.
     pub fn scroll_anchors(&self) -> (i32, i32) {
         (self.top_row, self.left_col)
     }
