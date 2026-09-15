@@ -102,6 +102,13 @@ impl Default for DataGridBuilder {
     }
 }
 
+/// The cell at a (source row, column) address, or `None` when either is out
+/// of range. Free-standing (not a method) so the sort comparator can read sort
+/// keys while [`DataGrid::order`] is mutably borrowed.
+fn cell_at(rows: &[Vec<Cell>], src: usize, col: usize) -> Option<&Cell> {
+    rows.get(src)?.get(col)
+}
+
 impl DataGrid {
     pub fn builder() -> DataGridBuilder {
         DataGridBuilder::default()
@@ -165,13 +172,17 @@ impl DataGrid {
         self.sort
             .map(|s| (s.column, matches!(s.dir, SortDirection::Ascending)))
     }
+    /// The cell at a (display row, column) address — insert/sort/edit paths
+    /// share this one lookup.
+    fn cell(&self, disp_row: usize, col: usize) -> Option<&Cell> {
+        cell_at(&self.rows, *self.order.get(disp_row)?, col)
+    }
+
     pub fn cell_value(&self, disp_row: usize, col: usize) -> Option<&str> {
-        let src = *self.order.get(disp_row)?;
-        self.rows.get(src)?.get(col).map(|c| c.value.as_str())
+        self.cell(disp_row, col).map(|c| c.value.as_str())
     }
     pub fn cell_style(&self, disp_row: usize, col: usize) -> Option<&CellStyle> {
-        let src = *self.order.get(disp_row)?;
-        self.rows.get(src)?.get(col)?.style.as_ref()
+        self.cell(disp_row, col).and_then(|c| c.style.as_ref())
     }
 
     // Raw field accessors for the CanvasModel bridge (display, 1-based).
@@ -211,9 +222,10 @@ impl DataGrid {
     // Mutation API (B.3): edits write through display order to source rows
 
     pub fn set_cell(&mut self, disp_row: usize, col: usize, value: impl Into<String>) {
-        if let Some(&src) = self.order.get(disp_row)
-            && let Some(cell) = self.rows.get_mut(src).and_then(|r| r.get_mut(col))
-        {
+        let Some(src) = self.order.get(disp_row).copied() else {
+            return;
+        };
+        if let Some(cell) = self.rows.get_mut(src).and_then(|r| r.get_mut(col)) {
             cell.value = value.into();
         }
     }
@@ -268,16 +280,13 @@ impl DataGrid {
         let Some(SortState { column, dir }) = self.sort else {
             return;
         };
-        let rows = &self.rows;
+        // A short row is a missing key, not an error: it sorts as "".
+        let rows: &[Vec<Cell>] = &self.rows;
         self.order.sort_by(|&a, &b| {
-            let va = rows
-                .get(a)
-                .and_then(|r| r.get(column))
+            let va = cell_at(rows, a, column)
                 .map(|c| c.value.as_str())
                 .unwrap_or("");
-            let vb = rows
-                .get(b)
-                .and_then(|r| r.get(column))
+            let vb = cell_at(rows, b, column)
                 .map(|c| c.value.as_str())
                 .unwrap_or("");
             let ord = match (va.parse::<f64>(), vb.parse::<f64>()) {
