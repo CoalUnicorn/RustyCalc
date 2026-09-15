@@ -178,11 +178,10 @@ impl Painter for PdfPainter {
 
     fn clear_rect(&self, rect: PixelRect) {
         // PDF has no destination clear — fill with opaque white, which
-        // matches what the canvas's default background paints over.
-        let (x, y, w, h) = rect.as_f64_tuple();
-        self.write_str("1.000 1.000 1.000 rg\n");
-        self.emit_rect(x, y, w, h);
-        self.write_str("f\n");
+        // matches what the canvas's default background paints over. Goes
+        // through `rect_fill` so the `white` -> `(1, 1, 1)` mapping and the
+        // `{:.3}` colour formatting keep exactly one definition in the crate.
+        self.rect_fill(rect, PaintColor::Static("white"));
     }
 
     fn rect_stroke(&self, rect: PixelRect, color: PaintColor, width: f64) {
