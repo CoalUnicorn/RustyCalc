@@ -4,5 +4,5 @@ mod canvas_model;
 mod model;
 mod model_cell;
 
-pub use model::{Cell, Column, DataGrid, DataGridBuilder, SortDirection};
+pub use model::{Cell, Column, DEFAULT_COL_WIDTH, DataGrid, DataGridBuilder, SortDirection};
 pub use model_cell::DataGridModel;

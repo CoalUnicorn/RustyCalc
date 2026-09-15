@@ -1,4 +1,4 @@
-use crate::DataGrid;
+use crate::{DEFAULT_COL_WIDTH, DataGrid};
 use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched};
 
@@ -36,9 +36,10 @@ impl CanvasModel for DataGrid {
     }
     fn get_column_width(&self, _s: u32, column: i32) -> Fetched<f64> {
         // `column < 1` is the row-header gutter pseudo-column — always a
-        // concrete width, never absent.
+        // concrete width, never absent. Same default as a data column, so the
+        // header strip lines up with the grid's own column rhythm.
         let w = if column < 1 {
-            96.0 // row-header gutter — standard column width
+            DEFAULT_COL_WIDTH
         } else {
             self.column_width_px((column - 1) as usize)
         };

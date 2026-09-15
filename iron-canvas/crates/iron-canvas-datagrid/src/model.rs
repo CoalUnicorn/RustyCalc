@@ -3,6 +3,13 @@
 
 use iron_canvas_core::{Alignment, CanvasSize, CellStyle, HAlign};
 
+/// Default column width in pixels. Deliberately wider than core's
+/// `DEFAULT_COL_WIDTH` (64 px): a grid column carries a caller-supplied header
+/// and has no model to ask, so its default is a display choice, not a
+/// worksheet convention. Named so the builder, the out-of-range fallback, and
+/// the row-header gutter cannot drift apart.
+pub const DEFAULT_COL_WIDTH: f64 = 96.0;
+
 #[derive(Clone, Debug)]
 pub struct Column {
     pub header: String,
@@ -14,7 +21,7 @@ impl Column {
     pub fn new(header: impl Into<String>) -> Self {
         Self {
             header: header.into(),
-            width: 96.0,
+            width: DEFAULT_COL_WIDTH,
             align: HAlign::General,
         }
     }
@@ -109,7 +116,10 @@ impl DataGrid {
         self.default_row_h
     }
     pub fn column_width_px(&self, col: usize) -> f64 {
-        self.columns.get(col).map(|c| c.width).unwrap_or(96.0)
+        self.columns
+            .get(col)
+            .map(|c| c.width)
+            .unwrap_or(DEFAULT_COL_WIDTH)
     }
 
     /// Natural pixel size of the full grid body (every column × every row,
