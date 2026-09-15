@@ -88,14 +88,14 @@ pub(crate) enum CachedColor {
 impl CachedColor {
     /// True when the next paint can skip the `ctx.set_*` round-trip.
     ///
-    /// `Static-Static` is the zero-cost path — same `&'static str` literal
-    /// pointer means same content. Falling back to content-eq across the
+    /// `Static-Static` compares the string address and length. Both must match
+    /// because static slices can share an address. Content equality across the
     /// other variants keeps us correct when a `Borrowed` color happens to
     /// equal a previously cached `Static`, or vice-versa.
     pub fn matches(&self, other: PaintColor) -> bool {
         match (self, other) {
             (CachedColor::Empty, _) => false,
-            (CachedColor::Static(a), PaintColor::Static(b)) => std::ptr::eq(a.as_ptr(), b.as_ptr()),
+            (CachedColor::Static(a), PaintColor::Static(b)) => std::ptr::eq(*a, b),
             (CachedColor::Static(a), PaintColor::Borrowed(b)) => *a == b,
             (CachedColor::Owned(a), other) => &**a == other.as_str(),
         }
@@ -157,8 +157,8 @@ pub struct CanvasPainter {
     /// strings `measure_text_width` binds through `set_font_cached`. Distinct
     /// from `SetterCache`: `invalidate` resets the sticky binds, but an
     /// interned string outlives invalidation — it is still a valid key. Not
-    /// cleared, so cardinality tracks the sheet's distinct-color set plus its
-    /// distinct font strings (bounded, like `ColorIntern`).
+    /// cleared. Entries accumulate for each distinct color and font string
+    /// seen during the painter's lifetime, including across model changes.
     interned_strings: RefCell<Vec<Rc<str>>>,
     /// Memo of `ctx.measure_text` widths keyed `(font_css, text)`.
     /// Interior mutability because `TextMetrics::measure_text_width` takes
@@ -254,8 +254,7 @@ impl CanvasPainter {
     /// Dedup a non-static (`Borrowed`) string — a custom color, or one of the
     /// font CSS strings `measure_text_width` passes to `set_font_cached` — to
     /// a painter-lifetime `Rc<str>`, so a value seen before is an `Rc::clone`
-    /// rather than a fresh allocation. Cardinality is bounded by the sheet's
-    /// palette plus its font strings (same assumption as `ColorIntern`).
+    /// rather than a fresh allocation. Entries remain until the painter drops.
     fn intern_string(&self, s: &str) -> Rc<str> {
         let mut interned = self.interned_strings.borrow_mut();
         if let Some(rc) = interned.iter().find(|rc| &***rc == s) {
@@ -528,5 +527,21 @@ impl BlitPainter for CanvasPainter {
             .draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
                 canvas, sx, sy, sw, sh, dx, dy, dw, dh,
             );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn static_cache_distinguishes_slices_with_the_same_start() {
+        let full: &'static str = "#123456";
+        let short: &'static str = &full[..4];
+        assert_eq!(full.as_ptr(), short.as_ptr());
+
+        assert!(!CachedColor::Static(full).matches(PaintColor::Static(short)));
+        assert!(!CachedColor::Static(short).matches(PaintColor::Static(full)));
+        assert!(CachedColor::Static(full).matches(PaintColor::Static(full)));
     }
 }

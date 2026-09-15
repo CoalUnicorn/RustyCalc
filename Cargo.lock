@@ -1071,6 +1071,7 @@ dependencies = [
 name = "iron-canvas-export"
 version = "0.1.0-beta.2"
 dependencies = [
+ "base64",
  "iron-canvas-core",
  "ttf-parser",
 ]

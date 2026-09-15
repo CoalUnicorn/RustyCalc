@@ -118,10 +118,7 @@ impl Surface for PdfSurface {
     /// `/MediaBox`. The assertion mirrors `SvgSurface::resize`.
     fn resize(&mut self, metrics: CanvasMetrics) {
         debug_assert_eq!(
-            (
-                metrics.size().w.round() as u32,
-                metrics.size().h.round() as u32
-            ),
+            crate::document_size(metrics),
             (self.painter.width, self.painter.height),
             "PdfSurface::resize disagrees with PdfPainter dimensions baked at construction",
         );

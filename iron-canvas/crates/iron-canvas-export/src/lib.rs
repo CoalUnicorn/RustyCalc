@@ -71,9 +71,9 @@ impl From<CanvasMetricError> for ExportError {
 /// `viewBox`) at construction and assert against them in `resize`, so the
 /// conversion lives here rather than once per backend. The size is already
 /// validated by [`CanvasMetrics::new`], so neither cast can overflow.
-/// Deliberately rounds instead of truncating as
-/// [`CanvasMetrics::backing_size`] does: a fractional CSS size must not clip
-/// the document's last pixel.
+/// Rounds logical CSS dimensions to the nearest whole pixel. Fractions below
+/// 0.5 round down; other fractions round up. This preserves the export size
+/// policy. [`CanvasMetrics::backing_size`] instead scales by DPR and truncates.
 #[cfg(any(feature = "svg", feature = "pdf"))]
 pub(crate) fn document_size(metrics: CanvasMetrics) -> (u32, u32) {
     let size = metrics.size();
