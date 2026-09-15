@@ -132,21 +132,26 @@ impl SetterCache {
 }
 
 pub struct CanvasPainter {
-    pub ctx: CanvasRenderingContext2d,
+    /// Crate-internal: hosts drive the painter through the `Painter` trait,
+    /// and an external write would desync `setter_cache` from the ctx.
+    pub(crate) ctx: CanvasRenderingContext2d,
     /// Cross-canvas blit source. `Some` on the double-buffered grid layer:
     /// `blit` reads the kept band from the front (visible) canvas instead of
     /// self-copying `ctx`'s own canvas — same-canvas `drawImage` is the
     /// interpolation hazard documented in `apply_dpr_transform`.
     blit_src: Option<HtmlCanvasElement>,
     pub(crate) setter_cache: SetterCache,
-    pub dash_pattern: js_sys::Array,
-    pub dash_empty: js_sys::Array,
-    pub clip_depth: Cell<u32>,
+    /// Only this crate's own modules touch the ctx-state mirrors below
+    /// (`dash_pattern` / `dash_empty` / `clip_depth` / `dpr`); every consumer
+    /// outside the crate sees the `Painter`/`BlitPainter` trait surface.
+    pub(crate) dash_pattern: js_sys::Array,
+    pub(crate) dash_empty: js_sys::Array,
+    pub(crate) clip_depth: Cell<u32>,
     /// Mirror of the active ctx.scale factor, written by every
     /// `apply_dpr_transform`. Read by `blit` so the source rect (which
     /// reads from the DPR-scaled backing store) is sized in backing-store
     /// pixels — dest coords go through the active transform unchanged.
-    pub dpr: Cell<f64>,
+    pub(crate) dpr: Cell<f64>,
     /// Painter-lifetime dedup of the non-static (`Borrowed`) strings the
     /// setter caches key on: custom fill/stroke colors *and* the font CSS
     /// strings `measure_text_width` binds through `set_font_cached`. Distinct
