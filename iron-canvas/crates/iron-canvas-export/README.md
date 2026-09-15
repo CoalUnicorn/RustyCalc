@@ -8,7 +8,7 @@ Provides two `Painter`/`Surface` implementations that serialize a frame to a doc
 
 ## Crate role
 
-The "save a picture of the grid" layer. `iron-canvas-web` uses it for SVG and optional PDF export; `iron-canvas-datagrid-web` uses its SVG path. Depends only on `iron-canvas-core`.
+The "save a picture of the grid" layer. `iron-canvas-web` uses it for SVG and optional PDF export; `iron-canvas-datagrid-web` uses its SVG path. Depends on `iron-canvas-core` plus two pure-Rust helper crates.
 
 ## Key exports
 
@@ -18,7 +18,11 @@ The "save a picture of the grid" layer. `iron-canvas-web` uses it for SVG and op
 
 ## Dependencies
 
-- `iron-canvas-core` only — no platform crates
+- `iron-canvas-core` — the `Painter`, `BlitPainter`, `TextMetrics`, and `Surface` contracts it implements
+- `ttf-parser` — reads the embedded Inter advances the SVG backend measures with
+- `base64` — encodes that font for the SVG `@font-face` data URI
+
+No platform crates — neither backend touches `web-sys` or the DOM.
 
 ## Usage
 

@@ -13,6 +13,7 @@ svg = []
 pdf = []
 
 [dependencies]
+base64 = { workspace = true }
 iron-canvas-core = { path = "../iron-canvas-core" }
 ttf-parser = { workspace = true }
 
