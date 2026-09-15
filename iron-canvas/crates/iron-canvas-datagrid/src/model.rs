@@ -10,9 +10,16 @@ use iron_canvas_core::{Alignment, CanvasSize, CellStyle, HAlign};
 /// the row-header gutter cannot drift apart.
 pub const DEFAULT_COL_WIDTH: f64 = 96.0;
 
+/// Narrowest column in pixels. Every width write path clamps to it: a column
+/// below this has no usable text area or resize target, and a negative width
+/// would subtract from `content_extent`.
+pub const MIN_COL_WIDTH: f64 = 16.0;
+
 #[derive(Clone, Debug)]
 pub struct Column {
     pub header: String,
+    /// Pixels. [`Column::width`] and `DataGrid::set_column_width` clamp to
+    /// [`MIN_COL_WIDTH`]; writing this field directly does not.
     pub width: f64,
     pub align: HAlign,
 }
@@ -25,8 +32,11 @@ impl Column {
             align: HAlign::General,
         }
     }
+    /// Set the width, clamped to [`MIN_COL_WIDTH`]. The builder and the
+    /// `setData` wire mirror both come through here, so a payload cannot build
+    /// a column narrower than `DataGrid::set_column_width` allows.
     pub fn width(mut self, w: f64) -> Self {
-        self.width = w;
+        self.width = w.max(MIN_COL_WIDTH);
         self
     }
     pub fn align(mut self, a: HAlign) -> Self {
@@ -162,7 +172,9 @@ impl DataGrid {
 
     pub fn set_column_width(&mut self, col: usize, width: f64) {
         if let Some(c) = self.columns.get_mut(col) {
-            c.width = width.max(16.0); // sane minimum so a column can't vanish
+            // Also clamped in `Column::width`; repeated here because this
+            // path writes the field directly.
+            c.width = width.max(MIN_COL_WIDTH);
         }
     }
 
