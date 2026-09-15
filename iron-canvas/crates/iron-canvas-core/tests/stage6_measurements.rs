@@ -137,25 +137,18 @@ impl ObservedModel {
     }
 }
 
-/// Forwarding bodies for the methods this wrapper only passes through. Mirrors
-/// `model_adapter`'s own private `forward_methods!`, which is not exported.
-macro_rules! delegate_to_inner {
-    ($(fn $name:ident(&self $(, $arg:ident: $argty:ty)*) $(-> $ret:ty)?;)*) => {
-        $(
-            fn $name(&self, $($arg: $argty),*) $(-> $ret)? {
-                self.inner.$name($($arg),*)
-            }
-        )*
-    };
-}
-
 impl CellContentQuery for ObservedModel {
-    delegate_to_inner! {
+    iron_canvas_core::forward_methods!(model, {
         fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle>;
         fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
         fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
-        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellDecoration>;
-    }
+        fn get_extended_cell_style(
+            &self,
+            sheet: u32,
+            row: i32,
+            column: i32,
+        ) -> Fetched<CellDecoration>;
+    });
 
     fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
         self.record(BulkChannel::Styles, range);
@@ -186,7 +179,7 @@ impl CellContentQuery for ObservedModel {
 }
 
 impl CanvasModel for ObservedModel {
-    delegate_to_inner! {
+    iron_canvas_core::forward_methods!(model, {
         fn get_selected_sheet(&self) -> Option<u32>;
         fn get_selected_view(&self) -> Option<CanvasView>;
         fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
@@ -201,7 +194,7 @@ impl CanvasModel for ObservedModel {
         fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
         fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;
         fn get_column_header_text(&self, sheet: u32, col: i32) -> Option<String>;
-    }
+    });
 }
 
 // ==============================================================================

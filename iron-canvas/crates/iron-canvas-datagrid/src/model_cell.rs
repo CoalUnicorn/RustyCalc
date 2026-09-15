@@ -1,8 +1,9 @@
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell};
 
 use crate::DataGrid;
 use iron_canvas_core::{
     CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched, RCRange,
+    forward_methods,
 };
 
 /// Interior-mutable `DataGrid` wrapper: the owner can mutate the grid
@@ -23,6 +24,13 @@ impl DataGridModel {
         f(&self.0.borrow())
     }
 
+    /// The inner grid, as the accessor the `forward_methods!` bodies below
+    /// call. Returns the guard (not `&DataGrid`) because the owner keeps
+    /// mutating the grid while the orchestrator holds the model.
+    fn inner(&self) -> Ref<'_, DataGrid> {
+        self.0.borrow()
+    }
+
     /// Run a mutation against the inner grid without exposing the borrow.
     pub fn borrow_mut_with<R>(&self, f: impl FnOnce(&mut DataGrid) -> R) -> R {
         f(&mut self.0.borrow_mut())
@@ -40,62 +48,34 @@ impl DataGridModel {
 // defaults call these per-cell forwarders, so they stay correct without
 // explicit forwarding. `last_row` / `last_column` are defaulted but
 // forwarded anyway: their defaults return Excel bounds, not delegations,
-// so skipping the forward would lose the grid's finite extent.
+// so skipping the forward would lose the grid's finite extent. The listed
+// signatures come from the shared macro, so a new trait method is added
+// here (and in the engine's `Rc` impls) in one place.
 impl CanvasModel for DataGridModel {
-    fn get_selected_sheet(&self) -> Option<u32> {
-        self.0.borrow().get_selected_sheet()
-    }
-    fn get_selected_view(&self) -> Option<CanvasView> {
-        self.0.borrow().get_selected_view()
-    }
-    fn get_show_selection(&self) -> bool {
-        self.0.borrow().get_show_selection()
-    }
-    fn get_frozen_rows_count(&self, s: u32) -> Option<i32> {
-        self.0.borrow().get_frozen_rows_count(s)
-    }
-    fn get_frozen_columns_count(&self, s: u32) -> Option<i32> {
-        self.0.borrow().get_frozen_columns_count(s)
-    }
-    fn get_row_height(&self, s: u32, row: i32) -> Fetched<f64> {
-        self.0.borrow().get_row_height(s, row)
-    }
-    fn get_column_width(&self, s: u32, col: i32) -> Fetched<f64> {
-        self.0.borrow().get_column_width(s, col)
-    }
-    fn get_show_grid_lines(&self, s: u32) -> Fetched<bool> {
-        self.0.borrow().get_show_grid_lines(s)
-    }
-    fn last_row(&self, s: u32) -> i32 {
-        self.0.borrow().last_row(s)
-    }
-    fn last_column(&self, s: u32) -> i32 {
-        self.0.borrow().last_column(s)
-    }
-    fn get_column_header_text(&self, s: u32, col: i32) -> Option<String> {
-        self.0.borrow().get_column_header_text(s, col)
-    }
-    fn get_row_header_text(&self, s: u32, row: i32) -> Option<String> {
-        self.0.borrow().get_row_header_text(s, row)
-    }
-    fn get_show_row_headers(&self, s: u32) -> Option<bool> {
-        self.0.borrow().get_show_row_headers(s)
-    }
-    fn get_show_col_headers(&self, s: u32) -> Option<bool> {
-        self.0.borrow().get_show_col_headers(s)
-    }
+    forward_methods!(inner, {
+        fn get_selected_sheet(&self) -> Option<u32>;
+        fn get_selected_view(&self) -> Option<CanvasView>;
+        fn get_show_selection(&self) -> bool;
+        fn get_frozen_rows_count(&self, s: u32) -> Option<i32>;
+        fn get_frozen_columns_count(&self, s: u32) -> Option<i32>;
+        fn get_row_height(&self, s: u32, row: i32) -> Fetched<f64>;
+        fn get_column_width(&self, s: u32, col: i32) -> Fetched<f64>;
+        fn get_show_grid_lines(&self, s: u32) -> Fetched<bool>;
+        fn last_row(&self, s: u32) -> i32;
+        fn last_column(&self, s: u32) -> i32;
+        fn get_column_header_text(&self, s: u32, col: i32) -> Option<String>;
+        fn get_row_header_text(&self, s: u32, row: i32) -> Option<String>;
+        fn get_show_row_headers(&self, s: u32) -> Option<bool>;
+        fn get_show_col_headers(&self, s: u32) -> Option<bool>;
+    });
 }
 
 impl CellContentQuery for DataGridModel {
-    fn get_cell_style(&self, s: u32, row: i32, col: i32) -> Fetched<CellStyle> {
-        self.0.borrow().get_cell_style(s, row, col)
-    }
-    fn get_cell_type(&self, s: u32, row: i32, col: i32) -> Fetched<CellKind> {
-        self.0.borrow().get_cell_type(s, row, col)
-    }
-    fn get_formatted_cell_value(&self, s: u32, row: i32, col: i32) -> Fetched<String> {
-        self.0.borrow().get_formatted_cell_value(s, row, col)
-    }
+    forward_methods!(inner, {
+        fn get_cell_style(&self, s: u32, row: i32, col: i32) -> Fetched<CellStyle>;
+        fn get_cell_type(&self, s: u32, row: i32, col: i32) -> Fetched<CellKind>;
+        fn get_formatted_cell_value(&self, s: u32, row: i32, col: i32) -> Fetched<String>;
+    });
 
     // Forward the bulk readers so the per-frame pane fetch reaches `DataGrid`'s
     // direct-storage `*_in` overrides. Without these, the defaulted trait loops
