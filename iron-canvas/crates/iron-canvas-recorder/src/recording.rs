@@ -558,7 +558,7 @@ mod tests {
     use iron_canvas_core::painter::{TextAlign, TextBaseline};
     use iron_canvas_core::theme::CanvasTheme;
 
-    use crate::GroupClass;
+    use iron_canvas_core::painter::GroupClass;
 
     fn header() -> IcrHeader {
         IcrHeader::new(
