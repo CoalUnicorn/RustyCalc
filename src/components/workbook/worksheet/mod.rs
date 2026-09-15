@@ -114,7 +114,8 @@ pub fn Worksheet() -> impl IntoView {
             let dpr = window().device_pixel_ratio();
             canvas_handle.update_value(|slot| {
                 if let Some(ic) = slot.as_mut() {
-                    ic.resize(w, h, dpr);
+                    // Invalid metrics leave the canvas at its last valid size.
+                    let _ = ic.resize(w, h, dpr);
                 }
             });
             poke();

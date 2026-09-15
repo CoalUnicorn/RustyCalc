@@ -12,24 +12,39 @@
 //! their normalization and merge rules must not be bypassable by
 //! constructing a value directly. `RowSpan` and the diagnostic `WorkFlags`
 //! cross the existing core API boundary and are re-exported from the crate
-//! root.
+//! root; `RowSpan` keeps the same guarantee by sealing its fields behind
+//! [`RowSpan::new`], which orders the endpoints.
 
-/// Inclusive row band in `RCRange` row coordinates.
+/// Inclusive, normalized row band in `RCRange` row coordinates.
+///
+/// Fields are private because the band carries an ordering invariant: a
+/// reversed span would survive merging and then silently intersect to
+/// nothing at paint time — stale pixels with content work already drained.
+/// [`RowSpan::new`] is the only constructor and orders the endpoints, so
+/// every reader can rely on `start() <= end()` without re-checking.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RowSpan {
-    pub r1: i32,
-    pub r2: i32,
+    start: i32,
+    end: i32,
 }
 
 impl RowSpan {
-    /// Callers may hand spans in either order; a reversed span would
-    /// survive merging and then silently intersect to nothing at paint
-    /// time — stale pixels with content work already drained.
-    fn normalized(self) -> Self {
-        RowSpan {
-            r1: self.r1.min(self.r2),
-            r2: self.r1.max(self.r2),
+    /// Order the endpoints: callers may hand a span in either direction.
+    pub fn new(r1: i32, r2: i32) -> Self {
+        Self {
+            start: r1.min(r2),
+            end: r1.max(r2),
         }
+    }
+
+    /// First row of the band (inclusive).
+    pub fn start(self) -> i32 {
+        self.start
+    }
+
+    /// Last row of the band (inclusive).
+    pub fn end(self) -> i32 {
+        self.end
     }
 }
 
@@ -103,12 +118,15 @@ impl ContentWork {
     /// `All` once the disjoint count stops paying for itself
     /// against one whole-grid walk.
     fn normalize_rows(sheet: u32, mut spans: Vec<RowSpan>) -> Self {
-        spans.sort_by_key(|span| span.r1);
+        spans.sort_by_key(|span| span.start());
         let mut merged: Vec<RowSpan> = Vec::with_capacity(spans.len());
         for span in spans {
             match merged.last_mut() {
-                // +1: adjacent bands repaint as one strip.
-                Some(last) if span.r1 <= last.r2 + 1 => last.r2 = last.r2.max(span.r2),
+                // +1: adjacent bands repaint as one strip. In-module field
+                // writes are safe: `RowSpan::new` already ordered the pair.
+                Some(last) if span.start() <= last.end.saturating_add(1) => {
+                    last.end = last.end.max(span.end());
+                }
                 _ => merged.push(span),
             }
         }
@@ -149,10 +167,11 @@ impl PendingWork {
         self.overlay = true;
     }
 
+    /// `span` is already normalized: `RowSpan::new` is its only constructor.
     pub(crate) fn mark_rows(&mut self, sheet: u32, span: RowSpan) {
         let incoming = ContentWork::Rows {
             sheet,
-            spans: vec![span.normalized()],
+            spans: vec![span],
         };
         self.content = std::mem::take(&mut self.content).merge(incoming);
     }
@@ -246,7 +265,7 @@ mod tests {
 
     fn rows(sheet: u32, r1: i32, r2: i32) -> PendingWork {
         let mut work = PendingWork::default();
-        work.mark_rows(sheet, RowSpan { r1, r2 });
+        work.mark_rows(sheet, RowSpan::new(r1, r2));
         work
     }
 
@@ -259,7 +278,7 @@ mod tests {
         work.mark_geometry();
         work.mark_view();
         work.mark_overlay();
-        work.mark_rows(1, RowSpan { r1: 3, r2: 5 });
+        work.mark_rows(1, RowSpan::new(3, 5));
 
         assert_eq!(merged(work.clone(), PendingWork::default()), work);
         assert_eq!(merged(PendingWork::default(), work.clone()), work);
@@ -271,7 +290,7 @@ mod tests {
     fn merge_is_idempotent() {
         let mut work = PendingWork::default();
         work.mark_view();
-        work.mark_rows(1, RowSpan { r1: 3, r2: 5 });
+        work.mark_rows(1, RowSpan::new(3, 5));
 
         assert_eq!(merged(work.clone(), work.clone()), work);
     }
@@ -283,11 +302,11 @@ mod tests {
     fn merge_is_commutative_for_a_representative_pair() {
         let mut a = PendingWork::default();
         a.mark_geometry();
-        a.mark_rows(1, RowSpan { r1: 0, r2: 2 });
+        a.mark_rows(1, RowSpan::new(0, 2));
 
         let mut b = PendingWork::default();
         b.mark_overlay();
-        b.mark_rows(1, RowSpan { r1: 5, r2: 7 });
+        b.mark_rows(1, RowSpan::new(5, 7));
 
         assert_eq!(merged(a.clone(), b.clone()), merged(b, a));
     }
@@ -315,13 +334,13 @@ mod tests {
     #[test]
     fn mark_rows_normalizes_a_reversed_span() {
         let mut work = PendingWork::default();
-        work.mark_rows(1, RowSpan { r1: 10, r2: 4 });
+        work.mark_rows(1, RowSpan::new(10, 4));
 
         assert_eq!(
             *work.content(),
             ContentWork::Rows {
                 sheet: 1,
-                spans: vec![RowSpan { r1: 4, r2: 10 }],
+                spans: vec![RowSpan::new(4, 10)],
             }
         );
     }
@@ -331,16 +350,22 @@ mod tests {
     #[test]
     fn adjacent_spans_merge_into_one_band() {
         let mut work = PendingWork::default();
-        work.mark_rows(1, RowSpan { r1: 0, r2: 3 });
-        work.mark_rows(1, RowSpan { r1: 4, r2: 6 });
+        work.mark_rows(1, RowSpan::new(0, 3));
+        work.mark_rows(1, RowSpan::new(4, 6));
 
         assert_eq!(
             *work.content(),
             ContentWork::Rows {
                 sheet: 1,
-                spans: vec![RowSpan { r1: 0, r2: 6 }],
+                spans: vec![RowSpan::new(0, 6)],
             }
         );
+    }
+
+    #[test]
+    fn maximum_endpoint_merge_is_idempotent() {
+        let work = rows(1, i32::MIN, i32::MAX);
+        assert_eq!(merged(work.clone(), work.clone()), work);
     }
 
     // A second sheet's rows can't be expressed alongside the first
@@ -348,8 +373,8 @@ mod tests {
     #[test]
     fn cross_sheet_rows_degrade_to_all_content() {
         let mut work = PendingWork::default();
-        work.mark_rows(1, RowSpan { r1: 0, r2: 2 });
-        work.mark_rows(2, RowSpan { r1: 0, r2: 2 });
+        work.mark_rows(1, RowSpan::new(0, 2));
+        work.mark_rows(2, RowSpan::new(0, 2));
 
         assert_eq!(*work.content(), ContentWork::All);
     }
@@ -361,7 +386,7 @@ mod tests {
         let mut work = PendingWork::default();
         for i in 0..=(MAX_DAMAGE_SPANS as i32) {
             let r = i * 3;
-            work.mark_rows(1, RowSpan { r1: r, r2: r });
+            work.mark_rows(1, RowSpan::new(r, r));
         }
 
         assert_eq!(*work.content(), ContentWork::All);
@@ -372,7 +397,7 @@ mod tests {
     #[test]
     fn rows_then_all_stays_all() {
         let mut work = PendingWork::default();
-        work.mark_rows(1, RowSpan { r1: 0, r2: 2 });
+        work.mark_rows(1, RowSpan::new(0, 2));
         work.mark_all_content();
 
         assert_eq!(*work.content(), ContentWork::All);
@@ -382,7 +407,7 @@ mod tests {
     fn all_then_rows_stays_all() {
         let mut work = PendingWork::default();
         work.mark_all_content();
-        work.mark_rows(1, RowSpan { r1: 0, r2: 2 });
+        work.mark_rows(1, RowSpan::new(0, 2));
 
         assert_eq!(*work.content(), ContentWork::All);
         assert!(work.has_content());

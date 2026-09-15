@@ -57,13 +57,13 @@ impl CanvasModel for DataGridModel {
     fn get_frozen_columns_count(&self, s: u32) -> Option<i32> {
         self.0.borrow().get_frozen_columns_count(s)
     }
-    fn get_row_height(&self, s: u32, row: i32) -> Option<f64> {
+    fn get_row_height(&self, s: u32, row: i32) -> Fetched<f64> {
         self.0.borrow().get_row_height(s, row)
     }
-    fn get_column_width(&self, s: u32, col: i32) -> Option<f64> {
+    fn get_column_width(&self, s: u32, col: i32) -> Fetched<f64> {
         self.0.borrow().get_column_width(s, col)
     }
-    fn get_show_grid_lines(&self, s: u32) -> Option<bool> {
+    fn get_show_grid_lines(&self, s: u32) -> Fetched<bool> {
         self.0.borrow().get_show_grid_lines(s)
     }
     fn last_row(&self, s: u32) -> i32 {

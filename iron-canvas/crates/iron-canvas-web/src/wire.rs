@@ -392,17 +392,17 @@ impl From<ThemeVariablesWire> for ThemeVariables {
     }
 }
 
-impl RenderOverlaysWire {
-    /// Convert to the engine `RenderOverlays`. Currently infallible; the
-    /// `Result` is preserved so future boundary invariants can surface as
-    /// a `JsError` without rippling through the call sites.
-    pub(crate) fn into_engine(self) -> Result<RenderOverlays, String> {
-        Ok(RenderOverlays {
-            extend_to: self.extend_to.map(Into::into),
-            clipboard: self.clipboard.map(Into::into),
-            point_range: self.point_range.map(Into::into),
-            formula_refs: self.formula_refs.into_iter().map(Into::into).collect(),
-        })
+impl From<RenderOverlaysWire> for RenderOverlays {
+    /// Convert to the engine `RenderOverlays`. Infallible: every field already
+    /// carries the engine shape, and the optional ones map through their own
+    /// `From` impls like every other inbound wire type.
+    fn from(w: RenderOverlaysWire) -> Self {
+        RenderOverlays {
+            extend_to: w.extend_to.map(Into::into),
+            clipboard: w.clipboard.map(Into::into),
+            point_range: w.point_range.map(Into::into),
+            formula_refs: w.formula_refs.into_iter().map(Into::into).collect(),
+        }
     }
 }
 
@@ -615,6 +615,8 @@ mod dev_wire {
         FrozenColumns,
         RowHeaderVisibility,
         ColumnHeaderVisibility,
+        InvalidFrozenRowCount,
+        InvalidFrozenColumnCount,
     }
 
     impl From<FrameInputFailure> for FrameInputFailureWire {
@@ -627,6 +629,8 @@ mod dev_wire {
                 FrameInputFailure::FrozenColumns => Self::FrozenColumns,
                 FrameInputFailure::RowHeaderVisibility => Self::RowHeaderVisibility,
                 FrameInputFailure::ColumnHeaderVisibility => Self::ColumnHeaderVisibility,
+                FrameInputFailure::InvalidFrozenRowCount => Self::InvalidFrozenRowCount,
+                FrameInputFailure::InvalidFrozenColumnCount => Self::InvalidFrozenColumnCount,
             }
         }
     }
@@ -892,11 +896,13 @@ mod dev_wire {
         pub r2: i32,
     }
 
+    /// The wire shape stays `{r1, r2}` — the engine's normalized pair maps
+    /// onto the existing schema fields.
     impl From<RowSpan> for RowSpanWire {
         fn from(span: RowSpan) -> Self {
             Self {
-                r1: span.r1,
-                r2: span.r2,
+                r1: span.start(),
+                r2: span.end(),
             }
         }
     }
@@ -1005,26 +1011,56 @@ mod dev_wire {
         }
     }
 
+    /// camelCase mirror of `DiagBufferTruth` — a mirror like every sibling diag
+    /// enum, not a hand-rolled string, so the wire name cannot drift from the
+    /// engine variant.
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagBufferTruthWire {
+        Valid,
+        Stale,
+    }
+
+    impl From<DiagBufferTruth> for DiagBufferTruthWire {
+        fn from(truth: DiagBufferTruth) -> Self {
+            match truth {
+                DiagBufferTruth::Valid => Self::Valid,
+                DiagBufferTruth::Stale => Self::Stale,
+            }
+        }
+    }
+
+    /// camelCase mirror of `DiagFingerprintTruth`. See `DiagBufferTruthWire`.
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(crate) enum DiagFingerprintTruthWire {
+        Exact,
+        Stale,
+    }
+
+    impl From<DiagFingerprintTruth> for DiagFingerprintTruthWire {
+        fn from(truth: DiagFingerprintTruth) -> Self {
+            match truth {
+                DiagFingerprintTruth::Exact => Self::Exact,
+                DiagFingerprintTruth::Stale => Self::Stale,
+            }
+        }
+    }
+
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     pub(crate) struct DiagCacheTruthWire {
         pub layout: Option<DiagLayoutWire>,
-        pub buffer_truth: String,
-        pub fingerprint_truth: String,
+        pub buffer_truth: DiagBufferTruthWire,
+        pub fingerprint_truth: DiagFingerprintTruthWire,
     }
 
     impl From<&DiagCacheTruth> for DiagCacheTruthWire {
         fn from(truth: &DiagCacheTruth) -> Self {
             Self {
                 layout: truth.layout.map(DiagLayoutWire::from),
-                buffer_truth: match truth.buffer_truth {
-                    DiagBufferTruth::Valid => "valid".to_string(),
-                    DiagBufferTruth::Stale => "stale".to_string(),
-                },
-                fingerprint_truth: match truth.fingerprint_truth {
-                    DiagFingerprintTruth::Exact => "exact".to_string(),
-                    DiagFingerprintTruth::Stale => "stale".to_string(),
-                },
+                buffer_truth: truth.buffer_truth.into(),
+                fingerprint_truth: truth.fingerprint_truth.into(),
             }
         }
     }
@@ -1221,6 +1257,45 @@ mod tests {
     /// exact field names here, natively, before any browser test relies on
     /// them.
     #[test]
+    fn input_failure_wire_names_are_stable() {
+        use iron_canvas_core::FrameInputFailure;
+
+        let cases = [
+            (FrameInputFailure::SelectedSheet, "selectedSheet"),
+            (FrameInputFailure::SelectedView, "selectedView"),
+            (FrameInputFailure::SheetMismatch, "sheetMismatch"),
+            (FrameInputFailure::FrozenRows, "frozenRows"),
+            (FrameInputFailure::FrozenColumns, "frozenColumns"),
+            (
+                FrameInputFailure::RowHeaderVisibility,
+                "rowHeaderVisibility",
+            ),
+            (
+                FrameInputFailure::ColumnHeaderVisibility,
+                "columnHeaderVisibility",
+            ),
+            (
+                FrameInputFailure::InvalidFrozenRowCount,
+                "invalidFrozenRowCount",
+            ),
+            (
+                FrameInputFailure::InvalidFrozenColumnCount,
+                "invalidFrozenColumnCount",
+            ),
+        ];
+        for (failure, expected) in cases {
+            let json = serde_json::to_value(FrameOutcomeWire::from(
+                FrameOutcome::HeldOnInputFailure(failure),
+            ))
+            .expect("input failure outcome serializes");
+            assert_eq!(
+                json,
+                serde_json::json!({ "kind": "heldOnInputFailure", "input": expected })
+            );
+        }
+    }
+
+    #[test]
     fn repaint_reason_wire_names_are_stable() {
         let cases = [
             (DiagRepaintReason::NoPaintedHistory, "noPaintedHistory"),
@@ -1270,7 +1345,7 @@ mod tests {
             repaint: iron_canvas_core::DiagRepaint {
                 verdict: Some(GridVerdict::Cell),
                 reason: Some(DiagRepaintReason::ChangedCell),
-                changed_rows: vec![RowSpan { r1: 5, r2: 5 }],
+                changed_rows: vec![RowSpan::new(5, 5)],
                 changed_cells: vec![DiagChangedCell { row: 5, column: 4 }],
                 clip: Some(PixelRect {
                     top_left: Point { x: 20, y: 30 },

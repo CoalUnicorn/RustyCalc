@@ -28,7 +28,10 @@ fn fruit_grid() -> DataGrid {
 
 fn new_orch(model: &Rc<DataGridModel>) -> Orchestrator<MemSurface> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 600.0, h: 400.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_model(Rc::clone(model) as Rc<dyn CanvasModel>);
     orch
 }

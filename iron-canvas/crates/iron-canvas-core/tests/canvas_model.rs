@@ -179,8 +179,8 @@ fn autofill_handle_lands_at_bottom_right_of_finite_selection() {
 
 #[test]
 fn autofill_handle_rect_anchors_at_bot_right_corner() {
-    // Excel anchor: handle's top-left == selection's bottom-right corner,
-    // so the handle visually pokes outside the selection rectangle.
+    // The handle's bottom-right corner is the selection's bottom-right
+    // cell corner. The fill rectangle extends six pixels back on each axis.
     let m = TestModel::new().with_selection([2, 3, 4, 5]);
     let inputs = test_inputs(&m, test_canvas(), &std::rc::Rc::new(LIGHT));
     let frame = Chrome::next(None, &m, &inputs, FramePath::Fresh);

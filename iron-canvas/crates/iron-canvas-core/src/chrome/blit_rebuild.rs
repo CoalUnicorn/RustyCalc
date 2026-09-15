@@ -26,7 +26,7 @@ pub enum ShiftDir {
 }
 
 /// Verify every slot's cached extent still matches what the model reports.
-/// `measure(id)` returns `None` when the model has no data for that id;
+/// `measure(id)` returns `None` when the read fails or the extent is invalid;
 /// `None` rejects the match (the kept band would no longer survive the blit).
 fn overlaps_match<S: AxisSlot>(slots: &[S], measure: impl Fn(i32) -> Option<i32>) -> bool {
     slots.iter().all(|s| measure(s.id()) == Some(s.extent()))
@@ -37,8 +37,7 @@ fn overlaps_match<S: AxisSlot>(slots: &[S], measure: impl Fn(i32) -> Option<i32>
 /// `prev_slots[0].id()` to `new_first_idx`; `None` when geometry,
 /// extent, or overlap rejects the shift. `pane_origin` / `pane_extent`
 /// are the scroll pane's canvas-pixel bounds along the scroll axis.
-/// `measure(id)` is the model accessor; `None` returns reject overlap
-/// (rebuild treats `None` as zero, but probe rejects).
+/// `measure(id)` is the resolved extent accessor; `None` rejects the probe.
 fn probe_axis_shift<S: AxisSlot>(
     prev_slots: &[S],
     new_first_idx: i32,
@@ -63,9 +62,9 @@ fn probe_axis_shift<S: AxisSlot>(
         Some((leaving, ShiftDir::Forward))
     } else {
         let d = (old_first_idx - new_first_idx) as usize;
-        let strip: i32 = (0..d)
-            .map(|i| measure(new_first_idx + i as i32).unwrap_or(0))
-            .fold(0, i32::saturating_add);
+        let strip = (0..d).try_fold(0_i32, |sum, i| {
+            sum.checked_add(measure(new_first_idx + i as i32)?)
+        })?;
         if strip <= 0 || strip >= pane_extent {
             return None;
         }
@@ -93,7 +92,7 @@ fn rebuild_axis_slots<S: AxisSlot>(
     max_cursor: i32,
     new_first_idx: i32,
     last_idx_limit: i32,
-    measure: impl Fn(i32) -> i32,
+    measure: impl Fn(i32) -> Option<i32>,
 ) -> Option<Vec<S>> {
     let first = prev_slots.first()?;
     let old_first_idx = first.id();
@@ -126,10 +125,12 @@ fn rebuild_axis_slots<S: AxisSlot>(
             frozen_offset,
             None,
             &measure,
-        );
+        )?;
         let strip_size = strip_cursor_end - frozen_offset;
         for slot in &prev_slots[..prev_slots.len() - d] {
-            new_slots.push(S::new(slot.id(), slot.start() + strip_size, slot.extent()));
+            let start = slot.start().checked_add(strip_size)?;
+            start.checked_add(slot.extent())?;
+            new_slots.push(S::new(slot.id(), start, slot.extent()));
         }
     }
 
@@ -147,13 +148,13 @@ fn rebuild_axis_slots<S: AxisSlot>(
             .last()
             .map(|s| s.id() + 1)
             .unwrap_or(new_first_idx);
-        let _ = fill_axis(
+        fill_axis(
             &mut new_slots,
             next_id..=last_idx_limit,
             cursor,
             Some(max_cursor),
             &measure,
-        );
+        )?;
     }
 
     Some(new_slots)
@@ -169,7 +170,7 @@ impl PaneSet {
         pane_h: i32,
     ) -> Option<(i32, ShiftDir)> {
         probe_axis_shift(&self.rows.scroll, new_top, pane_y, pane_h, |r| {
-            model.get_row_height(sheet, r).map(|h| h.round() as i32)
+            row_height(model, sheet, r).extent()
         })
     }
 
@@ -182,7 +183,7 @@ impl PaneSet {
         pane_w: i32,
     ) -> Option<(i32, ShiftDir)> {
         probe_axis_shift(&self.cols.scroll, new_left, pane_x, pane_w, |c| {
-            model.get_column_width(sheet, c).map(|w| w.round() as i32)
+            col_width(model, sheet, c).extent()
         })
     }
 
@@ -203,7 +204,7 @@ impl PaneSet {
             // !content_dirty, so the model's bound cannot have moved
             // since prev was built — both rebuild paths agree.
             self.rows.last_id,
-            |r| row_height(model, sheet, r),
+            |r| row_height(model, sheet, r).extent(),
         )
     }
 
@@ -221,7 +222,36 @@ impl PaneSet {
             canvas_w,
             new_left,
             self.cols.last_id,
-            |c| col_width(model, sheet, c),
+            |c| col_width(model, sheet, c).extent(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backward_probe_rejects_a_failed_strip_measure() {
+        let slots = [RowSlot::new(3, 0, 20), RowSlot::new(4, 20, 20)];
+        let probe = probe_axis_shift(
+            &slots,
+            1,
+            0,
+            100,
+            |id| {
+                if id == 1 { None } else { Some(20) }
+            },
+        );
+        assert!(
+            probe.is_none(),
+            "a failed read cannot count as a hidden row"
+        );
+    }
+
+    #[test]
+    fn backward_rebuild_rejects_overflow_in_shifted_slot_end() {
+        let slots = [RowSlot::new(2, 0, i32::MAX), RowSlot::new(3, i32::MAX, 0)];
+        assert!(rebuild_axis_slots(&slots, 0, 100, 1, 3, |_| Some(20)).is_none());
     }
 }

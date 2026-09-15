@@ -67,13 +67,13 @@ impl CanvasModel for CountingModel {
         self.frozen_cols_calls.set(self.frozen_cols_calls.get() + 1);
         self.inner.get_frozen_columns_count(sheet)
     }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
+    fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64> {
         self.inner.get_row_height(sheet, row)
     }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
+    fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64> {
         self.inner.get_column_width(sheet, column)
     }
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
+    fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool> {
         self.inner.get_show_grid_lines(sheet)
     }
     fn get_show_row_headers(&self, sheet: u32) -> Option<bool> {
@@ -101,7 +101,13 @@ fn frame_inputs_capture_reads_each_scalar_exactly_once() {
     };
     let theme = Rc::new(CanvasTheme::light());
 
-    let result = FrameInputs::capture(&model, canvas_default(), 1.0, theme, 0);
+    let result = FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        theme,
+        0,
+    );
 
     let inputs = result.expect("healthy model must capture successfully");
     assert_eq!(
@@ -152,8 +158,8 @@ fn base_model() -> TestModel {
 fn capture(model: &TestModel) -> Result<FrameInputs, FrameInputFailure> {
     FrameInputs::capture(
         model,
-        canvas_default(),
-        1.0,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
         Rc::new(CanvasTheme::light()),
         0,
     )
@@ -228,4 +234,60 @@ fn frame_inputs_failure_column_header_visibility() {
         capture(&model),
         Err(FrameInputFailure::ColumnHeaderVisibility)
     ));
+}
+
+// Frozen counts are range-checked at capture, not at geometry time: a
+// negative value would reach `Vec::reserve(frozen_count as usize)` as an
+// enormous `usize` capacity request, and a count past the axis's last id
+// would make the frozen-band walk read rows/columns the sheet cannot
+// contain. The `CanvasModel` API stays raw `i32`; capture rejects the
+// invalid values before any allocation or walk.
+#[test]
+fn frame_inputs_rejects_negative_frozen_row_count() {
+    let model = base_model().with_frozen_rows(-1);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::InvalidFrozenRowCount)
+    ));
+}
+
+#[test]
+fn frame_inputs_rejects_frozen_row_count_past_last_row() {
+    let model = base_model().with_frozen_rows(iron_canvas_core::LAST_ROW + 1);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::InvalidFrozenRowCount)
+    ));
+}
+
+#[test]
+fn frame_inputs_accepts_frozen_row_count_at_last_row() {
+    let model = base_model().with_frozen_rows(iron_canvas_core::LAST_ROW);
+    let inputs = capture(&model).expect("LAST_ROW frozen rows are in range");
+    assert_eq!(inputs.frozen_rows(), iron_canvas_core::LAST_ROW);
+}
+
+#[test]
+fn frame_inputs_rejects_negative_frozen_column_count() {
+    let model = base_model().with_frozen_cols(-1);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::InvalidFrozenColumnCount)
+    ));
+}
+
+#[test]
+fn frame_inputs_rejects_frozen_column_count_past_last_column() {
+    let model = base_model().with_frozen_cols(iron_canvas_core::LAST_COLUMN + 1);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::InvalidFrozenColumnCount)
+    ));
+}
+
+#[test]
+fn frame_inputs_accepts_frozen_column_count_at_last_column() {
+    let model = base_model().with_frozen_cols(iron_canvas_core::LAST_COLUMN);
+    let inputs = capture(&model).expect("LAST_COLUMN frozen columns are in range");
+    assert_eq!(inputs.frozen_cols(), iron_canvas_core::LAST_COLUMN);
 }

@@ -136,7 +136,7 @@ fn damage_span_crosses_freeze() {
     let before = core.painter().ops().len();
     core.reset_trace();
 
-    assert!(!core.render_grid_damage(&model, &frame, &[RowSpan { r1: 5, r2: 5 }]));
+    assert!(!core.render_grid_damage(&model, &frame, &[RowSpan::new(5, 5)]));
     assert_eq!(core.trace().verdict, Some(GridVerdict::Strip));
     let ranges = model.bulk_fetch_ranges();
     assert_eq!(ranges.len(), 2);
@@ -168,7 +168,7 @@ fn grid_cache_splice_shift() {
     frame0.kind = iron_canvas_core::chrome::FrameKindTag::SlotsReused;
 
     model.set_cell(5, 1, "spliced");
-    assert!(!core.render_grid_damage(&model, &frame0, &[RowSpan { r1: 5, r2: 5 }]));
+    assert!(!core.render_grid_damage(&model, &frame0, &[RowSpan::new(5, 5)]));
     assert_eq!(core.grid_cache.buffer_truth(), BufferTruth::Valid);
 
     model.set_top_row(2);

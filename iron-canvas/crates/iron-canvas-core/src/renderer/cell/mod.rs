@@ -7,17 +7,25 @@
 //!   points (`paint_bg`, `repaint_active_cell`).
 //! - [`borders`] — `ResolvedBorders`, `BorderPaint`, and the grid /
 //!   explicit / single-cell border passes.
+//! - [`cf`] — `CfDecorationPaint` (resolved conditional-formatting
+//!   decoration: data bar, icon, rating) and its `Painter`-primitive paint
+//!   step.
 //! - This module — the five-pass walk over one grid segment
 //!   and `paint_cell` (single-cell composer).
 //!
 //! Pass order is load-bearing: bg -> CF decoration -> grid borders ->
 //! explicit borders -> text. See the doc on `paint_cells_pass`
 //! for why.
+//!
+//! [`repaint`] and [`repaint_plan`] are the retained-pixel decisions this tier
+//! consumes: `repaint_plan` selects a plan from the cache-tier fingerprint
+//! trees, and `repaint` turns it into executable clip geometry.
 
 pub mod borders;
-pub mod fingerprint;
+pub mod cf;
 pub mod paint;
 pub mod repaint;
+pub mod repaint_plan;
 pub mod text;
 
 pub use paint::{CellPaint, PaneCells};
@@ -26,10 +34,10 @@ use crate::style::CellKind;
 use crate::types::fetched::Fetched;
 
 use self::borders::BorderPaint;
+use self::cf::CfDecorationPaint;
 use self::text::TextPaint;
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
-use crate::renderer::cf_types::CfDecorationPaint;
 use crate::renderer::prepared::FetchedCellsMut;
 use crate::theme::CanvasTheme;
 use crate::types::coord::RCRange;
@@ -69,12 +77,14 @@ impl<P: Painter> RendererCore<P> {
             };
             // `own_style` already holds the dxf-merged CellStyle (the bridge folds
             // the CF overlay in get_cell_styles_in). The decoration rides the
-            // same bulk buffer, indexed alongside styles/values/types.
+            // same bulk buffer, indexed alongside styles/values/types. Resolve
+            // moves the taken decoration into the paint, so the icon name is
+            // never cloned, and the data-bar color is interned once per color.
             let cf_decoration = fetched
                 .decorations
                 .get_mut(idx)
                 .and_then(Fetched::take_value)
-                .map(|deco| CfDecorationPaint::from_cell_decoration(&deco));
+                .map(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
             let Some(mut p) =
                 CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
             else {

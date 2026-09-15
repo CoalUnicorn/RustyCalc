@@ -10,7 +10,10 @@ use std::rc::Rc;
 
 fn painted(grid: DataGrid) -> Vec<String> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 600.0, h: 400.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_model(Rc::new(grid));
     orch.render_pending();
     orch.grid_surface()
@@ -55,7 +58,10 @@ fn hidden_selection_still_paints_grid_but_draws_no_selection() {
         .build();
 
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    orch.resize(CanvasSize { w: 600.0, h: 400.0 }, 1.0);
+    orch.resize(
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 600.0, h: 400.0 }, 1.0)
+            .expect("test canvas metrics are valid"),
+    );
     orch.set_model(Rc::new(g));
     let result = orch.render_pending();
 

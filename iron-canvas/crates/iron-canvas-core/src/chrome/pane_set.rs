@@ -9,7 +9,9 @@
 
 use crate::CanvasModel;
 use crate::geometry::constants::HEADER_COL_WIDTH;
-use crate::geometry::slot::{AxisSlot, AxisSlots, ColSlot, RowSlot, col_width, row_height};
+use crate::geometry::slot::{
+    AxisSlot, AxisSlots, ColSlot, RowSlot, col_width, row_height, scroll_first,
+};
 
 use super::recycled_slots::RecycledSlots;
 
@@ -150,6 +152,10 @@ impl PaneSet {
     /// `sheet` is the caller's already-captured sheet, threaded into the
     /// per-row `measure` closure so the walk reads it once instead of once
     /// per row (`row_height`'s doc).
+    ///
+    /// Returns `false` when a row-height read failed transiently
+    /// (`BridgeFailed`); the caller must not commit the partially-filled
+    /// band. `Absent` rows resolve to the documented default height.
     #[allow(clippy::too_many_arguments)]
     pub fn fill_rows(
         &mut self,
@@ -160,7 +166,7 @@ impl PaneSet {
         view_top_row: i32,
         last_row: i32,
         canvas_h: i32,
-    ) {
+    ) -> bool {
         self.rows.fill(
             model,
             frozen_count,
@@ -168,13 +174,14 @@ impl PaneSet {
             view_top_row,
             last_row,
             canvas_h,
-            |model, row| row_height(model, sheet, row),
-        );
+            |model, row| row_height(model, sheet, row).extent(),
+        )
     }
 
     /// Column-axis mirror of `fill_rows`. Runs as Phase D, using the
     /// cell-area X origin that already folds in the measured
-    /// `row_header_thickness`.
+    /// `row_header_thickness`. Returns `false` on a transient
+    /// column-width read failure, mirroring `fill_rows`.
     #[allow(clippy::too_many_arguments)]
     pub fn fill_cols(
         &mut self,
@@ -185,7 +192,7 @@ impl PaneSet {
         view_left_column: i32,
         last_column: i32,
         canvas_w: i32,
-    ) {
+    ) -> bool {
         self.cols.fill(
             model,
             frozen_count,
@@ -193,8 +200,8 @@ impl PaneSet {
             view_left_column,
             last_column,
             canvas_w,
-            |model, col| col_width(model, sheet, col),
-        );
+            |model, col| col_width(model, sheet, col).extent(),
+        )
     }
 
     #[inline]
@@ -246,23 +253,39 @@ impl PaneSet {
     }
 }
 
-/// Decimal digit count, clamped to `>= 1` so a zero input still reserves a slot.
-fn digit_count(n: i32) -> i32 {
-    let mut n = n.max(1);
-    let mut d = 0;
-    while n > 0 {
-        d += 1;
-        n /= 10;
-    }
-    d
-}
-
 /// Pixel width the row-header strip needs to fit the widest visible row
 /// label. Uses a pessimistic char-count approximation to avoid threading
 /// `TextMetrics` (and thus a painter dependency) into `Chrome::build`.
 /// Floored at `HEADER_COL_WIDTH` so 3-digit labels never shrink the strip.
 pub fn measure_row_header_width(max_visible_row: i32) -> i32 {
-    let digits = digit_count(max_visible_row);
+    // Decimal digit count of the label, clamped to `>= 1` so a zero input
+    // still reserves one slot.
+    let digits = max_visible_row.max(1).ilog10() as i32 + 1;
     let approx = digits * APPROX_DIGIT_WIDTH_PX + 2 * HEADER_LABEL_PAD_PX;
     approx.max(HEADER_COL_WIDTH)
+}
+
+/// Row-header thickness the row band implies: the last visible row's label
+/// width, or — for an empty band — the band's first id, which is
+/// [`scroll_first`] of the frozen count and the scrolled-to row.
+/// Hidden row headers have zero thickness.
+///
+/// `Chrome::build` (phase C) and the blit gate derive
+/// `row_header_thickness` from this one expression. The gate compares the
+/// thickness a rebuilt band implies against the committed frame's, so the
+/// two derivations must agree by construction.
+pub(crate) fn row_header_thickness_for(
+    rows: &[RowSlot],
+    frozen_count: i32,
+    scroll_top: i32,
+    show_row_headers: bool,
+) -> i32 {
+    if !show_row_headers {
+        return 0;
+    }
+    let last_visible_row = rows
+        .last()
+        .map(AxisSlot::id)
+        .unwrap_or_else(|| scroll_first(frozen_count, scroll_top));
+    measure_row_header_width(last_visible_row)
 }

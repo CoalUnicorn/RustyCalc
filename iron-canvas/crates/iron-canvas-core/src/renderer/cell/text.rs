@@ -58,11 +58,12 @@ pub struct TextPaint {
     pub color: TextColor,
     pub underline: bool,
     pub strike: bool,
-    /// Resolved horizontal alignment — carried through to `paint_text` so
-    /// backends that can't measure glyphs accurately (SVG) can use
-    /// `text-anchor="start"` / `"end"` anchored on cell boundaries instead
-    /// of the `CHAR_WIDTH_FACTOR`-approximated `center_x`.
-    pub h_align: HAlign,
+    /// Resolved horizontal alignment, already normalized to the three paint
+    /// directions by `CellTextStyle::resolve`. Carried through to
+    /// `paint_text` so backends that can't measure glyphs accurately (SVG)
+    /// can use `text-anchor="start"` / `"end"` anchored on cell boundaries
+    /// instead of the `CHAR_WIDTH_FACTOR`-approximated `center_x`.
+    pub h_align: TextAlign,
     /// True when at least one line overflows horizontally or there are
     /// multiple lines (which can overflow vertically). Resolved here so
     /// `paint_text` can skip `push_clip`/`pop_clip` when the cell can't
@@ -186,7 +187,7 @@ impl TextPaint {
 /// `width` must already be populated by `layout_into`.
 fn position_lines(
     lines: &mut [TextLine],
-    h_align: HAlign,
+    h_align: TextAlign,
     v_align: VAlign,
     rect: PixelRect,
     size_px: f64,
@@ -199,11 +200,12 @@ fn position_lines(
     for (i, line) in lines.iter_mut().enumerate() {
         let i_f = i as f64;
         let tw = line.width;
-        // Left / General / Justify / Distributed / Fill default to left-anchored.
+        // `CellTextStyle::resolve` owns the model's fallback rules, so only
+        // the three paint directions reach here and every arm is explicit.
         line.center_x = match h_align {
-            HAlign::Right => f64::from(right) - CELL_PADDING - tw / 2.0,
-            HAlign::Center | HAlign::CenterContinuous => f64::from(center.x),
-            _ => f64::from(rect.left()) + CELL_PADDING + tw / 2.0,
+            TextAlign::End => f64::from(right) - CELL_PADDING - tw / 2.0,
+            TextAlign::Center => f64::from(center.x),
+            TextAlign::Start => f64::from(rect.left()) + CELL_PADDING + tw / 2.0,
         };
         // Top / Justify / Distributed default to top-anchored.
         line.center_y = match v_align {
@@ -243,7 +245,10 @@ struct CellTextStyle {
     text_color: TextColor,
     underline: bool,
     strike: bool,
-    h_align: HAlign,
+    /// The model's `HAlign` is collapsed here, once, into the three
+    /// paint directions — so `position_lines` and `paint_text` match an
+    /// exhaustive enum instead of each re-deriving the fallback rules.
+    h_align: TextAlign,
     v_align: VAlign,
     wrap_text: bool,
 }
@@ -264,15 +269,15 @@ impl CellTextStyle {
 
         let alignment = style.alignment.as_ref();
         let h_align = match alignment.map(|a| a.horizontal) {
-            Some(HAlign::Right) => HAlign::Right,
-            Some(HAlign::Center) | Some(HAlign::CenterContinuous) => HAlign::Center,
-            Some(HAlign::Left) | Some(HAlign::Fill) => HAlign::Left,
+            Some(HAlign::Right) => TextAlign::End,
+            Some(HAlign::Center) | Some(HAlign::CenterContinuous) => TextAlign::Center,
+            Some(HAlign::Left) | Some(HAlign::Fill) => TextAlign::Start,
             // Canvas 2D has no justify/distributed — fall back to left.
-            Some(HAlign::Justify) | Some(HAlign::Distributed) => HAlign::Left,
+            Some(HAlign::Justify) | Some(HAlign::Distributed) => TextAlign::Start,
             // General or unset: numbers right, everything else left.
             None | Some(HAlign::General) => match cell_type {
-                CellKind::Number => HAlign::Right,
-                _ => HAlign::Left,
+                CellKind::Number => TextAlign::End,
+                _ => TextAlign::Start,
             },
         };
         let v_align = alignment.map(|a| a.vertical).unwrap_or(VAlign::Bottom);
@@ -422,14 +427,14 @@ impl<P: Painter> RendererCore<P> {
         }
         for line in lines {
             let (x, align) = match t.h_align {
-                HAlign::Right => (f64::from(t.clip.right()) - CELL_PADDING, TextAlign::End),
-                HAlign::Center | HAlign::CenterContinuous => (line.center_x, TextAlign::Center),
-                _ => {
-                    // Left / General / Justify / Distributed / Fill — start-anchored
-                    // on the cell's left edge. No width approximation needed; the
-                    // SVG `text-anchor="start"` renders glyphs at their natural
-                    // width; `needs_clip` contains any escaping glyphs to the
-                    // cell rectangle on both SVG and Canvas2D backends.
+                TextAlign::End => (f64::from(t.clip.right()) - CELL_PADDING, TextAlign::End),
+                TextAlign::Center => (line.center_x, TextAlign::Center),
+                TextAlign::Start => {
+                    // Start-anchored on the cell's left edge. No width
+                    // approximation needed; the SVG `text-anchor="start"`
+                    // renders glyphs at their natural width and `needs_clip`
+                    // contains any escaping glyphs to the cell rectangle on
+                    // both SVG and Canvas2D backends.
                     (f64::from(t.clip.left()) + CELL_PADDING, TextAlign::Start)
                 }
             };
@@ -501,7 +506,7 @@ mod tests {
 
         position_lines(
             &mut lines,
-            HAlign::Left,
+            TextAlign::Start,
             VAlign::Bottom,
             rect,
             size_px,
@@ -529,7 +534,7 @@ mod tests {
 
         position_lines(
             &mut lines,
-            HAlign::Left,
+            TextAlign::Start,
             VAlign::Bottom,
             rect,
             size_px,
@@ -552,7 +557,7 @@ mod tests {
 
         position_lines(
             &mut lines,
-            HAlign::Left,
+            TextAlign::Start,
             VAlign::Bottom,
             rect,
             size_px,

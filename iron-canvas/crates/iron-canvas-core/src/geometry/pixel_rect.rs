@@ -142,7 +142,7 @@ impl Display for PixelRect {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "left:{:.0}px;top:{:.0}px;width:{:.0}px;height:{:.0}px;",
+            "left:{}px;top:{}px;width:{}px;height:{}px;",
             self.left(),
             self.top(),
             self.width,

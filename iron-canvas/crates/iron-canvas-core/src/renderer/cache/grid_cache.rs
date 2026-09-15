@@ -3,7 +3,8 @@
 use std::cell::{Cell, RefCell};
 
 use crate::chrome::{GridLayout, PaneRegion};
-use crate::renderer::cell::fingerprint::{FingerprintState, GridLayoutTransition};
+use crate::renderer::cache::fingerprint::FingerprintState;
+use crate::renderer::cache::layout_transition::GridLayoutTransition;
 use crate::renderer::prepared::FetchedCells;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

@@ -1,10 +1,10 @@
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::layer::Surface;
-use iron_canvas_recorder::recording::Recording;
+use iron_canvas_recorder::recording::{Recording, ValidatedRecording};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::playback::{PlayClock, PlaybackSession, replay_through};
+use crate::playback::{PlayClock, PlaybackSession, ReplayOutcome, replay_through};
 
 use super::{CanvasMode, IronCanvas};
 
@@ -29,6 +29,11 @@ impl IronCanvas {
     /// The method sets the canvas size and DPR from the recording.
     /// It also sets the inline CSS dimensions.
     /// `exitPlayback` restores the previous size and DPR.
+    ///
+    /// The recording is validated before it can mutate live state: an invalid
+    /// canvas, backwards timestamps, unbalanced clip/group brackets, or grid
+    /// ops with no committed anchor are rejected here (see
+    /// `iron_canvas_recorder::recording::ValidatedRecording`).
     #[wasm_bindgen(js_name = "loadRecording")]
     pub fn load_recording(&mut self, bytes: &[u8]) -> Result<(), JsError> {
         if matches!(self.mode, CanvasMode::Recording(_)) {
@@ -38,25 +43,37 @@ impl IronCanvas {
         }
         let rec = Recording::deserialize(bytes)
             .map_err(|e| JsError::new(&format!("recording deserialize failed: {e}")))?;
-        if rec.frames.is_empty() {
-            return Err(JsError::new("recording has no frames"));
-        }
-        let live_size = self.runtime.orchestrator().canvas_size();
-        let live_dpr = self.runtime.dpr();
-        let rec_size = CanvasSize {
-            w: rec.header.canvas_w,
-            h: rec.header.canvas_h,
+        let validated = ValidatedRecording::try_from(rec)
+            .map_err(|e| JsError::new(&format!("recording validation failed: {e}")))?;
+        let live_metrics = match &self.mode {
+            CanvasMode::Playback(session) => session.live_metrics,
+            CanvasMode::Live | CanvasMode::Recording(_) => self.runtime.orchestrator().metrics(),
         };
-        let rec_dpr = rec.header.dpr;
+        let rec_size = validated.metrics().size();
+
+        // Set the inline CSS size because `.ws-canvas` uses `100%`.
+        // Apply the fallible overrides before any live state changes: a rejected
+        // override must not leave the runtime sized for the recording while
+        // `mode` is still Live, with no session holding the live size to restore.
+        // A replacement recording must preserve the current playback CSS too.
+        let grid_style = self.runtime.grid_canvas().style();
+        let overlay_style = self.runtime.overlay_canvas().style();
+        let previous_grid_css = grid_style.css_text();
+        let previous_overlay_css = overlay_style.css_text();
+        if let Err(error) = set_canvas_css_size(self.runtime.grid_canvas(), rec_size)
+            .and_then(|()| set_canvas_css_size(self.runtime.overlay_canvas(), rec_size))
+        {
+            grid_style.set_css_text(&previous_grid_css);
+            overlay_style.set_css_text(&previous_overlay_css);
+            return Err(error);
+        }
 
         // Set the orchestrator and backing stores to the recorded size.
-        // Set the inline CSS size because `.ws-canvas` uses `100%`.
-        self.runtime.resize(rec_size, rec_dpr);
-        set_canvas_css_size(self.runtime.grid_canvas(), rec_size)?;
-        set_canvas_css_size(self.runtime.overlay_canvas(), rec_size)?;
+        self.runtime.resize(validated.metrics());
 
-        self.mode = CanvasMode::Playback(PlaybackSession::new(rec, live_size, live_dpr));
-        self.seek_recording_inner(0)
+        self.mode = CanvasMode::Playback(PlaybackSession::new(validated, live_metrics));
+        self.seek_recording_inner(0)?;
+        Ok(())
     }
 
     /// Paint the specified recorded frame.
@@ -64,8 +81,12 @@ impl IronCanvas {
     /// It pauses active playback before it paints the frame.
     ///
     /// The method returns an error if capture is active.
+    /// The returned `ReplayResult` says whether a committed anchor existed to
+    /// replay: `NoCommittedFrame` means the recording has no committed
+    /// `FullRebuild` frame at or before the target, so the canvas keeps its
+    /// previous pixels. That is a reported state, not an error.
     #[wasm_bindgen(js_name = "seekRecording")]
-    pub fn seek_recording(&mut self, frame_idx: u32) -> Result<(), JsError> {
+    pub fn seek_recording(&mut self, frame_idx: u32) -> Result<ReplayResult, JsError> {
         match &mut self.mode {
             CanvasMode::Recording(_) => {
                 return Err(JsError::new(
@@ -78,7 +99,7 @@ impl IronCanvas {
                 s.clock = PlayClock::Paused;
             }
         }
-        self.seek_recording_inner(frame_idx)
+        Ok(self.seek_recording_inner(frame_idx)?.into())
     }
 
     /// Start time-based playback.
@@ -157,6 +178,9 @@ impl IronCanvas {
     /// Do no work if no playback session is loaded.
     #[wasm_bindgen(js_name = "exitPlayback")]
     pub fn exit_playback(&mut self) {
+        if !matches!(self.mode, CanvasMode::Playback(_)) {
+            return;
+        }
         let CanvasMode::Playback(session) = std::mem::replace(&mut self.mode, CanvasMode::Live)
         else {
             return;
@@ -165,7 +189,7 @@ impl IronCanvas {
         let _ = clear_canvas_css_size(self.runtime.grid_canvas());
         let _ = clear_canvas_css_size(self.runtime.overlay_canvas());
 
-        self.runtime.resize(session.live_size, session.live_dpr);
+        self.runtime.resize(session.live_metrics);
         // Playback bypasses `last_frame`. Thus, resize invalidation is not sufficient.
         self.runtime.orchestrator_mut().request_repaint();
     }
@@ -228,7 +252,9 @@ fn clear_canvas_css_size(canvas: &HtmlCanvasElement) -> Result<(), JsError> {
 
 #[cfg(feature = "dev-tools")]
 impl IronCanvas {
-    fn seek_recording_inner(&mut self, frame_idx: u32) -> Result<(), JsError> {
+    /// Replay `frame_idx` (clamped to the loaded recording) and report whether
+    /// the recording had a committed anchor to replay from.
+    fn seek_recording_inner(&mut self, frame_idx: u32) -> Result<ReplayOutcome, JsError> {
         let CanvasMode::Playback(session) = &mut self.mode else {
             return Err(JsError::new("no recording loaded"));
         };
@@ -242,7 +268,34 @@ impl IronCanvas {
         let grid = self.runtime.orchestrator().grid_surface().painter();
         let overlay = self.runtime.orchestrator().overlay_surface().painter();
         let present_grid = || self.runtime.orchestrator().grid_surface().present();
-        replay_through(grid, overlay, &session.recording, clamped, &present_grid);
-        Ok(())
+        Ok(replay_through(
+            grid,
+            overlay,
+            &session.recording,
+            clamped,
+            &present_grid,
+        ))
+    }
+}
+
+/// Result of a playback seek, mirrored for JavaScript.
+///
+/// Mirrors `ReplayOutcome`; the engine type stays wasm-bindgen-free so
+/// playback logic and its tests build for native targets.
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ReplayResult {
+    Replayed,
+    NoCommittedFrame,
+}
+
+#[cfg(feature = "dev-tools")]
+impl From<ReplayOutcome> for ReplayResult {
+    fn from(outcome: ReplayOutcome) -> Self {
+        match outcome {
+            ReplayOutcome::Replayed => Self::Replayed,
+            ReplayOutcome::NoCommittedFrame => Self::NoCommittedFrame,
+        }
     }
 }

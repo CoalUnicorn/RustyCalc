@@ -11,7 +11,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::geometry::{CanvasMetrics, CanvasSize};
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::{CanvasModel, CanvasTheme};
 
@@ -80,18 +80,26 @@ impl PdfSurface {
     /// `Orchestrator`, but only the grid stream feeds `build_document`,
     /// so the PDF carries no selection, marching ants, autofill handle,
     /// or formula refs.
-    pub fn render(model: Rc<dyn CanvasModel>, theme: &CanvasTheme, size: CanvasSize) -> Vec<u8> {
-        let width = size.w.round() as u32;
-        let height = size.h.round() as u32;
+    /// Fallible: the size must parse as [`CanvasMetrics`] (DPR 1.0 — the page
+    /// has no device scale), and the one paint attempt must commit a frame.
+    /// See [`crate::ExportError`].
+    pub fn render(
+        model: Rc<dyn CanvasModel>,
+        theme: &CanvasTheme,
+        size: CanvasSize,
+    ) -> Result<Vec<u8>, crate::ExportError> {
+        let metrics = CanvasMetrics::new(size, 1.0)?;
+        let width = metrics.size().w.round() as u32;
+        let height = metrics.size().h.round() as u32;
 
         let grid = PdfSurface::new(width, height);
         let overlay = PdfSurface::new(width, height);
         let grid_stream = grid.stream();
 
-        crate::drive_once(grid, overlay, model, theme, size);
+        crate::drive_once(grid, overlay, model, theme, metrics)?;
 
         let stream = grid_stream.borrow();
-        Self::build_document(&stream, width, height)
+        Ok(Self::build_document(&stream, width, height))
     }
 }
 
@@ -109,9 +117,12 @@ impl Surface for PdfSurface {
     /// PDF document dimensions are baked at `PdfSurface::new`; a later
     /// `resize` that disagrees would silently produce a mismatched
     /// `/MediaBox`. The assertion mirrors `SvgSurface::resize`.
-    fn resize(&mut self, css: CanvasSize, _dpr: f64) {
+    fn resize(&mut self, metrics: CanvasMetrics) {
         debug_assert_eq!(
-            (css.w.round() as u32, css.h.round() as u32),
+            (
+                metrics.size().w.round() as u32,
+                metrics.size().h.round() as u32
+            ),
             (self.painter.width, self.painter.height),
             "PdfSurface::resize disagrees with PdfPainter dimensions baked at construction",
         );

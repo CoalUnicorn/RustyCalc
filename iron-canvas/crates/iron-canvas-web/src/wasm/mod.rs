@@ -9,10 +9,25 @@
 //! didn't deserialize. Both are counted on `Cell<u64>` and surfaced via
 //! `console.warn` exactly once per class per session — enough signal to
 //! diagnose a contract drift, not enough to flood the console.
+//!
+//! One rule decides what a content read reports:
+//!
+//! - a JS throw, or a payload no arm decodes, is a wire-shape failure →
+//!   [`Fetched::BridgeFailed`]: the attempt holds prior pixels and re-reads.
+//! - a decoded payload carrying a `null` or a value the core does not model
+//!   (an out-of-range `getCellType` discriminant) is a known-empty or
+//!   unknown-value cell → [`Fetched::Absent`], which the renderer paints with
+//!   its documented fallback.
+//!
+//! So the split is about what is *known*, not about how the host misbehaves: a
+//! `null` is data the bulk and per-cell paths must both read as a blank cell,
+//! while an undecodable payload is a broken contract — and holding a frame on
+//! a broken contract is the only answer that cannot paint a lie.
 
 use std::cell::{Cell, RefCell};
 
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
@@ -89,13 +104,16 @@ extern "C" {
         column: i32,
     ) -> Result<JsValue, JsValue>;
 
+    // The three content accessors return `JsValue`, not the decoded type: a JS
+    // `null` must stay distinguishable from a throw. `(catch)` reports the
+    // throw as `Err`; the `null` decodes to `None` here.
     #[wasm_bindgen(catch, method, js_name = "getCellType")]
     fn get_cell_type(
         this: &IronCalcModelHandle,
         sheet: u32,
         row: i32,
         column: i32,
-    ) -> Result<i32, JsValue>;
+    ) -> Result<JsValue, JsValue>;
 
     #[wasm_bindgen(catch, method, js_name = "getFormattedCellValue")]
     fn get_formatted_cell_value(
@@ -103,7 +121,7 @@ extern "C" {
         sheet: u32,
         row: i32,
         column: i32,
-    ) -> Result<String, JsValue>;
+    ) -> Result<JsValue, JsValue>;
 
     // Batched range accessors (optional on the host). A dense, row-major array
     // of length `(r2-r1+1)*(c2-c1+1)` collapses a pane fetch to one boundary
@@ -157,11 +175,20 @@ pub struct JsBackedModel {
     has_get_theme: bool,
     has_show_row_headers: bool,
     has_show_col_headers: bool,
+    // Geometry/config accessors are optional on the host. A method that is
+    // *statically absent* means the host has no override data for that
+    // dimension — `Absent`, so the engine's documented default applies. A
+    // present method that *throws* is a transient bridge failure
+    // (`BridgeFailed`), which must hold the attempt, not fall back.
+    has_row_height: bool,
+    has_column_width: bool,
+    has_show_grid_lines: bool,
     // Workbook theme, fetched lazily and cached for the model's lifetime
     // (user decision: cache once, explicit refresh). The host must call
     // `IronCanvas.themeChanged()` after `model.setTheme(...)` — a stale
     // cache silently misrenders theme colors, and that is a host bug, not
-    // a recoverable bridge failure.
+    // a recoverable bridge failure. Only a real answer fills the slot: a
+    // failed fetch leaves it empty so the next conversion retries.
     theme: RefCell<Option<ic::Theme>>,
 }
 
@@ -173,6 +200,9 @@ impl JsBackedModel {
         let has_get_theme = Self::has_method(&handle, "getTheme");
         let has_show_row_headers = Self::has_method(&handle, "getShowRowHeaders");
         let has_show_col_headers = Self::has_method(&handle, "getShowColHeaders");
+        let has_row_height = Self::has_method(&handle, "getRowHeight");
+        let has_column_width = Self::has_method(&handle, "getColumnWidth");
+        let has_show_grid_lines = Self::has_method(&handle, "getShowGridLines");
         Self {
             handle,
             js_throw_count: Cell::new(0),
@@ -183,6 +213,9 @@ impl JsBackedModel {
             has_get_theme,
             has_show_row_headers,
             has_show_col_headers,
+            has_row_height,
+            has_column_width,
+            has_show_grid_lines,
             theme: RefCell::new(None),
         }
     }
@@ -196,29 +229,32 @@ impl JsBackedModel {
     }
 
     /// Run `f` against the cached workbook theme, filling the cache on first
-    /// use. A throw, a bad shape, or a host without `getTheme` all cache the
-    /// Office default — strictly better than dropping theme colors, and
-    /// recoverable via `theme_changed()` once the host fixes itself.
+    /// use. A failed fetch leaves the slot empty and passes `None` to `f`.
+    /// The caller reports `BridgeFailed` so the renderer schedules a retry.
+    /// Only a host without `getTheme` uses the Office default.
     /// Holds the `RefCell` borrow across `f`; `f` must not re-enter the theme
     /// cache (style conversion never does).
-    fn with_theme<T>(&self, f: impl FnOnce(&ic::Theme) -> T) -> T {
+    fn with_theme<T>(&self, f: impl FnOnce(Option<&ic::Theme>) -> T) -> T {
         let mut slot = self.theme.borrow_mut();
-        let theme = slot.get_or_insert_with(|| self.fetch_theme());
-        f(theme)
+        if slot.is_none() {
+            *slot = self.fetch_theme();
+        }
+        f(slot.as_ref())
     }
 
-    fn fetch_theme(&self) -> ic::Theme {
+    /// Fetch the workbook theme. `None` is a failure the caller must not cache.
+    /// A host without `getTheme` answers `Some(default)`: that absence is
+    /// structural and cannot change, so the default is permanent.
+    fn fetch_theme(&self) -> Option<ic::Theme> {
         if !self.has_get_theme {
-            return ic::Theme::default();
+            return Some(ic::Theme::default());
         }
-        let Some(jsv) = self.note_throw("getTheme", self.handle.get_theme()) else {
-            return ic::Theme::default();
-        };
+        let jsv = self.note_throw("getTheme", self.handle.get_theme())?;
         match serde_wasm_bindgen::from_value(jsv) {
-            Ok(t) => t,
+            Ok(t) => Some(t),
             Err(e) => {
                 self.note_serde_err("getTheme", &e);
-                ic::Theme::default()
+                None
             }
         }
     }
@@ -301,34 +337,68 @@ impl JsBackedModel {
         }
     }
 
+    /// Fill `out` row-major over `range` with one per-cell fetch each. This is
+    /// the trait's own default body and the degrade path every batch accessor
+    /// shares, so it lives once.
+    fn fill_per_cell<T>(
+        out: &mut Vec<Fetched<T>>,
+        sheet: u32,
+        range: RCRange,
+        mut fetch: impl FnMut(u32, i32, i32) -> Fetched<T>,
+    ) {
+        out.clear();
+        for r in range.r1..=range.r2 {
+            for c in range.c1..=range.c2 {
+                out.push(fetch(sheet, r, c));
+            }
+        }
+    }
+
     /// Per-cell style fill — the trait default's body, reachable as a real
     /// method so a flag-miss or batched-failure can degrade to today's exact
     /// behaviour. (`super` can't reach a trait default.)
     fn styles_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_cell_style(sheet, r, c));
-            }
-        }
+        Self::fill_per_cell(out, sheet, range, |sheet, row, column| {
+            self.get_cell_style(sheet, row, column)
+        });
     }
 
     fn values_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<String>>) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_formatted_cell_value(sheet, r, c));
-            }
-        }
+        Self::fill_per_cell(out, sheet, range, |sheet, row, column| {
+            self.get_formatted_cell_value(sheet, row, column)
+        });
     }
 
     fn types_in_per_cell(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>) {
-        out.clear();
-        for r in range.r1..=range.r2 {
-            for c in range.c1..=range.c2 {
-                out.push(self.get_cell_type(sheet, r, c));
+        Self::fill_per_cell(out, sheet, range, |sheet, row, column| {
+            self.get_cell_type(sheet, row, column)
+        });
+    }
+
+    /// One boundary crossing for a dense row-major range, or `None` when the
+    /// batch cannot be trusted and the caller must degrade to the per-cell
+    /// path. Owns the whole D-1/D-2 ladder so all three channels apply the
+    /// same rules: a throw is transient (`note_throw`), a non-conforming
+    /// payload is a shape error (`note_serde_err`), and a length other than
+    /// the range's cell count cannot be indexed row-major (`batch_is_dense`).
+    ///
+    /// A `null` *element* is none of those — it is a blank cell, and each
+    /// channel decides what that maps to.
+    fn decode_dense_batch<T: DeserializeOwned>(
+        &self,
+        ctx: &str,
+        fetch: Result<JsValue, JsValue>,
+        range: RCRange,
+    ) -> Option<Vec<Option<T>>> {
+        let jsv = self.note_throw(ctx, fetch)?;
+        let decoded: Vec<Option<T>> = match serde_wasm_bindgen::from_value(jsv) {
+            Ok(v) => v,
+            Err(e) => {
+                self.note_serde_err(ctx, &e);
+                return None;
             }
-        }
+        };
+        batch_is_dense(&decoded, range).then_some(decoded)
     }
 }
 
@@ -367,19 +437,37 @@ impl CanvasModel for JsBackedModel {
         )
     }
 
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
-        self.note_throw("getRowHeight", self.handle.get_row_height(sheet, row))
+    fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64> {
+        if !self.has_row_height {
+            return Fetched::Absent;
+        }
+        match self.note_throw("getRowHeight", self.handle.get_row_height(sheet, row)) {
+            Some(h) => Fetched::Value(h),
+            None => Fetched::BridgeFailed,
+        }
     }
 
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
-        self.note_throw(
+    fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64> {
+        if !self.has_column_width {
+            return Fetched::Absent;
+        }
+        match self.note_throw(
             "getColumnWidth",
             self.handle.get_column_width(sheet, column),
-        )
+        ) {
+            Some(w) => Fetched::Value(w),
+            None => Fetched::BridgeFailed,
+        }
     }
 
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
-        self.note_throw("getShowGridLines", self.handle.get_show_grid_lines(sheet))
+    fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool> {
+        if !self.has_show_grid_lines {
+            return Fetched::Absent;
+        }
+        match self.note_throw("getShowGridLines", self.handle.get_show_grid_lines(sheet)) {
+            Some(v) => Fetched::Value(v),
+            None => Fetched::BridgeFailed,
+        }
     }
 
     fn get_show_row_headers(&self, sheet: u32) -> Option<bool> {
@@ -404,21 +492,27 @@ impl CellContentQuery for JsBackedModel {
         // hashes what is painted. If JS returns the base style, CF cells paint
         // unmerged here — a known parity gap with the native adapter.
         //
-        // A JS throw or a non-conforming payload is a transient bridge failure,
-        // not an empty cell — the next frame re-queries. `getCellStyle` never
-        // legitimately answers "absent" (a blank cell still has a base style),
-        // so there is no `Absent` arm here.
+        // A JS throw, or a payload no `JsStyle` arm decodes, is a wire-shape
+        // failure — `BridgeFailed`, so the attempt holds prior pixels and the
+        // next frame re-reads. An explicit `null` is data, not a failure: the
+        // bulk contract's blank cell, reported as `Absent`.
         let Some(jsv) = self.note_throw(
             "getCellStyle",
             self.handle.get_cell_style(sheet, row, column),
         ) else {
             return Fetched::BridgeFailed;
         };
-        match serde_wasm_bindgen::from_value::<JsStyle>(jsv) {
-            Ok(s) => {
+        match serde_wasm_bindgen::from_value::<Option<JsStyle>>(jsv) {
+            Ok(Some(s)) => {
                 let s: ic::Style = s.into();
-                Fetched::Value(self.with_theme(|t| style_to_core(s, &|c| color_to_css(c, t))))
+                self.with_theme(|theme| match theme {
+                    Some(t) => Fetched::Value(style_to_core(s, &|c| color_to_css(c, t))),
+                    None => Fetched::BridgeFailed,
+                })
             }
+            // A `null` payload is a blank cell — the same meaning the bulk
+            // `getCellStylesIn` contract gives a null element.
+            Ok(None) => Fetched::Absent,
             Err(e) => {
                 self.note_serde_err("getCellStyle", &e);
                 Fetched::BridgeFailed
@@ -427,32 +521,48 @@ impl CellContentQuery for JsBackedModel {
     }
 
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind> {
-        // Two failures with opposite lifetimes must not share a variant. A
-        // *throw* is transient — `BridgeFailed`, so the caller holds prior
-        // pixels and re-queries next frame. A successful call carrying a
-        // discriminant the core enum doesn't model is *persistent* (re-querying
-        // returns the same value); routing it through `BridgeFailed` would
-        // suppress the active-cell overlay every frame. It maps to `Absent`,
-        // letting the renderer's `unwrap_or(CellKind::Text)` own the fallback —
-        // matching the native adapter, where a model error is also `Absent`.
-        let Some(disc) =
+        // A throw, or a payload no arm decodes, is a wire-shape failure —
+        // `BridgeFailed`, so the caller holds prior pixels and re-queries next
+        // frame. A `null` is the bulk contract's blank cell. A discriminant the
+        // core enum does not model decoded fine: the *value* is unknown, not the
+        // payload, and re-querying returns the same one — so it maps to
+        // `Absent`, letting the renderer's `unwrap_or(CellKind::Text)` own the
+        // fallback, matching the native adapter where a model error is also
+        // `Absent`.
+        let Some(jsv) =
             self.note_throw("getCellType", self.handle.get_cell_type(sheet, row, column))
         else {
             return Fetched::BridgeFailed;
         };
-        match cell_kind_from_discriminant(disc) {
-            Some(k) => Fetched::Value(k),
-            None => Fetched::Absent,
+        match serde_wasm_bindgen::from_value::<Option<i32>>(jsv) {
+            Ok(Some(disc)) => match cell_kind_from_discriminant(disc) {
+                Some(k) => Fetched::Value(k),
+                None => Fetched::Absent,
+            },
+            Ok(None) => Fetched::Absent,
+            Err(e) => {
+                self.note_serde_err("getCellType", &e);
+                Fetched::BridgeFailed
+            }
         }
     }
 
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String> {
-        match self.note_throw(
+        // A throw is a transient bridge failure; a `null` payload is a blank
+        // cell, matching the bulk `getFormattedCellValuesIn` contract.
+        let Some(jsv) = self.note_throw(
             "getFormattedCellValue",
             self.handle.get_formatted_cell_value(sheet, row, column),
-        ) {
-            Some(v) => Fetched::Value(v),
-            None => Fetched::BridgeFailed,
+        ) else {
+            return Fetched::BridgeFailed;
+        };
+        match serde_wasm_bindgen::from_value::<Option<String>>(jsv) {
+            Ok(Some(v)) => Fetched::Value(v),
+            Ok(None) => Fetched::Absent,
+            Err(e) => {
+                self.note_serde_err("getFormattedCellValue", &e);
+                Fetched::BridgeFailed
+            }
         }
     }
 
@@ -461,37 +571,29 @@ impl CellContentQuery for JsBackedModel {
         if !self.has_styles_in {
             return self.styles_in_per_cell(sheet, range, out);
         }
-        // A transient throw is a fall-back, not a corruption.
-        let jsv = match self.note_throw(
+        // D-2: a throw, a shape drift, or a wrong-length array forfeits the
+        // batch. None of them corrupts the output — the per-cell path re-reads
+        // every cell and reports its own outcome.
+        let Some(decoded) = self.decode_dense_batch::<JsStyle>(
             "getCellStylesIn",
             self.handle
                 .get_cell_styles_in(sheet, range.r1, range.c1, range.r2, range.c2),
-        ) {
-            Some(v) => v,
-            None => return self.styles_in_per_cell(sheet, range, out),
-        };
-        // The array element shape is the per-cell shape — no new wire struct.
-        let decoded: Vec<Option<JsStyle>> = match serde_wasm_bindgen::from_value(jsv) {
-            Ok(v) => v,
-            Err(e) => {
-                self.note_serde_err("getCellStylesIn", &e);
-                return self.styles_in_per_cell(sheet, range, out);
-            }
-        };
-
-        // D-2: only a wrong-length array is untrustworthy now; a null element
-        // is a blank cell. A *clean dense batch* never carries `BridgeFailed`:
-        // the whole-batch throw is the only failure here and routed to per-cell
-        // above — so a null element is `Absent`, not a transient failure.
-        if !batch_is_dense(&decoded, range) {
+            range,
+        ) else {
             return self.styles_in_per_cell(sheet, range, out);
-        }
+        };
         out.clear();
+        // The array element shape is the per-cell shape — no new wire struct.
+        // A null element is a blank cell: `Absent`, never `BridgeFailed`, so a
+        // pane full of blanks skips the O(cells) per-cell refetch.
         // One theme borrow for the whole batch — not one cache hit per cell.
-        self.with_theme(|t| {
-            out.extend(decoded.into_iter().map(|s| match s {
-                Some(s) => Fetched::Value(style_to_core(s.into(), &|c| color_to_css(c, t))),
-                None => Fetched::Absent,
+        self.with_theme(|theme| {
+            out.extend(decoded.into_iter().map(|s| match (s, theme) {
+                (Some(s), Some(t)) => {
+                    Fetched::Value(style_to_core(s.into(), &|c| color_to_css(c, t)))
+                }
+                (Some(_), None) => Fetched::BridgeFailed,
+                (None, _) => Fetched::Absent,
             }));
         });
     }
@@ -505,24 +607,14 @@ impl CellContentQuery for JsBackedModel {
         if !self.has_values_in {
             return self.values_in_per_cell(sheet, range, out);
         }
-        let jsv = match self.note_throw(
+        let Some(decoded) = self.decode_dense_batch::<String>(
             "getFormattedCellValuesIn",
             self.handle
                 .get_formatted_cell_values_in(sheet, range.r1, range.c1, range.r2, range.c2),
-        ) {
-            Some(v) => v,
-            None => return self.values_in_per_cell(sheet, range, out),
-        };
-        let decoded: Vec<Option<String>> = match serde_wasm_bindgen::from_value(jsv) {
-            Ok(v) => v,
-            Err(e) => {
-                self.note_serde_err("getFormattedCellValuesIn", &e);
-                return self.values_in_per_cell(sheet, range, out);
-            }
-        };
-        if !batch_is_dense(&decoded, range) {
+            range,
+        ) else {
             return self.values_in_per_cell(sheet, range, out);
-        }
+        };
         out.clear();
         out.extend(decoded.into_iter().map(|v| match v {
             Some(v) => Fetched::Value(v),
@@ -534,24 +626,14 @@ impl CellContentQuery for JsBackedModel {
         if !self.has_types_in {
             return self.types_in_per_cell(sheet, range, out);
         }
-        let jsv = match self.note_throw(
+        let Some(decoded) = self.decode_dense_batch::<i32>(
             "getCellTypesIn",
             self.handle
                 .get_cell_types_in(sheet, range.r1, range.c1, range.r2, range.c2),
-        ) {
-            Some(v) => v,
-            None => return self.types_in_per_cell(sheet, range, out),
-        };
-        let decoded: Vec<Option<i32>> = match serde_wasm_bindgen::from_value(jsv) {
-            Ok(v) => v,
-            Err(e) => {
-                self.note_serde_err("getCellTypesIn", &e);
-                return self.types_in_per_cell(sheet, range, out);
-            }
-        };
-        if !batch_is_dense(&decoded, range) {
+            range,
+        ) else {
             return self.types_in_per_cell(sheet, range, out);
-        }
+        };
         // A valid discriminant maps to a `CellKind`; a null or out-of-range one
         // yields `Absent` — the same legitimate per-cell outcome (matching
         // single-cell `get_cell_type`), not a corruption.
@@ -584,6 +666,13 @@ fn batch_is_dense<T>(decoded: &[Option<T>], range: RCRange) -> bool {
     decoded.len() == rows * cols
 }
 
+/// The `getSelectedView` payload.
+///
+/// The host's `SelectedView` (IronCalc's wasm/node API) names its fields in
+/// snake_case — `top_row` / `left_column` — like every other IronCalc model
+/// payload the bridge consumes, so this is deliberately the one inbound shape
+/// without a camelCase rename policy. The shapes in `crate::wire` are
+/// iron-canvas's own API and stay camelCase; do not merge the conventions.
 #[derive(Deserialize)]
 struct JsSelectedView {
     sheet: u32,
@@ -727,8 +816,11 @@ mod tests {
     }
 }
 
+/// Browser-run tests over the exact JS payload shapes the bridge decodes.
+/// Only a `from_value` decode pins the wire key names — a fixture built as the
+/// Rust struct in the sibling module cannot see them.
 #[cfg(test)]
-mod js_style_tests {
+mod js_payload_decode_tests {
     use super::*;
     use wasm_bindgen_test::*;
 
@@ -777,6 +869,49 @@ mod js_style_tests {
             .expect("ExtendedStyle payload must decode")
             .into();
         assert_eq!(decoded, inner);
+    }
+
+    /// Pin the exact key names the host sends. `JsSelectedView` carries no
+    /// rename policy, so a camelCase `topRow`/`leftColumn` payload would decode
+    /// to an error and hold every paint attempt as `HeldOnInputFailure` — a
+    /// failure the natively-built fixture in the sibling module cannot catch.
+    #[wasm_bindgen_test]
+    fn decodes_the_host_selected_view_payload() {
+        let payload = js_sys::Object::new();
+        for (key, number) in [
+            ("sheet", 2.0),
+            ("row", 7.0),
+            ("column", 3.0),
+            ("top_row", 6.0),
+            ("left_column", 2.0),
+        ] {
+            js_sys::Reflect::set(
+                &payload,
+                &JsValue::from_str(key),
+                &JsValue::from_f64(number),
+            )
+            .expect("set payload key");
+        }
+        let range = js_sys::Array::new();
+        for number in [5.0, 1.0, 12.0, 4.0] {
+            range.push(&JsValue::from_f64(number));
+        }
+        js_sys::Reflect::set(&payload, &JsValue::from_str("range"), &range).expect("set range");
+
+        let decoded: JsSelectedView =
+            serde_wasm_bindgen::from_value(payload.into()).expect("host payload must decode");
+        let view = decoded.into_canvas_view();
+        assert_eq!((view.sheet, view.row, view.column), (2, 7, 3));
+        assert_eq!((view.top_row, view.left_column), (6, 2));
+        assert_eq!(
+            view.selection,
+            RCRange {
+                r1: 5,
+                c1: 1,
+                r2: 12,
+                c2: 4
+            }
+        );
     }
 }
 

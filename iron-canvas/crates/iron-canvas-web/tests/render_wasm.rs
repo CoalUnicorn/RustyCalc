@@ -35,9 +35,14 @@ fn fractional_dpr_reaches_canvas_backing_store() {
         panic!("create IronCanvas");
     };
 
-    canvas.resize(300.0, 200.0, 1.25);
+    canvas
+        .resize(300.0, 200.0, 1.25)
+        .expect("fixture canvas metrics are valid");
 
-    let (expect_w, expect_h) = CanvasSize { w: 300.0, h: 200.0 }.to_backing_size(1.25);
+    let (expect_w, expect_h) =
+        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 300.0, h: 200.0 }, 1.25)
+            .expect("fixture canvas metrics are valid")
+            .backing_size();
     assert_eq!(
         grid.width(),
         expect_w,
@@ -59,6 +64,565 @@ use iron_canvas_core::{CellDecoration, CellKind, CellStyle, Fetched};
 use iron_canvas_web::wasm::JsBackedModel;
 use iron_canvas_web::{CanvasModel, CellContentQuery};
 use wasm_bindgen::JsValue;
+
+#[wasm_bindgen_test]
+fn geometry_accessors_preserve_absence_values_and_throws() {
+    let absent = model_with_methods(&[]);
+    assert_eq!(absent.get_row_height(0, 1), Fetched::Absent);
+    assert_eq!(absent.get_column_width(0, 1), Fetched::Absent);
+    assert_eq!(absent.get_show_grid_lines(0), Fetched::Absent);
+
+    let height = js_sys::Function::new_no_args("return 20.5;");
+    let width = js_sys::Function::new_no_args("return 0;");
+    let grid = js_sys::Function::new_no_args("return false;");
+    let values = model_with_methods(&[
+        ("getRowHeight", &height),
+        ("getColumnWidth", &width),
+        ("getShowGridLines", &grid),
+    ]);
+    assert_eq!(values.get_row_height(0, 1), Fetched::Value(20.5));
+    assert_eq!(values.get_column_width(0, 1), Fetched::Value(0.0));
+    assert_eq!(values.get_show_grid_lines(0), Fetched::Value(false));
+
+    let throws = js_sys::Function::new_no_args("throw new Error('extent unavailable');");
+    let failed = model_with_methods(&[
+        ("getRowHeight", &throws),
+        ("getColumnWidth", &throws),
+        ("getShowGridLines", &throws),
+    ]);
+    assert_eq!(failed.get_row_height(0, 1), Fetched::BridgeFailed);
+    assert_eq!(failed.get_column_width(0, 1), Fetched::BridgeFailed);
+    assert_eq!(failed.get_show_grid_lines(0), Fetched::BridgeFailed);
+}
+
+#[wasm_bindgen_test]
+fn content_accessors_read_null_as_a_blank_cell() {
+    // The bulk contract reads a null element as a blank cell. The per-cell
+    // twins must agree: the same host data paints blank through
+    // `getCellStylesIn` and holds the frame forever through `getCellStyle` if
+    // they do not.
+    let null = js_sys::Function::new_no_args("return null;");
+    let model = model_with_methods(&[
+        ("getCellStyle", &null),
+        ("getCellType", &null),
+        ("getFormattedCellValue", &null),
+    ]);
+    assert_eq!(model.get_cell_style(0, 1, 1), Fetched::Absent);
+    assert_eq!(model.get_cell_type(0, 1, 1), Fetched::Absent);
+    assert_eq!(model.get_formatted_cell_value(0, 1, 1), Fetched::Absent);
+}
+
+#[wasm_bindgen_test]
+fn content_accessors_hold_on_an_undecodable_payload() {
+    // A payload no arm decodes is wire-shape drift: it must hold the attempt
+    // (`BridgeFailed`), never paint a fabricated cell. Only a payload that
+    // *did* decode into a value the core does not model (an out-of-range type
+    // discriminant) is `Absent`, where the renderer owns the fallback.
+    let bad_style = js_sys::Function::new_no_args("return 'not-a-style';");
+    let bad_value = js_sys::Function::new_no_args("return 7;");
+    let unknown_kind = js_sys::Function::new_no_args("return 999;");
+    let model = model_with_methods(&[
+        ("getCellStyle", &bad_style),
+        ("getFormattedCellValue", &bad_value),
+    ]);
+    assert_eq!(model.get_cell_style(0, 1, 1), Fetched::BridgeFailed);
+    assert_eq!(
+        model.get_formatted_cell_value(0, 1, 1),
+        Fetched::BridgeFailed
+    );
+
+    let model = model_with_methods(&[("getCellType", &unknown_kind)]);
+    assert_eq!(model.get_cell_type(0, 1, 1), Fetched::Absent);
+}
+
+#[wasm_bindgen_test]
+fn bulk_content_fallback_preserves_row_order_absence_and_failure() {
+    let per_cell = js_sys::Function::new_with_args(
+        "sheet, row, column",
+        "if (sheet === 2 && row === 3 && column === 3) throw new Error('cell unavailable'); return null;",
+    );
+    for batch_body in [
+        None,
+        Some("throw new Error('batch unavailable');"),
+        Some("return {};"),
+        Some("return [null];"),
+        Some("return [{}, {}, {}, {}];"),
+        Some("return [null, null, null, null];"),
+    ] {
+        let mut methods = vec![
+            ("getCellStyle", &per_cell),
+            ("getCellType", &per_cell),
+            ("getFormattedCellValue", &per_cell),
+        ];
+        let batch = batch_body.map(js_sys::Function::new_no_args);
+        if let Some(batch) = &batch {
+            methods.extend([
+                ("getCellStylesIn", batch),
+                ("getCellTypesIn", batch),
+                ("getFormattedCellValuesIn", batch),
+            ]);
+        }
+        let model = model_with_methods(&methods);
+        let range = RCRange {
+            r1: 2,
+            c1: 3,
+            r2: 3,
+            c2: 4,
+        };
+        let mut styles = vec![Fetched::Value(CellStyle::default()); 7];
+        let mut values = vec![Fetched::Value("stale".to_string()); 7];
+        let mut types = vec![Fetched::Value(CellKind::Text); 7];
+        model.get_cell_styles_in(2, range, &mut styles);
+        model.get_formatted_cell_values_in(2, range, &mut values);
+        model.get_cell_types_in(2, range, &mut types);
+        assert_eq!((styles.len(), values.len(), types.len()), (4, 4, 4));
+        for index in 0..4 {
+            let failed = index == 2 && batch_body != Some("return [null, null, null, null];");
+            assert_eq!(
+                styles[index],
+                if failed {
+                    Fetched::BridgeFailed
+                } else {
+                    Fetched::Absent
+                }
+            );
+            assert_eq!(
+                values[index],
+                if failed {
+                    Fetched::BridgeFailed
+                } else {
+                    Fetched::Absent
+                }
+            );
+            assert_eq!(
+                types[index],
+                if failed {
+                    Fetched::BridgeFailed
+                } else {
+                    Fetched::Absent
+                }
+            );
+        }
+    }
+}
+
+/// A transient `getTheme` failure must not pin the Office default for the
+/// model's lifetime. The failed conversion holds, and the next one resolves
+/// against the host theme once the host answers.
+#[wasm_bindgen_test]
+fn transient_get_theme_failure_is_retried() {
+    let host_theme = ic::Theme {
+        accent1: "#FF0000".to_string(),
+        ..ic::Theme::default()
+    };
+    let theme_js = serde_wasm_bindgen::to_value(&host_theme).expect("fixture Theme serializes");
+    let calls = Rc::new(Cell::new(0u32));
+    let get_theme = Closure::wrap(Box::new(move || -> JsValue {
+        let n = calls.get();
+        calls.set(n + 1);
+        if n == 0 {
+            wasm_bindgen::throw_val(JsValue::from_str("transient getTheme failure"));
+        }
+        theme_js.clone()
+    }) as Box<dyn Fn() -> JsValue>);
+
+    // A theme-indexed fill: accent1 resolves through whichever theme the bridge
+    // holds, so the two assertions below see the theme, not the style.
+    let style = ic::Style {
+        fill: ic::Fill {
+            color: ic::Color::Theme(4, 0.0),
+        },
+        ..ic::Style::default()
+    };
+    let style_js = serde_wasm_bindgen::to_value(&style).expect("fixture Style serializes");
+    let get_style = Closure::wrap(
+        Box::new(move |_sheet: u32, _row: i32, _col: i32| -> JsValue { style_js.clone() })
+            as Box<dyn Fn(u32, i32, i32) -> JsValue>,
+    );
+
+    let model = model_with_methods(&[
+        ("getCellStyle", get_style.as_ref().unchecked_ref()),
+        ("getTheme", get_theme.as_ref().unchecked_ref()),
+    ]);
+
+    assert_eq!(
+        model.get_cell_style(0, 1, 1),
+        Fetched::BridgeFailed,
+        "the failed theme fetch must request a retry"
+    );
+
+    let Fetched::Value(second) = model.get_cell_style(0, 1, 1) else {
+        panic!("a conforming style payload must resolve");
+    };
+    assert_eq!(
+        second.fill_color.as_deref(),
+        Some("#FF0000"),
+        "the next conversion must re-query the theme instead of pinning the default"
+    );
+    assert_eq!(
+        model.diagnostic_counts().0,
+        1,
+        "exactly one throw: the retry succeeded on the second fetch"
+    );
+}
+
+#[wasm_bindgen_test]
+fn theme_failure_holds_pixels_and_retries_without_a_host_signal() {
+    for rebuild in [false, true] {
+        for bulk in [false, true] {
+            for dpr in [1.0, 1.25, 1.5] {
+                let handle: js_sys::Object =
+                    make_fixture_model(plain_fixture_store()).unchecked_into();
+                let style = ic::Style {
+                    fill: ic::Fill {
+                        color: ic::Color::Theme(4, 0.0),
+                    },
+                    ..ic::Style::default()
+                };
+                set_value_prop(
+                    &handle,
+                    "style",
+                    &serde_wasm_bindgen::to_value(&style).expect("style"),
+                );
+                set_value_prop(
+                    &handle,
+                    "theme",
+                    &serde_wasm_bindgen::to_value(&ic::Theme::default()).expect("theme"),
+                );
+                set_prop(
+                    &handle,
+                    "getCellStyle",
+                    &js_sys::Function::new_no_args("return this.style;"),
+                );
+                set_prop(
+                    &handle,
+                    "getTheme",
+                    &js_sys::Function::new_no_args(
+                        "if (this.failTheme) throw new Error('theme unavailable'); return this.theme;",
+                    ),
+                );
+                if bulk {
+                    set_prop(
+                        &handle,
+                        "getCellStylesIn",
+                        &js_sys::Function::new_with_args(
+                            "sheet, r1, c1, r2, c2",
+                            "return Array((r2-r1+1)*(c2-c1+1)).fill(this.style);",
+                        ),
+                    );
+                }
+                let grid = make_canvas();
+                let overlay = make_canvas();
+                let mut canvas = IronCanvas::create(grid.clone(), overlay.clone()).expect("canvas");
+                canvas
+                    .set_model_js(handle.clone().into())
+                    .expect("fixture model");
+                canvas.resize(400.0, 240.0, dpr).expect("valid metrics");
+                assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+                let fresh_grid = make_canvas();
+                let fresh_overlay = make_canvas();
+                let mut fresh = IronCanvas::create(fresh_grid.clone(), fresh_overlay.clone())
+                    .expect("reference");
+                fresh
+                    .set_model_js(handle.clone().into())
+                    .expect("healthy model");
+                fresh.resize(400.0, 240.0, dpr).expect("valid metrics");
+                assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+                let before = [grid_pixels(&grid), grid_pixels(&overlay)];
+                let theme = ic::Theme {
+                    accent1: "#FF0000".to_string(),
+                    ..ic::Theme::default()
+                };
+                set_value_prop(
+                    &handle,
+                    "theme",
+                    &serde_wasm_bindgen::to_value(&theme).expect("changed theme"),
+                );
+                set_value_prop(&handle, "failTheme", &JsValue::TRUE);
+                canvas.theme_changed();
+                if rebuild {
+                    canvas.request_repaint();
+                }
+                assert_eq!(
+                    canvas.render_pending(),
+                    RenderResult::RetryRequired,
+                    "bulk={bulk}, dpr={dpr}, rebuild={rebuild}"
+                );
+                assert!(
+                    [grid_pixels(&grid), grid_pixels(&overlay)] == before,
+                    "held pixels: bulk={bulk}, dpr={dpr}, rebuild={rebuild}"
+                );
+                set_value_prop(&handle, "failTheme", &JsValue::FALSE);
+                assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+                assert_eq!(canvas.render_pending(), RenderResult::Idle);
+
+                // Match the healthy theme-change repaint, including fractional-DPR
+                // edge coverage, after both canvases started from a Fresh frame.
+                fresh.theme_changed();
+                if rebuild {
+                    fresh.request_repaint();
+                }
+                assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+                assert!(
+                    [grid_pixels(&grid), grid_pixels(&overlay)]
+                        == [grid_pixels(&fresh_grid), grid_pixels(&fresh_overlay)],
+                    "recovered pixels: bulk={bulk}, dpr={dpr}, rebuild={rebuild}"
+                );
+            }
+        }
+    }
+}
+
+#[wasm_bindgen_test]
+fn backward_scroll_after_one_failed_measure_matches_fresh() {
+    for (method, value) in [("getRowHeight", "20"), ("getColumnWidth", "80")] {
+        let top = Rc::new(Cell::new(3));
+        let left = Rc::new(Cell::new(3));
+        let handle: js_sys::Object = make_scrollable_fixture_model(
+            stage6_fixture_store(),
+            Rc::clone(&top),
+            Rc::clone(&left),
+            None,
+        )
+        .unchecked_into();
+        let accessor = js_sys::Function::new_with_args(
+            "sheet, id",
+            &format!(
+                "if (id === 1 && this.failOnce) {{ this.failOnce = false; throw new Error('one failed measure'); }} return {value};"
+            ),
+        );
+        set_prop(&handle, method, &accessor);
+        let grid = make_canvas();
+        let overlay = make_canvas();
+        let mut canvas = IronCanvas::create(grid.clone(), overlay.clone())
+            .expect("create backward scroll canvas");
+        canvas
+            .set_model_js(handle.clone().into())
+            .expect("valid fixture");
+        canvas
+            .resize(400.0, 240.0, 1.25)
+            .expect("fixture canvas metrics are valid");
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+
+        set_value_prop(&handle, "failOnce", &JsValue::TRUE);
+        if method == "getRowHeight" {
+            top.set(1);
+        } else {
+            left.set(1);
+        }
+        canvas.view_changed();
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+
+        let fresh_grid = make_canvas();
+        let fresh_overlay = make_canvas();
+        let mut fresh = IronCanvas::create(fresh_grid.clone(), fresh_overlay.clone())
+            .expect("create Fresh reference canvas");
+        fresh
+            .set_model_js(handle.into())
+            .expect("same recovered model");
+        fresh
+            .resize(400.0, 240.0, 1.25)
+            .expect("fixture canvas metrics are valid");
+        assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+        assert_eq!(grid_pixels(&grid), grid_pixels(&fresh_grid), "{method}");
+        assert_eq!(grid_pixels(&overlay), grid_pixels(&fresh_overlay));
+    }
+}
+
+#[wasm_bindgen_test]
+fn hidden_row_header_blits_match_fresh_on_both_axes() {
+    use iron_canvas_core::geometry::prim::Axis;
+
+    for dpr in [1.0, 1.25, 1.5] {
+        for axis in [Axis::Row, Axis::Column] {
+            for (frozen, show_col_headers) in
+                [(false, true), (true, true), (false, false), (true, false)]
+            {
+                let top = Rc::new(Cell::new(3));
+                let left = Rc::new(Cell::new(3));
+                let handle: js_sys::Object = make_scrollable_fixture_model(
+                    stage6_fixture_store(),
+                    Rc::clone(&top),
+                    Rc::clone(&left),
+                    None,
+                )
+                .unchecked_into();
+                set_prop(
+                    &handle,
+                    "getShowRowHeaders",
+                    &js_sys::Function::new_no_args("return false;"),
+                );
+                if !show_col_headers {
+                    set_prop(
+                        &handle,
+                        "getShowColHeaders",
+                        &js_sys::Function::new_no_args("return false;"),
+                    );
+                }
+                if frozen {
+                    set_prop(
+                        &handle,
+                        "getFrozenRowsCount",
+                        &js_sys::Function::new_no_args("return 2;"),
+                    );
+                    set_prop(
+                        &handle,
+                        "getFrozenColumnsCount",
+                        &js_sys::Function::new_no_args("return 1;"),
+                    );
+                }
+                let grid = make_canvas();
+                let overlay = make_canvas();
+                let mut canvas = IronCanvas::create(grid.clone(), overlay.clone())
+                    .expect("create hidden-header canvas");
+                canvas
+                    .set_model_js(handle.clone().into())
+                    .expect("valid fixture");
+                canvas.resize(400.0, 240.0, dpr).expect("valid metrics");
+                assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+
+                for origin in [4, 3] {
+                    match axis {
+                        Axis::Row => top.set(origin),
+                        Axis::Column => left.set(origin),
+                    }
+                    canvas.view_changed();
+                    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+                    let trace = canvas.frame_trace();
+                    assert!(trace.contains("ScrollBlit"), "{trace}");
+                    if dpr == 1.0 || (!frozen && !show_col_headers) {
+                        stage6_assert_verdict(&trace, "grid:strip", "aligned hidden-header blit");
+                    } else {
+                        stage6_assert_verdict(&trace, "grid:FULL", "fractional header boundary");
+                    }
+                    let fresh_grid = make_canvas();
+                    let fresh_overlay = make_canvas();
+                    let mut fresh = IronCanvas::create(fresh_grid.clone(), fresh_overlay.clone())
+                        .expect("create Fresh reference canvas");
+                    fresh
+                        .set_model_js(handle.clone().into())
+                        .expect("same fixture");
+                    fresh.resize(400.0, 240.0, dpr).expect("valid metrics");
+                    assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+                    let expected = grid_pixels(&fresh_grid);
+                    let actual = grid_pixels(&grid);
+                    let differences: Vec<_> = actual
+                        .iter()
+                        .zip(&expected)
+                        .enumerate()
+                        .filter_map(|(offset, (actual, expected))| {
+                            (actual != expected).then_some((offset, *actual, *expected))
+                        })
+                        .collect();
+                    assert!(
+                        differences.is_empty(),
+                        "grid: {axis:?}, origin {origin}, frozen {frozen}, col headers {show_col_headers}, DPR {dpr}: {} bytes differ from Fresh; first {:?}",
+                        differences.len(),
+                        differences.first()
+                    );
+                    assert_eq!(
+                        grid_pixels(&overlay),
+                        grid_pixels(&fresh_overlay),
+                        "overlay: {axis:?}, origin {origin}, frozen {frozen}, DPR {dpr}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[wasm_bindgen_test]
+fn geometry_and_grid_failures_preserve_pixels_and_retry() {
+    for dpr in [1.0, 1.25, 1.5] {
+        for (method, value, path) in [
+            ("getRowHeight", "20", "fresh"),
+            ("getColumnWidth", "80", "fresh"),
+            ("getRowHeight", "20", "rows"),
+            ("getColumnWidth", "80", "columns"),
+            ("getShowGridLines", "true", "fresh"),
+            ("getShowGridLines", "true", "content"),
+            ("getShowGridLines", "true", "damage"),
+            ("getShowGridLines", "true", "rows"),
+        ] {
+            let top = Rc::new(Cell::new(3));
+            let left = Rc::new(Cell::new(3));
+            let handle: js_sys::Object = make_scrollable_fixture_model(
+                stage6_fixture_store(),
+                Rc::clone(&top),
+                Rc::clone(&left),
+                None,
+            )
+            .unchecked_into();
+            let accessor = js_sys::Function::new_no_args(&format!(
+                "if (this.fail) throw new Error('temporary read failure'); return {value};"
+            ));
+            set_prop(&handle, method, &accessor);
+            let grid = make_canvas();
+            let overlay = make_canvas();
+            let mut canvas = IronCanvas::create(grid.clone(), overlay.clone())
+                .expect("create failure fixture canvas");
+            canvas
+                .set_model_js(handle.clone().into())
+                .expect("valid fixture model");
+            canvas
+                .resize(400.0, 240.0, dpr)
+                .expect("fixture canvas metrics are valid");
+            assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+            let before_grid = grid_pixels(&grid);
+            let before_overlay = grid_pixels(&overlay);
+            set_value_prop(&handle, "fail", &JsValue::TRUE);
+            match path {
+                "fresh" => canvas.request_repaint(),
+                "content" => canvas.mark_content_dirty(),
+                "damage" => canvas.mark_rows_damaged(0, 5, 5),
+                "rows" => {
+                    top.set(1);
+                    canvas.view_changed();
+                }
+                "columns" => {
+                    left.set(1);
+                    canvas.view_changed();
+                }
+                _ => unreachable!("fixture path"),
+            }
+            for _ in 0..2 {
+                assert_eq!(
+                    canvas.render_pending(),
+                    RenderResult::RetryRequired,
+                    "{method}/{path}/{dpr}"
+                );
+                assert_eq!(grid_pixels(&grid), before_grid);
+                assert_eq!(grid_pixels(&overlay), before_overlay);
+            }
+            set_value_prop(&handle, "fail", &JsValue::FALSE);
+            assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+            assert_eq!(canvas.render_pending(), RenderResult::Idle);
+
+            let fresh_grid = make_canvas();
+            let fresh_overlay = make_canvas();
+            let mut fresh = IronCanvas::create(fresh_grid.clone(), fresh_overlay.clone())
+                .expect("create Fresh reference canvas");
+            fresh
+                .set_model_js(handle.into())
+                .expect("same healthy fixture model");
+            fresh
+                .resize(400.0, 240.0, dpr)
+                .expect("fixture canvas metrics are valid");
+            assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+            // Stable retries use ChangedCells. Compare with the same healthy
+            // execution: stable repaint differs from Fresh at fractional DPR.
+            if matches!(path, "content" | "damage") {
+                fresh.mark_content_dirty();
+                assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+            }
+            assert!(
+                grid_pixels(&grid) == grid_pixels(&fresh_grid),
+                "{method}/{path}/{dpr}"
+            );
+            assert_eq!(grid_pixels(&overlay), grid_pixels(&fresh_overlay));
+        }
+    }
+}
 
 /// Minimal duck-typed model handle: `try_from_js_value` requires
 /// `getSelectedView`, `getSelectedSheet`, `getFrozenRowsCount`, and
@@ -341,6 +905,14 @@ struct ScrollFailureControls {
     fail_from_row: Rc<Cell<Option<i32>>>,
 }
 
+/// A `getCellStyle` payload no `JsStyle` arm decodes — the shape-drift failure
+/// the held-transaction fixtures inject. `null` is *not* usable for this: the
+/// per-cell and bulk contracts both read a null style as a blank cell
+/// (`Fetched::Absent`).
+fn invalid_style_payload() -> JsValue {
+    JsValue::from_str("not-a-style")
+}
+
 /// Build the same fixture with a live scroll origin and a controllable invalid
 /// style payload from a chosen row onward. Keeping the active cell outside
 /// those rows lets `Chrome::classify` approve the ScrollBlit plan; decoding then
@@ -391,7 +963,7 @@ fn make_scroll_failure_fixture_model(
                 .get()
                 .is_some_and(|first_failed| row >= first_failed)
             {
-                JsValue::NULL
+                invalid_style_payload()
             } else {
                 let Ok(value) = serde_wasm_bindgen::to_value(&ic::Style::default()) else {
                     panic!("default fixture Style always serializes");
@@ -425,7 +997,9 @@ fn canvas_over(store: FixtureStore) -> (IronCanvas, HtmlCanvasElement) {
     let Ok(()) = canvas.set_model_js(make_fixture_model(store)) else {
         panic!("fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     (canvas, grid)
 }
 
@@ -470,7 +1044,9 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     let Ok(()) = canvas.set_model_js(model) else {
         panic!("scroll-failure fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
 
     let baseline_pixels = grid_pixels(&grid);
@@ -522,7 +1098,9 @@ fn held_viewport_recovers_byte_identical_to_forced_fresh() {
     let Ok(()) = fresh_canvas.set_model_js(fresh_model) else {
         panic!("forced-fresh fixture model passes the duck test");
     };
-    fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    fresh_canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(fresh_canvas.render_pending(), RenderResult::Rendered);
 
     assert_eq!(
@@ -545,10 +1123,9 @@ struct FreshFailureControls {
 /// covered by
 /// `selected_sheet_bridge_failure_holds_then_recovers_without_another_signal`)
 /// and not a ScrollBlit strip reveal (covered above). `getCellStyle` returning
-/// `null` is the same decode-failure mechanism
-/// `make_scroll_failure_fixture_model` uses: `serde_wasm_bindgen` cannot
-/// decode `null` into `Style`, so `JsBackedModel::get_cell_style` reports
-/// `Fetched::BridgeFailed`.
+/// an undecodable payload is the same decode-failure mechanism
+/// `make_scroll_failure_fixture_model` uses: no `JsStyle` arm accepts it, so
+/// `JsBackedModel::get_cell_style` reports `Fetched::BridgeFailed`.
 fn make_fresh_failure_fixture_model(store: FixtureStore) -> (JsValue, FreshFailureControls) {
     let model = make_fixture_model(store);
     let obj: js_sys::Object = model.unchecked_into();
@@ -558,7 +1135,7 @@ fn make_fresh_failure_fixture_model(store: FixtureStore) -> (JsValue, FreshFailu
     let get_style = Closure::wrap(
         Box::new(move |_sheet: u32, _row: i32, _col: i32| -> JsValue {
             if style_fail.get() {
-                JsValue::NULL
+                invalid_style_payload()
             } else {
                 let Ok(value) = serde_wasm_bindgen::to_value(&ic::Style::default()) else {
                     panic!("default fixture Style always serializes");
@@ -594,7 +1171,9 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
     let Ok(()) = canvas.set_model_js(model) else {
         panic!("fresh-failure fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
 
     controls.fail.set(true);
     assert_eq!(
@@ -636,7 +1215,9 @@ fn held_fresh_recovers_byte_identical_to_forced_fresh() {
     let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("forced-fresh fixture model passes the duck test");
     };
-    fresh_canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    fresh_canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(fresh_canvas.render_pending(), RenderResult::Rendered);
 
     assert_eq!(
@@ -771,7 +1352,7 @@ fn partial_repaint_matches_forced_fresh_when_neighbor_row_keeps_bottom_border() 
 /// Acceptance criterion 2b: the CHANGED row's own bottom border disappears
 /// this frame (present in `painted`, absent in `scratch`) — an internal
 /// span-boundary change, not just a neighbour's static state — which also
-/// forces `RepaintPlan::Full` (`fingerprint.rs`'s "old border removed"
+/// forces `RepaintPlan::Full` (`repaint_plan.rs`'s "old border removed"
 /// arm). Byte-identical to forced-fresh proves the fallback actually
 /// erases the stale stroke correctly, not just that *some* repaint
 /// happened.
@@ -838,10 +1419,14 @@ fn resize_self_invalidates_without_explicit_repaint() {
     let Ok(()) = canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
-    canvas.resize(OLD_W, OLD_H, OLD_DPR);
+    canvas
+        .resize(OLD_W, OLD_H, OLD_DPR)
+        .expect("fixture canvas metrics are valid");
     canvas.render_pending(); // baseline Fresh paint at the old size
 
-    canvas.resize(NEW_W, NEW_H, NEW_DPR);
+    canvas
+        .resize(NEW_W, NEW_H, NEW_DPR)
+        .expect("fixture canvas metrics are valid");
     canvas.render_pending(); // bare renderPending — no requestRepaint()
 
     let fresh_grid = make_canvas();
@@ -852,7 +1437,9 @@ fn resize_self_invalidates_without_explicit_repaint() {
     let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
-    fresh_canvas.resize(NEW_W, NEW_H, NEW_DPR);
+    fresh_canvas
+        .resize(NEW_W, NEW_H, NEW_DPR)
+        .expect("fixture canvas metrics are valid");
     fresh_canvas.render_pending(); // single Fresh paint straight at the new size/DPR
 
     assert_eq!(
@@ -881,10 +1468,14 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
     let Ok(()) = canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
-    canvas.resize(W, H, OLD_DPR);
+    canvas
+        .resize(W, H, OLD_DPR)
+        .expect("fixture canvas metrics are valid");
     canvas.render_pending(); // baseline Fresh paint at the old DPR
 
-    canvas.resize(W, H, NEW_DPR); // CSS size unchanged, DPR-only change
+    canvas
+        .resize(W, H, NEW_DPR)
+        .expect("fixture canvas metrics are valid"); // CSS size unchanged, DPR-only change
     canvas.render_pending(); // bare renderPending — no requestRepaint()
 
     let fresh_grid = make_canvas();
@@ -895,7 +1486,9 @@ fn dpr_only_resize_self_invalidates_without_explicit_repaint() {
     let Ok(()) = fresh_canvas.set_model_js(make_fixture_model(plain_fixture_store())) else {
         panic!("fixture model passes the duck test");
     };
-    fresh_canvas.resize(W, H, NEW_DPR);
+    fresh_canvas
+        .resize(W, H, NEW_DPR)
+        .expect("fixture canvas metrics are valid");
     fresh_canvas.render_pending(); // single Fresh paint straight at the new DPR
 
     assert_eq!(
@@ -1043,7 +1636,9 @@ fn active_sheet_change_repaints_new_sheets_values_at_identical_coordinates() {
     else {
         panic!("active-sheet fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(canvas.render_pending(), RenderResult::Rendered); // sheet 0 baseline
     let sheet0_pixels = grid_pixels(&grid);
 
@@ -1110,7 +1705,9 @@ fn selected_sheet_bridge_failure_holds_then_recovers_without_another_signal() {
     else {
         panic!("sheet-throws-once fixture model passes the duck test");
     };
-    canvas.resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR);
+    canvas
+        .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
+        .expect("fixture canvas metrics are valid");
 
     assert_eq!(
         canvas.render_pending(),
@@ -1377,8 +1974,8 @@ impl CanvasModel for StableFixtureModel {
         Some(self.view.frozen_cols.get())
     }
 
-    fn get_row_height(&self, _sheet: u32, row: i32) -> Option<f64> {
-        Some(
+    fn get_row_height(&self, _sheet: u32, row: i32) -> Fetched<f64> {
+        Fetched::Value(
             self.view
                 .row_heights
                 .borrow()
@@ -1388,8 +1985,8 @@ impl CanvasModel for StableFixtureModel {
         )
     }
 
-    fn get_column_width(&self, _sheet: u32, column: i32) -> Option<f64> {
-        Some(
+    fn get_column_width(&self, _sheet: u32, column: i32) -> Fetched<f64> {
+        Fetched::Value(
             self.view
                 .column_widths
                 .borrow()
@@ -1399,8 +1996,8 @@ impl CanvasModel for StableFixtureModel {
         )
     }
 
-    fn get_show_grid_lines(&self, _sheet: u32) -> Option<bool> {
-        Some(true)
+    fn get_show_grid_lines(&self, _sheet: u32) -> Fetched<bool> {
+        Fetched::Value(true)
     }
 
     fn get_show_selection(&self) -> bool {
@@ -1431,7 +2028,9 @@ fn stable_canvas_over_at(
         panic!("stable-view fixture content model passes the duck test");
     };
     canvas.set_model(Rc::new(StableFixtureModel { content, view }));
-    canvas.resize(width, height, dpr);
+    canvas
+        .resize(width, height, dpr)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     (canvas, grid, overlay)
 }
@@ -1582,7 +2181,9 @@ fn stage6_canvas_over(
     let Ok(()) = canvas.set_model_js(model) else {
         panic!("scrollable fixture model passes the duck test");
     };
-    canvas.resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR);
+    canvas
+        .resize(STAGE6_CANVAS_W, STAGE6_CANVAS_H, STAGE6_DPR)
+        .expect("fixture canvas metrics are valid");
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     // The cold Fresh covers the whole pane, so it is the cheapest place to
     // prove the geometry before any sample or pixel is taken. A tall row
@@ -2234,6 +2835,48 @@ fn stable_assert_changed_cells_trace(trace: &str, case: &str) {
         "stable repaint case `{case}` must carry VIEW | CONTENT | OVERLAY through ChangedCells; \
          trace was `{trace}`"
     );
+}
+
+#[wasm_bindgen_test]
+fn damage_then_revert_matches_forced_fresh() {
+    for dpr in [1.0, 1.25, 2.0] {
+        let store = stage6_fixture_store();
+        let view = StableViewFixture::new(5, 3);
+        let row = STAGE6_DAMAGE_ROW;
+        let col = STAGE6_EDIT_COL;
+        stage6_set_value(&store, row, col, "original");
+        let (mut canvas, grid, overlay) = stable_canvas_over_at(
+            Rc::clone(&store),
+            view.clone(),
+            STAGE6_CANVAS_W,
+            STAGE6_CANVAS_H,
+            dpr,
+        );
+
+        stage6_set_value(&store, row, col, "damaged");
+        canvas.mark_rows_damaged(0, row, row);
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+        stage6_assert_verdict(&canvas.frame_trace(), "grid:strip", "damage before revert");
+
+        stage6_set_value(&store, row, col, "original");
+        canvas.mark_content_dirty();
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+        stable_assert_matches_forced_fresh_at(
+            &grid,
+            &overlay,
+            &store,
+            &view,
+            &format!("Damage followed by a reverted value at DPR {dpr}"),
+            STAGE6_CANVAS_W,
+            STAGE6_CANVAS_H,
+            dpr,
+        );
+        stage6_assert_verdict(&canvas.frame_trace(), "grid:FULL", "revert after damage");
+
+        canvas.mark_content_dirty();
+        assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+        stage6_assert_verdict(&canvas.frame_trace(), "grid:skip", "reseeded history");
+    }
 }
 
 #[wasm_bindgen_test]
@@ -3251,7 +3894,9 @@ fn stable_diag_canvas_over_at(
         panic!("stable-view fixture content model passes the duck test");
     };
     canvas.set_model(Rc::new(StableFixtureModel { content, view }));
-    canvas.resize(width, height, dpr);
+    canvas
+        .resize(width, height, dpr)
+        .expect("fixture canvas metrics are valid");
     canvas.set_frame_diagnostics_enabled(true);
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
     (canvas, grid, overlay)

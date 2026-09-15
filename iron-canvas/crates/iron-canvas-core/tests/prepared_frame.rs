@@ -98,11 +98,7 @@ fn damage_failure_preserves_committed_grid_cache_and_original_pixels() {
     model.set_cell(6, 2, "damaged");
     model.set_bulk_bridge_fail_from(Some(3));
     core.reset_trace();
-    assert!(core.render_grid_damage(
-        &model,
-        &frame,
-        &[RowSpan { r1: 1, r2: 1 }, RowSpan { r1: 6, r2: 6 }]
-    ));
+    assert!(core.render_grid_damage(&model, &frame, &[RowSpan::new(1, 1), RowSpan::new(6, 6)]));
     assert_eq!(core.painter().ops().len(), ops);
     assert_eq!(core.grid_cache.layout(), layout);
     assert_eq!(core.grid_cache.buffer_truth(), truth);
@@ -122,7 +118,7 @@ fn late_damage_strip_failure_is_atomic() {
     model.reset_bulk_fetch_calls();
     model.set_bulk_bridge_fail_after(Some(4));
     let ops = core.painter().ops().len();
-    assert!(core.render_grid_damage(&model, &frame, &[RowSpan { r1: 5, r2: 5 }]));
+    assert!(core.render_grid_damage(&model, &frame, &[RowSpan::new(5, 5)]));
     assert_eq!(core.painter().ops().len(), ops);
 
     let capacities = core.strip_scratch_capacities();

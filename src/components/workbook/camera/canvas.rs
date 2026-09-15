@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
 use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::{CanvasMetricError, CanvasMetrics};
 use iron_canvas_core::{CanvasModel, PaintResult};
 use iron_canvas_datagrid::{DataGrid, DataGridModel};
 use leptos::prelude::window;
@@ -38,8 +39,14 @@ impl CameraCanvas {
         self.runtime.orchestrator_mut().request_repaint();
     }
 
-    pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) {
-        self.runtime.resize(CanvasSize { w: css_w, h: css_h }, dpr);
+    /// Parse the size/DPR pair at this boundary and apply it. A rejected pair
+    /// (non-finite or negative extent, non-positive DPR, backing store past
+    /// `u32`) leaves the runtime untouched, so a camera keeps its last valid
+    /// size instead of adopting a canvas no geometry can describe.
+    pub fn resize(&mut self, css_w: f64, css_h: f64, dpr: f64) -> Result<(), CanvasMetricError> {
+        let metrics = CanvasMetrics::new(CanvasSize { w: css_w, h: css_h }, dpr)?;
+        self.runtime.resize(metrics);
+        Ok(())
     }
 
     /// Scroll and return the clamped anchors, so callers can persist the
@@ -76,7 +83,10 @@ impl CameraCanvas {
             .borrow_with(|g| (g.row_count(), g.column_count()));
         for col in 0..cols {
             // 1-based model coords for the measure; 0-based index for the write.
-            if let Some(w) =
+            // A failed measurement (no model, unreadable sheet or column extent)
+            // leaves that column at its stored width; `Ok(None)` means the
+            // column has no content to fit to.
+            if let Ok(Some(w)) =
                 self.runtime
                     .orchestrator()
                     .fit_column_width(col as i32 + 1, 1, rows as i32)

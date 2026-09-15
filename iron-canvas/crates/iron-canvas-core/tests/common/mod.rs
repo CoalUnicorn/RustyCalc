@@ -64,6 +64,7 @@ pub struct TestModel {
     /// `Fetched::BridgeFailed` — simulating a JS-bridge throw so tests can
     /// exercise the active-cell repaint's atomic-skip path.
     value_bridge_fail: Cell<bool>,
+    style_bridge_fail_at: Cell<Option<(i32, i32)>>,
     /// Adversarial contract knob: the four bulk `*_in` accessors fill their
     /// output with `Fetched::BridgeFailed` while single accessors stay
     /// healthy. Not a `JsBackedModel` simulation (that adapter degrades
@@ -92,6 +93,22 @@ pub struct TestModel {
     /// (not per-accessor) since the table tests exercise one failure at a
     /// time.
     capture_fail: Cell<Option<FrameInputFailure>>,
+    /// When set, `get_row_height` reports a transient `Fetched::BridgeFailed`
+    /// — simulating a JS-bridge throw on a geometry read so tests can
+    /// exercise the hold/retry path that must not fabricate a default row
+    /// height.
+    row_height_bridge_fail: Cell<bool>,
+    /// When set, every `get_row_height` answers `Absent` — "no override;
+    /// the engine's documented default applies".
+    row_height_absent: Cell<bool>,
+    /// Column mirror of `row_height_bridge_fail`.
+    col_width_bridge_fail: Cell<bool>,
+    /// Column mirror of `row_height_absent`.
+    col_width_absent: Cell<bool>,
+    /// When set, `get_show_grid_lines` reports `Fetched::BridgeFailed`.
+    grid_lines_bridge_fail: Cell<bool>,
+    /// When set, `get_show_grid_lines` answers `Absent` (default: show).
+    grid_lines_absent: Cell<bool>,
 }
 
 impl Default for TestModel {
@@ -126,6 +143,7 @@ impl Default for TestModel {
             show_col_headers: Cell::new(true),
             show_selection: Cell::new(true),
             value_bridge_fail: Cell::new(false),
+            style_bridge_fail_at: Cell::new(None),
             bulk_bridge_fail: Cell::new(false),
             bulk_bridge_fail_channel: Cell::new(None),
             bulk_bridge_fail_from: Cell::new(None),
@@ -133,6 +151,12 @@ impl Default for TestModel {
             bulk_fetch_calls: Cell::new(0),
             bulk_fetch_ranges: RefCell::new(Vec::new()),
             capture_fail: Cell::new(None),
+            row_height_bridge_fail: Cell::new(false),
+            row_height_absent: Cell::new(false),
+            col_width_bridge_fail: Cell::new(false),
+            col_width_absent: Cell::new(false),
+            grid_lines_bridge_fail: Cell::new(false),
+            grid_lines_absent: Cell::new(false),
         }
     }
 }
@@ -282,6 +306,27 @@ impl TestModel {
     pub fn set_col_width(&self, col: i32, w: f64) {
         self.col_width_overrides.borrow_mut().insert(col, w);
     }
+    /// Make every `get_row_height` read fail transiently — the FSM-A2
+    /// geometry-bridge-failure knob.
+    pub fn set_row_height_bridge_fail(&self, fail: bool) {
+        self.row_height_bridge_fail.set(fail);
+    }
+    /// Make every `get_row_height` read answer `Absent` (no override).
+    pub fn set_row_height_absent(&self, absent: bool) {
+        self.row_height_absent.set(absent);
+    }
+    pub fn set_col_width_bridge_fail(&self, fail: bool) {
+        self.col_width_bridge_fail.set(fail);
+    }
+    pub fn set_col_width_absent(&self, absent: bool) {
+        self.col_width_absent.set(absent);
+    }
+    pub fn set_grid_lines_bridge_fail(&self, fail: bool) {
+        self.grid_lines_bridge_fail.set(fail);
+    }
+    pub fn set_grid_lines_absent(&self, absent: bool) {
+        self.grid_lines_absent.set(absent);
+    }
     pub fn set_cell(&self, row: i32, col: i32, value: &str) {
         self.cell_values
             .borrow_mut()
@@ -298,6 +343,9 @@ impl TestModel {
     }
     pub fn set_value_bridge_fail(&self, fail: bool) {
         self.value_bridge_fail.set(fail);
+    }
+    pub fn set_style_bridge_fail_at(&self, cell: Option<(i32, i32)>) {
+        self.style_bridge_fail_at.set(cell);
     }
     pub fn set_bulk_bridge_fail(&self, fail: bool) {
         self.bulk_bridge_fail.set(fail);
@@ -401,8 +449,14 @@ impl CanvasModel for TestModel {
         }
         Some(self.frozen_cols.get())
     }
-    fn get_row_height(&self, _: u32, row: i32) -> Option<f64> {
-        Some(
+    fn get_row_height(&self, _: u32, row: i32) -> Fetched<f64> {
+        if self.row_height_bridge_fail.get() {
+            return Fetched::BridgeFailed;
+        }
+        if self.row_height_absent.get() {
+            return Fetched::Absent;
+        }
+        Fetched::Value(
             self.row_height_overrides
                 .borrow()
                 .get(&row)
@@ -410,8 +464,14 @@ impl CanvasModel for TestModel {
                 .unwrap_or_else(|| self.default_row_height.get()),
         )
     }
-    fn get_column_width(&self, _: u32, col: i32) -> Option<f64> {
-        Some(
+    fn get_column_width(&self, _: u32, col: i32) -> Fetched<f64> {
+        if self.col_width_bridge_fail.get() {
+            return Fetched::BridgeFailed;
+        }
+        if self.col_width_absent.get() {
+            return Fetched::Absent;
+        }
+        Fetched::Value(
             self.col_width_overrides
                 .borrow()
                 .get(&col)
@@ -419,8 +479,14 @@ impl CanvasModel for TestModel {
                 .unwrap_or_else(|| self.default_col_width.get()),
         )
     }
-    fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
-        Some(self.show_grid.get())
+    fn get_show_grid_lines(&self, _: u32) -> Fetched<bool> {
+        if self.grid_lines_bridge_fail.get() {
+            return Fetched::BridgeFailed;
+        }
+        if self.grid_lines_absent.get() {
+            return Fetched::Absent;
+        }
+        Fetched::Value(self.show_grid.get())
     }
     fn last_row(&self, _: u32) -> i32 {
         self.last_row.get()
@@ -450,6 +516,9 @@ impl CanvasModel for TestModel {
 
 impl CellContentQuery for TestModel {
     fn get_cell_style(&self, _: u32, row: i32, col: i32) -> Fetched<CellStyle> {
+        if self.style_bridge_fail_at.get() == Some((row, col)) {
+            return Fetched::BridgeFailed;
+        }
         match self.cell_styles.borrow().get(&(row, col)).cloned() {
             Some(s) => Fetched::Value(s),
             None => Fetched::Value(CellStyle::default()),
@@ -592,6 +661,11 @@ pub fn test_inputs(
     canvas: CanvasSize,
     theme: &Rc<CanvasTheme>,
 ) -> FrameInputs {
-    FrameInputs::capture(model, canvas, 1.0, Rc::clone(theme), 0)
-        .expect("test model must capture FrameInputs successfully")
+    FrameInputs::capture(
+        model,
+        iron_canvas_core::CanvasMetrics::new(canvas, 1.0).expect("test canvas metrics are valid"),
+        Rc::clone(theme),
+        0,
+    )
+    .expect("test model must capture FrameInputs successfully")
 }

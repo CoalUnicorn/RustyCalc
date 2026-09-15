@@ -67,7 +67,9 @@ pub(super) fn install_raf_loop(
             let dpr = window().device_pixel_ratio();
             match IronCanvas::create(grid_el, overlay_el) {
                 Ok(mut ic) => {
-                    ic.resize(w, h, dpr);
+                    // A rejected pair (non-finite/negative extent, non-positive DPR)
+                    // leaves the canvas at its last valid size.
+                    let _ = ic.resize(w, h, dpr);
                     // Initial state push: sync current Worksheet state to the
                     // freshly-constructed orchestrator so the first frame is
                     // correct. Subsequent pushes are driven by the reactive

@@ -14,14 +14,15 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 use crate::frame_plan::FrameInputs;
+use crate::geometry::CanvasMetrics;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
-use crate::geometry::slot::{AxisSlot, AxisSlots, RowSlot, scroll_first};
+use crate::geometry::slot::{AxisSlots, scroll_first};
 use crate::theme::CanvasTheme;
 
 use super::blit_rebuild::ShiftDir;
-use super::pane_set::ScrollAxisSlots;
-use super::{Chrome, FrameKindTag, PaneSet, measure_row_header_width};
+use super::pane_set::{ScrollAxisSlots, row_header_thickness_for};
+use super::{Chrome, FrameKindTag, PaneSet};
 
 /// The single pixel shift performed by a scroll blit.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -161,15 +162,26 @@ pub enum FramePath {
 // still reports — that is the final qualification that the shifted pixels
 // will land where the new chrome would paint them.
 
-/// Row-header thickness implied by the last visible row's label — the value
-/// the blit gate compares against `prev`. `scroll_rows` is the scrolled axis's
-/// band (rebuilt or unchanged); an empty band falls back to the first scroll id.
-fn blit_row_header_thickness(scroll_rows: &[RowSlot], frozen_rows_count: i32, new_top: i32) -> i32 {
-    let last_visible_row = scroll_rows
-        .last()
-        .map(|s| s.id())
-        .unwrap_or((frozen_rows_count + 1).max(new_top));
-    measure_row_header_width(last_visible_row)
+/// Result of [`try_blit_reuse`]: either a reversible in-place candidate, or
+/// `prev` handed back whole so the caller rebuilds `Fresh`.
+///
+/// `FreshFallback` is a normal scheduler outcome — the row-header digit
+/// boundary, or a cross-axis model anomaly — not a fault, so it is a named
+/// variant rather than the `Err` arm of a `Result`. Callers therefore cannot
+/// mistake it for a technical failure, and no `?` can propagate it by
+/// accident. The public immediate-commit wrapper
+/// ([`BlitOutcome`](crate::chrome::BlitOutcome)) reports the same two cases.
+// Large by value on both arms on purpose: the reject arm gives `prev` back
+// with zero copies, and boxing would add a heap allocation to the
+// steady-state blit path.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum PreparedBlitOutcome {
+    /// In-place reuse succeeded; the candidate is reversible until the
+    /// caller commits or rolls back.
+    Ready(PreparedBlitFrame),
+    /// In-place reuse rejected; `Chrome` is handed back intact for a
+    /// `Fresh` rebuild.
+    FreshFallback(Chrome),
 }
 
 /// Reversible construction of a scroll-blit's next-frame `Chrome`. Wraps a
@@ -220,13 +232,13 @@ impl PreparedBlitFrame {
             row_header_labels,
             col_header_labels,
             theme,
-            dpr,
+            metrics,
             model_generation,
             show_row_headers,
             show_col_headers,
             kind,
         } = rollback;
-        // `theme`/`dpr`/`model_generation`/`show_row_headers`/
+        // `theme`/`metrics`/`model_generation`/`show_row_headers`/
         // `show_col_headers`/`kind` all came from `inputs`/`FrameKindTag::Blitted`
         // when `candidate` was built, not from `prev` — dropped here in
         // favor of `rollback`'s saved originals, bound above.
@@ -236,7 +248,6 @@ impl PreparedBlitFrame {
             row_header_thickness,
             col_header_thickness,
             cell_origin,
-            canvas_size,
             ..
         } = candidate;
         Chrome {
@@ -245,9 +256,8 @@ impl PreparedBlitFrame {
             row_header_thickness,
             col_header_thickness,
             cell_origin,
-            canvas_size,
+            metrics,
             theme,
-            dpr,
             model_generation,
             show_row_headers,
             show_col_headers,
@@ -259,9 +269,9 @@ impl PreparedBlitFrame {
 /// The exact fields `try_blit_reuse` replaces when it builds `candidate`
 /// from `prev`, saved so [`PreparedBlitFrame::rollback`] can restore them
 /// without re-deriving anything from `inputs` or the model. `sheet`,
-/// `col_header_thickness`, `cell_origin`, `canvas_size`, and
-/// `row_header_thickness` are deliberately not here: `try_blit_reuse`
-/// always either copies them from `prev` unchanged or proves them equal to
+/// `col_header_thickness`, `cell_origin`, and `row_header_thickness` are
+/// deliberately not here: `try_blit_reuse` always either copies them from
+/// `prev` unchanged or proves them equal to
 /// `prev`'s value — via its own row-header-thickness gate, or via
 /// `Chrome::classify`'s canvas-size/etc. hard breaks that must pass before
 /// `try_blit_reuse` is ever called — before `candidate` is built, so
@@ -275,7 +285,7 @@ struct BlitRollback {
     row_header_labels: Vec<String>,
     col_header_labels: Vec<String>,
     theme: Rc<CanvasTheme>,
-    dpr: f64,
+    metrics: CanvasMetrics,
     model_generation: u64,
     show_row_headers: bool,
     show_col_headers: bool,
@@ -288,29 +298,51 @@ struct BlitRollback {
 /// new frame — no per-scroll-frame clone), the scroll-axis kept band
 /// carries forward heights/widths, only the strip touches the model.
 ///
-/// Takes `prev` by value and returns `Err(prev)` — handing it back intact —
-/// on the one cross-axis-affecting edge case (row_header_thickness changes
-/// across a digit boundary) or any model anomaly, so the caller can fall
-/// through to a full `Chrome::next`. Every `Err` return happens *before* the
-/// first move out of `prev`, so the returned `prev` is always whole.
+/// Takes `prev` by value and returns it intact inside
+/// [`PreparedBlitOutcome::FreshFallback`] on the one cross-axis-affecting edge
+/// case (row_header_thickness changes across a digit boundary) or any model
+/// anomaly, so the caller can fall through to a full `Chrome::next`. Every
+/// reject happens *before* the first move out of `prev`, so the returned
+/// `prev` is always whole.
 ///
-/// On success, returns a [`PreparedBlitFrame`] rather than a bare `Chrome`:
+/// On success, returns [`PreparedBlitOutcome::Ready`] wrapping a
+/// [`PreparedBlitFrame`] rather than a bare `Chrome`:
 /// the caller may still need to reconstruct `prev` if a later step (the
 /// strip-prefetch bridge check, run against the returned candidate) fails —
-/// see that type's doc. Building `Ok`'s `BlitRollback` costs only moves and
+/// see that type's doc. Building `Ready`'s `BlitRollback` costs only moves and
 /// `Copy` reads out of fields of `prev` that `candidate` was already about
 /// to replace or abandon; nothing is cloned to make rollback possible.
 // `Chrome`/`PreparedBlitFrame` are large and intentionally returned by value
-// on both arms (the zero-copy give-back on `Err`); boxing either would add a
-// heap alloc to a path that must stay allocation-free on the steady-state
-// blit.
-#[allow(clippy::result_large_err)]
+// on both arms (the zero-copy give-back on `FreshFallback`); boxing either
+// would add a heap alloc to a path that must stay allocation-free on the
+// steady-state blit.
 pub(super) fn try_blit_reuse(
     mut prev: Chrome,
     model: &dyn CanvasModel,
     inputs: &FrameInputs,
     plan: &BlitPlan,
-) -> Result<PreparedBlitFrame, Chrome> {
+) -> PreparedBlitOutcome {
+    // Hidden row headers previously always used Fresh. Fractional-DPR headers
+    // and frozen separators can blend again over copied pixels. Keep Fresh
+    // for those cases, and require aligned copy/strip edges in the others.
+    let dpr = inputs.dpr();
+    let fractional_chrome = dpr.fract() != 0.0
+        && (inputs.show_col_headers()
+            || !prev.pane_set.rows.frozen.is_empty()
+            || !prev.pane_set.cols.frozen.is_empty());
+    if !inputs.show_row_headers()
+        && (fractional_chrome
+            || [plan.shift.src, plan.shift.dst, plan.pixel_strip]
+                .into_iter()
+                .any(|rect| {
+                    let (x, y, w, h) = rect.as_f64_tuple();
+                    [x, y, w, h]
+                        .into_iter()
+                        .any(|value| (value * dpr).fract() != 0.0)
+                }))
+    {
+        return PreparedBlitOutcome::FreshFallback(prev);
+    }
     // `inputs.view()` is this attempt's one already-validated read (see
     // `Chrome::build`'s comment) — no `None`/fallback branch needed here.
     let view = inputs.view();
@@ -345,11 +377,16 @@ pub(super) fn try_blit_reuse(
                 .rebuild_rows_for_row_scroll(model, sheet, new_top, canvas)
             {
                 Some(rows) => rows,
-                None => return Err(prev),
+                None => return PreparedBlitOutcome::FreshFallback(prev),
             };
-            let thickness = blit_row_header_thickness(&rows, frozen_rows_count, new_top);
+            let thickness = row_header_thickness_for(
+                &rows,
+                frozen_rows_count,
+                new_top,
+                inputs.show_row_headers(),
+            );
             if thickness != prev.row_header_thickness {
-                return Err(prev);
+                return PreparedBlitOutcome::FreshFallback(prev);
             }
             let old = ScrollAxisSlots::Row(std::mem::take(&mut prev.pane_set.rows.scroll));
             let cols = std::mem::take(&mut prev.pane_set.cols.scroll);
@@ -361,14 +398,18 @@ pub(super) fn try_blit_reuse(
                 .rebuild_cols_for_col_scroll(model, sheet, new_left, canvas)
             {
                 Some(cols) => cols,
-                None => return Err(prev),
+                None => return PreparedBlitOutcome::FreshFallback(prev),
             };
             // Cross-axis rows band is unchanged across a column scroll; read it
             // (not taken yet) for the gate.
-            let thickness =
-                blit_row_header_thickness(&prev.pane_set.rows.scroll, frozen_rows_count, new_top);
+            let thickness = row_header_thickness_for(
+                &prev.pane_set.rows.scroll,
+                frozen_rows_count,
+                new_top,
+                inputs.show_row_headers(),
+            );
             if thickness != prev.row_header_thickness {
-                return Err(prev);
+                return PreparedBlitOutcome::FreshFallback(prev);
             }
             let old = ScrollAxisSlots::Column(std::mem::take(&mut prev.pane_set.cols.scroll));
             let rows = std::mem::take(&mut prev.pane_set.rows.scroll);
@@ -395,7 +436,7 @@ pub(super) fn try_blit_reuse(
         row_header_labels: std::mem::take(&mut prev.pane_set.row_header_labels),
         col_header_labels: std::mem::take(&mut prev.pane_set.col_header_labels),
         theme: prev.theme,
-        dpr: prev.dpr,
+        metrics: prev.metrics,
         model_generation: prev.model_generation,
         show_row_headers: prev.show_row_headers,
         show_col_headers: prev.show_col_headers,
@@ -432,16 +473,15 @@ pub(super) fn try_blit_reuse(
         row_header_thickness,
         col_header_thickness: prev.col_header_thickness,
         cell_origin: prev.cell_origin,
-        canvas_size: canvas,
+        metrics: inputs.metrics(),
         theme: Rc::clone(inputs.theme()),
-        dpr: inputs.dpr(),
         model_generation: inputs.model_generation(),
         show_row_headers: inputs.show_row_headers(),
         show_col_headers: inputs.show_col_headers(),
         kind: FrameKindTag::Blitted,
     };
 
-    Ok(PreparedBlitFrame {
+    PreparedBlitOutcome::Ready(PreparedBlitFrame {
         candidate,
         rollback,
     })
@@ -453,7 +493,7 @@ pub(super) fn try_blit_rows(
     sheet: u32,
     new_top: i32,
 ) -> Option<BlitPlan> {
-    let (canvas_w, canvas_h) = prev.canvas_size.to_logical_extent();
+    let (canvas_w, canvas_h) = prev.metrics.logical_extent();
     let pane_x = prev.pane_set.cols.frozen_offset;
     let pane_y = prev.pane_set.rows.frozen_offset;
     // pane_h is bounded by the canvas backing store extent, not by
@@ -493,7 +533,7 @@ pub(super) fn try_blit_cols(
     sheet: u32,
     new_left: i32,
 ) -> Option<BlitPlan> {
-    let (canvas_w, canvas_h) = prev.canvas_size.to_logical_extent();
+    let (canvas_w, canvas_h) = prev.metrics.logical_extent();
     let pane_x = prev.pane_set.cols.frozen_offset;
     let pane_y = prev.pane_set.rows.frozen_offset;
     // pane_w is bounded by the canvas backing store extent, not by

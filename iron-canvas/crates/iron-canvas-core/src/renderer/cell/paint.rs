@@ -10,19 +10,19 @@
 //! semi-transparent selection fill.
 
 use super::borders::ResolvedBorders;
+use super::cf::CfDecorationPaint;
 use super::text::TextPaint;
 use crate::CellContentQuery;
 use crate::chrome::{Chrome, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
-use crate::geometry::slot::{ColSlot, RowSlot};
+use crate::geometry::slot::{AxisSlot, ColSlot, RowSlot};
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
-use crate::renderer::cf_types::CfDecorationPaint;
 use crate::style::{CellKind, CellStyle};
 use crate::theme::CanvasTheme;
-use crate::types::coord::RCRange;
+use crate::types::coord::{CellCoord, RCRange};
 
 pub struct CellPaint {
     pub row: i32,
@@ -112,10 +112,10 @@ impl<'a> PaneCells<'a> {
     pub fn for_strip(pane: &'a PaneRegion, frame: &'a Chrome, strip: RCRange) -> Self {
         let rows_full = pane.rows(frame);
         let cols_full = pane.cols(frame);
-        let r_start = rows_full.partition_point(|s| s.row < strip.r1);
-        let r_end = rows_full.partition_point(|s| s.row <= strip.r2);
-        let c_start = cols_full.partition_point(|s| s.col < strip.c1);
-        let c_end = cols_full.partition_point(|s| s.col <= strip.c2);
+        let r_start = rows_full.partition_point(|s| s.id() < strip.r1);
+        let r_end = rows_full.partition_point(|s| s.id() <= strip.r2);
+        let c_start = cols_full.partition_point(|s| s.id() < strip.c1);
+        let c_end = cols_full.partition_point(|s| s.id() <= strip.c2);
         let cols_template = &cols_full[c_start..c_end];
         Self {
             rows: rows_full[r_start..r_end].iter(),
@@ -145,15 +145,15 @@ impl<'a> Iterator for PaneCells<'a> {
                 continue;
             };
             return Some(CellSlot {
-                row: row.row,
-                col: col.col,
+                row: row.id(),
+                col: col.id(),
                 rect: PixelRect {
                     top_left: Point {
-                        x: col.left,
-                        y: row.top,
+                        x: col.start(),
+                        y: row.start(),
                     },
-                    width: col.width,
-                    height: row.height,
+                    width: col.extent(),
+                    height: row.extent(),
                 },
             });
         }
@@ -173,19 +173,19 @@ impl<P: Painter> RendererCore<P> {
         self.painter.rect_fill(p.rect, color);
     }
 
-    /// Repaint one cell's full paint (bg + borders + text) at `(row, column)`
-    /// on the active sheet. Used by the selection overlay to restore the
-    /// active cell on top of the semi-transparent selection fill. Sheet is
-    /// implicit — taken from `frame.sheet`.
+    /// Repaint one cell's full paint (bg + borders + text) at `cell` on the
+    /// active sheet. Used by the selection overlay to restore the active cell
+    /// on top of the semi-transparent selection fill. Sheet is implicit —
+    /// taken from `frame.sheet`.
     pub fn repaint_active_cell(
         &self,
         model: &dyn CellContentQuery,
-        row: i32,
-        column: i32,
+        cell: CellCoord,
         frame: &Chrome,
     ) {
+        let CellCoord { row, col } = cell;
         let sheet = frame.sheet;
-        let range = RCRange::from_cell(row, column);
+        let range = RCRange::from_cell(row, col);
         let Some(rect) = frame.range_rect(range) else {
             return;
         };
@@ -199,9 +199,9 @@ impl<P: Painter> RendererCore<P> {
         // A-3 flash. `Absent` is not a failure (a blank cell legitimately has
         // no text), so it does not abort. Native models never report
         // `BridgeFailed`, making this a no-op for every non-JS host.
-        let style = model.get_cell_style(sheet, row, column);
-        let value = model.get_formatted_cell_value(sheet, row, column);
-        let cell_type = model.get_cell_type(sheet, row, column);
+        let style = model.get_cell_style(sheet, row, col);
+        let value = model.get_formatted_cell_value(sheet, row, col);
+        let cell_type = model.get_cell_type(sheet, row, col);
         if style.is_bridge_failed() || value.is_bridge_failed() || cell_type.is_bridge_failed() {
             return;
         }
@@ -211,11 +211,7 @@ impl<P: Painter> RendererCore<P> {
         };
         let theme = &frame.theme;
         let Some(paint) = CellPaint::resolve_cell_paint(
-            CellSlot {
-                row,
-                col: column,
-                rect,
-            },
+            CellSlot { row, col, rect },
             own_style,
             theme,
             &self.color_intern,

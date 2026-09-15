@@ -24,7 +24,7 @@ pub(crate) enum EnvelopeBuild {
 }
 
 pub(crate) fn build_envelope(frame: &Chrome, changed_cells: &[RCRange]) -> EnvelopeBuild {
-    let (width, height) = frame.canvas_size.to_logical_extent();
+    let (width, height) = frame.canvas_size().to_logical_extent();
     let canvas = PixelRect {
         top_left: Point { x: 0, y: 0 },
         width,
@@ -43,7 +43,7 @@ pub(crate) fn build_envelope(frame: &Chrome, changed_cells: &[RCRange]) -> Envel
     let Some(bounds) = changed_bounds else {
         return EnvelopeBuild::Ready(Envelope::NoPixels);
     };
-    let Some(aligned) = align_outward_to_backing(bounds, frame.dpr) else {
+    let Some(aligned) = align_outward_to_backing(bounds, frame.dpr()) else {
         return EnvelopeBuild::UnalignedDpr;
     };
     let Some(clip) = aligned.intersection(canvas) else {
@@ -92,10 +92,15 @@ fn grow_pixel_rect(rect: PixelRect) -> PixelRect {
     rect.inset(-CELL_REPAINT_PAD_PX, -CELL_REPAINT_PAD_PX)
 }
 
+/// Align `rect`'s edges outward to coordinates whose backing-store position is
+/// integral at `dpr`.
+///
+/// `dpr` needs no finiteness or sign check here: every caller's frame carries
+/// [`CanvasMetrics`](crate::CanvasMetrics), which rejected non-finite or
+/// non-positive DPRs at the host boundary. The only `None` is the bounded
+/// search giving up — no outward edge within [`MAX_OUTSET_CSS_PX`] lands on a
+/// whole backing pixel.
 fn align_outward_to_backing(rect: PixelRect, dpr: f64) -> Option<PixelRect> {
-    if !dpr.is_finite() || dpr <= 0.0 {
-        return None;
-    }
     let left = aligned_edge(rect.left(), dpr, -1)?;
     let top = aligned_edge(rect.top(), dpr, -1)?;
     let right = aligned_edge(rect.right(), dpr, 1)?;
@@ -171,16 +176,16 @@ mod tests {
             Some(0)
         }
 
-        fn get_row_height(&self, _: u32, row: i32) -> Option<f64> {
-            Some(if row == 2 { 0.0 } else { 20.0 })
+        fn get_row_height(&self, _: u32, row: i32) -> Fetched<f64> {
+            Fetched::Value(if row == 2 { 0.0 } else { 20.0 })
         }
 
-        fn get_column_width(&self, _: u32, column: i32) -> Option<f64> {
-            Some(if column == 2 { 0.0 } else { 60.0 })
+        fn get_column_width(&self, _: u32, column: i32) -> Fetched<f64> {
+            Fetched::Value(if column == 2 { 0.0 } else { 60.0 })
         }
 
-        fn get_show_grid_lines(&self, _: u32) -> Option<bool> {
-            Some(true)
+        fn get_show_grid_lines(&self, _: u32) -> Fetched<bool> {
+            Fetched::Value(true)
         }
     }
 
@@ -192,8 +197,8 @@ mod tests {
         let model = Model;
         let inputs = FrameInputs::capture(
             &model,
-            CanvasSize { w: 320.0, h: 180.0 },
-            dpr,
+            crate::geometry::CanvasMetrics::new(CanvasSize { w: 320.0, h: 180.0 }, dpr)
+                .expect("test canvas metrics are valid"),
             Rc::new(CanvasTheme::light()),
             0,
         )
@@ -316,7 +321,7 @@ mod tests {
             panic!("a common fractional DPR must produce an aligned envelope");
         };
         for edge in [clip.left(), clip.top(), clip.right(), clip.bottom()] {
-            let backing = f64::from(edge) * frame.dpr;
+            let backing = f64::from(edge) * frame.dpr();
             assert!((backing - backing.round()).abs() <= 1.0e-9);
         }
     }

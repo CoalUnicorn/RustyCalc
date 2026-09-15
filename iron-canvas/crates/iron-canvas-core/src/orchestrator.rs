@@ -44,9 +44,11 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 
 use crate::CanvasModel;
-use crate::chrome::{BlitPlan, Chrome, FramePath, RecycledSlots};
+use crate::autofit::AutoFitError;
+use crate::chrome::{BlitPlan, Chrome, FramePath, FreshBuild, PreparedBlitOutcome, RecycledSlots};
 use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
 use crate::frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
+use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
@@ -378,20 +380,22 @@ impl fmt::Display for GridVerdict {
 ///
 /// The backward walk is bounded by how many slots fit in `extent`, so a jump of
 /// 100k rows costs the same as a jump of one. Returning `current` unchanged is
-/// the "already visible / nothing to do" answer.
+/// the "already visible / nothing to do" answer. `None` when `measure`
+/// reports a transient bridge failure — a scroll target derived from
+/// fabricated heights is not trustworthy.
 fn origin_showing(
     target: i32,
     current: i32,
     frozen: i32,
     extent: i32,
-    mut measure: impl FnMut(i32) -> i32,
-) -> i32 {
+    mut measure: impl FnMut(i32) -> Option<i32>,
+) -> Option<i32> {
     // A collapsed axis scrolls nowhere, and a frozen target is always painted.
     if extent <= 0 || target <= frozen {
-        return current;
+        return Some(current);
     }
     if target < current {
-        return target; // scrolled past it — flush against the near edge
+        return Some(target); // scrolled past it — flush against the near edge
     }
 
     // Walk back from the target while the run still fits. `smallest` is then
@@ -400,16 +404,16 @@ fn origin_showing(
     // The loop floor also keeps `smallest` out of the frozen run, so the result
     // is a legal origin without clamping `current` on the way in.
     let mut smallest = target;
-    let mut run = measure(target);
+    let mut run = measure(target)?;
     while smallest > frozen + 1 {
-        let previous = measure(smallest - 1);
-        if run + previous > extent {
+        let previous = measure(smallest - 1)?;
+        if i64::from(run) + i64::from(previous) > i64::from(extent) {
             break;
         }
         smallest -= 1;
         run += previous;
     }
-    current.max(smallest)
+    Some(current.max(smallest))
 }
 
 /// Whole-frame outcome. Blit preflight validates every required address strip
@@ -522,10 +526,10 @@ impl fmt::Display for FrameTrace {
 /// `last_frame` out of `self` during preparation (see `render_full_rebuild`)
 /// so there is nothing to put back.
 // `Chrome` is large and intentionally carried by value here, matching
-// `chrome::blit`'s own `#[allow(clippy::result_large_err)]` precedent on
-// `try_blit_reuse`/`Chrome::prepare_blit`/`Chrome::next_blit`: boxing it
-// would add a heap allocation to every committed paint attempt, not just
-// the rare held/rollback path clippy's size comparison is really about.
+// `chrome::blit`'s own `#[allow(clippy::large_enum_variant)]` precedent on
+// `PreparedBlitOutcome`: boxing a variant would add a heap allocation to
+// every committed paint attempt, not just the rare held/rollback path
+// clippy's size comparison is really about.
 #[allow(clippy::large_enum_variant)]
 enum FrameUpdate {
     Preserve,
@@ -650,16 +654,12 @@ where
     /// takes this pool's vectors to build, then folds the *outgoing*
     /// committed frame's vectors back in once the candidate has replaced it.
     spare_slots: RecycledSlots,
-    /// Logical (CSS) canvas size; written by `resize`, read when building
-    /// the next `Chrome`.
-    size: CanvasSize,
-    /// DPR from the last `resize` call. `None` before the first resize —
-    /// not a `0.0` sentinel, since `resize` must self-invalidate on the
-    /// very first call regardless of what DPR it's given. Private and
-    /// unexposed — distinct from the wasm facade's own `last_dpr` in
-    /// `iron-canvas-web`, which keeps an independent copy for the
+    /// Validated canvas metrics from the last `resize`. `None` before the
+    /// first resize — not a zero sentinel, since `resize` must self-invalidate
+    /// on the very first call regardless of what values it is given. Private
+    /// and unexposed: the wasm facade keeps its own DPR copy for the
     /// recording/playback pipeline.
-    last_dpr: Option<f64>,
+    metrics: Option<CanvasMetrics>,
     /// Everything queued for the next paint attempt: geometry rebuild, view
     /// movement, content damage, overlay repaint. The single owner of paint
     /// work — layers hold none. Every setter marks intent here; a paint
@@ -714,8 +714,7 @@ where
             model_generation: 0,
             last_frame: None,
             spare_slots: RecycledSlots::default(),
-            size: CanvasSize { w: 0.0, h: 0.0 },
-            last_dpr: None,
+            metrics: None,
             pending: PendingWork::default(),
             last_strategy: None,
             last_effective_strategy: None,
@@ -773,14 +772,17 @@ where
     /// callers can't leave the pair half-sized. Self-invalidating: a real
     /// size or DPR change forces the next `render_pending` to `Fresh` — no
     /// caller needs a follow-up `request_repaint()`.
-    pub fn resize(&mut self, size: CanvasSize, dpr: f64) {
-        if size == self.size && self.last_dpr == Some(dpr) {
+    ///
+    /// Takes [`CanvasMetrics`]: the host boundary parses the raw
+    /// width/height/DPR once (`CanvasMetrics::new`), and every backend and
+    /// geometry walk downstream reads the validated value.
+    pub fn resize(&mut self, metrics: CanvasMetrics) {
+        if self.metrics == Some(metrics) {
             return;
         }
-        self.size = size;
-        self.last_dpr = Some(dpr);
-        self.grid.resize(size, dpr);
-        self.overlay.resize(size, dpr);
+        self.metrics = Some(metrics);
+        self.grid.resize(metrics);
+        self.overlay.resize(metrics);
         // A backing-store resize may clear both canvases (Canvas2D), so
         // geometry invalidation must be atomic with the resize itself.
         self.last_frame = None;
@@ -967,7 +969,14 @@ where
     }
 
     pub fn canvas_size(&self) -> CanvasSize {
-        self.size
+        self.metrics.unwrap_or_else(CanvasMetrics::unresized).size()
+    }
+
+    /// Validated canvas metrics for the committed configuration. Before the
+    /// first `resize` this is the zero-size, DPR-1.0 default — the same pair
+    /// the renderer assumed before the type carried an invariant.
+    pub fn metrics(&self) -> CanvasMetrics {
+        self.metrics.unwrap_or_else(CanvasMetrics::unresized)
     }
 
     pub fn theme(&self) -> &CanvasTheme {
@@ -1072,9 +1081,9 @@ where
             x: frame.pane_set.cols.frozen_offset,
             y: frame.pane_set.rows.frozen_offset,
         };
-        let (canvas_w, canvas_h) = frame.canvas_size.to_logical_extent();
-        // The frame's own canvas size, not `self.size` — a resize between the
-        // last paint and this query must not be mixed into a snapshot answer.
+        let (canvas_w, canvas_h) = frame.canvas_size().to_logical_extent();
+        // The frame's own canvas size, not `self.metrics()` — a resize between
+        // the last paint and this query must not be mixed into a snapshot answer.
         Some(PixelRect {
             top_left,
             width: (canvas_w - top_left.x).max(0),
@@ -1126,33 +1135,46 @@ where
             view.top_row,
             frame.pane_set.rows.frozen_count(),
             pane.height,
-            |id| crate::geometry::slot::row_height(model, view.sheet, id),
-        );
+            |id| crate::geometry::slot::row_height(model, view.sheet, id).extent(),
+        )?;
         let left = origin_showing(
             column,
             view.left_column,
             frame.pane_set.cols.frozen_count(),
             pane.width,
-            |id| crate::geometry::slot::col_width(model, view.sheet, id),
-        );
+            |id| crate::geometry::slot::col_width(model, view.sheet, id).extent(),
+        )?;
         ((top, left) != (view.top_row, view.left_column)).then_some((top, left))
     }
 
     /// Auto-fit width for `col`: widest formatted value across the
-    /// `[first_row, last_row]` used-row span, plus padding. `None` when the
-    /// model is absent or no scanned cell in `col` has text. Pure
-    /// measurement — the consumer applies the returned extent.
-    pub fn fit_column_width(&self, col: i32, first_row: i32, last_row: i32) -> Option<f64> {
-        let model = self.model.as_deref()?;
+    /// `[first_row, last_row]` used-row span, plus padding.
+    ///
+    /// `Ok(None)` when no scanned cell in `col` has text — nothing to fit to.
+    /// `Err(AutoFitError)` when there is no model, or a model read fails: a
+    /// host must not treat a failed read as "no content". Pure measurement —
+    /// the consumer applies the returned extent.
+    pub fn fit_column_width(
+        &self,
+        col: i32,
+        first_row: i32,
+        last_row: i32,
+    ) -> Result<Option<f64>, AutoFitError> {
+        let model = self.model.as_deref().ok_or(AutoFitError::NoModel)?;
         let metrics = self.grid.surface.painter();
         crate::autofit::fit_width(model, metrics, col, first_row, last_row)
     }
 
     /// Auto-fit height for `row`: tallest font across the `[first_col,
-    /// last_col]` used-column span, plus padding. Same absence semantics as
-    /// `fit_column_width`.
-    pub fn fit_row_height(&self, row: i32, first_col: i32, last_col: i32) -> Option<f64> {
-        let model = self.model.as_deref()?;
+    /// last_col]` used-column span, plus padding. Same
+    /// [`AutoFitError`] semantics as `fit_column_width`.
+    pub fn fit_row_height(
+        &self,
+        row: i32,
+        first_col: i32,
+        last_col: i32,
+    ) -> Result<Option<f64>, AutoFitError> {
+        let model = self.model.as_deref().ok_or(AutoFitError::NoModel)?;
         let metrics = self.grid.surface.painter();
         crate::autofit::fit_height(model, metrics, row, first_col, last_col)
     }
@@ -1204,14 +1226,12 @@ where
         // This runs after the model/pending early exits above but before
         // delta classification, plan construction, Chrome mutation, cache
         // invalidation, paint, or presentation — a failure here can hold
-        // the whole attempt having touched none of those. DPR defaults to
-        // `1.0` before the first `resize`, matching the renderer's own
-        // default transform.
-        let dpr = self.last_dpr.unwrap_or(1.0);
+        // the whole attempt having touched none of those. Metrics default to
+        // a zero-size canvas at DPR 1.0 before the first `resize`, matching
+        // the renderer's own default transform.
         let capture = FrameInputs::capture(
             model_dyn,
-            self.size,
-            dpr,
+            self.metrics(),
             Rc::clone(&self.theme),
             self.model_generation,
         );
@@ -1558,7 +1578,7 @@ where
     /// built. Holding the `PreparedBlitFrame` open until that result is
     /// known is what lets the `Held` outcome carry `prepared.rollback()`
     /// instead of restoring from a clone taken up front. `prepare_blit`'s
-    /// `Err(prev)` arm is the demote-to-`Fresh` path (e.g. a row-header
+    /// `FreshFallback` arm is the demote-to-`Fresh` path (e.g. a row-header
     /// digit boundary rejects in-place reuse), delegated to
     /// [`Self::paint_fresh_fallback`] — the same atomic-Fresh mechanics
     /// `render_full_rebuild` uses, since a `FreshFallback`'s geometry and
@@ -1575,7 +1595,7 @@ where
             return self.render_full_rebuild(model, inputs, work);
         };
         match Chrome::prepare_blit(prev, model, inputs, &plan) {
-            Ok(prepared) => {
+            PreparedBlitOutcome::Ready(prepared) => {
                 match self.grid.paint_grid_blit(model, prepared.frame(), &plan) {
                     GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
                         cache_commit,
@@ -1598,7 +1618,7 @@ where
                     }
                 }
             }
-            Err(prev) => {
+            PreparedBlitOutcome::FreshFallback(prev) => {
                 #[cfg(feature = "dev-diagnostics")]
                 self.grid.renderer.diag_blit(
                     &plan,
@@ -1622,21 +1642,28 @@ where
     /// differ in what (if anything) they must hand back on Held: ordinary
     /// Fresh never took `last_frame` at all, but `FreshFallback` already
     /// took it for the original blit attempt and holds `prev` locally.
+    /// Returns `Err(recycled)` — the drained pool, for the caller to stash
+    /// back into `self.spare_slots` — when a row-height or column-width read
+    /// failed transiently during `Chrome::build`, before any paint. See
+    /// `FreshBuild::Held`'s doc.
     fn build_and_paint_fresh(
         &mut self,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
-    ) -> (Chrome, GridPaintOutcome) {
+    ) -> Result<(Chrome, GridPaintOutcome), RecycledSlots> {
         let spare = std::mem::take(&mut self.spare_slots);
-        let frame = Chrome::build(model, inputs, spare);
+        let frame = match Chrome::build(model, inputs, spare) {
+            FreshBuild::Ready(frame) => frame,
+            FreshBuild::Held(recycled) => return Err(recycled),
+        };
         // `paint_grid_fresh` prepares the whole grid before touching the
         // painter at all (not even the cache invalidation or background
         // fill), so a held attempt is a true no-op here — see its doc.
         let cache_commit = self.grid.paint_grid_fresh(model, &frame);
-        (frame, cache_commit)
+        Ok((frame, cache_commit))
     }
 
-    /// `render_scroll_blit`'s `Err(prev)` arm: `prepare_blit` rejected
+    /// `render_scroll_blit`'s `FreshFallback` arm: `prepare_blit` rejected
     /// in-place reuse and handed `prev` back whole (never partially
     /// consumed — see `try_blit_reuse`'s doc), so it is still available
     /// here as an ordinary owned value, not something sitting in
@@ -1650,7 +1677,22 @@ where
         work: PendingWork,
         prev: Chrome,
     ) -> AttemptOutcome {
-        let (frame, paint) = self.build_and_paint_fresh(model, inputs);
+        let (frame, paint) = match self.build_and_paint_fresh(model, inputs) {
+            Ok(ok) => ok,
+            Err(recycled) => {
+                // Geometry held before any paint. `prev` was already taken
+                // out of `self.last_frame` for the original blit attempt, so
+                // it must be handed back explicitly via `Replace(prev)`;
+                // `prev`'s own vecs are still inside it, so only the failed
+                // candidate's drained pool needs stashing for the retry.
+                self.spare_slots = recycled;
+                return AttemptOutcome::Held {
+                    retry: retry_grid_wide(work),
+                    frame: FrameUpdate::Replace(prev),
+                    reason: HoldReason::BridgeFailure,
+                };
+            }
+        };
 
         let cache_commit = match paint {
             GridPaintOutcome::Committed(cache_commit) => cache_commit,
@@ -1761,7 +1803,22 @@ where
         inputs: &FrameInputs,
         work: PendingWork,
     ) -> AttemptOutcome {
-        let (frame, paint) = self.build_and_paint_fresh(model, inputs);
+        let (frame, paint) = match self.build_and_paint_fresh(model, inputs) {
+            Ok(ok) => ok,
+            Err(recycled) => {
+                // Geometry held before any paint: the drained pool goes back
+                // to `spare_slots`, and `last_frame` is left completely
+                // untouched — it was never taken (see
+                // `build_and_paint_fresh`), so `prev` (or `None`, on a held
+                // first frame) is exactly what `finish_attempt` will see.
+                self.spare_slots = recycled;
+                return AttemptOutcome::Held {
+                    retry: retry_grid_wide(work),
+                    frame: FrameUpdate::Preserve,
+                    reason: HoldReason::BridgeFailure,
+                };
+            }
+        };
 
         let cache_commit = match paint {
             GridPaintOutcome::Committed(cache_commit) => cache_commit,
@@ -1795,14 +1852,19 @@ mod tests {
 
     /// Uniform rows, so `extent / 20` is how many fit and every expectation
     /// below is arithmetic a reader can redo in their head.
-    fn rows_20(_id: i32) -> i32 {
-        20
+    fn rows_20(_id: i32) -> Option<i32> {
+        Some(20)
+    }
+
+    #[test]
+    fn origin_showing_does_not_overflow_on_large_valid_extents() {
+        assert_eq!(origin_showing(3, 1, 0, 100, |_| Some(i32::MAX)), Some(3));
     }
 
     #[test]
     fn bridge_retry_widens_content_and_preserves_other_intent() {
         let mut work = PendingWork::default();
-        work.mark_rows(7, RowSpan { r1: 2, r2: 4 });
+        work.mark_rows(7, RowSpan::new(2, 4));
         work.mark_view();
         work.mark_overlay();
 
@@ -1831,15 +1893,15 @@ mod tests {
     #[test]
     fn stays_put_when_there_is_nothing_to_scroll() {
         // A collapsed axis has nowhere to put the target.
-        assert_eq!(origin_showing(50, 7, 0, 0, rows_20), 7);
-        assert_eq!(origin_showing(50, 7, 0, -100, rows_20), 7);
+        assert_eq!(origin_showing(50, 7, 0, 0, rows_20), Some(7));
+        assert_eq!(origin_showing(50, 7, 0, -100, rows_20), Some(7));
         // A frozen target is painted whatever the scrollable band shows.
-        assert_eq!(origin_showing(2, 7, 3, 500, rows_20), 7);
+        assert_eq!(origin_showing(2, 7, 3, 500, rows_20), Some(7));
     }
 
     #[test]
     fn flushes_against_the_near_edge_when_scrolled_past() {
-        assert_eq!(origin_showing(5, 20, 0, 500, rows_20), 5);
+        assert_eq!(origin_showing(5, 20, 0, 500, rows_20), Some(5));
     }
 
     /// The trailing `max` earns its keep here: the walk finds row 8 as the
@@ -1847,7 +1909,7 @@ mod tests {
     /// shows row 12 — scrolling back to 8 would be visible, pointless motion.
     #[test]
     fn leaves_an_already_visible_target_alone() {
-        assert_eq!(origin_showing(12, 10, 0, 100, rows_20), 10);
+        assert_eq!(origin_showing(12, 10, 0, 100, rows_20), Some(10));
     }
 
     /// A target past the far edge pulls the origin forward — to the *smallest*
@@ -1856,20 +1918,20 @@ mod tests {
     fn walks_back_to_the_smallest_origin_that_shows_the_target() {
         // Five 20 px rows fill 100, so 26..=30 is the earliest band showing 30.
         // An implementation that stopped after one step would answer 29.
-        assert_eq!(origin_showing(30, 2, 0, 100, rows_20), 26);
+        assert_eq!(origin_showing(30, 2, 0, 100, rows_20), Some(26));
     }
 
     /// Rows of 8/19/30/41/52 px on a five-row cycle, so a walk that assumed a
     /// uniform height cannot land on the right origin by symmetry.
-    fn rows_uneven(id: i32) -> i32 {
-        8 + id.rem_euclid(5) * 11
+    fn rows_uneven(id: i32) -> Option<i32> {
+        Some(8 + id.rem_euclid(5) * 11)
     }
 
     /// The walk accumulates real heights: rows 30 (8 px) and 29 (52 px) fill 60
     /// of the 100 px band, and taking row 28 (41 px) too would overflow it.
     #[test]
     fn walk_sums_actual_row_heights_rather_than_assuming_uniform_rows() {
-        assert_eq!(origin_showing(30, 2, 0, 100, rows_uneven), 29);
+        assert_eq!(origin_showing(30, 2, 0, 100, rows_uneven), Some(29));
     }
 }
 
@@ -1948,7 +2010,7 @@ mod frame_plan_tests {
         assert_eq!(
             GridWork::Rows {
                 sheet: 0,
-                spans: vec![RowSpan { r1: 1, r2: 2 }],
+                spans: vec![RowSpan::new(1, 2)],
             }
             .strategy(),
             RenderStrategy::DamagedRows
@@ -2058,7 +2120,7 @@ mod frame_plan_tests {
 
     #[test]
     fn row_content_stable_matching_sheet_selects_damaged_rows() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 4)));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
@@ -2066,12 +2128,12 @@ mod frame_plan_tests {
             panic!("expected GridWork::Rows");
         };
         assert_eq!(sheet, SHEET);
-        assert_eq!(spans, vec![RowSpan { r1: 2, r2: 4 }]);
+        assert_eq!(spans, vec![RowSpan::new(2, 4)]);
     }
 
     #[test]
     fn row_content_stable_mismatched_sheet_falls_back_to_changed_cells_all() {
-        let work = work_with(|w| w.mark_rows(OTHER_SHEET, RowSpan { r1: 2, r2: 4 }));
+        let work = work_with(|w| w.mark_rows(OTHER_SHEET, RowSpan::new(2, 4)));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(
@@ -2084,7 +2146,7 @@ mod frame_plan_tests {
 
     #[test]
     fn row_content_scroll_selects_full_rebuild() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 4)));
         let plan = plan_frame(work, stub_scroll(), SHEET, true);
 
         assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
@@ -2093,7 +2155,7 @@ mod frame_plan_tests {
 
     #[test]
     fn row_content_rebuild_selects_full_rebuild() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 4 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 4)));
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
         assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
@@ -2136,7 +2198,7 @@ mod frame_plan_tests {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
-            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 3 });
+            w.mark_rows(SHEET, RowSpan::new(1, 3));
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
@@ -2145,7 +2207,7 @@ mod frame_plan_tests {
             panic!("expected GridWork::Rows");
         };
         assert_eq!(sheet, SHEET);
-        assert_eq!(spans, vec![RowSpan { r1: 1, r2: 3 }]);
+        assert_eq!(spans, vec![RowSpan::new(1, 3)]);
         assert_eq!(plan.overlay, OverlayWork::Paint);
     }
 
@@ -2168,7 +2230,7 @@ mod frame_plan_tests {
         let work = work_with(|w| {
             w.mark_view();
             w.mark_overlay();
-            w.mark_rows(OTHER_SHEET, RowSpan { r1: 1, r2: 3 });
+            w.mark_rows(OTHER_SHEET, RowSpan::new(1, 3));
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
@@ -2193,7 +2255,7 @@ mod frame_plan_tests {
     fn content_plus_view_rebuild_selects_full_rebuild() {
         let work = work_with(|w| {
             w.mark_view();
-            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 1 });
+            w.mark_rows(SHEET, RowSpan::new(1, 1));
         });
         let plan = plan_frame(work, stub_rebuild(), SHEET, true);
 
@@ -2208,7 +2270,7 @@ mod frame_plan_tests {
             w.mark_geometry();
             w.mark_view();
             w.mark_overlay();
-            w.mark_rows(SHEET, RowSpan { r1: 1, r2: 1 });
+            w.mark_rows(SHEET, RowSpan::new(1, 1));
         });
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
@@ -2256,7 +2318,7 @@ mod frame_plan_tests {
 
     #[test]
     fn damaged_rows_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 2 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 2)));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, false);
 
         assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
@@ -2269,7 +2331,7 @@ mod frame_plan_tests {
 
     #[test]
     fn damaged_rows_paints_overlay_when_selection_is_visible() {
-        let work = work_with(|w| w.mark_rows(SHEET, RowSpan { r1: 2, r2: 2 }));
+        let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 2)));
         let plan = plan_frame(work, FrameDelta::Stable, SHEET, true);
 
         assert_eq!(plan.overlay, OverlayWork::Paint);

@@ -55,7 +55,9 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
         let (gw, gh) = c.autosize();
         let w = (gw + 2.0 * BORDER_PX).clamp(MIN_W, MAX_W);
         let h = (gh + GRIP_H + 2.0 * BORDER_PX).clamp(MIN_H, MAX_H);
-        c.resize(
+        // A rejected pair (non-finite/negative extent, non-positive DPR)
+        // leaves the camera at its last valid size.
+        let _ = c.resize(
             w - 2.0 * BORDER_PX,
             h - GRIP_H - 2.0 * BORDER_PX,
             window().device_pixel_ratio(),
@@ -103,7 +105,7 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
         let dpr = window().device_pixel_ratio();
         match CameraCanvas::create(grid_el, overlay_el) {
             Ok(mut c) => {
-                c.resize(w, h, dpr);
+                let _ = c.resize(w, h, dpr); // both checked > 0 above
                 c.set_grid(model.with_value(|m| extract_grid(m, spec.source)));
                 c.set_scroll(spec.scroll.0, spec.scroll.1);
                 if spec.autosize {
@@ -228,7 +230,9 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
             // measure on the init path).
             cam.update_value(|slot| {
                 if let Some(c) = slot.as_mut() {
-                    c.resize(
+                    // A rejected pair (non-finite/negative extent,
+                    // non-positive DPR) leaves the camera at its last size.
+                    let _ = c.resize(
                         w - 2.0 * BORDER_PX,
                         h - GRIP_H - 2.0 * BORDER_PX,
                         window().device_pixel_ratio(),

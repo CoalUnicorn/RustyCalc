@@ -17,6 +17,7 @@ use std::rc::Rc;
 use crate::CanvasModel;
 use crate::chrome::{BlitPlan, Chrome};
 use crate::decoration::{DecorationId, Layer, selection::SelectionLayer};
+use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
@@ -49,12 +50,17 @@ pub trait Surface {
     /// need a different trait shape, not a swap to `Arc` here.
     fn clone_painter(&self) -> Rc<Self::P>;
 
-    /// Resize the backing store. `dpr` here scales the backing pixel
+    /// Resize the backing store. `metrics.dpr()` scales the backing pixel
     /// buffer (e.g. `canvas.width = css.w * dpr`) — it does *not* set the
     /// painter's transform matrix. That side runs separately via
     /// `LayerBase::resize` -> `LayerOps::resize_for_dpr`. Two effects, one
     /// shared input; each backend resizes only what it owns.
-    fn resize(&mut self, css: CanvasSize, dpr: f64);
+    ///
+    /// Takes [`CanvasMetrics`] rather than a raw size/DPR pair so a backend
+    /// never has to re-check finiteness, sign, or `u32` fit: the pair was
+    /// parsed at the host boundary, and `metrics.backing_size()` is
+    /// infallible from there on.
+    fn resize(&mut self, metrics: CanvasMetrics);
 
     /// Flush the rendered frame. Backends without a back buffer no-op
     /// this; `WebSurface`'s grid surface flips its back buffer onto the
@@ -80,9 +86,9 @@ where
         Self { surface, renderer }
     }
 
-    pub fn resize(&mut self, css: CanvasSize, dpr: f64) {
-        self.surface.resize(css, dpr);
-        self.renderer.resize_for_dpr(dpr);
+    pub fn resize(&mut self, metrics: CanvasMetrics) {
+        self.surface.resize(metrics);
+        self.renderer.resize_for_dpr(metrics.dpr());
     }
 
     /// Flush this layer's surface. Callers present a layer iff the current
@@ -144,12 +150,18 @@ where
         model: &dyn CanvasModel,
         frame: &Chrome,
     ) -> GridPaintOutcome {
+        // Grid-line visibility is per-execution config (a toggle repaints
+        // without a geometry rebuild); read it before any painter op — the
+        // bg fill below is a pixel op, so a BridgeFailed must hold first.
+        if self.renderer.fetch_show_grid(model, frame.sheet).is_none() {
+            return GridPaintOutcome::Held;
+        }
         let Some(prepared) = self.renderer.prepare_fresh_grid(model, frame) else {
             return GridPaintOutcome::Held;
         };
         self.renderer.invalidate_paint_cache();
         self.surface.painter().rect_fill(
-            full_canvas_rect(frame.canvas_size),
+            full_canvas_rect(frame.canvas_size()),
             PaintColor::from_theme_str(&frame.theme.cell_bg),
         );
         GridPaintOutcome::Committed(self.renderer.execute_fresh_grid(model, frame, prepared))
@@ -217,7 +229,7 @@ where
         others: &[&dyn Layer],
         customs: &[(DecorationId, Rc<dyn Layer>)],
     ) {
-        let size = frame.canvas_size;
+        let size = frame.canvas_size();
         let painter = self.surface.painter();
         painter.clear_rect(full_canvas_rect(size));
         painter.begin_group(GroupClass::Overlay);
@@ -233,10 +245,9 @@ where
         // Gate on `Some` so a tick where the model briefly has no selected
         // view (sheet swap, workbook reload) does not repaint A1 with the
         // default-zero snapshot or emit an empty bracket into recordings.
-        if let Some(hook) = selection.active_cell_repaint() {
+        if let Some(cell) = selection.active_cell_repaint() {
             painter.begin_group(GroupClass::ActiveCellRepaint);
-            self.renderer
-                .repaint_active_cell(model, hook.row, hook.col, frame);
+            self.renderer.repaint_active_cell(model, cell, frame);
             painter.end_group();
         }
 

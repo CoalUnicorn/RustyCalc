@@ -2,36 +2,33 @@
 #![allow(clippy::expect_used)]
 
 use iron_canvas_core::CanvasSize;
+use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
 use iron_canvas_core::geometry::utils::col_name;
 
+/// The one validated path to a backing size. These tests pin the browser
+/// rounding contract (truncate after the DPR scale) that used to live on the
+/// permissive `CanvasSize`; the validating constructor now owns it.
+fn backing(w: f64, h: f64, dpr: f64) -> (u32, u32) {
+    CanvasMetrics::new(CanvasSize { w, h }, dpr)
+        .expect("valid test metrics")
+        .backing_size()
+}
+
 #[test]
 fn backing_size_scales_by_dpr() {
-    assert_eq!(
-        CanvasSize { w: 100.0, h: 200.0 }.to_backing_size(2.0),
-        (200, 400)
-    );
+    assert_eq!(backing(100.0, 200.0, 2.0), (200, 400));
 }
 
 #[test]
 fn backing_size_at_1x_dpr_equals_css() {
-    assert_eq!(
-        CanvasSize {
-            w: 1920.0,
-            h: 1080.0
-        }
-        .to_backing_size(1.0),
-        (1920, 1080)
-    );
+    assert_eq!(backing(1920.0, 1080.0, 1.0), (1920, 1080));
 }
 
 #[test]
 fn backing_size_truncates_fractional_pixels() {
-    assert_eq!(
-        CanvasSize { w: 100.3, h: 50.7 }.to_backing_size(2.0),
-        (200, 101)
-    );
+    assert_eq!(backing(100.3, 50.7, 2.0), (200, 101));
 }
 
 #[test]

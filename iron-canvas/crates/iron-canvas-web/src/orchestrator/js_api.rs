@@ -62,7 +62,7 @@ impl IronCanvas {
     /// Return the pixel position of the autofill handle.
     /// Return `null` if the canvas does not show a selection.
     #[wasm_bindgen(js_name = "autofillHandlePos")]
-    pub fn autofill_handle_pos(&self) -> Result<JsValue, JsError> {
+    pub fn autofill_handle_js(&self) -> Result<JsValue, JsError> {
         match self.runtime.orchestrator().autofill_handle() {
             Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
             None => Ok(JsValue::NULL),
@@ -92,13 +92,20 @@ impl IronCanvas {
     /// Measure the required width of a 1-based column in an inclusive row range.
     ///
     /// The host must apply the result to its model and request a repaint.
-    /// Return `undefined` if the range has no formatted content.
-    /// Also return `undefined` if the model read fails.
+    /// The method returns `undefined` if the range has no formatted content.
+    /// The method throws if the model is missing or a model read fails: a
+    /// failed read is not "no content".
     #[wasm_bindgen(js_name = "fitColumnWidth")]
-    pub fn fit_column_width_js(&self, column: i32, first_row: i32, last_row: i32) -> Option<f64> {
+    pub fn fit_column_width_js(
+        &self,
+        column: i32,
+        first_row: i32,
+        last_row: i32,
+    ) -> Result<Option<f64>, JsError> {
         self.runtime
             .orchestrator()
             .fit_column_width(column, first_row, last_row)
+            .map_err(|error| JsError::new(&format!("column width fit failed: {error}")))
     }
 
     // ============================================================
@@ -160,12 +167,10 @@ impl IronCanvas {
     }
 
     /// Replace all overlay state.
-    /// The `Result` permits future validation errors without an API change.
     #[wasm_bindgen(js_name = "setOverlays")]
     pub fn set_overlays_js(&mut self, overlays: JsValue) -> Result<(), JsError> {
         let wire: crate::wire::RenderOverlaysWire = serde_wasm_bindgen::from_value(overlays)?;
-        let engine = wire.into_engine().map_err(|msg| JsError::new(&msg))?;
-        self.runtime.orchestrator_mut().set_overlays(engine);
+        self.runtime.orchestrator_mut().set_overlays(wire.into());
         Ok(())
     }
 

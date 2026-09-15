@@ -37,6 +37,23 @@ extern "C" {
 /// the failure mode is a ctx-level capability, not a layer-local one.
 static MEASURE_WARN_EMITTED: AtomicBool = AtomicBool::new(false);
 
+/// One-shot guard for the `apply_dpr_transform` rejection warning. Separate
+/// from `MEASURE_WARN_EMITTED`: a lost ctx can surface through either call
+/// site first, and one warning must not silence the other.
+static DPR_WARN_EMITTED: AtomicBool = AtomicBool::new(false);
+
+/// Print `message` through the private `console.warn` binding at most once
+/// per process for `flag`. Every one-shot canvas-capability warning routes
+/// through here so the compare-exchange idiom lives in one place.
+fn warn_once(flag: &AtomicBool, message: &str) {
+    if flag
+        .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+    {
+        console_warn(message);
+    }
+}
+
 /// Snap an axis-aligned stroke's cross-axis coordinate onto the pixel grid.
 ///
 /// Canvas centers a stroke on its path, so a width-1 line at integer `coord`
@@ -287,15 +304,11 @@ impl TextMetrics for CanvasPainter {
                     "CanvasPainter::measure_text_width: ctx.measure_text errored; \
                      falling back to approx_text_width for {text:?} font={font_css:?}"
                 );
-                if MEASURE_WARN_EMITTED
-                    .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-                    .is_ok()
-                {
-                    console_warn(
-                        "iron-canvas: ctx.measure_text errored; using approx_text_width fallback \
-                         (subsequent measure errors silenced)",
-                    );
-                }
+                warn_once(
+                    &MEASURE_WARN_EMITTED,
+                    "iron-canvas: ctx.measure_text errored; using approx_text_width fallback \
+                     (subsequent measure errors silenced)",
+                );
                 approx_text_width(parse_font_size_px(font_css), text)
             }
         }
@@ -435,11 +448,24 @@ impl Painter for CanvasPainter {
 
     fn apply_dpr_transform(&self, dpr: f64) {
         self.dpr.set(dpr);
-        let dpr_f = dpr;
-        self.ctx
-            .set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-            .expect("set_transform should not fail");
-        self.ctx.scale(dpr_f, dpr_f).expect("scale should not fail");
+        // Both calls are spec-infallible for finite arguments, and `dpr` is
+        // already validated finite and positive by `CanvasMetrics::new`, so
+        // an `Err` here means the ctx is gone (lost context) rather than a
+        // caller error. Panicking would abort the whole wasm app mid-paint,
+        // so keep the frame alive and report the unscaled output once —
+        // the same discipline `measure_text_width` applies below.
+        let reset = self.ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+        if reset.and_then(|()| self.ctx.scale(dpr, dpr)).is_err() {
+            debug_assert!(
+                false,
+                "CanvasPainter::apply_dpr_transform: ctx rejected the DPR transform"
+            );
+            warn_once(
+                &DPR_WARN_EMITTED,
+                "iron-canvas: ctx rejected the DPR transform; the frame paints unscaled \
+                 (subsequent rejections silenced)",
+            );
+        }
         // Canvas2D defaults `imageSmoothingEnabled = true`, which bilinear-
         // interpolates `drawImage` source pixels. `Painter::blit` without a
         // `blit_src` calls drawImage with src/dst on the same canvas — every

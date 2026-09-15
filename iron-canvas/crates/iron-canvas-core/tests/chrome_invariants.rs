@@ -12,12 +12,12 @@
 
 mod common;
 
-use iron_canvas_core::CanvasModel;
 use iron_canvas_core::chrome::{Chrome, FramePath, measure_row_header_width};
 use iron_canvas_core::geometry::constants::{CELL_AREA_INSET, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT};
 use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
+use iron_canvas_core::{CanvasModel, Fetched};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
@@ -307,13 +307,13 @@ impl iron_canvas_core::CanvasModel for SheetChangesOnSecondRead {
     fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32> {
         self.inner.get_frozen_columns_count(sheet)
     }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
+    fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64> {
         self.inner.get_row_height(sheet, row)
     }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
+    fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64> {
         self.inner.get_column_width(sheet, column)
     }
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
+    fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool> {
         self.inner.get_show_grid_lines(sheet)
     }
     fn last_row(&self, sheet: u32) -> i32 {
@@ -330,8 +330,14 @@ fn chrome_build_uses_captured_sheet_not_a_second_live_read() {
     let theme = std::rc::Rc::new(CanvasTheme::light());
 
     // Capture is the one read `Chrome::build` is allowed to depend on.
-    let inputs = iron_canvas_core::FrameInputs::capture(&model, canvas_default(), 1.0, theme, 0)
-        .expect("healthy model must capture successfully");
+    let inputs = iron_canvas_core::FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        theme,
+        0,
+    )
+    .expect("healthy model must capture successfully");
     assert_eq!(inputs.sheet(), 0, "capture must see the first-call value");
 
     // Prove the premise: a second call to the same accessor really does

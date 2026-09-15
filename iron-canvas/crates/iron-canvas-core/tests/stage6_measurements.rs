@@ -41,7 +41,7 @@
 //!
 //! Timings are not measured here at all — end-to-end elapsed time is the
 //! browser probe's job (`iron-canvas-web/tests/render_wasm.rs`), and the
-//! private fingerprint A/B lives in `renderer/cell/fingerprint.rs`.
+//! private fingerprint A/B lives in `renderer/cache/fingerprint.rs`.
 
 mod common;
 
@@ -191,9 +191,9 @@ impl CanvasModel for ObservedModel {
         fn get_selected_view(&self) -> Option<CanvasView>;
         fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
         fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
-        fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64>;
-        fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64>;
-        fn get_show_grid_lines(&self, sheet: u32) -> Option<bool>;
+        fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64>;
+        fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64>;
+        fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool>;
         fn get_show_selection(&self) -> bool;
         fn last_row(&self, sheet: u32) -> i32;
         fn last_column(&self, sheet: u32) -> i32;
@@ -531,7 +531,10 @@ impl Probe {
         let model = Rc::new(ObservedModel::new(inner));
 
         let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-        orch.resize(shape.canvas(), 1.0);
+        orch.resize(
+            iron_canvas_core::CanvasMetrics::new(shape.canvas(), 1.0)
+                .expect("test canvas metrics are valid"),
+        );
         orch.set_model(Rc::clone(&model) as Rc<dyn CanvasModel>);
         // Construction is not part of any workload, so the first measured
         // window opens after `resize`/`set_model`, not at op zero.
@@ -670,9 +673,7 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.warm();
             let row = borderless_scroll_row(shape.scroll_origin());
             probe.model().set_cell(row, edit_col, "edited");
-            probe
-                .orch
-                .mark_rows_damaged(sheet, RowSpan { r1: row, r2: row });
+            probe.orch.mark_rows_damaged(sheet, RowSpan::new(row, row));
             push("row_damage", probe.paint());
         }
         Workload::W3 => {
@@ -707,13 +708,9 @@ fn run_workload(workload: Workload, shape: Shape) -> Vec<Row> {
             probe.warm();
             let damaged = borderless_scroll_row(shape.scroll_origin());
 
-            probe.orch.mark_rows_damaged(
-                sheet,
-                RowSpan {
-                    r1: damaged,
-                    r2: damaged,
-                },
-            );
+            probe
+                .orch
+                .mark_rows_damaged(sheet, RowSpan::new(damaged, damaged));
             probe.warm();
             probe.model().set_top_row(shape.scrolled_origin());
             probe.orch.view_changed();

@@ -29,4 +29,7 @@ pub use iron_canvas_core::{
     ResizeTarget, SheetArea, Side, Span, ThemeVariables, chrome, decoration, geometry,
     model_adapter, painter, renderer, theme, types,
 };
+pub use iron_canvas_core::{AutoFitError, CanvasMetricError, CanvasMetrics};
+#[cfg(feature = "dev-tools")]
+pub use orchestrator::ReplayResult;
 pub use orchestrator::{IronCanvas, RenderResult};

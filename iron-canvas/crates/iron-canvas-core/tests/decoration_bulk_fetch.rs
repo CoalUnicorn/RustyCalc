@@ -8,10 +8,11 @@
 mod common;
 
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
+use iron_canvas_core::geometry::prim::Point;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict};
+use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict, RatingSpec};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
@@ -124,4 +125,94 @@ fn decoration_reaches_painter_and_skip_is_stable() {
         "idempotent repaint must not repaint the decoration",
     );
     assert_eq!(core.trace().verdict, Some(GridVerdict::Skip));
+}
+
+#[test]
+fn malformed_data_bar_color_paints_black_and_matches_black_fingerprint() {
+    for color in ["#aé000", "#00aé0", "#0000é", "#中文", "#+10000"] {
+        let model = TestModel::synthetic_grid();
+        model.set_decoration(
+            2,
+            2,
+            CellDecoration::DataBar(DataBarSpec {
+                fraction: 0.75,
+                color: color.to_string(),
+            }),
+        );
+        let theme = std::rc::Rc::new(CanvasTheme::light());
+        let inputs = test_inputs(&model, canvas_default(), &theme);
+        let mut frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
+        let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+
+        core.render_grid(&model, &frame);
+        assert_eq!(data_bar_fill_count(core.painter(), "#000000"), 1, "{color}");
+
+        model.set_decoration(
+            2,
+            2,
+            CellDecoration::DataBar(DataBarSpec {
+                fraction: 0.75,
+                color: "#000000".to_string(),
+            }),
+        );
+        frame.kind = FrameKindTag::SlotsReused;
+        core.reset_trace();
+        core.render_grid(&model, &frame);
+        assert_eq!(core.trace().verdict, Some(GridVerdict::Skip), "{color}");
+        assert_eq!(data_bar_fill_count(core.painter(), "#000000"), 1, "{color}");
+    }
+}
+
+#[test]
+fn rating_paints_five_star_polygons_in_filled_then_empty_order() {
+    let model = TestModel::synthetic_grid();
+    model.set_col_width(2, 104.0);
+    model.set_row_height(2, 24.0);
+    model.set_decoration(
+        2,
+        2,
+        CellDecoration::Rating(RatingSpec {
+            stars: 5,
+            filled: 3,
+        }),
+    );
+    let theme = std::rc::Rc::new(CanvasTheme::light());
+    let inputs = test_inputs(&model, canvas_default(), &theme);
+    let frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
+    let rect = frame.cell_rect(2, 2).expect("the rating cell is visible");
+    let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+    core.render_grid(&model, &frame);
+
+    let expected: Vec<_> = ["#f0a30a", "#f0a30a", "#f0a30a", "#d0d0d0", "#d0d0d0"]
+        .into_iter()
+        .zip(0..5)
+        .map(|(color, star)| DrawOp::FillPath {
+            points: [
+                (12, 3),
+                (14, 9),
+                (21, 9),
+                (15, 13),
+                (17, 19),
+                (12, 15),
+                (7, 19),
+                (9, 13),
+                (3, 9),
+                (10, 9),
+            ]
+            .map(|(x, y)| Point {
+                x: rect.left() + star * 20 + x,
+                y: rect.top() + y,
+            })
+            .to_vec(),
+            color: color.to_string(),
+        })
+        .collect();
+    let paths: Vec<_> = core
+        .painter()
+        .ops()
+        .iter()
+        .filter(|op| matches!(op, DrawOp::FillPath { .. }))
+        .cloned()
+        .collect();
+    assert_eq!(paths, expected);
 }

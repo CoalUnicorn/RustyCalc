@@ -1,9 +1,14 @@
 //! [`Fetched`] — the outcome of a single content fetch against the host model.
 
-/// Outcome of a single content fetch against the host model. Replaces the
-/// overloaded `Option<T>` on the content accessors: `None` used to mean three
-/// different things; each is now a named variant the caller must handle.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Outcome of a single fetch against the host model. Replaces the overloaded
+/// `Option<T>` on the content and geometry/config accessors: `None` used to
+/// mean three different things; each is now a named variant the caller must
+/// handle.
+///
+/// `Eq` is implemented only when `T: Eq` (payloads like `f64` row heights are
+/// only `PartialEq`), so this type serves both cell content and scalar
+/// geometry reads.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Fetched<T> {
     /// The model answered with a concrete value.
     Value(T),
@@ -16,6 +21,10 @@ pub enum Fetched<T> {
     /// re-query next frame.
     BridgeFailed,
 }
+
+// `Eq` only when the payload is `Eq` (e.g. `CellKind`, `String`); scalar
+// geometry payloads (`f64`) keep `PartialEq` only, mirroring `f64` itself.
+impl<T: Eq> Eq for Fetched<T> {}
 
 impl<T> Fetched<T> {
     /// Collapse to `Option`, discarding the `Absent`/`BridgeFailed` distinction.

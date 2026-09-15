@@ -85,7 +85,7 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 | Method | Description |
 | ------ | ----------- |
 | `IronCanvas.create(gridCanvas, overlayCanvas)` | Construct over two stacked canvases. Returns `IronCanvas` or throws. |
-| `canvas.resize(css_w, css_h, dpr)` | Resize both layers. Call it when the CSS size or DPR changes. A real change forces `renderPending()` to rebuild all pixels. |
+| `canvas.resize(css_w, css_h, dpr)` | Resize both layers. Call it when the CSS size or DPR changes. A real change forces `renderPending()` to rebuild all pixels. Throws when the values cannot be canvas metrics (non-finite or negative extent, non-positive DPR, or a backing store that cannot fit `u32`). |
 | `canvas.dispose()` | Release the canvas. Call when unmounting. |
 
 #### Model
@@ -93,8 +93,8 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 | Method | Description |
 | ------ | ----------- |
 | `canvas.setModel(model)` | Bind an IronCalc `Model` JS handle. Triggers a full repaint. |
-| `canvas.exportSvg(css_w, css_h)` | Render the current sheet as a self-contained SVG string. Drives a throwaway `Orchestrator<SvgSurface>` against the cached model — no painted-pixel state on the live canvas is touched. Returns `""` if no model is bound. |
-| `canvas.exportPdf(css_w, css_h)` | Render the current sheet as a self-contained PDF (returned as `Uint8Array`). Gated behind `--features pdf`. |
+| `canvas.exportSvg(css_w, css_h)` | Render the current sheet as a self-contained SVG string. Drives a throwaway `Orchestrator<SvgSurface>` against the cached model — no painted-pixel state on the live canvas is touched. Throws if no model is bound, the size is not valid canvas metrics, or the export paint attempt does not commit a frame. |
+| `canvas.exportPdf(css_w, css_h)` | Render the current sheet as a self-contained PDF (returned as `Uint8Array`). Gated behind `--features pdf`. Same throw contract as `exportSvg`. |
 
 #### Repaint triggers
 

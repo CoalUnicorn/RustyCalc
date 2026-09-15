@@ -1,8 +1,9 @@
-//! `Chrome::range_rect` and its private `range_intersects_fold` helper
-//! decide whether an arbitrary sheet range can be drawn — and where.
-//! Off-screen refs (`=BB3` when column BB hasn't been scrolled in) must
-//! return `None`; oversized selections must clamp to canvas edges rather
-//! than extending into negative pixels or off-canvas.
+//! `Chrome::range_rect` decides whether an arbitrary sheet range can be
+//! drawn — and where. Off-screen refs (`=BB3` when column BB hasn't been
+//! scrolled in) must return `None`; oversized selections must clamp to canvas
+//! edges rather than extending into negative pixels or off-canvas; and a
+//! range that overlaps only part of the visible frozen/scroll union must
+//! report that part, never the address gap or the separator between bands.
 
 mod common;
 
@@ -18,7 +19,7 @@ fn fresh(model: &TestModel) -> Chrome {
     Chrome::next(None, model, &inputs, FramePath::Fresh)
 }
 
-// ─── range_intersects_fold (via range_rect == None) ──────────────────────
+// ─── nothing visible (range_rect == None) ────────────────────────────────
 
 #[test]
 fn range_entirely_below_viewport_returns_none() {
@@ -117,6 +118,99 @@ fn single_cell_at_frozen_seam_paints_at_scroll_band_origin() {
     let p = &frame.pane_set;
     assert_eq!(rect.top_left.y, p.row_to_y(3));
     assert_eq!(rect.height, p.row_extent_at(3));
+}
+
+// ─── address-gap projection ──────────────────────────────────────────────
+
+#[test]
+fn range_overlapping_only_the_frozen_band_with_scroll_far_below_paints() {
+    // Scrolled to row 100 with rows 1..=3 frozen: rows 4..=99 are an address
+    // gap no slot covers. A range whose *far* corner sits in that gap still
+    // overlaps rows 2..=3, so it must paint exactly those frozen rows — the
+    // far corner alone must not reject the range.
+    let model = TestModel::synthetic_grid()
+        .with_frozen_rows(3)
+        .with_top_row(100);
+    let frame = fresh(&model);
+    let rect = frame
+        .range_rect(RCRange::from([2, 1, 8, 3]))
+        .expect("range overlapping the frozen band must paint");
+
+    let p = &frame.pane_set;
+    assert_eq!(rect.top_left.y, p.row_to_y(2), "starts at row 2");
+    assert_eq!(
+        rect.top_left.y + rect.height,
+        p.row_to_y(3) + p.row_extent_at(3),
+        "covers exactly the frozen rows 2..=3, not the gap below them"
+    );
+}
+
+#[test]
+fn range_starting_in_address_gap_covers_only_the_scroll_part() {
+    // Same scroll: rows 50..=105 starts inside the gap (4..=99) and ends in
+    // the scroll band (100..=105). Painting must start at row 100 — the gap
+    // rows and the frozen rows above them are not part of the range's visible
+    // extent on the scroll axis.
+    let model = TestModel::synthetic_grid()
+        .with_frozen_rows(3)
+        .with_top_row(100);
+    let frame = fresh(&model);
+    let rect = frame
+        .range_rect(RCRange::from([50, 1, 105, 3]))
+        .expect("range ending in the scroll band must paint");
+
+    let p = &frame.pane_set;
+    assert_eq!(
+        rect.top_left.y,
+        p.row_to_y(100),
+        "starts at the scroll band"
+    );
+    assert_eq!(
+        rect.top_left.y + rect.height,
+        p.row_to_y(105) + p.row_extent_at(105),
+        "ends at the range's last covered scroll row"
+    );
+}
+
+#[test]
+fn range_entirely_in_address_gap_returns_none() {
+    // Rows 20..=30 sit in the gap between frozen rows 1..=3 and the
+    // scrolled-to row 100: nothing is painted there, so no outline exists.
+    let model = TestModel::synthetic_grid()
+        .with_frozen_rows(3)
+        .with_top_row(100);
+    let frame = fresh(&model);
+    assert!(
+        frame.range_rect(RCRange::from([20, 1, 30, 3])).is_none(),
+        "a range with no covered slot must not paint"
+    );
+}
+
+#[test]
+fn column_gap_projection_is_independent_of_corner_order() {
+    let model = TestModel::synthetic_grid()
+        .with_frozen_cols(2)
+        .with_left_column(100);
+    let frame = fresh(&model);
+    let p = &frame.pane_set;
+    for (first, last, visible_first, visible_last) in
+        [(2, 50, 2, 2), (50, 101, 100, 101), (2, 101, 2, 101)]
+    {
+        for range in [
+            RCRange::from([1, first, 2, last]),
+            RCRange::from([2, last, 1, first]),
+        ] {
+            let rect = frame
+                .range_rect(range)
+                .expect("range intersects a visible band");
+            assert_eq!(rect.top_left.x, p.col_to_x(visible_first));
+            assert_eq!(
+                rect.top_left.x + rect.width,
+                p.col_to_x(visible_last) + p.col_extent_at(visible_last)
+            );
+        }
+    }
+    assert!(frame.range_rect(RCRange::from([1, 20, 2, 30])).is_none());
 }
 
 // ─── oversized-range clamping ────────────────────────────────────────────

@@ -68,14 +68,29 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
     fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32> {
         UserModel::get_frozen_columns_count(&self.0, sheet).ok()
     }
-    fn get_row_height(&self, sheet: u32, row: i32) -> Option<f64> {
-        UserModel::get_row_height(&self.0, sheet, row).ok()
+    // Geometry reads carry the explicit `Fetched` outcome so the engine can
+    // distinguish "no override" (`Absent` — the documented default applies)
+    // from a transient failure. There is no JS bridge here: a native
+    // `UserModel` error (invalid row/sheet) is persistent, not transient, so
+    // it maps to `Absent`, matching the content accessors' native-error
+    // convention.
+    fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64> {
+        match UserModel::get_row_height(&self.0, sheet, row) {
+            Ok(h) => Fetched::Value(h),
+            Err(_) => Fetched::Absent,
+        }
     }
-    fn get_column_width(&self, sheet: u32, column: i32) -> Option<f64> {
-        UserModel::get_column_width(&self.0, sheet, column).ok()
+    fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64> {
+        match UserModel::get_column_width(&self.0, sheet, column) {
+            Ok(w) => Fetched::Value(w),
+            Err(_) => Fetched::Absent,
+        }
     }
-    fn get_show_grid_lines(&self, sheet: u32) -> Option<bool> {
-        UserModel::get_show_grid_lines(&self.0, sheet).ok()
+    fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool> {
+        match UserModel::get_show_grid_lines(&self.0, sheet) {
+            Ok(v) => Fetched::Value(v),
+            Err(_) => Fetched::Absent,
+        }
     }
 }
 

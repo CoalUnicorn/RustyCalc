@@ -35,9 +35,12 @@ pub fn handle_dblclick(
             ResizeTarget::ColumnEdge(col) => {
                 let (first, last) = full_header_span(area, col, Axis::Col);
                 for c in first..=last {
-                    if let Some(w) =
-                        with_canvas(icv, |ic| ic.fit_column_width(c, dim.r1, dim.r2)).flatten()
-                    {
+                    // A failed measurement (no model, unreadable sheet or
+                    // column extent) is not "no content": skip that column.
+                    let measured = with_canvas(icv, |ic| ic.fit_column_width(c, dim.r1, dim.r2))
+                        .and_then(|fit| fit.ok())
+                        .flatten();
+                    if let Some(w) = measured {
                         execute(
                             &SpreadsheetAction::Structure(StructAction::SetColumnWidth {
                                 col: c,
@@ -53,9 +56,12 @@ pub fn handle_dblclick(
             ResizeTarget::RowEdge(row) => {
                 let (first, last) = full_header_span(area, row, Axis::Row);
                 for r in first..=last {
-                    if let Some(h) =
-                        with_canvas(icv, |ic| ic.fit_row_height(r, dim.c1, dim.c2)).flatten()
-                    {
+                    // A failed measurement (no model, unreadable sheet or
+                    // column extent) is not "no content": skip that row.
+                    let measured = with_canvas(icv, |ic| ic.fit_row_height(r, dim.c1, dim.c2))
+                        .and_then(|fit| fit.ok())
+                        .flatten();
+                    if let Some(h) = measured {
                         execute(
                             &SpreadsheetAction::Structure(StructAction::SetRowHeight {
                                 row: r,

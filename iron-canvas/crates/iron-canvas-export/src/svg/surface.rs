@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use iron_canvas_core::geometry::CanvasSize;
+use iron_canvas_core::geometry::{CanvasMetrics, CanvasSize};
 use iron_canvas_core::layer::Surface;
 use iron_canvas_core::{CanvasModel, CanvasTheme};
 
@@ -38,17 +38,26 @@ impl SvgSurface {
     /// active-cell repaint hook draws through the *overlay* surface,
     /// which is dropped here — only the grid surface's cell / border /
     /// chrome draws survive into the returned string.
-    pub fn render(model: Rc<dyn CanvasModel>, theme: &CanvasTheme, size: CanvasSize) -> String {
-        let width = size.w.round() as i32;
-        let height = size.h.round() as i32;
+    ///
+    /// Fallible: the size must parse as [`CanvasMetrics`] (DPR 1.0 — the
+    /// document has no device scale), and the one paint attempt must commit a
+    /// frame. See [`crate::ExportError`].
+    pub fn render(
+        model: Rc<dyn CanvasModel>,
+        theme: &CanvasTheme,
+        size: CanvasSize,
+    ) -> Result<String, crate::ExportError> {
+        let metrics = CanvasMetrics::new(size, 1.0)?;
+        let width = metrics.size().w.round() as i32;
+        let height = metrics.size().h.round() as i32;
 
         let grid = SvgSurface::new(width, height);
         let overlay = SvgSurface::new(width, height);
         let grid_painter = grid.clone_painter();
 
-        crate::drive_once(grid, overlay, model, theme, size);
+        crate::drive_once(grid, overlay, model, theme, metrics)?;
 
-        grid_painter.finish()
+        Ok(grid_painter.finish())
     }
 }
 
@@ -67,9 +76,12 @@ impl Surface for SvgSurface {
     /// `resize` that disagrees would silently produce a mismatched
     /// `viewBox`. Callers must pair construction and `Orchestrator::resize`
     /// with the same `(w, h)` — the assert hardens that contract.
-    fn resize(&mut self, css: CanvasSize, _dpr: f64) {
+    fn resize(&mut self, metrics: CanvasMetrics) {
         debug_assert_eq!(
-            (css.w.round() as i32, css.h.round() as i32),
+            (
+                metrics.size().w.round() as i32,
+                metrics.size().h.round() as i32
+            ),
             (self.painter.width, self.painter.height),
             "SvgSurface::resize disagrees with SvgPainter dimensions baked at construction",
         );

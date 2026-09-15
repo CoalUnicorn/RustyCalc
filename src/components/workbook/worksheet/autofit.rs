@@ -60,10 +60,13 @@ pub(super) fn install_autofit_effect(
 
         for row in rows {
             // Renderer measures wrapped line count against live model text.
-            let Some(fitted) = canvas_handle.with_value(|slot| {
+            // A failed measurement (no model, unreadable sheet or column
+            // extent) is not "no content": leave that row at its height.
+            let fitted = canvas_handle.with_value(|slot| {
                 slot.as_ref()
-                    .and_then(|ic| ic.fit_row_height(row, dim.c1, dim.c2))
-            }) else {
+                    .and_then(|ic| ic.fit_row_height(row, dim.c1, dim.c2).ok())
+            });
+            let Some(Some(fitted)) = fitted else {
                 continue;
             };
             let current = model

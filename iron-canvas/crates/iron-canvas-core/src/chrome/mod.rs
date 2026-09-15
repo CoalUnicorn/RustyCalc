@@ -31,11 +31,12 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use crate::frame_plan::{FrameDelta, FrameInputs, RebuildReason};
+use crate::geometry::CanvasMetrics;
 use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
     pixel_rect::PixelRect,
     prim::Point,
-    slot::{AxisSlot, scroll_first},
+    slot::scroll_first,
 };
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
@@ -48,7 +49,7 @@ mod pane_region;
 mod pane_set;
 mod recycled_slots;
 
-pub(crate) use blit::PreparedBlitFrame;
+pub(crate) use blit::PreparedBlitOutcome;
 pub use blit::{BlitPlan, FramePath, Shift};
 pub use kind::FrameKindTag;
 pub use pane_region::{GridLayout, GridSegment, GridShape, PaneRegion};
@@ -130,9 +131,12 @@ pub struct Chrome {
     /// Top-left of the cell area; single source of truth for hit-test
     /// and viewport math.
     pub cell_origin: Point,
-    /// Canvas size at build time. `Chrome::classify` reads this to detect
-    /// a resize.
-    pub canvas_size: CanvasSize,
+    /// Canvas metrics at build time. `Chrome::classify` reads this to detect
+    /// a resize or DPR change, and every geometry walk takes its logical extent
+    /// and backing size from here. Private: the value carries
+    /// [`CanvasMetrics`]' validated invariant, and `Chrome::next`/`next_blit`
+    /// are the only producers.
+    metrics: CanvasMetrics,
     /// Theme this frame was painted with. The renderer reads `frame.theme`
     /// directly; `IronCanvas::set_theme` marks both layers dirty on change,
     /// so the overlay-only fast path never paints against a stale theme.
@@ -141,10 +145,6 @@ pub struct Chrome {
     /// every color `String` — `Chrome` is rebuilt on every Fresh/SlotsReuse/
     /// Blit frame (B-1).
     pub theme: Rc<CanvasTheme>,
-    /// Device pixel ratio this frame was captured with. Committed geometry
-    /// metadata, not a live orchestrator read — lets `Chrome::classify`
-    /// detect a DPR change by comparing committed frames only.
-    pub dpr: f64,
     /// `Orchestrator::model_generation` at capture time. Committed so
     /// `Chrome::classify` can detect a `set_model` replacement without
     /// comparing trait-object pointers.
@@ -159,6 +159,19 @@ pub struct Chrome {
     /// paint-skip gating read it; `FrameKindTag::reuses_slots()` is the
     /// "slot vecs inherited from prev" predicate.
     pub kind: FrameKindTag,
+}
+
+/// Outcome of [`Chrome::build`] (the `FramePath::Fresh` walk). The two
+/// results are a built frame or a held attempt: a transient `BridgeFailed`
+/// on any row-height or column-width read makes the whole geometry
+/// untrustworthy (one slot's cursor depends on every earlier extent), so the
+/// walk aborts before any pixel or cache state is committed. `Held` hands
+/// the drained slot pool back so the retry reuses its allocations.
+#[must_use = "a held Fresh build must become an AttemptOutcome::Held, never a painted frame"]
+pub(crate) enum FreshBuild {
+    Ready(Chrome),
+    /// Geometry reads failed; `RecycledSlots` is the drained pool for reuse.
+    Held(RecycledSlots),
 }
 
 /// Outcome of [`Chrome::next_blit`]. The blit construction has exactly two
@@ -177,6 +190,23 @@ pub enum BlitOutcome {
 }
 
 impl Chrome {
+    /// Validated canvas metrics this frame was built with.
+    pub fn metrics(&self) -> CanvasMetrics {
+        self.metrics
+    }
+
+    /// Logical canvas size at build time.
+    pub fn canvas_size(&self) -> CanvasSize {
+        self.metrics.size()
+    }
+
+    /// Device pixel ratio this frame was captured with. Committed geometry
+    /// metadata, not a live orchestrator read — lets `Chrome::classify`
+    /// detect a DPR change by comparing committed frames only.
+    pub fn dpr(&self) -> f64 {
+        self.metrics.dpr()
+    }
+
     /// Piecewise address layout for the visible grid.
     pub fn grid_layout(&self) -> GridLayout {
         GridLayout::from_frame(self)
@@ -199,6 +229,18 @@ impl Chrome {
     /// `SlotsReuse` requires `prev = Some`; `None` falls through to `Fresh`
     /// defensively. The orchestrator proves `prev.is_some()` before selecting
     /// that path, but the fallback keeps `Chrome::next` total.
+    /// Construct the next `Chrome` on the assumption that the model's
+    /// geometry/config reads succeed (`Absent` overrides select the
+    /// documented defaults). A transient `BridgeFailed` on any row-height
+    /// or column-width read makes geometry untrustworthy. The orchestrator
+    /// uses [`Chrome::build`] and handles `FreshBuild::Held` before paint.
+    /// This wrapper is for healthy-model construction and slot reuse.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a Fresh build fails because an extent read failed, an
+    /// extent was invalid, or slot coordinates overflowed. This also applies
+    /// to `SlotsReuse` when `prev` is `None` and construction falls back to Fresh.
     pub fn next(
         prev: Option<Chrome>,
         model: &dyn CanvasModel,
@@ -211,7 +253,15 @@ impl Chrome {
                     Some(c) => RecycledSlots::from_pane_set(c.pane_set),
                     None => RecycledSlots::default(),
                 };
-                Self::build(model, inputs, recycled)
+                match Self::build(model, inputs, recycled) {
+                    FreshBuild::Ready(frame) => frame,
+                    FreshBuild::Held(_) => {
+                        panic!(
+                            "Chrome::next(Fresh) requires a geometry-healthy model; \
+                                bridge failures hold through Orchestrator::render_pending"
+                        )
+                    }
+                }
             }
             FramePath::SlotsReuse => {
                 let Some(mut prev) = prev else {
@@ -223,7 +273,7 @@ impl Chrome {
                 // was actually built for. Grid paint scope remains the
                 // caller's `GridWork` verdict rather than state stored here.
                 prev.theme = Rc::clone(inputs.theme());
-                prev.dpr = inputs.dpr();
+                prev.metrics = inputs.metrics();
                 prev.model_generation = inputs.model_generation();
                 prev.show_row_headers = inputs.show_row_headers();
                 prev.show_col_headers = inputs.show_col_headers();
@@ -234,24 +284,21 @@ impl Chrome {
     }
 
     /// Prepare the blit fast-path's next-frame candidate without committing:
-    /// `Ok(prepared)` on successful in-place reuse, `Err(prev)` — `prev`
-    /// handed back whole — on reject (see `try_blit_reuse`'s doc for both
-    /// cases). `Chrome::next_blit` is the immediate-commit wrapper built on
-    /// top of this for callers that don't need to hold the decision open;
-    /// `Orchestrator::render_scroll_blit` calls this directly instead, so
-    /// it can call `PreparedBlitFrame::rollback` if the paint that follows a
-    /// successful `Ok` still fails a bulk bridge read. `pub(crate)`: an
-    /// execution detail of the render pipeline, not consumer-facing API.
-    // Same large-`Err` shape as `try_blit_reuse` (this just forwards to it) —
-    // see that function's own comment for why `Chrome` stays by-value here
-    // instead of boxed.
-    #[allow(clippy::result_large_err)]
+    /// [`PreparedBlitOutcome::Ready`] on successful in-place reuse,
+    /// [`PreparedBlitOutcome::FreshFallback`] carrying `prev` whole on reject
+    /// (see `try_blit_reuse`'s doc for both cases). `Chrome::next_blit` is the
+    /// immediate-commit wrapper built on top of this for callers that don't
+    /// need to hold the decision open; `Orchestrator::render_scroll_blit`
+    /// calls this directly instead, so it can call
+    /// `PreparedBlitFrame::rollback` if the paint that follows a successful
+    /// `Ready` still fails a bulk bridge read. `pub(crate)`: an execution
+    /// detail of the render pipeline, not consumer-facing API.
     pub(crate) fn prepare_blit(
         prev: Chrome,
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
         plan: &BlitPlan,
-    ) -> Result<PreparedBlitFrame, Chrome> {
+    ) -> PreparedBlitOutcome {
         blit::try_blit_reuse(prev, model, inputs, plan)
     }
 
@@ -261,9 +308,10 @@ impl Chrome {
     /// Qualification passed (`Chrome::classify` returned `FrameDelta::Scroll`),
     /// but in-place reuse may still reject — e.g. the row-header digit boundary at 99 -> 100,
     /// where `row_header_thickness` widens and the cross-axis cell-area origin
-    /// shifts. `try_blit_reuse` hands `prev` back (`Err`) on reject, and we
-    /// rebuild `Fresh`. The two results map straight to the two `BlitOutcome`
-    /// arms at the decision point, so no caller has to assert an impossible
+    /// shifts. `try_blit_reuse` hands `prev` back
+    /// (`PreparedBlitOutcome::FreshFallback`) on reject, and we rebuild
+    /// `Fresh`. The two outcomes map straight to the two `BlitOutcome` arms at
+    /// the decision point, so no caller has to assert an impossible
     /// `SlotsReused` away.
     ///
     /// Implemented through [`Self::prepare_blit`] — the same internal
@@ -280,8 +328,8 @@ impl Chrome {
             return BlitOutcome::FreshFallback(Self::next(None, model, inputs, FramePath::Fresh));
         };
         match Self::prepare_blit(prev, model, inputs, plan) {
-            Ok(prepared) => BlitOutcome::Blitted(prepared.commit()),
-            Err(prev) => {
+            PreparedBlitOutcome::Ready(prepared) => BlitOutcome::Blitted(prepared.commit()),
+            PreparedBlitOutcome::FreshFallback(prev) => {
                 BlitOutcome::FreshFallback(Self::next(Some(prev), model, inputs, FramePath::Fresh))
             }
         }
@@ -300,13 +348,21 @@ impl Chrome {
         model: &dyn CanvasModel,
         inputs: &FrameInputs,
         recycled: RecycledSlots,
-    ) -> Self {
+    ) -> FreshBuild {
         // `inputs` is a `FrameInputs::capture` snapshot: sheet, view, freeze
         // counts, and header visibility already read exactly once and
         // validated (a bridge failure on any of them holds the whole paint
         // attempt before `Chrome::build` is ever called — see
         // `Orchestrator::render_pending`). No fallback default is needed or
         // read here.
+        //
+        // Row heights and column widths are *not* capture-time scalars: they
+        // are walked per visible slot below. A transient `BridgeFailed` on any
+        // of those reads makes the whole geometry untrustworthy — a slot's
+        // cursor position depends on every earlier extent — so `build`
+        // returns `Held` (with the drained slot pool handed back for the
+        // retry to reuse) and the caller holds the attempt instead of
+        // committing fabricated geometry.
         let view = inputs.view();
         let sheet = inputs.sheet();
 
@@ -334,7 +390,7 @@ impl Chrome {
         } else {
             0
         };
-        pane_set.fill_rows(
+        if !pane_set.fill_rows(
             model,
             sheet,
             frozen_row_count,
@@ -342,20 +398,17 @@ impl Chrome {
             view.top_row,
             last_row,
             canvas_h,
-        );
+        ) {
+            return FreshBuild::Held(RecycledSlots::from_pane_set(pane_set));
+        }
 
         // Phase C — measure row_header_thickness from the last visible row label.
-        let last_visible_row = pane_set
-            .rows
-            .scroll
-            .last()
-            .map(|s| s.id())
-            .unwrap_or((frozen_row_count + 1).max(view.top_row));
-        let row_header_thickness = if show_row {
-            measure_row_header_width(last_visible_row)
-        } else {
-            0
-        };
+        let row_header_thickness = pane_set::row_header_thickness_for(
+            &pane_set.rows.scroll,
+            frozen_row_count,
+            view.top_row,
+            show_row,
+        );
 
         // Phase D — col walk uses the measured width to anchor `origin_x`.
         let origin_x = if show_row {
@@ -363,7 +416,7 @@ impl Chrome {
         } else {
             0
         };
-        pane_set.fill_cols(
+        if !pane_set.fill_cols(
             model,
             sheet,
             frozen_col_count,
@@ -371,7 +424,9 @@ impl Chrome {
             view.left_column,
             last_column,
             canvas_w,
-        );
+        ) {
+            return FreshBuild::Held(RecycledSlots::from_pane_set(pane_set));
+        }
 
         // Data-driven header labels in walk_header_strip (frozen ++ scroll)
         // order so header_strip can zip slots <-> labels positionally.
@@ -388,20 +443,19 @@ impl Chrome {
             y: origin_y,
         };
 
-        Chrome {
+        FreshBuild::Ready(Chrome {
             sheet,
             pane_set,
             row_header_thickness,
             col_header_thickness,
             cell_origin,
-            canvas_size: canvas,
+            metrics: inputs.metrics(),
             theme: Rc::clone(inputs.theme()),
-            dpr: inputs.dpr(),
             model_generation: inputs.model_generation(),
             show_row_headers: show_row,
             show_col_headers: show_col,
             kind: FrameKindTag::Fresh,
-        }
+        })
     }
 
     /// The one classifier that replaces the former split verdict
@@ -466,10 +520,10 @@ impl Chrome {
         let Some(prev) = prev else {
             return FrameDelta::Rebuild(RebuildReason::NoCommittedFrame);
         };
-        if inputs.size() != prev.canvas_size {
+        if inputs.size() != prev.canvas_size() {
             return FrameDelta::Rebuild(RebuildReason::Size);
         }
-        if inputs.dpr() != prev.dpr {
+        if inputs.dpr() != prev.dpr() {
             return FrameDelta::Rebuild(RebuildReason::Dpr);
         }
         if inputs.theme() != &prev.theme {
@@ -546,58 +600,47 @@ impl Chrome {
     }
 
     /// Map a sheet-coordinate range to canvas pixel bounds, clamping
-    /// oversized selections to the canvas edge. `None` when the range
-    /// lies entirely outside the drawable fold. Pure `Chrome` math, no
-    /// model access.
+    /// oversized selections to the canvas edge. `None` when no row or no
+    /// column of the range is painted in this frame — the range lies entirely
+    /// in the address gap between the frozen band and the scrolled-to band, or
+    /// beyond the walked extent. Pure `Chrome` math, no model access.
+    ///
+    /// Both axes are normalized once, then projected onto their
+    /// frozen-plus-scroll union
+    /// ([`AxisSlots::project_interval`](crate::geometry::slot::AxisSlots::project_interval)). A range that
+    /// starts in the address gap and ends in the scroll band therefore covers
+    /// only the ids it names — never the header or frozen pixels between them —
+    /// and a range that overlaps only the frozen band still returns its true
+    /// rectangle instead of a zero-extent one built from off-frame zeros.
     pub fn range_rect(&self, range: RCRange) -> Option<PixelRect> {
+        let norm = range.normalized();
         let p = &self.pane_set;
-        let (canvas_w, canvas_h) = self.canvas_size.to_logical_extent();
-        let frozen_rows = p.rows.frozen_count();
-        let frozen_cols = p.cols.frozen_count();
+        let (canvas_w, canvas_h) = self.metrics.logical_extent();
 
-        if !self.range_intersects_fold(range, frozen_rows, frozen_cols) {
-            return None;
+        let (x, mut right) = p.cols.project_interval(norm.c1, norm.c2)?;
+        let (y, mut bottom) = p.rows.project_interval(norm.r1, norm.r2)?;
+
+        // The selection continues past the last painted id: there is no slot to
+        // take a trailing edge from, so the outline runs to the canvas edge.
+        if norm.c2 > p.cols.frozen_count().max(p.cols.last_visible()) {
+            right = canvas_w;
         }
-
-        let x = p.col_to_x(range.c1);
-        let y = p.row_to_y(range.r1);
-        let right = if range.c2 > p.last_visible_col() && range.c2 > frozen_cols {
-            canvas_w
-        } else {
-            p.col_to_x(range.c2) + p.col_extent_at(range.c2)
-        };
-        let bottom = if range.r2 > p.last_visible_row() && range.r2 > frozen_rows {
-            canvas_h
-        } else {
-            p.row_to_y(range.r2) + p.row_extent_at(range.r2)
-        };
+        if norm.r2 > p.rows.frozen_count().max(p.rows.last_visible()) {
+            bottom = canvas_h;
+        }
         Some(PixelRect {
             top_left: Point { x, y },
-            width: right - x,
-            height: bottom - y,
+            // A frozen band taller/wider than the canvas can start past the
+            // clamped edge; never hand a painter a negative extent.
+            width: (right - x).max(0),
+            height: (bottom - y).max(0),
         })
     }
 
-    /// True if `range` overlaps the drawable fold (scrollable viewport
-    /// plus the frozen bands). Guards `range_rect`'s slot lookups against
-    /// off-screen refs like `=BB3` when column BB is not visible.
-    fn range_intersects_fold(&self, range: RCRange, frozen_rows: i32, frozen_cols: i32) -> bool {
-        let p = &self.pane_set;
-        if range.c1 > p.last_visible_col() && range.c1 > frozen_cols {
-            return false;
-        }
-        if range.r1 > p.last_visible_row() && range.r1 > frozen_rows {
-            return false;
-        }
-        if range.c2 < p.left_column() && range.c2 > frozen_cols {
-            return false;
-        }
-        if range.r2 < p.top_row() && range.r2 > frozen_rows {
-            return false;
-        }
-        true
-    }
-
+    /// Return the bottom-right corner of the selection's last cell in canvas
+    /// pixels. Return `None` if either cell coordinate has no frame slot or
+    /// reaches the model's last row or column. A retained edge slot can extend
+    /// past the canvas, so the returned point is not clipped to the canvas.
     pub fn autofill_handle(&self, selection_range: RCRange) -> Option<Point> {
         let norm = selection_range.normalized();
         let r2 = norm.r2;
@@ -618,6 +661,11 @@ impl Chrome {
         })
     }
 
+    /// Return the handle's fill rectangle, with [`AUTOFILL_HANDLE_PX`] per side.
+    /// Its bottom-right corner is [`autofill_handle`](Chrome::autofill_handle).
+    /// The rectangle can extend beyond a cell smaller than the handle.
+    /// The selection painter strokes a separate outline around this rectangle.
+    /// Return `None` under the same conditions as the anchor.
     pub fn autofill_handle_rect(&self, selection_range: RCRange) -> Option<PixelRect> {
         let p = self.autofill_handle(selection_range)?;
         Some(PixelRect {

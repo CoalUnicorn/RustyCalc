@@ -11,19 +11,20 @@ use crate::pending_work::RowSpan;
 use crate::renderer::RendererCore;
 use crate::renderer::blit_work;
 use crate::renderer::cache::BufferTruth;
-use crate::renderer::cell::PaneCells;
-use crate::renderer::cell::fingerprint::{
-    GridFingerprint, GridLayoutTransition, RepaintPlan, RepaintReason, RowShiftIneligible,
-    StripFingerprintSource,
+use crate::renderer::cache::fingerprint::{
+    GridFingerprint, RowShiftIneligible, StripFingerprintSource,
 };
+use crate::renderer::cache::layout_transition::GridLayoutTransition;
+use crate::renderer::cell::PaneCells;
 use crate::renderer::cell::repaint;
+use crate::renderer::cell::repaint_plan::{self, RepaintPlan, RepaintReason};
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diag::{
     DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose, DiagFingerprintActionTag,
     distinct_rows,
 };
 use crate::style::{CellDecoration, CellKind, CellStyle};
-use crate::types::coord::RCRange;
+use crate::types::coord::{DenseRange, RCRange};
 use crate::types::fetched::Fetched;
 
 #[derive(Default, Clone)]
@@ -37,17 +38,22 @@ pub(crate) struct FetchedCells {
 impl FetchedCells {
     pub(crate) const CHANNEL_COUNT: usize = 4;
 
-    pub(crate) fn addressed_cells(range: RCRange) -> usize {
-        let rows = (range.r2 - range.r1 + 1).max(0) as usize;
-        let columns = (range.c2 - range.c1 + 1).max(0) as usize;
-        rows.saturating_mul(columns)
+    /// Addressed cells of `range`, counted against the dense invariant.
+    ///
+    /// `range` is any permissive address value convertible into a
+    /// [`DenseRange`] (today always an `RCRange`); the conversion normalizes
+    /// the corners once, so a dual-direction range can no longer be counted as
+    /// zero cells. Reads of the returned bundle always cover `range`'s rows by
+    /// `range`'s columns, never a smaller normalized subset.
+    pub(crate) fn addressed_cells(range: impl Into<DenseRange>) -> usize {
+        range.into().addressed_cells()
     }
 
-    pub(crate) fn logical_channel_slots(range: RCRange) -> usize {
+    pub(crate) fn logical_channel_slots(range: impl Into<DenseRange>) -> usize {
         Self::addressed_cells(range).saturating_mul(Self::CHANNEL_COUNT)
     }
 
-    pub(crate) fn is_dense_for(&self, range: RCRange) -> bool {
+    pub(crate) fn is_dense_for(&self, range: impl Into<DenseRange>) -> bool {
         let expected = Self::addressed_cells(range);
         self.styles.len() == expected
             && self.values.len() == expected
@@ -96,12 +102,21 @@ impl FetchedCells {
         &self.decorations
     }
 
+    /// Fetch all four channels for `range` into `reuse`'s buffers.
+    ///
+    /// `range` is parsed into a [`DenseRange`] first: the model's bulk
+    /// accessors keep their permissive `RCRange` signatures, so without this
+    /// parse a reversed range would reach them and fetch nothing while the
+    /// caller still believed a full bundle was addressed. Every consumer of
+    /// the returned bundle may therefore index it by `height * width`
+    /// directly.
     pub(crate) fn fetch_into(
         model: &dyn CellContentQuery,
         sheet: u32,
-        range: RCRange,
+        range: impl Into<DenseRange>,
         reuse: Self,
     ) -> Self {
+        let range = range.into().as_rc();
         let Self {
             mut styles,
             mut values,
@@ -230,7 +245,7 @@ impl From<&PreparedRepaintPlan> for GridVerdict {
                 spans: spans.len().min(u8::MAX as usize) as u8,
                 rows: spans
                     .iter()
-                    .map(|span| (span.r2 - span.r1 + 1).max(0) as u32)
+                    .map(|span| (span.end() - span.start() + 1).max(0) as u32)
                     .sum::<u32>()
                     .min(u16::MAX as u32) as u16,
             },
@@ -372,7 +387,10 @@ impl<P: Painter> RendererCore<P> {
             .fingerprint
             .build_candidate(layout, &fetched);
         let (plan, reason, changed_rows, changed_cells) = if frame.kind.reuses_slots() {
-            let decision = self.grid_cache.fingerprint.compare_to_painted(&candidate);
+            let decision = repaint_plan::plan_grid_repaint(
+                self.grid_cache.fingerprint.painted().as_deref(),
+                &candidate,
+            );
             let mut reason = decision.reason;
             let plan = match decision.plan {
                 RepaintPlan::Cell(_) => {
@@ -451,8 +469,8 @@ impl<P: Painter> RendererCore<P> {
         for grid_segment in layout.segments() {
             let range = grid_segment.range();
             for span in spans {
-                let r1 = span.r1.max(range.r1);
-                let r2 = span.r2.min(range.r2);
+                let r1 = span.start().max(range.r1);
+                let r2 = span.end().min(range.r2);
                 if r1 > r2 {
                     continue;
                 }
@@ -683,60 +701,7 @@ impl<P: Painter> RendererCore<P> {
                 }
                 self.trace_grid(GridVerdict::from(&repaint.plan));
                 #[cfg(feature = "dev-diagnostics")]
-                {
-                    let verdict = GridVerdict::from(&repaint.plan);
-                    self.diag_repaint(
-                        verdict,
-                        repaint.reason,
-                        &repaint.changed_rows,
-                        &repaint.changed_cells,
-                    );
-                }
-                #[cfg(feature = "dev-diagnostics")]
-                {
-                    self.diag_fingerprint_action(DiagFingerprintActionTag::Install);
-                    // Absolute row intervals per painted segment, merged so
-                    // `rows` counts distinct grid rows even when frozen
-                    // columns visit the same rows in left and right
-                    // segments. Cells stay disjoint across segments.
-                    // Envelope plans record their own counts inside
-                    // `paint_repaint_envelope`.
-                    match &repaint.plan {
-                        PreparedRepaintPlan::Skip => self.diag_paint_counts(0, 0),
-                        PreparedRepaintPlan::Full => {
-                            let row_intervals: Vec<(i32, i32)> = layout
-                                .segments()
-                                .map(|grid_segment| grid_segment.range())
-                                .map(|range| (range.r1, range.r2))
-                                .collect();
-                            let cells = layout
-                                .segments()
-                                .map(|grid_segment| {
-                                    FetchedCells::addressed_cells(grid_segment.range())
-                                })
-                                .sum();
-                            self.diag_paint_counts(distinct_rows(&row_intervals), cells);
-                        }
-                        PreparedRepaintPlan::Rows(spans) => {
-                            let mut row_intervals: Vec<(i32, i32)> = Vec::new();
-                            let mut cells = 0usize;
-                            for grid_segment in layout.segments() {
-                                let range = grid_segment.range();
-                                let cols = (range.c2 - range.c1 + 1).max(0) as usize;
-                                for span in spans {
-                                    let r1 = span.r1.max(range.r1);
-                                    let r2 = span.r2.min(range.r2);
-                                    if r1 <= r2 {
-                                        row_intervals.push((r1, r2));
-                                        cells += (r2 - r1 + 1) as usize * cols;
-                                    }
-                                }
-                            }
-                            self.diag_paint_counts(distinct_rows(&row_intervals), cells);
-                        }
-                        PreparedRepaintPlan::Cell { .. } | PreparedRepaintPlan::Range { .. } => {}
-                    }
-                }
+                self.diag_commit_replace(&repaint, layout);
                 GridCacheCommit::Replace {
                     layout,
                     segments: std::array::from_fn(|index| {
@@ -751,20 +716,7 @@ impl<P: Painter> RendererCore<P> {
                 }
                 self.trace_grid(GridVerdict::Strip);
                 #[cfg(feature = "dev-diagnostics")]
-                self.diag_repaint(GridVerdict::Strip, None, &[], &[]);
-                #[cfg(feature = "dev-diagnostics")]
-                {
-                    self.diag_fingerprint_action(DiagFingerprintActionTag::MarkStale);
-                    let row_intervals: Vec<(i32, i32)> = strips
-                        .iter()
-                        .map(|strip| (strip.range.r1, strip.range.r2))
-                        .collect();
-                    let cells = strips
-                        .iter()
-                        .map(|strip| FetchedCells::addressed_cells(strip.range))
-                        .sum();
-                    self.diag_paint_counts(distinct_rows(&row_intervals), cells);
-                }
+                self.diag_commit_splice(&strips);
                 GridCacheCommit::Splice {
                     layout,
                     strips,
@@ -788,25 +740,7 @@ impl<P: Painter> RendererCore<P> {
                 self.painter.pop_clip();
                 self.trace_grid(GridVerdict::Strip);
                 #[cfg(feature = "dev-diagnostics")]
-                self.diag_repaint(GridVerdict::Strip, None, &[], &[]);
-                #[cfg(feature = "dev-diagnostics")]
-                {
-                    self.diag_fingerprint_action(match &fingerprint {
-                        PreparedFingerprintUpdate::Install(_) => DiagFingerprintActionTag::Install,
-                        PreparedFingerprintUpdate::MarkStale => DiagFingerprintActionTag::MarkStale,
-                    });
-                    let row_intervals: Vec<(i32, i32)> = address_strips
-                        .iter()
-                        .flatten()
-                        .map(|strip| (strip.range.r1, strip.range.r2))
-                        .collect();
-                    let cells = address_strips
-                        .iter()
-                        .flatten()
-                        .map(|strip| FetchedCells::addressed_cells(strip.range))
-                        .sum();
-                    self.diag_paint_counts(distinct_rows(&row_intervals), cells);
-                }
+                self.diag_commit_shift(&address_strips, &fingerprint);
                 GridCacheCommit::Shift {
                     previous,
                     layout,
@@ -1032,8 +966,8 @@ fn paint_segment_span<P: Painter>(
     span: RowSpan,
 ) {
     let range = data.segment.range();
-    let r1 = span.r1.max(range.r1);
-    let r2 = span.r2.min(range.r2);
+    let r1 = span.start().max(range.r1);
+    let r2 = span.end().min(range.r2);
     if r1 > r2 {
         return;
     }
@@ -1128,6 +1062,30 @@ fn shift_channel<E: Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reversed_fetch_preserves_dense_channels_and_row_major_values() {
+        struct Model;
+        impl CellContentQuery for Model {
+            fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Fetched<CellStyle> {
+                Fetched::Absent
+            }
+            fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Fetched<CellKind> {
+                Fetched::Absent
+            }
+            fn get_formatted_cell_value(&self, sheet: u32, row: i32, col: i32) -> Fetched<String> {
+                Fetched::Value(format!("{sheet}:{row}:{col}"))
+            }
+        }
+        let range = RCRange::from([3, 2, 2, 1]);
+        let cells = FetchedCells::fetch_into(&Model, 7, range, FetchedCells::default());
+        assert!(cells.is_dense_for(range));
+        assert_eq!(FetchedCells::logical_channel_slots(range), 16);
+        assert_eq!(
+            cells.values,
+            ["7:2:1", "7:2:2", "7:3:1", "7:3:2"].map(|value| Fetched::Value(value.into()))
+        );
+    }
 
     #[test]
     fn bridge_failure_is_detected_in_each_dense_channel() {

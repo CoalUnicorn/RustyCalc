@@ -77,11 +77,23 @@ fn canvas_size_change_forces_rebuild() {
 fn dpr_change_forces_rebuild() {
     let model = TestModel::synthetic_grid();
     let theme = light();
-    let inputs0 = FrameInputs::capture(&model, canvas_default(), 1.0, Rc::clone(&theme), 0)
-        .expect("healthy model must capture");
+    let inputs0 = FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        Rc::clone(&theme),
+        0,
+    )
+    .expect("healthy model must capture");
     let frame = Chrome::next(None, &model, &inputs0, FramePath::Fresh);
-    let inputs1 = FrameInputs::capture(&model, canvas_default(), 2.0, Rc::clone(&theme), 0)
-        .expect("healthy model must capture");
+    let inputs1 = FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 2.0)
+            .expect("test canvas metrics are valid"),
+        Rc::clone(&theme),
+        0,
+    )
+    .expect("healthy model must capture");
     let delta = Chrome::classify(Some(&frame), &model, &inputs1, None);
     assert!(
         matches!(delta, FrameDelta::Rebuild(RebuildReason::Dpr)),
@@ -100,8 +112,14 @@ fn theme_change_forces_rebuild() {
     let model = TestModel::synthetic_grid();
     let frame = fresh(&model); // built with light()
     let dark = Rc::new(CanvasTheme::dark());
-    let inputs = FrameInputs::capture(&model, canvas_default(), 1.0, dark, 0)
-        .expect("healthy model must capture");
+    let inputs = FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        dark,
+        0,
+    )
+    .expect("healthy model must capture");
     let delta = Chrome::classify(Some(&frame), &model, &inputs, None);
     assert!(
         matches!(delta, FrameDelta::Rebuild(RebuildReason::Theme)),
@@ -113,11 +131,23 @@ fn theme_change_forces_rebuild() {
 fn model_generation_change_forces_rebuild() {
     let model = TestModel::synthetic_grid();
     let theme = light();
-    let inputs0 = FrameInputs::capture(&model, canvas_default(), 1.0, Rc::clone(&theme), 0)
-        .expect("healthy model must capture");
+    let inputs0 = FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        Rc::clone(&theme),
+        0,
+    )
+    .expect("healthy model must capture");
     let frame = Chrome::next(None, &model, &inputs0, FramePath::Fresh);
-    let inputs1 = FrameInputs::capture(&model, canvas_default(), 1.0, theme, 1)
-        .expect("healthy model must capture");
+    let inputs1 = FrameInputs::capture(
+        &model,
+        iron_canvas_core::CanvasMetrics::new(canvas_default(), 1.0)
+            .expect("test canvas metrics are valid"),
+        theme,
+        1,
+    )
+    .expect("healthy model must capture");
     let delta = Chrome::classify(Some(&frame), &model, &inputs1, None);
     assert!(
         matches!(delta, FrameDelta::Rebuild(RebuildReason::Model)),

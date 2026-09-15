@@ -27,7 +27,7 @@ pub use autofill::AutofillLayer;
 pub use clipboard::ClipboardLayer;
 pub use formula_refs::FormulaRefsLayer;
 pub use point_mode::PointModeLayer;
-pub use selection::{RepaintActiveCell, SelectionLayer};
+pub use selection::SelectionLayer;
 
 pub use decorations::DecorationId;
 pub(crate) use decorations::Decorations;
