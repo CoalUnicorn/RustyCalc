@@ -77,7 +77,7 @@ impl Surface for MemSurface {
 /// off costs exactly one branch per op (no allocation, no Vec push).
 ///
 /// Built by `RecordingSurface`; not constructed directly by callers.
-pub struct RecordingPainter<P: Painter + BlitPainter> {
+pub struct RecordingPainter<P: BlitPainter> {
     inner: Rc<P>,
     recorder: Rc<RecorderPainter>,
     enabled: Rc<Cell<bool>>,
@@ -89,13 +89,13 @@ pub struct RecordingPainter<P: Painter + BlitPainter> {
     skip_depth: Rc<Cell<u32>>,
 }
 
-impl<P: Painter + BlitPainter> RecordingPainter<P> {
+impl<P: BlitPainter> RecordingPainter<P> {
     fn should_record(&self) -> bool {
         self.enabled.get() && self.skip_depth.get() == 0
     }
 }
 
-impl<P: Painter + BlitPainter> TextMetrics for RecordingPainter<P> {
+impl<P: BlitPainter> TextMetrics for RecordingPainter<P> {
     fn measure_text_width(&self, text: &str, font_css: &str) -> f64 {
         // Query, not an op — go to inner for the real measurement.
         // Recorder's approximation must not bleed into paint geometry.
@@ -103,7 +103,7 @@ impl<P: Painter + BlitPainter> TextMetrics for RecordingPainter<P> {
     }
 }
 
-impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
+impl<P: BlitPainter> Painter for RecordingPainter<P> {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor) {
         self.inner.rect_fill(rect, color);
         if self.should_record() {
@@ -257,7 +257,7 @@ impl<P: Painter + BlitPainter> Painter for RecordingPainter<P> {
     }
 }
 
-impl<P: Painter + BlitPainter> BlitPainter for RecordingPainter<P> {
+impl<P: BlitPainter> BlitPainter for RecordingPainter<P> {
     fn blit(&self, src: PixelRect, dst: PixelRect) {
         self.inner.blit(src, dst);
         if self.should_record() {
