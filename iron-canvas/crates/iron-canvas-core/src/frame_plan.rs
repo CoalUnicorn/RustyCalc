@@ -105,27 +105,42 @@ pub struct FrameInputs {
 /// valid range. Named per accessor (rather than one generic "bridge failed")
 /// so a held frame's diagnostics — and `FrameOutcome::HeldOnInputFailure` —
 /// can say which input regressed.
+///
+/// The discriminant is the wire code a `.icr` recording stores (the recorder
+/// writes `failure as u8` and validates the decoded value against
+/// [`Self::LAST_CODE`]). The values are explicit and append-only: renumbering
+/// would silently relabel every recorded frame. Declaration order is the read
+/// order of `capture`, which is why the numbers are not in ascending order.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameInputFailure {
-    SelectedSheet,
-    SelectedView,
+    SelectedSheet = 0,
+    SelectedView = 1,
     /// The standalone selected-sheet read and `CanvasView.sheet` disagreed.
     /// Building a frame from one accessor's sheet and the other's
     /// coordinates is not a valid fallback — see the module docs.
-    SheetMismatch,
+    SheetMismatch = 2,
     /// The frozen-row-count read itself failed (`None` from the bridge).
-    FrozenRows,
+    FrozenRows = 3,
     /// The frozen-column-count read itself failed (`None` from the bridge).
-    FrozenColumns,
+    FrozenColumns = 4,
     /// The frozen-row-count read succeeded but returned a value outside
     /// `0..=LAST_ROW`. Rejected at capture so the value can never reach
     /// `Vec::reserve` or the frozen-band walk as an unchecked signed count.
-    InvalidFrozenRowCount,
+    InvalidFrozenRowCount = 7,
     /// Column mirror of [`Self::InvalidFrozenRowCount`], bounded by
     /// `LAST_COLUMN`.
-    InvalidFrozenColumnCount,
-    RowHeaderVisibility,
-    ColumnHeaderVisibility,
+    InvalidFrozenColumnCount = 8,
+    RowHeaderVisibility = 5,
+    ColumnHeaderVisibility = 6,
+}
+
+impl FrameInputFailure {
+    /// Highest wire code. The variants carry every code in `0..=LAST_CODE`
+    /// (in declaration order 0-4, 7, 8, 5, 6), so `code > LAST_CODE` is
+    /// exactly "no variant carries this code" — the check a reader applies to
+    /// a decoded recording.
+    pub const LAST_CODE: u8 = Self::InvalidFrozenColumnCount as u8;
 }
 
 impl FrameInputs {

@@ -75,7 +75,7 @@ use serde::{Deserialize, Serialize};
 
 use iron_canvas_core::geometry::{CanvasMetrics, CanvasSize};
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{FrameOutcome, FrameTrace, GridVerdict, RenderStrategy};
+use iron_canvas_core::{FrameInputFailure, FrameOutcome, FrameTrace, GridVerdict, RenderStrategy};
 
 use crate::DrawOp;
 
@@ -155,19 +155,10 @@ impl From<FrameTrace> for TraceRecord {
         let outcome = match trace.outcome {
             FrameOutcome::Painted => TraceOutcome::Painted,
             FrameOutcome::HeldOnBridgeFailure => TraceOutcome::HeldOnBridgeFailure,
+            // `FrameInputFailure` is `#[repr(u8)]` with explicit
+            // discriminants, so this is a cast, not a table to keep in step.
             FrameOutcome::HeldOnInputFailure(failure) => TraceOutcome::HeldOnInputFailure {
-                failure: match failure {
-                    iron_canvas_core::FrameInputFailure::SelectedSheet => 0,
-                    iron_canvas_core::FrameInputFailure::SelectedView => 1,
-                    iron_canvas_core::FrameInputFailure::SheetMismatch => 2,
-                    iron_canvas_core::FrameInputFailure::FrozenRows => 3,
-                    iron_canvas_core::FrameInputFailure::FrozenColumns => 4,
-                    iron_canvas_core::FrameInputFailure::RowHeaderVisibility => 5,
-                    iron_canvas_core::FrameInputFailure::ColumnHeaderVisibility => 6,
-                    // Codes are stable wire values: new variants append.
-                    iron_canvas_core::FrameInputFailure::InvalidFrozenRowCount => 7,
-                    iron_canvas_core::FrameInputFailure::InvalidFrozenColumnCount => 8,
-                },
+                failure: failure as u8,
             },
         };
         let blit_fallback = trace.blit_fallback.map(|fallback| TraceBlitFallback {
@@ -298,6 +289,14 @@ fn validate_frames(frames: &[Frame]) -> Result<(), IcrError> {
             )));
         }
         previous_t_ms = Some(frame.t_ms);
+        if let TraceOutcome::HeldOnInputFailure { failure } = frame.trace.outcome
+            && failure > FrameInputFailure::LAST_CODE
+        {
+            return Err(IcrError::Format(format!(
+                "frame {index}: held on input-failure code {failure}, which names no \
+                 FrameInputFailure variant",
+            )));
+        }
         validate_ops(index, "grid", &frame.grid_ops)?;
         validate_ops(index, "overlay", &frame.overlay_ops)?;
         if frame.is_replay_anchor() {
@@ -649,6 +648,9 @@ mod tests {
             (FrameInputFailure::InvalidFrozenColumnCount, 8),
         ];
         for (failure, code) in cases {
+            // The wire code is the discriminant, so this pins the numbering
+            // as well as the round trip.
+            assert_eq!(failure as u8, code, "discriminant must equal the wire code");
             let mut rec = Recording::new(header());
             rec.push_frame(Frame {
                 frame_idx: 0,
@@ -671,6 +673,23 @@ mod tests {
                 TraceOutcome::HeldOnInputFailure { failure: code }
             );
         }
+    }
+
+    /// A code no variant carries is a corrupt frame, not a diagnostic to
+    /// render: the reader rejects the whole recording.
+    #[test]
+    fn validated_recording_rejects_unknown_input_failure_code() {
+        let mut rec = Recording::new(header());
+        let mut held = anchored_frame(0, 0, Vec::new());
+        held.trace.outcome = TraceOutcome::HeldOnInputFailure {
+            failure: FrameInputFailure::LAST_CODE + 1,
+        };
+        held.trace.committed_seq = None;
+        held.trace.effective = None;
+        held.result = RecordedPaintResult::Retry;
+        rec.push_frame(held);
+
+        assert!(ValidatedRecording::try_from(rec).is_err());
     }
 
     #[test]
