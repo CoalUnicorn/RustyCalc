@@ -10,6 +10,8 @@
 //! `x y w h` we received from `PixelRect`.
 
 use std::cell::{Cell, RefCell};
+use std::fmt;
+use std::io::Write as _;
 use std::rc::Rc;
 
 use iron_canvas_core::geometry::constants::DASHED_RECT_PATTERN;
@@ -31,6 +33,12 @@ pub struct PdfPainter {
     pub(super) height: u32,
     clip_depth: Cell<u32>,
     group_depth: Cell<u32>,
+    /// Reused formatting buffer behind [`Self::emit`]. A full-sheet export
+    /// emits tens of thousands of ops, so formatting each one into this
+    /// buffer — cleared and flushed once per op — keeps a per-op `format!`
+    /// allocation out of the content path. The SVG backend gets the same
+    /// effect by formatting straight into its own `body` buffer.
+    scratch: RefCell<Vec<u8>>,
 }
 
 impl PdfPainter {
@@ -52,6 +60,7 @@ impl PdfPainter {
             height,
             clip_depth: Cell::new(0),
             group_depth: Cell::new(0),
+            scratch: RefCell::new(Vec::new()),
         }
     }
 
@@ -88,28 +97,42 @@ impl PdfPainter {
         self.write(s.as_bytes());
     }
 
+    /// Format one content-stream op into the reused scratch buffer and hand
+    /// the bytes to the shared stream in a single write.
+    ///
+    /// Takes `fmt::Arguments` rather than an owned `String`, so the call site
+    /// is one `format_args!` with no intermediate allocation. Formatting
+    /// itself cannot fail — `Vec<u8>`'s `io::Write` reports errors only from
+    /// the sink, and this sink is memory.
+    fn emit(&self, op: fmt::Arguments<'_>) {
+        let mut scratch = self.scratch.borrow_mut();
+        scratch.clear();
+        let _ = scratch.write_fmt(op);
+        self.write(scratch.as_slice());
+    }
+
     /// Emit `r g b rg` (nonstroking fill colour).
     fn emit_fill_color(&self, color: PaintColor) {
         let (r, g, b) = parse_css_color(color.as_str());
-        self.write_str(&format!("{r:.3} {g:.3} {b:.3} rg\n"));
+        self.emit(format_args!("{r:.3} {g:.3} {b:.3} rg\n"));
     }
 
     /// Emit `r g b RG` (stroking colour).
     fn emit_stroke_color(&self, color: PaintColor) {
         let (r, g, b) = parse_css_color(color.as_str());
-        self.write_str(&format!("{r:.3} {g:.3} {b:.3} RG\n"));
+        self.emit(format_args!("{r:.3} {g:.3} {b:.3} RG\n"));
     }
 
     fn emit_line_width(&self, width: f64) {
-        self.write_str(&format!("{width:.3} w\n"));
+        self.emit(format_args!("{width:.3} w\n"));
     }
 
     fn emit_rect(&self, x: f64, y: f64, w: f64, h: f64) {
-        self.write_str(&format!("{x:.3} {y:.3} {w:.3} {h:.3} re\n"));
+        self.emit(format_args!("{x:.3} {y:.3} {w:.3} {h:.3} re\n"));
     }
 
     fn emit_line(&self, x1: f64, y1: f64, x2: f64, y2: f64) {
-        self.write_str(&format!("{x1:.3} {y1:.3} m\n{x2:.3} {y2:.3} l\nS\n"));
+        self.emit(format_args!("{x1:.3} {y1:.3} m\n{x2:.3} {y2:.3} l\nS\n"));
     }
 }
 
@@ -138,13 +161,17 @@ impl Painter for PdfPainter {
         }
         self.emit_fill_color(color);
         let first = points[0];
-        self.write_str(&format!(
+        self.emit(format_args!(
             "{:.3} {:.3} m\n",
             f64::from(first.x),
             f64::from(first.y)
         ));
         for p in &points[1..] {
-            self.write_str(&format!("{:.3} {:.3} l\n", f64::from(p.x), f64::from(p.y)));
+            self.emit(format_args!(
+                "{:.3} {:.3} l\n",
+                f64::from(p.x),
+                f64::from(p.y)
+            ));
         }
         self.write_str("h\nf\n"); // h closes the subpath; f fills
     }
@@ -170,7 +197,7 @@ impl Painter for PdfPainter {
         let (x, y, w, h) = rect.as_f64_tuple();
         self.emit_stroke_color(color);
         self.emit_line_width(width);
-        self.write_str(&format!(
+        self.emit(format_args!(
             "[{} {}] 0 d\n",
             DASHED_RECT_PATTERN[0], DASHED_RECT_PATTERN[1]
         ));
@@ -261,16 +288,17 @@ impl Painter for PdfPainter {
 
         let (r, g, b) = parse_css_color(color.as_str());
 
-        let mut buf = Vec::with_capacity(text.len() + 64);
-        buf.extend_from_slice(b"BT\n");
-        buf.extend_from_slice(format!("/F1 {size:.3} Tf\n").as_bytes());
-        buf.extend_from_slice(format!("{r:.3} {g:.3} {b:.3} rg\n").as_bytes());
-        buf.extend_from_slice(format!("1 0 0 -1 {tx:.3} {ty:.3} Tm\n").as_bytes());
-        buf.push(b'(');
+        // One op: four formatted lines around the escaped string. Built in the
+        // reusable scratch buffer, then flushed in a single write.
+        let mut buf = self.scratch.borrow_mut();
+        buf.clear();
+        let _ = write!(
+            buf,
+            "BT\n/F1 {size:.3} Tf\n{r:.3} {g:.3} {b:.3} rg\n1 0 0 -1 {tx:.3} {ty:.3} Tm\n("
+        );
         pdf_string_escape(text, &mut buf);
-        buf.extend_from_slice(b") Tj\n");
-        buf.extend_from_slice(b"ET\n");
-        self.write(&buf);
+        let _ = write!(buf, ") Tj\nET\n");
+        self.write(buf.as_slice());
     }
 
     fn invalidate_cache(&self) {
@@ -293,7 +321,7 @@ impl Painter for PdfPainter {
         self.group_depth.set(self.group_depth.get() + 1);
         // Comment for debug readability, then `q` to bracket the group
         // ops in their own graphics-state save/restore pair.
-        self.write_str(&format!("% group: {}\nq\n", class.as_str()));
+        self.emit(format_args!("% group: {}\nq\n", class.as_str()));
     }
 
     fn end_group(&self) {
