@@ -55,13 +55,16 @@ impl IronCanvas {
         // Apply the fallible overrides before any live state changes: a rejected
         // override must not leave the runtime sized for the recording while
         // `mode` is still Live, with no session holding the live size to restore.
-        // On failure both overrides are cleared, which is the live canvas state
-        // (`exitPlayback` clears the same two properties).
+        // A replacement recording must preserve the current playback CSS too.
+        let grid_style = self.runtime.grid_canvas().style();
+        let overlay_style = self.runtime.overlay_canvas().style();
+        let previous_grid_css = grid_style.css_text();
+        let previous_overlay_css = overlay_style.css_text();
         if let Err(error) = set_canvas_css_size(self.runtime.grid_canvas(), rec_size)
             .and_then(|()| set_canvas_css_size(self.runtime.overlay_canvas(), rec_size))
         {
-            let _ = clear_canvas_css_size(self.runtime.grid_canvas());
-            let _ = clear_canvas_css_size(self.runtime.overlay_canvas());
+            grid_style.set_css_text(&previous_grid_css);
+            overlay_style.set_css_text(&previous_overlay_css);
             return Err(error);
         }
 

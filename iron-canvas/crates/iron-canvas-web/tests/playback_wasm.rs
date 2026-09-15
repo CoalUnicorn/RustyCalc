@@ -370,6 +370,59 @@ fn replacement_recording_preserves_original_live_metrics() {
     );
 }
 
+#[wasm_bindgen_test]
+fn rejected_recording_css_preserves_live_and_playback_state() {
+    for playback in [false, true] {
+        for failure in 0..4 {
+            let (mut canvas, grid, overlay, mut rec) = recorded_canvas();
+            if playback {
+                rec.header.canvas_w = 200.0;
+                rec.header.canvas_h = 100.0;
+                canvas
+                    .load_recording(&rec.serialize().expect("serialize first recording"))
+                    .expect("load first recording");
+            } else {
+                grid.style()
+                    .set_css_text("width: 80% !important; height: 90%; color: red;");
+                overlay
+                    .style()
+                    .set_css_text("width: 75%; height: 85% !important;");
+            }
+            let before_css = [grid.style().css_text(), overlay.style().css_text()];
+            let before_pixels = [grid_pixels(&grid), grid_pixels(&overlay)];
+            let before_size = canvas.canvas_size();
+            let before_frame = canvas.recording_current_frame();
+            let before_count = canvas.recording_frame_count();
+            let target = if failure < 2 { &grid } else { &overlay };
+            let property = if failure % 2 == 0 { "width" } else { "height" };
+            let reject = js_sys::Function::new_with_args(
+                "name, value, priority",
+                &format!(
+                    "if (name === '{property}') throw new Error('injected CSS failure');
+                     return CSSStyleDeclaration.prototype.setProperty.call(this, name, value, priority);"
+                ),
+            );
+            js_sys::Reflect::set(&target.style(), &JsValue::from_str("setProperty"), &reject)
+                .expect("inject CSS failure on this canvas only");
+            rec.header.canvas_w = 300.0;
+            rec.header.canvas_h = 150.0;
+            let result = canvas.load_recording(&rec.serialize().expect("serialize replacement"));
+            js_sys::Reflect::delete_property(&target.style(), &JsValue::from_str("setProperty"))
+                .expect("remove CSS failure injection");
+            assert!(result.is_err());
+            assert_eq!(canvas.playback_active(), playback);
+            assert_eq!(canvas.canvas_size(), before_size);
+            assert_eq!(canvas.recording_current_frame(), before_frame);
+            assert_eq!(canvas.recording_frame_count(), before_count);
+            assert_eq!([grid_pixels(&grid), grid_pixels(&overlay)], before_pixels);
+            assert_eq!(
+                [grid.style().css_text(), overlay.style().css_text()],
+                before_css
+            );
+        }
+    }
+}
+
 /// Acceptance criterion: seeking to a recorded `ScrollBlit` frame must
 /// raster identically to the live frame it was captured from. Before the
 /// fix, `replay_through` never presented the grid surface mid-replay, so

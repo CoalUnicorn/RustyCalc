@@ -126,15 +126,89 @@ fn content_accessors_hold_on_an_undecodable_payload() {
         ("getFormattedCellValue", &bad_value),
     ]);
     assert_eq!(model.get_cell_style(0, 1, 1), Fetched::BridgeFailed);
-    assert_eq!(model.get_formatted_cell_value(0, 1, 1), Fetched::BridgeFailed);
+    assert_eq!(
+        model.get_formatted_cell_value(0, 1, 1),
+        Fetched::BridgeFailed
+    );
 
     let model = model_with_methods(&[("getCellType", &unknown_kind)]);
     assert_eq!(model.get_cell_type(0, 1, 1), Fetched::Absent);
 }
 
+#[wasm_bindgen_test]
+fn bulk_content_fallback_preserves_row_order_absence_and_failure() {
+    let per_cell = js_sys::Function::new_with_args(
+        "sheet, row, column",
+        "if (sheet === 2 && row === 3 && column === 3) throw new Error('cell unavailable'); return null;",
+    );
+    for batch_body in [
+        None,
+        Some("throw new Error('batch unavailable');"),
+        Some("return {};"),
+        Some("return [null];"),
+        Some("return [{}, {}, {}, {}];"),
+        Some("return [null, null, null, null];"),
+    ] {
+        let mut methods = vec![
+            ("getCellStyle", &per_cell),
+            ("getCellType", &per_cell),
+            ("getFormattedCellValue", &per_cell),
+        ];
+        let batch = batch_body.map(js_sys::Function::new_no_args);
+        if let Some(batch) = &batch {
+            methods.extend([
+                ("getCellStylesIn", batch),
+                ("getCellTypesIn", batch),
+                ("getFormattedCellValuesIn", batch),
+            ]);
+        }
+        let model = model_with_methods(&methods);
+        let range = RCRange {
+            r1: 2,
+            c1: 3,
+            r2: 3,
+            c2: 4,
+        };
+        let mut styles = vec![Fetched::Value(CellStyle::default()); 7];
+        let mut values = vec![Fetched::Value("stale".to_string()); 7];
+        let mut types = vec![Fetched::Value(CellKind::Text); 7];
+        model.get_cell_styles_in(2, range, &mut styles);
+        model.get_formatted_cell_values_in(2, range, &mut values);
+        model.get_cell_types_in(2, range, &mut types);
+        assert_eq!((styles.len(), values.len(), types.len()), (4, 4, 4));
+        for index in 0..4 {
+            let failed = index == 2 && batch_body != Some("return [null, null, null, null];");
+            assert_eq!(
+                styles[index],
+                if failed {
+                    Fetched::BridgeFailed
+                } else {
+                    Fetched::Absent
+                }
+            );
+            assert_eq!(
+                values[index],
+                if failed {
+                    Fetched::BridgeFailed
+                } else {
+                    Fetched::Absent
+                }
+            );
+            assert_eq!(
+                types[index],
+                if failed {
+                    Fetched::BridgeFailed
+                } else {
+                    Fetched::Absent
+                }
+            );
+        }
+    }
+}
+
 /// A transient `getTheme` failure must not pin the Office default for the
-/// model's lifetime: the failing conversion paints with the default, and the
-/// next one resolves against the host theme once the host answers.
+/// model's lifetime. The failed conversion holds, and the next one resolves
+/// against the host theme once the host answers.
 #[wasm_bindgen_test]
 fn transient_get_theme_failure_is_retried() {
     let host_theme = ic::Theme {
@@ -161,22 +235,20 @@ fn transient_get_theme_failure_is_retried() {
         ..ic::Style::default()
     };
     let style_js = serde_wasm_bindgen::to_value(&style).expect("fixture Style serializes");
-    let get_style = Closure::wrap(Box::new(move |_sheet: u32, _row: i32, _col: i32| -> JsValue {
-        style_js.clone()
-    }) as Box<dyn Fn(u32, i32, i32) -> JsValue>);
+    let get_style = Closure::wrap(
+        Box::new(move |_sheet: u32, _row: i32, _col: i32| -> JsValue { style_js.clone() })
+            as Box<dyn Fn(u32, i32, i32) -> JsValue>,
+    );
 
     let model = model_with_methods(&[
         ("getCellStyle", get_style.as_ref().unchecked_ref()),
         ("getTheme", get_theme.as_ref().unchecked_ref()),
     ]);
 
-    let Fetched::Value(first) = model.get_cell_style(0, 1, 1) else {
-        panic!("a conforming style payload must resolve");
-    };
     assert_eq!(
-        first.fill_color.as_deref(),
-        Some("#4472C4"),
-        "the failed fetch falls back to the Office default accent1"
+        model.get_cell_style(0, 1, 1),
+        Fetched::BridgeFailed,
+        "the failed theme fetch must request a retry"
     );
 
     let Fetched::Value(second) = model.get_cell_style(0, 1, 1) else {
@@ -192,6 +264,113 @@ fn transient_get_theme_failure_is_retried() {
         1,
         "exactly one throw: the retry succeeded on the second fetch"
     );
+}
+
+#[wasm_bindgen_test]
+fn theme_failure_holds_pixels_and_retries_without_a_host_signal() {
+    for rebuild in [false, true] {
+        for bulk in [false, true] {
+            for dpr in [1.0, 1.25, 1.5] {
+                let handle: js_sys::Object =
+                    make_fixture_model(plain_fixture_store()).unchecked_into();
+                let style = ic::Style {
+                    fill: ic::Fill {
+                        color: ic::Color::Theme(4, 0.0),
+                    },
+                    ..ic::Style::default()
+                };
+                set_value_prop(
+                    &handle,
+                    "style",
+                    &serde_wasm_bindgen::to_value(&style).expect("style"),
+                );
+                set_value_prop(
+                    &handle,
+                    "theme",
+                    &serde_wasm_bindgen::to_value(&ic::Theme::default()).expect("theme"),
+                );
+                set_prop(
+                    &handle,
+                    "getCellStyle",
+                    &js_sys::Function::new_no_args("return this.style;"),
+                );
+                set_prop(
+                    &handle,
+                    "getTheme",
+                    &js_sys::Function::new_no_args(
+                        "if (this.failTheme) throw new Error('theme unavailable'); return this.theme;",
+                    ),
+                );
+                if bulk {
+                    set_prop(
+                        &handle,
+                        "getCellStylesIn",
+                        &js_sys::Function::new_with_args(
+                            "sheet, r1, c1, r2, c2",
+                            "return Array((r2-r1+1)*(c2-c1+1)).fill(this.style);",
+                        ),
+                    );
+                }
+                let grid = make_canvas();
+                let overlay = make_canvas();
+                let mut canvas = IronCanvas::create(grid.clone(), overlay.clone()).expect("canvas");
+                canvas
+                    .set_model_js(handle.clone().into())
+                    .expect("fixture model");
+                canvas.resize(400.0, 240.0, dpr).expect("valid metrics");
+                assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+                let fresh_grid = make_canvas();
+                let fresh_overlay = make_canvas();
+                let mut fresh = IronCanvas::create(fresh_grid.clone(), fresh_overlay.clone())
+                    .expect("reference");
+                fresh
+                    .set_model_js(handle.clone().into())
+                    .expect("healthy model");
+                fresh.resize(400.0, 240.0, dpr).expect("valid metrics");
+                assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+                let before = [grid_pixels(&grid), grid_pixels(&overlay)];
+                let theme = ic::Theme {
+                    accent1: "#FF0000".to_string(),
+                    ..ic::Theme::default()
+                };
+                set_value_prop(
+                    &handle,
+                    "theme",
+                    &serde_wasm_bindgen::to_value(&theme).expect("changed theme"),
+                );
+                set_value_prop(&handle, "failTheme", &JsValue::TRUE);
+                canvas.theme_changed();
+                if rebuild {
+                    canvas.request_repaint();
+                }
+                assert_eq!(
+                    canvas.render_pending(),
+                    RenderResult::RetryRequired,
+                    "bulk={bulk}, dpr={dpr}, rebuild={rebuild}"
+                );
+                assert!(
+                    [grid_pixels(&grid), grid_pixels(&overlay)] == before,
+                    "held pixels: bulk={bulk}, dpr={dpr}, rebuild={rebuild}"
+                );
+                set_value_prop(&handle, "failTheme", &JsValue::FALSE);
+                assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+                assert_eq!(canvas.render_pending(), RenderResult::Idle);
+
+                // Match the healthy theme-change repaint, including fractional-DPR
+                // edge coverage, after both canvases started from a Fresh frame.
+                fresh.theme_changed();
+                if rebuild {
+                    fresh.request_repaint();
+                }
+                assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+                assert!(
+                    [grid_pixels(&grid), grid_pixels(&overlay)]
+                        == [grid_pixels(&fresh_grid), grid_pixels(&fresh_overlay)],
+                    "recovered pixels: bulk={bulk}, dpr={dpr}, rebuild={rebuild}"
+                );
+            }
+        }
+    }
 }
 
 #[wasm_bindgen_test]

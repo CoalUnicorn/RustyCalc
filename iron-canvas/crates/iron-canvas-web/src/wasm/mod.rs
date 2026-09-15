@@ -229,24 +229,17 @@ impl JsBackedModel {
     }
 
     /// Run `f` against the cached workbook theme, filling the cache on first
-    /// use. Only a real answer is cached: a throw or a non-conforming payload
-    /// leaves the slot empty, so the next conversion re-fetches instead of
-    /// pinning the Office default for the model's lifetime. Recovery therefore
-    /// needs no explicit `themeChanged()` call — a host that threw once starts
-    /// rendering resolved theme colors again on its own.
+    /// use. A failed fetch leaves the slot empty and passes `None` to `f`.
+    /// The caller reports `BridgeFailed` so the renderer schedules a retry.
+    /// Only a host without `getTheme` uses the Office default.
     /// Holds the `RefCell` borrow across `f`; `f` must not re-enter the theme
     /// cache (style conversion never does).
-    fn with_theme<T>(&self, f: impl FnOnce(&ic::Theme) -> T) -> T {
+    fn with_theme<T>(&self, f: impl FnOnce(Option<&ic::Theme>) -> T) -> T {
         let mut slot = self.theme.borrow_mut();
         if slot.is_none() {
             *slot = self.fetch_theme();
         }
-        match slot.as_ref() {
-            Some(theme) => f(theme),
-            // This fetch failed: convert with the Office default, uncached, so
-            // the next one re-queries.
-            None => f(&ic::Theme::default()),
-        }
+        f(slot.as_ref())
     }
 
     /// Fetch the workbook theme. `None` is a failure the caller must not cache.
@@ -512,7 +505,10 @@ impl CellContentQuery for JsBackedModel {
         match serde_wasm_bindgen::from_value::<Option<JsStyle>>(jsv) {
             Ok(Some(s)) => {
                 let s: ic::Style = s.into();
-                Fetched::Value(self.with_theme(|t| style_to_core(s, &|c| color_to_css(c, t))))
+                self.with_theme(|theme| match theme {
+                    Some(t) => Fetched::Value(style_to_core(s, &|c| color_to_css(c, t))),
+                    None => Fetched::BridgeFailed,
+                })
             }
             // A `null` payload is a blank cell — the same meaning the bulk
             // `getCellStylesIn` contract gives a null element.
@@ -533,10 +529,9 @@ impl CellContentQuery for JsBackedModel {
         // `Absent`, letting the renderer's `unwrap_or(CellKind::Text)` own the
         // fallback, matching the native adapter where a model error is also
         // `Absent`.
-        let Some(jsv) = self.note_throw(
-            "getCellType",
-            self.handle.get_cell_type(sheet, row, column),
-        ) else {
+        let Some(jsv) =
+            self.note_throw("getCellType", self.handle.get_cell_type(sheet, row, column))
+        else {
             return Fetched::BridgeFailed;
         };
         match serde_wasm_bindgen::from_value::<Option<i32>>(jsv) {
@@ -592,10 +587,13 @@ impl CellContentQuery for JsBackedModel {
         // A null element is a blank cell: `Absent`, never `BridgeFailed`, so a
         // pane full of blanks skips the O(cells) per-cell refetch.
         // One theme borrow for the whole batch — not one cache hit per cell.
-        self.with_theme(|t| {
-            out.extend(decoded.into_iter().map(|s| match s {
-                Some(s) => Fetched::Value(style_to_core(s.into(), &|c| color_to_css(c, t))),
-                None => Fetched::Absent,
+        self.with_theme(|theme| {
+            out.extend(decoded.into_iter().map(|s| match (s, theme) {
+                (Some(s), Some(t)) => {
+                    Fetched::Value(style_to_core(s.into(), &|c| color_to_css(c, t)))
+                }
+                (Some(_), None) => Fetched::BridgeFailed,
+                (None, _) => Fetched::Absent,
             }));
         });
     }
