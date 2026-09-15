@@ -19,19 +19,3 @@ pub fn from_element(el: &web_sys::Element) -> CanvasTheme {
     };
     ThemeVariables::from_css_reader(|key| style.get_property_value(key).ok()).build()
 }
-
-/// Build a theme from CSS custom properties on `document.documentElement`.
-/// Mirrors IronCalc upstream's default theme target. Falls back to
-/// `CanvasTheme::light()` if the document or root element is missing.
-pub fn from_root() -> CanvasTheme {
-    let Some(window) = web_sys::window() else {
-        return CanvasTheme::light();
-    };
-    let Some(doc) = window.document() else {
-        return CanvasTheme::light();
-    };
-    let Some(el) = doc.document_element() else {
-        return CanvasTheme::light();
-    };
-    from_element(&el)
-}
