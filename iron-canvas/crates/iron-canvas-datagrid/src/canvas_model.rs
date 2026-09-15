@@ -1,6 +1,7 @@
 use crate::{DEFAULT_COL_WIDTH, DataGrid};
-use iron_canvas_core::types::coord::RCRange;
-use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched};
+use iron_canvas_core::{
+    CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched, RCRange,
+};
 
 impl CanvasModel for DataGrid {
     fn get_selected_sheet(&self) -> Option<u32> {
