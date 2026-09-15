@@ -29,20 +29,32 @@ fn inter_face() -> &'static ttf_parser::Face<'static> {
     })
 }
 
+/// Sum per-character advances for `text`.
+///
+/// `advance` returns the real advance for a character, or `None` when that
+/// font's table has no entry for it — such a character alone falls back to the
+/// flat [`approx_text_width`] estimate, so every mapped script keeps working
+/// exactly as before. Each backend passes its own per-char lookup, so the
+/// fallback and the summing live here once.
+fn sum_advances(text: &str, size_px: f64, advance: impl Fn(char) -> Option<f64>) -> f64 {
+    text.chars()
+        .map(|c| {
+            advance(c).unwrap_or_else(|| approx_text_width(size_px, c.encode_utf8(&mut [0u8; 4])))
+        })
+        .sum()
+}
+
 /// Sum of real Inter glyph advances for `text` at `size_px`. Characters with
 /// no glyph in the embedded subset fall back to the flat estimate for that
 /// character alone.
 pub fn inter_advance_width(text: &str, size_px: f64) -> f64 {
     let face = inter_face();
     let units_per_em = f64::from(face.units_per_em());
-    text.chars()
-        .map(|c| {
-            face.glyph_index(c)
-                .and_then(|id| face.glyph_hor_advance(id))
-                .map(|adv| f64::from(adv) / units_per_em * size_px)
-                .unwrap_or_else(|| approx_text_width(size_px, &c.to_string()))
-        })
-        .sum()
+    sum_advances(text, size_px, |c| {
+        face.glyph_index(c)
+            .and_then(|id| face.glyph_hor_advance(id))
+            .map(|adv| f64::from(adv) / units_per_em * size_px)
+    })
 }
 
 /// Base64 (standard alphabet, padded) of the embedded Inter TTF, for the SVG
@@ -107,16 +119,12 @@ const HELVETICA_ASCII_WIDTHS: [u16; 95] = [
 /// Sum of Helvetica advances for `text` at `size_px`. Codepoints outside
 /// printable ASCII fall back to the flat estimate for that character alone.
 pub fn helvetica_advance_width(text: &str, size_px: f64) -> f64 {
-    text.chars()
-        .map(|c| {
-            let idx = c as u32;
-            if (0x20..=0x7E).contains(&idx) {
-                f64::from(HELVETICA_ASCII_WIDTHS[(idx - 0x20) as usize]) / 1000.0 * size_px
-            } else {
-                approx_text_width(size_px, &c.to_string())
-            }
-        })
-        .sum()
+    sum_advances(text, size_px, |c| {
+        let idx = c as u32;
+        (0x20..=0x7E)
+            .contains(&idx)
+            .then(|| f64::from(HELVETICA_ASCII_WIDTHS[(idx - 0x20) as usize]) / 1000.0 * size_px)
+    })
 }
 
 #[cfg(test)]
