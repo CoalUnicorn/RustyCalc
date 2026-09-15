@@ -221,6 +221,9 @@
                     } else if (hit.kind === "cell") {
                         canvas.selectCell(hit.row, hit.col);
                     }
+                    // `autofillHandle` (the selection's fill handle) is its own
+                    // kind, and this demo has no fill-drag, so a press on the
+                    // handle is deliberately inert rather than a cell select.
                 });
 
                 phase = "wire mousemove";
