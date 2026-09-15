@@ -215,7 +215,9 @@ impl DataGridCanvas {
 
     #[wasm_bindgen(js_name = "currentSort")]
     pub fn current_sort(&self) -> Result<JsValue, JsValue> {
-        match self.model.borrow_current_sort() {
+        // `borrow_with` returns the owned `Option<(usize, bool)>` — the reader
+        // needs the borrow, not a borrowed return.
+        match self.model.borrow_with(|g| g.current_sort()) {
             Some((column, ascending)) => Ok(serde_wasm_bindgen::to_value(&wire::SortWire {
                 column,
                 ascending,

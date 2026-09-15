@@ -35,12 +35,6 @@ impl DataGridModel {
     pub fn borrow_mut_with<R>(&self, f: impl FnOnce(&mut DataGrid) -> R) -> R {
         f(&mut self.0.borrow_mut())
     }
-
-    /// Read-only sort snapshot: `(0-based column, ascending)` or `None`.
-    /// A dedicated reader because `borrow_mut_with` can't return a borrow.
-    pub fn borrow_current_sort(&self) -> Option<(usize, bool)> {
-        self.0.borrow().current_sort()
-    }
 }
 
 // Forward the non-defaulted `CanvasModel` methods. The defaulted bulk
