@@ -522,11 +522,20 @@ impl BlitPainter for CanvasPainter {
         let (dx, dy, dw, dh) = dst.as_f64_tuple();
         let (sx, sy, sw, sh) = (sx0 * dpr, sy0 * dpr, sw0 * dpr, sh0 * dpr);
 
+        // Replace transparent source pixels too. Limit `copy` to the
+        // destination so it cannot clear headers or frozen cells outside it.
+        // drawImage snapshots a self-copy before writing overlapping pixels.
+        self.ctx.save();
+        self.ctx.begin_path();
+        self.ctx.rect(dx, dy, dw, dh);
+        self.ctx.clip();
+        let _ = self.ctx.set_global_composite_operation("copy");
         let _ = self
             .ctx
             .draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
                 canvas, sx, sy, sw, sh, dx, dy, dw, dh,
             );
+        self.ctx.restore();
     }
 }
 

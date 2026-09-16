@@ -7,9 +7,10 @@
 //! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::layer::Surface)
 //! and a layer-specific renderer wrapping [`RendererCore`] — and no dirty
 //! state of its own. In the wasm build the surface is
-//! `iron_canvas_canvas2d::WebSurface`; the grid context uses `alpha: false`
-//! (opaque, skips alpha compositing) and the overlay uses
-//! `alpha: true, desynchronized: true`. The renderer is long-lived per
+//! `iron_canvas_canvas2d::WebSurface`; both contexts keep alpha
+//! (`alpha: true`) so empty buffers stay transparent. Sheet backgrounds
+//! must remain opaque because background fills erase retained content.
+//! The overlay also uses `desynchronized: true`. The renderer is long-lived per
 //! layer, so the painter's cached fill/stroke/font/line-width state
 //! survives across frames.
 //!
