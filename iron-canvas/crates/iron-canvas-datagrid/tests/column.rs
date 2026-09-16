@@ -1,5 +1,5 @@
 use iron_canvas_core::CanvasSize;
-use iron_canvas_datagrid::{Column, DataGrid, SortDirection};
+use iron_canvas_datagrid::{Column, DataGrid, MIN_COL_WIDTH, SortDirection};
 
 #[test]
 fn set_column_width_clamps_min() {
@@ -26,6 +26,27 @@ fn builder_clamps_column_width_to_min() {
         .row(vec!["a".into(), "b".into()])
         .build();
     assert_eq!(g.content_extent(), CanvasSize { w: 32.0, h: 10.0 });
+}
+
+#[test]
+fn builder_clamps_direct_column_widths() {
+    for width in [0.0, -40.0, 2.0, f64::NAN, f64::NEG_INFINITY, 200.0] {
+        let mut column = Column::new("A");
+        column.width = width;
+        let grid = DataGrid::builder().column(column).build();
+        assert_eq!(grid.content_extent().w, width.max(MIN_COL_WIDTH));
+    }
+}
+
+#[test]
+fn set_data_clamps_direct_column_widths() {
+    let mut grid = DataGrid::builder().build();
+    for width in [0.0, -40.0, 2.0, f64::NAN, f64::NEG_INFINITY, 200.0] {
+        let mut column = Column::new("A");
+        column.width = width;
+        grid.set_data(vec![column], vec![vec!["a".into()]]);
+        assert_eq!(grid.content_extent().w, width.max(MIN_COL_WIDTH));
+    }
 }
 
 #[test]

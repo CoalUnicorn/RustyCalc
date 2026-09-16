@@ -244,13 +244,15 @@ pub trait CanvasModel: CellContentQuery {
 /// The accessor is the one thing each wrapper must supply: `Rc<T>` forwards
 /// through the private `RcForwardee` accessor (below), the datagrid's
 /// `DataGridModel` returns its `RefCell` guard, and the core stage-6 observer
-/// returns the model it wraps. The macro names that accessor instead of taking
-/// a receiver expression because `self` cannot cross a `macro_rules!`
-/// argument — an `expr` fragment holding `self` expands into the generated
-/// `fn` body as an unresolvable token (E0424).
+/// returns the model it wraps. The accessor keeps the generated `self` binding
+/// and its use in the same macro context. A receiver expression can also work,
+/// but the macro must capture the receiver identifier from each signature and
+/// use it in the generated binding. A literal generated `self` cannot bind a
+/// `self` token supplied by the caller (E0424).
 ///
-/// Exported so the sibling crates that wrap a concrete model use the same
-/// method list: a new trait method is added in one place, not one per wrapper.
+/// Exported so sibling crates can share the forwarding implementation.
+/// Each wrapper still maintains its own method list. A new trait method must
+/// be checked in every wrapper, including methods with default bodies.
 #[macro_export]
 macro_rules! forward_methods {
     ($accessor:ident, { $(fn $name:ident(&self $(, $arg:ident: $argty:ty)* $(,)?) $(-> $ret:ty)?;)* }) => {

@@ -52,9 +52,9 @@ pub fn Camera(spec: CameraSpec) -> impl IntoView {
     });
 
     let apply_autosize = move |c: &mut CameraCanvas| {
-        let (gw, gh) = c.autosize();
-        let w = (gw + 2.0 * BORDER_PX).clamp(MIN_W, MAX_W);
-        let h = (gh + GRIP_H + 2.0 * BORDER_PX).clamp(MIN_H, MAX_H);
+        let size = c.autosize();
+        let w = (size.w + 2.0 * BORDER_PX).clamp(MIN_W, MAX_W);
+        let h = (size.h + GRIP_H + 2.0 * BORDER_PX).clamp(MIN_H, MAX_H);
         // A rejected pair (non-finite/negative extent, non-positive DPR)
         // leaves the camera at its last valid size.
         let _ = c.resize(

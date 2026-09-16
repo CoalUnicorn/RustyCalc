@@ -77,7 +77,7 @@ impl CameraCanvas {
 
     /// Fit every column to its text, then return the grid's natural pixel
     /// size. The caller owns applying it (widget chrome + clamping live there).
-    pub fn autosize(&mut self) -> (f64, f64) {
+    pub fn autosize(&mut self) -> CanvasSize {
         let (rows, cols) = self
             .model
             .borrow_with(|g| (g.row_count(), g.column_count()));

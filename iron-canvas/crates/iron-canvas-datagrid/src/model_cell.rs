@@ -37,14 +37,10 @@ impl DataGridModel {
     }
 }
 
-// Forward the non-defaulted `CanvasModel` methods. The defaulted bulk
-// readers (`get_*_in`) and the `get_extended_cell_style` / header-toggle
-// defaults call these per-cell forwarders, so they stay correct without
-// explicit forwarding. `last_row` / `last_column` are defaulted but
-// forwarded anyway: their defaults return Excel bounds, not delegations,
-// so skipping the forward would lose the grid's finite extent. The listed
-// signatures come from the shared macro, so a new trait method is added
-// here (and in the engine's `Rc` impls) in one place.
+// Forward geometry, view, and header queries to the grid. In particular,
+// `last_row` and `last_column` must preserve the grid's finite bounds.
+// The macro shares forwarding bodies. This list and the engine's `Rc` lists
+// must each be checked when a trait method changes.
 impl CanvasModel for DataGridModel {
     forward_methods!(inner, {
         fn get_selected_sheet(&self) -> Option<u32>;

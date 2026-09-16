@@ -10,16 +10,15 @@ use iron_canvas_core::{Alignment, CanvasSize, CellStyle, HAlign};
 /// the row-header gutter cannot drift apart.
 pub const DEFAULT_COL_WIDTH: f64 = 96.0;
 
-/// Narrowest column in pixels. Every width write path clamps to it: a column
-/// below this has no usable text area or resize target, and a negative width
-/// would subtract from `content_extent`.
+/// Minimum stored column width in pixels. Grid insertion and width setters
+/// clamp to this value. Negative widths must not reduce `content_extent`.
 pub const MIN_COL_WIDTH: f64 = 16.0;
 
 #[derive(Clone, Debug)]
 pub struct Column {
     pub header: String,
-    /// Pixels. [`Column::width`] and `DataGrid::set_column_width` clamp to
-    /// [`MIN_COL_WIDTH`]; writing this field directly does not.
+    /// Width in pixels. Direct writes are clamped when the column enters a
+    /// grid through [`DataGridBuilder::column`] or [`DataGrid::set_data`].
     pub width: f64,
     pub align: HAlign,
 }
@@ -184,8 +183,7 @@ impl DataGrid {
         self.sort
             .map(|s| (s.column, matches!(s.dir, SortDirection::Ascending)))
     }
-    /// The cell at a (display row, column) address — insert/sort/edit paths
-    /// share this one lookup.
+    /// Read the cell at a display-row and column address.
     fn cell(&self, disp_row: usize, col: usize) -> Option<&Cell> {
         cell_at(&self.rows, *self.order.get(disp_row)?, col)
     }
@@ -258,13 +256,16 @@ impl DataGrid {
         self.resort();
     }
 
-    /// Append without touching the display order — the caller re-sorts.
+    /// Append to source rows and display order. The caller then re-sorts.
     fn push_row(&mut self, cells: Vec<String>) {
         self.order.push(self.rows.len());
         self.rows.push(cells.into_iter().map(Cell::text).collect());
     }
 
-    pub fn set_data(&mut self, columns: Vec<Column>, rows: Vec<Vec<String>>) {
+    pub fn set_data(&mut self, mut columns: Vec<Column>, rows: Vec<Vec<String>>) {
+        for column in &mut columns {
+            column.width = column.width.max(MIN_COL_WIDTH);
+        }
         self.columns = columns;
         self.rows = rows
             .into_iter()
@@ -365,7 +366,8 @@ impl DataGrid {
 
 impl DataGridBuilder {
     pub fn column(mut self, c: Column) -> Self {
-        self.columns.push(c);
+        let width = c.width;
+        self.columns.push(c.width(width));
         self
     }
     pub fn row(mut self, cells: Vec<String>) -> Self {
