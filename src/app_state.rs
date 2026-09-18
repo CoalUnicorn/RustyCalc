@@ -10,6 +10,8 @@ use leptos::prelude::*;
 use leptos_use::{ColorMode, UseColorModeReturn};
 
 use crate::events::*;
+#[cfg(feature = "dev-tools")]
+use crate::perf::PerfStore;
 use crate::perf::PerfTimings;
 use crate::state::Split;
 use crate::theme::{Theme, use_rusty_calc_theme};
@@ -25,14 +27,21 @@ pub enum RecordingCmd {
     Stop,
 }
 
-/// One-shot command from the PerfPanel diagnostics toggle to the
-/// Worksheet dispatch Effect: `Some(enabled)` means "set the canvas
-/// capture flag". Drains via `set(None)`. Dev-tools builds only — the
-/// design promise is that production builds retain no diagnostic state.
+/// One-shot command from the Perf panel to the Worksheet capture Effect.
+///
+/// The panel never touches the canvas: it publishes intent here, and one
+/// coordinator drains it. `Set(bool)` is gone because the canvas flag is
+/// derived from the store state — a limit stop or a generation change needs
+/// no command at all.
 #[cfg(feature = "dev-tools")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DiagCmd {
-    Set(bool),
+pub enum CaptureCmd {
+    Start,
+    Pause,
+    Resume,
+    Finish,
+    ExportCaptureJson,
+    CopySelectedAttemptJson,
 }
 
 /// One-shot command from the PerfPanel export buttons to the Worksheet
@@ -74,13 +83,13 @@ pub struct AppState {
     /// `true` while iron-canvas is capturing frames. Updated by the
     /// Worksheet dispatch Effect after a successful start/stop.
     pub recording_active: Split<bool>,
-    /// Pending command from the PerfPanel button. Cleared by Worksheet
+    /// Pending command from the Perf button. Cleared by Worksheet
     /// once dispatched. See [`RecordingCmd`].
     pub recording_cmd: Split<Option<RecordingCmd>>,
-    /// Pending diagnostics-toggle command from the PerfPanel. Cleared by
-    /// Worksheet once dispatched. See [`DiagCmd`]. Dev-tools only.
+    /// Pending capture command from the Perf panel. Cleared by Worksheet once
+    /// dispatched. See [`CaptureCmd`]. Dev-tools only.
     #[cfg(feature = "dev-tools")]
-    pub diag_cmd: Split<Option<DiagCmd>>,
+    pub capture_cmd: Split<Option<CaptureCmd>>,
     /// Pending export command from the PerfPanel SVG/PDF buttons.
     /// Cleared by Worksheet once the file download has been triggered.
     pub export_cmd: Split<Option<ExportCmd>>,
@@ -96,6 +105,10 @@ pub struct AppState {
     /// Total frames in the loaded recording. Set on Load, zeroed on Exit.
     pub playback_frame_count: Split<u32>,
     pub perf: PerfTimings,
+    /// Paint-attempt capture store: signals only, so this struct stays `Copy`.
+    /// Dev-tools only — a production build retains no capture state.
+    #[cfg(feature = "dev-tools")]
+    pub perf_store: PerfStore,
     /// Bumped when the workbook registry changes (create/delete/rename/group).
     pub registry_version: RwSignal<u64>,
 }
@@ -113,7 +126,7 @@ impl AppState {
             recording_active: Split::new(false),
             recording_cmd: Split::new(None),
             #[cfg(feature = "dev-tools")]
-            diag_cmd: Split::new(None),
+            capture_cmd: Split::new(None),
             export_cmd: Split::new(None),
             playback_cmd: Split::new(None),
             playback_loaded: Split::new(false),
@@ -121,6 +134,8 @@ impl AppState {
             playback_frame: Split::new(0),
             playback_frame_count: Split::new(0),
             perf: PerfTimings::new(),
+            #[cfg(feature = "dev-tools")]
+            perf_store: PerfStore::new(),
             registry_version: RwSignal::new(0),
         }
     }

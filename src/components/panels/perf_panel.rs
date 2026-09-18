@@ -1,15 +1,18 @@
 use leptos::prelude::*;
 
 #[cfg(feature = "dev-tools")]
-use crate::app_state::DiagCmd;
+use crate::app_state::CaptureCmd;
 use crate::app_state::{AppState, ExportCmd, RecordingCmd};
 #[cfg(feature = "dev-tools")]
 use crate::components::ui::popover::Popover;
+#[cfg(feature = "dev-tools")]
+use crate::perf::{CaptureState, attempt_json};
 use crate::perf::{EvaluationOutcome, MutationOutcome};
 #[cfg(feature = "dev-tools")]
 use wasm_bindgen::JsCast;
 
-/// Displays the last mutation and the last paint as separate numbers.
+/// Dev-tools strip: the last mutation, evaluation, and render numbers, plus
+/// the capture controls.
 ///
 /// Three readouts, each naming one thing that happened:
 /// - Mutation: duration of the model closure (`mutate` / `try_mutate`) and
@@ -17,8 +20,12 @@ use wasm_bindgen::JsCast;
 /// - Eval: measured `evaluate()` duration, `deferred`, or `not run`.
 /// - Render: duration of the last `render_pending()` call that painted.
 ///
-/// Nothing here subtracts two timestamps: a phase that did not run reports
-/// its own name, never a zero.
+/// Nothing here subtracts two timestamps: a phase that did not run reports its
+/// own name, never a zero.
+///
+/// The capture controls publish intent to `CaptureCmd` only. They never touch
+/// the canvas, and closing the popover does not change capture state — the
+/// capture outlives any view of it.
 #[component]
 pub fn PerfPanel() -> impl IntoView {
     let app = expect_context::<AppState>();
@@ -26,7 +33,7 @@ pub fn PerfPanel() -> impl IntoView {
 
     let mutation_text = move || {
         perf.mutation.get().map_or_else(
-            || "Mutation: —".to_owned(),
+            || "Mutation: \u{2014}".to_owned(),
             |sample| {
                 let outcome = match sample.outcome {
                     MutationOutcome::Ok => "ok",
@@ -39,7 +46,7 @@ pub fn PerfPanel() -> impl IntoView {
 
     let eval_text = move || {
         perf.mutation.get().map_or_else(
-            || "Eval: —".to_owned(),
+            || "Eval: \u{2014}".to_owned(),
             |sample| match sample.evaluation {
                 EvaluationOutcome::Measured { ms } => format!("Eval: {ms:.1}ms"),
                 EvaluationOutcome::Deferred => "Eval: deferred".to_owned(),
@@ -50,15 +57,14 @@ pub fn PerfPanel() -> impl IntoView {
 
     let render_text = move || {
         perf.render_call.get().map_or_else(
-            || "Render: —".to_owned(),
+            || "Render: \u{2014}".to_owned(),
             |sample| format!("Render: {:.1}ms", sample.ms),
         )
     };
 
     // Which renderer path drew the last frame. Reads e.g.
-    // "ChangedCells tl:skip tr:- bl:- br:FULL fetched=8000" — a `FULL` on the
-    // frame right after a `ScrollBlit` is the post-blit full repaint described
-    // in iron-canvas/docs/designs/2026-07-24-paint-stage-remodel-and-frame-trace.md.
+    // "ChangedCells tl:skip tr:- bl:- br:FULL fetched=8000", numbered by the
+    // engine's attempt sequence.
     let frame_trace = move || perf.frame_trace.get();
 
     // Runtime detect: only render the record button when the wasm was built
@@ -78,125 +84,164 @@ pub fn PerfPanel() -> impl IntoView {
     let on_export_svg = move |_| app.export_cmd.set(Some(ExportCmd::Svg));
     let on_export_pdf = move |_| app.export_cmd.set(Some(ExportCmd::Pdf));
 
+    // ---- capture controls (dev-tools only) ----
     #[cfg(feature = "dev-tools")]
-    let diag_open = RwSignal::new(false);
+    let store = app.perf_store;
     #[cfg(feature = "dev-tools")]
-    let diag_pos = RwSignal::new((0, 0));
+    let popover_open = RwSignal::new(false);
     #[cfg(feature = "dev-tools")]
-    let diag_json = move || app.perf.frame_diagnostics.get();
+    let popover_pos = RwSignal::new((0, 0));
 
     #[cfg(feature = "dev-tools")]
-    let on_toggle_diag = move |ev: web_sys::MouseEvent| {
+    let capture_label = move || {
+        let status = store.status();
+        let mut text = format!(
+            "{} \u{b7} {} attempts",
+            status.state.label(),
+            status.attempts
+        );
+        if let Some(reason) = status.stop_reason {
+            text.push_str(&format!(" \u{b7} {}", reason.label()));
+        }
+        if let Some(error) = store.error() {
+            text.push_str(&format!(" \u{b7} {error}"));
+        }
+        text
+    };
+
+    // The JSON of the newest attempt in the selected capture: the record is
+    // the source of truth, not the live canvas.
+    #[cfg(feature = "dev-tools")]
+    let attempt_json_text = move || {
+        if !popover_open.get() {
+            return String::new();
+        }
+        let _revision = store.revision();
+        store
+            .with_latest_attempt(attempt_json)
+            .and_then(Result::ok)
+            .unwrap_or_default()
+    };
+
+    #[cfg(feature = "dev-tools")]
+    let on_toggle_popover = move |ev: web_sys::MouseEvent| {
         let pos = ev
             .current_target()
-            .and_then(|t| t.dyn_into::<web_sys::HtmlElement>().ok())
-            .map(|el| {
-                let rect = el.get_bounding_client_rect();
+            .and_then(|target| target.dyn_into::<web_sys::HtmlElement>().ok())
+            .map(|element| {
+                let rect = element.get_bounding_client_rect();
                 (rect.left() as i32, rect.top() as i32)
             })
             .unwrap_or((0, 0));
-        diag_pos.set(pos);
-        let next = !app.perf.diag_enabled.get_untracked();
-        diag_open.set(next);
-        app.diag_cmd.set(Some(DiagCmd::Set(next)));
-    };
-    #[cfg(feature = "dev-tools")]
-    let on_copy_json = move |_| {
-        if let Some(json) = app.perf.frame_diagnostics.get_untracked() {
-            // Best-effort clipboard write. `Clipboard::write_text` returns
-            // the `Promise` directly (no synchronous `Result` in web-sys),
-            // so failure (denied permissions, sandboxed iframe) surfaces as
-            // a promise rejection here. The text stays visible as a manual
-            // fallback.
-            let promise = window().navigator().clipboard().write_text(&json);
-            wasm_bindgen_futures::spawn_local(async move {
-                if let Err(e) = wasm_bindgen_futures::JsFuture::from(promise).await {
-                    web_sys::console::warn_1(
-                        &format!("[rustycalc diag] clipboard write failed: {e:?}").into(),
-                    );
-                }
-            });
-        }
+        popover_pos.set(pos);
+        popover_open.update(|open| *open = !*open);
     };
 
-    // Forcing capture off on unmount: closing the Perf panel (or the
-    // worksheet) must not leave detailed capture active — it would
-    // contaminate later timing samples.
     #[cfg(feature = "dev-tools")]
-    on_cleanup(move || app.diag_cmd.set(Some(DiagCmd::Set(false))));
+    let send = move |cmd: CaptureCmd| app.capture_cmd.set(Some(cmd));
 
-    // One control governs both capture and visibility. The toggle button
-    // dispatches `DiagCmd::Set(next)` itself, but the Popover's
-    // outside-click close only writes `diag_open` — this effect closes that
-    // gap so a dismissed popup disables capture too, instead of leaving
-    // instrumentation running invisibly. Reads `diag_enabled` untracked, so
-    // the effect only reacts to popup state, never to its own output.
     #[cfg(feature = "dev-tools")]
-    Effect::new(move |_| {
-        if !diag_open.get() && app.perf.diag_enabled.get_untracked() {
-            app.diag_cmd.set(Some(DiagCmd::Set(false)));
-        }
-    });
+    let capture_strip = move || {
+        let status = store.status();
+        let capturing = matches!(status.state, CaptureState::Capturing(_));
+        let paused = matches!(status.state, CaptureState::Paused(_));
+        let idle = matches!(status.state, CaptureState::Idle);
+        Some(
+            view! {
+                <span class="pp-sep">"|"</span>
+                <button
+                    class="pp-cap-btn"
+                    disabled=move || !idle
+                    title="Start a paint-attempt capture"
+                    on:click=move |_| send(CaptureCmd::Start)
+                >
+                    "\u{25cf} Start"
+                </button>
+                <button
+                    class="pp-cap-btn"
+                    disabled=move || !capturing
+                    title="Stop accepting records; every record is kept"
+                    on:click=move |_| send(CaptureCmd::Pause)
+                >
+                    "\u{23f8} Pause"
+                </button>
+                <button
+                    class="pp-cap-btn"
+                    disabled=move || !paused
+                    title="Accept records again"
+                    on:click=move |_| send(CaptureCmd::Resume)
+                >
+                    "\u{25b6} Resume"
+                </button>
+                <button
+                    class="pp-cap-btn"
+                    disabled=move || idle
+                    title="Close the capture and keep it in the archive"
+                    on:click=move |_| send(CaptureCmd::Finish)
+                >
+                    "\u{23f9} Finish"
+                </button>
+                <button
+                    class="pp-cap-btn"
+                    disabled=move || status.selected.is_none()
+                    title="Download the selected capture as JSON"
+                    on:click=move |_| send(CaptureCmd::ExportCaptureJson)
+                >
+                    "\u{2913} JSON"
+                </button>
+                <button
+                    class="pp-cap-btn"
+                    class:active=move || popover_open.get()
+                    disabled=move || status.attempts == 0
+                    title="Copy the newest attempt JSON"
+                    on:click=move |_| send(CaptureCmd::CopySelectedAttemptJson)
+                >
+                    "Copy attempt"
+                </button>
+                <button
+                    class="pp-diag-btn"
+                    class:active=move || popover_open.get()
+                    title="Show the newest attempt JSON"
+                    on:click=on_toggle_popover
+                    // Stop pointerdown so the Popover's click-outside does not
+                    // immediately re-close on the same event.
+                    on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
+                >
+                    "\u{25c9} JSON"
+                </button>
+                <span class="pp-detail" title="Capture state, retained attempts, and the stop reason">
+                    {capture_label}
+                </span>
+            }
+            .into_any(),
+        )
+    };
+    #[cfg(not(feature = "dev-tools"))]
+    let capture_strip = move || None::<AnyView>;
 
-    // The leptos `view!` macro does not support `#[cfg]` on child nodes (the
-    // attribute is dropped, not applied), so the two diag fragments are built
-    // in these closures — where `#[cfg]` is plain Rust — and spliced through
-    // always-present dynamic children. In prod the body collapses to `None`
-    // (renders nothing), keeping every diag reference out of that build.
-    let diag_strip = move || {
-        #[cfg(feature = "dev-tools")]
-        {
-            Some(
-                view! {
-                    <span class="pp-sep">"|"</span>
-                    <button
-                        class="pp-diag-btn"
-                        class:active=move || app.perf.diag_enabled.get()
-                        title="Capture structured frame diagnostics (frameDiagnostics)"
-                        on:click=on_toggle_diag
-                        // Stop pointerdown so the Popover's click-outside
-                        // does not immediately re-close on the same event.
-                        on:pointerdown=|ev: web_sys::PointerEvent| ev.stop_propagation()
-                    >
-                        "◉ Diag"
-                    </button>
-                }
-                .into_any(),
-            )
-        }
-        #[cfg(not(feature = "dev-tools"))]
-        {
-            None::<AnyView>
-        }
+    #[cfg(feature = "dev-tools")]
+    let json_popover = move || {
+        Some(
+            view! {
+                <Popover
+                    open=popover_open.read_only()
+                    set_open=popover_open.write_only()
+                    pos=popover_pos.read_only()
+                    above_anchor=true
+                    class="pp-diag-popover"
+                >
+                    <pre class="pp-diag-json">{attempt_json_text}</pre>
+                </Popover>
+            }
+            .into_any(),
+        )
     };
-    let diag_popover = move || {
-        #[cfg(feature = "dev-tools")]
-        {
-            Some(
-                view! {
-                    <Popover
-                        open=diag_open.read_only()
-                        set_open=diag_open.write_only()
-                        pos=diag_pos.read_only()
-                        above_anchor=true
-                        class="pp-diag-popover"
-                    >
-                        <pre class="pp-diag-json">{move || diag_json().unwrap_or_default()}</pre>
-                        <button class="pp-diag-copy" on:click=on_copy_json>"Copy JSON"</button>
-                    </Popover>
-                }
-                .into_any(),
-            )
-        }
-        #[cfg(not(feature = "dev-tools"))]
-        {
-            None::<AnyView>
-        }
-    };
+    #[cfg(not(feature = "dev-tools"))]
+    let json_popover = move || None::<AnyView>;
 
     view! {
         <div class="pp">
-            <span class="pp-label">"⏱ Perf"</span>
+            <span class="pp-label">"\u{23f1} Perf"</span>
             <span class="pp-detail" title="mutate() / try_mutate() model closure">
                 {mutation_text}
             </span>
@@ -206,16 +251,17 @@ pub fn PerfPanel() -> impl IntoView {
             <span class="pp-detail" title="IronCanvas render_pending()">
                 {render_text}
             </span>
-            {move || frame_trace().map(|t| view! {
+            {move || frame_trace().map(|trace| view! {
                 <span class="pp-sep">"|"</span>
                 <span
                     class="pp-trace"
-                    title="Last frame: strategy + per-pane verdict (tl tr bl br) + cell slots fetched"
+                    title="Last attempt: strategy + per-pane verdict (tl tr bl br) + cell slots fetched"
                 >
-                    {t}
+                    {trace}
                 </span>
             })}
-            {diag_popover}
+            {json_popover}
+            {capture_strip}
             {recording_supported.then(|| view! {
                 <span class="pp-sep">"|"</span>
                 <button
@@ -225,26 +271,25 @@ pub fn PerfPanel() -> impl IntoView {
                     title="Capture paint-level .icr recording"
                     on:click=on_record_click
                 >
-                    {move || if app.recording_active.get() { "■ Stop" } else { "● Record" }}
+                    {move || if app.recording_active.get() { "\u{25a0} Stop" } else { "\u{25cf} Record" }}
                 </button>
                 {move || app.recording_active.get().then(|| view! {
                     <span class="pp-recording-label">"Recording..."</span>
                 })}
-                {diag_strip}
                 <span class="pp-sep">"|"</span>
                 <button
                     class="pp-export-btn"
                     title="Download current sheet as SVG"
                     on:click=on_export_svg
                 >
-                    "⇩ SVG"
+                    "\u{21e9} SVG"
                 </button>
                 <button
                     class="pp-export-btn"
                     title="PDF export"
                     on:click=on_export_pdf
                 >
-                    "⇩ PDF"
+                    "\u{21e9} PDF"
                 </button>
             })}
         </div>

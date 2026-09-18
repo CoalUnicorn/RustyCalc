@@ -5,7 +5,8 @@
 //! consumer. `StructureEvent::StructureChanged(HeaderChange)` is the only
 //! payload that uses them.
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum Dimension {
     Row { start: Option<i32> },
     Column { start: Option<i32> },
@@ -29,7 +30,8 @@ impl Location {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HeaderChange {
     pub sheet: u32,
     pub operation: HeaderOperation,
@@ -37,7 +39,8 @@ pub struct HeaderChange {
     pub count: i32,
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum HeaderOperation {
     Insert,
     Delete,

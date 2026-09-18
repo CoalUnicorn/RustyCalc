@@ -108,14 +108,20 @@ impl IronCanvas {
             backing_size: (canvas.width(), canvas.height()),
         })
     }
+}
 
+impl IronCanvas {
     /// Attempt identity of the last non-idle paint, from the lightweight
-    /// `FrameTrace` the renderer always publishes. Works with detailed
-    /// capture disabled. Return `None` during playback and before the first
-    /// non-idle attempt: `FrameTrace::default()` carries sequence zero, and
-    /// the orchestrator only increments the counter for an attempt it took,
-    /// so the first real attempt is 1.
+    /// `FrameTrace` the renderer always publishes.
+    ///
+    /// Works with detailed capture disabled and allocates nothing, so a
+    /// production build can number its frame trace from the engine's own
+    /// attempt sequence instead of a host frame counter. Return `None` during
+    /// playback and before the first non-idle attempt: `FrameTrace::default()`
+    /// carries sequence zero, and the orchestrator only increments the counter
+    /// for an attempt it took, so the first real attempt is 1.
     pub fn frame_attempt_seq(&self) -> Option<u64> {
+        #[cfg(feature = "dev-tools")]
         if matches!(self.mode, CanvasMode::Playback(_)) {
             return None;
         }

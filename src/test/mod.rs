@@ -19,6 +19,11 @@ mod model_frontend_types;
 mod model_style;
 mod mouse;
 mod one_shot_raf;
+// Capture, export, and their fixtures need the `dev-tools` instrumentation.
+#[cfg(feature = "dev-tools")]
+mod perf_capture;
+#[cfg(feature = "dev-tools")]
+mod perf_export;
 mod perf_timing;
 mod state;
 mod toolbar_section;

@@ -5,19 +5,22 @@
 //! a zero.
 
 use leptos::prelude::*;
+use serde::Serialize;
 
 /// Result of the model closure.
 ///
 /// Independent of [`EvaluationOutcome`]: a mutation can fail and evaluation
 /// can still be pending, deferred, or never run.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MutationOutcome {
     Ok,
     Err,
 }
 
 /// What `evaluate()` did for one mutation.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
 pub enum EvaluationOutcome {
     /// No evaluation belongs to this mutation. The closure failed, or the
     /// call was skipped for another reason.
@@ -47,7 +50,8 @@ impl EvaluationOutcome {
 }
 
 /// One completed model mutation: one `mutate` or `try_mutate` call.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MutationSample {
     /// Monotonic per-session identifier, assigned by [`PerfTimings`].
     /// The first mutation of a session is 1.
@@ -99,17 +103,6 @@ pub struct PerfTimings {
     /// per frame, and an instrument that runs when nobody is watching taxes
     /// the timings it exists to explain.
     pub frame_trace: RwSignal<Option<String>>,
-    /// Authoritative canvas capture state, mirrored by the worksheet's
-    /// diagnostics Effect. The rAF loop reads it (untracked) to decide
-    /// whether to sample `frameDiagnostics()`. Dev-tools only — the design
-    /// promise is that production builds retain no diagnostic state.
-    #[cfg(feature = "dev-tools")]
-    pub diag_enabled: RwSignal<bool>,
-    /// JSON string of the last captured `IronCanvas.frameDiagnostics()`.
-    /// `None` until capture is enabled and a painted frame completes.
-    /// Dev-tools only.
-    #[cfg(feature = "dev-tools")]
-    pub frame_diagnostics: RwSignal<Option<String>>,
     /// Capture store's sample sink. Non-reactive on purpose: installing it
     /// must not re-run the panel, and it is not a rendering input.
     #[cfg(feature = "dev-tools")]
@@ -126,10 +119,6 @@ impl PerfTimings {
             mutation_seq: RwSignal::new(0),
             render_call: RwSignal::new(None),
             frame_trace: RwSignal::new(None),
-            #[cfg(feature = "dev-tools")]
-            diag_enabled: RwSignal::new(false),
-            #[cfg(feature = "dev-tools")]
-            frame_diagnostics: RwSignal::new(None),
             #[cfg(feature = "dev-tools")]
             sample_sink: StoredValue::new_local(None),
         }

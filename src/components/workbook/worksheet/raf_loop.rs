@@ -21,14 +21,16 @@ use crate::app_state::AppState;
 use crate::components::workbook::one_shot_raf::use_one_shot_raf;
 use crate::coord::SheetRange;
 use crate::input::mouse::CanvasHandle;
+#[cfg(feature = "dev-tools")]
+use crate::perf::{AppendOutcome, AttemptOrigin, CaptureState};
 use crate::state::{ModelStore, Split};
 use iron_canvas_core::*;
 use iron_canvas_web::{IronCanvas, RenderResult};
-#[cfg(feature = "dev-tools")]
-use wasm_bindgen::JsValue;
 
 use super::ClipboardDraw;
 use super::adapter::WorksheetModelAdapter;
+#[cfg(feature = "dev-tools")]
+use super::capture_collect;
 use super::overlay_memo::OverlayTuple;
 
 #[allow(clippy::too_many_arguments)]
@@ -46,7 +48,6 @@ pub(super) fn install_raf_loop(
 ) -> impl Fn() + Clone {
     let last_pane_w = Cell::new(0.0f64);
     let last_pane_h = Cell::new(0.0f64);
-    let painted_frames = StoredValue::new(0u32);
 
     let paint = move || -> bool {
         canvas_handle.update_value(|slot| {
@@ -295,55 +296,43 @@ pub(super) fn install_raf_loop(
             app.perf.render_call.set(Some(sample));
         }
 
-        // The trace readout below is independent of the timing write above:
-        // both run on every painted or retried frame.
-        // Written on every painted or retried frame, not only on change, and
-        // prefixed with a frame counter: an unchanging string is otherwise
-        // indistinguishable from a stale panel, and "which strategy, every
-        // single frame" is exactly the question being asked. A held RetryRequired
-        // publishes at the same counter value rather than a new one — it
-        // names the attempt, not a committed frame.
+        // Trace numbering uses the engine's attempt sequence, not a host
+        // frame counter: the number names the attempt, so a held attempt is
+        // visible as its own attempt rather than reusing the last committed
+        // frame's number. The accessor allocates nothing and works with
+        // detailed capture off.
         if let Some(app) = &app
             && let Some(trace) = frame_trace
         {
-            if action.count_frame {
-                painted_frames.set_value(painted_frames.get_value() + 1);
-            }
-            let n = painted_frames.get_value();
-            app.perf.frame_trace.set(Some(format!("#{n} {trace}")));
+            let attempt = canvas_handle
+                .with_value(|slot| slot.as_ref().and_then(|ic| ic.frame_attempt_seq()));
+            app.perf
+                .frame_trace
+                .set(Some(format!("#{} {trace}", attempt.unwrap_or(0))));
         }
 
-        // Structured frame diagnostics: sample `frameDiagnostics()` only when
-        // the panel toggle enabled capture and this frame actually published
-        // a trace. The toggle path lives entirely in `install_diag_effect`
-        // (which owns the wake); this block only reads signals, so a paused
-        // loop stops sampling as soon as the toggle flips back off.
+        // Attempt capture: one immutable record per non-idle attempt the
+        // engine reported, appended only while a capture is running. The
+        // record carries the attempt's own identity, so a hold and its retry
+        // are two records rather than one overwritten sample.
         #[cfg(feature = "dev-tools")]
         if let Some(app) = &app
-            && app.perf.diag_enabled.get_untracked()
             && action.publish_trace
+            && matches!(app.perf_store.state_untracked(), CaptureState::Capturing(_))
         {
-            let json = canvas_handle.with_value(|slot| {
-                slot.as_ref().and_then(|ic| {
-                    let value = ic.frame_diagnostics();
-                    if value.is_undefined() {
-                        None
-                    } else {
-                        // Two-space indent: the popup shows the snapshot in
-                        // a bounded scrollable surface, so multi-line JSON
-                        // is far more inspectable than one compact line.
-                        js_sys::JSON::stringify_with_replacer_and_space(
-                            &value,
-                            &JsValue::NULL,
-                            &JsValue::from_str("  "),
-                        )
-                        .ok()
-                        .and_then(|text| text.as_string())
-                    }
-                })
-            });
-            if let Some(json) = json {
-                app.perf.frame_diagnostics.set(Some(json));
+            let store = app.perf_store;
+            let snapshot = canvas_handle
+                .with_value(|slot| slot.as_ref().and_then(|ic| ic.frame_diagnostics_snapshot()));
+            if let Some(snapshot) = snapshot
+                && let AppendOutcome::Rejected(_) = capture_collect::append_snapshot(
+                    &store,
+                    model,
+                    snapshot,
+                    AttemptOrigin::Live,
+                    render_sample.map(|sample| sample.ms),
+                )
+            {
+                store.request_canvas_sync();
             }
         }
 
@@ -377,7 +366,6 @@ pub(super) fn install_raf_loop(
 /// re-derive "which variants publish / count / keep alive".
 struct SchedulerAction {
     publish_trace: bool,
-    count_frame: bool,
     #[cfg(any(test, feature = "dev-tools"))]
     update_timing: bool,
     keep_alive: bool,
@@ -393,28 +381,24 @@ fn scheduling_after(result: RenderResult, playback_active: bool) -> SchedulerAct
     match result {
         RenderResult::Idle => SchedulerAction {
             publish_trace: false,
-            count_frame: false,
             #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
             keep_alive: playback_active,
         },
         RenderResult::Rendered => SchedulerAction {
             publish_trace: true,
-            count_frame: true,
             #[cfg(any(test, feature = "dev-tools"))]
             update_timing: true,
             keep_alive: playback_active,
         },
         RenderResult::RetryRequired => SchedulerAction {
             publish_trace: true,
-            count_frame: false,
             #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
             keep_alive: true,
         },
         RenderResult::PlaybackActive => SchedulerAction {
             publish_trace: false,
-            count_frame: false,
             #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
             keep_alive: playback_active,
@@ -431,7 +415,6 @@ mod scheduling_after_tests {
     fn idle_touches_no_diagnostic_and_preserves_keep_alive() {
         let action = scheduling_after(RenderResult::Idle, false);
         assert!(!action.publish_trace);
-        assert!(!action.count_frame);
         assert!(!action.update_timing);
         assert!(!action.keep_alive);
 
@@ -446,7 +429,6 @@ mod scheduling_after_tests {
     fn painted_publishes_counts_and_times() {
         let action = scheduling_after(RenderResult::Rendered, false);
         assert!(action.publish_trace);
-        assert!(action.count_frame);
         assert!(action.update_timing);
         assert!(!action.keep_alive);
     }
@@ -455,7 +437,6 @@ mod scheduling_after_tests {
     fn retry_publishes_without_counting_and_forces_keep_alive() {
         let action = scheduling_after(RenderResult::RetryRequired, false);
         assert!(action.publish_trace);
-        assert!(!action.count_frame);
         assert!(!action.update_timing);
         assert!(action.keep_alive, "a held attempt must keep the loop armed");
     }
@@ -464,7 +445,6 @@ mod scheduling_after_tests {
     fn playback_leaves_every_diagnostic_untouched() {
         let action = scheduling_after(RenderResult::PlaybackActive, true);
         assert!(!action.publish_trace);
-        assert!(!action.count_frame);
         assert!(!action.update_timing);
         assert!(
             action.keep_alive,

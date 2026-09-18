@@ -90,6 +90,27 @@
 }
 .pp .pp-export-btn:hover { background: var(--bg-hover); }
 
+/* Capture controls. Same shape as the export buttons so the strip reads as
+ * one row of controls, with the disabled state carrying the lifecycle. */
+.pp .pp-cap-btn {
+    padding: 0 6px;
+    height: 18px;
+    font-size: 11px;
+    font-family: monospace;
+    border: 1px solid var(--border-inner);
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+.pp .pp-cap-btn:hover:not(:disabled) { background: var(--bg-hover); }
+.pp .pp-cap-btn:disabled {
+    color: var(--text-dim);
+    cursor: default;
+    opacity: 0.55;
+}
+
 /* Structured diagnostics: button lives in the perf strip; the JSON
  * surface is a fixed-position Popover (viewport-clamped by the Popover
  * component) so the .pp overflow:hidden strip cannot clip it. */
