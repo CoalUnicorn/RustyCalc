@@ -266,6 +266,14 @@ pub fn Workbook() -> impl IntoView {
         }
     });
 
+    // The inspector mounts beside the worksheet, outside `StatusBar`, so no
+    // row-scoped overflow can clip it. It is a dev-tools surface: a production
+    // build mounts nothing.
+    #[cfg(feature = "dev-tools")]
+    let inspector = view! { <crate::components::panels::perf_panel::PerfPanel /> }.into_any();
+    #[cfg(not(feature = "dev-tools"))]
+    let inspector = ().into_any();
+
     view! {
         <div
             id="workbook"
@@ -281,6 +289,7 @@ pub fn Workbook() -> impl IntoView {
             <HeaderContextMenuOverlay />
             <SheetTabBar />
             <StatusBar />
+            {inspector}
         </div>
     }
 }

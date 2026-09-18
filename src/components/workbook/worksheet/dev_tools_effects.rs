@@ -341,13 +341,19 @@ pub(super) fn install_capture_effect(
                             .set(Some(StatusMessage::Error("no capture to export".into()))),
                     }
                 }
-                CaptureCmd::CopySelectedAttemptJson => {
-                    match store.with_latest_attempt(attempt_json) {
-                        Some(Ok(json)) => copy_to_clipboard(&json),
-                        Some(Err(error)) => state.status.set(Some(StatusMessage::Error(format!(
-                            "attempt copy failed: {error}"
-                        )))),
-                        None => state
+                CaptureCmd::CopyAttemptJson(key) => {
+                    match store.with_selected(|capture| {
+                        capture
+                            .attempts
+                            .iter()
+                            .find(|attempt| attempt.key == key)
+                            .map(attempt_json)
+                    }) {
+                        Some(Some(Ok(json))) => copy_to_clipboard(&json),
+                        Some(Some(Err(error))) => state.status.set(Some(StatusMessage::Error(
+                            format!("attempt copy failed: {error}"),
+                        ))),
+                        _ => state
                             .status
                             .set(Some(StatusMessage::Error("no attempt to copy".into()))),
                     }

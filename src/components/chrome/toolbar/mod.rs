@@ -3,6 +3,8 @@ mod camera;
 pub(crate) mod chrome_controls;
 mod color_pickers;
 mod conditional_formatting;
+#[cfg(feature = "dev-tools")]
+mod dev_tools;
 mod file_ops;
 mod font;
 mod format_toggles;
@@ -124,6 +126,12 @@ pub fn Toolbar() -> impl IntoView {
             ToolSlot::new("Headers", || view! { <ShowHeadersToggle /> }.into_any()),
             ToolSlot::new("Gridlines", || view! { <GridLinesToggle /> }.into_any()),
             ToolSlot::new("Camera", || view! { <InsertCamera /> }.into_any()),
+            // The inspector is dev-tools only, so the production toolbar has
+            // no launcher slot at all.
+            #[cfg(feature = "dev-tools")]
+            ToolSlot::new("Developer", || {
+                view! { <dev_tools::DevToolsLauncher /> }.into_any()
+            }),
         ],
         ToolbarSection::File => {
             vec![ToolSlot::new("File", || view! { <FileOps /> }.into_any())]

@@ -216,11 +216,11 @@ pub(super) fn install_raf_loop(
 
         #[cfg(feature = "dev-tools")]
         web_sys::console::time_with_label("render");
-        // Sampling the frame trace is opt-in on the panel being visible, so a
-        // closed panel costs nothing per frame.
+        // Sampling the frame trace is opt-in on the inspector being open, so a
+        // closed inspector costs nothing per frame.
         let trace_wanted = app
             .as_ref()
-            .is_some_and(|a| a.show_perf_panel.get_untracked());
+            .is_some_and(|a| a.inspector_open.get_untracked());
         let mut paint_result = RenderResult::Idle;
         // Duration of the `render_pending()` call alone: `performance.now()`
         // is read immediately before and after it, inside the same closure —

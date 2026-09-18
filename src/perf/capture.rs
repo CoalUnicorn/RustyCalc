@@ -20,6 +20,7 @@ use crate::events::{
     ThemeEvent,
 };
 use crate::perf::MutationSample;
+use iron_canvas_core::RCRange;
 use iron_canvas_core::RowSpan;
 use iron_canvas_core::chrome::PaneRegion;
 use iron_canvas_core::renderer::diag::{
@@ -161,6 +162,32 @@ pub enum HostScope {
     Colors {
         count: usize,
     },
+}
+
+impl HostScope {
+    /// The addressable extent of this scope in canvas coordinates.
+    ///
+    /// `None` for a scope that names no rectangle: a viewport, a whole sheet,
+    /// a set of sheets, a layout change, a header change, a moved row or
+    /// column, or a colour list. Coordinates stay numeric — A1 text is a view
+    /// concern.
+    pub fn range(&self) -> Option<RCRange> {
+        match self {
+            Self::Cell(cell) => Some(RCRange {
+                r1: cell.row,
+                c1: cell.column,
+                r2: cell.row,
+                c2: cell.column,
+            }),
+            Self::Range(range) => Some(RCRange {
+                r1: range.area.r1,
+                c1: range.area.c1,
+                r2: range.area.r2,
+                c2: range.area.c2,
+            }),
+            _ => None,
+        }
+    }
 }
 
 /// The facts one host event contributes to a batch summary.
@@ -499,6 +526,10 @@ pub struct CaptureRecord {
     /// address; every record carries its own [`SheetRef`].
     pub sheet_names: Vec<(u32, String)>,
     pub attempts: Vec<AttemptRecord>,
+    /// Host event summaries, ordered by `batch_id` ascending — the bus's
+    /// monotonic counter appends them in order, so a lookup is a binary
+    /// search rather than a scan. [`CaptureRecord::batch_summaries`] is the
+    /// only reader that relies on the order.
     pub batches: Vec<HostBatchSummary>,
     pub mutations: Vec<MutationSample>,
     /// A limit stopped this capture before the operator finished it.
@@ -512,6 +543,21 @@ impl CaptureRecord {
     /// while the capture is still running. Includes pauses.
     pub fn wall_ms(&self, observed_at_ms: f64) -> f64 {
         self.completed_at_ms.unwrap_or(observed_at_ms) - self.started_at_ms
+    }
+
+    /// Every summary of one host batch, in emit order.
+    ///
+    /// Binary search over the `batch_id`-ordered `batches`, so an attempt's
+    /// scope lookup costs `O(log n)` rather than a scan of every retained
+    /// host event.
+    pub fn batch_summaries(&self, batch_id: HostBatchId) -> &[HostBatchSummary] {
+        let start = self
+            .batches
+            .partition_point(|summary| summary.batch_id < batch_id);
+        let end = self
+            .batches
+            .partition_point(|summary| summary.batch_id <= batch_id);
+        &self.batches[start..end]
     }
 }
 
@@ -619,6 +665,19 @@ impl CaptureStatus {
             stop_reason: None,
         }
     }
+}
+
+/// One retained capture, for the inspector's capture selector.
+///
+/// A view needs the identity, the label, and whether the capture is the one
+/// still in the live slot. The records themselves stay in the archive.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaptureSummary {
+    pub id: CaptureId,
+    pub name: String,
+    pub attempts: usize,
+    /// The capture in the live slot: running, starting, or paused.
+    pub active: bool,
 }
 
 /// The capture slot, the retained captures, and the read-side state a view
@@ -734,6 +793,30 @@ impl CaptureArchive {
 
     pub fn with_active<R>(&self, f: impl FnOnce(&CaptureRecord) -> R) -> Option<R> {
         self.lifecycle.record().map(f)
+    }
+
+    /// One row per retained capture, for the inspector's capture selector.
+    ///
+    /// The active capture comes first, then the archived captures newest
+    /// first: the list reads as "what is running, then what I can look back
+    /// at".
+    pub fn capture_summaries(&self) -> Vec<CaptureSummary> {
+        let mut out = Vec::with_capacity(self.retained_captures());
+        if let Some(record) = self.lifecycle.record() {
+            out.push(CaptureSummary {
+                id: record.id,
+                name: record.name.clone(),
+                attempts: record.attempts.len(),
+                active: true,
+            });
+        }
+        out.extend(self.archived.iter().rev().map(|record| CaptureSummary {
+            id: record.id,
+            name: record.name.clone(),
+            attempts: record.attempts.len(),
+            active: false,
+        }));
+        out
     }
 
     /// Read the selected capture, or the newest one when nothing is selected.

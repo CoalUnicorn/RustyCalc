@@ -17,6 +17,10 @@
 #[cfg(feature = "dev-tools")]
 mod capture;
 #[cfg(feature = "dev-tools")]
+mod digest;
+#[cfg(feature = "dev-tools")]
+mod evidence;
+#[cfg(feature = "dev-tools")]
 mod export;
 #[cfg(feature = "dev-tools")]
 mod store;
@@ -25,10 +29,17 @@ mod timing;
 #[cfg(feature = "dev-tools")]
 pub use capture::{
     AppendOutcome, AttemptKey, AttemptOrigin, AttemptRecord, BatchFacts, CaptureArchive, CaptureId,
-    CaptureRecord, CaptureState, CaptureStatus, HostBatchId, HostBatchKind, HostBatchSummary,
-    HostScope, InstrumentationFlags, LimitKind, LimitReport, MAX_ATTEMPTS, MAX_BATCHES, MAX_BYTES,
-    MAX_CAPTURES, MAX_MUTATIONS, SheetRef, StartRefusal, StopReason, estimate_attempt_bytes,
-    estimate_capture_bytes, estimate_host_summary_bytes, summarize,
+    CaptureRecord, CaptureState, CaptureStatus, CaptureSummary, HostBatchId, HostBatchKind,
+    HostBatchSummary, HostScope, InstrumentationFlags, LimitKind, LimitReport, MAX_ATTEMPTS,
+    MAX_BATCHES, MAX_BYTES, MAX_CAPTURES, MAX_MUTATIONS, SheetRef, StartRefusal, StopReason,
+    estimate_attempt_bytes, estimate_capture_bytes, estimate_host_summary_bytes, summarize,
+};
+#[cfg(feature = "dev-tools")]
+pub use digest::{CaptureDigest, DigestFilter, FetchTotals, RenderStats, digest};
+#[cfg(feature = "dev-tools")]
+pub use evidence::{
+    AddressEvidence, AddressRange, Coverage, EvidenceNote, EvidencePrecision, EvidenceSource,
+    UnavailableReason, attempt_evidence, format_range, repainted_coverage,
 };
 #[cfg(feature = "dev-tools")]
 pub use export::{

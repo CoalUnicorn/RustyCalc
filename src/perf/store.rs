@@ -16,7 +16,8 @@ use crate::perf::{MutationSample, now};
 
 use super::capture::{
     AppendOutcome, AttemptKey, AttemptRecord, CaptureArchive, CaptureId, CaptureRecord,
-    CaptureState, CaptureStatus, HostBatchId, LimitReport, StartRefusal, StopReason,
+    CaptureState, CaptureStatus, CaptureSummary, HostBatchId, LimitReport, StartRefusal,
+    StopReason,
 };
 
 /// The capture store: signals only, so `AppState` stays `Copy`.
@@ -108,6 +109,12 @@ impl PerfStore {
     pub fn with_selected<R>(&self, f: impl FnOnce(&CaptureRecord) -> R) -> Option<R> {
         self.archive
             .with_untracked(|archive| archive.with_selected(f))
+    }
+
+    /// One row per retained capture, for the inspector's capture selector.
+    pub fn capture_summaries(&self) -> Vec<CaptureSummary> {
+        self.archive
+            .with_untracked(CaptureArchive::capture_summaries)
     }
 
     /// The newest attempt of the capture the views show.

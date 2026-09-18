@@ -24,6 +24,7 @@ styles/
     color-picker.css   cp-
     context-menu.css   ctx-
     modal.css          md-
+    floating-window.css fw-
   panels/              feature surfaces
     perf-panel.css     pp-
     playback-panel.css pb-
@@ -63,8 +64,9 @@ prefix as its class (`.tb`, `.cp`, `.ld`).
 | `cp-`  | Color Picker    | `.cp`         | ui/color-picker.css        |
 | `ctx-` | Context Menu    | `.ctx`        | ui/context-menu.css        |
 | `md-`  | Modal Dialog    | `.md-box`     | ui/modal.css               |
-| `pp-`  | Perf Panel      | `.pp`         | panels/perf-panel.css      |
-| `pb-`  | Playback Panel  | `.pb`         | panels/playback-panel.css  |
+| `fw-`  | Floating Window | `.fw-shell`   | ui/floating-window.css     |
+| `pp-`  | Perf Inspector  | `.pp-inspector` | panels/perf-panel.css    |
+| `pb-`  | Playback Panel  | `.pb-row`     | panels/playback-panel.css  |
 | `nrm-` | Named Ranges    | `.nrm`        | panels/named-ranges.css    |
 | `sp-`  | Share Popover   | `.sp-popover` | panels/share-popover.css   |
 

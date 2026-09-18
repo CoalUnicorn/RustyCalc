@@ -1,11 +1,11 @@
 /* Playback Panel — prefix: pb-
  *
- * Renders inside the perf panel bar. Two modes:
+ * Mounted by the inspector's Tools view. Two modes:
  * - Idle: "📂 Load .icr" file picker
  * - Loaded: play/pause btn + scrubber + frame counter + close btn
  *
  * Mapping:
- *   playback-panel → sits inside .pp bar, no root
+ *   pb-row          → inline row holding either mode
  *   pb-label        → playback section label
  *   pb-btn          → play/pause + close buttons
  *   pb-btn.active   → playing state
@@ -13,6 +13,14 @@
  *   pb-counter      → "N / M" frame counter
  *   pb-load         → idle-state "Load .icr" label
  */
+
+.pb-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    min-height: 22px;
+}
 
 .pb-label {
     font-weight: 600;

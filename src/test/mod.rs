@@ -23,6 +23,10 @@ mod one_shot_raf;
 #[cfg(feature = "dev-tools")]
 mod perf_capture;
 #[cfg(feature = "dev-tools")]
+mod perf_digest;
+#[cfg(feature = "dev-tools")]
+mod perf_evidence;
+#[cfg(feature = "dev-tools")]
 mod perf_export;
 mod perf_timing;
 mod state;

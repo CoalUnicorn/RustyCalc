@@ -1,7 +1,7 @@
 //! `.icr` recording playback controls.
 //!
-//! Status-bar sibling of [`crate::components::panels::perf_panel::PerfPanel`]. Renders only when the wasm was built
-//! with `--features dev-tools` (runtime-checked via
+//! Mounted by the performance inspector's Tools view. Renders only when the
+//! wasm was built with `--features dev-tools` (runtime-checked via
 //! `IronCanvas::recording_supported()`). The panel itself is stateless — every
 //! interaction emits a [`PlaybackCmd`] which the Worksheet dispatch Effect
 //! drains onto the live `IronCanvas`.
@@ -76,53 +76,54 @@ pub fn PlaybackPanel() -> impl IntoView {
     };
 
     view! {
-        <span class="pp-sep">"|"</span>
-        {move || {
-            if app.playback_loaded.get() {
-                view! {
-                    <span class="pb-label">"Playback"</span>
-                    <button
-                        class="pb-btn"
-                        class:active=move || app.playback_playing.get()
-                        title="Play / pause"
-                        on:click=on_play_pause
-                    >
-                        {move || if app.playback_playing.get() { "⏸" } else { "▶" }}
-                    </button>
-                    <input
-                        class="pb-scrub"
-                        type="range"
-                        min="0"
-                        max=move || app.playback_frame_count.get().saturating_sub(1).to_string()
-                        prop:value=move || app.playback_frame.get().to_string()
-                        on:input=on_scrub
-                    />
-                    <span class="pb-counter">
-                        {move || format!(
-                            "{} / {}",
-                            app.playback_frame.get(),
-                            app.playback_frame_count.get().saturating_sub(1),
-                        )}
-                    </span>
-                    <button class="pb-btn" title="Close playback" on:click=on_exit>"✕"</button>
-                }
-                .into_any()
-            } else {
-                view! {
-                    <label class="pb-load" title="Load an .icr recording">
-                        "📂 Load .icr"
+        <div class="pb-row">
+            {move || {
+                if app.playback_loaded.get() {
+                    view! {
+                        <span class="pb-label">"Playback"</span>
+                        <button
+                            class="pb-btn"
+                            class:active=move || app.playback_playing.get()
+                            title="Play / pause"
+                            on:click=on_play_pause
+                        >
+                            {move || if app.playback_playing.get() { "⏸" } else { "▶" }}
+                        </button>
                         <input
-                            node_ref=file_input
-                            type="file"
-                            style="display:none"
-                            accept=".icr,application/octet-stream"
-                            on:change=on_file_change
+                            class="pb-scrub"
+                            type="range"
+                            min="0"
+                            max=move || app.playback_frame_count.get().saturating_sub(1).to_string()
+                            prop:value=move || app.playback_frame.get().to_string()
+                            on:input=on_scrub
                         />
-                    </label>
+                        <span class="pb-counter">
+                            {move || format!(
+                                "{} / {}",
+                                app.playback_frame.get(),
+                                app.playback_frame_count.get().saturating_sub(1),
+                            )}
+                        </span>
+                        <button class="pb-btn" title="Close playback" on:click=on_exit>"✕"</button>
+                    }
+                    .into_any()
+                } else {
+                    view! {
+                        <label class="pb-load" title="Load an .icr recording">
+                            "📂 Load .icr"
+                            <input
+                                node_ref=file_input
+                                type="file"
+                                style="display:none"
+                                accept=".icr,application/octet-stream"
+                                on:change=on_file_change
+                            />
+                        </label>
+                    }
+                    .into_any()
                 }
-                .into_any()
-            }
-        }}
+            }}
+        </div>
     }
     .into_any()
 }
