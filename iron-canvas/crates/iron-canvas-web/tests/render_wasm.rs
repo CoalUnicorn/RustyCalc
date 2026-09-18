@@ -3610,6 +3610,64 @@ fn stage6_column_blit_stays_conservative_and_matches_forced_fresh() {
 // can parse, and disabled capture returns `undefined`.
 // ==============================================================================
 
+/// The host snapshot and JS projection describe the same completed attempt.
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen_test]
+fn historical_snapshot_matches_js_and_survives_canvas_changes() {
+    use iron_canvas_web::{frame_diagnostics_json, frame_diagnostics_value};
+
+    let mut empty = IronCanvas::create(make_canvas(), make_canvas()).unwrap();
+    assert_eq!(empty.frame_attempt_seq(), None);
+    empty.set_frame_diagnostics_enabled(true);
+    assert!(empty.frame_diagnostics_snapshot().is_none());
+
+    let (mut canvas, grid) = stage6_canvas_over(
+        stage6_fixture_store(),
+        Rc::new(Cell::new(1)),
+        Rc::new(Cell::new(1)),
+        None,
+    );
+    assert_eq!(canvas.frame_attempt_seq(), Some(1));
+    assert!(canvas.frame_diagnostics_snapshot().is_none());
+    canvas.set_frame_diagnostics_enabled(true);
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+    let snapshot = canvas.frame_diagnostics_snapshot().unwrap();
+    assert_eq!(
+        canvas.frame_attempt_seq(),
+        Some(snapshot.diagnostics.attempt_seq)
+    );
+    assert_eq!(snapshot.backing_size, (grid.width(), grid.height()));
+    let js: serde_json::Value = serde_wasm_bindgen::from_value(canvas.frame_diagnostics()).unwrap();
+    let archived = frame_diagnostics_value(&snapshot).unwrap();
+    // Normalize numbers through JS: it has one Number type, while
+    // serde_json distinguishes integer 1 from floating-point 1.0.
+    let exported_js = js_sys::JSON::parse(&frame_diagnostics_json(&snapshot).unwrap()).unwrap();
+    let exported: serde_json::Value = serde_wasm_bindgen::from_value(exported_js).unwrap();
+    assert_eq!(exported, js);
+
+    canvas.resize(123.0, 87.0, 2.0).unwrap();
+    canvas.set_frame_diagnostics_enabled(false);
+    assert!(canvas.frame_diagnostics_snapshot().is_none());
+    assert!(canvas.frame_diagnostics().is_undefined());
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+    assert_eq!(canvas.frame_attempt_seq(), Some(3));
+
+    canvas
+        .start_recording(wasm_bindgen::JsValue::UNDEFINED)
+        .unwrap();
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+    let bytes = canvas.stop_recording().unwrap().to_vec();
+    canvas.load_recording(&bytes).unwrap();
+    assert!(canvas.frame_diagnostics_snapshot().is_none());
+    assert_eq!(canvas.frame_attempt_seq(), None);
+    drop(canvas);
+    let json: serde_json::Value =
+        serde_json::from_str(&frame_diagnostics_json(&snapshot).unwrap()).unwrap();
+    assert_eq!(json, archived);
+}
+
 /// Dev-diagnostics wire smoke: enabled capture returns a snapshot object
 /// with the attempt fields; disabled capture returns `undefined`.
 #[cfg(feature = "dev-tools")]

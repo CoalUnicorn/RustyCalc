@@ -215,13 +215,17 @@ pub(super) fn install_raf_loop(
 
         #[cfg(feature = "dev-tools")]
         web_sys::console::time_with_label("render");
-        let paint_t0 = crate::perf::now();
         // Sampling the frame trace is opt-in on the panel being visible, so a
         // closed panel costs nothing per frame.
         let trace_wanted = app
             .as_ref()
             .is_some_and(|a| a.show_perf_panel.get_untracked());
         let mut paint_result = RenderResult::Idle;
+        // Duration of the `render_pending()` call alone: `performance.now()`
+        // is read immediately before and after it, inside the same closure —
+        // the theme check above is not part of the number.
+        #[cfg(feature = "dev-tools")]
+        let mut render_sample = None;
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
                 if theme_dirty.get_value() {
@@ -231,7 +235,16 @@ pub(super) fn install_raf_loop(
                     }
                     theme_dirty.set_value(false);
                 }
+                #[cfg(feature = "dev-tools")]
+                let started_at_ms = crate::perf::now();
                 paint_result = ic.render_pending();
+                #[cfg(feature = "dev-tools")]
+                {
+                    render_sample = Some(crate::perf::RenderSample {
+                        started_at_ms,
+                        ms: crate::perf::now() - started_at_ms,
+                    });
+                }
             }
         });
         #[cfg(feature = "dev-tools")]
@@ -270,22 +283,20 @@ pub(super) fn install_raf_loop(
             }
         }
 
-        // Record paint duration for the PerfPanel. Skipped until the first
-        // cell commit has happened so the panel stays on its placeholder
-        // ("commit a cell to measure") and we don't spam the signal on
-        // every scroll / resize / overlay tick — and skipped on a tick that
-        // didn't commit or retry a paint (Idle / PlaybackActive).
+        // Record the paint duration for the PerfPanel on every frame that
+        // actually painted. A scroll, resize, or overlay tick measures here
+        // and publishes no mutation sample — the two numbers answer
+        // different questions and neither waits for the other.
+        #[cfg(feature = "dev-tools")]
         if action.update_timing
             && let Some(app) = &app
-            && app.perf.commit_start.get_untracked().is_some()
+            && let Some(sample) = render_sample
         {
-            app.perf.render_ms.set(Some(crate::perf::now() - paint_t0));
+            app.perf.render_call.set(Some(sample));
         }
 
-        // The trace deliberately skips the commit_start gate above: scrolling
-        // never commits a cell, and the post-blit repaint is exactly what this
-        // readout exists to catch.
-        //
+        // The trace readout below is independent of the timing write above:
+        // both run on every painted or retried frame.
         // Written on every painted or retried frame, not only on change, and
         // prefixed with a frame counter: an unchanging string is otherwise
         // indistinguishable from a stale panel, and "which strategy, every
@@ -367,6 +378,7 @@ pub(super) fn install_raf_loop(
 struct SchedulerAction {
     publish_trace: bool,
     count_frame: bool,
+    #[cfg(any(test, feature = "dev-tools"))]
     update_timing: bool,
     keep_alive: bool,
 }
@@ -382,24 +394,28 @@ fn scheduling_after(result: RenderResult, playback_active: bool) -> SchedulerAct
         RenderResult::Idle => SchedulerAction {
             publish_trace: false,
             count_frame: false,
+            #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
             keep_alive: playback_active,
         },
         RenderResult::Rendered => SchedulerAction {
             publish_trace: true,
             count_frame: true,
+            #[cfg(any(test, feature = "dev-tools"))]
             update_timing: true,
             keep_alive: playback_active,
         },
         RenderResult::RetryRequired => SchedulerAction {
             publish_trace: true,
             count_frame: false,
+            #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
             keep_alive: true,
         },
         RenderResult::PlaybackActive => SchedulerAction {
             publish_trace: false,
             count_frame: false,
+            #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
             keep_alive: playback_active,
         },
@@ -409,8 +425,9 @@ fn scheduling_after(result: RenderResult, playback_active: bool) -> SchedulerAct
 #[cfg(test)]
 mod scheduling_after_tests {
     use super::*;
+    use wasm_bindgen_test::wasm_bindgen_test;
 
-    #[test]
+    #[wasm_bindgen_test]
     fn idle_touches_no_diagnostic_and_preserves_keep_alive() {
         let action = scheduling_after(RenderResult::Idle, false);
         assert!(!action.publish_trace);
@@ -425,7 +442,7 @@ mod scheduling_after_tests {
         );
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn painted_publishes_counts_and_times() {
         let action = scheduling_after(RenderResult::Rendered, false);
         assert!(action.publish_trace);
@@ -434,7 +451,7 @@ mod scheduling_after_tests {
         assert!(!action.keep_alive);
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn retry_publishes_without_counting_and_forces_keep_alive() {
         let action = scheduling_after(RenderResult::RetryRequired, false);
         assert!(action.publish_trace);
@@ -443,7 +460,7 @@ mod scheduling_after_tests {
         assert!(action.keep_alive, "a held attempt must keep the loop armed");
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn playback_leaves_every_diagnostic_untouched() {
         let action = scheduling_after(RenderResult::PlaybackActive, true);
         assert!(!action.publish_trace);
@@ -455,7 +472,7 @@ mod scheduling_after_tests {
         );
     }
 
-    #[test]
+    #[wasm_bindgen_test]
     fn retry_remains_live_until_a_later_attempt_commits() {
         for attempt in 1..=1_000 {
             let action = scheduling_after(RenderResult::RetryRequired, false);

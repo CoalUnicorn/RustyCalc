@@ -86,7 +86,6 @@ pub fn execute_edit(
         }
         EditAction::CommitAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
-                stamp_last_formula(&edit.text);
                 try_mutate(
                     model,
                     EvaluationMode::Immediate,
@@ -118,7 +117,6 @@ pub fn execute_edit(
         }
         EditAction::CommitArrayAndNavigate(dir) => {
             if let Some(edit) = state.editing_cell.get_untracked() {
-                stamp_last_formula(&edit.text);
                 try_mutate(model, EvaluationMode::Immediate, |m| {
                     commit_array_formula(m, &edit)
                 })?;
@@ -225,16 +223,3 @@ fn finish_commit(model: ModelStore, state: &WorkbookState, edit: &EditingCell, d
 
     crate::util::refocus_workbook();
 }
-
-/// Stamp the last-committed text for the dev-tools PerfPanel readout. Phase
-/// timestamps (commit_start / input_done / eval_done) are written inside
-/// `try_mutate` itself. No-op without the `dev-tools` feature.
-#[cfg(feature = "dev-tools")]
-fn stamp_last_formula(text: &str) {
-    if let Some(perf) = leptos::prelude::use_context::<crate::perf::PerfTimings>() {
-        leptos::prelude::Set::set(&perf.last_formula, Some(text.to_owned()));
-    }
-}
-
-#[cfg(not(feature = "dev-tools"))]
-fn stamp_last_formula(_text: &str) {}

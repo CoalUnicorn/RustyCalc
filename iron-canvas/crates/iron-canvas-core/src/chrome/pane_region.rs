@@ -93,6 +93,15 @@ pub struct GridShape {
 }
 
 impl GridShape {
+    /// Build a shape from the frozen/scroll axis lengths — `[frozen, scroll]`
+    /// per axis. Hosts that have to state geometry facts without a live
+    /// `Chrome` (diagnostics fixtures, historical snapshot tests) use this;
+    /// the invariant that the frozen counts are the first elements holds by
+    /// construction, and nothing can mutate a shape afterwards.
+    pub const fn from_lens(row_lens: [usize; 2], col_lens: [usize; 2]) -> Self {
+        Self { row_lens, col_lens }
+    }
+
     pub const fn row_lens(self) -> [usize; 2] {
         self.row_lens
     }

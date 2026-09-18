@@ -5,39 +5,55 @@ use crate::app_state::DiagCmd;
 use crate::app_state::{AppState, ExportCmd, RecordingCmd};
 #[cfg(feature = "dev-tools")]
 use crate::components::ui::popover::Popover;
+use crate::perf::{EvaluationOutcome, MutationOutcome};
 #[cfg(feature = "dev-tools")]
 use wasm_bindgen::JsCast;
 
-/// Displays the last commit->render timing breakdown.
+/// Displays the last mutation and the last paint as separate numbers.
 ///
-/// Shows four phases:
-/// - Input: `set_user_input()` writes the value into the model.
-/// - Eval: `evaluate()` recalculates all formulas.
-/// - Render: canvas `render()` draws the visible grid.
-/// - Total: commit start to render complete.
+/// Three readouts, each naming one thing that happened:
+/// - Mutation: duration of the model closure (`mutate` / `try_mutate`) and
+///   whether it applied.
+/// - Eval: measured `evaluate()` duration, `deferred`, or `not run`.
+/// - Render: duration of the last `render_pending()` call that painted.
+///
+/// Nothing here subtracts two timestamps: a phase that did not run reports
+/// its own name, never a zero.
 #[component]
 pub fn PerfPanel() -> impl IntoView {
     let app = expect_context::<AppState>();
     let perf = app.perf;
 
-    let timing = move || {
-        // In / Eval are durations within the cell-commit pipeline.
-        // Draw is the most recent `renderPending()` duration — independent of
-        // commit, so it stays meaningful even when the last action was a
-        // scroll, overlay change, or theme flip.
-        let commit_start = perf.commit_start.get()?;
-        let input_done = perf.input_done.get()?;
-        let eval_done = perf.eval_done.get()?;
-        let render_ms = perf.render_ms.get()?;
-
-        let input_ms = input_done - commit_start;
-        let eval_ms = eval_done - input_done;
-        let total_ms = input_ms + eval_ms + render_ms;
-
-        Some((input_ms, eval_ms, render_ms, total_ms))
+    let mutation_text = move || {
+        perf.mutation.get().map_or_else(
+            || "Mutation: —".to_owned(),
+            |sample| {
+                let outcome = match sample.outcome {
+                    MutationOutcome::Ok => "ok",
+                    MutationOutcome::Err => "err",
+                };
+                format!("Mutation: {:.1}ms {outcome}", sample.apply_ms)
+            },
+        )
     };
 
-    let formula_text = move || perf.last_formula.get().unwrap_or_default();
+    let eval_text = move || {
+        perf.mutation.get().map_or_else(
+            || "Eval: —".to_owned(),
+            |sample| match sample.evaluation {
+                EvaluationOutcome::Measured { ms } => format!("Eval: {ms:.1}ms"),
+                EvaluationOutcome::Deferred => "Eval: deferred".to_owned(),
+                EvaluationOutcome::NotRun => "Eval: not run".to_owned(),
+            },
+        )
+    };
+
+    let render_text = move || {
+        perf.render_call.get().map_or_else(
+            || "Render: —".to_owned(),
+            |sample| format!("Render: {:.1}ms", sample.ms),
+        )
+    };
 
     // Which renderer path drew the last frame. Reads e.g.
     // "ChangedCells tl:skip tr:- bl:- br:FULL fetched=8000" — a `FULL` on the
@@ -181,32 +197,15 @@ pub fn PerfPanel() -> impl IntoView {
     view! {
         <div class="pp">
             <span class="pp-label">"⏱ Perf"</span>
-            {move || match timing() {
-                Some((input, eval, render, total)) => {
-                    view! {
-                        <span class="pp-detail" title="set_user_input()">
-                            {format!("In: {input:.1}ms")}
-                        </span>
-                        <span class="pp-detail" title="evaluate() - formula recalc">
-                            {format!("Eval: {eval:.1}ms")}
-                        </span>
-                        <span class="pp-detail" title="Canvas render()">
-                            {format!("Draw: {render:.1}ms")}
-                        </span>
-                        <span class="pp-total" title="Total commit-to-pixels">
-                            {format!("Σ {total:.1}ms")}
-                        </span>
-                        <span class="pp-formula" title="Last committed formula">
-                            {formula_text}
-                        </span>
-                    }.into_any()
-                }
-                None => {
-                    view! {
-                        <span class="pp-detail">"commit a cell to measure"</span>
-                    }.into_any()
-                }
-            }}
+            <span class="pp-detail" title="mutate() / try_mutate() model closure">
+                {mutation_text}
+            </span>
+            <span class="pp-detail" title="evaluate() - formula recalc">
+                {eval_text}
+            </span>
+            <span class="pp-detail" title="IronCanvas render_pending()">
+                {render_text}
+            </span>
             {move || frame_trace().map(|t| view! {
                 <span class="pp-sep">"|"</span>
                 <span

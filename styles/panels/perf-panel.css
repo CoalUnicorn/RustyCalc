@@ -4,8 +4,6 @@
  *   perf-panel   -> pp
  *   perf-label   -> pp-label
  *   perf-detail  -> pp-detail
- *   perf-total   -> pp-total
- *   perf-formula -> pp-formula
  */
 
 .pp {
@@ -31,20 +29,6 @@
 
 .pp .pp-detail {
     flex-shrink: 0;
-}
-
-.pp .pp-total {
-    font-weight: 600;
-    color: var(--accent);
-    flex-shrink: 0;
-}
-
-.pp .pp-formula {
-    color: var(--text-dim);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 300px;
 }
 
 /* Separator between sections (perf timing | playback | recording) */
