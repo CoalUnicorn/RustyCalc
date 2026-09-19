@@ -28,6 +28,8 @@ mod perf_digest;
 mod perf_evidence;
 #[cfg(feature = "dev-tools")]
 mod perf_export;
+#[cfg(feature = "dev-tools")]
+mod perf_inspector;
 mod perf_timing;
 mod state;
 mod toolbar_section;

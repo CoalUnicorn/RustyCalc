@@ -110,15 +110,18 @@ pub fn attempt_evidence(capture: &CaptureRecord, record: &AttemptRecord) -> Vec<
         .geometry
         .as_ref()
         .map(|geometry| geometry.sheet);
-    vec![
+    let mut evidence = vec![
         reported_changes(capture, record),
         fingerprint_changes(record, sheet_id),
-        fetched_ranges(record, sheet_id),
+    ];
+    evidence.extend(fetched_ranges(record, sheet_id));
+    evidence.extend([
         source_ranges(record, sheet_id),
         repaint_clip(&record.diagnostics),
         coverage_row(record),
         revealed_ranges(record, sheet_id),
-    ]
+    ]);
+    evidence
 }
 
 /// Resolve the address coverage the attempt actually repainted.
@@ -331,7 +334,7 @@ fn fingerprint_changes(record: &AttemptRecord, sheet_id: Option<u32>) -> Address
             );
         };
         let sheet = SheetRef::new(sheet_id, record.sheet_name.clone());
-        let mut ranges: Vec<AddressRange> = cells
+        let ranges: Vec<AddressRange> = cells
             .iter()
             .map(|cell| AddressRange {
                 sheet: sheet.clone(),
@@ -343,27 +346,28 @@ fn fingerprint_changes(record: &AttemptRecord, sheet_id: Option<u32>) -> Address
                 },
             })
             .collect();
-        if !rows.is_empty() {
-            match visible_columns(diag) {
-                Some((c1, c2)) => {
-                    ranges.extend(rows.iter().map(|span| AddressRange {
-                        sheet: sheet.clone(),
-                        range: RCRange {
-                            r1: span.start(),
-                            c1,
-                            r2: span.end(),
-                            c2,
-                        },
-                    }));
-                }
-                None => {
-                    return unavailable(
-                        LABEL,
-                        EvidenceSource::FingerprintChanges,
-                        UnavailableReason::SectionMissing,
-                    );
-                }
+        // Row fingerprints name affected rows, not every cell in those rows.
+        // Prefer the exact cell list when the renderer supplies one.
+        if cells.is_empty() {
+            let Some(geometry) = diag.geometry.as_ref() else {
+                return unavailable(
+                    LABEL,
+                    EvidenceSource::FingerprintChanges,
+                    UnavailableReason::SectionMissing,
+                );
+            };
+            let mut ranges = row_coverage(rows, geometry);
+            for range in &mut ranges {
+                range.sheet.name.clone_from(&record.sheet_name);
             }
+            return AddressEvidence {
+                label: "fingerprint row spans (visible intersections)",
+                source: EvidenceSource::FingerprintChanges,
+                precision: EvidencePrecision::Derived,
+                ranges,
+                clip: None,
+                note: None,
+            };
         }
         return AddressEvidence {
             label: LABEL,
@@ -402,41 +406,45 @@ fn fingerprint_changes(record: &AttemptRecord, sheet_id: Option<u32>) -> Address
 }
 
 /// Renderer-owned fetches, listed even on held attempts.
-fn fetched_ranges(record: &AttemptRecord, sheet_id: Option<u32>) -> AddressEvidence {
+fn fetched_ranges(record: &AttemptRecord, sheet_id: Option<u32>) -> Vec<AddressEvidence> {
     const LABEL: &str = "fetched ranges";
     let requests = &record.diagnostics.fetch.requests;
     if requests.is_empty() {
-        return AddressEvidence {
+        return vec![AddressEvidence {
             label: LABEL,
             source: EvidenceSource::FetchRequests,
             precision: EvidencePrecision::Exact,
             ranges: Vec::new(),
             clip: None,
             note: None,
-        };
+        }];
     }
     let Some(sheet_id) = sheet_id else {
-        return unavailable(
+        return vec![unavailable(
             LABEL,
             EvidenceSource::FetchRequests,
             UnavailableReason::SectionMissing,
-        );
+        )];
     };
     let sheet = SheetRef::new(sheet_id, record.sheet_name.clone());
-    AddressEvidence {
-        label: LABEL,
-        source: EvidenceSource::FetchRequests,
-        precision: EvidencePrecision::Exact,
-        ranges: requests
-            .iter()
-            .map(|request| AddressRange {
+    requests
+        .iter()
+        .map(|request| AddressEvidence {
+            label: match request.purpose {
+                DiagFetchPurpose::FullSegment => "fetched range (full segment)",
+                DiagFetchPurpose::DamageStrip => "fetched range (damage strip)",
+                DiagFetchPurpose::BlitReveal => "fetched range (blit reveal)",
+            },
+            source: EvidenceSource::FetchRequests,
+            precision: EvidencePrecision::Exact,
+            ranges: vec![AddressRange {
                 sheet: sheet.clone(),
                 range: request.range,
-            })
-            .collect(),
-        clip: None,
-        note: None,
-    }
+            }],
+            clip: None,
+            note: None,
+        })
+        .collect()
 }
 
 /// The repaint's own source envelope, one entry per recorded range.
@@ -551,20 +559,6 @@ fn revealed_ranges(record: &AttemptRecord, sheet_id: Option<u32>) -> AddressEvid
         clip: blit.clip,
         note: None,
     }
-}
-
-/// The visible column extent across every populated segment.
-fn visible_columns(diag: &FrameDiagnostics) -> Option<(i32, i32)> {
-    let geometry = diag.geometry.as_ref()?;
-    let mut segments = geometry.segments.iter();
-    let first = segments.next()?;
-    let mut c1 = first.range.c1;
-    let mut c2 = first.range.c2;
-    for segment in segments {
-        c1 = c1.min(segment.range.c1);
-        c2 = c2.max(segment.range.c2);
-    }
-    Some((c1, c2))
 }
 
 fn unavailable(

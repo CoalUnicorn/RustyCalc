@@ -63,6 +63,19 @@ pub fn FloatingWindow(
 ) -> impl IntoView {
     let pos = RwSignal::new((default_pos.0 as i32, default_pos.1 as i32));
     let size = RwSignal::new(default_size);
+    let shell = NodeRef::<leptos::html::Div>::new();
+
+    Effect::new(move |_| {
+        if open.get()
+            && let Some(element) = shell.get()
+        {
+            request_animation_frame(move || {
+                if open.try_get_untracked() == Some(true) {
+                    let _ = element.focus();
+                }
+            });
+        }
+    });
 
     let UseWindowSizeReturn {
         width: viewport_w,
@@ -84,14 +97,25 @@ pub fn FloatingWindow(
     let drag_offset: StoredValue<Option<(f64, f64)>, LocalStorage> = StoredValue::new_local(None);
 
     let on_grip_down = move |ev: web_sys::PointerEvent| {
+        if ev.button() != 0 {
+            return;
+        }
         ev.prevent_default();
         if let Some(el) = ev
-            .target()
+            .current_target()
             .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
         {
             let _ = el.set_pointer_capture(ev.pointer_id());
         }
-        let (x, y) = pos.get_untracked();
+        let Some(element) = shell.get_untracked() else {
+            return;
+        };
+        let Some(panel) = element.parent_element() else {
+            return;
+        };
+        let bounds = panel.get_bounding_client_rect();
+        let (x, y) = (bounds.x() as i32, bounds.y() as i32);
+        pos.set((x, y));
         drag_offset.set_value(Some((
             ev.client_x() as f64 - f64::from(x),
             ev.client_y() as f64 - f64::from(y),
@@ -115,7 +139,7 @@ pub fn FloatingWindow(
 
     let on_grip_up = move |ev: web_sys::PointerEvent| {
         if let Some(el) = ev
-            .target()
+            .current_target()
             .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
         {
             let _ = el.release_pointer_capture(ev.pointer_id());
@@ -130,14 +154,21 @@ pub fn FloatingWindow(
         StoredValue::new_local(None);
 
     let on_handle_down = move |ev: web_sys::PointerEvent| {
+        if ev.button() != 0 {
+            return;
+        }
         ev.prevent_default();
         if let Some(el) = ev
-            .target()
+            .current_target()
             .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
         {
             let _ = el.set_pointer_capture(ev.pointer_id());
         }
-        let (w, h) = size.get_untracked();
+        let Some(element) = shell.get_untracked() else {
+            return;
+        };
+        let bounds = element.get_bounding_client_rect();
+        let (w, h) = (bounds.width(), bounds.height());
         resize_grab.set_value(Some((ev.client_x() as f64, ev.client_y() as f64, w, h)));
     };
 
@@ -156,7 +187,7 @@ pub fn FloatingWindow(
 
     let on_handle_up = move |ev: web_sys::PointerEvent| {
         if let Some(el) = ev
-            .target()
+            .current_target()
             .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
         {
             let _ = el.release_pointer_capture(ev.pointer_id());
@@ -198,10 +229,10 @@ pub fn FloatingWindow(
 
     let shell_style = move || {
         let (w, h) = size.get();
-        let max_w = (viewport_w.get() - 2.0 * MARGIN).max(MIN_WIDTH);
-        let max_h = (viewport_h.get() - 2.0 * MARGIN).max(MIN_HEIGHT);
-        let w = w.clamp(MIN_WIDTH, max_w);
-        let h = h.clamp(MIN_HEIGHT, max_h);
+        let max_w = (viewport_w.get() - 2.0 * MARGIN).max(1.0);
+        let max_h = (viewport_h.get() - 2.0 * MARGIN).max(1.0);
+        let w = w.clamp(MIN_WIDTH.min(max_w), max_w);
+        let h = h.clamp(MIN_HEIGHT.min(max_h), max_h);
         format!("width:{w}px;height:{h}px;")
     };
 
@@ -215,6 +246,7 @@ pub fn FloatingWindow(
         >
             <div
                 class="fw-shell"
+                node_ref=shell
                 role="dialog"
                 aria-modal="false"
                 aria-label=title
@@ -238,9 +270,13 @@ pub fn FloatingWindow(
                         <select
                             class="fw-preset"
                             title="Size preset"
+                            prop:value=move || SIZE_PRESETS.iter()
+                                .position(|(_, w, h)| (*w, *h) == size.get())
+                                .map_or_else(|| "custom".to_owned(), |index| index.to_string())
                             on:pointerdown=on_control_down
                             on:change=on_preset
                         >
+                            <option value="custom" disabled>"Custom"</option>
                             {SIZE_PRESETS
                                 .iter()
                                 .enumerate()

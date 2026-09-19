@@ -124,8 +124,29 @@ pub fn PerfPanel() -> impl IntoView {
         }
     });
 
+    // Refresh elapsed time while the digest is visible, even when the sheet is idle.
+    let observed_at = RwSignal::new(crate::perf::now());
+    let leptos_use::utils::Pausable { pause, resume, .. } =
+        leptos_use::use_interval_fn(move || observed_at.set(crate::perf::now()), 1000);
+    let observe_time = Memo::new(move |_| {
+        let visible = app.inspector_open.get() && view.get() == InspectorView::Digest;
+        let _ = store.revision();
+        visible
+            && store
+                .with_selected(|capture| capture.completed_at_ms.is_none())
+                .unwrap_or(false)
+    });
+    Effect::new(move |_| {
+        if observe_time.get() {
+            resume();
+        } else {
+            pause();
+        }
+    });
+
     let digest_panel = Memo::new(move |_| {
         let _ = store.revision();
+        let _ = observed_at.get();
         let filter = DigestFilter {
             include_forced_baseline: filter_include_forced.get(),
             outcome: None,
@@ -165,7 +186,7 @@ pub fn PerfPanel() -> impl IntoView {
     });
 
     let json_view = Memo::new(move |_| {
-        if view.get() != InspectorView::Json {
+        if !app.inspector_open.get() || view.get() != InspectorView::Json {
             // Lazy: the JSON is built only while the view is open.
             return JsonView::default();
         }
@@ -199,12 +220,15 @@ pub fn PerfPanel() -> impl IntoView {
         app.export_cmd.set(Some(crate::app_state::ExportCmd::Pdf));
     });
 
-    let on_close = Callback::new(move |_: ()| {
-        // Closing the window pauses an active capture and keeps every record.
-        if matches!(store.state_untracked(), CaptureState::Capturing(_)) {
-            store.pause();
+    Effect::new(move |previous: Option<bool>| {
+        let open = app.inspector_open.get();
+        if previous == Some(true) && !open {
+            if matches!(store.state_untracked(), CaptureState::Capturing(_)) {
+                store.pause();
+            }
+            focus_launcher();
         }
-        focus_launcher();
+        open
     });
 
     view! {
@@ -212,7 +236,6 @@ pub fn PerfPanel() -> impl IntoView {
             open=app.inspector_open.read()
             set_open=app.inspector_open.write()
             title="Performance"
-            on_close=on_close
         >
             <div class="pp-inspector">
                 <div class="pp-head">
@@ -306,6 +329,20 @@ pub fn PerfPanel() -> impl IntoView {
                     >
                         "\u{2913} Export JSON"
                     </button>
+                    <button
+                        class="pp-action-btn"
+                        type="button"
+                        disabled=move || {
+                            let (summaries, selected) = captures.get();
+                            !summaries.iter().any(|capture| Some(capture.id) == selected && !capture.active)
+                        }
+                        title="Delete the selected finished capture"
+                        on:click=move |_| {
+                            if let Some(id) = store.selected() {
+                                store.delete_capture(id);
+                            }
+                        }
+                    >"Delete capture"</button>
                 </div>
 
                 <div class="pp-status-line">
@@ -375,7 +412,7 @@ pub fn PerfPanel() -> impl IntoView {
                             view! {
                                 <InspectorAttempts
                                     rows=attempt_rows
-                                    selected=selection.read_only()
+                                    selected=effective_key
                                     follow_latest=follow_latest.read_only()
                                     on_select=Callback::new(move |key: AttemptKey| {
                                         selection.set(Some(key));
@@ -440,7 +477,7 @@ fn attempt_row(capture: &CaptureRecord, record: &AttemptRecord) -> AttemptRow {
         key: record.key,
         seq: record.key.attempt_seq,
         scope: attempt_scope(capture, record),
-        strategy: diagnostics.effective.or(diagnostics.selected).map_or_else(
+        strategy: diagnostics.selected.map_or_else(
             || "\u{2014}".to_owned(),
             |strategy| strategy_label(strategy).to_owned(),
         ),
@@ -793,15 +830,16 @@ fn pixel_label(rect: PixelRect) -> String {
     )
 }
 
-/// Return focus to the toolbar launcher after a close.
+/// Return focus to the launcher, or the workbook when its toolbar tab is inactive.
 ///
 /// The launcher is a separate component with no shared state, so the window
 /// finds it by the id it publishes.
 fn focus_launcher() {
-    let Some(element) = window()
-        .document()
-        .and_then(|document| document.get_element_by_id("dev-tools-launcher"))
-    else {
+    let Some(element) = window().document().and_then(|document| {
+        document
+            .get_element_by_id("dev-tools-launcher")
+            .or_else(|| document.get_element_by_id("workbook"))
+    }) else {
         return;
     };
     if let Ok(element) = element.dyn_into::<web_sys::HtmlElement>() {

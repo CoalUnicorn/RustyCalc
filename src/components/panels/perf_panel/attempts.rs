@@ -31,7 +31,7 @@ pub(super) struct AttemptRow {
 #[component]
 pub(super) fn InspectorAttempts(
     rows: Memo<Vec<AttemptRow>>,
-    selected: ReadSignal<Option<AttemptKey>>,
+    selected: Memo<Option<AttemptKey>>,
     follow_latest: ReadSignal<bool>,
     on_select: Callback<AttemptKey>,
     on_follow_latest: Callback<bool>,
@@ -66,7 +66,7 @@ pub(super) fn InspectorAttempts(
                         <tr>
                             <th>"Attempt"</th>
                             <th>"Trigger scope"</th>
-                            <th>"Strategy"</th>
+                            <th>"Selected strategy"</th>
                             <th>"Verdict"</th>
                             <th>"Outcome"</th>
                             <th>"Render"</th>
@@ -75,12 +75,12 @@ pub(super) fn InspectorAttempts(
                         </tr>
                     </thead>
                     <tbody>
-                        {move || {
-                            rows.get()
-                                .into_iter()
-                                .map(|row| {
+                        <For
+                            each=move || rows.get()
+                            key=|row| row.key
+                            children=move |row| {
                                     let key = row.key;
-                                    let is_selected = selected.get() == Some(key);
+                                    let is_selected = move || selected.get() == Some(key);
                                     let render = row
                                         .render_ms
                                         .map_or_else(|| "\u{2014}".to_owned(), |ms| {
@@ -98,7 +98,12 @@ pub(super) fn InspectorAttempts(
                                             class:selected=is_selected
                                             on:click=move |_| on_select.run(key)
                                         >
-                                            <td>{format!("#{}", row.seq)}</td>
+                                            <td><button
+                                                type="button"
+                                                class="pp-action-btn"
+                                                aria-pressed=is_selected
+                                                on:click=move |_| on_select.run(key)
+                                            >{format!("#{}", row.seq)}</button></td>
                                             <td title=scope_title>{scope_text}</td>
                                             <td>{row.strategy}</td>
                                             <td>{row.verdict}</td>
@@ -108,9 +113,8 @@ pub(super) fn InspectorAttempts(
                                             <td>{row.batches}</td>
                                         </tr>
                                     }
-                                })
-                                .collect_view()
-                        }}
+                            }
+                        />
                     </tbody>
                 </table>
             </div>

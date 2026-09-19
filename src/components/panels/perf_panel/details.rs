@@ -36,7 +36,7 @@ pub(super) struct DetailsView {
     pub attempt: Option<String>,
     pub evidence: Vec<EvidenceRow>,
     pub advanced: Vec<AdvancedSection>,
-    /// The engine's raw frame trace line. Never part of the digest.
+    /// Latest live trace. It does not belong to the selected attempt.
     pub frame_trace: Option<String>,
 }
 
@@ -116,7 +116,7 @@ pub(super) fn InspectorDetails(view: Memo<DetailsView>) -> impl IntoView {
                             {frame_trace
                                 .map(|trace| view! {
                                     <details class="pp-section">
-                                        <summary>"Frame trace"</summary>
+                                        <summary>"Latest live frame trace (not selected attempt)"</summary>
                                         <pre class="pp-trace-raw">{trace}</pre>
                                     </details>
                                 })}

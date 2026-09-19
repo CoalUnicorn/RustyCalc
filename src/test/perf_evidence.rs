@@ -159,7 +159,7 @@ fn changed_cells_source_range_and_clip_stay_distinct() {
     d.repaint = DiagRepaint {
         verdict: Some(GridVerdict::Range),
         reason: Some(DiagRepaintReason::ChangedCells),
-        changed_rows: Vec::new(),
+        changed_rows: vec![RowSpan::new(4, 4)],
         changed_cells: vec![
             DiagChangedCell { row: 4, column: 1 },
             DiagChangedCell { row: 4, column: 18 },
@@ -707,5 +707,73 @@ fn format_range_renders_a1_with_and_without_a_name() {
             }
         ),
         "Sheet#2!A1:D4"
+    );
+}
+
+#[wasm_bindgen_test]
+fn row_fingerprint_intersections_do_not_bridge_invisible_columns() {
+    let mut d = diagnostics();
+    d.geometry = Some(geometry(vec![
+        segment(PaneRegion::BottomLeft, 10, 1, 20, 2),
+        segment(PaneRegion::BottomRight, 10, 10, 20, 19),
+    ]));
+    d.repaint.changed_rows = vec![RowSpan::new(9, 11)];
+    let evidence = fingerprint_row(d);
+    assert_eq!(evidence.precision, EvidencePrecision::Derived);
+    assert_eq!(evidence.ranges.len(), 2);
+    assert_eq!(
+        evidence.ranges[0].range,
+        RCRange {
+            r1: 10,
+            c1: 1,
+            r2: 11,
+            c2: 2
+        }
+    );
+    assert_eq!(
+        evidence.ranges[1].range,
+        RCRange {
+            r1: 10,
+            c1: 10,
+            r2: 11,
+            c2: 19
+        }
+    );
+}
+
+#[wasm_bindgen_test]
+fn fetched_ranges_keep_each_request_purpose() {
+    let mut d = diagnostics();
+    for purpose in [
+        DiagFetchPurpose::FullSegment,
+        DiagFetchPurpose::DamageStrip,
+        DiagFetchPurpose::BlitReveal,
+    ] {
+        d.fetch.requests.push(DiagFetchRequest {
+            purpose,
+            region: Some(PaneRegion::BottomRight),
+            range: RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 1,
+                c2: 1,
+            },
+            cells: 1,
+            slots: 4,
+        });
+    }
+    let evidence = attempt_evidence(&capture(), &attempt(d));
+    let labels: Vec<_> = evidence
+        .iter()
+        .filter(|row| row.source == EvidenceSource::FetchRequests)
+        .map(|row| row.label)
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            "fetched range (full segment)",
+            "fetched range (damage strip)",
+            "fetched range (blit reveal)"
+        ]
     );
 }
