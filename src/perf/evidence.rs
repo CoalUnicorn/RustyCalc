@@ -12,10 +12,10 @@
 //! rewrite history.
 
 use super::capture::{AttemptRecord, CaptureRecord, HostBatchSummary, SheetRef};
-use iron_canvas_core::renderer::diag::{
+use iron_canvas_core::{
     DiagCacheResolution, DiagFetchPurpose, DiagGeometry, DiagRepaintReason, FrameDiagnostics,
+    GridVerdict, PixelRect, RCRange, RenderStrategy, RowSpan, col_name,
 };
-use iron_canvas_core::{GridVerdict, PixelRect, RCRange, RenderStrategy, RowSpan, col_name};
 
 /// One address range on one sheet, with the sheet identity captured with it.
 #[derive(Clone, Debug, PartialEq, Eq)]

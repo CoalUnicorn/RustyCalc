@@ -3,6 +3,10 @@
 
 use crate::CellContentQuery;
 use crate::chrome::{BlitPlan, Chrome, GridLayout, GridSegment, PaneRegion};
+#[cfg(feature = "dev-diagnostics")]
+use crate::diagnostics::{
+    DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose, DiagFingerprintActionTag,
+};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
 use crate::orchestrator::GridVerdict;
@@ -19,10 +23,7 @@ use crate::renderer::cell::PaneCells;
 use crate::renderer::cell::repaint;
 use crate::renderer::cell::repaint_plan::{self, RepaintPlan, RepaintReason};
 #[cfg(feature = "dev-diagnostics")]
-use crate::renderer::diag::{
-    DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose, DiagFingerprintActionTag,
-    distinct_rows,
-};
+use crate::renderer::diag::distinct_rows;
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::{DenseRange, RCRange};
 use crate::types::fetched::Fetched;

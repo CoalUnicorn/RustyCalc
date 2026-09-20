@@ -33,10 +33,10 @@ use crate::perf::{
 };
 use iron_canvas_core::chrome::PaneRegion;
 use iron_canvas_core::geometry::prim::Axis;
-use iron_canvas_core::renderer::diag::{
-    DiagBlit, DiagCacheActionTag, DiagCacheResolution, DiagFingerprintActionTag,
+use iron_canvas_core::{
+    DiagBlit, DiagCacheActionTag, DiagCacheResolution, DiagFingerprintActionTag, FrameOutcome,
+    PixelRect, RCRange, RenderStrategy, WorkFlags,
 };
-use iron_canvas_core::{FrameOutcome, PixelRect, RCRange, RenderStrategy, WorkFlags};
 
 /// Which inspector view is showing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

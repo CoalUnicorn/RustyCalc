@@ -9,7 +9,7 @@ use crate::components::panels::perf_panel::PerfPanel;
 use crate::components::ui::floating_window::FloatingWindow;
 use crate::events::EventBus;
 use crate::perf::{AttemptKey, AttemptOrigin, AttemptRecord, CaptureState};
-use iron_canvas_core::renderer::diag::FrameDiagnostics;
+use iron_canvas_core::FrameDiagnostics;
 
 wasm_bindgen_test_configure!(run_in_browser);
 

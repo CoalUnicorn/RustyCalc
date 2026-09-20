@@ -47,6 +47,10 @@ use crate::CanvasModel;
 use crate::autofit::AutoFitError;
 use crate::chrome::{BlitPlan, Chrome, FramePath, FreshBuild, PreparedBlitOutcome, RecycledSlots};
 use crate::decoration::{DecorationId, Decorations, Layer, selection::SelectionLayer};
+#[cfg(feature = "dev-diagnostics")]
+use crate::diagnostics::{
+    DiagBlitResultTag, DiagCacheResolution, DiagDeltaKind, DiagPaintedLayers, FrameDiagnostics,
+};
 use crate::frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
 use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
@@ -57,11 +61,7 @@ use crate::painter::BlitPainter;
 use crate::pending_work::{ContentWork, PendingWork, RowSpan, WorkFlags};
 use crate::render_overlays::RenderOverlays;
 #[cfg(feature = "dev-diagnostics")]
-use crate::renderer::diag::DiagDeltaKind;
-#[cfg(feature = "dev-diagnostics")]
-use crate::renderer::diag::{
-    DiagBlitResultTag, DiagCacheResolution, DiagCompletion, DiagPaintedLayers, FrameDiagnostics,
-};
+use crate::renderer::diag::DiagCompletion;
 use crate::renderer::{GridCacheCommit, GridPaintOutcome, GridRenderer, OverlayRenderer};
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};

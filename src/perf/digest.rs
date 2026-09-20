@@ -13,9 +13,7 @@
 
 use super::capture::{AttemptOrigin, CaptureRecord, StopReason};
 use super::{EvaluationOutcome, MutationOutcome};
-use iron_canvas_core::GridVerdict;
-use iron_canvas_core::renderer::diag::DiagCacheResolution;
-use iron_canvas_core::{FrameOutcome, RenderStrategy};
+use iron_canvas_core::{DiagCacheResolution, FrameOutcome, GridVerdict, RenderStrategy};
 
 /// Which attempt records the digest measures.
 ///

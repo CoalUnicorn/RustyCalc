@@ -421,15 +421,13 @@ mod dev_wire {
     use serde::Serialize;
 
     use iron_canvas_core::chrome::{GridShape, PaneRegion};
-    use iron_canvas_core::renderer::diag::{
+    use iron_canvas_core::{
         DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache, DiagCacheActionTag,
         DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagDeltaKind, DiagFetch,
         DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
         DiagGeometry, DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason,
-        DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
-    };
-    use iron_canvas_core::{
-        FrameInputFailure, GridVerdict, RebuildReason, RenderStrategy, RowSpan, WorkFlags,
+        DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics, FrameInputFailure,
+        GridVerdict, RebuildReason, RenderStrategy, RowSpan, WorkFlags,
     };
 
     /// camelCase mirror of `RenderStrategy`. The engine tag rides the `.icr`
@@ -1258,12 +1256,12 @@ mod tests {
     use super::*;
     use crate::orchestrator::{CanvasFrameSnapshot, frame_diagnostics_value};
     use iron_canvas_core::chrome::{GridShape, PaneRegion};
-    use iron_canvas_core::renderer::diag::DIAG_SCHEMA_VERSION;
     use iron_canvas_core::{
-        DiagBufferTruth, DiagCacheActionTag, DiagCacheResolution, DiagCacheTruth, DiagChangedCell,
-        DiagDeltaKind, DiagFingerprintActionTag, DiagFingerprintTruth, DiagPaintCounts,
-        DiagPaintedLayers, DiagRepaintReason, DiagSourceRange, FrameDiagnostics, FrameOutcome,
-        GridVerdict, PixelRect, Point, RCRange, RebuildReason, RowSpan,
+        DIAG_SCHEMA_VERSION, DiagBufferTruth, DiagCacheActionTag, DiagCacheResolution,
+        DiagCacheTruth, DiagChangedCell, DiagDeltaKind, DiagFingerprintActionTag,
+        DiagFingerprintTruth, DiagPaintCounts, DiagPaintedLayers, DiagRepaintReason,
+        DiagSourceRange, FrameDiagnostics, FrameOutcome, GridVerdict, PixelRect, Point, RCRange,
+        RebuildReason, RowSpan,
     };
 
     /// The wire shape is the contract the browser mirrors parse. Prove the

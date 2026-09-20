@@ -8,6 +8,7 @@
 pub mod autofit;
 pub mod chrome;
 pub mod decoration;
+pub mod diagnostics;
 mod frame_plan;
 pub mod geometry;
 pub mod layer;
@@ -27,10 +28,10 @@ pub use orchestrator::{
 };
 
 #[cfg(feature = "dev-diagnostics")]
-pub use renderer::diag::{
-    DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache, DiagCacheActionTag,
-    DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagDeltaKind, DiagFetch,
-    DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
+pub use diagnostics::{
+    DIAG_SCHEMA_VERSION, DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache,
+    DiagCacheActionTag, DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagDeltaKind,
+    DiagFetch, DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
     DiagGeometry, DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason,
     DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
 };

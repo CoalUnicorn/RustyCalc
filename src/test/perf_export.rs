@@ -9,10 +9,9 @@ use crate::perf::{
     attempt_json, capture_json,
 };
 use iron_canvas_core::chrome::{GridShape, PaneRegion};
-use iron_canvas_core::renderer::diag::{
-    DIAG_SCHEMA_VERSION, DiagGeometry, DiagSegment, FrameDiagnostics,
+use iron_canvas_core::{
+    CanvasSize, DIAG_SCHEMA_VERSION, DiagGeometry, DiagSegment, FrameDiagnostics, RCRange,
 };
-use iron_canvas_core::{CanvasSize, RCRange};
 use serde_json::{Value, json};
 use wasm_bindgen_test::*;
 

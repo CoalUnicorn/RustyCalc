@@ -12,14 +12,12 @@ use crate::perf::{
 };
 use iron_canvas_core::chrome::{GridShape, PaneRegion};
 use iron_canvas_core::geometry::prim::Axis;
-use iron_canvas_core::renderer::diag::{
-    DIAG_SCHEMA_VERSION, DiagBlit, DiagBlitResultTag, DiagCache, DiagCacheResolution,
+use iron_canvas_core::{
+    CanvasSize, DIAG_SCHEMA_VERSION, DiagBlit, DiagBlitResultTag, DiagCache, DiagCacheResolution,
     DiagChangedCell, DiagFetch, DiagFetchPurpose, DiagFetchRequest, DiagGeometry,
     DiagPaintedLayers, DiagRepaint, DiagRepaintReason, DiagRevealedStrip, DiagSegment,
-    DiagSourceRange, FrameDiagnostics,
-};
-use iron_canvas_core::{
-    CanvasSize, GridVerdict, PixelRect, Point, RCRange, RenderStrategy, RowSpan, WorkFlags,
+    DiagSourceRange, FrameDiagnostics, GridVerdict, PixelRect, Point, RCRange, RenderStrategy,
+    RowSpan, WorkFlags,
 };
 use wasm_bindgen_test::*;
 

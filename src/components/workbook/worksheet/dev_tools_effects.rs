@@ -64,13 +64,7 @@ pub(super) fn install_recording_effect(
                     match ic.stop_recording() {
                         Ok(arr) => {
                             let bytes = arr.to_vec();
-                            let ts = js_sys::Date::new_0()
-                                .to_iso_string()
-                                .as_string()
-                                .and_then(|s| s.split('.').next().map(str::to_owned))
-                                .map(|s| s.replace(':', "-"))
-                                .unwrap_or_else(|| "now".into());
-                            let filename = format!("recording-{ts}.icr");
+                            let filename = format!("recording-{}.icr", timestamp());
                             if let Err(e) = crate::input::xlsx_io::trigger_download(
                                 &bytes,
                                 &filename,
@@ -384,7 +378,9 @@ pub(super) fn install_capture_effect(
         let capturing = matches!(store.state(), CaptureState::Capturing(_));
         if capturing && !attached.get_value() {
             let observer: BatchObserver = Rc::new(move |batch_id, events| {
-                store.note_batch(batch_id, events, |sheet| sheet_name(model, sheet));
+                store.note_batch(batch_id, events, |sheet| {
+                    super::capture_collect::sheet_name(model, sheet)
+                });
             });
             state.events.set_batch_observer(Some(observer));
             app.perf
@@ -422,17 +418,6 @@ fn enable_canvas(canvas_handle: &CanvasHandle, enabled: bool) -> bool {
         }
     });
     applied
-}
-
-/// Resolve a sheet name through the model roster, at capture time.
-pub(super) fn sheet_name(model: ModelStore, sheet: u32) -> Option<String> {
-    model.with_value(|model| {
-        model
-            .get_sheet_names()
-            .into_iter()
-            .find(|(id, _)| *id == sheet)
-            .map(|(_, name)| name)
-    })
 }
 
 /// Report a refused action without changing a published capture.

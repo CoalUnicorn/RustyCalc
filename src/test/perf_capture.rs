@@ -14,11 +14,10 @@ use crate::perf::{
     HostBatchId, InstrumentationFlags, LimitKind, PerfStore, StartRefusal, StopReason, summarize,
 };
 use iron_canvas_core::chrome::{GridShape, PaneRegion};
-use iron_canvas_core::renderer::diag::{
-    DIAG_SCHEMA_VERSION, DiagFetchPurpose, DiagFetchRequest, DiagGeometry, DiagSegment,
-    FrameDiagnostics,
+use iron_canvas_core::{
+    CanvasSize, DIAG_SCHEMA_VERSION, DiagFetchPurpose, DiagFetchRequest, DiagGeometry, DiagSegment,
+    FrameDiagnostics, RCRange,
 };
-use iron_canvas_core::{CanvasSize, RCRange};
 use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);

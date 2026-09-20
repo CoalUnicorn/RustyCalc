@@ -3,6 +3,7 @@
 //! `IronCanvas` owns the `wasm-bindgen` handle and the Canvas2D runtime.
 //! It delegates setters, queries, recording, and playback.
 
+mod diagnostics;
 mod export;
 #[cfg(target_arch = "wasm32")]
 mod js_api;
@@ -12,7 +13,7 @@ mod playback_api;
 pub use playback_api::ReplayResult;
 mod recording;
 #[cfg(feature = "dev-tools")]
-pub use recording::{CanvasFrameSnapshot, frame_diagnostics_value};
+pub use diagnostics::{CanvasFrameSnapshot, frame_diagnostics_value};
 
 use std::rc::Rc;
 

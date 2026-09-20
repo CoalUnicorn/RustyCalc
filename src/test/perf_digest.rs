@@ -8,11 +8,10 @@ use crate::perf::{
     AttemptKey, AttemptOrigin, AttemptRecord, CaptureRecord, DigestFilter, EvaluationOutcome,
     InstrumentationFlags, MutationOutcome, MutationSample, StopReason, digest,
 };
-use iron_canvas_core::renderer::diag::{
+use iron_canvas_core::{
     DIAG_SCHEMA_VERSION, DiagCacheResolution, DiagFetch, DiagPaintCounts, DiagPaintedLayers,
-    DiagRepaint, FrameDiagnostics,
+    DiagRepaint, FrameDiagnostics, FrameOutcome, GridVerdict, RenderStrategy,
 };
-use iron_canvas_core::{FrameOutcome, GridVerdict, RenderStrategy};
 use wasm_bindgen_test::*;
 
 wasm_bindgen_test_configure!(run_in_browser);

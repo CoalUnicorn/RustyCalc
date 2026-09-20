@@ -5,10 +5,10 @@
 //! frame. Timestamps come from `performance.now()` (sub-millisecond
 //! resolution).
 //!
-//! `capture.rs` holds the immutable capture records and the pure archive that
-//! retains them; `store.rs` puts signals in front of it; `export.rs` writes
-//! the JSON envelope. All three are `dev-tools` only, so a production build
-//! retains no capture state.
+//! `capture/` holds the immutable capture records, the host-event
+//! projection, and the pure archive that retains them; `store.rs` puts
+//! signals in front of it; `export.rs` writes the JSON envelope. All three
+//! are `dev-tools` only, so a production build retains no capture state.
 //!
 //! The panel shows each sample as its own number. It never subtracts two
 //! timestamps, so a phase that did not run can never be reported as a zero
