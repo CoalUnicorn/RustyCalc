@@ -10,8 +10,8 @@ use iron_canvas_core::geometry::prim::Axis;
 use iron_canvas_core::{
     CanvasSize, DiagBlitResultTag, DiagBufferTruth, DiagCacheActionTag, DiagCacheResolution,
     DiagDeltaKind, DiagFetchPurpose, DiagFingerprintActionTag, DiagFingerprintTruth,
-    DiagRepaintReason, FrameOutcome, GridVerdict, Orchestrator, PaintResult, RCRange,
-    RebuildReason, RowSpan,
+    DiagRepaintReason, FrameOutcome, GridVerdict, Orchestrator, PaintResult, RebuildReason,
+    RowSpan,
 };
 use iron_canvas_recorder::MemSurface;
 
@@ -41,7 +41,7 @@ fn enable_then_disable_round_trips() {
     orch.set_frame_diagnostics_enabled(true);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     let diag = orch.frame_diagnostics().expect("enabled capture publishes");
-    assert_eq!(diag.schema_version, 3);
+    assert_eq!(diag.schema_version, 4);
     assert_eq!(diag.attempt_seq, 1);
     assert_eq!(diag.committed_seq, Some(1));
     orch.set_frame_diagnostics_enabled(false);
@@ -157,66 +157,7 @@ fn freeze_rebuild_reports_reason_and_exact_segments() {
 }
 
 #[test]
-fn probe_reports_exact_containing_segment_and_is_consumed() {
-    let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
-    let model = Rc::new(TestModel::new().with_data_until(40).with_frozen(2, 1));
-    orch.set_model(model.clone());
-    orch.resize(
-        iron_canvas_core::CanvasMetrics::new(CanvasSize { w: 800.0, h: 600.0 }, 1.0)
-            .expect("test canvas metrics are valid"),
-    );
-    orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.render_pending(), PaintResult::Rendered);
-
-    // Probe the frozen top-left corner: exactly TL contains it.
-    orch.set_frame_diagnostics_probe(RCRange {
-        r1: 1,
-        c1: 1,
-        r2: 1,
-        c2: 1,
-    });
-    orch.mark_content_dirty();
-    assert_eq!(orch.render_pending(), PaintResult::Rendered);
-    let diag = orch.frame_diagnostics().unwrap();
-    assert_eq!(
-        diag.probe,
-        Some(RCRange {
-            r1: 1,
-            c1: 1,
-            r2: 1,
-            c2: 1
-        })
-    );
-    assert_eq!(diag.probe_segments, vec![PaneRegion::TopLeft]);
-
-    // The probe is attempt-scoped: the next attempt consumes nothing.
-    orch.mark_content_dirty();
-    assert_eq!(orch.render_pending(), PaintResult::Rendered);
-    let diag = orch.frame_diagnostics().unwrap();
-    assert_eq!(diag.probe, None);
-    assert!(diag.probe_segments.is_empty());
-}
-
-#[test]
-fn probe_outside_all_segments_reports_empty_attribution() {
-    let (mut orch, _model) = harness();
-    orch.set_frame_diagnostics_enabled(true);
-    assert_eq!(orch.render_pending(), PaintResult::Rendered);
-    orch.set_frame_diagnostics_probe(RCRange {
-        r1: 999,
-        c1: 999,
-        r2: 999,
-        c2: 999,
-    });
-    orch.mark_content_dirty();
-    assert_eq!(orch.render_pending(), PaintResult::Rendered);
-    let diag = orch.frame_diagnostics().unwrap();
-    assert!(diag.probe.is_some());
-    assert!(diag.probe_segments.is_empty());
-}
-
-#[test]
-fn overlay_only_attempt_has_no_geometry_and_no_probe_segments() {
+fn overlay_only_attempt_has_no_geometry() {
     let model = Rc::new(TestModel::synthetic_grid().with_active(5, 2));
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.set_model(model.clone());
@@ -234,7 +175,6 @@ fn overlay_only_attempt_has_no_geometry_and_no_probe_segments() {
     assert_eq!(diag.delta, Some(DiagDeltaKind::Stable));
     assert!(diag.geometry.is_none());
     assert_eq!(diag.repaint.verdict, None);
-    assert!(diag.probe_segments.is_empty());
 }
 
 #[test]

@@ -9,8 +9,8 @@ use crate::perf::{
     InstrumentationFlags, MutationOutcome, MutationSample, StopReason, digest,
 };
 use iron_canvas_core::renderer::diag::{
-    DiagCacheResolution, DiagFetch, DiagPaintCounts, DiagPaintedLayers, DiagRepaint,
-    FrameDiagnostics,
+    DIAG_SCHEMA_VERSION, DiagCacheResolution, DiagFetch, DiagPaintCounts, DiagPaintedLayers,
+    DiagRepaint, FrameDiagnostics,
 };
 use iron_canvas_core::{FrameOutcome, GridVerdict, RenderStrategy};
 use wasm_bindgen_test::*;
@@ -19,7 +19,7 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 fn diagnostics(attempt_seq: u64) -> FrameDiagnostics {
     FrameDiagnostics {
-        schema_version: 3,
+        schema_version: DIAG_SCHEMA_VERSION,
         attempt_seq,
         ..FrameDiagnostics::default()
     }

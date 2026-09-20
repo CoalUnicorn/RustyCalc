@@ -96,11 +96,6 @@ impl PerfStore {
         self.status.with_untracked(|status| status.selected)
     }
 
-    pub fn with_capture<R>(&self, id: CaptureId, f: impl FnOnce(&CaptureRecord) -> R) -> Option<R> {
-        self.archive
-            .with_untracked(|archive| archive.with_capture(id, f))
-    }
-
     pub fn with_active<R>(&self, f: impl FnOnce(&CaptureRecord) -> R) -> Option<R> {
         self.archive
             .with_untracked(|archive| archive.with_active(f))
@@ -115,12 +110,6 @@ impl PerfStore {
     pub fn capture_summaries(&self) -> Vec<CaptureSummary> {
         self.archive
             .with_untracked(CaptureArchive::capture_summaries)
-    }
-
-    /// The newest attempt of the capture the views show.
-    pub fn with_latest_attempt<R>(&self, f: impl FnOnce(&AttemptRecord) -> R) -> Option<R> {
-        self.with_selected(|capture| capture.attempts.last().map(f))
-            .flatten()
     }
 
     /// Start a capture. Refused while playback owns the canvas and when the

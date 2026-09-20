@@ -632,9 +632,8 @@ impl<P: Painter> GridRenderer<P> {
         &self,
         delta: diag::DiagDeltaKind,
         rebuild_reason: Option<crate::frame_plan::RebuildReason>,
-        probe: Option<RCRange>,
     ) {
-        self.core.diag_begin_attempt(delta, rebuild_reason, probe);
+        self.core.diag_begin_attempt(delta, rebuild_reason);
     }
 
     #[cfg(feature = "dev-diagnostics")]

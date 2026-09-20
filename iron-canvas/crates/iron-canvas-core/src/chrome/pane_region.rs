@@ -97,7 +97,10 @@ impl GridShape {
     /// per axis. Hosts that have to state geometry facts without a live
     /// `Chrome` (diagnostics fixtures, historical snapshot tests) use this;
     /// the invariant that the frozen counts are the first elements holds by
-    /// construction, and nothing can mutate a shape afterwards.
+    /// construction, and nothing can mutate a shape afterwards. Dev-only:
+    /// every caller constructs a diagnostic fixture, and production shapes
+    /// come from `GridLayout::from_frame`.
+    #[cfg(feature = "dev-diagnostics")]
     pub const fn from_lens(row_lens: [usize; 2], col_lens: [usize; 2]) -> Self {
         Self { row_lens, col_lens }
     }

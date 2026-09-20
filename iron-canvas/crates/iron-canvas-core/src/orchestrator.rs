@@ -688,13 +688,6 @@ where
     attempt_seq: u64,
     /// Sequence assigned to the last committed transaction.
     commit_seq: u64,
-    /// Host-supplied expected-change address for the next paint attempt
-    /// (dev diagnostics only). Latched by `render_pending` after the
-    /// empty-work short circuit and cleared on consumption. Diagnostic
-    /// evidence only — never read by classification, planning, or any
-    /// prepare/execute path.
-    #[cfg(feature = "dev-diagnostics")]
-    diag_probe: Option<RCRange>,
 }
 
 impl<S> Orchestrator<S>
@@ -722,8 +715,6 @@ where
             last_trace: FrameTrace::default(),
             attempt_seq: 0,
             commit_seq: 0,
-            #[cfg(feature = "dev-diagnostics")]
-            diag_probe: None,
         }
     }
 
@@ -739,13 +730,6 @@ where
     #[cfg(feature = "dev-diagnostics")]
     pub fn set_frame_diagnostics_enabled(&mut self, enabled: bool) {
         self.grid.renderer.set_diag_enabled(enabled);
-    }
-    /// Set the diagnostic probe address for the next non-idle paint
-    /// attempt. Attempt-scoped: the next attempt latches it and it is
-    /// cleared on consumption. Dev builds only.
-    #[cfg(feature = "dev-diagnostics")]
-    pub fn set_frame_diagnostics_probe(&mut self, range: RCRange) {
-        self.diag_probe = Some(range);
     }
 
     /// Last completed attempt's structured diagnostics, or `None` when
@@ -1275,17 +1259,12 @@ where
         #[cfg(feature = "dev-diagnostics")]
         let diag_delta = DiagDeltaKind::from(&delta);
         let plan = plan_frame(work, delta, inputs.sheet(), inputs.show_selection());
-        // Record the classification facts and latch the attempt's probe
-        // before dispatch; the renderer fills the rest during prepare/
-        // execute, and its geometry pass reads the probe back to compute
-        // containment. The probe is copied here, not consumed: `diag_probe`
-        // is cleared only after a strategy outcome exists (below), so a silently
-        // dropped attempt never loses its attribution without a published
-        // snapshot.
+        // Record the classification facts before dispatch; the renderer
+        // fills the rest during prepare/execute.
         #[cfg(feature = "dev-diagnostics")]
         self.grid
             .renderer
-            .diag_begin_attempt(diag_delta, plan.rebuild_reason, self.diag_probe);
+            .diag_begin_attempt(diag_delta, plan.rebuild_reason);
         let selected = plan.grid.strategy();
         let work_flags = plan.consumes.flags();
         // The trace was reset before capture so both successful dispatch and
@@ -1315,14 +1294,6 @@ where
         // for every planned branch (an absent `last_frame` is an explicit
         // invariant hold that requeues the consumed work, never an `Idle`
         // that drops it), so there is no `Option` to fall through here.
-        // A strategy outcome exists, so `finish_attempt` is about to publish a
-        // snapshot: consume the probe now so it is attributed to this
-        // attempt and cannot leak into the next one.
-        #[cfg(feature = "dev-diagnostics")]
-        {
-            self.diag_probe = None;
-        }
-
         let overlay_ctx = Some(OverlayContext {
             model: model_dyn,
             inputs: &inputs,

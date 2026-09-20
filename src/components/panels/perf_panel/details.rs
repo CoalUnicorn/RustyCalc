@@ -2,7 +2,7 @@
 //!
 //! Address evidence comes first because it answers the question the inspector
 //! exists for: what did this attempt actually touch? Cache, geometry, blit,
-//! work flags, probe, and the raw frame trace sit behind disclosure controls,
+//! work flags, and the raw frame trace sit behind disclosure controls,
 //! because they are diagnostic detail rather than the summary.
 //!
 //! Every list names its source and its precision. An unavailable list shows

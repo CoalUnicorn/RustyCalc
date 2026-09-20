@@ -75,16 +75,9 @@ pub struct CanvasFrameSnapshot {
     pub backing_size: (u32, u32),
 }
 
-/// Serialize an immutable snapshot. Touches no canvas and no orchestrator.
-/// Return `None` when the projection cannot be serialized.
-#[cfg(feature = "dev-tools")]
-pub fn frame_diagnostics_json(snapshot: &CanvasFrameSnapshot) -> Option<String> {
-    serde_json::to_string_pretty(&frame_diagnostics_value(snapshot)?).ok()
-}
-
 /// Project an immutable snapshot to a JSON object, for envelope embedding and
-/// for the copy path. `frame_diagnostics_json` is the pretty-printed form of
-/// this same value.
+/// for the copy path. Touches no canvas and no orchestrator. Return `None`
+/// when the projection cannot be serialized.
 #[cfg(feature = "dev-tools")]
 pub fn frame_diagnostics_value(snapshot: &CanvasFrameSnapshot) -> Option<serde_json::Value> {
     let wire =
@@ -147,17 +140,6 @@ impl IronCanvas {
         self.runtime
             .orchestrator_mut()
             .set_frame_diagnostics_enabled(enabled);
-    }
-
-    /// Set the diagnostic probe range for the next non-idle paint attempt.
-    /// The snapshot identifies each planned segment that contains the range.
-    /// The planner does not read this diagnostic value.
-    #[cfg(feature = "dev-tools")]
-    #[wasm_bindgen(js_name = "setFrameDiagnosticsProbe")]
-    pub fn set_frame_diagnostics_probe(&mut self, r1: i32, c1: i32, r2: i32, c2: i32) {
-        self.runtime
-            .orchestrator_mut()
-            .set_frame_diagnostics_probe(iron_canvas_core::RCRange { r1, c1, r2, c2 });
     }
 
     /// Return structured diagnostics for the last completed live attempt.

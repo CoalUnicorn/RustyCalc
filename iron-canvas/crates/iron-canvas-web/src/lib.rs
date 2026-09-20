@@ -31,7 +31,5 @@ pub use iron_canvas_core::{
 };
 pub use iron_canvas_core::{AutoFitError, CanvasMetricError, CanvasMetrics};
 #[cfg(feature = "dev-tools")]
-pub use orchestrator::{
-    CanvasFrameSnapshot, ReplayResult, frame_diagnostics_json, frame_diagnostics_value,
-};
+pub use orchestrator::{CanvasFrameSnapshot, ReplayResult, frame_diagnostics_value};
 pub use orchestrator::{IronCanvas, RenderResult};

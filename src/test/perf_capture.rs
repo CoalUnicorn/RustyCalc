@@ -15,7 +15,8 @@ use crate::perf::{
 };
 use iron_canvas_core::chrome::{GridShape, PaneRegion};
 use iron_canvas_core::renderer::diag::{
-    DiagFetchPurpose, DiagFetchRequest, DiagGeometry, DiagSegment, FrameDiagnostics,
+    DIAG_SCHEMA_VERSION, DiagFetchPurpose, DiagFetchRequest, DiagGeometry, DiagSegment,
+    FrameDiagnostics,
 };
 use iron_canvas_core::{CanvasSize, RCRange};
 use wasm_bindgen_test::*;
@@ -28,7 +29,7 @@ const SHEET: u32 = 0;
 /// something real to walk.
 fn diagnostics(attempt_seq: u64) -> FrameDiagnostics {
     FrameDiagnostics {
-        schema_version: 3,
+        schema_version: DIAG_SCHEMA_VERSION,
         attempt_seq,
         geometry: Some(DiagGeometry {
             canvas: CanvasSize { w: 800.0, h: 600.0 },

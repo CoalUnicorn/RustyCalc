@@ -470,8 +470,6 @@ mod dev_wire {
         pub rebuild_reason: Option<RebuildReasonWire>,
         pub outcome: FrameOutcomeWire,
         pub painted_layers: DiagPaintedLayersWire,
-        pub probe: Option<RCRangeWire>,
-        pub probe_segments: Vec<PaneRegionWire>,
         pub geometry: Option<DiagGeometryWire>,
         pub fetch: DiagFetchWire,
         pub repaint: DiagRepaintWire,
@@ -509,13 +507,6 @@ mod dev_wire {
                     grid: diag.painted_layers.grid,
                     overlay: diag.painted_layers.overlay,
                 },
-                probe: diag.probe.map(RCRangeWire::from),
-                probe_segments: diag
-                    .probe_segments
-                    .iter()
-                    .copied()
-                    .map(PaneRegionWire::from)
-                    .collect(),
                 geometry: diag.geometry.as_ref().map(DiagGeometryWire::from),
                 fetch: DiagFetchWire::from(&diag.fetch),
                 repaint: DiagRepaintWire::from(&diag.repaint),
@@ -1265,10 +1256,9 @@ pub(crate) use dev_wire::*;
 #[cfg(all(test, feature = "dev-tools"))]
 mod tests {
     use super::*;
-    use crate::orchestrator::{
-        CanvasFrameSnapshot, frame_diagnostics_json, frame_diagnostics_value,
-    };
+    use crate::orchestrator::{CanvasFrameSnapshot, frame_diagnostics_value};
     use iron_canvas_core::chrome::{GridShape, PaneRegion};
+    use iron_canvas_core::renderer::diag::DIAG_SCHEMA_VERSION;
     use iron_canvas_core::{
         DiagBufferTruth, DiagCacheActionTag, DiagCacheResolution, DiagCacheTruth, DiagChangedCell,
         DiagDeltaKind, DiagFingerprintActionTag, DiagFingerprintTruth, DiagPaintCounts,
@@ -1343,7 +1333,7 @@ mod tests {
     #[test]
     fn frame_diagnostics_wire_matches_declared_shape() {
         let diag = FrameDiagnostics {
-            schema_version: 3,
+            schema_version: DIAG_SCHEMA_VERSION,
             attempt_seq: 7,
             committed_seq: Some(6),
             selected: Some(iron_canvas_core::RenderStrategy::ChangedCells),
@@ -1356,13 +1346,6 @@ mod tests {
                 grid: true,
                 overlay: false,
             },
-            probe: Some(RCRange {
-                r1: 5,
-                c1: 4,
-                r2: 5,
-                c2: 4,
-            }),
-            probe_segments: vec![PaneRegion::BottomLeft],
             geometry: None,
             fetch: Default::default(),
             repaint: iron_canvas_core::DiagRepaint {
@@ -1419,7 +1402,7 @@ mod tests {
         let wire = FrameDiagnosticsWire::from(&diag);
         let json = serde_json::to_value(&wire).expect("wire serializes");
 
-        assert_eq!(json["schemaVersion"], 3);
+        assert_eq!(json["schemaVersion"], 4);
         assert_eq!(json["attemptSeq"], 7);
         assert_eq!(json["committedSeq"], 6);
         assert_eq!(json["selected"], "changedCells");
@@ -1429,11 +1412,6 @@ mod tests {
         assert_eq!(json["outcome"]["kind"], "painted");
         assert_eq!(json["paintedLayers"]["grid"], true);
         assert_eq!(json["paintedLayers"]["overlay"], false);
-        assert_eq!(
-            json["probe"],
-            serde_json::json!({ "r1": 5, "c1": 4, "r2": 5, "c2": 4 })
-        );
-        assert_eq!(json["probeSegments"], serde_json::json!(["bottomLeft"]));
         assert_eq!(json["geometry"], serde_json::Value::Null);
         assert_eq!(json["repaint"]["verdict"]["kind"], "cell");
         assert_eq!(json["repaint"]["reason"], "changedCell");
@@ -1480,7 +1458,7 @@ mod tests {
     /// came from a canvas. Shared by the snapshot tests below.
     fn snapshot_with_geometry(attempt_seq: u64, backing: (u32, u32)) -> CanvasFrameSnapshot {
         let diag = FrameDiagnostics {
-            schema_version: 3,
+            schema_version: DIAG_SCHEMA_VERSION,
             attempt_seq,
             committed_seq: Some(attempt_seq),
             selected: Some(iron_canvas_core::RenderStrategy::ChangedCells),
@@ -1528,19 +1506,23 @@ mod tests {
         }
     }
 
-    /// Export serializes a snapshot that no canvas backs any more. The
-    /// injected backing size must survive, and the field names must stay the
-    /// ones the JS path emits.
+    /// Export projects a snapshot that no canvas backs any more. The injected
+    /// backing size must survive, and the field names must stay the ones the
+    /// JS path emits.
     #[test]
-    fn frame_diagnostics_json_serializes_historical_snapshot() {
+    fn frame_diagnostics_value_projects_historical_snapshot() {
         let snapshot = snapshot_with_geometry(12, (1600, 800));
-        let text = frame_diagnostics_json(&snapshot).expect("snapshot serializes");
+        let text = serde_json::to_string_pretty(
+            &frame_diagnostics_value(&snapshot).expect("snapshot projects"),
+        )
+        .expect("projected value serializes");
         assert!(
             text.contains("\"attemptSeq\""),
             "camelCase wire names survive serialization: {text}"
         );
         let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
 
+        assert_eq!(json["schemaVersion"], 4);
         assert_eq!(
             json["geometry"]["backingSize"],
             serde_json::json!({ "w": 1600, "h": 800 })
@@ -1554,17 +1536,5 @@ mod tests {
             serde_json::json!({ "rows": 19, "cells": 171 })
         );
         assert_eq!(json["geometry"]["segments"][0]["cells"], 171);
-    }
-
-    /// A whole-capture export and a Copy attempt JSON must agree field for
-    /// field: both go through `project_frame_diagnostics`, so the value form
-    /// and the pretty-printed form cannot drift.
-    #[test]
-    fn frame_diagnostics_value_matches_json_helper() {
-        let snapshot = snapshot_with_geometry(9, (300, 150));
-        let value = frame_diagnostics_value(&snapshot).expect("snapshot projects");
-        let text = frame_diagnostics_json(&snapshot).expect("snapshot serializes");
-        let parsed: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
-        assert_eq!(value, parsed);
     }
 }

@@ -9,7 +9,9 @@ use crate::perf::{
     attempt_json, capture_json,
 };
 use iron_canvas_core::chrome::{GridShape, PaneRegion};
-use iron_canvas_core::renderer::diag::{DiagGeometry, DiagSegment, FrameDiagnostics};
+use iron_canvas_core::renderer::diag::{
+    DIAG_SCHEMA_VERSION, DiagGeometry, DiagSegment, FrameDiagnostics,
+};
 use iron_canvas_core::{CanvasSize, RCRange};
 use serde_json::{Value, json};
 use wasm_bindgen_test::*;
@@ -18,7 +20,7 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 fn diagnostics(attempt_seq: u64) -> FrameDiagnostics {
     FrameDiagnostics {
-        schema_version: 3,
+        schema_version: DIAG_SCHEMA_VERSION,
         attempt_seq,
         geometry: Some(DiagGeometry {
             canvas: CanvasSize { w: 640.0, h: 480.0 },
@@ -151,7 +153,7 @@ fn capture_export_embeds_the_same_diagnostics_as_the_attempt_copy() {
             attempt["diagnostics"], copied["diagnostics"],
             "attempt {index} embeds the projected snapshot"
         );
-        assert_eq!(attempt["diagnostics"]["schemaVersion"], json!(3));
+        assert_eq!(attempt["diagnostics"]["schemaVersion"], json!(4));
         assert_eq!(
             attempt["diagnostics"]["geometry"]["backingSize"]["w"],
             json!(800)

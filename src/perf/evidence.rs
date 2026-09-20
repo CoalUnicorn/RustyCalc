@@ -76,8 +76,6 @@ pub enum EvidenceNote {
     /// A held attempt paints no coverage, so its revealed ranges must not be
     /// read as painted work.
     HeldExcludesCoverage,
-    /// The host probe is an expected-change hint, not a change list.
-    ProbeIsNotAChangeList,
 }
 
 /// One row of address evidence.
@@ -281,11 +279,6 @@ fn reported_changes(capture: &CaptureRecord, record: &AttemptRecord) -> AddressE
         }
     }
 
-    let note = record
-        .diagnostics
-        .probe
-        .is_some()
-        .then_some(EvidenceNote::ProbeIsNotAChangeList);
     if missing {
         return AddressEvidence {
             label: LABEL,
@@ -293,7 +286,7 @@ fn reported_changes(capture: &CaptureRecord, record: &AttemptRecord) -> AddressE
             precision: EvidencePrecision::Unavailable(UnavailableReason::SectionMissing),
             ranges: Vec::new(),
             clip: None,
-            note,
+            note: None,
         };
     }
     AddressEvidence {
@@ -302,7 +295,7 @@ fn reported_changes(capture: &CaptureRecord, record: &AttemptRecord) -> AddressE
         precision: EvidencePrecision::Exact,
         ranges,
         clip: None,
-        note,
+        note: None,
     }
 }
 

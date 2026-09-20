@@ -12,7 +12,7 @@ mod playback_api;
 pub use playback_api::ReplayResult;
 mod recording;
 #[cfg(feature = "dev-tools")]
-pub use recording::{CanvasFrameSnapshot, frame_diagnostics_json, frame_diagnostics_value};
+pub use recording::{CanvasFrameSnapshot, frame_diagnostics_value};
 
 use std::rc::Rc;
 

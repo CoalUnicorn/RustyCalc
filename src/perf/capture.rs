@@ -22,7 +22,6 @@ use crate::events::{
 use crate::perf::MutationSample;
 use iron_canvas_core::RCRange;
 use iron_canvas_core::RowSpan;
-use iron_canvas_core::chrome::PaneRegion;
 use iron_canvas_core::renderer::diag::{
     DiagBlit, DiagChangedCell, DiagFetchRequest, DiagGeometry, DiagRevealedStrip, DiagSegment,
     DiagSourceRange, FrameDiagnostics,
@@ -593,7 +592,6 @@ pub fn estimate_attempt_bytes(record: &AttemptRecord) -> usize {
     let mut bytes = size_of::<AttemptRecord>()
         + record.batch_ids.len() * size_of::<HostBatchId>()
         + record.sheet_name.as_ref().map_or(0, String::len)
-        + diagnostics.probe_segments.len() * size_of::<PaneRegion>()
         + diagnostics.fetch.requests.len() * size_of::<DiagFetchRequest>()
         + diagnostics.repaint.changed_rows.len() * size_of::<RowSpan>()
         + diagnostics.repaint.changed_cells.len() * size_of::<DiagChangedCell>()

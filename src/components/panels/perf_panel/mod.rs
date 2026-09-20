@@ -633,36 +633,6 @@ fn advanced_sections(record: &AttemptRecord) -> Vec<AdvancedSection> {
         rows: work_rows(diagnostics.work),
     });
 
-    let probe = diagnostics.probe.map(|range| {
-        let sheet = diagnostics.geometry.as_ref().map(|geometry| geometry.sheet);
-        match sheet {
-            Some(sheet) => address(sheet, range),
-            None => format!("r{}-{} c{}-{}", range.r1, range.r2, range.c1, range.c2),
-        }
-    });
-    sections.push(AdvancedSection {
-        title: "Probe",
-        rows: vec![
-            (
-                "expected change".to_owned(),
-                probe.unwrap_or_else(|| "\u{2014}".to_owned()),
-            ),
-            (
-                "containing segments".to_owned(),
-                if diagnostics.probe_segments.is_empty() {
-                    "\u{2014}".to_owned()
-                } else {
-                    diagnostics
-                        .probe_segments
-                        .iter()
-                        .map(|region| region_label(*region).to_owned())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                },
-            ),
-        ],
-    });
-
     sections
 }
 
@@ -739,9 +709,6 @@ fn note_label(note: EvidenceNote) -> String {
         }
         EvidenceNote::HeldExcludesCoverage => {
             "a held attempt paints no coverage; revealed ranges are not painted work".to_owned()
-        }
-        EvidenceNote::ProbeIsNotAChangeList => {
-            "the host probe is an expected-change hint, not a change list".to_owned()
         }
     }
 }

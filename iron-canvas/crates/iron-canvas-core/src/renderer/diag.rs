@@ -2,10 +2,9 @@
 //!
 //! `FrameTrace` answers "which path painted this frame?" in one allocation-
 //! free line. This module answers "why?" with a typed snapshot of the same
-//! attempt: planned segments, the host's probe address and which segments
-//! contain it, renderer-owned fetch requests, the repaint decision and its
-//! reason, the prepared/committed cache transition, blit geometry, and
-//! painted row/cell counts.
+//! attempt: planned segments, renderer-owned fetch requests, the repaint
+//! decision and its reason, the prepared/committed cache transition, blit
+//! geometry, and painted row/cell counts.
 //!
 //! Capture is a pure observer: nothing here re-runs classifiers, changes
 //! planner outcomes, or touches committed cache state. All writes are
@@ -37,10 +36,11 @@ use crate::renderer::prepared::{
 };
 use crate::types::coord::RCRange;
 /// Wire version of the snapshot shape. Bump when the projection changes.
-/// Schema 3 replaces `overlay`, `viewport`, `slotsReuse`, `fresh`, and
+/// Schema 3 replaced `overlay`, `viewport`, `slotsReuse`, `fresh`, and
 /// `damage` with the camelCase `RenderStrategy` names `overlayOnly`,
 /// `scrollBlit`, `changedCells`, `fullRebuild`, and `damagedRows`.
-pub const DIAG_SCHEMA_VERSION: u8 = 3;
+/// Schema 4 removed the `probe` and `probeSegments` fields.
+pub const DIAG_SCHEMA_VERSION: u8 = 4;
 
 /// Classification verdict for this attempt, as `Chrome::classify` decided.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -324,12 +324,6 @@ pub struct FrameDiagnostics {
     pub rebuild_reason: Option<RebuildReason>,
     pub outcome: FrameOutcome,
     pub painted_layers: DiagPaintedLayers,
-    /// Host-supplied expected-change address, latched by this attempt.
-    /// Diagnostic evidence only — never read by the planner.
-    pub probe: Option<RCRange>,
-    /// Segments whose `RCRange` fully contains `probe`. Empty when the
-    /// probe lies outside every planned segment or no probe was set.
-    pub probe_segments: Vec<PaneRegion>,
     pub geometry: Option<DiagGeometry>,
     pub fetch: DiagFetch,
     pub repaint: DiagRepaint,
@@ -341,9 +335,10 @@ pub struct FrameDiagnostics {
 /// Frame-completion facts assembled by `Orchestrator::finish_attempt` and
 /// handed to publication as ONE value. The renderer wrapper and the core
 /// sink take this by value so adjacent scalar arguments cannot be swapped
-/// at the wrapper boundary.
+/// at the wrapper boundary. Crate-private: this is a collection input, not
+/// part of the published snapshot contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct DiagCompletion {
+pub(crate) struct DiagCompletion {
     pub attempt_seq: u64,
     pub selected: Option<RenderStrategy>,
     pub work: WorkFlags,
@@ -412,16 +407,15 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         }
     }
 
-    /// Classification facts plus the attempt-scoped probe and the
-    /// attempt-start committed cache truth, recorded once by
-    /// `render_pending` after `plan_frame`. The capture-failure path never
-    /// calls this — its snapshot keeps `delta`/`rebuild_reason`/`probe` at
-    /// `None` and `committed_before` is filled by `publish_diag`.
+    /// Classification facts plus the attempt-start committed cache truth,
+    /// recorded once by `render_pending` after `plan_frame`. The
+    /// capture-failure path never calls this — its snapshot keeps
+    /// `delta`/`rebuild_reason` at `None` and `committed_before` is filled
+    /// by `publish_diag`.
     pub(crate) fn diag_begin_attempt(
         &self,
         delta: DiagDeltaKind,
         rebuild_reason: Option<RebuildReason>,
-        probe: Option<RCRange>,
     ) {
         if !self.diag.enabled.get() {
             return;
@@ -431,7 +425,6 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
             schema_version: DIAG_SCHEMA_VERSION,
             delta: Some(delta),
             rebuild_reason,
-            probe,
             cache: DiagCache {
                 committed_before: Some(self.cache_truth_now()),
                 ..DiagCache::default()
@@ -440,8 +433,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         });
     }
 
-    /// Geometry of the frame a grid prepare is about to paint against,
-    /// plus which planned segments fully contain the attempt's probe.
+    /// Geometry of the frame a grid prepare is about to paint against.
     /// Called from every grid prepare entry point; idempotent overwrite.
     pub(crate) fn diag_geometry(&self, frame: &Chrome, layout: GridLayout) {
         if !self.diag.enabled.get() {
@@ -449,20 +441,6 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         }
         let mut slot = self.diag.ensure_capture();
         let capture = slot.as_mut().expect("ensure_capture inserted a frame");
-        capture.probe_segments = capture
-            .probe
-            .into_iter()
-            .flat_map(|probe| {
-                layout.segments().filter_map(move |segment| {
-                    let range = segment.range();
-                    (range.r1 <= probe.r1
-                        && range.c1 <= probe.c1
-                        && range.r2 >= probe.r2
-                        && range.c2 >= probe.c2)
-                        .then_some(segment.region())
-                })
-            })
-            .collect();
         capture.geometry = Some(DiagGeometry {
             canvas: frame.canvas_size(),
             backing_size: frame.metrics().backing_size(),

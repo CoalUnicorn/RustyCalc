@@ -13,9 +13,10 @@ use crate::perf::{
 use iron_canvas_core::chrome::{GridShape, PaneRegion};
 use iron_canvas_core::geometry::prim::Axis;
 use iron_canvas_core::renderer::diag::{
-    DiagBlit, DiagBlitResultTag, DiagCache, DiagCacheResolution, DiagChangedCell, DiagFetch,
-    DiagFetchPurpose, DiagFetchRequest, DiagGeometry, DiagPaintedLayers, DiagRepaint,
-    DiagRepaintReason, DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
+    DIAG_SCHEMA_VERSION, DiagBlit, DiagBlitResultTag, DiagCache, DiagCacheResolution,
+    DiagChangedCell, DiagFetch, DiagFetchPurpose, DiagFetchRequest, DiagGeometry,
+    DiagPaintedLayers, DiagRepaint, DiagRepaintReason, DiagRevealedStrip, DiagSegment,
+    DiagSourceRange, FrameDiagnostics,
 };
 use iron_canvas_core::{
     CanvasSize, GridVerdict, PixelRect, Point, RCRange, RenderStrategy, RowSpan, WorkFlags,
@@ -53,7 +54,7 @@ fn geometry(segments: Vec<DiagSegment>) -> DiagGeometry {
 
 fn diagnostics() -> FrameDiagnostics {
     FrameDiagnostics {
-        schema_version: 3,
+        schema_version: DIAG_SCHEMA_VERSION,
         attempt_seq: 1,
         painted_layers: DiagPaintedLayers {
             grid: true,
