@@ -2,7 +2,7 @@
 //! live `IronCanvas` orchestrator, mirror result state back into AppState
 //! signals so the dev panels re-render.
 //!
-//! All three Effects share the same shape: `let-else` to drop spurious
+//! Command Effects use `let-else` to drop spurious
 //! re-fires from the trailing `set(None)`, `update_value` to access the
 //! orchestrator, an `Err` -> `StatusMessage::Error` fallthrough.
 
@@ -182,10 +182,8 @@ pub(super) fn install_playback_effect(
 }
 
 /// Export dispatch — drains `app.export_cmd` (Svg/Pdf from PerfPanel) and
-/// pipes the bytes through `trigger_download`. SVG runs today via
-/// `IronCanvas::exportSvg`; the PDF arm is wired but unreachable until
-/// the iron-canvas-export PDF backend lands — the PerfPanel button is
-/// rendered `disabled=true` in the meantime.
+/// pipes the bytes through `trigger_download`. Both SVG and PDF exports
+/// use the current sheet view. The `dev-tools` feature enables PDF export.
 pub(super) fn install_export_effect(
     state: WorkbookState,
     app: AppState,

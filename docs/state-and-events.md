@@ -93,6 +93,15 @@ state.events.theme      ->  Vec<ThemeEvent>
 
 Each `emit_event()` call **replaces** all five signals — it's a snapshot of the most recent action, not a history buffer.
 
+With `dev-tools`, `src/events/bus.rs` also provides `set_batch_observer()`.
+The capture coordinator installs this observer only while capture runs. The
+observer receives a borrowed event batch and its id before category fan-out.
+It must not emit another event. The capture store retains summaries of each
+batch, so several emits before one animation frame remain distinct. Pause,
+stop, limit, and worksheet cleanup detach the observer. Default builds omit
+the observer fields and setter. The inactive path does not copy an event batch
+for capture.
+
 ### Emitting
 
 ```rust
@@ -199,8 +208,10 @@ Rare — most changes fit the existing five. If you need one:
 | _(theme)_ | `Signal<ColorMode>` (private, from `leptos_use::use_color_mode`) | User's theme preference. Public surface: `get_theme()` / `get_theme_untracked()` / `set_theme(Theme)` / `toggle_light_dark()`. |
 | `sidebar_open` | `Split<bool>` | Left drawer visibility. |
 | `collapsed_groups` | `Split<Vec<String>>` | Group labels currently collapsed in the left drawer. |
-| `show_perf_panel` | `Split<bool>` | Whether the performance panel overlay is visible. |
-| `perf` | `PerfTimings` | Timestamps for the commit → render pipeline. |
+| `inspector_open` | `Split<bool>` | Performance inspector visibility. Starts open with `dev-tools`. Closing it pauses capture. |
+| `perf` | `PerfTimings` | Independent mutation and render samples. Mutation results and evaluation coverage stay separate. Default model wrappers publish no diagnostic samples. |
+| `perf_store` | `PerfStore` | `dev-tools` only. Bounded archive, capture selection, state, and revision signals. Records use `(canvas generation, attempt sequence)` identities. |
+| `capture_cmd` | `Split<Option<CaptureCmd>>` | `dev-tools` only. Capture, export, and copy commands. The worksheet coordinator drains each command. |
 | `registry_version` | `RwSignal<u64>` | Bumped on workbook CRUD. Left drawer subscribes to this; nothing else should. |
 
 ### DragState

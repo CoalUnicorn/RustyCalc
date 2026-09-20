@@ -98,7 +98,7 @@ pub struct PerfTimings {
     /// or overlay-only repaint updates this and publishes no mutation.
     pub render_call: RwSignal<Option<RenderSample>>,
     /// One-line paint attribution for the last frame, straight from
-    /// `IronCanvas.frameTrace()`: strategy + per-pane verdict + cells fetched.
+    /// `IronCanvas.frameTrace()`: strategy, grid verdict, and fetch counts.
     /// Only sampled while the panel is open — reading it costs a wasm call
     /// per frame, and an instrument that runs when nobody is watching taxes
     /// the timings it exists to explain.
