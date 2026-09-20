@@ -115,7 +115,7 @@ fn capture_export_embeds_the_same_diagnostics_as_the_attempt_copy() {
             .expect("parses");
 
     assert_eq!(envelope["version"], json!(1));
-    assert_eq!(envelope["diagnosticsSchemaVersion"], json!(3));
+    assert_eq!(envelope["diagnosticsSchemaVersion"], json!(4));
     assert_eq!(envelope["limits"]["retainedBytes"], json!(4096));
     assert_eq!(envelope["limits"]["retainedCaptures"], json!(2));
     assert_eq!(

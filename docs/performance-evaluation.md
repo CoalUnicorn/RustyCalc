@@ -100,7 +100,7 @@ can show an earlier capture while another capture records new attempts.
   repaint source ranges, pixel clips, and derived painted coverage. Each address
   row states its source and precision. Missing evidence stays explicit.
 - **JSON** serializes the selected immutable attempt on demand. Capture export
-  uses envelope version 1 and diagnostics schema 3. Tools also contains the
+  uses envelope version 1 and diagnostics schema 4. Tools also contains the
   existing SVG/PDF exports and `.icr` recording and playback controls. These
   sheet exports use the current view. `.icr` keeps schema 7. A recording baseline
   is retained once and excluded from the default digest.

@@ -30,7 +30,7 @@ Method names are camelCase, matching the IronCalc wasm API convention (snake_cas
 ### dev-tools (feature `dev-tools`)
 
 - **recording** — `startRecording(opts)`, `stopRecording()`, `setFrameDiagnosticsEnabled(b)`, `frameDiagnostics()`, `recordingCurrentAttempt()`
-  - `frameDiagnostics()` returns snapshot schema version 4. The shape is declared by `FrameDiagnosticsWire` in `wire.rs`; the version changes only when a projected field is added or removed.
+  - `frameDiagnostics()` returns snapshot schema version 4. The shape is declared by `FrameDiagnosticsWire` in `wire.rs`; the version changes when the wire contract changes, including field names, representations, and semantics.
 - **playback** — `loadRecording(bytes)` (rejects a recording whose canvas metrics are invalid, whose timestamps go backwards, whose clip/group brackets are unbalanced, whose draw numbers are non-finite, or whose first grid ops have no committed anchor), `seekRecording(frameIdx)` (returns `ReplayResult::{Replayed, NoCommittedFrame}`; `NoCommittedFrame` means the recording has no committed `FullRebuild` anchor at or before the target, so the canvas keeps its previous pixels), `playRecording(nowMs)`, `pauseRecording()`, `isPlaying()`, `tickPlayback(nowMs)`, `exitPlayback()`, `playbackActive()`, `recordingFrameCount()`, `recordingCurrentFrame()`
 - **free functions** — `icrReplayGridOps(ctx, opsJson)`, `icrReplayOverlayOps(ctx, opsJson)`
 

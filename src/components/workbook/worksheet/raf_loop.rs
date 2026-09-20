@@ -484,10 +484,9 @@ mod scheduling_after_tests {
     }
 }
 
-/// A hold driven through the real loop, the real `WorksheetModelAdapter` and a
-/// real `<canvas>`: the app stops scheduling, the committed pixels and query
-/// geometry survive, and a corrected model plus one `poke()` renders the work
-/// the engine retained.
+/// A hold driven through `use_one_shot_raf`, the worksheet outcome policy,
+/// `WorksheetModelAdapter`, and real canvases. A correction plus one `poke()`
+/// renders retained work without another dirty notification.
 ///
 /// The bad geometry is the state the XLSX importer can install: it parses the
 /// `ht` attribute with `f64::from_str` (`"NaN"` is accepted) and
@@ -664,7 +663,6 @@ mod held_geometry_tests {
         // The correction a host can make: a real height for that row, then one
         // poke for the work the engine retained.
         set_row_height(fixture.model, MALFORMED_ROW, 30.0);
-        request_repaint(fixture.handle);
         poke();
         next_frame().await;
 
@@ -676,8 +674,9 @@ mod held_geometry_tests {
         );
 
         // Byte-identical to a canvas that paints the corrected model fresh.
-        let (mut control, control_grid, _control_overlay) = live_canvas(&fixture);
+        let (mut control, control_grid, control_overlay) = live_canvas(&fixture);
         assert_eq!(control.render_pending(), RenderResult::Rendered);
         assert_eq!(pixels(&grid), pixels(&control_grid));
+        assert_eq!(pixels(&overlay), pixels(&control_overlay));
     }
 }
