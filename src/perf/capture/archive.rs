@@ -2,7 +2,7 @@
 //!
 //! Every rule about capture lifetime, admission, and the retained-byte budget
 //! lives here as plain functions over `&mut CaptureArchive`. The signal layer
-//! ([`super::PerfStore`]) owns the clock and the reactivity; this module owns
+//! ([`crate::perf::PerfStore`]) owns the clock and the reactivity; this module owns
 //! the behaviour, so the rules are testable without a browser and without a
 //! canvas.
 //!
@@ -25,7 +25,7 @@ use super::records::{
 };
 
 /// The capture slot, the retained captures, and the read-side state a view
-/// needs. Holds no signal: [`super::PerfStore`] wraps this.
+/// needs. Holds no signal: [`crate::perf::PerfStore`] wraps this.
 #[derive(Debug)]
 pub struct CaptureArchive {
     next_capture_id: CaptureId,

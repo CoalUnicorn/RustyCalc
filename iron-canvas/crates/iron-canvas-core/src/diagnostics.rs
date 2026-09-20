@@ -2,8 +2,9 @@
 //!
 //! Every type here is an evidence fact a consumer may name without knowing
 //! how the renderer collects it. Collection — the in-flight buffer, private
-//! prepared-data reads, and cache sampling — stays in
-//! [`crate::renderer::diag`]; these definitions carry no renderer state.
+//! prepared-data reads, and cache sampling — stays in the renderer's `diag`
+//! module, behind the `dev-diagnostics` feature; these definitions carry no
+//! renderer state.
 //!
 //! The types refer to core ranges, layouts, strategies, and outcomes. They
 //! stay in this crate: a separate crate depending on core while core depends
