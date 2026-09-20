@@ -251,10 +251,10 @@ pub(super) fn install_raf_loop(
         #[cfg(feature = "dev-tools")]
         web_sys::console::time_end_with_label("render");
 
-        // Idle touches no diagnostic; Rendered counts + times; RetryRequired publishes
-        // the held-pane trace without counting a frame and forces the loop to
-        // stay armed; PlaybackActive (dev-tools short-circuit) leaves every
-        // diagnostic untouched. See `scheduling_after` below.
+        // Idle touches no diagnostic; Rendered counts + times; RetryRequired
+        // publishes the held-pane trace without counting a frame;
+        // PlaybackActive (dev-tools short-circuit) leaves every diagnostic
+        // untouched. See `scheduling_after` below.
         let action = scheduling_after(paint_result, playing);
         let mut frame_trace = None;
         if trace_wanted && action.publish_trace {
@@ -371,37 +371,45 @@ struct SchedulerAction {
     keep_alive: bool,
 }
 
-/// Pure outcome policy. `playback_active` is the same
-/// `playing` bool the dev-tools playback tick already computed this frame —
-/// `Idle` and `PlaybackActive` simply hand it back unchanged; `RetryRequired` forces it to
-/// `true` so the one-shot loop stays armed until the held attempt commits.
-/// No external bridge-recovery signal exists to wake a paused loop, so a
-/// `RetryRequired` must remain live even when the failure lasts for many frames.
+/// Pure outcome policy. `playback_active` is the same `playing` bool the
+/// dev-tools playback tick already computed this frame, and it is also the
+/// only thing that arms the one-shot loop.
+///
+/// A `RetryRequired` holds the last committed pixels and keeps its pending
+/// work in the engine, so it needs no frame of its own: the next `poke()` —
+/// a model change, a resize, a workbook switch, a recording start, a font
+/// load — retries that work. Native worksheet reads return a value or
+/// `Absent`, never a transient bridge failure, so a held native attempt
+/// waits for a host correction rather than for time to pass; re-arming the
+/// loop on the hold itself would spin it for as long as the bad value lives.
+/// The standalone JS host keeps its own retry policy, where a thrown or
+/// malformed bridge reply really can clear on its own.
 fn scheduling_after(result: RenderResult, playback_active: bool) -> SchedulerAction {
+    let keep_alive = playback_active;
     match result {
         RenderResult::Idle => SchedulerAction {
             publish_trace: false,
             #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
-            keep_alive: playback_active,
+            keep_alive,
         },
         RenderResult::Rendered => SchedulerAction {
             publish_trace: true,
             #[cfg(any(test, feature = "dev-tools"))]
             update_timing: true,
-            keep_alive: playback_active,
+            keep_alive,
         },
         RenderResult::RetryRequired => SchedulerAction {
             publish_trace: true,
             #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
-            keep_alive: true,
+            keep_alive,
         },
         RenderResult::PlaybackActive => SchedulerAction {
             publish_trace: false,
             #[cfg(any(test, feature = "dev-tools"))]
             update_timing: false,
-            keep_alive: playback_active,
+            keep_alive,
         },
     }
 }
@@ -434,11 +442,16 @@ mod scheduling_after_tests {
     }
 
     #[wasm_bindgen_test]
-    fn retry_publishes_without_counting_and_forces_keep_alive() {
+    fn retry_publishes_the_held_trace_without_counting_a_frame() {
         let action = scheduling_after(RenderResult::RetryRequired, false);
-        assert!(action.publish_trace);
-        assert!(!action.update_timing);
-        assert!(action.keep_alive, "a held attempt must keep the loop armed");
+        assert!(
+            action.publish_trace,
+            "a held attempt must still publish its trace"
+        );
+        assert!(
+            !action.update_timing,
+            "a held attempt is not a painted frame"
+        );
     }
 
     #[wasm_bindgen_test]
@@ -446,23 +459,225 @@ mod scheduling_after_tests {
         let action = scheduling_after(RenderResult::PlaybackActive, true);
         assert!(!action.publish_trace);
         assert!(!action.update_timing);
-        assert!(
-            action.keep_alive,
-            "playback keep-alive is driven by the tick, not this policy"
-        );
+    }
+
+    /// Playback is the only wake-up this policy grants. Every outcome of an
+    /// idle app leaves the loop to the next `poke()`, so a held attempt stops
+    /// the loop instead of spinning on input that only the host can correct.
+    #[wasm_bindgen_test]
+    fn no_outcome_of_an_idle_app_keeps_the_loop_armed() {
+        for result in [
+            RenderResult::Idle,
+            RenderResult::Rendered,
+            RenderResult::RetryRequired,
+            RenderResult::PlaybackActive,
+        ] {
+            assert!(
+                !scheduling_after(result, false).keep_alive,
+                "{result:?} must leave the loop to the next poke()"
+            );
+            assert!(
+                scheduling_after(result, true).keep_alive,
+                "{result:?} must not pause an active playback tick"
+            );
+        }
+    }
+}
+
+/// A hold driven through the real loop, the real `WorksheetModelAdapter` and a
+/// real `<canvas>`: the app stops scheduling, the committed pixels and query
+/// geometry survive, and a corrected model plus one `poke()` renders the work
+/// the engine retained.
+///
+/// The bad geometry is the state the XLSX importer can install: it parses the
+/// `ht` attribute with `f64::from_str` (`"NaN"` is accepted) and
+/// `Worksheet::set_row_height` rejects only negative heights.
+#[cfg(test)]
+mod held_geometry_tests {
+    use super::*;
+    use crate::events::EventBus;
+    use crate::state::WorkbookState;
+    use std::cell::{Cell, RefCell};
+    use wasm_bindgen::JsCast as _;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    const CANVAS_W: f64 = 400.0;
+    const CANVAS_H: f64 = 240.0;
+    /// Visible in the fixture viewport, so the fresh geometry walk reads it.
+    const MALFORMED_ROW: i32 = 3;
+
+    struct Fixture {
+        state: WorkbookState,
+        model: ModelStore,
+        handle: CanvasHandle,
+    }
+
+    fn fixture() -> Fixture {
+        Fixture {
+            state: WorkbookState::new(EventBus::new()),
+            model: StoredValue::new_local(
+                ironcalc_base::UserModel::new_empty("Sheet1", "en", "UTC", "en")
+                    .expect("empty workbook"),
+            ),
+            handle: StoredValue::new_local(None),
+        }
+    }
+
+    fn element() -> web_sys::HtmlCanvasElement {
+        document()
+            .create_element("canvas")
+            .expect("create canvas element")
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .expect("element is a canvas")
+    }
+
+    fn live_canvas(
+        fixture: &Fixture,
+    ) -> (
+        IronCanvas,
+        web_sys::HtmlCanvasElement,
+        web_sys::HtmlCanvasElement,
+    ) {
+        let (grid, overlay) = (element(), element());
+        let mut canvas =
+            IronCanvas::create(grid.clone(), overlay.clone()).expect("create IronCanvas");
+        canvas
+            .resize(CANVAS_W, CANVAS_H, 1.0)
+            .expect("fixture metrics are valid");
+        canvas.set_model(Rc::new(WorksheetModelAdapter {
+            store: fixture.model,
+            show_headers: fixture.state.show_headers,
+        }));
+        (canvas, grid, overlay)
+    }
+
+    fn pixels(canvas: &web_sys::HtmlCanvasElement) -> Vec<u8> {
+        let ctx = canvas
+            .get_context("2d")
+            .expect("get canvas context")
+            .expect("2d context exists")
+            .dyn_into::<web_sys::CanvasRenderingContext2d>()
+            .expect("context is Canvas2D");
+        ctx.get_image_data(0.0, 0.0, canvas.width() as f64, canvas.height() as f64)
+            .expect("read painted pixels")
+            .data()
+            .0
+    }
+
+    async fn next_frame() {
+        let promise = js_sys::Promise::new(&mut |resolve, _reject| {
+            let _ = window().request_animation_frame(&resolve);
+        });
+        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    }
+
+    fn set_row_height(model: ModelStore, row: i32, height: f64) {
+        model.update_value(|m| {
+            m.set_rows_height(0, row, row, height)
+                .expect("a non-negative height is accepted");
+        });
+    }
+
+    fn request_repaint(handle: CanvasHandle) {
+        handle.update_value(|slot| {
+            slot.as_mut().expect("canvas is live").request_repaint();
+        });
+    }
+
+    fn cell_rect(handle: CanvasHandle, row: i32, column: i32) -> Option<PixelRect> {
+        handle.with_value(|slot| {
+            slot.as_ref()
+                .expect("canvas is live")
+                .cell_rect(row, column)
+        })
     }
 
     #[wasm_bindgen_test]
-    fn retry_remains_live_until_a_later_attempt_commits() {
-        for attempt in 1..=1_000 {
-            let action = scheduling_after(RenderResult::RetryRequired, false);
-            assert!(action.keep_alive, "retry attempt {attempt} paused the loop");
-        }
+    async fn a_hold_stops_loop_scheduling_and_a_correction_renders_retained_work() {
+        let owner = Owner::new();
+        let fixture = owner.with(fixture);
+        let (canvas, grid, overlay) = live_canvas(&fixture);
+        fixture.handle.set_value(Some(canvas));
 
-        let committed = scheduling_after(RenderResult::Rendered, false);
-        assert!(
-            !committed.keep_alive,
-            "a committed paint may let an otherwise-idle loop pause"
+        // The paint closure mirrors the production tail: render one frame
+        // through the app's handle, then let the shared outcome policy say
+        // whether the one-shot loop runs again. `false` is this app's real
+        // `playing` value — the fixture loads no recording.
+        let results = Rc::new(RefCell::new(Vec::new()));
+        let frames = Rc::new(Cell::new(0_u32));
+        let poke = owner.with(|| {
+            let results = Rc::clone(&results);
+            let frames = Rc::clone(&frames);
+            use_one_shot_raf(move || {
+                frames.set(frames.get() + 1);
+                let mut result = RenderResult::Idle;
+                fixture.handle.update_value(|slot| {
+                    if let Some(ic) = slot.as_mut() {
+                        result = ic.render_pending();
+                    }
+                });
+                results.borrow_mut().push(result);
+                scheduling_after(result, false).keep_alive
+            })
+        });
+
+        next_frame().await;
+        assert_eq!(results.borrow().as_slice(), [RenderResult::Rendered]);
+        let committed_grid = pixels(&grid);
+        let committed_overlay = pixels(&overlay);
+        let committed_rect = cell_rect(fixture.handle, 1, 1);
+        assert!(committed_rect.is_some(), "the first frame commits geometry");
+
+        // A malformed import lands a non-finite row height on the live model.
+        set_row_height(fixture.model, MALFORMED_ROW, f64::NAN);
+        request_repaint(fixture.handle);
+        poke();
+        next_frame().await;
+
+        assert_eq!(results.borrow().last(), Some(&RenderResult::RetryRequired));
+        assert_eq!(
+            pixels(&grid),
+            committed_grid,
+            "a held attempt must present no new grid pixels"
         );
+        assert_eq!(
+            pixels(&overlay),
+            committed_overlay,
+            "a held attempt must present no new overlay pixels"
+        );
+        assert_eq!(
+            cell_rect(fixture.handle, 1, 1),
+            committed_rect,
+            "queries must read the last committed frame while held"
+        );
+
+        // The hold has no wake-up of its own: no further frame runs.
+        let held_frames = frames.get();
+        next_frame().await;
+        next_frame().await;
+        assert_eq!(
+            frames.get(),
+            held_frames,
+            "a held attempt must not schedule another frame"
+        );
+
+        // The correction a host can make: a real height for that row, then one
+        // poke for the work the engine retained.
+        set_row_height(fixture.model, MALFORMED_ROW, 30.0);
+        request_repaint(fixture.handle);
+        poke();
+        next_frame().await;
+
+        assert_eq!(results.borrow().last(), Some(&RenderResult::Rendered));
+        assert_ne!(
+            pixels(&grid),
+            committed_grid,
+            "the corrected row height must reach the raster"
+        );
+
+        // Byte-identical to a canvas that paints the corrected model fresh.
+        let (mut control, control_grid, _control_overlay) = live_canvas(&fixture);
+        assert_eq!(control.render_pending(), RenderResult::Rendered);
+        assert_eq!(pixels(&grid), pixels(&control_grid));
     }
 }
