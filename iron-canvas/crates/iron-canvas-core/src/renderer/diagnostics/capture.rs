@@ -1,120 +1,30 @@
-//! Structured per-attempt diagnostics for dev builds.
+//! Capture writers for the per-attempt diagnostic snapshot.
 //!
-//! `FrameTrace` answers "which path painted this frame?" in one allocation-
-//! free line. This module answers "why?" with a typed snapshot of the same
-//! attempt: planned segments, renderer-owned fetch requests, the repaint
-//! decision and its reason, the prepared/committed cache transition, blit
-//! geometry, and painted row/cell counts.
-//!
-//! The published snapshot vocabulary lives in [`crate::diagnostics`], so a
-//! consumer can name an evidence fact without naming this renderer module.
-//! It is re-exported here for callers that already reach the renderer.
-//!
-//! Capture is a pure observer: nothing here re-runs classifiers, changes
-//! planner outcomes, or touches committed cache state. All writes are
-//! feature-gated (`dev-diagnostics`) and no-ops while `enabled` is false,
-//! so disabled capture performs no allocations. Wall-clock reads belong to
-//! the host; core never samples a clock here.
-//!
-//! The grid `RendererCore` owns one `DiagState`: an in-flight `capture`
-//! buffer written during prepare/execute, and a `published` last snapshot
-//! moved there only by `Orchestrator::finish_attempt` — so a held attempt
-//! can never surface candidate layout or cache state as committed.
+//! One method per renderer section. Each writer appends to the in-flight
+//! capture owned by [`DiagState`](super::DiagState) and returns immediately
+//! while capture is disabled, so a production build performs no work here.
+//! The completion boundary in [`super`] seals the buffer.
 
-use std::cell::{Cell, RefCell};
-
-use crate::chrome::BlitPlan;
-use crate::chrome::{Chrome, GridLayout, PaneRegion};
+use crate::chrome::{BlitPlan, Chrome, GridLayout, PaneRegion};
 use crate::frame_plan::RebuildReason;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
-use crate::orchestrator::{FrameOutcome, GridVerdict, RenderStrategy};
-use crate::pending_work::{RowSpan, WorkFlags};
-use crate::renderer::cache::BufferTruth;
-use crate::renderer::cache::fingerprint::FingerprintTruth;
+use crate::orchestrator::GridVerdict;
+use crate::pending_work::RowSpan;
 use crate::renderer::cell::repaint_plan::RepaintReason;
 use crate::renderer::prepared::{
     FetchedCells, PreparedFingerprintUpdate, PreparedRepaint, PreparedRepaintPlan, PreparedStrip,
 };
 use crate::types::coord::RCRange;
 
-pub use crate::diagnostics::*;
+use super::snapshot::{
+    DIAG_SCHEMA_VERSION, DiagBlit, DiagBlitResultTag, DiagCache, DiagCacheActionTag,
+    DiagChangedCell, DiagDeltaKind, DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag,
+    DiagGeometry, DiagRepaintReason, DiagRevealedStrip, DiagSegment, DiagSourceRange,
+    FrameDiagnostics,
+};
 
-/// Frame-completion facts assembled by `Orchestrator::finish_attempt` and
-/// handed to publication as ONE value. The renderer wrapper and the core
-/// sink take this by value so adjacent scalar arguments cannot be swapped
-/// at the wrapper boundary. Crate-private: this is a collection input, not
-/// part of the published snapshot contract.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct DiagCompletion {
-    pub attempt_seq: u64,
-    pub selected: Option<RenderStrategy>,
-    pub work: WorkFlags,
-    pub effective: Option<RenderStrategy>,
-    pub committed_seq: Option<u64>,
-    pub outcome: FrameOutcome,
-    pub layers: DiagPaintedLayers,
-    pub resolution: DiagCacheResolution,
-}
-
-/// Renderer-owned capture state: enable flag, in-flight buffer, published
-/// last snapshot. Interior mutability because paint methods run on `&self`.
-pub(crate) struct DiagState {
-    enabled: Cell<bool>,
-    capture: RefCell<Option<FrameDiagnostics>>,
-    published: RefCell<Option<FrameDiagnostics>>,
-}
-
-impl Default for DiagState {
-    fn default() -> Self {
-        Self {
-            enabled: Cell::new(false),
-            capture: RefCell::new(None),
-            published: RefCell::new(None),
-        }
-    }
-}
-
-impl DiagState {
-    /// Empty the in-flight capture. Called by `render_pending` at attempt
-    /// start so a capture-failure hold cannot inherit the previous
-    /// attempt's renderer sections.
-    pub(crate) fn reset_capture(&self) {
-        *self.capture.borrow_mut() = None;
-    }
-
-    /// `&mut` access to a fresh capture. All write sites route through
-    /// this so an enable toggle mid-attempt never half-writes.
-    fn ensure_capture(&self) -> std::cell::RefMut<'_, Option<FrameDiagnostics>> {
-        let mut slot = self.capture.borrow_mut();
-        slot.get_or_insert_with(|| FrameDiagnostics {
-            schema_version: DIAG_SCHEMA_VERSION,
-            ..FrameDiagnostics::default()
-        });
-        slot
-    }
-}
-
-#[cfg(feature = "dev-diagnostics")]
 impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
-    /// Committed cache truth at the moment of the read. Shared by the
-    /// attempt-start sample (`diag_begin_attempt`, Task 2) and the
-    /// post-install read in `publish_diag`.
-    fn cache_truth_now(&self) -> DiagCacheTruth {
-        DiagCacheTruth {
-            layout: self.grid_cache.layout(),
-            buffer_truth: if self.grid_cache.buffer_truth() == BufferTruth::Valid {
-                DiagBufferTruth::Valid
-            } else {
-                DiagBufferTruth::Stale
-            },
-            fingerprint_truth: match self.grid_cache.fingerprint.truth() {
-                FingerprintTruth::Exact => DiagFingerprintTruth::Exact,
-                FingerprintTruth::Stale => DiagFingerprintTruth::Stale,
-            },
-        }
-    }
-
     /// Classification facts plus the attempt-start committed cache truth,
     /// recorded once by `render_pending` after `plan_frame`. The
     /// capture-failure path never calls this — its snapshot keeps
@@ -452,63 +362,6 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
         }
         self.diag_paint_counts(distinct_rows(&row_intervals), cells);
     }
-
-    /// Runtime switch. Disabling drops the retained published snapshot so
-    /// the web facade's `frameDiagnostics()` returns `undefined`.
-    pub(crate) fn set_diag_enabled(&self, enabled: bool) {
-        self.diag.enabled.set(enabled);
-        if !enabled {
-            *self.diag.published.borrow_mut() = None;
-            *self.diag.capture.borrow_mut() = None;
-        }
-    }
-
-    pub(crate) fn diag_reset_capture(&self) {
-        self.diag.reset_capture();
-    }
-
-    /// Seal the in-flight capture and move it into `published`. Only
-    /// `Orchestrator::finish_attempt` calls this, after the cache commit
-    /// (if any) was installed — so `committed_after` reads the
-    /// post-commit truth and a held attempt keeps
-    /// `committed_before == committed_after`.
-    pub(crate) fn publish_diag(&self, completion: DiagCompletion) {
-        if !self.diag.enabled.get() {
-            return;
-        }
-        let mut snapshot =
-            self.diag
-                .capture
-                .borrow_mut()
-                .take()
-                .unwrap_or_else(|| FrameDiagnostics {
-                    schema_version: DIAG_SCHEMA_VERSION,
-                    ..FrameDiagnostics::default()
-                });
-        snapshot.attempt_seq = completion.attempt_seq;
-        snapshot.committed_seq = completion.committed_seq;
-        snapshot.selected = completion.selected;
-        snapshot.effective = completion.effective;
-        snapshot.work = completion.work;
-        snapshot.outcome = completion.outcome;
-        snapshot.painted_layers = completion.layers;
-        snapshot.cache.resolution = completion.resolution;
-        let committed_after = self.cache_truth_now();
-        // A capture-failure attempt never reaches a grid prepare, so its
-        // committed cache could not have changed during the attempt —
-        // before == after by construction.
-        if snapshot.cache.committed_before.is_none() {
-            snapshot.cache.committed_before = Some(committed_after.clone());
-        }
-        snapshot.cache.committed_after = committed_after;
-        *self.diag.published.borrow_mut() = Some(snapshot);
-    }
-
-    /// Clone of the last published snapshot. Called by the web facade on
-    /// demand only.
-    pub(crate) fn last_diag(&self) -> Option<FrameDiagnostics> {
-        self.diag.published.borrow().clone()
-    }
 }
 
 /// Number of distinct absolute grid rows covered by the given inclusive
@@ -516,7 +369,6 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
 /// frozen columns split one band into left and right halves; merging them
 /// keeps `DiagPaintCounts.rows` a unique-row count. Intervals are assumed
 /// valid (`r1 <= r2`), as constructed by the execute arms.
-#[cfg(feature = "dev-diagnostics")]
 pub(crate) fn distinct_rows(intervals: &[(i32, i32)]) -> usize {
     let mut sorted: Vec<(i32, i32)> = intervals.to_vec();
     sorted.sort_unstable_by_key(|(r1, _)| *r1);

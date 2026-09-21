@@ -64,8 +64,7 @@
 pub mod blit_work;
 pub mod cache;
 pub mod cell;
-#[cfg(feature = "dev-diagnostics")]
-pub mod diag;
+pub mod diagnostics;
 pub mod frame;
 pub mod prepared;
 // `renderer/overlay/` has moved to `src/decoration/`. Each decoration is
@@ -160,11 +159,11 @@ pub struct RendererCore<P: Painter> {
     /// `FrameTrace` is `Copy`.
     trace: Cell<FrameTrace>,
     /// Dev-only structured capture state. `pub(crate)` so the gated
-    /// capture methods in `renderer::diag` can read it; zero-size
+    /// capture methods in `renderer::diagnostics` can read it; zero-size
     /// contribution to production builds (feature-gated), and all writes
     /// are no-ops while its `enabled` flag is false.
     #[cfg(feature = "dev-diagnostics")]
-    pub(crate) diag: diag::DiagState,
+    pub(crate) diag: diagnostics::DiagState,
 }
 
 impl<P: Painter> RendererCore<P> {
@@ -273,7 +272,7 @@ impl<P: Painter> RendererCore<P> {
             color_intern: ColorIntern::new(),
             trace: Cell::new(FrameTrace::default()),
             #[cfg(feature = "dev-diagnostics")]
-            diag: diag::DiagState::default(),
+            diag: diagnostics::DiagState::default(),
         }
     }
 
@@ -619,7 +618,7 @@ impl<P: Painter> GridRenderer<P> {
     }
 
     #[cfg(feature = "dev-diagnostics")]
-    pub(crate) fn last_diag(&self) -> Option<diag::FrameDiagnostics> {
+    pub(crate) fn last_diag(&self) -> Option<diagnostics::FrameDiagnostics> {
         self.core.last_diag()
     }
 
@@ -630,7 +629,7 @@ impl<P: Painter> GridRenderer<P> {
     #[cfg(feature = "dev-diagnostics")]
     pub(crate) fn diag_begin_attempt(
         &self,
-        delta: diag::DiagDeltaKind,
+        delta: diagnostics::DiagDeltaKind,
         rebuild_reason: Option<crate::frame_plan::RebuildReason>,
     ) {
         self.core.diag_begin_attempt(delta, rebuild_reason);
@@ -640,7 +639,7 @@ impl<P: Painter> GridRenderer<P> {
     pub(crate) fn diag_blit(
         &self,
         plan: &BlitPlan,
-        result: diag::DiagBlitResultTag,
+        result: diagnostics::DiagBlitResultTag,
         cold_cache: Option<bool>,
         previous: Option<GridLayout>,
         candidate: GridLayout,
@@ -650,7 +649,7 @@ impl<P: Painter> GridRenderer<P> {
     }
 
     #[cfg(feature = "dev-diagnostics")]
-    pub(crate) fn publish_diag(&self, completion: diag::DiagCompletion) {
+    pub(crate) fn publish_diag(&self, completion: diagnostics::DiagCompletion) {
         self.core.publish_diag(completion);
     }
 
