@@ -1,4 +1,7 @@
 #![cfg(target_arch = "wasm32")]
+// Every test in this file drives the canvas through a JS fixture handle bound
+// with `setModel` / `JsBackedModel`, so the whole suite needs the bridge.
+#![cfg(feature = "js-model")]
 //! Browser-only proof that fractional DPR reaches the real `<canvas>`
 //! backing store through the `IronCanvas` facade. Regression test for a
 //! bug where `resize()` rounded `dpr` before forwarding it to

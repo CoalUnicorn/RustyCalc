@@ -265,7 +265,7 @@ impl IronCanvas {
 
         if !state.soft_warn_fired && t_ms > SOFT_WARN_MS {
             state.soft_warn_fired = true;
-            crate::wasm::diag::console_warn(
+            crate::diag::console_warn(
                 "iron-canvas: recording is longer than 30 seconds. Call stopRecording() soon.",
             );
         }
@@ -281,7 +281,7 @@ impl IronCanvas {
                 .orchestrator()
                 .overlay_surface()
                 .disable_recording();
-            crate::wasm::diag::console_warn(
+            crate::diag::console_warn(
                 "iron-canvas: recording exceeded the 100 MB limit. Recording stopped with partial data.",
             );
         }

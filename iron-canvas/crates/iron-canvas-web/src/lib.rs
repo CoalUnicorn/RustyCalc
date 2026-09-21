@@ -5,16 +5,19 @@
 //! CSS-var theme bridge live in `iron-canvas-canvas2d` (re-exported below).
 //! This crate
 //! owns the `wasm-bindgen` `IronCanvas` handle, the JS-bridged
-//! `JsBackedModel`, and the dev-tools recording / playback glue.
+//! `JsBackedModel` (feature `js-model`), and the dev-tools recording /
+//! playback glue.
 //!
 //! Everything `iron-canvas-core` and `iron-canvas-canvas2d` re-export flows
 //! through here unchanged, so downstream call sites name a single facade crate.
 
+mod diag;
 mod orchestrator;
 #[cfg(feature = "dev-tools")]
 mod playback;
 #[cfg(feature = "dev-tools")]
 mod replay;
+#[cfg(feature = "js-model")]
 pub mod wasm;
 #[cfg(any(target_arch = "wasm32", feature = "dev-tools"))]
 mod wire;

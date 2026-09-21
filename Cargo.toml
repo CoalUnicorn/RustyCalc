@@ -11,7 +11,9 @@ readme = "README.md"
 leptos = { version = "0.8", features = ["csr"] }
 ironcalc_base = { version = "0.8.3", path = "IronCalc/base"  }
 ironcalc = { version = "0.8.3", path = "IronCalc/xlsx" }
-iron-canvas-web = { path = "iron-canvas/crates/iron-canvas-web" }
+# The app binds its own Rust `CanvasModel` (`WorksheetModelAdapter`) and never
+# calls the JS `setModel` bridge, so the `js-model` default feature stays off.
+iron-canvas-web = { path = "iron-canvas/crates/iron-canvas-web", default-features = false }
 iron-canvas-core = { path = "iron-canvas/crates/iron-canvas-core" }
 iron-canvas-ironcalc = { path = "iron-canvas/crates/iron-canvas-ironcalc" }
 

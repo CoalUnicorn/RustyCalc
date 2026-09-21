@@ -53,7 +53,7 @@ impl From<JsStyle> for ic::Style {
     }
 }
 
-use crate::wasm::diag::console_warn;
+use crate::diag::console_warn;
 use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
 use iron_canvas_core::{CellKind, CellStyle};
@@ -914,5 +914,3 @@ mod js_payload_decode_tests {
         );
     }
 }
-
-pub mod diag;

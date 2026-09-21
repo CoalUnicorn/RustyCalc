@@ -22,6 +22,7 @@ use web_sys::HtmlCanvasElement;
 
 use crate::RenderOverlays;
 use crate::theme::{CanvasTheme, ThemeVariables};
+#[cfg(feature = "js-model")]
 use crate::wasm::JsBackedModel;
 use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
 use iron_canvas_core::AutoFitError;
@@ -85,6 +86,7 @@ pub struct IronCanvas {
     // `themeChanged` must call `JsBackedModel::theme_changed`.
     // The type-erased `Rc<dyn CanvasModel>` cannot call this method.
     // A Rust model sets this value to `None` because its host controls its theme.
+    #[cfg(feature = "js-model")]
     js_model: Option<Rc<JsBackedModel>>,
     #[cfg(feature = "dev-tools")]
     mode: CanvasMode,
@@ -104,6 +106,7 @@ impl IronCanvas {
         Ok(IronCanvas {
             runtime,
             model: None,
+            #[cfg(feature = "js-model")]
             js_model: None,
             #[cfg(feature = "dev-tools")]
             mode: CanvasMode::Live,
@@ -221,6 +224,9 @@ impl IronCanvas {
     ///
     /// `JsBackedModel::try_from_js_value` checks the structure of the value.
     /// The method returns `JsError` if the value does not have the required API.
+    ///
+    /// Compiles only with the `js-model` feature.
+    #[cfg(feature = "js-model")]
     #[wasm_bindgen(js_name = "setModel")]
     pub fn set_model_js(&mut self, model: JsValue) -> Result<(), JsError> {
         let backed = Rc::new(JsBackedModel::try_from_js_value(model)?);
@@ -239,6 +245,7 @@ impl IronCanvas {
     /// For a Rust model, the method only marks content as dirty.
     #[wasm_bindgen(js_name = "themeChanged")]
     pub fn theme_changed(&mut self) {
+        #[cfg(feature = "js-model")]
         if let Some(m) = &self.js_model {
             m.theme_changed();
         }
@@ -296,7 +303,10 @@ impl IronCanvas {
         self.model = Some(Rc::clone(&model));
         // A Rust model replaces the current JavaScript model.
         // The Rust host resolves the theme.
-        self.js_model = None;
+        #[cfg(feature = "js-model")]
+        {
+            self.js_model = None;
+        }
         self.runtime.orchestrator_mut().set_model(model);
     }
 

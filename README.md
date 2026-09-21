@@ -80,6 +80,10 @@ Replay a saved `.icr` by opening [`iron-canvas/web-test/recording-viewer.html`](
 
 Without the feature flag, the recorder and its optional serialization dependency are not compiled into the wasm bundle, and the production build pays no recording cost.
 
+### Model binding
+
+The app binds the worksheet through the Rust `CanvasModel` adapter (`WorksheetModelAdapter`), so it declares `iron-canvas-web` with `default-features = false` and compiles without the crate's `js-model` feature. That feature carries the JS `setModel` bridge and its IronCalc conversion dependencies, which the app never calls. The JS package and the browser harness keep it on by default.
+
 ## Docs
 
 - [iron-canvas/README.md](iron-canvas/README.md): renderer architecture entry point (ownership, render-attempt lifecycle, five paint strategies, crate boundaries)

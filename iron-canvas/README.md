@@ -20,7 +20,7 @@ Every visible pixel composes from core geometry such as `PixelRect`, `Line`, and
 | `iron-canvas-export`   | Multi-format export: `SvgPainter` + `SvgSurface` (feature `svg`), `PdfPainter` + `PdfSurface` (feature `pdf`). Pure `std`. |
 | `iron-canvas-ironcalc` | Bridge crate: `IronCalcModel<'a>` newtype implementing `CanvasModel` for IronCalc `UserModel`. CF (conditional formatting) decoration bridge. |
 | `iron-canvas-datagrid` | Engine-agnostic in-memory table implementing `CanvasModel`: `DataGrid`, `DataGridBuilder`, `Column`, `Cell`, `SortDirection`. No IronCalc |
-| `iron-canvas-web`      | `#[wasm_bindgen]` facade: `IronCanvas`, `JsBackedModel`. Re-exports the core API plus `WebSurface`, `CanvasPainter`, and `theme_from_element` |
+| `iron-canvas-web`      | `#[wasm_bindgen]` facade: `IronCanvas`, `JsBackedModel` (feature `js-model`, on by default). Re-exports the core API plus `WebSurface`, `CanvasPainter`, and `theme_from_element` |
 | `iron-canvas-datagrid-web` | `#[wasm_bindgen]` facade for a standalone canvas grid: `DataGridCanvas`. Composes datagrid + canvas2d + export — zero IronCalc |
 
 Consumers depending on the wasm bundle use `iron-canvas-web`. Native /
@@ -92,7 +92,7 @@ These are the methods exported via `#[wasm_bindgen]` and available from JavaScri
 
 | Method | Description |
 | ------ | ----------- |
-| `canvas.setModel(model)` | Bind an IronCalc `Model` JS handle. Triggers a full repaint. |
+| `canvas.setModel(model)` | Bind an IronCalc `Model` JS handle. Triggers a full repaint. Requires feature `js-model` (on by default); a native Rust host binds through `IronCanvas::set_model` instead. |
 | `canvas.exportSvg(css_w, css_h)` | Render the current sheet as a self-contained SVG string. Drives a throwaway `Orchestrator<SvgSurface>` against the cached model — no painted-pixel state on the live canvas is touched. Throws if no model is bound, the size is not valid canvas metrics, or the export paint attempt does not commit a frame. |
 | `canvas.exportPdf(css_w, css_h)` | Render the current sheet as a self-contained PDF (returned as `Uint8Array`). Gated behind `--features pdf`. Same throw contract as `exportSvg`. |
 
