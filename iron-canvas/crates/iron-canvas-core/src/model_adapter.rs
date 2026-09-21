@@ -237,17 +237,48 @@ pub trait CanvasModel: CellContentQuery {
     }
 }
 
-/// Emits forwarding bodies that defer to `(**self).<method>(args)` for each
-/// listed signature. Used by the `Rc<T>` blanket impls below — once per trait —
-/// without hand-written shims that move together.
+/// Emits forwarding bodies that defer to `self.<accessor>().<method>(args)` for
+/// each listed signature, so a delegating impl lists its methods once instead
+/// of carrying a hand-written shim per method per trait.
+///
+/// The accessor is the one thing each wrapper must supply: `Rc<T>` forwards
+/// through the private `RcForwardee` accessor (below), the datagrid's
+/// `DataGridModel` returns its `RefCell` guard, and the core stage-6 observer
+/// returns the model it wraps. The accessor keeps the generated `self` binding
+/// and its use in the same macro context. A receiver expression can also work,
+/// but the macro must capture the receiver identifier from each signature and
+/// use it in the generated binding. A literal generated `self` cannot bind a
+/// `self` token supplied by the caller (E0424).
+///
+/// Exported so sibling crates can share the forwarding implementation.
+/// Each wrapper still maintains its own method list. A new trait method must
+/// be checked in every wrapper, including methods with default bodies.
+#[macro_export]
 macro_rules! forward_methods {
-    ($(fn $name:ident(&self $(, $arg:ident: $argty:ty)*) $(-> $ret:ty)?;)*) => {
+    ($accessor:ident, { $(fn $name:ident(&self $(, $arg:ident: $argty:ty)* $(,)?) $(-> $ret:ty)?;)* }) => {
         $(
             fn $name(&self, $($arg: $argty),*) $(-> $ret)? {
-                (**self).$name($($arg),*)
+                self.$accessor().$name($($arg),*)
             }
         )*
     };
+}
+
+/// The accessor [`forward_methods!`] calls on an `Rc` wrapper. A named trait
+/// (rather than `Rc::as_ref`) so the generated call resolves without choosing
+/// among the `AsRef` impls.
+trait RcForwardee {
+    type Target: ?Sized;
+
+    fn forwardee(&self) -> &Self::Target;
+}
+
+impl<T: ?Sized> RcForwardee for Rc<T> {
+    type Target = T;
+
+    fn forwardee(&self) -> &T {
+        self
+    }
 }
 
 /// Forwarding impls so an `Rc<M>` wrapping any `CanvasModel` is itself a
@@ -259,20 +290,35 @@ macro_rules! forward_methods {
 /// requires a real `Rc<T>: CellContentQuery` impl. The `CanvasModel` bound on
 /// the second block implies `T: CellContentQuery`, satisfying the first.
 impl<T: CellContentQuery + ?Sized> CellContentQuery for Rc<T> {
-    forward_methods! {
+    forward_methods!(forwardee, {
         fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle>;
         fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
         fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
-        fn get_extended_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellDecoration>;
+        fn get_extended_cell_style(
+            &self,
+            sheet: u32,
+            row: i32,
+            column: i32,
+        ) -> Fetched<CellDecoration>;
         fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>);
-        fn get_formatted_cell_values_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<String>>);
+        fn get_formatted_cell_values_in(
+            &self,
+            sheet: u32,
+            range: RCRange,
+            out: &mut Vec<Fetched<String>>,
+        );
         fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>);
-        fn get_cell_decorations_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellDecoration>>);
-    }
+        fn get_cell_decorations_in(
+            &self,
+            sheet: u32,
+            range: RCRange,
+            out: &mut Vec<Fetched<CellDecoration>>,
+        );
+    });
 }
 
 impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
-    forward_methods! {
+    forward_methods!(forwardee, {
         fn get_selected_sheet(&self) -> Option<u32>;
         fn get_selected_view(&self) -> Option<CanvasView>;
         fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
@@ -287,7 +333,7 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
         fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;
         fn get_column_header_text(&self, sheet: u32, col: i32) -> Option<String>;
-    }
+    });
 }
 
 #[cfg(test)]

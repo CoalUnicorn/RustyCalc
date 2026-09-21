@@ -20,6 +20,7 @@ serde = { workspace = true, features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 
 [dev-dependencies]
+serde_json = { workspace = true }
 iron-canvas-recorder = { path = "../iron-canvas-recorder" }
 iron-canvas-core = { path = "../iron-canvas-core", features = ["surface-introspection"] }
 wasm-bindgen-test = "0.3"

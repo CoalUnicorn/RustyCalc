@@ -17,7 +17,7 @@ pub struct GridDataWire {
 pub struct ColumnWire {
     pub header: String,
     pub width: Option<f64>,
-    pub align: Option<String>, // "left" | "center" | "right"
+    pub align: Option<AlignWire>,
 }
 
 #[derive(Deserialize)]
@@ -36,7 +36,29 @@ pub struct CellWire {
     pub italic: Option<bool>,
     pub color: Option<String>, // CSS text color
     pub fill: Option<String>,  // CSS background
-    pub align: Option<String>,
+    pub align: Option<AlignWire>,
+}
+
+/// Inbound horizontal alignment: a typed mirror of the three values a
+/// `setData` payload may set. Serde owns the parse, so an unknown or miscased
+/// value (`"LEFT"`, a typo) fails `setData` instead of silently producing a
+/// `General`-aligned column or cell.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AlignWire {
+    Left,
+    Center,
+    Right,
+}
+
+impl From<AlignWire> for HAlign {
+    fn from(a: AlignWire) -> Self {
+        match a {
+            AlignWire::Left => HAlign::Left,
+            AlignWire::Center => HAlign::Center,
+            AlignWire::Right => HAlign::Right,
+        }
+    }
 }
 
 // Stage D result mirrors: engine enums are tuple-variant, so serialize
@@ -45,9 +67,23 @@ pub struct CellWire {
 #[derive(Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HitTestWire {
-    Cell { row: i32, col: i32 },
-    RowHeader { row: i32 },
-    ColumnHeader { col: i32 },
+    Cell {
+        row: i32,
+        col: i32,
+    },
+    RowHeader {
+        row: i32,
+    },
+    ColumnHeader {
+        col: i32,
+    },
+    /// The selected range's fill handle. Its own kind, not a `Cell`: the engine
+    /// paints that handle, so a consumer that wants to grab the handle (or
+    /// ignore the click) must be able to tell it from the cell underneath.
+    AutofillHandle {
+        row: i32,
+        col: i32,
+    },
     Corner,
     Outside,
 }
@@ -59,13 +95,17 @@ impl From<HitTest> for HitTestWire {
                 row: row - 1,
                 col: column - 1,
             },
-            HitTest::AutofillHandle { row, column } => HitTestWire::Cell {
+            HitTest::AutofillHandle { row, column } => HitTestWire::AutofillHandle {
                 row: row - 1,
                 col: column - 1,
             },
             HitTest::RowHeader(r) => HitTestWire::RowHeader { row: r - 1 },
             HitTest::ColumnHeader(c) => HitTestWire::ColumnHeader { col: c - 1 },
             HitTest::Corner => HitTestWire::Corner,
+            // `FormulaRef` needs the formula-ref overlay, which this facade
+            // never arms (no `setFormulaRefs` counterpart), so its own
+            // orchestrator cannot produce that hit. It falls in with `Outside`
+            // rather than getting an unreachable wire variant.
             HitTest::FormulaRef { .. } | HitTest::Outside => HitTestWire::Outside,
         }
     }
@@ -94,15 +134,6 @@ pub struct SortWire {
     pub ascending: bool,
 }
 
-fn halign(s: &str) -> HAlign {
-    match s {
-        "left" => HAlign::Left,
-        "center" => HAlign::Center,
-        "right" => HAlign::Right,
-        _ => HAlign::General,
-    }
-}
-
 impl GridDataWire {
     pub fn into_model(self) -> DataGrid {
         let mut b = DataGrid::builder();
@@ -114,8 +145,8 @@ impl GridDataWire {
             if let Some(w) = c.width {
                 col = col.width(w);
             }
-            if let Some(a) = c.align.as_deref() {
-                col = col.align(halign(a));
+            if let Some(a) = c.align {
+                col = col.align(a.into());
             }
             b = b.column(col);
         }
@@ -158,10 +189,10 @@ fn cell_style(c: &CellWire) -> Option<CellStyle> {
     if let Some(f) = &c.fill {
         st.fill_color = Some(f.clone());
     }
-    if let Some(a) = c.align.as_deref() {
+    if let Some(a) = c.align {
         st.alignment
             .get_or_insert_with(Alignment::default)
-            .horizontal = halign(a);
+            .horizontal = a.into();
     }
     Some(st)
 }

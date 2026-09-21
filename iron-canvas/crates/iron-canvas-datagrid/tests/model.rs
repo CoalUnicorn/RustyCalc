@@ -1,3 +1,4 @@
+use iron_canvas_core::CanvasSize;
 use iron_canvas_datagrid::{Column, DataGrid};
 
 #[test]
@@ -25,5 +26,5 @@ fn content_extent_sums_columns_and_rows() {
         .row(vec!["c".into(), "d".into()])
         .row(vec!["e".into(), "f".into()])
         .build();
-    assert_eq!(g.content_extent(), (120.0, 60.0));
+    assert_eq!(g.content_extent(), CanvasSize { w: 120.0, h: 60.0 });
 }

@@ -28,6 +28,45 @@ fn make_canvas() -> HtmlCanvasElement {
 }
 
 #[wasm_bindgen_test]
+fn static_color_prefix_updates_the_painted_color() {
+    use iron_canvas_canvas2d::CanvasPainter;
+    use iron_canvas_core::geometry::pixel_rect::PixelRect;
+    use iron_canvas_core::geometry::prim::Point;
+    use iron_canvas_core::painter::{PaintColor, Painter};
+
+    let canvas = make_canvas();
+    canvas.set_width(1);
+    canvas.set_height(1);
+    let ctx = canvas
+        .get_context("2d")
+        .expect("get canvas context")
+        .expect("2d context exists")
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .expect("context is Canvas2D");
+    let painter = CanvasPainter::new(ctx.clone());
+    let rect = PixelRect {
+        top_left: Point { x: 0, y: 0 },
+        width: 1,
+        height: 1,
+    };
+    let full: &'static str = "#123456";
+    let short: &'static str = &full[..4];
+
+    for (color, expected) in [
+        (full, [0x12, 0x34, 0x56, 255]),
+        (short, [0x11, 0x22, 0x33, 255]),
+        (full, [0x12, 0x34, 0x56, 255]),
+    ] {
+        painter.rect_fill(rect, PaintColor::Static(color));
+        let pixels = ctx
+            .get_image_data(0.0, 0.0, 1.0, 1.0)
+            .expect("read painted pixel")
+            .data();
+        assert_eq!(pixels.0.as_slice(), expected, "color {color}");
+    }
+}
+
+#[wasm_bindgen_test]
 fn fractional_dpr_reaches_canvas_backing_store() {
     let grid = make_canvas();
     let overlay = make_canvas();

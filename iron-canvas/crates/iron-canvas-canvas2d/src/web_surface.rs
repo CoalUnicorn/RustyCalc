@@ -1,11 +1,16 @@
 //! `WebSurface` — the `Surface` adapter for HTML `<canvas>` + Canvas-2D.
 //!
 //! One `WebSurface` per `<canvas>` element: `IronCanvas` builds two, one
-//! `grid` (opaque) and one `overlay` (`alpha: true, desynchronized: true`).
-//! The painter is wrapped in `Rc` so the renderer can hold its own owning
-//! handle to the same painter without ever lifetime-borrowing through the
-//! surface. Grid is double-buffered (paints into a detached back canvas,
-//! `present` flips it to the visible front canvas); overlay draws direct.
+//! `grid` and one `overlay` (`alpha: true`, overlay also
+//! `desynchronized: true`). Both contexts keep their alpha channel, so an
+//! empty or resized canvas is transparent instead of opaque black.
+//! Sheet backgrounds must still be opaque: retained paint uses background
+//! fills to erase old content. The painter is
+//! wrapped in `Rc` so the renderer can hold its own owning handle to the
+//! same painter without ever lifetime-borrowing through the surface. Grid is
+//! double-buffered (paints into a detached back canvas, `present` flips it to
+//! the visible front canvas under the `copy` composite op); overlay draws
+//! direct.
 
 use std::rc::Rc;
 
@@ -16,6 +21,11 @@ use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::layer::Surface;
 
 use crate::canvas_painter::CanvasPainter;
+
+/// Composite op for the grid's back-to-front present copy. Replaces the
+/// destination region instead of blending over it, so transparent back-buffer
+/// pixels clear the front canvas rather than leaving stale pixels behind.
+const PRESENT_COMPOSITE: &str = "copy";
 
 pub struct WebSurface {
     canvas: HtmlCanvasElement,
@@ -30,11 +40,14 @@ pub struct WebSurface {
 impl WebSurface {
     pub fn grid(canvas: HtmlCanvasElement) -> Result<Self, JsValue> {
         let back = create_detached_canvas(&canvas)?;
-        let back_ctx = create_2d_context(&back, false, false)?;
-        let front_ctx = create_2d_context(&canvas, false, false)?;
+        let back_ctx = create_2d_context(&back, true, false)?;
+        let front_ctx = create_2d_context(&canvas, true, false)?;
         // The 1:1 present copy must never resample; re-pinned on resize too
         // because a backing-store resize wipes ctx state.
         front_ctx.set_image_smoothing_enabled(false);
+        // Replace front pixels, including regions cleared in the back buffer.
+        // Resize resets context state, so it must restore this operation.
+        front_ctx.set_global_composite_operation(PRESENT_COMPOSITE)?;
         Ok(Self {
             painter: Rc::new(CanvasPainter::with_blit_source(back_ctx, canvas.clone())),
             canvas,
@@ -83,6 +96,9 @@ impl Surface for WebSurface {
         }
         if let Some(front) = &self.front_ctx {
             front.set_image_smoothing_enabled(false);
+            // A backing-store resize resets the ctx drawing state, so both
+            // pins made in `grid` must be re-applied here.
+            let _ = front.set_global_composite_operation(PRESENT_COMPOSITE);
         }
         // `LayerBase::resize` follows up with `LayerOps::resize_for_dpr`,
         // which routes through `RendererCore::resize_for_dpr` and calls
@@ -95,6 +111,8 @@ impl Surface for WebSurface {
             return;
         };
         // front_ctx carries no transform, so this is a 1:1 backing-pixel copy.
+        // `PRESENT_COMPOSITE` (`copy`, pinned at construction and re-pinned
+        // on resize) makes it a replacement, not a blend — see that constant.
         let _ = front.draw_image_with_html_canvas_element(back, 0.0, 0.0);
     }
 }
@@ -111,9 +129,8 @@ fn create_detached_canvas(sibling: &HtmlCanvasElement) -> Result<HtmlCanvasEleme
         .map_err(|_| JsValue::from_str("created element is not a canvas"))
 }
 
-/// Build the 2D context with the given options. Grid uses `alpha: false`
-/// for opaque compositing; overlay uses `alpha: true, desynchronized: true`
-/// so transparent updates can land without a full present.
+/// Build the 2D context with the given options. Both surfaces keep alpha.
+/// The overlay also uses `desynchronized: true` for direct updates.
 fn create_2d_context(
     canvas: &HtmlCanvasElement,
     alpha: bool,

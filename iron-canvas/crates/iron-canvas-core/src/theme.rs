@@ -256,9 +256,9 @@ impl ThemeVariables {
     /// `reader` is invoked once per upstream `--palette-*` key. Returning
     /// `None` (or an empty string after trim, which the helper treats as
     /// `None`) leaves the corresponding field unset; the `From` impl then
-    /// falls back to `CanvasTheme::light()`. The DOM-bridge wrappers
-    /// (`iron_canvas_canvas2d::theme_from_element::{from_element, from_root}`)
-    /// close over a `CssStyleDeclaration::get_property_value` call; tests pass an
+    /// falls back to `CanvasTheme::light()`. The DOM-bridge wrapper
+    /// (`iron_canvas_canvas2d::theme_from_element::from_element`)
+    /// closes over a `CssStyleDeclaration::get_property_value` call; tests pass an
     /// in-memory `HashMap` lookup so the derivation logic stays
     /// host-testable.
     ///

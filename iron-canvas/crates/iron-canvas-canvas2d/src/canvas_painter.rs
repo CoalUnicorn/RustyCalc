@@ -72,11 +72,11 @@ fn snap_stroke_cross(coord: f64, width: f64) -> f64 {
 
 /// Cached color/font value. `Static` is the zero-alloc fast path: when the
 /// renderer pushed a `&'static str` (theme color, `HEADER_FONT`), we keep the
-/// reference and ptr-eq it on the next call. `Owned` carries a custom color
-/// that originated as a non-static `&str`, deduped to a painter-lifetime
-/// `Rc<str>` (see `intern_borrowed`) so a recurring color is `Rc::clone`, not
-/// a fresh allocation. `Empty` is the initial / post-clip state — always
-/// misses so the next paint re-binds the ctx.
+/// reference and ptr-eq it on the next call. `Owned` carries a custom color —
+/// or a font CSS string — that originated as a non-static `&str`, deduped to a
+/// painter-lifetime `Rc<str>` (see `intern_string`) so a recurring value is
+/// `Rc::clone`, not a fresh allocation. `Empty` is the initial / post-clip
+/// state — always misses so the next paint re-binds the ctx.
 #[derive(Default, Clone)]
 pub(crate) enum CachedColor {
     #[default]
@@ -88,14 +88,14 @@ pub(crate) enum CachedColor {
 impl CachedColor {
     /// True when the next paint can skip the `ctx.set_*` round-trip.
     ///
-    /// `Static-Static` is the zero-cost path — same `&'static str` literal
-    /// pointer means same content. Falling back to content-eq across the
+    /// `Static-Static` compares the string address and length. Both must match
+    /// because static slices can share an address. Content equality across the
     /// other variants keeps us correct when a `Borrowed` color happens to
     /// equal a previously cached `Static`, or vice-versa.
     pub fn matches(&self, other: PaintColor) -> bool {
         match (self, other) {
             (CachedColor::Empty, _) => false,
-            (CachedColor::Static(a), PaintColor::Static(b)) => std::ptr::eq(a.as_ptr(), b.as_ptr()),
+            (CachedColor::Static(a), PaintColor::Static(b)) => std::ptr::eq(*a, b),
             (CachedColor::Static(a), PaintColor::Borrowed(b)) => *a == b,
             (CachedColor::Owned(a), other) => &**a == other.as_str(),
         }
@@ -132,27 +132,34 @@ impl SetterCache {
 }
 
 pub struct CanvasPainter {
-    pub ctx: CanvasRenderingContext2d,
+    /// Crate-internal: hosts drive the painter through the `Painter` trait,
+    /// and an external write would desync `setter_cache` from the ctx.
+    pub(crate) ctx: CanvasRenderingContext2d,
     /// Cross-canvas blit source. `Some` on the double-buffered grid layer:
     /// `blit` reads the kept band from the front (visible) canvas instead of
     /// self-copying `ctx`'s own canvas — same-canvas `drawImage` is the
     /// interpolation hazard documented in `apply_dpr_transform`.
     blit_src: Option<HtmlCanvasElement>,
     pub(crate) setter_cache: SetterCache,
-    pub dash_pattern: js_sys::Array,
-    pub dash_empty: js_sys::Array,
-    pub clip_depth: Cell<u32>,
+    /// Only this crate's own modules touch the ctx-state mirrors below
+    /// (`dash_pattern` / `dash_empty` / `clip_depth` / `dpr`); every consumer
+    /// outside the crate sees the `Painter`/`BlitPainter` trait surface.
+    pub(crate) dash_pattern: js_sys::Array,
+    pub(crate) dash_empty: js_sys::Array,
+    pub(crate) clip_depth: Cell<u32>,
     /// Mirror of the active ctx.scale factor, written by every
     /// `apply_dpr_transform`. Read by `blit` so the source rect (which
     /// reads from the DPR-scaled backing store) is sized in backing-store
     /// pixels — dest coords go through the active transform unchanged.
-    pub dpr: Cell<f64>,
-    /// Painter-lifetime dedup of custom (`Borrowed`) color strings to
-    /// `Rc<str>`. Distinct from `SetterCache`: `invalidate` resets the sticky
-    /// binds, but the palette outlives invalidation — an interned color is
-    /// still a valid key. Not cleared, so cardinality tracks the sheet's
-    /// distinct-color set (bounded, like `ColorIntern`).
-    palette: RefCell<Vec<Rc<str>>>,
+    pub(crate) dpr: Cell<f64>,
+    /// Painter-lifetime dedup of the non-static (`Borrowed`) strings the
+    /// setter caches key on: custom fill/stroke colors *and* the font CSS
+    /// strings `measure_text_width` binds through `set_font_cached`. Distinct
+    /// from `SetterCache`: `invalidate` resets the sticky binds, but an
+    /// interned string outlives invalidation — it is still a valid key. Not
+    /// cleared. Entries accumulate for each distinct color and font string
+    /// seen during the painter's lifetime, including across model changes.
+    interned_strings: RefCell<Vec<Rc<str>>>,
     /// Memo of `ctx.measure_text` widths keyed `(font_css, text)`.
     /// Interior mutability because `TextMetrics::measure_text_width` takes
     /// `&self`. `get` and `insert` are separate short borrows — never held
@@ -175,7 +182,7 @@ impl CanvasPainter {
             dash_empty: js_sys::Array::new(),
             clip_depth: Cell::new(0),
             dpr: Cell::new(1.0),
-            palette: RefCell::new(Vec::new()),
+            interned_strings: RefCell::new(Vec::new()),
             measure_cache: RefCell::new(MeasureCache::default()),
         }
     }
@@ -233,26 +240,28 @@ impl CanvasPainter {
     }
 
     /// Map a call-site `PaintColor` to its `CachedColor`. `Static` stays
-    /// zero-alloc; `Borrowed` is deduped through the painter palette so a
-    /// recurring color reuses its `Rc<str>` instead of reallocating.
+    /// zero-alloc; `Borrowed` is deduped through `interned_strings`, so a
+    /// recurring color reuses its `Rc<str>` instead of reallocating. The font
+    /// cache routes here too (`set_font_cached`), which is why the strings a
+    /// `PaintColor` can carry are not only colors.
     fn cache_color(&self, color: PaintColor<'_>) -> CachedColor {
         match color {
             PaintColor::Static(s) => CachedColor::Static(s),
-            PaintColor::Borrowed(s) => CachedColor::Owned(self.intern_borrowed(s)),
+            PaintColor::Borrowed(s) => CachedColor::Owned(self.intern_string(s)),
         }
     }
 
-    /// Dedup a custom (`Borrowed`) color string to a painter-lifetime
-    /// `Rc<str>`, so a color seen before is an `Rc::clone` rather than a fresh
-    /// allocation. Cardinality is bounded by the sheet's palette (same
-    /// assumption as `ColorIntern`).
-    fn intern_borrowed(&self, s: &str) -> Rc<str> {
-        let mut palette = self.palette.borrow_mut();
-        if let Some(rc) = palette.iter().find(|rc| &***rc == s) {
+    /// Dedup a non-static (`Borrowed`) string — a custom color, or one of the
+    /// font CSS strings `measure_text_width` passes to `set_font_cached` — to
+    /// a painter-lifetime `Rc<str>`, so a value seen before is an `Rc::clone`
+    /// rather than a fresh allocation. Entries remain until the painter drops.
+    fn intern_string(&self, s: &str) -> Rc<str> {
+        let mut interned = self.interned_strings.borrow_mut();
+        if let Some(rc) = interned.iter().find(|rc| &***rc == s) {
             return Rc::clone(rc);
         }
         let rc: Rc<str> = Rc::from(s);
-        palette.push(Rc::clone(&rc));
+        interned.push(Rc::clone(&rc));
         rc
     }
 
@@ -513,10 +522,35 @@ impl BlitPainter for CanvasPainter {
         let (dx, dy, dw, dh) = dst.as_f64_tuple();
         let (sx, sy, sw, sh) = (sx0 * dpr, sy0 * dpr, sw0 * dpr, sh0 * dpr);
 
+        // Replace transparent source pixels too. Limit `copy` to the
+        // destination so it cannot clear headers or frozen cells outside it.
+        // drawImage snapshots a self-copy before writing overlapping pixels.
+        self.ctx.save();
+        self.ctx.begin_path();
+        self.ctx.rect(dx, dy, dw, dh);
+        self.ctx.clip();
+        let _ = self.ctx.set_global_composite_operation("copy");
         let _ = self
             .ctx
             .draw_image_with_html_canvas_element_and_sw_and_sh_and_dx_and_dy_and_dw_and_dh(
                 canvas, sx, sy, sw, sh, dx, dy, dw, dh,
             );
+        self.ctx.restore();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn static_cache_distinguishes_slices_with_the_same_start() {
+        let full: &'static str = "#123456";
+        let short: &'static str = &full[..4];
+        assert_eq!(full.as_ptr(), short.as_ptr());
+
+        assert!(!CachedColor::Static(full).matches(PaintColor::Static(short)));
+        assert!(!CachedColor::Static(short).matches(PaintColor::Static(full)));
+        assert!(CachedColor::Static(full).matches(PaintColor::Static(full)));
     }
 }

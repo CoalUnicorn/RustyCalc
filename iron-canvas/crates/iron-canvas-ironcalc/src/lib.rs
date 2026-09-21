@@ -99,6 +99,10 @@ impl<'a> CellContentQuery for IronCalcModel<'a> {
         // Use the dxf-MERGED style so the fingerprint hashes what is painted.
         // A native UserModel error is the only `None` source here, and it maps
         // to `Absent` — there is no JS bridge to fail.
+        //
+        // First of the two merged-style reads a Fresh frame makes per cell:
+        // `get_extended_cell_style` below reads the same IronCalc record for
+        // the decoration, and each bulk `*_in` default loops one of the two.
         match UserModel::get_extended_cell_style(&self.0, sheet, row, column)
             .ok()
             .map(|ext| style_to_core(ext.style, &color_resolver(&self.0)))
@@ -146,4 +150,14 @@ impl<'a> CellContentQuery for IronCalcModel<'a> {
     // The bulk `*_in` accessors (styles, types, decorations) inherit the trait
     // default — a per-cell loop over the merged accessors above. There is no JS
     // boundary to amortise here, so an override would only re-spell the default.
+    //
+    // Accepted cost of that shape: a Fresh frame reads IronCalc's merged style
+    // twice per cell — once for the style (fingerprint), once for the
+    // decoration (CF pass). A cache is the obvious answer and the wrong one
+    // until this adapter has a change signal: the owner mutates the `UserModel`
+    // underneath, so a cell-keyed entry could outlive the style it cached and
+    // paint stale pixels. Deferred with the bulk-override option (one merged
+    // read per cell serving both halves) in
+    // `docs/plans/2026-06-10-ironcalc-color-theme-migration-plan.md`; CF-heavy
+    // workbooks pay the second read, correctness does not depend on it.
 }

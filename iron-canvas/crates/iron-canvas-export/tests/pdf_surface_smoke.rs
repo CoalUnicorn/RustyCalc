@@ -76,11 +76,16 @@ fn xref_offsets_land_on_obj_lines() {
     let bytes = build_minimal_doc();
 
     // 1. Find `startxref\n<offset>\n%%EOF` at the tail.
-    let Some(startxref_pos) = find_subslice(&bytes, b"startxref\n") else {
+    let startxref = b"startxref\n";
+    let Some(startxref_pos) = bytes.windows(startxref.len()).position(|w| w == startxref) else {
         panic!("startxref marker not found");
     };
-    let after_startxref = startxref_pos + b"startxref\n".len();
-    let Some(eof_pos) = find_subslice(&bytes[after_startxref..], b"\n%%EOF") else {
+    let after_startxref = startxref_pos + startxref.len();
+    let eof = b"\n%%EOF";
+    let Some(eof_pos) = bytes[after_startxref..]
+        .windows(eof.len())
+        .position(|w| w == eof)
+    else {
         panic!("trailing newline before %%EOF not found");
     };
     let Ok(xref_offset_str) =
@@ -99,7 +104,7 @@ fn xref_offsets_land_on_obj_lines() {
         "startxref offset does not point at `xref\\n`"
     );
     let header_start = xref_offset + 5;
-    let Some(header_nl) = find_subslice(&bytes[header_start..], b"\n") else {
+    let Some(header_nl) = bytes[header_start..].iter().position(|&b| b == b'\n') else {
         panic!("xref subsection header missing newline");
     };
     let Ok(header_str) = std::str::from_utf8(&bytes[header_start..header_start + header_nl]) else {
@@ -203,14 +208,4 @@ fn pdf_render_discards_overlay() {
         a, b,
         "selection (overlay-only) changed the grid PDF — overlay not discarded"
     );
-}
-
-/// Linear subslice search — no `windows().position()` dependency, no
-/// `expect()` on absence. Returns the start index of `needle` in
-/// `haystack`, or `None` if absent.
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    (0..=haystack.len() - needle.len()).find(|&i| &haystack[i..i + needle.len()] == needle)
 }

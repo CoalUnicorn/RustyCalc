@@ -1,11 +1,24 @@
 //! Engine-agnostic tabular model: columns + rows of styled string cells,
 //! with sorting, selection, viewport, and live mutation. No IronCalc, no web.
 
-use iron_canvas_core::{Alignment, CellStyle, HAlign};
+use iron_canvas_core::{Alignment, CanvasSize, CellStyle, HAlign};
+
+/// Default column width in pixels. Deliberately wider than core's
+/// `DEFAULT_COL_WIDTH` (64 px): a grid column carries a caller-supplied header
+/// and has no model to ask, so its default is a display choice, not a
+/// worksheet convention. Named so the builder, the out-of-range fallback, and
+/// the row-header gutter cannot drift apart.
+pub const DEFAULT_COL_WIDTH: f64 = 96.0;
+
+/// Minimum stored column width in pixels. Grid insertion and width setters
+/// clamp to this value. Negative widths must not reduce `content_extent`.
+pub const MIN_COL_WIDTH: f64 = 16.0;
 
 #[derive(Clone, Debug)]
 pub struct Column {
     pub header: String,
+    /// Width in pixels. Direct writes are clamped when the column enters a
+    /// grid through [`DataGridBuilder::column`] or [`DataGrid::set_data`].
     pub width: f64,
     pub align: HAlign,
 }
@@ -14,12 +27,15 @@ impl Column {
     pub fn new(header: impl Into<String>) -> Self {
         Self {
             header: header.into(),
-            width: 96.0,
+            width: DEFAULT_COL_WIDTH,
             align: HAlign::General,
         }
     }
+    /// Set the width, clamped to [`MIN_COL_WIDTH`]. The builder and the
+    /// `setData` wire mirror both come through here, so a payload cannot build
+    /// a column narrower than `DataGrid::set_column_width` allows.
     pub fn width(mut self, w: f64) -> Self {
-        self.width = w;
+        self.width = w.max(MIN_COL_WIDTH);
         self
     }
     pub fn align(mut self, a: HAlign) -> Self {
@@ -95,6 +111,13 @@ impl Default for DataGridBuilder {
     }
 }
 
+/// The cell at a (source row, column) address, or `None` when either is out
+/// of range. Free-standing (not a method) so the sort comparator can read sort
+/// keys while [`DataGrid::order`] is mutably borrowed.
+fn cell_at(rows: &[Vec<Cell>], src: usize, col: usize) -> Option<&Cell> {
+    rows.get(src)?.get(col)
+}
+
 impl DataGrid {
     pub fn builder() -> DataGridBuilder {
         DataGridBuilder::default()
@@ -109,17 +132,20 @@ impl DataGrid {
         self.default_row_h
     }
     pub fn column_width_px(&self, col: usize) -> f64 {
-        self.columns.get(col).map(|c| c.width).unwrap_or(96.0)
+        self.columns
+            .get(col)
+            .map(|c| c.width)
+            .unwrap_or(DEFAULT_COL_WIDTH)
     }
 
     /// Natural pixel size of the full grid body (every column × every row,
     /// headers excluded) — what a shrink-wrapped viewport would show.
-    pub fn content_extent(&self) -> (f64, f64) {
+    pub fn content_extent(&self) -> CanvasSize {
         let w: f64 = (0..self.column_count())
             .map(|c| self.column_width_px(c))
             .sum();
         let h = self.row_count() as f64 * self.default_row_height();
-        (w, h)
+        CanvasSize { w, h }
     }
     pub fn column_header(&self, col: usize) -> Option<&str> {
         self.columns.get(col).map(|c| c.header.as_str())
@@ -145,22 +171,28 @@ impl DataGrid {
 
     pub fn set_column_width(&mut self, col: usize, width: f64) {
         if let Some(c) = self.columns.get_mut(col) {
-            c.width = width.max(16.0); // sane minimum so a column can't vanish
+            // Also clamped in `Column::width`; repeated here because this
+            // path writes the field directly.
+            c.width = width.max(MIN_COL_WIDTH);
         }
     }
 
-    /// Current sort as (0-based column, ascending) or `None`.
+    /// Current sort as `(0-based column, ascending)` or `None` — the shape the
+    /// facade's `currentSort()` returns, so the tuple is deliberate here.
     pub fn current_sort(&self) -> Option<(usize, bool)> {
         self.sort
             .map(|s| (s.column, matches!(s.dir, SortDirection::Ascending)))
     }
+    /// Read the cell at a display-row and column address.
+    fn cell(&self, disp_row: usize, col: usize) -> Option<&Cell> {
+        cell_at(&self.rows, *self.order.get(disp_row)?, col)
+    }
+
     pub fn cell_value(&self, disp_row: usize, col: usize) -> Option<&str> {
-        let src = *self.order.get(disp_row)?;
-        self.rows.get(src)?.get(col).map(|c| c.value.as_str())
+        self.cell(disp_row, col).map(|c| c.value.as_str())
     }
     pub fn cell_style(&self, disp_row: usize, col: usize) -> Option<&CellStyle> {
-        let src = *self.order.get(disp_row)?;
-        self.rows.get(src)?.get(col)?.style.as_ref()
+        self.cell(disp_row, col).and_then(|c| c.style.as_ref())
     }
 
     // Raw field accessors for the CanvasModel bridge (display, 1-based).
@@ -200,21 +232,40 @@ impl DataGrid {
     // Mutation API (B.3): edits write through display order to source rows
 
     pub fn set_cell(&mut self, disp_row: usize, col: usize, value: impl Into<String>) {
-        if let Some(&src) = self.order.get(disp_row)
-            && let Some(cell) = self.rows.get_mut(src).and_then(|r| r.get_mut(col))
-        {
+        let Some(src) = self.order.get(disp_row).copied() else {
+            return;
+        };
+        if let Some(cell) = self.rows.get_mut(src).and_then(|r| r.get_mut(col)) {
             cell.value = value.into();
         }
     }
 
+    /// Append one row, re-sorting when a sort is active.
     pub fn append_row(&mut self, cells: Vec<String>) {
-        let idx = self.rows.len();
-        self.rows.push(cells.into_iter().map(Cell::text).collect());
-        self.order.push(idx);
+        self.push_row(cells);
         self.resort(); // keep display order consistent if a sort is active
     }
 
-    pub fn set_data(&mut self, columns: Vec<Column>, rows: Vec<Vec<String>>) {
+    /// Append a batch, re-sorting once. `append_row` per row costs a full
+    /// `resort` each time — O(N² log N) for a bulk feed into a sorted grid.
+    pub fn append_rows(&mut self, rows: Vec<Vec<String>>) {
+        self.rows.reserve(rows.len());
+        for cells in rows {
+            self.push_row(cells);
+        }
+        self.resort();
+    }
+
+    /// Append to source rows and display order. The caller then re-sorts.
+    fn push_row(&mut self, cells: Vec<String>) {
+        self.order.push(self.rows.len());
+        self.rows.push(cells.into_iter().map(Cell::text).collect());
+    }
+
+    pub fn set_data(&mut self, mut columns: Vec<Column>, rows: Vec<Vec<String>>) {
+        for column in &mut columns {
+            column.width = column.width.max(MIN_COL_WIDTH);
+        }
         self.columns = columns;
         self.rows = rows
             .into_iter()
@@ -242,16 +293,13 @@ impl DataGrid {
         let Some(SortState { column, dir }) = self.sort else {
             return;
         };
-        let rows = &self.rows;
+        // A short row is a missing key, not an error: it sorts as "".
+        let rows: &[Vec<Cell>] = &self.rows;
         self.order.sort_by(|&a, &b| {
-            let va = rows
-                .get(a)
-                .and_then(|r| r.get(column))
+            let va = cell_at(rows, a, column)
                 .map(|c| c.value.as_str())
                 .unwrap_or("");
-            let vb = rows
-                .get(b)
-                .and_then(|r| r.get(column))
+            let vb = cell_at(rows, b, column)
                 .map(|c| c.value.as_str())
                 .unwrap_or("");
             let ord = match (va.parse::<f64>(), vb.parse::<f64>()) {
@@ -290,6 +338,7 @@ impl DataGrid {
         self.clamp_view();
     }
 
+    /// Viewport anchor as 1-based display coords: `(top_row, left_col)`.
     pub fn scroll_anchors(&self) -> (i32, i32) {
         (self.top_row, self.left_col)
     }
@@ -317,7 +366,8 @@ impl DataGrid {
 
 impl DataGridBuilder {
     pub fn column(mut self, c: Column) -> Self {
-        self.columns.push(c);
+        let width = c.width;
+        self.columns.push(c.width(width));
         self
     }
     pub fn row(mut self, cells: Vec<String>) -> Self {

@@ -1,9 +1,5 @@
 #![cfg(target_arch = "wasm32")]
-//! Browser-only proof of the camelCase deserialize path. Constructing real
-//! `HtmlCanvasElement`s in the headless harness is impractical, so this
-//! exercises the `serde-wasm-bindgen` decode that `setData` relies on: a
-//! JS object literal with camelCase keys (`rowHeight`) must round-trip into
-//! `GridDataWire` without throwing.
+//! Browser checks for canvas sizing, JS input, and serialized hit tests.
 
 use iron_canvas_core::{CanvasSize, CanvasTheme};
 use iron_canvas_datagrid_web::DataGridCanvas;
@@ -112,9 +108,87 @@ fn set_data_from_js_object_decodes_camel_case() {
     assert_eq!(decoded.rows.len(), 1, "one row decoded");
 }
 
-// E.1: constructing a real `HtmlCanvasElement` to drive `setThemeName` through
-// a live handle is impractical here (see module note), so assert the built-in
-// palettes the name-switch resolves to are actually distinct.
+#[wasm_bindgen_test]
+fn autofill_handle_hit_reaches_js_with_zero_based_coordinates() {
+    let mut canvas = DataGridCanvas::new(make_canvas(), make_canvas()).unwrap();
+    canvas.resize(240.0, 120.0, 1.25).unwrap();
+    canvas
+        .set_data(
+            js_sys::JSON::parse(
+                r#"{"columns":[{"header":"A","width":80},{"header":"B","width":80},
+                              {"header":"C","width":32}],
+                    "rows":[{"cells":[{"value":"a"},{"value":"b"}]},
+                            {"cells":[{"value":"c"},{"value":"d"}]},
+                            {"cells":[{"value":"e"}]}]}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    // Leave a row and column beyond the selection so the handle is available.
+    canvas.set_selection(0, 0, 1, 1);
+    canvas.render_pending();
+
+    // Find the painted handle without duplicating the core's header geometry.
+    for y in (0..120).step_by(2) {
+        for x in (0..240).step_by(2) {
+            let hit = canvas.hit_test(f64::from(x), f64::from(y)).unwrap();
+            if Reflect::get(&hit, &"kind".into())
+                .unwrap()
+                .as_string()
+                .as_deref()
+                == Some("autofillHandle")
+            {
+                assert_eq!(
+                    Reflect::get(&hit, &"row".into()).unwrap().as_f64(),
+                    Some(1.0)
+                );
+                assert_eq!(
+                    Reflect::get(&hit, &"col".into()).unwrap().as_f64(),
+                    Some(1.0)
+                );
+                return;
+            }
+        }
+    }
+    panic!("the selected range must expose an autofillHandle hit to JS");
+}
+
+#[wasm_bindgen_test]
+fn invalid_alignment_rejects_set_data_without_replacing_the_model() {
+    let mut canvas = DataGridCanvas::new(make_canvas(), make_canvas()).unwrap();
+    canvas
+        .set_data(
+            js_sys::JSON::parse(
+                r#"{"columns":[{"header":"A","align":"right"}],
+                    "rows":[{"cells":[{"value":"a","align":"center"}]}]}"#,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    canvas.sort_by_column(0, true);
+
+    for invalid in [
+        r#"{"columns":[{"header":"A","align":"LEFT"}],"rows":[]}"#,
+        r#"{"columns":[{"header":"A"}],"rows":[{"cells":[{"value":"b","align":"LEFT"}]}]}"#,
+    ] {
+        assert!(
+            canvas
+                .set_data(js_sys::JSON::parse(invalid).unwrap())
+                .is_err()
+        );
+        let sort = canvas.current_sort().unwrap();
+        assert_eq!(
+            Reflect::get(&sort, &"column".into()).unwrap().as_f64(),
+            Some(0.0)
+        );
+        assert_eq!(
+            Reflect::get(&sort, &"ascending".into()).unwrap().as_bool(),
+            Some(true)
+        );
+    }
+}
+
+// Check that the built-in palettes have distinct cell backgrounds.
 #[wasm_bindgen_test]
 fn builtin_themes_differ_in_cell_bg() {
     assert_ne!(

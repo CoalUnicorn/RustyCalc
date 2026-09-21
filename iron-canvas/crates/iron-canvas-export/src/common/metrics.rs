@@ -12,7 +12,10 @@
 //! `approx_text_width` for that one character only, so every other script
 //! keeps working exactly as before.
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
+
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 
 use iron_canvas_core::painter::approx_text_width;
 
@@ -23,10 +26,25 @@ use iron_canvas_core::painter::approx_text_width;
 const INTER_TTF: &[u8] = include_bytes!("../../assets/inter-regular.ttf");
 
 fn inter_face() -> &'static ttf_parser::Face<'static> {
-    static FACE: OnceLock<ttf_parser::Face<'static>> = OnceLock::new();
-    FACE.get_or_init(|| {
+    static FACE: LazyLock<ttf_parser::Face<'static>> = LazyLock::new(|| {
         ttf_parser::Face::parse(INTER_TTF, 0).expect("bundled Inter TTF must parse")
-    })
+    });
+    &FACE
+}
+
+/// Sum per-character advances for `text`.
+///
+/// `advance` returns the real advance for a character, or `None` when that
+/// font's table has no entry for it — such a character alone falls back to the
+/// flat [`approx_text_width`] estimate, so every mapped script keeps working
+/// exactly as before. Each backend passes its own per-char lookup, so the
+/// fallback and the summing live here once.
+fn sum_advances(text: &str, size_px: f64, advance: impl Fn(char) -> Option<f64>) -> f64 {
+    text.chars()
+        .map(|c| {
+            advance(c).unwrap_or_else(|| approx_text_width(size_px, c.encode_utf8(&mut [0u8; 4])))
+        })
+        .sum()
 }
 
 /// Sum of real Inter glyph advances for `text` at `size_px`. Characters with
@@ -35,48 +53,19 @@ fn inter_face() -> &'static ttf_parser::Face<'static> {
 pub fn inter_advance_width(text: &str, size_px: f64) -> f64 {
     let face = inter_face();
     let units_per_em = f64::from(face.units_per_em());
-    text.chars()
-        .map(|c| {
-            face.glyph_index(c)
-                .and_then(|id| face.glyph_hor_advance(id))
-                .map(|adv| f64::from(adv) / units_per_em * size_px)
-                .unwrap_or_else(|| approx_text_width(size_px, &c.to_string()))
-        })
-        .sum()
+    sum_advances(text, size_px, |c| {
+        face.glyph_index(c)
+            .and_then(|id| face.glyph_hor_advance(id))
+            .map(|adv| f64::from(adv) / units_per_em * size_px)
+    })
 }
 
 /// Base64 (standard alphabet, padded) of the embedded Inter TTF, for the SVG
-/// `@font-face` data URI. Hand-rolled instead of pulling in a `base64` crate
-/// for one call site — the workspace has none today.
+/// `@font-face` data URI. Encoded once per process — the TTF is a build-time
+/// constant, and every document that drew text carries the same data URI.
 pub fn inter_base64() -> &'static str {
-    static ENCODED: OnceLock<String> = OnceLock::new();
-    ENCODED.get_or_init(|| encode_base64(INTER_TTF))
-}
-
-const BASE64_ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-fn encode_base64(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b0 = chunk[0];
-        let b1 = *chunk.get(1).unwrap_or(&0);
-        let b2 = *chunk.get(2).unwrap_or(&0);
-        let n = (u32::from(b0) << 16) | (u32::from(b1) << 8) | u32::from(b2);
-        out.push(BASE64_ALPHABET[(n >> 18 & 0x3F) as usize] as char);
-        out.push(BASE64_ALPHABET[(n >> 12 & 0x3F) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            BASE64_ALPHABET[(n >> 6 & 0x3F) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            BASE64_ALPHABET[(n & 0x3F) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
+    static ENCODED: LazyLock<String> = LazyLock::new(|| STANDARD.encode(INTER_TTF));
+    &ENCODED
 }
 
 //  Helvetica (PDF)
@@ -107,16 +96,12 @@ const HELVETICA_ASCII_WIDTHS: [u16; 95] = [
 /// Sum of Helvetica advances for `text` at `size_px`. Codepoints outside
 /// printable ASCII fall back to the flat estimate for that character alone.
 pub fn helvetica_advance_width(text: &str, size_px: f64) -> f64 {
-    text.chars()
-        .map(|c| {
-            let idx = c as u32;
-            if (0x20..=0x7E).contains(&idx) {
-                f64::from(HELVETICA_ASCII_WIDTHS[(idx - 0x20) as usize]) / 1000.0 * size_px
-            } else {
-                approx_text_width(size_px, &c.to_string())
-            }
-        })
-        .sum()
+    sum_advances(text, size_px, |c| {
+        let idx = c as u32;
+        (0x20..=0x7E)
+            .contains(&idx)
+            .then(|| f64::from(HELVETICA_ASCII_WIDTHS[(idx - 0x20) as usize]) / 1000.0 * size_px)
+    })
 }
 
 #[cfg(test)]
@@ -168,22 +153,12 @@ mod tests {
     }
 
     #[test]
-    fn base64_round_trips_known_bytes() {
-        // RFC 4648 test vectors.
-        assert_eq!(encode_base64(b""), "");
-        assert_eq!(encode_base64(b"f"), "Zg==");
-        assert_eq!(encode_base64(b"fo"), "Zm8=");
-        assert_eq!(encode_base64(b"foo"), "Zm9v");
-        assert_eq!(encode_base64(b"foob"), "Zm9vYg==");
-        assert_eq!(encode_base64(b"fooba"), "Zm9vYmE=");
-        assert_eq!(encode_base64(b"foobar"), "Zm9vYmFy");
-    }
+    fn inter_base64_decodes_to_the_embedded_ttf() {
+        use base64::Engine as _;
 
-    #[test]
-    fn inter_base64_is_nonempty_and_stable() {
-        let a = inter_base64();
-        let b = inter_base64();
-        assert!(!a.is_empty());
-        assert_eq!(a, b, "OnceLock must return the same encoded string");
+        let decoded = STANDARD
+            .decode(inter_base64())
+            .expect("inter_base64 must be standard-alphabet base64");
+        assert_eq!(decoded, INTER_TTF);
     }
 }
