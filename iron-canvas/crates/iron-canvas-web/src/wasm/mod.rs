@@ -53,7 +53,6 @@ impl From<JsStyle> for ic::Style {
     }
 }
 
-use crate::diag::console_warn;
 use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
 use iron_canvas_core::{CellKind, CellStyle};
@@ -320,7 +319,7 @@ impl JsBackedModel {
         let prev = self.js_throw_count.get();
         self.js_throw_count.set(prev + 1);
         if prev == 0 {
-            console_warn(&format!(
+            crate::console::warn(&format!(
                 "iron-canvas: JS handle method threw ({ctx}); subsequent throws silenced"
             ));
         }
@@ -330,7 +329,7 @@ impl JsBackedModel {
         let prev = self.serde_shape_errs.get();
         self.serde_shape_errs.set(prev + 1);
         if prev == 0 {
-            console_warn(&format!(
+            crate::console::warn(&format!(
                 "iron-canvas: JS handle returned non-conforming shape ({ctx}: {err}); \
                  subsequent shape errors silenced"
             ));

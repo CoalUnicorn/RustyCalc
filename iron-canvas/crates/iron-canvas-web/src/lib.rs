@@ -11,7 +11,7 @@
 //! Everything `iron-canvas-core` and `iron-canvas-canvas2d` re-export flows
 //! through here unchanged, so downstream call sites name a single facade crate.
 
-mod diag;
+mod console;
 mod orchestrator;
 #[cfg(feature = "dev-tools")]
 mod playback;
