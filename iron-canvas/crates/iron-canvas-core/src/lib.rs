@@ -27,10 +27,10 @@ pub use orchestrator::{
 };
 
 #[cfg(feature = "dev-diagnostics")]
-pub use renderer::diag::{
-    DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache, DiagCacheActionTag,
-    DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagCompletion, DiagDeltaKind, DiagFetch,
-    DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
+pub use renderer::diagnostics::{
+    DIAG_SCHEMA_VERSION, DiagBlit, DiagBlitResultTag, DiagBufferTruth, DiagCache,
+    DiagCacheActionTag, DiagCacheResolution, DiagCacheTruth, DiagChangedCell, DiagDeltaKind,
+    DiagFetch, DiagFetchPurpose, DiagFetchRequest, DiagFingerprintActionTag, DiagFingerprintTruth,
     DiagGeometry, DiagPaintCounts, DiagPaintedLayers, DiagRepaint, DiagRepaintReason,
     DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
 };

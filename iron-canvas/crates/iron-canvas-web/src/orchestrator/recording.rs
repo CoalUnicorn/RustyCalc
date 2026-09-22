@@ -10,10 +10,9 @@ use iron_canvas_recorder::recording::{
 };
 use wasm_bindgen::prelude::*;
 
+use super::IronCanvas;
 #[cfg(feature = "dev-tools")]
 use crate::playback::PlaybackSession;
-
-use super::IronCanvas;
 
 #[cfg(feature = "dev-tools")]
 const SOFT_WARN_MS: u64 = 30_000;
@@ -82,17 +81,6 @@ impl IronCanvas {
             .set_frame_diagnostics_enabled(enabled);
     }
 
-    /// Set the diagnostic probe range for the next non-idle paint attempt.
-    /// The snapshot identifies each planned segment that contains the range.
-    /// The planner does not read this diagnostic value.
-    #[cfg(feature = "dev-tools")]
-    #[wasm_bindgen(js_name = "setFrameDiagnosticsProbe")]
-    pub fn set_frame_diagnostics_probe(&mut self, r1: i32, c1: i32, r2: i32, c2: i32) {
-        self.runtime
-            .orchestrator_mut()
-            .set_frame_diagnostics_probe(iron_canvas_core::RCRange { r1, c1, r2, c2 });
-    }
-
     /// Return structured diagnostics for the last completed live attempt.
     /// Return `undefined` if diagnostics are disabled or playback is active.
     #[cfg(feature = "dev-tools")]
@@ -104,16 +92,11 @@ impl IronCanvas {
         match self.runtime.orchestrator().frame_diagnostics() {
             None => JsValue::UNDEFINED,
             Some(diag) => {
-                let mut wire = crate::wire::FrameDiagnosticsWire::from(&diag);
-                // Core calculates the backing size from the CSS size and DPR.
-                // Use the actual grid backing size for mismatch diagnostics.
-                if let Some(geometry) = &mut wire.geometry {
-                    let canvas = self.runtime.grid_canvas();
-                    geometry.backing_size = crate::wire::BackingSizeWire {
-                        w: canvas.width(),
-                        h: canvas.height(),
-                    };
-                }
+                let canvas = self.runtime.grid_canvas();
+                let wire = crate::wire::project_frame_diagnostics(
+                    &diag,
+                    Some((canvas.width(), canvas.height())),
+                );
                 serde_wasm_bindgen::to_value(&wire).unwrap_or(JsValue::UNDEFINED)
             }
         }
@@ -282,7 +265,7 @@ impl IronCanvas {
 
         if !state.soft_warn_fired && t_ms > SOFT_WARN_MS {
             state.soft_warn_fired = true;
-            crate::wasm::diag::console_warn(
+            crate::console::warn(
                 "iron-canvas: recording is longer than 30 seconds. Call stopRecording() soon.",
             );
         }
@@ -298,7 +281,7 @@ impl IronCanvas {
                 .orchestrator()
                 .overlay_surface()
                 .disable_recording();
-            crate::wasm::diag::console_warn(
+            crate::console::warn(
                 "iron-canvas: recording exceeded the 100 MB limit. Recording stopped with partial data.",
             );
         }

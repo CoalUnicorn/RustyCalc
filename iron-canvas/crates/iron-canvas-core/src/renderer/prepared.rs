@@ -19,9 +19,10 @@ use crate::renderer::cell::PaneCells;
 use crate::renderer::cell::repaint;
 use crate::renderer::cell::repaint_plan::{self, RepaintPlan, RepaintReason};
 #[cfg(feature = "dev-diagnostics")]
-use crate::renderer::diag::{
+use crate::renderer::diagnostics::distinct_rows;
+#[cfg(feature = "dev-diagnostics")]
+use crate::renderer::diagnostics::{
     DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose, DiagFingerprintActionTag,
-    distinct_rows,
 };
 use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::coord::{DenseRange, RCRange};

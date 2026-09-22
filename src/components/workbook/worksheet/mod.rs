@@ -17,6 +17,8 @@ use crate::state::{DragState, ModelStore, WorkbookState};
 mod adapter;
 mod autofit;
 #[cfg(feature = "dev-tools")]
+mod capture_collect;
+#[cfg(feature = "dev-tools")]
 mod dev_tools_effects;
 mod overlay_memo;
 mod raf_loop;
@@ -150,6 +152,11 @@ pub fn Worksheet() -> impl IntoView {
         let poke = poke.clone();
         Effect::new(move |_| {
             let _uuid = current_uuid.get();
+            // A new workbook is a new generation: close the active capture and
+            // keep it. This runs before `set_model`, so the old canvas state
+            // cannot bleed into the next generation's records.
+            #[cfg(feature = "dev-tools")]
+            app.perf_store.end_generation();
             canvas_handle.update_value(|slot| {
                 if let Some(ic) = slot.as_mut() {
                     ic.set_model(Rc::new(WorksheetModelAdapter {
@@ -164,10 +171,10 @@ pub fn Worksheet() -> impl IntoView {
 
     #[cfg(feature = "dev-tools")]
     {
-        dev_tools_effects::install_recording_effect(state, app, canvas_handle);
+        dev_tools_effects::install_recording_effect(state, app, model, canvas_handle, poke.clone());
         dev_tools_effects::install_playback_effect(state, app, canvas_handle, poke.clone());
         dev_tools_effects::install_export_effect(state, app, canvas_handle);
-        dev_tools_effects::install_diag_effect(state, app, canvas_handle, poke.clone());
+        dev_tools_effects::install_capture_effect(state, app, model, canvas_handle, poke.clone());
     }
 
     // mousedown: dispatches via IronCanvas::hit_test (canvas_handle owns the

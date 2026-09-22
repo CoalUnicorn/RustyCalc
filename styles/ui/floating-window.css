@@ -1,0 +1,130 @@
+/* Floating Window — prefix: fw-
+ *
+ * Generic non-modal window primitive. Presentation only: the component owns
+ * the title, the drag surface, the resize handle, and the size.
+ *
+ * Mapping:
+ *   floating-window  -> fw-panel (the [Popover] surface) + fw-shell
+ *   fw-titlebar      -> drag grip + title + window actions
+ *   fw-body          -> scrollable content area
+ *   fw-resize        -> bottom-right corner resize handle
+ */
+
+/* The [Popover] surface. Fixed so the viewport-coordinate clamping the
+ * Popover computes is exact; 1100 matches the floating layer used by context
+ * menus and pickers, and stays below the modal layer at 2000. */
+.fw-panel {
+    position: fixed;
+    z-index: 1100;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+}
+
+/* Sized by the component; fills the measured panel exactly. */
+.fw-shell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.fw-shell:focus {
+    outline: none;
+}
+
+.fw-titlebar {
+    touch-action: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: 26px;
+    padding: 0 4px 0 8px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    border-radius: 6px 6px 0 0;
+    cursor: grab;
+    user-select: none;
+}
+
+.fw-titlebar:active {
+    cursor: grabbing;
+}
+
+.fw-title {
+    font-weight: 600;
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.fw-preset-label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: default;
+}
+
+.fw-preset {
+    font-size: 11px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: 0 2px;
+}
+
+.fw-btn {
+    flex: none;
+    height: 18px;
+    padding: 0 6px;
+    font-size: 11px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.fw-btn:hover {
+    background: var(--bg-hover);
+}
+
+.fw-close:hover {
+    background: var(--error);
+    border-color: var(--error);
+    color: #fff;
+}
+
+.fw-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.fw-resize {
+    touch-action: none;
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 14px;
+    height: 14px;
+    cursor: nwse-resize;
+    /* Diagonal grip affordance, drawn from the theme border colour. */
+    background: linear-gradient(
+        135deg,
+        transparent 0 50%,
+        var(--border-color) 50% 58%,
+        transparent 58% 70%,
+        var(--border-color) 70% 78%,
+        transparent 78%
+    );
+}

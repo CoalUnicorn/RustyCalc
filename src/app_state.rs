@@ -11,35 +11,49 @@ use leptos_use::{ColorMode, UseColorModeReturn};
 
 use crate::events::*;
 use crate::perf::PerfTimings;
+#[cfg(feature = "dev-tools")]
+use crate::perf::{AttemptKey, PerfStore};
 use crate::state::Split;
 use crate::theme::{Theme, use_rusty_calc_theme};
 
-/// One-shot command from the PerfPanel record button to the Worksheet
+/// One-shot command from the inspector's Tools view to the Worksheet
 /// dispatch Effect. The Effect drains it (`set(None)`) after handing the
-/// call to the iron-canvas orchestrator. Exists in both build flavors —
-/// in prod (no `dev-tools` feature) it is written but never read, since the
-/// PerfPanel button is hidden by the runtime `recordingSupported()` guard.
+/// call to the iron-canvas orchestrator.
+///
+/// Dev-tools only: the button that writes it lives in the inspector, and the
+/// coordinator that drains it is gated with the inspector.
+#[cfg(feature = "dev-tools")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecordingCmd {
     Start,
     Stop,
 }
 
-/// One-shot command from the PerfPanel diagnostics toggle to the
-/// Worksheet dispatch Effect: `Some(enabled)` means "set the canvas
-/// capture flag". Drains via `set(None)`. Dev-tools builds only — the
-/// design promise is that production builds retain no diagnostic state.
+/// One-shot command from the Perf panel to the Worksheet capture Effect.
+///
+/// The panel never touches the canvas: it publishes intent here, and one
+/// coordinator drains it. `Set(bool)` is gone because the canvas flag is
+/// derived from the store state — a limit stop or a generation change needs
+/// no command at all.
 #[cfg(feature = "dev-tools")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DiagCmd {
-    Set(bool),
+pub enum CaptureCmd {
+    Start,
+    Pause,
+    Resume,
+    Finish,
+    ExportCaptureJson,
+    /// Copy one attempt's JSON. The key names the attempt the inspector has
+    /// selected, so the copy follows the selection rather than the newest
+    /// record.
+    CopyAttemptJson(AttemptKey),
 }
 
-/// One-shot command from the PerfPanel export buttons to the Worksheet
+/// One-shot command from the inspector's Tools view to the Worksheet
 /// dispatch Effect. Same drain pattern as [`RecordingCmd`]. `Svg` is served
-/// by `IronCanvas::exportSvg` (always on); `Pdf` is served by
-/// `IronCanvas::exportPdf` (gated behind the `export -> iron-canvas-web/pdf`
-/// feature chain, orthogonal to `dev-tools`).
+/// by `IronCanvas::exportSvg`; `Pdf` is served by `IronCanvas::exportPdf`
+/// (gated behind the `export -> iron-canvas-web/pdf` feature chain).
+#[cfg(feature = "dev-tools")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExportCmd {
     Svg,
@@ -49,8 +63,8 @@ pub enum ExportCmd {
 /// One-shot command from the PlaybackPanel to the Worksheet dispatch
 /// Effect. Same drain pattern as [`RecordingCmd`]. `Load` carries owned
 /// `.icr` bytes — read once by the Effect, then cleared.
+#[cfg(feature = "dev-tools")]
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub enum PlaybackCmd {
     Load(Vec<u8>),
     Seek(u32),
@@ -70,32 +84,46 @@ pub struct AppState {
     set_theme_mode: WriteSignal<ColorMode>,
     pub(crate) sidebar_open: Split<bool>,
     pub(crate) collapsed_groups: Split<Vec<String>>,
-    pub(crate) show_perf_panel: Split<bool>,
+    /// Whether the dev-tools performance inspector window is open. Seeded
+    /// open in a `dev-tools` build, where the toolbar launcher can close it.
+    pub(crate) inspector_open: Split<bool>,
     /// `true` while iron-canvas is capturing frames. Updated by the
     /// Worksheet dispatch Effect after a successful start/stop.
-    pub recording_active: Split<bool>,
-    /// Pending command from the PerfPanel button. Cleared by Worksheet
-    /// once dispatched. See [`RecordingCmd`].
-    pub recording_cmd: Split<Option<RecordingCmd>>,
-    /// Pending diagnostics-toggle command from the PerfPanel. Cleared by
-    /// Worksheet once dispatched. See [`DiagCmd`]. Dev-tools only.
     #[cfg(feature = "dev-tools")]
-    pub diag_cmd: Split<Option<DiagCmd>>,
-    /// Pending export command from the PerfPanel SVG/PDF buttons.
-    /// Cleared by Worksheet once the file download has been triggered.
+    pub recording_active: Split<bool>,
+    /// Pending command from the inspector's record button. Cleared by
+    /// Worksheet once dispatched. See [`RecordingCmd`].
+    #[cfg(feature = "dev-tools")]
+    pub recording_cmd: Split<Option<RecordingCmd>>,
+    /// Pending capture command from the inspector. Cleared by Worksheet once
+    /// dispatched. See [`CaptureCmd`].
+    #[cfg(feature = "dev-tools")]
+    pub capture_cmd: Split<Option<CaptureCmd>>,
+    /// Pending export command from the inspector's Tools view. Cleared by
+    /// Worksheet once the file download has been triggered.
+    #[cfg(feature = "dev-tools")]
     pub export_cmd: Split<Option<ExportCmd>>,
     /// Pending playback command. Cleared by Worksheet once dispatched.
+    #[cfg(feature = "dev-tools")]
     pub playback_cmd: Split<Option<PlaybackCmd>>,
     /// `true` once an `.icr` is loaded and playback has taken ownership of
     /// the live canvases; `false` again on Exit.
+    #[cfg(feature = "dev-tools")]
     pub playback_loaded: Split<bool>,
-    /// Mirrors `IronCanvas::isPlaying()` — synced from the rAF tick.
+    /// Mirrors `IronCanvas::isPlaying()` — synced from the playback Effect.
+    #[cfg(feature = "dev-tools")]
     pub playback_playing: Split<bool>,
-    /// Current displayed frame, synced from the rAF tick.
+    /// Current displayed frame, synced from the playback Effect.
+    #[cfg(feature = "dev-tools")]
     pub playback_frame: Split<u32>,
     /// Total frames in the loaded recording. Set on Load, zeroed on Exit.
+    #[cfg(feature = "dev-tools")]
     pub playback_frame_count: Split<u32>,
     pub perf: PerfTimings,
+    /// Paint-attempt capture store: signals only, so this struct stays `Copy`.
+    /// Dev-tools only — a production build retains no capture state.
+    #[cfg(feature = "dev-tools")]
+    pub perf_store: PerfStore,
     /// Bumped when the workbook registry changes (create/delete/rename/group).
     pub registry_version: RwSignal<u64>,
 }
@@ -109,18 +137,28 @@ impl AppState {
             set_theme_mode: set_mode,
             sidebar_open: Split::new(false),
             collapsed_groups: Split::new(vec![]),
-            show_perf_panel: Split::new(cfg!(feature = "dev-tools")),
+            inspector_open: Split::new(cfg!(feature = "dev-tools")),
+            #[cfg(feature = "dev-tools")]
             recording_active: Split::new(false),
+            #[cfg(feature = "dev-tools")]
             recording_cmd: Split::new(None),
             #[cfg(feature = "dev-tools")]
-            diag_cmd: Split::new(None),
+            capture_cmd: Split::new(None),
+            #[cfg(feature = "dev-tools")]
             export_cmd: Split::new(None),
+            #[cfg(feature = "dev-tools")]
             playback_cmd: Split::new(None),
+            #[cfg(feature = "dev-tools")]
             playback_loaded: Split::new(false),
+            #[cfg(feature = "dev-tools")]
             playback_playing: Split::new(false),
+            #[cfg(feature = "dev-tools")]
             playback_frame: Split::new(0),
+            #[cfg(feature = "dev-tools")]
             playback_frame_count: Split::new(0),
             perf: PerfTimings::new(),
+            #[cfg(feature = "dev-tools")]
+            perf_store: PerfStore::new(),
             registry_version: RwSignal::new(0),
         }
     }

@@ -2,9 +2,6 @@ use ironcalc_base::{
     UserModel, expressions::types::Area, types::HorizontalAlignment, worksheet::NavigationDirection,
 };
 
-#[cfg(feature = "dev-tools")]
-use leptos::prelude::Set;
-
 use crate::coord::SheetRange;
 use crate::model::frontend_types::*;
 use crate::model::style_types::BorderWeight;
@@ -586,15 +583,11 @@ pub fn mutate(
     evaluate: EvaluationMode,
     f: impl FnOnce(&mut UserModel<'static>),
 ) {
-    model.update_value(|m| {
-        m.pause_evaluation();
+    // The closure cannot fail, so `mutate` has no result to forward.
+    let _applied = run_mutate(model, evaluate, |m| {
         f(m);
-        m.resume_evaluation();
-        if matches!(evaluate, EvaluationMode::Immediate) {
-            m.evaluate();
-        }
+        true
     });
-    // No automatic redraw - caller must emit specific events
 }
 
 /// Fallible variant of [`mutate`]: the closure returns `Result<(), E>`.
@@ -606,35 +599,138 @@ pub fn try_mutate<E>(
     evaluate: EvaluationMode,
     f: impl FnOnce(&mut UserModel<'static>) -> Result<(), E>,
 ) -> Result<(), E> {
-    // Phase timestamps under the `recorder` feature only. PerfTimings is
-    // pulled from Leptos context (provided in app.rs); if it isn't there
-    // — e.g. unit tests outside a runtime — the writes are silently skipped.
-    #[cfg(feature = "dev-tools")]
-    let perf = leptos::prelude::use_context::<crate::perf::PerfTimings>();
     let mut outcome: Result<(), E> = Ok(());
-    model.update_value(|m| {
-        #[cfg(feature = "dev-tools")]
-        if let Some(p) = perf {
-            p.commit_start.set(Some(crate::perf::now()));
-            // Arm the paint-duration capture: the rAF loop's
-            // `if render_ms.is_none()` guard writes the next paint's
-            // duration and then leaves it alone until the next commit.
-            p.render_ms.set(None);
-        }
-        m.pause_evaluation();
+    run_mutate(model, evaluate, |m| {
         outcome = f(m);
-        #[cfg(feature = "dev-tools")]
-        if let Some(p) = perf {
-            p.input_done.set(Some(crate::perf::now()));
-        }
-        m.resume_evaluation();
-        if outcome.is_ok() && matches!(evaluate, EvaluationMode::Immediate) {
-            m.evaluate();
-            #[cfg(feature = "dev-tools")]
-            if let Some(p) = perf {
-                p.eval_done.set(Some(crate::perf::now()));
-            }
-        }
+        outcome.is_ok()
     });
     outcome
+}
+
+/// Body shared by [`mutate`] and [`try_mutate`], so both publish exactly one
+/// [`crate::perf::MutationSample`] with the same shape.
+///
+/// Two facts are recorded independently: whether the closure applied, and
+/// what evaluation did. A failed closure is `Err` with `NotRun` in both
+/// modes — it never reports a deferred evaluation it does not own.
+fn run_mutate(
+    model: ModelStore,
+    evaluate: EvaluationMode,
+    f: impl FnOnce(&mut UserModel<'static>) -> bool,
+) -> bool {
+    let mut clock = MutateClock::start();
+    let mut applied = true;
+    model.update_value(|m| {
+        m.pause_evaluation();
+        clock.begin_phase();
+        applied = f(m);
+        clock.applied();
+        m.resume_evaluation();
+        if applied && matches!(evaluate, EvaluationMode::Immediate) {
+            clock.begin_phase();
+            m.evaluate();
+            clock.evaluated();
+        }
+    });
+    clock.publish(applied, matches!(evaluate, EvaluationMode::Deferred));
+    applied
+}
+
+/// Clock reads for one wrapper call, published as one
+/// [`crate::perf::MutationSample`].
+///
+/// Compiled to nothing without `dev-tools`, and to nothing outside a Leptos
+/// runtime (unit tests): the wrapper body stays single-sourced, and a
+/// production build reads no clock on the mutation path.
+struct MutateClock {
+    #[cfg(feature = "dev-tools")]
+    inner: Option<MutateClockInner>,
+}
+
+#[cfg(feature = "dev-tools")]
+struct MutateClockInner {
+    perf: crate::perf::PerfTimings,
+    started_at_ms: f64,
+    /// Start of the interval being measured.
+    last_ms: f64,
+    apply_ms: f64,
+    eval_ms: f64,
+}
+
+impl MutateClock {
+    fn start() -> Self {
+        #[cfg(feature = "dev-tools")]
+        {
+            // Without the context, do not read the clock or publish a sample.
+            if let Some(perf) = leptos::prelude::use_context::<crate::perf::PerfTimings>() {
+                let now = crate::perf::now();
+                return Self {
+                    inner: Some(MutateClockInner {
+                        perf,
+                        started_at_ms: now,
+                        last_ms: now,
+                        apply_ms: 0.0,
+                        eval_ms: 0.0,
+                    }),
+                };
+            }
+        }
+        Self {
+            #[cfg(feature = "dev-tools")]
+            inner: None,
+        }
+    }
+
+    /// Start a measured phase after wrapper bookkeeping has completed.
+    #[inline]
+    fn begin_phase(&mut self) {
+        #[cfg(feature = "dev-tools")]
+        if let Some(inner) = &mut self.inner {
+            inner.last_ms = crate::perf::now();
+        }
+    }
+
+    /// Record the end of the model closure.
+    #[inline]
+    fn applied(&mut self) {
+        #[cfg(feature = "dev-tools")]
+        if let Some(inner) = &mut self.inner {
+            let now = crate::perf::now();
+            inner.apply_ms = now - inner.last_ms;
+            inner.last_ms = now;
+        }
+    }
+
+    /// Record the end of `evaluate()`.
+    #[inline]
+    fn evaluated(&mut self) {
+        #[cfg(feature = "dev-tools")]
+        if let Some(inner) = &mut self.inner {
+            let now = crate::perf::now();
+            inner.eval_ms = now - inner.last_ms;
+            inner.last_ms = now;
+        }
+    }
+
+    /// Publish one sample: `apply_ok` from the closure result, `deferred`
+    /// from the evaluation mode. Evaluation duration is read only when
+    /// evaluation ran.
+    fn publish(self, apply_ok: bool, deferred: bool) {
+        #[cfg(feature = "dev-tools")]
+        if let Some(inner) = self.inner {
+            let outcome = if apply_ok {
+                crate::perf::MutationOutcome::Ok
+            } else {
+                crate::perf::MutationOutcome::Err
+            };
+            inner.perf.publish_mutation(
+                inner.started_at_ms,
+                inner.apply_ms,
+                outcome,
+                crate::perf::EvaluationOutcome::of_call(apply_ok, deferred, inner.eval_ms),
+            );
+        }
+        #[cfg(not(feature = "dev-tools"))]
+        let _ = (apply_ok, deferred);
+    }
 }

@@ -14,7 +14,7 @@ The primary shippable artifact for spreadsheet consumers: RustyCalc's Leptos fro
 
 Method names are camelCase, matching the IronCalc wasm API convention (snake_case stays on the Rust side). Payload setters return `Result<(), JsError>`; optional query results are `null` when absent.
 
-- **lifecycle** — `create(gridCanvas, overlayCanvas)` (static), `setModel(model)`, `resize(cssW, cssH, dpr)`, `dispose()`
+- **lifecycle** — `create(gridCanvas, overlayCanvas)` (static), `setModel(model)` (feature `js-model`), `resize(cssW, cssH, dpr)`, `dispose()`
   - `resize` parses its arguments as canvas metrics at the host boundary and throws on a non-finite or negative extent, a DPR that is not finite and greater than zero, or a DPR-scaled backing store that cannot fit `u32`.
 - **paint** — `requestRepaint`, `markContentDirty`, `markRowsDamaged(sheet, rowStart, rowEnd)`, `viewChanged`, `requestOverlayRepaint`, `renderPending`, `fontsChanged`, `frameTrace`, `recordingSupported` (static)
   - `renderPending` returns `RenderResult`: `Idle`, `Rendered`, `RetryRequired`, or `PlaybackActive`. Call it again on the next frame after `RetryRequired`.
@@ -29,11 +29,14 @@ Method names are camelCase, matching the IronCalc wasm API convention (snake_cas
 
 ### dev-tools (feature `dev-tools`)
 
-- **recording** — `startRecording(opts)`, `stopRecording()`, `setFrameDiagnosticsEnabled(b)`, `setFrameDiagnosticsProbe(r1, c1, r2, c2)`, `frameDiagnostics()`, `recordingCurrentAttempt()`
+- **recording** — `startRecording(opts)`, `stopRecording()`, `setFrameDiagnosticsEnabled(b)`, `frameDiagnostics()`, `recordingCurrentAttempt()`
+  - `frameDiagnostics()` returns snapshot schema version 4. The shape is declared by `FrameDiagnosticsWire` in `wire.rs`; the version changes when the wire contract changes, including field names, representations, and semantics.
 - **playback** — `loadRecording(bytes)` (rejects a recording whose canvas metrics are invalid, whose timestamps go backwards, whose clip/group brackets are unbalanced, whose draw numbers are non-finite, or whose first grid ops have no committed anchor), `seekRecording(frameIdx)` (returns `ReplayResult::{Replayed, NoCommittedFrame}`; `NoCommittedFrame` means the recording has no committed `FullRebuild` anchor at or before the target, so the canvas keeps its previous pixels), `playRecording(nowMs)`, `pauseRecording()`, `isPlaying()`, `tickPlayback(nowMs)`, `exitPlayback()`, `playbackActive()`, `recordingFrameCount()`, `recordingCurrentFrame()`
 - **free functions** — `icrReplayGridOps(ctx, opsJson)`, `icrReplayOverlayOps(ctx, opsJson)`
 
 ## JS model contract — `setModel`
+
+Feature `js-model` (default). A build without it has no `setModel` and no `JsBackedModel`; bind the model through the Rust `set_model` instead.
 
 `setModel` adopts an IronCalc wasm `Model` handle after a structural duck-test (module-agnostic, not `instanceof`). Required methods — all part of the IronCalc wasm API:
 
@@ -62,12 +65,13 @@ Counterpart methods for Rust hosts (RustyCalc's Leptos frontend drives these dir
 ## Dependencies
 
 - `iron-canvas-core`, `iron-canvas-canvas2d`, `iron-canvas-export` — renderer, paint, export
-- `iron-canvas-ironcalc`, `ironcalc_base` — IronCalc conversion and model types
+- `iron-canvas-ironcalc`, `ironcalc_base` — IronCalc conversion and model types (optional, feature `js-model`)
 - `wasm-bindgen`, `web-sys` — JS bindings
 - optional: `iron-canvas-recorder` + `serde_json` (feature `dev-tools`)
 
 ## Feature flags
 
+- `js-model` — default. Compiles `JsBackedModel`, the `setModel` JS method, JS theme cache invalidation, and the IronCalc conversion dependencies. A Rust host that binds its own `CanvasModel` turns it off with `default-features = false`. The Rust model API (`IronCanvas::set_model`) and every other JS method stay available. Without this feature, `themeChanged` marks content dirty without accessing a JS model.
 - `dev-tools` — enables recording + replay via `iron-canvas-recorder`
 - `pdf` — exposes `IronCanvas.exportPdf`; export crate types are not re-exported
 

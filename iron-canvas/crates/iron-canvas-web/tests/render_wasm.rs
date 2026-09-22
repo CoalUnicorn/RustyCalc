@@ -1,4 +1,7 @@
 #![cfg(target_arch = "wasm32")]
+// Every test in this file drives the canvas through a JS fixture handle bound
+// with `setModel` / `JsBackedModel`, so the whole suite needs the bridge.
+#![cfg(feature = "js-model")]
 //! Browser-only proof that fractional DPR reaches the real `<canvas>`
 //! backing store through the `IronCanvas` facade. Regression test for a
 //! bug where `resize()` rounded `dpr` before forwarding it to
@@ -3610,6 +3613,67 @@ fn stage6_column_blit_stays_conservative_and_matches_forced_fresh() {
 // can parse, and disabled capture returns `undefined`.
 // ==============================================================================
 
+/// The host snapshot and JS projection describe the same completed attempt.
+#[cfg(feature = "dev-tools")]
+#[wasm_bindgen_test]
+fn historical_snapshot_matches_js_and_survives_canvas_changes() {
+    use iron_canvas_web::frame_diagnostics_value;
+
+    let mut empty = IronCanvas::create(make_canvas(), make_canvas()).unwrap();
+    assert_eq!(empty.frame_attempt_seq(), None);
+    empty.set_frame_diagnostics_enabled(true);
+    assert!(empty.frame_diagnostics_snapshot().is_none());
+
+    let (mut canvas, grid) = stage6_canvas_over(
+        stage6_fixture_store(),
+        Rc::new(Cell::new(1)),
+        Rc::new(Cell::new(1)),
+        None,
+    );
+    assert_eq!(canvas.frame_attempt_seq(), Some(1));
+    assert!(canvas.frame_diagnostics_snapshot().is_none());
+    canvas.set_frame_diagnostics_enabled(true);
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+    let snapshot = canvas.frame_diagnostics_snapshot().unwrap();
+    assert_eq!(
+        canvas.frame_attempt_seq(),
+        Some(snapshot.diagnostics.attempt_seq)
+    );
+    assert_eq!(snapshot.backing_size, (grid.width(), grid.height()));
+    let js: serde_json::Value = serde_wasm_bindgen::from_value(canvas.frame_diagnostics()).unwrap();
+    let archived = frame_diagnostics_value(&snapshot).unwrap();
+    // Normalize numbers through JS: it has one Number type, while
+    // serde_json distinguishes integer 1 from floating-point 1.0.
+    let exported_js = js_sys::JSON::parse(&serde_json::to_string(&archived).unwrap()).unwrap();
+    let exported: serde_json::Value = serde_wasm_bindgen::from_value(exported_js).unwrap();
+    assert_eq!(exported, js);
+
+    canvas.resize(123.0, 87.0, 2.0).unwrap();
+    canvas.set_frame_diagnostics_enabled(false);
+    assert!(canvas.frame_diagnostics_snapshot().is_none());
+    assert!(canvas.frame_diagnostics().is_undefined());
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+    assert_eq!(canvas.frame_attempt_seq(), Some(3));
+
+    canvas
+        .start_recording(wasm_bindgen::JsValue::UNDEFINED)
+        .unwrap();
+    canvas.mark_content_dirty();
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+    let bytes = canvas.stop_recording().unwrap().to_vec();
+    canvas.load_recording(&bytes).unwrap();
+    assert!(canvas.frame_diagnostics_snapshot().is_none());
+    assert_eq!(canvas.frame_attempt_seq(), None);
+    drop(canvas);
+    // The archived snapshot still projects the same facts after the live
+    // canvas is gone: projection reads the value, never a canvas.
+    assert_eq!(
+        frame_diagnostics_value(&snapshot).expect("archived snapshot still projects"),
+        archived
+    );
+}
+
 /// Dev-diagnostics wire smoke: enabled capture returns a snapshot object
 /// with the attempt fields; disabled capture returns `undefined`.
 #[cfg(feature = "dev-tools")]
@@ -3631,7 +3695,7 @@ fn stage6_frame_diagnostics_wire_smoke() {
     assert!(!value.is_undefined(), "enabled capture must publish");
 
     let diag: DiagWireMirror = serde_wasm_bindgen::from_value(value).expect("snapshot parses");
-    assert_eq!(diag.schema_version, 3);
+    assert_eq!(diag.schema_version, 4);
     assert_eq!(diag.attempt_seq, 2);
     assert!(matches!(diag.outcome, FrameOutcomeMirror::Painted));
     let geo = diag
@@ -3703,10 +3767,11 @@ struct DiagSegmentMirror {
 // These drive the structured capture pipeline end to end through the web
 // facade. The assertions are deterministic, not adjust-to-observed: a freeze
 // toggle rebuilds Fresh with a named reason and exact segment accounting;
-// isolated edits land in exactly the probed segment and either skip with a
-// named fingerprint reason or repaint with changed rows intersecting the
-// probe; deep scrolls expose exact blit geometry. Raster truth stays under
-// the retained-pixel gates above — the snapshot explains, those prove.
+// isolated edits land in exactly the segment that owns the edited cell and
+// either skip with a named fingerprint reason or repaint with changed rows
+// intersected with the visible segments; deep scrolls expose exact blit
+// geometry. Raster truth stays under the retained-pixel gates above — the
+// snapshot explains, those prove.
 // ==============================================================================
 
 // Dev-diagnostics wire mirrors for scenario assertions. Field names are
@@ -3722,8 +3787,6 @@ struct DiagScenario {
     attempt_seq: u64,
     rebuild_reason: Option<String>,
     outcome: FrameOutcomeMirror,
-    probe: Option<RcRangeScenario>,
-    probe_segments: Vec<String>,
     geometry: Option<DiagGeometryScenario>,
     fetch: DiagFetchScenario,
     repaint: DiagRepaintScenario,
@@ -3985,10 +4048,10 @@ fn stage6_diag_freeze_toggle_explains_segments() {
     assert_eq!(off.geometry.as_ref().unwrap().segments.len(), 1);
 }
 
-/// One edit per real segment, attributed by the probe address: the probe
-/// must land in exactly the intended segment, an identical-value edit must
-/// `Skip` with `fingerprintsEqual`, and a real change must repaint with
-/// exact changed-cell evidence and a concrete repaint envelope.
+/// One edit per real segment: the repaint envelope must name exactly the
+/// segment that owns the edited cell, an identical-value edit must `Skip`
+/// with `fingerprintsEqual`, and a real change must repaint with exact
+/// changed-cell evidence and a concrete repaint envelope.
 #[cfg(feature = "dev-tools")]
 #[wasm_bindgen_test]
 fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
@@ -4010,25 +4073,10 @@ fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
     ] {
         // Identical-value edit: the fixture seeds `r{row}c{col}`, so
         // writing the same string back must compare equal and skip.
-        canvas.set_frame_diagnostics_probe(row, col, row, col);
         stage6_set_value(&store, row, col, &format!("r{row}c{col}"));
         canvas.mark_content_dirty();
         assert_eq!(canvas.render_pending(), RenderResult::Rendered);
         let diag = diag_snapshot(&canvas);
-        assert_eq!(
-            diag.probe,
-            Some(RcRangeScenario {
-                r1: row,
-                c1: col,
-                r2: row,
-                c2: col
-            })
-        );
-        assert_eq!(
-            diag.probe_segments,
-            vec![region.to_string()],
-            "the probe must belong to exactly the intended segment"
-        );
         assert!(
             matches!(diag.repaint.verdict, Some(VerdictScenario::Skip)),
             "identical-value edit in {region} must skip; got {:?}",
@@ -4041,13 +4089,12 @@ fn stage6_diag_isolated_edits_attribute_segments_and_skips() {
         );
 
         // Real value change: repaint must report the exact changed cell and
-        // applied envelope, while probe attribution stays exact.
-        canvas.set_frame_diagnostics_probe(row, col, row, col);
+        // applied envelope, and its source ranges must name only the
+        // segment that owns the cell.
         stage6_set_value(&store, row, col, &format!("{region}-changed"));
         canvas.mark_content_dirty();
         assert_eq!(canvas.render_pending(), RenderResult::Rendered);
         let diag = diag_snapshot(&canvas);
-        assert_eq!(diag.probe_segments, vec![region.to_string()]);
         assert!(matches!(diag.repaint.verdict, Some(VerdictScenario::Cell)));
         assert_eq!(diag.repaint.reason.as_deref(), Some("changedCell"));
         assert_eq!(
@@ -4100,7 +4147,6 @@ fn cell_repaint_diag_30_by_18_keeps_fetch_and_reduces_paint() {
         Some(ic::BorderStyle::Medium),
     );
     stage6_set_value(&store, 15, 9, "edited");
-    canvas.set_frame_diagnostics_probe(15, 9, 15, 9);
     canvas.mark_content_dirty();
     assert_eq!(canvas.render_pending(), RenderResult::Rendered);
 

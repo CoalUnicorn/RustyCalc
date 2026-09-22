@@ -618,7 +618,8 @@ pub struct ActiveRef {
 }
 
 /// A cell range pinned to a specific sheet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SheetRange {
     pub sheet: u32,
     pub area: CellArea,
@@ -658,7 +659,8 @@ impl SheetRange {
 use ironcalc_base::expressions::types::Area;
 
 /// Axis-aligned cell range. 1-based sheet coordinates.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CellArea {
     pub r1: i32,
     pub c1: i32,
@@ -763,7 +765,8 @@ impl CellArea {
 }
 
 /// Single cell position on a sheet. 1-based indices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CellAddress {
     pub sheet: u32,
     pub row: i32,

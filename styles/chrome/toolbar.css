@@ -65,6 +65,19 @@
     pointer-events: none;
 }
 
+/* Recording indicator on the dev-tools launcher. */
+.tb .tb-rec-dot {
+    color: var(--error);
+    font-size: 10px;
+    line-height: 1;
+    animation: tb-rec-pulse 1s ease-in-out infinite;
+}
+
+@keyframes tb-rec-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.3; }
+}
+
 .tb .tb-sep {
     width: 1px;
     height: 20px;

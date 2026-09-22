@@ -16,6 +16,12 @@ use leptos_use::{
 /// by its bottom edge) instead of downward — use for menus anchored to a
 /// bottom bar.
 ///
+/// `dismiss_on_outside_click`: when `true` (the default), a click anywhere
+/// outside the panel closes it. Every menu and picker wants that. A
+/// **persistent** caller — a floating window the user works beside — passes
+/// `false` and owns its own close action; otherwise the first click on the
+/// surface behind it would dismiss it.
+///
 /// # Viewport clamping
 /// Positioning is **edge-aware**: the panel measures itself
 /// ([`use_element_size`]) and the viewport ([`use_window_size`]) and clamps
@@ -41,16 +47,22 @@ pub fn Popover(
     set_open: WriteSignal<bool>,
     pos: ReadSignal<(i32, i32)>,
     #[prop(default = false)] above_anchor: bool,
+    #[prop(default = true)] dismiss_on_outside_click: bool,
     #[prop(default = "")] class: &'static str,
     children: Children,
 ) -> impl IntoView {
     let panel_ref = NodeRef::<leptos::html::Div>::new();
 
-    let _ = on_click_outside(panel_ref, move |_| {
-        if open.get_untracked() {
-            set_open.set(false);
-        }
-    });
+    // A persistent panel (a floating window, for example) opts out: it closes
+    // only through its own close action, never because the user clicked the
+    // grid behind it.
+    if dismiss_on_outside_click {
+        let _ = on_click_outside(panel_ref, move |_| {
+            if open.get_untracked() {
+                set_open.set(false);
+            }
+        });
+    }
 
     // Reactive measurements: the panel's own box and the viewport. Both update
     // the position the instant either changes, giving us place-then-measure

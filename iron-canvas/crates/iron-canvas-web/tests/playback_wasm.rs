@@ -1,5 +1,7 @@
 #![cfg(target_arch = "wasm32")]
 #![cfg(feature = "dev-tools")]
+// The replay fixtures bind a JS model handle through `setModel`.
+#![cfg(feature = "js-model")]
 //! Browser-only regression test: `replay_through` must `present()` the grid
 //! surface after EACH replayed frame, not once at the end.
 //!

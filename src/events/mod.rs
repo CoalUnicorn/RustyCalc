@@ -36,10 +36,16 @@ mod navigation;
 mod structure;
 mod theme;
 
+#[cfg(feature = "dev-tools")]
+pub use bus::BatchObserver;
 pub use bus::EventBus;
 pub use content::ContentEvent;
 pub use format::FormatEvent;
 pub use navigation::NavigationEvent;
+/// `HeaderChange` is the shape of `StructureEvent::StructureChanged`. Only the
+/// capture path names it, so a production build does not pay for the re-export.
+#[cfg(feature = "dev-tools")]
+pub use structure::HeaderChange;
 pub use structure::{Location, StructureEvent};
 pub use theme::ThemeEvent;
 
