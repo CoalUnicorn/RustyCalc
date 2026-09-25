@@ -28,12 +28,11 @@
 
 use std::rc::Rc;
 
-use crate::frame::FrameInputs;
+use crate::CanvasSize;
 pub use crate::frame::{BlitPlan, Shift};
 use crate::geometry::CanvasMetrics;
 use crate::geometry::prim::Point;
 use crate::theme::CanvasTheme;
-use crate::{CanvasModel, CanvasSize};
 
 mod blit;
 mod build;
@@ -129,57 +128,5 @@ impl Chrome {
     /// Piecewise address layout for the visible grid.
     pub fn grid_layout(&self) -> GridLayout {
         GridLayout::from_frame(self)
-    }
-
-    /// Prepare the blit fast-path's next-frame candidate without committing:
-    /// [`PreparedBlitOutcome::Ready`] on successful in-place reuse,
-    /// [`PreparedBlitOutcome::FreshFallback`] carrying `prev` whole on reject
-    /// (see `try_blit_reuse`'s doc for both cases). `Chrome::next_blit` is the
-    /// immediate-commit wrapper built on top of this for callers that don't
-    /// need to hold the decision open; `Orchestrator::render_scroll_blit`
-    /// calls this directly instead, so it can call
-    /// `PreparedBlitFrame::rollback` if the paint that follows a successful
-    /// `Ready` still fails a bulk bridge read. `pub(crate)`: an execution
-    /// detail of the render pipeline, not consumer-facing API.
-    pub(crate) fn prepare_blit(
-        prev: Chrome,
-        model: &dyn CanvasModel,
-        inputs: &FrameInputs,
-        plan: &BlitPlan,
-    ) -> PreparedBlitOutcome {
-        blit::try_blit_reuse(prev, model, inputs, plan)
-    }
-
-    /// Build the next-frame `Chrome` for the blit fast-path, returning a typed
-    /// [`BlitOutcome`] rather than a `Chrome` with an open `FrameKindTag`.
-    ///
-    /// Qualification passed (`Chrome::classify` returned `FrameDelta::Scroll`),
-    /// but in-place reuse may still reject — e.g. the row-header digit boundary at 99 -> 100,
-    /// where `row_header_thickness` widens and the cross-axis cell-area origin
-    /// shifts. `try_blit_reuse` hands `prev` back
-    /// (`PreparedBlitOutcome::FreshFallback`) on reject, and we rebuild
-    /// `Fresh`. The two outcomes map straight to the two `BlitOutcome` arms at
-    /// the decision point, so no caller has to assert an impossible
-    /// `SlotsReused` away.
-    ///
-    /// Implemented through [`Self::prepare_blit`] — the same internal
-    /// candidate builder `Orchestrator::render_scroll_blit` uses — with an
-    /// immediate `.commit()`: there is no second blit construction algorithm,
-    /// only a second (non-atomic) way to consume the first one's result.
-    pub fn next_blit(
-        prev: Option<Chrome>,
-        model: &dyn CanvasModel,
-        inputs: &FrameInputs,
-        plan: &BlitPlan,
-    ) -> BlitOutcome {
-        let Some(prev) = prev else {
-            return BlitOutcome::FreshFallback(Self::next(None, model, inputs, FramePath::Fresh));
-        };
-        match Self::prepare_blit(prev, model, inputs, plan) {
-            PreparedBlitOutcome::Ready(prepared) => BlitOutcome::Blitted(prepared.commit()),
-            PreparedBlitOutcome::FreshFallback(prev) => {
-                BlitOutcome::FreshFallback(Self::next(Some(prev), model, inputs, FramePath::Fresh))
-            }
-        }
     }
 }
