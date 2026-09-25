@@ -1,8 +1,8 @@
+use crate::address::RCRange;
 use crate::chrome::Chrome;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::geometry::slot::AxisSlot;
-use crate::types::coord::RCRange;
 
 pub(crate) const CELL_REPAINT_PAD_PX: i32 = 2;
 

@@ -16,11 +16,11 @@ use std::hash::{Hash, Hasher};
 
 use super::color::data_bar_rgb;
 use super::layout_transition::GridLayoutTransition;
+use crate::address::RCRange;
 use crate::chrome::{GridLayout, PaneRegion};
 use crate::geometry::prim::Axis;
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
-use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
 use crate::types::ui::Side;
 

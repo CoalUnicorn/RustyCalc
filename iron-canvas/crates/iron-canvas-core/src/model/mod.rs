@@ -2,9 +2,9 @@
 
 use std::rc::Rc;
 
+use crate::address::RCRange;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
 use crate::style::{CellDecoration, CellKind, CellStyle};
-use crate::types::coord::RCRange;
 
 pub mod autofit;
 pub mod fetched;

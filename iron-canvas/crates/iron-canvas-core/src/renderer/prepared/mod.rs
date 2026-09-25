@@ -2,6 +2,7 @@
 //! committed cache state is touched.
 
 use crate::CellContentQuery;
+use crate::address::{DenseRange, RCRange};
 use crate::chrome::{GridLayout, GridSegment, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
@@ -9,7 +10,6 @@ use crate::painter::Painter;
 use crate::renderer::RendererCore;
 use crate::renderer::cache::fingerprint::GridFingerprint;
 use crate::style::{CellDecoration, CellKind, CellStyle};
-use crate::types::coord::{DenseRange, RCRange};
 use crate::types::fetched::Fetched;
 
 mod execute;

@@ -1,11 +1,11 @@
 //! Candidate-derived address work for a pixel-only scroll-blit plan.
 
+use crate::address::RCRange;
 use crate::chrome::{Chrome, GridLayout, PaneRegion};
 use crate::frame::BlitPlan;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
 use crate::geometry::slot::AxisSlot;
-use crate::types::coord::RCRange;
 
 pub(crate) struct FinalizedBlitWork {
     pub(crate) address_strips: [Option<(PaneRegion, RCRange)>; 2],

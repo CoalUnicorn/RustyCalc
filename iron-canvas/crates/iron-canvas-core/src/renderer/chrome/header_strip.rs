@@ -76,7 +76,7 @@ impl<P: Painter> RendererCore<P> {
         &self,
         axis: Axis,
         frame: &Chrome,
-        selection_range: crate::types::coord::RCRange,
+        selection_range: crate::address::RCRange,
     ) {
         let (sel_start, sel_end) = axis.selection_range(selection_range);
         self.walk_header_strip(axis, frame, |slot, label| {

@@ -5,6 +5,7 @@
 //! [`Chrome`](crate::chrome::Chrome) for the per-frame snapshot, and
 //! [`renderer`](crate::renderer) for the paint passes.
 
+pub mod address;
 pub mod autofit;
 pub mod chrome;
 pub mod decoration;
@@ -39,6 +40,7 @@ pub use renderer::diagnostics::{
 
 pub use render_overlays::RenderOverlays;
 
+pub use address::{AutofillTarget, CellCoord, FormulaRef, FormulaRefKind, RCRange, SheetArea};
 pub use chrome::{
     ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, GridLayout, GridShape,
     PaneRegion, measure_row_header_width,
@@ -64,5 +66,4 @@ pub use style::{
 };
 pub use surface::{LayerBase, Surface};
 pub use theme::{CanvasTheme, ThemeVariables};
-pub use types::coord::{AutofillTarget, CellCoord, FormulaRef, FormulaRefKind, RCRange, SheetArea};
 pub use types::ui::{HitTest, RectCorner, RefZone, ResizeTarget, Side};

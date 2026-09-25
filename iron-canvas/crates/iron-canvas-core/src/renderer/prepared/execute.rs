@@ -1,3 +1,4 @@
+use crate::address::RCRange;
 use crate::chrome::{Chrome, GridLayout, PaneRegion};
 use crate::frame::GridVerdict;
 use crate::frame::work::RowSpan;
@@ -14,7 +15,6 @@ use crate::renderer::prepared::{
     SegmentData,
 };
 use crate::renderer::repaint::envelope as repaint;
-use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {
     pub(crate) fn execute_prepared_grid(

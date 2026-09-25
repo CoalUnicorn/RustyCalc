@@ -11,9 +11,9 @@
 //! in `LayerBase::paint_overlay_layer`. The extra phases live as
 //! inherent methods on `SelectionLayer`, not on this trait.
 
+use crate::address::RCRange;
 use crate::chrome::Chrome;
 use crate::painter::{GroupClass, Painter};
-use crate::types::coord::RCRange;
 use crate::types::ui::HitTest;
 
 pub mod autofill;

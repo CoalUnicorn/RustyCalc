@@ -1,10 +1,10 @@
+#[cfg(feature = "dev-diagnostics")]
+use crate::address::RCRange;
 use crate::frame::GridVerdict;
 use crate::frame::work::RowSpan;
 use crate::renderer::cache::fingerprint::GridFingerprint;
 use crate::renderer::repaint::envelope as repaint;
 use crate::renderer::repaint::plan::RepaintReason;
-#[cfg(feature = "dev-diagnostics")]
-use crate::types::coord::RCRange;
 
 pub(crate) enum PreparedFingerprintUpdate {
     Install(GridFingerprint),

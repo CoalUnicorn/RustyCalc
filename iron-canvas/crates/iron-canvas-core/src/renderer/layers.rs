@@ -248,7 +248,7 @@ impl<P: Painter> OverlayRenderer<P> {
         &self,
         axis: crate::geometry::prim::Axis,
         frame: &Chrome,
-        selection_range: crate::types::coord::RCRange,
+        selection_range: crate::address::RCRange,
     ) {
         self.core
             .render_header_highlights(axis, frame, selection_range);
@@ -257,7 +257,7 @@ impl<P: Painter> OverlayRenderer<P> {
     pub fn repaint_active_cell(
         &self,
         model: &dyn CanvasModel,
-        cell: crate::types::coord::CellCoord,
+        cell: crate::address::CellCoord,
         frame: &Chrome,
     ) {
         self.core.repaint_active_cell(model, cell, frame);

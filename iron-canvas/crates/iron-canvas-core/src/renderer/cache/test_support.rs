@@ -9,13 +9,13 @@ use std::rc::Rc;
 
 use super::fingerprint::{FingerprintState, GridFingerprint};
 use crate::FrameInputs;
+use crate::address::RCRange;
 use crate::chrome::{Chrome, FramePath, GridLayout};
 use crate::geometry::{CanvasMetrics, CanvasSize};
 use crate::model_adapter::{CanvasModel, CanvasView, CellContentQuery};
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{CellKind, CellStyle};
 use crate::theme::CanvasTheme;
-use crate::types::coord::RCRange;
 use crate::types::fetched::Fetched;
 
 struct LayoutModel {

@@ -4,12 +4,12 @@
 //! the phases by name.
 
 use crate::CanvasModel;
+use crate::address::{CellCoord, RCRange};
 use crate::chrome::{ActiveCellSnapshot, Chrome};
 use crate::decoration::Layer;
 use crate::geometry::constants::{AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH};
 use crate::model_adapter::CanvasView;
 use crate::painter::{GroupClass, PaintColor, Painter};
-use crate::types::coord::{CellCoord, RCRange};
 
 #[derive(Default)]
 pub struct SelectionLayer {

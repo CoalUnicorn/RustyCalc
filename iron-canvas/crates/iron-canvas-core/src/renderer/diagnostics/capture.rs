@@ -5,6 +5,7 @@
 //! while capture is disabled, so a production build performs no work here.
 //! The completion boundary in [`super`] seals the buffer.
 
+use crate::address::RCRange;
 use crate::chrome::{Chrome, GridLayout, PaneRegion};
 use crate::frame::BlitPlan;
 use crate::frame::GridVerdict;
@@ -16,7 +17,6 @@ use crate::renderer::prepared::{
     FetchedCells, PreparedFingerprintUpdate, PreparedRepaint, PreparedRepaintPlan, PreparedStrip,
 };
 use crate::renderer::repaint::plan::RepaintReason;
-use crate::types::coord::RCRange;
 
 use super::snapshot::{
     DIAG_SCHEMA_VERSION, DiagBlit, DiagBlitResultTag, DiagCache, DiagCacheActionTag,

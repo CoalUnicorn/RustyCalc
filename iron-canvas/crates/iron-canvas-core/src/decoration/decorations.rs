@@ -21,9 +21,9 @@
 use std::rc::Rc;
 
 use crate::CanvasModel;
+use crate::address::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 use crate::model_adapter::CanvasView;
 use crate::render_overlays::RenderOverlays;
-use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 
 use super::{
     AutofillLayer, ClipboardLayer, FormulaRefsLayer, Layer, PointModeLayer, SelectionLayer,

@@ -34,11 +34,11 @@ use crate::types::fetched::Fetched;
 use self::borders::BorderPaint;
 use self::cf::CfDecorationPaint;
 use self::text::TextPaint;
+use crate::address::RCRange;
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
 use crate::renderer::prepared::FetchedCellsMut;
 use crate::theme::CanvasTheme;
-use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {
     /// Shared paint tail for every prepared-execution method in

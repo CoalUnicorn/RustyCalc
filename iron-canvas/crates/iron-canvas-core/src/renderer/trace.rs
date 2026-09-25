@@ -1,7 +1,7 @@
+use crate::address::RCRange;
 use crate::frame::{BlitFallback, FrameOutcome, FrameTrace, GridVerdict};
 use crate::painter::Painter;
 use crate::renderer::prepared::FetchedCells;
-use crate::types::coord::RCRange;
 
 use super::RendererCore;
 

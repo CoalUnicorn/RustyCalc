@@ -1,4 +1,5 @@
 use crate::CellContentQuery;
+use crate::address::RCRange;
 use crate::chrome::Chrome;
 use crate::frame::BlitPlan;
 use crate::frame::work::RowSpan;
@@ -18,7 +19,6 @@ use crate::renderer::prepared::{
 use crate::renderer::repaint::envelope as repaint;
 use crate::renderer::repaint::plan as repaint_plan;
 use crate::renderer::repaint::plan::{RepaintPlan, RepaintReason};
-use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {
     pub(crate) fn prepare_full_grid(

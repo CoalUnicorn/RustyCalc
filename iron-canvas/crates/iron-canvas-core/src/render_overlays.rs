@@ -4,7 +4,7 @@
 //! `model.get_selected_view()`. The web crate signals selection changes via
 //! `IronCanvas::request_overlay_repaint()`.
 
-use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
+use crate::address::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 
 #[derive(Clone, PartialEq, Default)]
 pub struct RenderOverlays {

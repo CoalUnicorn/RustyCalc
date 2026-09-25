@@ -6,11 +6,11 @@
 //! are cache truth (`renderer/cache/fingerprint.rs`); the module reads them and
 //! never mutates them.
 
+use crate::address::RCRange;
 use crate::chrome::GridLayout;
 use crate::frame::work::{MAX_DAMAGE_SPANS, RowSpan};
 use crate::renderer::cache::fingerprint::{GridFingerprint, band_rows};
 use crate::renderer::prepared::FetchedCells;
-use crate::types::coord::RCRange;
 
 /// Grid-wide repaint decision for an exact-layout comparison.
 #[derive(Debug, Clone, PartialEq, Eq)]
