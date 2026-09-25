@@ -2,11 +2,11 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 use crate::address::{AutofillTarget, FormulaRef, RCRange, SheetArea};
+use crate::decoration::RenderOverlays;
 use crate::decoration::{DecorationId, Layer};
 use crate::frame::work::{PendingWork, RowSpan};
 use crate::geometry::CanvasMetrics;
 use crate::painter::BlitPainter;
-use crate::render_overlays::RenderOverlays;
 use crate::surface::Surface;
 use crate::theme::{CanvasTheme, ThemeVariables};
 

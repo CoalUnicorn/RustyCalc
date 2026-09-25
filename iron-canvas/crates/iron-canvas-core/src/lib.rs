@@ -16,7 +16,6 @@ pub mod model;
 pub mod model_adapter;
 mod orchestrator;
 pub mod painter;
-mod render_overlays;
 pub mod renderer;
 mod style;
 pub mod surface;
@@ -38,15 +37,13 @@ pub use renderer::diagnostics::{
     DiagRevealedStrip, DiagSegment, DiagSourceRange, FrameDiagnostics,
 };
 
-pub use render_overlays::RenderOverlays;
-
 pub use address::{AutofillTarget, CellCoord, FormulaRef, FormulaRefKind, RCRange, SheetArea};
 pub use chrome::hit::{HitTest, RefZone, ResizeTarget};
 pub use chrome::{
     ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, GridLayout, GridShape,
     PaneRegion, measure_row_header_width,
 };
-pub use decoration::{DecorationId, Layer};
+pub use decoration::{DecorationId, Layer, RenderOverlays};
 pub use frame::{RowSpan, WorkFlags};
 pub use geometry::{
     CanvasMetricError, CanvasMetrics, CanvasSize,

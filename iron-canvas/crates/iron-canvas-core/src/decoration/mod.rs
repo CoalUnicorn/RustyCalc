@@ -20,6 +20,7 @@ pub mod autofill;
 pub mod clipboard;
 pub(crate) mod decorations;
 pub mod formula_refs;
+mod overlays;
 pub mod point_mode;
 pub mod selection;
 
@@ -28,6 +29,8 @@ pub use clipboard::ClipboardLayer;
 pub use formula_refs::FormulaRefsLayer;
 pub use point_mode::PointModeLayer;
 pub use selection::SelectionLayer;
+
+pub use overlays::RenderOverlays;
 
 pub use decorations::DecorationId;
 pub(crate) use decorations::Decorations;
