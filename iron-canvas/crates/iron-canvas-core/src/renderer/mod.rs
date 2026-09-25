@@ -64,8 +64,8 @@
 pub mod blit_work;
 pub mod cache;
 pub mod cell;
+pub mod chrome;
 pub mod diagnostics;
-pub mod frame;
 pub mod prepared;
 // `renderer/overlay/` has moved to `src/decoration/`. Each decoration is
 // a struct that impls `Layer`; the orchestration that used to live in
