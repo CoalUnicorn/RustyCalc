@@ -52,8 +52,9 @@ fn hidden_col_headers_collapse_col_thickness_and_y_origin() {
 // left edge of the frozen-column band on every row-scroll blit.
 
 use common::canvas_default;
+use iron_canvas_core::BlitPlan;
 use iron_canvas_core::CanvasModel;
-use iron_canvas_core::chrome::{ActiveCellSnapshot, BlitPlan};
+use iron_canvas_core::chrome::ActiveCellSnapshot;
 use iron_canvas_core::{FrameDelta, FrameInputs};
 
 fn snap_at_top(m: &TestModel) -> ActiveCellSnapshot {

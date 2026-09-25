@@ -13,7 +13,7 @@
 use std::rc::Rc;
 
 use crate::CanvasModel;
-use crate::frame_plan::FrameInputs;
+use crate::frame::{AxisRange, BlitPlan, FrameInputs, Shift};
 use crate::geometry::CanvasMetrics;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
@@ -23,39 +23,6 @@ use crate::theme::CanvasTheme;
 use super::blit_rebuild::ShiftDir;
 use super::pane_set::{ScrollAxisSlots, row_header_thickness_for};
 use super::{Chrome, FrameKindTag, PaneSet};
-
-/// The single pixel shift performed by a scroll blit.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Shift {
-    pub src: PixelRect,
-    pub dst: PixelRect,
-}
-
-/// 1D pixel range along a single axis (origin + size). Used by
-/// `BlitPlan::for_axis_scroll` to thread main-axis and cross-axis extents
-/// through axis-agnostic code without committing to X-vs-Y until the rect
-/// is assembled.
-#[derive(Clone, Copy)]
-struct AxisRange {
-    origin: i32,
-    size: i32,
-}
-
-/// Pure-canvas-pixel description of a scroll-blit. `shift` is the one merged
-/// cell-area rectangle the painter copies; `pixel_strip` is the band the
-/// renderer must paint over to fill in newly-revealed
-/// content. Axis tells the orchestrator which header strip to repaint
-/// (the cross-axis header is untouched by the scroll).
-///
-/// All rects are in CSS pixels relative to the canvas origin — the
-/// `Painter::blit` backend handles DPR.
-#[derive(Clone)]
-#[must_use = "a BlitPlan represents a committed viewport-shift decision; dropping it means the blit never happens"]
-pub struct BlitPlan {
-    pub axis: Axis,
-    pub shift: Shift,
-    pub pixel_strip: PixelRect,
-}
 
 impl BlitPlan {
     /// Compose an axis-scroll `BlitPlan`. `main_pane` covers the pane along

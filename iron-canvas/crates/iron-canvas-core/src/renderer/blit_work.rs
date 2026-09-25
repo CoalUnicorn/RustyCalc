@@ -1,6 +1,7 @@
 //! Candidate-derived address work for a pixel-only scroll-blit plan.
 
-use crate::chrome::{BlitPlan, Chrome, GridLayout, PaneRegion};
+use crate::chrome::{Chrome, GridLayout, PaneRegion};
+use crate::frame::BlitPlan;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
 use crate::geometry::slot::AxisSlot;

@@ -76,19 +76,20 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::CanvasModel;
+use crate::chrome::Chrome;
 #[cfg(feature = "dev-diagnostics")]
 use crate::chrome::GridLayout;
 pub use crate::chrome::PaneRegion;
-use crate::chrome::{BlitPlan, Chrome};
+use crate::frame::BlitPlan;
+use crate::frame::work::RowSpan;
 use crate::geometry::prim::Axis;
-use crate::pending_work::RowSpan;
 use crate::renderer::cache::{FrameCache, GridCache};
 pub use cache::ColorIntern;
 pub use cache::FontIntern;
 
 pub use self::cell::text::{TextLine, layout_into};
 
-use crate::orchestrator::{BlitFallback, FrameOutcome, FrameTrace, GridVerdict};
+use crate::frame::{BlitFallback, FrameOutcome, FrameTrace, GridVerdict};
 use crate::painter::{BlitPainter, GroupClass, Painter};
 pub(crate) use crate::renderer::prepared::GridCacheCommit;
 use crate::renderer::prepared::{FetchedCells, PreparedGrid};
@@ -630,7 +631,7 @@ impl<P: Painter> GridRenderer<P> {
     pub(crate) fn diag_begin_attempt(
         &self,
         delta: diagnostics::DiagDeltaKind,
-        rebuild_reason: Option<crate::frame_plan::RebuildReason>,
+        rebuild_reason: Option<crate::frame::RebuildReason>,
     ) {
         self.core.diag_begin_attempt(delta, rebuild_reason);
     }

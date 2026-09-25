@@ -30,7 +30,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
-use crate::frame_plan::{FrameDelta, FrameInputs, RebuildReason};
+pub use crate::frame::{BlitPlan, Shift};
+use crate::frame::{FrameDelta, FrameInputs, RebuildReason};
 use crate::geometry::CanvasMetrics;
 use crate::geometry::{
     constants::{AUTOFILL_HANDLE_PX, CELL_AREA_INSET, HEADER_ROW_HEIGHT},
@@ -49,8 +50,8 @@ mod pane_region;
 mod pane_set;
 mod recycled_slots;
 
+pub use blit::FramePath;
 pub(crate) use blit::PreparedBlitOutcome;
-pub use blit::{BlitPlan, FramePath, Shift};
 pub use kind::FrameKindTag;
 pub use pane_region::{GridLayout, GridSegment, GridShape, PaneRegion};
 pub use pane_set::{PaneSet, measure_row_header_width};

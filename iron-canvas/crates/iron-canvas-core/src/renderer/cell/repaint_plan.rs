@@ -7,7 +7,7 @@
 //! never mutates them.
 
 use crate::chrome::GridLayout;
-use crate::pending_work::{MAX_DAMAGE_SPANS, RowSpan};
+use crate::frame::work::{MAX_DAMAGE_SPANS, RowSpan};
 use crate::renderer::cache::fingerprint::{GridFingerprint, band_rows};
 use crate::renderer::prepared::FetchedCells;
 use crate::types::coord::RCRange;

@@ -3,22 +3,11 @@
 //! [`FrameInputs`] snapshots every scalar model/geometry read a paint
 //! attempt needs — selected sheet, selected view, frozen counts, header
 //! visibility, selection visibility — exactly once, before any geometry
-//! walk, cache invalidation, or paint runs. Stage 2 (and everything before
-//! it) treated a failed scalar bridge read as license to substitute a
-//! synthetic default (an all-A1 view, sheet `0`, "headers visible"): the
-//! frame still built, just against fabricated state. [`FrameInputs::capture`]
-//! replaces that with a fallible constructor — any one bridge failure holds
-//! the whole attempt (see `Orchestrator::render_pending`'s capture-failure
-//! handling) instead of silently painting the wrong sheet.
-//!
-//! [`FrameDelta`] and [`RebuildReason`] are the classification types
-//! [`Chrome::classify`](crate::chrome::Chrome::classify) produces: comparing
-//! a captured `FrameInputs` against the previously committed `Chrome` to
-//! decide whether the next frame is a Stable reuse, a safe scroll, or a
-//! full rebuild (and why). They live here — rather than in `chrome/mod.rs`
-//! alongside the classifier itself — so the crate's public re-export
-//! surface stays stable regardless of which module owns the comparison
-//! logic; `Chrome::classify` is the sole producer.
+//! walk, cache invalidation, or paint runs. [`FrameInputs::capture`] is a
+//! fallible constructor: any one bridge failure holds the whole attempt
+//! instead of silently painting fabricated state (see
+//! `Orchestrator::render_pending`), and [`FrameInputFailure`] names which
+//! input regressed.
 
 use std::rc::Rc;
 
@@ -269,37 +258,4 @@ impl FrameInputs {
     pub fn model_generation(&self) -> u64 {
         self.model_generation
     }
-}
-
-/// Outcome of classifying a captured [`FrameInputs`] against the previously
-/// committed `Chrome`. Produced by
-/// [`Chrome::classify`](crate::chrome::Chrome::classify); consumed by the
-/// orchestrator's planner (`plan_frame` in `orchestrator.rs`), which turns
-/// one `FrameDelta` plus the attempt's taken `PendingWork` into a closed
-/// `FramePlan` — see that module's doc comment for the complete
-/// `PendingWork` x `FrameDelta` table.
-#[derive(Clone)]
-pub enum FrameDelta {
-    Stable,
-    Scroll(crate::chrome::BlitPlan),
-    Rebuild(RebuildReason),
-}
-
-/// Why [`FrameDelta::Rebuild`] fired. Named per hard-break check (rather
-/// than one generic "geometry changed") so a rebuilt frame's diagnostics can
-/// say which committed field diverged.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RebuildReason {
-    NoCommittedFrame,
-    Size,
-    Dpr,
-    Theme,
-    Model,
-    Sheet,
-    Freeze,
-    Headers,
-    TwoAxisScroll,
-    MissingActiveSnapshot,
-    ActiveCellChangedOrUnknown,
-    IncompatibleScrollOverlap,
 }

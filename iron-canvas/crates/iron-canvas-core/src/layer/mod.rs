@@ -15,14 +15,15 @@
 use std::rc::Rc;
 
 use crate::CanvasModel;
-use crate::chrome::{BlitPlan, Chrome};
+use crate::chrome::Chrome;
 use crate::decoration::{DecorationId, Layer, selection::SelectionLayer};
+use crate::frame::BlitPlan;
+use crate::frame::work::RowSpan;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};
 use crate::painter::{BlitPainter, GroupClass, PaintColor, Painter};
-use crate::pending_work::RowSpan;
 use crate::renderer::{GridCacheCommit, GridPaintOutcome, GridRenderer, LayerOps, OverlayRenderer};
 
 /// Drawing target abstraction. Production wasm holds one Surface per

@@ -5,12 +5,13 @@
 //! while capture is disabled, so a production build performs no work here.
 //! The completion boundary in [`super`] seals the buffer.
 
-use crate::chrome::{BlitPlan, Chrome, GridLayout, PaneRegion};
-use crate::frame_plan::RebuildReason;
+use crate::chrome::{Chrome, GridLayout, PaneRegion};
+use crate::frame::BlitPlan;
+use crate::frame::GridVerdict;
+use crate::frame::RebuildReason;
+use crate::frame::work::RowSpan;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
-use crate::orchestrator::GridVerdict;
-use crate::pending_work::RowSpan;
 use crate::renderer::cell::repaint_plan::RepaintReason;
 use crate::renderer::prepared::{
     FetchedCells, PreparedFingerprintUpdate, PreparedRepaint, PreparedRepaintPlan, PreparedStrip,

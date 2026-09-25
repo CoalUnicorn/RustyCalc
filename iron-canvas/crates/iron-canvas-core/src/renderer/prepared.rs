@@ -2,12 +2,13 @@
 //! committed cache state is touched.
 
 use crate::CellContentQuery;
-use crate::chrome::{BlitPlan, Chrome, GridLayout, GridSegment, PaneRegion};
+use crate::chrome::{Chrome, GridLayout, GridSegment, PaneRegion};
+use crate::frame::BlitPlan;
+use crate::frame::GridVerdict;
+use crate::frame::work::RowSpan;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
-use crate::orchestrator::GridVerdict;
 use crate::painter::{PaintColor, Painter};
-use crate::pending_work::RowSpan;
 use crate::renderer::RendererCore;
 use crate::renderer::blit_work;
 use crate::renderer::cache::BufferTruth;

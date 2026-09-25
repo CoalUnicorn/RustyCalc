@@ -8,23 +8,23 @@
 pub mod autofit;
 pub mod chrome;
 pub mod decoration;
-mod frame_plan;
+mod frame;
 pub mod geometry;
 pub mod layer;
 pub mod model_adapter;
 mod orchestrator;
 pub mod painter;
-mod pending_work;
 mod render_overlays;
 pub mod renderer;
 mod style;
 pub mod theme;
 pub mod types;
 
-pub use frame_plan::{FrameDelta, FrameInputFailure, FrameInputs, RebuildReason};
-pub use orchestrator::{
-    FrameOutcome, FrameTrace, GridVerdict, Orchestrator, PaintResult, RenderStrategy,
+pub use frame::{
+    BlitFallback, BlitPlan, FrameDelta, FrameInputFailure, FrameInputs, FrameOutcome, FrameTrace,
+    GridVerdict, PaintResult, RebuildReason, RenderStrategy, Shift,
 };
+pub use orchestrator::Orchestrator;
 
 #[cfg(feature = "dev-diagnostics")]
 pub use renderer::diagnostics::{
@@ -39,6 +39,7 @@ pub use render_overlays::RenderOverlays;
 
 pub use autofit::AutoFitError;
 pub use decoration::{DecorationId, Layer};
+pub use frame::{RowSpan, WorkFlags};
 pub use geometry::{
     CanvasMetricError, CanvasMetrics, CanvasSize,
     constants::{
@@ -50,7 +51,6 @@ pub use geometry::{
     utils::col_name,
 };
 pub use model_adapter::{CanvasModel, CanvasView, CellContentQuery};
-pub use pending_work::{RowSpan, WorkFlags};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
     FontStyle, HAlign, IconSpec, RatingSpec, VAlign,
