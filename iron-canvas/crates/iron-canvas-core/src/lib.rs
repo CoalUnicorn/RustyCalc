@@ -38,6 +38,10 @@ pub use renderer::diagnostics::{
 pub use render_overlays::RenderOverlays;
 
 pub use autofit::AutoFitError;
+pub use chrome::{
+    ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, GridLayout, GridShape,
+    PaneRegion, measure_row_header_width,
+};
 pub use decoration::{DecorationId, Layer};
 pub use frame::{RowSpan, WorkFlags};
 pub use geometry::{
@@ -47,9 +51,10 @@ pub use geometry::{
         HEADER_ROW_HEIGHT, HEADER_SEPARATOR_WIDTH, LAST_COLUMN, LAST_ROW,
     },
     pixel_rect::PixelRect,
-    prim::{Line, Point, Span},
+    prim::{Axis, Line, Point, Span},
     utils::col_name,
 };
+pub use layer::{LayerBase, Surface};
 pub use model_adapter::{CanvasModel, CanvasView, CellContentQuery};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
