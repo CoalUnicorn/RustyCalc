@@ -12,6 +12,7 @@
 //! every geometry walk, hit test, backend, and export path names them.
 
 pub mod constants;
+pub mod labels;
 pub mod pixel_rect;
 pub mod prim;
 pub mod slot;

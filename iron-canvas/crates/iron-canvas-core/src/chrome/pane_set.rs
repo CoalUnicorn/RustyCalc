@@ -138,7 +138,7 @@ impl PaneSet {
             .map(|s| {
                 model
                     .get_column_header_text(sheet, s.id())
-                    .unwrap_or_else(|| crate::geometry::utils::col_name(s.id()))
+                    .unwrap_or_else(|| crate::geometry::labels::col_name(s.id()))
             })
             .collect()
     }
