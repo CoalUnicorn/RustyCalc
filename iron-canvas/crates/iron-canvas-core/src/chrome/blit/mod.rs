@@ -20,9 +20,11 @@ use crate::geometry::prim::{Axis, Point};
 use crate::geometry::slot::{AxisSlots, scroll_first};
 use crate::theme::CanvasTheme;
 
-use super::blit_rebuild::ShiftDir;
+use self::rebuild::ShiftDir;
 use super::pane_set::{ScrollAxisSlots, row_header_thickness_for};
 use super::{Chrome, FrameKindTag, PaneSet};
+
+mod rebuild;
 
 impl BlitPlan {
     /// Compose an axis-scroll `BlitPlan`. `main_pane` covers the pane along

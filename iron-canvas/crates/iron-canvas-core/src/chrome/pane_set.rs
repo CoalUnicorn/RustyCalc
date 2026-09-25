@@ -4,7 +4,7 @@
 //! `Chrome` composes these axis-symmetric methods whenever a query spans
 //! both axes; everything here knows about only one axis at a time. The
 //! blit probe/rebuild paths and the cross-frame slot recycler live in
-//! sibling files (`blit_rebuild.rs`, `recycled_slots.rs`) — this module
+//! sibling files (`blit/rebuild.rs`, `recycled_slots.rs`) — this module
 //! holds only the pure-axis surface.
 
 use crate::CanvasModel;

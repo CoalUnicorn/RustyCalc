@@ -44,7 +44,6 @@ use crate::types::ui::{HitTest, ResizeTarget};
 use crate::{CanvasModel, CanvasSize, RCRange};
 
 mod blit;
-mod blit_rebuild;
 mod kind;
 mod pane_region;
 mod pane_set;

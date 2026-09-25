@@ -10,7 +10,7 @@
 use crate::geometry::slot::{AxisSlot, ColSlot, RowSlot, col_width, fill_axis, row_height};
 use crate::{CanvasModel, CanvasSize};
 
-use super::pane_set::PaneSet;
+use super::super::pane_set::PaneSet;
 
 /// Direction of a single-axis viewport shift between `prev.pane_set.top_row()`
 /// (or `left_column()`) and the new effective scroll start.
