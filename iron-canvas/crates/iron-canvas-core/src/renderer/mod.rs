@@ -61,7 +61,7 @@
 //! With no frozen rows or columns the grid is a single `BottomRight`
 //! quadrant.
 
-pub mod blit_work;
+pub mod blit;
 pub mod cache;
 pub mod cell;
 pub mod chrome;

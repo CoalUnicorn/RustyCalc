@@ -10,7 +10,7 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
-use crate::renderer::blit_work;
+use crate::renderer::blit;
 use crate::renderer::cache::BufferTruth;
 use crate::renderer::cache::fingerprint::{
     GridFingerprint, RowShiftIneligible, StripFingerprintSource,
@@ -557,7 +557,7 @@ impl<P: Painter> RendererCore<P> {
             .grid_cache
             .layout()
             .expect("a Shift transition always has a committed layout");
-        let Some(work) = blit_work::finalize_blit_work(previous, candidate, frame, plan) else {
+        let Some(work) = blit::finalize_blit_work(previous, candidate, frame, plan) else {
             // A classified Shift should always expose at least one address
             // strip. If geometry rules drift, repainting the candidate is a
             // safe recovery; treating this as a bridge hold would retry the
