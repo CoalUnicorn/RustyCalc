@@ -105,24 +105,6 @@ impl BlitPlan {
     }
 }
 
-/// Dispatch input for `Chrome::next` — which reuse-or-rebuild strategy the
-/// orchestrator selected for this frame. Exhaustive: adding a variant breaks
-/// every strategy arm at compile time. The blit fast-path is *not* here — it has
-/// a two-outcome result and lives in [`Chrome::next_blit`] returning
-/// [`super::BlitOutcome`], so it never widens into this shared dispatch.
-#[derive(Clone, Copy)]
-#[must_use = "FramePath dispatches Chrome::next; dropping it skips the chosen construction strategy"]
-pub enum FramePath {
-    /// Full rebuild walk. `prev = Some` recycles slot Vec allocations;
-    /// `prev = None` is the first-frame path.
-    Fresh,
-    /// Reuse prev's slot vecs verbatim; refresh per-frame state only
-    /// (theme). Content scope is the caller's `GridWork` verdict rather than
-    /// state stored on `Chrome`, so `SlotsReuse` following a blit cannot
-    /// inherit stale shift state. Requires `prev = Some`.
-    SlotsReuse,
-}
-
 // Scroll-blit helpers
 //
 // `Chrome::classify` already disqualified anything that isn't a pure single-axis
