@@ -4,8 +4,8 @@ use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
-use crate::layer::Surface;
 use crate::painter::BlitPainter;
+use crate::surface::Surface;
 use crate::theme::CanvasTheme;
 use crate::types::ui::{HitTest, ResizeTarget};
 

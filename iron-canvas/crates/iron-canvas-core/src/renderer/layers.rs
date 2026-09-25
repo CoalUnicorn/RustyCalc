@@ -105,7 +105,7 @@ impl<P: Painter> GridRenderer<P> {
 
     /// See [`RendererCore::prepare_fresh_grid`]. `pub(crate)`: an
     /// execution detail of the Fresh atomic paint path, reached only
-    /// through [`crate::layer::LayerBase::paint_grid_fresh`].
+    /// through [`crate::surface::LayerBase::paint_grid_fresh`].
     pub(crate) fn prepare_fresh_grid(
         &self,
         model: &dyn CanvasModel,

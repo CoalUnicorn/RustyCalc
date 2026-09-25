@@ -4,9 +4,9 @@ use crate::CanvasModel;
 use crate::decoration::{DecorationId, Layer};
 use crate::frame::work::{PendingWork, RowSpan};
 use crate::geometry::CanvasMetrics;
-use crate::layer::Surface;
 use crate::painter::BlitPainter;
 use crate::render_overlays::RenderOverlays;
+use crate::surface::Surface;
 use crate::theme::{CanvasTheme, ThemeVariables};
 use crate::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
 

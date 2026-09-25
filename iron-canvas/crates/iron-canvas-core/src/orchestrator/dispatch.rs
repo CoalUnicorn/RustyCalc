@@ -3,10 +3,10 @@ use std::rc::Rc;
 use crate::CanvasModel;
 use crate::chrome::Chrome;
 use crate::frame::{FrameInputs, GridWork, PaintResult, plan_frame};
-use crate::layer::Surface;
 use crate::painter::BlitPainter;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::DiagDeltaKind;
+use crate::surface::Surface;
 
 use super::Orchestrator;
 use super::finish::{AttemptOutcome, FrameUpdate, HoldReason, OverlayContext};

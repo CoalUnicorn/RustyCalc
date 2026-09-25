@@ -4,11 +4,11 @@ use crate::frame::work::{PendingWork, WorkFlags};
 use crate::frame::{
     FrameInputFailure, FrameInputs, FrameOutcome, OverlayWork, PaintResult, RenderStrategy,
 };
-use crate::layer::Surface;
 use crate::painter::BlitPainter;
 use crate::renderer::GridCacheCommit;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::{DiagCacheResolution, DiagCompletion, DiagPaintedLayers};
+use crate::surface::Surface;
 
 use super::Orchestrator;
 

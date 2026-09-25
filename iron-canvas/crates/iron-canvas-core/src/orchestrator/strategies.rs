@@ -2,11 +2,11 @@ use crate::CanvasModel;
 use crate::chrome::{Chrome, FramePath, FreshBuild, PreparedBlitOutcome, RecycledSlots};
 use crate::frame::work::{PendingWork, RowSpan};
 use crate::frame::{BlitPlan, FrameInputs, RenderStrategy};
-use crate::layer::Surface;
 use crate::painter::BlitPainter;
 use crate::renderer::GridPaintOutcome;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::DiagBlitResultTag;
+use crate::surface::Surface;
 
 use super::Orchestrator;
 use super::finish::{AttemptOutcome, FrameUpdate, HoldReason, retry_grid_wide};

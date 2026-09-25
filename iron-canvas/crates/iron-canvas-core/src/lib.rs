@@ -17,6 +17,7 @@ pub mod painter;
 mod render_overlays;
 pub mod renderer;
 mod style;
+pub mod surface;
 pub mod theme;
 pub mod types;
 
@@ -54,12 +55,12 @@ pub use geometry::{
     prim::{Axis, Line, Point, Span},
     utils::col_name,
 };
-pub use layer::{LayerBase, Surface};
 pub use model_adapter::{CanvasModel, CanvasView, CellContentQuery};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
     FontStyle, HAlign, IconSpec, RatingSpec, VAlign,
 };
+pub use surface::{LayerBase, Surface};
 pub use theme::{CanvasTheme, ThemeVariables};
 pub use types::coord::{AutofillTarget, CellCoord, FormulaRef, FormulaRefKind, RCRange, SheetArea};
 pub use types::fetched::Fetched;

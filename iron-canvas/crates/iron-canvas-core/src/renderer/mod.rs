@@ -3,8 +3,8 @@
 //! # Lifecycle
 //!
 //! `Orchestrator<S>` (in [`crate::orchestrator`]) owns two
-//! [`LayerBase<S, R>`](crate::layer::LayerBase) values: one for the grid,
-//! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::layer::Surface)
+//! [`LayerBase<S, R>`](crate::surface::LayerBase) values: one for the grid,
+//! one for the overlay. Each `LayerBase` holds a [`Surface`](crate::surface::Surface)
 //! and a layer-specific renderer wrapping [`RendererCore`] — and no dirty
 //! state of its own. In the wasm build the surface is
 //! `iron_canvas_canvas2d::WebSurface`; both contexts keep alpha

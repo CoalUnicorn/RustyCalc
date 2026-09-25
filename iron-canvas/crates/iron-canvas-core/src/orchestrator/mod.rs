@@ -46,11 +46,11 @@ use crate::decoration::Decorations;
 use crate::frame::work::{PendingWork, WorkFlags};
 use crate::frame::{FrameTrace, RenderStrategy};
 use crate::geometry::CanvasMetrics;
-use crate::layer::{LayerBase, Surface};
 use crate::painter::BlitPainter;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::FrameDiagnostics;
 use crate::renderer::{GridRenderer, OverlayRenderer};
+use crate::surface::{LayerBase, Surface};
 use crate::theme::CanvasTheme;
 
 mod dispatch;
