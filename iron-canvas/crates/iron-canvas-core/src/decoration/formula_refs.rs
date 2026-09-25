@@ -5,12 +5,13 @@ use std::borrow::Cow;
 
 use crate::address::{FormulaRef, FormulaRefKind, RCRange};
 use crate::chrome::Chrome;
+use crate::chrome::hit::{HitTest, RefZone};
 use crate::decoration::Layer;
 use crate::geometry::constants::{DASHED_BORDER_WIDTH, REF_HANDLE_HIT_PAD_PX};
 use crate::geometry::pixel_rect::PixelRect;
+use crate::geometry::prim::{RectCorner, Side};
 use crate::painter::{GroupClass, PaintColor, Painter};
 use crate::theme::{FORMULA_REF_COLORS, FORMULA_REF_TINTS};
-use crate::types::ui::{HitTest, RectCorner, RefZone, Side};
 
 #[derive(Default)]
 pub struct FormulaRefsLayer {

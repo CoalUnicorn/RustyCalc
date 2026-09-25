@@ -1,8 +1,8 @@
 use crate::RCRange;
+use crate::chrome::hit::{HitTest, ResizeTarget};
 use crate::geometry::constants::AUTOFILL_HANDLE_PX;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
-use crate::types::ui::{HitTest, ResizeTarget};
 
 use super::Chrome;
 

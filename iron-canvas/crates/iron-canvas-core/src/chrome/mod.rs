@@ -37,6 +37,7 @@ use crate::theme::CanvasTheme;
 mod blit;
 mod build;
 mod classify;
+pub mod hit;
 mod kind;
 mod pane_region;
 mod pane_set;

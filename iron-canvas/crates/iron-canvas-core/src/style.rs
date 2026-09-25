@@ -1,7 +1,7 @@
 // Engine-agnostic cell styling — mirrors the renderer's read-set exactly.
 // Colors are CSS strings (resolved against the theme at paint time, not here).
 
-use crate::types::ui::Side;
+use crate::geometry::prim::Side;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CellStyle {

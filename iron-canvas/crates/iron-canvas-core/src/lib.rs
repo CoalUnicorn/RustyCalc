@@ -41,6 +41,7 @@ pub use renderer::diagnostics::{
 pub use render_overlays::RenderOverlays;
 
 pub use address::{AutofillTarget, CellCoord, FormulaRef, FormulaRefKind, RCRange, SheetArea};
+pub use chrome::hit::{HitTest, RefZone, ResizeTarget};
 pub use chrome::{
     ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, GridLayout, GridShape,
     PaneRegion, measure_row_header_width,
@@ -55,7 +56,7 @@ pub use geometry::{
     },
     labels::col_name,
     pixel_rect::PixelRect,
-    prim::{Axis, Line, Point, Span},
+    prim::{Axis, Line, Point, RectCorner, Side, Span},
 };
 pub use model::autofit::AutoFitError;
 pub use model::fetched::Fetched;
@@ -66,4 +67,3 @@ pub use style::{
 };
 pub use surface::{LayerBase, Surface};
 pub use theme::{CanvasTheme, ThemeVariables};
-pub use types::ui::{HitTest, RectCorner, RefZone, ResizeTarget, Side};

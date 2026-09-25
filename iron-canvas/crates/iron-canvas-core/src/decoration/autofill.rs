@@ -3,10 +3,10 @@
 
 use crate::address::{AutofillTarget, RCRange};
 use crate::chrome::Chrome;
+use crate::chrome::hit::HitTest;
 use crate::decoration::Layer;
 use crate::geometry::constants::{AUTOFILL_HIT_PAD_PX, STANDARD_BORDER_WIDTH};
 use crate::painter::{GroupClass, PaintColor, Painter};
-use crate::types::ui::HitTest;
 
 #[derive(Default)]
 pub struct AutofillLayer {

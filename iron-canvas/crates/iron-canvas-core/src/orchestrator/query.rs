@@ -1,4 +1,5 @@
 use crate::autofit::AutoFitError;
+use crate::chrome::hit::{HitTest, ResizeTarget};
 use crate::decoration::selection::SelectionLayer;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
@@ -7,7 +8,6 @@ use crate::geometry::prim::Point;
 use crate::painter::BlitPainter;
 use crate::surface::Surface;
 use crate::theme::CanvasTheme;
-use crate::types::ui::{HitTest, ResizeTarget};
 
 use super::Orchestrator;
 

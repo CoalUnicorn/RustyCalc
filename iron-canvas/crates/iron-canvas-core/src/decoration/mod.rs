@@ -13,8 +13,8 @@
 
 use crate::address::RCRange;
 use crate::chrome::Chrome;
+use crate::chrome::hit::HitTest;
 use crate::painter::{GroupClass, Painter};
-use crate::types::ui::HitTest;
 
 pub mod autofill;
 pub mod clipboard;
