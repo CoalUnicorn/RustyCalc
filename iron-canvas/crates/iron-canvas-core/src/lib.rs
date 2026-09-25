@@ -11,6 +11,7 @@ pub mod decoration;
 mod frame;
 pub mod geometry;
 pub mod layer;
+pub mod model;
 pub mod model_adapter;
 mod orchestrator;
 pub mod painter;
@@ -38,7 +39,6 @@ pub use renderer::diagnostics::{
 
 pub use render_overlays::RenderOverlays;
 
-pub use autofit::AutoFitError;
 pub use chrome::{
     ActiveCellSnapshot, BlitOutcome, Chrome, FrameKindTag, FramePath, GridLayout, GridShape,
     PaneRegion, measure_row_header_width,
@@ -55,7 +55,9 @@ pub use geometry::{
     pixel_rect::PixelRect,
     prim::{Axis, Line, Point, Span},
 };
-pub use model_adapter::{CanvasModel, CanvasView, CellContentQuery};
+pub use model::autofit::AutoFitError;
+pub use model::fetched::Fetched;
+pub use model::{CanvasModel, CanvasView, CellContentQuery};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
     FontStyle, HAlign, IconSpec, RatingSpec, VAlign,
@@ -63,5 +65,4 @@ pub use style::{
 pub use surface::{LayerBase, Surface};
 pub use theme::{CanvasTheme, ThemeVariables};
 pub use types::coord::{AutofillTarget, CellCoord, FormulaRef, FormulaRefKind, RCRange, SheetArea};
-pub use types::fetched::Fetched;
 pub use types::ui::{HitTest, RectCorner, RefZone, ResizeTarget, Side};
