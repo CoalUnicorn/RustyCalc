@@ -13,12 +13,13 @@ use crate::style::{CellDecoration, CellKind, CellStyle};
 use crate::types::fetched::Fetched;
 
 mod execute;
+mod paint;
 mod prepare;
 mod repaint;
 
 pub(crate) use repaint::{PreparedFingerprintUpdate, PreparedRepaint, PreparedRepaintPlan};
 
-use self::execute::shift_channel;
+use self::paint::shift_channel;
 
 #[derive(Default, Clone)]
 pub(crate) struct FetchedCells {
