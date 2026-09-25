@@ -1,7 +1,7 @@
 //! Grid-wide repaint planning: compare the candidate fingerprint tree with the
 //! painted one and select the smallest safe repaint.
 //!
-//! Cell tier, next to [`repaint::Envelope`](super::repaint), which turns the
+//! Cell tier, next to [`repaint::Envelope`](super::envelope), which turns the
 //! selected plan into executable clip geometry. The trees this module compares
 //! are cache truth (`renderer/cache/fingerprint.rs`); the module reads them and
 //! never mutates them.

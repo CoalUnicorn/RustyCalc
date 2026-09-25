@@ -5,7 +5,6 @@ use crate::geometry::prim::Axis;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::cell::PaneCells;
-use crate::renderer::cell::repaint;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::DiagFingerprintActionTag;
 #[cfg(feature = "dev-diagnostics")]
@@ -14,6 +13,7 @@ use crate::renderer::prepared::{
     FetchedCells, GridCacheCommit, PreparedFingerprintUpdate, PreparedGrid, PreparedRepaintPlan,
     SegmentData,
 };
+use crate::renderer::repaint::envelope as repaint;
 use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {

@@ -69,6 +69,7 @@ pub mod diagnostics;
 mod grid;
 mod layers;
 pub mod prepared;
+mod repaint;
 mod trace;
 // `renderer/overlay/` has moved to `src/decoration/`. Each decoration is
 // a struct that impls `Layer`; the orchestration that used to live in

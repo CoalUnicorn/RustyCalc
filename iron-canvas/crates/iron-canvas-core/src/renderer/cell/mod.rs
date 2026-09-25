@@ -24,8 +24,6 @@
 pub mod borders;
 pub mod cf;
 pub mod paint;
-pub mod repaint;
-pub mod repaint_plan;
 pub mod text;
 
 pub use paint::{CellPaint, PaneCells};

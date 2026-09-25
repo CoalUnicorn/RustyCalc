@@ -8,7 +8,7 @@
 //!
 //! Cache tier, next to [`GridCache`](super::GridCache), which owns one
 //! [`FingerprintState`]. Comparing two trees and selecting a repaint is a paint
-//! decision and lives in [`crate::renderer::cell::repaint_plan`].
+//! decision and lives in [`crate::renderer::repaint::plan`].
 
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::hash_map::DefaultHasher;

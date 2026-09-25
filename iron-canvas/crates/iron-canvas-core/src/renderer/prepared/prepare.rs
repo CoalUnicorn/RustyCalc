@@ -9,14 +9,15 @@ use crate::renderer::blit;
 use crate::renderer::cache::BufferTruth;
 use crate::renderer::cache::fingerprint::{RowShiftIneligible, StripFingerprintSource};
 use crate::renderer::cache::layout_transition::GridLayoutTransition;
-use crate::renderer::cell::repaint;
-use crate::renderer::cell::repaint_plan::{self, RepaintPlan, RepaintReason};
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::{DiagBlitResultTag, DiagCacheActionTag, DiagFetchPurpose};
 use crate::renderer::prepared::{
     FetchedCells, PreparedFingerprintUpdate, PreparedGrid, PreparedRepaint, PreparedRepaintPlan,
     PreparedStrip, SegmentData,
 };
+use crate::renderer::repaint::envelope as repaint;
+use crate::renderer::repaint::plan as repaint_plan;
+use crate::renderer::repaint::plan::{RepaintPlan, RepaintReason};
 use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {

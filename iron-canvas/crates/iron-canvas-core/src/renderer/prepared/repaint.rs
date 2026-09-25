@@ -1,8 +1,8 @@
 use crate::frame::GridVerdict;
 use crate::frame::work::RowSpan;
 use crate::renderer::cache::fingerprint::GridFingerprint;
-use crate::renderer::cell::repaint;
-use crate::renderer::cell::repaint_plan::RepaintReason;
+use crate::renderer::repaint::envelope as repaint;
+use crate::renderer::repaint::plan::RepaintReason;
 #[cfg(feature = "dev-diagnostics")]
 use crate::types::coord::RCRange;
 

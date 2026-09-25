@@ -12,10 +12,10 @@ use crate::frame::RebuildReason;
 use crate::frame::work::RowSpan;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
-use crate::renderer::cell::repaint_plan::RepaintReason;
 use crate::renderer::prepared::{
     FetchedCells, PreparedFingerprintUpdate, PreparedRepaint, PreparedRepaintPlan, PreparedStrip,
 };
+use crate::renderer::repaint::plan::RepaintReason;
 use crate::types::coord::RCRange;
 
 use super::snapshot::{
