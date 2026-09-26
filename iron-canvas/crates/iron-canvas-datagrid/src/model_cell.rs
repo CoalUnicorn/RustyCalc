@@ -2,7 +2,7 @@ use std::cell::{Ref, RefCell};
 
 use crate::DataGrid;
 use iron_canvas_core::{
-    CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched, RCRange,
+    CanvasModel, CanvasView, CellContentQuery, CellKind, CellLink, CellStyle, Fetched, RCRange,
     forward_methods,
 };
 
@@ -57,6 +57,7 @@ impl CanvasModel for DataGridModel {
         fn get_row_header_text(&self, s: u32, row: i32) -> Option<String>;
         fn get_show_row_headers(&self, s: u32) -> Option<bool>;
         fn get_show_col_headers(&self, s: u32) -> Option<bool>;
+        fn get_sheet_links(&self, s: u32) -> Option<Vec<CellLink>>;
     });
 }
 

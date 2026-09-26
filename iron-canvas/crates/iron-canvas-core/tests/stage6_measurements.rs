@@ -53,9 +53,9 @@ use std::rc::Rc;
 use iron_canvas_core::geometry::constants::{CELL_AREA_INSET, FROZEN_SEP};
 use iron_canvas_core::{
     Border, BorderItem, BorderStyle, CanvasModel, CanvasSize, CanvasTheme, CanvasView,
-    CellContentQuery, CellDecoration, CellKind, CellStyle, DataBarSpec, Fetched, FrameOutcome,
-    FrameTrace, GridVerdict, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, Orchestrator, PaintResult,
-    RCRange, RowSpan,
+    CellContentQuery, CellDecoration, CellKind, CellLink, CellStyle, DataBarSpec, Fetched,
+    FrameOutcome, FrameTrace, GridVerdict, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, Orchestrator,
+    PaintResult, RCRange, RowSpan,
 };
 use iron_canvas_recorder::{DrawOp, MemSurface};
 
@@ -194,6 +194,7 @@ impl CanvasModel for ObservedModel {
         fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
         fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;
         fn get_column_header_text(&self, sheet: u32, col: i32) -> Option<String>;
+        fn get_sheet_links(&self, sheet: u32) -> Option<Vec<CellLink>>;
     });
 }
 

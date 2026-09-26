@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use crate::address::RCRange;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
+use crate::link::CellLink;
 use crate::style::{CellDecoration, CellKind, CellStyle};
 
 pub mod autofit;
@@ -184,6 +185,23 @@ pub trait CanvasModel: CellContentQuery {
     /// than painting a fabricated grid state.
     fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool>;
 
+    /// Every cell hyperlink on `sheet`, in any order.
+    ///
+    /// `Some(empty)` is a known empty collection: the model holds no links,
+    /// or it does not implement this optional capability at all (the default
+    /// below). `None` is a failed query — a thrown bridge call, a payload the
+    /// bridge could not decode, a malformed list, or a validation error in
+    /// [`LinkIndex::from_cells`](crate::link::LinkIndex::from_cells) — and
+    /// holds the whole paint attempt. An
+    /// invalid list is not empty data: silently painting no link would leave a
+    /// visible link unclickable.
+    ///
+    /// Read once per attempt, not per cell: links are sparse, and one
+    /// sheet-level read avoids a per-cell bridge crossing.
+    fn get_sheet_links(&self, _sheet: u32) -> Option<Vec<CellLink>> {
+        Some(Vec::new())
+    }
+
     /// Whether the selection (fill, stroke, autofill handle, active-cell
     /// overlay repaint, header highlights) should paint at all. Infallible
     /// and default-`true` — unlike the other accessors here, there is no
@@ -330,6 +348,7 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64>;
         fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64>;
         fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool>;
+        fn get_sheet_links(&self, sheet: u32) -> Option<Vec<CellLink>>;
         fn get_show_selection(&self) -> bool;
         fn last_row(&self, sheet: u32) -> i32;
         fn last_column(&self, sheet: u32) -> i32;
@@ -414,5 +433,50 @@ mod tests {
         assert!(matches!(out[1], Fetched::Value(CellDecoration::Icon(_))));
         assert!(matches!(out[2], Fetched::Absent));
         assert!(matches!(out[3], Fetched::Absent));
+    }
+
+    /// A model that does not implement the optional link capability must
+    /// answer the trait default: a known empty collection, never a hold.
+    #[test]
+    fn default_sheet_links_is_a_known_empty_collection() {
+        struct NoLinkCapability;
+
+        impl CellContentQuery for NoLinkCapability {
+            fn get_cell_style(&self, _: u32, _: i32, _: i32) -> Fetched<CellStyle> {
+                Fetched::Absent
+            }
+            fn get_cell_type(&self, _: u32, _: i32, _: i32) -> Fetched<CellKind> {
+                Fetched::Absent
+            }
+            fn get_formatted_cell_value(&self, _: u32, _: i32, _: i32) -> Fetched<String> {
+                Fetched::Absent
+            }
+        }
+
+        impl CanvasModel for NoLinkCapability {
+            fn get_selected_sheet(&self) -> Option<u32> {
+                None
+            }
+            fn get_selected_view(&self) -> Option<CanvasView> {
+                None
+            }
+            fn get_frozen_rows_count(&self, _: u32) -> Option<i32> {
+                None
+            }
+            fn get_frozen_columns_count(&self, _: u32) -> Option<i32> {
+                None
+            }
+            fn get_row_height(&self, _: u32, _: i32) -> Fetched<f64> {
+                Fetched::Absent
+            }
+            fn get_column_width(&self, _: u32, _: i32) -> Fetched<f64> {
+                Fetched::Absent
+            }
+            fn get_show_grid_lines(&self, _: u32) -> Fetched<bool> {
+                Fetched::Absent
+            }
+        }
+
+        assert_eq!(NoLinkCapability.get_sheet_links(0), Some(Vec::new()));
     }
 }
