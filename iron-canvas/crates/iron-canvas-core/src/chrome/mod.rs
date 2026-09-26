@@ -92,11 +92,12 @@ pub struct Chrome {
     /// "slot vecs inherited from prev" predicate.
     pub kind: FrameKindTag,
     /// Committed link state for this frame's sheet. Empty for a sheet with no
-    /// links. A candidate frame carries the empty index until
-    /// [`Chrome::attach_links`] installs the captured attempt value at the
-    /// completion boundary, so `Rc` keeps every `Chrome` clone a refcount bump
-    /// and every query reads the same committed index the pixels were painted
-    /// from.
+    /// links. A candidate frame is seeded from the index captured for this
+    /// attempt (`Chrome::build` and `next_blit` read it from `FrameInputs`); a
+    /// held attempt hands the previously committed index back, and
+    /// [`Chrome::attach_links`] installs the committed value at the completion
+    /// boundary. `Rc` keeps every `Chrome` clone a refcount bump and every
+    /// query reads the same committed index the pixels were painted from.
     links: Rc<LinkIndex>,
 }
 

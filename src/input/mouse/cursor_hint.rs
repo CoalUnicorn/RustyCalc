@@ -10,7 +10,7 @@
 use iron_canvas_core::chrome::hit::{HitTest, RefZone, ResizeTarget};
 use iron_canvas_core::geometry::prim::{RectCorner, Side};
 
-use crate::state::CursorHint;
+use crate::state::{CursorHint, WorkbookState};
 
 use super::{CanvasHandle, with_canvas};
 
@@ -70,6 +70,48 @@ fn ref_zone_hint(zone: RefZone) -> CursorHint {
         RefZone::Edge(Side::Left | Side::Right) => CursorHint::RefExtendEW,
         RefZone::Corner(RectCorner::TopLeft | RectCorner::BottomRight) => CursorHint::RefCornerNwse,
         RefZone::Corner(RectCorner::TopRight | RectCorner::BottomLeft) => CursorHint::RefCornerNesw,
+    }
+}
+
+/// One idle-hover probe resolved against the committed frame.
+///
+/// Publishes the cursor class, the link cell under the pointer, and the
+/// position a later revalidation re-probes from. Callers that already know the
+/// pointer is idle use this; drag handling keeps its own priority.
+///
+/// The pointer position is stored before the probe, so a revalidation after a
+/// commit re-probes the same position even when the pointer has not moved.
+pub(crate) fn set_hover_probe(state: WorkbookState, icv: CanvasHandle, x: f64, y: f64) {
+    state.hover_pointer.set(Some((x, y)));
+    let probe = compute_cursor_hint(icv, x, y);
+    if state.hover_cursor.get_untracked() != probe.cursor {
+        state.hover_cursor.set(probe.cursor);
+    }
+    if state.hover_link.get_untracked() != probe.link_cell {
+        state.hover_link.set(probe.link_cell);
+    }
+}
+
+/// Drop the hover: the pointer is no longer over the grid, so no revalidation
+/// can apply until the next move.
+pub(crate) fn clear_hover(state: WorkbookState) {
+    state.hover_pointer.set(None);
+    if state.hover_link.get_untracked().is_some() {
+        state.hover_link.set(None);
+    }
+}
+
+/// Re-probe the stored hover position against the frame that just committed.
+///
+/// A commit changes what an unmoved pointer sits over: a scroll moves the
+/// cells, a sheet switch replaces them, and an edit adds or removes the link.
+/// Both the cursor class and the hovered link cell are derived from committed
+/// state, so both are re-derived here rather than from the input event that
+/// scheduled the paint.
+pub(crate) fn revalidate_hover(state: WorkbookState, icv: CanvasHandle) {
+    match state.hover_pointer.get_untracked() {
+        Some((x, y)) => set_hover_probe(state, icv, x, y),
+        None => clear_hover(state),
     }
 }
 

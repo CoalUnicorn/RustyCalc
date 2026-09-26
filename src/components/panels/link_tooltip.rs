@@ -26,14 +26,13 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
     let (open, set_open) = signal(false);
     let (pos, set_pos) = signal((0i32, 0i32));
 
-    // Re-query on every commit that can change the committed link or its
-    // geometry: content/structure for the links, navigation and layout
-    // (scroll, row height, column width) for the rect.
+    // Re-query on every commit: `committed_frame` is bumped by the render loop
+    // once a frame is on screen, so the link and rect read here belong to that
+    // frame. The content/navigation/format/structure event signals are *not*
+    // tracked — they only schedule the paint, so an effect driven by them would
+    // describe the frame before it.
     Effect::new(move |_| {
-        let _ = state.events.content.get();
-        let _ = state.events.navigation.get();
-        let _ = state.events.format.get();
-        let _ = state.events.structure.get();
+        let _ = state.committed_frame.get();
 
         let anchor = state.hover_link.get().and_then(|(row, column)| {
             let rect = with_canvas(canvas_handle, |ic| {
@@ -59,9 +58,7 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
     });
 
     let link_text = move || {
-        let _ = state.events.content.get();
-        let _ = state.events.navigation.get();
-        let _ = state.events.format.get();
+        let _ = state.committed_frame.get();
         state
             .hover_link
             .get()

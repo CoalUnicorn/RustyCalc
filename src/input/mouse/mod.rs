@@ -31,6 +31,7 @@ mod mouseup;
 mod wheel;
 
 pub use contextmenu::handle_contextmenu;
+pub(crate) use cursor_hint::{clear_hover, revalidate_hover};
 pub use dblclick::handle_dblclick;
 pub use mousedown::handle_mousedown;
 pub use mousemove::handle_mousemove;

@@ -40,6 +40,18 @@ pub struct WorkbookState {
     /// re-read from the canvas on every commit, so a deleted or moved link
     /// never keeps a stale tooltip.
     pub(crate) hover_link: Split<Option<(i32, i32)>>,
+    /// Canvas-local pointer position of the idle hover, `None` while the
+    /// pointer is outside the grid. The committed-frame effect re-probes it,
+    /// so a scroll, a sheet switch or a link edit re-hit-tests the cell that
+    /// is under the pointer now, not the one that was there when the pointer
+    /// last moved.
+    pub(crate) hover_pointer: Split<Option<(f64, f64)>>,
+    /// Bumped by the render loop after a frame commits. A commit is the first
+    /// moment the committed link index and the pane geometry agree with what
+    /// is on screen, so hover state derived from them is revalidated on this
+    /// signal: reading it from an input event describes the previous frame,
+    /// because that event only schedules the paint which produces the next.
+    pub(crate) committed_frame: Split<u64>,
     /// Ghost-range published by `DragState::DraggingFormulaRef` mousemoves.
     /// Cleared on mouseup, on Escape, and on the mouseup-missed bail-out.
     pub(crate) dragged_ref_override: Split<Option<RefOverride>>,
@@ -135,6 +147,8 @@ impl WorkbookState {
             drag: Split::new(DragState::Idle),
             hover_cursor: Split::new(CursorHint::default()),
             hover_link: Split::new(None),
+            hover_pointer: Split::new(None),
+            committed_frame: Split::new(0),
             dragged_ref_override: Split::new(None),
             context_menu: Split::new(None),
             status: Split::new(None),

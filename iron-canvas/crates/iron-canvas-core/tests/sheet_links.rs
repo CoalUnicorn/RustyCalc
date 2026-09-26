@@ -82,6 +82,40 @@ fn a_held_attempt_leaves_committed_link_state_in_place() {
     );
 }
 
+/// A preparation failure *after* the link capture discards the whole
+/// candidate, so a changed capture is not observable until an attempt commits
+/// it — the committed index must be the previous one.
+#[test]
+fn a_preparation_failure_after_a_link_change_keeps_the_committed_index() {
+    let model = model_with_links(vec![link(2, 3, "https://first.example")]);
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    // The link capture succeeds with the new target; the geometry walk that
+    // follows it fails.
+    model.set_sheet_links(vec![link(2, 3, "https://second.example")]);
+    model.set_row_height_bridge_fail(true);
+    model.set_frozen_rows(1);
+    orch.view_changed();
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+    assert_eq!(
+        orch.link_at(2, 3)
+            .expect("the held attempt must not clear committed link state")
+            .target()
+            .as_str(),
+        "https://first.example"
+    );
+
+    model.set_row_height_bridge_fail(false);
+    model.set_frozen_rows(0);
+    orch.view_changed();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(
+        orch.link_at(2, 3).expect("the committed frame carries the link").target().as_str(),
+        "https://second.example"
+    );
+}
+
 /// A metadata-only link change must not take the overlay-only shortcut: the
 /// link's underline and color are pixels, so the digest change forces
 /// whole-grid content work even when nothing marked content dirty.

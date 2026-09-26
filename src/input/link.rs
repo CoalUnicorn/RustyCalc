@@ -1,10 +1,13 @@
-//! Cell hyperlink actions: set or delete a link on the selection, and follow
-//! the link under a modified click.
+//! Cell hyperlink actions: set or delete a link on the selected cell, and
+//! follow the link under a modified click.
 //!
-//! Mirrors `structure.rs`: a pure action enum resolved against the model. One
-//! difference matters: a link can be owned by a formula (`HYPERLINK`) — such a
+//! Mirrors `structure.rs`: a pure action enum resolved against the model. Two
+//! differences matter. A link can be owned by a formula (`HYPERLINK`) — such a
 //! link is "dynamic" (`CellLink::is_dynamic`) and the host refuses to edit or
-//! delete it, because the next recalculation would recreate it anyway.
+//! delete it, because the next recalculation would recreate it anyway. And an
+//! action touches exactly one cell: the engine records one undo entry per cell,
+//! so a selection-wide action could not be undone in one step, and the work it
+//! needs is unbounded.
 
 use leptos::prelude::*;
 
@@ -28,26 +31,121 @@ pub enum LinkKind {
     Internal,
 }
 
-/// Link mutations, applied to the current selection.
+/// Link mutations, applied to the selected cell.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkAction {
-    /// Attach a link to every cell of the selection. `label` becomes the
-    /// content of the cell, so it applies only when the selection is a single
-    /// cell — one shared label would flatten a multi-cell selection.
+    /// Attach a link to the selected cell. `label`, when given, becomes the
+    /// content of that cell.
     SetLink {
         kind: LinkKind,
         target_or_location: String,
         tooltip: Option<String>,
         label: Option<String>,
     },
-    /// Remove the link from every cell of the selection. Cell content and
-    /// formatting stay untouched.
+    /// Remove the link from the selected cell. Cell content and formatting
+    /// stay untouched.
     DeleteLink,
 }
 
 /// Shown whenever a formula owns the link: it cannot be edited or deleted.
 pub const FORMULA_OWNED: &str =
     "This hyperlink is created by a formula. Edit the formula to change or delete it.";
+
+/// Shown whenever the selection covers more than one cell.
+pub const SINGLE_CELL_ONLY: &str =
+    "Select one cell. A hyperlink is set or removed one cell at a time.";
+
+/// A link action resolved against the selection.
+#[derive(Clone, Debug)]
+pub(crate) enum LinkPlan {
+    Set {
+        row: i32,
+        column: i32,
+        link: Link,
+        label: Option<String>,
+    },
+    Delete {
+        row: i32,
+        column: i32,
+    },
+}
+
+/// Resolve `action` against the selection.
+///
+/// `area` is the normalized selection and `anchor` its active cell.
+/// `formula_owned` reports whether the committed link of `anchor` is a
+/// formula's — such a link must not be replaced or removed, because the next
+/// recalculation would recreate it.
+pub(crate) fn plan_link_action(
+    action: &LinkAction,
+    area: CellArea,
+    anchor: CellAddress,
+    formula_owned: bool,
+) -> Result<LinkPlan, LinkError> {
+    if !area.is_single_cell() {
+        return Err(LinkError::Refused(SINGLE_CELL_ONLY.to_string()));
+    }
+    if formula_owned {
+        return Err(LinkError::Refused(FORMULA_OWNED.to_string()));
+    }
+    let (row, column) = (anchor.row, anchor.column);
+    Ok(match action {
+        LinkAction::SetLink {
+            kind,
+            target_or_location,
+            tooltip,
+            label,
+        } => LinkPlan::Set {
+            row,
+            column,
+            link: match kind {
+                LinkKind::External => Link::External {
+                    target: target_or_location.clone(),
+                    tooltip: tooltip.clone(),
+                },
+                LinkKind::Internal => Link::Internal {
+                    location: target_or_location.clone(),
+                    tooltip: tooltip.clone(),
+                },
+            },
+            label: label.clone(),
+        },
+        LinkAction::DeleteLink => LinkPlan::Delete { row, column },
+    })
+}
+
+/// Attach `link` to one cell.
+///
+/// The label is written first. The engine's `set_cell_link` writes the link
+/// before it checks whether the label may replace the cell content, and it
+/// returns that rejection without recording the link write — so a rejected
+/// label would leave an untracked link behind, and the model's undo entry would
+/// never name it. The label write is the only step that can reject a cell
+/// (part of an array formula, a spill cell, or a merged cell), and it rejects
+/// the cell before mutating anything, so it runs first: either it fails with
+/// link, content, style and history untouched, or it succeeds and the link
+/// write that follows can only fail on an invalid address.
+pub(crate) fn write_cell_link(
+    m: &mut UserModel<'_>,
+    sheet: u32,
+    row: i32,
+    column: i32,
+    link: Link,
+    label: Option<&str>,
+) -> Result<(), String> {
+    if let Some(label) = label {
+        // The engine's own rule: `set_cell_link` compares the label with the
+        // formatted cell value, and an unchanged label is not rewritten. A
+        // write of the same text would add a history entry of its own.
+        let changes = m
+            .get_formatted_cell_value(sheet, row, column)
+            .is_ok_and(|current| current != label);
+        if changes {
+            m.set_user_input(sheet, row, column, label)?;
+        }
+    }
+    m.set_cell_link(sheet, row, column, link, None)
+}
 
 /// Apply `action` to the current selection.
 ///
@@ -61,51 +159,25 @@ pub fn execute_link(
 ) -> Result<(), LinkError> {
     let anchor = model.with_value(CellAddress::from_view);
     let area = model.with_value(|m| CellArea::from_view(m).normalized());
-
-    if selection_has_dynamic_link(icv, area) {
-        return Err(LinkError::Refused(FORMULA_OWNED.to_string()));
-    }
-
-    let label_applies = area.is_single_cell();
+    let plan = plan_link_action(action, area, anchor, link_is_dynamic(icv, anchor))?;
     let old_value = model.with_value(|m| cell_text(m, anchor));
 
-    match action {
-        LinkAction::SetLink {
-            kind,
-            target_or_location,
-            tooltip,
+    match plan {
+        LinkPlan::Set {
+            row,
+            column,
+            link,
             label,
         } => {
-            let link = match kind {
-                LinkKind::External => Link::External {
-                    target: target_or_location.clone(),
-                    tooltip: tooltip.clone(),
-                },
-                LinkKind::Internal => Link::Internal {
-                    location: target_or_location.clone(),
-                    tooltip: tooltip.clone(),
-                },
-            };
-            let label = if label_applies {
-                label.as_deref()
-            } else {
-                None
-            };
             try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), LinkError> {
-                for (row, column) in area.cells() {
-                    m.set_cell_link(anchor.sheet, row, column, link.clone(), label)
-                        .map_err(LinkError::Engine)?;
-                }
-                Ok(())
+                write_cell_link(m, anchor.sheet, row, column, link, label.as_deref())
+                    .map_err(LinkError::Engine)
             })?;
         }
-        LinkAction::DeleteLink => {
+        LinkPlan::Delete { row, column } => {
             try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), LinkError> {
-                for (row, column) in area.cells() {
-                    m.delete_cell_link(anchor.sheet, row, column)
-                        .map_err(LinkError::Engine)?;
-                }
-                Ok(())
+                m.delete_cell_link(anchor.sheet, row, column)
+                    .map_err(LinkError::Engine)
             })?;
         }
     }
@@ -223,14 +295,14 @@ fn navigate_internal(
     Ok(())
 }
 
-/// True when any cell of `area` carries a link a formula owns. Without a
-/// mounted canvas there is no committed link state, hence nothing to protect.
-fn selection_has_dynamic_link(icv: CanvasHandle, area: CellArea) -> bool {
-    with_canvas(icv, |ic| {
-        area.cells()
-            .any(|(row, column)| ic.link_at(row, column).is_some_and(|l| l.is_dynamic()))
-    })
-    .unwrap_or(false)
+/// True when the committed link of `address` is owned by a formula. One
+/// committed lookup: the link index is sparse, so no cell scan is needed.
+/// Without a mounted canvas there is no committed link state, hence nothing
+/// to protect.
+fn link_is_dynamic(icv: CanvasHandle, address: CellAddress) -> bool {
+    with_canvas(icv, |ic| ic.link_at(address.row, address.column))
+        .flatten()
+        .is_some_and(|link| link.is_dynamic())
 }
 
 /// Resolve a link `location` to the first reference it names.

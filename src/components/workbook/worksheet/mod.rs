@@ -9,8 +9,8 @@ use crate::components::panels::link_tooltip::LinkTooltip;
 use crate::components::panels::named_ranges::NamedRangesDialog;
 use crate::components::workbook::editing::cell_editor::CellEditor;
 use crate::input::mouse::{
-    CanvasHandle, handle_contextmenu, handle_dblclick, handle_mousedown, handle_mousemove,
-    handle_mouseup, handle_wheel,
+    CanvasHandle, clear_hover, handle_contextmenu, handle_dblclick, handle_mousedown,
+    handle_mousemove, handle_mouseup, handle_wheel, revalidate_hover,
 };
 use crate::model::AppClipboard;
 use crate::state::{DragState, ModelStore, WorkbookState};
@@ -85,7 +85,17 @@ pub fn Worksheet() -> impl IntoView {
         Some(app),
         state.show_headers,
         state.scroll_into_view,
+        state.committed_frame,
     );
+
+    // Revalidate the idle hover after every commit. The event signals above
+    // only *schedule* a paint, so an effect driven by them reads the previous
+    // frame; this one runs after the frame that changed the link, the scroll
+    // offset, or the sheet, and re-hit-tests the stored pointer position.
+    Effect::new(move |_| {
+        let _ = state.committed_frame.get();
+        revalidate_hover(state, canvas_handle);
+    });
 
     // Cleanup is automatic when the component unmounts. Needs `poke`, so it
     // is registered here rather than alongside `container_ref` above.
@@ -225,7 +235,7 @@ pub fn Worksheet() -> impl IntoView {
             node_ref=container_ref
             class="ws"
             style:overflow=container_overflow
-            on:mouseleave=move |_| state.hover_link.set(None)
+            on:mouseleave=move |_| clear_hover(state)
         >
             <canvas
                 node_ref=grid_ref
