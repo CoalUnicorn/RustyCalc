@@ -335,6 +335,13 @@ impl IronCanvas {
         self.runtime.orchestrator().cell_rect(row, column)
     }
 
+    /// The committed hyperlink at a 1-based cell, or `None`. Reads committed
+    /// state only, so a Rust host (RustyCalc) can drive hover, cursor, and
+    /// activation without crossing the JS boundary.
+    pub fn link_at(&self, row: i32, column: i32) -> Option<Rc<iron_canvas_core::CellLink>> {
+        self.runtime.orchestrator().link_at(row, column)
+    }
+
     pub fn scroll_pane_rect(&self) -> Option<PixelRect> {
         self.runtime.orchestrator().scroll_pane_rect()
     }
