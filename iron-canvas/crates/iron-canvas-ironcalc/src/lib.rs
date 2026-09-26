@@ -15,7 +15,7 @@ use iron_canvas_core::{
 };
 use ironcalc_base::UserModel;
 
-use crate::convert::{cell_decoration_from_extended, cell_type_to_kind, style_to_core};
+use crate::convert::{cell_decoration_from_extended, cell_type_to_kind, link_to_core, style_to_core};
 
 /// Color resolver over a live `UserModel`: `resolve_color` borrows the
 /// workbook theme, so resolving costs no theme clone per cell. Pass as
@@ -90,6 +90,31 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
         match UserModel::get_show_grid_lines(&self.0, sheet) {
             Ok(v) => Fetched::Value(v),
             Err(_) => Fetched::Absent,
+        }
+    }
+
+    /// `UserModel::get_links_list` already merges worksheet and formula links
+    /// with worksheet precedence, sorted by `(row, column)` — no new engine
+    /// helper is needed, and `dynamic` is preserved verbatim.
+    ///
+    /// Unlike the geometry reads above, a native error here maps to `None`
+    /// (hold the attempt), not `Absent` (default). An empty link set is a
+    /// legitimate answer for a sheet with no links; a failed read is not, and
+    /// painting no link would leave a visible link unclickable.
+    fn get_sheet_links(&self, sheet: u32) -> Option<Vec<iron_canvas_core::CellLink>> {
+        match UserModel::get_links_list(&self.0, sheet) {
+            Ok(links) => {
+                let resolve = color_resolver(&self.0);
+                Some(
+                    links
+                        .into_iter()
+                        .map(|view| {
+                            link_to_core(view.link, view.row, view.column, view.dynamic, &resolve)
+                        })
+                        .collect(),
+                )
+            }
+            Err(_) => None,
         }
     }
 }

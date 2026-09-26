@@ -8,8 +8,8 @@
 //! (orphan rule). Free functions serve the same role for the bridge crate.
 
 use iron_canvas_core::{
-    Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
-    FontStyle, HAlign, RatingSpec, VAlign,
+    Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellLink, CellStyle,
+    DataBarSpec, FontStyle, HAlign, LinkTarget, RCRange, RatingSpec, VAlign,
 };
 use ironcalc_base::cf_types as ic_cf;
 use ironcalc_base::types as ic;
@@ -152,4 +152,38 @@ pub fn cell_type_to_kind(t: ic::CellType) -> CellKind {
         // Array and CompoundData have no dedicated core kind; treat as text.
         I::Text | I::Array | I::CompoundData => CellKind::Text,
     }
+}
+
+/// Resolve the workbook's hyperlink theme color.
+///
+/// The index `10` mirrors `links::THEME_COLOR_HYPERLINK`, which is
+/// `pub(crate)` upstream, so it cannot be imported. A test in this crate
+/// compares the result with the color a static link's own cell style
+/// resolves, which guards the literal against upstream drift.
+pub fn hyperlink_color(resolve: ColorResolver) -> Option<String> {
+    resolve(&ic::Color::Theme(10, 0.0))
+}
+
+/// Convert one IronCalc link into a core [`CellLink`].
+///
+/// `row` and `column` are the link's 1-based address; `dynamic` is the
+/// engine's flag — a formula (`HYPERLINK`) owns a dynamic link.
+pub fn link_to_core(
+    link: ic::Link,
+    row: i32,
+    column: i32,
+    dynamic: bool,
+    resolve: ColorResolver,
+) -> CellLink {
+    let (target, tooltip) = match link {
+        ic::Link::External { target, tooltip } => (LinkTarget::External(target), tooltip),
+        ic::Link::Internal { location, tooltip } => (LinkTarget::Internal(location), tooltip),
+    };
+    CellLink::new(
+        RCRange::from_cell(row, column),
+        target,
+        tooltip,
+        dynamic,
+        hyperlink_color(resolve),
+    )
 }
