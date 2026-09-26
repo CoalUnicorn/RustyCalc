@@ -20,6 +20,7 @@ use crate::address::RCRange;
 use crate::chrome::{GridLayout, PaneRegion};
 use crate::geometry::prim::Axis;
 use crate::geometry::prim::Side;
+use crate::link::{CellLink, LinkIndex};
 use crate::model::fetched::Fetched;
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
@@ -126,6 +127,7 @@ fn fingerprint_grid_row(
     layout: GridLayout,
     row: i32,
     cells: &[Option<&FetchedCells>; 4],
+    links: &LinkIndex,
     leaves: &mut Vec<CellFingerprint>,
 ) -> RowFingerprint {
     let cell_start = leaves.len();
@@ -154,6 +156,7 @@ fn fingerprint_grid_row(
                 &fetched.values()[idx],
                 &fetched.cell_types()[idx],
                 &fetched.decorations()[idx],
+                links.get(row, col).map(|link| link.as_ref()),
             );
             leaves.push(CellFingerprint(digest));
             digest.hash(&mut row_hasher);
@@ -173,6 +176,7 @@ fn fingerprint_strip_row(
     layout: GridLayout,
     row: i32,
     strips: &[StripFingerprintSource<'_>],
+    links: &LinkIndex,
     leaves: &mut Vec<CellFingerprint>,
 ) -> Option<RowFingerprint> {
     let cell_start = leaves.len();
@@ -210,6 +214,7 @@ fn fingerprint_strip_row(
                 &strip.cells.values()[idx],
                 &strip.cells.cell_types()[idx],
                 &strip.cells.decorations()[idx],
+                links.get(row, col).map(|link| link.as_ref()),
             );
             leaves.push(CellFingerprint(digest));
             digest.hash(&mut row_hasher);
@@ -238,23 +243,32 @@ fn rebuild_grid_fingerprint(
     target: &mut GridFingerprint,
     layout: GridLayout,
     cells: &[Option<&FetchedCells>; 4],
+    links: &LinkIndex,
 ) {
     target.layout = layout;
     target.rows.clear();
     target.cells.clear();
     if let Some(rows) = band_rows(layout, true) {
         for row in rows {
-            target
-                .rows
-                .push(fingerprint_grid_row(layout, row, cells, &mut target.cells));
+            target.rows.push(fingerprint_grid_row(
+                layout,
+                row,
+                cells,
+                links,
+                &mut target.cells,
+            ));
         }
     }
     target.scroll_band_start = target.rows.len();
     if let Some(rows) = band_rows(layout, false) {
         for row in rows {
-            target
-                .rows
-                .push(fingerprint_grid_row(layout, row, cells, &mut target.cells));
+            target.rows.push(fingerprint_grid_row(
+                layout,
+                row,
+                cells,
+                links,
+                &mut target.cells,
+            ));
         }
     }
 }
@@ -273,13 +287,14 @@ impl FingerprintState {
         &self,
         layout: GridLayout,
         cells: &[Option<&FetchedCells>; 4],
+        links: &LinkIndex,
     ) -> GridFingerprint {
         let mut candidate = self
             .scratch
             .borrow_mut()
             .take()
             .unwrap_or_else(|| empty_grid_fingerprint(layout));
-        rebuild_grid_fingerprint(&mut candidate, layout, cells);
+        rebuild_grid_fingerprint(&mut candidate, layout, cells, links);
         candidate
     }
 
@@ -302,11 +317,17 @@ impl FingerprintState {
     /// Rotate only the scroll-row band. Frozen rows retain their original
     /// digests, overlapping scroll rows reuse painted truth, and every newly
     /// addressed row must be complete across all candidate column segments.
+    ///
+    /// Link correctness on this path: a changed link set forces all-content
+    /// work in `plan_frame` and a complete fingerprint rebuild, so the blit
+    /// path never compares a shifted prior digest against a new link truth.
+    /// The column-shift path already reports `MarkStale`.
     pub(crate) fn build_row_shift_candidate(
         &self,
         previous_layout: GridLayout,
         candidate_layout: GridLayout,
         strips: &[StripFingerprintSource<'_>],
+        links: &LinkIndex,
     ) -> Result<GridFingerprint, RowShiftIneligible> {
         if self.truth.get() != FingerprintTruth::Exact {
             return Err(RowShiftIneligible::StaleHistory);
@@ -340,7 +361,7 @@ impl FingerprintState {
             if let Some(band) = band_rows(candidate_layout, frozen) {
                 for row in band {
                     if let Some(fingerprint) =
-                        fingerprint_strip_row(candidate_layout, row, strips, output_cells)
+                        fingerprint_strip_row(candidate_layout, row, strips, links, output_cells)
                     {
                         output_rows.push(fingerprint);
                         continue;
@@ -384,6 +405,7 @@ fn cell_digest(
     value: &Fetched<String>,
     cell_type: &Fetched<CellKind>,
     decoration: &Fetched<CellDecoration>,
+    link: Option<&CellLink>,
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     hasher.write_i32(row);
@@ -411,6 +433,16 @@ fn cell_digest(
         }
     }
     hash_decoration(decoration, &mut hasher);
+    // The link digest folds presence, resolved color, target, tooltip, and
+    // dynamic state in one `u64` — precomputed per link, never re-hashed per
+    // frame. A same-label target change therefore changes the cell digest.
+    match link {
+        None => hasher.write_u8(0),
+        Some(link) => {
+            hasher.write_u8(1);
+            link.digest().hash(&mut hasher);
+        }
+    }
     hasher.finish()
 }
 
@@ -476,6 +508,8 @@ fn hash_border_item<H: Hasher>(border: Option<&BorderItem>, state: &mut H) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::address::RCRange;
+    use crate::link::{CellLink, LinkTarget};
     use crate::renderer::cache::test_support::{build, dense, layout};
     use crate::style::{Border, BorderStyle};
 
@@ -497,6 +531,7 @@ mod tests {
             &Fetched::Value("a".to_string()),
             &Fetched::Value(CellKind::Text),
             &Fetched::Absent,
+            None,
         );
         let value_changed = cell_digest(
             1,
@@ -505,6 +540,7 @@ mod tests {
             &Fetched::Value("b".to_string()),
             &Fetched::Value(CellKind::Text),
             &Fetched::Absent,
+            None,
         );
         let style_changed = cell_digest(
             1,
@@ -513,9 +549,48 @@ mod tests {
             &Fetched::Value("a".to_string()),
             &Fetched::Value(CellKind::Text),
             &Fetched::Absent,
+            None,
         );
         assert_ne!(base, value_changed);
         assert_ne!(base, style_changed);
+    }
+
+    /// A same-label target change must change the per-cell digest, or the
+    /// repaint planner would keep the old clickable target's pixels.
+    #[test]
+    fn a_link_target_change_changes_the_cell_digest() {
+        let style = Fetched::Value(CellStyle::default());
+        let value = Fetched::Value("label".to_string());
+        let kind = Fetched::Value(CellKind::Text);
+        let decoration = Fetched::Absent;
+        let index = |target: &str| {
+            LinkIndex::from_cells(vec![CellLink::new(
+                RCRange::from_cell(2, 3),
+                LinkTarget::External(target.to_string()),
+                None,
+                false,
+                None,
+            )])
+            .expect("a single-cell link is a valid index")
+        };
+        let first = index("https://first.example");
+        let second = index("https://second.example");
+        let digest = |links: &LinkIndex| {
+            cell_digest(
+                2,
+                3,
+                &style,
+                &value,
+                &kind,
+                &decoration,
+                links.get(2, 3).map(|link| link.as_ref()),
+            )
+        };
+        assert_ne!(digest(&first), digest(&second));
+        assert_ne!(
+            digest(&first),
+            cell_digest(2, 3, &style, &value, &kind, &decoration, None)
+        );
     }
 
     #[test]
@@ -562,7 +637,7 @@ mod tests {
             .collect();
 
         let rotated = state
-            .build_row_shift_candidate(previous_layout, candidate_layout, &sources)
+            .build_row_shift_candidate(previous_layout, candidate_layout, &sources, &LinkIndex::empty())
             .unwrap();
         let rebuilt = build(candidate_layout);
         assert_eq!(rotated, rebuilt);
@@ -575,12 +650,12 @@ mod tests {
         let candidate = layout(11, 8, 2, 2);
         let state = FingerprintState::default();
         assert_eq!(
-            state.build_row_shift_candidate(previous, candidate, &[]),
+            state.build_row_shift_candidate(previous, candidate, &[], &LinkIndex::empty()),
             Err(RowShiftIneligible::StaleHistory)
         );
         state.install(build(previous));
         assert_eq!(
-            state.build_row_shift_candidate(previous, candidate, &[]),
+            state.build_row_shift_candidate(previous, candidate, &[], &LinkIndex::empty()),
             Err(RowShiftIneligible::IncompleteStripOrExtent)
         );
     }

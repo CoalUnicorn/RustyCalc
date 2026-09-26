@@ -121,5 +121,6 @@ fn bundles(layout: GridLayout) -> [Option<FetchedCells>; 4] {
 pub(crate) fn build(layout: GridLayout) -> GridFingerprint {
     let bundles = bundles(layout);
     let references = std::array::from_fn(|index| bundles[index].as_ref());
-    FingerprintState::default().build_candidate(layout, &references)
+    FingerprintState::default()
+        .build_candidate(layout, &references, &crate::link::LinkIndex::empty())
 }

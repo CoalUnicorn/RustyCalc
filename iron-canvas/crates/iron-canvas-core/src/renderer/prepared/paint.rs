@@ -42,6 +42,7 @@ fn paint_cells_in<P: Painter>(
     renderer.paint_cells_pass(
         PaneCells::for_strip(&region, frame, ranges.walk_range),
         ranges.index_range,
+        frame.links(),
         &frame.theme,
         fetched.as_mut(),
     );
