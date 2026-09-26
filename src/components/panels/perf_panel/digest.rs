@@ -165,11 +165,13 @@ pub(super) fn InspectorDigest(
                         <div class="pp-stats">
                             {stat("Attempts", digest.attempts.to_string())}
                             {stat("Committed", digest.committed.to_string())}
-                            {stat("Held", digest.held.to_string())}
+                            {(digest.held > 0)
+                                .then(|| stat("Render deferred", digest.held.to_string()))}
                             {stat("Grid paints", digest.grid_paints.to_string())}
                             {stat("Overlay-only paints", digest.overlay_only_paints.to_string())}
-                            {stat("Skips", digest.skips.to_string())}
-                            {stat("Fallbacks", digest.fallbacks.to_string())}
+                            {stat("Grid unchanged", digest.skips.to_string())}
+                            {(digest.fallbacks > 0)
+                                .then(|| stat("Strategy fallbacks", digest.fallbacks.to_string()))}
                             {stat(
                                 "Render calls",
                                 format!(
