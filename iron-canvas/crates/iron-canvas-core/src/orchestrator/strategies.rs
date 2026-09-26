@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::CanvasModel;
 use crate::chrome::{Chrome, FramePath, FreshBuild, PreparedBlitOutcome, RecycledSlots};
 use crate::frame::work::{PendingWork, RowSpan};
@@ -189,6 +191,10 @@ where
         let Some(prev) = self.last_frame.take() else {
             return self.render_full_rebuild(model, inputs, work);
         };
+        // The candidate refreshes its link index from `inputs`; a held
+        // attempt must install the previously committed one instead, so the
+        // committed handle is saved before `Chrome::next` consumes `prev`.
+        let committed_links = Rc::clone(prev.links_rc());
         let frame = Chrome::next(Some(prev), model, inputs, FramePath::SlotsReuse);
         match self.grid.paint_grid_damage(model, &frame, &spans) {
             GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
@@ -196,11 +202,15 @@ where
                 frame: FrameUpdate::Replace(frame),
                 effective: RenderStrategy::DamagedRows,
             },
-            GridPaintOutcome::Held => AttemptOutcome::Held {
-                retry: retry_grid_wide(work),
-                frame: FrameUpdate::Replace(frame),
-                reason: HoldReason::BridgeFailure,
-            },
+            GridPaintOutcome::Held => {
+                let mut frame = frame;
+                frame.attach_links(committed_links);
+                AttemptOutcome::Held {
+                    retry: retry_grid_wide(work),
+                    frame: FrameUpdate::Replace(frame),
+                    reason: HoldReason::BridgeFailure,
+                }
+            }
         }
     }
 
@@ -218,6 +228,9 @@ where
         let Some(prev) = self.last_frame.take() else {
             return self.render_full_rebuild(model, inputs, work);
         };
+        // See `render_damaged_rows`: save the committed link handle before
+        // `Chrome::next` refreshes the candidate's from `inputs`.
+        let committed_links = Rc::clone(prev.links_rc());
         let frame = Chrome::next(Some(prev), model, inputs, FramePath::SlotsReuse);
         match self.grid.paint_grid(model, &frame) {
             GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
@@ -225,11 +238,15 @@ where
                 frame: FrameUpdate::Replace(frame),
                 effective: RenderStrategy::ChangedCells,
             },
-            GridPaintOutcome::Held => AttemptOutcome::Held {
-                retry: retry_grid_wide(work),
-                frame: FrameUpdate::Replace(frame),
-                reason: HoldReason::BridgeFailure,
-            },
+            GridPaintOutcome::Held => {
+                let mut frame = frame;
+                frame.attach_links(committed_links);
+                AttemptOutcome::Held {
+                    retry: retry_grid_wide(work),
+                    frame: FrameUpdate::Replace(frame),
+                    reason: HoldReason::BridgeFailure,
+                }
+            }
         }
     }
 

@@ -2,7 +2,7 @@
 //! scalar snapshot. Two concerns:
 //!
 //! - the counting model proves `capture` reads each scalar accessor exactly
-//!   once (the fixed 7-step order the plan requires never double-reads or
+//!   once (the fixed 8-step order the plan requires never double-reads or
 //!   skips a step);
 //! - the table tests prove every `FrameInputFailure` variant is reachable,
 //!   holds the attempt (`Err`, not a substituted default), and that a
@@ -16,8 +16,8 @@ use std::rc::Rc;
 
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
-    CanvasModel, CanvasView, CellContentQuery, CellKind, CellStyle, Fetched, FrameInputFailure,
-    FrameInputs,
+    CanvasModel, CanvasView, CellContentQuery, CellKind, CellLink, CellStyle, Fetched,
+    FrameInputFailure, FrameInputs, LinkTarget, RCRange,
 };
 
 use common::{TestModel, canvas_default};
@@ -36,6 +36,7 @@ struct CountingModel {
     show_row_headers_calls: Cell<u32>,
     show_col_headers_calls: Cell<u32>,
     show_selection_calls: Cell<u32>,
+    sheet_links_calls: Cell<u32>,
 }
 
 impl CellContentQuery for CountingModel {
@@ -91,6 +92,10 @@ impl CanvasModel for CountingModel {
             .set(self.show_selection_calls.get() + 1);
         self.inner.get_show_selection()
     }
+    fn get_sheet_links(&self, sheet: u32) -> Option<Vec<CellLink>> {
+        self.sheet_links_calls.set(self.sheet_links_calls.get() + 1);
+        self.inner.get_sheet_links(sheet)
+    }
 }
 
 #[test]
@@ -140,6 +145,11 @@ fn frame_inputs_capture_reads_each_scalar_exactly_once() {
         model.show_selection_calls.get(),
         1,
         "selection visibility read exactly once"
+    );
+    assert_eq!(
+        model.sheet_links_calls.get(),
+        1,
+        "sheet link list read exactly once"
     );
 
     // Not just "it was read once" — read the right thing.
@@ -290,4 +300,50 @@ fn frame_inputs_accepts_frozen_column_count_at_last_column() {
     let model = base_model().with_frozen_cols(iron_canvas_core::LAST_COLUMN);
     let inputs = capture(&model).expect("LAST_COLUMN frozen columns are in range");
     assert_eq!(inputs.frozen_cols(), iron_canvas_core::LAST_COLUMN);
+}
+
+fn link(row: i32, col: i32, target: &str) -> CellLink {
+    CellLink::new(
+        RCRange::from_cell(row, col),
+        LinkTarget::External(target.to_string()),
+        None,
+        false,
+        None,
+    )
+}
+
+#[test]
+fn frame_inputs_failure_sheet_links() {
+    let model = base_model().with_capture_fail(FrameInputFailure::SheetLinks);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::SheetLinks)
+    ));
+}
+
+#[test]
+fn frame_inputs_accepts_and_indexes_a_valid_link_list() {
+    let model = base_model().with_sheet_links(vec![link(3, 2, "https://example.com")]);
+    let inputs = capture(&model).expect("a valid link list captures");
+    assert_eq!(
+        inputs
+            .links()
+            .get(3, 2)
+            .expect("the captured link is addressable")
+            .target()
+            .as_str(),
+        "https://example.com"
+    );
+    assert_ne!(inputs.links().digest(), 0);
+}
+
+// An invalid list is not empty data: a duplicate address would silently drop
+// or shadow one of two links, so capture holds the attempt instead.
+#[test]
+fn frame_inputs_rejects_a_duplicate_link_address() {
+    let model = base_model().with_sheet_links(vec![link(2, 3, "a"), link(2, 3, "b")]);
+    assert!(matches!(
+        capture(&model),
+        Err(FrameInputFailure::SheetLinks)
+    ));
 }

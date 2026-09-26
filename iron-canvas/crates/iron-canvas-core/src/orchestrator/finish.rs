@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::CanvasModel;
 use crate::chrome::{Chrome, RecycledSlots};
 use crate::frame::work::{PendingWork, WorkFlags};
@@ -206,6 +208,21 @@ where
         if let Some(cache_commit) = cache_commit {
             self.grid.commit_grid_cache(cache_commit);
         }
+        // The committed frame carries this attempt's captured link index. A
+        // held outcome never attaches: `committed` is false there, so the
+        // preserved or rolled-back frame keeps the previously committed
+        // links, and a failed attempt changes no observable link state. An
+        // `OverlayCommitted` outcome is `FrameUpdate::Preserve`, so the
+        // committed index likewise stays.
+        let frame = match frame {
+            FrameUpdate::Replace(mut chrome) if committed => {
+                if let Some(ctx) = overlay_ctx.as_ref() {
+                    chrome.attach_links(Rc::clone(ctx.inputs.links()));
+                }
+                FrameUpdate::Replace(chrome)
+            }
+            other => other,
+        };
         self.install_frame(frame);
 
         // (dev only) overlay-painted facts for the diagnostics snapshot must

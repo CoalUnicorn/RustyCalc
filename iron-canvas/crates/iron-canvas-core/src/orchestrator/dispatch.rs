@@ -105,7 +105,19 @@ where
         );
         #[cfg(feature = "dev-diagnostics")]
         let diag_delta = DiagDeltaKind::from(&delta);
-        let plan = plan_frame(work, delta, inputs.sheet(), inputs.show_selection());
+        // A missing committed frame counts as changed: a first frame must not
+        // take a path that assumes prior pixels or prior link state.
+        let links_changed = self
+            .last_frame
+            .as_ref()
+            .is_none_or(|frame| frame.links().digest() != inputs.links().digest());
+        let plan = plan_frame(
+            work,
+            delta,
+            inputs.sheet(),
+            inputs.show_selection(),
+            links_changed,
+        );
         // Record the classification facts before dispatch; the renderer
         // fills the rest during prepare/execute.
         #[cfg(feature = "dev-diagnostics")]
