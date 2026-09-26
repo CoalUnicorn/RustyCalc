@@ -6,6 +6,7 @@ import {
     columnLabel,
     denseRowMajor,
     installDenseRangeMethods,
+    knownSeparatorEdges,
     queryOptions,
     rectCenter,
     shouldRescheduleAfterDrain,
@@ -47,6 +48,7 @@ test("dense range methods count one crossing and bypass scalar wrappers", () => 
         getCellStyle: (_sheet, row, column) => ({ row, column }),
         getCellType: (_sheet, row, column) => row + column,
         getFormattedCellValue: (_sheet, row, column) => `${row},${column}`,
+        getLinks: (sheet) => [{ row: sheet + 1, column: 1, dynamic: false, type: "External", target: "https://example.com" }],
     };
     const bridge = installDenseRangeMethods(model);
 
@@ -61,6 +63,8 @@ test("dense range methods count one crossing and bypass scalar wrappers", () => 
 
     model.getCellStyle(0, 1, 1);
     assert.equal(bridge.counts.getCellStyle, 1);
+    model.getLinks(0);
+    assert.equal(bridge.counts.getLinks, 1);
     bridge.reset();
     assert.deepEqual(bridge.snapshot(), {
         getCellStyle: 0,
@@ -69,7 +73,72 @@ test("dense range methods count one crossing and bypass scalar wrappers", () => 
         getCellStylesIn: 0,
         getFormattedCellValuesIn: 0,
         getCellTypesIn: 0,
+        getLinks: 0,
     });
+});
+
+test("known separator mismatches are accepted, cell interiors never are", () => {
+    const geometry = {
+        columns: [
+            { left: 0, right: 100 },
+            { left: 100, right: 200 },
+        ],
+        rowBands: [
+            { top: 30, bottom: 60 },
+            { top: 60, bottom: 90 },
+        ],
+    };
+    const point = (x, y, fresh = [203, 203, 203, 255], retained = [201, 201, 201, 255]) => ({
+        x,
+        y,
+        fresh,
+        retained,
+    });
+    const diff = (...points) => ({
+        truncated: false,
+        points,
+        pixels: points.length,
+        differingBytes: points.length * 3,
+    });
+
+    // On a painted column edge, anywhere in the pane: the known defect.
+    assert.deepEqual(knownSeparatorEdges(diff(point(100, 45)), geometry), ["x=100"]);
+    // On a painted row edge: the DPR 1 appearance.
+    assert.deepEqual(knownSeparatorEdges(diff(point(50, 30)), geometry), ["y=30"]);
+    // Distinct lines reported once each.
+    assert.deepEqual(
+        knownSeparatorEdges(diff(point(100, 45), point(200, 45), point(50, 61)), geometry),
+        ["x=100", "x=200", "y=60"],
+    );
+    // Strictly inside a cell: link text and underline territory, never accepted.
+    assert.equal(knownSeparatorEdges(diff(point(50, 45)), geometry), null);
+    // Not on any painted edge.
+    assert.equal(knownSeparatorEdges(diff(point(250, 45)), geometry), null);
+    // A per-channel delta that is not uniform is a real colour change.
+    assert.equal(
+        knownSeparatorEdges(diff(point(100, 45, [203, 203, 203, 255], [201, 200, 200, 255])), geometry),
+        null,
+    );
+    // A lighter retained pixel is not an accumulating stroke.
+    assert.equal(
+        knownSeparatorEdges(diff(point(100, 45, [203, 203, 203, 255], [210, 210, 210, 255])), geometry),
+        null,
+    );
+    // An alpha change is never the known defect.
+    assert.equal(
+        knownSeparatorEdges(diff(point(100, 45, [203, 203, 203, 255], [201, 201, 201, 254])), geometry),
+        null,
+    );
+    // A truncated point list can hide an interior pixel, so it never classifies.
+    assert.equal(
+        knownSeparatorEdges(
+            { truncated: true, points: [point(100, 45)], pixels: 9999, differingBytes: 3 },
+            geometry,
+        ),
+        null,
+    );
+    // Without derivable geometry nothing is accepted.
+    assert.equal(knownSeparatorEdges(diff(point(100, 45)), null), null);
 });
 
 test("rectCenter follows the serialized PixelRect shape", () => {

@@ -5,6 +5,10 @@ const root = fileURLToPath(new URL(".", import.meta.url));
 const webPort = Number(process.env.PORT || 8123);
 const driverPort = Number(process.env.WEBDRIVER_PORT || 9515);
 const workbook = process.env.WORKBOOK || "dynamic_arrays";
+// Opt-in device-pixel-ratio emulation for the raster-parity check. Real
+// browser emulation (not a JS override of `window.devicePixelRatio`), applied
+// before the page loads so the canvas is created at that DPR.
+const dpr = Number(process.env.DPR || 0);
 const webOrigin = `http://127.0.0.1:${webPort}`;
 const driverOrigin = `http://127.0.0.1:${driverPort}`;
 const children = [];
@@ -85,6 +89,15 @@ async function main() {
     });
     sessionId = session.sessionId;
     await webdriver(`/session/${sessionId}/timeouts`, "POST", { script: 120_000 });
+    if (dpr > 0) {
+        // Chrome-specific WebDriver extension. The override must precede the
+        // page load: the harness reads `window.devicePixelRatio` when it sizes
+        // the canvas, and the raster-parity check reports the DPR it saw.
+        await webdriver(`/session/${sessionId}/chromium/send_command`, "POST", {
+            cmd: "Emulation.setDeviceMetricsOverride",
+            params: { width: 1440, height: 1000, deviceScaleFactor: dpr, mobile: false },
+        });
+    }
     await webdriver(`/session/${sessionId}/url`, "POST", {
         url: `${webOrigin}/index.html?workbook=${encodeURIComponent(workbook)}`,
     });
@@ -117,7 +130,12 @@ async function main() {
     const report = result.report;
     for (const check of report.checks) {
         process.stdout.write(`${check.pass ? "PASS" : "FAIL"} ${check.name}\n`);
-        if (!check.pass && check.detail) process.stdout.write(`  ${check.detail}\n`);
+        // A passing check prints its detail only when the detail carries a
+        // KNOWN-DEFECT line, so an accepted pre-existing defect stays visible
+        // in the harness output instead of being hidden by the pass.
+        if (check.detail && (!check.pass || check.detail.includes("KNOWN-DEFECT"))) {
+            process.stdout.write(`  ${check.detail}\n`);
+        }
     }
     process.stdout.write(
         `browser smoke: ${report.passed} passed, ${report.failed} failed (${report.workbook})\n`,

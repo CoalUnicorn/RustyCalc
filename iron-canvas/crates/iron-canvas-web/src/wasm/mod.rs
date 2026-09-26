@@ -55,8 +55,8 @@ impl From<JsStyle> for ic::Style {
 
 use iron_canvas_core::address::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
-use iron_canvas_core::{CellKind, CellStyle};
-use iron_canvas_ironcalc::convert::{color_to_css, style_to_core};
+use iron_canvas_core::{CellKind, CellLink, CellStyle};
+use iron_canvas_ironcalc::convert::{color_to_css, link_to_core, style_to_core};
 
 #[wasm_bindgen]
 extern "C" {
@@ -159,6 +159,14 @@ extern "C" {
     // Optional on the host; absence falls back to the Office default theme.
     #[wasm_bindgen(catch, method, js_name = "getTheme")]
     fn get_theme(this: &IronCalcModelHandle) -> Result<JsValue, JsValue>;
+
+    // Sheet-level hyperlink list, flattened `CellLinkView` records (see
+    // `ironcalc_base::links`). Optional on the host: a statically absent
+    // method means the host carries no link data, so the empty list is the
+    // known answer. A present method that throws, or a payload no record
+    // decodes, is a wire-shape failure that must hold the attempt.
+    #[wasm_bindgen(catch, method, js_name = "getLinks")]
+    fn get_links(this: &IronCalcModelHandle, sheet: u32) -> Result<JsValue, JsValue>;
 }
 
 pub struct JsBackedModel {
@@ -172,6 +180,7 @@ pub struct JsBackedModel {
     has_values_in: bool,
     has_types_in: bool,
     has_get_theme: bool,
+    has_get_links: bool,
     has_show_row_headers: bool,
     has_show_col_headers: bool,
     // Geometry/config accessors are optional on the host. A method that is
@@ -197,6 +206,7 @@ impl JsBackedModel {
         let has_values_in = Self::has_method(&handle, "getFormattedCellValuesIn");
         let has_types_in = Self::has_method(&handle, "getCellTypesIn");
         let has_get_theme = Self::has_method(&handle, "getTheme");
+        let has_get_links = Self::has_method(&handle, "getLinks");
         let has_show_row_headers = Self::has_method(&handle, "getShowRowHeaders");
         let has_show_col_headers = Self::has_method(&handle, "getShowColHeaders");
         let has_row_height = Self::has_method(&handle, "getRowHeight");
@@ -210,6 +220,7 @@ impl JsBackedModel {
             has_values_in,
             has_types_in,
             has_get_theme,
+            has_get_links,
             has_show_row_headers,
             has_show_col_headers,
             has_row_height,
@@ -481,6 +492,41 @@ impl CanvasModel for JsBackedModel {
             return Some(true);
         }
         self.note_throw("getShowColHeaders", self.handle.get_show_col_headers(sheet))
+    }
+
+    /// A host without `getLinks` has no link data at all — a structural fact,
+    /// so the empty list is the true answer (the same meaning an empty list
+    /// has on a sheet with no links). A present method that throws, or a
+    /// payload no `CellLinkView` decodes, is a wire-shape failure that holds
+    /// the attempt: painting no links would leave a visible link unclickable.
+    /// A missing theme holds too, exactly as it does for styles.
+    fn get_sheet_links(&self, sheet: u32) -> Option<Vec<CellLink>> {
+        if !self.has_get_links {
+            return Some(Vec::new());
+        }
+        let jsv = self.note_throw("getLinks", self.handle.get_links(sheet))?;
+        let views: Vec<ironcalc_base::links::CellLinkView> =
+            match serde_wasm_bindgen::from_value(jsv) {
+                Ok(v) => v,
+                Err(e) => {
+                    self.note_serde_err("getLinks", &e);
+                    return None;
+                }
+            };
+        // One theme borrow for the whole list — not one cache probe per link.
+        self.with_theme(|theme| match theme {
+            Some(t) => Some(
+                views
+                    .into_iter()
+                    .map(|view| {
+                        link_to_core(view.link, view.row, view.column, view.dynamic, &|c| {
+                            color_to_css(c, t)
+                        })
+                    })
+                    .collect(),
+            ),
+            None => None,
+        })
     }
 }
 
