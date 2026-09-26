@@ -5,6 +5,7 @@ pub mod format;
 pub mod formula;
 pub mod formula_overlay;
 pub mod keyboard;
+pub mod link;
 pub mod mouse;
 pub mod nav;
 pub mod sheet;

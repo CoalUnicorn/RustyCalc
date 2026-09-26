@@ -190,12 +190,18 @@ pub fn handle_mousemove(
         state.autoscroll.cancel();
         state.drag.set(DragState::Idle);
         state.dragged_ref_override.set(None);
-        let hint = compute_cursor_hint(icv, x, y);
-        if state.hover_cursor.get_untracked() != hint {
-            state.hover_cursor.set(hint);
+        let probe = compute_cursor_hint(icv, x, y);
+        if state.hover_cursor.get_untracked() != probe.cursor {
+            state.hover_cursor.set(probe.cursor);
+        }
+        if state.hover_link.get_untracked() != probe.link_cell {
+            state.hover_link.set(probe.link_cell);
         }
         return;
     }
+    // Any held button means no idle hover: the tooltip must not outlive the
+    // gesture that started on the link.
+    state.hover_link.set(None);
     let sheet = model.with_value(UserModel::get_selected_sheet);
 
     match state.drag.get_untracked() {

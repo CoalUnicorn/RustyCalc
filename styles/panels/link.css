@@ -1,0 +1,142 @@
+/* Cell hyperlinks — hover tooltip (panels/link_tooltip.rs) and the toolbar
+ * editor popover (chrome/toolbar/link_controls.rs).
+ *
+ * Both surfaces anchor through the shared <Popover> primitive, which positions
+ * its panel with inline left/top in viewport coordinates: the class here must
+ * therefore stay `position: fixed`.
+ *
+ * Prefix: lt-
+ */
+
+/* Hover tooltip, anchored below-right of the link cell. */
+.lt-pop {
+    position: fixed;
+    z-index: 200;
+    max-width: 320px;
+}
+
+.lt-body {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px 5px 10px;
+    background: var(--bg-secondary, #ffffff);
+    border: 1px solid var(--border-color, #d0d7de);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.lt-target {
+    font-size: 12px;
+    color: var(--text-primary, #1f2328);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.lt-open {
+    flex: none;
+    padding: 2px 8px;
+    font-size: 12px;
+    color: var(--text-primary, #1f2328);
+    background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+    border: 1px solid var(--border-color, #d0d7de);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.lt-open:hover {
+    background: var(--bg-primary, #ffffff);
+}
+
+/* Toolbar editor dropdown. */
+.tb-link-dropdown {
+    position: fixed;
+    z-index: 200;
+    width: 280px;
+}
+
+.lt-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+}
+
+.lt-owned {
+    margin: 0;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: var(--text-secondary, #57606a);
+    background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+    border-radius: 4px;
+}
+
+.lt-kind {
+    display: flex;
+    gap: 4px;
+}
+
+.lt-kind-btn {
+    flex: 1;
+    padding: 4px 6px;
+    font-size: 12px;
+    color: var(--text-primary, #1f2328);
+    background: var(--bg-primary, #ffffff);
+    border: 1px solid var(--border-color, #d0d7de);
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.lt-kind-btn.on {
+    border-color: var(--accent, #0969da);
+    color: var(--accent, #0969da);
+}
+
+.lt-kind-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.lt-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 4px 6px;
+    font-size: 12px;
+}
+
+.lt-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.lt-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.lt-actions button {
+    padding: 4px 12px;
+    font-size: 12px;
+    border: 1px solid var(--border-color, #d0d7de);
+    border-radius: 4px;
+    background: var(--bg-primary, #ffffff);
+    cursor: pointer;
+}
+
+.lt-actions button:hover:not(:disabled) {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+}
+
+.lt-actions button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.lt-actions .lt-apply {
+    background: var(--accent, #0969da);
+    border-color: var(--accent, #0969da);
+    color: #ffffff;
+}

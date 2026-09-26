@@ -2,10 +2,12 @@
 //!
 //! Resize handles are probed first (they straddle the header/cell seam
 //! by `HIT_ZONE` px), then the normal hit-test routes to the four click
-//! helpers in `click.rs` or starts a formula-reference drag.
+//! helpers in `click.rs`, starts a formula-reference drag, or — for a
+//! Ctrl/Cmd-click on a link cell — follows the hyperlink.
 
 use crate::coord::CellArea;
-use crate::state::{DragState, ModelStore, WorkbookState};
+use crate::input::link::activate_link;
+use crate::state::{DragState, ModelStore, StatusMessage, WorkbookState};
 use iron_canvas_core::chrome::hit::{HitTest, ResizeTarget};
 use leptos::prelude::WithValue;
 
@@ -59,7 +61,23 @@ pub fn handle_mousedown(
         HitTest::AutofillHandle { row, column } => {
             handle_cell_click(&ev, row, column, true, model, state)
         }
-        HitTest::Cell { row, column } => handle_cell_click(&ev, row, column, false, model, state),
+        HitTest::Cell { row, column } => {
+            // Ctrl/Cmd-click follows the link under the pointer instead of
+            // selecting. An active drag, edit, or point-mode owns the click:
+            // the link is only followed from a clean idle mousedown.
+            let link_click = (ev.ctrl_key() || ev.meta_key())
+                && state.drag.get_untracked() == DragState::Idle
+                && state.editing_cell.get_untracked().is_none()
+                && with_canvas(icv, |ic| ic.link_at(row, column)).flatten().is_some();
+            if link_click {
+                if let Err(e) = activate_link(model, &state, icv, row, column) {
+                    state.status.set(Some(StatusMessage::Error(e.to_string())));
+                }
+                ev.prevent_default();
+                return;
+            }
+            handle_cell_click(&ev, row, column, false, model, state)
+        }
         HitTest::FormulaRef {
             ref_idx,
             zone,

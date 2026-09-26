@@ -35,6 +35,11 @@ pub struct WorkbookState {
     /// `buttons() == 0` branch after a `resize_handle_at` + `hit_test`
     /// probe. The worksheet `class=` memo composes this with `drag`.
     pub(crate) hover_cursor: Split<CursorHint>,
+    /// Cell under the idle pointer when a committed hyperlink covers it, as
+    /// `(row, column)`. Only the address is stored: the link itself is
+    /// re-read from the canvas on every commit, so a deleted or moved link
+    /// never keeps a stale tooltip.
+    pub(crate) hover_link: Split<Option<(i32, i32)>>,
     /// Ghost-range published by `DragState::DraggingFormulaRef` mousemoves.
     /// Cleared on mouseup, on Escape, and on the mouseup-missed bail-out.
     pub(crate) dragged_ref_override: Split<Option<RefOverride>>,
@@ -129,6 +134,7 @@ impl WorkbookState {
             cell_editor_ref: NodeRef::new(),
             drag: Split::new(DragState::Idle),
             hover_cursor: Split::new(CursorHint::default()),
+            hover_link: Split::new(None),
             dragged_ref_override: Split::new(None),
             context_menu: Split::new(None),
             status: Split::new(None),
@@ -153,6 +159,7 @@ impl WorkbookState {
     pub(crate) fn reset_view_state(&self) {
         self.editing_cell.set(None);
         self.drag.set(DragState::Idle);
+        self.hover_link.set(None);
         self.active_drawer.set(None);
         self.editing_named_range.set(None);
         self.editing_cf_rule.set(None);

@@ -33,6 +33,7 @@
  *   sv-     share verify modal         panels/share-verify.css
  *   resize- header resize popover      panels/header-context-menu.css
  *   cfm-    conditional formatting     panels/conditional-formatting.css
+ *   lt-     cell link surfaces         panels/link.css
  */
 
 @import "layout.css";
@@ -66,3 +67,4 @@
 @import "panels/share-verify.css";
 @import "panels/header-context-menu.css";
 @import "panels/conditional-formatting.css";
+@import "panels/link.css";
