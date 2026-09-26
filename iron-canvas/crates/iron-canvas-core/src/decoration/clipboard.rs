@@ -1,11 +1,11 @@
 //! Clipboard marching-ants border around the last Ctrl+C copied range.
 //! No-op when the clipboard is empty or lives on another sheet.
 
+use crate::address::SheetArea;
 use crate::chrome::Chrome;
 use crate::decoration::Layer;
 use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::painter::{GroupClass, PaintColor, Painter};
-use crate::types::coord::SheetArea;
 
 #[derive(Default)]
 pub struct ClipboardLayer {

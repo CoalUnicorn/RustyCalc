@@ -6,7 +6,9 @@
 
 mod common;
 
-use iron_canvas_core::autofit::{AutoFitError, FIT_PADDING, fit_height, fit_width, font_css};
+use iron_canvas_core::model::autofit::{
+    AutoFitError, FIT_PADDING, fit_height, fit_width, font_css,
+};
 use iron_canvas_core::painter::TextMetrics;
 
 use common::TestModel;
@@ -129,7 +131,7 @@ fn fit_width_returns_widest_value_plus_padding() {
 
 #[test]
 fn fit_width_caps_scan_at_fit_scan_cap_rows() {
-    use iron_canvas_core::autofit::FIT_SCAN_CAP;
+    use iron_canvas_core::model::autofit::FIT_SCAN_CAP;
     // Narrow value just inside the cap; wide value one row past it. With a
     // top-down cap the row past FIT_SCAN_CAP is never measured, so the wide
     // value can't influence the fitted width.

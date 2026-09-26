@@ -11,8 +11,8 @@ use super::snapshot::{
     DIAG_SCHEMA_VERSION, DiagBufferTruth, DiagCacheResolution, DiagCacheTruth,
     DiagFingerprintTruth, DiagPaintedLayers, FrameDiagnostics,
 };
-use crate::orchestrator::{FrameOutcome, RenderStrategy};
-use crate::pending_work::WorkFlags;
+use crate::frame::work::WorkFlags;
+use crate::frame::{FrameOutcome, RenderStrategy};
 use crate::renderer::cache::BufferTruth;
 use crate::renderer::cache::fingerprint::FingerprintTruth;
 

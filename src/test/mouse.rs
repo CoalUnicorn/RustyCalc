@@ -1,8 +1,9 @@
 //! Tests for mouse input helpers: formula-reference drag and header span.
 
 use crate::coord::{CellAddress, CellArea, SheetRange};
+use iron_canvas_core::chrome::hit::RefZone;
 use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
-use iron_canvas_core::types::ui::{RectCorner, RefZone, Side};
+use iron_canvas_core::geometry::prim::{RectCorner, Side};
 
 use crate::input::mouse::formula_ref::dragged_ref_range;
 use crate::input::mouse::header_span::{Axis, full_header_span};

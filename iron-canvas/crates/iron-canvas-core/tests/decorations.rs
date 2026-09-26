@@ -8,10 +8,10 @@
 
 mod common;
 
+use iron_canvas_core::address::{RCRange, SheetArea};
 use iron_canvas_core::chrome::{Chrome, FramePath};
 use iron_canvas_core::decoration::{ClipboardLayer, Layer, PointModeLayer, SelectionLayer};
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::types::coord::{RCRange, SheetArea};
 use iron_canvas_core::{CanvasModel, FrameDelta, RebuildReason};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 

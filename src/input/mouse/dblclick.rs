@@ -7,7 +7,7 @@ use crate::input::keyboard::{SpreadsheetAction, execute};
 use crate::input::structure::StructAction;
 use crate::model::{ActiveCellQuery, FormulaAnalyzer};
 use crate::state::{EditFocus, EditMode, EditingCell, ModelStore, WorkbookState};
-use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
+use iron_canvas_core::chrome::hit::{HitTest, ResizeTarget};
 
 use super::cursor_hint::HIT_ZONE;
 use super::header_span::{Axis, full_header_span};

@@ -10,10 +10,10 @@ use std::rc::Rc;
 use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
-use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
+use iron_canvas_core::surface::Surface;
 
 use crate::ops::DrawOp;
 use crate::painter::RecorderPainter;

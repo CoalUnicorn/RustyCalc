@@ -21,7 +21,7 @@ pub use pdf::{PdfPainter, PdfSurface};
 #[cfg(any(feature = "svg", feature = "pdf"))]
 use {
     iron_canvas_core::geometry::{CanvasMetricError, CanvasMetrics},
-    iron_canvas_core::layer::Surface,
+    iron_canvas_core::surface::Surface,
     iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator, PaintResult},
     std::rc::Rc,
 };

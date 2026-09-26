@@ -1,7 +1,7 @@
 use crate::{
+    address::RCRange,
     chrome::Chrome,
     geometry::slot::{AxisSlot, ColSlot, RowSlot},
-    types::coord::RCRange,
 };
 
 /// One of the four frozen-pane quadrants.

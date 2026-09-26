@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use iron_canvas_core::geometry::{CanvasMetrics, CanvasSize};
-use iron_canvas_core::layer::Surface;
+use iron_canvas_core::surface::Surface;
 use iron_canvas_core::{CanvasModel, CanvasTheme};
 
 use crate::pdf::doc::{ContentStream, PdfDocument};

@@ -6,14 +6,14 @@ use std::rc::Rc;
 
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::chrome::{
-    ActiveCellSnapshot, BlitOutcome, BlitPlan, Chrome, FramePath, GridLayout, PaneRegion,
+    ActiveCellSnapshot, BlitOutcome, Chrome, FramePath, GridLayout, PaneRegion,
 };
 use iron_canvas_core::geometry::prim::Axis;
 use iron_canvas_core::painter::GroupClass;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::renderer::cache::BufferTruth;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{FrameDelta, FrameOutcome, GridVerdict, RCRange};
+use iron_canvas_core::{BlitPlan, FrameDelta, FrameOutcome, GridVerdict, RCRange};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};

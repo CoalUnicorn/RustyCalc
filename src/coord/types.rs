@@ -10,7 +10,7 @@ use ironcalc_base::expressions::types::CellReferenceRC;
 use ironcalc_base::language::get_language;
 use ironcalc_base::locale::get_locale;
 
-pub use iron_canvas_core::types::coord::FormulaRefKind;
+pub use iron_canvas_core::address::FormulaRefKind;
 
 use crate::model::ArrowKey;
 

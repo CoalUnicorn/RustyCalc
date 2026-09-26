@@ -4,7 +4,7 @@
 //! `Chrome` composes these axis-symmetric methods whenever a query spans
 //! both axes; everything here knows about only one axis at a time. The
 //! blit probe/rebuild paths and the cross-frame slot recycler live in
-//! sibling files (`blit_rebuild.rs`, `recycled_slots.rs`) — this module
+//! sibling files (`blit/rebuild.rs`, `recycled_slots.rs`) — this module
 //! holds only the pure-axis surface.
 
 use crate::CanvasModel;
@@ -138,7 +138,7 @@ impl PaneSet {
             .map(|s| {
                 model
                     .get_column_header_text(sheet, s.id())
-                    .unwrap_or_else(|| crate::geometry::utils::col_name(s.id()))
+                    .unwrap_or_else(|| crate::geometry::labels::col_name(s.id()))
             })
             .collect()
     }

@@ -3,9 +3,9 @@
 
 use iron_canvas_core::CanvasSize;
 use iron_canvas_core::geometry::CanvasMetrics;
+use iron_canvas_core::geometry::labels::col_name;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
-use iron_canvas_core::geometry::utils::col_name;
 
 /// The one validated path to a backing size. These tests pin the browser
 /// rounding contract (truncate after the DPR scale) that used to live on the

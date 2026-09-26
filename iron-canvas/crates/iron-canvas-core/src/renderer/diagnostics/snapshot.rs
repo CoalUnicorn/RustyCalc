@@ -11,14 +11,14 @@
 //! stay in this crate: a separate crate depending on core while core depends
 //! on it would be a dependency cycle.
 
+use crate::address::RCRange;
 use crate::chrome::{GridLayout, GridShape, PaneRegion};
-use crate::frame_plan::{FrameDelta, RebuildReason};
+use crate::frame::work::{RowSpan, WorkFlags};
+use crate::frame::{FrameDelta, RebuildReason};
+use crate::frame::{FrameOutcome, GridVerdict, RenderStrategy};
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
-use crate::orchestrator::{FrameOutcome, GridVerdict, RenderStrategy};
-use crate::pending_work::{RowSpan, WorkFlags};
-use crate::types::coord::RCRange;
 
 /// Wire version of the snapshot shape. Bump when the projection changes.
 /// Schema 3 replaced `overlay`, `viewport`, `slotsReuse`, `fresh`, and

@@ -7,7 +7,7 @@ use leptos::prelude::*;
 
 use crate::coord::CellArea;
 use crate::state::{ContextMenuState, HeaderContextMenu, ModelStore, WorkbookState};
-use iron_canvas_core::types::ui::HitTest;
+use iron_canvas_core::chrome::hit::HitTest;
 
 use super::header_span::{Axis, full_header_span};
 use super::{CanvasHandle, with_canvas};

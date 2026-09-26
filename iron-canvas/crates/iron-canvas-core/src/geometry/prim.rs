@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{RCRange, geometry::pixel_rect::PixelRect, types::ui::Side};
+use crate::{RCRange, geometry::pixel_rect::PixelRect};
 
 /// A point in logical (CSS) pixels on the canvas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -188,4 +188,35 @@ impl Side {
             },
         }
     }
+}
+
+/// Cardinal side of a rectangle.
+///
+/// Formula-reference hit testing uses it through
+/// [`RefZone::Edge`](crate::chrome::hit::RefZone::Edge); border
+/// paint uses [`Side::line`] to project the side onto a stroke segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Side {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+impl Side {
+    /// All four sides in the renderer's explicit-stroke order.
+    ///
+    /// The order is observable where differently styled strokes overlap at a
+    /// corner, so border paint must preserve it.
+    pub const ALL: [Self; 4] = [Self::Left, Self::Top, Self::Right, Self::Bottom];
+}
+
+/// One of the four corners of a formula-ref rectangle. Used by
+/// `RefZone::Corner` to drive two-axis resize.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RectCorner {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
 }

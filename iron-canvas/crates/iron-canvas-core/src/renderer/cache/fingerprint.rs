@@ -8,7 +8,7 @@
 //!
 //! Cache tier, next to [`GridCache`](super::GridCache), which owns one
 //! [`FingerprintState`]. Comparing two trees and selecting a repaint is a paint
-//! decision and lives in [`crate::renderer::cell::repaint_plan`].
+//! decision and lives in [`crate::renderer::repaint::plan`].
 
 use std::cell::{Cell, Ref, RefCell};
 use std::collections::hash_map::DefaultHasher;
@@ -16,13 +16,13 @@ use std::hash::{Hash, Hasher};
 
 use super::color::data_bar_rgb;
 use super::layout_transition::GridLayoutTransition;
+use crate::address::RCRange;
 use crate::chrome::{GridLayout, PaneRegion};
 use crate::geometry::prim::Axis;
+use crate::geometry::prim::Side;
+use crate::model::fetched::Fetched;
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
-use crate::types::coord::RCRange;
-use crate::types::fetched::Fetched;
-use crate::types::ui::Side;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CellFingerprint(u64);

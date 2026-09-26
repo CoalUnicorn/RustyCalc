@@ -11,7 +11,7 @@ pub mod convert;
 
 use iron_canvas_core::{
     CanvasModel, CanvasView, CellContentQuery, CellDecoration, CellKind, CellStyle, Fetched,
-    types::coord::RCRange,
+    address::RCRange,
 };
 use ironcalc_base::UserModel;
 

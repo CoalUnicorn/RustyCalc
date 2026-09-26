@@ -17,30 +17,28 @@
 //! explicit borders -> text. See the doc on `paint_cells_pass`
 //! for why.
 //!
-//! [`repaint`] and [`repaint_plan`] are the retained-pixel decisions this tier
-//! consumes: `repaint_plan` selects a plan from the cache-tier fingerprint
-//! trees, and `repaint` turns it into executable clip geometry.
+//! The retained-pixel decisions live in `renderer::repaint`: `plan.rs`
+//! selects a plan from the cache-tier fingerprint trees, and `envelope.rs`
+//! turns it into executable clip geometry.
 
 pub mod borders;
 pub mod cf;
 pub mod paint;
-pub mod repaint;
-pub mod repaint_plan;
 pub mod text;
 
 pub use paint::{CellPaint, PaneCells};
 
+use crate::model::fetched::Fetched;
 use crate::style::CellKind;
-use crate::types::fetched::Fetched;
 
 use self::borders::BorderPaint;
 use self::cf::CfDecorationPaint;
 use self::text::TextPaint;
+use crate::address::RCRange;
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
 use crate::renderer::prepared::FetchedCellsMut;
 use crate::theme::CanvasTheme;
-use crate::types::coord::RCRange;
 
 impl<P: Painter> RendererCore<P> {
     /// Shared paint tail for every prepared-execution method in

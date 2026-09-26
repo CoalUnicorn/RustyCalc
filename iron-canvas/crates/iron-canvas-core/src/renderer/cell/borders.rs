@@ -19,11 +19,11 @@ use crate::style::{Border, BorderItem, BorderStyle};
 use super::paint::CellPaint;
 use crate::geometry::constants::{MEDIUM_BORDER_WIDTH, STANDARD_BORDER_WIDTH, THICK_BORDER_WIDTH};
 use crate::geometry::pixel_rect::PixelRect;
+use crate::geometry::prim::Side;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::RendererCore;
 use crate::renderer::cache::ColorIntern;
 use crate::theme::CanvasTheme;
-use crate::types::ui::Side;
 
 /// Per-edge `BorderPaint` resolved from a cell's `Borders` style. `None` on
 /// an edge means the cell carries no explicit border there — the grid

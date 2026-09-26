@@ -11,15 +11,16 @@
 //! in `LayerBase::paint_overlay_layer`. The extra phases live as
 //! inherent methods on `SelectionLayer`, not on this trait.
 
+use crate::address::RCRange;
 use crate::chrome::Chrome;
+use crate::chrome::hit::HitTest;
 use crate::painter::{GroupClass, Painter};
-use crate::types::coord::RCRange;
-use crate::types::ui::HitTest;
 
 pub mod autofill;
 pub mod clipboard;
 pub(crate) mod decorations;
 pub mod formula_refs;
+mod overlays;
 pub mod point_mode;
 pub mod selection;
 
@@ -28,6 +29,8 @@ pub use clipboard::ClipboardLayer;
 pub use formula_refs::FormulaRefsLayer;
 pub use point_mode::PointModeLayer;
 pub use selection::SelectionLayer;
+
+pub use overlays::RenderOverlays;
 
 pub use decorations::DecorationId;
 pub(crate) use decorations::Decorations;

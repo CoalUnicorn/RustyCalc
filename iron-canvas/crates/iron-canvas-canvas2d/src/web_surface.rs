@@ -18,7 +18,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, js_sys};
 
 use iron_canvas_core::geometry::CanvasMetrics;
-use iron_canvas_core::layer::Surface;
+use iron_canvas_core::surface::Surface;
 
 use crate::canvas_painter::CanvasPainter;
 

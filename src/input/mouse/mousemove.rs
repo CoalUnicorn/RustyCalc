@@ -16,8 +16,8 @@ use crate::input::formula::splice_ref;
 use crate::model::{ArrowKey, EvaluationMode, FormulaAnalyzer, Navigator, SheetRoster, try_mutate};
 use crate::state::{DragState, ModelStore, RefOverride, StatusMessage, WorkbookState};
 use iron_canvas_core::{
+    chrome::hit::HitTest,
     geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, LAST_COLUMN, LAST_ROW},
-    types::ui::HitTest,
 };
 use iron_canvas_web::PixelRect;
 use ironcalc_base::UserModel;

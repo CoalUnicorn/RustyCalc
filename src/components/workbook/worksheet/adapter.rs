@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 
 use crate::state::{ModelStore, Split};
-use iron_canvas_core::types::coord::RCRange;
+use iron_canvas_core::address::RCRange;
 use iron_canvas_core::{
     CanvasModel, CanvasView, CellContentQuery, CellDecoration, CellKind, CellStyle, Fetched,
 };

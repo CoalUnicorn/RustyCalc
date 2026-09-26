@@ -1,7 +1,7 @@
 use crate::coord::ActiveRef;
 use crate::coord::{Absolute, RefNode, SheetRange, TextRef};
 use crate::input::formula_overlay::*;
-use iron_canvas_core::types::coord::FormulaRefKind;
+use iron_canvas_core::address::FormulaRefKind;
 
 fn make_ref(start: usize, end: usize, color_idx: usize) -> ActiveRef {
     ActiveRef {

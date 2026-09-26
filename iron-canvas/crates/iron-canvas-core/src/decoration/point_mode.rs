@@ -1,10 +1,10 @@
 //! Point-mode range highlight — blue dashed outline with an 8% fill tint.
 
+use crate::address::RCRange;
 use crate::chrome::Chrome;
 use crate::decoration::Layer;
 use crate::geometry::constants::DASHED_BORDER_WIDTH;
 use crate::painter::{GroupClass, PaintColor, Painter};
-use crate::types::coord::RCRange;
 
 #[derive(Default)]
 pub struct PointModeLayer {
