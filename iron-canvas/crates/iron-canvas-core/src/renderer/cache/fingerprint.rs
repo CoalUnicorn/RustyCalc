@@ -20,9 +20,9 @@ use crate::address::RCRange;
 use crate::chrome::{GridLayout, PaneRegion};
 use crate::geometry::prim::Axis;
 use crate::geometry::prim::Side;
+use crate::model::fetched::Fetched;
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
-use crate::types::fetched::Fetched;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CellFingerprint(u64);

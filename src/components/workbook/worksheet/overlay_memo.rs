@@ -13,7 +13,7 @@
 //! (non-reactive). It is read fresh in the rAF callback each render so it
 //! never goes stale (the original marching-ants bug).
 
-use iron_canvas_core::types::coord::AutofillTarget;
+use iron_canvas_core::address::AutofillTarget;
 use leptos::prelude::*;
 
 use crate::coord::{ActiveRef, CellArea};

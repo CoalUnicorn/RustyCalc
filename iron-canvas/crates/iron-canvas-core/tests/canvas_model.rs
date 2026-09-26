@@ -9,13 +9,13 @@
 
 mod common;
 
+use iron_canvas_core::chrome::hit::HitTest;
 use iron_canvas_core::chrome::{Chrome, FramePath};
 use iron_canvas_core::geometry::constants::{
     AUTOFILL_HANDLE_PX, AUTOFILL_HIT_PAD_PX, CELL_AREA_INSET, DEFAULT_COL_WIDTH,
     DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH, HEADER_ROW_HEIGHT, LAST_COLUMN, LAST_ROW,
 };
 use iron_canvas_core::theme::LIGHT;
-use iron_canvas_core::types::ui::HitTest;
 use iron_canvas_core::{CanvasSize, RCRange};
 
 use common::{TestModel, test_inputs};

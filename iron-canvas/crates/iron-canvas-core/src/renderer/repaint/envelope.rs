@@ -131,10 +131,10 @@ mod tests {
     use crate::chrome::{FramePath, PaneRegion};
     use crate::geometry::CanvasSize;
     use crate::geometry::slot::RowSlot;
-    use crate::model_adapter::{CanvasModel, CanvasView, CellContentQuery};
+    use crate::model::fetched::Fetched;
+    use crate::model::{CanvasModel, CanvasView, CellContentQuery};
     use crate::style::{CellKind, CellStyle};
     use crate::theme::CanvasTheme;
-    use crate::types::fetched::Fetched;
 
     struct Model;
 

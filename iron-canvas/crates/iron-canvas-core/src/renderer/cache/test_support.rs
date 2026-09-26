@@ -12,11 +12,11 @@ use crate::FrameInputs;
 use crate::address::RCRange;
 use crate::chrome::{Chrome, FramePath, GridLayout};
 use crate::geometry::{CanvasMetrics, CanvasSize};
-use crate::model_adapter::{CanvasModel, CanvasView, CellContentQuery};
+use crate::model::fetched::Fetched;
+use crate::model::{CanvasModel, CanvasView, CellContentQuery};
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{CellKind, CellStyle};
 use crate::theme::CanvasTheme;
-use crate::types::fetched::Fetched;
 
 struct LayoutModel {
     top: i32,

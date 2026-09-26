@@ -20,10 +20,10 @@
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::{Line, Point, Span};
-use iron_canvas_core::layer::Surface;
 use iron_canvas_core::painter::{
     BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
+use iron_canvas_core::surface::Surface;
 use iron_canvas_export::common::metrics;
 use iron_canvas_export::pdf::{PdfPainter, PdfSurface};
 

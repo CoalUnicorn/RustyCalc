@@ -1,10 +1,10 @@
-use crate::autofit::AutoFitError;
 use crate::chrome::hit::{HitTest, ResizeTarget};
 use crate::decoration::selection::SelectionLayer;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
+use crate::model::autofit::{AutoFitError, fit_height};
 use crate::painter::BlitPainter;
 use crate::surface::Surface;
 use crate::theme::CanvasTheme;
@@ -252,7 +252,7 @@ where
     ) -> Result<Option<f64>, AutoFitError> {
         let model = self.model.as_deref().ok_or(AutoFitError::NoModel)?;
         let metrics = self.grid.surface.painter();
-        crate::autofit::fit_width(model, metrics, col, first_row, last_row)
+        crate::model::autofit::fit_width(model, metrics, col, first_row, last_row)
     }
 
     /// Auto-fit height for `row`: tallest font across the `[first_col,
@@ -266,7 +266,7 @@ where
     ) -> Result<Option<f64>, AutoFitError> {
         let model = self.model.as_deref().ok_or(AutoFitError::NoModel)?;
         let metrics = self.grid.surface.painter();
-        crate::autofit::fit_height(model, metrics, row, first_col, last_col)
+        fit_height(model, metrics, row, first_col, last_col)
     }
 
     pub fn autofill_handle(&self) -> Option<Point> {

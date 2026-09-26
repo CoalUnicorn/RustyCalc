@@ -192,7 +192,8 @@ impl Side {
 
 /// Cardinal side of a rectangle.
 ///
-/// Formula-reference hit testing uses it through [`RefZone::Edge`]; border
+/// Formula-reference hit testing uses it through
+/// [`RefZone::Edge`](crate::chrome::hit::RefZone::Edge); border
 /// paint uses [`Side::line`] to project the side onto a stroke segment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {

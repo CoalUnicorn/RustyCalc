@@ -14,7 +14,7 @@ use std::rc::Rc;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
-use crate::model_adapter::{CanvasModel, CanvasView};
+use crate::model::{CanvasModel, CanvasView};
 use crate::theme::CanvasTheme;
 
 /// Validated count of frozen leading rows or columns along one axis.

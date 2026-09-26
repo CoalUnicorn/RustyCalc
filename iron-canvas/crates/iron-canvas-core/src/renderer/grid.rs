@@ -191,9 +191,9 @@ impl<P: Painter> RendererCore<P> {
     /// instant.
     pub(crate) fn fetch_show_grid(&self, model: &dyn CanvasModel, sheet: u32) -> Option<bool> {
         let show = match model.get_show_grid_lines(sheet) {
-            crate::types::fetched::Fetched::Value(v) => v,
-            crate::types::fetched::Fetched::Absent => true,
-            crate::types::fetched::Fetched::BridgeFailed => return None,
+            crate::model::fetched::Fetched::Value(v) => v,
+            crate::model::fetched::Fetched::Absent => true,
+            crate::model::fetched::Fetched::BridgeFailed => return None,
         };
         self.frame_cache.show_grid.set(show);
         Some(show)

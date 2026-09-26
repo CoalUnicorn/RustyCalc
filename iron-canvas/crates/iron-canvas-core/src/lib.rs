@@ -6,21 +6,17 @@
 //! [`renderer`](crate::renderer) for the paint passes.
 
 pub mod address;
-pub mod autofit;
 pub mod chrome;
 pub mod decoration;
 mod frame;
 pub mod geometry;
-pub mod layer;
 pub mod model;
-pub mod model_adapter;
 mod orchestrator;
 pub mod painter;
 pub mod renderer;
 mod style;
 pub mod surface;
 pub mod theme;
-pub mod types;
 
 pub use frame::{
     BlitFallback, BlitPlan, FrameDelta, FrameInputFailure, FrameInputs, FrameOutcome, FrameTrace,

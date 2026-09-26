@@ -11,6 +11,5 @@ pub mod labels;
 pub mod pixel_rect;
 pub mod prim;
 pub mod slot;
-pub mod utils;
 
 pub use extent::{CanvasMetricError, CanvasMetrics, CanvasSize};

@@ -12,7 +12,7 @@ use web_sys::HtmlCanvasElement;
 
 use iron_canvas_core::Orchestrator;
 use iron_canvas_core::geometry::CanvasMetrics;
-use iron_canvas_core::layer::Surface;
+use iron_canvas_core::surface::Surface;
 
 use crate::{CanvasPainter, WebSurface};
 

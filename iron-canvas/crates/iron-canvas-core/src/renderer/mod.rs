@@ -45,7 +45,7 @@
 //! The grid splits into up to four quadrants (`TopLeft`, `TopRight`,
 //! `BottomLeft`, `BottomRight`) based on frozen rows and columns. Each
 //! quadrant is rendered as one segment of the grid walk against a different
-//! [`PaneRegion`](crate::chrome::PaneRegion); a thick separator line
+//! [`PaneRegion`]; a thick separator line
 //! marks the freeze boundary:
 //!
 //! ```text
@@ -74,7 +74,7 @@ mod trace;
 // `renderer/overlay/` has moved to `src/decoration/`. Each decoration is
 // a struct that impls `Layer`; the orchestration that used to live in
 // `RendererCore::render_overlays` is now in
-// `LayerBase::paint_overlay_layer` (src/layer/mod.rs).
+// `LayerBase::paint_overlay_layer` (src/surface/mod.rs).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;

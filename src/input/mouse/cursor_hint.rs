@@ -4,7 +4,8 @@
 //! exactly so the cursor previews which mousedown branch would fire.
 //! When you change priorities in `mousedown.rs`, update both files.
 
-use iron_canvas_core::types::ui::{HitTest, RectCorner, RefZone, ResizeTarget, Side};
+use iron_canvas_core::chrome::hit::{HitTest, RefZone, ResizeTarget};
+use iron_canvas_core::geometry::prim::{RectCorner, Side};
 
 use crate::state::CursorHint;
 

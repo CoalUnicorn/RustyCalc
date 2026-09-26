@@ -8,7 +8,7 @@ use crate::address::{CellCoord, RCRange};
 use crate::chrome::{ActiveCellSnapshot, Chrome};
 use crate::decoration::Layer;
 use crate::geometry::constants::{AUTOFILL_HANDLE_BORDER_PX, SELECTION_BORDER_WIDTH};
-use crate::model_adapter::CanvasView;
+use crate::model::CanvasView;
 use crate::painter::{GroupClass, PaintColor, Painter};
 
 #[derive(Default)]

@@ -7,11 +7,11 @@
 
 mod common;
 
+use iron_canvas_core::address::RCRange;
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
 use iron_canvas_core::geometry::prim::Point;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::types::coord::RCRange;
 use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict, RatingSpec};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 

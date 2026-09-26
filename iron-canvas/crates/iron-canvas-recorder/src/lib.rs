@@ -25,10 +25,10 @@ mod tests {
     use super::*;
     use crate::test_support::pix;
     use iron_canvas_core::geometry::prim::{Line, Point, Span};
-    use iron_canvas_core::layer::Surface;
     use iron_canvas_core::painter::{
         BlitPainter, GroupClass, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
     };
+    use iron_canvas_core::surface::Surface;
     use std::collections::HashSet;
 
     #[test]

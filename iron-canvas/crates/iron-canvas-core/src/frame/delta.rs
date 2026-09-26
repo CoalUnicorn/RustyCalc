@@ -16,7 +16,7 @@
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
 
-/// Outcome of classifying a captured [`FrameInputs`] against the previously
+/// Outcome of classifying a captured [`FrameInputs`](crate::FrameInputs) against the previously
 /// committed `Chrome`. Produced by
 /// [`Chrome::classify`](crate::chrome::Chrome::classify); consumed by the
 /// planner (`plan_frame` in `plan.rs`), which turns

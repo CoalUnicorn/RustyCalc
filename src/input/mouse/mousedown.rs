@@ -6,7 +6,7 @@
 
 use crate::coord::CellArea;
 use crate::state::{DragState, ModelStore, WorkbookState};
-use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
+use iron_canvas_core::chrome::hit::{HitTest, ResizeTarget};
 use leptos::prelude::WithValue;
 
 use super::header_span::{Axis, full_header_span};

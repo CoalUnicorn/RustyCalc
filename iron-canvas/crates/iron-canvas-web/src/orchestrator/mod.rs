@@ -28,12 +28,12 @@ use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
 use iron_canvas_core::AutoFitError;
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::PaintResult;
+use iron_canvas_core::address::{AutofillTarget, FormulaRef, RCRange, SheetArea};
+use iron_canvas_core::chrome::hit::{HitTest, ResizeTarget};
 use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
 use iron_canvas_core::geometry::prim::Point;
-use iron_canvas_core::types::coord::{AutofillTarget, FormulaRef, RCRange, SheetArea};
-use iron_canvas_core::types::ui::{HitTest, ResizeTarget};
 #[cfg(feature = "dev-tools")]
 use iron_canvas_recorder::RecordingSurface;
 #[cfg(feature = "dev-tools")]

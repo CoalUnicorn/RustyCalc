@@ -19,8 +19,8 @@ use std::rc::Rc;
 use iron_canvas_core::chrome::{Chrome, FramePath};
 use iron_canvas_core::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT};
 use iron_canvas_core::geometry::slot::{ExtentFetch, col_width, row_height};
+use iron_canvas_core::model::fetched::Fetched;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::types::fetched::Fetched;
 use iron_canvas_core::{CanvasModel, FrameInputs};
 
 use common::{TestModel, canvas_default};

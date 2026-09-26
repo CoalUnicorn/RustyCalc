@@ -53,7 +53,7 @@ impl From<JsStyle> for ic::Style {
     }
 }
 
-use iron_canvas_core::types::coord::RCRange;
+use iron_canvas_core::address::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
 use iron_canvas_core::{CellKind, CellStyle};
 use iron_canvas_ironcalc::convert::{color_to_css, style_to_core};

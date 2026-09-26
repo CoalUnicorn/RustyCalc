@@ -6,11 +6,11 @@ use crate::address::{DenseRange, RCRange};
 use crate::chrome::{GridLayout, GridSegment, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Axis;
+use crate::model::fetched::Fetched;
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
 use crate::renderer::cache::fingerprint::GridFingerprint;
 use crate::style::{CellDecoration, CellKind, CellStyle};
-use crate::types::fetched::Fetched;
 
 mod execute;
 mod paint;

@@ -18,13 +18,13 @@ mod common;
 use std::rc::Rc;
 
 use iron_canvas_core::RowSpan;
+use iron_canvas_core::address::{AutofillTarget, RCRange, SheetArea};
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::constants::{
     CELL_AREA_INSET, DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGHT, FROZEN_SEP, HEADER_COL_WIDTH,
     HEADER_ROW_HEIGHT,
 };
 use iron_canvas_core::painter::GroupClass;
-use iron_canvas_core::types::coord::{AutofillTarget, RCRange, SheetArea};
 use iron_canvas_core::{CanvasTheme, Orchestrator};
 use iron_canvas_core::{PixelRect, Point};
 

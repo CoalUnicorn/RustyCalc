@@ -242,7 +242,7 @@ The `Painter` trait is unsealed; adapter crates implement it. Renderer code does
 
 ### Model and overlay decorations
 
-`CanvasModel` is the read-only adapter trait at `crates/iron-canvas-core/src/model_adapter.rs`, extending the per-cell `CellContentQuery` trait with sheet, viewport, header, and geometry queries. `CellContentQuery` provides four batched range accessors for styles, formatted values, cell types, and decorations. The JS bridge overrides the first three to collapse a pane fetch into one boundary crossing; decoration fetching currently uses the default loop. Forwarding impls let `Rc<T>` and `Rc<dyn CanvasModel>` pass through the same query surface.
+`CanvasModel` is the read-only adapter trait at `crates/iron-canvas-core/src/model/mod.rs`, extending the per-cell `CellContentQuery` trait with sheet, viewport, header, and geometry queries. `CellContentQuery` provides four batched range accessors for styles, formatted values, cell types, and decorations. The JS bridge overrides the first three to collapse a pane fetch into one boundary crossing; decoration fetching currently uses the default loop. Forwarding impls let `Rc<T>` and `Rc<dyn CanvasModel>` pass through the same query surface.
 
 Selection, autofill preview, clipboard ants, point-mode, and formula-ref outlines each implement the `Layer` trait in `crates/iron-canvas-core/src/decoration/`. `LayerBase::paint_overlay_layer` walks the built-ins in fixed z-order, followed by consumer layers registered through `Orchestrator::add_decoration`.
 

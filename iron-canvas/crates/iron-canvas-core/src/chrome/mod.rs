@@ -29,7 +29,6 @@
 use std::rc::Rc;
 
 use crate::CanvasSize;
-pub use crate::frame::{BlitPlan, Shift};
 use crate::geometry::CanvasMetrics;
 use crate::geometry::prim::Point;
 use crate::theme::CanvasTheme;

@@ -64,19 +64,19 @@ impl ExtentFetch {
 /// every one of which now supplies it explicitly).
 pub fn row_height(model: &dyn CanvasModel, sheet: u32, row: i32) -> ExtentFetch {
     match model.get_row_height(sheet, row) {
-        crate::types::fetched::Fetched::Value(h) => ExtentFetch::from_host_px(h),
-        crate::types::fetched::Fetched::Absent => {
+        crate::model::fetched::Fetched::Value(h) => ExtentFetch::from_host_px(h),
+        crate::model::fetched::Fetched::Absent => {
             ExtentFetch::Px(DEFAULT_ROW_HEIGHT.round() as i32)
         }
-        crate::types::fetched::Fetched::BridgeFailed => ExtentFetch::BridgeFailed,
+        crate::model::fetched::Fetched::BridgeFailed => ExtentFetch::BridgeFailed,
     }
 }
 
 /// Column mirror of [`row_height`]; same explicit-`sheet` rationale.
 pub fn col_width(model: &dyn CanvasModel, sheet: u32, col: i32) -> ExtentFetch {
     match model.get_column_width(sheet, col) {
-        crate::types::fetched::Fetched::Value(w) => ExtentFetch::from_host_px(w),
-        crate::types::fetched::Fetched::Absent => ExtentFetch::Px(DEFAULT_COL_WIDTH.round() as i32),
-        crate::types::fetched::Fetched::BridgeFailed => ExtentFetch::BridgeFailed,
+        crate::model::fetched::Fetched::Value(w) => ExtentFetch::from_host_px(w),
+        crate::model::fetched::Fetched::Absent => ExtentFetch::Px(DEFAULT_COL_WIDTH.round() as i32),
+        crate::model::fetched::Fetched::BridgeFailed => ExtentFetch::BridgeFailed,
     }
 }

@@ -1,5 +1,5 @@
 use iron_canvas_core::geometry::CanvasSize;
-use iron_canvas_core::layer::Surface;
+use iron_canvas_core::surface::Surface;
 use iron_canvas_recorder::recording::{Recording, ValidatedRecording};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;

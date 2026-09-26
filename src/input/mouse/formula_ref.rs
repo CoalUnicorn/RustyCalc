@@ -12,8 +12,9 @@ use crate::coord::{CellAddress, SheetRange};
 use crate::input::formula::splice_dragged_ref;
 use crate::model::FormulaAnalyzer;
 use crate::state::{DragState, ModelStore, RefOverride, WorkbookState};
+use iron_canvas_core::chrome::hit::RefZone;
 use iron_canvas_core::geometry::constants::{LAST_COLUMN, LAST_ROW};
-use iron_canvas_core::types::ui::{RectCorner, RefZone, Side};
+use iron_canvas_core::geometry::prim::{RectCorner, Side};
 
 /// never runs. `ev.prevent_default()` only suppresses the browser default.
 pub(super) fn handle_formula_ref_mousedown(
