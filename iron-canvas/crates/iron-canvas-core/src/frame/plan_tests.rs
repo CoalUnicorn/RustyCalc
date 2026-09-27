@@ -542,6 +542,26 @@ fn no_merge_impact_keeps_the_existing_strategy() {
     assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
 }
 
+/// A *changed* merge table must not ride the overlay-only arm: that arm commits
+/// the previous frame unchanged, so the newly captured table would be dropped
+/// and its geometry would stay uncommitted until some other attempt rebuilt.
+#[test]
+fn changed_merge_bars_the_overlay_only_arm() {
+    let work = work_with(|w| w.mark_overlay());
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::Changed,
+    );
+
+    assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
+    assert!(matches!(plan.grid, GridWork::Fresh));
+    assert_eq!(plan.overlay, OverlayWork::Paint);
+}
+
 /// An overlay-only attempt on stable geometry stays overlay-only even with a
 /// merge in view: the merge pixels are already committed, and nothing repaints
 /// the grid, so a rebuild would be pure waste on every selection move.
@@ -559,4 +579,3 @@ fn visible_merge_keeps_stable_overlay_only_cheap() {
 
     assert!(matches!(plan.grid, GridWork::None));
 }
-

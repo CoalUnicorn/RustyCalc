@@ -685,8 +685,42 @@ async function runChecksOnce() {
         if (bulk === 0) throw new Error(`No bulk calls observed: ${JSON.stringify(counts)}`);
         // Frame capture reads the active cell through scalar accessors; the
         // dense pane itself must stay on the three range methods.
-        if (scalar > 4) throw new Error(`Observed ${scalar} scalar crossings`);
-        return `${bulk} bulk calls, ${scalar} per-cell calls`;
+        //
+        // The active-cell *overlay* is the one other legitimate scalar reader:
+        // it restores a single logical cell on the overlay surface, which has
+        // no fetched buffers, so it reads that cell's fill/borders/text from the
+        // model. When the active cell is a merged range that cost is the anchor
+        // plus the merge's visible perimeter, so the allowance follows the
+        // merge's visible span instead of being a constant.
+        const selected = model.getSelectedView();
+        const merge = (model.getMergedCells(selected.sheet) ?? []).find(
+            (mc) =>
+                selected.row >= mc.row &&
+                selected.row < mc.row + mc.height &&
+                selected.column >= mc.column &&
+                selected.column < mc.column + mc.width,
+        );
+        let allowance = 4;
+        if (merge) {
+            const fragments = canvas.visibleFragments(
+                merge.row,
+                merge.column,
+                merge.row + merge.height - 1,
+                merge.column + merge.width - 1,
+            );
+            const span = fragments.reduce(
+                (sum, fragment) =>
+                    sum +
+                    (fragment.range.c2 - fragment.range.c1 + 1) +
+                    (fragment.range.r2 - fragment.range.r1 + 1),
+                0,
+            );
+            allowance += 4 + 2 * span;
+        }
+        if (scalar > allowance) {
+            throw new Error(`Observed ${scalar} scalar crossings (allowance ${allowance})`);
+        }
+        return `${bulk} bulk calls, ${scalar} per-cell calls (allowance ${allowance})`;
     });
 
     await check("frameTrace and recordingSupported are always callable", () => {

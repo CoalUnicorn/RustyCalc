@@ -104,8 +104,11 @@ pub(super) fn install_subscribe_effect(
                 // bits.
                 // `has_structure` covers every structural change, including
                 // `StructureEvent::MergedCellsChanged`: a merge-list change
-                // moves grid geometry, so it must drop `last_frame` and
-                // rebuild, exactly like a resize.
+                // moves grid geometry, so it must rebuild, exactly like a
+                // resize. `request_repaint` marks that geometry work and
+                // deliberately keeps the committed frame: the next attempt
+                // routes through FullRebuild and replaces it, so query geometry
+                // stays coherent with the pixels until that paint lands.
                 if has_structure || has_format {
                     ic.request_repaint();
                 }

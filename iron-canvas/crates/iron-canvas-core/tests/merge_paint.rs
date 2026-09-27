@@ -221,6 +221,45 @@ fn a_covered_cell_resolves_to_its_offscreen_anchor() {
     assert!(cell.fragment.right() <= 400 && cell.fragment.bottom() <= 300);
 }
 
+/// A covered cell reports the anchor's committed link, which is what the host
+/// activates and what the tooltip exists for: the physical lookup the host used
+/// before would miss a link the user can see.
+#[test]
+fn a_covered_cell_reports_the_anchors_link() {
+    use iron_canvas_core::{CellCoord, CellLink, LinkTarget};
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(1)
+            .with_merged_ranges(vec![RCRange {
+                r1: 2,
+                c1: 2,
+                r2: 4,
+                c2: 3,
+            }])
+            .with_sheet_links(vec![CellLink::new(
+                RCRange::from_cell(2, 2),
+                LinkTarget::External("https://anchor.example".to_string()),
+                None,
+                false,
+                None,
+            )]),
+    );
+    model.set_cell(2, 2, "anchor");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let covered = orch.cell_rect(3, 3).expect("covered cell must be visible");
+    let cell = orch
+        .display_cell_at(f64::from(covered.left() + 1), f64::from(covered.top() + 1))
+        .expect("the covered cell is on the grid");
+
+    assert_eq!(cell.cell, CellCoord { row: 3, col: 3 });
+    let link = cell.link.expect("the anchor's link must travel with the merge");
+    assert_eq!(link.target().as_str(), "https://anchor.example");
+    assert_eq!(cell.anchor, RCRange::from_cell(2, 2));
+}
+
 /// An unmerged cell reports itself as its own anchor and range.
 #[test]
 fn an_unmerged_cell_reports_itself() {
@@ -656,5 +695,320 @@ fn an_invalid_merge_list_holds_the_attempt() {
     assert_eq!(
         orch.last_trace().outcome,
         iron_canvas_core::FrameOutcome::HeldOnInputFailure(FrameInputFailure::MergedRanges)
+    );
+}
+
+// ── Metadata discovery on an overlay-only wakeup ──
+
+/// A merge the model gained since the last frame must commit even when the host
+/// only asks for an overlay repaint: the capture sees the change, so dropping it
+/// would leave committed query geometry wrong until some other attempt rebuilt.
+#[test]
+fn an_overlay_only_repaint_publishes_a_newly_discovered_merge() {
+    let model = Rc::new(TestModel::synthetic_grid().with_top_row(1));
+    model.set_cell(2, 2, "anchor");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let covered = orch.cell_rect(2, 3).expect("cell must be visible");
+    let at = (f64::from(covered.left() + 1), f64::from(covered.top() + 1));
+    assert_eq!(
+        orch.display_cell_at(at.0, at.1)
+            .expect("cell is on the grid")
+            .anchor,
+        RCRange::from_cell(2, 3),
+        "before the merge, the cell is its own anchor"
+    );
+
+    // The model gains a merge; the host asks for overlay work only.
+    model.set_merged_ranges(vec![RCRange {
+        r1: 2,
+        c1: 2,
+        r2: 3,
+        c2: 3,
+    }]);
+    orch.request_overlay_repaint();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let after = orch
+        .display_cell_at(at.0, at.1)
+        .expect("cell is on the grid");
+    assert_eq!(
+        after.anchor,
+        RCRange::from_cell(2, 2),
+        "the discovered merge must commit, not be dropped"
+    );
+    assert_eq!(
+        after.merged,
+        RCRange {
+            r1: 2,
+            c1: 2,
+            r2: 3,
+            c2: 3
+        }
+    );
+}
+
+// ── Per-fragment text transform across a frozen boundary ──
+
+type Paint = (Vec<iron_canvas_core::PixelRect>, f64, f64);
+
+/// Every paint of `value` with the clip stack active at the time, in paint
+/// order.
+///
+/// A backend discards text drawn outside its clip, and text drawn *under* a
+/// clip that a later op covers is not the final pixel either. Scoping an
+/// assertion to the merge pass's own clip block is therefore the only way to
+/// ask "did the merge show this text" — the per-cell pass paints the covered
+/// anchor's text too, under the anchor cell's clip, before the merge covers it.
+fn text_paints(ops: &[iron_canvas_recorder::DrawOp], value: &str) -> Vec<Paint> {
+    use iron_canvas_recorder::DrawOp;
+    let mut clips: Vec<iron_canvas_core::PixelRect> = Vec::new();
+    let mut paints = Vec::new();
+    for op in ops {
+        match op {
+            DrawOp::PushClip { rect } => clips.push(*rect),
+            DrawOp::PopClip => {
+                clips.pop();
+            }
+            DrawOp::FillText { text, x, y, .. } if text == value => {
+                paints.push((clips.clone(), *x, *y));
+            }
+            _ => {}
+        }
+    }
+    paints
+}
+
+/// How many paints of `value` were drawn under `fragment`'s clip and land
+/// inside every clip of their own stack — i.e. are actually shown there.
+fn shown_in(paints: &[Paint], fragment: iron_canvas_core::PixelRect) -> usize {
+    fn inside(rect: iron_canvas_core::PixelRect, x: f64, y: f64) -> bool {
+        x >= f64::from(rect.left()) - 1.0
+            && x <= f64::from(rect.right()) + 1.0
+            && y >= f64::from(rect.top()) - 1.0
+            && y <= f64::from(rect.bottom()) + 1.0
+    }
+    paints
+        .iter()
+        .filter(|(stack, x, y)| {
+            stack.contains(&fragment) && stack.iter().all(|clip| inside(*clip, *x, *y))
+        })
+        .count()
+}
+
+fn right_aligned(color: &str) -> CellStyle {
+    use iron_canvas_core::{Alignment, HAlign, VAlign};
+    CellStyle {
+        font: iron_canvas_core::FontStyle {
+            color: Some(color.to_string()),
+            ..Default::default()
+        },
+        alignment: Some(Alignment {
+            horizontal: HAlign::Right,
+            vertical: VAlign::Center,
+            wrap_text: false,
+        }),
+        ..CellStyle::default()
+    }
+}
+
+/// A merge crossing a frozen **column** boundary: the scrolled fragment needs the
+/// scrolled band's transform, not the frozen anchor's. Before the translation
+/// fix, right-aligned text was painted at the frozen anchor's absolute position
+/// under the scrolled fragment's clip and vanished.
+#[test]
+fn merge_text_uses_each_frozen_column_fragment_transform() {
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_frozen(0, 1)
+            .with_left_column(4)
+            .with_merged_ranges(vec![RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 1,
+                c2: 6,
+            }]),
+    );
+    model.set_cell(1, 1, "edge");
+    model.set_style(1, 1, right_aligned("#000000"));
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let range = RCRange {
+        r1: 1,
+        c1: 1,
+        r2: 1,
+        c2: 6,
+    };
+    let fragments = orch.visible_fragments(range);
+    assert_eq!(
+        fragments.len(),
+        2,
+        "the merge must span the frozen column and the scrolled band: {fragments:?}"
+    );
+
+    let ops = orch.grid_surface().recorder().ops();
+    let paints = text_paints(&ops, "edge");
+    let frozen = fragments[0].1;
+    let scrolled = fragments[1].1;
+    assert_eq!(
+        shown_in(&paints, scrolled),
+        1,
+        "right-aligned text belongs at the merge's right edge, in the scrolled fragment; fragments: {fragments:?} paints: {paints:?}"
+    );
+    assert_eq!(
+        shown_in(&paints, frozen),
+        0,
+        "the frozen fragment shows no part of a right-aligned label; fragments: {fragments:?}"
+    );
+}
+
+/// Column mirror of the above: a merge crossing a frozen **row** boundary with
+/// bottom-aligned text.
+#[test]
+fn merge_text_uses_each_frozen_row_fragment_transform() {
+    use iron_canvas_core::{Alignment, HAlign, VAlign};
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_frozen(1, 0)
+            .with_top_row(4)
+            .with_merged_ranges(vec![RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 6,
+                c2: 1,
+            }]),
+    );
+    model.set_cell(1, 1, "edge");
+    model.set_style(
+        1,
+        1,
+        CellStyle {
+            font: iron_canvas_core::FontStyle {
+                color: Some("#000000".to_string()),
+                ..Default::default()
+            },
+            alignment: Some(Alignment {
+                horizontal: HAlign::Center,
+                vertical: VAlign::Bottom,
+                wrap_text: false,
+            }),
+            ..CellStyle::default()
+        },
+    );
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let range = RCRange {
+        r1: 1,
+        c1: 1,
+        r2: 6,
+        c2: 1,
+    };
+    let fragments = orch.visible_fragments(range);
+    assert_eq!(
+        fragments.len(),
+        2,
+        "the merge must span the frozen row and the scrolled band: {fragments:?}"
+    );
+
+    let ops = orch.grid_surface().recorder().ops();
+    let paints = text_paints(&ops, "edge");
+    let frozen = fragments[0].1;
+    let scrolled = fragments[1].1;
+    assert_eq!(
+        shown_in(&paints, scrolled),
+        1,
+        "bottom-aligned text belongs at the merge's bottom edge, in the scrolled fragment; fragments: {fragments:?}"
+    );
+    assert_eq!(
+        shown_in(&paints, frozen),
+        0,
+        "the frozen fragment shows no part of a bottom-aligned label; fragments: {fragments:?}"
+    );
+}
+
+// ── Active-cell overlay on a merged cell ──
+
+/// The overlay's active-cell restore must cover the **logical** cell, with the
+/// grid's own text geometry. Restoring only the physical anchor would lay a
+/// second, smaller label and interior grid edges over pixels the grid painted as
+/// one merged cell.
+#[test]
+fn the_active_cell_overlay_restores_the_whole_merged_cell() {
+    use iron_canvas_recorder::DrawOp;
+
+    let range = RCRange {
+        r1: 2,
+        c1: 2,
+        r2: 4,
+        c2: 3,
+    };
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(1)
+            .with_merged_ranges(vec![range])
+            // A covered cell is the active cell: the overlay must resolve it to
+            // the merge, exactly as a click on it would.
+            .with_active(3, 3),
+    );
+    model.set_cell(2, 2, "merged");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let fragments = orch.visible_fragments(range);
+    assert_eq!(fragments.len(), 1, "the merge must be visible: {fragments:?}");
+    let fragment = fragments[0].1;
+
+    let ops = orch.overlay_surface().recorder().ops();
+    assert!(
+        ops.iter().any(|op| matches!(op, DrawOp::RectFill { rect, .. } if *rect == fragment)),
+        "the overlay's active-cell fill must cover the merged fragment {fragment:?}"
+    );
+    let paints = text_paints(&ops, "merged");
+    assert_eq!(
+        shown_in(&paints, fragment),
+        1,
+        "the overlay must show the merged label once, in the fragment: {paints:?}"
+    );
+}
+
+/// The same restore when the merge's anchor is scrolled out of view: the
+/// overlay resolves the covered cell to the merge from committed geometry, so it
+/// still paints the visible fragment rather than nothing.
+#[test]
+fn the_active_cell_overlay_restores_an_offscreen_anchor_merge() {
+    use iron_canvas_recorder::DrawOp;
+
+    let range = RCRange {
+        r1: 1,
+        c1: 1,
+        r2: 12,
+        c2: 2,
+    };
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(8)
+            .with_merged_ranges(vec![range])
+            .with_active(9, 1),
+    );
+    model.set_cell(1, 1, "offscreen");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let fragments = orch.visible_fragments(range);
+    assert!(!fragments.is_empty(), "part of the merge must be visible");
+    let ops = orch.overlay_surface().recorder().ops();
+    assert!(
+        ops.iter().any(|op| matches!(op, DrawOp::RectFill { rect, .. } if *rect == fragments[0].1)),
+        "the overlay must restore the visible fragment {fragments:?}"
+    );
+    let paints = text_paints(&ops, "offscreen");
+    assert_eq!(
+        shown_in(&paints, fragments[0].1),
+        1,
+        "the offscreen anchor's label must be restored in the visible fragment: {paints:?}"
     );
 }

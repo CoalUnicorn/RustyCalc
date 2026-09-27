@@ -163,3 +163,67 @@ fn unmerge_restores_the_range() {
         assert_eq!(merge_count(model), 0);
     });
 }
+
+/// The autofill ghost and the commit must submit the same target, and the
+/// snapped target must be one the engine accepts. A drag that stops inside a
+/// merge previews the merge's far edge; submitting the raw pointer cell instead
+/// asks for a fill that cuts the merge, which the engine rejects.
+#[allow(clippy::unwrap_used)]
+#[wasm_bindgen_test]
+fn autofill_preview_and_commit_submit_one_target() {
+    use crate::input::mouse::resolved_fill_target;
+    use crate::model::try_mutate;
+    use ironcalc_base::expressions::types::Area;
+
+    let owner = Owner::new();
+    owner.with(|| {
+        let model = StoredValue::new_local(new_model());
+        let state = WorkbookState::new(crate::events::EventBus::new());
+        crate::model::mutate(model, EvaluationMode::Immediate, |m| {
+            m.set_user_input(0, 1, 1, "src").ok();
+            m.merge_cells(&Area {
+                sheet: 0,
+                row: 6,
+                column: 1,
+                width: 1,
+                height: 3,
+            })
+            .ok();
+        });
+        select(model, 1, 1, 1, 1);
+
+        // The pointer stops at row 7, inside the merge at A6:A8.
+        let target = resolved_fill_target(model, 7, 1);
+        assert_eq!(
+            target.row, 8,
+            "the preview and the commit both use the merge's far edge"
+        );
+
+        let source = Area {
+            sheet: 0,
+            row: 1,
+            column: 1,
+            width: 1,
+            height: 1,
+        };
+        let raw = try_mutate(model, EvaluationMode::Immediate, |m| {
+            m.auto_fill_rows(&source, 7)
+        });
+        assert!(
+            raw.is_err(),
+            "the engine must reject the raw target that cuts the merge"
+        );
+        let snapped = try_mutate(model, EvaluationMode::Immediate, |m| {
+            m.auto_fill_rows(&source, target.row)
+        });
+        assert!(
+            snapped.is_ok(),
+            "the snapped target must be the operation the engine accepts: {snapped:?}"
+        );
+        assert_eq!(
+            model.with_value(|m| m.get_formatted_cell_value(0, 8, 1).unwrap_or_default()),
+            "src",
+            "the accepted fill must actually reach the merge's far row"
+        );
+    });
+}

@@ -146,7 +146,9 @@ pub enum StructureEvent {
     },
     /// Document or viewport geometry replaced wholesale — undo/redo, workbook
     /// switch, shared-workbook load, viewport resize. Routes through the
-    /// FullRebuild strategy (drops `last_frame`), not the content blit cache.
+    /// FullRebuild strategy, which replaces the committed frame when its paint
+    /// lands; the committed frame itself is preserved until then, so queries
+    /// keep describing the pixels still on screen.
     DocumentReset,
     /// The sheet's merge list changed. The renderer must rebuild the grid: the
     /// merge table it painted from no longer matches the model.

@@ -565,10 +565,7 @@ impl CanvasModel for JsBackedModel {
         };
         let mut ranges = Vec::with_capacity(cells.len());
         for cell in cells {
-            match merged_range_to_core(cell) {
-                Some(range) => ranges.push(range),
-                None => return None,
-            }
+            ranges.push(merged_range_to_core(cell)?);
         }
         Some(ranges)
     }
