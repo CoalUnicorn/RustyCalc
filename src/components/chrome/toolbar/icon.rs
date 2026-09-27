@@ -47,6 +47,11 @@ pub enum SheetIcon {
     NamedRange,
     Camera,
     Link,
+    Merge,
+    MergeCenter,
+    MergeAcross,
+    MergeDown,
+    Unmerge,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -147,6 +152,27 @@ impl Glyph for SheetIcon {
             // Link: two interlocking chain links.
             SheetIcon::Link => {
                 r#"<path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h3V7H7a5 5 0 0 0 0 10h3v-1.9H7A3.1 3.1 0 0 1 3.9 12zm3.1 1h10v-2H7v2zm7-6h-3v1.9h3a3.1 3.1 0 0 1 0 6.2h-3V17h3a5 5 0 0 0 0-10z"/>"#
+            }
+            // Merge family: a cell frame plus the shape of the span it produces.
+            // Merge: one span across the frame.
+            SheetIcon::Merge => {
+                r#"<path d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2zM8 11h8v2H8z"/>"#
+            }
+            // MergeCenter: a shorter span, centered.
+            SheetIcon::MergeCenter => {
+                r#"<path d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2zM9 11h6v2H9z"/>"#
+            }
+            // MergeAcross: a vertical divider, one span per row.
+            SheetIcon::MergeAcross => {
+                r#"<path d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2zM11 8h2v8h-2z"/>"#
+            }
+            // MergeDown: a downward span.
+            SheetIcon::MergeDown => {
+                r#"<path d="M3 4h18v2H3zM3 18h18v2H3zM3 4h2v16H3zM19 4h2v16h-2zM11 6h2v6h-2zM8 11l4 4 4-4z"/>"#
+            }
+            // Unmerge: the frame split back into four cells.
+            SheetIcon::Unmerge => {
+                r#"<path d="M3 4h8v7H3zM13 4h8v7h-8zM3 13h8v7H3zM13 13h8v7h-8z"/>"#
             }
         }
     }

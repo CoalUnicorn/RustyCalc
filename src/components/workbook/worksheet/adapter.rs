@@ -8,7 +8,8 @@ use iron_canvas_core::{
 };
 use iron_canvas_ironcalc::color_resolver;
 use iron_canvas_ironcalc::convert::{
-    cell_decoration_from_extended, cell_type_to_kind, link_to_core, style_to_core,
+    cell_decoration_from_extended, cell_type_to_kind, link_to_core, merged_range_to_core,
+    style_to_core,
 };
 
 /// Bridges `ModelStore` (a Leptos `StoredValue` holding `UserModel<'static>`)
@@ -96,6 +97,18 @@ impl CanvasModel for WorksheetModelAdapter {
                     })
                     .collect()
             })
+        })
+    }
+
+    /// The engine's merged list, converted once at this boundary. A native
+    /// model error is persistent, not transient, so it maps to `None` (hold the
+    /// attempt) — never to an empty list, which would render a merged region as
+    /// separate cells and let a user edit a covered cell.
+    fn get_merged_ranges(&self, sheet: u32) -> Option<Vec<RCRange>> {
+        self.store.with_value(|m| {
+            m.get_merged_cells(sheet)
+                .ok()
+                .map(|cells| cells.into_iter().filter_map(merged_range_to_core).collect())
         })
     }
 }

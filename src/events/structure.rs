@@ -148,6 +148,11 @@ pub enum StructureEvent {
     /// switch, shared-workbook load, viewport resize. Routes through the
     /// FullRebuild strategy (drops `last_frame`), not the content blit cache.
     DocumentReset,
+    /// The sheet's merge list changed. The renderer must rebuild the grid: the
+    /// merge table it painted from no longer matches the model.
+    MergedCellsChanged {
+        sheet: u32,
+    },
     // FreezeChanged {
     //     sheet: u32,
     //     frozen_rows: i32,

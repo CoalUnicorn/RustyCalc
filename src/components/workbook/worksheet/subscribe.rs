@@ -102,6 +102,10 @@ pub(super) fn install_subscribe_effect(
                 // needed alongside content for commit-then-move (Enter/Tab),
                 // where content raise alone never touches the view/overlay
                 // bits.
+                // `has_structure` covers every structural change, including
+                // `StructureEvent::MergedCellsChanged`: a merge-list change
+                // moves grid geometry, so it must drop `last_frame` and
+                // rebuild, exactly like a resize.
                 if has_structure || has_format {
                     ic.request_repaint();
                 }

@@ -1,0 +1,165 @@
+//! Merge command execution: the host sends the operation to the engine and
+//! surfaces the engine's own error, and every accepted change announces
+//! `StructureEvent::MergedCellsChanged`.
+
+use crate::input::keyboard::{SpreadsheetAction, execute};
+use crate::input::structure::StructAction;
+use crate::model::EvaluationMode;
+use crate::state::{ModelStore, StatusMessage, WorkbookState};
+use ironcalc_base::UserModel;
+use leptos::prelude::*;
+use wasm_bindgen_test::*;
+
+wasm_bindgen_test_configure!(run_in_browser);
+
+fn new_model() -> UserModel<'static> {
+    match UserModel::new_empty("test", "en", "UTC", "en") {
+        Ok(m) => m,
+        Err(e) => panic!("empty workbook must construct: {e}"),
+    }
+}
+
+fn struc(a: StructAction) -> SpreadsheetAction {
+    SpreadsheetAction::Structure(a)
+}
+
+/// Inclusive engine bounds of the first merge on sheet 0, or `None`.
+fn first_merge(model: ModelStore) -> Option<(i32, i32, i32, i32)> {
+    model.with_value(|m| {
+        m.get_merged_cells(0).ok().and_then(|merges| {
+            merges.first().map(|mc| {
+                (
+                    mc.row,
+                    mc.column,
+                    mc.row + mc.height - 1,
+                    mc.column + mc.width - 1,
+                )
+            })
+        })
+    })
+}
+
+fn merge_count(model: ModelStore) -> usize {
+    model.with_value(|m| m.get_merged_cells(0).map(|v| v.len()).unwrap_or(0))
+}
+
+/// Select `(r1, c1)..=(r2, c2)`. The engine requires the active cell to lie
+/// inside the range, so the anchor is set first — the same order the model's
+/// own column/row selection helpers use.
+#[allow(clippy::unwrap_used)]
+fn select(model: ModelStore, r1: i32, c1: i32, r2: i32, c2: i32) {
+    crate::model::mutate(model, EvaluationMode::Immediate, |m| {
+        m.set_selected_cell(r1, c1).unwrap();
+        m.set_selected_range(r1, c1, r2, c2).unwrap();
+    });
+}
+
+#[allow(clippy::unwrap_used)]
+#[wasm_bindgen_test]
+fn merge_cells_merges_the_selection_and_announces_it() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let model = StoredValue::new_local(new_model());
+        let state = WorkbookState::new(crate::events::EventBus::new());
+        select(model, 2, 2, 3, 4);
+
+        execute(&struc(StructAction::MergeCells), model, &state);
+
+        assert_eq!(first_merge(model), Some((2, 2, 3, 4)));
+        assert_eq!(state.status.get_untracked(), None);
+        let announced = state
+            .events
+            .structure
+            .get_untracked()
+            .iter()
+            .any(|e| matches!(e, crate::events::StructureEvent::MergedCellsChanged { .. }));
+        assert!(
+            announced,
+            "an accepted merge must announce it, or an idle renderer never repaints"
+        );
+    });
+}
+
+/// The engine rejects a merge with more than one content cell. The host
+/// surfaces that error verbatim and leaves the model unmerged.
+#[allow(clippy::unwrap_used)]
+#[wasm_bindgen_test]
+fn merge_rejects_more_than_one_content_cell() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let model = StoredValue::new_local(new_model());
+        let state = WorkbookState::new(crate::events::EventBus::new());
+        crate::model::mutate(model, EvaluationMode::Immediate, |m| {
+            m.set_user_input(0, 2, 2, "a").ok();
+            m.set_user_input(0, 2, 3, "b").ok();
+        });
+        select(model, 2, 2, 2, 3);
+
+        execute(&struc(StructAction::MergeCells), model, &state);
+
+        assert_eq!(merge_count(model), 0, "a rejected merge must not apply");
+        assert!(
+            matches!(state.status.get_untracked(), Some(StatusMessage::Error(_))),
+            "the engine's rejection must reach the status bar"
+        );
+    });
+}
+
+/// A merge with exactly one content cell moves that content to the anchor.
+#[allow(clippy::unwrap_used)]
+#[wasm_bindgen_test]
+fn merge_moves_a_sole_covered_content_cell_to_the_anchor() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let model = StoredValue::new_local(new_model());
+        let state = WorkbookState::new(crate::events::EventBus::new());
+        // Content only in the covered (bottom-right) cell.
+        crate::model::mutate(model, EvaluationMode::Immediate, |m| {
+            m.set_user_input(0, 3, 3, "moved").ok();
+        });
+        select(model, 2, 2, 3, 3);
+
+        execute(&struc(StructAction::MergeCells), model, &state);
+
+        assert_eq!(first_merge(model), Some((2, 2, 3, 3)));
+        let anchor = model.with_value(|m| m.get_formatted_cell_value(0, 2, 2).unwrap_or_default());
+        assert_eq!(anchor, "moved");
+    });
+}
+
+/// Merge-across is one undo step: undo restores the unmerged range.
+#[allow(clippy::unwrap_used)]
+#[wasm_bindgen_test]
+fn merge_across_is_one_undo_step() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let model = StoredValue::new_local(new_model());
+        let state = WorkbookState::new(crate::events::EventBus::new());
+        select(model, 2, 1, 3, 2);
+
+        execute(&struc(StructAction::MergeCellsAcross), model, &state);
+        assert_eq!(merge_count(model), 2, "one merge per row");
+
+        execute(&SpreadsheetAction::undo(), model, &state);
+        assert_eq!(merge_count(model), 0, "one undo must clear every row");
+
+        execute(&SpreadsheetAction::redo(), model, &state);
+        assert_eq!(merge_count(model), 2);
+    });
+}
+
+#[allow(clippy::unwrap_used)]
+#[wasm_bindgen_test]
+fn unmerge_restores_the_range() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let model = StoredValue::new_local(new_model());
+        let state = WorkbookState::new(crate::events::EventBus::new());
+        select(model, 2, 2, 3, 4);
+        execute(&struc(StructAction::MergeCells), model, &state);
+        assert_eq!(merge_count(model), 1);
+
+        execute(&struc(StructAction::UnmergeCells), model, &state);
+        assert_eq!(merge_count(model), 0);
+    });
+}

@@ -69,6 +69,17 @@ pub enum StructAction {
     },
     /// Remove all frozen panes.
     Unfreeze,
+    /// Merge the current selection into one cell. The anchor keeps its content;
+    /// more than one content cell is rejected by the engine.
+    MergeCells,
+    /// Merge the current selection and center the anchor horizontally.
+    MergeCellsCenter,
+    /// Merge each row of the selection across its columns.
+    MergeCellsAcross,
+    /// Merge each column of the selection down its rows.
+    MergeCellsDown,
+    /// Remove merges intersecting the current selection.
+    UnmergeCells,
 }
 
 /// Dispatch a [`StructAction`] against the model and UI state.
@@ -426,6 +437,57 @@ pub fn execute_struct(
                 row: None,
             }));
         }
+        StructAction::MergeCells => execute_merge(MergeOp::Cells, model, state)?,
+        StructAction::MergeCellsCenter => execute_merge(MergeOp::Center, model, state)?,
+        StructAction::MergeCellsAcross => execute_merge(MergeOp::Across, model, state)?,
+        StructAction::MergeCellsDown => execute_merge(MergeOp::Down, model, state)?,
+        StructAction::UnmergeCells => execute_merge(MergeOp::Unmerge, model, state)?,
     }
+    Ok(())
+}
+
+/// Which engine merge operation to apply to the current selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MergeOp {
+    Cells,
+    Center,
+    Across,
+    Down,
+    Unmerge,
+}
+
+/// Apply one merge operation to the current selection, then announce it.
+///
+/// The host sends the operation to the engine and lets the engine validate:
+/// `try_mutate` emits no event and provides no rollback, so the engine's own
+/// error is the contract and must surface verbatim. The announcement only
+/// happens after the engine accepted the change, so a rejected merge never
+/// requests a repaint.
+fn execute_merge(
+    op: MergeOp,
+    model: ModelStore,
+    state: &WorkbookState,
+) -> Result<(), StructError> {
+    let sheet = model.with_value(|m| m.get_selected_sheet());
+    try_mutate(
+        model,
+        EvaluationMode::Immediate,
+        |m| -> Result<(), StructError> {
+            let area = CellArea::from_view(m)
+                .normalized()
+                .to_area(m.get_selected_sheet());
+            match op {
+                MergeOp::Cells => m.merge_cells(&area),
+                MergeOp::Center => m.merge_cells_center(&area),
+                MergeOp::Across => m.merge_cells_across(&area),
+                MergeOp::Down => m.merge_cells_down(&area),
+                MergeOp::Unmerge => m.unmerge_cells(&area),
+            }
+            .map_err(StructError::Engine)
+        },
+    )?;
+    state.emit_event(SpreadsheetEvent::Structure(
+        StructureEvent::MergedCellsChanged { sheet },
+    ));
     Ok(())
 }
