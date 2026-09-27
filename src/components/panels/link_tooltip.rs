@@ -36,9 +36,16 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
 
         let anchor = state.hover_link.get().and_then(|(row, column)| {
             let rect = with_canvas(canvas_handle, |ic| {
+                // Resolve the hovered physical cell to its logical cell: over a
+                // merged range the anchor owns the link, and the tooltip is
+                // placed against the visible fragment rather than the anchor's
+                // own cell (which may be scrolled away entirely).
+                let own = ic.cell_rect(row, column)?;
+                let centre = own.center();
+                let cell = ic.display_cell_at(f64::from(centre.x), f64::from(centre.y))?;
                 // A link that no longer exists keeps no tooltip.
-                ic.link_at(row, column)?;
-                ic.cell_rect(row, column)
+                cell.link.as_ref()?;
+                Some(cell.fragment)
             })
             .flatten()?;
             let canvas_box = grid_ref.get_untracked()?.get_bounding_client_rect();

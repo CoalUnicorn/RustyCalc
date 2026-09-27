@@ -65,12 +65,21 @@ pub fn handle_mousedown(
             // Ctrl/Cmd-click follows the link under the pointer instead of
             // selecting. An active drag, edit, or point-mode owns the click:
             // the link is only followed from a clean idle mousedown.
+            // The logical cell, not the physical one: over a merged range the
+            // anchor owns the link and is the address the browser must open.
+            let logical = with_canvas(icv, |ic| ic.display_cell_at(x, y)).flatten();
+            let link_anchor = logical
+                .as_ref()
+                .filter(|cell| cell.link.is_some())
+                .map(|cell| (cell.anchor.r1, cell.anchor.c1));
             let link_click = (ev.ctrl_key() || ev.meta_key())
                 && state.drag.get_untracked() == DragState::Idle
                 && state.editing_cell.get_untracked().is_none()
-                && with_canvas(icv, |ic| ic.link_at(row, column)).flatten().is_some();
-            if link_click {
-                if let Err(e) = activate_link(model, &state, icv, row, column) {
+                && link_anchor.is_some();
+            if link_click
+                && let Some((anchor_row, anchor_column)) = link_anchor
+            {
+                if let Err(e) = activate_link(model, &state, icv, anchor_row, anchor_column) {
                     state.status.set(Some(StatusMessage::Error(e.to_string())));
                 }
                 ev.prevent_default();

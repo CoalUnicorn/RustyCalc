@@ -31,7 +31,7 @@ mod mousemove;
 mod mouseup;
 mod wheel;
 
-pub(crate) use autofill::snap_autofill_target;
+pub(crate) use autofill::resolved_fill_target;
 pub use contextmenu::handle_contextmenu;
 pub(crate) use cursor_hint::{clear_hover, revalidate_hover};
 pub use dblclick::handle_dblclick;

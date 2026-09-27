@@ -338,11 +338,18 @@ pub(crate) fn plan_frame(
     // already claimed every attempt whose pixels actually move, so a view
     // mark surviving to here means the movement stayed inside the
     // committed frame (ordinary arrow-key selection, the single most common
-    // interaction in the app). Only content and geometry exclude this
-    // fallback.
+    // interaction in the app).
+    //
+    // Excluded by content, geometry, and a *changed* merge table. The last one
+    // is not about pixels: an overlay-only commit installs the committed frame
+    // unchanged, so a table the capture just discovered would be dropped and
+    // its geometry would stay wrong until some other attempt forced a rebuild.
+    // A merely *visible* merge is fine here — those pixels are already
+    // committed, and an overlay repaint does not touch them.
     if (work.has_overlay() || work.has_view())
         && !work.has_content()
         && !work.has_geometry()
+        && !matches!(merge_impact, MergeImpact::Changed)
         && reusable
     {
         return FramePlan {

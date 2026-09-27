@@ -12,8 +12,24 @@
 
 use ironcalc_base::types::MergedCell;
 
+use leptos::prelude::WithValue;
+
 use crate::coord::CellArea;
+use crate::state::ModelStore;
 use iron_canvas_core::AutofillTarget;
+
+/// The one fill target the host both previews and submits.
+///
+/// The ghost and the commit must agree, or the preview promises an operation the
+/// engine rejects: `IronCalc` refuses a fill whose boundary cuts a merged cell.
+/// Both callers therefore resolve the target through this function.
+pub fn resolved_fill_target(model: ModelStore, to_row: i32, to_col: i32) -> AutofillTarget {
+    model.with_value(|m| {
+        let view = m.get_selected_view();
+        let merges = m.get_merged_cells(view.sheet).unwrap_or_default();
+        snap_autofill_target(CellArea::from(view.range).normalized(), to_row, to_col, &merges)
+    })
+}
 
 /// Snap the autofill drag target out of any merge it lands inside.
 ///
@@ -57,13 +73,22 @@ pub fn snap_autofill_target(
     }
 }
 
-/// Move `target` out of any `(start, end)` span that strictly contains it: to
-/// `end` when filling forward, to `start` when filling backward. A target on a
-/// span boundary is already outside a cut.
+/// Move `target` out of any `(start, end)` span the fill boundary would cut.
+///
+/// Filling forward covers `start + 1..=target`, so a target anywhere in
+/// `start..end` cuts the span; filling backward covers `target..=end - 1`, so a
+/// target in `start..=end` cuts it. Both snap outward — to `end` forward, to
+/// `start` backward — which is the extent the engine accepts (the whole merge is
+/// replaced, never cut).
 fn snap_span(target: i32, forward: bool, spans: impl Iterator<Item = (i32, i32)>) -> i32 {
     let mut target = target;
     for (start, end) in spans {
-        if target > start && target < end {
+        let cuts = if forward {
+            target >= start && target < end
+        } else {
+            target > start && target <= end
+        };
+        if cuts {
             target = if forward { end } else { start };
         }
     }
@@ -121,9 +146,35 @@ mod tests {
     }
 
     #[test]
-    fn a_target_on_a_merge_boundary_is_left_alone() {
+    fn a_target_on_the_far_merge_boundary_is_left_alone() {
         let merges = [merge(6, 1, 2, 3)]; // rows 6..=8
         let target = snap_autofill_target(area(1, 1, 1, 1), 8, 1, &merges);
         assert_eq!((target.row, target.col), (8, 1));
+    }
+
+    /// The near edge cuts too: filling down to the merge's *first* row covers
+    /// part of it, which the engine rejects. Snapping must reach the far row.
+    #[test]
+    fn a_downward_drag_onto_the_near_edge_snaps_past_the_merge() {
+        let merges = [merge(6, 1, 2, 3)]; // rows 6..=8
+        let target = snap_autofill_target(area(1, 1, 1, 1), 6, 1, &merges);
+        assert_eq!((target.row, target.col), (8, 1));
+    }
+
+    /// Upward mirror: filling up to the merge's last row cuts it, so the target
+    /// snaps to the row just above the merge.
+    #[test]
+    fn an_upward_drag_onto_the_far_edge_snaps_before_the_merge() {
+        let merges = [merge(3, 1, 2, 3)]; // rows 3..=5
+        let target = snap_autofill_target(area(8, 1, 8, 1), 5, 1, &merges);
+        assert_eq!((target.row, target.col), (3, 1));
+    }
+
+    /// A horizontal drag snaps the column the same way and pins the row.
+    #[test]
+    fn a_leftward_drag_onto_the_far_edge_snaps_before_the_merge() {
+        let merges = [merge(1, 3, 2, 3)]; // columns 3..=4
+        let target = snap_autofill_target(area(1, 8, 1, 8), 1, 4, &merges);
+        assert_eq!((target.row, target.col), (1, 3));
     }
 }
