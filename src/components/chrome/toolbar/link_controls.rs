@@ -13,7 +13,9 @@ use leptos::prelude::*;
 
 use crate::components::ui::popover::Popover;
 use crate::coord::{CellAddress, CellArea};
-use crate::input::link::{FORMULA_OWNED, LinkAction, LinkKind, SINGLE_CELL_ONLY, execute_link};
+use crate::input::link::{
+    FORMULA_OWNED, LinkAction, LinkKind, SINGLE_CELL_ONLY, execute_link, label_edit,
+};
 use crate::input::mouse::{CanvasHandle, with_canvas};
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
 use crate::util::refocus_workbook;
@@ -50,6 +52,10 @@ pub fn LinkButton() -> impl IntoView {
     let target = RwSignal::new(String::new());
     let tooltip = RwSignal::new(String::new());
     let label = RwSignal::new(String::new());
+    // The text the field showed when the popover opened. Apply compares the
+    // field against it, because an unchanged field must not rewrite the cell
+    // (the seed is the formatted value, not the cell's input text).
+    let seed_label = RwSignal::new(String::new());
     let dynamic = RwSignal::new(false);
     let single_cell = RwSignal::new(true);
 
@@ -60,6 +66,7 @@ pub fn LinkButton() -> impl IntoView {
             set_kind.set(seed.kind);
             target.set(seed.target);
             tooltip.set(seed.tooltip);
+            seed_label.set(seed.label.clone());
             label.set(seed.label);
             dynamic.set(seed.dynamic);
             single_cell.set(seed.single_cell);
@@ -74,7 +81,7 @@ pub fn LinkButton() -> impl IntoView {
             kind: kind.get_untracked(),
             target_or_location: target.get_untracked().trim().to_string(),
             tooltip: trimmed_option(&tooltip.get_untracked()),
-            label: trimmed_option(&label.get_untracked()),
+            label: label_edit(&seed_label.get_untracked(), &label.get_untracked()),
         };
         if let Err(e) = execute_link(&action, model, &state, canvas_handle) {
             state.status.set(Some(StatusMessage::Error(e.to_string())));
@@ -231,7 +238,7 @@ fn cell_label(m: &UserModel<'_>, address: CellAddress) -> String {
         .unwrap_or_default()
 }
 
-/// Trimmed text as an optional field; empty means "leave unchanged".
+/// Trimmed tooltip text; empty means "no tooltip".
 fn trimmed_option(value: &str) -> Option<String> {
     let trimmed = value.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())

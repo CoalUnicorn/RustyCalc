@@ -114,7 +114,21 @@ pub(crate) fn plan_link_action(
     })
 }
 
-/// Attach `link` to one cell.
+/// The label to write for the cell-text field of the link editor.
+///
+/// `seed` is the text the editor showed when it opened and `field` the text it
+/// holds on Apply. A field the user did not change leaves the cell content
+/// alone: the seed is the *formatted* value, so rewriting it as literal text
+/// would replace a formula (or lose significant whitespace) that no edit
+/// touched. An empty field also leaves the content alone, as it did before.
+///
+/// The comparison is exact. Cell content is not a URL: trimming it is a
+/// normalization the user did not ask for.
+pub(crate) fn label_edit(seed: &str, field: &str) -> Option<String> {
+    (field != seed && !field.is_empty()).then(|| field.to_string())
+}
+
+/// Attach `link` to one cell, and report whether the cell content changed.
 ///
 /// The label is written first. The engine's `set_cell_link` writes the link
 /// before it checks whether the label may replace the cell content, and it
@@ -125,6 +139,9 @@ pub(crate) fn plan_link_action(
 /// the cell before mutating anything, so it runs first: either it fails with
 /// link, content, style and history untouched, or it succeeds and the link
 /// write that follows can only fail on an invalid address.
+///
+/// The label and the link are separate history entries — see
+/// [`execute_link`] for why the host accepts that.
 pub(crate) fn write_cell_link(
     m: &mut UserModel<'_>,
     sheet: u32,
@@ -132,7 +149,8 @@ pub(crate) fn write_cell_link(
     column: i32,
     link: Link,
     label: Option<&str>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+    let mut content_written = false;
     if let Some(label) = label {
         // The engine's own rule: `set_cell_link` compares the label with the
         // formatted cell value, and an unchanged label is not rewritten. A
@@ -142,15 +160,57 @@ pub(crate) fn write_cell_link(
             .is_ok_and(|current| current != label);
         if changes {
             m.set_user_input(sheet, row, column, label)?;
+            content_written = true;
         }
     }
-    m.set_cell_link(sheet, row, column, link, None)
+    m.set_cell_link(sheet, row, column, link, None)?;
+    Ok(content_written)
+}
+
+/// Events of a completed link action.
+///
+/// A label write changes cell content, so the values of formulas that
+/// reference the cell can change. A consumer that watches only its own range
+/// — a camera, a second pane — learns that from `CalculationUpdated` alone:
+/// the anchor `CellChanged` marks the anchor's row. A link write with no label
+/// change is metadata (no formula value reads a link), so the anchor-only
+/// notification stays exact.
+pub(crate) fn link_events(
+    anchor: CellAddress,
+    old_value: Option<String>,
+    new_value: Option<String>,
+    content_written: bool,
+    selection: SheetRange,
+) -> Vec<SpreadsheetEvent> {
+    let mut events = vec![SpreadsheetEvent::Content(ContentEvent::CellChanged {
+        address: anchor,
+        old_value,
+        new_value,
+    })];
+    if content_written {
+        events.push(SpreadsheetEvent::Content(ContentEvent::CalculationUpdated {
+            affected_sheets: vec![anchor.sheet],
+        }));
+    }
+    events.push(SpreadsheetEvent::Navigation(
+        NavigationEvent::SelectionRangeChanged {
+            sheet_area: selection,
+        },
+    ));
+    events
 }
 
 /// Apply `action` to the current selection.
 ///
 /// Errors are forwarded as they are: the engine's own message for a rejected
 /// mutation, or a host-authored [`FORMULA_OWNED`] refusal.
+///
+/// A label plus link Apply costs two undo entries: the label write and the
+/// link write. The engine groups them only when it receives both at once
+/// (`set_cell_link(.., Some(label))`), and that order installs the link before
+/// it validates the label, which leaves an untracked link after a rejection
+/// (see [`write_cell_link`]). So the host writes the label first and accepts
+/// the second entry rather than trade a clean rejection for one Undo step.
 pub fn execute_link(
     action: &LinkAction,
     model: ModelStore,
@@ -162,6 +222,7 @@ pub fn execute_link(
     let plan = plan_link_action(action, area, anchor, link_is_dynamic(icv, anchor))?;
     let old_value = model.with_value(|m| cell_text(m, anchor));
 
+    let mut content_written = false;
     match plan {
         LinkPlan::Set {
             row,
@@ -170,8 +231,10 @@ pub fn execute_link(
             label,
         } => {
             try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), LinkError> {
-                write_cell_link(m, anchor.sheet, row, column, link, label.as_deref())
-                    .map_err(LinkError::Engine)
+                content_written =
+                    write_cell_link(m, anchor.sheet, row, column, link, label.as_deref())
+                        .map_err(LinkError::Engine)?;
+                Ok(())
             })?;
         }
         LinkPlan::Delete { row, column } => {
@@ -183,16 +246,14 @@ pub fn execute_link(
     }
 
     let new_value = model.with_value(|m| cell_text(m, anchor));
-    state.emit_events([
-        SpreadsheetEvent::Content(ContentEvent::CellChanged {
-            address: anchor,
-            old_value,
-            new_value,
-        }),
-        SpreadsheetEvent::Navigation(NavigationEvent::SelectionRangeChanged {
-            sheet_area: model.with_value(SheetRange::from_view),
-        }),
-    ]);
+    let selection = model.with_value(SheetRange::from_view);
+    state.emit_events(link_events(
+        anchor,
+        old_value,
+        new_value,
+        content_written,
+        selection,
+    ));
     Ok(())
 }
 

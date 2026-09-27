@@ -168,7 +168,7 @@ async function fetchDemoModel(id) {
             `Could not load ${demo.compiled} (${response.status}). Run \"make demos\" or \"make serve\" first.`,
         );
     }
-    return Model.from_bytes(new Uint8Array(await response.arrayBuffer()), "en");
+    return Model.fromBytes(new Uint8Array(await response.arrayBuffer()), "en");
 }
 
 async function loadWorkbook(id) {

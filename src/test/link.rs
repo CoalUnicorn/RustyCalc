@@ -5,10 +5,11 @@
 //! move the selection; both are pure and tested here without a DOM.
 
 use crate::coord::{CellAddress, CellArea, SheetRange};
+use crate::events::{ContentEvent, NavigationEvent, SpreadsheetEvent};
 use crate::input::error::LinkError;
 use crate::input::link::{
     FORMULA_OWNED, LinkAction, LinkKind, LinkPlan, SINGLE_CELL_ONLY, allowed_external_url,
-    plan_link_action, resolve_internal_location, write_cell_link,
+    label_edit, link_events, plan_link_action, resolve_internal_location, write_cell_link,
 };
 use ironcalc_base::UserModel;
 use ironcalc_base::types::Link;
@@ -288,4 +289,139 @@ fn an_accepted_label_write_installs_the_link_once() {
     );
     m.undo().expect("undo the label write");
     assert_eq!(m.get_formatted_cell_value(0, 1, 1).expect("cell value"), "");
+}
+
+/// An untouched cell-text field must not rewrite the cell.
+///
+/// The field is seeded with the *formatted* value, which for `=" padded "` is
+/// ` padded ` — whitespace that is part of the text. Trimming the field before
+/// the comparison made it differ from the seed, so Apply replaced the formula
+/// with the literal `padded`.
+#[test]
+fn an_unchanged_label_leaves_a_formula_result_with_edge_spaces_alone() {
+    let mut m = make_model();
+    m.set_user_input(0, 1, 1, "=\" padded \"")
+        .expect("write the formula");
+    let seed = m.get_formatted_cell_value(0, 1, 1).expect("cell value");
+    assert_eq!(seed, " padded ", "the formula result keeps its spaces");
+
+    // The editor fills the field from `seed` and the user edits only the
+    // target, so the field still equals the seed on Apply.
+    let label = label_edit(&seed, &seed);
+    assert_eq!(label, None, "an untouched field must not write the label");
+
+    let link = Link::External {
+        target: "https://example.com".to_string(),
+        tooltip: None,
+    };
+    let content_written = write_cell_link(&mut m, 0, 1, 1, link.clone(), label.as_deref())
+        .expect("write the link");
+    assert!(!content_written, "no label was written");
+
+    assert_eq!(
+        m.get_cell_content(0, 1, 1).expect("cell input"),
+        "=\" padded \"",
+        "the content must still be the formula, not a literal"
+    );
+    assert_eq!(
+        m.get_formatted_cell_value(0, 1, 1).expect("cell value"),
+        " padded "
+    );
+    assert_eq!(m.get_cell_link(0, 1, 1).expect("read the link"), Some(link));
+}
+
+/// The cell-text field writes the label only when the user changed it to a
+/// non-empty value, and it writes it exactly as typed.
+#[test]
+fn a_label_edit_writes_only_a_changed_non_empty_field() {
+    assert_eq!(
+        label_edit("a label", "a label"),
+        None,
+        "an unchanged field writes nothing"
+    );
+    assert_eq!(
+        label_edit(" padded ", " padded "),
+        None,
+        "the field is compared exactly, not trimmed"
+    );
+    assert_eq!(
+        label_edit("a label", ""),
+        None,
+        "an emptied field leaves the content alone"
+    );
+    assert_eq!(label_edit("", "a label").as_deref(), Some("a label"));
+    assert_eq!(
+        label_edit("a label", " padded ").as_deref(),
+        Some(" padded "),
+        "a changed field is written exactly, whitespace included"
+    );
+}
+
+/// A written label reports the content change, and a repeat of the same label
+/// does not: the engine skips a label equal to the formatted value.
+#[test]
+fn a_written_label_reports_the_content_change_once() {
+    let mut m = make_model();
+    let link = Link::External {
+        target: "https://example.com".to_string(),
+        tooltip: None,
+    };
+
+    let first = write_cell_link(&mut m, 0, 1, 1, link.clone(), Some("a label"))
+        .expect("write the label and the link");
+    assert!(first, "a changed label writes cell content");
+
+    let repeat = write_cell_link(&mut m, 0, 1, 1, link, Some("a label")).expect("repeat the write");
+    assert!(!repeat, "an equal label writes nothing");
+}
+
+/// A label write can change the values of formulas that reference the cell, so
+/// it must ask for a recalculation. The anchor `CellChanged` marks the anchor
+/// row only, which leaves a consumer on another row stale.
+#[test]
+fn a_label_write_asks_for_recalculation_and_a_link_only_write_does_not() {
+    let selection = SheetRange::new(0, 1, 1, 1, 1);
+    let anchor = anchor();
+
+    let label_written = link_events(
+        anchor,
+        Some("2".to_string()),
+        Some("4".to_string()),
+        true,
+        selection,
+    );
+    assert!(
+        label_written.iter().any(|event| matches!(
+            event,
+            SpreadsheetEvent::Content(ContentEvent::CalculationUpdated { affected_sheets })
+                if affected_sheets == &vec![anchor.sheet]
+        )),
+        "a label write must ask for a recalculation"
+    );
+
+    // A link-only write changes no cell value: the anchor event is enough.
+    let link_only = link_events(anchor, None, None, false, selection);
+    assert!(
+        link_only.iter().all(|event| !matches!(
+            event,
+            SpreadsheetEvent::Content(ContentEvent::CalculationUpdated { .. })
+        )),
+        "a link-only write must not force a recalculation"
+    );
+    assert!(
+        link_only.iter().any(|event| matches!(
+            event,
+            SpreadsheetEvent::Content(ContentEvent::CellChanged { address, .. })
+                if *address == anchor
+        )),
+        "the anchor is still named"
+    );
+    assert!(
+        link_only.iter().any(|event| matches!(
+            event,
+            SpreadsheetEvent::Navigation(NavigationEvent::SelectionRangeChanged { sheet_area })
+                if *sheet_area == selection
+        )),
+        "the selection change is still announced"
+    );
 }

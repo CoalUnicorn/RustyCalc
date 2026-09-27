@@ -20,7 +20,7 @@ fn external(target: &str) -> ic::Link {
     }
 }
 
-fn link_at<'a>(links: &'a [CellLink], row: i32, column: i32) -> &'a CellLink {
+fn link_at(links: &[CellLink], row: i32, column: i32) -> &CellLink {
     links
         .iter()
         .find(|link| link.range().r1 == row && link.range().c1 == column)

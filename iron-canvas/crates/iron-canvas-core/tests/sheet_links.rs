@@ -144,3 +144,39 @@ fn a_metadata_only_link_change_escalates_to_content_work() {
         "https://second.example"
     );
 }
+
+/// A hold on the slots-reused grid path restores the previously committed link
+/// index. `Chrome::next(.., FramePath::SlotsReuse)` refreshes the candidate's
+/// index from the new capture, so the failed attempt already holds the new
+/// target when the grid transaction holds — publishing it would show a link
+/// whose pixels never committed.
+#[test]
+fn a_slots_reuse_hold_keeps_the_committed_link_index() {
+    let model = model_with_links(vec![link(2, 3, "https://first.example")]);
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    model.set_sheet_links(vec![link(2, 3, "https://second.example")]);
+    model.set_bulk_bridge_fail(true);
+    orch.mark_content_dirty();
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+    assert_eq!(
+        orch.last_strategy(),
+        Some(RenderStrategy::ChangedCells),
+        "the held attempt must be the slots-reused grid path"
+    );
+    assert_eq!(
+        orch.link_at(2, 3)
+            .expect("the held attempt must not clear committed link state")
+            .target()
+            .as_str(),
+        "https://first.example"
+    );
+
+    model.set_bulk_bridge_fail(false);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(
+        orch.link_at(2, 3).expect("the committed frame carries the link").target().as_str(),
+        "https://second.example"
+    );
+}
