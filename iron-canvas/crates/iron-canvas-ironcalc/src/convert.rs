@@ -187,3 +187,23 @@ pub fn link_to_core(
         hyperlink_color(resolve),
     )
 }
+
+/// Convert one IronCalc merged cell into a core inclusive [`RCRange`].
+///
+/// Returns `None` when the engine's shape cannot become geometry: a
+/// non-positive `width`/`height`, or inclusive bounds that overflow `i32`.
+/// The engine guarantees both are valid; a custom model does not, and an
+/// invalid rectangle must never reach the slot math or the merge table.
+pub fn merged_range_to_core(m: ic::MergedCell) -> Option<RCRange> {
+    if m.width <= 0 || m.height <= 0 {
+        return None;
+    }
+    let r2 = m.row.checked_add(m.height - 1)?;
+    let c2 = m.column.checked_add(m.width - 1)?;
+    Some(RCRange {
+        r1: m.row,
+        c1: m.column,
+        r2,
+        c2,
+    })
+}

@@ -15,7 +15,10 @@ use iron_canvas_core::{
 };
 use ironcalc_base::UserModel;
 
-use crate::convert::{cell_decoration_from_extended, cell_type_to_kind, link_to_core, style_to_core};
+use crate::convert::{
+    cell_decoration_from_extended, cell_type_to_kind, link_to_core, merged_range_to_core,
+    style_to_core,
+};
 
 /// Color resolver over a live `UserModel`: `resolve_color` borrows the
 /// workbook theme, so resolving costs no theme clone per cell. Pass as
@@ -114,6 +117,24 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
                         .collect(),
                 )
             }
+            Err(_) => None,
+        }
+    }
+
+    /// Every merged range on `sheet`, converted to inclusive core bounds.
+    ///
+    /// A native error maps to `None` (hold the attempt), matching the link
+    /// read above: an empty merge set is a legitimate answer for an unmerged
+    /// sheet, a failed read is not. A range the engine shape cannot express as
+    /// geometry is dropped rather than propagated — the engine guarantees the
+    /// shape is valid, and `merged_range_to_core` rejects only a
+    /// non-positive extent or an `i32` overflow, neither of which is a valid
+    /// merge. A dropped range leaves the rest of the sheet rendering
+    /// correctly; a `None` here would hold the whole grid for a value that
+    /// cannot come from a healthy engine.
+    fn get_merged_ranges(&self, sheet: u32) -> Option<Vec<RCRange>> {
+        match UserModel::get_merged_cells(&self.0, sheet) {
+            Ok(merges) => Some(merges.into_iter().filter_map(merged_range_to_core).collect()),
             Err(_) => None,
         }
     }
