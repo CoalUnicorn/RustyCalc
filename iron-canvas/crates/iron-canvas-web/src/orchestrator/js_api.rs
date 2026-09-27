@@ -95,6 +95,27 @@ impl IronCanvas {
         }
     }
 
+    /// Return the visible pixel fragments of an addressed 1-based range, one
+    /// per intersecting pane segment. An empty array means the range has no
+    /// pixel on screen.
+    #[wasm_bindgen(js_name = "visibleFragments")]
+    pub fn visible_fragments_js(
+        &self,
+        r1: i32,
+        c1: i32,
+        r2: i32,
+        c2: i32,
+    ) -> Result<JsValue, JsError> {
+        let fragments: Vec<crate::wire::FragmentWire> = self
+            .runtime
+            .orchestrator()
+            .visible_fragments(iron_canvas_core::RCRange { r1, c1, r2, c2 })
+            .into_iter()
+            .map(crate::wire::FragmentWire::from)
+            .collect();
+        Ok(serde_wasm_bindgen::to_value(&fragments)?)
+    }
+
     /// Resolve a pixel position to its logical cell, merged or not.
     /// A covered cell of a merged range reports the merge's anchor, its full
     /// range, and the anchor's link. `crate::wire::DisplayCellWire` defines

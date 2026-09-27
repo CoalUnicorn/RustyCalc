@@ -889,6 +889,116 @@ async function runChecksOnce() {
         return `merge ${JSON.stringify(expected)}, getMergedCells crossed ${bridge.counts.getMergedCells}×`;
     });
 
+    await check("a click inside a merge selects its anchor and the editor fragment covers it", () => {
+        const sheet = model.getSelectedSheet();
+        const firstRow = 220;
+        const lastRow = 227;
+        const firstColumn = 4;
+        const lastColumn = 5;
+        for (let row = firstRow; row <= lastRow; row += 1) {
+            for (let column = firstColumn; column <= lastColumn; column += 1) {
+                model.setUserInput(sheet, row, column, "");
+            }
+        }
+        const area = {
+            sheet,
+            row: firstRow,
+            column: firstColumn,
+            width: lastColumn - firstColumn + 1,
+            height: lastRow - firstRow + 1,
+        };
+        model.setUserInput(sheet, firstRow, firstColumn, "merged");
+        model.mergeCells(area);
+        model.evaluate();
+        model.setTopLeftVisibleCell(firstRow - 1, firstColumn);
+        canvas.viewChanged();
+        canvas.markContentDirty();
+        drainPaint();
+
+        try {
+            // The engine normalizes the selection: naming a covered cell selects
+            // the whole merged range and reports the anchor, which is the
+            // address the host then uses for the editor and the active cell.
+            model.setSelectedCell(lastRow, lastColumn);
+            canvas.viewChanged();
+            drainPaint();
+            const view = model.getSelectedView();
+            if (view.row !== firstRow || view.column !== firstColumn) {
+                throw new Error(
+                    `selection did not snap to the anchor: ${view.row},${view.column}`,
+                );
+            }
+            const [r1, c1, r2, c2] = view.range;
+            if (r1 !== firstRow || c1 !== firstColumn || r2 !== lastRow || c2 !== lastColumn) {
+                throw new Error(`selection range is not the merge: ${JSON.stringify(view.range)}`);
+            }
+
+            // Editor placement primitives: one fragment spanning the whole
+            // merge, strictly larger than the anchor's own cell.
+            const fragments = canvas.visibleFragments(firstRow, firstColumn, lastRow, lastColumn);
+            if (fragments.length !== 1) {
+                throw new Error(`expected one merge fragment, got ${JSON.stringify(fragments)}`);
+            }
+            const anchorCell = canvas.cellRect(firstRow, firstColumn);
+            if (
+                fragments[0].rect.width <= anchorCell.width ||
+                fragments[0].rect.height <= anchorCell.height
+            ) {
+                throw new Error(
+                    `merge fragment ${JSON.stringify(fragments[0].rect)} is not larger than the anchor cell`,
+                );
+            }
+
+            // `displayCellAt` (the editor's primary path) resolves a covered
+            // cell to that same fragment.
+            const covered = canvas.cellRect(lastRow, lastColumn);
+            const hit = canvas.displayCellAt(covered.top_left.x + 2, covered.top_left.y + 2);
+            if (!hit) throw new Error("displayCellAt returned null over a covered cell");
+            if (
+                hit.fragment.width !== fragments[0].rect.width ||
+                hit.fragment.top_left.y !== fragments[0].rect.top_left.y
+            ) {
+                throw new Error(
+                    `displayCellAt fragment ${JSON.stringify(hit.fragment)} != visibleFragments ${JSON.stringify(fragments[0].rect)}`,
+                );
+            }
+
+            // Anchor scrolled out of view: the fallback path must still answer
+            // with the visible part of the merge, inside the canvas.
+            model.setTopLeftVisibleCell(lastRow - 1, firstColumn);
+            canvas.viewChanged();
+            canvas.markContentDirty();
+            drainPaint();
+            const scrolled = canvas.visibleFragments(firstRow, firstColumn, lastRow, lastColumn);
+            if (scrolled.length !== 1) {
+                throw new Error(`scrolled: expected one fragment, got ${JSON.stringify(scrolled)}`);
+            }
+            const size = canvas.canvasSize();
+            if (
+                scrolled[0].rect.top_left.x < 0 ||
+                scrolled[0].rect.top_left.y < 0 ||
+                scrolled[0].rect.top_left.x + scrolled[0].rect.width > size.w + 1 ||
+                scrolled[0].rect.top_left.y + scrolled[0].rect.height > size.h + 1
+            ) {
+                throw new Error(`scrolled fragment escapes the canvas: ${JSON.stringify(scrolled[0].rect)}`);
+            }
+            if (scrolled[0].rect.top_left.y > fragments[0].rect.top_left.y) {
+                throw new Error(
+                    `scrolled fragment moved down: before ${JSON.stringify(fragments[0].rect)} after ${JSON.stringify(scrolled[0].rect)}`,
+                );
+            }
+        } finally {
+            model.unmergeCells(area);
+            for (let row = firstRow; row <= lastRow; row += 1) {
+                model.setUserInput(sheet, row, firstColumn, "");
+            }
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+        return "selection snapped to the anchor; one editor fragment per merge";
+    });
+
     await check("retained link raster matches a forced-Fresh repaint", () => {
         const sheet = model.getSelectedSheet();
         const column = 20;

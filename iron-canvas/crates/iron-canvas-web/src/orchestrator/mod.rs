@@ -29,7 +29,9 @@ use iron_canvas_core::AutoFitError;
 use iron_canvas_core::CanvasModel;
 use iron_canvas_core::PaintResult;
 use iron_canvas_core::address::{AutofillTarget, FormulaRef, RCRange, SheetArea};
+use iron_canvas_core::DisplayCell;
 use iron_canvas_core::chrome::hit::{HitTest, ResizeTarget};
+use iron_canvas_core::chrome::GridSegment;
 use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
@@ -333,6 +335,19 @@ impl IronCanvas {
 
     pub fn cell_rect(&self, row: i32, column: i32) -> Option<PixelRect> {
         self.runtime.orchestrator().cell_rect(row, column)
+    }
+
+    /// The committed logical cell at a pixel position, or `None` off-grid.
+    /// Same answer as the `displayCellAt` binding, for Rust hosts (the Leptos
+    /// editor, hover resolution) that must not cross the JS boundary.
+    pub fn display_cell_at(&self, x: f64, y: f64) -> Option<DisplayCell> {
+        self.runtime.orchestrator().display_cell_at(x, y)
+    }
+
+    /// Visible pixel fragments of an addressed range, one per intersecting
+    /// pane segment. Same answer as the `visibleFragments` binding.
+    pub fn visible_fragments(&self, range: RCRange) -> Vec<(GridSegment, PixelRect)> {
+        self.runtime.orchestrator().visible_fragments(range)
     }
 
     /// The committed hyperlink at a 1-based cell, or `None`. Reads committed

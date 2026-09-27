@@ -138,6 +138,30 @@ pub(crate) enum LinkKindWire {
     Internal,
 }
 
+/// One visible fragment of an addressed range, for the `visibleFragments`
+/// query: the address range it covers and its pixel rectangle on the canvas.
+///
+/// No pane-region field: every consumer (editor placement, autofill ghost,
+/// outline) needs the rectangle, and the region would only duplicate the
+/// dev-only diagnostics wire enum.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FragmentWire {
+    pub range: RCRangeWire,
+    pub rect: iron_canvas_core::PixelRect,
+}
+
+impl From<(iron_canvas_core::chrome::GridSegment, iron_canvas_core::PixelRect)> for FragmentWire {
+    fn from(
+        (segment, rect): (iron_canvas_core::chrome::GridSegment, iron_canvas_core::PixelRect),
+    ) -> Self {
+        FragmentWire {
+            range: RCRangeWire::from(segment.range()),
+            rect,
+        }
+    }
+}
+
 impl From<&CellLink> for LinkWire {
     fn from(link: &CellLink) -> Self {
         let kind = if link.target().is_external() {

@@ -19,6 +19,7 @@
 use iron_canvas_web::IronCanvas;
 use leptos::prelude::*;
 
+mod autofill;
 mod click;
 mod contextmenu;
 mod cursor_hint;
@@ -30,6 +31,7 @@ mod mousemove;
 mod mouseup;
 mod wheel;
 
+pub(crate) use autofill::snap_autofill_target;
 pub use contextmenu::handle_contextmenu;
 pub(crate) use cursor_hint::{clear_hover, revalidate_hover};
 pub use dblclick::handle_dblclick;
