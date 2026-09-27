@@ -999,6 +999,117 @@ async function runChecksOnce() {
         return "selection snapped to the anchor; one editor fragment per merge";
     });
 
+    await check("a throwing or malformed getMergedCells holds the attempt", () => {
+        const sheet = model.getSelectedSheet();
+        const firstRow = 240;
+        const firstColumn = 7;
+        const area = { sheet, row: firstRow, column: firstColumn, width: 2, height: 2 };
+        for (let row = firstRow; row <= firstRow + 1; row += 1) {
+            for (let column = firstColumn; column <= firstColumn + 1; column += 1) {
+                model.setUserInput(sheet, row, column, "");
+            }
+        }
+        model.setUserInput(sheet, firstRow, firstColumn, "held-merge");
+        model.mergeCells(area);
+        model.evaluate();
+        model.setTopLeftVisibleCell(firstRow - 1, firstColumn);
+        canvas.viewChanged();
+        canvas.markContentDirty();
+        drainPaint();
+
+        const covered = canvas.cellRect(firstRow + 1, firstColumn + 1);
+        const probe = { x: covered.top_left.x + 2, y: covered.top_left.y + 2 };
+        const committed = canvas.displayCellAt(probe.x, probe.y);
+        if (!committed) throw new Error("the committed merge must resolve before the hold");
+        const healthy = model.getMergedCells;
+
+        const assertHeld = (label) => {
+            canvas.markContentDirty();
+            const outcomes = drainPaint();
+            if (outcomes.at(-1) === RenderResult.Idle && !outcomes.includes(RenderResult.RetryRequired)) {
+                throw new Error(`${label}: expected a held attempt, got ${outcomes.join(",")}`);
+            }
+            const after = canvas.displayCellAt(probe.x, probe.y);
+            if (!after) throw new Error(`${label}: the held attempt dropped the merge geometry`);
+            if (after.anchor.r1 !== committed.anchor.r1 || after.merged.r2 !== committed.merged.r2) {
+                throw new Error(`${label}: the held attempt changed committed merge geometry`);
+            }
+        };
+
+        try {
+            // A host whose method throws is a wire-shape failure: hold, never
+            // paint a sheet with the merges silently missing.
+            model.getMergedCells = () => {
+                throw new Error("bridge down");
+            };
+            assertHeld("throwing");
+
+            // A record whose extent cannot become geometry is malformed data:
+            // hold too, since the JS host is untrusted.
+            model.getMergedCells = () => [{ row: firstRow, column: firstColumn, width: 0, height: 1 }];
+            assertHeld("malformed");
+        } finally {
+            model.getMergedCells = healthy;
+            model.unmergeCells(area);
+            model.setUserInput(sheet, firstRow, firstColumn, "");
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+
+        // Recovered: the healthy bridge commits again.
+        if (drainPaint().at(-1) !== RenderResult.Idle) {
+            throw new Error("the healthy bridge must settle back to Idle");
+        }
+        return "throwing and malformed merge lists both hold, committed geometry survives";
+    });
+
+    await check("SVG export paints an offscreen merged anchor's text", () => {
+        const sheet = model.getSelectedSheet();
+        const firstRow = 260;
+        const firstColumn = 10;
+        const lastRow = firstRow + 7;
+        const area = { sheet, row: firstRow, column: firstColumn, width: 2, height: 8 };
+        for (let row = firstRow; row <= lastRow; row += 1) {
+            for (let column = firstColumn; column <= firstColumn + 1; column += 1) {
+                model.setUserInput(sheet, row, column, "");
+            }
+        }
+        model.setUserInput(sheet, firstRow, firstColumn, "svg-merge");
+        model.mergeCells(area);
+        model.evaluate();
+        // Scroll the anchor out of the viewport: only covered cells are on
+        // screen, so the per-cell pass cannot paint the anchor's text — the
+        // export's only possible source is the merge pass.
+        model.setTopLeftVisibleCell(lastRow - 1, firstColumn);
+        canvas.viewChanged();
+        canvas.markContentDirty();
+        drainPaint();
+
+        try {
+            const size = canvas.canvasSize();
+            const svg = canvas.exportSvg(size.w, size.h);
+            if (!svg.startsWith("<svg")) {
+                throw new Error("exportSvg did not return an SVG document");
+            }
+            const occurrences = svg.split("svg-merge").length - 1;
+            if (occurrences !== 1) {
+                throw new Error(
+                    `an offscreen anchor's value must be exported exactly once, got ${occurrences}`,
+                );
+            }
+        } finally {
+            model.unmergeCells(area);
+            model.setUserInput(sheet, firstRow, firstColumn, "");
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+        // PDF export has no host binding yet (`exportSvg` is the only export
+        // surface on `IronCanvas`), so PDF parity cannot be asserted here.
+        return "offscreen merged anchor exported exactly once";
+    });
+
     await check("retained link raster matches a forced-Fresh repaint", () => {
         const sheet = model.getSelectedSheet();
         const column = 20;

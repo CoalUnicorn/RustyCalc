@@ -12,6 +12,16 @@ use iron_canvas_recorder::MemSurface;
 
 use common::TestModel;
 
+/// The text of every `FillText` op, in paint order.
+fn texts(ops: &[iron_canvas_recorder::DrawOp]) -> Vec<String> {
+    ops.iter()
+        .filter_map(|op| match op {
+            iron_canvas_recorder::DrawOp::FillText { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn build(model: Rc<TestModel>) -> Orchestrator<MemSurface> {
     let mut orch = Orchestrator::<MemSurface>::new(MemSurface::new(), MemSurface::new());
     orch.resize(
@@ -230,4 +240,421 @@ fn an_unmerged_cell_reports_itself() {
     assert_eq!(cell.anchor, RCRange::from_cell(3, 4));
     assert_eq!(cell.merged, RCRange::from_cell(3, 4));
     assert_eq!(cell.fragment, rect);
+}
+
+// ── Offscreen anchor: full logical dimensions ──
+
+/// Only covered cells visible, vertically: the fill covers every visible row of
+/// the merge, not just the covered cell the renderer happened to start from.
+#[test]
+fn a_vertical_offscreen_anchor_uses_the_full_logical_height() {
+    use iron_canvas_recorder::DrawOp;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(6)
+            .with_merged_ranges(vec![RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 9,
+                c2: 1,
+            }]),
+    );
+    model.set_cell(1, 1, "anchor");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let row = orch.cell_rect(7, 1).expect("row 7 must be visible");
+    let ops = orch.grid_surface().recorder().ops();
+    assert!(
+        ops.iter().any(|op| matches!(op, DrawOp::RectFill { rect, .. }
+            if rect.height > row.height && rect.width == row.width)),
+        "the merge fill must span every visible row of the merge"
+    );
+    assert!(texts(&ops).iter().any(|t| t == "anchor"));
+}
+
+/// Horizontal mirror: the fill covers every visible column of the merge.
+#[test]
+fn a_horizontal_offscreen_anchor_uses_the_full_logical_width() {
+    use iron_canvas_recorder::DrawOp;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_left_column(6)
+            .with_merged_ranges(vec![RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 1,
+                c2: 9,
+            }]),
+    );
+    model.set_cell(1, 1, "anchor");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let cell = orch.cell_rect(1, 7).expect("column 7 must be visible");
+    let ops = orch.grid_surface().recorder().ops();
+    assert!(
+        ops.iter().any(|op| matches!(op, DrawOp::RectFill { rect, .. }
+            if rect.width > cell.width && rect.height == cell.height)),
+        "the merge fill must span every visible column of the merge"
+    );
+    assert!(texts(&ops).iter().any(|t| t == "anchor"));
+}
+
+// ── Anchor fill, CF decoration, wrap, neighbours ──
+
+/// The anchor's fill and conditional-formatting decoration paint over the whole
+/// merged rectangle, after the interior cell strokes they cover.
+#[test]
+fn the_anchor_fill_and_cf_decoration_cover_the_merge() {
+    use iron_canvas_core::{CellDecoration, DataBarSpec};
+    use iron_canvas_recorder::DrawOp;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(1)
+            .with_merged_ranges(vec![RCRange {
+                r1: 2,
+                c1: 2,
+                r2: 4,
+                c2: 3,
+            }]),
+    );
+    model.set_cell(2, 2, "x");
+    model.set_style(
+        2,
+        2,
+        CellStyle {
+            fill_color: Some("#ff0000".to_string()),
+            ..CellStyle::default()
+        },
+    );
+    model.set_decoration(
+        2,
+        2,
+        CellDecoration::DataBar(DataBarSpec {
+            fraction: 1.0,
+            color: "#112233".to_string(),
+        }),
+    );
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let ops = orch.grid_surface().recorder().ops();
+    let fill = ops
+        .iter()
+        .position(|op| matches!(op, DrawOp::RectFill { color, .. } if color == "#ff0000"))
+        .expect("the anchor fill must paint");
+    let bar = ops
+        .iter()
+        .position(|op| matches!(op, DrawOp::RectFill { color, .. } if color == "#112233"))
+        .expect("the anchor CF data bar must paint");
+    assert!(bar > fill, "the CF decoration paints over the anchor fill");
+}
+
+/// A neighbour's explicit border on the shared edge paints in the per-cell
+/// pass; the merge re-paints its own perimeter afterwards, so the merge wins
+/// the shared pixels. The covered cell's own border is painted too and then
+/// covered — that redundancy is deliberate (see the merge-paint comments).
+#[test]
+fn the_merge_perimeter_paints_after_a_neighbour_border() {
+    use iron_canvas_core::{Border, BorderItem, BorderStyle};
+    use iron_canvas_recorder::DrawOp;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(1)
+            .with_merged_ranges(vec![RCRange {
+                r1: 2,
+                c1: 2,
+                r2: 2,
+                c2: 3,
+            }]),
+    );
+    model.set_cell(2, 2, "x");
+    // The merge's right perimeter runs along column 3's right edge.
+    model.set_style(
+        2,
+        3,
+        CellStyle {
+            border: Border {
+                right: Some(BorderItem {
+                    style: BorderStyle::Thick,
+                    color: Some("#00ff00".to_string()),
+                }),
+                ..Border::default()
+            },
+            ..CellStyle::default()
+        },
+    );
+    // The neighbour to the right carries its own left border on that edge.
+    model.set_style(
+        2,
+        4,
+        CellStyle {
+            border: Border {
+                left: Some(BorderItem {
+                    style: BorderStyle::Thin,
+                    color: Some("#0000ff".to_string()),
+                }),
+                ..Border::default()
+            },
+            ..CellStyle::default()
+        },
+    );
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let ops = orch.grid_surface().recorder().ops();
+    let neighbour = ops
+        .iter()
+        .position(|op| matches!(op, DrawOp::StrokeLine { color, .. } if color == "#0000ff"))
+        .expect("the neighbour's left border must paint");
+    // The *last* green stroke is the merge pass's perimeter: the covered cell's
+    // own right border paints earlier, in the per-cell pass.
+    let perimeter = ops
+        .iter()
+        .rposition(|op| matches!(op, DrawOp::StrokeLine { color, .. } if color == "#00ff00"))
+        .expect("the merge's right perimeter must paint");
+    let covered_cell_border = ops
+        .iter()
+        .position(|op| matches!(op, DrawOp::StrokeLine { color, .. } if color == "#00ff00"))
+        .expect("the covered cell's own border paints in the per-cell pass");
+    assert!(
+        covered_cell_border < perimeter,
+        "the covered cell's border must paint before the merge re-paints the perimeter"
+    );
+    assert!(
+        perimeter > neighbour,
+        "the merge perimeter paints after the neighbour border it shares"
+    );
+}
+
+/// Wrapped text is laid out against the logical rectangle and clipped to the
+/// visible fragment: the clip is the fragment, not a single cell.
+#[test]
+fn wrapped_merge_text_is_clipped_to_the_fragment() {
+    use iron_canvas_recorder::DrawOp;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(1)
+            .with_merged_ranges(vec![RCRange {
+                r1: 2,
+                c1: 1,
+                r2: 3,
+                c2: 4,
+            }]),
+    );
+    model.set_cell(2, 1, "a long wrapped value that needs more than one line");
+    model.set_style(
+        2,
+        1,
+        CellStyle {
+            alignment: Some(iron_canvas_core::Alignment {
+                horizontal: iron_canvas_core::HAlign::General,
+                vertical: iron_canvas_core::VAlign::Top,
+                wrap_text: true,
+            }),
+            ..CellStyle::default()
+        },
+    );
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let cell = orch.cell_rect(2, 1).expect("the anchor cell must be visible");
+    let ops = orch.grid_surface().recorder().ops();
+    let clip = ops
+        .iter()
+        .find_map(|op| match op {
+            DrawOp::PushClip { rect } if rect.width > cell.width => Some(*rect),
+            _ => None,
+        })
+        .expect("wrapped text must clip to the merged fragment");
+    assert!(
+        clip.height > cell.height,
+        "the clip is the whole fragment, not the anchor's own cell"
+    );
+}
+
+// ── Frozen boundaries ──
+
+/// A merge spanning both frozen boundaries paints once per pane segment, and
+/// the frozen separators still paint after the cells (so they stay visible).
+#[test]
+fn a_merge_crossing_both_frozen_boundaries_paints_per_segment() {
+    use iron_canvas_core::painter::GroupClass;
+    use iron_canvas_recorder::DrawOp;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_frozen(2, 2)
+            .with_top_row(3)
+            .with_left_column(3)
+            .with_merged_ranges(vec![RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 4,
+                c2: 4,
+            }]),
+    );
+    model.set_cell(1, 1, "spanning");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let fragments = orch.visible_fragments(RCRange {
+        r1: 1,
+        c1: 1,
+        r2: 4,
+        c2: 4,
+    });
+    assert_eq!(
+        fragments.len(),
+        4,
+        "the merge intersects all four panes: {fragments:?}"
+    );
+
+    let ops = orch.grid_surface().recorder().ops();
+    let last_merge_fill = ops
+        .iter()
+        .rposition(|op| matches!(op, DrawOp::FillText { text, .. } if text == "spanning"))
+        .expect("the merge text must paint");
+    let separator_group = ops
+        .iter()
+        .position(|op| matches!(op, DrawOp::BeginGroup { class } if *class == GroupClass::FrozenSep))
+        .expect("the frozen separators must paint");
+    assert!(
+        separator_group > last_merge_fill,
+        "frozen separators must paint after the merge"
+    );
+}
+
+// ── Transactional failure ──
+
+/// A failed merge preparation holds the attempt: the previous pixels stay and
+/// the previous merge hit geometry stays queryable.
+#[test]
+fn a_failed_merge_preparation_keeps_pixels_and_hit_geometry() {
+
+    // The anchor is above the viewport, so its content comes from the scalar
+    // accessors — the read that can fail for a merge with no segment to read it
+    // from.
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(6)
+            .with_merged_ranges(vec![RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 9,
+                c2: 2,
+            }]),
+    );
+    model.set_cell(1, 1, "anchor");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let covered = orch.cell_rect(7, 1).expect("row 7 must be visible");
+    let before = orch
+        .display_cell_at(f64::from(covered.left() + 1), f64::from(covered.top() + 1))
+        .expect("the covered cell resolves to its anchor");
+    let ops_before = orch.grid_surface().recorder().ops().len();
+
+    // Fail the offscreen anchor's style read only: geometry and the visible
+    // segments still prepare, so this exercises the merge preparation path.
+    model.set_style_bridge_fail_at(Some((1, 1)));
+    model.set_cell(1, 1, "changed");
+    orch.mark_content_dirty();
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+
+    let after = orch
+        .display_cell_at(f64::from(covered.left() + 1), f64::from(covered.top() + 1))
+        .expect("the held attempt must keep the committed merge geometry");
+    assert_eq!(after.anchor, before.anchor);
+    assert_eq!(after.merged, before.merged);
+    assert_eq!(
+        orch.grid_surface().recorder().ops().len(),
+        ops_before,
+        "a held attempt must not paint"
+    );
+    assert!(
+        !texts(&orch.grid_surface().recorder().ops())
+            .iter()
+            .any(|t| t == "changed"),
+        "the held attempt must not publish the new anchor value either"
+    );
+}
+
+// ── Merge-table contract ──
+
+/// An out-of-bounds or overlapping merge list holds the attempt instead of
+/// painting a fabricated table, and the committed geometry survives.
+#[test]
+fn an_invalid_merge_list_holds_the_attempt() {
+    use iron_canvas_core::FrameInputFailure;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(1)
+            .with_merged_ranges(vec![RCRange {
+                r1: 2,
+                c1: 2,
+                r2: 3,
+                c2: 3,
+            }]),
+    );
+    model.set_cell(2, 2, "anchor");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    let covered = orch.cell_rect(3, 3).expect("covered cell must be visible");
+    let committed = orch
+        .display_cell_at(f64::from(covered.left() + 1), f64::from(covered.top() + 1))
+        .expect("the covered cell resolves to its anchor");
+
+    for invalid in [
+        vec![RCRange {
+            r1: 0,
+            c1: 1,
+            r2: 1,
+            c2: 1,
+        }],
+        vec![
+            RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 3,
+                c2: 3,
+            },
+            RCRange {
+                r1: 3,
+                c1: 3,
+                r2: 5,
+                c2: 5,
+            },
+        ],
+    ] {
+        model.set_merged_ranges(invalid);
+        orch.mark_content_dirty();
+        assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+        let held = orch
+            .display_cell_at(f64::from(covered.left() + 1), f64::from(covered.top() + 1))
+            .expect("the held attempt keeps the committed merge geometry");
+        assert_eq!(held.anchor, committed.anchor);
+        model.set_merged_ranges(vec![RCRange {
+            r1: 2,
+            c1: 2,
+            r2: 3,
+            c2: 3,
+        }]);
+    }
+
+    // The named failure is reported, so a recording can attribute the hold.
+    model.set_capture_fail(Some(FrameInputFailure::MergedRanges));
+    orch.mark_content_dirty();
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+    assert_eq!(
+        orch.last_trace().outcome,
+        iron_canvas_core::FrameOutcome::HeldOnInputFailure(FrameInputFailure::MergedRanges)
+    );
 }
