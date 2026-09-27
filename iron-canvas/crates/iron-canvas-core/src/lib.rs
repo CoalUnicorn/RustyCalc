@@ -24,7 +24,7 @@ pub use frame::{
     BlitFallback, BlitPlan, FrameDelta, FrameInputFailure, FrameInputs, FrameOutcome, FrameTrace,
     GridVerdict, PaintResult, RebuildReason, RenderStrategy, Shift,
 };
-pub use orchestrator::Orchestrator;
+pub use orchestrator::{DisplayCell, Orchestrator};
 
 #[cfg(feature = "dev-diagnostics")]
 pub use renderer::diagnostics::{

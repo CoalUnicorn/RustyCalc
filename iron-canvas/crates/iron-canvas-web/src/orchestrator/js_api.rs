@@ -95,6 +95,20 @@ impl IronCanvas {
         }
     }
 
+    /// Resolve a pixel position to its logical cell, merged or not.
+    /// A covered cell of a merged range reports the merge's anchor, its full
+    /// range, and the anchor's link. `crate::wire::DisplayCellWire` defines
+    /// the JavaScript value; the method returns `null` off-grid.
+    #[wasm_bindgen(js_name = "displayCellAt")]
+    pub fn display_cell_at_js(&self, x: f64, y: f64) -> Result<JsValue, JsError> {
+        match self.runtime.orchestrator().display_cell_at(x, y) {
+            Some(cell) => Ok(serde_wasm_bindgen::to_value(
+                &crate::wire::DisplayCellWire::from(cell),
+            )?),
+            None => Ok(JsValue::NULL),
+        }
+    }
+
     /// Return the current drawable size in CSS pixels as `{ w, h }`.
     #[wasm_bindgen(js_name = "canvasSize")]
     pub fn canvas_size_js(&self) -> Result<JsValue, JsError> {

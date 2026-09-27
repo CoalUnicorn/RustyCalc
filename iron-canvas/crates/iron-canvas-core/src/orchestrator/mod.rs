@@ -59,6 +59,8 @@ mod query;
 mod setters;
 mod strategies;
 
+pub use query::DisplayCell;
+
 pub struct Orchestrator<S>
 where
     S: Surface,

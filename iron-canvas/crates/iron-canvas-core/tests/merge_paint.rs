@@ -165,3 +165,69 @@ fn a_mixed_perimeter_edge_paints_one_stroke_per_style_run() {
         "both style runs must paint their own stroke, got {colors:?}"
     );
 }
+
+// ── Display-cell queries (Task 10) ──
+
+/// A covered physical cell resolves to its merge's anchor and full range, even
+/// when the anchor itself is scrolled out of view, and the reported fragment
+/// lies inside the canvas.
+#[test]
+fn a_covered_cell_resolves_to_its_offscreen_anchor() {
+    use iron_canvas_core::CellCoord;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(10)
+            .with_merged_ranges(vec![RCRange {
+                r1: 1,
+                c1: 1,
+                r2: 30,
+                c2: 2,
+            }]),
+    );
+    model.set_cell(1, 1, "anchor-value");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let rect = orch.cell_rect(12, 1).expect("row 12 must be visible");
+    let cell = orch
+        .display_cell_at(f64::from(rect.left() + 1), f64::from(rect.top() + 1))
+        .expect("the point is on the grid");
+
+    assert_eq!(cell.cell, CellCoord { row: 12, col: 1 });
+    assert_eq!(cell.anchor, RCRange::from_cell(1, 1));
+    assert_eq!(
+        cell.merged,
+        RCRange {
+            r1: 1,
+            c1: 1,
+            r2: 30,
+            c2: 2
+        }
+    );
+    assert!(cell.link.is_none());
+    // The visible fragment must lie inside the 400x300 canvas.
+    assert!(cell.fragment.left() >= 0 && cell.fragment.top() >= 0);
+    assert!(cell.fragment.right() <= 400 && cell.fragment.bottom() <= 300);
+}
+
+/// An unmerged cell reports itself as its own anchor and range.
+#[test]
+fn an_unmerged_cell_reports_itself() {
+    use iron_canvas_core::CellCoord;
+
+    let model = Rc::new(TestModel::synthetic_grid().with_top_row(1));
+    model.set_cell(3, 4, "plain");
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let rect = orch.cell_rect(3, 4).expect("cell must be visible");
+    let cell = orch
+        .display_cell_at(f64::from(rect.left() + 1), f64::from(rect.top() + 1))
+        .expect("the point is on the grid");
+
+    assert_eq!(cell.cell, CellCoord { row: 3, col: 4 });
+    assert_eq!(cell.anchor, RCRange::from_cell(3, 4));
+    assert_eq!(cell.merged, RCRange::from_cell(3, 4));
+    assert_eq!(cell.fragment, rect);
+}
