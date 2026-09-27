@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::CanvasModel;
-use crate::address::RCRange;
+use crate::address::{CellCoord, RCRange};
 use crate::chrome::{Chrome, GridLayout, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Point, Side};
@@ -153,6 +153,57 @@ impl ExtentCache {
     }
 }
 
+/// The anchor's paint inputs, resolved once per prepared merge.
+struct AnchorContent {
+    style: CellStyle,
+    value: String,
+    cell_type: CellKind,
+    decoration: Option<CellDecoration>,
+}
+
+/// The dense-buffer index of `(row, col)` in whichever prepared segment paints
+/// it, or `None` when no segment does.
+fn buffered_anchor_content(
+    segments: &[Option<SegmentData>; 4],
+    anchor: CellCoord,
+) -> Option<AnchorContent> {
+    for data in segments.iter().flatten() {
+        let range = data.segment.range();
+        if !range.contains(anchor.row, anchor.col) {
+            continue;
+        }
+        let cols = range.c2 - range.c1 + 1;
+        let idx = ((anchor.row - range.r1) * cols + (anchor.col - range.c1)) as usize;
+        let fetched = &data.fetched;
+        return Some(AnchorContent {
+            style: fetched
+                .styles()
+                .get(idx)
+                .and_then(Fetched::value_ref)
+                .cloned()
+                .unwrap_or_default(),
+            value: fetched
+                .values()
+                .get(idx)
+                .and_then(Fetched::value_ref)
+                .cloned()
+                .unwrap_or_default(),
+            cell_type: fetched
+                .cell_types()
+                .get(idx)
+                .and_then(Fetched::value_ref)
+                .copied()
+                .unwrap_or(CellKind::Text),
+            decoration: fetched
+                .decorations()
+                .get(idx)
+                .and_then(Fetched::value_ref)
+                .cloned(),
+        });
+    }
+    None
+}
+
 /// Inclusive intersection of two ranges, or `None` when they are disjoint.
 fn intersect(a: RCRange, b: RCRange) -> Option<RCRange> {
     let a = a.normalized();
@@ -262,6 +313,15 @@ impl<P: Painter> RendererCore<P> {
         let mut extents = ExtentCache::default();
         let mut prepared = Vec::new();
         for merge in frame.merges().iter() {
+            // A merge with no in-frame cell is skipped before any model read:
+            // the extent walk is O(height + width) and the anchor read is a
+            // bridge crossing, and neither has an answer to contribute.
+            if !layout
+                .segments()
+                .any(|segment| intersect(merge.range, segment.range()).is_some())
+            {
+                continue;
+            }
             prepared.push(self.prepare_one_merge(
                 model, frame, layout, segments, &mut extents, merge,
             )?);
@@ -331,10 +391,48 @@ impl<P: Painter> RendererCore<P> {
             });
         }
 
-        // Anchor reads. A transient failure holds the attempt: painting a
+        // Anchor content. A transient failure holds the attempt: painting a
         // merge with fabricated content would cover the covered cells with
         // wrong pixels.
         let anchor = merge.anchor;
+        let content = self.anchor_content(model, frame, segments, anchor)?;
+
+        Some(PreparedMerge {
+            logical_rect: logical_rect.unwrap_or(PixelRect {
+                top_left: Point { x: 0, y: 0 },
+                width: 0,
+                height: 0,
+            }),
+            fragments,
+            style: content.style,
+            value: content.value,
+            cell_type: content.cell_type,
+            decoration: content.decoration,
+            link: frame.links().get(anchor.row, anchor.col).cloned(),
+            borders: build_perimeter(frame, &self.color_intern, segments, range),
+        })
+    }
+
+    /// Content of the merge's anchor, preferring the already-fetched segment
+    /// buffers.
+    ///
+    /// The buffers hold exactly what the scalar accessors would return, so a
+    /// merge whose anchor is visible costs no bridge crossing — the dense pane
+    /// fetch must not degrade into per-cell reads (the browser harness asserts
+    /// that bound). Only an anchor outside every painted segment — a merge
+    /// scrolled partly out of view — falls back to the scalar accessors, which
+    /// is the case the buffers cannot answer.
+    fn anchor_content(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        segments: &[Option<SegmentData>; 4],
+        anchor: CellCoord,
+    ) -> Option<AnchorContent> {
+        if let Some(content) = buffered_anchor_content(segments, anchor) {
+            return Some(content);
+        }
+        let sheet = frame.sheet;
         let value = model.get_formatted_cell_value(sheet, anchor.row, anchor.col);
         let cell_type = model.get_cell_type(sheet, anchor.row, anchor.col);
         let style = model.get_cell_style(sheet, anchor.row, anchor.col);
@@ -347,20 +445,11 @@ impl<P: Painter> RendererCore<P> {
             return None;
         }
         self.trace_fetch(RCRange::from_cell(anchor.row, anchor.col));
-
-        Some(PreparedMerge {
-            logical_rect: logical_rect.unwrap_or(PixelRect {
-                top_left: Point { x: 0, y: 0 },
-                width: 0,
-                height: 0,
-            }),
-            fragments,
+        Some(AnchorContent {
             style: style.value().unwrap_or_default(),
             value: value.value().unwrap_or_default(),
             cell_type: cell_type.value().unwrap_or(CellKind::Text),
             decoration: decoration.value(),
-            link: frame.links().get(anchor.row, anchor.col).cloned(),
-            borders: build_perimeter(frame, &self.color_intern, segments, range),
         })
     }
 

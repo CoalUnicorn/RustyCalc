@@ -66,12 +66,14 @@ export function installDenseRangeMethods(model, onChange = () => {}) {
         getFormattedCellValuesIn: 0,
         getCellTypesIn: 0,
         getLinks: 0,
+        getMergedCells: 0,
     };
     const raw = {
         style: model.getCellStyle.bind(model),
         type: model.getCellType.bind(model),
         value: model.getFormattedCellValue.bind(model),
         links: model.getLinks.bind(model),
+        merges: model.getMergedCells.bind(model),
     };
     const count = (name) => {
         counts[name] += 1;
@@ -111,6 +113,10 @@ export function installDenseRangeMethods(model, onChange = () => {}) {
     model.getLinks = (sheet) => {
         count("getLinks");
         return raw.links(sheet);
+    };
+    model.getMergedCells = (sheet) => {
+        count("getMergedCells");
+        return raw.merges(sheet);
     };
 
     return {

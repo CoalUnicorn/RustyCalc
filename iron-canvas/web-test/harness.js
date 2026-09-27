@@ -168,7 +168,21 @@ async function fetchDemoModel(id) {
             `Could not load ${demo.compiled} (${response.status}). Run \"make demos\" or \"make serve\" first.`,
         );
     }
-    return Model.from_bytes(new Uint8Array(await response.arrayBuffer()), "en");
+    return modelFromBytes(new Uint8Array(await response.arrayBuffer()), "en");
+}
+
+/**
+ * Decode a compiled `.ic` workbook. The upstream binding renamed this static
+ * from `from_bytes` to `fromBytes`; accept either so the harness runs against
+ * both the vendored package and a freshly built one (and therefore can
+ * exercise `getMergedCells`, which only a current build exposes).
+ */
+function modelFromBytes(bytes, language) {
+    const decode = Model.fromBytes ?? Model.from_bytes;
+    if (typeof decode !== "function") {
+        throw new Error("the vendored IronCalc package exposes no fromBytes/from_bytes");
+    }
+    return decode.call(Model, bytes, language);
 }
 
 async function loadWorkbook(id) {
@@ -769,6 +783,110 @@ async function runChecksOnce() {
             drainPaint();
         }
         return `${cases.length} links, getLinks crossed ${bridge.counts.getLinks}×`;
+    });
+
+    await check("merged cells bridge reads upstream getMergedCells and resolve covered cells", () => {
+        const sheet = model.getSelectedSheet();
+        // Scratch block, clear of every demo fixture so the check runs against
+        // whichever workbook the harness loaded. A merge with no content is
+        // accepted; the anchor gets one text cell afterwards.
+        const firstRow = 200;
+        const lastRow = 207;
+        const firstColumn = 1;
+        const lastColumn = 2;
+        for (let row = firstRow; row <= lastRow; row += 1) {
+            for (let column = firstColumn; column <= lastColumn; column += 1) {
+                model.setUserInput(sheet, row, column, "");
+            }
+        }
+        const area = {
+            sheet,
+            row: firstRow,
+            column: firstColumn,
+            width: lastColumn - firstColumn + 1,
+            height: lastRow - firstRow + 1,
+        };
+        model.setUserInput(sheet, firstRow, firstColumn, "merged");
+        model.mergeCells(area);
+        model.evaluate();
+        // The scratch block must be on screen: every other check left the view
+        // wherever it finished, and `cellRect` answers null off-viewport.
+        model.setTopLeftVisibleCell(firstRow - 1, firstColumn);
+        canvas.viewChanged();
+
+        bridge.reset();
+        canvas.markContentDirty();
+        drainPaint();
+        if (bridge.counts.getMergedCells === 0) {
+            throw new Error("A committed paint never crossed getMergedCells");
+        }
+
+        // Parity: the renderer's committed geometry must agree with the
+        // engine's own merged list. Demo workbooks ship their own merges, so
+        // locate the scratch merge rather than assuming it is the only one.
+        const engine = model.getMergedCells(sheet);
+        const expected = engine.find(
+            (mc) => mc.row === area.row && mc.column === area.column,
+        );
+        if (!expected) {
+            throw new Error(`engine does not report the scratch merge: ${JSON.stringify(engine)}`);
+        }
+
+        const assertResolvesToAnchor = (label, row, column) => {
+            const rect = canvas.cellRect(row, column);
+            if (!rect) throw new Error(`${label}: cell R${row}C${column} is not visible`);
+            const hit = canvas.displayCellAt(rect.top_left.x + 2, rect.top_left.y + 2);
+            if (!hit) throw new Error(`${label}: displayCellAt returned null`);
+            if (hit.row !== row || hit.column !== column) {
+                throw new Error(`${label}: physical cell ${hit.row},${hit.column}`);
+            }
+            if (hit.anchor.r1 !== expected.row || hit.anchor.c1 !== expected.column) {
+                throw new Error(
+                    `${label}: anchor ${JSON.stringify(hit.anchor)} != engine anchor ${expected.row},${expected.column}`,
+                );
+            }
+            if (
+                hit.merged.r1 !== expected.row ||
+                hit.merged.c1 !== expected.column ||
+                hit.merged.r2 !== expected.row + expected.height - 1 ||
+                hit.merged.c2 !== expected.column + expected.width - 1
+            ) {
+                throw new Error(`${label}: merged ${JSON.stringify(hit.merged)} != engine merge`);
+            }
+            const size = canvas.canvasSize();
+            if (hit.fragment.top_left.x < 0 || hit.fragment.top_left.y < 0) {
+                throw new Error(`${label}: fragment starts off-canvas ${JSON.stringify(hit.fragment)}`);
+            }
+            if (
+                hit.fragment.top_left.x + hit.fragment.width > size.w + 1 ||
+                hit.fragment.top_left.y + hit.fragment.height > size.h + 1
+            ) {
+                throw new Error(`${label}: fragment escapes the canvas ${JSON.stringify(hit.fragment)}`);
+            }
+        };
+
+        try {
+            // Anchor visible: a covered cell resolves to it.
+            assertResolvesToAnchor("anchor visible", firstRow + 1, firstColumn + 1);
+
+            // Anchor offscreen: scroll so the merge's first rows leave the
+            // viewport while covered rows stay visible. The covered cell must
+            // still report the offscreen anchor.
+            model.setTopLeftVisibleCell(lastRow - 1, firstColumn);
+            canvas.viewChanged();
+            canvas.markContentDirty();
+            drainPaint();
+            assertResolvesToAnchor("anchor offscreen", lastRow, firstColumn);
+        } finally {
+            model.unmergeCells(area);
+            for (let row = firstRow; row <= lastRow; row += 1) {
+                model.setUserInput(sheet, row, firstColumn, "");
+            }
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+        return `merge ${JSON.stringify(expected)}, getMergedCells crossed ${bridge.counts.getMergedCells}×`;
     });
 
     await check("retained link raster matches a forced-Fresh repaint", () => {

@@ -56,7 +56,9 @@ impl From<JsStyle> for ic::Style {
 use iron_canvas_core::address::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
 use iron_canvas_core::{CellKind, CellLink, CellStyle};
-use iron_canvas_ironcalc::convert::{color_to_css, link_to_core, style_to_core};
+use iron_canvas_ironcalc::convert::{
+    color_to_css, link_to_core, merged_range_to_core, style_to_core,
+};
 
 #[wasm_bindgen]
 extern "C" {
@@ -167,6 +169,15 @@ extern "C" {
     // decodes, is a wire-shape failure that must hold the attempt.
     #[wasm_bindgen(catch, method, js_name = "getLinks")]
     fn get_links(this: &IronCalcModelHandle, sheet: u32) -> Result<JsValue, JsValue>;
+
+    // Sheet-level merged-range list, `MergedCell { row, column, width, height }`
+    // records. Optional on the host: a statically absent method means the host
+    // carries no merge data, so the empty list is the known answer. A present
+    // method that throws, or a payload no record decodes, is a wire-shape
+    // failure that must hold the attempt — rendering a merged region as
+    // separate cells would let a user edit a covered cell.
+    #[wasm_bindgen(catch, method, js_name = "getMergedCells")]
+    fn get_merged_cells(this: &IronCalcModelHandle, sheet: u32) -> Result<JsValue, JsValue>;
 }
 
 pub struct JsBackedModel {
@@ -181,6 +192,7 @@ pub struct JsBackedModel {
     has_types_in: bool,
     has_get_theme: bool,
     has_get_links: bool,
+    has_get_merged_cells: bool,
     has_show_row_headers: bool,
     has_show_col_headers: bool,
     // Geometry/config accessors are optional on the host. A method that is
@@ -207,6 +219,7 @@ impl JsBackedModel {
         let has_types_in = Self::has_method(&handle, "getCellTypesIn");
         let has_get_theme = Self::has_method(&handle, "getTheme");
         let has_get_links = Self::has_method(&handle, "getLinks");
+        let has_get_merged_cells = Self::has_method(&handle, "getMergedCells");
         let has_show_row_headers = Self::has_method(&handle, "getShowRowHeaders");
         let has_show_col_headers = Self::has_method(&handle, "getShowColHeaders");
         let has_row_height = Self::has_method(&handle, "getRowHeight");
@@ -221,6 +234,7 @@ impl JsBackedModel {
             has_types_in,
             has_get_theme,
             has_get_links,
+            has_get_merged_cells,
             has_show_row_headers,
             has_show_col_headers,
             has_row_height,
@@ -527,6 +541,36 @@ impl CanvasModel for JsBackedModel {
             ),
             None => None,
         })
+    }
+
+    /// A host without `getMergedCells` has no merge data at all — a structural
+    /// fact, so the empty list is the true answer. A present method that throws,
+    /// or a payload no `MergedCell` decodes, holds the attempt.
+    ///
+    /// A record whose extent cannot become geometry also holds, unlike the
+    /// native adapter, which drops one: the native engine's values are typed and
+    /// validated by the engine, while a JS host's answer is arbitrary user code,
+    /// so a malformed record is a wire-shape failure like any other.
+    fn get_merged_ranges(&self, sheet: u32) -> Option<Vec<RCRange>> {
+        if !self.has_get_merged_cells {
+            return Some(Vec::new());
+        }
+        let jsv = self.note_throw("getMergedCells", self.handle.get_merged_cells(sheet))?;
+        let cells: Vec<ic::MergedCell> = match serde_wasm_bindgen::from_value(jsv) {
+            Ok(v) => v,
+            Err(e) => {
+                self.note_serde_err("getMergedCells", &e);
+                return None;
+            }
+        };
+        let mut ranges = Vec::with_capacity(cells.len());
+        for cell in cells {
+            match merged_range_to_core(cell) {
+                Some(range) => ranges.push(range),
+                None => return None,
+            }
+        }
+        Some(ranges)
     }
 }
 
