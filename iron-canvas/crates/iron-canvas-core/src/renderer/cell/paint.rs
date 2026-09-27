@@ -12,7 +12,8 @@
 use super::borders::ResolvedBorders;
 use super::cf::CfDecorationPaint;
 use super::text::TextPaint;
-use crate::CellContentQuery;
+use crate::CanvasModel;
+
 use crate::address::{CellCoord, RCRange};
 use crate::chrome::{Chrome, PaneRegion};
 use crate::geometry::pixel_rect::PixelRect;
@@ -177,13 +178,27 @@ impl<P: Painter> RendererCore<P> {
     /// active sheet. Used by the selection overlay to restore the active cell
     /// on top of the semi-transparent selection fill. Sheet is implicit —
     /// taken from `frame.sheet`.
+    ///
+    /// A merged active cell is restored as the **whole logical cell**, with the
+    /// merge pass's own rules. Restoring only the physical anchor would lay a
+    /// second, differently aligned label and interior grid edges over the merged
+    /// pixels the grid painted, and would leave the rest of the merge under the
+    /// selection tint.
     pub fn repaint_active_cell(
         &self,
-        model: &dyn CellContentQuery,
+        model: &dyn CanvasModel,
         cell: CellCoord,
         frame: &Chrome,
     ) {
         let CellCoord { row, col } = cell;
+        if let Some(merge) = frame.merges().merge_at(row, col) {
+            // A failed read leaves the grid's own pixels showing rather than
+            // painting a partial cell over them.
+            if let Some(prepared) = self.prepare_overlay_merge(model, frame, merge) {
+                self.paint_prepared_merge(frame, &prepared);
+            }
+            return;
+        }
         let sheet = frame.sheet;
         let range = RCRange::from_cell(row, col);
         let Some(rect) = frame.range_rect(range) else {

@@ -63,11 +63,24 @@ pub(crate) struct MergeFragment {
     /// Intersection of the merge's logical rectangle (under this segment's
     /// transform) with the segment's visible cell area.
     pub(crate) rect: PixelRect,
+    /// The merge's full logical rectangle under **this segment's** transform.
+    /// Same size for every fragment of one merge, but a different origin
+    /// whenever the segments' transforms differ — the frozen band and the
+    /// scrolled band, including the address gap between them. Text laid out once
+    /// in merge-local coordinates is translated by the difference between this
+    /// and `PreparedMerge::logical_rect`, which is what keeps frozen-band and
+    /// scrolled-band fragments from sharing one absolute position.
+    pub(crate) logical_rect: PixelRect,
     /// Which logical sides coincide with this fragment's own sides, in
     /// `[left, top, right, bottom]` order. A fragment clipped by the viewport
     /// or by a frozen boundary has `false` on the clipped edge, which is
     /// exactly the edge that must not paint a perimeter stroke.
     pub(crate) sides: [bool; 4],
+    /// The merge cells this fragment actually covers: the intersection of the
+    /// merge with one layout segment. Bounded by the viewport, which is what
+    /// lets the overlay path walk a side without touching every row of a merge
+    /// larger than the screen.
+    pub(crate) covered: RCRange,
 }
 
 /// The four logical sides of a merge, each as a coalesced run list.
@@ -153,6 +166,145 @@ impl ExtentCache {
     }
 }
 
+/// No fetched segment buffers: the overlay path reads the model directly.
+const NO_SEGMENTS: [Option<SegmentData>; 4] = [None, None, None, None];
+
+/// Walk `range`'s visible fragments, one per intersecting pane segment, and
+/// return them with the primary layout rectangle (the anchor's own segment when
+/// it is visible, else the first fragment's).
+fn merge_geometry(
+    model: &dyn CanvasModel,
+    frame: &Chrome,
+    layout: GridLayout,
+    extents: &mut ExtentCache,
+    range: RCRange,
+) -> Option<(Vec<MergeFragment>, PixelRect)> {
+    let sheet = frame.sheet;
+    let row_total = extents.row_span(model, sheet, range.r1, range.r2)?;
+    let col_total = extents.col_span(model, sheet, range.c1, range.c2)?;
+    let mut fragments = Vec::new();
+    let mut logical_rect: Option<PixelRect> = None;
+    for grid_segment in layout.segments() {
+        let Some(cell_range) = intersect(range, grid_segment.range()) else {
+            continue;
+        };
+        let (row, col) = (cell_range.r1, cell_range.c1);
+        // `cell_rect` is the in-frame check: the scroll band's address range
+        // includes the address gap between the frozen band and the scrolled-to
+        // id, and a cell in that gap has no pixels.
+        let Some(cell) = frame.cell_rect(row, col) else {
+            continue;
+        };
+        let rows_before = extents.row_span(model, sheet, range.r1, row - 1)?;
+        let cols_before = extents.col_span(model, sheet, range.c1, col - 1)?;
+        // The segment's own transform: a cell in the frozen band and one in the
+        // scroll band resolve the same logical rectangle to different pixels,
+        // so each fragment derives its own.
+        let own_logical = PixelRect {
+            top_left: Point {
+                x: cell.left() - cols_before,
+                y: cell.top() - rows_before,
+            },
+            width: col_total,
+            height: row_total,
+        };
+        let Some(area) = segment_cell_area(frame, grid_segment.region()) else {
+            continue;
+        };
+        let Some(rect) = own_logical.intersection(area) else {
+            continue;
+        };
+        // The layout rectangle comes from the anchor's own segment when it is
+        // visible; otherwise from the first visible fragment.
+        if logical_rect.is_none() || cell_range.contains(range.r1, range.c1) {
+            logical_rect = Some(own_logical);
+        }
+        fragments.push(MergeFragment {
+            rect,
+            logical_rect: own_logical,
+            covered: cell_range,
+            sides: [
+                rect.left() == own_logical.left(),
+                rect.top() == own_logical.top(),
+                rect.right() == own_logical.right(),
+                rect.bottom() == own_logical.bottom(),
+            ],
+        });
+    }
+    let primary = logical_rect.unwrap_or(PixelRect {
+        top_left: Point { x: 0, y: 0 },
+        width: 0,
+        height: 0,
+    });
+    Some((fragments, primary))
+}
+
+/// Coalesce one logical side's runs from the **model**, for the overlay path
+/// where no fetched style buffer exists.
+///
+/// `span` is `(fixed, first, last)`: the fixed id is the side's row (horizontal
+/// sides) or column (vertical sides), and the walked ids are `first..=last` —
+/// always a fragment's covered span, so the walk is viewport-bounded.
+fn model_runs(
+    model: &dyn CanvasModel,
+    frame: &Chrome,
+    intern: &ColorIntern,
+    span: (i32, i32, i32),
+    horizontal: bool,
+    side: Side,
+    runs: &mut Vec<BorderRun>,
+) -> Option<()> {
+    let (fixed, first, last) = span;
+    let theme = &frame.theme;
+    for id in first..=last {
+        let (row, col) = if horizontal { (fixed, id) } else { (id, fixed) };
+        let paint = match model.get_cell_style(frame.sheet, row, col) {
+            Fetched::Value(style) => {
+                let resolved = ResolvedBorders::resolve(&style.border, theme, intern);
+                match side {
+                    Side::Top => resolved.top,
+                    Side::Bottom => resolved.bottom,
+                    Side::Left => resolved.left,
+                    Side::Right => resolved.right,
+                }
+            }
+            Fetched::Absent => None,
+            // A transient failure must hold: a fabricated perimeter would
+            // stroke a boundary the model does not have.
+            Fetched::BridgeFailed => return None,
+        };
+        let Some(paint) = paint else {
+            continue;
+        };
+        if let Some(last) = runs.last_mut()
+            && last.end + 1 == id
+            && last.paint == paint
+        {
+            last.end = id;
+            continue;
+        }
+        runs.push(BorderRun {
+            start: id,
+            end: id,
+            paint,
+        });
+    }
+    Some(())
+}
+
+/// `rect` moved by the difference between two logical rectangles of one merge
+/// (same size, different segment transform).
+fn translate(origin: PixelRect, target: PixelRect, rect: PixelRect) -> PixelRect {
+    PixelRect {
+        top_left: Point {
+            x: rect.left() + (target.left() - origin.left()),
+            y: rect.top() + (target.top() - origin.top()),
+        },
+        width: rect.width,
+        height: rect.height,
+    }
+}
+
 /// The anchor's paint inputs, resolved once per prepared merge.
 struct AnchorContent {
     style: CellStyle,
@@ -235,11 +387,11 @@ fn segment_cell_area(frame: &Chrome, region: PaneRegion) -> Option<PixelRect> {
 
 /// The fetched style for `(row, col)`, when that cell is visible in one of the
 /// prepared segments.
-fn visible_style<'a>(
-    segments: &'a [Option<SegmentData>; 4],
+fn visible_style(
+    segments: &[Option<SegmentData>; 4],
     row: i32,
     col: i32,
-) -> Option<&'a Fetched<CellStyle>> {
+) -> Option<&Fetched<CellStyle>> {
     for data in segments.iter().flatten() {
         let range = data.segment.range();
         if range.contains(row, col) {
@@ -338,58 +490,8 @@ impl<P: Painter> RendererCore<P> {
         extents: &mut ExtentCache,
         merge: &MergedRange,
     ) -> Option<PreparedMerge> {
-        let sheet = frame.sheet;
-        let range = merge.range;
-        let row_total = extents.row_span(model, sheet, range.r1, range.r2)?;
-        let col_total = extents.col_span(model, sheet, range.c1, range.c2)?;
-
-        let mut fragments = Vec::new();
-        let mut logical_rect: Option<PixelRect> = None;
-        for grid_segment in layout.segments() {
-            let Some(cell_range) = intersect(range, grid_segment.range()) else {
-                continue;
-            };
-            let (row, col) = (cell_range.r1, cell_range.c1);
-            // `cell_rect` is the in-frame check: the scroll band's address
-            // range includes the address gap between the frozen band and the
-            // scrolled-to id, and a cell in that gap has no pixels.
-            let Some(cell) = frame.cell_rect(row, col) else {
-                continue;
-            };
-            let rows_before = extents.row_span(model, sheet, range.r1, row - 1)?;
-            let cols_before = extents.col_span(model, sheet, range.c1, col - 1)?;
-            // The segment's own transform: a cell in the frozen band and one in
-            // the scroll band resolve the same logical rectangle to different
-            // pixels, so each fragment derives its own.
-            let own_logical = PixelRect {
-                top_left: Point {
-                    x: cell.left() - cols_before,
-                    y: cell.top() - rows_before,
-                },
-                width: col_total,
-                height: row_total,
-            };
-            let Some(area) = segment_cell_area(frame, grid_segment.region()) else {
-                continue;
-            };
-            let Some(rect) = own_logical.intersection(area) else {
-                continue;
-            };
-            // The layout rectangle comes from the anchor's own segment when it
-            // is visible; otherwise from the first visible fragment.
-            if logical_rect.is_none() || cell_range.contains(range.r1, range.c1) {
-                logical_rect = Some(own_logical);
-            }
-            fragments.push(MergeFragment {
-                rect,
-                sides: [
-                    rect.left() == own_logical.left(),
-                    rect.top() == own_logical.top(),
-                    rect.right() == own_logical.right(),
-                    rect.bottom() == own_logical.bottom(),
-                ],
-            });
-        }
+        let (fragments, logical_rect) =
+            merge_geometry(model, frame, layout, extents, merge.range)?;
 
         // Anchor content. A transient failure holds the attempt: painting a
         // merge with fabricated content would cover the covered cells with
@@ -398,19 +500,152 @@ impl<P: Painter> RendererCore<P> {
         let content = self.anchor_content(model, frame, segments, anchor)?;
 
         Some(PreparedMerge {
-            logical_rect: logical_rect.unwrap_or(PixelRect {
-                top_left: Point { x: 0, y: 0 },
-                width: 0,
-                height: 0,
-            }),
+            logical_rect,
             fragments,
             style: content.style,
             value: content.value,
             cell_type: content.cell_type,
             decoration: content.decoration,
             link: frame.links().get(anchor.row, anchor.col).cloned(),
-            borders: build_perimeter(frame, &self.color_intern, segments, range),
+            borders: build_perimeter(frame, &self.color_intern, segments, merge.range),
         })
+    }
+
+    /// Prepare one merge for the **overlay** surface.
+    ///
+    /// The overlay repaints the active cell on top of the selection tint, and
+    /// the grid surface was painted earlier on its own surface, so there are no
+    /// fetched segment buffers here: the anchor's content comes from the
+    /// model's single-cell accessors, and the perimeter has to be resolved from
+    /// the model too. Geometry is the committed frame's, so the restored cell
+    /// covers exactly the pixels the grid painted.
+    ///
+    /// Returns `None` on a failed read; the caller then leaves the grid's own
+    /// pixels showing rather than painting a partial cell over them.
+    pub(crate) fn prepare_overlay_merge(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        merge: &MergedRange,
+    ) -> Option<PreparedMerge> {
+        let layout = frame.grid_layout();
+        let mut extents = ExtentCache::default();
+        let (fragments, logical_rect) =
+            merge_geometry(model, frame, layout, &mut extents, merge.range)?;
+        let anchor = merge.anchor;
+        // No segment buffers on the overlay path, so `anchor_content` takes its
+        // scalar fallback by construction.
+        let content = self.anchor_content(model, frame, &NO_SEGMENTS, anchor)?;
+        let mut prepared = PreparedMerge {
+            logical_rect,
+            fragments,
+            style: content.style,
+            value: content.value,
+            cell_type: content.cell_type,
+            decoration: content.decoration,
+            link: frame.links().get(anchor.row, anchor.col).cloned(),
+            borders: MergePerimeter {
+                top: Vec::new(),
+                bottom: Vec::new(),
+                left: Vec::new(),
+                right: Vec::new(),
+            },
+        };
+        prepared.borders = self.overlay_perimeter(model, frame, &prepared.fragments)?;
+        Some(prepared)
+    }
+
+    /// Resolve the merge's perimeter from the model, for the overlay path.
+    ///
+    /// The grid path reads the already-fetched segment styles; the overlay has
+    /// none, so it reads perimeter cells one at a time — bounded by each
+    /// fragment's own covered span, never by the merge's declared size.
+    fn overlay_perimeter(
+        &self,
+        model: &dyn CanvasModel,
+        frame: &Chrome,
+        fragments: &[MergeFragment],
+    ) -> Option<MergePerimeter> {
+        let mut sides = MergePerimeter {
+            top: Vec::new(),
+            bottom: Vec::new(),
+            left: Vec::new(),
+            right: Vec::new(),
+        };
+        for fragment in fragments {
+            let covered = fragment.covered;
+            if fragment.sides[1] {
+                model_runs(model, frame, &self.color_intern, (covered.r1, covered.c1, covered.c2), true, Side::Top, &mut sides.top)?;
+            }
+            if fragment.sides[3] {
+                model_runs(model, frame, &self.color_intern, (covered.r2, covered.c1, covered.c2), true, Side::Bottom, &mut sides.bottom)?;
+            }
+            if fragment.sides[0] {
+                model_runs(model, frame, &self.color_intern, (covered.c1, covered.r1, covered.r2), false, Side::Left, &mut sides.left)?;
+            }
+            if fragment.sides[2] {
+                model_runs(model, frame, &self.color_intern, (covered.c2, covered.r1, covered.r2), false, Side::Right, &mut sides.right)?;
+            }
+        }
+        Some(sides)
+    }
+
+    /// Paint one prepared merge: fill, perimeter, decoration, then text laid out
+    /// once and translated into each fragment's transform.
+    pub(crate) fn paint_prepared_merge(&self, frame: &Chrome, merge: &PreparedMerge) {
+        let theme = &frame.theme;
+        let decoration = merge
+            .decoration
+            .clone()
+            .map(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
+        for fragment in &merge.fragments {
+            self.paint_merge_fragment(frame, merge, fragment, decoration.as_ref());
+        }
+        if merge.fragments.is_empty() {
+            return;
+        }
+        let mut text_lines = self.frame_cache.text_lines.take();
+        if let Some(text) = TextPaint::resolve_into(
+            self,
+            merge.logical_rect,
+            merge.logical_rect,
+            &merge.style,
+            merge.value.clone(),
+            merge.cell_type,
+            merge.link.as_deref(),
+            &mut text_lines,
+        ) {
+            let origin = merge.logical_rect;
+            for fragment in &merge.fragments {
+                // The clipped paint path anchors on `TextPaint::clip`
+                // (Start/End alignment ignore the line centres), so the clip
+                // must carry the same translation as the lines. Otherwise a
+                // right- or left-aligned label under a scrolled fragment
+                // would anchor on the frozen band's edge and vanish.
+                let mut fragment_text = text.clone();
+                fragment_text.clip = translate(origin, fragment.logical_rect, text.clip);
+                // Lay the text out once in merge-local coordinates, then
+                // translate it into this fragment's own transform. Without
+                // the translation a merge crossing the freeze boundary (or
+                // the address gap after it) paints the frozen anchor's
+                // absolute position under the scrolled fragment's clip —
+                // right-aligned text lands past the clip and disappears.
+                let dx = fragment.logical_rect.left() - origin.left();
+                let dy = fragment.logical_rect.top() - origin.top();
+                for line in text_lines.iter_mut() {
+                    line.center_x += f64::from(dx);
+                    line.center_y += f64::from(dy);
+                }
+                self.painter.push_clip(fragment.rect);
+                self.paint_text(&fragment_text, theme, &text_lines);
+                self.painter.pop_clip();
+                for line in text_lines.iter_mut() {
+                    line.center_x -= f64::from(dx);
+                    line.center_y -= f64::from(dy);
+                }
+            }
+        }
+        self.frame_cache.text_lines.set(text_lines);
     }
 
     /// Content of the merge's anchor, preferring the already-fetched segment
@@ -456,44 +691,9 @@ impl<P: Painter> RendererCore<P> {
     /// Paint every prepared merge. The last step of the grid paint, inside
     /// `GroupClass::Cells`, after every segment's cells.
     pub(crate) fn paint_merges(&self, frame: &Chrome, merges: &[PreparedMerge]) {
-        if merges.is_empty() {
-            return;
-        }
-        let theme = &frame.theme;
-        // One line buffer for the whole pass, so the pass allocates none.
-        let mut text_lines = self.frame_cache.text_lines.take();
         for merge in merges {
-            // Resolved once per merge and reused for every fragment: resolving
-            // per fragment would allocate the data-bar color `Rc` twice.
-            let decoration = merge
-                .decoration
-                .clone()
-                .map(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
-            for fragment in &merge.fragments {
-                self.paint_merge_fragment(frame, merge, fragment, decoration.as_ref());
-            }
-            // Text is resolved once against the whole logical rectangle and
-            // each fragment paints the same lines under its own clip; resolving
-            // per fragment would lay the text out once per fragment and could
-            // duplicate it.
-            if let Some(text) = TextPaint::resolve_into(
-                self,
-                merge.logical_rect,
-                merge.logical_rect,
-                &merge.style,
-                merge.value.clone(),
-                merge.cell_type,
-                merge.link.as_deref(),
-                &mut text_lines,
-            ) {
-                for fragment in &merge.fragments {
-                    self.painter.push_clip(fragment.rect);
-                    self.paint_text(&text, theme, &text_lines);
-                    self.painter.pop_clip();
-                }
-            }
+            self.paint_prepared_merge(frame, merge);
         }
-        self.frame_cache.text_lines.set(text_lines);
     }
 
     fn paint_merge_fragment(

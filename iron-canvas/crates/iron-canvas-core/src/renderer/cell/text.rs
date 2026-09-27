@@ -50,6 +50,11 @@ const MIN_UNDERLINE_OFFSET: i32 = 2;
 /// Pre-resolved text paint for one cell. Pure pixel inputs — no model access
 /// during paint. The `Vec<TextLine>` lives on the caller's reusable buffer
 /// (parked on `FrameCache::text_lines`) so resolve never allocates per cell.
+///
+/// `Clone` exists for the merge pass, which lays text out once and repaints it
+/// under each fragment's own transform: the clone carries the translated
+/// `clip`, which the clipped paint path anchors on.
+#[derive(Clone)]
 pub struct TextPaint {
     pub clip: PixelRect,
     /// Interned `ctx.font` string. `Rc::clone` on cache hit; one alloc per
@@ -79,6 +84,7 @@ pub struct TextPaint {
 /// on host-page `Cow::Owned` themes that was one alloc per text cell per frame).
 /// `Owned` carries an interned `Rc<str>` from `ColorIntern` for the per-cell
 /// font-color override — `Rc::clone` after the first sighting.
+#[derive(Clone)]
 pub enum TextColor {
     ThemeDefault,
     ThemeError,
@@ -115,6 +121,10 @@ impl TextPaint {
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
     /// the caller takes the buffer once for the grid segment, hands it
     /// to every cell, and parks it back on `FrameCache::text_lines`.
+    // `rect` and `clip` are separate inputs, not one rectangle: a merged cell
+    // lays text out against the logical rectangle and shows it through the
+    // visible fragment. Bundling them would hide which is which.
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve_into<P: Painter>(
         renderer: &RendererCore<P>,
         rect: PixelRect,

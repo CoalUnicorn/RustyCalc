@@ -9,11 +9,14 @@
 //! covered. Hit queries resolve a covered cell to its anchor, and paint draws
 //! the merge over the per-cell pass.
 //!
-//! The committed state is a small keyed index over every covered cell and its
-//! anchor: a merge's declared area bounds the entry count, and a sheet holds
-//! few merges. Absolute keys need no blit shift.
+//! The committed state is the merge list itself: lookups scan rectangles, so
+//! construction is proportional to the number of merges and never to their
+//! covered area. A full-column merge (`A1:A1048576`) therefore costs one
+//! entry, not a million. Absolute addresses need no blit shift, and a sheet
+//! holds few merges, so a scan answers a hit query in the same order as a map
+//! probe would in practice. An interval tree is the deferred alternative if a
+//! measurement ever justifies it.
 
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use crate::address::{CellCoord, RCRange};
@@ -45,10 +48,10 @@ pub enum MergeTableError {
 /// Committed merge state for one sheet, plus the address lookups queries need.
 #[derive(Debug)]
 pub struct MergeTable {
+    /// The committed merges. Every lookup scans this list, so the table's
+    /// memory and construction cost are proportional to the merge count — never
+    /// to the covered area a merge declares.
     merges: Vec<MergedRange>,
-    /// `(row, col)` -> index into `merges`, for every covered cell **and** the
-    /// anchor. Sparse: one entry per cell of each merge.
-    by_cell: HashMap<(i32, i32), u32>,
     digest: u64,
 }
 
@@ -59,13 +62,12 @@ impl Default for MergeTable {
 }
 
 impl MergeTable {
-    /// The empty table. `HashMap::new` does not allocate, so this costs
+    /// The empty table. An empty `Vec` does not allocate, so this costs
     /// nothing as a `Chrome` default. Not a `const`: an empty table is built
     /// once per `Chrome`, mirroring `LinkIndex::empty`.
     pub fn empty() -> MergeTable {
         MergeTable {
             merges: Vec::new(),
-            by_cell: HashMap::new(),
             digest: 0,
         }
     }
@@ -100,14 +102,6 @@ impl MergeTable {
             return Err(MergeTableError::Overlap { first, second });
         }
 
-        let mut by_cell: HashMap<(i32, i32), u32> = HashMap::new();
-        for (index, merge) in merges.iter().enumerate() {
-            let index = index as u32;
-            for (row, col) in merge.range.cells() {
-                by_cell.insert((row, col), index);
-            }
-        }
-
         // Deterministic digest: the capture order is the engine's, which is
         // not a contract. Sort by the rectangle so an identical set hashes
         // identically however it arrives.
@@ -127,27 +121,24 @@ impl MergeTable {
             hasher.finish()
         };
 
-        Ok(MergeTable {
-            merges,
-            by_cell,
-            digest,
-        })
+        Ok(MergeTable { merges, digest })
     }
 
     /// The anchor of the merge covering `(row, col)`, if any. Returns the
     /// anchor for both the anchor cell and any covered cell.
+    ///
+    /// A scan, not a map probe: `from_ranges` rejects overlapping ranges, so at
+    /// most one merge can contain the address, and the merge list is small by
+    /// construction.
     pub fn anchor_at(&self, row: i32, col: i32) -> Option<CellCoord> {
-        self.by_cell
-            .get(&(row, col))
-            .and_then(|index| self.merges.get(*index as usize))
-            .map(|merge| merge.anchor)
+        self.merge_at(row, col).map(|merge| merge.anchor)
     }
 
     /// The merge covering `(row, col)`, if any.
     pub fn merge_at(&self, row: i32, col: i32) -> Option<&MergedRange> {
-        self.by_cell
-            .get(&(row, col))
-            .and_then(|index| self.merges.get(*index as usize))
+        self.merges
+            .iter()
+            .find(|merge| merge.range.contains(row, col))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -295,11 +286,10 @@ mod tests {
         assert_eq!(MergeTable::empty().digest(), 0);
     }
 
-    /// A merge larger than any viewport is accepted and indexed. Records the
-    /// declared-area cost of `by_cell`; an interval tree is the deferred
-    /// alternative if a measurement ever justifies it.
+    /// A merge larger than any viewport is accepted and answers lookups at its
+    /// far corner — without expanding into per-cell storage.
     #[test]
-    fn large_merge_indexes_its_whole_declared_area() {
+    fn a_large_merge_stores_one_entry_and_still_resolves() {
         let table = MergeTable::from_ranges(vec![RCRange {
             r1: 1,
             c1: 1,
@@ -309,6 +299,45 @@ mod tests {
         .unwrap();
         assert_eq!(
             table.anchor_at(1000, 50),
+            Some(CellCoord { row: 1, col: 1 })
+        );
+        assert_eq!(table.merges.len(), 1, "storage is per merge, not per cell");
+    }
+
+    /// A merge covering an entire column is a legal engine value. It must not
+    /// expand into one entry per covered row: table construction and lookups
+    /// stay proportional to the merge count.
+    #[test]
+    fn a_full_column_merge_costs_one_entry() {
+        let table = MergeTable::from_ranges(vec![RCRange {
+            r1: 1,
+            c1: 1,
+            r2: LAST_ROW,
+            c2: 1,
+        }])
+        .unwrap();
+        assert_eq!(table.merges.len(), 1);
+        assert_eq!(
+            table.anchor_at(LAST_ROW, 1),
+            Some(CellCoord { row: 1, col: 1 })
+        );
+        assert_eq!(table.anchor_at(LAST_ROW, 2), None);
+    }
+
+    /// A whole-sheet rectangle is likewise one entry, even though it addresses
+    /// far more cells than an index could hold.
+    #[test]
+    fn a_full_sheet_merge_costs_one_entry() {
+        let table = MergeTable::from_ranges(vec![RCRange {
+            r1: 1,
+            c1: 1,
+            r2: LAST_ROW,
+            c2: LAST_COLUMN,
+        }])
+        .unwrap();
+        assert_eq!(table.merges.len(), 1);
+        assert_eq!(
+            table.anchor_at(LAST_ROW, LAST_COLUMN),
             Some(CellCoord { row: 1, col: 1 })
         );
     }
