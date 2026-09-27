@@ -15,6 +15,7 @@ use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
 use crate::link::LinkIndex;
+use crate::merge::MergeTable;
 use crate::model::{CanvasModel, CanvasView};
 use crate::theme::CanvasTheme;
 
@@ -90,6 +91,9 @@ pub struct FrameInputs {
     /// Committed link candidate for this attempt. `Rc` so the orchestrator
     /// hands the same index to the committer without a deep clone.
     links: Rc<LinkIndex>,
+    /// Committed merge candidate for this attempt. `Rc` for the same reason as
+    /// `links`.
+    merges: Rc<MergeTable>,
 }
 
 /// Which scalar input a failed [`FrameInputs::capture`] attempt could not
@@ -130,14 +134,18 @@ pub enum FrameInputFailure {
     /// valid [`LinkIndex`](crate::link::LinkIndex) (a non-single-cell range,
     /// an out-of-bounds address, or a duplicate address).
     SheetLinks = 9,
+    /// The sheet's merge-list read failed, or the list it returned is not a
+    /// valid [`MergeTable`](crate::merge::MergeTable) (an out-of-bounds
+    /// address or an overlapping pair).
+    MergedRanges = 10,
 }
 
 impl FrameInputFailure {
     /// Highest wire code. The variants carry every code in `0..=LAST_CODE`
-    /// (in declaration order 0-4, 7, 8, 5, 6, 9), so `code > LAST_CODE` is
+    /// (in declaration order 0-4, 7, 8, 5, 6, 9, 10), so `code > LAST_CODE` is
     /// exactly "no variant carries this code" — the check a reader applies to
     /// a decoded recording.
-    pub const LAST_CODE: u8 = Self::SheetLinks as u8;
+    pub const LAST_CODE: u8 = Self::MergedRanges as u8;
 }
 
 impl FrameInputs {
@@ -151,7 +159,8 @@ impl FrameInputs {
     /// 5. row-header visibility;
     /// 6. column-header visibility;
     /// 7. selection visibility;
-    /// 8. the sheet's link list.
+    /// 8. the sheet's link list;
+    /// 9. the sheet's merged-range list.
     ///
     /// Steps 1-7 are scalar reads. Step 8 is the one allocating, fallible
     /// list read: it builds a validated [`LinkIndex`] from the model's whole
@@ -223,6 +232,18 @@ impl FrameInputs {
             )
             .map_err(|_| FrameInputFailure::SheetLinks)?,
         );
+        // Step 9: the sheet's merges. Same contract as the link list: a
+        // `None` read or a list `from_ranges` rejects is a hold, never empty
+        // data — silently painting no merge would render the covered cells
+        // with their own content over a region the model presents as one cell.
+        let merges = Rc::new(
+            MergeTable::from_ranges(
+                model
+                    .get_merged_ranges(sheet)
+                    .ok_or(FrameInputFailure::MergedRanges)?,
+            )
+            .map_err(|_| FrameInputFailure::MergedRanges)?,
+        );
 
         Ok(FrameInputs {
             metrics,
@@ -236,6 +257,7 @@ impl FrameInputs {
             show_col_headers,
             show_selection,
             links,
+            merges,
         })
     }
 
@@ -285,6 +307,13 @@ impl FrameInputs {
     /// fingerprints and paint.
     pub fn links(&self) -> &Rc<LinkIndex> {
         &self.links
+    }
+
+    /// Committed merge candidate captured for this attempt. The orchestrator
+    /// attaches this to the frame it commits; the renderer reads it for merge
+    /// paint and query resolution.
+    pub fn merges(&self) -> &Rc<MergeTable> {
+        &self.merges
     }
 
     pub fn dpr(&self) -> f64 {

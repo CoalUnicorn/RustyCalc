@@ -249,6 +249,7 @@ pub(super) fn try_blit_reuse(
         show_col_headers: prev.show_col_headers,
         kind: prev.kind,
         links: Rc::clone(&prev.links),
+        merges: Rc::clone(&prev.merges),
     };
 
     // Frozen bands are unchanged across a scroll, and their labels are now
@@ -291,6 +292,7 @@ pub(super) fn try_blit_reuse(
         // the link digest changed), so the captured index equals the one
         // `prev` carried. `rollback` restores `prev`'s handle exactly.
         links: Rc::clone(inputs.links()),
+        merges: Rc::clone(inputs.merges()),
     };
 
     PreparedBlitOutcome::Ready(PreparedBlitFrame {

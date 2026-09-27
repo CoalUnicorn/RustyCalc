@@ -35,6 +35,9 @@ pub(crate) enum RepaintReason {
     ChangedCells,
     ChangedRows,
     ClipAlignment,
+    /// A merge is present, so the merge paint pass owns pixels the per-cell
+    /// fingerprint tree does not describe. Forces a full repaint.
+    Merge,
 }
 
 /// One grid-wide repaint decision plus the reason for it.

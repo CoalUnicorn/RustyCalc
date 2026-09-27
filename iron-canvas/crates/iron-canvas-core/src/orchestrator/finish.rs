@@ -218,6 +218,7 @@ where
             FrameUpdate::Replace(mut chrome) if committed => {
                 if let Some(ctx) = overlay_ctx.as_ref() {
                     chrome.attach_links(Rc::clone(ctx.inputs.links()));
+                    chrome.attach_merges(Rc::clone(ctx.inputs.merges()));
                 }
                 FrameUpdate::Replace(chrome)
             }

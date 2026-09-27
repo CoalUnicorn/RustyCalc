@@ -20,6 +20,6 @@ pub(crate) use delta::AxisRange;
 pub use delta::{BlitPlan, FrameDelta, RebuildReason, Shift};
 pub use inputs::{FrameInputFailure, FrameInputs};
 pub use plan::RenderStrategy;
-pub(crate) use plan::{GridWork, OverlayWork, plan_frame};
+pub(crate) use plan::{GridWork, MergeImpact, OverlayWork, plan_frame};
 pub use report::{BlitFallback, FrameOutcome, FrameTrace, GridVerdict, PaintResult};
 pub use work::{RowSpan, WorkFlags};

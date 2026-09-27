@@ -60,7 +60,7 @@ impl CfDecorationPaint {
     /// instead of cloning. The data-bar color is interned here — one
     /// `format!` per unique rgb triple per renderer lifetime, not per
     /// decorated cell per frame.
-    pub(super) fn resolve(deco: CellDecoration, intern: &ColorIntern) -> Self {
+    pub(crate) fn resolve(deco: CellDecoration, intern: &ColorIntern) -> Self {
         match deco {
             CellDecoration::Icon(name) => CfDecorationPaint::Icon(CfIconPaint {
                 icon: name,
@@ -83,7 +83,7 @@ impl CfDecorationPaint {
     /// backend stays primitive-only: data bars become a `rect_fill` scaled by
     /// the fill fraction; ratings become `fill_path` star polygons. The icon
     /// variant is a placeholder (no glyph system yet) and paints nothing.
-    pub(super) fn paint<P: Painter + ?Sized>(&self, painter: &P, rect: PixelRect) {
+    pub(crate) fn paint<P: Painter + ?Sized>(&self, painter: &P, rect: PixelRect) {
         match self {
             CfDecorationPaint::DataBar(bar) => {
                 // Inset so the bar clears the grid/border strokes, then scale

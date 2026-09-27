@@ -11,6 +11,7 @@ pub mod decoration;
 mod frame;
 pub mod geometry;
 pub mod link;
+pub mod merge;
 pub mod model;
 mod orchestrator;
 pub mod painter;
@@ -53,6 +54,7 @@ pub use geometry::{
     prim::{Axis, Line, Point, RectCorner, Side, Span},
 };
 pub use link::{CellLink, LinkIndex, LinkIndexError, LinkTarget};
+pub use merge::{MergeTable, MergeTableError, MergedRange};
 pub use model::autofit::AutoFitError;
 pub use model::fetched::Fetched;
 pub use model::{CanvasModel, CanvasView, CellContentQuery};

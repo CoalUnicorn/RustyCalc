@@ -26,6 +26,7 @@ impl<P: Painter> RendererCore<P> {
                 layout,
                 mut segments,
                 repaint,
+                merges,
             } => {
                 match &repaint.plan {
                     PreparedRepaintPlan::Cell { envelope }
@@ -52,6 +53,18 @@ impl<P: Painter> RendererCore<P> {
                         }
                     }
                 }
+                // Last step inside `GroupClass::Cells`: the merge pass paints
+                // over every segment's cells so its fill, perimeter, and text
+                // win. `GroupClass::FrozenSep` still follows the whole Cells
+                // group, so the frozen separators stay visible over a merge.
+                //
+                // No suppression pass exists for the covered cells: their fill,
+                // grid strokes, explicit borders, and text are painted by the
+                // per-cell pass and then covered here. That redundancy is
+                // deliberate — removing it needs a per-slot covered predicate
+                // threaded through the fingerprint, the blit shift, and the
+                // repaint envelope, and is a deferred optimization.
+                self.paint_merges(frame, &merges);
                 self.trace_grid(GridVerdict::from(&repaint.plan));
                 #[cfg(feature = "dev-diagnostics")]
                 self.diag_commit_replace(&repaint, layout);

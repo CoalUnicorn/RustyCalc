@@ -110,6 +110,7 @@ impl Chrome {
                 // A caller that holds this candidate must restore the
                 // committed index it replaced.
                 prev.links = Rc::clone(inputs.links());
+                prev.merges = Rc::clone(inputs.merges());
                 prev
             }
         }
@@ -240,6 +241,7 @@ impl Chrome {
             // outcome hands the frame back for restoration, and only
             // `finish_attempt` publishes a committed one.
             links: Rc::clone(inputs.links()),
+            merges: Rc::clone(inputs.merges()),
         })
     }
 }

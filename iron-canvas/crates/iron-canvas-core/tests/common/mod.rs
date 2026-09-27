@@ -113,6 +113,10 @@ pub struct TestModel {
     /// `FrameInputFailure::SheetLinks` in `capture_fail` makes the read fail;
     /// the list here is then irrelevant.
     sheet_links: RefCell<Vec<CellLink>>,
+    /// Merged ranges `get_merged_ranges` reports. Empty means a known empty
+    /// set. A `FrameInputFailure::MergedRanges` in `capture_fail` makes the
+    /// read fail.
+    merged_ranges: RefCell<Vec<RCRange>>,
 }
 
 impl Default for TestModel {
@@ -162,6 +166,7 @@ impl Default for TestModel {
             grid_lines_bridge_fail: Cell::new(false),
             grid_lines_absent: Cell::new(false),
             sheet_links: RefCell::default(),
+            merged_ranges: RefCell::default(),
         }
     }
 }
@@ -259,6 +264,10 @@ impl TestModel {
         *self.sheet_links.borrow_mut() = links;
         self
     }
+    pub fn with_merged_ranges(self, ranges: Vec<RCRange>) -> Self {
+        *self.merged_ranges.borrow_mut() = ranges;
+        self
+    }
     pub fn with_hidden_row_headers(self) -> Self {
         self.show_row_headers.set(false);
         self
@@ -285,6 +294,11 @@ impl TestModel {
     /// Replace the reported link list mid-test (through a shared reference).
     pub fn set_sheet_links(&self, links: Vec<CellLink>) {
         *self.sheet_links.borrow_mut() = links;
+    }
+
+    /// Replace the reported merged-range list mid-test.
+    pub fn set_merged_ranges(&self, ranges: Vec<RCRange>) {
+        *self.merged_ranges.borrow_mut() = ranges;
     }
 
     pub fn set_top_row(&self, r: i32) {
@@ -528,6 +542,12 @@ impl CanvasModel for TestModel {
             return None;
         }
         Some(self.sheet_links.borrow().clone())
+    }
+    fn get_merged_ranges(&self, _: u32) -> Option<Vec<RCRange>> {
+        if self.capture_fail.get() == Some(FrameInputFailure::MergedRanges) {
+            return None;
+        }
+        Some(self.merged_ranges.borrow().clone())
     }
     fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
         self.column_headers.borrow().get(&column).cloned()

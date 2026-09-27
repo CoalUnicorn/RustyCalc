@@ -97,13 +97,19 @@ pub struct TextLine {
 //  resolve
 
 impl TextPaint {
-    /// Build a `TextPaint` at `rect` and fill `lines` with the
-    /// resolved per-line text/width/position. Returns `None` (with `lines`
-    /// left empty) for empty/too-small cells. Formatted value AND cell type
-    /// are supplied by the caller — the grid pass drains both from the
+    /// Build a `TextPaint` laid out in `rect` and clipped to `clip`, filling
+    /// `lines` with the resolved per-line text/width/position. Returns `None`
+    /// (with `lines` left empty) for empty/too-small cells. Formatted value AND
+    /// cell type are supplied by the caller — the grid pass drains both from the
     /// prefetched value and cell-type buffers;
     /// `repaint_active_cell` reads the model directly for the active cell.
     /// Font / alignment / colour are resolved via `CellTextStyle`.
+    ///
+    /// `rect` and `clip` are the same rectangle for a single cell. They differ
+    /// for a merged range: line positioning and alignment read the full logical
+    /// rectangle, while the overflow decision and `TextPaint::clip` read the
+    /// visible fragment, so a merge scrolled partly out of view clips its text
+    /// at the visible edge instead of at the logical one.
     ///
     /// The split between `TextPaint` (per-cell scalars) and the externally
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
@@ -112,6 +118,7 @@ impl TextPaint {
     pub fn resolve_into<P: Painter>(
         renderer: &RendererCore<P>,
         rect: PixelRect,
+        clip: PixelRect,
         style: &CellStyle,
         text: String,
         cell_type: CellKind,
@@ -168,10 +175,10 @@ impl TextPaint {
 
         position_lines(lines, h_align, v_align, rect, size_px, line_height);
 
-        let needs_clip = lines_escape_cell(lines, usable_w, rect, line_height);
+        let needs_clip = lines_escape_cell(lines, usable_w, clip, line_height);
 
         Some(TextPaint {
-            clip: rect,
+            clip,
             font_css,
             font_size_px: size_px,
             color: text_color,

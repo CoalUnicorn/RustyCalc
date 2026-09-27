@@ -130,6 +130,7 @@ impl<P: Painter> RendererCore<P> {
             if let Some(tp) = TextPaint::resolve_into(
                 self,
                 p.rect,
+                p.rect,
                 &p.style,
                 text,
                 cell_type,

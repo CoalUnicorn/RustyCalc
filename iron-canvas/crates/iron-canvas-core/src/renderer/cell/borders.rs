@@ -40,7 +40,7 @@ impl ResolvedBorders {
     /// Zero allocations on edges that fall back to the theme grid color
     /// (`BorderColor::Static`); `Rc::clone` per edge with an explicit color
     /// (the renderer's `ColorIntern` absorbs the first-sighting alloc).
-    pub(super) fn resolve(border: &Border, theme: &CanvasTheme, intern: &ColorIntern) -> Self {
+    pub(crate) fn resolve(border: &Border, theme: &CanvasTheme, intern: &ColorIntern) -> Self {
         Self {
             left: border
                 .get(Side::Left)
@@ -57,7 +57,7 @@ impl ResolvedBorders {
         }
     }
 
-    pub(super) fn get(&self, side: Side) -> Option<&BorderPaint> {
+    pub(crate) fn get(&self, side: Side) -> Option<&BorderPaint> {
         match side {
             Side::Left => self.left.as_ref(),
             Side::Top => self.top.as_ref(),
@@ -67,6 +67,7 @@ impl ResolvedBorders {
     }
 }
 
+#[derive(PartialEq, Eq)]
 pub struct BorderStroke {
     pub width_px: i32,
     pub double: bool,
@@ -78,11 +79,13 @@ pub struct BorderStroke {
 /// resolve and content-eq through the cache. `Owned` is the per-cell override
 /// path, an interned `Rc<str>` from `ColorIntern` (`Rc::clone` after the first
 /// sighting of each unique color).
+#[derive(PartialEq, Eq)]
 pub enum BorderColor {
     Static(Cow<'static, str>),
     Owned(Rc<str>),
 }
 
+#[derive(PartialEq, Eq)]
 pub struct BorderPaint {
     pub color: BorderColor,
     pub stroke: BorderStroke,
@@ -194,7 +197,7 @@ impl<P: Painter> RendererCore<P> {
 
     /// Stroke one resolved border. `Double`-style borders render as two
     /// parallel strokes offset ±1 px on the cross-axis.
-    fn paint_border(&self, side: Side, rect: PixelRect, b: &BorderPaint) {
+    pub(crate) fn paint_border(&self, side: Side, rect: PixelRect, b: &BorderPaint) {
         // Extend each edge by half its width so perpendicular borders overlap
         // at the corner instead of leaving a butt-cap notch. With the painter's
         // parity-aware pixel snap, `width_px / 2` is the exact reach of the

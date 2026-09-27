@@ -147,7 +147,7 @@ fn horizontal_alignment_keeps_text_and_decoration_anchors_consistent() {
             };
             let mut lines = Vec::new();
             let paint = TextPaint::resolve_into(
-                &renderer, rect, &style, "42".into(), kind, None, &mut lines,
+                &renderer, rect, rect, &style, "42".into(), kind, None, &mut lines,
             )
             .expect("short text fits the cell");
             renderer.paint_text(&paint, &CanvasTheme::light(), &lines);

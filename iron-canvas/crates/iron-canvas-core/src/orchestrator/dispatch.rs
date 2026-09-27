@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 use crate::chrome::Chrome;
-use crate::frame::{FrameInputs, GridWork, PaintResult, plan_frame};
+use crate::frame::{FrameInputs, GridWork, MergeImpact, PaintResult, plan_frame};
 use crate::painter::BlitPainter;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::DiagDeltaKind;
@@ -111,12 +111,14 @@ where
             .last_frame
             .as_ref()
             .is_none_or(|frame| frame.links().digest() != inputs.links().digest());
+        let merge_impact = MergeImpact::classify(self.last_frame.as_ref(), &inputs);
         let plan = plan_frame(
             work,
             delta,
             inputs.sheet(),
             inputs.show_selection(),
             links_changed,
+            merge_impact,
         );
         // Record the classification facts before dispatch; the renderer
         // fills the rest during prepare/execute.

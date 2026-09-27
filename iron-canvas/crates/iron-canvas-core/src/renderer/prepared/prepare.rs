@@ -1,4 +1,4 @@
-use crate::CellContentQuery;
+use crate::CanvasModel;
 use crate::address::RCRange;
 use crate::chrome::Chrome;
 use crate::frame::BlitPlan;
@@ -23,7 +23,7 @@ use crate::renderer::repaint::plan::{RepaintPlan, RepaintReason};
 impl<P: Painter> RendererCore<P> {
     pub(crate) fn prepare_full_grid(
         &self,
-        model: &dyn CellContentQuery,
+        model: &dyn CanvasModel,
         frame: &Chrome,
     ) -> Option<PreparedGrid> {
         let layout = frame.grid_layout();
@@ -69,7 +69,30 @@ impl<P: Painter> RendererCore<P> {
             .grid_cache
             .fingerprint
             .build_candidate(layout, &fetched, frame.links());
-        let (plan, reason, changed_rows, changed_cells) = if frame.kind.reuses_slots() {
+        // Merge preparation reads the model once, before any painter op. A
+        // failed read holds the whole attempt, recycling the prepared scratch.
+        let Some(merges) = self.prepare_merges(model, frame, layout, &segments) else {
+            for prepared in segments.into_iter().flatten() {
+                self.grid_cache
+                    .park_prepare_scratch(prepared.segment.region(), prepared.fetched);
+            }
+            self.trace_frame_held();
+            return None;
+        };
+        let (plan, reason, changed_rows, changed_cells) = if frame.kind.reuses_slots()
+            && !frame.merges().is_empty()
+        {
+            // Merge guard. A merge-affected attempt is normally `Fresh`, so
+            // this comparison is unreachable today. When a future optimized
+            // path does reach it, the installed fingerprint truth must not
+            // claim the merges' cells are current: repaint the whole grid.
+            (
+                PreparedRepaintPlan::Full,
+                Some(RepaintReason::Merge),
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if frame.kind.reuses_slots() {
             let decision = repaint_plan::plan_grid_repaint(
                 self.grid_cache.fingerprint.painted().as_deref(),
                 &candidate,
@@ -130,12 +153,13 @@ impl<P: Painter> RendererCore<P> {
                 #[cfg(feature = "dev-diagnostics")]
                 changed_cells,
             },
+            merges,
         })
     }
 
     pub(crate) fn prepare_damage_grid(
         &self,
-        model: &dyn CellContentQuery,
+        model: &dyn CanvasModel,
         frame: &Chrome,
         spans: &[RowSpan],
     ) -> Option<PreparedGrid> {
@@ -198,7 +222,7 @@ impl<P: Painter> RendererCore<P> {
 
     pub(crate) fn prepare_blit_grid(
         &self,
-        model: &dyn CellContentQuery,
+        model: &dyn CanvasModel,
         frame: &Chrome,
         plan: &BlitPlan,
     ) -> Option<PreparedGrid> {

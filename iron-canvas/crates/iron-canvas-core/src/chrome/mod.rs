@@ -32,6 +32,7 @@ use crate::CanvasSize;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::prim::Point;
 use crate::link::LinkIndex;
+use crate::merge::MergeTable;
 use crate::theme::CanvasTheme;
 
 mod blit;
@@ -99,6 +100,15 @@ pub struct Chrome {
     /// boundary. `Rc` keeps every `Chrome` clone a refcount bump and every
     /// query reads the same committed index the pixels were painted from.
     links: Rc<LinkIndex>,
+    /// Committed merge state for this frame's sheet. Empty for a sheet with no
+    /// merges. Built and attached exactly like `links`: a candidate frame is
+    /// seeded from the table captured for this attempt (`Chrome::build` and
+    /// `next_blit` read it from `FrameInputs`); a held attempt hands the
+    /// previously committed table back, and [`Chrome::attach_merges`] installs
+    /// the committed value at the completion boundary. Merge geometry must
+    /// commit together with the pixels that used it, so hit queries and painted
+    /// pixels cannot disagree.
+    merges: Rc<MergeTable>,
 }
 
 /// Outcome of [`Chrome::next_blit`]. The blit construction has exactly two
@@ -160,5 +170,29 @@ impl Chrome {
     /// directly, and none of them may read model metadata.
     pub(crate) fn attach_links(&mut self, links: Rc<LinkIndex>) {
         self.links = links;
+    }
+
+    /// The committed merge table for this frame's sheet, empty when the sheet
+    /// has none.
+    pub fn merges(&self) -> &MergeTable {
+        &self.merges
+    }
+
+    /// The committed merge table's shared handle. `pub(crate)` for the
+    /// strategies, which must hand the committed table back to a held
+    /// candidate's frame without cloning it.
+    pub(crate) fn merges_rc(&self) -> &Rc<MergeTable> {
+        &self.merges
+    }
+
+    /// Install an attempt's merge table. Two callers, mirroring
+    /// [`Self::attach_links`]: the strategies when a held candidate must hand
+    /// back the previously committed table, and `Orchestrator::finish_attempt`
+    /// on the committed branch so the committed frame's merge geometry is
+    /// exactly the captured one. Never called from
+    /// `Chrome::build`/`next`/`next_blit` — those read `FrameInputs` directly,
+    /// and none of them may read model metadata.
+    pub(crate) fn attach_merges(&mut self, merges: Rc<MergeTable>) {
+        self.merges = merges;
     }
 }

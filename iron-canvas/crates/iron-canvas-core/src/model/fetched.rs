@@ -44,6 +44,17 @@ impl<T> Fetched<T> {
         }
     }
 
+    /// Borrow the concrete value, if any. The read-only counterpart of
+    /// [`Self::value`], for callers that must leave the fetched slot in place
+    /// (the merge perimeter walk reads segment style buffers the cell pass
+    /// still needs).
+    pub fn value_ref(&self) -> Option<&T> {
+        match self {
+            Fetched::Value(v) => Some(v),
+            Fetched::Absent | Fetched::BridgeFailed => None,
+        }
+    }
+
     pub fn is_bridge_failed(&self) -> bool {
         matches!(self, Fetched::BridgeFailed)
     }

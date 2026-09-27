@@ -68,6 +68,7 @@ pub mod chrome;
 pub mod diagnostics;
 mod grid;
 mod layers;
+pub mod merge;
 pub mod prepared;
 mod repaint;
 mod trace;

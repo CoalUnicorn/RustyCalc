@@ -16,6 +16,7 @@ use crate::CanvasModel;
 use crate::frame::{BlitPlan, FrameInputs};
 use crate::geometry::CanvasMetrics;
 use crate::link::LinkIndex;
+use crate::merge::MergeTable;
 use crate::theme::CanvasTheme;
 
 use super::pane_set::ScrollAxisSlots;
@@ -103,6 +104,7 @@ impl PreparedBlitFrame {
             show_col_headers,
             kind,
             links,
+            merges,
         } = rollback;
         // `theme`/`metrics`/`model_generation`/`show_row_headers`/
         // `show_col_headers`/`kind`/`links` all came from `inputs`/`FrameKindTag::Blitted`
@@ -129,6 +131,7 @@ impl PreparedBlitFrame {
             show_col_headers,
             kind,
             links,
+            merges,
         }
     }
 }
@@ -162,6 +165,10 @@ struct BlitRollback {
     /// digest is unchanged, so the two are equivalent — but rollback restores
     /// the committed handle exactly).
     links: Rc<LinkIndex>,
+    /// The committed merge table `prev` carried, saved for the same reason as
+    /// `links`: the candidate refreshes it from `inputs`, and rollback restores
+    /// the committed handle exactly.
+    merges: Rc<MergeTable>,
 }
 
 impl Chrome {

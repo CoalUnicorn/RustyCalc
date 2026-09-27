@@ -202,6 +202,23 @@ pub trait CanvasModel: CellContentQuery {
         Some(Vec::new())
     }
 
+    /// Every merged range on `sheet`, as inclusive rectangles, in any order.
+    ///
+    /// Same contract as [`Self::get_sheet_links`]: `Some(empty)` is a known
+    /// empty collection — the sheet holds no merges, or the model does not
+    /// implement this optional capability at all (the default below). `None`
+    /// is a failed query — a thrown bridge call, a payload the bridge could
+    /// not decode, or a list
+    /// [`MergeTable::from_ranges`](crate::merge::MergeTable::from_ranges)
+    /// rejects (out-of-bounds address, overlapping ranges) — and holds the
+    /// whole paint attempt. An invalid list is never converted to empty data.
+    ///
+    /// Read once per attempt, not per cell: one sheet-level read avoids a
+    /// per-cell bridge crossing.
+    fn get_merged_ranges(&self, _sheet: u32) -> Option<Vec<RCRange>> {
+        Some(Vec::new())
+    }
+
     /// Whether the selection (fill, stroke, autofill handle, active-cell
     /// overlay repaint, header highlights) should paint at all. Infallible
     /// and default-`true` — unlike the other accessors here, there is no
@@ -349,6 +366,7 @@ impl<T: CanvasModel + ?Sized> CanvasModel for Rc<T> {
         fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64>;
         fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool>;
         fn get_sheet_links(&self, sheet: u32) -> Option<Vec<CellLink>>;
+        fn get_merged_ranges(&self, sheet: u32) -> Option<Vec<RCRange>>;
         fn get_show_selection(&self) -> bool;
         fn last_row(&self, sheet: u32) -> i32;
         fn last_column(&self, sheet: u32) -> i32;
@@ -478,5 +496,6 @@ mod tests {
         }
 
         assert_eq!(NoLinkCapability.get_sheet_links(0), Some(Vec::new()));
+        assert_eq!(NoLinkCapability.get_merged_ranges(0), Some(Vec::new()));
     }
 }
