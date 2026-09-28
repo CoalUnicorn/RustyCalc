@@ -10,7 +10,7 @@
 //! the merge over the per-cell pass.
 //!
 //! The committed state is the merge list itself: lookups scan rectangles, so
-//! construction is proportional to the number of merges and never to their
+//! storage is proportional to the number of merges and never to their
 //! covered area. A full-column merge (`A1:A1048576`) therefore costs one
 //! entry, not a million. Absolute addresses need no blit shift, and a sheet
 //! holds few merges, so a scan answers a hit query in the same order as a map
@@ -39,18 +39,15 @@ pub enum MergeTableError {
     OutOfBounds { row: i32, column: i32 },
     /// Two ranges overlap. An overlapping table would make `anchor_at`
     /// order-dependent, so the whole list is rejected.
-    Overlap {
-        first: RCRange,
-        second: RCRange,
-    },
+    Overlap { first: RCRange, second: RCRange },
 }
 
 /// Committed merge state for one sheet, plus the address lookups queries need.
 #[derive(Debug)]
 pub struct MergeTable {
     /// The committed merges. Every lookup scans this list, so the table's
-    /// memory and construction cost are proportional to the merge count — never
-    /// to the covered area a merge declares.
+    /// storage is proportional to the merge count. Validation compares pairs
+    /// of ranges; it never walks the covered cells.
     merges: Vec<MergedRange>,
     digest: u64,
 }
@@ -128,8 +125,7 @@ impl MergeTable {
     /// anchor for both the anchor cell and any covered cell.
     ///
     /// A scan, not a map probe: `from_ranges` rejects overlapping ranges, so at
-    /// most one merge can contain the address, and the merge list is small by
-    /// construction.
+    /// most one merge can contain the address, and lookups cost O(number of merges).
     pub fn anchor_at(&self, row: i32, col: i32) -> Option<CellCoord> {
         self.merge_at(row, col).map(|merge| merge.anchor)
     }

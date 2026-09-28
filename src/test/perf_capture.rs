@@ -793,6 +793,11 @@ fn summarize_covers_every_event_shape() {
             None,
         ),
         (
+            structure(StructureEvent::MergedCellsChanged { sheet: 2 }),
+            HostBatchKind::Structure,
+            Some(2),
+        ),
+        (
             navigation(NavigationEvent::SelectionChanged { address }),
             HostBatchKind::Navigation,
             Some(2),
@@ -857,6 +862,9 @@ fn summarize_covers_every_event_shape() {
         assert_eq!(facts.kind, kind);
         assert_eq!(facts.sheet, sheet, "sheet for {event:?}");
     }
+
+    let facts = summarize(&structure(StructureEvent::MergedCellsChanged { sheet: 2 }));
+    assert_eq!(facts.scope, Some(HostScope::Sheet { sheet: 2 }));
 
     // Structures carry their header change, colors collapse to a count, and a
     // move keeps both endpoints. Nothing carries a value or a color list.

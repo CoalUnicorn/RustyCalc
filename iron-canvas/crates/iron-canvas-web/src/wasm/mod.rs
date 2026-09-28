@@ -528,8 +528,8 @@ impl CanvasModel for JsBackedModel {
                 }
             };
         // One theme borrow for the whole list — not one cache probe per link.
-        self.with_theme(|theme| match theme {
-            Some(t) => Some(
+        self.with_theme(|theme| {
+            theme.map(|t| {
                 views
                     .into_iter()
                     .map(|view| {
@@ -537,9 +537,8 @@ impl CanvasModel for JsBackedModel {
                             color_to_css(c, t)
                         })
                     })
-                    .collect(),
-            ),
-            None => None,
+                    .collect()
+            })
         })
     }
 

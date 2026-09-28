@@ -1144,6 +1144,77 @@ async function runChecksOnce() {
         return "offscreen merged anchor exported exactly once";
     });
 
+    await check("merged grid and active overlay match a forced-Fresh repaint", () => {
+        const sheet = model.getSelectedSheet();
+        const area = { sheet, row: 320, column: 12, width: 3, height: 5 };
+        const dpr = window.devicePixelRatio || 1;
+        const originalSize = canvas.canvasSize();
+        const clearCells = () => {
+            for (let r = area.row; r < area.row + area.height; r += 1) {
+                for (let c = area.column; c < area.column + area.width; c += 1) {
+                    model.setUserInput(sheet, r, c, "");
+                }
+            }
+        };
+        clearOverlays();
+        canvas.setTheme(LIGHT_THEME);
+        clearCells();
+        model.setUserInput(sheet, area.row, area.column, "merged raster");
+        model.mergeCellsCenter(area);
+        model.setSelectedCell(area.row, area.column);
+        model.setTopLeftVisibleCell(area.row, area.column);
+        model.evaluate();
+        canvas.requestRepaint();
+        drainPaint();
+        let cases = 0;
+        const verify = (label, signal) => {
+            signal(canvas);
+            drainPaint();
+            const fresh = renderFreshReference(canvas.canvasSize(), dpr);
+            signal(fresh.canvas);
+            drain(fresh.canvas);
+            for (const layer of ["grid", "overlay"]) {
+                const diff = rasterDiff(layerPixels(fresh[layer]), layerPixels(elements[layer]), elements[layer].width);
+                if (diff !== null) {
+                    throw new Error(`${label}: ${layer}: ${JSON.stringify(diff)}`);
+                }
+            }
+            cases += 1;
+        };
+        try {
+            verify("merged baseline", () => {});
+            verify("merged overlay", (c) => c.requestOverlayRepaint());
+            model.setUserInput(sheet, area.row, area.column, "edited merge");
+            model.evaluate();
+            verify("merged edit", (c) => c.markContentDirty());
+            model.undo();
+            model.evaluate();
+            verify("merged undo", (c) => c.markContentDirty());
+            model.setTopLeftVisibleCell(area.row + 2, area.column + 1);
+            verify("offscreen merged anchor", (c) => c.viewChanged());
+            verify("merged resize", (c) => {
+                c.resize(originalSize.w - 32, originalSize.h - 24, dpr);
+                c.requestRepaint();
+            });
+            if (model.getWorksheetsProperties().length > 1) {
+                model.setSelectedSheet(sheet === 0 ? 1 : 0);
+                canvas.viewChanged();
+                drainPaint();
+                model.setSelectedSheet(sheet);
+                verify("return to merged sheet", (c) => c.viewChanged());
+            }
+        } finally {
+            model.setSelectedSheet(sheet);
+            model.unmergeCells(area);
+            clearCells();
+            model.evaluate();
+            canvas.resize(originalSize.w, originalSize.h, dpr);
+            canvas.requestRepaint();
+            drainPaint();
+        }
+        return `${cases} exact grid and overlay ImageData comparisons at DPR ${dpr}`;
+    });
+
     await check("retained link raster matches a forced-Fresh repaint", () => {
         const sheet = model.getSelectedSheet();
         const column = 20;

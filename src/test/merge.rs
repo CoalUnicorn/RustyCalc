@@ -178,7 +178,6 @@ fn autofill_preview_and_commit_submit_one_target() {
     let owner = Owner::new();
     owner.with(|| {
         let model = StoredValue::new_local(new_model());
-        let state = WorkbookState::new(crate::events::EventBus::new());
         crate::model::mutate(model, EvaluationMode::Immediate, |m| {
             m.set_user_input(0, 1, 1, "src").ok();
             m.merge_cells(&Area {
@@ -225,5 +224,64 @@ fn autofill_preview_and_commit_submit_one_target() {
             "src",
             "the accepted fill must actually reach the merge's far row"
         );
+    });
+}
+
+#[wasm_bindgen_test]
+fn tooltip_resolves_a_covered_pointer_to_the_anchor_link_and_fragment() {
+    use crate::components::panels::link_tooltip::hovered_link;
+    use ironcalc_base::expressions::types::Area;
+    use ironcalc_base::types::Link;
+    use std::rc::Rc;
+    use wasm_bindgen::JsCast;
+
+    Owner::new().with(|| {
+        let document = web_sys::window()
+            .expect("window")
+            .document()
+            .expect("document");
+        let make_canvas = || {
+            document
+                .create_element("canvas")
+                .expect("element")
+                .dyn_into::<web_sys::HtmlCanvasElement>()
+                .expect("canvas")
+        };
+        let mut m = new_model();
+        m.merge_cells(&Area {
+            sheet: 0,
+            row: 2,
+            column: 2,
+            width: 3,
+            height: 2,
+        })
+        .expect("merge");
+        m.set_cell_link(
+            0,
+            2,
+            2,
+            Link::Internal {
+                location: "A20".to_string(),
+                tooltip: Some("destination".to_string()),
+            },
+            None,
+        )
+        .expect("anchor link");
+        let mut canvas =
+            iron_canvas_web::IronCanvas::create(make_canvas(), make_canvas()).expect("renderer");
+        canvas.resize(400.0, 300.0, 1.0).expect("size");
+        canvas.set_model(Rc::new(iron_canvas_ironcalc::IronCalcModel(m)));
+        canvas.render_pending();
+        let point = canvas.cell_rect(3, 3).expect("covered cell").center();
+        let handle = StoredValue::new_local(Some(canvas));
+        let cell = hovered_link(handle, Some((f64::from(point.x), f64::from(point.y))))
+            .expect("logical tooltip");
+        assert_eq!((cell.anchor.r1, cell.anchor.c1), (2, 2));
+        assert_eq!(
+            cell.link.as_ref().and_then(|l| l.tooltip()),
+            Some("destination")
+        );
+        assert_eq!(cell.link.as_ref().map(|l| l.target().as_str()), Some("A20"));
+        assert!(cell.fragment.width > 80);
     });
 }

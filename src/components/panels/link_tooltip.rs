@@ -1,11 +1,7 @@
 //! Hover tooltip for a committed cell hyperlink.
 //!
-//! A host DOM popover anchored to the link cell through
-//! `IronCanvas::cell_rect` — no canvas layer. The pointer-adjacent cell is the
-//! only cached fact (`WorkbookState::hover_link`); the link itself is read
-//! from committed canvas state on every content/navigation/layout commit, so a
-//! link deleted, retargeted, or scrolled away by the last frame cannot keep a
-//! stale tooltip.
+//! Position, text, and activation resolve the pointer to the logical cell.
+//! Each frame commit refreshes the query so the tooltip follows visible pixels.
 
 use leptos::html;
 use leptos::prelude::*;
@@ -14,6 +10,17 @@ use crate::components::ui::popover::Popover;
 use crate::input::link::activate_link;
 use crate::input::mouse::{CanvasHandle, with_canvas};
 use crate::state::{ModelStore, StatusMessage, WorkbookState};
+
+/// Resolve the pointer against the committed frame for every tooltip action.
+pub(crate) fn hovered_link(
+    canvas: CanvasHandle,
+    pointer: Option<(f64, f64)>,
+) -> Option<iron_canvas_core::DisplayCell> {
+    let (x, y) = pointer?;
+    with_canvas(canvas, |ic| ic.display_cell_at(x, y))
+        .flatten()
+        .filter(|cell| cell.link.is_some())
+}
 
 /// Hover tooltip with an explicit Open action. Mounted inside the worksheet so
 /// `grid_ref` supplies the canvas-to-viewport offset for the anchor rect.
@@ -34,22 +41,10 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
     Effect::new(move |_| {
         let _ = state.committed_frame.get();
 
-        let anchor = state.hover_link.get().and_then(|(row, column)| {
-            let rect = with_canvas(canvas_handle, |ic| {
-                // Resolve the hovered physical cell to its logical cell: over a
-                // merged range the anchor owns the link, and the tooltip is
-                // placed against the visible fragment rather than the anchor's
-                // own cell (which may be scrolled away entirely).
-                let own = ic.cell_rect(row, column)?;
-                let centre = own.center();
-                let cell = ic.display_cell_at(f64::from(centre.x), f64::from(centre.y))?;
-                // A link that no longer exists keeps no tooltip.
-                cell.link.as_ref()?;
-                Some(cell.fragment)
-            })
-            .flatten()?;
+        let anchor = state.hover_link.get().and_then(|_| {
+            let cell = hovered_link(canvas_handle, state.hover_pointer.get())?;
             let canvas_box = grid_ref.get_untracked()?.get_bounding_client_rect();
-            Some((rect, canvas_box))
+            Some((cell.fragment, canvas_box))
         });
 
         match anchor {
@@ -69,25 +64,25 @@ pub fn LinkTooltip(grid_ref: NodeRef<html::Canvas>) -> impl IntoView {
         state
             .hover_link
             .get()
-            .and_then(|(row, column)| {
-                with_canvas(canvas_handle, |ic| {
-                    let link = ic.link_at(row, column)?;
-                    Some(match link.tooltip() {
-                        Some(tooltip) => tooltip.to_string(),
-                        None => link.target().as_str().to_string(),
-                    })
-                })
-                .flatten()
+            .and_then(|_| {
+                let cell = hovered_link(canvas_handle, state.hover_pointer.get())?;
+                let link = cell.link?;
+                Some(
+                    link.tooltip()
+                        .unwrap_or_else(|| link.target().as_str())
+                        .to_string(),
+                )
             })
             .unwrap_or_default()
     };
 
     let on_open = move |ev: web_sys::MouseEvent| {
         ev.stop_propagation();
-        let Some((row, column)) = state.hover_link.get_untracked() else {
+        let Some(cell) = hovered_link(canvas_handle, state.hover_pointer.get_untracked()) else {
             return;
         };
-        if let Err(e) = activate_link(model, &state, canvas_handle, row, column) {
+        if let Err(e) = activate_link(model, &state, canvas_handle, cell.anchor.r1, cell.anchor.c1)
+        {
             state.status.set(Some(StatusMessage::Error(e.to_string())));
         }
         // Following the target moves the selection, so the hover no longer
