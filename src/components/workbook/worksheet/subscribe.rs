@@ -80,8 +80,14 @@ pub(super) fn install_subscribe_effect(
         if has_theme {
             theme_dirty.set_value(true);
         }
+        // The current link/merge metadata epoch. Content, format, structure,
+        // and theme events advance it; navigation does not. Pushed every tick
+        // so a purely visual repaint keeps the last value and the canvas can
+        // reuse its validated link/merge snapshot instead of rebuilding it.
+        let metadata_epoch = state.events.metadata_seq.get_value();
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
+                ic.set_metadata_epoch(Some(metadata_epoch));
                 ic.set_overlays(overlays);
                 // Each category below is independent, not an if/else-if
                 // cascade: a structure resize, a content edit, and a nav

@@ -154,6 +154,10 @@ where
     /// repaint after a redundant push.
     pub fn set_model(&mut self, model: Rc<dyn CanvasModel>) {
         self.model = Some(model);
+        // A replacement model's link/merge lists are unrelated to the outgoing
+        // model's, so the cached metadata snapshot is dropped outright rather
+        // than relying on the generation check alone.
+        self.metadata_cache = None;
         // Wrapping: correctness never depends on uniqueness after a wrap
         // (see the field doc) — this exists to classify an ordinary model
         // replacement, not to gate repaint.
@@ -182,6 +186,28 @@ where
     /// `Chrome::classify`, not duplicated at the callsite.
     pub fn request_overlay_repaint(&mut self) {
         self.pending.mark_overlay();
+    }
+
+    /// Push the host's current metadata epoch, the revision of the selected
+    /// sheet's link and merged-range lists.
+    ///
+    /// The host MUST call this whenever either list may have changed — for the
+    /// Leptos host, on every content, format, structure, or theme event — and
+    /// MAY call it on any other repaint request, since an unchanged value is a
+    /// no-op. Passing the same value across a purely visual repaint (selection,
+    /// scroll, hover, autofill preview) lets the next attempt reuse the last
+    /// validated `LinkIndex`/`MergeTable` instead of re-reading and rebuilding
+    /// them. Passing `None` disables reuse: every attempt re-reads the model,
+    /// which is the correct and safe default for a host that cannot observe
+    /// link or merge changes cheaply.
+    ///
+    /// A stale value is the only failure mode, and it is a visible one: an
+    /// unchanged-but-actually-changed list leaves a link unclickable or a
+    /// merged region editable. Do not advance this with a counter that can
+    /// repeat across a model replacement — `set_model` clears the cache and
+    /// bumps the generation, so a replacement is already safe.
+    pub fn set_metadata_epoch(&mut self, epoch: Option<u64>) {
+        self.metadata_epoch = epoch;
     }
 
     /// Typed cell-content-changed signal. Marks all visible content dirty so

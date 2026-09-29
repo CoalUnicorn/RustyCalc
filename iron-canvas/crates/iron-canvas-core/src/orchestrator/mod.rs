@@ -44,7 +44,7 @@ use crate::CanvasModel;
 use crate::chrome::{Chrome, RecycledSlots};
 use crate::decoration::Decorations;
 use crate::frame::work::{PendingWork, WorkFlags};
-use crate::frame::{FrameTrace, RenderStrategy};
+use crate::frame::{FrameTrace, MetadataSnapshot, RenderStrategy};
 use crate::geometry::CanvasMetrics;
 use crate::painter::BlitPainter;
 #[cfg(feature = "dev-diagnostics")]
@@ -78,6 +78,18 @@ where
     /// independently queues geometry work every time, so this exists to
     /// classify and diagnose, not to gate repaint.
     model_generation: u64,
+    /// Host-supplied revision of the current sheet's link and merged-range
+    /// metadata. `None` (the initial value) means the host cannot supply a
+    /// reliable one, so every attempt re-reads and rebuilds both indexes.
+    /// Pushed by [`Self::set_metadata_epoch`]; the value is the host's promise
+    /// that either list may have changed whenever it changes.
+    metadata_epoch: Option<u64>,
+    /// Last validated link/merge snapshot, keyed on
+    /// `(model_generation, sheet, metadata_epoch)`. `None` until an attempt
+    /// captures metadata while a host epoch is set, and reset by every
+    /// `set_model`. Reused only on an exact key match — see
+    /// [`FrameInputs::capture_with_metadata_cache`](crate::frame::FrameInputs).
+    metadata_cache: Option<MetadataSnapshot>,
     last_frame: Option<Chrome>,
     /// Standing pool of slot-Vec allocations for `FramePath::Fresh`
     /// construction, owned here (not derived from `last_frame` inline) so a
@@ -138,6 +150,8 @@ where
             decos: Decorations::default(),
             model: None,
             model_generation: 0,
+            metadata_epoch: None,
+            metadata_cache: None,
             last_frame: None,
             spare_slots: RecycledSlots::default(),
             metrics: None,

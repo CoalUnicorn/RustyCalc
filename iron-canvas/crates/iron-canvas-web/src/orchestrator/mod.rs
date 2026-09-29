@@ -149,6 +149,17 @@ impl IronCanvas {
         self.runtime.orchestrator_mut().request_repaint();
     }
 
+    /// Push the host's current link/merge metadata epoch.
+    ///
+    /// Call this whenever the selected sheet's links or merged ranges may have
+    /// changed, and pass the same value on a purely visual repaint (selection,
+    /// scroll, hover) so the next attempt can reuse the last validated
+    /// `LinkIndex`/`MergeTable` instead of rebuilding them. `None` disables
+    /// reuse. See `Orchestrator::set_metadata_epoch`.
+    pub fn set_metadata_epoch(&mut self, epoch: Option<u64>) {
+        self.runtime.orchestrator_mut().set_metadata_epoch(epoch);
+    }
+
     /// Report a content change that can affect the full grid.
     #[wasm_bindgen(js_name = "markContentDirty")]
     pub fn mark_content_dirty(&mut self) {

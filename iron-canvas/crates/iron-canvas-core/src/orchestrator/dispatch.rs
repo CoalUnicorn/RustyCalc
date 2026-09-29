@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 use crate::chrome::Chrome;
-use crate::frame::{FrameInputs, GridWork, MergeImpact, PaintResult, plan_frame};
+use crate::frame::{FrameInputs, GridWork, MergeImpact, MetadataSnapshot, PaintResult, plan_frame};
 use crate::painter::BlitPainter;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::DiagDeltaKind;
@@ -60,11 +60,13 @@ where
         // the whole attempt having touched none of those. Metrics default to
         // a zero-size canvas at DPR 1.0 before the first `resize`, matching
         // the renderer's own default transform.
-        let capture = FrameInputs::capture(
+        let capture = FrameInputs::capture_with_metadata_cache(
             model_dyn,
             self.metrics(),
             Rc::clone(&self.theme),
             self.model_generation,
+            self.metadata_epoch,
+            self.metadata_cache.as_ref(),
         );
         // `FrameInputs::capture` here makes a bridge failure on any scalar
         // read observable and holds the attempt (below), rather than the
@@ -96,6 +98,22 @@ where
                 return result;
             }
         };
+
+        // Refresh the reusable snapshot from this attempt's capture, but only
+        // when the host supplied an epoch — without one, reuse is impossible
+        // and storing would only retain dead state. Storing on capture success
+        // (not on commit) is safe: the snapshot is a model read, not committed
+        // pixels, so a later hold leaves `last_frame`'s committed indexes
+        // untouched while the next attempt rebuilds only if the epoch moved.
+        if let Some(epoch) = self.metadata_epoch {
+            self.metadata_cache = Some(MetadataSnapshot {
+                model_generation: self.model_generation,
+                sheet: inputs.sheet(),
+                epoch,
+                links: Rc::clone(inputs.links()),
+                merges: Rc::clone(inputs.merges()),
+            });
+        }
 
         let delta = Chrome::classify(
             self.last_frame.as_ref(),

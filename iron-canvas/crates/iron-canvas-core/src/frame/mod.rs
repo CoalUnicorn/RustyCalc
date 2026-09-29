@@ -18,6 +18,7 @@ mod plan_tests;
 
 pub(crate) use delta::AxisRange;
 pub use delta::{BlitPlan, FrameDelta, RebuildReason, Shift};
+pub(crate) use inputs::MetadataSnapshot;
 pub use inputs::{FrameInputFailure, FrameInputs};
 pub use plan::RenderStrategy;
 pub(crate) use plan::{GridWork, MergeImpact, OverlayWork, plan_frame};
