@@ -28,6 +28,10 @@ use iron_canvas_core::*;
 use super::ClipboardDraw;
 use super::overlay_memo::OverlayTuple;
 
+#[cfg(test)]
+#[path = "subscribe_tests.rs"]
+mod tests;
+
 pub(super) fn install_subscribe_effect(
     state: WorkbookState,
     canvas_handle: CanvasHandle,

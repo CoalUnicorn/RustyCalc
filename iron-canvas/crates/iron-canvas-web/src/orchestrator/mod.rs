@@ -27,11 +27,11 @@ use crate::wasm::JsBackedModel;
 use iron_canvas_canvas2d::{Canvas2dRuntime, WebSurface};
 use iron_canvas_core::AutoFitError;
 use iron_canvas_core::CanvasModel;
+use iron_canvas_core::DisplayCell;
 use iron_canvas_core::PaintResult;
 use iron_canvas_core::address::{AutofillTarget, FormulaRef, RCRange, SheetArea};
-use iron_canvas_core::DisplayCell;
-use iron_canvas_core::chrome::hit::{HitTest, ResizeTarget};
 use iron_canvas_core::chrome::GridSegment;
+use iron_canvas_core::chrome::hit::{HitTest, ResizeTarget};
 use iron_canvas_core::geometry::CanvasMetrics;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::geometry::pixel_rect::PixelRect;
@@ -147,17 +147,6 @@ impl IronCanvas {
     #[wasm_bindgen(js_name = "requestRepaint")]
     pub fn request_repaint(&mut self) {
         self.runtime.orchestrator_mut().request_repaint();
-    }
-
-    /// Push the host's current link/merge metadata epoch.
-    ///
-    /// Call this whenever the selected sheet's links or merged ranges may have
-    /// changed, and pass the same value on a purely visual repaint (selection,
-    /// scroll, hover) so the next attempt can reuse the last validated
-    /// `LinkIndex`/`MergeTable` instead of rebuilding them. `None` disables
-    /// reuse. See `Orchestrator::set_metadata_epoch`.
-    pub fn set_metadata_epoch(&mut self, epoch: Option<u64>) {
-        self.runtime.orchestrator_mut().set_metadata_epoch(epoch);
     }
 
     /// Report a content change that can affect the full grid.
@@ -278,6 +267,16 @@ impl IronCanvas {
 
 // This API accepts Rust types and does not cross the JavaScript boundary.
 impl IronCanvas {
+    /// Push the host's current link/merge metadata epoch.
+    ///
+    /// Update the epoch before requesting a repaint when either list can
+    /// change. Keep the same epoch for selection, scroll, and hover repaints.
+    /// `None` clears the snapshot and disables reuse.
+    /// See `Orchestrator::set_metadata_epoch`.
+    pub fn set_metadata_epoch(&mut self, epoch: Option<u64>) {
+        self.runtime.orchestrator_mut().set_metadata_epoch(epoch);
+    }
+
     pub fn set_overlays(&mut self, overlays: RenderOverlays) {
         self.runtime.orchestrator_mut().set_overlays(overlays);
     }

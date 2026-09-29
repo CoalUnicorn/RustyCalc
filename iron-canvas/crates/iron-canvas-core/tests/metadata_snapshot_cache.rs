@@ -13,7 +13,8 @@ use std::rc::Rc;
 
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::{
-    CanvasMetrics, CellLink, LinkTarget, Orchestrator, PaintResult, RCRange, RenderStrategy,
+    CanvasMetrics, CellLink, FrameInputFailure, LinkTarget, Orchestrator, PaintResult, RCRange,
+    RenderStrategy,
 };
 use iron_canvas_recorder::MemSurface;
 
@@ -134,6 +135,31 @@ fn a_missing_epoch_always_rebuilds() {
     );
 }
 
+#[test]
+fn disabling_reuse_discards_the_previous_snapshot() {
+    let model = model_with_metadata();
+    let mut orch = build(Rc::clone(&model));
+    orch.set_metadata_epoch(Some(0));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    orch.set_metadata_epoch(None);
+    model.set_sheet_links(vec![link(2, 3, "https://current.example")]);
+    orch.request_overlay_repaint();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(model.metadata_list_calls(), 4);
+
+    // Revision tracking starts again after an interval without a revision.
+    orch.set_metadata_epoch(Some(0));
+    orch.request_overlay_repaint();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(
+        orch.link_at(2, 3).expect("current link").target().as_str(),
+        "https://current.example",
+        "re-enabling reuse must not restore metadata from before None"
+    );
+    assert_eq!(model.metadata_list_calls(), 6);
+}
+
 /// A model replacement drops the cached snapshot even when the host reuses the
 /// same epoch value: the new model's lists are unrelated to the old model's.
 #[test]
@@ -167,6 +193,84 @@ fn a_model_replacement_drops_the_snapshot() {
     );
 }
 
+#[test]
+fn a_sheet_change_rebuilds_with_the_same_epoch() {
+    let model = model_with_metadata();
+    let mut orch = build(Rc::clone(&model));
+    orch.set_metadata_epoch(Some(0));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    model.set_sheet(1);
+    model.set_sheet_links(vec![link(2, 3, "https://sheet-two.example")]);
+    orch.view_changed();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(model.metadata_list_calls(), 4);
+    assert_eq!(
+        orch.link_at(2, 3)
+            .expect("second sheet link")
+            .target()
+            .as_str(),
+        "https://sheet-two.example"
+    );
+}
+
+#[test]
+fn an_advanced_epoch_publishes_changed_merge_geometry() {
+    let model = Rc::new(TestModel::synthetic_grid().with_top_row(1));
+    let mut orch = build(Rc::clone(&model));
+    orch.set_metadata_epoch(Some(0));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    let cell = orch.cell_rect(2, 3).expect("visible cell");
+    let point = (f64::from(cell.left() + 1), f64::from(cell.top() + 1));
+
+    model.set_merged_ranges(vec![merged(2, 2, 3, 3)]);
+    orch.set_metadata_epoch(Some(1));
+    orch.request_overlay_repaint();
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(orch.last_strategy(), Some(RenderStrategy::FullRebuild));
+    assert_eq!(model.metadata_list_calls(), 4);
+    assert_eq!(
+        orch.display_cell_at(point.0, point.1)
+            .expect("merged cell")
+            .merged,
+        merged(2, 2, 3, 3)
+    );
+}
+
+#[test]
+fn failed_metadata_capture_does_not_cache_a_partial_pair() {
+    let model = model_with_metadata();
+    let mut orch = build(Rc::clone(&model));
+    orch.set_metadata_epoch(Some(0));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    model.set_sheet_links(vec![link(2, 3, "https://uncommitted.example")]);
+    model.set_capture_fail(Some(FrameInputFailure::MergedRanges));
+    orch.set_metadata_epoch(Some(1));
+    orch.request_overlay_repaint();
+    assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
+    assert_eq!(model.metadata_list_calls(), 4);
+    assert_eq!(
+        orch.link_at(2, 3)
+            .expect("committed link")
+            .target()
+            .as_str(),
+        "https://example.com"
+    );
+
+    model.set_sheet_links(vec![link(2, 3, "https://recovered.example")]);
+    model.set_capture_fail(None);
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(model.metadata_list_calls(), 6);
+    assert_eq!(
+        orch.link_at(2, 3)
+            .expect("recovered link")
+            .target()
+            .as_str(),
+        "https://recovered.example"
+    );
+}
+
 /// A held attempt keeps the cached snapshot from the successful capture, so a
 /// retry on the same epoch does not re-read the lists.
 #[test]
@@ -178,17 +282,31 @@ fn a_held_attempt_retries_without_re_reading_metadata() {
     let reads = model.metadata_list_calls();
 
     // Fail a geometry read so the next attempt holds after metadata capture.
+    model.set_sheet_links(vec![link(2, 3, "https://after-hold.example")]);
     model.set_row_height_bridge_fail(true);
     orch.set_metadata_epoch(Some(1));
     orch.request_repaint();
     assert_eq!(orch.render_pending(), PaintResult::RetryRequired);
     assert_eq!(model.metadata_list_calls(), reads + 2);
+    assert_eq!(
+        orch.link_at(2, 3)
+            .expect("committed link during hold")
+            .target()
+            .as_str(),
+        "https://example.com"
+    );
 
     // The retry keeps the same epoch, so the snapshot captured above is reused
     // even though the previous attempt held.
     model.set_row_height_bridge_fail(false);
-    orch.request_repaint();
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
+    assert_eq!(
+        orch.link_at(2, 3)
+            .expect("committed link after retry")
+            .target()
+            .as_str(),
+        "https://after-hold.example"
+    );
     assert_eq!(
         model.metadata_list_calls(),
         reads + 2,
