@@ -3,11 +3,12 @@ use leptos::prelude::*;
 use crate::state::{ModelStore, Split};
 use iron_canvas_core::address::RCRange;
 use iron_canvas_core::{
-    CanvasModel, CanvasView, CellContentQuery, CellDecoration, CellKind, CellStyle, Fetched,
+    CanvasModel, CanvasView, CellContentQuery, CellDecoration, CellKind, CellLink, CellStyle,
+    Fetched,
 };
 use iron_canvas_ironcalc::color_resolver;
 use iron_canvas_ironcalc::convert::{
-    cell_decoration_from_extended, cell_type_to_kind, style_to_core,
+    cell_decoration_from_extended, cell_type_to_kind, link_to_core, style_to_core,
 };
 
 /// Bridges `ModelStore` (a Leptos `StoredValue` holding `UserModel<'static>`)
@@ -79,6 +80,23 @@ impl CanvasModel for WorksheetModelAdapter {
     }
     fn get_show_col_headers(&self, _sheet: u32) -> Option<bool> {
         Some(self.show_headers.get_untracked())
+    }
+    /// The engine's merged link list, converted once at this boundary. A
+    /// native model error is persistent, not transient, so it maps to `None`
+    /// (hold the attempt) — never to an empty list, which would leave a
+    /// visible link unclickable.
+    fn get_sheet_links(&self, sheet: u32) -> Option<Vec<CellLink>> {
+        self.store.with_value(|m| {
+            let resolve = color_resolver(m);
+            m.get_links_list(sheet).ok().map(|links| {
+                links
+                    .into_iter()
+                    .map(|view| {
+                        link_to_core(view.link, view.row, view.column, view.dynamic, &resolve)
+                    })
+                    .collect()
+            })
+        })
     }
 }
 

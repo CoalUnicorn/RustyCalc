@@ -15,6 +15,7 @@ use std::rc::Rc;
 use crate::CanvasModel;
 use crate::frame::{BlitPlan, FrameInputs};
 use crate::geometry::CanvasMetrics;
+use crate::link::LinkIndex;
 use crate::theme::CanvasTheme;
 
 use super::pane_set::ScrollAxisSlots;
@@ -101,9 +102,10 @@ impl PreparedBlitFrame {
             show_row_headers,
             show_col_headers,
             kind,
+            links,
         } = rollback;
         // `theme`/`metrics`/`model_generation`/`show_row_headers`/
-        // `show_col_headers`/`kind` all came from `inputs`/`FrameKindTag::Blitted`
+        // `show_col_headers`/`kind`/`links` all came from `inputs`/`FrameKindTag::Blitted`
         // when `candidate` was built, not from `prev` — dropped here in
         // favor of `rollback`'s saved originals, bound above.
         let Chrome {
@@ -126,6 +128,7 @@ impl PreparedBlitFrame {
             show_row_headers,
             show_col_headers,
             kind,
+            links,
         }
     }
 }
@@ -154,6 +157,11 @@ struct BlitRollback {
     show_row_headers: bool,
     show_col_headers: bool,
     kind: FrameKindTag,
+    /// The committed link index `prev` carried, saved because the candidate
+    /// refreshes it from `inputs` (a blit can only be selected when the link
+    /// digest is unchanged, so the two are equivalent — but rollback restores
+    /// the committed handle exactly).
+    links: Rc<LinkIndex>,
 }
 
 impl Chrome {

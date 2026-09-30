@@ -9,6 +9,7 @@ use leptos_use::{DebounceOptions, use_debounce_fn_with_options};
 
 use crate::app_state::AppState;
 use crate::events::EventBus;
+use crate::input::mouse::CanvasHandle;
 use crate::state::WorkbookState;
 use crate::storage;
 
@@ -43,6 +44,12 @@ pub fn App() -> impl IntoView {
     let clipboard: StoredValue<Option<crate::model::AppClipboard>, LocalStorage> =
         StoredValue::new_local(None);
 
+    // Canvas orchestrator handle. App-level (like `clipboard`) because the
+    // toolbar and the hover tooltip read committed canvas state (link targets,
+    // cell rects) while the grid canvas is mounted by `Worksheet`, a sibling.
+    // `Worksheet` fills the slot on mount and empties it on cleanup.
+    let canvas_handle: CanvasHandle = StoredValue::new_local(None);
+
     // Pre-serialized model bytes refreshed by the debounced save. The
     // beforeunload handler reads these directly, sidestepping a 10-50ms
     // bitcode pass inside the browser's ~200ms unload budget.
@@ -55,6 +62,7 @@ pub fn App() -> impl IntoView {
     provide_context(wb_state);
     provide_context(model);
     provide_context(clipboard);
+    provide_context(canvas_handle);
     // Pending v1 share verification — consumed by ShareVerify modal.
     provide_context(pending_share);
     provide_context(set_pending_share);

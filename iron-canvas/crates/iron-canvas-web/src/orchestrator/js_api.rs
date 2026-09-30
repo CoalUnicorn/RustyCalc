@@ -69,6 +69,19 @@ impl IronCanvas {
         }
     }
 
+    /// Return the committed hyperlink at a 1-based cell, or `null`.
+    /// The method reads committed state only, never the live model.
+    /// `crate::wire::LinkWire` defines the JavaScript value.
+    #[wasm_bindgen(js_name = "linkAt")]
+    pub fn link_at_js(&self, row: i32, column: i32) -> Result<JsValue, JsError> {
+        match self.runtime.orchestrator().link_at(row, column) {
+            Some(link) => Ok(serde_wasm_bindgen::to_value(&crate::wire::LinkWire::from(
+                link.as_ref(),
+            ))?),
+            None => Ok(JsValue::NULL),
+        }
+    }
+
     /// Find the cell at a pixel position without an overlay hit test.
     /// Return `{row, column}` or `null`.
     #[wasm_bindgen(js_name = "pixelToCell")]

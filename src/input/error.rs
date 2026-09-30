@@ -66,6 +66,24 @@ pub enum SheetError {
     Engine(String),
 }
 
+/// Error from a hyperlink action (set, delete, follow).
+///
+/// Both variants render the message verbatim: `Engine` is the engine string,
+/// and `Refused` is a host-authored, user-facing explanation.
+#[derive(Debug, Error)]
+pub enum LinkError {
+    #[error("{0}")]
+    Engine(String),
+    #[error("{0}")]
+    Refused(String),
+}
+
+impl From<String> for LinkError {
+    fn from(s: String) -> Self {
+        Self::Engine(s)
+    }
+}
+
 impl From<String> for SheetError {
     fn from(s: String) -> Self {
         Self::Engine(s)

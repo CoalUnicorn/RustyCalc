@@ -8,6 +8,8 @@
 pub enum CursorHint {
     #[default]
     Cell,
+    /// The cell under the pointer carries a committed hyperlink.
+    Pointer,
     ColResize,
     RowResize,
     Autofill,
@@ -24,6 +26,7 @@ impl CursorHint {
     pub fn class(self) -> &'static str {
         match self {
             CursorHint::Cell => "",
+            CursorHint::Pointer => "cur-pointer",
             CursorHint::ColResize => "resize-col",
             CursorHint::RowResize => "resize-row",
             CursorHint::Autofill => "cur-autofill",

@@ -222,9 +222,20 @@ impl<P: Painter> RendererCore<P> {
         let mut text_lines = self.frame_cache.text_lines.take();
         if let Some(text) = value.value() {
             let cell_type = cell_type.unwrap_or(CellKind::Text);
-            if let Some(t) =
-                TextPaint::resolve_into(self, rect, &paint.style, text, cell_type, &mut text_lines)
-            {
+            // The link comes from committed state (this frame's index), not
+            // the model: the model's single-cell accessor cannot return a
+            // formula-generated link, so querying it would drop the
+            // underline the grid layer just painted.
+            let link = frame.links().get(row, col).map(|link| link.as_ref());
+            if let Some(t) = TextPaint::resolve_into(
+                self,
+                rect,
+                &paint.style,
+                text,
+                cell_type,
+                link,
+                &mut text_lines,
+            ) {
                 self.paint_text(&t, theme, &text_lines);
             }
         }

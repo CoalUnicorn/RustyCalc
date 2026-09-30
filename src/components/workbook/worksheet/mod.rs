@@ -5,11 +5,12 @@ use std::rc::Rc;
 
 use crate::app_state::AppState;
 use crate::components::panels::conditional_formatting::ConditionalFormattingDialog;
+use crate::components::panels::link_tooltip::LinkTooltip;
 use crate::components::panels::named_ranges::NamedRangesDialog;
 use crate::components::workbook::editing::cell_editor::CellEditor;
 use crate::input::mouse::{
-    CanvasHandle, handle_contextmenu, handle_dblclick, handle_mousedown, handle_mousemove,
-    handle_mouseup, handle_wheel,
+    CanvasHandle, clear_hover, handle_contextmenu, handle_dblclick, handle_mousedown,
+    handle_mousemove, handle_mouseup, handle_wheel, revalidate_hover,
 };
 use crate::model::AppClipboard;
 use crate::state::{DragState, ModelStore, WorkbookState};
@@ -39,19 +40,18 @@ pub(super) type ClipboardDraw = StoredValue<Option<AppClipboard>, LocalStorage>;
 pub fn Worksheet() -> impl IntoView {
     let grid_ref = NodeRef::<html::Canvas>::new();
     let overlay_ref = NodeRef::<html::Canvas>::new();
-    // IronCanvas orchestrator handle. None until both <canvas> elements mount
-    // and the container has nonzero CSS dimensions; then constructed exactly
-    // once by the lazy-construct block in the rAF loop. Disposed in on_cleanup.
-    let canvas_handle: CanvasHandle = StoredValue::new_local(None);
+    // IronCanvas orchestrator handle, provided by `App` so the toolbar and the
+    // link tooltip can read committed canvas state too. None until both
+    // <canvas> elements mount and the container has nonzero CSS dimensions;
+    // then constructed exactly once by the lazy-construct block in the rAF
+    // loop. Disposed in on_cleanup.
+    let canvas_handle: CanvasHandle = expect_context::<CanvasHandle>();
     // Theme-change fence. Set when `events.theme` fires; consumed in the rAF
     // callback below. Defers `setThemeFromElement` to after leptos-use has
     // written the new `data-theme` attribute on `<html>` — reading CSS vars
     // synchronously inside the same effect batch as the toggle would race the
     // attribute write and yield stale values.
     let theme_dirty: StoredValue<bool> = StoredValue::new(false);
-    // Expose the handle to descendant components (e.g. FormulaTextArea needs
-    // `cell_rect` to position the in-cell editor against the painted frame).
-    provide_context(canvas_handle);
     on_cleanup(move || {
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.take() {
@@ -85,7 +85,17 @@ pub fn Worksheet() -> impl IntoView {
         Some(app),
         state.show_headers,
         state.scroll_into_view,
+        state.committed_frame,
     );
+
+    // Revalidate the idle hover after every commit. The event signals above
+    // only *schedule* a paint, so an effect driven by them reads the previous
+    // frame; this one runs after the frame that changed the link, the scroll
+    // offset, or the sheet, and re-hit-tests the stored pointer position.
+    Effect::new(move |_| {
+        let _ = state.committed_frame.get();
+        revalidate_hover(state, canvas_handle);
+    });
 
     // Cleanup is automatic when the component unmounts. Needs `poke`, so it
     // is registered here rather than alongside `container_ref` above.
@@ -221,7 +231,12 @@ pub fn Worksheet() -> impl IntoView {
     let container_overflow = move || "";
 
     view! {
-        <div node_ref=container_ref class="ws" style:overflow=container_overflow>
+        <div
+            node_ref=container_ref
+            class="ws"
+            style:overflow=container_overflow
+            on:mouseleave=move |_| clear_hover(state)
+        >
             <canvas
                 node_ref=grid_ref
                 role="application"
@@ -259,6 +274,7 @@ pub fn Worksheet() -> impl IntoView {
                 aria-hidden="true"
             />
             <CellEditor />
+            <LinkTooltip grid_ref=grid_ref />
             <NamedRangesDialog />
             <ConditionalFormattingDialog />
         </div>

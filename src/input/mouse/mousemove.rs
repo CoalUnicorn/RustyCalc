@@ -22,7 +22,7 @@ use iron_canvas_core::{
 use iron_canvas_web::PixelRect;
 use ironcalc_base::UserModel;
 
-use super::cursor_hint::compute_cursor_hint;
+use super::cursor_hint::{clear_hover, set_hover_probe};
 use super::formula_ref::dragged_ref_range;
 use super::{CanvasHandle, with_canvas};
 
@@ -190,12 +190,12 @@ pub fn handle_mousemove(
         state.autoscroll.cancel();
         state.drag.set(DragState::Idle);
         state.dragged_ref_override.set(None);
-        let hint = compute_cursor_hint(icv, x, y);
-        if state.hover_cursor.get_untracked() != hint {
-            state.hover_cursor.set(hint);
-        }
+        set_hover_probe(state, icv, x, y);
         return;
     }
+    // Any held button means no idle hover: the tooltip must not outlive the
+    // gesture that started on the link.
+    clear_hover(state);
     let sheet = model.with_value(UserModel::get_selected_sheet);
 
     match state.drag.get_untracked() {

@@ -65,11 +65,13 @@ export function installDenseRangeMethods(model, onChange = () => {}) {
         getCellStylesIn: 0,
         getFormattedCellValuesIn: 0,
         getCellTypesIn: 0,
+        getLinks: 0,
     };
     const raw = {
         style: model.getCellStyle.bind(model),
         type: model.getCellType.bind(model),
         value: model.getFormattedCellValue.bind(model),
+        links: model.getLinks.bind(model),
     };
     const count = (name) => {
         counts[name] += 1;
@@ -106,6 +108,10 @@ export function installDenseRangeMethods(model, onChange = () => {}) {
             raw.type(sheet, row, column),
         );
     };
+    model.getLinks = (sheet) => {
+        count("getLinks");
+        return raw.links(sheet);
+    };
 
     return {
         counts,
@@ -117,6 +123,68 @@ export function installDenseRangeMethods(model, onChange = () => {}) {
             return { ...counts };
         },
     };
+}
+
+/**
+ * Known pre-existing core defect classifier, shared with the browser harness so
+ * the rule itself is unit-testable. See
+ * `docs/bugs/2026-09-26-retained-seam-alpha-accumulation.md`.
+ *
+ * A retained content repaint re-strokes a separator line on top of the previous
+ * stroke, so its alpha accumulates and the pixels darken (203 -> 201 at DPR 1,
+ * 205 -> 202 at fractional DPR). Accepting that as "known" is safe only while
+ * it cannot hide a link regression: link text and underline pixels paint
+ * strictly inside a cell, and any pixel strictly inside a painted cell rect
+ * fails here.
+ */
+export const SEPARATOR_EDGE_SLACK = 1;
+
+/** The painted separator edge this pixel sits on, or null. */
+export function separatorEdge(geometry, x, y) {
+    for (const column of geometry.columns) {
+        for (const edge of [column.left, column.right]) {
+            if (Math.abs(x - edge) <= SEPARATOR_EDGE_SLACK) return `x=${edge}`;
+        }
+    }
+    for (const band of geometry.rowBands) {
+        for (const edge of [band.top, band.bottom]) {
+            if (Math.abs(y - edge) <= SEPARATOR_EDGE_SLACK) return `y=${edge}`;
+        }
+    }
+    return null;
+}
+
+/**
+ * The distinct separator lines a known separator defect covers, or null when
+ * the mismatch is anything else. Every differing pixel must keep its alpha, be
+ * the same RGB and strictly darker by one uniform per-channel delta, sit on a
+ * painted separator edge, and lie strictly inside no painted cell rect.
+ */
+export function knownSeparatorEdges(diff, geometry) {
+    if (diff.truncated || diff.points.length === 0 || geometry === null) return null;
+    const edges = [];
+    for (const { x, y, fresh, retained } of diff.points) {
+        if (fresh[3] !== retained[3]) return null;
+        const darkening = fresh[0] - retained[0];
+        if (darkening <= 0) return null;
+        if (fresh[1] - retained[1] !== darkening) return null;
+        if (fresh[2] - retained[2] !== darkening) return null;
+        if (retained[0] >= fresh[0] || retained[1] >= fresh[1] || retained[2] >= fresh[2]) return null;
+        const interior = geometry.columns.some((column) =>
+            geometry.rowBands.some(
+                (band) =>
+                    x > column.left + SEPARATOR_EDGE_SLACK &&
+                    x < column.right - SEPARATOR_EDGE_SLACK &&
+                    y > band.top + SEPARATOR_EDGE_SLACK &&
+                    y < band.bottom - SEPARATOR_EDGE_SLACK,
+            ),
+        );
+        if (interior) return null;
+        const edge = separatorEdge(geometry, x, y);
+        if (edge === null) return null;
+        if (!edges.includes(edge)) edges.push(edge);
+    }
+    return edges;
 }
 
 export function rectCenter(rect) {

@@ -151,7 +151,12 @@ pub(crate) struct FramePlan {
 ///   real scroll or rebuild plans `FullRebuild`, never a blit over changed values;
 /// - `ContentWork::Rows` carries its original sheet into `GridWork::Rows`;
 /// - Rows fall back to `AllContent` whenever `DamagedRows` is ineligible;
-/// - geometry work forces `FullRebuild` even when `delta` is otherwise `Stable`.
+/// - geometry work forces `FullRebuild` even when `delta` is otherwise `Stable`;
+/// - a changed link set (`links_changed`) forces `ChangedCells`/`AllContent`
+///   on reusable geometry, so a metadata-only link change still repaints and
+///   commits with its new query data. It is whole-content, not row-scoped: a
+///   link can change in a row the host never edited. A real scroll is barred
+///   from the `Blit` arm too and keeps `FullRebuild`.
 ///
 /// `OverlayWork` is calculated once here, from the captured selection
 /// visibility and the attempted work, so every execution arm reads
@@ -172,6 +177,7 @@ pub(crate) fn plan_frame(
     delta: FrameDelta,
     sheet: u32,
     show_selection: bool,
+    links_changed: bool,
 ) -> FramePlan {
     let rebuild_reason = match delta {
         FrameDelta::Rebuild(reason) => Some(reason),
@@ -190,6 +196,28 @@ pub(crate) fn plan_frame(
         OverlayWork::Preserve
     };
 
+    // A link-set change is a metadata change with a pixel consequence: the
+    // cell's underline and resolved color can change with no content edit —
+    // a precedent recalculated elsewhere, possibly in a row the host never
+    // marked. Route it to whole-grid content work so the new link state and
+    // the pixels it paints commit together. An overlay-only or blit attempt
+    // would publish the new query data over stale pixels, or drop the change
+    // entirely.
+    //
+    // Deliberately whole-content, not row-scoped damage: the link can live
+    // in a row that was never edited. Geometry work and a real scroll keep
+    // their own `Fresh` fallback (the `Blit` probe below is barred on
+    // `links_changed`), where a full rebuild installs complete fingerprint
+    // truth, links included.
+    if links_changed && reusable && !work.has_geometry() {
+        return FramePlan {
+            grid: GridWork::AllContent,
+            overlay: content_overlay,
+            consumes: work,
+            rebuild_reason,
+        };
+    }
+
     // Geometric viewport probe, attempted before Overlay. Content and
     // geometry both bar it: content, because blitting stale pixels over
     // changed values is the recalc bug; geometry, because every current
@@ -202,6 +230,7 @@ pub(crate) fn plan_frame(
     // `view_changed`.
     if !work.has_content()
         && !work.has_geometry()
+        && !links_changed
         && let FrameDelta::Scroll(plan) = delta
     {
         return FramePlan {

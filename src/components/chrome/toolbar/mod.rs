@@ -10,6 +10,7 @@ mod font;
 mod format_toggles;
 mod freeze;
 pub(crate) mod icon;
+mod link_controls;
 mod named_ranges;
 mod number_format;
 pub(crate) mod overflow;
@@ -33,6 +34,7 @@ use conditional_formatting::ConditionalFormattingButton;
 use font::{FontFamily, FontSize};
 use format_toggles::{ClearFormat, FormatToggles};
 use freeze::FreezePane;
+use link_controls::LinkButton;
 use named_ranges::NamedRangesButton;
 use number_format::{NumFmtQuickButtons, NumberFormatPicker};
 use undo_redo::UndoRedo;
@@ -114,6 +116,7 @@ pub fn Toolbar() -> impl IntoView {
             }),
         ],
         ToolbarSection::Data => vec![
+            ToolSlot::new("Link", || view! { <LinkButton /> }.into_any()),
             ToolSlot::new("Named ranges", || {
                 view! { <NamedRangesButton /> }.into_any()
             }),

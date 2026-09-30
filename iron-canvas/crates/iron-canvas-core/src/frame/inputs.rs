@@ -14,6 +14,7 @@ use std::rc::Rc;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
+use crate::link::LinkIndex;
 use crate::model::{CanvasModel, CanvasView};
 use crate::theme::CanvasTheme;
 
@@ -86,6 +87,9 @@ pub struct FrameInputs {
     show_row_headers: bool,
     show_col_headers: bool,
     show_selection: bool,
+    /// Committed link candidate for this attempt. `Rc` so the orchestrator
+    /// hands the same index to the committer without a deep clone.
+    links: Rc<LinkIndex>,
 }
 
 /// Which scalar input a failed [`FrameInputs::capture`] attempt could not
@@ -122,14 +126,18 @@ pub enum FrameInputFailure {
     InvalidFrozenColumnCount = 8,
     RowHeaderVisibility = 5,
     ColumnHeaderVisibility = 6,
+    /// The sheet's link-list read failed, or the list it returned is not a
+    /// valid [`LinkIndex`](crate::link::LinkIndex) (a non-single-cell range,
+    /// an out-of-bounds address, or a duplicate address).
+    SheetLinks = 9,
 }
 
 impl FrameInputFailure {
     /// Highest wire code. The variants carry every code in `0..=LAST_CODE`
-    /// (in declaration order 0-4, 7, 8, 5, 6), so `code > LAST_CODE` is
+    /// (in declaration order 0-4, 7, 8, 5, 6, 9), so `code > LAST_CODE` is
     /// exactly "no variant carries this code" — the check a reader applies to
     /// a decoded recording.
-    pub const LAST_CODE: u8 = Self::InvalidFrozenColumnCount as u8;
+    pub const LAST_CODE: u8 = Self::SheetLinks as u8;
 }
 
 impl FrameInputs {
@@ -142,7 +150,15 @@ impl FrameInputs {
     /// 4. frozen column count;
     /// 5. row-header visibility;
     /// 6. column-header visibility;
-    /// 7. selection visibility.
+    /// 7. selection visibility;
+    /// 8. the sheet's link list.
+    ///
+    /// Steps 1-7 are scalar reads. Step 8 is the one allocating, fallible
+    /// list read: it builds a validated [`LinkIndex`] from the model's whole
+    /// link list once per attempt, so the renderer never crosses the bridge
+    /// per cell. A `None` from the model, or a list
+    /// [`LinkIndex::from_cells`](crate::link::LinkIndex::from_cells)
+    /// rejects, is `FrameInputFailure::SheetLinks` and holds the attempt.
     ///
     /// `metrics`, `theme`, and `model_generation` come from the caller
     /// (`Orchestrator`) rather than the model — they are host/orchestrator
@@ -195,6 +211,18 @@ impl FrameInputs {
             .get_show_col_headers(sheet)
             .ok_or(FrameInputFailure::ColumnHeaderVisibility)?;
         let show_selection = model.get_show_selection();
+        // Step 8: the sheet's links. `Some(empty)` is a known empty set; a
+        // `None` read or a list `from_cells` rejects is a hold, never empty
+        // data — silently painting no link would leave a visible link
+        // unclickable.
+        let links = Rc::new(
+            LinkIndex::from_cells(
+                model
+                    .get_sheet_links(sheet)
+                    .ok_or(FrameInputFailure::SheetLinks)?,
+            )
+            .map_err(|_| FrameInputFailure::SheetLinks)?,
+        );
 
         Ok(FrameInputs {
             metrics,
@@ -207,6 +235,7 @@ impl FrameInputs {
             show_row_headers,
             show_col_headers,
             show_selection,
+            links,
         })
     }
 
@@ -249,6 +278,13 @@ impl FrameInputs {
 
     pub fn show_selection(&self) -> bool {
         self.show_selection
+    }
+
+    /// Committed link candidate captured for this attempt. The orchestrator
+    /// attaches this to the frame it commits; the renderer reads it for
+    /// fingerprints and paint.
+    pub fn links(&self) -> &Rc<LinkIndex> {
+        &self.links
     }
 
     pub fn dpr(&self) -> f64 {

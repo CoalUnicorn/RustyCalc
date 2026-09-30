@@ -23,7 +23,7 @@ use iron_canvas_core::geometry::constants::{DEFAULT_COL_WIDTH, DEFAULT_ROW_HEIGH
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{CanvasModel, CanvasSize, CanvasView, CellContentQuery, RCRange};
 use iron_canvas_core::{
-    CellDecoration, CellKind, CellStyle, Fetched, FrameInputFailure, FrameInputs,
+    CellDecoration, CellKind, CellLink, CellStyle, Fetched, FrameInputFailure, FrameInputs,
 };
 
 pub struct TestModel {
@@ -109,6 +109,10 @@ pub struct TestModel {
     grid_lines_bridge_fail: Cell<bool>,
     /// When set, `get_show_grid_lines` answers `Absent` (default: show).
     grid_lines_absent: Cell<bool>,
+    /// Links `get_sheet_links` reports. Empty means a known empty set. A
+    /// `FrameInputFailure::SheetLinks` in `capture_fail` makes the read fail;
+    /// the list here is then irrelevant.
+    sheet_links: RefCell<Vec<CellLink>>,
 }
 
 impl Default for TestModel {
@@ -157,6 +161,7 @@ impl Default for TestModel {
             col_width_absent: Cell::new(false),
             grid_lines_bridge_fail: Cell::new(false),
             grid_lines_absent: Cell::new(false),
+            sheet_links: RefCell::default(),
         }
     }
 }
@@ -250,6 +255,10 @@ impl TestModel {
         self.show_grid.set(b);
         self
     }
+    pub fn with_sheet_links(self, links: Vec<CellLink>) -> Self {
+        *self.sheet_links.borrow_mut() = links;
+        self
+    }
     pub fn with_hidden_row_headers(self) -> Self {
         self.show_row_headers.set(false);
         self
@@ -271,6 +280,11 @@ impl TestModel {
 
     pub fn set_capture_fail(&self, which: Option<FrameInputFailure>) {
         self.capture_fail.set(which);
+    }
+
+    /// Replace the reported link list mid-test (through a shared reference).
+    pub fn set_sheet_links(&self, links: Vec<CellLink>) {
+        *self.sheet_links.borrow_mut() = links;
     }
 
     pub fn set_top_row(&self, r: i32) {
@@ -508,6 +522,12 @@ impl CanvasModel for TestModel {
     }
     fn get_show_selection(&self) -> bool {
         self.show_selection.get()
+    }
+    fn get_sheet_links(&self, _: u32) -> Option<Vec<CellLink>> {
+        if self.capture_fail.get() == Some(FrameInputFailure::SheetLinks) {
+            return None;
+        }
+        Some(self.sheet_links.borrow().clone())
     }
     fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
         self.column_headers.borrow().get(&column).cloned()

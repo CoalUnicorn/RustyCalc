@@ -8,8 +8,12 @@
 
 use std::rc::Rc;
 
+use iron_canvas_core::forward_methods;
 use iron_canvas_core::geometry::CanvasSize;
-use iron_canvas_core::{CanvasModel, CanvasTheme, Orchestrator};
+use iron_canvas_core::{
+    CanvasModel, CanvasTheme, CanvasView, CellContentQuery, CellDecoration, CellKind, CellLink,
+    CellStyle, Fetched, LinkTarget, Orchestrator, RCRange,
+};
 use iron_canvas_datagrid::{Column, DataGrid};
 use iron_canvas_export::SvgSurface;
 
@@ -59,5 +63,107 @@ fn svg_render_discards_overlay() {
     assert!(
         !svg.contains("class=\"overlay\""),
         "overlay group leaked into the grid-only SVG export"
+    );
+}
+
+/// A `DataGrid` plus committed link state, so an export render exercises the
+/// link text rule through the shared painter path.
+struct LinkModel {
+    grid: DataGrid,
+    links: Vec<CellLink>,
+}
+
+impl LinkModel {
+    fn grid(&self) -> &DataGrid {
+        &self.grid
+    }
+}
+
+impl CellContentQuery for LinkModel {
+    forward_methods!(grid, {
+        fn get_cell_style(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellStyle>;
+        fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
+        fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
+        fn get_extended_cell_style(
+            &self,
+            sheet: u32,
+            row: i32,
+            column: i32,
+        ) -> Fetched<CellDecoration>;
+        fn get_cell_styles_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellStyle>>);
+        fn get_formatted_cell_values_in(
+            &self,
+            sheet: u32,
+            range: RCRange,
+            out: &mut Vec<Fetched<String>>,
+        );
+        fn get_cell_types_in(&self, sheet: u32, range: RCRange, out: &mut Vec<Fetched<CellKind>>);
+        fn get_cell_decorations_in(
+            &self,
+            sheet: u32,
+            range: RCRange,
+            out: &mut Vec<Fetched<CellDecoration>>,
+        );
+    });
+}
+
+impl CanvasModel for LinkModel {
+    forward_methods!(grid, {
+        fn get_selected_sheet(&self) -> Option<u32>;
+        fn get_selected_view(&self) -> Option<CanvasView>;
+        fn get_frozen_rows_count(&self, sheet: u32) -> Option<i32>;
+        fn get_frozen_columns_count(&self, sheet: u32) -> Option<i32>;
+        fn get_row_height(&self, sheet: u32, row: i32) -> Fetched<f64>;
+        fn get_column_width(&self, sheet: u32, column: i32) -> Fetched<f64>;
+        fn get_show_grid_lines(&self, sheet: u32) -> Fetched<bool>;
+        fn get_show_selection(&self) -> bool;
+        fn last_row(&self, sheet: u32) -> i32;
+        fn last_column(&self, sheet: u32) -> i32;
+        fn get_show_row_headers(&self, sheet: u32) -> Option<bool>;
+        fn get_show_col_headers(&self, sheet: u32) -> Option<bool>;
+        fn get_row_header_text(&self, sheet: u32, row: i32) -> Option<String>;
+        fn get_column_header_text(&self, sheet: u32, col: i32) -> Option<String>;
+    });
+
+    fn get_sheet_links(&self, _sheet: u32) -> Option<Vec<CellLink>> {
+        Some(self.links.clone())
+    }
+}
+
+/// Acceptance 5 (visual half): a link's resolved color and underline must
+/// reach the SVG. PDF replays the same `Painter::fill_text` and
+/// `stroke_text_hline` calls, so the shared rule covers both; the PDF
+/// primitives themselves are pinned in `pdf_painter_smoke`.
+#[test]
+fn svg_export_passes_link_color_and_underline_to_the_painter() {
+    let grid = DataGrid::builder()
+        .column(Column::new("A"))
+        .row(vec!["link".to_string()])
+        .build();
+    let model = LinkModel {
+        grid,
+        links: vec![CellLink::new(
+            RCRange::from_cell(1, 1),
+            LinkTarget::External("https://example.com".to_string()),
+            None,
+            true,
+            Some("#0563c1".to_string()),
+        )],
+    };
+
+    let svg = SvgSurface::render(
+        Rc::new(model),
+        &CanvasTheme::light(),
+        CanvasSize { w: 300.0, h: 200.0 },
+    )
+    .expect("a one-shot export of a readable model commits a frame");
+
+    assert!(
+        svg.contains("fill=\"#0563c1\""),
+        "the link's resolved color must reach the SVG text: {svg}"
+    );
+    assert!(
+        svg.contains("stroke=\"#0563c1\""),
+        "the link underline must reach the SVG: {svg}"
     );
 }

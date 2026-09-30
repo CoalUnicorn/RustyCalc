@@ -106,6 +106,10 @@ impl Chrome {
                 prev.show_row_headers = inputs.show_row_headers();
                 prev.show_col_headers = inputs.show_col_headers();
                 prev.kind = FrameKindTag::SlotsReused;
+                // The candidate carries this attempt's captured link index.
+                // A caller that holds this candidate must restore the
+                // committed index it replaced.
+                prev.links = Rc::clone(inputs.links());
                 prev
             }
         }
@@ -231,6 +235,11 @@ impl Chrome {
             show_row_headers: show_row,
             show_col_headers: show_col,
             kind: FrameKindTag::Fresh,
+            // The candidate carries this attempt's captured link index, so
+            // prepare (fingerprints) and paint read one source. A held
+            // outcome hands the frame back for restoration, and only
+            // `finish_attempt` publishes a committed one.
+            links: Rc::clone(inputs.links()),
         })
     }
 }

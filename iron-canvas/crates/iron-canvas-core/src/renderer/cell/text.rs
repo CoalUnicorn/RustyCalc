@@ -18,6 +18,7 @@ use crate::style::{CellKind, CellStyle, HAlign, VAlign};
 
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
+use crate::link::CellLink;
 use crate::painter::{
     CHAR_WIDTH_FACTOR, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
@@ -114,6 +115,7 @@ impl TextPaint {
         style: &CellStyle,
         text: String,
         cell_type: CellKind,
+        link: Option<&CellLink>,
         lines: &mut Vec<TextLine>,
     ) -> Option<TextPaint> {
         if text.is_empty() {
@@ -130,7 +132,7 @@ impl TextPaint {
             h_align,
             v_align,
             wrap_text,
-        } = CellTextStyle::resolve(cell_type, style, &renderer.color_intern);
+        } = CellTextStyle::resolve(cell_type, style, &renderer.color_intern, link);
 
         // Font interning: skips `FontStyle::build` on cache hit. Same lookup
         // is shared across cells with identical (size, weight, slant, family).
@@ -254,12 +256,22 @@ struct CellTextStyle {
 }
 
 impl CellTextStyle {
-    fn resolve(cell_type: CellKind, style: &CellStyle, intern: &ColorIntern) -> Self {
+    fn resolve(
+        cell_type: CellKind,
+        style: &CellStyle,
+        intern: &ColorIntern,
+        link: Option<&CellLink>,
+    ) -> Self {
         // Error cells render in the theme's error color regardless of per-cell
-        // font color. CellKind::Error covers all IronCalc error variants. Both
+        // font color, and regardless of a link — an error is not a link. Both
         // theme slots resolve at paint time (B-5), so this is payload-free.
         let text_color = if matches!(cell_type, CellKind::Error) {
             TextColor::ThemeError
+        } else if let Some(color) = link.and_then(|link| link.color()) {
+            // A link's resolved color wins over the cell's own font color:
+            // the adapter resolved it from the workbook theme, the same
+            // authority every other engine color comes from.
+            TextColor::Owned(intern.get(color))
         } else {
             match style.font.color.as_deref() {
                 None | Some("#000000") => TextColor::ThemeDefault,
@@ -285,7 +297,9 @@ impl CellTextStyle {
 
         Self {
             text_color,
-            underline: style.font.underline,
+            // A link is underlined whether or not a font style says so: a
+            // static link already carries `font.u`, a formula link does not.
+            underline: style.font.underline || link.is_some(),
             strike: style.font.strike,
             h_align,
             v_align,
@@ -472,7 +486,19 @@ impl<P: Painter> RendererCore<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::address::RCRange;
     use crate::geometry::prim::Point;
+    use crate::link::{CellLink, LinkTarget};
+
+    fn link(color: Option<&str>, dynamic: bool) -> CellLink {
+        CellLink::new(
+            RCRange::from_cell(1, 1),
+            LinkTarget::External("https://example.com".to_string()),
+            None,
+            dynamic,
+            color.map(str::to_string),
+        )
+    }
 
     fn line(width: f64) -> TextLine {
         TextLine {
@@ -568,5 +594,52 @@ mod tests {
             lines_escape_cell(&lines, usable_w, rect, line_height),
             "horizontal overflow must clip"
         );
+    }
+
+    // A formula link carries no `font.u`, so the link rule must underline it;
+    // the resolved color comes from the link, not the cell's font color.
+    #[test]
+    fn a_dynamic_link_resolves_to_underlined_link_color() {
+        let intern = ColorIntern::default();
+        let style = CellStyle::default();
+        let link = link(Some("#0563C1"), true);
+        let resolved = CellTextStyle::resolve(CellKind::Text, &style, &intern, Some(&link));
+        assert!(resolved.underline, "a link must be underlined");
+        match resolved.text_color {
+            TextColor::Owned(color) => assert_eq!(&*color, "#0563c1"),
+            _ => panic!("the link's resolved color must win"),
+        }
+    }
+
+    // No link means no behavioural change from the pre-link renderer.
+    #[test]
+    fn a_cell_without_a_link_resolves_as_before() {
+        let intern = ColorIntern::default();
+        let resolved = CellTextStyle::resolve(CellKind::Text, &CellStyle::default(), &intern, None);
+        assert!(!resolved.underline);
+        assert!(matches!(resolved.text_color, TextColor::ThemeDefault));
+    }
+
+    // The error rule stays first: an error cell is not a link, even when the
+    // address also holds one.
+    #[test]
+    fn an_error_cell_keeps_the_error_color_with_a_link() {
+        let intern = ColorIntern::default();
+        let style = CellStyle::default();
+        let link = link(Some("#0563C1"), false);
+        let resolved = CellTextStyle::resolve(CellKind::Error, &style, &intern, Some(&link));
+        assert!(matches!(resolved.text_color, TextColor::ThemeError));
+        assert!(resolved.underline);
+    }
+
+    // A link with no resolved color falls back to the existing font rules.
+    #[test]
+    fn a_colorless_link_falls_back_to_the_font_color() {
+        let intern = ColorIntern::default();
+        let style = CellStyle::default();
+        let link = link(None, false);
+        let resolved = CellTextStyle::resolve(CellKind::Text, &style, &intern, Some(&link));
+        assert!(resolved.underline);
+        assert!(matches!(resolved.text_color, TextColor::ThemeDefault));
     }
 }

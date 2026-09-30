@@ -146,9 +146,16 @@ fn horizontal_alignment_keeps_text_and_decoration_anchors_consistent() {
                 ..CellStyle::default()
             };
             let mut lines = Vec::new();
-            let paint =
-                TextPaint::resolve_into(&renderer, rect, &style, "42".into(), kind, &mut lines)
-                    .expect("short text fits the cell");
+            let paint = TextPaint::resolve_into(
+                &renderer,
+                rect,
+                &style,
+                "42".into(),
+                kind,
+                None,
+                &mut lines,
+            )
+            .expect("short text fits the cell");
             renderer.paint_text(&paint, &CanvasTheme::light(), &lines);
             let expected_x = match expected {
                 TextAlign::Start => 34.0,

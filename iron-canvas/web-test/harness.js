@@ -9,6 +9,7 @@ import {
     columnLabel,
     detailFor,
     installDenseRangeMethods,
+    knownSeparatorEdges,
     queryOptions,
     rectCenter,
     shouldRescheduleAfterDrain,
@@ -167,7 +168,7 @@ async function fetchDemoModel(id) {
             `Could not load ${demo.compiled} (${response.status}). Run \"make demos\" or \"make serve\" first.`,
         );
     }
-    return Model.from_bytes(new Uint8Array(await response.arrayBuffer()), "en");
+    return Model.fromBytes(new Uint8Array(await response.arrayBuffer()), "en");
 }
 
 async function loadWorkbook(id) {
@@ -225,6 +226,186 @@ function schedulePaint() {
         const outcomes = drainPaint();
         if (shouldRescheduleAfterDrain(outcomes.at(-1), RenderResult)) schedulePaint();
     });
+}
+
+/**
+ * Raw pixels of a harness layer. The renderer owns the context, so
+ * `getContext("2d")` here returns that same context and never resets the
+ * backing store.
+ */
+function layerPixels(element) {
+    const ctx = element.getContext("2d");
+    if (!ctx) throw new Error(`Layer #${element.id} has no 2D context`);
+    return ctx.getImageData(0, 0, element.width, element.height).data;
+}
+
+/**
+ * Compare two RGBA rasters.
+ *
+ * `null` when identical. Otherwise the differing byte and pixel counts plus up
+ * to `MISMATCH_POINTS` differing pixels with both RGBA values; `truncated`
+ * reports that more pixels differ than were collected.
+ */
+const MISMATCH_POINTS = 4096;
+
+function rasterDiff(fresh, retained, width) {
+    if (fresh.length !== retained.length) {
+        return { lengthMismatch: `${fresh.length} vs ${retained.length}` };
+    }
+    const points = [];
+    let differingBytes = 0;
+    let pixels = 0;
+    let truncated = false;
+    for (let pixel = 0; pixel * 4 < fresh.length; pixel += 1) {
+        const at = pixel * 4;
+        const same =
+            fresh[at] === retained[at] &&
+            fresh[at + 1] === retained[at + 1] &&
+            fresh[at + 2] === retained[at + 2] &&
+            fresh[at + 3] === retained[at + 3];
+        if (same) continue;
+        pixels += 1;
+        for (let channel = 0; channel < 4; channel += 1) {
+            if (fresh[at + channel] !== retained[at + channel]) differingBytes += 1;
+        }
+        if (points.length < MISMATCH_POINTS) {
+            points.push({
+                x: pixel % width,
+                y: Math.floor(pixel / width),
+                fresh: [fresh[at], fresh[at + 1], fresh[at + 2], fresh[at + 3]],
+                retained: [retained[at], retained[at + 1], retained[at + 2], retained[at + 3]],
+            });
+        } else {
+            truncated = true;
+        }
+    }
+    return pixels === 0 ? null : { pixels, differingBytes, points, truncated };
+}
+
+const rgbaText = (rgba) => `[${rgba.join(",")}]`;
+
+/** "first differing pixel (x,y) fresh=[…] retained=[…]; N bytes in M pixels …" */
+function describeDiff(diff) {
+    const rows = [...new Set(diff.points.map(({ y }) => y))].sort((a, b) => a - b);
+    const listed = diff.points
+        .slice(0, 4)
+        .map(({ x, y }) => `(${x},${y})`)
+        .join(" ");
+    const first = diff.points[0];
+    return (
+        `first differing pixel (${first.x},${first.y}) ` +
+        `fresh=${rgbaText(first.fresh)} retained=${rgbaText(first.retained)}; ` +
+        `${diff.differingBytes} bytes in ${diff.pixels} pixels on row(s) ` +
+        `${rows[0]}..${rows[rows.length - 1]} differ at ${listed}` +
+        (diff.truncated ? " …" : "")
+    );
+}
+
+/**
+ * Known pre-existing core defect, recorded in
+ * `docs/bugs/2026-09-26-retained-seam-alpha-accumulation.md`. At fractional
+ * DPR the snapped per-cell opaque fills leave the sub-pixel separator band
+ * uncovered, so a retained content repaint re-strokes the separator on top of
+ * the previous stroke and the alpha accumulates (205 -> 202 -> ...). At DPR 1
+ * the same gap shows up only at the seam at the top of the cell area, below
+ * the column-header strip, where it accumulates 203 -> 201. It reproduces with
+ * a workbook that has no links at all, so it is not this feature's defect.
+ *
+ * Accepted here so the check can still guard link rendering, but only for a
+ * mismatch that passes every test below. Link text and underline pixels paint
+ * strictly inside a cell, so a link regression always fails loudly.
+ */
+/**
+ * Device-pixel geometry of the painted pane, scaled by DPR: the visible cell
+ * rects as their column and row edge coordinates. The pane is a uniform grid,
+ * so one probe row gives every column edge and one probe column gives every row
+ * edge. Null when the geometry cannot be derived, which keeps the classifier
+ * conservative.
+ */
+function paintedEdgeGeometry() {
+    const view = model.getSelectedView();
+    const dpr = window.devicePixelRatio || 1;
+    const columns = [];
+    for (let column = view.left_column; column < view.left_column + 64; column += 1) {
+        const rect = canvas.cellRect(view.top_row, column);
+        if (!rect || rect.width <= 0) break;
+        columns.push({ left: rect.top_left.x * dpr, right: (rect.top_left.x + rect.width) * dpr });
+    }
+    const rowBands = [];
+    for (let row = view.top_row; row < view.top_row + 256; row += 1) {
+        const rect = canvas.cellRect(row, view.left_column);
+        if (!rect || rect.height <= 0) break;
+        rowBands.push({ top: rect.top_left.y * dpr, bottom: (rect.top_left.y + rect.height) * dpr });
+    }
+    return columns.length > 0 && rowBands.length > 0 ? { columns, rowBands } : null;
+}
+
+
+
+/**
+ * A history-free reference: a brand-new `IronCanvas` over new layer elements
+ * has no committed frame, so its first attempt takes the renderer's `Fresh`
+ * path and reuses no prior pixels or frame state. Same model, theme, metrics,
+ * and DPR as the retained canvas make the two comparable.
+ *
+ * The caller then applies the same host signal to this reference, so the two
+ * rasters share an operation class and differ only in history: the retained
+ * canvas carries every earlier blit and repaint, the reference carries none.
+ */
+function renderFreshReference(size, dpr) {
+    const grid = document.createElement("canvas");
+    const overlay = document.createElement("canvas");
+    const reference = IronCanvas.create(grid, overlay);
+    reference.setTheme(LIGHT_THEME);
+    reference.setModel(model);
+    reference.resize(size.w, size.h, dpr);
+    reference.requestRepaint();
+    drain(reference);
+    if (grid.width !== elements.grid.width || grid.height !== elements.grid.height) {
+        throw new Error(
+            `Fresh reference is ${grid.width}×${grid.height}, retained is ` +
+                `${elements.grid.width}×${elements.grid.height}`,
+        );
+    }
+    return { grid, overlay, canvas: reference };
+}
+
+/** Paint every layer with pending work on `target`, or nothing when idle. */
+function drain(target) {
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+        if (target.renderPending() === RenderResult.Idle) break;
+    }
+}
+
+/** Byte-compare the retained harness layers with a reference's layers. */
+function compareLayers(label, reference, notes) {
+    for (const layer of ["grid", "overlay"]) {
+        const diff = rasterDiff(
+            layerPixels(reference[layer]),
+            layerPixels(elements[layer]),
+            elements[layer].width,
+        );
+        if (diff === null) continue;
+        if (diff.lengthMismatch) {
+            throw new Error(`${label}: ${layer} byte length ${diff.lengthMismatch}`);
+        }
+        const edges = layer === "grid" ? knownSeparatorEdges(diff, paintedEdgeGeometry()) : null;
+        if (edges !== null) {
+            notes.push(
+                `KNOWN-DEFECT ${label}: ${diff.pixels} px on ${edges.length} separator line(s) ` +
+                    `${edges.slice(0, 4).join(",")}${edges.length > 4 ? ",…" : ""}, ` +
+                    `${describeDiff(diff)} — pre-existing core retained-separator alpha ` +
+                    `accumulation (cell-area seam at DPR 1, separator bands at ` +
+                    `fractional DPR) ` +
+                    `(docs/bugs/2026-09-26-retained-seam-alpha-accumulation.md)`,
+            );
+            continue;
+        }
+        throw new Error(
+            `${label}: ${layer} (${elements[layer].width}×${elements[layer].height}) ` +
+                `not byte-identical to Fresh (${describeDiff(diff)})`,
+        );
+    }
 }
 
 function renderTabs() {
@@ -501,6 +682,209 @@ async function runChecksOnce() {
             throw new Error("Unexpected diagnostics types");
         }
         return `recording ${recording ? "enabled" : "disabled"}`;
+    });
+
+    await check("links bridge reads upstream getLinks targets and dynamic flags", () => {
+        const sheet = model.getSelectedSheet();
+        // Scratch column T, rows 100-103: clear of every demo fixture, so the
+        // check runs against whichever workbook the harness loaded. `linkAt`
+        // reads committed frame state, so the paint below is what publishes
+        // the engine's `getLinks` answer through the bridge.
+        const column = 20;
+        const rows = [100, 101, 102, 103];
+        model.setUserInput(sheet, rows[0], column, '=HYPERLINK("https://formula.example","x")');
+        model.setCellLink(
+            sheet,
+            rows[1],
+            column,
+            { type: "External", target: "https://static.example" },
+            "static",
+        );
+        model.setCellLink(
+            sheet,
+            rows[2],
+            column,
+            { type: "External", target: "https://tooltip.example", tooltip: "hover me" },
+            "hover",
+        );
+        model.setUserInput(sheet, rows[3], column, '=HYPERLINK("#Sheet1!A5","go")');
+        // `setUserInput` only records the formula; the engine builds the
+        // dynamic `links` map during evaluation.
+        model.evaluate();
+
+        bridge.reset();
+        canvas.markContentDirty();
+        drainPaint();
+        if (bridge.counts.getLinks === 0) {
+            throw new Error("A committed paint never crossed getLinks");
+        }
+
+        const cases = [
+            { row: 100, kind: "external", target: "https://formula.example", dynamic: true },
+            { row: 101, kind: "external", target: "https://static.example", dynamic: false },
+            {
+                row: 102,
+                kind: "external",
+                target: "https://tooltip.example",
+                dynamic: false,
+                tooltip: "hover me",
+            },
+            { row: 103, kind: "internal", target: "Sheet1!A5", dynamic: true },
+        ];
+        try {
+            const colors = new Set();
+            for (const { row, kind, target, dynamic, tooltip } of cases) {
+                const link = canvas.linkAt(row, column);
+                if (!link) throw new Error(`No committed link at T${row}`);
+                if (link.kind !== kind || link.target !== target || link.dynamic !== dynamic) {
+                    throw new Error(
+                        `T${row}: expected ${kind} ${target} dynamic=${dynamic}, got ${JSON.stringify(link)}`,
+                    );
+                }
+                if (tooltip !== undefined && link.tooltip !== tooltip) {
+                    throw new Error(
+                        `T${row}: expected tooltip ${tooltip}, got ${JSON.stringify(link.tooltip)}`,
+                    );
+                }
+                if (typeof link.color !== "string" || !/^#[0-9A-Fa-f]{6}$/.test(link.color)) {
+                    throw new Error(
+                        `T${row}: hyperlink color resolved to ${JSON.stringify(link.color)}`,
+                    );
+                }
+                colors.add(link.color);
+            }
+            // Every link resolves the one theme slot, whichever workbook theme
+            // is loaded; the exact default value is pinned natively.
+            if (colors.size !== 1) {
+                throw new Error(`Link colors diverged: ${JSON.stringify([...colors])}`);
+            }
+        } finally {
+            // Clearing the content removes the worksheet link too, and drops a
+            // dynamic one with its formula. The dynamic map is rebuilt only by
+            // evaluation, so evaluate before repainting: the committed frame
+            // must be link-free for any later run or manual inspection.
+            for (const row of rows) model.setUserInput(sheet, row, column, "");
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+        return `${cases.length} links, getLinks crossed ${bridge.counts.getLinks}×`;
+    });
+
+    await check("retained link raster matches a forced-Fresh repaint", () => {
+        const sheet = model.getSelectedSheet();
+        const column = 20;
+        const firstRow = 100;
+        const rows = [firstRow, firstRow + 1, firstRow + 2];
+        const dpr = window.devicePixelRatio || 1;
+        const sheetCount = model.getWorksheetsProperties().length;
+
+
+        // Deterministic shared state: no stale overlays, and the exact palette
+        // the Fresh reference is given inside `renderFreshReference`.
+        clearOverlays();
+        canvas.setTheme(LIGHT_THEME);
+
+        // A formula link, a static link (the one edited and undone), and an
+        // internal formula link — all on one sheet, all inside the viewport
+        // the view is scrolled to below.
+        model.setUserInput(sheet, rows[0], column, '=HYPERLINK("https://formula.example","x")');
+        model.setCellLink(
+            sheet,
+            rows[1],
+            column,
+            { type: "External", target: "https://static.example" },
+            "static",
+        );
+        model.setUserInput(sheet, rows[2], column, '=HYPERLINK("#Sheet1!A5","go")');
+        model.evaluate();
+        model.setTopLeftVisibleCell(firstRow - 4, column - 5);
+        canvas.viewChanged();
+        canvas.markContentDirty();
+        drainPaint();
+
+        const failures = [];
+        const notes = [];
+        let cases = 0;
+        // Apply the host signal to the retained canvas and to a history-free
+        // reference, then byte-compare: the two frames share an operation class
+        // and differ only in retained history. The comparison stays exact; only
+        // a mismatch the narrow `knownSeparatorEdges` classifier recognises is
+        // downgraded to a printed note.
+        const verify = (label, signal) => {
+            cases += 1;
+            signal(canvas);
+            const outcomes = drainPaint();
+            try {
+                const fresh = renderFreshReference(canvas.canvasSize(), dpr);
+                signal(fresh.canvas);
+                drain(fresh.canvas);
+                compareLayers(label, fresh, notes);
+            } catch (error) {
+                failures.push(`${label}: ${error.message} [drain ${outcomes.join(",")}]`);
+            }
+        };
+
+        try {
+            verify("baseline", () => {});
+            verify("second content repaint", (c) => c.markContentDirty());
+
+            model.setCellLink(
+                sheet,
+                rows[1],
+                column,
+                { type: "External", target: "https://edited.example" },
+                "static",
+            );
+            verify("target edit", (c) => c.markContentDirty());
+
+            model.undo();
+            verify("undo", (c) => c.markContentDirty());
+
+            model.setTopLeftVisibleCell(firstRow - 12, column - 9);
+            verify("scroll", (c) => c.viewChanged());
+
+            const base = canvas.canvasSize();
+            verify("resize", (c) => {
+                c.resize(base.w - 32, base.h - 24, dpr);
+                c.requestRepaint();
+            });
+            resizeCanvas();
+            drainPaint();
+
+            if (sheetCount > 1) {
+                model.setSelectedSheet(sheet === 0 ? 1 : 0);
+                verify("sheet switch", (c) => c.viewChanged());
+                model.setSelectedSheet(sheet);
+                canvas.viewChanged();
+                drainPaint();
+            }
+
+            // Put the edited link's cell back under the active-cell overlay.
+            model.setTopLeftVisibleCell(rows[1] - 4, column - 5);
+            canvas.viewChanged();
+            drainPaint();
+            model.setSelectedCell(rows[1], column);
+            verify("active cell on link", (c) => {
+                c.viewChanged();
+                c.requestOverlayRepaint();
+            });
+        } finally {
+            for (const row of rows) model.setUserInput(sheet, row, column, "");
+            model.evaluate();
+            model.setSelectedSheet(sheet);
+            resizeCanvas();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+        const known = notes.length > 0 ? `; ${notes.join("; ")}` : "";
+        if (failures.length > 0) {
+            throw new Error(
+                `${failures.length} of ${cases} cases diverge from a forced-Fresh repaint ` +
+                    `at dpr ${dpr}: ${failures.join(" | ")}${known}`,
+            );
+        }
+        return `${cases} cases compared with a history-free reference at dpr ${dpr}${known}`;
     });
 
     const passed = results.filter((result) => result.pass).length;

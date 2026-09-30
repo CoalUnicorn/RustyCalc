@@ -46,6 +46,7 @@ pub enum SheetIcon {
     Freeze,
     NamedRange,
     Camera,
+    Link,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,6 +143,10 @@ impl Glyph for SheetIcon {
             // Camera: body rectangle with lens circle and shutter notch.
             SheetIcon::Camera => {
                 r#"<path d="M9 3 7.17 5H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2h-3.17L15 3H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>"#
+            }
+            // Link: two interlocking chain links.
+            SheetIcon::Link => {
+                r#"<path d="M3.9 12a3.1 3.1 0 0 1 3.1-3.1h3V7H7a5 5 0 0 0 0 10h3v-1.9H7A3.1 3.1 0 0 1 3.9 12zm3.1 1h10v-2H7v2zm7-6h-3v1.9h3a3.1 3.1 0 0 1 0 6.2h-3V17h3a5 5 0 0 0 0-10z"/>"#
             }
         }
     }
@@ -256,8 +261,13 @@ impl AlignIcon {
 
 #[cfg(test)]
 impl SheetIcon {
-    pub fn all() -> [SheetIcon; 3] {
-        [SheetIcon::Freeze, SheetIcon::NamedRange, SheetIcon::Camera]
+    pub fn all() -> [SheetIcon; 4] {
+        [
+            SheetIcon::Freeze,
+            SheetIcon::NamedRange,
+            SheetIcon::Camera,
+            SheetIcon::Link,
+        ]
     }
 }
 

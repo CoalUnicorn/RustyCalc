@@ -11,7 +11,8 @@
 //! - [`click`] — the four hit-test-resolved click helpers
 //!   (`handle_*_click`) called from `mousedown` once a `HitTest` is known.
 //! - [`cursor_hint`] — `compute_cursor_hint`, which must mirror
-//!   `mousedown`'s hit-test priority exactly (see its module doc).
+//!   `mousedown`'s hit-test priority exactly (see its module doc) and also
+//!   reports the hovered link cell.
 //! - [`formula_ref`] — the formula-reference drag sub-grammar
 //!   (handle_formula_ref_mousedown, dragged_ref_range, commit_formula_ref_drag).
 
@@ -30,6 +31,7 @@ mod mouseup;
 mod wheel;
 
 pub use contextmenu::handle_contextmenu;
+pub(crate) use cursor_hint::{clear_hover, revalidate_hover};
 pub use dblclick::handle_dblclick;
 pub use mousedown::handle_mousedown;
 pub use mousemove::handle_mousemove;
@@ -44,6 +46,6 @@ pub type CanvasHandle = StoredValue<Option<IronCanvas>, LocalStorage>;
 
 /// Read a value from the canvas handle. Returns `None` until both
 /// `<canvas>` elements mount and the lazy rAF construction runs.
-pub(super) fn with_canvas<R>(handle: CanvasHandle, f: impl FnOnce(&IronCanvas) -> R) -> Option<R> {
+pub(crate) fn with_canvas<R>(handle: CanvasHandle, f: impl FnOnce(&IronCanvas) -> R) -> Option<R> {
     handle.with_value(|slot| slot.as_ref().map(f))
 }

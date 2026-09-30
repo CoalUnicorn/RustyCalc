@@ -4,6 +4,7 @@ use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
+use crate::link::CellLink;
 use crate::model::autofit::{AutoFitError, fit_height};
 use crate::painter::BlitPainter;
 use crate::surface::Surface;
@@ -67,6 +68,16 @@ where
     /// the renderer assumed before the type carried an invariant.
     pub fn metrics(&self) -> CanvasMetrics {
         self.metrics.unwrap_or_else(CanvasMetrics::unresized)
+    }
+
+    /// The committed hyperlink at `(row, column)`, if the committed frame has
+    /// one. Reads committed state only — never the live model — so a pointer
+    /// query during an in-flight or held attempt matches the pixels on
+    /// screen. `None` before the first committed frame.
+    pub fn link_at(&self, row: i32, column: i32) -> Option<std::rc::Rc<CellLink>> {
+        self.last_frame
+            .as_ref()
+            .and_then(|frame| frame.links().get(row, column).cloned())
     }
 
     pub fn theme(&self) -> &CanvasTheme {

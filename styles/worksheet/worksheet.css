@@ -61,6 +61,10 @@
 
 /* Idle hover hints — preview the action a mousedown at this position
  * would trigger. Driven by CursorHint::class() in src/state.rs. */
+.ws .ws-canvas.cur-pointer {
+    cursor: pointer;
+}
+
 .ws .ws-canvas.cur-autofill {
     cursor: crosshair;
 }

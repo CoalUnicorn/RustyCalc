@@ -24,8 +24,9 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use iron_canvas_core::{
-    AutofillTarget, CanvasTheme, FormulaRef, FormulaRefKind, HitTest, RCRange, RectCorner, RefZone,
-    RenderOverlays, ResizeTarget, SheetArea, Side, ThemeVariables, geometry::CanvasSize,
+    AutofillTarget, CanvasTheme, CellLink, FormulaRef, FormulaRefKind, HitTest, RCRange,
+    RectCorner, RefZone, RenderOverlays, ResizeTarget, SheetArea, Side, ThemeVariables,
+    geometry::CanvasSize,
 };
 
 #[derive(Serialize)]
@@ -113,6 +114,43 @@ impl From<Side> for SideWire {
             Side::Right => SideWire::Right,
             Side::Bottom => SideWire::Bottom,
             Side::Left => SideWire::Left,
+        }
+    }
+}
+
+/// The committed hyperlink at one cell, for the `linkAt` query. `kind` names
+/// the target's kind; `target` carries the engine's target or location string
+/// without the engine's own `type` tag, so the host reads one shape.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LinkWire {
+    pub target: String,
+    pub tooltip: Option<String>,
+    pub dynamic: bool,
+    pub color: Option<String>,
+    pub kind: LinkKindWire,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum LinkKindWire {
+    External,
+    Internal,
+}
+
+impl From<&CellLink> for LinkWire {
+    fn from(link: &CellLink) -> Self {
+        let kind = if link.target().is_external() {
+            LinkKindWire::External
+        } else {
+            LinkKindWire::Internal
+        };
+        LinkWire {
+            target: link.target().as_str().to_string(),
+            tooltip: link.tooltip().map(str::to_string),
+            dynamic: link.is_dynamic(),
+            color: link.color().map(str::to_string),
+            kind,
         }
     }
 }
@@ -626,6 +664,7 @@ mod dev_wire {
         ColumnHeaderVisibility,
         InvalidFrozenRowCount,
         InvalidFrozenColumnCount,
+        SheetLinks,
     }
 
     impl From<FrameInputFailure> for FrameInputFailureWire {
@@ -640,6 +679,7 @@ mod dev_wire {
                 FrameInputFailure::ColumnHeaderVisibility => Self::ColumnHeaderVisibility,
                 FrameInputFailure::InvalidFrozenRowCount => Self::InvalidFrozenRowCount,
                 FrameInputFailure::InvalidFrozenColumnCount => Self::InvalidFrozenColumnCount,
+                FrameInputFailure::SheetLinks => Self::SheetLinks,
             }
         }
     }
@@ -1293,6 +1333,7 @@ mod tests {
                 FrameInputFailure::InvalidFrozenColumnCount,
                 "invalidFrozenColumnCount",
             ),
+            (FrameInputFailure::SheetLinks, "sheetLinks"),
         ];
         for (failure, expected) in cases {
             let json = serde_json::to_value(FrameOutcomeWire::from(
@@ -1534,5 +1575,48 @@ mod tests {
             serde_json::json!({ "rows": 19, "cells": 171 })
         );
         assert_eq!(json["geometry"]["segments"][0]["cells"], 171);
+    }
+
+    /// `linkAt` returns this shape. Both target kinds, `tooltip: null`, and
+    /// `dynamic: false` are part of the contract.
+    #[test]
+    fn link_wire_names_are_stable_for_both_target_kinds() {
+        let external = CellLink::new(
+            RCRange::from_cell(2, 3),
+            iron_canvas_core::LinkTarget::External("https://example.com".to_string()),
+            None,
+            false,
+            Some("#0563c1".to_string()),
+        );
+        let json = serde_json::to_value(LinkWire::from(&external)).expect("wire serializes");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "target": "https://example.com",
+                "tooltip": null,
+                "dynamic": false,
+                "color": "#0563c1",
+                "kind": "external",
+            })
+        );
+
+        let internal = CellLink::new(
+            RCRange::from_cell(4, 1),
+            iron_canvas_core::LinkTarget::Internal("Sheet1!A5".to_string()),
+            Some("jump".to_string()),
+            true,
+            None,
+        );
+        let json = serde_json::to_value(LinkWire::from(&internal)).expect("wire serializes");
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "target": "Sheet1!A5",
+                "tooltip": "jump",
+                "dynamic": true,
+                "color": null,
+                "kind": "internal",
+            })
+        );
     }
 }

@@ -45,6 +45,7 @@ pub(super) fn install_raf_loop(
     app: Option<AppState>,
     show_headers: Split<bool>,
     scroll_into_view: StoredValue<bool>,
+    committed_frame: Split<u64>,
 ) -> impl Fn() + Clone {
     let last_pane_w = Cell::new(0.0f64);
     let last_pane_h = Cell::new(0.0f64);
@@ -250,6 +251,14 @@ pub(super) fn install_raf_loop(
         });
         #[cfg(feature = "dev-tools")]
         web_sys::console::time_end_with_label("render");
+
+        // A commit just changed what is on screen: publish it so hover state
+        // derived from committed link data and pane geometry is revalidated.
+        // Only `Rendered` commits a frame — `RetryRequired` is a held attempt,
+        // and `Idle` painted nothing.
+        if matches!(paint_result, RenderResult::Rendered) {
+            committed_frame.update(|n| *n += 1);
+        }
 
         // Idle touches no diagnostic; Rendered counts + times; RetryRequired
         // publishes the held-pane trace without counting a frame;

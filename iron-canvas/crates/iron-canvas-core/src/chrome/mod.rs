@@ -31,6 +31,7 @@ use std::rc::Rc;
 use crate::CanvasSize;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::prim::Point;
+use crate::link::LinkIndex;
 use crate::theme::CanvasTheme;
 
 mod blit;
@@ -90,6 +91,14 @@ pub struct Chrome {
     /// paint-skip gating read it; `FrameKindTag::reuses_slots()` is the
     /// "slot vecs inherited from prev" predicate.
     pub kind: FrameKindTag,
+    /// Committed link state for this frame's sheet. Empty for a sheet with no
+    /// links. A candidate frame is seeded from the index captured for this
+    /// attempt (`Chrome::build` and `next_blit` read it from `FrameInputs`); a
+    /// held attempt hands the previously committed index back, and
+    /// [`Chrome::attach_links`] installs the committed value at the completion
+    /// boundary. `Rc` keeps every `Chrome` clone a refcount bump and every
+    /// query reads the same committed index the pixels were painted from.
+    links: Rc<LinkIndex>,
 }
 
 /// Outcome of [`Chrome::next_blit`]. The blit construction has exactly two
@@ -128,5 +137,28 @@ impl Chrome {
     /// Piecewise address layout for the visible grid.
     pub fn grid_layout(&self) -> GridLayout {
         GridLayout::from_frame(self)
+    }
+
+    /// The committed link index for this frame's sheet, empty when the sheet
+    /// has none.
+    pub fn links(&self) -> &LinkIndex {
+        &self.links
+    }
+
+    /// The committed link index's shared handle. `pub(crate)` for the
+    /// strategies, which must hand the committed index back to a held
+    /// candidate's frame without cloning the index itself.
+    pub(crate) fn links_rc(&self) -> &Rc<LinkIndex> {
+        &self.links
+    }
+
+    /// Install an attempt's link index. Two callers: the strategies call it
+    /// when a held candidate must hand back the previously committed index,
+    /// and `Orchestrator::finish_attempt` calls it on the committed branch so
+    /// the committed frame's index is exactly the captured one. Never called
+    /// from `Chrome::build`/`next`/`next_blit` — those read `FrameInputs`
+    /// directly, and none of them may read model metadata.
+    pub(crate) fn attach_links(&mut self, links: Rc<LinkIndex>) {
+        self.links = links;
     }
 }

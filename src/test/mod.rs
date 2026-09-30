@@ -14,6 +14,7 @@ mod formula_analysis;
 mod formula_input;
 mod formula_overlay;
 mod keyboard;
+mod link;
 mod model_frontend;
 mod model_frontend_types;
 mod model_style;
