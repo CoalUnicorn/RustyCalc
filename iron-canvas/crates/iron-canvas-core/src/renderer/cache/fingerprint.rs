@@ -637,7 +637,12 @@ mod tests {
             .collect();
 
         let rotated = state
-            .build_row_shift_candidate(previous_layout, candidate_layout, &sources, &LinkIndex::empty())
+            .build_row_shift_candidate(
+                previous_layout,
+                candidate_layout,
+                &sources,
+                &LinkIndex::empty(),
+            )
             .unwrap();
         let rebuilt = build(candidate_layout);
         assert_eq!(rotated, rebuilt);

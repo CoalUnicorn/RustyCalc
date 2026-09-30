@@ -65,10 +65,10 @@ impl<P: Painter> RendererCore<P> {
 
         let fetched: [Option<&FetchedCells>; 4] =
             std::array::from_fn(|index| segments[index].as_ref().map(|segment| &segment.fetched));
-        let candidate = self
-            .grid_cache
-            .fingerprint
-            .build_candidate(layout, &fetched, frame.links());
+        let candidate =
+            self.grid_cache
+                .fingerprint
+                .build_candidate(layout, &fetched, frame.links());
         let (plan, reason, changed_rows, changed_cells) = if frame.kind.reuses_slots() {
             let decision = repaint_plan::plan_grid_repaint(
                 self.grid_cache.fingerprint.painted().as_deref(),

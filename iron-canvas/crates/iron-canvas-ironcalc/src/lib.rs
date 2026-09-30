@@ -15,7 +15,9 @@ use iron_canvas_core::{
 };
 use ironcalc_base::UserModel;
 
-use crate::convert::{cell_decoration_from_extended, cell_type_to_kind, link_to_core, style_to_core};
+use crate::convert::{
+    cell_decoration_from_extended, cell_type_to_kind, link_to_core, style_to_core,
+};
 
 /// Color resolver over a live `UserModel`: `resolve_color` borrows the
 /// workbook theme, so resolving costs no theme clone per cell. Pass as

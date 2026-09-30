@@ -8,12 +8,12 @@
 
 use std::rc::Rc;
 
+use iron_canvas_core::forward_methods;
 use iron_canvas_core::geometry::CanvasSize;
 use iron_canvas_core::{
     CanvasModel, CanvasTheme, CanvasView, CellContentQuery, CellDecoration, CellKind, CellLink,
     CellStyle, Fetched, LinkTarget, Orchestrator, RCRange,
 };
-use iron_canvas_core::forward_methods;
 use iron_canvas_datagrid::{Column, DataGrid};
 use iron_canvas_export::SvgSurface;
 

@@ -188,9 +188,11 @@ pub(crate) fn link_events(
         new_value,
     })];
     if content_written {
-        events.push(SpreadsheetEvent::Content(ContentEvent::CalculationUpdated {
-            affected_sheets: vec![anchor.sheet],
-        }));
+        events.push(SpreadsheetEvent::Content(
+            ContentEvent::CalculationUpdated {
+                affected_sheets: vec![anchor.sheet],
+            },
+        ));
     }
     events.push(SpreadsheetEvent::Navigation(
         NavigationEvent::SelectionRangeChanged {
@@ -230,18 +232,26 @@ pub fn execute_link(
             link,
             label,
         } => {
-            try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), LinkError> {
-                content_written =
-                    write_cell_link(m, anchor.sheet, row, column, link, label.as_deref())
-                        .map_err(LinkError::Engine)?;
-                Ok(())
-            })?;
+            try_mutate(
+                model,
+                EvaluationMode::Immediate,
+                |m| -> Result<(), LinkError> {
+                    content_written =
+                        write_cell_link(m, anchor.sheet, row, column, link, label.as_deref())
+                            .map_err(LinkError::Engine)?;
+                    Ok(())
+                },
+            )?;
         }
         LinkPlan::Delete { row, column } => {
-            try_mutate(model, EvaluationMode::Immediate, |m| -> Result<(), LinkError> {
-                m.delete_cell_link(anchor.sheet, row, column)
-                    .map_err(LinkError::Engine)
-            })?;
+            try_mutate(
+                model,
+                EvaluationMode::Immediate,
+                |m| -> Result<(), LinkError> {
+                    m.delete_cell_link(anchor.sheet, row, column)
+                        .map_err(LinkError::Engine)
+                },
+            )?;
         }
     }
 
@@ -324,20 +334,25 @@ fn navigate_internal(
 ) -> Result<(), LinkError> {
     let anchor = model.with_value(CellAddress::from_view);
     let from_sheet = anchor.sheet;
-    let Some(sheet_area) = model.with_value(|m| resolve_internal_location(m, location, anchor)) else {
+    let Some(sheet_area) = model.with_value(|m| resolve_internal_location(m, location, anchor))
+    else {
         return Err(LinkError::Refused(format!(
             "\"{location}\" does not resolve to a cell reference"
         )));
     };
 
-    try_mutate(model, EvaluationMode::Deferred, |m| -> Result<(), LinkError> {
-        // The sheet first: `set_selected_area` resolves against the sheet that
-        // is selected when it runs.
-        m.set_selected_sheet(sheet_area.sheet)
-            .map_err(LinkError::Engine)?;
-        m.set_selected_area(sheet_area.area);
-        Ok(())
-    })?;
+    try_mutate(
+        model,
+        EvaluationMode::Deferred,
+        |m| -> Result<(), LinkError> {
+            // The sheet first: `set_selected_area` resolves against the sheet that
+            // is selected when it runs.
+            m.set_selected_sheet(sheet_area.sheet)
+                .map_err(LinkError::Engine)?;
+            m.set_selected_area(sheet_area.area);
+            Ok(())
+        },
+    )?;
 
     state.scroll_into_view.set_value(true);
     let mut events = Vec::new();

@@ -43,7 +43,9 @@ pub(super) fn compute_cursor_hint(icv: CanvasHandle, x: f64, y: f64) -> HoverHin
         HitTest::AutofillHandle { .. } => HoverHint::plain(CursorHint::Autofill),
         HitTest::FormulaRef { zone, .. } => HoverHint::plain(ref_zone_hint(zone)),
         HitTest::Cell { row, column } => {
-            let link = with_canvas(icv, |ic| ic.link_at(row, column)).flatten().is_some();
+            let link = with_canvas(icv, |ic| ic.link_at(row, column))
+                .flatten()
+                .is_some();
             HoverHint {
                 cursor: if link {
                     CursorHint::Pointer
@@ -53,10 +55,9 @@ pub(super) fn compute_cursor_hint(icv: CanvasHandle, x: f64, y: f64) -> HoverHin
                 link_cell: link.then_some((row, column)),
             }
         }
-        HitTest::ColumnHeader(_)
-        | HitTest::RowHeader(_)
-        | HitTest::Corner
-        | HitTest::Outside => HoverHint::plain(CursorHint::Cell),
+        HitTest::ColumnHeader(_) | HitTest::RowHeader(_) | HitTest::Corner | HitTest::Outside => {
+            HoverHint::plain(CursorHint::Cell)
+        }
     }
 }
 

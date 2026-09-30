@@ -68,7 +68,9 @@ pub fn handle_mousedown(
             let link_click = (ev.ctrl_key() || ev.meta_key())
                 && state.drag.get_untracked() == DragState::Idle
                 && state.editing_cell.get_untracked().is_none()
-                && with_canvas(icv, |ic| ic.link_at(row, column)).flatten().is_some();
+                && with_canvas(icv, |ic| ic.link_at(row, column))
+                    .flatten()
+                    .is_some();
             if link_click {
                 if let Err(e) = activate_link(model, &state, icv, row, column) {
                     state.status.set(Some(StatusMessage::Error(e.to_string())));
