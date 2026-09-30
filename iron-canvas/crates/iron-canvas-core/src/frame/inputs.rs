@@ -132,11 +132,11 @@ pub enum FrameInputFailure {
     RowHeaderVisibility = 5,
     ColumnHeaderVisibility = 6,
     /// The sheet's link-list read failed, or the list it returned is not a
-    /// valid [`LinkIndex`](crate::link::LinkIndex) (a non-single-cell range,
+    /// valid [`LinkIndex`](crate::LinkIndex) (a non-single-cell range,
     /// an out-of-bounds address, or a duplicate address).
     SheetLinks = 9,
     /// The sheet's merge-list read failed, or the list it returned is not a
-    /// valid [`MergeTable`](crate::merge::MergeTable) (an out-of-bounds
+    /// valid [`MergeTable`](crate::MergeTable) (an out-of-bounds
     /// address or an overlapping pair).
     MergedRanges = 10,
 }
@@ -167,7 +167,7 @@ impl FrameInputs {
     /// list read: it builds a validated [`LinkIndex`] from the model's whole
     /// link list once per attempt, so the renderer never crosses the bridge
     /// per cell. A `None` from the model, or a list
-    /// [`LinkIndex::from_cells`](crate::link::LinkIndex::from_cells)
+    /// [`LinkIndex::from_cells`](crate::LinkIndex::from_cells)
     /// rejects, is `FrameInputFailure::SheetLinks` and holds the attempt.
     ///
     /// `metrics`, `theme`, and `model_generation` come from the caller

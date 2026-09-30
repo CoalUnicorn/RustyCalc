@@ -192,7 +192,7 @@ pub trait CanvasModel: CellContentQuery {
     /// or it does not implement this optional capability at all (the default
     /// below). `None` is a failed query — a thrown bridge call, a payload the
     /// bridge could not decode, a malformed list, or a validation error in
-    /// [`LinkIndex::from_cells`](crate::link::LinkIndex::from_cells) — and
+    /// [`LinkIndex::from_cells`](crate::LinkIndex::from_cells) — and
     /// holds the whole paint attempt. An
     /// invalid list is not empty data: silently painting no link would leave a
     /// visible link unclickable.
@@ -210,7 +210,7 @@ pub trait CanvasModel: CellContentQuery {
     /// implement this optional capability at all (the default below). `None`
     /// is a failed query — a thrown bridge call, a payload the bridge could
     /// not decode, or a list
-    /// [`MergeTable::from_ranges`](crate::merge::MergeTable::from_ranges)
+    /// [`MergeTable::from_ranges`](crate::MergeTable::from_ranges)
     /// rejects (out-of-bounds address, overlapping ranges) — and holds the
     /// whole paint attempt. An invalid list is never converted to empty data.
     ///
