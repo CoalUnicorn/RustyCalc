@@ -151,9 +151,17 @@ pub(crate) struct FragmentWire {
     pub rect: iron_canvas_core::PixelRect,
 }
 
-impl From<(iron_canvas_core::chrome::GridSegment, iron_canvas_core::PixelRect)> for FragmentWire {
+impl
+    From<(
+        iron_canvas_core::chrome::GridSegment,
+        iron_canvas_core::PixelRect,
+    )> for FragmentWire
+{
     fn from(
-        (segment, rect): (iron_canvas_core::chrome::GridSegment, iron_canvas_core::PixelRect),
+        (segment, rect): (
+            iron_canvas_core::chrome::GridSegment,
+            iron_canvas_core::PixelRect,
+        ),
     ) -> Self {
         FragmentWire {
             range: RCRangeWire::from(segment.range()),
@@ -1684,9 +1692,9 @@ mod tests {
 #[cfg(test)]
 mod display_cell_wire_tests {
     use super::*;
+    use iron_canvas_core::CellCoord;
     use iron_canvas_core::geometry::pixel_rect::PixelRect;
     use iron_canvas_core::geometry::prim::Point;
-    use iron_canvas_core::CellCoord;
 
     /// The browser mirrors parse this exact shape, so pin the field names and
     /// the merged/covered relationship natively first.

@@ -463,11 +463,7 @@ enum MergeOp {
 /// error is the contract and must surface verbatim. The announcement only
 /// happens after the engine accepted the change, so a rejected merge never
 /// requests a repaint.
-fn execute_merge(
-    op: MergeOp,
-    model: ModelStore,
-    state: &WorkbookState,
-) -> Result<(), StructError> {
+fn execute_merge(op: MergeOp, model: ModelStore, state: &WorkbookState) -> Result<(), StructError> {
     let sheet = model.with_value(|m| m.get_selected_sheet());
     try_mutate(
         model,

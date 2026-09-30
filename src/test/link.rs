@@ -15,8 +15,8 @@ use ironcalc_base::types::Link;
 
 /// Empty workbook with `Sheet1`, plus `Sheet2` for the cross-sheet cases.
 fn make_model() -> UserModel<'static> {
-    let mut m = UserModel::new_empty("Sheet1", "en", "UTC", "en")
-        .expect("failed to create test model");
+    let mut m =
+        UserModel::new_empty("Sheet1", "en", "UTC", "en").expect("failed to create test model");
     m.new_sheet().expect("failed to add Sheet2");
     m
 }
@@ -36,7 +36,10 @@ fn allowlist_accepts_http_https_mailto() {
         allowed_external_url("https://a.test/x?y=1#z"),
         Some("https://a.test/x?y=1#z")
     );
-    assert_eq!(allowed_external_url("HTTPS://a.test"), Some("HTTPS://a.test"));
+    assert_eq!(
+        allowed_external_url("HTTPS://a.test"),
+        Some("HTTPS://a.test")
+    );
     assert_eq!(
         allowed_external_url("mailto:a@b.test"),
         Some("mailto:a@b.test")
@@ -60,7 +63,11 @@ fn allowlist_rejects_other_schemes_and_malformed_targets() {
         "1http://a.test",
         "://x",
     ] {
-        assert_eq!(allowed_external_url(target), None, "{target} must be refused");
+        assert_eq!(
+            allowed_external_url(target),
+            None,
+            "{target} must be refused"
+        );
     }
     // "https://" has an empty authority but a non-empty rest, so it passes the
     // scheme allowlist; only the scheme is vetted here. The browser then
@@ -98,8 +105,14 @@ fn internal_location_bare_reference_uses_the_anchor_sheet() {
 #[test]
 fn internal_location_without_a_reference_is_none() {
     let m = make_model();
-    assert_eq!(resolve_internal_location(&m, "NoSuchSheet!A1", anchor()), None);
-    assert_eq!(resolve_internal_location(&m, "not a reference", anchor()), None);
+    assert_eq!(
+        resolve_internal_location(&m, "NoSuchSheet!A1", anchor()),
+        None
+    );
+    assert_eq!(
+        resolve_internal_location(&m, "not a reference", anchor()),
+        None
+    );
     assert_eq!(resolve_internal_location(&m, "", anchor()), None);
 }
 

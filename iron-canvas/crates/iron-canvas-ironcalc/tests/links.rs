@@ -125,7 +125,10 @@ fn link_to_core_preserves_kind_tooltip_and_address() {
     );
     assert_eq!(core.range().r1, 4);
     assert_eq!(core.range().c1, 2);
-    assert_eq!(core.target(), &LinkTarget::Internal("Sheet2!B7".to_string()));
+    assert_eq!(
+        core.target(),
+        &LinkTarget::Internal("Sheet2!B7".to_string())
+    );
     assert_eq!(core.tooltip(), Some("jump"));
     assert!(core.is_dynamic());
 }

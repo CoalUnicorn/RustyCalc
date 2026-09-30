@@ -41,10 +41,7 @@ pub fn MergeCellsControls() -> impl IntoView {
                     merges.iter().any(|mc| {
                         let r2 = mc.row + mc.height - 1;
                         let c2 = mc.column + mc.width - 1;
-                        mc.row <= area.r2
-                            && area.r1 <= r2
-                            && mc.column <= area.c2
-                            && area.c1 <= c2
+                        mc.row <= area.r2 && area.r1 <= r2 && mc.column <= area.c2 && area.c1 <= c2
                     })
                 })
                 .unwrap_or(false);
@@ -56,11 +53,7 @@ pub fn MergeCellsControls() -> impl IntoView {
     });
 
     let run = move |action: StructAction| {
-        execute(
-            &SpreadsheetAction::Structure(action),
-            model,
-            &state,
-        );
+        execute(&SpreadsheetAction::Structure(action), model, &state);
         refocus_workbook();
     };
 

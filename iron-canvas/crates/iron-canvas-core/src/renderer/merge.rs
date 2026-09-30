@@ -136,13 +136,7 @@ impl ExtentCache {
 
     /// Sum of the full logical row heights `r1..=r2`, inclusive. An empty
     /// range sums to zero.
-    fn row_span(
-        &mut self,
-        model: &dyn CanvasModel,
-        sheet: u32,
-        r1: i32,
-        r2: i32,
-    ) -> Option<i32> {
+    fn row_span(&mut self, model: &dyn CanvasModel, sheet: u32, r1: i32, r2: i32) -> Option<i32> {
         let mut sum = 0i32;
         for row in r1..=r2 {
             sum = sum.checked_add(self.row_extent(model, sheet, row)?)?;
@@ -151,13 +145,7 @@ impl ExtentCache {
     }
 
     /// Column mirror of [`Self::row_span`].
-    fn col_span(
-        &mut self,
-        model: &dyn CanvasModel,
-        sheet: u32,
-        c1: i32,
-        c2: i32,
-    ) -> Option<i32> {
+    fn col_span(&mut self, model: &dyn CanvasModel, sheet: u32, c1: i32, c2: i32) -> Option<i32> {
         let mut sum = 0i32;
         for col in c1..=c2 {
             sum = sum.checked_add(self.col_extent(model, sheet, col)?)?;
@@ -448,7 +436,6 @@ fn side_runs(
     runs
 }
 
-
 impl<P: Painter> RendererCore<P> {
     /// Prepare every merge for paint against `frame`, reading the model once.
     /// Returns `None` on any failed read, so the whole attempt holds.
@@ -475,7 +462,12 @@ impl<P: Painter> RendererCore<P> {
                 continue;
             }
             prepared.push(self.prepare_one_merge(
-                model, frame, layout, segments, &mut extents, merge,
+                model,
+                frame,
+                layout,
+                segments,
+                &mut extents,
+                merge,
             )?);
         }
         Some(prepared)
@@ -490,8 +482,7 @@ impl<P: Painter> RendererCore<P> {
         extents: &mut ExtentCache,
         merge: &MergedRange,
     ) -> Option<PreparedMerge> {
-        let (fragments, logical_rect) =
-            merge_geometry(model, frame, layout, extents, merge.range)?;
+        let (fragments, logical_rect) = merge_geometry(model, frame, layout, extents, merge.range)?;
 
         // Anchor content. A transient failure holds the attempt: painting a
         // merge with fabricated content would cover the covered cells with
@@ -575,16 +566,48 @@ impl<P: Painter> RendererCore<P> {
         for fragment in fragments {
             let covered = fragment.covered;
             if fragment.sides[1] {
-                model_runs(model, frame, &self.color_intern, (covered.r1, covered.c1, covered.c2), true, Side::Top, &mut sides.top)?;
+                model_runs(
+                    model,
+                    frame,
+                    &self.color_intern,
+                    (covered.r1, covered.c1, covered.c2),
+                    true,
+                    Side::Top,
+                    &mut sides.top,
+                )?;
             }
             if fragment.sides[3] {
-                model_runs(model, frame, &self.color_intern, (covered.r2, covered.c1, covered.c2), true, Side::Bottom, &mut sides.bottom)?;
+                model_runs(
+                    model,
+                    frame,
+                    &self.color_intern,
+                    (covered.r2, covered.c1, covered.c2),
+                    true,
+                    Side::Bottom,
+                    &mut sides.bottom,
+                )?;
             }
             if fragment.sides[0] {
-                model_runs(model, frame, &self.color_intern, (covered.c1, covered.r1, covered.r2), false, Side::Left, &mut sides.left)?;
+                model_runs(
+                    model,
+                    frame,
+                    &self.color_intern,
+                    (covered.c1, covered.r1, covered.r2),
+                    false,
+                    Side::Left,
+                    &mut sides.left,
+                )?;
             }
             if fragment.sides[2] {
-                model_runs(model, frame, &self.color_intern, (covered.c2, covered.r1, covered.r2), false, Side::Right, &mut sides.right)?;
+                model_runs(
+                    model,
+                    frame,
+                    &self.color_intern,
+                    (covered.c2, covered.r1, covered.r2),
+                    false,
+                    Side::Right,
+                    &mut sides.right,
+                )?;
             }
         }
         Some(sides)
@@ -744,8 +767,7 @@ impl<P: Painter> RendererCore<P> {
         for run in runs {
             let subrect = if horizontal {
                 let start = frame.pane_set.col_to_x(run.start);
-                let end = frame.pane_set.col_to_x(run.end)
-                    + frame.pane_set.col_extent_at(run.end);
+                let end = frame.pane_set.col_to_x(run.end) + frame.pane_set.col_extent_at(run.end);
                 let left = start.max(rect.left());
                 let right = end.min(rect.right());
                 if left >= right {
@@ -761,8 +783,7 @@ impl<P: Painter> RendererCore<P> {
                 }
             } else {
                 let start = frame.pane_set.row_to_y(run.start);
-                let end =
-                    frame.pane_set.row_to_y(run.end) + frame.pane_set.row_extent_at(run.end);
+                let end = frame.pane_set.row_to_y(run.end) + frame.pane_set.row_extent_at(run.end);
                 let top = start.max(rect.top());
                 let bottom = end.min(rect.bottom());
                 if top >= bottom {

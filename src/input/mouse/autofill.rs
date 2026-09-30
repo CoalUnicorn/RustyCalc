@@ -27,7 +27,12 @@ pub fn resolved_fill_target(model: ModelStore, to_row: i32, to_col: i32) -> Auto
     model.with_value(|m| {
         let view = m.get_selected_view();
         let merges = m.get_merged_cells(view.sheet).unwrap_or_default();
-        snap_autofill_target(CellArea::from(view.range).normalized(), to_row, to_col, &merges)
+        snap_autofill_target(
+            CellArea::from(view.range).normalized(),
+            to_row,
+            to_col,
+            &merges,
+        )
     })
 }
 
@@ -47,25 +52,33 @@ pub fn snap_autofill_target(
     let fill_rows = to_row < source.r1 || to_row > source.r2;
     if fill_rows {
         let down = to_row > source.r2;
-        let row = snap_span(to_row, down, merges.iter().filter_map(|mc| {
-            // Only merges inside the fill band can be cut by the fill boundary.
-            if mc.column + mc.width - 1 < source.c1 || mc.column > source.c2 {
-                return None;
-            }
-            Some((mc.row, mc.row + mc.height - 1))
-        }));
+        let row = snap_span(
+            to_row,
+            down,
+            merges.iter().filter_map(|mc| {
+                // Only merges inside the fill band can be cut by the fill boundary.
+                if mc.column + mc.width - 1 < source.c1 || mc.column > source.c2 {
+                    return None;
+                }
+                Some((mc.row, mc.row + mc.height - 1))
+            }),
+        );
         AutofillTarget {
             row,
             col: source.c1,
         }
     } else {
         let right = to_col > source.c2;
-        let col = snap_span(to_col, right, merges.iter().filter_map(|mc| {
-            if mc.row + mc.height - 1 < source.r1 || mc.row > source.r2 {
-                return None;
-            }
-            Some((mc.column, mc.column + mc.width - 1))
-        }));
+        let col = snap_span(
+            to_col,
+            right,
+            merges.iter().filter_map(|mc| {
+                if mc.row + mc.height - 1 < source.r1 || mc.row > source.r2 {
+                    return None;
+                }
+                Some((mc.column, mc.column + mc.width - 1))
+            }),
+        );
         AutofillTarget {
             row: source.r1,
             col,

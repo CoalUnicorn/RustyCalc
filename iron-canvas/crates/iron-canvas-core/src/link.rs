@@ -67,7 +67,13 @@ impl CellLink {
         dynamic: bool,
         color: Option<String>,
     ) -> Self {
-        let digest = link_digest(range, &target, tooltip.as_deref(), dynamic, color.as_deref());
+        let digest = link_digest(
+            range,
+            &target,
+            tooltip.as_deref(),
+            dynamic,
+            color.as_deref(),
+        );
         Self {
             range,
             target,
@@ -287,10 +293,7 @@ mod tests {
         let a = LinkIndex::from_cells(vec![link(4, 4, "https://a.example")]).unwrap();
         let b = LinkIndex::from_cells(vec![link(4, 4, "https://b.example")]).unwrap();
         assert_ne!(a.digest(), b.digest());
-        assert_ne!(
-            a.get(4, 4).unwrap().digest(),
-            b.get(4, 4).unwrap().digest()
-        );
+        assert_ne!(a.get(4, 4).unwrap().digest(), b.get(4, 4).unwrap().digest());
     }
 
     #[test]

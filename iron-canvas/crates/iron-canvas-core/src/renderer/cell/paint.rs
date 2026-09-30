@@ -184,12 +184,7 @@ impl<P: Painter> RendererCore<P> {
     /// second, differently aligned label and interior grid edges over the merged
     /// pixels the grid painted, and would leave the rest of the merge under the
     /// selection tint.
-    pub fn repaint_active_cell(
-        &self,
-        model: &dyn CanvasModel,
-        cell: CellCoord,
-        frame: &Chrome,
-    ) {
+    pub fn repaint_active_cell(&self, model: &dyn CanvasModel, cell: CellCoord, frame: &Chrome) {
         let CellCoord { row, col } = cell;
         if let Some(merge) = frame.merges().merge_at(row, col) {
             // A failed read leaves the grid's own pixels showing rather than

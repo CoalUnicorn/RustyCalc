@@ -92,7 +92,14 @@ fn view_and_overlay_stable_selects_overlay_only_with_no_grid_work() {
         w.mark_view();
         w.mark_overlay();
     });
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::OverlayOnly);
     assert!(
@@ -107,7 +114,14 @@ fn view_and_overlay_stable_selects_overlay_only_with_no_grid_work() {
 #[test]
 fn overlay_only_stable_selects_overlay_only() {
     let work = work_with(|w| w.mark_overlay());
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::OverlayOnly);
     assert!(matches!(plan.grid, GridWork::None));
@@ -120,7 +134,14 @@ fn overlay_only_stable_selects_overlay_only() {
 #[test]
 fn view_only_no_shift_still_selects_overlay_only() {
     let work = work_with(|w| w.mark_view());
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(
         plan.grid.strategy(),
@@ -179,7 +200,14 @@ fn view_and_overlay_rebuild_selects_full_rebuild() {
 #[test]
 fn row_content_stable_matching_sheet_selects_damaged_rows() {
     let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 4)));
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
     let GridWork::Rows { sheet, spans } = plan.grid else {
@@ -192,7 +220,14 @@ fn row_content_stable_matching_sheet_selects_damaged_rows() {
 #[test]
 fn row_content_stable_mismatched_sheet_falls_back_to_changed_cells_all() {
     let work = work_with(|w| w.mark_rows(OTHER_SHEET, RowSpan::new(2, 4)));
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(
         plan.grid.strategy(),
@@ -225,7 +260,14 @@ fn row_content_rebuild_selects_full_rebuild() {
 #[test]
 fn all_content_stable_selects_changed_cells() {
     let work = work_with(PendingWork::mark_all_content);
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
     assert!(matches!(plan.grid, GridWork::AllContent));
@@ -258,7 +300,14 @@ fn content_rows_plus_view_stable_selects_damaged_rows() {
         w.mark_overlay();
         w.mark_rows(SHEET, RowSpan::new(1, 3));
     });
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
     let GridWork::Rows { sheet, spans } = plan.grid else {
@@ -276,7 +325,14 @@ fn all_content_plus_view_stable_selects_changed_cells() {
         w.mark_overlay();
         w.mark_all_content();
     });
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
     assert!(matches!(plan.grid, GridWork::AllContent));
@@ -290,7 +346,14 @@ fn content_rows_wrong_sheet_plus_view_stable_selects_changed_cells_all() {
         w.mark_overlay();
         w.mark_rows(OTHER_SHEET, RowSpan::new(1, 3));
     });
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
     assert!(matches!(plan.grid, GridWork::AllContent));
@@ -330,7 +393,14 @@ fn geometry_plus_content_view_stable_selects_full_rebuild() {
         w.mark_overlay();
         w.mark_rows(SHEET, RowSpan::new(1, 1));
     });
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
     assert!(matches!(plan.grid, GridWork::Fresh));
@@ -341,7 +411,14 @@ fn geometry_plus_content_view_stable_selects_full_rebuild() {
 #[test]
 fn geometry_alone_stable_selects_full_rebuild() {
     let work = work_with(|w| w.mark_geometry());
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
     assert!(matches!(plan.grid, GridWork::Fresh));
@@ -377,7 +454,14 @@ fn geometry_with_everything_else_still_selects_full_rebuild() {
 #[test]
 fn damaged_rows_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
     let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 2)));
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, false, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        false,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
     assert_eq!(
@@ -390,7 +474,14 @@ fn damaged_rows_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
 #[test]
 fn damaged_rows_paints_overlay_when_selection_is_visible() {
     let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 2)));
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.overlay, OverlayWork::Paint);
 }
@@ -398,7 +489,14 @@ fn damaged_rows_paints_overlay_when_selection_is_visible() {
 #[test]
 fn changed_cells_preserves_overlay_when_selection_hidden_and_no_overlay_mark() {
     let work = work_with(PendingWork::mark_all_content);
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, false, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        false,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
     assert_eq!(plan.overlay, OverlayWork::Preserve);
@@ -411,7 +509,14 @@ fn changed_cells_paints_overlay_when_overlay_marked_even_with_selection_hidden()
         w.mark_view();
         w.mark_overlay();
     });
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, false, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        false,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
     assert_eq!(
@@ -424,7 +529,14 @@ fn changed_cells_paints_overlay_when_overlay_marked_even_with_selection_hidden()
 #[test]
 fn full_rebuild_always_paints_overlay_even_with_selection_hidden() {
     let work = work_with(|w| w.mark_geometry());
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, false, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        false,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::FullRebuild);
     assert_eq!(plan.overlay, OverlayWork::Paint);
@@ -435,7 +547,14 @@ fn full_rebuild_always_paints_overlay_even_with_selection_hidden() {
 #[test]
 fn plan_owns_the_taken_work() {
     let work = work_with(|w| w.mark_overlay());
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert!(plan.consumes.has_overlay());
 }
@@ -452,7 +571,14 @@ fn link_change_escalates_stable_overlay_attempt_to_all_content() {
         w.mark_view();
         w.mark_overlay();
     });
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, true, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        true,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::ChangedCells);
     assert!(matches!(plan.grid, GridWork::AllContent));
@@ -487,7 +613,14 @@ fn link_change_does_not_override_geometry_rebuild() {
 #[test]
 fn unchanged_links_keep_the_overlay_only_path() {
     let work = work_with(|w| w.mark_overlay());
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert!(matches!(plan.grid, GridWork::None));
 }
@@ -537,7 +670,14 @@ fn changed_merge_bars_blit_on_a_safe_scroll() {
 #[test]
 fn no_merge_impact_keeps_the_existing_strategy() {
     let work = work_with(|w| w.mark_rows(SHEET, RowSpan::new(2, 4)));
-    let plan = plan_frame(work, FrameDelta::Stable, SHEET, true, false, MergeImpact::None);
+    let plan = plan_frame(
+        work,
+        FrameDelta::Stable,
+        SHEET,
+        true,
+        false,
+        MergeImpact::None,
+    );
 
     assert_eq!(plan.grid.strategy(), RenderStrategy::DamagedRows);
 }

@@ -134,7 +134,12 @@ impl<'a> CanvasModel for IronCalcModel<'a> {
     /// cannot come from a healthy engine.
     fn get_merged_ranges(&self, sheet: u32) -> Option<Vec<RCRange>> {
         match UserModel::get_merged_cells(&self.0, sheet) {
-            Ok(merges) => Some(merges.into_iter().filter_map(merged_range_to_core).collect()),
+            Ok(merges) => Some(
+                merges
+                    .into_iter()
+                    .filter_map(merged_range_to_core)
+                    .collect(),
+            ),
             Err(_) => None,
         }
     }

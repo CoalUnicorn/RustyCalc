@@ -255,7 +255,9 @@ fn a_covered_cell_reports_the_anchors_link() {
         .expect("the covered cell is on the grid");
 
     assert_eq!(cell.cell, CellCoord { row: 3, col: 3 });
-    let link = cell.link.expect("the anchor's link must travel with the merge");
+    let link = cell
+        .link
+        .expect("the anchor's link must travel with the merge");
     assert_eq!(link.target().as_str(), "https://anchor.example");
     assert_eq!(cell.anchor, RCRange::from_cell(2, 2));
 }
@@ -306,7 +308,8 @@ fn a_vertical_offscreen_anchor_uses_the_full_logical_height() {
     let row = orch.cell_rect(7, 1).expect("row 7 must be visible");
     let ops = orch.grid_surface().recorder().ops();
     assert!(
-        ops.iter().any(|op| matches!(op, DrawOp::RectFill { rect, .. }
+        ops.iter()
+            .any(|op| matches!(op, DrawOp::RectFill { rect, .. }
             if rect.height > row.height && rect.width == row.width)),
         "the merge fill must span every visible row of the merge"
     );
@@ -335,7 +338,8 @@ fn a_horizontal_offscreen_anchor_uses_the_full_logical_width() {
     let cell = orch.cell_rect(1, 7).expect("column 7 must be visible");
     let ops = orch.grid_surface().recorder().ops();
     assert!(
-        ops.iter().any(|op| matches!(op, DrawOp::RectFill { rect, .. }
+        ops.iter()
+            .any(|op| matches!(op, DrawOp::RectFill { rect, .. }
             if rect.width > cell.width && rect.height == cell.height)),
         "the merge fill must span every visible column of the merge"
     );
@@ -503,7 +507,9 @@ fn wrapped_merge_text_is_clipped_to_the_fragment() {
     let mut orch = build(Rc::clone(&model));
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
-    let cell = orch.cell_rect(2, 1).expect("the anchor cell must be visible");
+    let cell = orch
+        .cell_rect(2, 1)
+        .expect("the anchor cell must be visible");
     let ops = orch.grid_surface().recorder().ops();
     let clip = ops
         .iter()
@@ -562,7 +568,9 @@ fn a_merge_crossing_both_frozen_boundaries_paints_per_segment() {
         .expect("the merge text must paint");
     let separator_group = ops
         .iter()
-        .position(|op| matches!(op, DrawOp::BeginGroup { class } if *class == GroupClass::FrozenSep))
+        .position(
+            |op| matches!(op, DrawOp::BeginGroup { class } if *class == GroupClass::FrozenSep),
+        )
         .expect("the frozen separators must paint");
     assert!(
         separator_group > last_merge_fill,
@@ -576,7 +584,6 @@ fn a_merge_crossing_both_frozen_boundaries_paints_per_segment() {
 /// the previous merge hit geometry stays queryable.
 #[test]
 fn a_failed_merge_preparation_keeps_pixels_and_hit_geometry() {
-
     // The anchor is above the viewport, so its content comes from the scalar
     // accessors — the read that can fail for a merge with no segment to read it
     // from.
@@ -959,12 +966,17 @@ fn the_active_cell_overlay_restores_the_whole_merged_cell() {
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
 
     let fragments = orch.visible_fragments(range);
-    assert_eq!(fragments.len(), 1, "the merge must be visible: {fragments:?}");
+    assert_eq!(
+        fragments.len(),
+        1,
+        "the merge must be visible: {fragments:?}"
+    );
     let fragment = fragments[0].1;
 
     let ops = orch.overlay_surface().recorder().ops();
     assert!(
-        ops.iter().any(|op| matches!(op, DrawOp::RectFill { rect, .. } if *rect == fragment)),
+        ops.iter()
+            .any(|op| matches!(op, DrawOp::RectFill { rect, .. } if *rect == fragment)),
         "the overlay's active-cell fill must cover the merged fragment {fragment:?}"
     );
     let paints = text_paints(&ops, "merged");
@@ -1002,7 +1014,8 @@ fn the_active_cell_overlay_restores_an_offscreen_anchor_merge() {
     assert!(!fragments.is_empty(), "part of the merge must be visible");
     let ops = orch.overlay_surface().recorder().ops();
     assert!(
-        ops.iter().any(|op| matches!(op, DrawOp::RectFill { rect, .. } if *rect == fragments[0].1)),
+        ops.iter()
+            .any(|op| matches!(op, DrawOp::RectFill { rect, .. } if *rect == fragments[0].1)),
         "the overlay must restore the visible fragment {fragments:?}"
     );
     let paints = text_paints(&ops, "offscreen");

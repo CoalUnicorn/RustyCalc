@@ -76,9 +76,7 @@ pub fn handle_mousedown(
                 && state.drag.get_untracked() == DragState::Idle
                 && state.editing_cell.get_untracked().is_none()
                 && link_anchor.is_some();
-            if link_click
-                && let Some((anchor_row, anchor_column)) = link_anchor
-            {
+            if link_click && let Some((anchor_row, anchor_column)) = link_anchor {
                 if let Err(e) = activate_link(model, &state, icv, anchor_row, anchor_column) {
                     state.status.set(Some(StatusMessage::Error(e.to_string())));
                 }

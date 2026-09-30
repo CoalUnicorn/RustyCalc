@@ -77,7 +77,10 @@ fn a_held_attempt_leaves_committed_link_state_in_place() {
     model.set_capture_fail(None);
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert_eq!(
-        orch.link_at(2, 3).expect("the committed frame carries the link").target().as_str(),
+        orch.link_at(2, 3)
+            .expect("the committed frame carries the link")
+            .target()
+            .as_str(),
         "https://second.example"
     );
 }
@@ -111,7 +114,10 @@ fn a_preparation_failure_after_a_link_change_keeps_the_committed_index() {
     orch.view_changed();
     assert_eq!(orch.render_pending(), PaintResult::Rendered);
     assert_eq!(
-        orch.link_at(2, 3).expect("the committed frame carries the link").target().as_str(),
+        orch.link_at(2, 3)
+            .expect("the committed frame carries the link")
+            .target()
+            .as_str(),
         "https://second.example"
     );
 }
@@ -140,7 +146,10 @@ fn a_metadata_only_link_change_escalates_to_content_work() {
         "the escalation must repaint grid pixels, not only publish new query data"
     );
     assert_eq!(
-        orch.link_at(2, 3).expect("the committed frame carries the link").target().as_str(),
+        orch.link_at(2, 3)
+            .expect("the committed frame carries the link")
+            .target()
+            .as_str(),
         "https://second.example"
     );
 }

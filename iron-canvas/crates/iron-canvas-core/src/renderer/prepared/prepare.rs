@@ -65,10 +65,10 @@ impl<P: Painter> RendererCore<P> {
 
         let fetched: [Option<&FetchedCells>; 4] =
             std::array::from_fn(|index| segments[index].as_ref().map(|segment| &segment.fetched));
-        let candidate = self
-            .grid_cache
-            .fingerprint
-            .build_candidate(layout, &fetched, frame.links());
+        let candidate =
+            self.grid_cache
+                .fingerprint
+                .build_candidate(layout, &fetched, frame.links());
         // Merge preparation reads the model once, before any painter op. A
         // failed read holds the whole attempt, recycling the prepared scratch.
         let Some(merges) = self.prepare_merges(model, frame, layout, &segments) else {
@@ -79,61 +79,60 @@ impl<P: Painter> RendererCore<P> {
             self.trace_frame_held();
             return None;
         };
-        let (plan, reason, changed_rows, changed_cells) = if frame.kind.reuses_slots()
-            && !frame.merges().is_empty()
-        {
-            // Merge guard. A merge-affected attempt is normally `Fresh`, so
-            // this comparison is unreachable today. When a future optimized
-            // path does reach it, the installed fingerprint truth must not
-            // claim the merges' cells are current: repaint the whole grid.
-            (
-                PreparedRepaintPlan::Full,
-                Some(RepaintReason::Merge),
-                Vec::new(),
-                Vec::new(),
-            )
-        } else if frame.kind.reuses_slots() {
-            let decision = repaint_plan::plan_grid_repaint(
-                self.grid_cache.fingerprint.painted().as_deref(),
-                &candidate,
-            );
-            let mut reason = decision.reason;
-            let plan = match decision.plan {
-                RepaintPlan::Cell(_) => {
-                    match repaint::build_envelope(frame, &decision.changed_cells) {
-                        repaint::EnvelopeBuild::Ready(envelope) => {
-                            PreparedRepaintPlan::Cell { envelope }
-                        }
-                        repaint::EnvelopeBuild::UnalignedDpr => {
-                            reason = RepaintReason::ClipAlignment;
-                            PreparedRepaintPlan::Full
-                        }
-                    }
-                }
-                RepaintPlan::Range(_) => {
-                    match repaint::build_envelope(frame, &decision.changed_cells) {
-                        repaint::EnvelopeBuild::Ready(envelope) => {
-                            PreparedRepaintPlan::Range { envelope }
-                        }
-                        repaint::EnvelopeBuild::UnalignedDpr => {
-                            reason = RepaintReason::ClipAlignment;
-                            PreparedRepaintPlan::Full
+        let (plan, reason, changed_rows, changed_cells) =
+            if frame.kind.reuses_slots() && !frame.merges().is_empty() {
+                // Merge guard. A merge-affected attempt is normally `Fresh`, so
+                // this comparison is unreachable today. When a future optimized
+                // path does reach it, the installed fingerprint truth must not
+                // claim the merges' cells are current: repaint the whole grid.
+                (
+                    PreparedRepaintPlan::Full,
+                    Some(RepaintReason::Merge),
+                    Vec::new(),
+                    Vec::new(),
+                )
+            } else if frame.kind.reuses_slots() {
+                let decision = repaint_plan::plan_grid_repaint(
+                    self.grid_cache.fingerprint.painted().as_deref(),
+                    &candidate,
+                );
+                let mut reason = decision.reason;
+                let plan = match decision.plan {
+                    RepaintPlan::Cell(_) => {
+                        match repaint::build_envelope(frame, &decision.changed_cells) {
+                            repaint::EnvelopeBuild::Ready(envelope) => {
+                                PreparedRepaintPlan::Cell { envelope }
+                            }
+                            repaint::EnvelopeBuild::UnalignedDpr => {
+                                reason = RepaintReason::ClipAlignment;
+                                PreparedRepaintPlan::Full
+                            }
                         }
                     }
-                }
-                RepaintPlan::Skip => PreparedRepaintPlan::Skip,
-                RepaintPlan::Rows(spans) => PreparedRepaintPlan::Rows(spans),
-                RepaintPlan::Full => PreparedRepaintPlan::Full,
+                    RepaintPlan::Range(_) => {
+                        match repaint::build_envelope(frame, &decision.changed_cells) {
+                            repaint::EnvelopeBuild::Ready(envelope) => {
+                                PreparedRepaintPlan::Range { envelope }
+                            }
+                            repaint::EnvelopeBuild::UnalignedDpr => {
+                                reason = RepaintReason::ClipAlignment;
+                                PreparedRepaintPlan::Full
+                            }
+                        }
+                    }
+                    RepaintPlan::Skip => PreparedRepaintPlan::Skip,
+                    RepaintPlan::Rows(spans) => PreparedRepaintPlan::Rows(spans),
+                    RepaintPlan::Full => PreparedRepaintPlan::Full,
+                };
+                (
+                    plan,
+                    Some(reason),
+                    decision.changed_rows,
+                    decision.changed_cells,
+                )
+            } else {
+                (PreparedRepaintPlan::Full, None, Vec::new(), Vec::new())
             };
-            (
-                plan,
-                Some(reason),
-                decision.changed_rows,
-                decision.changed_cells,
-            )
-        } else {
-            (PreparedRepaintPlan::Full, None, Vec::new(), Vec::new())
-        };
         #[cfg(not(feature = "dev-diagnostics"))]
         {
             drop(changed_rows);

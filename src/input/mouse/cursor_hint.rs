@@ -60,10 +60,9 @@ pub(super) fn compute_cursor_hint(icv: CanvasHandle, x: f64, y: f64) -> HoverHin
                 link_cell: linked.then_some((row, column)),
             }
         }
-        HitTest::ColumnHeader(_)
-        | HitTest::RowHeader(_)
-        | HitTest::Corner
-        | HitTest::Outside => HoverHint::plain(CursorHint::Cell),
+        HitTest::ColumnHeader(_) | HitTest::RowHeader(_) | HitTest::Corner | HitTest::Outside => {
+            HoverHint::plain(CursorHint::Cell)
+        }
     }
 }
 

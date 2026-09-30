@@ -98,7 +98,13 @@ pub fn LinkButton() -> impl IntoView {
     // A formula owns the link, or the selection is not one cell: either way the
     // action cannot run, so both disable the same controls and show the reason.
     let blocked = move || locked() || !single_cell.get();
-    let refusal = move || if locked() { FORMULA_OWNED } else { SINGLE_CELL_ONLY };
+    let refusal = move || {
+        if locked() {
+            FORMULA_OWNED
+        } else {
+            SINGLE_CELL_ONLY
+        }
+    };
 
     view! {
         <div class="tb-link">

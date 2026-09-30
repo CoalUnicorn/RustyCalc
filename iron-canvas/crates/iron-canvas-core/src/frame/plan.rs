@@ -127,7 +127,10 @@ impl MergeImpact {
         if committed.merges().digest() != inputs.merges().digest() {
             return MergeImpact::Changed;
         }
-        if committed.merges().intersects_visible(committed.grid_layout()) {
+        if committed
+            .merges()
+            .intersects_visible(committed.grid_layout())
+        {
             return MergeImpact::Visible;
         }
         // The candidate visible area is not built yet, so approximate it from
