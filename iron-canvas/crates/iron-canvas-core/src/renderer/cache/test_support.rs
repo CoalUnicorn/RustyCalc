@@ -124,6 +124,6 @@ pub(crate) fn build(layout: GridLayout) -> GridFingerprint {
     FingerprintState::default().build_candidate(
         layout,
         &references,
-        &crate::link::LinkIndex::empty(),
+        &crate::model::sheet::links::LinkIndex::empty(),
     )
 }

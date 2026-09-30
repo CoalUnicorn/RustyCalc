@@ -4,11 +4,12 @@ use std::rc::Rc;
 
 use crate::address::RCRange;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
-use crate::link::CellLink;
+use crate::model::sheet::links::CellLink;
 use crate::style::{CellDecoration, CellKind, CellStyle};
 
 pub mod autofit;
 pub mod fetched;
+pub(crate) mod sheet;
 
 use self::fetched::Fetched;
 

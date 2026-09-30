@@ -18,7 +18,7 @@ use crate::style::{CellKind, CellStyle, HAlign, VAlign};
 
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
-use crate::link::CellLink;
+use crate::model::sheet::links::CellLink;
 use crate::painter::{
     CHAR_WIDTH_FACTOR, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
@@ -505,7 +505,7 @@ mod tests {
     use super::*;
     use crate::address::RCRange;
     use crate::geometry::prim::Point;
-    use crate::link::{CellLink, LinkTarget};
+    use crate::model::sheet::links::{CellLink, LinkTarget};
 
     fn link(color: Option<&str>, dynamic: bool) -> CellLink {
         CellLink::new(

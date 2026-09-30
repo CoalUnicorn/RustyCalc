@@ -6,8 +6,9 @@
 //! crate-private with crate-visible fields, so this sibling test module can
 //! construct and inspect them.
 
+use crate::chrome::merge::MergeImpact;
 use crate::frame::delta::{BlitPlan, FrameDelta, RebuildReason, Shift};
-use crate::frame::plan::{GridWork, MergeImpact, OverlayWork, RenderStrategy, plan_frame};
+use crate::frame::plan::{GridWork, OverlayWork, RenderStrategy, plan_frame};
 use crate::frame::work::{PendingWork, RowSpan};
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::{Axis, Point};

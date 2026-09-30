@@ -20,7 +20,6 @@
 use std::hash::{Hash, Hasher};
 
 use crate::address::{CellCoord, RCRange};
-use crate::chrome::GridLayout;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
 
 /// One merged range. `range` is the full logical rectangle; `anchor` is its
@@ -153,19 +152,10 @@ impl MergeTable {
         self.digest
     }
 
-    /// True when any merge overlaps a cell of `layout`. Both the committed and
-    /// the candidate layout are probed this way, so scrolling into a merge and
-    /// scrolling out of one both trigger a rebuild.
-    pub fn intersects_visible(&self, layout: GridLayout) -> bool {
-        self.merges.iter().any(|merge| {
-            layout
-                .segments()
-                .any(|segment| ranges_overlap(merge.range, segment.range()))
-        })
-    }
-
-    /// True when any merge overlaps the address rectangle `rect`. Used to probe
-    /// the candidate visible area, which is not yet a built `GridLayout`.
+    /// True when any merge overlaps the address rectangle `rect`. The viewport
+    /// probe itself lives at the geometry boundary in `chrome::merge`: this
+    /// value type stays free of `Chrome` and of layout knowledge, and answers
+    /// only about addresses.
     pub fn intersects_rect(&self, rect: RCRange) -> bool {
         self.merges
             .iter()

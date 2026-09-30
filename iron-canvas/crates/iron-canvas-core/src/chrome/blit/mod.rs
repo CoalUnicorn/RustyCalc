@@ -15,8 +15,8 @@ use std::rc::Rc;
 use crate::CanvasModel;
 use crate::frame::{BlitPlan, FrameInputs};
 use crate::geometry::CanvasMetrics;
-use crate::link::LinkIndex;
-use crate::merge::MergeTable;
+use crate::model::sheet::links::LinkIndex;
+use crate::model::sheet::merges::MergeTable;
 use crate::theme::CanvasTheme;
 
 use super::pane_set::ScrollAxisSlots;

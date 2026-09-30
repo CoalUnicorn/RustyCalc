@@ -2,7 +2,8 @@ use std::rc::Rc;
 
 use crate::CanvasModel;
 use crate::chrome::Chrome;
-use crate::frame::{FrameInputs, GridWork, MergeImpact, MetadataSnapshot, PaintResult, plan_frame};
+use crate::chrome::merge::MergeImpact;
+use crate::frame::{FrameInputs, GridWork, MetadataSnapshot, PaintResult, plan_frame};
 use crate::painter::BlitPainter;
 #[cfg(feature = "dev-diagnostics")]
 use crate::renderer::diagnostics::DiagDeltaKind;
@@ -106,13 +107,12 @@ where
         // pixels, so a later hold leaves `last_frame`'s committed indexes
         // untouched while the next attempt rebuilds only if the epoch moved.
         if let Some(epoch) = self.metadata_epoch {
-            self.metadata_cache = Some(MetadataSnapshot {
-                model_generation: self.model_generation,
-                sheet: inputs.sheet(),
+            self.metadata_cache = Some(MetadataSnapshot::new(
+                self.model_generation,
+                inputs.sheet(),
                 epoch,
-                links: Rc::clone(inputs.links()),
-                merges: Rc::clone(inputs.merges()),
-            });
+                Rc::clone(inputs.metadata()),
+            ));
         }
 
         let delta = Chrome::classify(

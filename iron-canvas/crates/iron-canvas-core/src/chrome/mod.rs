@@ -31,8 +31,8 @@ use std::rc::Rc;
 use crate::CanvasSize;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::prim::Point;
-use crate::link::LinkIndex;
-use crate::merge::MergeTable;
+use crate::model::sheet::links::LinkIndex;
+use crate::model::sheet::merges::MergeTable;
 use crate::theme::CanvasTheme;
 
 mod blit;
@@ -40,6 +40,7 @@ mod build;
 mod classify;
 pub mod hit;
 mod kind;
+pub(crate) mod merge;
 mod pane_region;
 mod pane_set;
 mod query;

@@ -35,7 +35,7 @@ use self::borders::BorderPaint;
 use self::cf::CfDecorationPaint;
 use self::text::TextPaint;
 use crate::address::RCRange;
-use crate::link::LinkIndex;
+use crate::model::sheet::links::LinkIndex;
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
 use crate::renderer::prepared::FetchedCellsMut;

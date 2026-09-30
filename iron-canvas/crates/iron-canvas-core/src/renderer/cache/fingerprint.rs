@@ -20,8 +20,8 @@ use crate::address::RCRange;
 use crate::chrome::{GridLayout, PaneRegion};
 use crate::geometry::prim::Axis;
 use crate::geometry::prim::Side;
-use crate::link::{CellLink, LinkIndex};
 use crate::model::fetched::Fetched;
+use crate::model::sheet::links::{CellLink, LinkIndex};
 use crate::renderer::prepared::FetchedCells;
 use crate::style::{BorderItem, CellDecoration, CellKind, CellStyle};
 
@@ -509,7 +509,7 @@ fn hash_border_item<H: Hasher>(border: Option<&BorderItem>, state: &mut H) {
 mod tests {
     use super::*;
     use crate::address::RCRange;
-    use crate::link::{CellLink, LinkTarget};
+    use crate::model::sheet::links::{CellLink, LinkTarget};
     use crate::renderer::cache::test_support::{build, dense, layout};
     use crate::style::{Border, BorderStyle};
 

@@ -11,35 +11,15 @@
 
 use std::rc::Rc;
 
+use crate::frame::metadata::{MetadataSnapshot, capture_metadata};
 use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::constants::{LAST_COLUMN, LAST_ROW};
-use crate::link::LinkIndex;
-use crate::merge::MergeTable;
+use crate::model::sheet::links::LinkIndex;
+use crate::model::sheet::merges::MergeTable;
+use crate::model::sheet::snapshot::SheetMetadata;
 use crate::model::{CanvasModel, CanvasView};
 use crate::theme::CanvasTheme;
-
-/// A validated link/merge snapshot captured by an earlier attempt, kept by
-/// the [`Orchestrator`](crate::Orchestrator) so a later attempt can reuse it
-/// instead of re-reading the model and rebuilding both indexes.
-///
-/// Reuse is gated on an exact match of the three fields the review requires —
-/// the model generation (a `set_model` replacement), the sheet, and a
-/// host-supplied metadata epoch — see [`FrameInputs::capture_with_metadata_cache`].
-/// `Rc` so a reuse hands the cached index to the frame without a deep clone.
-#[derive(Clone)]
-pub(crate) struct MetadataSnapshot {
-    /// `Orchestrator::model_generation` at the capturing attempt. A different
-    /// value means a `set_model` replacement, so the snapshot is discarded.
-    pub(crate) model_generation: u64,
-    /// The sheet the two indexes describe.
-    pub(crate) sheet: u32,
-    /// Host revision under which the indexes were read. A different current
-    /// epoch means either list may have changed, so the snapshot is rebuilt.
-    pub(crate) epoch: u64,
-    pub(crate) links: Rc<LinkIndex>,
-    pub(crate) merges: Rc<MergeTable>,
-}
 
 /// Validated count of frozen leading rows or columns along one axis.
 ///
@@ -110,12 +90,11 @@ pub struct FrameInputs {
     show_row_headers: bool,
     show_col_headers: bool,
     show_selection: bool,
-    /// Committed link candidate for this attempt. `Rc` so the orchestrator
-    /// hands the same index to the committer without a deep clone.
-    links: Rc<LinkIndex>,
-    /// Committed merge candidate for this attempt. `Rc` for the same reason as
-    /// `links`.
-    merges: Rc<MergeTable>,
+    /// Committed worksheet metadata candidate for this attempt — the link
+    /// index and merge table captured together. `Rc` so the orchestrator hands
+    /// the same value to the committer, the renderer, and its own reuse cache
+    /// without a deep clone.
+    metadata: Rc<SheetMetadata>,
 }
 
 /// Which scalar input a failed [`FrameInputs::capture`] attempt could not
@@ -223,16 +202,19 @@ impl FrameInputs {
     /// - the cached snapshot's model generation, sheet, and epoch match this
     ///   attempt's.
     ///
-    /// The cached `Rc<LinkIndex>`/`Rc<MergeTable>` are then cloned into this
-    /// snapshot, so a repeated overlay-only (or navigation-only) attempt pays
-    /// no bridge read, no per-link `Rc` allocation, no sort, and no quadratic
-    /// overlap validation.
+    /// The cached metadata value is then shared into this snapshot, so a
+    /// repeated overlay-only (or navigation-only) attempt pays no bridge read,
+    /// no per-link `Rc` allocation, no sort, and no quadratic overlap
+    /// validation.
     ///
     /// A `None` epoch (the default for a host that cannot supply one), a
     /// missing cache, or any field mismatch re-reads and rebuilds — the exact
     /// pre-cache behavior. A stale "unchanged" would leave a visible link
     /// unclickable or a merged region editable, so the epoch is the host's
     /// promise that either list may have changed whenever it changes.
+    ///
+    /// The capture itself, and its reuse rule, live in
+    /// [`crate::frame::metadata`].
     pub(crate) fn capture_with_metadata_cache(
         model: &dyn CanvasModel,
         metrics: CanvasMetrics,
@@ -276,42 +258,14 @@ impl FrameInputs {
             .get_show_col_headers(sheet)
             .ok_or(FrameInputFailure::ColumnHeaderVisibility)?;
         let show_selection = model.get_show_selection();
-        // Step 8: the sheet's links. `Some(empty)` is a known empty set; a
-        // `None` read or a list `from_cells` rejects is a hold, never empty
-        // data — silently painting no link would leave a visible link
-        // unclickable.
-        let (links, merges) = match (metadata_epoch, cached) {
-            (Some(epoch), Some(cache))
-                if cache.model_generation == model_generation
-                    && cache.sheet == sheet
-                    && cache.epoch == epoch =>
-            {
-                (Rc::clone(&cache.links), Rc::clone(&cache.merges))
-            }
-            _ => {
-                let links = Rc::new(
-                    LinkIndex::from_cells(
-                        model
-                            .get_sheet_links(sheet)
-                            .ok_or(FrameInputFailure::SheetLinks)?,
-                    )
-                    .map_err(|_| FrameInputFailure::SheetLinks)?,
-                );
-                // Step 9: the sheet's merges. Same contract as the link list: a
-                // `None` read or a list `from_ranges` rejects is a hold, never empty
-                // data — silently painting no merge would render the covered cells
-                // with their own content over a region the model presents as one cell.
-                let merges = Rc::new(
-                    MergeTable::from_ranges(
-                        model
-                            .get_merged_ranges(sheet)
-                            .ok_or(FrameInputFailure::MergedRanges)?,
-                    )
-                    .map_err(|_| FrameInputFailure::MergedRanges)?,
-                );
-                (links, merges)
-            }
-        };
+        // Steps 8 and 9: the sheet's links and merged ranges. `Some(empty)` is
+        // a known empty set; a `None` read or a list the index rejects is a
+        // hold, never empty data — silently painting no link would leave a
+        // visible link unclickable, and painting no merge would render the
+        // covered cells with their own content over a region the model
+        // presents as one cell. The reuse rule lives with the capture in
+        // `frame::metadata`.
+        let metadata = capture_metadata(model, sheet, model_generation, metadata_epoch, cached)?;
 
         Ok(FrameInputs {
             metrics,
@@ -324,8 +278,7 @@ impl FrameInputs {
             show_row_headers,
             show_col_headers,
             show_selection,
-            links,
-            merges,
+            metadata,
         })
     }
 
@@ -374,14 +327,20 @@ impl FrameInputs {
     /// attaches this to the frame it commits; the renderer reads it for
     /// fingerprints and paint.
     pub fn links(&self) -> &Rc<LinkIndex> {
-        &self.links
+        self.metadata.links()
     }
 
     /// Committed merge candidate captured for this attempt. The orchestrator
     /// attaches this to the frame it commits; the renderer reads it for merge
     /// paint and query resolution.
     pub fn merges(&self) -> &Rc<MergeTable> {
-        &self.merges
+        self.metadata.merges()
+    }
+
+    /// The whole captured worksheet metadata value. The orchestrator stores it
+    /// in its reuse cache and attaches both indexes to the committed frame.
+    pub(crate) fn metadata(&self) -> &Rc<SheetMetadata> {
+        &self.metadata
     }
 
     pub fn dpr(&self) -> f64 {
