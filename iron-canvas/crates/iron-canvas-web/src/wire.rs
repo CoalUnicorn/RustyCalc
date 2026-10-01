@@ -1689,7 +1689,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "dev-tools"))]
 mod display_cell_wire_tests {
     use super::*;
     use iron_canvas_core::CellCoord;
