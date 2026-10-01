@@ -398,3 +398,37 @@ fn shown_icon_shifts_the_value_right() {
         "the icon must reserve a left band: {plain_x} -> {icon_x}"
     );
 }
+
+/// The engine resolves icons and data bars independently, so both can apply to
+/// one cell. Both must paint, with the bar underneath the glyph.
+#[test]
+fn icon_and_bar_paint_together_with_the_bar_underneath() {
+    let decoration = CellDecoration {
+        icon: Some(iron_canvas_core::IconSpec {
+            glyph: IconGlyph::ArrowUp,
+            color: Some("#84cb1f".to_string()),
+            show_value: true,
+        }),
+        data_bar: Some(DataBarSpec {
+            positive_color: "#3366cc".to_string(),
+            negative_color: None,
+            is_gradient: false,
+            value: 1.0,
+            axis_position: 0.0,
+            show_value: true,
+        }),
+        ..CellDecoration::default()
+    };
+    let (core, _) = render_cell(decoration);
+    let ops = core.painter().ops();
+    let bar = ops
+        .iter()
+        .position(|op| matches!(op, DrawOp::RectFill { color, .. } if color == "#3366cc"));
+    let icon = ops
+        .iter()
+        .position(|op| matches!(op, DrawOp::FillPath { color, .. } if color == "#84cb1f"));
+    let (Some(bar), Some(icon)) = (bar, icon) else {
+        panic!("both categories must paint; bar={bar:?} icon={icon:?}");
+    };
+    assert!(bar < icon, "the data bar paints under the icon");
+}
