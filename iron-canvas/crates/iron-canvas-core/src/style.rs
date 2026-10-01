@@ -121,31 +121,92 @@ pub enum CellKind {
     Error,
 }
 
-/// Conditional-formatting decoration overlay. `IconSpec = String` is a v1
-/// placeholder (the icon name) — the renderer resolves an icon to no pixels
-/// yet (no glyph system), so no painted pixel depends on a richer icon enum.
-pub type IconSpec = String;
-
-/// CF decorations today, but `#[non_exhaustive]` so non-CF per-cell visuals
-/// (sparklines, comment markers) can be added without breaking downstream
-/// matches. Variants resolve into `Painter` primitives at the renderer, so a
-/// new variant needs no new `Painter` method.
-#[non_exhaustive]
-#[derive(Clone, Debug, PartialEq)]
-pub enum CellDecoration {
-    DataBar(DataBarSpec),
-    Icon(IconSpec),
-    Rating(RatingSpec),
+/// Backend-independent identity of one icon glyph. Mirrors IronCalc's `Icon`
+/// enum 1:1 so the bridge mapping is total; the renderer owns the geometry of
+/// each variant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum IconGlyph {
+    ArrowUp,
+    ArrowRight,
+    ArrowDown,
+    ArrowAngleUp,
+    ArrowAngleDown,
+    Circle,
+    TriangleUp,
+    TriangleDown,
+    TriangleUpFilled,
+    TriangleDownFilled,
+    FlatRectangle,
+    Rhombus,
+    Flag,
+    Check,
+    Cross,
+    Exclamation,
+    Star,
+    Heart,
+    ThumbsUp,
+    ThumbsDown,
 }
 
+/// One evaluated icon-set decoration: the engine-selected glyph, its resolved
+/// color, and whether the cell value stays visible.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IconSpec {
+    pub glyph: IconGlyph,
+    /// Resolved CSS color. `None` when the engine color is unresolved; the
+    /// renderer then picks its default.
+    pub color: Option<String>,
+    /// When false, the painted cell value is hidden.
+    pub show_value: bool,
+}
+
+/// One evaluated data-bar decoration.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DataBarSpec {
-    pub fraction: f64, // 0.0..=1.0
-    pub color: String, // CSS color
+    /// Resolved CSS color on the positive side of the axis. Always present —
+    /// the bridge substitutes Excel's default blue for an unresolved color.
+    pub positive_color: String,
+    /// Resolved CSS color on the negative side; `None` when unresolved.
+    pub negative_color: Option<String>,
+    /// Gradient fill when true; solid fill when false.
+    pub is_gradient: bool,
+    /// Normalized endpoint position in `[0, 1]`. The bar runs from
+    /// `axis_position` to `value`; it is not a width measured from the left.
+    pub value: f64,
+    /// Normalized position in `[0, 1]` where the zero axis falls.
+    pub axis_position: f64,
+    /// When false, the painted cell value is hidden.
+    pub show_value: bool,
 }
 
+/// One evaluated rating decoration: `count` filled glyphs out of `max`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RatingSpec {
-    pub stars: u32,
-    pub filled: u32,
+    pub glyph: IconGlyph,
+    /// Resolved CSS color; `None` when the engine color is unresolved.
+    pub color: Option<String>,
+    /// Number of filled glyphs (engine `count`).
+    pub count: u32,
+    /// Total glyphs in the scale (engine `max`).
+    pub max: u32,
+    /// When false, the painted cell value is hidden.
+    pub show_value: bool,
+}
+
+/// Evaluated conditional-formatting overlay for one cell. The three categories
+/// are independent: the engine resolves icons, data bars, and ratings
+/// separately, so all of them can apply to the same cell at once. A cell with
+/// no decoration is [`CellDecoration::is_empty`].
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CellDecoration {
+    pub icon: Option<IconSpec>,
+    pub data_bar: Option<DataBarSpec>,
+    pub rating: Option<RatingSpec>,
+}
+
+impl CellDecoration {
+    /// True when no category applies — the value a model reports as `Absent`.
+    pub fn is_empty(&self) -> bool {
+        self.icon.is_none() && self.data_bar.is_none() && self.rating.is_none()
+    }
 }

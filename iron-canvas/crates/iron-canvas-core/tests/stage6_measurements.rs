@@ -603,10 +603,17 @@ fn decorate(model: &TestModel, shape: Shape) {
                 model.set_decoration(
                     row,
                     col,
-                    CellDecoration::DataBar(DataBarSpec {
-                        fraction: f64::from(row % 10) / 10.0,
-                        color: "#3366cc".to_string(),
-                    }),
+                    CellDecoration {
+                        data_bar: Some(DataBarSpec {
+                            positive_color: "#3366cc".to_string(),
+                            negative_color: None,
+                            is_gradient: true,
+                            value: f64::from(row % 10) / 10.0,
+                            axis_position: 0.0,
+                            show_value: true,
+                        }),
+                        ..CellDecoration::default()
+                    },
                 );
             }
         }

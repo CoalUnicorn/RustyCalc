@@ -12,10 +12,39 @@ use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
 use iron_canvas_core::geometry::prim::Point;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict, RatingSpec};
+use iron_canvas_core::{
+    CellDecoration, DataBarSpec, Fetched, GridVerdict, IconGlyph, RatingSpec,
+};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
+
+fn data_bar(color: &str, value: f64) -> CellDecoration {
+    CellDecoration {
+        data_bar: Some(DataBarSpec {
+            positive_color: color.to_string(),
+            negative_color: None,
+            is_gradient: true,
+            value,
+            axis_position: 0.0,
+            show_value: true,
+        }),
+        ..CellDecoration::default()
+    }
+}
+
+fn rating(count: u32, max: u32) -> CellDecoration {
+    CellDecoration {
+        rating: Some(RatingSpec {
+            glyph: IconGlyph::Star,
+            color: None,
+            count,
+            max,
+            show_value: true,
+        }),
+        ..CellDecoration::default()
+    }
+}
 
 // A data bar paints as a `RectFill` in its own distinctive color; cell
 // backgrounds always use the theme color, so matching on the bar color
@@ -34,14 +63,7 @@ fn data_bar_fill_count(painter: &RecorderPainter, bar_color: &str) -> usize {
 #[test]
 fn bulk_method_places_decoration_at_correct_index() {
     let model = TestModel::synthetic_grid();
-    model.set_decoration(
-        2,
-        3,
-        CellDecoration::DataBar(DataBarSpec {
-            fraction: 0.5,
-            color: "#0a0".to_string(),
-        }),
-    );
+    model.set_decoration(2, 3, data_bar("#0a0", 0.5));
 
     let range = RCRange {
         r1: 1,
@@ -88,14 +110,7 @@ impl<T: CanvasModel> CanvasModelExt for T {}
 #[test]
 fn decoration_reaches_painter_and_skip_is_stable() {
     let model = TestModel::synthetic_grid();
-    model.set_decoration(
-        2,
-        2,
-        CellDecoration::DataBar(DataBarSpec {
-            fraction: 0.75,
-            color: "#3366cc".to_string(),
-        }),
-    );
+    model.set_decoration(2, 2, data_bar("#3366cc", 0.75));
 
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let inputs = test_inputs(&model, canvas_default(), &theme);
@@ -131,14 +146,7 @@ fn decoration_reaches_painter_and_skip_is_stable() {
 fn malformed_data_bar_color_paints_black_and_matches_black_fingerprint() {
     for color in ["#aé000", "#00aé0", "#0000é", "#中文", "#+10000"] {
         let model = TestModel::synthetic_grid();
-        model.set_decoration(
-            2,
-            2,
-            CellDecoration::DataBar(DataBarSpec {
-                fraction: 0.75,
-                color: color.to_string(),
-            }),
-        );
+        model.set_decoration(2, 2, data_bar(color, 0.75));
         let theme = std::rc::Rc::new(CanvasTheme::light());
         let inputs = test_inputs(&model, canvas_default(), &theme);
         let mut frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
@@ -147,14 +155,7 @@ fn malformed_data_bar_color_paints_black_and_matches_black_fingerprint() {
         core.render_grid(&model, &frame);
         assert_eq!(data_bar_fill_count(core.painter(), "#000000"), 1, "{color}");
 
-        model.set_decoration(
-            2,
-            2,
-            CellDecoration::DataBar(DataBarSpec {
-                fraction: 0.75,
-                color: "#000000".to_string(),
-            }),
-        );
+        model.set_decoration(2, 2, data_bar("#000000", 0.75));
         frame.kind = FrameKindTag::SlotsReused;
         core.reset_trace();
         core.render_grid(&model, &frame);
@@ -168,14 +169,7 @@ fn rating_paints_five_star_polygons_in_filled_then_empty_order() {
     let model = TestModel::synthetic_grid();
     model.set_col_width(2, 104.0);
     model.set_row_height(2, 24.0);
-    model.set_decoration(
-        2,
-        2,
-        CellDecoration::Rating(RatingSpec {
-            stars: 5,
-            filled: 3,
-        }),
-    );
+    model.set_decoration(2, 2, rating(3, 5));
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let inputs = test_inputs(&model, canvas_default(), &theme);
     let frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);

@@ -14,7 +14,7 @@ use std::cell::{Cell, Ref, RefCell};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
-use super::color::data_bar_rgb;
+use super::color::{css_rgb, data_bar_rgb};
 use super::layout_transition::GridLayoutTransition;
 use crate::address::RCRange;
 use crate::chrome::{GridLayout, PaneRegion};
@@ -446,20 +446,48 @@ fn cell_digest(
     hasher.finish()
 }
 
+/// Fold every resolved decoration input that can change painted pixels or
+/// text layout into the digest: each category present, its glyph identity,
+/// colors, flags, geometry, and value-visibility. A rule edit that leaves the
+/// numeric cell value unchanged must still change the digest, or the retained
+/// pixels go stale.
 fn hash_decoration<H: Hasher>(decoration: &Fetched<CellDecoration>, hasher: &mut H) {
     match decoration {
-        Fetched::Absent | Fetched::BridgeFailed | Fetched::Value(CellDecoration::Icon(_)) => {
-            hasher.write_u8(0)
-        }
-        Fetched::Value(CellDecoration::DataBar(spec)) => {
+        Fetched::Absent | Fetched::BridgeFailed => hasher.write_u8(0),
+        Fetched::Value(deco) => {
             hasher.write_u8(1);
-            data_bar_rgb(spec).hash(hasher);
-            spec.fraction.clamp(0.0, 1.0).to_bits().hash(hasher);
-        }
-        Fetched::Value(CellDecoration::Rating(spec)) => {
-            hasher.write_u8(2);
-            (spec.stars as u8).hash(hasher);
-            (spec.filled as u8).hash(hasher);
+            match &deco.icon {
+                None => hasher.write_u8(0),
+                Some(icon) => {
+                    hasher.write_u8(1);
+                    icon.glyph.hash(hasher);
+                    icon.color.as_deref().map(css_rgb).hash(hasher);
+                    icon.show_value.hash(hasher);
+                }
+            }
+            match &deco.data_bar {
+                None => hasher.write_u8(0),
+                Some(bar) => {
+                    hasher.write_u8(1);
+                    data_bar_rgb(bar).hash(hasher);
+                    bar.negative_color.as_deref().map(css_rgb).hash(hasher);
+                    bar.is_gradient.hash(hasher);
+                    bar.value.clamp(0.0, 1.0).to_bits().hash(hasher);
+                    bar.axis_position.clamp(0.0, 1.0).to_bits().hash(hasher);
+                    bar.show_value.hash(hasher);
+                }
+            }
+            match &deco.rating {
+                None => hasher.write_u8(0),
+                Some(rating) => {
+                    hasher.write_u8(1);
+                    rating.glyph.hash(hasher);
+                    rating.color.as_deref().map(css_rgb).hash(hasher);
+                    rating.count.hash(hasher);
+                    rating.max.hash(hasher);
+                    rating.show_value.hash(hasher);
+                }
+            }
         }
     }
 }

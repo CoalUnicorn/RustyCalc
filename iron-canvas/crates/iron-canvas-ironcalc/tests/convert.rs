@@ -1,8 +1,9 @@
-use iron_canvas_core::{BorderStyle, CellKind, HAlign, VAlign};
+use iron_canvas_core::{BorderStyle, CellKind, HAlign, IconGlyph, VAlign};
 use iron_canvas_ironcalc::convert::{
-    alignment_to_core, border_style_to_core, border_to_core, cell_type_to_kind, color_to_css,
-    font_to_core, halign_to_core, style_to_core, valign_to_core,
+    alignment_to_core, border_style_to_core, border_to_core, cell_decoration_from_extended,
+    cell_type_to_kind, color_to_css, font_to_core, halign_to_core, style_to_core, valign_to_core,
 };
+use ironcalc_base::cf_types as ic_cf;
 use ironcalc_base::types as ic;
 
 /// Test resolver over the default (Office) theme — same shape the live call
@@ -157,4 +158,72 @@ fn theme_font_color_survives_conversion() {
         "theme colors must resolve at the model boundary — dropping them to \
          None loses fills/fonts/borders on most real xlsx files"
     );
+}
+
+/// The engine resolves icons, data bars, and ratings independently, so an
+/// `ExtendedStyle` can carry all three. Every category, resolved color, and
+/// `show_value` flag must survive the conversion; the old converter returned
+/// the first present category and dropped the other two.
+#[test]
+fn extended_style_preserves_all_decoration_categories() {
+    let theme = ic::Theme::default();
+    let ext = ic_cf::ExtendedStyle {
+        style: ic::Style::default(),
+        icon: Some(ic_cf::CfIcon {
+            icon: ic_cf::Icon::ArrowUp,
+            color: ic::Color::Rgb("#84cb1f".to_string()),
+            show_value: false,
+        }),
+        data_bar: Some(ic_cf::CfDataBar {
+            positive_color: ic::Color::Rgb("#638ec6".to_string()),
+            negative_color: ic::Color::Rgb("#ff0000".to_string()),
+            is_gradient: false,
+            value: 0.25,
+            axis_position: 0.4,
+            show_value: false,
+        }),
+        rating: Some(ic_cf::CfRating {
+            icon: ic_cf::Icon::Star,
+            count: 3,
+            max: 5,
+            color: ic::Color::Rgb("#ffd700".to_string()),
+            show_value: true,
+        }),
+    };
+
+    let deco = cell_decoration_from_extended(&ext, &office_resolver(&theme))
+        .expect("all three categories present");
+
+    let icon = deco.icon.as_ref().expect("icon preserved");
+    assert_eq!(icon.glyph, IconGlyph::ArrowUp);
+    assert_eq!(icon.color.as_deref(), Some("#84cb1f"));
+    assert!(!icon.show_value);
+
+    let bar = deco.data_bar.as_ref().expect("data bar preserved");
+    assert_eq!(bar.positive_color, "#638ec6");
+    assert_eq!(bar.negative_color.as_deref(), Some("#ff0000"));
+    assert!(!bar.is_gradient);
+    assert_eq!(bar.value, 0.25);
+    assert_eq!(bar.axis_position, 0.4);
+    assert!(!bar.show_value);
+
+    let rating = deco.rating.as_ref().expect("rating preserved");
+    assert_eq!(rating.glyph, IconGlyph::Star);
+    assert_eq!(rating.color.as_deref(), Some("#ffd700"));
+    assert_eq!((rating.count, rating.max), (3, 5));
+    assert!(rating.show_value);
+}
+
+/// A cell with no CF decoration converts to `None`, the value the adapter
+/// reports as `Absent`.
+#[test]
+fn extended_style_without_decoration_converts_to_none() {
+    let theme = ic::Theme::default();
+    let ext = ic_cf::ExtendedStyle {
+        style: ic::Style::default(),
+        icon: None,
+        data_bar: None,
+        rating: None,
+    };
+    assert!(cell_decoration_from_extended(&ext, &office_resolver(&theme)).is_none());
 }

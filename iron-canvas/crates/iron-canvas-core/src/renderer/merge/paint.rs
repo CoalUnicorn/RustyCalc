@@ -19,7 +19,7 @@ impl<P: Painter> RendererCore<P> {
         let decoration = merge
             .decoration
             .clone()
-            .map(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
+            .and_then(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
         for fragment in &merge.fragments {
             self.paint_merge_fragment(frame, merge, fragment, decoration.as_ref());
         }

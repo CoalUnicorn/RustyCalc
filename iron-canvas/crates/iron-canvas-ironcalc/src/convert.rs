@@ -9,7 +9,7 @@
 
 use iron_canvas_core::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellLink, CellStyle,
-    DataBarSpec, FontStyle, HAlign, LinkTarget, RCRange, RatingSpec, VAlign,
+    DataBarSpec, FontStyle, HAlign, IconGlyph, IconSpec, LinkTarget, RCRange, RatingSpec, VAlign,
 };
 use ironcalc_base::cf_types as ic_cf;
 use ironcalc_base::types as ic;
@@ -112,35 +112,81 @@ pub fn border_style_to_core(s: ic::BorderStyle) -> BorderStyle {
     }
 }
 
-/// Map an IronCalc `ExtendedStyle` to a core `CellDecoration`. Returns `None`
-/// when no decoration applies (icon -> data_bar -> rating priority order).
-///
-/// IconSpec is a String placeholder — `Debug` of `Icon` gives the variant
-/// name ("Circle", "ArrowUp", ...), which is fine for a no-op decoration.
+/// Map an IronCalc `Icon` to the core glyph identity. Total: the two enums
+/// carry the same 20 variants.
+pub fn icon_glyph_from_ic(icon: ic_cf::Icon) -> IconGlyph {
+    use ic_cf::Icon as I;
+    match icon {
+        I::ArrowUp => IconGlyph::ArrowUp,
+        I::ArrowRight => IconGlyph::ArrowRight,
+        I::ArrowDown => IconGlyph::ArrowDown,
+        I::ArrowAngleUp => IconGlyph::ArrowAngleUp,
+        I::ArrowAngleDown => IconGlyph::ArrowAngleDown,
+        I::Circle => IconGlyph::Circle,
+        I::TriangleUp => IconGlyph::TriangleUp,
+        I::TriangleDown => IconGlyph::TriangleDown,
+        I::TriangleUpFilled => IconGlyph::TriangleUpFilled,
+        I::TriangleDownFilled => IconGlyph::TriangleDownFilled,
+        I::FlatRectangle => IconGlyph::FlatRectangle,
+        I::Rhombus => IconGlyph::Rhombus,
+        I::Flag => IconGlyph::Flag,
+        I::Check => IconGlyph::Check,
+        I::Cross => IconGlyph::Cross,
+        I::Exclamation => IconGlyph::Exclamation,
+        I::Star => IconGlyph::Star,
+        I::Heart => IconGlyph::Heart,
+        I::ThumbsUp => IconGlyph::ThumbsUp,
+        I::ThumbsDown => IconGlyph::ThumbsDown,
+    }
+}
+
+/// Map the three evaluated decoration categories to a core `CellDecoration`.
+/// Each category is converted independently so a cell that carries more than
+/// one keeps them all. Returns `None` when none applies.
+pub fn cell_decoration_from_parts(
+    icon: Option<&ic_cf::CfIcon>,
+    data_bar: Option<&ic_cf::CfDataBar>,
+    rating: Option<&ic_cf::CfRating>,
+    resolve: ColorResolver,
+) -> Option<CellDecoration> {
+    let decoration = CellDecoration {
+        icon: icon.map(|i| IconSpec {
+            glyph: icon_glyph_from_ic(i.icon.clone()),
+            color: resolve(&i.color),
+            show_value: i.show_value,
+        }),
+        data_bar: data_bar.map(|bar| DataBarSpec {
+            // Color::None falls back to Excel's default data-bar blue — an
+            // uncolored bar should still be visible, not an empty CSS string.
+            positive_color: resolve(&bar.positive_color).unwrap_or_else(|| "#638EC6".into()),
+            negative_color: resolve(&bar.negative_color),
+            is_gradient: bar.is_gradient,
+            value: bar.value.clamp(0.0, 1.0),
+            axis_position: bar.axis_position.clamp(0.0, 1.0),
+            show_value: bar.show_value,
+        }),
+        rating: rating.map(|r| RatingSpec {
+            glyph: icon_glyph_from_ic(r.icon.clone()),
+            color: resolve(&r.color),
+            count: r.count,
+            max: r.max,
+            show_value: r.show_value,
+        }),
+    };
+    (!decoration.is_empty()).then_some(decoration)
+}
+
+/// Map an IronCalc `ExtendedStyle` to a core `CellDecoration`.
 pub fn cell_decoration_from_extended(
     ext: &ic_cf::ExtendedStyle,
     resolve: ColorResolver,
 ) -> Option<CellDecoration> {
-    if let Some(ref icon) = ext.icon {
-        return Some(CellDecoration::Icon(format!("{:?}", icon.icon)));
-    }
-    if let Some(ref bar) = ext.data_bar {
-        // Color::None falls back to Excel's default data-bar blue — an
-        // uncolored bar should still be visible, not an empty CSS string.
-        let color = resolve(&bar.positive_color).unwrap_or_else(|| "#638EC6".into());
-        return Some(CellDecoration::DataBar(DataBarSpec {
-            color,
-            fraction: bar.value.clamp(0.0, 1.0),
-        }));
-    }
-    if let Some(ref rating) = ext.rating {
-        // CfRating.count/max are u32; RatingSpec is u32 — no cast needed.
-        return Some(CellDecoration::Rating(RatingSpec {
-            stars: rating.max,
-            filled: rating.count,
-        }));
-    }
-    None
+    cell_decoration_from_parts(
+        ext.icon.as_ref(),
+        ext.data_bar.as_ref(),
+        ext.rating.as_ref(),
+        resolve,
+    )
 }
 
 pub fn cell_type_to_kind(t: ic::CellType) -> CellKind {

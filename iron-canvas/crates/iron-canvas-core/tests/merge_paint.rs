@@ -377,10 +377,17 @@ fn the_anchor_fill_and_cf_decoration_cover_the_merge() {
     model.set_decoration(
         2,
         2,
-        CellDecoration::DataBar(DataBarSpec {
-            fraction: 1.0,
-            color: "#112233".to_string(),
-        }),
+        CellDecoration {
+            data_bar: Some(DataBarSpec {
+                positive_color: "#112233".to_string(),
+                negative_color: None,
+                is_gradient: true,
+                value: 1.0,
+                axis_position: 0.0,
+                show_value: true,
+            }),
+            ..CellDecoration::default()
+        },
     );
     let mut orch = build(Rc::clone(&model));
     assert_eq!(orch.render_pending(), PaintResult::Rendered);

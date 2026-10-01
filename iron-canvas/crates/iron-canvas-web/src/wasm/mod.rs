@@ -31,33 +31,66 @@ use serde::de::DeserializeOwned;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
+use ironcalc_base::cf_types as ic_cf;
 use ironcalc_base::types as ic;
 
 /// Upstream `getCellStyle` returns the CF-merged `ExtendedStyle` wrapper
 /// (`{ style, icon, data_bar, rating }`); other hosts may return a bare
-/// `Style`. Decorations are ignored here — CF-visual painting via the
-/// bridge is an accepted gap (see design doc's Known Gaps).
+/// `Style`. Both shapes decode here: the wrapper carries the decoration
+/// payload, a bare style host has none. Decoration fields are optional so a
+/// wrapper that omits them, and every bare host, still decode.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum JsStyle {
     Bare(ic::Style),
-    Extended { style: ic::Style },
+    Extended {
+        style: ic::Style,
+        #[serde(default)]
+        icon: Option<ic_cf::CfIcon>,
+        #[serde(default)]
+        data_bar: Option<ic_cf::CfDataBar>,
+        #[serde(default)]
+        rating: Option<ic_cf::CfRating>,
+    },
 }
 
 impl From<JsStyle> for ic::Style {
     fn from(s: JsStyle) -> Self {
         match s {
             JsStyle::Bare(style) => style,
-            JsStyle::Extended { style } => style,
+            JsStyle::Extended { style, .. } => style,
+        }
+    }
+}
+
+impl JsStyle {
+    /// Convert the payload's decoration fields to a core `CellDecoration`,
+    /// preserving every category the wrapper carries. A bare style host has no
+    /// decoration channel, so it yields `None`.
+    fn decoration(self, resolve: ColorResolver) -> Option<CellDecoration> {
+        match self {
+            JsStyle::Bare(_) => None,
+            JsStyle::Extended {
+                icon,
+                data_bar,
+                rating,
+                ..
+            } => cell_decoration_from_parts(
+                icon.as_ref(),
+                data_bar.as_ref(),
+                rating.as_ref(),
+                resolve,
+            ),
         }
     }
 }
 
 use iron_canvas_core::address::RCRange;
 use iron_canvas_core::{CanvasModel, CanvasView, CellContentQuery, Fetched};
-use iron_canvas_core::{CellKind, CellLink, CellStyle};
+use iron_canvas_core::{CellDecoration, CellKind, CellLink, CellStyle};
 use iron_canvas_ironcalc::convert::{
-    color_to_css, link_to_core, merged_range_to_core, style_to_core,
+    ColorResolver, cell_decoration_from_parts, color_to_css, link_to_core, merged_range_to_core,
+    style_to_core,
 };
 
 #[wasm_bindgen]
@@ -646,6 +679,39 @@ impl CellContentQuery for JsBackedModel {
             Ok(None) => Fetched::Absent,
             Err(e) => {
                 self.note_serde_err("getFormattedCellValue", &e);
+                Fetched::BridgeFailed
+            }
+        }
+    }
+
+    fn get_extended_cell_style(
+        &self,
+        sheet: u32,
+        row: i32,
+        column: i32,
+    ) -> Fetched<CellDecoration> {
+        // The same `getCellStyle` payload the style read decodes, read again
+        // for its decoration fields. A JS throw or an undecodable payload is a
+        // wire-shape failure (`BridgeFailed`, hold and retry); a decoded `null`
+        // is a blank cell (`Absent`). A bare-style host decodes but carries no
+        // decoration, so it reports `Absent` — the renderer draws nothing.
+        let Some(jsv) = self.note_throw(
+            "getCellStyle",
+            self.handle.get_cell_style(sheet, row, column),
+        ) else {
+            return Fetched::BridgeFailed;
+        };
+        match serde_wasm_bindgen::from_value::<Option<JsStyle>>(jsv) {
+            Ok(Some(s)) => self.with_theme(|theme| match theme {
+                Some(t) => match s.decoration(&|c| color_to_css(c, t)) {
+                    Some(d) => Fetched::Value(d),
+                    None => Fetched::Absent,
+                },
+                None => Fetched::BridgeFailed,
+            }),
+            Ok(None) => Fetched::Absent,
+            Err(e) => {
+                self.note_serde_err("getCellStyle", &e);
                 Fetched::BridgeFailed
             }
         }

@@ -84,7 +84,7 @@ impl<P: Painter> RendererCore<P> {
                 .decorations
                 .get_mut(idx)
                 .and_then(Fetched::take_value)
-                .map(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
+                .and_then(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
             let Some(mut p) =
                 CellPaint::resolve_cell_paint(slot, own_style, theme, &self.color_intern)
             else {

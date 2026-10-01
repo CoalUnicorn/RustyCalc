@@ -58,7 +58,7 @@ pub use model::sheet::merges::{MergeTable, MergeTableError, MergedRange};
 pub use model::{CanvasModel, CanvasView, CellContentQuery};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,
-    FontStyle, HAlign, IconSpec, RatingSpec, VAlign,
+    FontStyle, HAlign, IconGlyph, IconSpec, RatingSpec, VAlign,
 };
 pub use surface::{LayerBase, Surface};
 pub use theme::{CanvasTheme, ThemeVariables};

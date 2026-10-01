@@ -4,7 +4,7 @@
 //! [`super::borders::BorderPaint`], [`super::text::TextPaint`]). The
 //! resolve/paint split is the module's contract:
 //! `CfDecorationPaint::resolve` is the only step in this module that may allocate. It
-//! parses the color, clamps the fraction, and interns the data-bar CSS color
+//! parses the color, clamps the value, and interns the data-bar CSS color
 //! once per unique RGB triple. `CfDecorationPaint::paint` passes borrowed
 //! colors and stack vertices to the backend. Backends may allocate.
 //!
@@ -18,16 +18,15 @@ use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
 use crate::painter::{PaintColor, Painter};
 use crate::renderer::cache::ColorIntern;
-use crate::renderer::cache::color::data_bar_rgb;
-use crate::style::CellDecoration;
+use crate::renderer::cache::color::{css_rgb, data_bar_rgb};
+use crate::style::{CellDecoration, IconGlyph};
 
-/// Resolved icon decoration for a cell. The `icon` field is a String
-/// placeholder (IconSpec); icon glyphs await a font/glyph system, so the
-/// `Icon` arm of `CfDecorationPaint::paint` is a no-op for now and no
-/// painted pixel depends on a richer icon enum yet.
+/// Resolved icon decoration for a cell. Icon glyphs await a glyph-geometry
+/// system, so the `Icon` arm of `CfDecorationPaint::paint` is a no-op for now;
+/// the resolved glyph and color are preserved for that step.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CfIconPaint {
-    pub icon: String, // IconSpec placeholder — not yet painted
+    pub glyph: IconGlyph,
     pub color_rgb: [u8; 3],
 }
 
@@ -42,9 +41,10 @@ pub struct CfDataBarPaint {
     pub fill_fraction: f64,
 }
 
-/// Resolved CF decoration enum. One per cell — at most one decoration
-/// applies (icon, data bar, or rating), following IronCalc's priority model
-/// where the last-matching rule in the evaluated result order wins.
+/// Resolved CF decoration paint. One per cell. The core decoration can carry
+/// several categories at once; this resolves the one this paint step draws,
+/// in icon > data bar > rating order, matching today's single-category output
+/// until the multi-category paint lands.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CfDecorationPaint {
     Icon(CfIconPaint),
@@ -53,29 +53,33 @@ pub enum CfDecorationPaint {
 }
 
 impl CfDecorationPaint {
-    /// Resolve a core `CellDecoration` into a renderer-ready paint.
+    /// Resolve a core `CellDecoration` into a renderer-ready paint, or `None`
+    /// when no category applies. Each category is taken in paint-priority
+    /// order; the caller drops the ones this step does not draw.
     ///
     /// Takes the decoration by value: the caller owns it (the bulk fetch
-    /// hands it over through `Fetched::take_value`), so the icon name moves
-    /// instead of cloning. The data-bar color is interned here — one
-    /// `format!` per unique rgb triple per renderer lifetime, not per
+    /// hands it over through `Fetched::take_value`), so the icon glyph and
+    /// colors move instead of cloning. The data-bar color is interned here —
+    /// one `format!` per unique rgb triple per renderer lifetime, not per
     /// decorated cell per frame.
-    pub(crate) fn resolve(deco: CellDecoration, intern: &ColorIntern) -> Self {
-        match deco {
-            CellDecoration::Icon(name) => CfDecorationPaint::Icon(CfIconPaint {
-                icon: name,
-                color_rgb: [0, 0, 0], // unused until icon glyphs are painted
-            }),
-            CellDecoration::DataBar(spec) => CfDecorationPaint::DataBar(CfDataBarPaint {
-                fill_css: intern.get_rgb(data_bar_rgb(&spec)),
-                fill_fraction: spec.fraction.clamp(0.0, 1.0),
-            }),
-            // RatingSpec fields are u32; CfDecorationPaint::Rating is u8.
-            CellDecoration::Rating(spec) => CfDecorationPaint::Rating {
-                stars: spec.stars as u8,
-                filled: spec.filled as u8,
-            },
+    pub(crate) fn resolve(deco: CellDecoration, intern: &ColorIntern) -> Option<Self> {
+        if let Some(icon) = deco.icon {
+            return Some(CfDecorationPaint::Icon(CfIconPaint {
+                glyph: icon.glyph,
+                color_rgb: icon.color.as_deref().map(css_rgb).unwrap_or([0, 0, 0]),
+            }));
         }
+        if let Some(bar) = deco.data_bar {
+            return Some(CfDecorationPaint::DataBar(CfDataBarPaint {
+                fill_css: intern.get_rgb(data_bar_rgb(&bar)),
+                fill_fraction: bar.value.clamp(0.0, 1.0),
+            }));
+        }
+        // RatingSpec count/max are u32; CfDecorationPaint::Rating is u8.
+        deco.rating.map(|rating| CfDecorationPaint::Rating {
+            stars: rating.max as u8,
+            filled: rating.count as u8,
+        })
     }
 
     /// Paint this decoration over the already-filled cell `rect`, expressed
@@ -164,18 +168,36 @@ fn star_points(center: Point, outer_r: f64) -> [Point; 10] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::{DataBarSpec, RatingSpec};
+    use crate::style::{DataBarSpec, IconSpec, RatingSpec};
+
+    fn bar(color: &str, value: f64) -> DataBarSpec {
+        DataBarSpec {
+            positive_color: color.to_string(),
+            negative_color: None,
+            is_gradient: true,
+            value,
+            axis_position: 0.0,
+            show_value: true,
+        }
+    }
+
+    fn icon(glyph: IconGlyph, color: Option<&str>) -> IconSpec {
+        IconSpec {
+            glyph,
+            color: color.map(str::to_string),
+            show_value: true,
+        }
+    }
 
     #[test]
-    fn data_bar_clamps_fraction_and_normalizes_color() {
+    fn data_bar_clamps_value_and_normalizes_color() {
         let intern = ColorIntern::new();
-        let spec = DataBarSpec {
-            color: "#3366CC".to_string(),
-            fraction: 1.5, // out of range — must clamp to 1.0
+        let deco = CellDecoration {
+            data_bar: Some(bar("#3366CC", 1.5)), // out of range — must clamp
+            ..CellDecoration::default()
         };
-        let paint = CfDecorationPaint::resolve(CellDecoration::DataBar(spec), &intern);
-        match paint {
-            CfDecorationPaint::DataBar(p) => {
+        match CfDecorationPaint::resolve(deco, &intern) {
+            Some(CfDecorationPaint::DataBar(p)) => {
                 assert_eq!(&*p.fill_css, "#3366cc");
                 assert_eq!(p.fill_fraction, 1.0);
             }
@@ -186,14 +208,15 @@ mod tests {
     #[test]
     fn data_bar_reuses_one_interned_color_per_rgb() {
         let intern = ColorIntern::new();
-        let spec = DataBarSpec {
-            color: "#3366CC".to_string(),
-            fraction: 0.5,
+        let deco = || CellDecoration {
+            data_bar: Some(bar("#3366CC", 0.5)),
+            ..CellDecoration::default()
         };
-        let first = CfDecorationPaint::resolve(CellDecoration::DataBar(spec.clone()), &intern);
-        let second = CfDecorationPaint::resolve(CellDecoration::DataBar(spec), &intern);
-        match (first, second) {
-            (CfDecorationPaint::DataBar(a), CfDecorationPaint::DataBar(b)) => assert!(
+        match (
+            CfDecorationPaint::resolve(deco(), &intern),
+            CfDecorationPaint::resolve(deco(), &intern),
+        ) {
+            (Some(CfDecorationPaint::DataBar(a)), Some(CfDecorationPaint::DataBar(b))) => assert!(
                 Rc::ptr_eq(&a.fill_css, &b.fill_css),
                 "repeat colors must reuse the interned string, not re-format it"
             ),
@@ -202,14 +225,19 @@ mod tests {
     }
 
     #[test]
-    fn rating_maps_stars_and_filled() {
-        let spec = RatingSpec {
-            stars: 5,
-            filled: 3,
+    fn rating_maps_count_out_of_max() {
+        let deco = CellDecoration {
+            rating: Some(RatingSpec {
+                glyph: IconGlyph::Star,
+                color: None,
+                count: 3,
+                max: 5,
+                show_value: true,
+            }),
+            ..CellDecoration::default()
         };
-        let paint = CfDecorationPaint::resolve(CellDecoration::Rating(spec), &ColorIntern::new());
-        match paint {
-            CfDecorationPaint::Rating { stars, filled } => {
+        match CfDecorationPaint::resolve(deco, &ColorIntern::new()) {
+            Some(CfDecorationPaint::Rating { stars, filled }) => {
                 assert_eq!(stars, 5);
                 assert_eq!(filled, 3);
             }
@@ -218,18 +246,36 @@ mod tests {
     }
 
     #[test]
-    fn icon_moves_the_name_and_carries_zeroed_color() {
-        let name = "ArrowUp".to_string();
-        let name_ptr = name.as_ptr();
-        let paint = CfDecorationPaint::resolve(CellDecoration::Icon(name), &ColorIntern::new());
-        match paint {
-            CfDecorationPaint::Icon(p) => {
-                assert_eq!(p.icon, "ArrowUp");
-                assert_eq!(p.icon.as_ptr(), name_ptr, "resolution must move the name");
-                assert_eq!(p.color_rgb, [0, 0, 0]);
+    fn icon_keeps_glyph_and_resolves_color() {
+        let deco = CellDecoration {
+            icon: Some(icon(IconGlyph::ArrowUp, Some("#84cb1f"))),
+            ..CellDecoration::default()
+        };
+        match CfDecorationPaint::resolve(deco, &ColorIntern::new()) {
+            Some(CfDecorationPaint::Icon(p)) => {
+                assert_eq!(p.glyph, IconGlyph::ArrowUp);
+                assert_eq!(p.color_rgb, [0x84, 0xcb, 0x1f]);
             }
             other => panic!("expected Icon, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn empty_decoration_resolves_to_nothing() {
+        assert!(CfDecorationPaint::resolve(CellDecoration::default(), &ColorIntern::new()).is_none());
+    }
+
+    #[test]
+    fn icon_wins_over_a_present_data_bar() {
+        let deco = CellDecoration {
+            icon: Some(icon(IconGlyph::Circle, None)),
+            data_bar: Some(bar("#3366cc", 0.5)),
+            ..CellDecoration::default()
+        };
+        assert!(matches!(
+            CfDecorationPaint::resolve(deco, &ColorIntern::new()),
+            Some(CfDecorationPaint::Icon(_))
+        ));
     }
 
     #[test]

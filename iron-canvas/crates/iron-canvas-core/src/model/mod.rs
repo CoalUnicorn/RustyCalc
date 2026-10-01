@@ -41,10 +41,13 @@ pub trait CellContentQuery {
     fn get_cell_type(&self, sheet: u32, row: i32, column: i32) -> Fetched<CellKind>;
     fn get_formatted_cell_value(&self, sheet: u32, row: i32, column: i32) -> Fetched<String>;
 
-    /// Conditional-formatting *decoration* for the cell, if any: an optional
-    /// data-bar, icon-set, or rating. Despite the `_style` in the name this
-    /// returns only the `CellDecoration` — the CF dxf *fill/font* overlay is
-    /// delivered separately, already merged into the base style by
+    /// Conditional-formatting *decoration* for the cell, if any. A
+    /// `CellDecoration` can carry an icon set, a data bar, and a rating at the
+    /// same time — the engine resolves each category separately — so the model
+    /// preserves all three rather than a single winning one. Each category
+    /// keeps its resolved color and `show_value` flag. Despite the `_style` in
+    /// the name this returns only the `CellDecoration` — the CF dxf *fill/font*
+    /// overlay is delivered separately, already merged into the base style by
     /// `get_cell_styles_in`, not here. `Absent` when no CF decoration applies
     /// or when the model doesn't support CF (the renderer draws both the same).
     /// The default returns `Absent` so engines without CF support (and test
@@ -403,7 +406,14 @@ mod tests {
         fn get_extended_cell_style(&self, _s: u32, row: i32, col: i32) -> Fetched<CellDecoration> {
             match (row, col) {
                 (1, 1) => Fetched::BridgeFailed,
-                (1, 2) => Fetched::Value(CellDecoration::Icon("ArrowUp".to_string())),
+                (1, 2) => Fetched::Value(CellDecoration {
+                    icon: Some(crate::style::IconSpec {
+                        glyph: crate::style::IconGlyph::ArrowUp,
+                        color: None,
+                        show_value: true,
+                    }),
+                    ..CellDecoration::default()
+                }),
                 _ => Fetched::Absent,
             }
         }
@@ -449,7 +459,10 @@ mod tests {
 
         // Row-major: (1,1), (1,2), (2,1), (2,2).
         assert!(matches!(out[0], Fetched::BridgeFailed));
-        assert!(matches!(out[1], Fetched::Value(CellDecoration::Icon(_))));
+        assert!(matches!(
+            out[1],
+            Fetched::Value(CellDecoration { icon: Some(_), .. })
+        ));
         assert!(matches!(out[2], Fetched::Absent));
         assert!(matches!(out[3], Fetched::Absent));
     }

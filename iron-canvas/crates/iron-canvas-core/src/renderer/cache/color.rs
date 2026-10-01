@@ -8,10 +8,15 @@
 
 use crate::style::DataBarSpec;
 
-/// The data bar's fill color as `[R, G, B]`. A malformed model color falls
+/// Decode a CSS color string to `[R, G, B]`. A malformed model color falls
 /// back to black, the same value the painter falls back to.
+pub(crate) fn css_rgb(color: &str) -> [u8; 3] {
+    parse_hex_color(color).unwrap_or([0, 0, 0])
+}
+
+/// The data bar's positive-side fill color as `[R, G, B]`.
 pub(crate) fn data_bar_rgb(spec: &DataBarSpec) -> [u8; 3] {
-    parse_hex_color(&spec.color).unwrap_or([0, 0, 0])
+    css_rgb(&spec.positive_color)
 }
 
 /// Parse a `#RRGGBB` hex string into `[R, G, B]`. Returns `None` for
@@ -33,8 +38,12 @@ mod tests {
 
     fn rgb(color: &str) -> [u8; 3] {
         data_bar_rgb(&DataBarSpec {
-            color: color.to_string(),
-            fraction: 0.5,
+            positive_color: color.to_string(),
+            negative_color: None,
+            is_gradient: true,
+            value: 0.5,
+            axis_position: 0.0,
+            show_value: true,
         })
     }
 
