@@ -35,7 +35,7 @@ use self::borders::BorderPaint;
 use self::cf::CfDecorationPaint;
 use self::text::TextPaint;
 use crate::address::RCRange;
-use crate::link::LinkIndex;
+use crate::model::sheet::links::LinkIndex;
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
 use crate::renderer::prepared::FetchedCellsMut;
@@ -129,6 +129,7 @@ impl<P: Painter> RendererCore<P> {
                 .unwrap_or(CellKind::Text);
             if let Some(tp) = TextPaint::resolve_into(
                 self,
+                p.rect,
                 p.rect,
                 &p.style,
                 text,

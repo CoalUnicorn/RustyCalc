@@ -18,7 +18,7 @@ use crate::style::{CellKind, CellStyle, HAlign, VAlign};
 
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
-use crate::link::CellLink;
+use crate::model::sheet::links::CellLink;
 use crate::painter::{
     CHAR_WIDTH_FACTOR, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
 };
@@ -50,6 +50,11 @@ const MIN_UNDERLINE_OFFSET: i32 = 2;
 /// Pre-resolved text paint for one cell. Pure pixel inputs — no model access
 /// during paint. The `Vec<TextLine>` lives on the caller's reusable buffer
 /// (parked on `FrameCache::text_lines`) so resolve never allocates per cell.
+///
+/// `Clone` exists for the merge pass, which lays text out once and repaints it
+/// under each fragment's own transform: the clone carries the translated
+/// `clip`, which the clipped paint path anchors on.
+#[derive(Clone)]
 pub struct TextPaint {
     pub clip: PixelRect,
     /// Interned `ctx.font` string. `Rc::clone` on cache hit; one alloc per
@@ -79,6 +84,7 @@ pub struct TextPaint {
 /// on host-page `Cow::Owned` themes that was one alloc per text cell per frame).
 /// `Owned` carries an interned `Rc<str>` from `ColorIntern` for the per-cell
 /// font-color override — `Rc::clone` after the first sighting.
+#[derive(Clone)]
 pub enum TextColor {
     ThemeDefault,
     ThemeError,
@@ -97,21 +103,32 @@ pub struct TextLine {
 //  resolve
 
 impl TextPaint {
-    /// Build a `TextPaint` at `rect` and fill `lines` with the
-    /// resolved per-line text/width/position. Returns `None` (with `lines`
-    /// left empty) for empty/too-small cells. Formatted value AND cell type
-    /// are supplied by the caller — the grid pass drains both from the
+    /// Build a `TextPaint` laid out in `rect` and clipped to `clip`, filling
+    /// `lines` with the resolved per-line text/width/position. Returns `None`
+    /// (with `lines` left empty) for empty/too-small cells. Formatted value AND
+    /// cell type are supplied by the caller — the grid pass drains both from the
     /// prefetched value and cell-type buffers;
     /// `repaint_active_cell` reads the model directly for the active cell.
     /// Font / alignment / colour are resolved via `CellTextStyle`.
+    ///
+    /// `rect` and `clip` are the same rectangle for a single cell. They differ
+    /// for a merged range: line positioning and alignment read the full logical
+    /// rectangle, while the overflow decision and `TextPaint::clip` read the
+    /// visible fragment, so a merge scrolled partly out of view clips its text
+    /// at the visible edge instead of at the logical one.
     ///
     /// The split between `TextPaint` (per-cell scalars) and the externally
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
     /// the caller takes the buffer once for the grid segment, hands it
     /// to every cell, and parks it back on `FrameCache::text_lines`.
+    // `rect` and `clip` are separate inputs, not one rectangle: a merged cell
+    // lays text out against the logical rectangle and shows it through the
+    // visible fragment. Bundling them would hide which is which.
+    #[allow(clippy::too_many_arguments)]
     pub fn resolve_into<P: Painter>(
         renderer: &RendererCore<P>,
         rect: PixelRect,
+        clip: PixelRect,
         style: &CellStyle,
         text: String,
         cell_type: CellKind,
@@ -168,10 +185,10 @@ impl TextPaint {
 
         position_lines(lines, h_align, v_align, rect, size_px, line_height);
 
-        let needs_clip = lines_escape_cell(lines, usable_w, rect, line_height);
+        let needs_clip = lines_escape_cell(lines, usable_w, clip, line_height);
 
         Some(TextPaint {
-            clip: rect,
+            clip,
             font_css,
             font_size_px: size_px,
             color: text_color,
@@ -488,7 +505,7 @@ mod tests {
     use super::*;
     use crate::address::RCRange;
     use crate::geometry::prim::Point;
-    use crate::link::{CellLink, LinkTarget};
+    use crate::model::sheet::links::{CellLink, LinkTarget};
 
     fn link(color: Option<&str>, dynamic: bool) -> CellLink {
         CellLink::new(

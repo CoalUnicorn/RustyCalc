@@ -43,16 +43,21 @@ pub(super) fn compute_cursor_hint(icv: CanvasHandle, x: f64, y: f64) -> HoverHin
         HitTest::AutofillHandle { .. } => HoverHint::plain(CursorHint::Autofill),
         HitTest::FormulaRef { zone, .. } => HoverHint::plain(ref_zone_hint(zone)),
         HitTest::Cell { row, column } => {
-            let link = with_canvas(icv, |ic| ic.link_at(row, column))
+            // Resolve the *logical* cell: a merged range is one cell whose
+            // anchor owns the link, so probing the physical address would miss
+            // a link the user can plainly see under the pointer. The reported
+            // cell stays the physical one — the tooltip is positioned against
+            // what the pointer is over, and drag/resize keep physical coords.
+            let linked = with_canvas(icv, |ic| ic.display_cell_at(x, y))
                 .flatten()
-                .is_some();
+                .is_some_and(|cell| cell.link.is_some());
             HoverHint {
-                cursor: if link {
+                cursor: if linked {
                     CursorHint::Pointer
                 } else {
                     CursorHint::Cell
                 },
-                link_cell: link.then_some((row, column)),
+                link_cell: linked.then_some((row, column)),
             }
         }
         HitTest::ColumnHeader(_) | HitTest::RowHeader(_) | HitTest::Corner | HitTest::Outside => {

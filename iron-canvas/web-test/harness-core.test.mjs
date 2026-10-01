@@ -49,6 +49,7 @@ test("dense range methods count one crossing and bypass scalar wrappers", () => 
         getCellType: (_sheet, row, column) => row + column,
         getFormattedCellValue: (_sheet, row, column) => `${row},${column}`,
         getLinks: (sheet) => [{ row: sheet + 1, column: 1, dynamic: false, type: "External", target: "https://example.com" }],
+        getMergedCells: (sheet) => [{ row: sheet + 1, column: 1, width: 2, height: 2 }],
     };
     const bridge = installDenseRangeMethods(model);
 
@@ -65,6 +66,8 @@ test("dense range methods count one crossing and bypass scalar wrappers", () => 
     assert.equal(bridge.counts.getCellStyle, 1);
     model.getLinks(0);
     assert.equal(bridge.counts.getLinks, 1);
+    model.getMergedCells(0);
+    assert.equal(bridge.counts.getMergedCells, 1);
     bridge.reset();
     assert.deepEqual(bridge.snapshot(), {
         getCellStyle: 0,
@@ -74,6 +77,7 @@ test("dense range methods count one crossing and bypass scalar wrappers", () => 
         getFormattedCellValuesIn: 0,
         getCellTypesIn: 0,
         getLinks: 0,
+        getMergedCells: 0,
     });
 });
 

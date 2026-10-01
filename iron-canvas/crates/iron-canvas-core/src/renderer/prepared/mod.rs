@@ -10,6 +10,7 @@ use crate::model::fetched::Fetched;
 use crate::painter::Painter;
 use crate::renderer::RendererCore;
 use crate::renderer::cache::fingerprint::GridFingerprint;
+use crate::renderer::merge::PreparedMerge;
 use crate::style::{CellDecoration, CellKind, CellStyle};
 
 mod execute;
@@ -225,10 +226,21 @@ pub(crate) struct PreparedStrip {
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum PreparedGrid {
     Empty,
+    /// Full-grid preparation.
+    ///
+    /// Invariants:
+    /// - `merges[..].fragments` never overlap: each fragment is an
+    ///   intersection with one segment of the layout partition.
+    /// - A merge-affected attempt is always a `GridWork::Fresh` build, so
+    ///   `repaint.plan` is `Full` and the fingerprint comparison is never
+    ///   consulted; `prepare_full_grid` additionally returns `Full` whenever
+    ///   `merges` is non-empty, so a future optimized path cannot skip a merge
+    ///   repaint through the fingerprint.
     Full {
         layout: GridLayout,
         segments: [Option<SegmentData>; 4],
         repaint: PreparedRepaint,
+        merges: Vec<PreparedMerge>,
     },
     Damage {
         layout: GridLayout,

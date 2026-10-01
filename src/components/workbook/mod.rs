@@ -342,11 +342,15 @@ fn paste_from_clipboard(
         let mut pasted = false;
         clipboard_store.with_value(|opt| {
             if let Some(acb) = opt {
-                mutate(model, EvaluationMode::Immediate, |m| {
-                    if let Err(e) = acb.paste(m, PasteMode::Copy) {
-                        web_sys::console::warn_1(&format!("[ironcalc] paste failed: {e}").into());
-                    }
+                // The engine owns the acceptance rule: a paste whose range
+                // only partly overlaps a merged cell is rejected, and the user
+                // must see why instead of a sheet that silently did not change.
+                let result = try_mutate(model, EvaluationMode::Immediate, |m| {
+                    acb.paste(m, PasteMode::Copy)
                 });
+                if let Err(error) = result {
+                    state.status.set(Some(StatusMessage::Error(error)));
+                }
                 pasted = true;
             }
         });

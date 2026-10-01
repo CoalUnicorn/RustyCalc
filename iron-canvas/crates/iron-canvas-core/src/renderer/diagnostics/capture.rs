@@ -135,6 +135,7 @@ impl<P: crate::painter::Painter> crate::renderer::RendererCore<P> {
             RepaintReason::ChangedCells => DiagRepaintReason::ChangedCells,
             RepaintReason::ChangedRows => DiagRepaintReason::ChangedRows,
             RepaintReason::ClipAlignment => DiagRepaintReason::ClipAlignment,
+            RepaintReason::Merge => DiagRepaintReason::Merge,
         });
         capture.repaint.changed_rows = changed_rows.to_vec();
         capture.repaint.changed_cells = changed_cells

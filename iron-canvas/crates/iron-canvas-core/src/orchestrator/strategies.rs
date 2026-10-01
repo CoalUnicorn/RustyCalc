@@ -195,6 +195,7 @@ where
         // attempt must install the previously committed one instead, so the
         // committed handle is saved before `Chrome::next` consumes `prev`.
         let committed_links = Rc::clone(prev.links_rc());
+        let committed_merges = Rc::clone(prev.merges_rc());
         let frame = Chrome::next(Some(prev), model, inputs, FramePath::SlotsReuse);
         match self.grid.paint_grid_damage(model, &frame, &spans) {
             GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
@@ -205,6 +206,7 @@ where
             GridPaintOutcome::Held => {
                 let mut frame = frame;
                 frame.attach_links(committed_links);
+                frame.attach_merges(committed_merges);
                 AttemptOutcome::Held {
                     retry: retry_grid_wide(work),
                     frame: FrameUpdate::Replace(frame),
@@ -231,6 +233,7 @@ where
         // See `render_damaged_rows`: save the committed link handle before
         // `Chrome::next` refreshes the candidate's from `inputs`.
         let committed_links = Rc::clone(prev.links_rc());
+        let committed_merges = Rc::clone(prev.merges_rc());
         let frame = Chrome::next(Some(prev), model, inputs, FramePath::SlotsReuse);
         match self.grid.paint_grid(model, &frame) {
             GridPaintOutcome::Committed(cache_commit) => AttemptOutcome::GridCommitted {
@@ -241,6 +244,7 @@ where
             GridPaintOutcome::Held => {
                 let mut frame = frame;
                 frame.attach_links(committed_links);
+                frame.attach_merges(committed_merges);
                 AttemptOutcome::Held {
                     retry: retry_grid_wide(work),
                     frame: FrameUpdate::Replace(frame),

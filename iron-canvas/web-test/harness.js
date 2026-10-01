@@ -168,7 +168,21 @@ async function fetchDemoModel(id) {
             `Could not load ${demo.compiled} (${response.status}). Run \"make demos\" or \"make serve\" first.`,
         );
     }
-    return Model.fromBytes(new Uint8Array(await response.arrayBuffer()), "en");
+    return modelFromBytes(new Uint8Array(await response.arrayBuffer()), "en");
+}
+
+/**
+ * Decode a compiled `.ic` workbook. The upstream binding renamed this static
+ * from `from_bytes` to `fromBytes`; accept either so the harness runs against
+ * both the vendored package and a freshly built one (and therefore can
+ * exercise `getMergedCells`, which only a current build exposes).
+ */
+function modelFromBytes(bytes, language) {
+    const decode = Model.fromBytes ?? Model.from_bytes;
+    if (typeof decode !== "function") {
+        throw new Error("the vendored IronCalc package exposes no fromBytes/from_bytes");
+    }
+    return decode.call(Model, bytes, language);
 }
 
 async function loadWorkbook(id) {
@@ -671,8 +685,42 @@ async function runChecksOnce() {
         if (bulk === 0) throw new Error(`No bulk calls observed: ${JSON.stringify(counts)}`);
         // Frame capture reads the active cell through scalar accessors; the
         // dense pane itself must stay on the three range methods.
-        if (scalar > 4) throw new Error(`Observed ${scalar} scalar crossings`);
-        return `${bulk} bulk calls, ${scalar} per-cell calls`;
+        //
+        // The active-cell *overlay* is the one other legitimate scalar reader:
+        // it restores a single logical cell on the overlay surface, which has
+        // no fetched buffers, so it reads that cell's fill/borders/text from the
+        // model. When the active cell is a merged range that cost is the anchor
+        // plus the merge's visible perimeter, so the allowance follows the
+        // merge's visible span instead of being a constant.
+        const selected = model.getSelectedView();
+        const merge = (model.getMergedCells(selected.sheet) ?? []).find(
+            (mc) =>
+                selected.row >= mc.row &&
+                selected.row < mc.row + mc.height &&
+                selected.column >= mc.column &&
+                selected.column < mc.column + mc.width,
+        );
+        let allowance = 4;
+        if (merge) {
+            const fragments = canvas.visibleFragments(
+                merge.row,
+                merge.column,
+                merge.row + merge.height - 1,
+                merge.column + merge.width - 1,
+            );
+            const span = fragments.reduce(
+                (sum, fragment) =>
+                    sum +
+                    (fragment.range.c2 - fragment.range.c1 + 1) +
+                    (fragment.range.r2 - fragment.range.r1 + 1),
+                0,
+            );
+            allowance += 4 + 2 * span;
+        }
+        if (scalar > allowance) {
+            throw new Error(`Observed ${scalar} scalar crossings (allowance ${allowance})`);
+        }
+        return `${bulk} bulk calls, ${scalar} per-cell calls (allowance ${allowance})`;
     });
 
     await check("frameTrace and recordingSupported are always callable", () => {
@@ -769,6 +817,402 @@ async function runChecksOnce() {
             drainPaint();
         }
         return `${cases.length} links, getLinks crossed ${bridge.counts.getLinks}×`;
+    });
+
+    await check("merged cells bridge reads upstream getMergedCells and resolve covered cells", () => {
+        const sheet = model.getSelectedSheet();
+        // Scratch block, clear of every demo fixture so the check runs against
+        // whichever workbook the harness loaded. A merge with no content is
+        // accepted; the anchor gets one text cell afterwards.
+        const firstRow = 200;
+        const lastRow = 207;
+        const firstColumn = 1;
+        const lastColumn = 2;
+        for (let row = firstRow; row <= lastRow; row += 1) {
+            for (let column = firstColumn; column <= lastColumn; column += 1) {
+                model.setUserInput(sheet, row, column, "");
+            }
+        }
+        const area = {
+            sheet,
+            row: firstRow,
+            column: firstColumn,
+            width: lastColumn - firstColumn + 1,
+            height: lastRow - firstRow + 1,
+        };
+        model.setUserInput(sheet, firstRow, firstColumn, "merged");
+        model.mergeCells(area);
+        model.evaluate();
+        // The scratch block must be on screen: every other check left the view
+        // wherever it finished, and `cellRect` answers null off-viewport.
+        model.setTopLeftVisibleCell(firstRow - 1, firstColumn);
+        canvas.viewChanged();
+
+        bridge.reset();
+        canvas.markContentDirty();
+        drainPaint();
+        if (bridge.counts.getMergedCells === 0) {
+            throw new Error("A committed paint never crossed getMergedCells");
+        }
+
+        // Parity: the renderer's committed geometry must agree with the
+        // engine's own merged list. Demo workbooks ship their own merges, so
+        // locate the scratch merge rather than assuming it is the only one.
+        const engine = model.getMergedCells(sheet);
+        const expected = engine.find(
+            (mc) => mc.row === area.row && mc.column === area.column,
+        );
+        if (!expected) {
+            throw new Error(`engine does not report the scratch merge: ${JSON.stringify(engine)}`);
+        }
+
+        const assertResolvesToAnchor = (label, row, column) => {
+            const rect = canvas.cellRect(row, column);
+            if (!rect) throw new Error(`${label}: cell R${row}C${column} is not visible`);
+            const hit = canvas.displayCellAt(rect.top_left.x + 2, rect.top_left.y + 2);
+            if (!hit) throw new Error(`${label}: displayCellAt returned null`);
+            if (hit.row !== row || hit.column !== column) {
+                throw new Error(`${label}: physical cell ${hit.row},${hit.column}`);
+            }
+            if (hit.anchor.r1 !== expected.row || hit.anchor.c1 !== expected.column) {
+                throw new Error(
+                    `${label}: anchor ${JSON.stringify(hit.anchor)} != engine anchor ${expected.row},${expected.column}`,
+                );
+            }
+            if (
+                hit.merged.r1 !== expected.row ||
+                hit.merged.c1 !== expected.column ||
+                hit.merged.r2 !== expected.row + expected.height - 1 ||
+                hit.merged.c2 !== expected.column + expected.width - 1
+            ) {
+                throw new Error(`${label}: merged ${JSON.stringify(hit.merged)} != engine merge`);
+            }
+            const size = canvas.canvasSize();
+            if (hit.fragment.top_left.x < 0 || hit.fragment.top_left.y < 0) {
+                throw new Error(`${label}: fragment starts off-canvas ${JSON.stringify(hit.fragment)}`);
+            }
+            if (
+                hit.fragment.top_left.x + hit.fragment.width > size.w + 1 ||
+                hit.fragment.top_left.y + hit.fragment.height > size.h + 1
+            ) {
+                throw new Error(`${label}: fragment escapes the canvas ${JSON.stringify(hit.fragment)}`);
+            }
+        };
+
+        try {
+            // Anchor visible: a covered cell resolves to it.
+            assertResolvesToAnchor("anchor visible", firstRow + 1, firstColumn + 1);
+
+            // Anchor offscreen: scroll so the merge's first rows leave the
+            // viewport while covered rows stay visible. The covered cell must
+            // still report the offscreen anchor.
+            model.setTopLeftVisibleCell(lastRow - 1, firstColumn);
+            canvas.viewChanged();
+            canvas.markContentDirty();
+            drainPaint();
+            assertResolvesToAnchor("anchor offscreen", lastRow, firstColumn);
+        } finally {
+            model.unmergeCells(area);
+            for (let row = firstRow; row <= lastRow; row += 1) {
+                model.setUserInput(sheet, row, firstColumn, "");
+            }
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+        return `merge ${JSON.stringify(expected)}, getMergedCells crossed ${bridge.counts.getMergedCells}×`;
+    });
+
+    await check("a click inside a merge selects its anchor and the editor fragment covers it", () => {
+        const sheet = model.getSelectedSheet();
+        const firstRow = 220;
+        const lastRow = 227;
+        const firstColumn = 4;
+        const lastColumn = 5;
+        for (let row = firstRow; row <= lastRow; row += 1) {
+            for (let column = firstColumn; column <= lastColumn; column += 1) {
+                model.setUserInput(sheet, row, column, "");
+            }
+        }
+        const area = {
+            sheet,
+            row: firstRow,
+            column: firstColumn,
+            width: lastColumn - firstColumn + 1,
+            height: lastRow - firstRow + 1,
+        };
+        model.setUserInput(sheet, firstRow, firstColumn, "merged");
+        model.mergeCells(area);
+        model.evaluate();
+        model.setTopLeftVisibleCell(firstRow - 1, firstColumn);
+        canvas.viewChanged();
+        canvas.markContentDirty();
+        drainPaint();
+
+        try {
+            // The engine normalizes the selection: naming a covered cell selects
+            // the whole merged range and reports the anchor, which is the
+            // address the host then uses for the editor and the active cell.
+            model.setSelectedCell(lastRow, lastColumn);
+            canvas.viewChanged();
+            drainPaint();
+            const view = model.getSelectedView();
+            if (view.row !== firstRow || view.column !== firstColumn) {
+                throw new Error(
+                    `selection did not snap to the anchor: ${view.row},${view.column}`,
+                );
+            }
+            const [r1, c1, r2, c2] = view.range;
+            if (r1 !== firstRow || c1 !== firstColumn || r2 !== lastRow || c2 !== lastColumn) {
+                throw new Error(`selection range is not the merge: ${JSON.stringify(view.range)}`);
+            }
+
+            // Editor placement primitives: one fragment spanning the whole
+            // merge, strictly larger than the anchor's own cell.
+            const fragments = canvas.visibleFragments(firstRow, firstColumn, lastRow, lastColumn);
+            if (fragments.length !== 1) {
+                throw new Error(`expected one merge fragment, got ${JSON.stringify(fragments)}`);
+            }
+            const anchorCell = canvas.cellRect(firstRow, firstColumn);
+            if (
+                fragments[0].rect.width <= anchorCell.width ||
+                fragments[0].rect.height <= anchorCell.height
+            ) {
+                throw new Error(
+                    `merge fragment ${JSON.stringify(fragments[0].rect)} is not larger than the anchor cell`,
+                );
+            }
+
+            // `displayCellAt` (the editor's primary path) resolves a covered
+            // cell to that same fragment.
+            const covered = canvas.cellRect(lastRow, lastColumn);
+            const hit = canvas.displayCellAt(covered.top_left.x + 2, covered.top_left.y + 2);
+            if (!hit) throw new Error("displayCellAt returned null over a covered cell");
+            if (
+                hit.fragment.width !== fragments[0].rect.width ||
+                hit.fragment.top_left.y !== fragments[0].rect.top_left.y
+            ) {
+                throw new Error(
+                    `displayCellAt fragment ${JSON.stringify(hit.fragment)} != visibleFragments ${JSON.stringify(fragments[0].rect)}`,
+                );
+            }
+
+            // Anchor scrolled out of view: the fallback path must still answer
+            // with the visible part of the merge, inside the canvas.
+            model.setTopLeftVisibleCell(lastRow - 1, firstColumn);
+            canvas.viewChanged();
+            canvas.markContentDirty();
+            drainPaint();
+            const scrolled = canvas.visibleFragments(firstRow, firstColumn, lastRow, lastColumn);
+            if (scrolled.length !== 1) {
+                throw new Error(`scrolled: expected one fragment, got ${JSON.stringify(scrolled)}`);
+            }
+            const size = canvas.canvasSize();
+            if (
+                scrolled[0].rect.top_left.x < 0 ||
+                scrolled[0].rect.top_left.y < 0 ||
+                scrolled[0].rect.top_left.x + scrolled[0].rect.width > size.w + 1 ||
+                scrolled[0].rect.top_left.y + scrolled[0].rect.height > size.h + 1
+            ) {
+                throw new Error(`scrolled fragment escapes the canvas: ${JSON.stringify(scrolled[0].rect)}`);
+            }
+            if (scrolled[0].rect.top_left.y > fragments[0].rect.top_left.y) {
+                throw new Error(
+                    `scrolled fragment moved down: before ${JSON.stringify(fragments[0].rect)} after ${JSON.stringify(scrolled[0].rect)}`,
+                );
+            }
+        } finally {
+            model.unmergeCells(area);
+            for (let row = firstRow; row <= lastRow; row += 1) {
+                model.setUserInput(sheet, row, firstColumn, "");
+            }
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+        return "selection snapped to the anchor; one editor fragment per merge";
+    });
+
+    await check("a throwing or malformed getMergedCells holds the attempt", () => {
+        const sheet = model.getSelectedSheet();
+        const firstRow = 240;
+        const firstColumn = 7;
+        const area = { sheet, row: firstRow, column: firstColumn, width: 2, height: 2 };
+        for (let row = firstRow; row <= firstRow + 1; row += 1) {
+            for (let column = firstColumn; column <= firstColumn + 1; column += 1) {
+                model.setUserInput(sheet, row, column, "");
+            }
+        }
+        model.setUserInput(sheet, firstRow, firstColumn, "held-merge");
+        model.mergeCells(area);
+        model.evaluate();
+        model.setTopLeftVisibleCell(firstRow - 1, firstColumn);
+        canvas.viewChanged();
+        canvas.markContentDirty();
+        drainPaint();
+
+        const covered = canvas.cellRect(firstRow + 1, firstColumn + 1);
+        const probe = { x: covered.top_left.x + 2, y: covered.top_left.y + 2 };
+        const committed = canvas.displayCellAt(probe.x, probe.y);
+        if (!committed) throw new Error("the committed merge must resolve before the hold");
+        const healthy = model.getMergedCells;
+
+        const assertHeld = (label) => {
+            canvas.markContentDirty();
+            const outcomes = drainPaint();
+            if (outcomes.at(-1) === RenderResult.Idle && !outcomes.includes(RenderResult.RetryRequired)) {
+                throw new Error(`${label}: expected a held attempt, got ${outcomes.join(",")}`);
+            }
+            const after = canvas.displayCellAt(probe.x, probe.y);
+            if (!after) throw new Error(`${label}: the held attempt dropped the merge geometry`);
+            if (after.anchor.r1 !== committed.anchor.r1 || after.merged.r2 !== committed.merged.r2) {
+                throw new Error(`${label}: the held attempt changed committed merge geometry`);
+            }
+        };
+
+        try {
+            // A host whose method throws is a wire-shape failure: hold, never
+            // paint a sheet with the merges silently missing.
+            model.getMergedCells = () => {
+                throw new Error("bridge down");
+            };
+            assertHeld("throwing");
+
+            // A record whose extent cannot become geometry is malformed data:
+            // hold too, since the JS host is untrusted.
+            model.getMergedCells = () => [{ row: firstRow, column: firstColumn, width: 0, height: 1 }];
+            assertHeld("malformed");
+        } finally {
+            model.getMergedCells = healthy;
+            model.unmergeCells(area);
+            model.setUserInput(sheet, firstRow, firstColumn, "");
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+
+        // Recovered: the healthy bridge commits again.
+        if (drainPaint().at(-1) !== RenderResult.Idle) {
+            throw new Error("the healthy bridge must settle back to Idle");
+        }
+        return "throwing and malformed merge lists both hold, committed geometry survives";
+    });
+
+    await check("SVG export paints an offscreen merged anchor's text", () => {
+        const sheet = model.getSelectedSheet();
+        const firstRow = 260;
+        const firstColumn = 10;
+        const lastRow = firstRow + 7;
+        const area = { sheet, row: firstRow, column: firstColumn, width: 2, height: 8 };
+        for (let row = firstRow; row <= lastRow; row += 1) {
+            for (let column = firstColumn; column <= firstColumn + 1; column += 1) {
+                model.setUserInput(sheet, row, column, "");
+            }
+        }
+        model.setUserInput(sheet, firstRow, firstColumn, "svg-merge");
+        model.mergeCells(area);
+        model.evaluate();
+        // Scroll the anchor out of the viewport: only covered cells are on
+        // screen, so the per-cell pass cannot paint the anchor's text — the
+        // export's only possible source is the merge pass.
+        model.setTopLeftVisibleCell(lastRow - 1, firstColumn);
+        canvas.viewChanged();
+        canvas.markContentDirty();
+        drainPaint();
+
+        try {
+            const size = canvas.canvasSize();
+            const svg = canvas.exportSvg(size.w, size.h);
+            if (!svg.startsWith("<svg")) {
+                throw new Error("exportSvg did not return an SVG document");
+            }
+            const occurrences = svg.split("svg-merge").length - 1;
+            if (occurrences !== 1) {
+                throw new Error(
+                    `an offscreen anchor's value must be exported exactly once, got ${occurrences}`,
+                );
+            }
+        } finally {
+            model.unmergeCells(area);
+            model.setUserInput(sheet, firstRow, firstColumn, "");
+            model.evaluate();
+            canvas.markContentDirty();
+            drainPaint();
+        }
+        // PDF export has no host binding yet (`exportSvg` is the only export
+        // surface on `IronCanvas`), so PDF parity cannot be asserted here.
+        return "offscreen merged anchor exported exactly once";
+    });
+
+    await check("merged grid and active overlay match a forced-Fresh repaint", () => {
+        const sheet = model.getSelectedSheet();
+        const area = { sheet, row: 320, column: 12, width: 3, height: 5 };
+        const dpr = window.devicePixelRatio || 1;
+        const originalSize = canvas.canvasSize();
+        const clearCells = () => {
+            for (let r = area.row; r < area.row + area.height; r += 1) {
+                for (let c = area.column; c < area.column + area.width; c += 1) {
+                    model.setUserInput(sheet, r, c, "");
+                }
+            }
+        };
+        clearOverlays();
+        canvas.setTheme(LIGHT_THEME);
+        clearCells();
+        model.setUserInput(sheet, area.row, area.column, "merged raster");
+        model.mergeCellsCenter(area);
+        model.setSelectedCell(area.row, area.column);
+        model.setTopLeftVisibleCell(area.row, area.column);
+        model.evaluate();
+        canvas.requestRepaint();
+        drainPaint();
+        let cases = 0;
+        const verify = (label, signal) => {
+            signal(canvas);
+            drainPaint();
+            const fresh = renderFreshReference(canvas.canvasSize(), dpr);
+            signal(fresh.canvas);
+            drain(fresh.canvas);
+            for (const layer of ["grid", "overlay"]) {
+                const diff = rasterDiff(layerPixels(fresh[layer]), layerPixels(elements[layer]), elements[layer].width);
+                if (diff !== null) {
+                    throw new Error(`${label}: ${layer}: ${JSON.stringify(diff)}`);
+                }
+            }
+            cases += 1;
+        };
+        try {
+            verify("merged baseline", () => {});
+            verify("merged overlay", (c) => c.requestOverlayRepaint());
+            model.setUserInput(sheet, area.row, area.column, "edited merge");
+            model.evaluate();
+            verify("merged edit", (c) => c.markContentDirty());
+            model.undo();
+            model.evaluate();
+            verify("merged undo", (c) => c.markContentDirty());
+            model.setTopLeftVisibleCell(area.row + 2, area.column + 1);
+            verify("offscreen merged anchor", (c) => c.viewChanged());
+            verify("merged resize", (c) => {
+                c.resize(originalSize.w - 32, originalSize.h - 24, dpr);
+                c.requestRepaint();
+            });
+            if (model.getWorksheetsProperties().length > 1) {
+                model.setSelectedSheet(sheet === 0 ? 1 : 0);
+                canvas.viewChanged();
+                drainPaint();
+                model.setSelectedSheet(sheet);
+                verify("return to merged sheet", (c) => c.viewChanged());
+            }
+        } finally {
+            model.setSelectedSheet(sheet);
+            model.unmergeCells(area);
+            clearCells();
+            model.evaluate();
+            canvas.resize(originalSize.w, originalSize.h, dpr);
+            canvas.requestRepaint();
+            drainPaint();
+        }
+        return `${cases} exact grid and overlay ImageData comparisons at DPR ${dpr}`;
     });
 
     await check("retained link raster matches a forced-Fresh repaint", () => {

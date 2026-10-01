@@ -198,7 +198,8 @@ pub fn summarize(event: &SpreadsheetEvent) -> BatchFacts {
             | StructureEvent::WorksheetDeleted { sheet }
             | StructureEvent::WorksheetRenamed { sheet, .. }
             | StructureEvent::WorksheetHidden { sheet }
-            | StructureEvent::WorksheetUnhidden { sheet, .. } => (
+            | StructureEvent::WorksheetUnhidden { sheet, .. }
+            | StructureEvent::MergedCellsChanged { sheet } => (
                 HostBatchKind::Structure,
                 Some(HostScope::Sheet { sheet: *sheet }),
                 Some(*sheet),

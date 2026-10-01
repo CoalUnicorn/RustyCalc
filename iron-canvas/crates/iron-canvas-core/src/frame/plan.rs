@@ -2,12 +2,14 @@
 //! attempt into a closed `FramePlan`.
 //!
 //! `plan_frame` is pure: everything it needs is either inside the taken
-//! `PendingWork` and the `FrameDelta`, the current sheet, or the captured
-//! selection visibility. `GridWork` is the single authority for the
-//! `RenderStrategy` tag.
+//! `PendingWork` and the `FrameDelta`, the current sheet, the captured
+//! selection visibility, or the already-classified merge impact
+//! ([`MergeImpact`]). It inspects no geometry itself. `GridWork` is the single
+//! authority for the `RenderStrategy` tag.
 
 use serde::{Deserialize, Serialize};
 
+use crate::chrome::merge::MergeImpact;
 use crate::frame::delta::{BlitPlan, FrameDelta, RebuildReason};
 use crate::frame::work::{ContentWork, PendingWork, RowSpan};
 
@@ -93,6 +95,11 @@ pub(crate) enum OverlayWork {
     Paint,
 }
 
+/// True when a merge makes this attempt a `GridWork::Fresh`.
+fn merge_forces_fresh(impact: MergeImpact) -> bool {
+    matches!(impact, MergeImpact::Visible | MergeImpact::Changed)
+}
+
 /// The closed output of `plan_frame`: everything `render_pending` needs to
 /// dispatch one paint attempt, plus the taken `PendingWork` the plan was
 /// built from — owned here so a held/retried arm has it to merge back into
@@ -117,13 +124,16 @@ pub(crate) struct FramePlan {
 }
 
 /// Build the plan for one paint attempt from its taken `PendingWork` and the
-/// `FrameDelta` `Chrome::classify` returned for it. Pure: everything it
-/// needs is either already inside `work`/`delta`, the current sheet (used
-/// only to check whether row-content work was recorded against the sheet
-/// still on screen — a `Stable`/`Scroll` delta already proves that sheet
-/// agrees with the committed frame's, so no `last_frame` access is needed
-/// here), or — the one additional overlay-policy input — `show_selection`,
-/// the frame's captured selection visibility.
+/// `FrameDelta` `Chrome::classify` returned for it. Pure: everything it needs
+/// is either already inside `work`/`delta`, the current sheet (used only to
+/// check whether row-content work was recorded against the sheet still on
+/// screen — a `Stable`/`Scroll` delta already proves that sheet agrees with
+/// the committed frame's, so no `last_frame` access is needed here), or one of
+/// the three already-decided inputs the caller passes in — `show_selection`
+/// (the frame's captured selection visibility), `links_changed` (the committed
+/// link digest moved), and `merge_impact` (the merge table's classified
+/// impact on this attempt's geometry, decided at the geometry boundary in
+/// `chrome::merge`). This function inspects no `Chrome`.
 ///
 /// Implements the Stage 3 planner table, cheapest arm first:
 ///
@@ -178,6 +188,7 @@ pub(crate) fn plan_frame(
     sheet: u32,
     show_selection: bool,
     links_changed: bool,
+    merge_impact: MergeImpact,
 ) -> FramePlan {
     let rebuild_reason = match delta {
         FrameDelta::Rebuild(reason) => Some(reason),
@@ -231,6 +242,7 @@ pub(crate) fn plan_frame(
     if !work.has_content()
         && !work.has_geometry()
         && !links_changed
+        && !merge_forces_fresh(merge_impact)
         && let FrameDelta::Scroll(plan) = delta
     {
         return FramePlan {
@@ -246,15 +258,39 @@ pub(crate) fn plan_frame(
     // already claimed every attempt whose pixels actually move, so a view
     // mark surviving to here means the movement stayed inside the
     // committed frame (ordinary arrow-key selection, the single most common
-    // interaction in the app). Only content and geometry exclude this
-    // fallback.
+    // interaction in the app).
+    //
+    // Excluded by content, geometry, and a *changed* merge table. The last one
+    // is not about pixels: an overlay-only commit installs the committed frame
+    // unchanged, so a table the capture just discovered would be dropped and
+    // its geometry would stay wrong until some other attempt forced a rebuild.
+    // A merely *visible* merge is fine here — those pixels are already
+    // committed, and an overlay repaint does not touch them.
     if (work.has_overlay() || work.has_view())
         && !work.has_content()
         && !work.has_geometry()
+        && !matches!(merge_impact, MergeImpact::Changed)
         && reusable
     {
         return FramePlan {
             grid: GridWork::None,
+            overlay: OverlayWork::Paint,
+            consumes: work,
+            rebuild_reason,
+        };
+    }
+
+    // Merge escalation. A merge must never be repainted by a fast path that
+    // does not paint merges (Damage strips, Blit strips), and a rebuilt frame
+    // must commit its merge geometry with the pixels that used it. An
+    // overlay-only attempt on stable geometry is already claimed above and
+    // needs no grid work. Everything reaching here touches the grid (content,
+    // geometry, or a moved viewport), so `Visible`/`Changed` rebuilds.
+    // Deliberately side by side with the link escalation above: the two
+    // metadata channels are independent.
+    if merge_forces_fresh(merge_impact) {
+        return FramePlan {
+            grid: GridWork::Fresh,
             overlay: OverlayWork::Paint,
             consumes: work,
             rebuild_reason,

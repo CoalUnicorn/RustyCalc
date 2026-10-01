@@ -24,17 +24,21 @@ pub fn handle_mouseup(_ev: web_sys::MouseEvent, model: ModelStore, state: Workbo
     }
 
     if let DragState::Extending { to_row, to_col } = state.drag.get_untracked() {
+        // The same normalization the ghost used: submitting the raw pointer cell
+        // would ask the engine for an extent the preview never showed, and a
+        // target inside a merge is rejected outright.
+        let target = super::autofill::resolved_fill_target(model, to_row, to_col);
         match try_mutate(
             model,
             EvaluationMode::Immediate,
             |m| -> Result<(), StructError> {
                 let norm = CellArea::from_view(m).normalized();
                 let area = norm.to_area(m.get_selected_sheet());
-                if to_row < norm.r1 || to_row > norm.r2 {
-                    m.auto_fill_rows(&area, to_row)
+                if target.row < norm.r1 || target.row > norm.r2 {
+                    m.auto_fill_rows(&area, target.row)
                         .map_err(StructError::Engine)?;
                 } else {
-                    m.auto_fill_columns(&area, to_col)
+                    m.auto_fill_columns(&area, target.col)
                         .map_err(StructError::Engine)?;
                 }
                 Ok(())

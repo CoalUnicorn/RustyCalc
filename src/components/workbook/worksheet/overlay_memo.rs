@@ -17,6 +17,7 @@ use iron_canvas_core::address::AutofillTarget;
 use leptos::prelude::*;
 
 use crate::coord::{ActiveRef, CellArea};
+use crate::input::mouse::resolved_fill_target;
 use crate::state::{DragState, ModelStore, WorkbookState};
 
 /// Named so the subscribe-Effect's `prev: Option<OverlayTuple>` reads
@@ -32,10 +33,10 @@ pub(super) struct OverlayTuple {
 pub(super) fn reactive_overlay(state: WorkbookState, model: ModelStore) -> Memo<OverlayTuple> {
     Memo::new(move |_| {
         let extend_to = if let DragState::Extending { to_row, to_col } = state.drag.get() {
-            Some(AutofillTarget {
-                row: to_row,
-                col: to_col,
-            })
+            // The ghost shows the extent the engine will accept, through the
+            // same helper the commit uses: a target inside a merge would promise
+            // a fill that cuts it, which the engine rejects.
+            Some(resolved_fill_target(model, to_row, to_col))
         } else {
             None
         };

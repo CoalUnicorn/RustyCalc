@@ -9,6 +9,7 @@
 
 pub(crate) mod delta;
 pub(crate) mod inputs;
+pub(crate) mod metadata;
 pub(crate) mod plan;
 pub(crate) mod report;
 pub(crate) mod work;
@@ -19,6 +20,7 @@ mod plan_tests;
 pub(crate) use delta::AxisRange;
 pub use delta::{BlitPlan, FrameDelta, RebuildReason, Shift};
 pub use inputs::{FrameInputFailure, FrameInputs};
+pub(crate) use metadata::MetadataSnapshot;
 pub use plan::RenderStrategy;
 pub(crate) use plan::{GridWork, OverlayWork, plan_frame};
 pub use report::{BlitFallback, FrameOutcome, FrameTrace, GridVerdict, PaintResult};

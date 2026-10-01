@@ -149,6 +149,7 @@ fn horizontal_alignment_keeps_text_and_decoration_anchors_consistent() {
             let paint = TextPaint::resolve_into(
                 &renderer,
                 rect,
+                rect,
                 &style,
                 "42".into(),
                 kind,

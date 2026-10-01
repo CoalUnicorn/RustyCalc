@@ -28,6 +28,10 @@ use iron_canvas_core::*;
 use super::ClipboardDraw;
 use super::overlay_memo::OverlayTuple;
 
+#[cfg(test)]
+#[path = "subscribe_tests.rs"]
+mod tests;
+
 pub(super) fn install_subscribe_effect(
     state: WorkbookState,
     canvas_handle: CanvasHandle,
@@ -80,8 +84,14 @@ pub(super) fn install_subscribe_effect(
         if has_theme {
             theme_dirty.set_value(true);
         }
+        // The current link/merge metadata epoch. Content, format, structure,
+        // and theme events advance it; navigation does not. Pushed every tick
+        // so a purely visual repaint keeps the last value and the canvas can
+        // reuse its validated link/merge snapshot instead of rebuilding it.
+        let metadata_epoch = state.events.metadata_seq.get_value();
         canvas_handle.update_value(|slot| {
             if let Some(ic) = slot.as_mut() {
+                ic.set_metadata_epoch(Some(metadata_epoch));
                 ic.set_overlays(overlays);
                 // Each category below is independent, not an if/else-if
                 // cascade: a structure resize, a content edit, and a nav
@@ -102,6 +112,13 @@ pub(super) fn install_subscribe_effect(
                 // needed alongside content for commit-then-move (Enter/Tab),
                 // where content raise alone never touches the view/overlay
                 // bits.
+                // `has_structure` covers every structural change, including
+                // `StructureEvent::MergedCellsChanged`: a merge-list change
+                // moves grid geometry, so it must rebuild, exactly like a
+                // resize. `request_repaint` marks that geometry work and
+                // deliberately keeps the committed frame: the next attempt
+                // routes through FullRebuild and replaces it, so query geometry
+                // stays coherent with the pixels until that paint lands.
                 if has_structure || has_format {
                     ic.request_repaint();
                 }

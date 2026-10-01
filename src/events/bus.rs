@@ -20,6 +20,14 @@ pub struct EventBus {
     pub navigation: RwSignal<Vec<NavigationEvent>>,
     pub structure: RwSignal<Vec<StructureEvent>>,
     pub theme: RwSignal<Vec<ThemeEvent>>,
+    /// Monotonic count of emitted batches that can change worksheet
+    /// *metadata* — the link list and the merged-range list: content, format,
+    /// structure, and theme. Navigation events are excluded: a selection move
+    /// cannot change a link or a merge, and counting it would defeat the
+    /// canvas's metadata-snapshot reuse for exactly the overlay-only repaints
+    /// that reuse targets. Non-reactive; the canvas reads it with
+    /// `get_value` and compares it, so a value that does not move is free.
+    pub metadata_seq: StoredValue<u64, LocalStorage>,
     /// Capture observer. Non-reactive: installing it must not re-run any
     /// subscriber, and it is not a rendering input.
     #[cfg(feature = "dev-tools")]
@@ -40,6 +48,7 @@ impl EventBus {
             navigation: RwSignal::new(vec![]),
             structure: RwSignal::new(vec![]),
             theme: RwSignal::new(vec![]),
+            metadata_seq: StoredValue::new_local(0),
             #[cfg(feature = "dev-tools")]
             batch_observer: StoredValue::new_local(None),
             #[cfg(feature = "dev-tools")]
@@ -96,6 +105,9 @@ impl EventBus {
         // write. `from_ref` borrows the event without cloning or allocating.
         #[cfg(feature = "dev-tools")]
         self.observe(std::slice::from_ref(&event));
+        // A navigation event cannot change a link or a merge list, so it does
+        // not advance the metadata epoch. Everything else can.
+        let touches_metadata = !matches!(event, SpreadsheetEvent::Navigation(_));
         match event {
             SpreadsheetEvent::Content(e) => {
                 self.content.update(|v| {
@@ -148,6 +160,9 @@ impl EventBus {
                 Self::clear_stale(self.structure);
             }
         }
+        if touches_metadata {
+            self.bump_metadata_seq();
+        }
     }
 
     /// Empty a category that still carries events from the previous emit,
@@ -157,6 +172,13 @@ impl EventBus {
         if !sig.with_untracked(Vec::is_empty) {
             sig.update(|v| v.clear());
         }
+    }
+
+    /// Advance the metadata epoch. Non-reactive read (`get_value`) in the
+    /// canvas, so bumping never re-runs a subscriber.
+    fn bump_metadata_seq(&self) {
+        self.metadata_seq
+            .set_value(self.metadata_seq.get_value().wrapping_add(1));
     }
 
     pub fn emit_events(&self, new_events: impl IntoIterator<Item = SpreadsheetEvent>) {
@@ -195,6 +217,12 @@ impl EventBus {
             }
         }
 
+        // Content, format, structure, or theme in the batch can change a link
+        // or a merge list; navigation alone cannot. Record it before the
+        // vectors are moved into their signals.
+        let touches_metadata =
+            !(content.is_empty() && format.is_empty() && structure.is_empty() && theme.is_empty());
+
         // Replace all 5 signals so no stale events from the previous action remain.
         if content.is_empty() {
             self.content.set(vec![]);
@@ -220,6 +248,11 @@ impl EventBus {
             self.theme.set(vec![]);
         } else {
             self.theme.update(|v| *v = theme);
+        }
+        // Content, format, structure, or theme in the batch can change a link
+        // or a merge list; navigation alone cannot.
+        if touches_metadata {
+            self.bump_metadata_seq();
         }
     }
 }

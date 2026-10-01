@@ -113,6 +113,15 @@ pub struct TestModel {
     /// `FrameInputFailure::SheetLinks` in `capture_fail` makes the read fail;
     /// the list here is then irrelevant.
     sheet_links: RefCell<Vec<CellLink>>,
+    /// Merged ranges `get_merged_ranges` reports. Empty means a known empty
+    /// set. A `FrameInputFailure::MergedRanges` in `capture_fail` makes the
+    /// read fail.
+    merged_ranges: RefCell<Vec<RCRange>>,
+    /// Counts calls to `get_sheet_links` and `get_merged_ranges` together.
+    /// The metadata-snapshot reuse tests assert this stays flat across
+    /// attempts that reuse a cached snapshot and advances when the epoch
+    /// moves.
+    metadata_list_calls: Cell<u32>,
 }
 
 impl Default for TestModel {
@@ -162,6 +171,8 @@ impl Default for TestModel {
             grid_lines_bridge_fail: Cell::new(false),
             grid_lines_absent: Cell::new(false),
             sheet_links: RefCell::default(),
+            merged_ranges: RefCell::default(),
+            metadata_list_calls: Cell::new(0),
         }
     }
 }
@@ -259,6 +270,10 @@ impl TestModel {
         *self.sheet_links.borrow_mut() = links;
         self
     }
+    pub fn with_merged_ranges(self, ranges: Vec<RCRange>) -> Self {
+        *self.merged_ranges.borrow_mut() = ranges;
+        self
+    }
     pub fn with_hidden_row_headers(self) -> Self {
         self.show_row_headers.set(false);
         self
@@ -285,6 +300,17 @@ impl TestModel {
     /// Replace the reported link list mid-test (through a shared reference).
     pub fn set_sheet_links(&self, links: Vec<CellLink>) {
         *self.sheet_links.borrow_mut() = links;
+    }
+
+    /// Replace the reported merged-range list mid-test.
+    pub fn set_merged_ranges(&self, ranges: Vec<RCRange>) {
+        *self.merged_ranges.borrow_mut() = ranges;
+    }
+
+    /// Total calls to `get_sheet_links` and `get_merged_ranges`, read or
+    /// write. The metadata-snapshot reuse test asserts this.
+    pub fn metadata_list_calls(&self) -> u32 {
+        self.metadata_list_calls.get()
     }
 
     pub fn set_top_row(&self, r: i32) {
@@ -524,10 +550,20 @@ impl CanvasModel for TestModel {
         self.show_selection.get()
     }
     fn get_sheet_links(&self, _: u32) -> Option<Vec<CellLink>> {
+        self.metadata_list_calls
+            .set(self.metadata_list_calls.get() + 1);
         if self.capture_fail.get() == Some(FrameInputFailure::SheetLinks) {
             return None;
         }
         Some(self.sheet_links.borrow().clone())
+    }
+    fn get_merged_ranges(&self, _: u32) -> Option<Vec<RCRange>> {
+        self.metadata_list_calls
+            .set(self.metadata_list_calls.get() + 1);
+        if self.capture_fail.get() == Some(FrameInputFailure::MergedRanges) {
+            return None;
+        }
+        Some(self.merged_ranges.borrow().clone())
     }
     fn get_column_header_text(&self, _sheet: u32, column: i32) -> Option<String> {
         self.column_headers.borrow().get(&column).cloned()

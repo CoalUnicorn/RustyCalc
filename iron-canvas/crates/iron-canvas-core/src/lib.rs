@@ -10,7 +10,6 @@ pub mod chrome;
 pub mod decoration;
 mod frame;
 pub mod geometry;
-pub mod link;
 pub mod model;
 mod orchestrator;
 pub mod painter;
@@ -23,7 +22,7 @@ pub use frame::{
     BlitFallback, BlitPlan, FrameDelta, FrameInputFailure, FrameInputs, FrameOutcome, FrameTrace,
     GridVerdict, PaintResult, RebuildReason, RenderStrategy, Shift,
 };
-pub use orchestrator::Orchestrator;
+pub use orchestrator::{DisplayCell, Orchestrator};
 
 #[cfg(feature = "dev-diagnostics")]
 pub use renderer::diagnostics::{
@@ -52,9 +51,10 @@ pub use geometry::{
     pixel_rect::PixelRect,
     prim::{Axis, Line, Point, RectCorner, Side, Span},
 };
-pub use link::{CellLink, LinkIndex, LinkIndexError, LinkTarget};
 pub use model::autofit::AutoFitError;
 pub use model::fetched::Fetched;
+pub use model::sheet::links::{CellLink, LinkIndex, LinkIndexError, LinkTarget};
+pub use model::sheet::merges::{MergeTable, MergeTableError, MergedRange};
 pub use model::{CanvasModel, CanvasView, CellContentQuery};
 pub use style::{
     Alignment, Border, BorderItem, BorderStyle, CellDecoration, CellKind, CellStyle, DataBarSpec,

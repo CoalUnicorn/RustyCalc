@@ -83,6 +83,9 @@ pub enum DiagRepaintReason {
     ChangedRows,
     /// An integer-CSS clip could not be aligned to backing pixels.
     ClipAlignment,
+    /// A merge is present; the merge paint pass owns pixels the fingerprint
+    /// tree does not describe.
+    Merge,
 }
 
 /// Prepared grid-cache transition tag.

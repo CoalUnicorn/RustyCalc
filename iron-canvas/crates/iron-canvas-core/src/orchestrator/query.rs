@@ -1,16 +1,81 @@
 use crate::chrome::hit::{HitTest, ResizeTarget};
+use crate::chrome::{Chrome, GridSegment};
 use crate::decoration::selection::SelectionLayer;
 use crate::geometry::CanvasMetrics;
 use crate::geometry::CanvasSize;
 use crate::geometry::pixel_rect::PixelRect;
 use crate::geometry::prim::Point;
-use crate::link::CellLink;
 use crate::model::autofit::{AutoFitError, fit_height};
+use crate::model::sheet::links::CellLink;
 use crate::painter::BlitPainter;
 use crate::surface::Surface;
 use crate::theme::CanvasTheme;
+use crate::{CellCoord, RCRange};
 
 use super::Orchestrator;
+
+/// One logical cell resolved at a pixel position: the physical cell under the
+/// point, the anchor a user edits, the full range the cell occupies, and the
+/// committed link at the anchor.
+///
+/// `cell` and `merged` differ for a covered cell of a merged range: `cell` is
+/// the physical slot the point landed on, `merged` is the whole merge, and
+/// `anchor` is its top-left single cell. For an unmerged cell all three name
+/// the same cell.
+#[derive(Debug, Clone)]
+pub struct DisplayCell {
+    /// Sheet this answer is qualified with.
+    pub sheet: u32,
+    /// Physical cell containing the point.
+    pub cell: CellCoord,
+    /// The logical anchor as a single-cell range — the cell a user edits.
+    pub anchor: RCRange,
+    /// The full merged range, or the single cell when not merged.
+    pub merged: RCRange,
+    /// The visible fragment of the logical cell containing the point.
+    pub fragment: PixelRect,
+    /// Committed link at the anchor, if any.
+    pub link: Option<std::rc::Rc<CellLink>>,
+}
+
+/// Visible pixel fragment of `range` per intersecting pane segment, from
+/// committed geometry only: the axis projection of the id interval, so no
+/// model read and no per-cell walk.
+fn visible_fragments_in(frame: &Chrome, range: RCRange) -> Vec<(GridSegment, PixelRect)> {
+    let range = range.normalized();
+    let mut out = Vec::new();
+    for segment in frame.grid_layout().segments() {
+        let seg = segment.range();
+        let r1 = range.r1.max(seg.r1);
+        let c1 = range.c1.max(seg.c1);
+        let r2 = range.r2.min(seg.r2);
+        let c2 = range.c2.min(seg.c2);
+        if r1 > r2 || c1 > c2 {
+            continue;
+        }
+        let Some((x, right)) = frame.pane_set.cols.project_interval(c1, c2) else {
+            continue;
+        };
+        let Some((y, bottom)) = frame.pane_set.rows.project_interval(r1, r2) else {
+            continue;
+        };
+        let (canvas_w, canvas_h) = frame.canvas_size().to_logical_extent();
+        let Some(clipped) = (PixelRect {
+            top_left: Point { x, y },
+            width: (right - x).max(0),
+            height: (bottom - y).max(0),
+        })
+        .intersection(PixelRect {
+            top_left: Point { x: 0, y: 0 },
+            width: canvas_w,
+            height: canvas_h,
+        }) else {
+            continue;
+        };
+        out.push((segment, clipped));
+    }
+    out
+}
 
 /// Smallest band origin along one axis that shows `target` in full, given the
 /// axis's frozen count, its scrollable `extent` in pixels, and where the band
@@ -163,6 +228,60 @@ where
 
     pub fn cell_rect(&self, row: i32, column: i32) -> Option<PixelRect> {
         self.last_frame.as_ref()?.cell_rect(row, column)
+    }
+
+    /// Resolve a pixel position to its logical cell, merged or not. Reads
+    /// committed state only: the answer matches the pixels on screen, and a
+    /// covered physical cell reports its merge's anchor, full range, and the
+    /// anchor's link. `None` before the first paint or off-grid.
+    ///
+    /// This is the query the editor, active-cell overlay, link hover, and
+    /// logical clicks use. `cell_rect` and `pixel_to_cell` keep their
+    /// slot-level contracts: drag focus and header/input math need physical
+    /// cells.
+    pub fn display_cell_at(&self, x: f64, y: f64) -> Option<DisplayCell> {
+        let frame = self.last_frame.as_ref()?;
+        let xi = x.round() as i32;
+        let yi = y.round() as i32;
+        let row = frame.pane_set.rows.pixel_to_id(yi)?;
+        let col = frame.pane_set.cols.pixel_to_id(xi)?;
+        let (anchor, merged) = match frame.merges().merge_at(row, col) {
+            Some(merge) => (
+                RCRange::from_cell(merge.anchor.row, merge.anchor.col),
+                merge.range,
+            ),
+            None => {
+                let cell = RCRange::from_cell(row, col);
+                (cell, cell)
+            }
+        };
+        let fragments = visible_fragments_in(frame, merged);
+        let fragment = fragments
+            .iter()
+            .find(|(_, rect)| {
+                rect.left() <= xi && xi < rect.right() && rect.top() <= yi && yi < rect.bottom()
+            })
+            .or_else(|| fragments.first())
+            .map(|(_, rect)| *rect)?;
+        Some(DisplayCell {
+            sheet: frame.sheet,
+            cell: CellCoord { row, col },
+            anchor,
+            merged,
+            fragment,
+            link: frame.links().get(anchor.r1, anchor.c1).cloned(),
+        })
+    }
+
+    /// Visible fragments of an addressed range, one per intersecting pane
+    /// segment. Pure committed-state read — no model access — so a caller can
+    /// place the editor or an outline against exactly the pixels on screen,
+    /// including when the range's anchor is scrolled out of view.
+    pub fn visible_fragments(&self, range: RCRange) -> Vec<(GridSegment, PixelRect)> {
+        match self.last_frame.as_ref() {
+            Some(frame) => visible_fragments_in(frame, range),
+            None => Vec::new(),
+        }
     }
 
     /// Canvas-space rect of the scrollable pane — everything past the frozen

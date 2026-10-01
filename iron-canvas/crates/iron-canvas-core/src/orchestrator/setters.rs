@@ -154,6 +154,10 @@ where
     /// repaint after a redundant push.
     pub fn set_model(&mut self, model: Rc<dyn CanvasModel>) {
         self.model = Some(model);
+        // A replacement model's link/merge lists are unrelated to the outgoing
+        // model's, so the cached metadata snapshot is dropped outright rather
+        // than relying on the generation check alone.
+        self.metadata_cache = None;
         // Wrapping: correctness never depends on uniqueness after a wrap
         // (see the field doc) — this exists to classify an ordinary model
         // replacement, not to gate repaint.
@@ -182,6 +186,28 @@ where
     /// `Chrome::classify`, not duplicated at the callsite.
     pub fn request_overlay_repaint(&mut self) {
         self.pending.mark_overlay();
+    }
+
+    /// Push the host's current metadata epoch, the revision of the selected
+    /// sheet's link and merged-range lists.
+    ///
+    /// The host must advance the epoch before requesting a repaint when
+    /// either list can change. This setter does not queue paint work.
+    /// An unchanged epoch lets selection, scroll, hover, and autofill preview
+    /// repaints reuse the validated `LinkIndex` and `MergeTable`.
+    /// Passing `None` clears the snapshot and disables reuse. Every attempt
+    /// then reads both lists. Use this default when the host cannot track
+    /// link or merge changes. Re-enabling reuse starts a new snapshot.
+    ///
+    /// A stale epoch can leave link targets or merge geometry out of date.
+    /// Within an enabled interval, each epoch must identify one metadata
+    /// revision per model and sheet. `set_model` clears the snapshot, so a
+    /// replacement model can use the same epoch as the previous model.
+    pub fn set_metadata_epoch(&mut self, epoch: Option<u64>) {
+        if epoch.is_none() {
+            self.metadata_cache = None;
+        }
+        self.metadata_epoch = epoch;
     }
 
     /// Typed cell-content-changed signal. Marks all visible content dirty so

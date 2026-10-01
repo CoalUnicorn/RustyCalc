@@ -24,8 +24,8 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 
 use iron_canvas_core::{
-    AutofillTarget, CanvasTheme, CellLink, FormulaRef, FormulaRefKind, HitTest, RCRange,
-    RectCorner, RefZone, RenderOverlays, ResizeTarget, SheetArea, Side, ThemeVariables,
+    AutofillTarget, CanvasTheme, CellLink, DisplayCell, FormulaRef, FormulaRefKind, HitTest,
+    RCRange, RectCorner, RefZone, RenderOverlays, ResizeTarget, SheetArea, Side, ThemeVariables,
     geometry::CanvasSize,
 };
 
@@ -138,6 +138,38 @@ pub(crate) enum LinkKindWire {
     Internal,
 }
 
+/// One visible fragment of an addressed range, for the `visibleFragments`
+/// query: the address range it covers and its pixel rectangle on the canvas.
+///
+/// No pane-region field: every consumer (editor placement, autofill ghost,
+/// outline) needs the rectangle, and the region would only duplicate the
+/// dev-only diagnostics wire enum.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FragmentWire {
+    pub range: RCRangeWire,
+    pub rect: iron_canvas_core::PixelRect,
+}
+
+impl
+    From<(
+        iron_canvas_core::chrome::GridSegment,
+        iron_canvas_core::PixelRect,
+    )> for FragmentWire
+{
+    fn from(
+        (segment, rect): (
+            iron_canvas_core::chrome::GridSegment,
+            iron_canvas_core::PixelRect,
+        ),
+    ) -> Self {
+        FragmentWire {
+            range: RCRangeWire::from(segment.range()),
+            rect,
+        }
+    }
+}
+
 impl From<&CellLink> for LinkWire {
     fn from(link: &CellLink) -> Self {
         let kind = if link.target().is_external() {
@@ -151,6 +183,37 @@ impl From<&CellLink> for LinkWire {
             dynamic: link.is_dynamic(),
             color: link.color().map(str::to_string),
             kind,
+        }
+    }
+}
+
+/// One logical cell resolved at a pixel position, for the `displayCellAt`
+/// query. `row`/`column` are the physical cell under the point; `anchor` is
+/// the single cell a user edits; `merged` is the full range the cell occupies
+/// (equal to the single cell when not merged); `fragment` is the visible pixel
+/// rectangle of the logical cell.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DisplayCellWire {
+    pub sheet: u32,
+    pub row: i32,
+    pub column: i32,
+    pub anchor: RCRangeWire,
+    pub merged: RCRangeWire,
+    pub fragment: iron_canvas_core::PixelRect,
+    pub link: Option<LinkWire>,
+}
+
+impl From<DisplayCell> for DisplayCellWire {
+    fn from(cell: DisplayCell) -> Self {
+        DisplayCellWire {
+            sheet: cell.sheet,
+            row: cell.cell.row,
+            column: cell.cell.col,
+            anchor: RCRangeWire::from(cell.anchor),
+            merged: RCRangeWire::from(cell.merged),
+            fragment: cell.fragment,
+            link: cell.link.as_deref().map(LinkWire::from),
         }
     }
 }
@@ -665,6 +728,7 @@ mod dev_wire {
         InvalidFrozenRowCount,
         InvalidFrozenColumnCount,
         SheetLinks,
+        MergedRanges,
     }
 
     impl From<FrameInputFailure> for FrameInputFailureWire {
@@ -680,6 +744,7 @@ mod dev_wire {
                 FrameInputFailure::InvalidFrozenRowCount => Self::InvalidFrozenRowCount,
                 FrameInputFailure::InvalidFrozenColumnCount => Self::InvalidFrozenColumnCount,
                 FrameInputFailure::SheetLinks => Self::SheetLinks,
+                FrameInputFailure::MergedRanges => Self::MergedRanges,
             }
         }
     }
@@ -921,6 +986,7 @@ mod dev_wire {
         ChangedCells,
         ChangedRows,
         ClipAlignment,
+        Merge,
     }
 
     impl From<DiagRepaintReason> for DiagRepaintReasonWire {
@@ -934,6 +1000,7 @@ mod dev_wire {
                 DiagRepaintReason::ChangedCells => Self::ChangedCells,
                 DiagRepaintReason::ChangedRows => Self::ChangedRows,
                 DiagRepaintReason::ClipAlignment => Self::ClipAlignment,
+                DiagRepaintReason::Merge => Self::Merge,
             }
         }
     }
@@ -1334,6 +1401,7 @@ mod tests {
                 "invalidFrozenColumnCount",
             ),
             (FrameInputFailure::SheetLinks, "sheetLinks"),
+            (FrameInputFailure::MergedRanges, "mergedRanges"),
         ];
         for (failure, expected) in cases {
             let json = serde_json::to_value(FrameOutcomeWire::from(
@@ -1618,5 +1686,57 @@ mod tests {
                 "kind": "internal",
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod display_cell_wire_tests {
+    use super::*;
+    use iron_canvas_core::CellCoord;
+    use iron_canvas_core::geometry::pixel_rect::PixelRect;
+    use iron_canvas_core::geometry::prim::Point;
+
+    /// The browser mirrors parse this exact shape, so pin the field names and
+    /// the merged/covered relationship natively first.
+    #[test]
+    fn display_cell_wire_names_and_shapes_are_stable() {
+        let wire = DisplayCellWire::from(DisplayCell {
+            sheet: 2,
+            cell: CellCoord { row: 5, col: 7 },
+            anchor: RCRange {
+                r1: 4,
+                c1: 6,
+                r2: 4,
+                c2: 6,
+            },
+            merged: RCRange {
+                r1: 4,
+                c1: 6,
+                r2: 6,
+                c2: 8,
+            },
+            fragment: PixelRect {
+                top_left: Point { x: 10, y: 20 },
+                width: 30,
+                height: 40,
+            },
+            link: None,
+        });
+
+        let json = serde_json::to_value(&wire).expect("wire serializes");
+        assert_eq!(json["sheet"], 2);
+        assert_eq!(json["row"], 5);
+        assert_eq!(json["column"], 7);
+        assert_eq!(
+            json["anchor"],
+            serde_json::json!({ "r1": 4, "c1": 6, "r2": 4, "c2": 6 })
+        );
+        assert_eq!(
+            json["merged"],
+            serde_json::json!({ "r1": 4, "c1": 6, "r2": 6, "c2": 8 })
+        );
+        assert_eq!(json["fragment"]["width"], 30);
+        assert_eq!(json["fragment"]["height"], 40);
+        assert_eq!(json["link"], serde_json::Value::Null);
     }
 }
