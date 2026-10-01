@@ -381,7 +381,7 @@ fn the_anchor_fill_and_cf_decoration_cover_the_merge() {
             data_bar: Some(DataBarSpec {
                 positive_color: "#112233".to_string(),
                 negative_color: None,
-                is_gradient: true,
+                is_gradient: false,
                 value: 1.0,
                 axis_position: 0.0,
                 show_value: true,

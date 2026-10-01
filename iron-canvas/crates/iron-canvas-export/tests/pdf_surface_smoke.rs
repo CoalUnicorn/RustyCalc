@@ -34,7 +34,7 @@ fn build_minimal_doc() -> Vec<u8> {
     stream.write(b"q\nQ\n");
     doc.add_object(4, 0, stream.into_object());
 
-    doc.add_object(5, 0, font::resources_object_with_helvetica());
+    doc.add_object(5, 0, font::resources_object_with_helvetica(&[]));
     doc.finish()
 }
 
@@ -208,4 +208,16 @@ fn pdf_render_discards_overlay() {
         a, b,
         "selection (overlay-only) changed the grid PDF — overlay not discarded"
     );
+}
+
+#[test]
+fn resources_inline_an_axial_shading_per_gradient() {
+    let shadings = vec![("#ffffff".to_string(), "#3366cc".to_string())];
+    let text = String::from_utf8(font::resources_object_with_helvetica(&shadings))
+        .expect("resources body is UTF-8");
+    assert!(text.contains("/Shading <<"), "{text}");
+    assert!(text.contains("/Sh0 << /ShadingType 2"), "{text}");
+    assert!(text.contains("/Coords [0 0 1 0]"), "{text}");
+    // #3366cc -> (0.200, 0.400, 0.800)
+    assert!(text.contains("/C1 [0.200 0.400 0.800]"), "{text}");
 }

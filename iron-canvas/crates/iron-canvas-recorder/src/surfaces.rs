@@ -111,6 +111,13 @@ impl<P: BlitPainter> Painter for RecordingPainter<P> {
         }
     }
 
+    fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor) {
+        self.inner.rect_fill_hgradient(rect, from, to);
+        if self.should_record() {
+            self.recorder.rect_fill_hgradient(rect, from, to);
+        }
+    }
+
     fn fill_path(&self, points: &[Point], color: PaintColor) {
         self.inner.fill_path(points, color);
         if self.should_record() {

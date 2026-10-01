@@ -377,6 +377,7 @@ fn draw_op_numbers_are_finite(op: &DrawOp) -> bool {
         DrawOp::FillText { x, y, .. } => x.is_finite() && y.is_finite(),
         DrawOp::ApplyDprTransform { dpr } => dpr.is_finite() && *dpr > 0.0,
         DrawOp::RectFill { .. }
+        | DrawOp::RectFillHGradient { .. }
         | DrawOp::FillPath { .. }
         | DrawOp::ClearRect { .. }
         | DrawOp::PushClip { .. }

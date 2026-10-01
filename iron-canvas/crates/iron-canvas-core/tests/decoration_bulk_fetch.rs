@@ -9,7 +9,6 @@ mod common;
 
 use iron_canvas_core::address::RCRange;
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
-use iron_canvas_core::geometry::prim::Point;
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
 use iron_canvas_core::{
@@ -20,13 +19,27 @@ use iron_canvas_recorder::{DrawOp, RecorderPainter};
 use common::{TestModel, canvas_default, test_inputs};
 
 fn data_bar(color: &str, value: f64) -> CellDecoration {
+    bar(color, None, value, 0.0, false)
+}
+
+fn gradient_bar(color: &str, value: f64, axis: f64) -> CellDecoration {
+    bar(color, None, value, axis, true)
+}
+
+fn bar(
+    positive: &str,
+    negative: Option<&str>,
+    value: f64,
+    axis_position: f64,
+    is_gradient: bool,
+) -> CellDecoration {
     CellDecoration {
         data_bar: Some(DataBarSpec {
-            positive_color: color.to_string(),
-            negative_color: None,
-            is_gradient: true,
+            positive_color: positive.to_string(),
+            negative_color: negative.map(str::to_string),
+            is_gradient,
             value,
-            axis_position: 0.0,
+            axis_position,
             show_value: true,
         }),
         ..CellDecoration::default()
@@ -164,49 +177,135 @@ fn malformed_data_bar_color_paints_black_and_matches_black_fingerprint() {
     }
 }
 
-#[test]
-fn rating_paints_five_star_polygons_in_filled_then_empty_order() {
+/// The rects of every `RectFill` in the recorded op stream that use `color`.
+fn rect_fills(painter: &RecorderPainter, color: &str) -> Vec<iron_canvas_core::PixelRect> {
+    painter
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::RectFill { rect, color: c } if c == color => Some(*rect),
+            _ => None,
+        })
+        .collect()
+}
+
+fn gradients(painter: &RecorderPainter) -> Vec<(String, String)> {
+    painter
+        .ops()
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::RectFillHGradient { from, to, .. } => Some((from.clone(), to.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn render_cell(decoration: CellDecoration) -> (RendererCore<RecorderPainter>, Chrome) {
     let model = TestModel::synthetic_grid();
-    model.set_col_width(2, 104.0);
+    model.set_col_width(2, 60.0);
     model.set_row_height(2, 24.0);
-    model.set_decoration(2, 2, rating(3, 5));
+    model.set_decoration(2, 2, decoration);
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let inputs = test_inputs(&model, canvas_default(), &theme);
     let frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
-    let rect = frame.cell_rect(2, 2).expect("the rating cell is visible");
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&model, &frame);
+    (core, frame)
+}
 
-    let expected: Vec<_> = ["#f0a30a", "#f0a30a", "#f0a30a", "#d0d0d0", "#d0d0d0"]
-        .into_iter()
-        .zip(0..5)
-        .map(|(color, star)| DrawOp::FillPath {
-            points: [
-                (12, 3),
-                (14, 9),
-                (21, 9),
-                (15, 13),
-                (17, 19),
-                (12, 15),
-                (7, 19),
-                (9, 13),
-                (3, 9),
-                (10, 9),
-            ]
-            .map(|(x, y)| Point {
-                x: rect.left() + star * 20 + x,
-                y: rect.top() + y,
-            })
-            .to_vec(),
-            color: color.to_string(),
-        })
-        .collect();
-    let paths: Vec<_> = core
+/// A positive bar runs from the zero axis to the value endpoint — not from
+/// the cell's left edge.
+#[test]
+fn positive_data_bar_spans_axis_to_value() {
+    let (core, frame) = render_cell(bar("#3366cc", None, 1.0, 0.5, false));
+    let rect = frame.cell_rect(2, 2).expect("the cell is visible");
+    let inner_left = rect.left() + 2; // CF_INSET
+    let axis = inner_left + (0.5 * f64::from(rect.width - 4)).round() as i32;
+
+    let fills = rect_fills(core.painter(), "#3366cc");
+    assert_eq!(fills.len(), 1, "exactly one positive bar");
+    assert_eq!(fills[0].left(), axis, "bar starts at the zero axis");
+    assert_eq!(fills[0].right(), inner_left + rect.width - 4);
+}
+
+/// A negative value paints the negative color between the value endpoint and
+/// the axis.
+#[test]
+fn negative_data_bar_spans_value_to_axis_in_the_negative_color() {
+    let (core, frame) = render_cell(bar("#3366cc", Some("#ff0000"), 0.0, 0.5, false));
+    let rect = frame.cell_rect(2, 2).expect("the cell is visible");
+    let inner_left = rect.left() + 2;
+    let axis = inner_left + (0.5 * f64::from(rect.width - 4)).round() as i32;
+
+    assert!(rect_fills(core.painter(), "#3366cc").is_empty());
+    let fills = rect_fills(core.painter(), "#ff0000");
+    assert_eq!(fills.len(), 1, "exactly one negative bar");
+    assert_eq!(fills[0].left(), inner_left);
+    assert_eq!(fills[0].right(), axis, "negative bar ends at the axis");
+}
+
+/// A value equal to the axis has zero length: the cell paints no bar.
+#[test]
+fn zero_length_bar_paints_nothing() {
+    let (core, _) = render_cell(bar("#3366cc", None, 0.25, 0.25, false));
+    assert!(rect_fills(core.painter(), "#3366cc").is_empty());
+    assert!(gradients(core.painter()).is_empty());
+}
+
+/// A gradient bar emits the gradient primitive, running from the lighter
+/// shade at the axis to the full color at the tip.
+#[test]
+fn gradient_data_bar_emits_a_gradient_fill() {
+    let (core, _) = render_cell(gradient_bar("#3366cc", 1.0, 0.0));
+    assert!(
+        rect_fills(core.painter(), "#3366cc").is_empty(),
+        "a gradient bar must not also paint a solid rect"
+    );
+    let grads = gradients(core.painter());
+    assert_eq!(grads.len(), 1);
+    assert_eq!(grads[0].1, "#3366cc", "gradient ends at the full color");
+    assert_ne!(grads[0].0, grads[0].1, "gradient starts at a lighter shade");
+}
+
+/// A rating paints `count` copies of its glyph in the resolved color — one
+/// per rating point, advancing left to right — not a fixed gold-star set.
+#[test]
+fn rating_paints_count_glyphs_in_the_resolved_color() {
+    let (core, _) = render_cell(rating(3, 5));
+    let paths: Vec<(Vec<iron_canvas_core::geometry::prim::Point>, String)> = core
         .painter()
         .ops()
         .iter()
-        .filter(|op| matches!(op, DrawOp::FillPath { .. }))
-        .cloned()
+        .filter_map(|op| match op {
+            DrawOp::FillPath { points, color } => Some((points.clone(), color.clone())),
+            _ => None,
+        })
         .collect();
-    assert_eq!(paths, expected);
+    assert_eq!(paths.len(), 3, "one glyph per filled rating point");
+    assert!(
+        paths.iter().all(|(_, color)| color == "#000000"),
+        "rating color comes from the engine (unresolved -> black)"
+    );
+    let xs: Vec<i32> = paths.iter().map(|(points, _)| points[0].x).collect();
+    assert!(xs[0] < xs[1] && xs[1] < xs[2], "glyphs advance left to right");
+}
+
+/// An icon paints its glyph geometry as a filled polygon.
+#[test]
+fn icon_paints_its_glyph() {
+    let decoration = CellDecoration {
+        icon: Some(iron_canvas_core::IconSpec {
+            glyph: IconGlyph::ArrowUp,
+            color: Some("#84cb1f".to_string()),
+            show_value: true,
+        }),
+        ..CellDecoration::default()
+    };
+    let (core, _) = render_cell(decoration);
+    let ops = core.painter().ops();
+    let arrows = ops
+        .iter()
+        .filter(|op| matches!(op, DrawOp::FillPath { color, .. } if color == "#84cb1f"))
+        .count();
+    assert!(arrows > 0, "the icon must paint at least one polygon");
 }

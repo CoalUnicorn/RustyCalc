@@ -76,6 +76,7 @@ mod tests {
         let src = RecorderPainter::new();
         let r = pix(0, 0, 10, 10);
         src.rect_fill(r, PaintColor::Static("#ff0000"));
+        src.rect_fill_hgradient(r, PaintColor::Static("#ff0000"), PaintColor::Static("#0000ff"));
         src.fill_path(
             &[
                 Point { x: 0, y: 0 },

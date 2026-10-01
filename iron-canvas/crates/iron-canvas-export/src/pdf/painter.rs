@@ -33,6 +33,12 @@ pub struct PdfPainter {
     pub(super) height: u32,
     clip_depth: Cell<u32>,
     group_depth: Cell<u32>,
+    /// Distinct horizontal-gradient endpoint color pairs, in first-use order.
+    /// The content stream references `/Sh{index}`; the surface inlines the
+    /// matching axial shading dictionaries into the `/Resources` object. `Rc`
+    /// so `PdfSurface::render` can keep the registry alive past the throwaway
+    /// orchestrator that consumes the surface.
+    shadings: Rc<RefCell<Vec<(String, String)>>>,
     /// Reused formatting buffer behind [`Self::emit`]. A full-sheet export
     /// emits tens of thousands of ops, so formatting each one into this
     /// buffer — cleared and flushed once per op — keeps a per-op `format!`
@@ -60,8 +66,31 @@ impl PdfPainter {
             height,
             clip_depth: Cell::new(0),
             group_depth: Cell::new(0),
+            shadings: Rc::new(RefCell::new(Vec::new())),
             scratch: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Shared registry of the gradient color pairs the content stream has
+    /// referenced. `PdfSurface::render` captures it before the surface moves
+    /// into the throwaway orchestrator, so the document can be assembled from
+    /// the surviving stream afterwards.
+    pub fn shadings(&self) -> Rc<RefCell<Vec<(String, String)>>> {
+        Rc::clone(&self.shadings)
+    }
+
+    /// Index of the shading for `(from, to)`, registering it on first use.
+    /// Linear scan: a sheet has a handful of distinct data-bar colors.
+    fn shading_index(&self, from: &str, to: &str) -> usize {
+        let mut shadings = self.shadings.borrow_mut();
+        if let Some(index) = shadings
+            .iter()
+            .position(|(f, t)| f == from && t == to)
+        {
+            return index;
+        }
+        shadings.push((from.to_string(), to.to_string()));
+        shadings.len() - 1
     }
 
     /// Hand back the shared stream. `PdfSurface::finish` takes it, wraps
@@ -153,6 +182,23 @@ impl Painter for PdfPainter {
         self.emit_fill_color(color);
         self.emit_rect(x, y, w, h);
         self.write_str("f\n");
+    }
+
+    fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor) {
+        let (x, y, w, h) = rect.as_f64_tuple();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let index = self.shading_index(from.as_str(), to.as_str());
+        // The shading is defined over a unit axis (`/Coords [0 0 1 0]`), so
+        // clip to the bar rect in page space, then scale the unit axis onto
+        // the rect before `sh`. `q`/`Q` scopes both the clip and the CTM.
+        self.write_str("q\n");
+        self.emit_rect(x, y, w, h);
+        self.write_str("W n\n");
+        self.emit(format_args!("{w:.3} 0 0 1 {x:.3} 0 cm\n"));
+        self.emit(format_args!("/Sh{index} sh\n"));
+        self.write_str("Q\n");
     }
 
     fn fill_path(&self, points: &[Point], color: PaintColor) {
@@ -340,5 +386,73 @@ impl BlitPainter for PdfPainter {
         // orchestrator can never reach the ScrollBlit strategy — see the
         // "`BlitPainter::blit` — short-circuit (proven safe)" section of
         // OUTPUT_REFACTOR_PLAN.md for the proof. No-op is sound.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iron_canvas_core::geometry::prim::Point;
+
+    fn content(painter: &PdfPainter) -> String {
+        String::from_utf8(painter.stream().borrow().bytes().to_vec())
+            .expect("content stream is UTF-8")
+    }
+
+    fn rect() -> PixelRect {
+        PixelRect {
+            top_left: Point { x: 10, y: 5 },
+            width: 40,
+            height: 8,
+        }
+    }
+
+    #[test]
+    fn gradient_registers_one_shading_and_clips_it() {
+        let painter = PdfPainter::new(100, 50);
+        painter.rect_fill_hgradient(
+            rect(),
+            PaintColor::Static("#ffffff"),
+            PaintColor::Static("#3366cc"),
+        );
+        let content = content(&painter);
+        assert!(content.contains("10.000 5.000 40.000 8.000 re"), "{content}");
+        assert!(content.contains("W n"), "{content}");
+        assert!(content.contains("/Sh0 sh"), "{content}");
+        let shadings = painter.shadings();
+        assert_eq!(shadings.borrow().as_slice(), &[("#ffffff".to_string(), "#3366cc".to_string())]);
+    }
+
+    #[test]
+    fn repeated_colors_reuse_one_shading() {
+        let painter = PdfPainter::new(100, 50);
+        painter.rect_fill_hgradient(
+            rect(),
+            PaintColor::Static("#ffffff"),
+            PaintColor::Static("#3366cc"),
+        );
+        painter.rect_fill_hgradient(
+            rect(),
+            PaintColor::Static("#ffffff"),
+            PaintColor::Static("#3366cc"),
+        );
+        assert_eq!(painter.shadings().borrow().len(), 1);
+        assert_eq!(content(&painter).matches("/Sh0 sh").count(), 2);
+    }
+
+    #[test]
+    fn zero_width_gradient_emits_nothing() {
+        let painter = PdfPainter::new(100, 50);
+        painter.rect_fill_hgradient(
+            PixelRect {
+                top_left: Point { x: 10, y: 5 },
+                width: 0,
+                height: 8,
+            },
+            PaintColor::Static("#ffffff"),
+            PaintColor::Static("#000000"),
+        );
+        assert!(painter.shadings().borrow().is_empty());
+        assert!(content(&painter).is_empty());
     }
 }

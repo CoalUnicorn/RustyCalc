@@ -42,8 +42,14 @@ impl PdfSurface {
     pub fn finish(&self) -> Vec<u8> {
         self.painter.assert_balanced();
         let stream = self.painter.stream();
+        let shadings = self.painter.shadings();
         let borrowed = stream.borrow();
-        Self::build_document(&borrowed, self.painter.width, self.painter.height)
+        Self::build_document(
+            &borrowed,
+            &shadings.borrow(),
+            self.painter.width,
+            self.painter.height,
+        )
     }
 
     /// Stream-first assembly: wrap an already-populated `ContentStream`
@@ -57,7 +63,12 @@ impl PdfSurface {
     ///
     /// The CTM `1 0 0 -1 0 H cm` flips painter Y-down into PDF Y-up —
     /// emitted exactly once here rather than once per paint call.
-    pub fn build_document(stream: &ContentStream, width: u32, height: u32) -> Vec<u8> {
+    pub fn build_document(
+        stream: &ContentStream,
+        shadings: &[(String, String)],
+        width: u32,
+        height: u32,
+    ) -> Vec<u8> {
         let mut page_stream = ContentStream::new();
         page_stream.write(format!("1 0 0 -1 0 {height} cm\n").as_bytes());
         page_stream.write(stream.bytes());
@@ -69,7 +80,7 @@ impl PdfSurface {
         doc.add_object(2, 0, object::pages_object(3));
         doc.add_object(3, 0, page::page_object(2, 4, 5, width, height));
         doc.add_object(4, 0, page_stream.into_object());
-        doc.add_object(5, 0, font::resources_object_with_helvetica());
+        doc.add_object(5, 0, font::resources_object_with_helvetica(shadings));
         doc.finish()
     }
 
@@ -94,11 +105,19 @@ impl PdfSurface {
         let grid = PdfSurface::new(width, height);
         let overlay = PdfSurface::new(width, height);
         let grid_stream = grid.stream();
+        // Captured before `grid` moves into the throwaway orchestrator: the
+        // registry must survive to document assembly.
+        let shadings = grid.painter().shadings();
 
         crate::drive_once(grid, overlay, model, theme, metrics)?;
 
         let stream = grid_stream.borrow();
-        Ok(Self::build_document(&stream, width, height))
+        Ok(Self::build_document(
+            &stream,
+            &shadings.borrow(),
+            width,
+            height,
+        ))
     }
 }
 

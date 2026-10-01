@@ -228,7 +228,10 @@ impl OpCounts {
         };
         for op in ops {
             match op {
-                DrawOp::RectFill { .. } | DrawOp::FillPath { .. } | DrawOp::ClearRect { .. } => {
+                DrawOp::RectFill { .. }
+                | DrawOp::RectFillHGradient { .. }
+                | DrawOp::FillPath { .. }
+                | DrawOp::ClearRect { .. } => {
                     counts.fills += 1;
                 }
                 DrawOp::RectStroke { .. }

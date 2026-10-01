@@ -77,6 +77,14 @@ impl Painter for RecorderPainter {
         });
     }
 
+    fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor) {
+        self.push(DrawOp::RectFillHGradient {
+            rect,
+            from: from.as_str().to_string(),
+            to: to.as_str().to_string(),
+        });
+    }
+
     fn fill_path(&self, points: &[Point], color: PaintColor) {
         self.push(DrawOp::FillPath {
             points: points.to_vec(),

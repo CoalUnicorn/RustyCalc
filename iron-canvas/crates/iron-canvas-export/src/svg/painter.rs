@@ -26,6 +26,7 @@ pub struct SvgPainter {
     defs: RefCell<String>,
     clip_depth: Cell<u32>,
     next_clip_id: Cell<u32>,
+    next_gradient_id: Cell<u32>,
     group_depth: Cell<u32>,
     /// Set the first time `fill_text` runs. Gates the `@font-face` block
     /// `finish()` prepends to `defs` — cells with no text (or a painter
@@ -44,6 +45,7 @@ impl SvgPainter {
             defs: RefCell::new(String::new()),
             clip_depth: Cell::new(0),
             next_clip_id: Cell::new(0),
+            next_gradient_id: Cell::new(0),
             group_depth: Cell::new(0),
             has_text: Cell::new(false),
             width,
@@ -137,6 +139,33 @@ impl Painter for SvgPainter {
         body.push_str(" fill=\"");
         xml_escape(color.as_str(), &mut body);
         body.push_str("\"/>");
+    }
+
+    fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor) {
+        let (_, _, w, h) = rect.as_f64_tuple();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        // One gradient def per call, referenced by a generated id. Object
+        // units (the default `objectBoundingBox`) scale the 0..1 axis to the
+        // rect, so the same def form works for any rect size.
+        let id = self.next_gradient_id.get();
+        self.next_gradient_id.set(id + 1);
+        {
+            let mut defs = self.defs.borrow_mut();
+            let _ = write!(
+                defs,
+                "<linearGradient id=\"g{id}\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"0\">\
+                 <stop offset=\"0\" stop-color=\""
+            );
+            xml_escape(from.as_str(), &mut defs);
+            defs.push_str("\"/><stop offset=\"1\" stop-color=\"");
+            xml_escape(to.as_str(), &mut defs);
+            defs.push_str("\"/></linearGradient>");
+        }
+        let mut body = self.body.borrow_mut();
+        open_rect(rect, &mut body);
+        let _ = write!(body, " fill=\"url(#g{id})\"/>");
     }
 
     fn fill_path(&self, points: &[Point], color: PaintColor) {
@@ -535,6 +564,41 @@ mod tests {
             1,
             "exactly one embedded font, not one per text element"
         );
+    }
+
+    #[test]
+    fn horizontal_gradient_emits_a_def_and_a_referencing_rect() {
+        let p = SvgPainter::new(100, 50);
+        p.rect_fill_hgradient(
+            PixelRect {
+                top_left: Point { x: 10, y: 5 },
+                width: 40,
+                height: 8,
+            },
+            PaintColor::Static("#ffffff"),
+            PaintColor::Static("#3366cc"),
+        );
+        let svg = p.finish();
+        assert!(svg.contains("<linearGradient id=\"g0\""), "{svg}");
+        assert!(svg.contains("stop-color=\"#ffffff\""), "{svg}");
+        assert!(svg.contains("stop-color=\"#3366cc\""), "{svg}");
+        assert!(svg.contains("fill=\"url(#g0)\""), "{svg}");
+    }
+
+    #[test]
+    fn zero_width_gradient_emits_nothing() {
+        let p = SvgPainter::new(100, 50);
+        p.rect_fill_hgradient(
+            PixelRect {
+                top_left: Point { x: 10, y: 5 },
+                width: 0,
+                height: 8,
+            },
+            PaintColor::Static("#ffffff"),
+            PaintColor::Static("#000000"),
+        );
+        let svg = p.finish();
+        assert!(!svg.contains("linearGradient"), "{svg}");
     }
 
     #[test]

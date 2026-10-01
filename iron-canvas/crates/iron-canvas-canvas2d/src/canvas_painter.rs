@@ -331,6 +331,23 @@ impl Painter for CanvasPainter {
         self.ctx.fill_rect(x, y, w, h);
     }
 
+    fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor) {
+        let (x, y, w, h) = rect.as_f64_tuple();
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let gradient = self.ctx.create_linear_gradient(x, y, x + w, y);
+        // A malformed color is the only failure mode; a lost ctx surfaces on
+        // the fill below. Either way the gradient object keeps its last stop.
+        let _ = gradient.add_color_stop(0.0, from.as_str());
+        let _ = gradient.add_color_stop(1.0, to.as_str());
+        self.ctx.set_fill_style_canvas_gradient(&gradient);
+        // The ctx fill style is now a gradient object, not the cached color
+        // string: drop the sticky fill so the next `set_fill_cached` re-binds.
+        self.setter_cache.last_fill.set(CachedColor::Empty);
+        self.ctx.fill_rect(x, y, w, h);
+    }
+
     fn fill_path(&self, points: &[Point], color: PaintColor) {
         if points.len() < 2 {
             return; // empty or single-point is a no-op

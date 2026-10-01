@@ -154,6 +154,13 @@ pub trait TextMetrics {
 )]
 pub trait Painter: TextMetrics {
     fn rect_fill(&self, rect: PixelRect, color: PaintColor);
+    /// Fill `rect` with a horizontal linear gradient: `from` at the rect's
+    /// left edge, `to` at its right edge. A zero-width or zero-height rect is
+    /// a no-op. The renderer uses this for gradient data bars; every backend
+    /// implements it with its native gradient (Canvas2D
+    /// `createLinearGradient`, SVG `linearGradient`, PDF axial shading),
+    /// never a browser-only shortcut or a banded approximation.
+    fn rect_fill_hgradient(&self, rect: PixelRect, from: PaintColor, to: PaintColor);
     /// Fill the closed polygon defined by `points`, in pixel space. The path
     /// implicitly closes from `points.last()` to `points.first()`. Empty or
     /// single-point input is a no-op.

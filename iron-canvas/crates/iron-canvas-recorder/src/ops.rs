@@ -47,6 +47,11 @@ pub enum DrawOp {
         rect: PixelRect,
         color: String,
     },
+    RectFillHGradient {
+        rect: PixelRect,
+        from: String,
+        to: String,
+    },
     FillPath {
         points: Vec<Point>,
         color: String,
@@ -134,6 +139,9 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
         match op {
             DrawOp::RectFill { rect, color } => {
                 target.rect_fill(*rect, PaintColor::Borrowed(color));
+            }
+            DrawOp::RectFillHGradient { rect, from, to } => {
+                target.rect_fill_hgradient(*rect, PaintColor::Borrowed(from), PaintColor::Borrowed(to));
             }
             DrawOp::FillPath { points, color } => {
                 target.fill_path(points, PaintColor::Borrowed(color));
