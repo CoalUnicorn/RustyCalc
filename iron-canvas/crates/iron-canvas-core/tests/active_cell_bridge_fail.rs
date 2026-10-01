@@ -90,3 +90,45 @@ fn active_cell_coordinates_reach_the_overlay_without_transposition() {
         .collect();
     assert_eq!(cell_text, ["target cell"]);
 }
+
+/// The overlay repaint applies the same CF text policy as the grid: a
+/// decoration with `show_value = false` hides the active cell's value, so the
+/// overlay does not paint text the grid deliberately suppressed.
+#[test]
+fn active_cell_hides_its_value_when_the_decoration_says_so() {
+    use iron_canvas_core::{CellDecoration, DataBarSpec};
+    use iron_canvas_recorder::DrawOp;
+
+    let model = TestModel::synthetic_grid().with_active(1, 1);
+    model.set_cell(1, 1, "42");
+    model.set_decoration(
+        1,
+        1,
+        CellDecoration {
+            data_bar: Some(DataBarSpec {
+                positive_color: "#3366cc".to_string(),
+                negative_color: None,
+                is_gradient: false,
+                value: 1.0,
+                axis_position: 0.0,
+                show_value: false,
+            }),
+            ..CellDecoration::default()
+        },
+    );
+    let frame = fresh_frame(&model);
+    let painter = Rc::new(RecorderPainter::new());
+    let core = RendererCore::for_layer(Rc::clone(&painter));
+
+    core.repaint_active_cell(&model, CellCoord { row: 1, col: 1 }, &frame);
+
+    let ops = painter.ops();
+    assert!(
+        !ops.iter().any(|op| matches!(op, DrawOp::FillText { .. })),
+        "a hidden active value must not paint text; got {ops:?}"
+    );
+    assert!(
+        !ops.is_empty(),
+        "the active cell still repaints its background"
+    );
+}

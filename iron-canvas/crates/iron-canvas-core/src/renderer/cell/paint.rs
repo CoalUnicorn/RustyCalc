@@ -212,7 +212,12 @@ impl<P: Painter> RendererCore<P> {
         let style = model.get_cell_style(sheet, row, col);
         let value = model.get_formatted_cell_value(sheet, row, col);
         let cell_type = model.get_cell_type(sheet, row, col);
-        if style.is_bridge_failed() || value.is_bridge_failed() || cell_type.is_bridge_failed() {
+        let mut decoration = model.get_extended_cell_style(sheet, row, col);
+        if style.is_bridge_failed()
+            || value.is_bridge_failed()
+            || cell_type.is_bridge_failed()
+            || decoration.is_bridge_failed()
+        {
             return;
         }
 
@@ -229,8 +234,18 @@ impl<P: Painter> RendererCore<P> {
             return;
         };
         self.paint_cell(&paint, theme);
+        // The overlay repaint must match the grid's text policy for this cell:
+        // a decoration hides the value, or reserves a left band for its icon.
+        let resolved = decoration
+            .take_value()
+            .and_then(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
+        let (hide_value, reserved_left) = match resolved.as_ref() {
+            Some(deco) if deco.hides_value() => (true, 0),
+            Some(deco) => (false, deco.reserved_left(rect)),
+            None => (false, 0),
+        };
         let mut text_lines = self.frame_cache.text_lines.take();
-        if let Some(text) = value.value() {
+        if !hide_value && let Some(text) = value.value() {
             let cell_type = cell_type.unwrap_or(CellKind::Text);
             // The link comes from committed state (this frame's index), not
             // the model: the model's single-cell accessor cannot return a
@@ -241,6 +256,7 @@ impl<P: Painter> RendererCore<P> {
                 self,
                 rect,
                 rect,
+                reserved_left,
                 &paint.style,
                 text,
                 cell_type,

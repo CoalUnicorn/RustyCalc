@@ -141,7 +141,11 @@ pub fn replay<P: BlitPainter>(target: &P, ops: &[DrawOp]) {
                 target.rect_fill(*rect, PaintColor::Borrowed(color));
             }
             DrawOp::RectFillHGradient { rect, from, to } => {
-                target.rect_fill_hgradient(*rect, PaintColor::Borrowed(from), PaintColor::Borrowed(to));
+                target.rect_fill_hgradient(
+                    *rect,
+                    PaintColor::Borrowed(from),
+                    PaintColor::Borrowed(to),
+                );
             }
             DrawOp::FillPath { points, color } => {
                 target.fill_path(points, PaintColor::Borrowed(color));

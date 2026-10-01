@@ -11,9 +11,7 @@ use iron_canvas_core::address::RCRange;
 use iron_canvas_core::chrome::{Chrome, FrameKindTag, FramePath};
 use iron_canvas_core::renderer::RendererCore;
 use iron_canvas_core::theme::CanvasTheme;
-use iron_canvas_core::{
-    CellDecoration, DataBarSpec, Fetched, GridVerdict, IconGlyph, RatingSpec,
-};
+use iron_canvas_core::{CellDecoration, DataBarSpec, Fetched, GridVerdict, IconGlyph, RatingSpec};
 use iron_canvas_recorder::{DrawOp, RecorderPainter};
 
 use common::{TestModel, canvas_default, test_inputs};
@@ -201,16 +199,77 @@ fn gradients(painter: &RecorderPainter) -> Vec<(String, String)> {
 }
 
 fn render_cell(decoration: CellDecoration) -> (RendererCore<RecorderPainter>, Chrome) {
+    render_cell_inner(Some(decoration), "")
+}
+
+fn render_text_cell(
+    decoration: Option<CellDecoration>,
+    text: &str,
+) -> (RendererCore<RecorderPainter>, Chrome) {
+    render_cell_inner(decoration, text)
+}
+
+fn render_cell_inner(
+    decoration: Option<CellDecoration>,
+    text: &str,
+) -> (RendererCore<RecorderPainter>, Chrome) {
     let model = TestModel::synthetic_grid();
-    model.set_col_width(2, 60.0);
+    model.set_col_width(2, 120.0);
     model.set_row_height(2, 24.0);
-    model.set_decoration(2, 2, decoration);
+    if let Some(decoration) = decoration {
+        model.set_decoration(2, 2, decoration);
+    }
+    if !text.is_empty() {
+        model.set_cell(2, 2, text);
+    }
     let theme = std::rc::Rc::new(CanvasTheme::light());
     let inputs = test_inputs(&model, canvas_default(), &theme);
     let frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
     let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
     core.render_grid(&model, &frame);
     (core, frame)
+}
+
+/// Clear every present category's `show_value`, so the cell value is hidden.
+fn hide_value(mut decoration: CellDecoration) -> CellDecoration {
+    if let Some(icon) = decoration.icon.as_mut() {
+        icon.show_value = false;
+    }
+    if let Some(bar) = decoration.data_bar.as_mut() {
+        bar.show_value = false;
+    }
+    if let Some(rating) = decoration.rating.as_mut() {
+        rating.show_value = false;
+    }
+    decoration
+}
+
+fn icon_decoration() -> CellDecoration {
+    CellDecoration {
+        icon: Some(iron_canvas_core::IconSpec {
+            glyph: IconGlyph::ArrowUp,
+            color: Some("#84cb1f".to_string()),
+            show_value: true,
+        }),
+        ..CellDecoration::default()
+    }
+}
+
+/// The anchor x of the first text op inside `rect` — the target cell's text,
+/// not another populated cell's.
+fn fill_text_x(painter: &RecorderPainter, rect: iron_canvas_core::PixelRect) -> Option<f64> {
+    let ops = painter.ops();
+    ops.iter().find_map(|op| match op {
+        DrawOp::FillText { x, y, .. }
+            if *x >= f64::from(rect.left())
+                && *x <= f64::from(rect.right())
+                && *y >= f64::from(rect.top())
+                && *y <= f64::from(rect.bottom()) =>
+        {
+            Some(*x)
+        }
+        _ => None,
+    })
 }
 
 /// A positive bar runs from the zero axis to the value endpoint — not from
@@ -287,25 +346,55 @@ fn rating_paints_count_glyphs_in_the_resolved_color() {
         "rating color comes from the engine (unresolved -> black)"
     );
     let xs: Vec<i32> = paths.iter().map(|(points, _)| points[0].x).collect();
-    assert!(xs[0] < xs[1] && xs[1] < xs[2], "glyphs advance left to right");
+    assert!(
+        xs[0] < xs[1] && xs[1] < xs[2],
+        "glyphs advance left to right"
+    );
 }
 
 /// An icon paints its glyph geometry as a filled polygon.
 #[test]
 fn icon_paints_its_glyph() {
-    let decoration = CellDecoration {
-        icon: Some(iron_canvas_core::IconSpec {
-            glyph: IconGlyph::ArrowUp,
-            color: Some("#84cb1f".to_string()),
-            show_value: true,
-        }),
-        ..CellDecoration::default()
-    };
-    let (core, _) = render_cell(decoration);
+    let (core, _) = render_cell(icon_decoration());
     let ops = core.painter().ops();
     let arrows = ops
         .iter()
         .filter(|op| matches!(op, DrawOp::FillPath { color, .. } if color == "#84cb1f"))
         .count();
     assert!(arrows > 0, "the icon must paint at least one polygon");
+}
+
+/// A decoration with `show_value = false` hides the painted cell value; the
+/// decoration itself still paints. The model value is untouched (formula bar
+/// and editing read the model, not this pass).
+#[test]
+fn hidden_value_paints_no_text_but_keeps_the_bar() {
+    let (core, frame) = render_text_cell(Some(hide_value(data_bar("#3366cc", 1.0))), "42");
+    let rect = frame.cell_rect(2, 2).expect("the cell is visible");
+    assert!(
+        fill_text_x(core.painter(), rect).is_none(),
+        "a hidden value must paint no text"
+    );
+    assert_eq!(
+        rect_fills(core.painter(), "#3366cc").len(),
+        1,
+        "the data bar still paints"
+    );
+}
+
+/// A shown icon reserves a left band, so the value lays out to the right of
+/// the icon rather than under it.
+#[test]
+fn shown_icon_shifts_the_value_right() {
+    let (plain, plain_frame) = render_text_cell(None, "42");
+    let rect = plain_frame.cell_rect(2, 2).expect("the cell is visible");
+    let plain_x = fill_text_x(plain.painter(), rect).expect("the plain cell paints text");
+
+    let (icon, _) = render_text_cell(Some(icon_decoration()), "42");
+    let icon_x = fill_text_x(icon.painter(), rect).expect("the icon cell still paints its value");
+
+    assert!(
+        icon_x > plain_x,
+        "the icon must reserve a left band: {plain_x} -> {icon_x}"
+    );
 }

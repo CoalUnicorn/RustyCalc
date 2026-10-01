@@ -26,17 +26,27 @@ impl<P: Painter> RendererCore<P> {
         if merge.fragments.is_empty() {
             return;
         }
+        // Same text policy as the per-cell pass: a decoration on the anchor
+        // hides the value or reserves a left band for its icon.
+        let (hide_value, reserved_left) = match decoration.as_ref() {
+            Some(deco) if deco.hides_value() => (true, 0),
+            Some(deco) => (false, deco.reserved_left(merge.logical_rect)),
+            None => (false, 0),
+        };
         let mut text_lines = self.frame_cache.text_lines.take();
-        if let Some(text) = TextPaint::resolve_into(
-            self,
-            merge.logical_rect,
-            merge.logical_rect,
-            &merge.style,
-            merge.value.clone(),
-            merge.cell_type,
-            merge.link.as_deref(),
-            &mut text_lines,
-        ) {
+        if !hide_value
+            && let Some(text) = TextPaint::resolve_into(
+                self,
+                merge.logical_rect,
+                merge.logical_rect,
+                reserved_left,
+                &merge.style,
+                merge.value.clone(),
+                merge.cell_type,
+                merge.link.as_deref(),
+                &mut text_lines,
+            )
+        {
             let origin = merge.logical_rect;
             for fragment in &merge.fragments {
                 // The clipped paint path anchors on `TextPaint::clip`
@@ -46,6 +56,7 @@ impl<P: Painter> RendererCore<P> {
                 // would anchor on the frozen band's edge and vanish.
                 let mut fragment_text = text.clone();
                 fragment_text.clip = translate(origin, fragment.logical_rect, text.clip);
+                fragment_text.anchor = translate(origin, fragment.logical_rect, text.anchor);
                 // Lay the text out once in merge-local coordinates, then
                 // translate it into this fragment's own transform. Without
                 // the translation a merge crossing the freeze boundary (or

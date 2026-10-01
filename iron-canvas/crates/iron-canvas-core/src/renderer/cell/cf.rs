@@ -28,6 +28,9 @@ use crate::style::{CellDecoration, IconGlyph};
 pub struct CfIconPaint {
     pub glyph: IconGlyph,
     pub color: Rc<str>,
+    /// When false, the painted cell value is hidden (the model value, the
+    /// formula bar, and editing are unaffected).
+    pub show_value: bool,
 }
 
 /// Resolved data bar: interned positive/negative colors plus the lighter
@@ -43,6 +46,8 @@ pub struct CfDataBarPaint {
     pub is_gradient: bool,
     pub value: f64,
     pub axis_position: f64,
+    /// When false, the painted cell value is hidden.
+    pub show_value: bool,
 }
 
 /// Resolved rating: `count` copies of the selected glyph, out of `max`.
@@ -52,6 +57,8 @@ pub struct CfRatingPaint {
     pub color: Rc<str>,
     pub count: u8,
     pub max: u8,
+    /// When false, the painted cell value is hidden.
+    pub show_value: bool,
 }
 
 /// Resolved CF decoration for one cell. The engine resolves each category
@@ -81,6 +88,7 @@ impl CfDecorationPaint {
             icon: deco.icon.map(|icon| CfIconPaint {
                 glyph: icon.glyph,
                 color: intern.get_rgb(icon.color.as_deref().map(css_rgb).unwrap_or([0, 0, 0])),
+                show_value: icon.show_value,
             }),
             data_bar: deco.data_bar.map(|bar| {
                 let positive = data_bar_rgb(&bar);
@@ -97,6 +105,7 @@ impl CfDecorationPaint {
                     is_gradient: bar.is_gradient,
                     value: bar.value.clamp(0.0, 1.0),
                     axis_position: bar.axis_position.clamp(0.0, 1.0),
+                    show_value: bar.show_value,
                 }
             }),
             rating: deco.rating.map(|rating| CfRatingPaint {
@@ -104,8 +113,38 @@ impl CfDecorationPaint {
                 color: intern.get_rgb(rating.color.as_deref().map(css_rgb).unwrap_or([0, 0, 0])),
                 count: rating.count.min(u32::from(u8::MAX)) as u8,
                 max: rating.max.min(u32::from(u8::MAX)) as u8,
+                show_value: rating.show_value,
             }),
         })
+    }
+
+    /// True when any present category hides the painted cell value. The
+    /// model value, the formula bar, and editing are deliberately unaffected:
+    /// only the canvas text pass consults this.
+    pub(crate) fn hides_value(&self) -> bool {
+        self.icon.as_ref().is_some_and(|icon| !icon.show_value)
+            || self.data_bar.as_ref().is_some_and(|bar| !bar.show_value)
+            || self
+                .rating
+                .as_ref()
+                .is_some_and(|rating| !rating.show_value)
+    }
+
+    /// Pixels reserved at `rect`'s left edge for the shown indicator, so the
+    /// text pass starts after the icon/rating instead of under it. Zero when
+    /// nothing is drawn on the left.
+    pub(crate) fn reserved_left(&self, rect: PixelRect) -> i32 {
+        let Some((slot_left, _, size)) = icon_slot(rect) else {
+            return 0;
+        };
+        let offset = slot_left - rect.left();
+        if self.icon.as_ref().is_some_and(|icon| icon.show_value) {
+            return offset + size;
+        }
+        match self.rating.as_ref().filter(|rating| rating.show_value) {
+            Some(rating) => (offset + i32::from(rating.count) * size).min(rect.width),
+            None => 0,
+        }
     }
 
     /// Paint every present decoration over the already-filled cell `rect`,
@@ -152,7 +191,9 @@ const DEFAULT_NEGATIVE_RGB: [u8; 3] = [0xff, 0x00, 0x00];
 fn lighten(rgb: [u8; 3], amount: f64) -> [u8; 3] {
     std::array::from_fn(|i| {
         let channel = f64::from(rgb[i]);
-        (channel + (255.0 - channel) * amount).round().clamp(0.0, 255.0) as u8
+        (channel + (255.0 - channel) * amount)
+            .round()
+            .clamp(0.0, 255.0) as u8
     })
 }
 
@@ -237,7 +278,14 @@ fn paint_rating<P: Painter + ?Sized>(painter: &P, rect: PixelRect, rating: &CfRa
         return;
     };
     for i in 0..i32::from(rating.count) {
-        paint_glyph(painter, rating.glyph, left + i * size, top, size, &rating.color);
+        paint_glyph(
+            painter,
+            rating.glyph,
+            left + i * size,
+            top,
+            size,
+            &rating.color,
+        );
     }
 }
 
@@ -415,8 +463,7 @@ impl<P: Painter + ?Sized> GlyphCanvas<'_, P> {
         let mut points = [(0.0, 0.0); 10];
         for (k, slot) in points.iter_mut().enumerate() {
             let r = if k % 2 == 0 { 0.5 } else { 0.5 * 0.382 };
-            let angle =
-                -std::f64::consts::FRAC_PI_2 + (k as f64) * std::f64::consts::PI / 5.0;
+            let angle = -std::f64::consts::FRAC_PI_2 + (k as f64) * std::f64::consts::PI / 5.0;
             *slot = (0.5 + r * angle.cos(), 0.5 + r * angle.sin());
         }
         self.poly(&points);
@@ -551,9 +598,7 @@ mod tests {
             ..CellDecoration::default()
         };
         match CfDecorationPaint::resolve(deco, &ColorIntern::new()) {
-            Some(CfDecorationPaint {
-                icon: Some(p), ..
-            }) => {
+            Some(CfDecorationPaint { icon: Some(p), .. }) => {
                 assert_eq!(p.glyph, IconGlyph::ArrowUp);
                 assert_eq!(&*p.color, "#84cb1f");
             }
@@ -566,6 +611,47 @@ mod tests {
         assert!(
             CfDecorationPaint::resolve(CellDecoration::default(), &ColorIntern::new()).is_none()
         );
+    }
+
+    fn cell_rect() -> PixelRect {
+        PixelRect {
+            top_left: Point { x: 0, y: 0 },
+            width: 100,
+            height: 20,
+        }
+    }
+
+    #[test]
+    fn a_hidden_category_hides_the_value() {
+        let mut spec = bar("#3366cc", 1.0, 0.0, false);
+        spec.show_value = false;
+        let deco = CellDecoration {
+            data_bar: Some(spec),
+            ..CellDecoration::default()
+        };
+        let paint = CfDecorationPaint::resolve(deco, &ColorIntern::new()).expect("a bar");
+        assert!(paint.hides_value());
+    }
+
+    #[test]
+    fn a_shown_icon_reserves_a_left_band_and_a_hidden_one_does_not() {
+        let shown = CellDecoration {
+            icon: Some(icon(IconGlyph::ArrowUp, None)),
+            ..CellDecoration::default()
+        };
+        let paint = CfDecorationPaint::resolve(shown, &ColorIntern::new()).expect("an icon");
+        let reserved = paint.reserved_left(cell_rect());
+        assert!(reserved > 0 && reserved < cell_rect().width);
+        assert!(!paint.hides_value());
+
+        let mut hidden_icon = icon(IconGlyph::ArrowUp, None);
+        hidden_icon.show_value = false;
+        let hidden = CellDecoration {
+            icon: Some(hidden_icon),
+            ..CellDecoration::default()
+        };
+        let paint = CfDecorationPaint::resolve(hidden, &ColorIntern::new()).expect("an icon");
+        assert_eq!(paint.reserved_left(cell_rect()), 0);
     }
 
     #[test]

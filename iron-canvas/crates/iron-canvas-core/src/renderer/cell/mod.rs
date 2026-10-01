@@ -127,10 +127,22 @@ impl<P: Painter> RendererCore<P> {
                 .get_mut(idx)
                 .and_then(Fetched::take_value)
                 .unwrap_or(CellKind::Text);
+            // A decoration hides the painted value (the model value and the
+            // formula bar keep it) or reserves a left band for its icon. The
+            // decision reads the already-resolved decoration on the slot.
+            let (hide_value, reserved_left) = match p.cf_decoration.as_ref() {
+                Some(deco) if deco.hides_value() => (true, 0),
+                Some(deco) => (false, deco.reserved_left(p.rect)),
+                None => (false, 0),
+            };
+            if hide_value {
+                continue;
+            }
             if let Some(tp) = TextPaint::resolve_into(
                 self,
                 p.rect,
                 p.rect,
+                reserved_left,
                 &p.style,
                 text,
                 cell_type,

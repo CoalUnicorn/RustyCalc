@@ -1032,3 +1032,51 @@ fn the_active_cell_overlay_restores_an_offscreen_anchor_merge() {
         "the offscreen anchor's label must be restored in the visible fragment: {paints:?}"
     );
 }
+
+/// A decoration on the merged anchor hides the painted value (same policy as
+/// the per-cell pass); the decoration itself still paints over the merge.
+#[test]
+fn a_hidden_value_on_a_merged_anchor_paints_no_text() {
+    use iron_canvas_core::{CellDecoration, DataBarSpec};
+    use iron_canvas_recorder::DrawOp;
+
+    let model = Rc::new(
+        TestModel::synthetic_grid()
+            .with_top_row(1)
+            .with_merged_ranges(vec![RCRange {
+                r1: 2,
+                c1: 2,
+                r2: 4,
+                c2: 3,
+            }]),
+    );
+    model.set_cell(2, 2, "anchor");
+    model.set_decoration(
+        2,
+        2,
+        CellDecoration {
+            data_bar: Some(DataBarSpec {
+                positive_color: "#112233".to_string(),
+                negative_color: None,
+                is_gradient: false,
+                value: 1.0,
+                axis_position: 0.0,
+                show_value: false,
+            }),
+            ..CellDecoration::default()
+        },
+    );
+    let mut orch = build(Rc::clone(&model));
+    assert_eq!(orch.render_pending(), PaintResult::Rendered);
+
+    let ops = orch.grid_surface().recorder().ops();
+    assert!(
+        !texts(&ops).iter().any(|t| t == "anchor"),
+        "a hidden merged value must not paint text"
+    );
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, DrawOp::RectFill { color, .. } if color == "#112233")),
+        "the decoration still paints over the merge"
+    );
+}

@@ -18,6 +18,7 @@ use crate::style::{CellKind, CellStyle, HAlign, VAlign};
 
 use crate::geometry::constants::STANDARD_BORDER_WIDTH;
 use crate::geometry::pixel_rect::PixelRect;
+use crate::geometry::prim::Point;
 use crate::model::sheet::links::CellLink;
 use crate::painter::{
     CHAR_WIDTH_FACTOR, PaintColor, Painter, TextAlign, TextBaseline, TextMetrics,
@@ -53,10 +54,15 @@ const MIN_UNDERLINE_OFFSET: i32 = 2;
 ///
 /// `Clone` exists for the merge pass, which lays text out once and repaints it
 /// under each fragment's own transform: the clone carries the translated
-/// `clip`, which the clipped paint path anchors on.
+/// `clip` and `anchor`.
 #[derive(Clone)]
 pub struct TextPaint {
     pub clip: PixelRect,
+    /// The rectangle Start/End alignment anchors on. Equal to `clip` for a
+    /// plain cell; narrower on the left when a CF icon/rating reserves a band
+    /// (see `resolve_into`'s `reserved_left`). The merge pass translates it
+    /// alongside `clip`.
+    pub anchor: PixelRect,
     /// Interned `ctx.font` string. `Rc::clone` on cache hit; one alloc per
     /// unique (size, bold, italic, family) tuple per renderer lifetime.
     pub font_css: Rc<str>,
@@ -117,6 +123,10 @@ impl TextPaint {
     /// visible fragment, so a merge scrolled partly out of view clips its text
     /// at the visible edge instead of at the logical one.
     ///
+    /// `reserved_left` shrinks `rect` at the left edge for a shown CF icon or
+    /// rating, so the value lays out after the indicator. It never moves the
+    /// clip: overflow past the right edge still clips at the visible fragment.
+    ///
     /// The split between `TextPaint` (per-cell scalars) and the externally
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
     /// the caller takes the buffer once for the grid segment, hands it
@@ -129,6 +139,7 @@ impl TextPaint {
         renderer: &RendererCore<P>,
         rect: PixelRect,
         clip: PixelRect,
+        reserved_left: i32,
         style: &CellStyle,
         text: String,
         cell_type: CellKind,
@@ -164,7 +175,23 @@ impl TextPaint {
 
         let approx_char_w = size_px * CHAR_WIDTH_FACTOR;
         let line_height = size_px * LINE_HEIGHT_FACTOR;
-        let usable_w = f64::from(rect.width) - 2.0 * CELL_PADDING;
+
+        // `reserved_left` is the band occupied by a shown icon/rating. Layout
+        // and positioning use the reduced rect; the clip stays the caller's
+        // visible fragment, so a merge still clips at its visible edge.
+        let layout_rect = if reserved_left > 0 {
+            PixelRect {
+                top_left: Point {
+                    x: rect.left() + reserved_left,
+                    y: rect.top(),
+                },
+                width: rect.width - reserved_left,
+                height: rect.height,
+            }
+        } else {
+            rect
+        };
+        let usable_w = f64::from(layout_rect.width) - 2.0 * CELL_PADDING;
 
         // Layout pass: split + wrap, measuring once. `lines` comes back with
         // text + width populated and `center_x/y` left at 0.0 for the position
@@ -183,12 +210,13 @@ impl TextPaint {
         );
         drop(wrap_buf);
 
-        position_lines(lines, h_align, v_align, rect, size_px, line_height);
+        position_lines(lines, h_align, v_align, layout_rect, size_px, line_height);
 
         let needs_clip = lines_escape_cell(lines, usable_w, clip, line_height);
 
         Some(TextPaint {
             clip,
+            anchor: layout_rect,
             font_css,
             font_size_px: size_px,
             color: text_color,
@@ -458,15 +486,15 @@ impl<P: Painter> RendererCore<P> {
         }
         for line in lines {
             let (x, align) = match t.h_align {
-                TextAlign::End => (f64::from(t.clip.right()) - CELL_PADDING, TextAlign::End),
+                TextAlign::End => (f64::from(t.anchor.right()) - CELL_PADDING, TextAlign::End),
                 TextAlign::Center => (line.center_x, TextAlign::Center),
                 TextAlign::Start => {
-                    // Start-anchored on the cell's left edge. No width
-                    // approximation needed; the SVG `text-anchor="start"`
-                    // renders glyphs at their natural width and `needs_clip`
-                    // contains any escaping glyphs to the cell rectangle on
-                    // both SVG and Canvas2D backends.
-                    (f64::from(t.clip.left()) + CELL_PADDING, TextAlign::Start)
+                    // Start-anchored on the cell's (or reserved layout
+                    // rectangle's) left edge. No width approximation needed;
+                    // the SVG `text-anchor="start"` renders glyphs at their
+                    // natural width and `needs_clip` contains any escaping
+                    // glyphs to the cell rectangle on both backends.
+                    (f64::from(t.anchor.left()) + CELL_PADDING, TextAlign::Start)
                 }
             };
             self.painter.fill_text(

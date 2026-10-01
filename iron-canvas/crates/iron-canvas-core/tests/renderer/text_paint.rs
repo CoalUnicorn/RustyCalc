@@ -150,6 +150,7 @@ fn horizontal_alignment_keeps_text_and_decoration_anchors_consistent() {
                 &renderer,
                 rect,
                 rect,
+                0,
                 &style,
                 "42".into(),
                 kind,

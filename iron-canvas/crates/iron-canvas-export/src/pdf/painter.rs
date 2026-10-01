@@ -83,10 +83,7 @@ impl PdfPainter {
     /// Linear scan: a sheet has a handful of distinct data-bar colors.
     fn shading_index(&self, from: &str, to: &str) -> usize {
         let mut shadings = self.shadings.borrow_mut();
-        if let Some(index) = shadings
-            .iter()
-            .position(|(f, t)| f == from && t == to)
-        {
+        if let Some(index) = shadings.iter().position(|(f, t)| f == from && t == to) {
             return index;
         }
         shadings.push((from.to_string(), to.to_string()));
@@ -416,11 +413,17 @@ mod tests {
             PaintColor::Static("#3366cc"),
         );
         let content = content(&painter);
-        assert!(content.contains("10.000 5.000 40.000 8.000 re"), "{content}");
+        assert!(
+            content.contains("10.000 5.000 40.000 8.000 re"),
+            "{content}"
+        );
         assert!(content.contains("W n"), "{content}");
         assert!(content.contains("/Sh0 sh"), "{content}");
         let shadings = painter.shadings();
-        assert_eq!(shadings.borrow().as_slice(), &[("#ffffff".to_string(), "#3366cc".to_string())]);
+        assert_eq!(
+            shadings.borrow().as_slice(),
+            &[("#ffffff".to_string(), "#3366cc".to_string())]
+        );
     }
 
     #[test]
