@@ -156,11 +156,14 @@ impl<P: Painter> RendererCore<P> {
         self.frame_cache.text_lines.set(text_lines);
     }
 
-    /// Paint bg + borders for one resolved `CellPaint`. Used by
+    /// Paint background, decoration, and borders for one `CellPaint`. Used by
     /// `repaint_active_cell` where a single-cell batch is not worth the
     /// overhead.
     pub(super) fn paint_cell(&self, p: &CellPaint, theme: &CanvasTheme) {
         self.paint_bg(p, theme);
+        if let Some(deco) = &p.cf_decoration {
+            deco.paint(&*self.painter, p.rect);
+        }
         self.paint_borders(p, theme);
     }
 }

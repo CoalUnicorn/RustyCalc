@@ -777,12 +777,8 @@ const FIXTURE_DPR: f64 = 1.0;
 /// enough to bleed into the neighbouring row's pixels, which is exactly the
 /// stale-stroke risk a retained blit band must not hide.
 ///
-/// `fill` is the conditional-format channel *as the browser host expresses it*.
-/// `JsBackedModel` has no `getCellDecorations` accessor at all — its
-/// `get_cell_style` doc states the JS `getCellStyle` extern must return the
-/// **dxf-merged** style — so a CF change reaches this renderer as a changed
-/// fill colour, never as a `CellDecoration`. Driving CF through `fill` is
-/// therefore the faithful browser analogue, not a simplification of one.
+/// `fill` covers differential fills. `decoration` supplies the extended style
+/// payload for icon, data-bar, and rating tests.
 #[derive(Clone, Default)]
 struct FixtureCell {
     value: String,
@@ -792,6 +788,7 @@ struct FixtureCell {
     border_right: Option<ic::BorderStyle>,
     fill: Option<String>,
     wrap: bool,
+    decoration: Option<ironcalc_base::cf_types::ExtendedStyle>,
 }
 
 #[derive(Clone, Copy)]
@@ -910,7 +907,13 @@ fn make_fixture_model(store: FixtureStore) -> JsValue {
             },
             ..ic::Style::default()
         };
-        let Ok(value) = serde_wasm_bindgen::to_value(&style) else {
+        let serialized = if let Some(mut extended) = cell.decoration {
+            extended.style = style;
+            serde_wasm_bindgen::to_value(&extended)
+        } else {
+            serde_wasm_bindgen::to_value(&style)
+        };
+        let Ok(value) = serialized else {
             panic!("fixture Style always serializes");
         };
         value
@@ -1043,6 +1046,186 @@ fn canvas_over(store: FixtureStore) -> (IronCanvas, HtmlCanvasElement) {
         .resize(FIXTURE_CANVAS_W, FIXTURE_CANVAS_H, FIXTURE_DPR)
         .expect("fixture canvas metrics are valid");
     (canvas, grid)
+}
+
+fn cf_payload() -> ironcalc_base::cf_types::ExtendedStyle {
+    use ironcalc_base::cf_types::{CfDataBar, CfIcon, CfRating, ExtendedStyle, Icon};
+    ExtendedStyle {
+        style: ic::Style::default(),
+        icon: Some(CfIcon {
+            icon: Icon::ArrowUp,
+            color: ic::Color::Rgb("#008800".into()),
+            show_value: true,
+        }),
+        data_bar: Some(CfDataBar {
+            positive_color: ic::Color::Rgb("#3366cc".into()),
+            negative_color: ic::Color::Rgb("#cc3300".into()),
+            is_gradient: true,
+            value: 1.0,
+            axis_position: 0.5,
+            show_value: true,
+        }),
+        rating: Some(CfRating {
+            icon: Icon::Star,
+            count: 2,
+            max: 5,
+            color: ic::Color::Rgb("#880088".into()),
+            show_value: true,
+        }),
+    }
+}
+
+#[wasm_bindgen_test]
+fn cf_extended_payload_preserves_all_categories_and_failures() {
+    use iron_canvas_core::IconGlyph;
+    let store = plain_fixture_store();
+    store
+        .borrow_mut()
+        .get_mut(&(2, 2))
+        .expect("cell")
+        .decoration = Some(cf_payload());
+    let model = JsBackedModel::try_from_js_value(make_fixture_model(store)).expect("valid model");
+    let Fetched::Value(deco) = model.get_extended_cell_style(0, 2, 2) else {
+        panic!("decoration decodes")
+    };
+    assert_eq!(deco.icon.expect("icon").glyph, IconGlyph::ArrowUp);
+    assert_eq!(deco.data_bar.expect("bar").axis_position, 0.5);
+    assert_eq!(deco.rating.expect("rating").count, 2);
+    assert_eq!(
+        model.get_extended_cell_style(0, 1, 1),
+        Fetched::Absent,
+        "bare style"
+    );
+    for (body, expected) in [
+        ("return null;", Fetched::Absent),
+        (
+            "throw new Error('decoration unavailable');",
+            Fetched::BridgeFailed,
+        ),
+        ("return {style: {}, icon: 'bad'};", Fetched::BridgeFailed),
+    ] {
+        let function = js_sys::Function::new_no_args(body);
+        let model = model_with_methods(&[("getCellStyle", &function)]);
+        assert_eq!(model.get_extended_cell_style(0, 2, 2), expected);
+    }
+}
+
+#[wasm_bindgen_test]
+fn cf_rule_changes_match_fresh_pixels_with_frozen_panes() {
+    for dpr in [1.0, 1.25, 1.5] {
+        for damage in [false, true] {
+            let store = plain_fixture_store();
+            for cell in [(1, 1), (3, 2)] {
+                store.borrow_mut().get_mut(&cell).expect("cell").decoration = Some(cf_payload());
+            }
+            let build = || {
+                let grid = make_canvas();
+                let overlay = make_canvas();
+                let mut canvas = IronCanvas::create(grid.clone(), overlay.clone()).expect("canvas");
+                let model: js_sys::Object = make_fixture_model(Rc::clone(&store)).unchecked_into();
+                for name in ["getFrozenRowsCount", "getFrozenColumnsCount"] {
+                    set_prop(&model, name, &js_sys::Function::new_no_args("return 1;"));
+                }
+                canvas.set_model_js(model.into()).expect("model");
+                canvas.resize(400.0, 240.0, dpr).expect("metrics");
+                (canvas, grid, overlay)
+            };
+            let (mut canvas, grid, overlay) = build();
+            assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+            // Change only the decoration. The cell value and base style stay fixed.
+            for cell in [(1, 1), (3, 2)] {
+                let mut cells = store.borrow_mut();
+                let deco = cells
+                    .get_mut(&cell)
+                    .expect("cell")
+                    .decoration
+                    .as_mut()
+                    .expect("decoration");
+                let bar = deco.data_bar.as_mut().expect("bar");
+                bar.value = 0.0;
+                bar.show_value = false;
+                deco.icon.as_mut().expect("icon").icon = ironcalc_base::cf_types::Icon::ArrowDown;
+                deco.rating.as_mut().expect("rating").count = 5;
+            }
+            if damage {
+                canvas.mark_rows_damaged(0, 1, 3);
+            } else {
+                canvas.mark_content_dirty();
+            }
+            assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+            let (mut fresh, fresh_grid, fresh_overlay) = build();
+            assert_eq!(fresh.render_pending(), RenderResult::Rendered);
+            let actual = grid_pixels(&grid);
+            let expected = grid_pixels(&fresh_grid);
+            if dpr == 1.0 {
+                assert!(actual == expected, "CF grid damage={damage}");
+            }
+            // Fractional-DPR header and grid strokes have a separate retained
+            // repaint mismatch. Check the full CF interiors against Fresh.
+            for (row, col) in [(1, 1), (3, 2)] {
+                let rect = canvas.cell_rect(row, col).expect("CF cell").inset(3, 3);
+                for y in (f64::from(rect.top()) * dpr).ceil() as usize
+                    ..(f64::from(rect.bottom()) * dpr).floor() as usize
+                {
+                    let start = (y * grid.width() as usize
+                        + (f64::from(rect.left()) * dpr).ceil() as usize)
+                        * 4;
+                    let end = (y * grid.width() as usize
+                        + (f64::from(rect.right()) * dpr).floor() as usize)
+                        * 4;
+                    assert_eq!(
+                        &actual[start..end],
+                        &expected[start..end],
+                        "CF interior ({row},{col}), dpr={dpr}, damage={damage}, y={y}"
+                    );
+                }
+            }
+            assert!(
+                grid_pixels(&overlay) == grid_pixels(&fresh_overlay),
+                "CF overlay dpr={dpr}, damage={damage}"
+            );
+        }
+    }
+}
+
+#[wasm_bindgen_test]
+fn cf_active_cell_overlay_restores_decoration_pixels() {
+    let store = plain_fixture_store();
+    let mut deco = cf_payload();
+    deco.icon = None;
+    deco.rating = None;
+    deco.data_bar.as_mut().expect("bar").show_value = false;
+    store
+        .borrow_mut()
+        .get_mut(&(1, 1))
+        .expect("cell")
+        .decoration = Some(deco);
+    let grid = make_canvas();
+    let overlay = make_canvas();
+    let mut canvas = IronCanvas::create(grid.clone(), overlay.clone()).expect("canvas");
+    canvas
+        .set_model_js(make_fixture_model(store))
+        .expect("model");
+    canvas.resize(400.0, 240.0, 1.0).expect("metrics");
+    assert_eq!(canvas.render_pending(), RenderResult::Rendered);
+    let rect = canvas.cell_rect(1, 1).expect("visible active cell");
+    let grid_pixels = grid_pixels(&grid);
+    let overlay_pixels = canvas_pixels(&overlay);
+    let width = grid.width() as usize;
+    let y = (rect.top() + rect.height / 2) as usize;
+    let mut colored = 0;
+    for x in (rect.left() + rect.width * 3 / 5) as usize..(rect.right() - 5) as usize {
+        let index = (y * width + x) * 4;
+        assert_eq!(
+            &grid_pixels[index..index + 4],
+            &overlay_pixels[index..index + 4],
+            "active bar pixel at {x},{y}"
+        );
+        if grid_pixels[index] != grid_pixels[index + 2] {
+            colored += 1;
+        }
+    }
+    assert!(colored > 5, "the compared interior contains the gradient");
 }
 
 /// Raw RGBA backing-store bytes for `canvas`'s current pixels, read

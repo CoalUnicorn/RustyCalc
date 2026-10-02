@@ -124,8 +124,8 @@ impl TextPaint {
     /// at the visible edge instead of at the logical one.
     ///
     /// `reserved_left` shrinks `rect` at the left edge for a shown CF icon or
-    /// rating, so the value lays out after the indicator. It never moves the
-    /// clip: overflow past the right edge still clips at the visible fragment.
+    /// rating, so the value lays out after the indicator. The text clip also
+    /// excludes this band, including for centered and right-aligned values.
     ///
     /// The split between `TextPaint` (per-cell scalars) and the externally
     /// owned `lines` buffer is what makes the per-cell text path zero-alloc:
@@ -176,9 +176,8 @@ impl TextPaint {
         let approx_char_w = size_px * CHAR_WIDTH_FACTOR;
         let line_height = size_px * LINE_HEIGHT_FACTOR;
 
-        // `reserved_left` is the band occupied by a shown icon/rating. Layout
-        // and positioning use the reduced rect; the clip stays the caller's
-        // visible fragment, so a merge still clips at its visible edge.
+        // Keep long values out of the indicator band for every alignment.
+        let reserved_left = reserved_left.clamp(0, rect.width);
         let layout_rect = if reserved_left > 0 {
             PixelRect {
                 top_left: Point {
@@ -191,7 +190,15 @@ impl TextPaint {
         } else {
             rect
         };
+        let clip = if reserved_left > 0 {
+            clip.intersection(layout_rect)?
+        } else {
+            clip
+        };
         let usable_w = f64::from(layout_rect.width) - 2.0 * CELL_PADDING;
+        if usable_w <= 0.0 {
+            return None;
+        }
 
         // Layout pass: split + wrap, measuring once. `lines` comes back with
         // text + width populated and `center_x/y` left at 0.0 for the position

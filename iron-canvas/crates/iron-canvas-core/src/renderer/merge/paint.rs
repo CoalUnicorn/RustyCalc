@@ -49,11 +49,8 @@ impl<P: Painter> RendererCore<P> {
         {
             let origin = merge.logical_rect;
             for fragment in &merge.fragments {
-                // The clipped paint path anchors on `TextPaint::clip`
-                // (Start/End alignment ignore the line centres), so the clip
-                // must carry the same translation as the lines. Otherwise a
-                // right- or left-aligned label under a scrolled fragment
-                // would anchor on the frozen band's edge and vanish.
+                // Start/End alignment uses `anchor`. Translate the anchor,
+                // clip, and line centres into the same fragment coordinates.
                 let mut fragment_text = text.clone();
                 fragment_text.clip = translate(origin, fragment.logical_rect, text.clip);
                 fragment_text.anchor = translate(origin, fragment.logical_rect, text.anchor);

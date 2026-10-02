@@ -225,7 +225,7 @@ impl<P: Painter> RendererCore<P> {
             return;
         };
         let theme = &frame.theme;
-        let Some(paint) = CellPaint::resolve_cell_paint(
+        let Some(mut paint) = CellPaint::resolve_cell_paint(
             CellSlot { row, col, rect },
             own_style,
             theme,
@@ -233,13 +233,13 @@ impl<P: Painter> RendererCore<P> {
         ) else {
             return;
         };
-        self.paint_cell(&paint, theme);
         // The overlay repaint must match the grid's text policy for this cell:
         // a decoration hides the value, or reserves a left band for its icon.
-        let resolved = decoration
+        paint.cf_decoration = decoration
             .take_value()
             .and_then(|deco| CfDecorationPaint::resolve(deco, &self.color_intern));
-        let (hide_value, reserved_left) = match resolved.as_ref() {
+        self.paint_cell(&paint, theme);
+        let (hide_value, reserved_left) = match paint.cf_decoration.as_ref() {
             Some(deco) if deco.hides_value() => (true, 0),
             Some(deco) => (false, deco.reserved_left(rect)),
             None => (false, 0),

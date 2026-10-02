@@ -131,4 +131,9 @@ fn active_cell_hides_its_value_when_the_decoration_says_so() {
         !ops.is_empty(),
         "the active cell still repaints its background"
     );
+    assert!(
+        ops.iter()
+            .any(|op| matches!(op, DrawOp::RectFill { color, .. } if color == "#3366cc")),
+        "the active cell must restore its data bar above the background"
+    );
 }

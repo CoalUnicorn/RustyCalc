@@ -364,6 +364,33 @@ fn icon_paints_its_glyph() {
     assert!(arrows > 0, "the icon must paint at least one polygon");
 }
 
+#[test]
+fn chevrons_are_distinct_from_filled_triangles() {
+    for (chevron, filled) in [
+        (IconGlyph::TriangleUp, IconGlyph::TriangleUpFilled),
+        (IconGlyph::TriangleDown, IconGlyph::TriangleDownFilled),
+    ] {
+        let paths = |glyph| {
+            let mut decoration = icon_decoration();
+            decoration.icon.as_mut().expect("icon").glyph = glyph;
+            let (core, _) = render_cell(decoration);
+            core.painter()
+                .ops()
+                .iter()
+                .filter_map(|op| match op {
+                    DrawOp::FillPath { points, .. } => Some(points.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_ne!(
+            paths(chevron),
+            paths(filled),
+            "distinct engine glyphs must stay distinct"
+        );
+    }
+}
+
 /// A decoration with `show_value = false` hides the painted cell value; the
 /// decoration itself still paints. The model value is untouched (formula bar
 /// and editing read the model, not this pass).
@@ -431,4 +458,110 @@ fn icon_and_bar_paint_together_with_the_bar_underneath() {
         panic!("both categories must paint; bar={bar:?} icon={icon:?}");
     };
     assert!(bar < icon, "the data bar paints under the icon");
+}
+
+#[test]
+fn icon_and_rating_have_separate_slots_before_the_value() {
+    let mut decoration = icon_decoration();
+    decoration.rating = rating(3, 5).rating;
+    let (core, frame) = render_text_cell(Some(decoration), "value");
+    let rect = frame.cell_rect(2, 2).expect("visible cell");
+    let ops = core.painter().ops();
+    let icon_right = ops
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::FillPath { points, color } if color == "#84cb1f" => {
+                points.iter().map(|p| p.x).max()
+            }
+            _ => None,
+        })
+        .max()
+        .expect("icon paints");
+    let rating_points: Vec<_> = ops
+        .iter()
+        .filter_map(|op| match op {
+            DrawOp::FillPath { points, color } if color == "#000000" => Some(points),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    assert!(
+        rating_points.iter().all(|p| p.x >= icon_right),
+        "rating overlaps icon"
+    );
+    let rating_right = rating_points
+        .iter()
+        .map(|p| p.x)
+        .max()
+        .expect("rating paints");
+    assert!(fill_text_x(core.painter(), rect).expect("value paints") > f64::from(rating_right));
+}
+
+#[test]
+fn wide_rating_is_clipped_to_its_cell() {
+    let (core, frame) = render_cell(rating(10, 10));
+    let rect = frame.cell_rect(2, 2).expect("visible cell");
+    let ops = core.painter().ops();
+    let mut clips = Vec::new();
+    for op in ops.iter() {
+        match op {
+            DrawOp::PushClip { rect } => clips.push(*rect),
+            DrawOp::PopClip => {
+                clips.pop();
+            }
+            DrawOp::FillPath { points, .. } if points.iter().any(|p| p.x > rect.right()) => {
+                assert!(
+                    clips
+                        .iter()
+                        .any(|clip| clip.left() >= rect.left() && clip.right() <= rect.right()),
+                    "rating can paint across the next cell"
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn long_value_is_clipped_after_the_icon_band() {
+    use iron_canvas_core::{Alignment, CellStyle, HAlign};
+    for align in [HAlign::Left, HAlign::Center, HAlign::Right] {
+        let model = TestModel::synthetic_grid();
+        model.set_decoration(2, 2, icon_decoration());
+        model.set_cell(2, 2, "a very long decorated value");
+        model.set_style(
+            2,
+            2,
+            CellStyle {
+                alignment: Some(Alignment {
+                    horizontal: align,
+                    ..Alignment::default()
+                }),
+                ..CellStyle::default()
+            },
+        );
+        let theme = std::rc::Rc::new(CanvasTheme::light());
+        let inputs = test_inputs(&model, canvas_default(), &theme);
+        let frame = Chrome::next(None, &model, &inputs, FramePath::Fresh);
+        let core = RendererCore::for_layer(std::rc::Rc::new(RecorderPainter::new()));
+        core.render_grid(&model, &frame);
+        let rect = frame.cell_rect(2, 2).expect("visible cell");
+        let ops = core.painter().ops();
+        let mut clips = Vec::new();
+        for op in ops.iter() {
+            match op {
+                DrawOp::PushClip { rect } => clips.push(*rect),
+                DrawOp::PopClip => {
+                    clips.pop();
+                }
+                DrawOp::FillText { text, .. } if text == "a very long decorated value" => {
+                    assert!(
+                        clips.iter().any(|clip| clip.left() > rect.left() + 5),
+                        "text clip includes the icon band for {align:?}"
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
 }

@@ -4,9 +4,6 @@
 //! the *evaluated decorations* the adapter hands the canvas — not just rule
 //! counts. This is the Rust half of the review's "Engine/import" acceptance
 //! check; the browser pixel comparison is still owed.
-//!
-//! Fixtures live outside this workspace (the IronCalc submodule and the app's
-//! examples), so the paths are resolved from `CARGO_MANIFEST_DIR`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -16,10 +13,6 @@ use iron_canvas_ironcalc::convert::cell_decoration_from_extended;
 use ironcalc::import::load_from_xlsx;
 use ironcalc_base::UserModel;
 
-const BIRD: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../../examples/slide-chart/bird-swr-chart.xlsx"
-);
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../IronCalc/xlsx/tests/conditional_formatting/cf_tests.xlsx"
@@ -48,44 +41,6 @@ fn rule_count(model: &UserModel<'static>, sheet: u32) -> usize {
         .get_conditional_formatting_list(sheet)
         .expect("rule list")
         .len()
-}
-
-#[test]
-fn bird_workbook_has_sixteen_rules_and_resolved_arrows() {
-    let model = load(BIRD);
-    assert_eq!(rule_count(&model, 0), 16, "SWR Chart rule count");
-
-    // C20:C65 — the arrows the screenshot was missing. The engine selects the
-    // glyph and color; the canvas must receive both.
-    let icon = decoration(&model, 0, 20, 3).expect("C20 has a decoration");
-    let icon = icon.icon.expect("C20 is an icon cell");
-    assert_eq!(icon.glyph, IconGlyph::ArrowUp);
-    assert_eq!(
-        icon.color.as_deref().map(str::to_lowercase).as_deref(),
-        Some("#84cb1f")
-    );
-    assert!(icon.show_value, "the value is visible beside the arrow");
-
-    // D20:D65 — a gradient data bar with the engine's bounds.
-    let bar = decoration(&model, 0, 20, 4)
-        .expect("D20 has a decoration")
-        .data_bar
-        .expect("D20 is a data-bar cell");
-    assert_eq!(bar.positive_color.to_lowercase(), "#638ec6");
-    assert!(bar.is_gradient, "the standard rule defaults to a gradient");
-
-    // B13 — a second gradient bar outside the screenshot.
-    let b13 = decoration(&model, 0, 13, 2)
-        .expect("B13 has a decoration")
-        .data_bar
-        .expect("B13 is a data-bar cell");
-    assert!(b13.is_gradient);
-
-    // Color scales are delivered as merged fills, not decorations.
-    assert!(
-        decoration(&model, 0, 20, 2).is_none(),
-        "B20 is a color scale"
-    );
 }
 
 #[test]

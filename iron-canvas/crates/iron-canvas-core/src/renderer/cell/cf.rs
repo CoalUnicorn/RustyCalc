@@ -134,17 +134,27 @@ impl CfDecorationPaint {
     /// text pass starts after the icon/rating instead of under it. Zero when
     /// nothing is drawn on the left.
     pub(crate) fn reserved_left(&self, rect: PixelRect) -> i32 {
+        if self.hides_value() {
+            return 0;
+        }
         let Some((slot_left, _, size)) = icon_slot(rect) else {
             return 0;
         };
         let offset = slot_left - rect.left();
-        if self.icon.as_ref().is_some_and(|icon| icon.show_value) {
-            return offset + size;
+        let count = self.glyph_count();
+        if count == 0 {
+            0
+        } else {
+            (offset + count * size).min(rect.width)
         }
-        match self.rating.as_ref().filter(|rating| rating.show_value) {
-            Some(rating) => (offset + i32::from(rating.count) * size).min(rect.width),
-            None => 0,
-        }
+    }
+
+    fn glyph_count(&self) -> i32 {
+        i32::from(self.icon.is_some())
+            + self
+                .rating
+                .as_ref()
+                .map_or(0, |rating| i32::from(rating.count))
     }
 
     /// Paint every present decoration over the already-filled cell `rect`,
@@ -156,13 +166,29 @@ impl CfDecorationPaint {
         if let Some(bar) = &self.data_bar {
             paint_data_bar(painter, rect, bar);
         }
-        if let Some(icon) = &self.icon
-            && let Some((left, top, size)) = icon_slot(rect)
-        {
+        let Some((mut left, top, size)) = icon_slot(rect) else {
+            return;
+        };
+        let inner = rect.inset(CF_INSET, CF_INSET);
+        let needs_clip = left + self.glyph_count() * size > inner.right();
+        if needs_clip {
+            painter.push_clip(inner);
+        }
+        if let Some(icon) = &self.icon {
             paint_glyph(painter, icon.glyph, left, top, size, &icon.color);
+            left += size;
         }
         if let Some(rating) = &self.rating {
-            paint_rating(painter, rect, rating);
+            for i in 0..i32::from(rating.count) {
+                let glyph_left = left + i * size;
+                if glyph_left >= inner.right() {
+                    break;
+                }
+                paint_glyph(painter, rating.glyph, glyph_left, top, size, &rating.color);
+            }
+        }
+        if needs_clip {
+            painter.pop_clip();
         }
     }
 }
@@ -271,24 +297,6 @@ fn paint_data_bar<P: Painter + ?Sized>(painter: &P, rect: PixelRect, bar: &CfDat
     }
 }
 
-/// Paint `count` copies of the rating's glyph, left to right, in the rating's
-/// color; each occupies one icon slot.
-fn paint_rating<P: Painter + ?Sized>(painter: &P, rect: PixelRect, rating: &CfRatingPaint) {
-    let Some((left, top, size)) = icon_slot(rect) else {
-        return;
-    };
-    for i in 0..i32::from(rating.count) {
-        paint_glyph(
-            painter,
-            rating.glyph,
-            left + i * size,
-            top,
-            size,
-            &rating.color,
-        );
-    }
-}
-
 /// Paint one glyph as filled polygons in the `size`×`size` box at `(left,
 /// top)`. Icon geometry is backend-neutral vector work: no font, no glyph
 /// asset, no browser-only API.
@@ -332,10 +340,18 @@ fn paint_glyph<P: Painter + ?Sized>(
             canvas.segment((0.06, 0.06), (0.56, 0.56), 0.11);
         }
         IconGlyph::Circle => canvas.disc(24, 0.5),
-        IconGlyph::TriangleUp | IconGlyph::TriangleUpFilled => {
+        IconGlyph::TriangleUp => {
+            canvas.segment((0.20, 0.65), (0.50, 0.35), 0.05);
+            canvas.segment((0.50, 0.35), (0.80, 0.65), 0.05);
+        }
+        IconGlyph::TriangleDown => {
+            canvas.segment((0.20, 0.35), (0.50, 0.65), 0.05);
+            canvas.segment((0.50, 0.65), (0.80, 0.35), 0.05);
+        }
+        IconGlyph::TriangleUpFilled => {
             canvas.poly(&[(0.5, 0.02), (0.98, 0.98), (0.02, 0.98)]);
         }
-        IconGlyph::TriangleDown | IconGlyph::TriangleDownFilled => {
+        IconGlyph::TriangleDownFilled => {
             canvas.poly(&[(0.02, 0.02), (0.98, 0.02), (0.5, 0.98)]);
         }
         IconGlyph::FlatRectangle => {

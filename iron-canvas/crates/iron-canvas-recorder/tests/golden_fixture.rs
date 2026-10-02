@@ -80,6 +80,11 @@ fn build_fixture() -> Recording {
             rect: r(0, 0, 200, 100),
             color: "#FFFFFF".to_string(),
         },
+        DrawOp::RectFillHGradient {
+            rect: r(2, 2, 76, 16),
+            from: "#adc2eb".to_string(),
+            to: "#3366cc".to_string(),
+        },
         DrawOp::StrokeHLine {
             span: Span { from: 0, to: 200 },
             y: 20.0,
@@ -412,13 +417,9 @@ fn fresh_frame_has_grid_sections() {
 }
 
 #[test]
-fn schema_version_is_pinned_at_7() {
-    // Schema 7 renames the trace field `regime` to `strategy` and
-    // switches `RenderStrategy` to plain snake_case wire values
-    // (`overlay_only`, `scroll_blit`, `changed_cells`, `full_rebuild`,
-    // `damaged_rows`), completing the public render-terminology rename at
-    // the recorder boundary.
-    assert_eq!(ICR_SCHEMA_VERSION, 7);
+fn schema_version_is_pinned_at_8() {
+    // Schema 8 adds the RectFillHGradient operation.
+    assert_eq!(ICR_SCHEMA_VERSION, 8);
 }
 
 #[test]
